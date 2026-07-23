@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"gopkg.in/yaml.v3"
 )
@@ -63,6 +64,20 @@ type Config struct {
 	Models map[string]string `yaml:"models"`
 	Loop   Loop              `yaml:"loop"`
 	Runner string            `yaml:"runner"`
+
+	// Commands declares the CONSUMER's build/test guidance (spec 123
+	// R7b, ADR-0040's consumer-identity clause): a free-form task ->
+	// shell-command map beside Models, with the documented (not
+	// enforced) vocabulary keys "build" and "test" — the same advisory
+	// posture as Models' phase keys. UNLIKE Models/Loop/Runner, this key
+	// is NOT inert: `mindspec init` and every `mindspec setup <agent>`
+	// verb render its populated entries as the managed AGENTS.md "Build
+	// & Test" section (see CommandLines/RenderBuildTestSection below) —
+	// so a populated commands: key changes generated content today. The
+	// framework never guesses these values (ADR-0036 ZFC): unset means
+	// the section is omitted entirely, plus a `missing-commands` doctor
+	// nudge (internal/doctor/config.go), never an inferred command.
+	Commands map[string]string `yaml:"commands"`
 }
 
 // Panel declares the review-panel creation-time defaults (spec 109 R2,
@@ -209,6 +224,116 @@ func KnownModels() []string {
 	return out
 }
 
+// commandOrder is the stable rendering order CommandLines/
+// RenderBuildTestSection apply: the documented vocabulary keys (build,
+// test) first when present, then every other declared key sorted — the
+// single ordering rule so two independent renderers (bootstrap's starter
+// AGENTS.md, setup's managed block) can never disagree about order (spec
+// 123 R7b).
+var commandOrder = []string{"build", "test"}
+
+// hasNonBlankEntry reports whether m has at least one entry whose key AND
+// value are both non-blank after trimming (spec 123 FX-2, empty≠declared):
+// a `commands:\n  build: ""` (or `models:\n  authoring: ""`) has map-length
+// 1 but declares NO runnable command / real model id, so it must NOT count
+// as "declared". Callers (HasDeclaredModels/HasDeclaredCommands, doctor's
+// missing-X checks, CommandLines) use this instead of a bare len() > 0.
+func hasNonBlankEntry(m map[string]string) bool {
+	for k, v := range m {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasDeclaredModels reports whether models: carries at least one
+// non-blank phase→model-id mapping (spec 123 R6c/FX-2). An all-blank
+// map (e.g. `models:\n  authoring: ""`) is NOT declared — doctor's
+// missing-models Warn must still fire.
+func (c *Config) HasDeclaredModels() bool { return hasNonBlankEntry(c.Models) }
+
+// HasDeclaredCommands reports whether commands: carries at least one
+// non-blank task→command mapping (spec 123 R7c/FX-2). An all-blank map
+// is NOT declared — doctor's missing-commands Warn must still fire and
+// the managed AGENTS.md Build & Test section must be omitted (never a
+// runnable-command-less section).
+func (c *Config) HasDeclaredCommands() bool { return hasNonBlankEntry(c.Commands) }
+
+// CommandLines returns c.Commands rendered as "<command>   # <task>"
+// lines in the stable commandOrder (build, test, then remaining keys
+// sorted). Entries with a blank key OR a blank (trimmed-empty) command
+// value are SKIPPED (spec 123 FX-2): a blank command is not runnable, so
+// it must never reach a generated Build & Test section. Each command
+// value is routed through termsafe.Escape before rendering: Commands is
+// operator/agent-declared free text reaching a generated document, the
+// same class of value `mindspec config show` already escapes for Models
+// (spec 116 AC6's safe-set/quote rule). Returns nil when Commands is
+// empty/unset OR every entry is blank.
+func (c *Config) CommandLines() []string {
+	if len(c.Commands) == 0 {
+		return nil
+	}
+	// nonBlank reports whether a task key names a real, runnable command.
+	nonBlank := func(k string) bool {
+		return strings.TrimSpace(k) != "" && strings.TrimSpace(c.Commands[k]) != ""
+	}
+	seen := make(map[string]bool, len(commandOrder))
+	ordered := make([]string, 0, len(c.Commands))
+	for _, k := range commandOrder {
+		if _, ok := c.Commands[k]; ok && nonBlank(k) {
+			ordered = append(ordered, k)
+			seen[k] = true
+		}
+	}
+	rest := make([]string, 0, len(c.Commands))
+	for k := range c.Commands {
+		if !seen[k] && nonBlank(k) {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	ordered = append(ordered, rest...)
+
+	if len(ordered) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(ordered))
+	for _, k := range ordered {
+		lines = append(lines, fmt.Sprintf("%s   # %s", termsafe.Escape(c.Commands[k]), termsafe.Escape(k)))
+	}
+	return lines
+}
+
+// RenderBuildTestSection renders the managed "Build & Test" markdown
+// section at the given heading depth (2 for a top-level managed block —
+// bootstrap's starterAgentsMD, setup's agentsMDManagedBlock — 3 for
+// content nested under a parent heading — bootstrap's appendAgentsBlock)
+// or "" when Commands is unset (spec 123 R7b/AC-13/AC-14): this is the
+// ONE renderer every managed-content call site uses, so mindspec never
+// hardcodes its OWN build/test commands (ADR-0040's consumer-identity
+// clause) and an unset declaration OMITS the section rather than
+// rendering a placeholder that reads as runnable. The returned text
+// starts with a leading blank line and ends immediately after the
+// closing code fence (no trailing blank line) — callers own their own
+// surrounding spacing.
+func (c *Config) RenderBuildTestSection(level int) string {
+	lines := c.CommandLines()
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(strings.Repeat("#", level))
+	b.WriteString(" Build & Test\n\n```bash\n")
+	for _, l := range lines {
+		b.WriteString(l)
+		b.WriteString("\n")
+	}
+	b.WriteString("```\n")
+	return b.String()
+}
+
 // Substitution controls quota-driven reviewer-substitution policy.
 type Substitution struct {
 	ClaudeSubOnQuota bool `yaml:"claude_sub_on_quota"`
@@ -336,7 +461,8 @@ func DefaultConfig() *Config {
 			// documented example, never the default — an existing
 			// install's zero-config panel sizes must not change.
 		},
-		Models: map[string]string{},
+		Models:   map[string]string{},
+		Commands: map[string]string{},
 		Loop: Loop{
 			Enabled: false,
 			GateAuthority: map[string]string{

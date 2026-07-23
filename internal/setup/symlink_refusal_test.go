@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
@@ -149,7 +150,10 @@ func TestManagedDocContent_Claude(t *testing.T) {
 }
 
 // TestManagedDocContent_Codex asserts that a fresh (non-symlinked) AGENTS.md
-// equals the block-constant-derived agentsMDFull in full.
+// equals the config-sourced agentsMDManagedBlock rendering in full. root has
+// no .mindspec/config.yaml, so config.Load(root) resolves to
+// config.DefaultConfig() (empty Commands) — the same value ensureAgentsMD
+// itself loads, proving the extraction kept the produced document identical.
 func TestManagedDocContent_Codex(t *testing.T) {
 	t.Parallel()
 
@@ -162,8 +166,9 @@ func TestManagedDocContent_Codex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
-	if string(got) != agentsMDFull {
-		t.Errorf("AGENTS.md content mismatch:\n got: %q\nwant: %q", string(got), agentsMDFull)
+	want := "# AGENTS.md\n" + mindspecMarkerBegin + "\n" + agentsMDManagedBlock(config.DefaultConfig()) + mindspecMarkerEnd + "\n"
+	if string(got) != want {
+		t.Errorf("AGENTS.md content mismatch:\n got: %q\nwant: %q", string(got), want)
 	}
 }
 

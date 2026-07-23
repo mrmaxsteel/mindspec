@@ -112,6 +112,10 @@ func RunWithOptions(root string, opts Options) *Report {
 	// existing-but-dead state) — one state, one Warn.
 	checkOwnershipManifests(r, root)
 	checkSourceGlobs(r, root)
+	// Spec 123 R6c/R7c: the models: and commands: ADR-0036 guidance-parity
+	// nudges, mirroring checkSourceGlobs — both advisory, neither gating.
+	checkModels(r, root)
+	checkCommands(r, root)
 	checkBeads(r, root)
 	checkOrphanedBeads(r, root)
 	// Spec 119 Bead 2 (R5/R7), final-review F1: the stale-OPEN cross-check
