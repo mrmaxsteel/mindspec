@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-23
+
+Five specs since v0.12.0. The headline is a **much better first hour** in a fresh consuming repo (spec 123) and **truthful domain/ADR gates** that stop forcing `--override-adr` on every bead (spec 122), on top of panel-review telemetry, lifecycle-completion integrity, and a trust-boundary render/derivation audit. No breaking changes: clean inputs and well-formed repos behave as v0.12.0.
+
+### Added
+- **Greenfield first-run integrity (spec 123)** — the shipped verbs are now correct, convergent, and self-checking in a fresh repo's first hour:
+  - `mindspec init` scaffolds `.mindspec/context-map.md`, so the very first `mindspec domain add` works instead of erroring; `domain add` converges from any partial state, mapping the domain under `## Bounded Contexts` (GH #207).
+  - `init` and all three `setup` verbs ensure `.mindspec/session.json` + `.mindspec/focus` are gitignored even when a `.gitignore` already exists — negation-aware, so a runtime file can't be committed by accident (GH #208).
+  - `mindspec adr create` emits slugged filenames (`ADR-NNNN-slug.md`) with the canonical number as the ID, matching the framework's own convention; collision-safe resolution (GH #206).
+  - A declared `commands:` config surface plus `mindspec models populate` / `mindspec commands populate` prompts and honest doctor nudges (`models:` is declared-and-inert — the orchestration skills remain its authoritative consumers per ADR-0040) (GH #210).
+  - The managed `AGENTS.md` block carries the **consumer's** identity, never mindspec-the-framework's: neutral title, no hardcoded `make build`/`make test`, and a Build & Test section rendered from the consumer's declared `commands:` (omitted with a nudge when unset — never guessed). A provenance-gated heal upgrades a pre-existing leaked block on any `setup` verb (GH #211).
+  - New `mindspec doctor` checks — missing-context-map, unmapped-domain, not-gitignored runtime file, missing-models, missing-commands — each with a single-lever recovery command.
+  - `mindspec panel create --gate adhoc` scaffolds the ad-hoc / no-owning-spec review path the `ms-panel-run` skill documents, gate-isolated so it never gates `mindspec complete` (GH #209).
+- **Panel-review telemetry (spec 117)** — a new `mindspec panel disposition` verb (`validate` / `append` / `check` / `query`) writes one durable, queryable JSONL row per finding (carrying `disposition` + `convergent_with`) as part of the tally flow, so per-model genuine-find and false-positive rates become checkable queries instead of anecdotes. The spec-116 seed dataset migrates in as the first data points.
+- **Automated protected-`main` finalize (spec 121)** — `mindspec impl approve` auto-opens the tracker-carrier PR (templated; degrades to a printed NOTE when `gh` is unavailable) and, behind an explicit config opt-in, auto-merges it on green checks — removing the manual two-PR dance.
+
+### Fixed
+- **Domain/ADR gate truthfulness (spec 122)** — the gates no longer force `--override-adr` on every source-touching bead:
+  - A non-resolving bare Impacted-Domains label is rejected early at spec/plan validate (forward-only, Draft-only; the Approved and status-less legacy corpus is grandfathered) instead of silently passing then failing every bead (GH #178).
+  - The cited ADR's `Domain(s)` line resolves symmetrically to owning-domain names before comparison, so a spec that cites the governing ADR passes (GH #147); the coverage hint now names the actually-covering ADR (GH #145); post-flatten hints render the correct `.mindspec/domains/` path (GH #197).
+- **Lifecycle completion & finalization integrity (spec 121)** — the already-merged probe and the finalize-orphan doctor suppression are now content-aware (net-effect), closing a squash-merge blind spot; the landed-merge predicate is revert-aware and demands corroboration; a mutual-orphan deadlock between two closed siblings now converges; `WorktreeRemoveForce` gains a containment gate. Recorded as an ADR-0041 amendment.
+
+### Security
+- **Trust-boundary / agent-writable render + derivation audit (spec 120)** — an untrusted string must pass `idvalidate` before it exercises ID authority at any of the five authority-bearing consumer classes (structural composition, executable operand, render, semantic lookup, persistence); clean IDs then stay raw. The `idvalidate` grammar was first corrected to the framework's real ID format (dotted epic-children, short/letter-suffixed IDs — verified against 774/774 live bd IDs and 120/120 spec dirs), and validation moved to the `workspace` composition waist so every caller is covered by construction. A new forced-safe `idrender` helper quotes any value not presented as a validated ID; genuinely free-text fields escape via `termsafe`; the `worktree_root` config value is charset / containment / shell-safe validated. Clean inputs render byte-identically to before.
+
 ## [0.12.0] - 2026-07-18
 
 Repairs the mutating lifecycle verbs — `mindspec complete`, `mindspec impl approve`, and `mindspec plan approve` — under one invariant: **gate-before-mutate**. Every immutable gate fact (the bead's owning spec from its epic lineage, branch ancestry, epic membership, plan and obligation state) is resolved and every derivable refusal evaluated *before* the first state mutation, so a verb either refuses cleanly up front — with a convergent recovery command — or completes without corrupting the state machine. Recovery is always forward-reconcilable, never rollback. Backward-compatible: absent the new checks, every verb behaves as v0.11.1 on the happy path.
@@ -125,6 +150,8 @@ A large release headlined by the **flattened `.mindspec/` layout**, plus ten spe
 
 Release notes for v0.9.0 and prior are on the [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases) page.
 
-[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.11.1...v0.12.0
 [0.11.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.9.0...v0.10.0
