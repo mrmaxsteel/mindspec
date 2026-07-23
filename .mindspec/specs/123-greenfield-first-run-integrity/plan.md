@@ -1,7 +1,4 @@
 ---
-status: Draft
-spec_id: 123-greenfield-first-run-integrity
-version: "1"
 adr_citations:
     - ADR-0040
     - ADR-0036
@@ -10,9 +7,19 @@ adr_citations:
     - ADR-0037
     - ADR-0039
     - ADR-0015
+approved_at: "2026-07-23T11:44:38Z"
+approved_by: user
+bead_ids:
+    - mindspec-ud0w.1
+    - mindspec-ud0w.2
+    - mindspec-ud0w.3
+    - mindspec-ud0w.4
+spec_id: 123-greenfield-first-run-integrity
+status: Approved
+version: "1"
 work_chunks:
-    - id: 1
-      depends_on: []
+    - depends_on: []
+      id: 1
       key_file_paths:
         - internal/bootstrap/bootstrap.go
         - internal/bootstrap/bootstrap_test.go
@@ -26,8 +33,8 @@ work_chunks:
         - internal/setup/claude.go
         - internal/setup/codex.go
         - internal/setup/copilot.go
-    - id: 2
-      depends_on: []
+    - depends_on: []
+      id: 2
       key_file_paths:
         - internal/adr/create.go
         - internal/adr/create_test.go
@@ -39,8 +46,10 @@ work_chunks:
         - internal/workspace/workspace.go
         - internal/workspace/workspace_test.go
         - cmd/mindspec/adr.go
-    - id: 3
-      depends_on: [1, 2]
+    - depends_on:
+        - 1
+        - 2
+      id: 3
       key_file_paths:
         - internal/config/config.go
         - internal/config/config_test.go
@@ -55,8 +64,8 @@ work_chunks:
         - internal/setup/codex_test.go
         - internal/setup/claude.go
         - .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md
-    - id: 4
-      depends_on: []
+    - depends_on: []
+      id: 4
       key_file_paths:
         - cmd/mindspec/panel.go
         - cmd/mindspec/panel_test.go
