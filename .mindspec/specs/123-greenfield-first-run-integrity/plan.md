@@ -137,6 +137,17 @@ RED-on-revert property is preserved: reverting Bead 1's fix makes
 Bead 3's AC-1/AC-19 tests red (the sequence breaks at `domain add`).
 Every AC has exactly one owning bead (Provenance table below).
 
+**Transient-window note (for the Bead 1 review panel — F2 INFO).**
+Between Bead 1 merging and Bead 3 merging, R1/R2's end-to-end
+first-run behavior is pinned in the spec branch ONLY by Bead 1's
+lane-scoped smoke (the AC-1/AC-19 full pins land with Bead 3). This
+is acceptable — Bead 1's own AC-2/AC-2b/AC-3/AC-5/AC-6/AC-7 already
+pin every R1–R4 unit, and the smoke covers the greenfield
+`init`→`domain add` sequence — but the Bead 1 panel MUST spot-check
+that Bead 1's smoke is genuinely revert-RED (reverting the
+context-map scaffold breaks it), so the R1/R2 regression floor is
+never merely the not-yet-present Bead 3 pin during the window.
+
 **Plan-level choices the spec delegates (Open Questions), resolved:**
 
 - **Slug rules (R5a, fixed observably by AC-8)**: lowercase; every
@@ -482,9 +493,21 @@ resolution only — never a rename of existing files (Out of Scope).
    canonical or full-slugged input; exact + `<canonical>-*.md` glob;
    multi-file number collision → error naming both paths + the
    ADR-0035 recovery line (rename or remove the redundant file so
-   exactly one carries the number). Rewire `--supersedes` (create's
-   predecessor resolution, `internal/adr/supersede.go` surfaces) and
-   every other `ADRFilePath` read-resolution caller through it.
+   exactly one carries the number). **Rewire set (READ-resolution
+   callers — enumerated so no caller keeps the drifting exact-join):**
+   `internal/adr/show.go:30` (`Show`), `internal/adr/create.go:100`
+   (the `--supersedes` predecessor read), `internal/adr/supersede.go:23`
+   (`Supersede`'s `oldID` read) and `internal/adr/supersede.go:56`
+   (`CopyDomains`, reading the superseded ADR's domain list). **KEEP
+   exact-join `ADRFilePath` for the WRITE-target sites** —
+   `create.go:139` (the new file's emission path) and
+   `create.go:185` (the collision-check existence probe for the new
+   `id`, whose slug-variant scan is emission-side and must not resolve
+   to an unrelated pre-existing number): the writer composes the
+   canonical new path, it does not resolve an existing one. `Show`'s
+   own glob fallback (`show.go:45-58`, guarded by AC-9) is subsumed by
+   routing `show.go:30` through the resolver, so `show` gains
+   collision detection it lacked.
 4. R5(c) collision fix in `internal/adr/show.go` (`:45-58`): route
    `show`'s lookup through the same resolver so the exact-`<id>.md`
    branch no longer returns BEFORE the glob runs — a directory
@@ -564,8 +587,13 @@ ADR-0040 amendment — the first citing code lives here (R9).
    `len(cfg.Models) == 0` (disclosing inert status, hinting
    `mindspec models populate`, `--fix` scaffolding the block) and
    `missing-commands` Warn when `len(cfg.Commands) == 0` (hinting
-   `mindspec commands populate`), both mirroring `checkSourceGlobs`
-   (`:63-96`).
+   `mindspec commands populate`, `--fix` scaffolding the block),
+   both mirroring `checkSourceGlobs` (`:63-96`). Both new checks'
+   `--fix` legs route through the SAME generalized three-state
+   scaffolder as `source_globs` (parameterized by key + literal
+   block) — no private per-key reimplementation; this shared routing
+   is what PF-2's identity test (Step 6) pins for all three
+   consumers.
 3. ZFC populate emitters (R6b/R7c): `cmd/mindspec/models.go` +
    `cmd/mindspec/commands.go` — `mindspec models populate` and
    `mindspec commands populate` print agent prompts to declare the
@@ -600,12 +628,30 @@ ADR-0040 amendment — the first citing code lives here (R9).
    and both config blocks. AC-18 anchor test
    (`rg -n 'consumer-identity|framework-generic'` non-empty +
    citation-site assertions).
-6. Fixtures — parity + identity: AC-11 ((i) empty-`models:` Warn
+6. Fixtures — parity + identity. AC-11 ((i) empty-`models:` Warn
    disclosing inertness + populate hint; (ii) `--fix` three-state
    scaffold, each state pinned, operator bytes never rewritten;
    (iii) `models populate` prints and writes nothing; (iv) populated
    `models:` clears the Warn and renders with the inert annotation
-   intact); AC-12 (block-honesty text pin — the block asserts
+   intact). **Commands-scaffolder parity (PF-2 / R7c / R10 —
+   proving the shared scaffolder's `commands` consumer, not just
+   `models`):** a `missing-commands` `doctor --fix` three-state
+   test mirroring AC-11(ii) — file-absent (block created),
+   key-absent (block appended, other keys' bytes preserved),
+   key-present (byte-preserving no-op / operator bytes never
+   rewritten); a `mindspec commands populate` test asserting it
+   prints the agent prompt and writes NOTHING (mirroring AC-11(iii));
+   and the `missing-commands` Warn clearing once `commands:` is
+   populated. **Shared-scaffolder identity pin (PF-2, the 121 AC-17
+   anti-drift pattern):** a structural/identity test asserting the
+   `source_globs`, `models`, AND `commands` `--fix` legs ALL route
+   through the one generalized scaffolder function (e.g. all three
+   `--fix` handlers hold the same scaffolder seam symbol, or a
+   table-driven test drives one scaffolder across all three keys), so
+   a private per-key reimplementation of any consumer fails the test
+   — closing PF-2's "commands could be omitted or privately
+   reimplemented while every listed check passes" gap. AC-12
+   (block-honesty text pin — the block asserts
    declared-but-inert and names the follow-up; test fails if it
    claims enforcement); AC-13 (greenfield `init` AND `setup codex`,
    no Makefile/go.mod: produced `AGENTS.md` has NO `make build`,
@@ -644,6 +690,8 @@ ADR-0040 amendment — the first citing code lives here (R9).
 
 - [ ] `go test ./internal/config/... ./internal/doctor/... ./internal/bootstrap/... ./internal/setup/... ./cmd/mindspec/...` passes; `golangci-lint run ./...` clean
 - [ ] AC-11 subtests RED on today's `main` (no command, no check, no block); three-state scaffold pinned per state; `rg -n 'missing-models' internal/doctor/` non-empty
+- [ ] Commands-scaffolder parity (PF-2): `missing-commands` `doctor --fix` three-state test green (file-absent / key-absent / key-present, operator bytes never rewritten); `mindspec commands populate` prints and writes nothing; `missing-commands` Warn clears once `commands:` populated; `rg -n 'missing-commands' internal/doctor/` non-empty
+- [ ] Shared-scaffolder identity pin (PF-2): a structural/identity test fails if `source_globs`, `models`, or `commands` is rewired to a private scaffolder — all three route through the one generalized function
 - [ ] AC-12 honesty pin: the block text asserts declared-but-inert + names the follow-up; test fails on any enforcement claim
 - [ ] AC-13 RED on today's `main` for BOTH verbs; `! grep -RnE 'make (build|test)|MindSpec Project' AGENTS.md` holds on both fixtures; unset ⇒ no Build & Test section
 - [ ] AC-14 RED on today's `main` (no mechanism; init's block hardcoded); both verbs render the populated key; re-render preserves outside-marker bytes; `--check` writes nothing
@@ -718,13 +766,32 @@ Bead 3 is disjoint hunks — see the preamble).
 5. R8(d) skill alignment: update the `ms-panel-run` SKILL.md ad-hoc
    section to state the now-real `mindspec panel create <slug>
    --gate adhoc --target <ref>` invocation (no `--spec`) and the
-   `.mindspec/reviews/<slug>/` location; AC-17's test greps the
-   SHIPPED skill content (through `pluginmindspec.SkillFiles()`, the
-   `internal/setup` skills surface) for the invocation shape so the
-   skill cannot drift back to an uncreatable path.
-6. Fixtures: AC-15 (the filed repro VERBATIM — `mindspec panel
-   create adr-review --gate adhoc --target "commit <sha>"`, no
-   `--spec`, in a repo with ZERO specs: exit 0; `panel.json` under
+   `.mindspec/reviews/<slug>/` location. The `--target <ref>` uses
+   the BARE-ref form the CLI actually rev-parses — never the
+   `commit <sha>` placeholder notation (PF-1) — matching the skill's
+   existing Step-0 `panel create --spec <id> --target <ref>` block
+   (SKILL.md:57); the semantic `bead <id>`/`pr <n>`/`commit <sha>`
+   vocabulary at SKILL.md:29 is the `/ms-panel` WORKFLOW input
+   (resolved to a bare ref before the CLI), left untouched.
+   AC-17's test greps the SHIPPED skill content (through
+   `pluginmindspec.SkillFiles()`, the `internal/setup` skills
+   surface) for the `--gate adhoc` invocation shape and the
+   `.mindspec/reviews/<slug>/` location so the skill cannot drift
+   back to an uncreatable path — and, being bare-ref, it stays
+   consistent with what `panel.go:149` accepts.
+6. Fixtures: AC-15 (the filed repro, target normalized to a BARE
+   resolvable ref — `mindspec panel create adr-review --gate adhoc
+   --target "$(git rev-parse HEAD)"`, no `--spec`, in a repo with
+   ZERO specs. #209's `"commit <sha>"` is placeholder notation:
+   `panel create` rev-parses the RAW `--target` string
+   (`cmd/mindspec/panel.go:149` `revParseForPanelFn(root, target)`),
+   so the literal `commit `+sha fails `git rev-parse` — the CLI takes
+   a bare ref, and #209's own command errored at the `--spec` guard
+   BEFORE target-resolution, so the prefix form was never exercised.
+   Bead 4 only removes the `--spec` requirement for `adhoc`; it does
+   NOT add a `commit <sha>`/`bead <id>`/`pr <n>` semantic-target
+   parser (that is #212 scope, Out of Scope). Expected: exit 0;
+   `panel.json` under
    `.mindspec/reviews/adr-review/` with gate `adhoc` + configured
    reviewer/threshold stamps; `panel tally adr-review` runs against
    it; `--spec`+`--gate adhoc` refused with the recovery line;
@@ -734,7 +801,7 @@ Bead 3 is disjoint hunks — see the preamble).
 **Verification**
 
 - [ ] `go test ./cmd/mindspec/... ./internal/complete/... ./internal/setup/...` passes; `golangci-lint run ./...` clean
-- [ ] AC-15 RED on today's `main` ("--spec is required"); `test -f .mindspec/reviews/adr-review/panel.json` after the verbatim repro; `panel tally adr-review` exits per its decision contract; both refusal legs asserted (spec+adhoc refused with recovery; non-adhoc specless still errors — guard)
+- [ ] AC-15 RED on today's `main` ("--spec is required"); `mindspec panel create adr-review --gate adhoc --target "$(git rev-parse HEAD)"` (bare ref, no `--spec`) then `test -f .mindspec/reviews/adr-review/panel.json`; `panel tally adr-review` exits per its decision contract; both refusal legs asserted (spec+adhoc refused with recovery; non-adhoc specless still errors — guard)
 - [ ] AC-16: `complete`-gate evaluation byte-identical with/without the planted ad-hoc REJECT panel; `panelGateRoots` diff is zero-byte
 - [ ] AC-17: shipped-skill grep pins the `--gate adhoc` invocation shape and the `.mindspec/reviews/<slug>/` location (RED against today's skill text, which documents an unreachable path)
 - [ ] `go build ./... && go test ./...` — no new red (z4ps caveat)
@@ -751,9 +818,13 @@ Bead 3 is disjoint hunks — see the preamble).
 Domains.
 
 **Depends on**
-None (W1; disjoint files from Beads 1 and 2; the
-`cmd/mindspec/config.go` adjacency with Bead 3 is disjoint hunks and
-Bead 3 merges in W2 anyway). (bd edges wired from
+None (W1; disjoint files from Beads 1 and 2). The
+`cmd/mindspec/config.go` adjacency with Bead 3 is disjoint hunks
+(Bead 4: `configShowReviewRoots` `:561`; Bead 3: the key-table
+rendering `:204-215`) — a shared-file adjacency, NOT a dependency:
+no state Bead 4 needs is produced by Bead 3, so no 3→4 (or 4→3) edge
+is wired; whichever of the two merges second rebases the other's
+disjoint hunk trivially. (bd edges wired exclusively from
 `work_chunks[].depends_on`.)
 
 ## Provenance
