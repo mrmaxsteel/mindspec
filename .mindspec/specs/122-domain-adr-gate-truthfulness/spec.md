@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-23T11:14:58Z"
+approved_by: user
+status: Approved
 ---
 # Spec 122-domain-adr-gate-truthfulness: Domain/ADR Gate Truthfulness
 
@@ -123,7 +123,7 @@ None unresolved. The following are recorded as plan-level choices, constrained o
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-23
+- **Notes**: Approved via mindspec approve spec
