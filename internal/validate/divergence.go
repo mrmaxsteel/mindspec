@@ -133,8 +133,14 @@ func ValidateDivergence(
 	// checkout, so spec-introduced ADRs count at bead-complete time.
 	// Spec 108 R8: wrap in the per-run memoizing decorator so the
 	// per-(file × citation) coverageOf loop below reads each distinct
-	// cited ADR from disk at most once.
-	store := newMemoStore(adrStoreForSpecFn(root, specDir))
+	// cited ADR from disk at most once. Spec 122 R2: additionally wrap
+	// in the domain-resolving decorator so the coverageOf probe below
+	// sees each cited ADR's Domain(s) entries resolved to owning-domain
+	// dir-names — symmetric with candidateDomains' spec-side resolution
+	// just below. This lane passes its OWN exec + ownerRef (not nil/"")
+	// so ADR-side resolution reads the SAME ref-anchored tree the
+	// spec-side normalizeImpactedDomains call below reads.
+	store := newDomainResolvingStore(newMemoStore(adrStoreForSpecFn(root, specDir)), exec, root, ownerRef)
 
 	// Resolve domain list to consult for attribution. Prefer the
 	// spec's declared impacted-domains; when that's empty (spec has
