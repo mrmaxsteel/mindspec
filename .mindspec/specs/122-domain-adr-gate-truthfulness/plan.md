@@ -15,10 +15,11 @@ work_chunks:
       - internal/validate/ownership_resolve.go
       - internal/validate/spec.go
       - internal/validate/plan.go
-      - internal/validate/frontmatter.go
       - internal/validate/hint_root.go
       - internal/validate/spec_test.go
       - internal/validate/plan_test.go
+      - internal/validate/corpus_guard_test.go
+      - internal/validate/adr0032_amendment_test.go
       - .mindspec/adr/ADR-0032-adr-semantic-gates.md
   - id: 2
     depends_on:
@@ -30,8 +31,6 @@ work_chunks:
       - internal/validate/divergence.go
       - internal/validate/plan_test.go
       - internal/validate/divergence_test.go
-      - internal/validate/ownership_resolve.go
-      - .mindspec/adr/ADR-0032-adr-semantic-gates.md
   - id: 3
     depends_on:
         - 2
@@ -39,26 +38,17 @@ work_chunks:
       - internal/validate/plan.go
       - internal/validate/divergence.go
       - internal/validate/docsync.go
-      - internal/validate/hint_root.go
       - internal/validate/plan_test.go
       - internal/validate/divergence_test.go
       - internal/validate/docsync_test.go
-      - internal/validate/ownership_resolve.go
-      - internal/validate/adr_domain_resolve.go
   - id: 4
     depends_on:
         - 1
         - 2
     key_file_paths:
-      - internal/contextpack/spec_test.go
-      - internal/approve/spec_test.go
       - internal/validate/corpus_guard_test.go
-      - cmd/mindspec/adr_test.go
-      - internal/adr/parse_test.go
-      - internal/approve/spec.go
-      - internal/contextpack/spec.go
-      - internal/validate/spec.go
-      - internal/validate/plan.go
+      - internal/approve/spec_test.go
+      - cmd/mindspec/ceremony_guard_test.go
 ---
 # Plan: 122-domain-adr-gate-truthfulness
 
@@ -104,36 +94,61 @@ produced-then-consumed state, not file adjacency:
   unchanged"), so Bead 4 does NOT need Bead 3 and runs parallel to it.
 
 **Shared-file seam resolution (the 117 false-independence lesson),
-stated explicitly**: `internal/validate/plan.go` is touched by Beads 1
-(the `:143`-area severity gate), 2 (the store wrap at `:157` feeding
-`:485`/`:641`), and 3 (the `:548-551` hint) — and
-`internal/validate/divergence.go` by Beads 2 (`:137`/`:230`) and 3
+stated explicitly** — and `key_file_paths` is declared as the true
+EDIT set per bead (it feeds bead metadata + `bead_scope.go`, so a
+read-only/revert-probe target is NEVER declared there): the only
+non-test SOURCE files edited by more than one bead are
+`internal/validate/plan.go` — Beads 1 (the `:143`-area severity-gate
+CALL of the new resolvability helper), 2 (the store wrap at `:157`
+feeding `:485`/`:641`), and 3 (the `:548-551` hint) — and
+`internal/validate/divergence.go` — Beads 2 (`:137`/`:230`) and 3
 (`:219-222`). Under the `1→2→3` chain these beads are STRICTLY
-SEQUENTIAL — no two beads ever edit either file concurrently, so the
-3-beads-one-file merge hazard is resolved by ordering, not by hope.
-Bead 4 touches only test files (`corpus_guard_test.go` and fixtures in
-OTHER packages), none co-edited with Bead 3's source or test files, so
-the W3 parallelism is safe. `ownership_resolve.go` is edited ONLY by
-Bead 1 (Bead 2's ADR-side resolver lives in a NEW file that calls the
-existing cache/match helpers without editing Bead 1's hunks).
+SEQUENTIAL, so no two edit either file concurrently and the
+3-beads-one-file hazard is resolved by ordering, not hope.
+`internal/validate/ownership_resolve.go` is edited ONLY by Bead 1
+(the new SIGNATURE-PRESERVING resolvability helper — see PF-2 below —
+so `normalizeImpactedDomains`'s 4 existing production callers stay
+untouched; Bead 2's ADR-side resolver lives in the NEW file
+`adr_domain_resolve.go` and only READS the existing `newOwnershipCache`
+/`matchesAny` helpers). `internal/validate/hint_root.go` is CREATED by
+Bead 1 and Bead 3 only READS it (Bead 3 edits the three call sites in
+`divergence.go`/`docsync.go`, not the helper). Bead 4's edit set is
+TEST-ONLY (`internal/validate/corpus_guard_test.go`,
+`internal/approve/spec_test.go`, `cmd/mindspec/ceremony_guard_test.go`)
+— none co-edited with any Bead-3 source or test file, so the W3
+parallelism is safe (`corpus_guard_test.go` is shared with Bead 1, but
+1→4 is a real edge, so that access is sequential and test-file anyway).
+Bead 4's AC-12 revert probes touch shipped source files
+(`cmd/mindspec/adr.go`, `plan.go`, `parse.go`) ONLY in throwaway trees,
+committing nothing — hence they are NOT in its `key_file_paths`.
 
 **Plan-level choices the spec delegates (Open Questions), resolved:**
 
-- **Forward-only plumbing: distinguished finding + caller-side severity
-  gate** (the spec's second option). `normalizeImpactedDomains` gains a
-  third return, `bareUnresolved []string` — the Rule-2 entries that are
-  bare tokens naming no domain dir, reported ONLY when the ownership
-  model is in use (≥1 domain whose OWNERSHIP.yaml LOADS via the
-  existing `ownCache`, not mere dir presence — the spec's resolved
-  boundary). The first two returns stay byte-identical (Rule 2 still
-  keeps verbatim in `normalized`), so the divergence consumer at
-  `divergence.go:155` is unchanged BY CONSTRUCTION (AC-3/AC-4's
-  anti-overreach), and only the two authoring callers promote the
-  distinguished entries to errors when the SPEC's status — read via
-  `validate.SpecStatusAt(specDir)` (`internal/validate/frontmatter.go:33`),
-  NOT `plan.go`'s `isApproved` (which reads the PLAN's status) — is an
-  explicit case-folded `Draft`. Empty status (no frontmatter / no
-  `status:` key) and every non-`Draft` explicit status emit NOTHING.
+- **Forward-only plumbing: a SEPARATE signature-preserving helper +
+  caller-side severity gate** (the spec's second option, PF-2's cleanest
+  fix). `normalizeImpactedDomains`'s SIGNATURE IS UNCHANGED — its 4
+  existing production callers (`plan.go:143`, `spec.go:225`,
+  `ownership.go:490` `ResolveCandidateDomains`, `divergence.go:155`)
+  are untouched, so `go build ./...` stays clean and the divergence
+  consumer is unchanged BY CONSTRUCTION (AC-3/AC-4's anti-overreach).
+  Instead Bead 1 adds a NEW helper in `ownership_resolve.go`,
+  `bareUnresolvedImpactedDomains(exec, root, ownerRef string, entries
+  []string) []string`, that reuses the SAME domain enumeration +
+  `ownCache` load path and returns the Rule-2 entries (bare tokens
+  naming no domain dir) reported ONLY when the ownership model is in
+  use (≥1 domain whose OWNERSHIP.yaml LOADS via `ownCache`, not mere
+  dir presence — the spec's resolved boundary). Only the two AUTHORING
+  callers (`checkImpactedDomainsResolutionParity` in `spec.go`,
+  `ValidatePlan` in `plan.go`) invoke it, ALONGSIDE their existing
+  `normalizeImpactedDomains` call, and promote each returned entry to an
+  error when the SPEC's status — read via `validate.SpecStatusAt(specDir)`
+  (`internal/validate/frontmatter.go:33`), NOT `plan.go`'s `isApproved`
+  (which reads the PLAN's status) — is an explicit case-folded `Draft`.
+  Empty status (no frontmatter / no `status:` key) and every non-`Draft`
+  explicit status emit NOTHING. This keeps Bead 1's non-test source edit
+  set to exactly `ownership_resolve.go` (new helper), `spec.go` (call +
+  retire the carve-out comment), `plan.go` (call), and `hint_root.go`
+  (new).
 - **ADR-side resolution home: a decorating `adr.Store`**
   (`newDomainResolvingStore(inner, exec, root, ownerRef)`) layered at
   the two gate-lane store constructions (`plan.go:157`,
@@ -149,7 +164,13 @@ existing cache/match helpers without editing Bead 1's hunks).
   (AC-12's user-facing verbs stay truthful to the document).
   Memoization: the decorator caches resolved sets per ADR ID per run,
   layered over the existing `newMemoStore` — the non-observable
-  performance choice the spec permits.
+  performance choice the spec permits. The ADR-side resolver reuses the
+  IDENTICAL cache plumbing as the spec side per lane: the plan lane
+  constructs it with `exec == nil` / `ownerRef == ""` (the working-tree
+  read `ValidatePlan` already uses — it builds no executor), and the
+  divergence lane passes the lane's `exec` + ref-anchored `ownerRef`,
+  so both comparison sides always see the same tree via one
+  `newOwnershipCache`.
 - **Directory-shape matching: glob-normalization with a synthetic
   child probe.** Trim any trailing `/`; an ADR-side label resolves to a
   domain when the trimmed label glob-matches the domain's explicit
@@ -187,7 +208,10 @@ existing cache/match helpers without editing Bead 1's hunks).
 spec's In Scope list — close GH #147, #178, #145, #197 and bead
 `mindspec-6ou2` against the landed ACs; update `mindspec-6ou2`'s design
 note to record the evidenced supersession; comment #181 with the
-Non-Goal disposition and the reviewer-lens follow-up reference.
+Non-Goal disposition and the reviewer-lens follow-up reference; and
+FILE the deferred FX-3 follow-up bead (the 6ou2-item-1 contextpack
+backtick-strip regression pin, deferred per PF-3 so it does not force
+the spec-excluded `context-system` domain into this spec).
 
 **Dogfood note (R7)**: every bead below touches only
 workflow-owned paths (`internal/validate/**`, `internal/adr/**`,
@@ -291,13 +315,23 @@ No ADR is superseded; no divergence requiring a human stop.
   `status:`-key-less) so the guard cannot go vacuous, and each pins the
   067 disposition the spec chose (excluded from AC-1b's green-staying
   set; allowed-additional-error in AC-14's already-red set).
-- **Existing pins are CITED, not re-authored (R5).** Five of the six
-  R5 regression pins already exist as named tests (enumerated in Bead
-  4); the genuinely-new test deliverables of this spec are exactly
-  three — the #147 end-to-end fixture (Bead 2, AC-7), the 6ou2 AC-5
-  repro (Bead 2), and the contextpack backtick/bold-strip fixture
-  (Bead 4, "FX-3") — plus the guard/sweep tests (AC-1b, AC-10, AC-14)
-  and a strengthening of the existing scaffold-comment pin (AC-12b).
+- **Existing pins are CITED, not re-authored (R5).** Five of R5's
+  regression pins already exist as named tests (enumerated in Bead 4);
+  the genuinely-new test deliverables of this spec are the #147
+  end-to-end fixture (Bead 2, AC-7) and the 6ou2 AC-5 repro (Bead 2),
+  plus the guard/sweep tests (AC-1b, AC-10, AC-14) and a strengthening
+  of the existing scaffold-comment pin (AC-12b). **The 6ou2-item-1
+  contextpack backtick/bold-strip fixture ("FX-3") is DEFERRED out of
+  this spec (PF-3):** it would land in `internal/contextpack/spec_test.go`
+  (the `context-system` domain, which this spec's Impacted Domains
+  explicitly EXCLUDE), so Bead 4's own zero-override `mindspec complete`
+  would self-inflict an `adr-divergence-unowned` on it (the divergence
+  lane has no test-file exemption). 6ou2 item 1 is ALREADY-SHIPPED
+  behavior (`contextpack/spec.go:79-81` already strips); the pin is a
+  nice-to-have regression net, not a fix, so it is filed as a
+  workflow-external follow-up bead at spec close rather than forced into
+  a domain this spec does not touch. R5's remaining evidence-map
+  obligations are unaffected.
 - **Sweep guards as tests.** AC-10's hint-literal guard scans
   `internal/validate` gate-message format strings for hard-coded
   domains roots and includes a fixture-of-the-guard demonstrating red
@@ -325,17 +359,20 @@ every `Approved`/non-`Draft`/status-less spec and every manifest-less
 workspace stays byte-identical.
 
 **Steps**
-1. `internal/validate/ownership_resolve.go`: add the ownership-model-
-   in-use predicate (≥1 enumerated domain dir whose OWNERSHIP.yaml
-   LOADS through the existing per-run `ownCache` — not mere dir
-   presence, per the spec's resolved boundary) and extend
-   `normalizeImpactedDomains` with a distinguished third return
-   `bareUnresolved []string`: the Rule-2 entries (`:119-125` — bare
-   token, no `/`, not a domain dir) recorded ONLY when the model is in
-   use. The `normalized`/`errs` returns stay byte-identical (Rule 2
-   still keeps verbatim in `normalized`), so the
-   `divergence.go:155` consumer and the manifest-less carve-out are
-   unchanged BY CONSTRUCTION. Update the doc comment contract.
+1. `internal/validate/ownership_resolve.go`: add the SIGNATURE-
+   PRESERVING helper `bareUnresolvedImpactedDomains(exec, root,
+   ownerRef string, entries []string) []string` (PF-2) — it computes
+   the ownership-model-in-use predicate (≥1 enumerated domain dir whose
+   OWNERSHIP.yaml LOADS through the existing per-run `ownCache` — not
+   mere dir presence, per the spec's resolved boundary) and returns the
+   Rule-2 entries (`:119-125` — bare token, no `/`, not a domain dir)
+   ONLY when the model is in use. `normalizeImpactedDomains`'s
+   SIGNATURE IS UNCHANGED — its 4 existing production callers
+   (`plan.go:143`, `spec.go:225`, `ownership.go:490`,
+   `divergence.go:155`) stay untouched, so `go build ./...` is clean
+   and the divergence consumer + manifest-less carve-out are unchanged
+   BY CONSTRUCTION. Document the helper's contract (in-use predicate,
+   the empty-return-when-manifest-less guarantee).
 2. Add `internal/validate/hint_root.go`: `domainsRootLabel(root)` — the
    workspace-relative domains-root label derived from the EXISTING
    `workspace.DomainsDir(root)` precedence (`workspace.go:617`), i.e.
@@ -343,7 +380,9 @@ workspace stays byte-identical.
    `docs/domains` legacy. Introduced here because this bead's error
    text is the first gate message that must print a true root; Bead 3
    wires the three remaining hint sites and the sweep guard.
-3. Caller-side severity gate at BOTH authoring consumers:
+3. Caller-side severity gate at BOTH authoring consumers, each calling
+   the new helper ALONGSIDE its existing `normalizeImpactedDomains`
+   call (no signature change to the latter):
    `checkImpactedDomainsResolutionParity` (`spec.go:217`; retire the
    `:212-214` "Rule 2 still passes" carve-out comment, replacing it
    with the forward-only contract note) and `ValidatePlan`'s
@@ -351,11 +390,12 @@ workspace stays byte-identical.
    status via `validate.SpecStatusAt(specDir)` / `SpecStatus`
    (`internal/validate/frontmatter.go:21`/`:33` — the
    parse-the-contract signal; explicitly NOT `plan.go`'s `isApproved`,
-   which reads the PLAN's status) and promotes each `bareUnresolved`
-   entry to ONE `impacted-domains-resolve` ERROR iff the status is an
-   explicit case-folded `Draft`. Empty status (no frontmatter / no
-   `status:` key) and every other explicit status emit NOTHING — no
-   error, no WARN (the strictly-cleaner-than-fallback pin).
+   which reads the PLAN's status) and promotes each
+   `bareUnresolvedImpactedDomains` entry to ONE
+   `impacted-domains-resolve` ERROR iff the status is an explicit
+   case-folded `Draft`. Empty status (no frontmatter / no `status:`
+   key) and every other explicit status emit NOTHING — no error, no
+   WARN (the strictly-cleaner-than-fallback pin).
 4. Error text, one message per offending entry: the entry verbatim
    (escaped per the existing `termsafe` discipline at this site — the
    fl91/SessionStart lesson), why it failed (neither a domain-dir name
@@ -470,9 +510,14 @@ ADR-side error class.
    `--override-adr`.
 4. AC-6 both polarities: (i) cited Accepted ADR whose `Domain(s)` is
    only legacy prose (`validation, lifecycle`) vs impacted `orders` —
-   exactly today's errors, no new class; (ii) an ADR-side path claimed
-   by NO domain resolves to nothing, compares literally, produces no
-   resolve-style error.
+   the SAME error CODES fire as today (`adr-cite-irrelevant` /
+   `adr-coverage-missing`), no new class; the assertion is scoped to
+   error CODES + count (the `adr-cite-irrelevant` message body now
+   renders the RESOLVED impacted-domain set, which for a prose-only ADR
+   is byte-identical to today because prose tokens stay literal — so
+   the test asserts codes/count and that no NEW code appears, not exact
+   message bytes). (ii) an ADR-side path claimed by NO domain resolves
+   to nothing, compares literally, produces no resolve-style error.
 5. AC-7, the #147 END-TO-END fixture (the genuinely-new R5a pin):
    spec Impacted Domains `genevieve/review.py` +
    `genevieve/summarizer.py`; domain `genevieve` claiming
@@ -587,13 +632,16 @@ Bead 2 (the covering-ADR scan consumes Bead 2's resolved ADR
 `Domain(s)`; also serializes the `plan.go`/`divergence.go` seam).
 (bd edges wired from `work_chunks[].depends_on`.)
 
-## Bead 4: Regression evidence map, new pins, ceremony non-inflation guard
+## Bead 4: Regression evidence map, scaffold pin, ceremony non-inflation guard
 
-R5 (minus the AC-7 fixture that travels with R2) + R7/AC-14. Closes
-#147/#145/6ou2-item-1 on EVIDENCE — citing the pins that already exist
-by name, adding only the genuinely-missing ones — and pins that this
-spec's net ceremony went DOWN (no new flags/keys; no corpus spec
-crosses green→red).
+R5 evidence obligations (minus the AC-7 fixture that travels with R2,
+and minus the deferred FX-3 contextpack pin — see PF-3 in Testing
+Strategy) + R7/AC-14. Closes #147/#145 on EVIDENCE — citing the pins
+that already exist by name — and pins that this spec's net ceremony
+went DOWN (no new flags/keys; no corpus spec crosses green→red). Edit
+set is TEST-ONLY, all in workflow/core-owned packages the spec's
+Impacted Domains cover, so the bead's own zero-override
+`mindspec complete` passes.
 
 **Steps**
 1. AC-12 issue→test evidence map, citing the FIVE existing pins (the
@@ -623,19 +671,13 @@ crosses green→red).
    `scaffoldPlan` (`internal/approve/spec.go:255`), beside the sibling
    scaffold-content assertions — so the documented-key remedy text
    cannot silently drop.
-3. The 6ou2-item-1 pin ("FX-3", genuinely new — no backtick fixture
-   exists in `internal/contextpack/spec_test.go` today): fixtures
-   asserting a backtick-wrapped AND a bold-wrapped
-   `## Impacted Domains` entry are stripped to their bare tokens
-   (`internal/contextpack/spec.go:79-81`) before normalization; red if
-   the strip is reverted.
-4. AC-14(a) surface guard: tests pinning that `mindspec complete
+3. AC-14(a) surface guard: tests pinning that `mindspec complete
    --help`, `mindspec impl approve --help`, `mindspec validate --help`,
    and `mindspec config` output gain no new flag or key versus the
    pre-spec baseline (assert the rendered flag/key SETS equal the
    pinned baseline sets — additions fail, so any future lane/flag
    inflation trips the guard).
-5. AC-14(b) corpus polarity guard (`internal/validate/corpus_guard_test.go`,
+4. AC-14(b) corpus polarity guard (`internal/validate/corpus_guard_test.go`,
    the AC-14 half, beside Bead 1's AC-1b half): run
    `ValidateSpec`/`ValidatePlan` over EVERY `.mindspec/specs/*` with a
    spec.md against the real `.mindspec/domains` + `.mindspec/adr`;
@@ -650,18 +692,16 @@ crosses green→red).
    present, crossing no green→red boundary).
 
 **Verification**
-- [ ] `go test ./internal/contextpack/ ./internal/approve/ ./internal/validate/ ./cmd/mindspec/ ./internal/adr/` passes; the five cited pins green by exact name (`go test <pkg> -run <name>` transcripts in review evidence)
+- [ ] `go test ./internal/approve/ ./internal/validate/ ./cmd/mindspec/ ./internal/adr/` passes; the five cited pins green by exact name (`go test <pkg> -run <name>` transcripts in review evidence)
 - [ ] AC-12 revert probes recorded: each of the three shipped-code reverts turns its cited pin red (throwaway tree, nothing committed)
 - [ ] AC-12b: guidance-sentence assertion red when the scaffold comment is dropped (mutation probe recorded)
-- [ ] FX-3 contextpack fixtures green; red if the `spec.go:79-81` strip is reverted
 - [ ] AC-14(a) flag/key sets byte-equal to baseline; AC-14(b) corpus polarity green with the 067 disposition asserted
-- [ ] `go build ./... && go test ./...` no new red (z4ps caveat); `golangci-lint run ./...` clean; bead completes with zero `--override-adr`
+- [ ] `go build ./... && go test ./...` no new red (z4ps caveat); `golangci-lint run ./...` clean; bead completes with zero `--override-adr` (edit set is test-only, all workflow/core-owned — no context-system file touched)
 
 **Acceptance Criteria**
 - [ ] AC-12 — the issue→test evidence map cites only EXISTING, passing, revert-red pins by exact name (user-facing verbs included)
 - [ ] AC-12b — the scaffold `adr_citations` comment pin covers the remedy-guidance text (existing key-presence pin strengthened, stated honestly)
 - [ ] AC-14 — no new flag/key on any pinned surface; no corpus spec crosses green→red; 067 dispositioned exactly per the spec
-- [ ] R5 (6ou2 item 1) — the contextpack backtick/bold-strip fixture exists and is revert-red
 
 **Depends on**
 Beads 1 and 2 (AC-14's polarity guard asserts the FINAL pass/fail
@@ -695,10 +735,13 @@ whole-corpus green→red polarity — Bead 4), so ownership stays single.
 | AC-13 (ADR-0032 third amendment + 6ou2 supersession, same bead as first R1/R2 code) | Bead 1 Step 5 (pre-drafted at plan time; finalized here) | Bead 1 verification: anchor test + rg proofs, PRE-DRAFT marker gone |
 | AC-14 (ceremony non-inflation; green→red polarity; 067 disposition) | Bead 4 Steps 4–5 | Bead 4 verification: flag/key set equality + corpus polarity guard |
 
-R5's non-AC deliverable (the 6ou2-item-1 contextpack fixture) is Bead 4
-Step 3, carried under Bead 4's fourth acceptance criterion. The spec's
-Validation Proofs commands are distributed per-bead (each bead runs its
-package subset + the rg sweeps from Bead 3 on); the delivery
-housekeeping (closing #147/#178/#145/#197/`mindspec-6ou2`, the 6ou2
-design-note supersession update, the #181 comment) is orchestrator
-close-out work, not a bead.
+R5's 6ou2-item-1 contextpack backtick pin ("FX-3") is DEFERRED out of
+this spec (PF-3 — it would force the spec-excluded `context-system`
+domain into a bead and self-trip its divergence gate); it is filed as a
+workflow-external follow-up bead at spec close, since 6ou2 item 1 is
+already-shipped behavior and the pin is a nice-to-have net, not a fix.
+The spec's Validation Proofs commands are distributed per-bead (each
+bead runs its package subset + the rg sweeps from Bead 3 on); the
+delivery housekeeping (closing #147/#178/#145/#197/`mindspec-6ou2`, the
+6ou2 design-note supersession update, the #181 comment, AND filing the
+FX-3 follow-up bead) is orchestrator close-out work, not a bead.
