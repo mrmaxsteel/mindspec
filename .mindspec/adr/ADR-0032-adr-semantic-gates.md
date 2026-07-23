@@ -163,6 +163,98 @@ domains, so a changed file owned by an undeclared domain still fails.
 `workflow` is added to this ADR's `Domain(s)` line because spec 100's
 workflow source implements the gate mechanism this ADR governs.
 
+## Amendment — authoring-time resolvability + symmetric name-resolution (2026-07-23, spec 122)
+
+<!-- PRE-DRAFT at PLAN time (spec 122, per the spec-117/ADR-0043 precedent):
+     this section is FINALIZED by spec 122's Bead 1 — the bead landing the
+     first Requirement-1/2 code — which removes this marker and adjusts
+     wording only where the concrete implementation forces it (AC-13). -->
+
+Spec 122 (`domain-adr-gate-truthfulness`; GH #178, #147, #145, #197 +
+bead `mindspec-6ou2`) amends sub-decisions 1 and 2 with two refinements
+of the coverage model this ADR records. No new gate lane, no new flag,
+no new config key; the `--override-adr` / `--supersede-adr` escapes are
+untouched.
+
+**(a) Forward-only authoring-time resolvability.** In a workspace where
+the ownership model is IN USE — the layout-aware domain enumeration
+finds at least one domain dir whose `OWNERSHIP.yaml` LOADS (not the
+mere presence of a domains directory) — an `## Impacted Domains` entry
+that is neither a domain-dir name nor a path resolving to exactly one
+owner is a hard `impacted-domains-resolve` ERROR at the authoring gates
+(`validate spec` / `spec approve` / `validate plan`), but ONLY when the
+spec's own frontmatter status is an explicit case-folded `Draft`. Both
+carve-outs are load-bearing: **(i) grandfathering** — a spec that is
+`Approved`, carries any other explicit non-`Draft` status, or is
+status-less (no YAML frontmatter, or frontmatter with no `status:` key;
+both read as the empty `SpecStatus`) keeps Rule 2's verbatim-keep with
+NO new finding of any severity, so the existing corpus (including the
+pre-frontmatter legacy specs) never newly reddens and emits no WARN
+noise; **(ii) manifest-less workspaces** — where zero `OWNERSHIP.yaml`
+loads there is nothing to resolve against, so nothing new may fail
+(ADR-0036's doctrine expressed at the gate). Rationale: a label that
+can never own a file makes every downstream coverage decision vacuously
+false; the fact is derivable at spec-approve, so it is derived there
+(ADR-0041's earliest-derivable-refusal, one lifecycle stage earlier
+than the bead-time detonation GH #178 filed). Accepted tradeoff,
+stated: a status-less legacy spec can carry a non-resolving label
+without being caught here — the forward-only gate exists to catch NEW
+authoring, and new specs are scaffolded `status: Draft`.
+
+**(b) Symmetric comparison by name resolution.** Every
+spec-domains-vs-ADR-`Domain(s)` intersection resolves BOTH sides to
+owning-domain dir-names through the same DETERMINISTIC explicit-manifest
+OWNERSHIP resolution before comparing. ADR-side: an entry that names a
+domain dir stays verbatim; a path-shaped entry claimed by exactly one
+domain's `paths:` globs resolves to that owner's dir-name, with
+directory-shape completeness (a directory label resolves identically
+with and without a trailing slash — `src/orders/` and `src/orders` —
+and a bare file path resolves the same way); an entry that does not
+resolve, is ambiguous, or is non-path prose/tuple (e.g. this ADR's own
+`validation, adr, lifecycle` tokens) stays VERBATIM and compares
+literally — it can only fail to intersect, exactly as before, and is
+NEVER a new error class, because ADR `Domain(s)` lines are historical
+documents this gate must not force churn on. Resolution consumes
+explicit per-domain manifests through the same loaders and per-run
+caches as the spec side; no ownership is synthesized (ADR-0036), and no
+free-form string is heuristically parsed.
+
+**Evidenced supersession of bead `mindspec-6ou2`'s panel decision.**
+§(b) supersedes the 6/6 unanimous ZFC-aware panel decision recorded on
+bead `mindspec-6ou2` (2026-06-26, 3 Claude + 3 Codex), which rejected
+"resolve-ADR-side-through-OWNERSHIP by name" in favor of "enforce +
+teach short-tags; the real fix is lola-side migration". Findings are
+never out-voted, so the reversal is discharged with evidence against
+each of that decision's three load-bearing objections, not by re-tally:
+**(1) the ZFC / guessed-ownership objection** ("resolving the ADR side
+requires heuristically parsing free-form strings like `api (lola,
+tools)`") is answered by scope — §(b) resolves ONLY deterministic
+path-shaped entries, by glob-matching them against EXPLICIT per-domain
+OWNERSHIP `paths:` (the identical mechanism the spec-100 amendment
+above already blessed for the spec side); a tuple/prose token is never
+parsed or guessed — it stays literal. **(2) the "doesn't even fix it —
+`impacted-domains-resolve` fires spec-side first" objection** was true
+of lola's specific spec-side state, which §(a) plus the spec-100
+normalization now handle FIRST; once the spec side resolves to a valid
+domain name, the remaining failures are precisely 6ou2's filed items 3
+(`adr-cite-irrelevant`) and 4 (`adr-coverage-missing`), which fire
+purely on the ADR-side literal mismatch §(b) closes. **(3) the
+"backward-compat is SAFE — mindspec's own ADRs already use short-tags"
+premise is factually FALSE**: this ADR's own `Domain(s)` line
+(`validation, adr, lifecycle, workflow`) and ADR-0031's (`validation,
+doc-sync, lifecycle, ownership`) carry non-short-tag tokens the panel's
+proposed ADR-side reject-check would have reddened on day one — the
+collision §(b)'s no-new-error policy structurally avoids. The panel's
+spec-side recommendation (enforce + teach) is ADOPTED as §(a), not
+reversed.
+
+**New-ADR trigger.** If a future change reaches for
+path-overlap/transitive intersection (domain A covers B when any of A's
+claimed paths overlap any of B's) or any owner-identity model not
+expressible as "resolve to dir-name, then compare", that is a
+resolution-model CHANGE and MUST land as a NEW ADR superseding this
+ADR's coverage semantics — not as a fourth amendment section.
+
 ## Rollback
 
 Revert spec 087 PR's merge commit (`git revert -m 1 <merge-sha>`). The
