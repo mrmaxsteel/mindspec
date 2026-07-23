@@ -44,11 +44,17 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 > a repo-wide review, a pre-release review, a design/proposal review, or a
 > standalone bug-fix — writes its panel dir to **`<repo>/.mindspec/reviews/<panel-slug>/`**
 > (a top-level sibling of `.mindspec/specs/`), never under a spec dir and never to
-> the old repo-root `review/`. For an ad-hoc panel, substitute
-> `.mindspec/reviews/<panel-slug>` for `<spec-dir>/reviews/<panel-slug>` everywhere
-> in the steps below. These panels are stored artifacts only — they are NOT scanned
-> by the `mindspec complete` gate (which is spec-lifecycle-scoped), so no `panel.json`
-> of theirs ever gates a merge.
+> the old repo-root `review/`. Register it with **`--gate adhoc` and NO `--spec`**
+> (spec 123 R8 — `--spec` together with `--gate adhoc` is refused):
+> ```bash
+> mindspec panel create <panel-slug> --gate adhoc --target <ref>
+> ```
+> For an ad-hoc panel, substitute `.mindspec/reviews/<panel-slug>` for
+> `<spec-dir>/reviews/<panel-slug>` everywhere in the steps below. These panels are
+> stored artifacts only — they are NOT scanned by the `mindspec complete` gate
+> (which is spec-lifecycle-scoped), so no `panel.json` of theirs ever gates a
+> merge; they ARE talliable (`mindspec panel tally <panel-slug>`), same as any
+> other registered panel.
 
 ## Step 0 — register the panel
 
