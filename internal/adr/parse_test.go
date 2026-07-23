@@ -471,6 +471,30 @@ func TestNextID_MalformedSkipped(t *testing.T) {
 	}
 }
 
+// TestParseADR_CanonicalIDFromSluggedStem is the AC-9(i) pin (spec 123
+// R5(b)): a slugged ADR file must report ID exactly "ADR-0001", never the
+// full stem "ADR-0001-integrate-at-contracts-not-tools". RED on revert to
+// parse.go's pre-123 `id := strings.TrimSuffix(base, ".md")`.
+func TestParseADR_CanonicalIDFromSluggedStem(t *testing.T) {
+	root := t.TempDir()
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(adrDir, "ADR-0001-integrate-at-contracts-not-tools.md")
+	if err := os.WriteFile(path, []byte(testADR1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := ParseADR(path)
+	if err != nil {
+		t.Fatalf("ParseADR: %v", err)
+	}
+	if a.ID != "ADR-0001" {
+		t.Errorf("ID = %q, want canonical ADR-0001 (not the full stem)", a.ID)
+	}
+}
+
 // TestParseADR_NonListDomainLine is a REGRESSION LOCK (not a RED pin): the
 // parser at parse.go ~L74 keys off strings.Contains(trimmed, "**Domain(s)**:"),
 // so it already accepts BOTH the markdown-list form ("- **Domain(s)**: ...")

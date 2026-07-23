@@ -94,6 +94,34 @@ func ADRID(id string) error {
 	return nil
 }
 
+// ADRCanonicalPrefix extracts the canonical "ADR-<digits>" prefix from an
+// ADR id or filename stem — bare ("ADR-0001") or slugged
+// ("ADR-0001-my-slug"). It walks the digit run immediately following the
+// "ADR-" marker: the same walk internal/adr's number-floor scan
+// (maxADRNum) already performs on disk, so ID canonicalization
+// (ParseADR.ID, workspace.ResolveADRFile) and ADR number allocation can
+// never disagree about where an ADR's number ends (spec 123 R5(b)/(c)).
+// When stem does not start with "ADR-", or carries no digit run
+// immediately after it (e.g. a malformed "ADR-foo.md"), the input is
+// returned UNCHANGED — a no-op rather than a truncation to a bare "ADR-"
+// prefix, so callers can still fall back to treating the whole stem as
+// an opaque identifier.
+func ADRCanonicalPrefix(stem string) string {
+	const prefix = "ADR-"
+	if !strings.HasPrefix(stem, prefix) {
+		return stem
+	}
+	rest := stem[len(prefix):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return stem
+	}
+	return prefix + rest[:end]
+}
+
 // BeadID validates a bead identifier (e.g. "mindspec-x1qr", "mindspec-9cyu.1").
 //
 // Format: beadIDPattern models a bead ID as a hyphen-separated

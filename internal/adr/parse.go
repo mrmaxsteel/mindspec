@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -44,7 +45,14 @@ func ParseADR(path string) (ADR, error) {
 
 	content := string(data)
 	base := filepath.Base(path)
-	id := strings.TrimSuffix(base, ".md")
+	stem := strings.TrimSuffix(base, ".md")
+	// R5(b) (spec 123): ID is the canonical "ADR-<digits>" prefix of the
+	// stem, never the full slugged stem — a slugged file
+	// "ADR-0001-integrate-at-contracts.md" reports ID "ADR-0001", not the
+	// long stem. Shares the digit-walk with workspace.ResolveADRFile via
+	// idvalidate.ADRCanonicalPrefix so the two can't disagree about where
+	// an ADR's number ends.
+	id := idvalidate.ADRCanonicalPrefix(stem)
 
 	a := ADR{
 		ID:      id,

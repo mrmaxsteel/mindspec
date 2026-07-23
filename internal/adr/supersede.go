@@ -13,6 +13,14 @@ import (
 // SEC-1 (bead mindspec-x1qr): both IDs are validated before path construction.
 // newID is normally derived from internal NextID output (safe), but Supersede
 // is also exported via FileStore.Supersede so we validate defensively.
+//
+// oldID resolution is READ-resolution (spec 123 R5(c)): oldID may be a
+// canonical ID whose on-disk file is slugged (e.g. superseding
+// "ADR-0001" when the file is "ADR-0001-integrate-at-contracts.md"), so
+// it routes through workspace.ResolveADRFile rather than the exact-join
+// ADRFilePath. The resolved path is then read AND written back to in
+// place — updating an existing file's Superseded-by field is not new
+// file emission.
 func Supersede(root, oldID, newID string) error {
 	if err := idvalidate.ADRID(oldID); err != nil {
 		return fmt.Errorf("invalid old ADR ID: %w", err)
@@ -20,7 +28,7 @@ func Supersede(root, oldID, newID string) error {
 	if err := idvalidate.ADRID(newID); err != nil {
 		return fmt.Errorf("invalid new ADR ID: %w", err)
 	}
-	oldPath, err := workspace.ADRFilePath(root, oldID)
+	oldPath, err := workspace.ResolveADRFile(root, oldID)
 	if err != nil {
 		return err
 	}
@@ -52,9 +60,12 @@ func Supersede(root, oldID, newID string) error {
 // CopyDomains reads an ADR and returns its domain list.
 // SEC-1: validates id before path construction (the join previously enabled
 // a read-arbitrary-*.md primitive via the same traversal pattern as
-// --supersedes).
+// --supersedes). Resolution routes through workspace.ResolveADRFile (spec
+// 123 R5(c)): this is a READ of a possibly-slugged existing file, not new
+// file emission, so the superseded ADR's domain list is found even when
+// its filename carries a slug.
 func CopyDomains(root, id string) ([]string, error) {
-	path, err := workspace.ADRFilePath(root, id)
+	path, err := workspace.ResolveADRFile(root, id)
 	if err != nil {
 		return nil, err
 	}
