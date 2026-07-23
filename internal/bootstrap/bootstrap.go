@@ -8,6 +8,9 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/domain"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
 )
 
@@ -132,7 +135,24 @@ func Run(root string, dryRun bool) (*Result, error) {
 		}
 	}
 
-	for _, item := range manifest() {
+	// Spec 123 R7(d): load .mindspec/config.yaml so a fresh init's
+	// AGENTS.md is config-sourced exactly like setup's (the FR-3
+	// asymmetry guard, AC-14) — never mindspec's own hardcoded build.
+	// config.Load returns DefaultConfig with a nil error for the ordinary
+	// greenfield case where .mindspec/config.yaml does not exist yet; a
+	// genuinely corrupt/invalid existing config is propagated (spec 123
+	// FX-1) rather than silently rendering AGENTS.md from a DefaultConfig
+	// fallback, matching how every other mindspec command handles a bad
+	// config. init never overwrites an existing AGENTS.md managed block
+	// (the manifest is create-or-append-only), so there is no data-loss
+	// path here, but failing loudly on a corrupt config keeps init's
+	// generated content honest and consistent with setup.
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, fmt.Errorf("loading .mindspec/config.yaml for init's AGENTS.md build guidance (fix the config and re-run init): %w", err)
+	}
+
+	for _, item := range manifest(cfg) {
 		target := filepath.Join(root, item.path)
 
 		if item.isDir {
@@ -204,6 +224,19 @@ func Run(root string, dryRun bool) (*Result, error) {
 		return nil, err
 	}
 
+	// Spec 123 R4a (#208): even when .gitignore already existed (the
+	// manifest item above is Skipped in that case — it carries no
+	// appendBlock), still ensure the two runtime entries are present, via
+	// the entry-granular gitutil helper that never reorders or rewrites
+	// existing bytes. This is a true no-op when the entries are already
+	// there — including immediately after the greenfield create-from-
+	// scratch write above, so it never double-writes a fresh starterGitignore.
+	if !dryRun {
+		if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
+			return nil, fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
+		}
+	}
+
 	return r, nil
 }
 
@@ -215,7 +248,7 @@ type manifestItem struct {
 	appendBlock string        // if set, append this block to existing files (idempotent via marker)
 }
 
-func manifest() []manifestItem {
+func manifest(cfg *config.Config) []manifestItem {
 	items := []manifestItem{
 		// Required directories — NEW (greenfield) projects are born FLAT
 		// (Req 2 / AC4): lifecycle artifacts live directly under .mindspec/,
@@ -224,12 +257,19 @@ func manifest() []manifestItem {
 		{path: ".mindspec/domains", isDir: true},
 		{path: ".mindspec/specs", isDir: true},
 
-		// Root files
-		{path: "AGENTS.md", content: starterAgentsMD, appendBlock: appendAgentsBlock},
+		// Root files. AGENTS.md is config-sourced (spec 123 R7): the
+		// Build & Test section renders cfg.Commands when populated and
+		// is omitted entirely when unset — never mindspec's own build.
+		{path: "AGENTS.md", content: renderStarterAgentsMD(cfg), appendBlock: renderAppendAgentsBlock(cfg)},
 		{path: "CLAUDE.md", content: starterClaudeMD, appendBlock: appendClaudeBlock},
 		{path: ".github/copilot-instructions.md", content: starterCopilotInstructionsMD, appendBlock: appendCopilotBlock},
 		// Gitignore: session.json and focus are local runtime files, not version-controlled
 		{path: ".gitignore", content: starterGitignore},
+		// Spec 123 R1 (#207): the context-map skeleton, so the very first
+		// `domain add` has a "## Bounded Contexts" section to insert into
+		// instead of erroring "reading context map". Create-only, like every
+		// other manifest item — never overwrites an existing context-map.md.
+		{path: ".mindspec/context-map.md", contentFunc: domain.ContextMapSkeleton},
 	}
 
 	return items
@@ -272,7 +312,15 @@ const starterGitignore = `# MindSpec local runtime files (not version-controlled
 
 // --- Starter file content ---
 
-const starterAgentsMD = `# AGENTS.md — MindSpec Project
+// starterAgentsMDTemplate is the full-doc AGENTS.md content `mindspec
+// init` writes for a fresh (non-existing) file. Spec 123 R7(a) rewrote
+// this from a mindspec-repo-specific document (title "MindSpec
+// Project", hardcoded `make build`/`make test`) into a CONSUMER-generic
+// one: neutral title, and a %s placeholder for the Build & Test section
+// that renderStarterAgentsMD fills from cfg.RenderBuildTestSection(2) —
+// populated-and-rendered or omitted entirely, never mindspec's own
+// build (ADR-0040's consumer-identity clause).
+const starterAgentsMDTemplate = `# AGENTS.md
 <!-- BEGIN mindspec:managed -->
 
 This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
@@ -280,14 +328,7 @@ This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-dri
 ## Workflow
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
-
-## Build & Test
-
-` + "```bash" + `
-make build    # Build binary
-make test     # Run all tests
-` + "```" + `
-
+%s
 ## Modes
 
 This project follows a strict spec-driven workflow with human gates:
@@ -307,6 +348,12 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
 <!-- END mindspec:managed -->
 `
+
+// renderStarterAgentsMD renders the full-doc AGENTS.md content for a
+// fresh file, config-sourced per spec 123 R7(a)/(b).
+func renderStarterAgentsMD(cfg *config.Config) string {
+	return fmt.Sprintf(starterAgentsMDTemplate, cfg.RenderBuildTestSection(2))
+}
 
 const starterClaudeMD = `# CLAUDE.md
 <!-- BEGIN mindspec:managed -->
@@ -350,21 +397,17 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 <!-- END mindspec:managed -->
 `
 
-// appendAgentsBlock is appended to an existing AGENTS.md when the marker is absent.
-const appendAgentsBlock = `
+// appendAgentsBlockTemplate is appended to an existing AGENTS.md when the
+// marker is absent — config-sourced identically to
+// starterAgentsMDTemplate (spec 123 R7), just nested (H3) under the
+// pre-existing document's own top-level heading.
+const appendAgentsBlockTemplate = `
 ## MindSpec
 
 This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
-
-### Build & Test
-
-` + "```bash" + `
-make build    # Build binary
-make test     # Run all tests
-` + "```" + `
-
+%s
 ### Modes
 
 This project follows a strict spec-driven workflow with human gates:
@@ -383,6 +426,13 @@ Transition between modes using ` + "`mindspec approve spec|plan`" + ` and ` + "`
 - Working tree must be clean before switching modes
 - Run ` + "`mindspec doctor`" + ` to verify project structure health
 `
+
+// renderAppendAgentsBlock renders the nested (H3) MindSpec block used
+// when AGENTS.md already exists without a managed marker, config-sourced
+// per spec 123 R7(a)/(b).
+func renderAppendAgentsBlock(cfg *config.Config) string {
+	return fmt.Sprintf(appendAgentsBlockTemplate, cfg.RenderBuildTestSection(3))
+}
 
 // appendClaudeBlock is appended to an existing CLAUDE.md when the marker is absent.
 // When appended, it is wrapped with BEGIN/END markers by Run().

@@ -36,6 +36,17 @@ func DomainsDir(root string) string
 // of the flat / canonical / legacy shapes (preserves mindspec-ew79).
 func TreeRootForSpecDir(specDir string) string
 
+// ADR file resolution (spec 123 R5). ADRFilePath is the exact-join
+// WRITE-target resolver (path a NEW file is written to); ResolveADRFile
+// is the shared READ resolver every existing-file caller uses (show,
+// --supersedes, Supersede, CopyDomains): accepts canonical "ADR-0001" or
+// a full slugged stem, resolves canonical-number driven to the bare OR
+// slugged on-disk file, and errors (a `recovery:`-prefixed prose
+// diagnostic — not ADR-0035's copy-pastable command form — with
+// termsafe-escaped filenames) when more than one file carries the number.
+func ADRFilePath(root, adrID string) (string, error)
+func ResolveADRFile(root, id string) (string, error)
+
 // Whole-tree layout classification (spec 106 Req 2).
 type Layout string // flat | canonical | legacy | greenfield | mixed
 
@@ -110,7 +121,25 @@ type Config struct {
     Models map[string]string `yaml:"models"` // phase -> model id; free-form (runner-specific); default {}
     Loop   Loop              `yaml:"loop"`
     Runner string            `yaml:"runner"` // claude-code-skills | claude-code-workflow | external; default claude-code-skills
+
+    // Commands is the CONSUMER's declared build/test guidance (spec 123
+    // R7, ADR-0040 consumer-identity clause): a free-form task -> shell
+    // command map (documented vocabulary keys: "build", "test"). NOT
+    // inert, unlike Models/Loop/Runner: `mindspec init` and every
+    // `mindspec setup <agent>` verb render populated entries as the
+    // managed AGENTS.md "Build & Test" section via
+    // RenderBuildTestSection; unset means the section is OMITTED (ZFC —
+    // the framework never guesses a consumer's build system).
+    Commands map[string]string `yaml:"commands"`
 }
+
+// Declared-key predicates + the single Build & Test renderer (spec 123).
+// An all-blank map is NOT declared (empty≠declared): doctor's
+// missing-models/missing-commands Warns key off these, never bare len().
+func (c *Config) HasDeclaredModels() bool
+func (c *Config) HasDeclaredCommands() bool
+func (c *Config) CommandLines() []string              // "<command>   # <task>" lines; stable order build, test, then sorted; termsafe-escaped
+func (c *Config) RenderBuildTestSection(level int) string // "" when Commands unset — section omitted, never a placeholder
 
 type Panel struct {
     Reviewers        []Reviewer   `yaml:"reviewers"`         // ALL-GATES default; default [{claude,3},{codex,3}]

@@ -1,6 +1,9 @@
 package adr
 
-import "sort"
+import (
+	"errors"
+	"sort"
+)
 
 // Compile-time interface check.
 var _ Store = (*OverlayStore)(nil)
@@ -26,12 +29,23 @@ func NewOverlayStore(branch, primary Store) *OverlayStore {
 }
 
 // Get returns the ADR from the branch store when it resolves there,
-// falling back to the primary store otherwise.
+// falling back to the primary store ONLY when the branch store reports a
+// genuine miss (errors.Is(err, ErrNotFound)). Any OTHER branch error — most
+// importantly a branch-local canonical-number collision (two same-numbered
+// ADRs in the branch store) — PROPAGATES instead of being masked by a
+// silent fallback to the primary store. Falling back on every error was
+// the G2 final-review bug: in a linked worktree it suppressed a real
+// collision error from `adr show` (cmd/mindspec/adr.go) and silently
+// displayed the unrelated primary-store ADR instead.
 func (s *OverlayStore) Get(id string) (*ADR, error) {
-	if a, err := s.branch.Get(id); err == nil {
+	a, err := s.branch.Get(id)
+	if err == nil {
 		return a, nil
 	}
-	return s.primary.Get(id)
+	if errors.Is(err, ErrNotFound) {
+		return s.primary.Get(id)
+	}
+	return nil, err
 }
 
 // List returns the union of both stores' results, deduplicated by ID

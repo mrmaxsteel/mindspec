@@ -4,12 +4,85 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
+
+// maxSlugLen caps the derived (or supplied) ADR filename slug at 48
+// characters (spec 123 R5(a), plan-level cap choice), truncated at a
+// hyphen boundary so a cap mid-word never leaves a partial token
+// dangling on disk.
+const maxSlugLen = 48
+
+// slugShapePattern is the shape a caller-supplied --slug value must
+// already match: lowercase kebab-case, no leading/trailing/consecutive
+// hyphens. A raw title is NOT expected to match this (deriveSlug does
+// the collapsing); --slug is for a caller who already knows the exact
+// filename token they want.
+var slugShapePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// deriveSlug converts an ADR title into a kebab-case filename slug:
+// lowercase, non-alphanumeric runs collapse to a single hyphen,
+// leading/trailing hyphens are trimmed, and the result is capped at
+// maxSlugLen characters, backed off to the nearest hyphen boundary so a
+// cap mid-word never leaves a partial token. A title with no
+// alphanumeric characters at all (e.g. pure punctuation) derives an
+// empty slug — callers fall back to the bare "ADR-NNNN.md" filename
+// form rather than writing an invalid "ADR-NNNN-.md".
+func deriveSlug(title string) string {
+	var b strings.Builder
+	prevHyphen := true // suppresses a leading hyphen
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevHyphen = false
+		case !prevHyphen:
+			b.WriteByte('-')
+			prevHyphen = true
+		}
+	}
+	slug := strings.TrimRight(b.String(), "-")
+
+	if len(slug) > maxSlugLen {
+		truncated := slug[:maxSlugLen]
+		if idx := strings.LastIndexByte(truncated, '-'); idx >= 0 {
+			truncated = truncated[:idx]
+		}
+		slug = truncated
+	}
+	return slug
+}
+
+// resolveSlug returns the slug to embed in the new ADR's filename: the
+// caller's --slug override when supplied (CreateOpts.SlugOverride
+// non-nil), otherwise a slug derived from the title (deriveSlug). An
+// override that is present but empty (an explicit empty --slug value) opts out
+// of slugging, the same as an empty derived slug — the caller falls back
+// to the bare filename. A non-empty override MUST already be
+// lowercase-kebab-shaped (slugShapePattern); a malformed override is
+// refused with an ADR-0035 recovery line naming the accepted shape,
+// never silently corrected.
+func resolveSlug(title string, override *string) (string, error) {
+	if override == nil {
+		return deriveSlug(title), nil
+	}
+	v := strings.TrimSpace(*override)
+	if v == "" {
+		return "", nil
+	}
+	if !slugShapePattern.MatchString(v) {
+		return "", fmt.Errorf(
+			"--slug %q must be lowercase kebab-case (letters, digits, single internal hyphens; no leading/trailing hyphen)\nrecovery: pass --slug %q or omit --slug to derive one from the title",
+			*override, deriveSlug(v),
+		)
+	}
+	return v, nil
+}
 
 const adrTemplate = `# ADR-NNNN: <Title>
 
@@ -60,6 +133,14 @@ const adrTemplate = `# ADR-NNNN: <Title>
 type CreateOpts struct {
 	Domains    []string
 	Supersedes string
+	// SlugOverride, when non-nil, replaces slug derivation from the title
+	// (spec 123 R5(a), the `--slug` flag). A non-nil-but-empty override
+	// (an explicit empty --slug value) opts out of slugging, the same as an
+	// empty derived slug — the new ADR gets the bare "ADR-NNNN.md" name.
+	// A non-empty override is validated to already be lowercase
+	// kebab-case; an invalid value is refused rather than silently
+	// corrected (see resolveSlug).
+	SlugOverride *string
 }
 
 // Create generates a new ADR file from the template under root, numbering
@@ -93,16 +174,19 @@ func create(root string, numberingRoots []string, title string, opts CreateOpts)
 	// "../../../tmp/poisoned" traversal that mutated arbitrary *.md files.
 	// We validate BEFORE any join so the error message is precise and no
 	// path-construction code runs on attacker input.
+	//
+	// Resolution (spec 123 R5(c)): opts.Supersedes may be a canonical ID
+	// whose on-disk file is slugged, so it resolves through
+	// workspace.ResolveADRFile (bare-or-slugged, collision-checked)
+	// rather than the exact-join ADRFilePath — ResolveADRFile itself
+	// returns a "not found" error when the predecessor is absent, so no
+	// separate os.Stat existence probe is needed here.
 	if opts.Supersedes != "" {
 		if err := idvalidate.ADRID(opts.Supersedes); err != nil {
 			return "", fmt.Errorf("invalid --supersedes value: %w", err)
 		}
-		oldPath, err := workspace.ADRFilePath(root, opts.Supersedes)
-		if err != nil {
+		if _, err := workspace.ResolveADRFile(root, opts.Supersedes); err != nil {
 			return "", err
-		}
-		if _, err := os.Stat(oldPath); os.IsNotExist(err) {
-			return "", fmt.Errorf("%s not found", opts.Supersedes)
 		}
 		if len(opts.Domains) == 0 {
 			domains, err := CopyDomains(root, opts.Supersedes)
@@ -116,6 +200,21 @@ func create(root string, numberingRoots []string, title string, opts CreateOpts)
 	id, err := NextIDAcross(numberingRoots...)
 	if err != nil {
 		return "", fmt.Errorf("generating next ID: %w", err)
+	}
+
+	// R5(a): derive (or accept the --slug override for) the new file's
+	// kebab-case slug. An empty slug (punctuation-only title, or an
+	// explicit empty --slug) falls back to the bare "ADR-NNNN" stem.
+	slug, err := resolveSlug(title, opts.SlugOverride)
+	if err != nil {
+		return "", err
+	}
+	stem := fmt.Sprintf("ADR-%s", id)
+	if slug != "" {
+		stem = fmt.Sprintf("%s-%s", stem, slug)
+	}
+	if err := idvalidate.ADRID(stem); err != nil {
+		return "", fmt.Errorf("computed ADR filename stem %q is invalid: %w\nrecovery: pass a lowercase kebab-case --slug (letters, digits, single hyphens)", stem, err)
 	}
 
 	content := adrTemplate
@@ -136,7 +235,11 @@ func create(root string, numberingRoots []string, title string, opts CreateOpts)
 		return "", fmt.Errorf("creating ADR directory: %w", err)
 	}
 
-	outPath := filepath.Join(adrDir, fmt.Sprintf("ADR-%s.md", id))
+	// R5(a) WRITE-target emission: composes the NEW file's path from the
+	// freshly-allocated id + slug; this is never a resolution of an
+	// existing file, so it stays a plain filepath.Join (not routed
+	// through workspace.ResolveADRFile).
+	outPath := filepath.Join(adrDir, stem+".md")
 	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("writing ADR file: %w", err)
 	}

@@ -1,8 +1,10 @@
 package adr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +70,45 @@ func TestOverlayStore_Get(t *testing.T) {
 	// Present in neither: error.
 	if _, err := s.Get("ADR-0099"); err == nil {
 		t.Error("expected error for ADR missing from both stores")
+	}
+}
+
+// TestOverlayStore_Get_BranchCollisionPropagates is the G2 final-review
+// pin: a branch-local canonical-number collision (two same-numbered ADRs
+// in the BRANCH store, e.g. "ADR-0005.md" and "ADR-0005-slug.md") must
+// PROPAGATE from OverlayStore.Get, not be masked by a fallback to the
+// primary store. Falling back on every branch error — the pre-fix bug —
+// would silently show whatever ADR-0005 happens to resolve to in the
+// primary store (or a spurious not-found if there is none), hiding the
+// real collision from a caller like `adr show`.
+func TestOverlayStore_Get_BranchCollisionPropagates(t *testing.T) {
+	branchRoot := t.TempDir()
+	primaryRoot := t.TempDir()
+
+	// Branch store: a genuine collision — both a bare and a slugged file
+	// for ADR-0005.
+	writeOverlayADR(t, branchRoot, "ADR-0005", "Bare", "Accepted", "core")
+	adrDir := filepath.Join(branchRoot, "docs", "adr")
+	content := "# ADR-0005: Slugged\n\n- **Date**: 2026-06-01\n- **Status**: Accepted\n- **Domain(s)**: core\n\n## Decision\nY.\n"
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-0005-slugged.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Primary store: an unrelated, cleanly-resolvable ADR-0005 that a
+	// wrongful fallback would silently surface instead of the collision.
+	writeOverlayADR(t, primaryRoot, "ADR-0005", "Primary Version", "Accepted", "core")
+
+	overlay := NewOverlayStore(NewFileStore(branchRoot), NewFileStore(primaryRoot))
+
+	_, err := overlay.Get("ADR-0005")
+	if err == nil {
+		t.Fatal("expected a collision error from OverlayStore.Get, got nil (silently fell back to primary)")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected a collision error, got a not-found error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("expected the branch collision error to propagate (mentioning 'ambiguous'), got: %v", err)
 	}
 }
 

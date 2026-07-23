@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
 	pluginmindspec "github.com/mrmaxsteel/mindspec/plugins/mindspec"
 )
@@ -191,6 +192,29 @@ func RunClaude(root string, check bool) (*Result, error) {
 	// so --check still reports pending drift without writing.
 	applyBeadsConfig(root, check, r)
 
+	// 8. Ensure MindSpec's runtime files are gitignored (spec 123 R4b) —
+	// setup is the onboarding verb for repos that never ran `mindspec init`.
+	if err := ensureGitignore(root, check, r); err != nil {
+		return nil, err
+	}
+
+	// 9. Heal a pre-123 leaked AGENTS.md (title and/or managed block, final
+	// review G3/FX-5, #211's exposure): `init` writes AGENTS.md for EVERY
+	// consumer, so a leaked "# AGENTS.md — MindSpec Project" title and/or a
+	// hardcoded `make build`/`make test` managed block can survive on a
+	// claude-only onboarding path. healLegacyAgentsMD performs both heals
+	// ATOMICALLY (round-2 final-review FIX C): it loads+validates config
+	// BEFORE either heal write, so a corrupt config.yaml aborts with
+	// AGENTS.md byte-unchanged rather than leaving a half-healed file
+	// (title fixed, block still leaked). Narrowly gated on positively
+	// detecting a leak (never a general takeover of AGENTS.md), so a clean
+	// repo is unaffected and never even loads config.
+	if !check {
+		if err := healLegacyAgentsMD(root); err != nil {
+			return nil, err
+		}
+	}
+
 	return r, nil
 }
 
@@ -243,6 +267,37 @@ func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]strin
 		}
 
 		r.Notices = append(r.Notices, relPath+" (user-modified — left in place; delete it to receive the canonical version)")
+	}
+	return nil
+}
+
+// ensureGitignore ensures MindSpec's local runtime files (ADR-0015:
+// .mindspec/session.json, .mindspec/focus) are gitignored (spec 123 R4b) —
+// the onboarding-time counterpart to bootstrap's R4a ensure, for repos that
+// never ran the greenfield-only `mindspec init`. Shared by RunClaude,
+// RunCodex, and RunCopilot so the three entry points can't drift. check
+// mode writes nothing; a byte-idempotent re-run reports Skipped, not
+// Created, so callers counting exact item totals stay stable.
+func ensureGitignore(root string, check bool, r *Result) error {
+	const label = ".gitignore (runtime entries)"
+
+	if check {
+		r.Skipped = append(r.Skipped, label+" (--check writes nothing)")
+		return nil
+	}
+
+	path := filepath.Join(root, ".gitignore")
+	before, _ := os.ReadFile(path)
+
+	if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
+		return fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
+	}
+
+	after, _ := os.ReadFile(path)
+	if string(before) == string(after) {
+		r.Skipped = append(r.Skipped, label)
+	} else {
+		r.Created = append(r.Created, label)
 	}
 	return nil
 }
@@ -571,6 +626,17 @@ func ensureManagedDoc(root, relPath, fullContent, appendBlock string, check bool
 
 	switch {
 	case strings.Contains(content, mindspecMarkerBegin):
+		// Has a BEGIN marker — but before ANY mutation, validate the
+		// marker topology (spec 123 FX-4): exactly one ordered
+		// BEGIN-before-END pair. A malformed layout (END before BEGIN,
+		// a duplicate marker, a BEGIN with no END) would make
+		// replaceManagedBlock's first-BEGIN/first-END index math corrupt
+		// or duplicate operator content, and — paired with the separate
+		// title heal — leave an observably half-rewritten file. Refuse
+		// with an actionable error and write NOTHING instead.
+		if err := validateManagedMarkers(content); err != nil {
+			return fmt.Errorf("%s has malformed MindSpec managed markers: %w", relPath, err)
+		}
 		// Has BEGIN/END markers — replace managed block in place.
 		updated := replaceManagedBlock(content, appendBlock)
 		if updated == content {
@@ -629,8 +695,45 @@ func chainBeadsSetup(root, agent string, r *Result) {
 	}
 }
 
+// validateManagedMarkers checks that content carries EXACTLY ONE
+// well-formed MindSpec managed block: exactly one BEGIN marker, exactly
+// one END marker, with BEGIN appearing before END (spec 123 FX-4). It is
+// the single topology gate every managed-doc rewrite (and the AGENTS.md
+// title heal's provenance check) runs BEFORE mutating, so malformed or
+// duplicate marker layouts are refused without a partial write rather
+// than silently corrupting/duplicating operator content. A file with NO
+// BEGIN marker at all is not this function's concern (the caller's
+// append/legacy branches handle that) — callers invoke this only once
+// they have already seen a BEGIN marker.
+func validateManagedMarkers(content string) error {
+	beginCount := strings.Count(content, mindspecMarkerBegin)
+	endCount := strings.Count(content, mindspecMarkerEnd)
+	if beginCount != 1 || endCount != 1 {
+		return fmt.Errorf("expected exactly one %q and one %q marker, found %d begin / %d end — refusing to rewrite (fix the markers by hand so exactly one ordered pair remains)",
+			mindspecMarkerBegin, mindspecMarkerEnd, beginCount, endCount)
+	}
+	if strings.Index(content, mindspecMarkerBegin) > strings.Index(content, mindspecMarkerEnd) {
+		return fmt.Errorf("the %q marker appears before its %q — refusing to rewrite (fix the markers by hand so BEGIN precedes END)",
+			mindspecMarkerEnd, mindspecMarkerBegin)
+	}
+	return nil
+}
+
+// hasWellFormedManagedMarkers reports whether content carries exactly one
+// ordered BEGIN-before-END MindSpec managed pair — the POSITIVE
+// provenance predicate (spec 123 FX-3): proof that mindspec generated the
+// managed region, so a heal that keys off framework-generated content
+// (the AGENTS.md title heal) can safely fire without risking an operator
+// who legitimately authored an identical title in a NON-mindspec file.
+func hasWellFormedManagedMarkers(content string) bool {
+	return validateManagedMarkers(content) == nil
+}
+
 // replaceManagedBlock replaces the content between BEGIN and END markers.
 // Returns the original string unchanged if the new content matches.
+// Callers MUST validateManagedMarkers first (spec 123 FX-4) — this
+// helper assumes a single ordered pair and does first-BEGIN/first-END
+// index math that is only correct under that precondition.
 func replaceManagedBlock(content, newBlock string) string {
 	beginIdx := strings.Index(content, mindspecMarkerBegin)
 	if beginIdx == -1 {

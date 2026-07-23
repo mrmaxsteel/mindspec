@@ -268,6 +268,7 @@ func TestCeremonyNonInflation_ConfigKeys(t *testing.T) {
 		"auto_finalize",
 		"auto_merge_finalize_pr",
 		"auto_open_finalize_pr",
+		"commands",
 		"decomposition",
 		"decomposition.max_beads",
 		"decomposition.max_chain_depth",

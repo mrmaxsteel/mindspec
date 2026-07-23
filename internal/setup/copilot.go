@@ -34,6 +34,27 @@ func RunCopilot(root string, check bool) (*Result, error) {
 	// already has. Shared helper keeps the three entry points aligned.
 	applyBeadsConfig(root, check, r)
 
+	// 5. Ensure MindSpec's runtime files are gitignored (spec 123 R4b).
+	if err := ensureGitignore(root, check, r); err != nil {
+		return nil, err
+	}
+
+	// 6. Heal a pre-123 leaked AGENTS.md (title and/or managed block, final
+	// review G3/FX-5, #211's exposure): `init` writes AGENTS.md for EVERY
+	// consumer, so a leaked title and/or a hardcoded `make build`/`make
+	// test` managed block can survive on a copilot-only onboarding path.
+	// healLegacyAgentsMD performs both heals ATOMICALLY (round-2
+	// final-review FIX C): it loads+validates config BEFORE either heal
+	// write, so a corrupt config.yaml aborts with AGENTS.md byte-unchanged
+	// rather than leaving a half-healed file. Narrowly gated on positively
+	// detecting a leak (never a general takeover of AGENTS.md by copilot),
+	// so a clean repo is unaffected and never even loads config.
+	if !check {
+		if err := healLegacyAgentsMD(root); err != nil {
+			return nil, err
+		}
+	}
+
 	return r, nil
 }
 

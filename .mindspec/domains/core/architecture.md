@@ -110,3 +110,68 @@ by misreading a query failure as "everything is out of scope" would
 either strand real lifecycle beads unmerged or (worse) merge nothing
 silently, so this call fails the whole `impl approve` invocation
 pre-mutation instead. bd-only, no git I/O (ADR-0030 boundary unaffected).
+
+## ADR resolution: write-target vs read-resolution (spec 123 R5)
+
+Spec 123's slugged-ADR-filename convention (workflow domain: `adr create`
+now emits `ADR-NNNN-<slug>.md`) split the core ADR path surface into two
+deliberately distinct resolvers in `internal/workspace/workspace.go`:
+
+- **`ADRFilePath(root, id)`** stays the exact-join WRITE-target resolver:
+  it composes the path a NEW file should be written to (and the path
+  `CreateWithID`'s own existence probe checks), and never resolves an
+  existing on-disk file that may be slugged.
+- **`ResolveADRFile(root, id)`** is the new shared READ-resolution
+  helper every caller that must find an EXISTING, possibly-slugged file
+  uses (`show`, `--supersedes`, `Supersede`, `CopyDomains`). It accepts a
+  canonical `ADR-NNNN` or a full slugged stem, validates via
+  `idvalidate.ADRID` BEFORE any `filepath.Glob`/`Join` (no unvalidated id
+  reaches the filesystem), derives the canonical number prefix
+  (`idvalidate.ADRCanonicalPrefix`), and enumerates every file carrying
+  that number: the bare `<canonical>.md` plus every `<canonical>-*.md`
+  glob match. Exactly one candidate resolves; zero is "not found"; MORE
+  than one is a COLLISION error naming both files, ending in a
+  `recovery:`-prefixed prose diagnostic (rename or remove the redundant
+  file so exactly one carries the number — guidance, not the
+  copy-pastable `recovery: <command>` form ADR-0035 defines for guard
+  failures) — never a silent short-circuit to the bare file. Resolution is canonical-number driven
+  for EVERY input shape, so naming the full slugged stem while a genuine
+  collision exists still surfaces the ambiguity. On-disk filenames
+  rendered into the collision error are routed through `termsafe.Escape`
+  (spec 116/ADR-0042: attacker-influenceable names never reach the
+  terminal raw).
+
+Canonical `ADR-NNNN` remains the reference currency everywhere — slugs
+are filename ergonomics only; ADR-citation gates and `--supersedes`
+chains match on the canonical ID.
+
+## Declared `commands:` build/test guidance (spec 123 R7, ADR-0040 consumer-identity)
+
+`Config` gains `Commands map[string]string` (`yaml:"commands"`) beside
+`Models`: a free-form task→shell-command map with the documented (not
+enforced) vocabulary keys `build` and `test`. UNLIKE `Models`/`Loop`/
+`Runner`, this key is NOT inert: `mindspec init` and every `mindspec
+setup <agent>` verb render its populated entries as the managed AGENTS.md
+"Build & Test" section, so mindspec never plants its OWN build commands
+into a consuming repo. The rendering surface is single-homed in config:
+
+- **`hasNonBlankEntry` / `HasDeclaredModels()` / `HasDeclaredCommands()`**
+  — the empty≠declared predicate: an entry counts only when key AND value
+  are non-blank after trimming, so `commands:\n  build: ""` does NOT
+  count as declared (doctor's `missing-commands`/`missing-models` Warns
+  still fire, and no runnable-command-less section is ever rendered).
+- **`CommandLines()`** — renders `"<command>   # <task>"` lines in the
+  stable order build, test, then remaining keys sorted (the single
+  ordering rule, so bootstrap's starter AGENTS.md and setup's managed
+  block can never disagree); blank entries are skipped; every value is
+  routed through `termsafe.Escape` (operator/agent-declared free text
+  reaching a generated document).
+- **`RenderBuildTestSection(level)`** — the ONE renderer every
+  managed-content call site uses (level 2 for top-level managed blocks,
+  3 for bootstrap's nested append block); returns `""` when `Commands`
+  is unset, so the section is OMITTED entirely rather than rendered as a
+  placeholder.
+
+The framework never guesses these values (ADR-0036 ZFC): unset means
+omitted plus the workflow-domain doctor nudge and the `mindspec commands
+populate` prompt emitter — never an inferred `npm test`.

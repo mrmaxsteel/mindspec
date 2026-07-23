@@ -329,3 +329,32 @@ func TestDomainNameErrorNoRawRegex(t *testing.T) {
 		}
 	}
 }
+
+// TestADRCanonicalPrefix pins spec 123 R5(b)/(c): the canonical-ID walk
+// used by both ParseADR.ID and workspace.ResolveADRFile must derive
+// "ADR-<digits>" from a bare or slugged stem, and must be a no-op on
+// inputs that aren't ADR-<digits>-shaped at all (never truncate to a
+// bare "ADR-" prefix).
+func TestADRCanonicalPrefix(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare", "ADR-0001", "ADR-0001"},
+		{"slugged", "ADR-0001-integrate-at-contracts", "ADR-0001"},
+		{"multi-segment slug", "ADR-0042-orchestration-layering-ratchet", "ADR-0042"},
+		{"single digit legacy", "ADR-1", "ADR-1"},
+		{"single digit slugged", "ADR-1-legacy", "ADR-1"},
+		{"no ADR- prefix (unchanged)", "not-an-adr", "not-an-adr"},
+		{"ADR- with no digits (unchanged)", "ADR-foo", "ADR-foo"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ADRCanonicalPrefix(tc.in); got != tc.want {
+				t.Errorf("ADRCanonicalPrefix(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

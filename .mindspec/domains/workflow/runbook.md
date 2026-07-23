@@ -2,6 +2,49 @@
 
 ## Common Operations
 
+### Onboard a greenfield repo (spec 123)
+
+In an empty directory, the first-run verbs now compose in any order:
+
+```bash
+git init .
+mindspec init                      # scaffolds .mindspec/, context-map.md skeleton,
+                                   # neutral AGENTS.md, and gitignores the runtime files
+mindspec domain add alpha          # scaffolds the domain AND its context-map entry
+mindspec adr create "First decision" --domain alpha   # writes ADR-0001-first-decision.md
+mindspec setup codex               # refreshes the managed AGENTS.md block; also
+                                   # ensures the runtime gitignore entries
+mindspec doctor                    # green on the governed lanes; four advisory Warns
+                                   # + a Beads [MISSING] line remain (see below)
+```
+
+- On this untouched greenfield state doctor reports FOUR Warns plus one
+  Missing — none of them structural failures on the lanes spec 123
+  governs (context-map, gitignore, scaffolding):
+  - `missing-models` and `missing-commands` are the two Warns spec 123
+    DESIGNED as ZFC nudges (and what its AC-1/AC-19 assertions scope
+    to): run `mindspec models populate` (declare the per-phase
+    protocol) and `mindspec commands populate` (declare this repo's
+    real build/test — the framework never guesses; while unset, the
+    managed AGENTS.md "Build & Test" section is omitted entirely).
+  - Two further pre-existing advisory Warns also appear because the
+    fresh scaffold hasn't been populated yet: `dead-manifest` (the
+    scaffolded `OWNERSHIP.yaml` paths glob is empty — run
+    `mindspec ownership populate alpha`) and `missing-source-globs`
+    (doc-sync is classifying source with the built-in default — run
+    `mindspec source populate`).
+  - `Beads: [MISSING]` (".beads/ directory not found — run
+    `beads init`"). Warns never fail doctor, so this Missing line is
+    the only reason the untouched sequence exits non-zero.
+- Recovering a pre-123 partial state (`domains/<name>/` present but no
+  context-map entry, or missing standard files): re-run
+  `mindspec domain add <name>` — it backfills whatever is missing and
+  never overwrites existing files. `mindspec doctor` names each
+  unmapped domain with exactly that recovery line.
+- A runtime file reported "not gitignored" by doctor: `mindspec doctor
+  --fix` appends the entry; a TRACKED runtime file is the worse state
+  and gets the existing untrack `--fix`.
+
 ### Start a New Spec
 
 Use `/spec-init` or create manually:

@@ -80,7 +80,16 @@ approve_threshold from that gate's creation-time defaults
 of the global panel.reviewers/approve_threshold. --gate must be one of
 the five config.PanelGateKeys (spec_approve, plan_approve, bead,
 final_review, adhoc); omitting it is byte-identical to today: the global
-defaults are used and no "gate" key is written.`,
+defaults are used and no "gate" key is written.
+
+--gate adhoc is the one exception to the --spec requirement above (spec
+123 R8): an ad-hoc panel has no owning spec, so --spec must be OMITTED
+(supplying both is refused with a recovery line) and the panel is
+written to .mindspec/reviews/<slug>/ (flat layout) or review/<slug>/
+(legacy layout) instead of a spec-scoped directory. Every other --gate
+value still requires --spec. Ad-hoc panels are stored artifacts only:
+creatable and talliable (` + "`panel tally`" + `), but never scanned by
+` + "`mindspec complete`" + `'s gate (ADR-0037 scope).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -110,7 +119,24 @@ defaults are used and no "gate" key is written.`,
 		if err := rejectControlBytes("--gate", gate); err != nil {
 			return err
 		}
-		if strings.TrimSpace(specID) == "" {
+		// R8b (spec 123 Bead 4): --spec remains REQUIRED for every
+		// non-adhoc gate (guard preserved, byte-identical to before);
+		// --spec together with --gate adhoc is refused with an ADR-0035
+		// recovery line naming both valid invocation forms — an ad-hoc
+		// panel has no owning spec by definition, so a silent ignore
+		// would misfile it. The mutual-exclusion test keys on
+		// Flags().Changed("spec") (was the flag EXPLICITLY supplied)
+		// rather than a TrimSpace(specID) emptiness probe: a
+		// whitespace-only `--spec '   '` trims to "" and would otherwise
+		// slip the guard, then flow an untrimmed-whitespace spec onward.
+		// Any explicit --spec — blank or not — is refused with --gate
+		// adhoc.
+		if gate == "adhoc" && cmd.Flags().Changed("spec") {
+			return guard.NewFailure(
+				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", specID),
+				fmt.Sprintf("use `panel create %s --spec <id> --target <ref>` for a gated panel, or `panel create %s --gate adhoc --target <ref>` for an ad-hoc panel", slug, slug))
+		}
+		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
 		}
 		if strings.TrimSpace(target) == "" {
@@ -141,7 +167,7 @@ defaults are used and no "gate" key is written.`,
 			return err
 		}
 
-		dir, err := panelDirFor(root, specID, slug)
+		dir, err := panelDirFor(root, specID, slug, gate)
 		if err != nil {
 			return err
 		}
@@ -354,8 +380,23 @@ func isValidPanelGateKey(gate string) bool {
 // internal/complete.panelGateRoots uses: flat -> co-located
 // <spec-dir>/reviews/<slug>, otherwise the repo-root review/<slug>
 // convention.
-func panelDirFor(root, specID, slug string) (string, error) {
-	if layout, _ := workspace.DetectLayout(root); layout == workspace.LayoutFlat {
+//
+// R8a (spec 123 Bead 4): an ad-hoc panel (gate == "adhoc") resolves
+// WITHOUT a spec — flat layout -> the workspace-level
+// .mindspec/reviews/<slug> (the location ms-panel-run documents,
+// plugins/mindspec/skills/ms-panel-run/SKILL.md), legacy/canonical/
+// greenfield layout -> the same repo-root review/<slug> convention the
+// non-flat gated branch already uses (the Open Questions resolution).
+// The non-adhoc branch below is untouched, byte-identical to before.
+func panelDirFor(root, specID, slug, gate string) (string, error) {
+	layout, _ := workspace.DetectLayout(root)
+	if gate == "adhoc" {
+		if layout == workspace.LayoutFlat {
+			return filepath.Join(workspace.MindspecDir(root), "reviews", slug), nil
+		}
+		return filepath.Join(root, "review", slug), nil
+	}
+	if layout == workspace.LayoutFlat {
 		specDir, err := workspace.SpecDir(root, specID)
 		if err != nil {
 			return "", fmt.Errorf("resolving spec dir for %q: %w", specID, err)

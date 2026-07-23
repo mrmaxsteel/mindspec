@@ -96,6 +96,7 @@ var CommandTokens = map[string]struct{}{
 	"approve":   {}, // hidden backward-compat alias
 	"bead":      {},
 	"cleanup":   {},
+	"commands":  {}, // spec 123 R7c: `commands populate` (consumer build/test declaration)
 	"complete":  {},
 	"config":    {}, // spec 109 R9: read-only `config show`
 	"context":   {},
@@ -106,6 +107,7 @@ var CommandTokens = map[string]struct{}{
 	"init":      {},
 	"instruct":  {},
 	"migrate":   {},
+	"models":    {}, // spec 123 R6b: `models populate` (declared per-phase model protocol)
 	"next":      {},
 	"otel":      {},
 	"ownership": {},

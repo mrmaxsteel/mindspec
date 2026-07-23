@@ -137,18 +137,30 @@ func TestFileStore_Get_PrefixAmbiguous(t *testing.T) {
 	}
 }
 
-func TestFileStore_Get_ExactBeatsPrefix(t *testing.T) {
+// TestFileStore_Get_BareSluggedCollisionErrors is the AC-10 collision pin
+// (spec 123 R5(c)): a directory holding BOTH a bare ADR-0001.md and a
+// slugged ADR-0001-also.md for the same canonical number must error
+// naming both paths, instead of the pre-123 silent short-circuit that
+// preferred the bare file (formerly TestFileStore_Get_ExactBeatsPrefix).
+// RED on revert to the exact-join short-circuit.
+func TestFileStore_Get_BareSluggedCollisionErrors(t *testing.T) {
 	root := t.TempDir()
 	writeADRAt(t, root, "ADR-0001.md", "ADR-0001", "Exact", "Accepted")
 	writeADRAt(t, root, "ADR-0001-also.md", "ADR-0001", "Slugged", "Accepted")
 
 	store := NewFileStore(root)
-	a, err := store.Get("ADR-0001")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
+	_, err := store.Get("ADR-0001")
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
 	}
-	if a.Title != "Exact" {
-		t.Errorf("expected exact match to win, got %q", a.Title)
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("expected ambiguity error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ADR-0001.md") || !strings.Contains(err.Error(), "ADR-0001-also.md") {
+		t.Errorf("expected error to name both paths, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery:") {
+		t.Errorf("expected an ADR-0035 recovery line, got: %v", err)
 	}
 }
 

@@ -6,7 +6,7 @@
 - **Deciders**: Max
 - **Supersedes**: n/a
 - **Superseded-by**: n/a
-- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (the decision matrix this ADR names as L1, mechanized), [ADR-0034](ADR-0034-ceremony-collapse.md) (the ceremony-collapse precedent this ADR cites as already-shipped ratcheting), [ADR-0030](ADR-0030-executor-boundary.md) (the `Executor` boundary cited as a healthy interface born with a real second consumer), [ADR-0032](ADR-0032-adr-semantic-gates.md) (the Accepted-vs-Proposed distinction this codification ADR lands under), [ADR-0038](ADR-0038-friction-reporter.md) (the friction journal that supplies evidence for a rule ratcheting down), [ADR-0039](ADR-0039-flat-layout-v2.md) (the artifact layout the L1/L2 contract in this ADR rides on)
+- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (the decision matrix this ADR names as L1, mechanized), [ADR-0034](ADR-0034-ceremony-collapse.md) (the ceremony-collapse precedent this ADR cites as already-shipped ratcheting), [ADR-0030](ADR-0030-executor-boundary.md) (the `Executor` boundary cited as a healthy interface born with a real second consumer), [ADR-0032](ADR-0032-adr-semantic-gates.md) (the Accepted-vs-Proposed distinction this codification ADR lands under), [ADR-0038](ADR-0038-friction-reporter.md) (the friction journal that supplies evidence for a rule ratcheting down), [ADR-0039](ADR-0039-flat-layout-v2.md) (the artifact layout the L1/L2 contract in this ADR rides on), [ADR-0036](ADR-0036-ownership-discovery.md) (the ZFC guidance stack — schema block, populate prompt, doctor nudge — the spec 123 amendment below extends verbatim to `models:` and `commands:`), [ADR-0035](ADR-0035-agent-error-contract.md) (the recovery-line contract every new finding this amendment's checks introduce must carry)
 
 ---
 
@@ -183,6 +183,73 @@ silently assumed every runner has Claude Code's full surface would not be
 portable; naming the degraded path for each missing capability is what makes
 the artifact + CLI contract the actual integration seam rather than an
 aspirational one.
+
+> **Amendment (2026-07-23, spec 123 — the consumer-identity clause):**
+> §1's layering doctrine was written for rules mindspec enforces ON
+> ITSELF (which surface holds "the panel must approve," "the threshold
+> is n-1"). Spec 123 (GH #211) found the identical failure mode one
+> layer outward, in content mindspec GENERATES **INTO** a consuming
+> repo: `init`'s starter `AGENTS.md` and `setup codex`'s managed block
+> hardcoded mindspec-the-framework's OWN repo facts — its title ("# AGENTS.md
+> — MindSpec Project") and its OWN Go build (`make build`/`make test`) —
+> directly into prose, with no declared home and no override, so every
+> onboarded consumer's agent read instructions to run commands that do
+> not exist in their repo. This is the exact L1-vs-hardcoded-prose
+> failure this ADR already names (§1's "where does this rule live?"),
+> just aimed at generated artifacts instead of binary behavior. This
+> amendment states the **consumer-identity clause** the ADR Touchpoints
+> promised: it extends the ratchet's own logic — hardcoded prose facts
+> drift; declared config has exactly one parsed representation —
+> outward, to content mindspec writes into a consumer's tree.
+>
+> **The clause.** A managed or scaffolded artifact mindspec generates
+> into a consuming repo (a starter doc, an appended managed block, a
+> commented config schema) may carry only framework-generic guidance or
+> the consumer's own L2-declared values — never mindspec-the-framework's
+> own repo facts:
+>
+>   1. **Framework-generic guidance** — content that is true of every
+>      consumer equally (e.g. "run `mindspec instruct` for
+>      mode-appropriate operating guidance"), or
+>   2. **Values sourced from the consumer's own L2 declared config**
+>      (`.mindspec/config.yaml`) — never mindspec-the-framework's own
+>      repo facts baked in as if they were universal.
+>
+> A repo-specific fact that generated content needs (the consumer's
+> build/test commands were the #211 case; the per-phase model protocol,
+> #210's `models:`, is the sibling case) either **gets an L2 home** —
+> this spec gives build/test its own declared key (`commands:`, beside
+> `models:`) — **or is omitted entirely**, never guessed (the ADR-0036
+> ZFC posture, applied to generated content the same way it already
+> applies to doctor's advisory nudges): an unset key renders NO
+> placeholder that could read as runnable, just a clean omission plus a
+> doctor nudge naming the populate path.
+>
+> **The honesty half.** A declared-but-inert L2 key (`models:` today;
+> any future key with no wired enforcement) must SAY it is inert
+> **everywhere it is surfaced** — the schema block scaffolded by
+> `doctor --fix`, the ZFC populate-prompt command, `mindspec config
+> show`'s own annotation — and each surface must name **today's
+> authoritative consumer** (for `models:`, the orchestration skills, not
+> the mindspec binary). A declared key that goes quiet about its own
+> inertness is exactly the kind of undeclared-continuum drift §1 exists
+> to prevent, just at the config layer instead of the gate layer:
+> nothing stops an operator from assuming a declared key does something
+> it does not, absent this standing honesty requirement.
+>
+> **Extends ADR-0036, doesn't replace it.** The `source_globs:` pattern
+> ADR-0036 already ships (commented schema scaffold, ZFC populate
+> prompt, doctor nudge, framework proposes no values) is the concrete
+> mechanism this clause generalizes to every future L2 surface that
+> backs generated content — spec 123 applies it a second and third time
+> (`models:`, `commands:`) verbatim, per this amendment's own logic:
+> reuse the ratchet's shipped shape rather than inventing a parallel
+> one.
+>
+> This is an amendment, not a supersession: no existing clause is
+> displaced, and §1's four-layer ratchet is unchanged for in-binary
+> behavior — this only states that the SAME "prose drifts, declared
+> config doesn't" logic governs content the binary writes outward, too.
 
 ## Consequences
 

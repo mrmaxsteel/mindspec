@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
 // adrDirFor returns the on-disk ADR directory for a checkout root.
@@ -127,13 +130,15 @@ func TestADRCreate_NextIDOverBranchMainUnion(t *testing.T) {
 	}
 
 	// The new file lands in the worktree; its ID must be 0051, not 0008.
-	if !fileExists(filepath.Join(adrDirFor(wtRoot), "ADR-0051.md")) {
+	// R5(a) (spec 123): create now emits a slugged filename, so match by
+	// canonical-number prefix rather than the exact bare "ADR-0051.md".
+	if matches, _ := filepath.Glob(filepath.Join(adrDirFor(wtRoot), "ADR-0051-*.md")); len(matches) != 1 {
 		all, _ := filepath.Glob(filepath.Join(adrDirFor(wtRoot), "ADR-*.md"))
-		t.Fatalf("expected ADR-0051.md in worktree (union of main ADR-0050 + branch ADR-0007), got %v", all)
+		t.Fatalf("expected exactly one ADR-0051-*.md in worktree (union of main ADR-0050 + branch ADR-0007), got %v", all)
 	}
 
 	// Defensively assert no colliding ADR-0008 was allocated.
-	if fileExists(filepath.Join(adrDirFor(wtRoot), "ADR-0008.md")) {
+	if matches, _ := filepath.Glob(filepath.Join(adrDirFor(wtRoot), "ADR-0008*.md")); len(matches) != 0 {
 		t.Fatalf("NextID collided: allocated ADR-0008 over only the worktree-local root instead of the branch+main union")
 	}
 }
@@ -153,9 +158,11 @@ func TestADRCreate_MainCheckout(t *testing.T) {
 		t.Fatalf("adr create: %v", err)
 	}
 
-	if !fileExists(filepath.Join(adrDirFor(root), "ADR-0004.md")) {
+	// R5(a) (spec 123): create now emits a slugged filename, so match by
+	// canonical-number prefix rather than the exact bare "ADR-0004.md".
+	if matches, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-0004-*.md")); len(matches) != 1 {
 		all, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-*.md"))
-		t.Fatalf("expected ADR-0004.md in main checkout, got %v", all)
+		t.Fatalf("expected exactly one ADR-0004-*.md in main checkout, got %v", all)
 	}
 }
 
@@ -281,5 +288,128 @@ func TestAdrShowMainCheckout_StillWorks(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(out), []byte("core")) {
 		t.Fatalf("adr show output missing Domain(s) 'core'; got:\n%s", out)
+	}
+}
+
+// resetAdrCreateSlugFlag zeroes the --slug flag state between invocations
+// so a prior test's --slug value (and its Changed bit) never leaks into a
+// later test that omits the flag.
+func resetAdrCreateSlugFlag(t *testing.T) {
+	t.Helper()
+	f := adrCreateCmd.Flags().Lookup("slug")
+	if f == nil {
+		t.Fatal("adrCreateCmd has no --slug flag")
+	}
+	_ = f.Value.Set(f.DefValue)
+	f.Changed = false
+}
+
+// TestAdrCreate_SluggedFilename pins AC-8 (spec 123 R5(a)): a fresh
+// workspace's `adr create` with a multi-word title writes a SLUGGED
+// filename derived from the title, not the bare "ADR-0001.md" the
+// pre-123 CLI wrote. RED on revert.
+func TestAdrCreate_SluggedFilename(t *testing.T) {
+	resetAdrCreateSlugFlag(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+
+	if err := adrCreateCmd.RunE(adrCreateCmd, []string{"Integrate at contracts, not tools"}); err != nil {
+		t.Fatalf("adr create: %v", err)
+	}
+
+	const wantStem = "ADR-0001-integrate-at-contracts-not-tools"
+	wantPath := filepath.Join(adrDirFor(root), wantStem+".md")
+	if !fileExists(wantPath) {
+		all, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-*.md"))
+		t.Fatalf("expected %s, got %v", wantPath, all)
+	}
+	if err := idvalidate.ADRID(wantStem); err != nil {
+		t.Fatalf("computed stem %q fails idvalidate.ADRID: %v", wantStem, err)
+	}
+
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# ADR-0001:") {
+		t.Errorf("expected heading '# ADR-0001:', got:\n%s", data)
+	}
+}
+
+// TestAdrCreate_SlugFlagOverride pins AC-8's `--slug` override: an
+// explicit --slug value replaces title-derived slugging.
+func TestAdrCreate_SlugFlagOverride(t *testing.T) {
+	resetAdrCreateSlugFlag(t)
+	t.Cleanup(func() { resetAdrCreateSlugFlag(t) })
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+
+	if err := adrCreateCmd.Flags().Set("slug", "my-custom-slug"); err != nil {
+		t.Fatal(err)
+	}
+	if err := adrCreateCmd.RunE(adrCreateCmd, []string{"A totally different title"}); err != nil {
+		t.Fatalf("adr create --slug: %v", err)
+	}
+
+	want := filepath.Join(adrDirFor(root), "ADR-0001-my-custom-slug.md")
+	if !fileExists(want) {
+		all, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-*.md"))
+		t.Fatalf("expected %s (--slug override), got %v", want, all)
+	}
+}
+
+// TestAdrCreate_PunctuationOnlyTitleFallsBackToBare pins AC-8's bare
+// fallback: a title with no alphanumeric characters derives an empty
+// slug, so create writes the bare "ADR-NNNN.md" form instead of an
+// invalid "ADR-NNNN-.md".
+func TestAdrCreate_PunctuationOnlyTitleFallsBackToBare(t *testing.T) {
+	resetAdrCreateSlugFlag(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+
+	if err := adrCreateCmd.RunE(adrCreateCmd, []string{"!!! ??? ---"}); err != nil {
+		t.Fatalf("adr create: %v", err)
+	}
+
+	want := filepath.Join(adrDirFor(root), "ADR-0001.md")
+	if !fileExists(want) {
+		all, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-*.md"))
+		t.Fatalf("expected bare %s (punctuation-only title), got %v", want, all)
+	}
+}
+
+// TestAdrCreate_SlugFlagInvalidShapeRefused pins that a malformed --slug
+// value (not lowercase kebab-case) is refused with a recovery line,
+// never silently corrected into something else.
+func TestAdrCreate_SlugFlagInvalidShapeRefused(t *testing.T) {
+	resetAdrCreateSlugFlag(t)
+	t.Cleanup(func() { resetAdrCreateSlugFlag(t) })
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+
+	if err := adrCreateCmd.Flags().Set("slug", "Not A Valid Slug!"); err != nil {
+		t.Fatal(err)
+	}
+	err := adrCreateCmd.RunE(adrCreateCmd, []string{"Some Title"})
+	if err == nil {
+		t.Fatal("expected error for malformed --slug, got nil")
+	}
+	if !strings.Contains(err.Error(), "recovery:") {
+		t.Errorf("expected a recovery line, got: %v", err)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(adrDirFor(root), "ADR-*.md")); len(matches) != 0 {
+		t.Errorf("malformed --slug must write nothing, got: %v", matches)
 	}
 }

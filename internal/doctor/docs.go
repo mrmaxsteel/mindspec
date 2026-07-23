@@ -6,12 +6,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/domain"
 	"github.com/mrmaxsteel/mindspec/internal/ownership"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // domainFiles are the expected files within each domain directory.
 var domainFiles = []string{"overview.md", "architecture.md", "interfaces.md", "runbook.md"}
+
+// docsMappedCheck is the "is this domain mapped in context-map.md"
+// predicate the unmapped-domain check consumes. It defaults to the exported
+// domain.HasEntry — the SAME helper scaffold.Add's context-map backfill
+// consumes (mirrored there as its own scaffoldMappedCheck seam var) — never
+// a private reimplementation, so the emission (writer) side and this
+// detection side cannot silently disagree about what "mapped" means (spec
+// 123 R3/AC-4). See TestDocsMappedCheckIsSharedHelper for the identity pin.
+var docsMappedCheck = domain.HasEntry
 
 func checkDocs(r *Report, root string) {
 	docsRel := docsRootRel(root)
@@ -38,6 +48,9 @@ func checkDocs(r *Report, root string) {
 		}
 	}
 
+	// Requirement 3 (spec 123, #207): missing-context-map + unmapped-domain.
+	checkContextMap(r, root, docsRel)
+
 	// Domain subdirectory checks
 	checkDomains(r, root, docsRel)
 
@@ -46,6 +59,107 @@ func checkDocs(r *Report, root string) {
 
 	// Migration metadata checks (only when migration artifacts are present).
 	checkMigrationMetadata(r, root)
+}
+
+// checkContextMap implements spec 123 Requirement 3: (a) missing-context-map
+// — context-map.md absent at the layout-resolved path → Missing, with a
+// --fix that scaffolds the Requirement-1 skeleton (mechanical, ZFC-safe:
+// structure only, no invented content); (b) unmapped-domain — a directory
+// under domains/ whose name has no corresponding entry heading in
+// context-map.md → Warn naming the domain with the recovery line `mindspec
+// domain add <name>`. The two states are mutually exclusive per domain: when
+// context-map.md is entirely absent, every domain is trivially "unmapped"
+// for the same reason the file itself is Missing, so the unmapped-domain
+// scan only runs once the file exists — a second lane doesn't pile on
+// redundant Warns for the one root cause the Missing finding already names.
+func checkContextMap(r *Report, root, docsRel string) {
+	cmPath := workspace.ContextMapPath(root)
+	cmName := contextMapDisplayName(root, docsRel, cmPath)
+
+	data, err := os.ReadFile(cmPath)
+	if err != nil {
+		// Only a genuinely-absent file is Missing + auto-scaffoldable. Any
+		// OTHER read failure (e.g. an existing but mode-000 unreadable file,
+		// or a permission-denied parent) is a concrete Error with NO scaffold
+		// fixer: scaffoldContextMap would no-op on an existing file
+		// (fileExists=true) yet Report.Fix() would still flip the check to
+		// Fixed while the read error persists — a "reports success without
+		// fixing" bug. Surfacing the real error with no fixer keeps the
+		// finding honest and actionable (FX-3).
+		if !os.IsNotExist(err) {
+			r.Checks = append(r.Checks, Check{
+				Name:    cmName,
+				Status:  Error,
+				Message: fmt.Sprintf("cannot read %s: %v", cmName, err),
+			})
+			return
+		}
+		r.Checks = append(r.Checks, Check{
+			Name:    cmName,
+			Status:  Missing,
+			Message: fmt.Sprintf("create %s — run 'mindspec doctor --fix' to scaffold the skeleton", cmName),
+			FixFunc: func() error {
+				return scaffoldContextMap(cmPath)
+			},
+		})
+		return
+	}
+
+	r.Checks = append(r.Checks, Check{Name: cmName, Status: OK})
+	checkUnmappedDomains(r, root, docsRel, string(data))
+}
+
+// checkUnmappedDomains warns on every domains/ directory that has no
+// corresponding entry heading in content (the docsMappedCheck predicate) —
+// the Requirement-3(b) unmapped-domain check. Recovery is `mindspec domain
+// add <name>` (the Requirement-2 backfill), not `doctor --fix`: no FixFunc
+// is attached, since populating a domain's context-map entry is the same
+// scaffolding action `domain add` already owns.
+func checkUnmappedDomains(r *Report, root, docsRel, content string) {
+	domainsDir := filepath.Join(root, docsRel, "domains")
+	entries, err := os.ReadDir(domainsDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if docsMappedCheck(content, name) {
+			continue
+		}
+		r.Checks = append(r.Checks, Check{
+			Name:   "context-map.md (" + name + ")",
+			Status: Warn,
+			Message: fmt.Sprintf("domain %q has no context-map entry — run 'mindspec domain add %s' to backfill it",
+				name, name),
+		})
+	}
+}
+
+// scaffoldContextMap writes the Requirement-1 skeleton at cmPath if absent.
+// Mechanical and ZFC-safe: structure only (title, heading, separator), no
+// invented domain content. Idempotent — never overwrites an existing file.
+func scaffoldContextMap(cmPath string) error {
+	if fileExists(cmPath) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(cmPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(cmPath, []byte(domain.ContextMapSkeleton()), 0o644)
+}
+
+// contextMapDisplayName returns the repo-relative display name for the
+// context-map.md check, falling back to a docsRel-joined path if the
+// resolved cmPath is somehow not under root (should not happen in practice).
+func contextMapDisplayName(root, docsRel, cmPath string) string {
+	rel, err := filepath.Rel(root, cmPath)
+	if err != nil {
+		rel = filepath.Join(docsRel, "context-map.md")
+	}
+	return filepath.ToSlash(rel)
 }
 
 func checkDomains(r *Report, root, docsRel string) {

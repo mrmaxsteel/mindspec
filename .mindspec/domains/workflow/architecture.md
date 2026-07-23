@@ -455,6 +455,188 @@ production seam has no test double (e.g. `internal/validate`'s
 scoped-PATH technique (a scratch `bin/` containing only a `git` symlink)
 rather than a dependency on this dev machine's real Dolt store.
 
+## Greenfield first-run integrity (spec 123)
+
+Spec 123 (beads `mindspec-ud0w.1` through `.4`) makes the first hour of
+MindSpec in a fresh consuming repo correct, convergent, and self-checking:
+`init`, `setup claude|codex|copilot`, `domain add`, `adr create`, and
+`panel create` now compose in any order without dead-ending, and
+`mindspec doctor` detects every partial state with a named recovery
+(ADR-0035). **ADR-0040 was AMENDED** with the consumer-identity clause:
+content mindspec generates INTO a consuming repo carries only
+framework-generic guidance or values sourced from the consumer's L2
+declared config — never mindspec-the-framework's own repo facts.
+
+### `init` scaffolds a first-run-complete workspace (#207, #208)
+
+The `bootstrap.Run` manifest additionally scaffolds
+`.mindspec/context-map.md` from `domain.ContextMapSkeleton()` — a title,
+a `## Bounded Contexts` section, and a `---` separator, so
+`appendContextMap`'s insertion scan finds its intended insertion point
+immediately. The item follows the manifest's additive discipline (never
+overwrites an existing file). After the manifest loop, `init` calls
+`gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...)`
+— an entry-granular, byte-idempotent append — so the two runtime files
+(`.mindspec/session.json`, `.mindspec/focus`, ADR-0015) are gitignored
+even when the repo already HAD a `.gitignore` (the pre-123 manifest item
+was create-only and silently `Skipped` on existing files). The manifest
+is now built per-run from `config.Load(root)` (`manifest(cfg)`) because
+the starter `AGENTS.md` content is config-sourced (see consumer identity
+below); a config load failure fails init loudly rather than scaffolding
+from a half-read config.
+
+### `domain add` converges from every partial state (#207)
+
+`internal/domain/scaffold.go` replaced the dir-exists refusal with a
+convergence check: when `context-map.md` is absent, `appendContextMap`
+creates the skeleton first; when the domain dir exists but files or the
+context-map entry are missing, `domain add <name>` backfills each missing
+standard file (four templates + `OWNERSHIP.yaml`, written only if
+absent — existing files are never overwritten) and the missing
+`### <Title>` entry; only a fully-scaffolded AND mapped domain is
+refused "already exists". Any failure after dir creation leaves a state
+a bare re-run repairs — no terminal partial state.
+
+The "is this domain mapped" predicate is ONE shared helper,
+`domain.HasEntry` (`internal/domain/contextmap.go`), consumed by both
+the emission side (scaffold's backfill) and the detection side
+(doctor's unmapped-domain check, via the `docsMappedCheck` seam var) —
+`TestDocsMappedCheckIsSharedHelper` pins the identity so the two sides
+cannot silently diverge (AC-4). `HasEntry` is SECTION-AWARE: a
+`### <Title>` heading counts only inside the `## Bounded Contexts`
+section, before its `---` terminator — the exact place the writer emits
+it.
+
+### New doctor checks (#207, #208, #210, #211)
+
+- **missing-context-map** (docs lane, `internal/doctor/docs.go`):
+  `context-map.md` absent at the layout-resolved path → `Missing`, with
+  a `--fix` that scaffolds the same `ContextMapSkeleton()` bytes init
+  writes. An existing-but-unreadable file is an `Error` with NO fixer
+  (the scaffold would no-op yet report Fixed — kept honest).
+- **unmapped-domain** (docs lane): a `domains/` directory with no
+  corresponding entry heading (per `domain.HasEntry`) → `Warn` naming
+  the domain with recovery `mindspec domain add <name>` — deliberately
+  no `--fix`, since the backfill is `domain add`'s own action. Runs only
+  once the context map exists (one root cause, one finding).
+- **runtime file not gitignored** (git lane, `internal/doctor/git.go`):
+  a runtime file that is untracked AND misses `git check-ignore` →
+  `Warn` ("one `git add .mindspec/` from being committed") with a
+  `--fix` appending the entry via `EnsureGitignoreEntries`. The
+  pre-existing tracked → `Error` + untrack `--fix` is unchanged and
+  takes precedence. The protected file set is sourced from
+  `gitutil.RuntimeIgnoreEntries` — the single canonical list bootstrap,
+  setup, and doctor all share.
+- **missing-models** / **missing-commands** (config lane,
+  `internal/doctor/config.go`): mirror `checkSourceGlobs`'s ADR-0036
+  stack. Each fires when the key has no non-blank entry
+  (`HasDeclaredModels`/`HasDeclaredCommands` — an all-blank map is NOT
+  declared), discloses the key's status honestly (`models:` is
+  declared-but-INERT; `commands:` IS consumed by init/setup's managed
+  AGENTS.md rendering), hints the populate command, and carries a
+  `--fix` that scaffolds a literal commented schema block
+  (`modelsBlock`/`commandsBlock`) with the three-state byte-preserving
+  `scaffoldConfigBlock` contract (file absent / key absent / key
+  present — operator bytes never rewritten).
+
+These are first-run nudges, not CI breakers: missing-context-map is
+`Missing` (structural, like the sibling dir checks); the rest are `Warn`.
+A greenfield fixture DESIGNEDLY shows the missing-models and
+missing-commands Warns (ZFC: the framework cannot guess them).
+
+### ADR slugged-filename / canonical-ID convention (#206)
+
+`adr create` now derives a kebab slug from the title (`deriveSlug`:
+lowercase, non-alphanumeric runs collapse to single hyphens,
+trimmed, length-capped) and writes `ADR-NNNN-<slug>.md`; `--slug`
+overrides the derivation (validated lowercase-kebab; an explicit empty
+`--slug` opts out); a title deriving an empty slug falls back to the
+bare form. Every computed stem must pass `idvalidate.ADRID`. `ParseADR`
+derives `ADR.ID` as the canonical `ADR-<digits>` prefix of the stem —
+`list`/`show` report `ADR-0001` for `ADR-0001-integrate-at-contracts.md`,
+never the long stem. ID→file READ resolution goes through the shared
+`workspace.ResolveADRFile` (see the core domain docs): canonical-number
+driven, bare-or-slugged tolerant, and COLLISION-ERRORING when both a
+bare and a slugged file carry one number (with a `recovery:`-prefixed
+prose diagnostic — not ADR-0035's copy-pastable command form) —
+replacing the silent exact-`<id>.md` short-circuit in `show`
+and the exact-join miss in `--supersedes`/`Supersede`/`CopyDomains`.
+Existing bare files keep their IDs and behavior; no rename migration
+(canonical `ADR-NNNN` remains the reference currency everywhere, so
+ADR-citation gates are untouched — ADR-0032 protected).
+
+### Declared-config parity + consumer identity (#210, #211)
+
+`models:` reaches guidance parity with `source_globs:`: schema block
+(doctor `--fix`), ZFC populate prompt (`mindspec models populate` —
+prints, writes nothing), doctor nudge, and the `mindspec config` inert
+annotation retained until an enforcement spec removes it. The new
+`commands:` key (core domain: `config.Commands`) is the consumer's
+declared build/test guidance with the same stack (`mindspec commands
+populate`) — but NOT inert. Rendering the managed AGENTS.md
+"Build & Test" section from config goes through the ONE renderer
+`cfg.RenderBuildTestSection`, and only TWO verbs render it as ordinary
+operation: `init` (`internal/bootstrap`, the starter AGENTS.md /
+append block) and `setup codex` (`ensureAgentsMD`, which owns
+AGENTS.md's managed block outright and refreshes it from config on
+every run — so a codex setup refresh re-renders the operator's
+declaration and it survives every wholesale block replacement).
+`setup claude` and `setup copilot` do NOT render or refresh the
+Build & Test section on an ordinary run — on AGENTS.md they are
+heal-only (below; the heal reaches the same renderer, but only when a
+pre-123 leak is positively detected).
+
+Managed/scaffolded consumer content no longer carries framework facts:
+the starter `AGENTS.md` title is the neutral `# AGENTS.md` (was
+"# AGENTS.md — MindSpec Project"), and NO managed block hardcodes
+`make build`/`make test` — with `commands:` unset the Build & Test
+section is OMITTED entirely (never a placeholder that reads as
+runnable). ALL THREE setup verbs (`codex`, `claude`, `copilot`) heal a
+pre-123 framework leak in an EXISTING AGENTS.md (final review G3
+closed the former claude/copilot block gap); both heals are
+provenance-gated (FX-3: they fire only when the file also carries a
+well-formed MindSpec managed BEGIN/END pair — an operator's own file
+is never touched) and skipped in `--check` mode:
+
+- **Title heal** (`healLegacyAgentsMDTitle`, run by all three verbs):
+  rewrites only the byte-exact pre-123 leaked first line
+  ("# AGENTS.md — MindSpec Project") to the neutral `# AGENTS.md`.
+- **Block heal**: `setup codex` heals a leaked managed block as a
+  side effect of `ensureAgentsMD`'s unconditional config-sourced
+  refresh. `setup claude`/`setup copilot` instead run the narrow
+  `healLegacyAgentsMDBlock`: it rewrites the managed block from
+  config ONLY when the existing content positively carries a pre-123
+  leak — the exact legacy hardcoded Build & Test comment literals
+  (`legacyAgentsMDBlockLeakSnippets`) or the legacy title line. A
+  clean, already-config-sourced AGENTS.md is left byte-untouched and
+  config is not even loaded for it.
+
+Both the codex render and the claude/copilot block heal FAIL LOUD on a
+bad `.mindspec/config.yaml` (FX-1): the load error propagates and the
+existing block is left byte-untouched, never silently regenerated from
+`DefaultConfig` (which would erase the consumer's declared build
+guidance). All three setup verbs also ensure the runtime gitignore
+entries (R4b), since `setup` is the onboarding verb for repos that
+never ran the greenfield-only `init`.
+
+### Ad-hoc panel path (#209)
+
+`mindspec panel create <slug> --gate adhoc --target <ref>` succeeds
+WITHOUT `--spec`: `panelDirFor` gained an adhoc branch writing the
+panel dir + `panel.json` to `.mindspec/reviews/<slug>/` on a flat
+layout (repo-root `review/<slug>/` on non-flat) — exactly the location
+the shipped `ms-panel-run` skill documents, whose ad-hoc note now
+states the real invocation (skill↔binary contract, grep-pinned by
+AC-17). Supplying `--spec` together with `--gate adhoc` is refused with
+a recovery line naming both valid forms (keyed on
+`Flags().Changed("spec")`, so a blank explicit `--spec` cannot slip
+the guard); every non-adhoc gate still requires `--spec`,
+byte-identical to before. `panel tally`/`verify` operate on the ad-hoc
+dir, restoring the deterministic tally for design/proposal reviews.
+Ad-hoc panels stay stored artifacts OUTSIDE the lifecycle gate:
+`mindspec complete`'s panel scanning never consults
+`.mindspec/reviews/` (ADR-0037 scope, pinned by the AC-16 isolation
+test in `internal/complete/panel_adhoc_isolation_test.go`).
 ## Domain/ADR gate truthfulness (spec 122, ADR-0032 third amendment)
 
 Spec 122 (beads `mindspec-gvb5.1` through `.4`; GH #147/#178/#145/#197 +

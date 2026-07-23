@@ -2,9 +2,8 @@ package adr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
@@ -14,50 +13,38 @@ import (
 
 // Show reads and returns a single ADR by ID.
 //
-// Lookup first tries an exact filename match ("<id>.md"). If that fails, it
-// falls back to a slug-tolerant match: any file named "<id>-<slug>.md" in the
-// ADR directory, provided it's unambiguous. This lets plans cite a pure ID
-// like `ADR-0001` even when the on-disk file is `ADR-0001-descriptive.md`.
+// Lookup resolves through workspace.ResolveADRFile: an exact filename match
+// ("<id>.md") when the on-disk file is bare, or a slug-tolerant match
+// ("<id>-<slug>.md") when it isn't — this lets callers cite a pure ID like
+// `ADR-0001` even when the on-disk file is `ADR-0001-descriptive.md`. A
+// directory holding BOTH a bare and a slugged file for the same number is a
+// collision: ResolveADRFile errors naming both paths rather than silently
+// preferring the bare file (spec 123 R5(c)).
 //
-// SEC-1 (bead mindspec-x1qr): id is validated BEFORE filepath.Glob. The
-// glob below appends `id+"-*.md"` — without validation, an id containing
-// `*`, `?`, `[`, `]` would inject a glob pattern; an id with `/` or `..`
-// would escape the ADR directory.
+// SEC-1 (bead mindspec-x1qr): id is validated BEFORE any path/glob
+// construction (ResolveADRFile re-validates defensively). Without
+// validation, an id containing `*`, `?`, `[`, `]` would inject a glob
+// pattern; an id with `/` or `..` would escape the ADR directory.
+//
+// G2 (final review): a ResolveADRFile "not found" result is translated to
+// the Store-level ErrNotFound sentinel so a caller layering Stores
+// (OverlayStore) can fall through to another store on a genuine miss while
+// still seeing every OTHER error — most importantly a collision, when the
+// directory holds both a bare and a slugged file for the same number —
+// propagate untranslated, so it can never be silently swallowed by a
+// fallback.
 func Show(root, id string) (*ADR, error) {
 	if err := idvalidate.ADRID(id); err != nil {
 		return nil, err
 	}
-	path, err := workspace.ADRFilePath(root, id)
+	path, err := workspace.ResolveADRFile(root, id)
 	if err != nil {
-		return nil, err
-	}
-	dir := workspace.ADRDir(root)
-	if _, err := os.Stat(path); err == nil {
-		a, err := ParseADR(path)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, workspace.ErrADRNotFound) {
+			return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 		}
-		return &a, nil
-	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-
-	matches, err := filepath.Glob(filepath.Join(dir, id+"-*.md"))
-	if err != nil {
-		return nil, err
-	}
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("%s not found", id)
-	}
-	if len(matches) > 1 {
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = filepath.Base(m)
-		}
-		return nil, fmt.Errorf("%s is ambiguous: matches %s", id, strings.Join(names, ", "))
-	}
-
-	a, err := ParseADR(matches[0])
+	a, err := ParseADR(path)
 	if err != nil {
 		return nil, err
 	}

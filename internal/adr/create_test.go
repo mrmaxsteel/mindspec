@@ -50,8 +50,10 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if !strings.HasSuffix(path, "ADR-0003.md") {
-		t.Errorf("path = %q, want suffix ADR-0003.md", path)
+	// R5(a) (spec 123): create now emits a SLUGGED filename derived from
+	// the title, not the bare ADR-0003.md the pre-123 behavior wrote.
+	if !strings.HasSuffix(path, "ADR-0003-use-redis-for-caching.md") {
+		t.Errorf("path = %q, want suffix ADR-0003-use-redis-for-caching.md", path)
 	}
 
 	data, err := os.ReadFile(path)
@@ -212,6 +214,91 @@ func TestCreateWithIDRejectsExistingSlug(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("error must contain 'already exists', got: %v", err)
+	}
+}
+
+// TestCreate_SupersedesResolvesSluggedPredecessor is the AC-9(ii) pin
+// (spec 123 R5(c)): `--supersedes ADR-0001` must resolve a SLUGGED
+// on-disk predecessor (ADR-0001-legacy-slug.md) through the exact-join
+// --supersedes path, not just show's pre-existing glob fallback. RED on
+// revert to the exact-join workspace.ADRFilePath (which only ever tried
+// "ADR-0001.md" and reported "not found" against a slugged file).
+func TestCreate_SupersedesResolvesSluggedPredecessor(t *testing.T) {
+	root := setupCreateEnv(t)
+
+	// Replace the bare ADR-0001.md fixture with a slugged sibling that
+	// carries the SAME canonical number, mirroring a real slugged-create
+	// predecessor.
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.Remove(filepath.Join(adrDir, "ADR-0001.md")); err != nil {
+		t.Fatalf("remove bare ADR-0001.md: %v", err)
+	}
+	sluggedPath := filepath.Join(adrDir, "ADR-0001-legacy-slug.md")
+	if err := os.WriteFile(sluggedPath, []byte(testADR1), 0o644); err != nil {
+		t.Fatalf("write slugged predecessor: %v", err)
+	}
+
+	path, err := Create(root, "Successor Decision", CreateOpts{Supersedes: "ADR-0001"})
+	if err != nil {
+		t.Fatalf("Create with --supersedes against a slugged predecessor: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "**Supersedes**: ADR-0001") {
+		t.Error("new ADR should reference the superseded predecessor")
+	}
+	// Domains should be copied from the slugged predecessor (core, context-system).
+	if !strings.Contains(string(data), "core, context-system") {
+		t.Errorf("expected inherited domains from slugged predecessor, got:\n%s", string(data))
+	}
+
+	// The slugged predecessor itself must have been updated in place.
+	oldData, err := os.ReadFile(sluggedPath)
+	if err != nil {
+		t.Fatalf("reading slugged predecessor: %v", err)
+	}
+	if !strings.Contains(string(oldData), "**Superseded-by**:") {
+		t.Errorf("slugged predecessor should have been updated with Superseded-by, got:\n%s", string(oldData))
+	}
+}
+
+// TestCreate_MixedDirectoryNumberingGuard is the AC-10 numbering-floor
+// GUARD (spec 123 R5(d)): a directory holding a bare ADR-0001.md and a
+// slugged ADR-0002-foo.md must allocate the NEXT create at 0003 — the
+// numbering floor (maxADRNum, parse.go) is already slug-aware and must
+// stay that way. Not a RED pin; this locks the guard against regression
+// alongside the AC-9/AC-10 resolution changes.
+func TestCreate_MixedDirectoryNumberingGuard(t *testing.T) {
+	root := t.TempDir()
+	adrDir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-0001.md"), []byte(testADR1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(adrDir, "ADR-0002-foo.md"), []byte(testADR2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adrs, err := ScanADRs(root)
+	if err != nil {
+		t.Fatalf("ScanADRs: %v", err)
+	}
+	gotIDs := map[string]bool{}
+	for _, a := range adrs {
+		gotIDs[a.ID] = true
+	}
+	if !gotIDs["ADR-0001"] || !gotIDs["ADR-0002"] {
+		t.Fatalf("expected canonical IDs ADR-0001 and ADR-0002, got %v", adrs)
+	}
+
+	path, err := Create(root, "Next Decision", CreateOpts{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !strings.Contains(path, "ADR-0003-") {
+		t.Errorf("path = %q, want next allocation ADR-0003-* (numbering floor over mixed bare+slugged dir)", path)
 	}
 }
 
