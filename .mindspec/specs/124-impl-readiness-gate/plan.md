@@ -1,7 +1,4 @@
 ---
-status: Draft
-spec_id: 124-impl-readiness-gate
-version: "1"
 adr_citations:
     - ADR-0041
     - ADR-0040
@@ -10,9 +7,18 @@ adr_citations:
     - ADR-0023
     - ADR-0037
     - ADR-0036
+approved_at: "2026-07-23T21:54:35Z"
+approved_by: user
+bead_ids:
+    - mindspec-8nhe.1
+    - mindspec-8nhe.2
+    - mindspec-8nhe.3
+spec_id: 124-impl-readiness-gate
+status: Approved
+version: "1"
 work_chunks:
-    - id: 1
-      depends_on: []
+    - depends_on: []
+      id: 1
       key_file_paths:
         - internal/validate/readiness/readiness.go
         - internal/validate/readiness/report.go
@@ -22,9 +28,9 @@ work_chunks:
         - cmd/mindspec/bead_ready.go
         - cmd/mindspec/bead_ready_test.go
         - cmd/mindspec/ceremony_guard_test.go
-    - id: 2
-      depends_on:
+    - depends_on:
         - 1
+      id: 2
       key_file_paths:
         - cmd/mindspec/next.go
         - cmd/mindspec/next_ready_gate_test.go
@@ -33,10 +39,10 @@ work_chunks:
         - internal/next/ready_gate_test.go
         - .mindspec/adr/ADR-0041-gate-before-mutate.md
         - cmd/mindspec/ceremony_guard_test.go
-    - id: 3
-      depends_on:
+    - depends_on:
         - 1
         - 2
+      id: 3
       key_file_paths:
         - cmd/mindspec/bead_clarify.go
         - cmd/mindspec/bead_clarify_test.go
