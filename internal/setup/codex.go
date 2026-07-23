@@ -154,8 +154,8 @@ var legacyAgentsMDBlockLeakSnippets = []string{
 // template (agentsMDManagedBlock) `setup codex`'s ensureAgentsMD renders
 // on every run, but ONLY when the EXISTING block is positively a pre-123
 // leak: it still carries the exact legacy hardcoded Build & Test literal
-// (legacyAgentsMDBlockLeakSnippets), or the file's first line is still
-// the legacy title.
+// (legacyAgentsMDBlockLeakSnippets). The file's title is judged separately
+// (see agentsMDBlockLeaked) and never on its own implies the block leaked.
 //
 // `setup codex` already refreshes AGENTS.md's block unconditionally,
 // every run (ensureAgentsMD owns AGENTS.md outright), so a codex-run
@@ -204,18 +204,22 @@ func healLegacyAgentsMDBlock(root string) error {
 }
 
 // agentsMDBlockLeaked reports whether content positively carries a pre-123
-// leak of AGENTS.md's managed BLOCK: either the leaked legacy title (which
-// always shipped together with the hardcoded Build & Test block in the old
-// template), or the hardcoded Build & Test literal itself
-// (legacyAgentsMDBlockLeakSnippets) surviving independently of the title.
+// leak of AGENTS.md's managed BLOCK: the hardcoded Build & Test literal
+// itself (legacyAgentsMDBlockLeakSnippets). This is judged SOLELY by the
+// block's own content, independent of the file's title line (final-review
+// r3): the legacy title can survive on its own on an otherwise-healthy,
+// operator-customized managed block (e.g. a repo healed of the title in a
+// prior mindspec version, or one whose block was hand-edited after the
+// title leaked), and conflating "title leaked" with "block leaked" caused
+// healLegacyAgentsMD to overwrite that clean, operator-customized block
+// from config merely because the title matched — clobbering content the
+// title heal (healLegacyAgentsMDTitle) never touches and was never asked
+// to touch. The title leak is detected and healed entirely independently
+// via healLegacyAgentsMDTitle / the titleLeaked check in healLegacyAgentsMD.
 // Pure detection, no write, no config load — shared by healLegacyAgentsMDBlock
 // and the atomic healLegacyAgentsMD (round-2 final-review FIX C) so both
 // agree on exactly what counts as "leaked".
 func agentsMDBlockLeaked(content string) bool {
-	firstLine, _, found := strings.Cut(content, "\n")
-	if found && firstLine == legacyBadAgentsMDTitle {
-		return true
-	}
 	for _, snippet := range legacyAgentsMDBlockLeakSnippets {
 		if strings.Contains(content, snippet) {
 			return true

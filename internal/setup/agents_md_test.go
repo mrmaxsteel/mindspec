@@ -590,6 +590,84 @@ func TestRunCopilot_LeakedBlockHeal_Idempotent(t *testing.T) {
 	}
 }
 
+// titleLeakCleanBlockFixture returns a repo AGENTS.md that carries ONLY the
+// pre-123 leaked legacy title, with an otherwise clean, operator-customized
+// managed block that carries NONE of legacyAgentsMDBlockLeakSnippets. This
+// is the final-review r3 regression repro: agentsMDBlockLeaked used to treat
+// the legacy title ALONE as proof the managed block itself had leaked, so
+// healLegacyAgentsMD's block heal overwrote this operator body from config
+// even though nothing about the block was ever a pre-123 leak.
+func titleLeakCleanBlockFixture() string {
+	return "# AGENTS.md — MindSpec Project\n" + mindspecMarkerBegin + "\n\noperator-preserved managed body\n" + mindspecMarkerEnd + "\n"
+}
+
+// TestHealLegacyAgentsMD_TitleLeakPreservesCleanBlock pins final-review r3:
+// agentsMDBlockLeaked must judge a block leak SOLELY by the block's own
+// content (legacyAgentsMDBlockLeakSnippets), never by the file's title
+// alone. A repo with the legacy title but an otherwise clean,
+// operator-customized managed block must have ONLY its title healed by
+// `setup claude`/`setup copilot` — the managed block must survive
+// byte-for-byte, not get overwritten from config. RED against the
+// pre-fix agentsMDBlockLeaked (which short-circuited true on a bare title
+// match): the operator body would be clobbered with the config-rendered
+// template instead of surviving unchanged.
+func TestHealLegacyAgentsMD_TitleLeakPreservesCleanBlock(t *testing.T) {
+	assertHealedTitleOnly := func(t *testing.T, content string) {
+		t.Helper()
+		if !strings.HasPrefix(content, "# AGENTS.md\n") {
+			t.Errorf("legacy title must be healed to the neutral form:\n%s", content)
+		}
+		if strings.Contains(content, "MindSpec Project") {
+			t.Errorf("legacy title must not survive:\n%s", content)
+		}
+		if !strings.Contains(content, "operator-preserved managed body") {
+			t.Errorf("a title-only heal must NOT clobber a clean, operator-customized managed block:\n%s", content)
+		}
+	}
+
+	t.Run("claude", func(t *testing.T) {
+		root := t.TempDir()
+		config.ResetCache()
+		t.Cleanup(config.ResetCache)
+
+		path := filepath.Join(root, "AGENTS.md")
+		if err := os.WriteFile(path, []byte(titleLeakCleanBlockFixture()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := RunClaude(root, false); err != nil {
+			t.Fatalf("RunClaude: %v", err)
+		}
+
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertHealedTitleOnly(t, string(got))
+	})
+
+	t.Run("copilot", func(t *testing.T) {
+		root := t.TempDir()
+		config.ResetCache()
+		t.Cleanup(config.ResetCache)
+
+		path := filepath.Join(root, "AGENTS.md")
+		if err := os.WriteFile(path, []byte(titleLeakCleanBlockFixture()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := RunCopilot(root, false); err != nil {
+			t.Fatalf("RunCopilot: %v", err)
+		}
+
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertHealedTitleOnly(t, string(got))
+	})
+}
+
 // TestRunCodex_HostileCommandValueEscapedInAgentsMD is the S-slot
 // coverage nicety: an end-to-end setup that WRITES AGENTS.md from a
 // hostile commands.build value inspects the resulting bytes and confirms
