@@ -647,18 +647,36 @@ func evaluateMF3(root, specID string, deps []dependencyEdge) Signal {
 		var noEvidence *lifecycle.LandedMergeNoEvidence
 		switch {
 		case errors.As(lmErr, &noEvidence):
+			// Corroboration-unavailable (*lifecycle.LandedMergeNoEvidence):
+			// a candidate merge EXISTS on the spec branch but no admissible
+			// datum confirms it belongs to this bead (or owned candidates
+			// conflict). The dependency is already complete, so `mindspec
+			// complete` is the WRONG verb here; `mindspec reattest` is the
+			// spec-125 verb built for exactly this state — it independently
+			// git-corroborates the candidate merge and writes the missing
+			// landed binding (final-review r2 G2-R2-MF3 / F2-1).
 			return Signal{
 				ID:       SignalDependencies,
 				Pass:     false,
 				Detail:   fmt.Sprintf("dependency %s: a candidate merge exists but no admissible datum corroborates it (%v)", dep.ID, lmErr),
-				Recovery: fmt.Sprintf("verify and re-attest the landed merge for %s, then re-run `mindspec bead ready-check`", dep.ID),
+				Recovery: fmt.Sprintf("verify the candidate merge, then run `mindspec reattest %s` to write the git-corroborated landed binding, and re-run `mindspec bead ready-check`", dep.ID),
 			}
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeNotFound):
+			// No candidate merge NAMES bead/<id> at all. Usually this is the
+			// genuine closed-but-unmerged 2u0u split (recovery: `mindspec
+			// complete`), but it is NOT proof the work never landed: spec
+			// 125's FindLandedMerge also returns this sentinel for a REAL
+			// merge whose subject names no bead (an anonymous hand-crafted
+			// operator merge is never automatically identifiable, and
+			// reattest's ownership nominator is the same subject parse — see
+			// internal/lifecycle/landed.go). State the two possibilities
+			// conservatively instead of asserting "not merged" as fact
+			// (final-review r2 G2-R2-MF3-ANONYMOUS-CLASSIFICATION).
 			return Signal{
 				ID:       SignalDependencies,
 				Pass:     false,
-				Detail:   fmt.Sprintf("dependency %s is closed but not landed-merged into %s", dep.ID, specBranch),
-				Recovery: fmt.Sprintf("mindspec complete %s", dep.ID),
+				Detail:   fmt.Sprintf("dependency %s is closed but no landed merge into %s names bead/%s — either it was never merged (the 2u0u split), or its merge subject does not name the bead", dep.ID, specBranch, dep.ID),
+				Recovery: fmt.Sprintf("if %s was never merged, run `mindspec complete %s`; if a real merge exists under an anonymous subject, re-merge under a bead-naming subject or use the audited attested-restore (`mindspec reattest` cannot adopt an anonymous merge)", dep.ID, dep.ID),
 			}
 		default:
 			return Signal{

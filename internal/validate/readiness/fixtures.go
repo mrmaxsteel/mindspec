@@ -58,10 +58,22 @@ type FakeBDStore struct {
 	// true) reports a positive landed merge and any OTHER dep reports
 	// ErrLandedMergeNotFound — consulting neither git NOR the transitive
 	// bd read (lifecycle.FindLandedMerge -> bead.GetMetadata) the real
-	// function performs. When LandedDeps is empty/nil, Install leaves
-	// findLandedMergeFn at its real default so the AC-3 real-repo fixtures
-	// exercise the genuine git+bd landed-merge predicate end-to-end.
+	// function performs. When LandedDeps AND NoEvidenceDeps are both
+	// empty/nil, Install leaves findLandedMergeFn at its real default so
+	// the AC-3 real-repo fixtures exercise the genuine git+bd landed-merge
+	// predicate end-to-end.
 	LandedDeps map[string]bool
+
+	// NoEvidenceDeps, when non-empty, makes the faked findLandedMergeFn
+	// return a *lifecycle.LandedMergeNoEvidence for a dep listed here
+	// (checked BEFORE LandedDeps) — the spec-125 corroboration-unavailable
+	// state: a candidate merge exists but no admissible datum confirms it.
+	// This is the final-review r2 F2-1 seam: it lets a consumer test drive
+	// evaluateMF3's errors.As arm (Detail: "no admissible datum
+	// corroborates it", Recovery: `mindspec reattest`) without a real git
+	// history, pinning the arm discrimination against the plain
+	// ErrLandedMergeNotFound arm's `mindspec complete` recovery.
+	NoEvidenceDeps map[string]bool
 }
 
 // NewFakeBDStore returns an empty, ready-to-populate FakeBDStore.
@@ -111,8 +123,16 @@ func (s *FakeBDStore) Install() (restore func()) {
 		return rec, nil
 	}
 	origFindLanded := findLandedMergeFn
-	if len(s.LandedDeps) > 0 {
+	if len(s.LandedDeps) > 0 || len(s.NoEvidenceDeps) > 0 {
 		findLandedMergeFn = func(root, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			if s.NoEvidenceDeps[beadID] {
+				return nil, &lifecycle.LandedMergeNoEvidence{
+					BeadID:       beadID,
+					SpecBranch:   specBranch,
+					MergeSHA:     "fakedcandidatemerge",
+					SecondParent: "fakedsecondparent",
+				}
+			}
 			if s.LandedDeps[beadID] {
 				return &lifecycle.LandedMerge{SHA: "faked", FirstParent: "faked", SecondParent: "faked"}, nil
 			}

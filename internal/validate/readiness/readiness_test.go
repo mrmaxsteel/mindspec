@@ -54,9 +54,13 @@ func TestReadiness_NegativeFixtureAllFail(t *testing.T) {
 	}
 
 	want := map[string]string{
-		SignalPlanSection:  "placeholder",
-		SignalTokens:       "AC-99",
-		SignalDependencies: "not landed-merged",
+		SignalPlanSection: "placeholder",
+		SignalTokens:      "AC-99",
+		// The NotFound-arm detail states the two possibilities
+		// conservatively (final-review r2 G2-R2-MF3-ANONYMOUS): no landed
+		// merge NAMES the dep's bead branch — never merged, or anonymous
+		// merge subject.
+		SignalDependencies: "no landed merge",
 		SignalBlocking:     "blocking",
 	}
 	for _, s := range report.Signals {
@@ -782,4 +786,161 @@ func TestReadiness_FX3_AllBlankKeyFilePathsFails(t *testing.T) {
 	if !signalByID(report2, SignalPlanSection).Pass {
 		t.Errorf("control: MF-1 expected PASS for a real concrete path, got FAIL: %q", signalByID(report2, SignalPlanSection).Detail)
 	}
+}
+
+// TestReadiness_MF3ErrorArmDiscrimination (final-review r2 F2-1 /
+// G2-R2-MF3): evaluateMF3's TWO FindLandedMerge refusal arms are
+// operational ROUTING, not cosmetics — each must emit its own truthful
+// state description and recovery verb:
+//
+//   - *lifecycle.LandedMergeNoEvidence (corroboration unavailable: a
+//     candidate merge exists, no admissible datum confirms it) → the
+//     dependency is already complete, so the recovery is `mindspec
+//     reattest <dep>` (the spec-125 verb that git-corroborates the merge
+//     and writes the missing landed binding) — NEVER `mindspec complete`.
+//   - plain ErrLandedMergeNotFound (no candidate merge names the bead) →
+//     the genuine closed-but-unmerged 2u0u split keeps `mindspec complete
+//     <dep>` as its recovery, stated conservatively (an anonymous-subject
+//     merge also lands here and is named as the other possibility).
+//
+// RED-on-revert: LandedMergeNoEvidence unwraps to ErrLandedMergeNotFound,
+// so deleting the errors.As arm silently reroutes the NoEvidence state
+// through the NotFound arm — still FAIL, but with the actively WRONG
+// `mindspec complete` recovery for an already-merged dependency. The
+// recovery-text assertions below turn that regression (and a collapse to
+// false-PASS) red.
+func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
+	t.Run("i NoEvidence arm: corroboration-unavailable routes to reattest", func(t *testing.T) {
+		root := t.TempDir()
+		specID, beadID, epicID := writeSimpleWorkspace(t, root, "mf3noev",
+			"    key_file_paths:\n      - internal/fixture/mf3noev.go",
+			"- [ ] AC-1 — a criterion.",
+			"This bead claims AC-1.")
+		depID := "mindspec-mf3noev.0"
+
+		store := NewFakeBDStore()
+		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
+		store.Records[beadID] = FakeBeadRecord{
+			Description:  "MF-3 NoEvidence-arm fixture.",
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+		}
+		store.NoEvidenceDeps = map[string]bool{depID: true}
+		restore := store.Install()
+		t.Cleanup(restore)
+
+		report, err := EvaluateReadiness(root, beadID)
+		if err != nil {
+			t.Fatalf("EvaluateReadiness: %v", err)
+		}
+		mf3 := signalByID(report, SignalDependencies)
+		if mf3.Pass {
+			t.Fatal("MF-3 expected NOT-READY (FAIL) for a NoEvidence dependency, got PASS")
+		}
+		if !strings.Contains(mf3.Detail, "no admissible datum corroborates it") {
+			t.Errorf("NoEvidence Detail must carry the corroboration-unavailable message, got %q", mf3.Detail)
+		}
+		if !strings.Contains(mf3.Recovery, "mindspec reattest "+depID) {
+			t.Errorf("NoEvidence Recovery must route to `mindspec reattest %s`, got %q", depID, mf3.Recovery)
+		}
+		if strings.Contains(mf3.Recovery, "mindspec complete") {
+			t.Errorf("NoEvidence Recovery must NOT prescribe `mindspec complete` (the dep is already complete), got %q", mf3.Recovery)
+		}
+	})
+
+	t.Run("ii NotFound arm: no candidate merge keeps the complete recovery", func(t *testing.T) {
+		root := t.TempDir()
+		specID, beadID, epicID := writeSimpleWorkspace(t, root, "mf3nf",
+			"    key_file_paths:\n      - internal/fixture/mf3nf.go",
+			"- [ ] AC-1 — a criterion.",
+			"This bead claims AC-1.")
+		depID := "mindspec-mf3nf.0"
+
+		store := NewFakeBDStore()
+		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
+		store.Records[beadID] = FakeBeadRecord{
+			Description:  "MF-3 NotFound-arm fixture.",
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+		}
+		// The dep is listed FALSE so the seam is installed but reports the
+		// plain ErrLandedMergeNotFound sentinel (no candidate merge).
+		store.LandedDeps = map[string]bool{depID: false}
+		restore := store.Install()
+		t.Cleanup(restore)
+
+		report, err := EvaluateReadiness(root, beadID)
+		if err != nil {
+			t.Fatalf("EvaluateReadiness: %v", err)
+		}
+		mf3 := signalByID(report, SignalDependencies)
+		if mf3.Pass {
+			t.Fatal("MF-3 expected NOT-READY (FAIL) for an unmerged dependency, got PASS")
+		}
+		if strings.Contains(mf3.Detail, "no admissible datum corroborates it") {
+			t.Errorf("NotFound Detail must NOT claim a candidate merge exists, got %q", mf3.Detail)
+		}
+		if !strings.Contains(mf3.Recovery, "mindspec complete "+depID) {
+			t.Errorf("NotFound Recovery must keep `mindspec complete %s` for the genuine 2u0u split, got %q", depID, mf3.Recovery)
+		}
+		if !strings.Contains(mf3.Detail, "does not name the bead") {
+			t.Errorf("NotFound Detail must state the anonymous-subject possibility conservatively (G2-R2-MF3-ANONYMOUS), got %q", mf3.Detail)
+		}
+	})
+}
+
+// TestReadiness_DescriptionLegDefectsRefuse (final-review r2 F2-3): the bd
+// DESCRIPTION is a first-class scan surface for MF-2 and MF-4, not just
+// the plan section — every other fixture plants its defect in the plan
+// section, so a regression dropping rec.Description from either harvest
+// would stay green without these two cases. Here the plan section is
+// entirely benign and the ONLY defect lives in the bd description.
+func TestReadiness_DescriptionLegDefectsRefuse(t *testing.T) {
+	t.Run("MF-2: dangling AC token only in the bd description", func(t *testing.T) {
+		root := t.TempDir()
+		specID, beadID, epicID := writeSimpleWorkspace(t, root, "descmf2",
+			"    key_file_paths:\n      - internal/fixture/descmf2.go",
+			"- [ ] AC-1 — a criterion.",
+			"This bead claims AC-1.")
+
+		store := NewFakeBDStore()
+		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
+		store.Records[beadID] = FakeBeadRecord{Description: "This bead also claims AC-99."}
+		restore := store.Install()
+		t.Cleanup(restore)
+
+		report, err := EvaluateReadiness(root, beadID)
+		if err != nil {
+			t.Fatalf("EvaluateReadiness: %v", err)
+		}
+		mf2 := signalByID(report, SignalTokens)
+		if mf2.Pass {
+			t.Error("MF-2 expected FAIL for a dangling AC-99 claimed ONLY in the bd description, got PASS")
+		} else if !strings.Contains(mf2.Detail, "AC-99") {
+			t.Errorf("MF-2 Detail must name the description-sourced dangling token, got %q", mf2.Detail)
+		}
+	})
+
+	t.Run("MF-4: TBD marker only in the bd description", func(t *testing.T) {
+		root := t.TempDir()
+		specID, beadID, epicID := writeSimpleWorkspace(t, root, "descmf4",
+			"    key_file_paths:\n      - internal/fixture/descmf4.go",
+			"- [ ] AC-1 — a criterion.",
+			"This bead claims AC-1.")
+
+		store := NewFakeBDStore()
+		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
+		store.Records[beadID] = FakeBeadRecord{Description: "TBD: decide the export format."}
+		restore := store.Install()
+		t.Cleanup(restore)
+
+		report, err := EvaluateReadiness(root, beadID)
+		if err != nil {
+			t.Fatalf("EvaluateReadiness: %v", err)
+		}
+		mf4 := signalByID(report, SignalBlocking)
+		if mf4.Pass {
+			t.Error("MF-4 expected FAIL for a TBD marker present ONLY in the bd description, got PASS")
+		} else if !strings.Contains(mf4.Detail, "TBD") {
+			t.Errorf("MF-4 Detail must surface the description-sourced blocking marker, got %q", mf4.Detail)
+		}
+	})
 }

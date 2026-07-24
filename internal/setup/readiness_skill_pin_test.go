@@ -311,6 +311,73 @@ func TestMsBeadImplSkill_AllCitedReasonsRenderedShipped(t *testing.T) {
 	}
 }
 
+// --- Final-review r2 G2-R2-R8-REPORT-OMISSION: independent re-derivation ---
+
+// mutationProbeIndependentRederivationPresent isolates the r2 fix: the
+// R8 reason-pairing bijection in `bead clarify` is closed only over the
+// operator-supplied record's `report` array, so a reason omitted from
+// BOTH arrays passes validation — the record can never prove itself
+// complete. The real anti-browbeat backstop is therefore the
+// re-dispatched Phase 0 RE-DERIVING its own SR-1..SR-5 reasons
+// independently: the injected clarifications are supplementary evidence,
+// NOT a closed checklist of the only reasons to consider, and a
+// clarification only helps if it resolves a reason Phase 0 independently
+// still finds. Both the Phase 0 rule and the ingress-side "never the
+// complete cited-set" framing must be present.
+func mutationProbeIndependentRederivationPresent(content string) bool {
+	return strings.Contains(content, "Independent re-derivation rule") &&
+		strings.Contains(content, "NOT a closed checklist of the only reasons to consider") &&
+		strings.Contains(content, "a reason YOU independently still find") &&
+		strings.Contains(content, "complete cited-set")
+}
+
+// TestMsBeadImplSkill_IndependentRederivationShipped pins the
+// G2-R2-R8-REPORT-OMISSION fix: omitting an originally-cited reason from
+// the clarification record cannot silently drop it, because the
+// re-dispatched Phase 0 is instructed to re-derive its own reasons from
+// a fresh review and re-report NOT READY for any genuinely-unresolved
+// concern — even one absent from the injected record.
+func TestMsBeadImplSkill_IndependentRederivationShipped(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeIndependentRederivationPresent(content) {
+		t.Error("expected the shipped ms-bead-impl Phase 0 block to carry the independent re-derivation rule (clarifications are supplementary evidence, never a closed checklist / the complete cited-set)")
+	}
+	if !strings.Contains(content, "including a concern that appears nowhere in the injected record") {
+		t.Error("expected the re-derivation rule to cover concerns absent from the injected record entirely")
+	}
+}
+
+// TestMsBeadImplSkill_IndependentRederivationMutationProbe proves the pin
+// is not vacuous: reverting to the closed-checklist framing (or dropping
+// the rule paragraph) turns the SAME predicate red.
+func TestMsBeadImplSkill_IndependentRederivationMutationProbe(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeIndependentRederivationPresent(content) {
+		t.Fatal("precondition failed: the shipped content must carry the independent re-derivation rule")
+	}
+	// Simulate the pre-fix regression: Phase 0 framed as "address the
+	// reasons in the clarification record" (a closed checklist).
+	mutated := strings.Replace(content,
+		"NOT a closed checklist of the only reasons to consider",
+		"the checklist of reasons to address", 1)
+	if mutationProbeIndependentRederivationPresent(mutated) {
+		t.Fatal("mutation probe failed: reverting to the closed-checklist framing should turn the pin red")
+	}
+	// Dropping the whole rule paragraph must also go red.
+	start := strings.Index(content, "**Independent re-derivation rule")
+	if start < 0 {
+		t.Fatal("could not locate the independent re-derivation paragraph to mutate")
+	}
+	end := strings.Index(content[start:], "\n\n")
+	if end < 0 {
+		end = len(content) - start
+	}
+	mutated2 := content[:start] + content[start+end:]
+	if mutationProbeIndependentRederivationPresent(mutated2) {
+		t.Fatal("mutation probe failed: stripping the re-derivation paragraph should turn the pin red")
+	}
+}
+
 // TestMsBeadImplSkill_AllReasonsRenderedMutationProbe proves the pin is
 // not vacuous: dropping the unaddressed-reason rendering turns the SAME
 // predicate red.
