@@ -72,7 +72,7 @@ type Config struct {
 	// advisory posture as Models' phase keys. "ci" (spec 126 R8a) names
 	// the project's declared CI invocation, reproduced by
 	// ms-spec-final-review's CI-parity check; when "ci" is undeclared,
-	// "test" is the documented fallback. UNLIKE Models/Loop/Runner, this key
+	// commands.test is the documented fallback. UNLIKE Models/Loop/Runner, this key
 	// is NOT inert: `mindspec init` and every `mindspec setup <agent>`
 	// verb render its populated entries as the managed AGENTS.md "Build
 	// & Test" section (see CommandLines/RenderBuildTestSection below) —

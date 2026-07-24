@@ -33,55 +33,95 @@ import (
 // itself edits, and does not depend on Bead 3 having landed yet.
 var sixReviewersRE = regexp.MustCompile(`(?i)6[- ]reviewers?`)
 
-// TestLifecycleGateStep_SpecApproveNamesGateAndTallyAllow pins the
-// ms-spec-approve literal half of AC-6: the shipped SKILL text names
-// `--gate spec_approve`, instructs NOT running the approve verb before a
-// `/ms-panel-tally` Allow, and cites ADR-0044.
-func TestLifecycleGateStep_SpecApproveNamesGateAndTallyAllow(t *testing.T) {
-	files := lifecycleSkillFiles()
-	content, ok := files["ms-spec-approve"]
-	if !ok {
-		t.Fatal("lifecycleSkillFiles() has no \"ms-spec-approve\" entry")
-	}
-
-	if !strings.Contains(content, "--gate spec_approve") {
-		t.Error("ms-spec-approve literal missing the '--gate spec_approve' panel-invocation fragment")
-	}
-	if !notBeforeTallyAllowPresent(content) {
-		t.Error("ms-spec-approve literal missing the not-before-tally-Allow instruction")
-	}
-	if !strings.Contains(content, "ADR-0044") {
-		t.Error("ms-spec-approve literal missing the ADR-0044 citation")
-	}
+// lifecycleGateCase drives both the positive pins and the mutation probe
+// below from ONE table, keyed by literal name -> expected gate flag and
+// expected approve VERB, so the wrong-verb and enforcement-note-removal
+// mutations exercise the exact same production predicates the positive
+// tests use (no separate, weaker probe-only logic).
+type lifecycleGateCase struct {
+	name      string // lifecycleSkillFiles() map key
+	gate      string // --gate <gate> value
+	verb      string // the CORRECT `mindspec <verb...>` approve invocation
+	otherVerb string // the OTHER gate's approve invocation (the wrong-verb mutation)
 }
 
-// TestLifecycleGateStep_PlanApproveNamesGateAndTallyAllow is the
-// ms-plan-approve mirror of the above.
-func TestLifecycleGateStep_PlanApproveNamesGateAndTallyAllow(t *testing.T) {
-	files := lifecycleSkillFiles()
-	content, ok := files["ms-plan-approve"]
-	if !ok {
-		t.Fatal("lifecycleSkillFiles() has no \"ms-plan-approve\" entry")
-	}
-
-	if !strings.Contains(content, "--gate plan_approve") {
-		t.Error("ms-plan-approve literal missing the '--gate plan_approve' panel-invocation fragment")
-	}
-	if !notBeforeTallyAllowPresent(content) {
-		t.Error("ms-plan-approve literal missing the not-before-tally-Allow instruction")
-	}
-	if !strings.Contains(content, "ADR-0044") {
-		t.Error("ms-plan-approve literal missing the ADR-0044 citation")
-	}
+var lifecycleGateCases = []lifecycleGateCase{
+	{
+		name:      "ms-spec-approve",
+		gate:      "spec_approve",
+		verb:      "mindspec spec approve",
+		otherVerb: "mindspec plan approve",
+	},
+	{
+		name:      "ms-plan-approve",
+		gate:      "plan_approve",
+		verb:      "mindspec plan approve",
+		otherVerb: "mindspec spec approve",
+	},
 }
 
-// notBeforeTallyAllowPresent isolates the "do not run the approve verb
-// until /ms-panel-tally returns Allow" instruction, so both positive tests
-// and the mutation probe below share the identical predicate.
-func notBeforeTallyAllowPresent(content string) bool {
-	return strings.Contains(content, "do NOT run") &&
-		strings.Contains(content, "/ms-panel-tally") &&
-		strings.Contains(content, "returns Allow")
+// notBeforeTallyVerbRE ties "do NOT run `<verb>`" to "until
+// `/ms-panel-tally` returns Allow" as a BOUNDED single fragment (not
+// three independent strings.Contains calls) — a literal that names the
+// WRONG approve verb right after "do NOT run" (e.g. ms-spec-approve
+// telling the reader not to run `mindspec plan approve`) must fail this
+// check for the gate's correct verb, even though the literal still
+// contains "/ms-panel-tally" and "returns Allow" somewhere.
+func notBeforeTallyVerbRE(verb string) *regexp.Regexp {
+	return regexp.MustCompile(
+		`do NOT run\s{1,10}` + "`" + regexp.QuoteMeta(verb) + "`" +
+			`\s{1,10}until\s{1,10}` + "`" + `/ms-panel-tally` + "`" +
+			`\s{1,10}returns Allow`,
+	)
+}
+
+func notBeforeTallyVerbPresent(content, verb string) bool {
+	return notBeforeTallyVerbRE(verb).MatchString(content)
+}
+
+// enforcementNoteRE pins the portable (bead-ID-free — see
+// TestLifecycleGateStep_NoBeadIDLeak) enforcement-scope note that must
+// appear in BOTH the ms-spec-approve and ms-plan-approve literals: "this
+// step is guidance, not a mechanized preflight; binary enforcement of
+// these gates is a separate, tracked enhancement." \s+ bridges the
+// line-wrap between "tracked" and "enhancement" in the shipped raw
+// string literal.
+var enforcementNoteRE = regexp.MustCompile(`binary enforcement of these gates is a separate, tracked\s+enhancement`)
+
+func enforcementNotePresent(content string) bool {
+	return enforcementNoteRE.MatchString(content)
+}
+
+// TestLifecycleGateStep_NamesGateVerbAndEnforcementNote is the
+// table-driven positive pin for AC-6's ms-spec-approve/ms-plan-approve
+// literal half: each literal names its own `--gate <gate>` flag, binds
+// "do NOT run <the CORRECT approve verb>" to the
+// "until `/ms-panel-tally` returns Allow" instruction (bounded, in the
+// SAME literal — a wrong-verb swap REDs this), cites ADR-0044, and
+// carries the portable "binary enforcement ... separate, tracked
+// enhancement" note.
+func TestLifecycleGateStep_NamesGateVerbAndEnforcementNote(t *testing.T) {
+	files := lifecycleSkillFiles()
+	for _, tc := range lifecycleGateCases {
+		t.Run(tc.name, func(t *testing.T) {
+			content, ok := files[tc.name]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
+			}
+			if !strings.Contains(content, "--gate "+tc.gate) {
+				t.Errorf("%s literal missing the '--gate %s' panel-invocation fragment", tc.name, tc.gate)
+			}
+			if !notBeforeTallyVerbPresent(content, tc.verb) {
+				t.Errorf("%s literal missing the bounded \"do NOT run `%s` ... until `/ms-panel-tally` returns Allow\" fragment", tc.name, tc.verb)
+			}
+			if !strings.Contains(content, "ADR-0044") {
+				t.Errorf("%s literal missing the ADR-0044 citation", tc.name)
+			}
+			if !enforcementNotePresent(content) {
+				t.Errorf("%s literal missing the portable \"binary enforcement of these gates is a separate, tracked enhancement\" note", tc.name)
+			}
+		})
+	}
 }
 
 // TestLifecycleGateStep_NoBeadIDLeak is the MUST-NOT-CONTAIN half of AC-6:
@@ -103,26 +143,82 @@ func TestLifecycleGateStep_NoBeadIDLeak(t *testing.T) {
 	}
 }
 
-// TestLifecycleGateStep_MutationProbe proves the two positive pins above
-// are not vacuous: stashing (simulated here by string-surgery on an
-// in-memory copy) the Step-1 literal edit turns the SAME predicates red.
-// The bead's own verification also runs the real `git stash` version of
-// this demonstration; this probe pins the same fact at the Go level so it
-// survives independently of any one manual verification run.
+// TestLifecycleGateStep_MutationProbe proves the positive pins above are
+// not vacuous by applying the SAME production predicates
+// (notBeforeTallyVerbPresent, enforcementNotePresent) to mutated copies
+// of the shipped literals — never a standalone strings.Replace/Contains
+// check that bypasses those predicates.
 func TestLifecycleGateStep_MutationProbe(t *testing.T) {
 	files := lifecycleSkillFiles()
-	content, ok := files["ms-spec-approve"]
-	if !ok {
-		t.Fatal("lifecycleSkillFiles() has no \"ms-spec-approve\" entry")
-	}
-	if !strings.Contains(content, "--gate spec_approve") {
-		t.Fatal("precondition failed: the shipped ms-spec-approve literal must carry the --gate spec_approve fragment")
-	}
 
-	mutated := strings.Replace(content, "--gate spec_approve", "", 1)
-	if strings.Contains(mutated, "--gate spec_approve") {
-		t.Fatal("mutation probe failed: stripping the fragment should remove it")
-	}
+	t.Run("wrong_verb_reds_notBeforeTallyVerbPresent", func(t *testing.T) {
+		for _, tc := range lifecycleGateCases {
+			content, ok := files[tc.name]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
+			}
+			if !notBeforeTallyVerbPresent(content, tc.verb) {
+				t.Fatalf("precondition failed: %s literal must currently carry the correct-verb fragment for %q", tc.name, tc.verb)
+			}
+
+			wrongVerbLiteral := "`" + tc.otherVerb + "`"
+			correctVerbLiteral := "`" + tc.verb + "`"
+			if !strings.Contains(content, correctVerbLiteral) {
+				t.Fatalf("fixture assumption broken: %q not found (backtick-delimited) in %s literal", correctVerbLiteral, tc.name)
+			}
+			mutated := strings.Replace(content, correctVerbLiteral, wrongVerbLiteral, 1)
+			if mutated == content {
+				t.Fatalf("fixture assumption broken: swap of %q -> %q had no effect on %s literal", correctVerbLiteral, wrongVerbLiteral, tc.name)
+			}
+
+			// Applying the SAME production predicate (for the gate's
+			// correct verb) to the mutated content must now fail: the
+			// "do NOT run" instruction no longer names this gate's verb.
+			if notBeforeTallyVerbPresent(mutated, tc.verb) {
+				t.Errorf("mutation probe failed: swapping the approve verb to %q in %s should turn notBeforeTallyVerbPresent(content, %q) false", tc.otherVerb, tc.name, tc.verb)
+			}
+		}
+	})
+
+	t.Run("enforcement_note_removal_reds", func(t *testing.T) {
+		for _, name := range []string{"ms-spec-approve", "ms-plan-approve"} {
+			content, ok := files[name]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", name)
+			}
+			if !enforcementNotePresent(content) {
+				t.Fatalf("precondition failed: %s literal must currently carry the enforcement note", name)
+			}
+
+			mutated := enforcementNoteRE.ReplaceAllString(content, "")
+			if mutated == content {
+				t.Fatalf("fixture assumption broken: could not locate the enforcement note to remove from %s literal", name)
+			}
+
+			// Applying the SAME production predicate to the mutated
+			// content must now fail.
+			if enforcementNotePresent(mutated) {
+				t.Errorf("mutation probe failed: deleting the enforcement note from %s literal should turn enforcementNotePresent false", name)
+			}
+		}
+	})
+
+	t.Run("gate_flag_removal_reds", func(t *testing.T) {
+		for _, tc := range lifecycleGateCases {
+			content, ok := files[tc.name]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
+			}
+			flag := "--gate " + tc.gate
+			if !strings.Contains(content, flag) {
+				t.Fatalf("precondition failed: the shipped %s literal must carry the %q fragment", tc.name, flag)
+			}
+			mutated := strings.Replace(content, flag, "", 1)
+			if strings.Contains(mutated, flag) {
+				t.Errorf("mutation probe failed: stripping %q from %s should remove it", flag, tc.name)
+			}
+		}
+	})
 }
 
 // TestLifecycleGateStep_ClaudeMDTemplateRewordedTopologyNeutral pins the
