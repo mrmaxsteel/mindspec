@@ -37,16 +37,16 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    ```
    Record the totals — files touched, +X/-Y lines, file count by directory. The bead-level panels saw this incrementally; the final reviewers see it as one thing.
 
-3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<spec-dir>/reviews/<spec-slug>-final/` (where `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/` — reviews are co-located under the spec per the spec 106 flat layout), writes `panel.json` (`bead_id` null, `expected_reviewers` from the configured mix for this gate — final-review is commonly operator-scaled via `panel.gates`, see `ms-panel-run`'s § Panel-size ladder, family-level only, no model values — `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
+3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<spec-dir>/reviews/<spec-slug>-final/` (where `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/` — reviews are co-located under the spec per the spec 106 flat layout), writes `panel.json` (`bead_id` null, `expected_reviewers` 6, `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
 
    The BRIEF (composed by step 0, with the final-review specifics) carries: PR link, spec.md scope summary, cumulative diff stat, list of merged beads (with round-N commit SHAs), known fix-author deviations from each round-2 panel that the final reviewer should re-assess in cumulative context.
 
-4. **Fan out one reviewer per configured slot with the FINAL-REVIEW lenses (different from bead lenses):** the table below is the **DEFAULT lens assignment for the shipped mix**; for a scaled mix, assign each configured slot a distinct lens, reusing or splitting this default set.
+4. **Fan out 6 reviewers with the FINAL-REVIEW lenses (different from bead lenses):**
 
    | Slot | Lens | Focus |
    |:-----|:-----|:------|
    | F1 | Cumulative scope | Does the merged diff stay within spec.md scope? Any beads land work spec.md didn't authorize? |
-   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD — in your own isolated checkout (`git worktree add --detach /tmp/rev-<panel-slug>-F2 <reviewed_head_sha>`, ADR-0044), never the shared spec worktree; remove the worktree (`git worktree remove`) when you're done. Then, in that same checkout and before sign-off, reproduce the project's declared CI invocation VERBATIM: run `commands.ci` when the project's config declares it, falling back to `commands.test` when `commands.ci` is undeclared. When the project's config declares NEITHER key, do not skip the check silently — record the explicit advisory finding "no declared CI invocation — CI parity not reproduced". |
+   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD. |
    | F3 | Main integration | Does the branch merge cleanly into current `main` HEAD? Any conflicts? Any post-cut main commits that should have been rebased through the spec branch? |
    | F4 | PR description accuracy | Does the PR body match the actual diff? Are claimed bead numbers right, file counts correct, follow-ups all filed in `bd`? |
    | F5 | AC release-gate readiness | For each AC the spec.md claims, identify the expected gate-evidence artifact path and check `[ -f <path> ]` on the spec branch. If the artifact does NOT exist at the path: emit a `concrete_changes_required` item `"materialize <artifact-name> at <path>"` with `"hard_block": true`. PR-body naming the path is necessary but not sufficient (see `/ms-panel-tally` § Artifact gates). |
@@ -56,20 +56,10 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
 
 5. **Tally through `/ms-panel-tally`** — the single decision authority. The artifact-gate HARD-block rule, the N−1 threshold, and the halt-recovery procedure all live there; the F5 "evidence path NAMED but artifact MISSING → HARD block" finding is a `"hard_block": true` verdict the tally halts on regardless of vote count. On APPROVE → proceed to `/ms-impl-approve`.
 
-## Reviewer conduct
-
-Per **ADR-0044** (the normative doctrine home; this section states only the role-local operational fragments a final-review participant acts on).
-
-**Mutation-isolation** (the F2 full-regression run above): any execution or mutation happens in an isolated detached checkout (`git worktree add --detach`), never the shared spec worktree, removed when the reviewer is done; read-only inspection stays fine.
-
-**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Every finding you raise is fixed or evidence-refuted via the audited `refutations` procedure — never dropped because the APPROVE count cleared the threshold. The threshold is a floor, not a license.
-
-**Absolute scratch.** Every scratch file you write lives at an ABSOLUTE path under `/tmp` (or the panel directory for verdicts), never a relative path — harness cwd-resets turn a relative write into sibling-worktree corruption.
-
 ## What this skill is NOT
 
 - Not a replacement for per-bead panels. The per-bead loop catches unit defects efficiently; the final panel catches the cumulative-only defects.
-- Not a CI substitute. CI checks (typecheck, lint, test) should run on the spec PR independently; this panel adds human-judgment review on top. F2's reproduction of `commands.ci`/`commands.test` in an isolated checkout narrows this gap but does not close it: a local-green run on the reviewer's own machine is not the same signal as CI-green on the PR — environment, secrets, and matrix jobs the reviewer's checkout doesn't have can still diverge — so F2's result is reviewer-side parity evidence, never a substitute for the PR's own CI run.
+- Not a CI substitute. CI checks (typecheck, lint, test) should run on the spec PR independently; this panel adds human-judgment review on top.
 - Not an authoritative deploy gate. Ops-side gates are separate from this panel's APPROVE.
 
 ## Final-review fix-ups land on the spec branch (escape hatch)

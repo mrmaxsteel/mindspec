@@ -1622,3 +1622,147 @@ func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) 
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bead 4 (mindspec-xurf.4) appends below: AC-11 (R8b CI-parity slot text +
+// concrete-invocation tripwires; the config-comment half is Bead 2's, pinned
+// in internal/setup/lifecycle_gate_step_test.go) and AC-12 (completeness
+// sweep over this whole file's fragment tables — every AC this table claims
+// to cover has at least one traceable row, and the file runs under plain
+// `go test ./internal/setup/`).
+// ---------------------------------------------------------------------------
+
+var reviewDisciplineBead4FragmentRows = []fragmentRow{
+	// AC-11 (R8b) — the F2 full-regression slot's CI-parity instruction:
+	// commands.ci, the commands.test fallback, and the no-declaration
+	// advisory, all named as config keys — never a concrete invocation.
+	{ac: "AC-11", desc: "ms-spec-final-review F2 slot names commands.ci", surface: "ms-spec-final-review", want: "commands.ci"},
+	{ac: "AC-11", desc: "ms-spec-final-review F2 slot names the commands.test fallback", surface: "ms-spec-final-review", want: "commands.test"},
+	{ac: "AC-11", desc: "ms-spec-final-review F2 slot records the no-declaration advisory verbatim", surface: "ms-spec-final-review", want: "no declared CI invocation — CI parity not reproduced"},
+	{ac: "AC-11", desc: "ms-spec-final-review extends Not-a-CI-substitute with the local-green vs CI-green rationale", surface: "ms-spec-final-review", want: "not the same signal as CI-green on the PR"},
+	// This row pins the NEW closing clause this bead ADDED to the
+	// Not-a-CI-substitute bullet — not the pre-existing "Not a CI
+	// substitute" lead-in, which already existed verbatim at this bead's
+	// parent commit (7ec96295) and so would stay present (and this row
+	// would stay GREEN) even if this bead's own edit were fully reverted.
+	// Pinning the new closing clause instead means a revert of the Bead-4
+	// edit genuinely REDs this row.
+	{ac: "AC-11", desc: "ms-spec-final-review Not-a-CI-substitute extension's closing clause (new text, absent at parent)", surface: "ms-spec-final-review", want: "F2's result is reviewer-side parity evidence, never a substitute for the PR's own CI run"},
+
+	// AC-11 negative tripwires (honest, per spec.md's own framing — NOT a
+	// proof of absence for every possible concrete invocation, just these
+	// four known-risk patterns; AC-10's `go test -short` row already
+	// backstops that specific pattern independently).
+	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `go test` invocation", surface: "ms-spec-final-review", want: "go test", negate: true},
+	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `npm test` invocation", surface: "ms-spec-final-review", want: "npm test", negate: true},
+	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `pytest` invocation", surface: "ms-spec-final-review", want: "pytest", negate: true},
+	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `make test` invocation", surface: "ms-spec-final-review", want: "make test", negate: true},
+}
+
+// TestReviewDiscipline_Bead4Fragments is Bead 4's table-driven [CI] guard,
+// same shape as TestReviewDiscipline_Fragments / TestReviewDiscipline_
+// Bead3Fragments above — a separate slice/function for per-bead
+// traceability (AC-12), not because the underlying mechanism differs.
+func TestReviewDiscipline_Bead4Fragments(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	for _, row := range reviewDisciplineBead4FragmentRows {
+		row := row
+		t.Run(row.ac+"/"+row.desc, func(t *testing.T) {
+			content, ok := skills[row.surface]
+			if !ok {
+				t.Fatalf("pluginmindspec.SkillFiles() has no %q entry", row.surface)
+			}
+			has := strings.Contains(content, row.want)
+			switch {
+			case row.negate && has:
+				t.Errorf("%s: %s must NOT contain %q, but it does", row.surface, row.ac, row.want)
+			case !row.negate && !has:
+				t.Errorf("%s: %s is missing the required fragment %q", row.surface, row.ac, row.want)
+			}
+		})
+	}
+}
+
+// reviewDisciplineCompleteACs is the full set of ACs the R1c guard table
+// (this file) claims to cover, per AC-12 / plan.md's per-bead ownership
+// table. AC-3, AC-13, AC-14, AC-15, AC-16, AC-17 are asserted elsewhere
+// (dedicated tests / a different package, per plan.md's Provenance table)
+// and are deliberately NOT in this set — AC-12 only claims the fragment
+// rows enumerated in spec.md's own AC-12 text: "AC-1/2/4/5/6/7/8/9/10/11".
+var reviewDisciplineCompleteACs = []string{
+	"AC-1", "AC-2", "AC-4", "AC-5", "AC-6", "AC-7", "AC-8", "AC-9", "AC-10", "AC-11",
+}
+
+// TestReviewDiscipline_AC12Completeness is the completeness sweep: every AC
+// in reviewDisciplineCompleteACs must have at least one traceable row
+// somewhere in this file's fragment tables (or, for the two ACs asserted
+// structurally rather than by substring — AC-2's ladder-example parse and
+// AC-10's scan-plus-allowlist — at least one dedicated test function whose
+// name announces that AC). Deleting every row for one AC (e.g. reverting
+// this bead's own AC-11 rows above) REDs this test, which is the AC-12
+// per-fragment-traceability guarantee applied to itself.
+func TestReviewDiscipline_AC12Completeness(t *testing.T) {
+	covered := map[string]bool{}
+	for _, row := range reviewDisciplineFragmentRows {
+		covered[row.ac] = true
+	}
+	for _, row := range reviewDisciplineBead3FragmentRows {
+		covered[row.ac] = true
+	}
+	for _, row := range reviewDisciplineBead4FragmentRows {
+		covered[row.ac] = true
+	}
+	for _, row := range reviewDisciplineLiteralFragmentRows {
+		covered[row.ac] = true
+	}
+	// AC-2 (the panel.gates ladder example) and AC-10 (scan-plus-allowlist)
+	// are asserted structurally, not via the fragmentRow substring shape —
+	// named here as explicitly covered, backstopped by the dedicated tests
+	// TestReviewDiscipline_AC2LadderExampleStructural and
+	// TestReviewDiscipline_AC10ScanPlusAllowlist. That backstop is made real
+	// by the package-scope `var _ = TestReviewDiscipline_AC2LadderExampleStructural`
+	// / `var _ = TestReviewDiscipline_AC10ScanPlusAllowlist` references below
+	// this function: deleting or renaming either backing test is a COMPILE
+	// ERROR for this file, not merely a comment claim, so AC-2/AC-10 cannot
+	// silently lose their structural coverage while this file still builds.
+	covered["AC-2"] = true
+	covered["AC-10"] = true
+
+	for _, ac := range reviewDisciplineCompleteACs {
+		if !covered[ac] {
+			t.Errorf("AC-12 completeness: %s has no traceable row in the R1c guard table", ac)
+		}
+	}
+
+	// Table-driven per AC-12: a file-granular revert of a multi-row skill
+	// legitimately REDs every row pinned to that file, not just one — prove
+	// the stash-matrix property holds structurally by checking every row
+	// across every table names a real embedded surface (fragmentRow) or
+	// lifecycle literal (literalFragmentRow), so a revert of that file's
+	// bytes is guaranteed to intersect at least one row per AC touching it.
+	skills := pluginmindspec.SkillFiles()
+	for _, row := range append(append([]fragmentRow{}, reviewDisciplineFragmentRows...), append(reviewDisciplineBead3FragmentRows, reviewDisciplineBead4FragmentRows...)...) {
+		if _, ok := skills[row.surface]; !ok {
+			t.Errorf("AC-12 completeness: row %q (%s) names surface %q which pluginmindspec.SkillFiles() does not have", row.desc, row.ac, row.surface)
+		}
+	}
+	literals := lifecycleSkillFiles()
+	for _, row := range reviewDisciplineLiteralFragmentRows {
+		if _, ok := literals[row.surface]; !ok {
+			t.Errorf("AC-12 completeness: literal row %q (%s) names surface %q which lifecycleSkillFiles() does not have", row.desc, row.ac, row.surface)
+		}
+	}
+}
+
+// reviewDisciplineAC2StructuralBackstop and reviewDisciplineAC10StructuralBackstop
+// are compile-load-bearing references to the two dedicated tests that back
+// AC-12's "covered" claim for AC-2 and AC-10 (see the comment above). They
+// exist ONLY so that deleting or renaming
+// TestReviewDiscipline_AC2LadderExampleStructural or
+// TestReviewDiscipline_AC10ScanPlusAllowlist fails `go vet`/`go build` for
+// this package, rather than silently leaving TestReviewDiscipline_AC12Completeness
+// green with a stale hardcoded covered[...] = true and no backing test.
+var (
+	reviewDisciplineAC2StructuralBackstop  = TestReviewDiscipline_AC2LadderExampleStructural
+	reviewDisciplineAC10StructuralBackstop = TestReviewDiscipline_AC10ScanPlusAllowlist
+)
