@@ -1,56 +1,63 @@
 ---
-status: Draft
-spec_id: 126-panel-review-discipline
-version: "1"
 adr_citations:
-  - ADR-0044
-  - ADR-0043
-  - ADR-0040
-  - ADR-0037
+    - ADR-0044
+    - ADR-0043
+    - ADR-0040
+    - ADR-0037
+approved_at: "2026-07-24T18:23:09Z"
+approved_by: user
+bead_ids:
+    - mindspec-xurf.1
+    - mindspec-xurf.2
+    - mindspec-xurf.3
+    - mindspec-xurf.4
+spec_id: 126-panel-review-discipline
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
-      - plugins/mindspec/skills/ms-bead-fix/SKILL.md
-      - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
-      - .mindspec/adr/ADR-0044-panel-review-conduct.md
-      - internal/setup/review_discipline_test.go
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/setup/claude.go
-      - internal/setup/lifecycle_gate_step_test.go
-      - internal/panel/create.go
-      - internal/panel/create_test.go
-      - internal/config/config.go
-      - internal/config/commands_test.go
-  - id: 3
-    depends_on:
-      - 1
-      - 2
-    key_file_paths:
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - internal/setup/review_discipline_test.go
-  - id: 4
-    depends_on:
-      - 3
-    key_file_paths:
-      - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
-      - internal/setup/historical_skills/ms-panel-run.pre126.md
-      - internal/setup/historical_skills/ms-panel-tally.pre126.md
-      - internal/setup/historical_skills/ms-bead-cycle.pre126.md
-      - internal/setup/historical_skills/ms-bead-fix.pre126.md
-      - internal/setup/historical_skills/ms-spec-final-review.pre126.md
-      - internal/setup/historical_skills/ms-spec-approve.pre126.md
-      - internal/setup/historical_skills/ms-plan-approve.pre126.md
-      - internal/setup/upgrade_refresh_pre126_test.go
-      - internal/setup/review_discipline_test.go
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+        - plugins/mindspec/skills/ms-bead-fix/SKILL.md
+        - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
+        - .mindspec/adr/ADR-0044-panel-review-conduct.md
+        - internal/setup/review_discipline_test.go
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/setup/claude.go
+        - internal/setup/lifecycle_gate_step_test.go
+        - internal/panel/create.go
+        - internal/panel/create_test.go
+        - internal/config/config.go
+        - internal/config/commands_test.go
+    - depends_on:
+        - 1
+        - 2
+      id: 3
+      key_file_paths:
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - internal/setup/review_discipline_test.go
+    - depends_on:
+        - 3
+      id: 4
+      key_file_paths:
+        - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
+        - internal/setup/historical_skills/ms-panel-run.pre126.md
+        - internal/setup/historical_skills/ms-panel-tally.pre126.md
+        - internal/setup/historical_skills/ms-bead-cycle.pre126.md
+        - internal/setup/historical_skills/ms-bead-fix.pre126.md
+        - internal/setup/historical_skills/ms-spec-final-review.pre126.md
+        - internal/setup/historical_skills/ms-spec-approve.pre126.md
+        - internal/setup/historical_skills/ms-plan-approve.pre126.md
+        - internal/setup/upgrade_refresh_pre126_test.go
+        - internal/setup/review_discipline_test.go
 ---
 # Plan: 126-panel-review-discipline
 
