@@ -7,49 +7,135 @@ approved_by: ""
 
 ## Goal
 
-<Brief description of what this spec achieves and the target user outcome>
+Make the spec-121 landed-merge attestation substrate TRUE in real practice. Two confirmed, pre-existing bugs sit on the merge critical path — the path every `mindspec complete` and `impl approve` crosses — and together they make the substrate's promise false end-to-end: **(1)** `mindspec complete` never actually persists the merge-time landed-binding ADR-0041 §2(ii) mandates — `ensureLandedBinding` swallows a locate MISS as a silent nil (`internal/executor/mindspec_executor.go:1516-1519`) and writes no `mindspec_landed_merge_sha`, so `internal/lifecycle.FindLandedMerge` later fail-closes with `*LandedMergeNoEvidence` on every branch-deleted, genuinely-merged bead; and **(2)** the revert-awareness leg misclassifies EVOLVED content as REVERTED — `gitutil.ContentSubsumedOutcome` returns `SubsumptionCleanDivergence` ("backed out") for a dependency whose touched surface later honest work evolved cleanly (the real `mindspec-8nhe.2` case), so `FindLandedMerge` refuses a dep whose work is still present. Every landed-merge consumer inherits both: `complete`'s merged-unclosed reconcile, the doctor stale-OPEN cross-check, and spec 124's MF-3 readiness signal, which today false-rejects EVERY genuinely-merged dependency — a ceremony trapdoor.
+
+Target outcome: after any real `mindspec complete` that performs a bead→spec merge, the landed-binding is durably on the bead (visible in `bd show`); a genuine bind failure is LOUD, fail-closed, and cleanup-suppressing — never a silent nil; content evolved by later honest work is identified as landed while genuinely backed-out content still refuses; already-merged history (the current fleet state: closed beads, deleted branches, no bindings) is recoverable through an audited, fail-closed, identity-corroborated re-attest operation; and every fixed class is pinned by a CI-hermetic regression test.
 
 ## Background
 
-<Context, motivation, and any relevant prior decisions>
+All citations verified in this worktree (fork of `main` at `ae53877e`, post-spec-123).
+
+### Bug 1 — `complete` never persists the landed-binding
+
+- Both producer legs record the binding fail-closed-before-cleanup exactly as ADR-0041 §2(ii) requires — `CompleteBead` (`internal/executor/mindspec_executor.go:448-453`) and `FinalizeEpic`'s auto-merge loop (`:672`, `:726`) call `ensureLandedBinding` before any branch/worktree cleanup, and a bind-WRITE failure suppresses cleanup via `guard.NewFailure`. But `ensureLandedBinding` (`:1514`) first calls `locateLandedMergeByIdentity(g.Root, specBranch, beadBranch)` (`:1468`), and on a locate MISS (`errNoLandedMergeIdentified`, `:1451`) it **silently returns nil** (`:1516-1519`) — no binding written, no warning, cleanup proceeds, branch deleted. The silent-nil design assumed the only miss is the legitimate zero-own-commits ancestor branch ("nothing to bind"); in real practice the locate misses for beads that DID merge with real commits, so the assumed-impossible state is the common one.
+- Downstream, `FindLandedMerge` (`internal/lifecycle/landed.go:249`) then has no admissible corroboration for the branch-deleted bead: no surviving branch tip, usually no registered-panel `reviewed_head_sha` at the consuming site, no binding — subject match alone is inadmissible by design (§2(ii)) — so it returns `*LandedMergeNoEvidence` (`landed.go:337-345`) on every merged dep. **Proven**: manually writing `mindspec_landed_merge_sha`/`mindspec_landed_second_parent` onto the bead makes the consumer pass — the engine, read path (`landedBindingForBead`, `landed.go:154-160`), corroboration ladder, and write path (`bead.MergeMetadata`) all work; only `complete`'s write goes missing.
+- A parallel diagnostic is pinning the exact miss condition (candidate axes: root-vs-worktree ref resolution in `FirstParentMerges(g.Root, specBranch)` (`internal/gitutil/gitops.go:539`), merge-subject shape vs the `"Merge " + beadBranch` identity (`mindspec_executor.go:1469`), timing relative to branch deletion, or the G3-1 read-skip reconcile). This spec does not presume the pin: Requirement 1 demands reliable persistence across the real topology and Requirement 2 makes any residual genuine miss LOUD, so the implementation fixes whatever the pin shows and the loud path catches whatever it doesn't.
+
+### Bug 2 — evolved content reads as reverted
+
+- `FindLandedMerge`'s revert-awareness leg (`landed.go:347-382`) discriminates `ContentSubsumedOutcome`'s trichotomy correctly at its own level: `SubsumptionConflict` → landed-then-evolved → identified; `SubsumptionCleanDivergence` → backed out → refused (`landed.go:379-382`).
+- But the underlying primitive (`internal/gitutil/neteffect.go:217-244`) classifies as `SubsumptionCleanDivergence` ANY clean three-way whose result differs from the tip — which captures not only the true `git revert` shape (tip returned to the pre-merge state on the merge's own paths) but also evolved shapes where later honest work changed the merge's touched surface in a way that still auto-merges cleanly (content relocated, removed-and-replaced, overlapping-surface doc reconciliation). The doc comment concedes the residual ("content later removed cleanly and fully by honest work is content-indistinguishable from a revert", `landed.go:370-374`); `mindspec-8nhe.2` — later beads and doc-recon touched the dep's overlapping surface — proves the residual is the REAL evolved case, not an edge. Existing fixtures (`landed_test.go:712`, `:760`) only pin evolved shapes that CONFLICT; no fixture pins the evolved-but-cleanly-divergent shape, so the false-reject ships green.
+- The refusal is a §2(i) violation in practice: no recovery converges (the content genuinely evolved; restoring the branch re-corroborates and re-refuses at the same leg), leaving only the bd-close bypass or reverting legitimate later work — the exact deadlock class ADR-0041 forbids.
+
+### Consumers and blast radius
+
+- `complete`'s merged-unclosed reconcile treats `*LandedMergeNoEvidence` as the attested-restore refusal (`internal/complete/complete.go:606-613`, `:1397-1405`) — a manual, human-marker recovery now demanded for every routinely-completed bead.
+- The doctor stale-OPEN cross-check consumes the same predicate (`internal/lifecycle/stale_open.go:92`).
+- Spec 124's MF-3 ("dependency closed AND landed-merged") consumes `FindLandedMerge` verbatim and fail-closes on any error — with Bug 1, that is a false FAIL for every dependency completed by the real lifecycle. This spec is 124's prerequisite; MF-3 itself is out of scope here.
 
 ## Impacted Domains
 
-- <domain-1>: <how it is impacted>
+- **execution**: `internal/executor/**` (`locateLandedMergeByIdentity`, `ensureLandedBinding`, the CompleteBead/FinalizeEpic bind legs — reliable persistence, positive nothing-to-bind classification, loud genuine-miss refusal), `internal/gitutil/**` (the evolved-vs-reverted discrimination under `ContentSubsumedOutcome`/a sibling primitive; `ContentSubsumed`/`NetEffectLanded` boolean consumers preserved), `internal/bead/**` (binding + audit metadata via the existing `MergeMetadata`/`GetMetadata` helpers; no bd schema change).
+- **workflow**: `internal/lifecycle/**` (`FindLandedMerge`'s revert-leg consumption and messages), `internal/complete/**` (consumer-side messages only, if touched), `cmd/mindspec/**` (the R4 re-attest surface).
+- **core**: only if the plan adds a new redact/registry token for the re-attest surface (the spec-110 precedent); otherwise untouched.
+
+These match `.mindspec/domains/*/OWNERSHIP.yaml` (execution: `internal/executor`, `internal/gitutil`, `internal/bead`; workflow: `internal/lifecycle`, `internal/complete`, `internal/doctor`, `cmd/**`). `context-system` is not impacted.
 
 ## ADR Touchpoints
 
-- [ADR-NNNN](../../adr/ADR-NNNN.md): <why this ADR is relevant>
+- [ADR-0041: Gate-Before-Mutate](../../adr/ADR-0041-gate-before-mutate.md) — **AMENDED by this spec (narrowly), otherwise APPLIED**. Requirements 1–3 are pure applications: §2(ii) already mandates the fail-closed, before-cleanup merge-time binding (Bug 1 is an implementation failure of it — the silent miss-swallow is exactly the "warning and continuing" the clause forbids, so making it loud needs NO amendment), and §2(i)+(ii) jointly already forbid the evolved-content permanent refusal ("a permanent 'ever-reverted ⇒ reject' rule would itself violate §2(i)'s deadlock-free rule"), so Requirement 3 needs NO amendment either. Requirement 4 DOES need one narrow §2(ii) touchpoint: §2(ii) admits "the merge-time landed-binding" as a corroborating datum, and a recovery re-attestation writes that same datum AFTER merge time. The amendment records that the binding's admissibility derives from its corroborated-identity discipline, not from when it is written: a re-attested binding is admissible iff written under the same corroboration rules (never subject-only) and carrying an audit record naming its corroborating datum. Amendment lifecycle per the 122/123 precedent: pre-drafted at plan time, landed by the same bead that lands the re-attest surface, so the ADR-divergence gate sees the declared touchpoint (pinned by AC-11).
+- [ADR-0035: Agent Error Contract](../../adr/ADR-0035-agent-error-contract.md) — unchanged, APPLIED: the new loud bind-failure refusal and every re-attest refusal route through `internal/guard` with a named, copy-pastable recovery (re-run `mindspec complete <id>`; the re-attest operation for historical beads); no refusal ends without a forward exit.
+- [ADR-0025: JSONL as Build Artifact](../../adr/ADR-0025-jsonl-as-build-artifact.md) — unchanged, RESPECTED: all binding and audit writes go through the existing `internal/bead` metadata helpers and the export-before-commit discipline; no direct JSONL edits, no raw `bd update --metadata` surfaces.
+- [ADR-0023: Beads/Dolt as Single State Authority](../../adr/ADR-0023.md) — unchanged, RESPECTED: the binding remains advisory corroboration metadata, never lifecycle authority — re-attestation writes identity evidence, it does not open, close, or reclassify any bead.
 
 ## Requirements
 
-1. <Requirement 1>
-2. <Requirement 2>
+Each requirement carries a hard falsifier. "Real topology" below means the shape production `complete` actually runs: merge performed in the spec worktree, locate/bind driven from the main root (`g.Root`), bead branch and worktree deleted immediately after.
+
+1. **`complete` reliably persists the landed-binding.** After every bead→spec merge performed by `mindspec complete` (and by `FinalizeEpic`'s auto-merge leg) for a bead branch with at least one own commit, the landed-binding (`mindspec_landed_merge_sha` + `mindspec_landed_second_parent`, per the existing key contract) MUST be durably recorded on the bead — surviving into `bd show <id> --json` metadata and matching the actual first-parent merge commit on the spec branch — across the real topology, BEFORE the branch/worktree cleanup that destroys the surviving-branch datum. The fix MUST incorporate the parallel diagnostic's pinned miss condition (see Open Questions): the R1 regression fixture reproduces that condition so it is RED on today's `main`, and `locateLandedMergeByIdentity` (or its successor) succeeds whenever a `Merge bead/<id>` first-parent merge commit for the bead actually exists on the spec branch.
+   *Falsified if*: a bead with own commits, completed by a real `mindspec complete` run, lacks `mindspec_landed_merge_sha` in its bd metadata afterward; or the recorded SHAs do not match the actual merge commit and its second parent; or the binding is written only after cleanup has already deleted the branch datum.
+
+2. **A genuine locate/bind failure is LOUD (fail-closed), never silent.** `ensureLandedBinding` MUST NOT return nil on a locate miss for a bead that DID merge. The legitimate "nothing to bind" state (a trivially-ancestor branch with zero own commits since its spec-branch fork point — `git merge --no-ff` of an already-ancestor creates no merge commit) MUST be POSITIVELY classified from its own evidence (e.g. the own-commit count), never inferred from the locate miss itself; only that positively-classified state proceeds quietly without a binding. Any other miss — a merged bead with own commits whose merge commit cannot be located or whose binding cannot be written — refuses via `guard.NewFailure`, suppresses branch/worktree cleanup (preserving the surviving-branch datum, so re-invocation converges per §2(ii)), and names the recovery.
+   *Falsified if*: any code path swallows a bind failure or locate miss for a merged-with-own-commits bead and proceeds to cleanup; or the nothing-to-bind classification is derived from the locate miss rather than from positive evidence; or the refusal deletes the branch it needs for recovery.
+
+3. **Revert-vs-evolved discrimination is correct.** For a merge M in the spec branch's first-parent history, the landed-identity decision MUST classify M as REVERTED (not identified) only when the branch tip's content on M's OWN touched surface is equivalent to the pre-merge (M^1) state — the shape `git revert M` leaves behind: M's net contribution removed and not replaced. Content EVOLVED or superseded by later honest first-parent work — the tip has moved beyond the pre-merge state on that surface, whether the three-way replays as a CONFLICT (today's already-correct `SubsumptionConflict` leg, preserved) or as a CLEAN divergence (the `mindspec-8nhe.2` shape, today's false-reject) — MUST identify as landed. The discrimination mechanism (a sub-classification of `SubsumptionCleanDivergence`, a per-path base-equality comparison, or a sibling primitive) is plan-level; the boolean `ContentSubsumed`/`NetEffectLanded` projections consumed by the protected-main probe and the doctor merged-carrier suppression (spec 121 R4) keep their existing behavior.
+   *Falsified if*: the evolved-content-reads-as-reverted fixture (later first-parent commits evolve M's touched surface such that today's `ContentSubsumedOutcome` returns `SubsumptionCleanDivergence`) is still refused; or a genuine `git revert M` with no later rework of that surface is identified as landed; or the spec-121 revert-then-reapply and boolean-consumer contracts regress.
+
+4. **A general, audited backfill/re-attest recovery.** A `mindspec`-surface operation (verb naming and doctor integration plan-level) MUST exist to (re)attest the landed-binding of an already-merged bead — the current fleet state: closed bead, branch deleted, no binding. It is **fail-closed and identity-corroborated**: it writes a binding only when the candidate merge commit's identity is corroborated by an admissible datum under the §2(ii) discipline (second-parent/merge-SHA identity consistent with a surviving branch tip, a registered panel's `reviewed_head_sha`, an existing consistent binding, or an explicitly supplied and audited operator attestation of the merge/second-parent SHAs) — NEVER a first-parent subject match alone, and with NO per-spec or global bypass flag. Every write is **auditable**: the recorded metadata names when, by which operation, and on which corroborating datum the binding was (re)attested. On an already-correct binding it converges as a no-op; on a contradictory existing binding it follows the G3-1 discipline (overwrite only with the corroborated located identity, never silently keep the contradiction). Refusals name the state and the forward exit (including the existing attested-restore path when no mechanical corroboration exists).
+   *Falsified if*: the operation attests on a subject-only match; or writes an uncorroborated binding; or a crafted subject-matching decoy merge gets attested; or a write leaves no audit trail; or a bypass flag disables corroboration.
+
+5. **Regression evidence, CI-hermetic.** Every fixed class MUST be pinned by an automated test that is RED on today's `main` (or on fix-revert) and runs in CI's bd-less `go test -short ./...` lane: (a) a real-git e2e through the production `CompleteBead` path in the real topology — merge, binding persisted, branch deleted — followed by `lifecycle.FindLandedMerge` positively identifying the merge for the branch-DELETED bead (the exact contract spec 124's MF-3 consumes); (b) an explicit `*LandedMergeNoEvidence` fail-closed test preserving the no-datum refusal; (c) the evolved-vs-true-revert discrimination pair of Requirement 3; (d) the loud-miss refusal of Requirement 2. Hermeticity per the spec-119 bd-less no-skip-gating convention: bd-touching legs run through the existing injectable seams (`mergeBindingFn`/`mergeBindingReadFn`) backed hermetically, with the seam DEFAULTS pinned to the real `bead.MergeMetadata`/`bead.GetMetadata` symbols by an anti-drift test (the `netEffectLandedFn` AC-17 pattern), so the gate cannot go hollow — no new test may skip-when-bd-missing, and any test that genuinely requires a real `bd` FATALs rather than skips when its declared environment lacks it.
+   *Falsified if*: any of the four classes lacks a test that fails on today's behavior; or a new gating test silently skips in the bd-less CI lane; or the seam defaults can be rewired off the real bd write path without a test going red.
 
 ## Scope
 
 ### In Scope
-- <File or component 1>
+
+- `internal/executor/mindspec_executor.go`: `locateLandedMergeByIdentity`, `ensureLandedBinding`, and the CompleteBead/FinalizeEpic bind legs — the diagnosed miss fix, positive nothing-to-bind classification, loud fail-closed refusal (Requirements 1, 2).
+- `internal/gitutil/neteffect.go` (and, if the plan chooses, a sibling primitive): the reverted-vs-evolved discrimination; boolean projections preserved (Requirement 3).
+- `internal/lifecycle/landed.go`: the revert-leg consumption of the corrected discrimination; refusal message accuracy (Requirement 3).
+- `cmd/mindspec/**` + `internal/bead` metadata helpers: the re-attest operation and its audit keys (Requirement 4).
+- The narrow ADR-0041 §2(ii) re-attestation amendment (ADR Touchpoints; Requirement 4).
+- Regression, anti-drift, and e2e tests per Requirement 5 across `internal/executor`, `internal/lifecycle`, `internal/gitutil`.
+
+A natural decomposition is three beads: (1) persistence + loud-miss (R1, R2, and their tests); (2) discrimination (R3 + tests); (3) re-attest surface + ADR amendment (R4 + tests). R5's evidence lands with each. Final structure is a plan decision; note beads 1 and 3 both touch the binding write/read seams, so the plan sequences 3 after 1.
 
 ### Out of Scope
-- <Explicitly excluded items>
+
+- **Spec 124's MF-3 / readiness gate** — signal design, fail-posture, ready-check verb: 124's concern. This spec only makes the substrate MF-3 consumes truthful.
+- **Panel/gate authority** — no change to the ADR-0037 decision ladder, panel gating, or the complete-gate order.
+- **Broad executor refactor** — no restructuring of `CompleteBead`/`FinalizeEpic` beyond the bind legs; the executor/lifecycle import boundary (executor must not import `internal/lifecycle`) stands.
+- **bd schema changes** — bindings and audit records stay in the existing free-form metadata map via existing helpers.
+- **The attested-restore human path** (`complete.go:1397-1405`, q9ea) — unchanged in semantics; R4 adds a mechanical sibling for corroborable states, it does not relax the no-datum human-marker exit.
+- **Retro-fleet backfill execution** — this spec ships the operation; actually running it across historical beads is operator work, not a migration this spec performs.
 
 ## Non-Goals
 
-- <What this spec intentionally does not address>
+- **No weakening of fail-closed identity.** Subject-only acceptance stays banned everywhere (§2(ii)); this spec makes honest evidence exist and read correctly, it does not lower the evidence bar.
+- **No new lifecycle authority for the binding.** It remains corroborating metadata; no consumer gains the right to close/open beads from it.
+- **No revert-detection heuristics over commit messages** — "This reverts commit …" subjects are not evidence; the discrimination is content-shape only.
+- **No changes to `NetEffectLanded`'s consumers' fail-postures** (the spec-121 probe WARN-and-proceed / suppression skip-and-surface contracts stand).
 
 ## Acceptance Criteria
 
-- [ ] <Specific, measurable criterion 1>
-- [ ] <Specific, measurable criterion 2>
+Each criterion is represented by an automated test whose setup reproduces the stated trigger; criteria marked *RED today* fail on current `main` and go RED again if the fix is reverted. Criteria marked *guard* pin behavior that must NOT change. All run in the bd-less CI lane per Requirement 5.
+
+- [ ] **AC-1** — Binding persisted by real complete (R1): real-git fixture in the real topology (spec worktree, bead worktree, bead branch with ≥1 own commit, merge performed where production performs it, locate from the main root), reproducing the parallel diagnostic's pinned miss condition; production `CompleteBead` runs with the metadata seams backed by a hermetic store: exit success; the store holds `mindspec_landed_merge_sha` + `mindspec_landed_second_parent` equal to the actual `Merge bead/<id>` commit and its second parent (rev-parse-verified); branch and worktree cleaned up. *(RED today — the locate MISS silently skips the write)*
+- [ ] **AC-2** — Branch-deleted identification, the MF-3 contract (R1/R5a): continuing AC-1's end state (branch deleted, binding present), `lifecycle.FindLandedMerge(root, specBranch, beadID)` returns the positive `*LandedMerge` for the same commit — not `*LandedMergeNoEvidence`, not `ErrLandedMergeNotFound`. *(RED today — no binding exists to corroborate)*
+- [ ] **AC-3** — Genuine miss is loud and cleanup-suppressing (R2): fixture where the bead DID merge with own commits but the locate cannot identify the merge (via the pinned real miss shape, or seam-injected once the real shape is fixed): `complete` refuses non-zero via `guard.NewFailure` naming the bead, branch, and recovery; the bead branch and worktree SURVIVE; a subsequent successful run converges (binding written, cleanup completes). *(RED today — silent nil, cleanup proceeds, datum destroyed)*
+- [ ] **AC-4** — Nothing-to-bind is positively classified (R2): a zero-own-commits ancestor bead branch (the bd_close orphan shape) completes with no binding, no refusal, and no warning noise; the test pins that the quiet path is taken on the own-commit-count classification, not on the locate miss (rewiring the classification back to infer-from-miss goes red). *(classification leg RED today; quiet outcome guard)*
+- [ ] **AC-5** — Evolved content identifies (R3): the 8nhe.2-shape fixture — merge M lands, later first-parent commits evolve M's touched surface such that `ContentSubsumedOutcome(base=M^1, ref=M, target=tip)` returns `SubsumptionCleanDivergence` on today's primitive (the fixture asserts this shape-precondition so it cannot drift into the already-green conflict shape): `FindLandedMerge` identifies M. *(RED today — refused as "reverted after landing")*
+- [ ] **AC-6** — True revert still refuses; reapply still identifies (R3 guard): `git revert -m 1 M` with no later rework of M's surface → not identified, revert-naming refusal; the spec-121 revert-then-reapply and cherry-pick-reapply fixtures (`landed_test.go:501`, `:526`) stay green; `ContentSubsumed`/`NetEffectLanded` boolean behavior for the probe and doctor suppression is byte-identically preserved (`neteffect_test.go` trichotomy + projection contracts). *(guard)*
+- [ ] **AC-7** — Re-attest happy path (R4): fixture in today's fleet state — closed bead, real `Merge bead/<id>` commit on the spec branch, branch deleted, no binding — with an admissible corroborating datum available: the re-attest operation writes the binding matching the real merge; the audit record names the operation and the corroborating datum; `FindLandedMerge` subsequently identifies; a re-run is a no-op (byte-identical metadata). *(RED today — no such surface exists)*
+- [ ] **AC-8** — Re-attest fail-closed (R4): the same fixture with NO admissible corroboration (subject match only), and separately a crafted decoy merge whose subject matches but whose second parent contradicts the corroborating datum: the operation refuses non-zero, writes NOTHING (metadata byte-identical), and names the forward exit; no flag exists that bypasses corroboration (pinned by flag-surface assertion). *(property of the new surface; decoy leg RED-on-lie)*
+- [ ] **AC-9** — Re-attest contradiction handling (R4): a bead carrying a stale/contradictory existing binding: the operation overwrites only with the corroborated located identity (G3-1 discipline) and audits the correction; it never silently keeps the contradiction and never writes an uncorroborated replacement. 
+- [ ] **AC-10** — No-datum refusal preserved (R5b): a subject-matching candidate with every corroboration leg unavailable still yields `*LandedMergeNoEvidence` from `FindLandedMerge` (the existing `landed_test.go:213` contract) — neither the R1 fix nor the R4 surface relaxes the fail-closed default. *(guard)*
+- [ ] **AC-11** — Seam anti-drift + ADR anchor (R5/ADR): (i) the production defaults of `mergeBindingFn`/`mergeBindingReadFn` are pinned to `bead.MergeMetadata`/`bead.GetMetadata` (and the re-attest surface's write path routes through the same seam family), so the hermetic tests provably exercise the real write path; (ii) the ADR-0041 amendment text contains the re-attestation clause and the re-attest code cites it, so the ADR-divergence gate sees the declared touchpoint. *(anti-drift; amendment RED until landed)*
 
 ## Validation Proofs
 
-- <command 1>: <Expected outcome>
+The implementation review MUST record successful output from concrete commands equivalent to:
+
+```bash
+go test -short ./internal/executor/... ./internal/lifecycle/... ./internal/gitutil/... ./internal/bead/... ./internal/complete/...
+golangci-lint run ./...
+
+# Local (bd-on-PATH) end-to-end, scripted against a scratch repo:
+#   real `mindspec complete <bead>` of a merged bead with own commits, then:
+bd show <bead> --json | jq -e '.metadata.mindspec_landed_merge_sha'
+#   and with the bead branch deleted, the consumer passes (FindLandedMerge
+#   identifies — the contract spec 124's ready-check will consume).
+
+rg -n 're-attest|reattest' .mindspec/adr/ADR-0041-gate-before-mutate.md
+```
+
+The focused tests MUST map subtest names or review evidence to every criterion AC-1 through AC-11; if final test names differ, review evidence MUST include the exact runnable `go test <package> -run <test>` commands covering each criterion.
 
 ## Open Questions
 
-- [ ] <Question that must be resolved before planning>
+- [ ] **The pinned locate-miss condition (Bug 1's root cause).** A parallel diagnostic is isolating WHY `locateLandedMergeByIdentity` misses in real practice (root-vs-worktree ref resolution, merge-subject shape, timing vs branch deletion, or the read-skip reconcile). The Requirements are written to be correct under any answer (reliable persistence + loud residual miss), but the plan MUST incorporate the pin before bead 1 is authored: AC-1/AC-3's fixtures must encode the real miss shape to be honestly RED-today, and the fix must target the diagnosed cause rather than papering over it with the loud path alone.
+
+Recorded as plan-level choices (not open questions): the re-attest verb's name and whether it is additionally surfaced through `doctor` (constrained by R4's observable contract); the discrimination mechanism for R3 (constrained by the AC-5/AC-6 fixtures); the audit-record key names (constrained by AC-7's auditability assertion); whether a redact/registry token is needed for the new surface (core-domain declaration activates only if so).
 
 ## Approval
 
