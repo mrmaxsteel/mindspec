@@ -275,6 +275,203 @@ func TestFirstParentMerges_FreshBranchYieldsNoMerge(t *testing.T) {
 	}
 }
 
+// TestExactSecondParentMerges_ExactMatchOnly pins spec 125's shared R1/R2/R5
+// identity primitive: given two sequential bead merges on a spec branch,
+// scanning by EACH bead's own tip returns exactly that bead's own merge —
+// never the other's, never both — regardless of subject text (both merges
+// here carry the ordinary exact subject; the subject is irrelevant to this
+// primitive by design).
+func TestExactSecondParentMerges_ExactMatchOnly(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	run("checkout", "-b", "spec/125-exact")
+	run("checkout", "-b", "bead/one")
+	os.WriteFile(filepath.Join(dir, "one.txt"), []byte("one\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work one")
+	run("checkout", "spec/125-exact")
+	run("merge", "--no-ff", "-m", "Merge bead/one", "bead/one")
+
+	run("checkout", "-b", "bead/two")
+	os.WriteFile(filepath.Join(dir, "two.txt"), []byte("two\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work two")
+	run("checkout", "spec/125-exact")
+	run("merge", "--no-ff", "-m", "Merge bead/two", "bead/two")
+
+	oneTip, err := RevParseRef(dir, "bead/one")
+	if err != nil {
+		t.Fatalf("RevParseRef bead/one: %v", err)
+	}
+	twoTip, err := RevParseRef(dir, "bead/two")
+	if err != nil {
+		t.Fatalf("RevParseRef bead/two: %v", err)
+	}
+
+	matches, err := ExactSecondParentMerges(dir, "spec/125-exact", oneTip)
+	if err != nil {
+		t.Fatalf("ExactSecondParentMerges(one): %v", err)
+	}
+	if len(matches) != 1 || matches[0].Subject != "Merge bead/one" {
+		t.Fatalf("ExactSecondParentMerges(one) = %+v, want exactly the bead/one merge", matches)
+	}
+
+	matches, err = ExactSecondParentMerges(dir, "spec/125-exact", twoTip)
+	if err != nil {
+		t.Fatalf("ExactSecondParentMerges(two): %v", err)
+	}
+	if len(matches) != 1 || matches[0].Subject != "Merge bead/two" {
+		t.Fatalf("ExactSecondParentMerges(two) = %+v, want exactly the bead/two merge", matches)
+	}
+
+	// A tip that matches no merge's second parent at all yields empty —
+	// no ancestor-consistent guessing.
+	matches, err = ExactSecondParentMerges(dir, "spec/125-exact", "0000000000000000000000000000000000000000")
+	if err != nil {
+		t.Fatalf("ExactSecondParentMerges(nonsense): %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("ExactSecondParentMerges(nonsense) = %+v, want empty", matches)
+	}
+}
+
+// TestExactSecondParentMerges_ExcludesOctopus pins the octopus/parent guard
+// (spec 125 R3's "Octopus/parent guard", shared by R2/R5's identity
+// primitive): a >2-parent octopus merge must be EXCLUDED even when one of
+// its OWN parents equals the queried tip — MindSpec bead→spec merges are
+// always exactly two-parent, so a candidate with more parents is never
+// guessed at.
+func TestExactSecondParentMerges_ExcludesOctopus(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	run("checkout", "-b", "spec/125-oct")
+	run("checkout", "-b", "octA")
+	os.WriteFile(filepath.Join(dir, "octa.txt"), []byte("a\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "octa work")
+	run("checkout", "spec/125-oct")
+	run("checkout", "-b", "octB")
+	os.WriteFile(filepath.Join(dir, "octb.txt"), []byte("b\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "octb work")
+	run("checkout", "spec/125-oct")
+	run("merge", "--no-ff", "-m", "octopus merge", "octA", "octB")
+
+	octATip, err := RevParseRef(dir, "octA")
+	if err != nil {
+		t.Fatalf("RevParseRef octA: %v", err)
+	}
+	octBTip, err := RevParseRef(dir, "octB")
+	if err != nil {
+		t.Fatalf("RevParseRef octB: %v", err)
+	}
+
+	for name, tip := range map[string]string{"octA": octATip, "octB": octBTip} {
+		matches, err := ExactSecondParentMerges(dir, "spec/125-oct", tip)
+		if err != nil {
+			t.Fatalf("ExactSecondParentMerges(%s): %v", name, err)
+		}
+		if len(matches) != 0 {
+			t.Errorf("ExactSecondParentMerges(%s) = %+v, want empty (octopus merge must be excluded even though %s's tip is one of its parents)", name, matches, name)
+		}
+	}
+}
+
+// TestExactSecondParentMerges_NewestFirstOnMultipleMatches pins the
+// newest-first ordering spec 125 R5 relies on when the SAME second parent
+// lands more than once (a revert-then-re-merge, or any re-merge of the
+// same bead tip): both matches are returned, newest first —
+// FirstParentMerges already orders this way, and the filter must preserve
+// it. The second merge is built directly via `commit-tree` (its own tree
+// identical to its first parent's — an "empty" re-merge that changes no
+// content, the real AC-2e re-merge shape) so the fixture needs no
+// interactive editor and does not depend on git's "already up to date"
+// short-circuit for a same-tip re-merge.
+func TestExactSecondParentMerges_NewestFirstOnMultipleMatches(t *testing.T) {
+	dir := initGitRepo(t)
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run("checkout", "-b", "spec/125-remerge")
+	run("checkout", "-b", "bead/re")
+	os.WriteFile(filepath.Join(dir, "re.txt"), []byte("re\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "bead re work")
+	run("checkout", "spec/125-remerge")
+	run("merge", "--no-ff", "-m", "Merge bead/re", "bead/re")
+	firstMergeSHA, err := RevParseRef(dir, "spec/125-remerge")
+	if err != nil {
+		t.Fatalf("RevParseRef spec/125-remerge (M1): %v", err)
+	}
+	beadTip, err := RevParseRef(dir, "bead/re")
+	if err != nil {
+		t.Fatalf("RevParseRef bead/re: %v", err)
+	}
+
+	// Unrelated later work advances the spec branch past M1.
+	os.WriteFile(filepath.Join(dir, "later.txt"), []byte("later\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "unrelated later work")
+	currentTip := run("rev-parse", "HEAD")
+	currentTree := run("rev-parse", "HEAD^{tree}")
+
+	// A second merge commit sharing the SAME second parent (bead/re's
+	// tip), built directly: first parent = the current spec tip, second
+	// parent = beadTip, tree = the current tip's OWN tree (a genuine
+	// no-op re-merge — nothing about bead/re's content changes).
+	secondMergeSHA := run("commit-tree", "-p", currentTip, "-p", beadTip, "-m", "Merge bead/re (again)", currentTree)
+	run("update-ref", "refs/heads/spec/125-remerge", secondMergeSHA)
+
+	matches, err := ExactSecondParentMerges(dir, "spec/125-remerge", beadTip)
+	if err != nil {
+		t.Fatalf("ExactSecondParentMerges: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 same-second-parent matches, got %d: %+v", len(matches), matches)
+	}
+	if matches[0].SHA != secondMergeSHA {
+		t.Errorf("newest-first: matches[0].SHA = %q, want the NEWER merge %q", matches[0].SHA, secondMergeSHA)
+	}
+	if matches[1].SHA != firstMergeSHA {
+		t.Errorf("matches[1].SHA = %q, want the OLDER merge %q", matches[1].SHA, firstMergeSHA)
+	}
+}
+
 func TestCommitAll_CleanTree(t *testing.T) {
 	dir := initGitRepo(t)
 

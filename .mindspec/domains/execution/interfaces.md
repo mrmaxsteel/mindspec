@@ -40,6 +40,19 @@ Low-level git operations used only by `MindspecExecutor`:
 | `PRChecksWatch(branch)` | Watch CI checks via gh |
 | `MergePR(branch)` | Merge PR via gh |
 
+### Landed-merge identity primitives (spec 125, ADR-0041 §2(ii))
+
+Unlike the executor-only helpers above, these two are ALSO consumed by
+the workflow domain's landed-merge read side
+(`internal/lifecycle.FindLandedMerge` / `ReattestLandedMerge`) — they
+are the shared root-of-trust primitives, so the write and read sides
+cannot drift:
+
+| Function | Purpose |
+|:---------|:--------|
+| `ExactSecondParentMerges(workdir, branch, tip)` | `branch`'s two-parent first-parent merges whose second parent EQUALS `tip` exactly, newest-first. The ONE exact-match landed-ness primitive: octopus merges and ancestor-consistent-but-not-equal candidates are excluded, never guessed at. `tip` is option-reject gated before reaching any git argv. |
+| `RevertShape(workdir, mergeSHA, target)` | Reverse un-apply no-op test — `merge-tree(base=M, ours=target tip, theirs=M^1)` with rename/copy detection DISABLED (`-c merge.renames=false`). True iff the un-apply is a clean no-op whose tree equals the tip's (the tip carries none of M's content at its original paths — a true `git revert M`, or its content-indistinguishable clean-full-removal residual). Requires a >=2-parent merge; any infra failure propagates as `(false, err)` — undetermined is never a classification. Consulted only under `ContentSubsumedOutcome`'s `SubsumptionCleanDivergence` arm; the forward (rename-detecting) legs are untouched. |
+
 ### Gitignore Ensure (`internal/gitutil/gitignore.go`, spec 123 R4)
 
 Unlike the executor-only helpers above, this surface is consumed by the

@@ -388,3 +388,74 @@ hard failure, a regression) or writing a test that doesn't actually test
 what it claims to (asserting "the run stopped" when nothing made it stop).
 The classification in §3 names this distinction explicitly instead of
 letting it stay implicit and get faked under time pressure.
+
+## Amendment (Spec 125): Re-attested landed-bindings under §2(ii)
+
+*(Finalized by the spec-125 R4 bead that lands the first citing code —
+the explicit `mindspec reattest` surface,
+`internal/lifecycle.ReattestLandedMerge` — per the 122/123
+amendment-lifecycle precedent.)*
+
+§2(ii) above admits "the merge-time landed-binding" as a corroborating
+datum. This amendment records that the binding's ADMISSIBILITY derives
+from its corroborated-identity discipline, not from WHEN it is written:
+a landed-binding written AFTER merge time by an explicit,
+operator-invoked re-attestation is admissible iff it is DERIVED from an
+independent git EXACT-second-parent match (exact match required;
+fail-closed on every ambiguity — no exact match, ancestor-only
+candidates, or competing candidates naming different beads) — never
+from an operator-asserted SHA pair corroborating itself, never from
+subject text alone, and never from an agent-writable binding
+uncorroborated to a real exact merge. Ownership and landed-ness remain
+two DISTINCT facts from two DIFFERENT sources, and the amendment is
+careful not to conflate them: the merge subject's bead-branch name
+NOMINATES which bead a merge belongs to (OWNERSHIP), and git topology
+(a two-parent first-parent merge whose second parent EQUALS the bead's
+landed tip) proves it LANDED (LANDED-NESS); the binding is a
+git-corroborated cache of that joint fact, never an authority. Each
+datum below corroborates LANDED-NESS by independent topology; NONE of
+them is claimed to prove ownership independently of the subject. For a
+bare bead (no surviving branch, no binding, no panel-sha), OWNERSHIP is
+SUBJECT-NOMINATED — the same trust in the subject-to-name mapping that
+spec 121 already relied on, and which sits squarely inside the
+documented threat boundary (a party who can forge spec-branch history
+is already out of the defended model; §2(ii) is not a git-only
+anti-forgery mechanism). Re-attesting a bare bead is therefore the
+EXPLICIT, operator-vouched, AUDITED recovery that trusts the subject
+for ownership and topology for landed-ness — it is NOT claimed to be
+independent of the subject.
+
+The admissible LANDED-NESS corroborating data for a re-attestation,
+each STANDALONE as topology evidence (ownership per the paragraph
+above):
+
+- **(a)** the git-derived exact-second-parent merge from the identity
+  scan itself — the branch-deleted happy path; no surviving tip is
+  required. This datum is STANDALONE LANDED-NESS (a real exact
+  second-parent merge exists); it is NOT standalone OWNERSHIP proof —
+  ownership of the scanned merge is subject-nominated per the paragraph
+  above, so datum (a) is not circular: topology, not the subject,
+  supplies the independent corroboration, and the subject only names
+  which bead;
+- **(b)** a surviving bead-branch tip that the exact match EQUALS;
+- **(c)** a registered panel's `reviewed_head_sha` equal to an exact
+  match's second parent;
+- **(d)** an existing binding git-corroborated to an exact merge;
+- **(e)** the ADR-0035 `mindspec-q9ea` human attested-restore marker —
+  admitted ONLY as an explicitly-blessed, audited exit for the
+  genuinely-no-mechanical-corroboration case, and NEVER the sole
+  corroboration where a scan could instead derive the identity.
+
+Every re-attest write carries an INSPECTABLE audit record held in bd
+metadata via the existing helpers — the acting identity/authority, the
+before/after binding values, the timestamp, the invoking operation, and
+the corroborating git datum — so a wrong backfill is detectable and
+reconstructable BY INSPECTION of the recorded before/after values. The
+record lives in the same mutable metadata map: it is
+detectable-by-inspection, NOT cryptographically tamper-proof, and this
+amendment claims exactly that and no more.
+
+The recovery is honestly scoped: re-attestation recovers exactly the
+git-corroborable (exact-second-parent) subset of merged beads and
+refuses the rest to the audited exit rather than guessing; it does not
+claim fleet-wide recovery of the merged-bead history.

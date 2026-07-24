@@ -113,6 +113,7 @@ var CommandTokens = map[string]struct{}{
 	"ownership": {},
 	"panel":     {}, // spec 110 R1/R2/R3: `panel create|verify|tally`
 	"plan":      {},
+	"reattest":  {}, // spec 125 R4: explicit git-corroborated landed-binding re-attest
 	"record":    {},
 	"release":   {}, // spec 101 bead 3cj0.2: `mindspec release <bead-id>` verb
 	"repair":    {},

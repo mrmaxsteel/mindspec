@@ -338,6 +338,7 @@ Work is not complete until changes are committed.
 | `mindspec bead clarify <bead-id> --file <record.json>` | Record the one-per-bead grounded clarification for a NOT-READY bead, then re-dispatch |
 | `mindspec complete` | Close current bead and advance |
 | `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |
+| `mindspec reattest <bead-id> [--spec-branch spec/<id>]` | Re-attest an already-merged bead's landed-binding from independent git topology — explicit, fail-closed, audited (`mindspec_landed_reattest_*`); `--spec-branch` is scoping-only, used when the epic linkage is underivable (ADR-0041 §2(ii), spec 125) |
 | `mindspec domain add <name>` | Scaffold a domain + its context-map entry; re-run to backfill any partial state (spec 123) |
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create a slugged ADR file; canonical `ADR-NNNN` stays the ID everywhere (spec 123) |
 | `mindspec models populate` | Print the prompt for declaring the per-phase `models:` protocol (writes nothing) |

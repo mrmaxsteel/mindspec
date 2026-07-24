@@ -395,3 +395,201 @@ func TestNetEffectLanded_RejectsOptionLikeOperands(t *testing.T) {
 		t.Error("expected a rejection for an option-like target operand")
 	}
 }
+
+// revertShapeMergeFixture builds a repo where branch "feature" (one file,
+// feature.txt) is --no-ff merged into main, and returns (dir, mergeSHA).
+// The base shape every RevertShape subtest below varies from.
+func revertShapeMergeFixture(t *testing.T) (string, string) {
+	t.Helper()
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "feature.txt", "feature content\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Merge feature", "feature")
+	mergeSHA := neRunGit(t, dir, "rev-parse", "HEAD")
+	return dir, mergeSHA[:len(mergeSHA)-1] // trim trailing newline
+}
+
+// TestRevertShape_TrueRevert is the positive half of the spec 125 R3
+// sub-classification: after a genuine `git revert -m 1 M` with no later
+// rework, the tip carries none of M's introduced content, so the reverse
+// un-apply is a clean no-op — revert-shape true.
+func TestRevertShape_TrueRevert(t *testing.T) {
+	dir, mergeSHA := revertShapeMergeFixture(t)
+	neRunGit(t, dir, "revert", "--no-edit", "-m", "1", mergeSHA)
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !rev {
+		t.Error("a genuine `git revert M` tip must classify as revert-shape")
+	}
+}
+
+// TestRevertShape_ContentPresentNotRevertShape: with M's content fully
+// present at the tip (nothing reverted), un-applying M would REMOVE that
+// content — the un-apply changes the tip, so NOT revert-shape.
+func TestRevertShape_ContentPresentNotRevertShape(t *testing.T) {
+	dir, mergeSHA := revertShapeMergeFixture(t)
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rev {
+		t.Error("a tip still carrying M's content must NOT classify as revert-shape")
+	}
+}
+
+// TestRevertShape_PartialSupersessionNotRevertShape is the AC-5 mechanism
+// pin (the 8nhe.2 evolved case): M lands content across TWO surfaces;
+// later honest work removes-and-replaces ONE surface while M's other
+// content remains at the tip. The forward check reads this as
+// SubsumptionCleanDivergence (asserted as the shape-precondition), but the
+// reverse un-apply would still remove the SURVIVING surface — the tip
+// carries SOME of M's content, so NOT revert-shape (evolved → identify).
+func TestRevertShape_PartialSupersessionNotRevertShape(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "surface-a.txt", "alpha payload\n")
+	neWriteFile(t, dir, "surface-b.txt", "beta payload\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature: two surfaces")
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Merge feature", "feature")
+	mergeSHA := neRunGit(t, dir, "rev-parse", "HEAD")
+	mergeSHA = mergeSHA[:len(mergeSHA)-1]
+
+	// Later honest work: surface-a removed AND replaced at a different
+	// path; surface-b (M's other content) remains at the tip.
+	neRunGit(t, dir, "rm", "surface-a.txt")
+	neWriteFile(t, dir, "surface-a2.txt", "superseding replacement for alpha\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "supersede surface-a with surface-a2")
+
+	// Shape-precondition: the FORWARD check reads this partial
+	// supersession as CleanDivergence — the arm spec 125 sub-classifies.
+	outcome, err := ContentSubsumedOutcome(dir, mergeSHA+"^1", mergeSHA, "main")
+	if err != nil || outcome != SubsumptionCleanDivergence {
+		t.Fatalf("fixture shape-precondition: want SubsumptionCleanDivergence from the forward check, got %v, %v", outcome, err)
+	}
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rev {
+		t.Error("a tip retaining PART of M's content (partial supersession) must NOT classify as revert-shape")
+	}
+}
+
+// TestRevertShape_TrueRevertWithCoincidentalBlobElsewhere is the
+// G-BLOCK-1 rename-safety pin (RED against a rename-detection-ON impl):
+// M introduces a distinctive blob at path X; M is then genuinely reverted
+// (X removed); unrelated later work happens to recreate the IDENTICAL
+// blob at a DIFFERENT path Y. With merge-ort's default rename detection,
+// the reverse un-apply reads "X renamed to Y" and produces a rename/delete
+// CONFLICT — so a rename-detecting RevertShape returns false (evolved →
+// IDENTIFY), an UNSAFE false-positive attestation of a truly-reverted
+// merge. With rename detection OFF the un-apply is a clean path-based
+// no-op → revert-shape TRUE (the merge REFUSES, correct). The blob is
+// deliberately multi-line so rename detection would fire on the ON path.
+func TestRevertShape_TrueRevertWithCoincidentalBlobElsewhere(t *testing.T) {
+	dir := initGitRepo(t)
+	blob := "line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\n"
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "X.txt", blob)
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature introduces X")
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Merge feature", "feature")
+	mergeSHA := neRunGit(t, dir, "rev-parse", "HEAD")
+	mergeSHA = mergeSHA[:len(mergeSHA)-1]
+
+	// Genuine revert of M (X removed).
+	neRunGit(t, dir, "revert", "--no-edit", "-m", "1", mergeSHA)
+	// Unrelated later work recreates the identical blob at a DIFFERENT path.
+	neWriteFile(t, dir, "Y.txt", blob)
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "unrelated: identical blob at Y")
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !rev {
+		t.Error("a true revert must classify as revert-shape even when a coincidentally-identical blob exists at an unrelated path (G-BLOCK-1: rename detection must be OFF)")
+	}
+}
+
+// TestRevertShape_UnApplyConflictNotRevertShape: the tip rewrote M's own
+// file, so un-applying M (which would delete it) conflicts with the tip's
+// modification — the tip built ON M's region (evolved), NOT revert-shape.
+func TestRevertShape_UnApplyConflictNotRevertShape(t *testing.T) {
+	dir, mergeSHA := revertShapeMergeFixture(t)
+	neWriteFile(t, dir, "feature.txt", "rewritten by later work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "later rewrite of M's file")
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err != nil {
+		t.Fatalf("a conflicting un-apply is a definitive classification, not an error: %v", err)
+	}
+	if rev {
+		t.Error("a conflicting un-apply (tip built on M's region) must NOT classify as revert-shape")
+	}
+}
+
+// TestRevertShape_NonMergeErrors: a <2-parent commit has no M^1/M^2 to
+// anchor the un-apply on — RevertShape must FAIL with an error, never
+// guess a classification (spec 125 R3's parent guard at the primitive).
+func TestRevertShape_NonMergeErrors(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "plain.txt", "plain\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "a plain non-merge commit")
+	plainSHA := neRunGit(t, dir, "rev-parse", "HEAD")
+	plainSHA = plainSHA[:len(plainSHA)-1]
+
+	if _, err := RevertShape(dir, plainSHA, "main"); err == nil {
+		t.Fatal("RevertShape on a non-merge commit must error, never classify")
+	}
+}
+
+// TestRevertShape_InfraErrorPropagates is the plan-gate O2-1 pin at the
+// primitive: a merge-tree infra failure (simulating git < 2.38's
+// unsupported --write-tree, exit >= 2) must PROPAGATE as an error from
+// RevertShape — never be mapped to a definite bool in either direction.
+func TestRevertShape_InfraErrorPropagates(t *testing.T) {
+	dir, mergeSHA := revertShapeMergeFixture(t)
+
+	orig := mergeTreeWriteTreeNoRenamesFn
+	t.Cleanup(func() { mergeTreeWriteTreeNoRenamesFn = orig })
+	simulated := errors.New(`fatal: unknown option '--write-tree'`)
+	mergeTreeWriteTreeNoRenamesFn = func(workdir, base, ours, theirs string) (mergeTreeResult, error) {
+		return mergeTreeResult{}, simulated
+	}
+
+	rev, err := RevertShape(dir, mergeSHA, "main")
+	if err == nil {
+		t.Fatalf("RevertShape must propagate the infra error, got rev=%v, nil error", rev)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated infra failure, got: %v", err)
+	}
+}
+
+// TestRevertShape_RejectsOptionLikeOperands: the SEC-5 argv-hygiene pin,
+// same as every other gitutil ref-bearing entry point.
+func TestRevertShape_RejectsOptionLikeOperands(t *testing.T) {
+	dir := initGitRepo(t)
+	if _, err := RevertShape(dir, "-x", "main"); err == nil {
+		t.Error("expected a rejection for an option-like mergeSHA operand")
+	}
+	if _, err := RevertShape(dir, "main", "-x"); err == nil {
+		t.Error("expected a rejection for an option-like target operand")
+	}
+}

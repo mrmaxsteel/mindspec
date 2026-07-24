@@ -563,6 +563,40 @@ func FirstParentMerges(workdir, ref string) ([]MergeCommit, error) {
 	return merges, nil
 }
 
+// ExactSecondParentMerges returns branch's first-parent merge commits in
+// workdir (per FirstParentMerges, so already newest-first), filtered to
+// those that are a plain two-parent merge whose SECOND parent EQUALS tip
+// exactly. This is the root-of-trust EXACT-MATCH identity primitive spec
+// 125 shares between the merge-time binding write
+// (internal/executor.locateLandedMergeByIdentity, R1/R2) and the
+// landed-merge read (internal/lifecycle.FindLandedMerge, R5): "landed-ness"
+// is git TOPOLOGY, never a merge's subject text. A candidate with anything
+// other than exactly two parents (an octopus merge, or a non-merge — which
+// FirstParentMerges never returns anyway) is EXCLUDED, never guessed at; a
+// candidate whose second parent merely descends from or is an ancestor of
+// tip, rather than EQUALING it, is likewise excluded — ancestor-consistent
+// is not exact-match (an ancestor-consistent scan is exactly the
+// misattribution vector a later, unrelated bead's merge can defeat).
+func ExactSecondParentMerges(workdir, branch, tip string) ([]MergeCommit, error) {
+	if err := rejectOptionLike(tip); err != nil {
+		return nil, err
+	}
+	merges, err := FirstParentMerges(workdir, branch)
+	if err != nil {
+		return nil, err
+	}
+	var out []MergeCommit
+	for _, m := range merges {
+		if len(m.Parents) != 2 {
+			continue
+		}
+		if m.Parents[1] == tip {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
 // CommitAll stages all changes in workdir and commits with the given message.
 // Used for auto-commits at lifecycle boundaries (spec-init, approvals) to ensure
 // artifacts are on the branch before downstream worktrees branch from it.
