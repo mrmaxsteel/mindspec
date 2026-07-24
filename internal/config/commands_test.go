@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -152,5 +155,83 @@ func TestRenderBuildTestSection_HeadingLevel(t *testing.T) {
 		if !strings.Contains(got2, want) {
 			t.Errorf("RenderBuildTestSection(2) missing %q, got:\n%s", want, got2)
 		}
+	}
+}
+
+// TestRenderBuildTestSection_CiRendersInVocabularyPosition pins spec 126
+// R8a/AC-17: RenderBuildTestSection (config.go:320) on a fixture declaring
+// build, test, ci, AND an extension key that sorts lexically BEFORE "ci"
+// (fixture key "aa") must render the lines in exactly build, test, ci,
+// aa order — "ci" in ITS OWN vocabulary position, ahead of the
+// lexically-earlier extension key. The sorted-rest fallback in
+// CommandLines already renders any declared key regardless of the
+// commandOrder entry, so presence of the "ci" line ALONE cannot pass this
+// test — only the ORDER can. Reverting the commandOrder "ci" entry
+// (config.go:233) reorders "ci" after "aa" and REDs this test.
+func TestRenderBuildTestSection_CiRendersInVocabularyPosition(t *testing.T) {
+	cfg := &Config{Commands: map[string]string{
+		"aa":    "aa-command",
+		"ci":    "ci-command",
+		"test":  "test-command",
+		"build": "build-command",
+	}}
+	got := cfg.RenderBuildTestSection(2)
+
+	wantOrder := []string{
+		"build-command   # build",
+		"test-command   # test",
+		"ci-command   # ci",
+		"aa-command   # aa",
+	}
+	var idx []int
+	for _, w := range wantOrder {
+		i := strings.Index(got, w)
+		if i < 0 {
+			t.Fatalf("RenderBuildTestSection(2) missing line %q, got:\n%s", w, got)
+		}
+		idx = append(idx, i)
+	}
+	for i := 1; i < len(idx); i++ {
+		if idx[i] <= idx[i-1] {
+			t.Fatalf("RenderBuildTestSection(2) lines out of order — want exactly build, test, ci, aa; got:\n%s", got)
+		}
+	}
+}
+
+// TestCommandsFieldComment_DocumentsCiKey is the spec 126 R8a/AC-11
+// config-half pin: the Commands field's doc comment in config.go must
+// name the "ci" vocabulary key beside build/test. A source-level grep
+// (runtime.Caller(0)-resolved, the same technique
+// internal/panel/leaf_imports_test.go uses to locate its own package
+// file) rather than a mirrored string constant, so a future comment
+// rewrite that silently drops "ci" is caught without this test also
+// having to duplicate the exact wording.
+func TestCommandsFieldComment_DocumentsCiKey(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed to resolve this test file's path")
+	}
+	configPath := filepath.Join(filepath.Dir(thisFile), "config.go")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", configPath, err)
+	}
+	src := string(data)
+
+	commentStart := strings.Index(src, "// Commands declares the CONSUMER's build/test guidance")
+	if commentStart < 0 {
+		t.Fatal("could not locate the Commands field's doc comment in config.go")
+	}
+	fieldIdx := strings.Index(src[commentStart:], "Commands map[string]string")
+	if fieldIdx < 0 {
+		t.Fatal("could not locate the Commands field declaration following its doc comment")
+	}
+	comment := src[commentStart : commentStart+fieldIdx]
+
+	if !strings.Contains(comment, `"ci"`) {
+		t.Errorf("Commands field comment does not name the \"ci\" vocabulary key:\n%s", comment)
+	}
+	if !strings.Contains(comment, "commands.test") && !strings.Contains(comment, `"test"`) {
+		t.Errorf("Commands field comment does not document the commands.test fallback semantics:\n%s", comment)
 	}
 }
