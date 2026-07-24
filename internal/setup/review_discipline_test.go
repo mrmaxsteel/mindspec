@@ -942,6 +942,17 @@ func TestReviewDiscipline_AC2LadderExampleNegativeModelKey(t *testing.T) {
 // DEFAULT-labelled lens tables, and the fenced ladder example.
 // ---------------------------------------------------------------------------
 
+// acOneMDGap matches the gap between adjacent words of a fixed-six phrase,
+// tolerating inline Markdown formatting (backtick / asterisk / underscore)
+// around either word in addition to plain whitespace. The round-2 codex
+// reviewer (G1-1A) proved the plain `\s+` gap hollow: the REAL pre-sweep
+// ms-panel-run:8 wording is backticked ("three `Agent` calls ... three
+// `codex exec` ..."), which `three\s+agent\s+calls` never matched — so
+// reverting the real line stayed GREEN while a de-backticked surrogate
+// fixture REDded. An interpreted string because a Go raw string cannot
+// contain the backtick the class must include.
+const acOneMDGap = "[\\s`*_]+"
+
 // acOneSweepPatterns is the pattern set the plan mandates PLUS the six
 // classes the round-1 panel (F1 + codex G1) proved the original 11 miss —
 // each entry named for clear failure messages. Deliberately separate from
@@ -966,9 +977,9 @@ var acOneSweepPatterns = []struct {
 
 	// --- panel round-1 additions (F1 + G1): paired-count wording ---
 	{"3+3 literal paired family count", regexp.MustCompile(`3\s*\+\s*3`)},
-	{"three per family", regexp.MustCompile(`(?i)three\s+per\s+family`)},
-	{"three Agent calls (paired-count launch wording, old ms-panel-run:8 form)", regexp.MustCompile(`(?i)three\s+agent\s+calls`)},
-	{"three claude(s)/codex spelled family count", regexp.MustCompile(`(?i)\bthree\s+(?:claudes?|codex)\b`)},
+	{"three per family (format-tolerant)", regexp.MustCompile(`(?i)three` + acOneMDGap + `per` + acOneMDGap + `family`)},
+	{"three Agent calls (paired-count launch wording, old ms-panel-run:8 form; format-tolerant so the REAL backticked form hits too — codex G1-1A)", regexp.MustCompile(`(?i)three` + acOneMDGap + `agent` + acOneMDGap + `calls`)},
+	{"three claude(s)/codex spelled family count (format-tolerant so the REAL backticked codex-exec form hits too — codex G1-1A)", regexp.MustCompile(`(?i)\bthree` + acOneMDGap + `(?:claudes?|codex)\b`)},
 	// The digit twin of the previous class. The canonical shipped-default
 	// sentences write the families BACKTICKED ("3 `claude` + 3 `codex`"),
 	// which this pattern deliberately does not match — bare "3 Claude
@@ -1019,8 +1030,21 @@ func acOneScanSurfaces(surfaces map[string]string) []acTenHit {
 
 // acOneSlotTableRowRE matches one markdown table row whose FIRST cell is a
 // single-uppercase-letter slot id (R1, F6, S3, ...), leading indent allowed
-// (ms-spec-final-review's table sits inside a numbered list item).
-var acOneSlotTableRowRE = regexp.MustCompile(`^[ \t]*\|\s*([A-Z])([0-9]+)\s*\|`)
+// (ms-spec-final-review's table sits inside a numbered list item). The cell
+// tolerates inline Markdown formatting around the token — inline-code and
+// bold slot ids are still slot ids (codex G1-1B: the unformatted-only
+// recognizer let a fully backticked or bolded six-row table pass). An
+// interpreted string because a Go raw string cannot contain the backtick
+// the class must include.
+var acOneSlotTableRowRE = regexp.MustCompile("^[ \t]*\\|[ \t`*_]*([A-Z])([0-9]+)[ \t`*_]*\\|")
+
+// acOneTableLineRE matches ANY markdown-table-shaped line (leading indent +
+// pipe): slot rows, header rows, and |---| separator rows alike. The
+// structural scan walks a contiguous block of such lines as ONE table
+// instead of terminating at the first non-slot row — codex G1-1B's third
+// bypass repeated the header row between R3 and R4, splitting what is
+// visually one six-row table into two "incomplete" three-row runs.
+var acOneTableLineRE = regexp.MustCompile(`^[ \t]*\|`)
 
 // The two fragments a six-row slot table's introducing prose MUST carry
 // (within acOneTableContextWindow lines above the first slot row) to be the
@@ -1033,34 +1057,41 @@ const (
 	acOneTableContextWindow         = 12
 )
 
-// acOneSixRowTableProblems returns one problem per contiguous slot-row table
-// in content that enumerates a complete <letter>1..<letter>6 row set without
-// the DEFAULT label + scaled-mix rule in the window above it.
+// acOneSixRowTableProblems returns one problem per markdown table block in
+// content that enumerates a complete <letter>1..<letter>6 slot-row set
+// without the DEFAULT label + scaled-mix rule in the window above the block.
+// A "table block" is a maximal run of table-shaped lines (acOneTableLineRE);
+// separator rows and repeated header rows inside the block are SKIPPED, not
+// terminators, so a header row wedged between R3 and R4 cannot split the
+// enumeration into two innocent-looking halves (codex G1-1B).
 func acOneSixRowTableProblems(surface, content string) []string {
 	lines := strings.Split(content, "\n")
 	var problems []string
 	i := 0
 	for i < len(lines) {
-		if acOneSlotTableRowRE.FindStringSubmatch(lines[i]) == nil {
+		if !acOneTableLineRE.MatchString(lines[i]) {
 			i++
 			continue
 		}
-		start := i
+		start := i         // first line of the table block (usually its header row)
+		firstSlotRow := -1 // first SLOT row, for the problem message
 		seen := map[string]map[int]bool{}
-		for i < len(lines) {
-			m := acOneSlotTableRowRE.FindStringSubmatch(lines[i])
-			if m == nil {
-				break
+		for i < len(lines) && acOneTableLineRE.MatchString(lines[i]) {
+			if m := acOneSlotTableRowRE.FindStringSubmatch(lines[i]); m != nil {
+				if n, err := strconv.Atoi(m[2]); err == nil { // err unreachable given [0-9]+; defensive
+					if firstSlotRow == -1 {
+						firstSlotRow = i
+					}
+					if seen[m[1]] == nil {
+						seen[m[1]] = map[int]bool{}
+					}
+					seen[m[1]][n] = true
+				}
 			}
-			n, err := strconv.Atoi(m[2])
-			if err != nil {
-				break // unreachable given the [0-9]+ group; defensive
-			}
-			if seen[m[1]] == nil {
-				seen[m[1]] = map[int]bool{}
-			}
-			seen[m[1]][n] = true
 			i++
+		}
+		if firstSlotRow == -1 {
+			continue // a table block with no slot rows at all
 		}
 		for letter, nums := range seen {
 			complete := true
@@ -1080,8 +1111,8 @@ func acOneSixRowTableProblems(surface, content string) []string {
 			ctx := strings.Join(lines[ctxStart:start], "\n")
 			if !strings.Contains(ctx, acOneTableDefaultLabelFragment) || !strings.Contains(ctx, acOneTableScaledMixRuleFragment) {
 				problems = append(problems, fmt.Sprintf(
-					"AC-1 structural sweep: %s carries a six-row %s1..%s6 slot table (first row at line %d) without the DEFAULT label (%q) plus the scaled-mix assignment rule (%q) in the %d lines above it — a fixed six-slot enumeration must be the labelled shipped default the operator derives a scaled mix from, never a bare execution instruction",
-					surface, letter, letter, start+1, acOneTableDefaultLabelFragment, acOneTableScaledMixRuleFragment, acOneTableContextWindow))
+					"AC-1 structural sweep: %s carries a six-row %s1..%s6 slot table (first slot row at line %d) without the DEFAULT label (%q) plus the scaled-mix assignment rule (%q) in the %d lines above it — a fixed six-slot enumeration must be the labelled shipped default the operator derives a scaled mix from, never a bare execution instruction",
+					surface, letter, letter, firstSlotRow+1, acOneTableDefaultLabelFragment, acOneTableScaledMixRuleFragment, acOneTableContextWindow))
 			}
 		}
 	}
@@ -1313,8 +1344,17 @@ func TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits(t *testing.T) {
 		// Panel round-1 additions (F1 + G1) — one categorical negative per
 		// newly added pattern class; before those classes existed, every one
 		// of these restored forms stayed GREEN.
-		{"three-agent-calls-and-three-codex", "launch three Agent calls (Claude) and three codex CLI sessions"},
+		// The EXACT real pre-sweep ms-panel-run:8 wording, Markdown backticks
+		// intact — the codex G1-1A finding: the pre-fix `three\s+agent\s+calls`
+		// pattern never matched this form, and the committed fixture was a
+		// de-backticked surrogate, so reverting the real line stayed GREEN.
+		{"three-agent-calls-and-three-codex-real-backticked", "fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex)"},
+		// The plain-whitespace form must keep hitting too — the tolerant gap
+		// class is a superset of \s+, and this pins that.
+		{"three-agent-calls-and-three-codex-plain", "launch three Agent calls (Claude) and three codex CLI sessions"},
+		{"three-agent-calls-bold", "launch three **Agent** calls in parallel"},
 		{"three-per-family", "keep the mix at three per family"},
+		{"three-per-family-backticked", "keep the mix at three `per family` slots"},
 		{"3-plus-3", "the classic 3+3 family split"},
 		{"three-claudes-spelled", "when all three Claudes APPROVE"},
 		{"3-claude-digit", "3 Claude APPROVE, 1+ Codex REQUEST_CHANGES"},
@@ -1413,20 +1453,75 @@ func TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals(t *testing.
 	}
 }
 
+// TestReviewDiscipline_AC1SweepGuardNegativeBacktickedFanOutRevert proves the
+// EXACT real pre-sweep ms-panel-run:8 fan-out wording — Markdown backticks
+// intact — REDs when restored into a FIXTURE copy of ms-panel-run (never the
+// real file). This is the codex G1-1A revert that stayed GREEN before the
+// format-tolerant gap class: `three\s+agent\s+calls` cannot see
+// "three `Agent` calls", and the only committed fixture was a de-backticked
+// surrogate.
+func TestReviewDiscipline_AC1SweepGuardNegativeBacktickedFanOutRevert(t *testing.T) {
+	const swept = "fan out one `Agent` call per configured Claude-family slot"
+	const restored = "fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex)"
+
+	surfaces := acOneSurfaces()
+	original, ok := surfaces["ms-panel-run"]
+	if !ok {
+		t.Fatal("fixture assumption broken: ms-panel-run missing from acOneSurfaces()")
+	}
+	if !strings.Contains(original, swept) {
+		t.Fatalf("fixture assumption broken: ms-panel-run no longer carries the swept per-configured-slot fan-out wording %q", swept)
+	}
+	mutated := strings.Replace(original, swept, restored, 1)
+	if mutated == original {
+		t.Fatal("fixture assumption broken: restore substitution had no effect")
+	}
+	surfaces["ms-panel-run"] = mutated
+
+	hits := acOneScanSurfaces(surfaces)
+	problems := acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces)
+	if len(problems) == 0 {
+		t.Fatalf("expected restoring the REAL backticked wording %q into ms-panel-run to RED the AC-1 sweep guard", restored)
+	}
+	found := false
+	for _, p := range problems {
+		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unallowlisted") {
+			found = true
+		}
+		// The allowlisted ms-panel-run entries must remain fully consumed —
+		// the mutation must not dislodge them into "unused" complaints.
+		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unused") {
+			t.Errorf("mutation probe over-fired on an allowlisted ms-panel-run entry (should remain fully consumed): %s", p)
+		}
+	}
+	if !found {
+		t.Errorf("expected an unallowlisted-hit problem naming ms-panel-run; got: %v", problems)
+	}
+}
+
 // TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable proves the
 // structural half REDs on a bare six-row slot table (R1..R6 and F1..F6
-// forms) injected into a synthetic fixture surface, stays GREEN when the
+// forms) injected into a synthetic fixture surface — including the three
+// codex G1-1B format bypasses (inline-code slot ids, bold slot ids, and a
+// repeated header row wedged between R3 and R4) — stays GREEN when the
 // SAME table carries the exact DEFAULT label + scaled-mix assignment rule,
 // and does not over-reach onto a five-row table.
 func TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable(t *testing.T) {
-	mkTable := func(letter string, n int) string {
+	// mkWrappedTable wraps each slot id in the given left/right formatting
+	// ("`"/"`" for inline code, "**"/"**" for bold, ""/"" for plain).
+	mkWrappedTable := func(letter, wrapL, wrapR string, n int) string {
 		var b strings.Builder
 		b.WriteString("| Slot | Lens |\n|:-----|:-----|\n")
 		for i := 1; i <= n; i++ {
-			fmt.Fprintf(&b, "| %s%d | lens %d |\n", letter, i, i)
+			fmt.Fprintf(&b, "| %s%s%d%s | lens %d |\n", wrapL, letter, i, wrapR, i)
 		}
 		return b.String()
 	}
+	mkTable := func(letter string, n int) string {
+		return mkWrappedTable(letter, "", "", n)
+	}
+	label := "The table below is the " + acOneTableDefaultLabelFragment + " mix. For a scaled mix, " +
+		acOneTableScaledMixRuleFragment + ".\n\n"
 
 	t.Run("bare R1..R6 REDs", func(t *testing.T) {
 		content := "Use the slot assignments below.\n\n" + mkTable("R", 6)
@@ -1440,11 +1535,42 @@ func TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable(t *testing.T) {
 			t.Fatal("expected a bare six-row F1..F6 table to RED the structural sweep")
 		}
 	})
+	t.Run("backticked slot ids RED (codex G1-1B inline-code bypass)", func(t *testing.T) {
+		content := "Use the slot assignments below.\n\n" + mkWrappedTable("R", "`", "`", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) == 0 {
+			t.Fatal("expected a six-row table with inline-code slot ids (|`R1`|) to RED the structural sweep")
+		}
+	})
+	t.Run("bold slot ids RED (codex G1-1B bold bypass)", func(t *testing.T) {
+		content := "Use the slot assignments below.\n\n" + mkWrappedTable("R", "**", "**", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) == 0 {
+			t.Fatal("expected a six-row table with bold slot ids (|**R1**|) to RED the structural sweep")
+		}
+	})
+	t.Run("header row wedged between R3 and R4 REDs (codex G1-1B split bypass)", func(t *testing.T) {
+		var b strings.Builder
+		b.WriteString("Use the slot assignments below.\n\n| Slot | Lens |\n|:-----|:-----|\n")
+		for i := 1; i <= 3; i++ {
+			fmt.Fprintf(&b, "| R%d | lens %d |\n", i, i)
+		}
+		b.WriteString("| Slot | Lens |\n|:-----|:-----|\n") // the wedge
+		for i := 4; i <= 6; i++ {
+			fmt.Fprintf(&b, "| R%d | lens %d |\n", i, i)
+		}
+		if problems := acOneSixRowTableProblems("fixture-surface", b.String()); len(problems) == 0 {
+			t.Fatal("expected a six-row table split by a repeated header row to RED the structural sweep")
+		}
+	})
 	t.Run("labelled DEFAULT table stays GREEN", func(t *testing.T) {
-		content := "The table below is the " + acOneTableDefaultLabelFragment + " mix. For a scaled mix, " +
-			acOneTableScaledMixRuleFragment + ".\n\n" + mkTable("R", 6)
+		content := label + mkTable("R", 6)
 		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) != 0 {
 			t.Fatalf("expected the labelled DEFAULT six-row table to stay GREEN; got: %v", problems)
+		}
+	})
+	t.Run("labelled DEFAULT table with backticked slot ids stays GREEN (label exemption survives formatting)", func(t *testing.T) {
+		content := label + mkWrappedTable("R", "`", "`", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) != 0 {
+			t.Fatalf("expected the labelled DEFAULT backticked six-row table to stay GREEN; got: %v", problems)
 		}
 	})
 	t.Run("five-row table stays GREEN (no over-reach)", func(t *testing.T) {
