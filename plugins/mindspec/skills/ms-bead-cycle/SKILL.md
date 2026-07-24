@@ -130,9 +130,11 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
 
 The headline signal is when all three Claudes APPROVE while one or more Codex REQUEST_CHANGES (or vice versa). Pay particular attention:
 
+The field evidence runs BOTH directions, stated portably: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed (ADR-0044): reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
+
 | Pattern | Likely meaning | Action |
 |:--------|:---------------|:-------|
-| 3 Claude APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex actually ran something and found a bug the Claudes missed | Treat as REQUEST_CHANGES — trust the empirical check |
+| 3 Claude APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex claims to have run something and found a bug the Claudes missed | Verify, never confirmed: reproduce the claim yourself in an isolated checkout before treating it as a confirmed REQUEST_CHANGES |
 | 3 Codex APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
 | Unanimous APPROVE | Genuine consensus | Proceed to merge |
 | Unanimous REQUEST_CHANGES | The implementation is genuinely off; fix or rewrite |
@@ -144,6 +146,7 @@ The headline signal is when all three Claudes APPROVE while one or more Codex RE
 - Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
 - Don't merge with a known REQUEST_CHANGES (even at the threshold). The dissenting verdict's `concrete_changes_required` either gets folded in or filed as a follow-up bead before merge.
 - Don't run `mindspec complete` until `/ms-panel-tally` decided merge — the merge is destructive of the bead branch.
+- Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block (gate leg 7), not a replacement for it (ADR-0044).
 
 ## Then
 

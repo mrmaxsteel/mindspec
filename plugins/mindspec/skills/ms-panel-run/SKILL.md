@@ -186,13 +186,13 @@ extract_verdict_from_log() {
 
 `launch_claude_sub_for_slot` spawns a `general-purpose` `Agent` with the same BRIEF + slot id + lens prompt the codex slot used, but writes its verdict JSON with `reviewer_id: "R<slot> claude-sub"` so the tally can see the family-substitution explicitly. Keep the slot name (R4 stays R4) so verdict comparability is preserved across rounds.
 
-When deciding whether to retry codex once before substituting: don't. Empirically on lola spec-050, every codex slot that tripped the usage-limit detector stayed tripped on retry — the user's account quota refreshes hourly, not per-process. Skip straight to claude-sub.
+When deciding whether to retry codex once before substituting: don't. Quota-tripped CLI slots stay tripped on immediate retry — account quotas refresh on a clock, not per-process. Skip straight to claude-sub.
 
 ## Working directory matters
 
 > **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), the `/ms-panel` workflow's own codex-wrapper agent step owns its working directory — this is superseded and not restated for `runner: claude-code-workflow`.
 
-Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
+Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, $HOME/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
 
 **Launch convention**: always `cd <repo>` first so `<spec-dir>/reviews/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
 
@@ -215,6 +215,20 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 | R6 | Codex  | Next-bead integration — will the next bead consume this cleanly? |
 
 Mix to taste. The point is six distinct lenses, not six clones. For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
+
+## Reviewer conduct
+
+The normative doctrine lives in **ADR-0044**; this section states only the role-local operational fragments a panel-run participant acts on.
+
+**Mutation-isolation.** Any reviewer that EXECUTES or MUTATES code — runs tests, deletes an escape to probe it, edits a fixture — does so in its OWN isolated checkout, never the shared bead worktree: `git worktree add --detach /tmp/rev-<panel-slug>-<slot> <reviewed_head_sha>` (or `git archive`), removed when the reviewer is done. Read-only inspection of the shared tree remains fine. Reviewers that mutate a shared checkout contaminate each other's probes — one slot's deleted escape becomes another slot's false REQUEST_CHANGES. This applies most directly to the R4 empirical-prober row of the Slot lens defaults table above: "run validators by hand" means in an isolated checkout, never the shared one.
+
+**Security-classifier substitution fallback.** When a reviewer family's safety classifier refuses an adversarial/security-framed lens, re-dispatch the SAME slot with a correctness-framed persona instead of the security framing — keep the slot id, mark the substitution in `reviewer_id` — the same convention as the quota-substitution above (`launch_claude_sub_for_slot`).
+
+**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Every finding you raise is either fixed or evidence-refuted via the audited `refutations` procedure — never dropped because the APPROVE count cleared the threshold. The threshold is a floor, not a license; even a "minor" finding gets adjudicated (the gate Blocks on any unresolved REQUEST_CHANGES; this is the doctrine ADR-0043 names).
+
+**Absolute scratch.** Every scratch file you write — not only the codex `/tmp/codex_*.md` prompts above — lives at an ABSOLUTE path under `/tmp` (or the panel directory for verdicts), never a relative path: harness cwd-resets turn a relative write into sibling-worktree corruption.
+
+See ADR-0044 for the full normative doctrine and incident provenance.
 
 ## Anti-patterns
 

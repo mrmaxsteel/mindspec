@@ -46,7 +46,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    | Slot | Lens | Focus |
    |:-----|:-----|:------|
    | F1 | Cumulative scope | Does the merged diff stay within spec.md scope? Any beads land work spec.md didn't authorize? |
-   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD. |
+   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD — in your own isolated checkout (`git worktree add --detach /tmp/rev-<panel-slug>-F2 <reviewed_head_sha>`, ADR-0044), never the shared spec worktree. |
    | F3 | Main integration | Does the branch merge cleanly into current `main` HEAD? Any conflicts? Any post-cut main commits that should have been rebased through the spec branch? |
    | F4 | PR description accuracy | Does the PR body match the actual diff? Are claimed bead numbers right, file counts correct, follow-ups all filed in `bd`? |
    | F5 | AC release-gate readiness | For each AC the spec.md claims, identify the expected gate-evidence artifact path and check `[ -f <path> ]` on the spec branch. If the artifact does NOT exist at the path: emit a `concrete_changes_required` item `"materialize <artifact-name> at <path>"` with `"hard_block": true`. PR-body naming the path is necessary but not sufficient (see `/ms-panel-tally` § Artifact gates). |
@@ -55,6 +55,16 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    Each reviewer writes a verdict JSON to `<spec-dir>/reviews/<spec-slug>-final/<slot>-round-1.json`.
 
 5. **Tally through `/ms-panel-tally`** — the single decision authority. The artifact-gate HARD-block rule, the N−1 threshold, and the halt-recovery procedure all live there; the F5 "evidence path NAMED but artifact MISSING → HARD block" finding is a `"hard_block": true` verdict the tally halts on regardless of vote count. On APPROVE → proceed to `/ms-impl-approve`.
+
+## Reviewer conduct
+
+Per **ADR-0044** (the normative doctrine home; this section states only the role-local operational fragments a final-review participant acts on).
+
+**Mutation-isolation** (the F2 full-regression run above): any execution or mutation happens in an isolated detached checkout (`git worktree add --detach`), never the shared spec worktree; read-only inspection stays fine.
+
+**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Every finding you raise is fixed or evidence-refuted via the audited `refutations` procedure — never dropped because the APPROVE count cleared the threshold. The threshold is a floor, not a license.
+
+**Absolute scratch.** Every scratch file you write lives at an ABSOLUTE path under `/tmp` (or the panel directory for verdicts), never a relative path — harness cwd-resets turn a relative write into sibling-worktree corruption.
 
 ## What this skill is NOT
 
