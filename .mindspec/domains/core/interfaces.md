@@ -100,6 +100,12 @@ silently at runtime (spec 109 Bead 4 hit this adding `config`; spec 125
 followed the same rule adding `reattest` — a one-token, core-owned
 registration for the workflow domain's new verb, no other core change).
 
+The same registration duty applies to SUBcommand names via the sibling
+closed-set enum `internal/redact.SubcommandTokens` — a new subcommand on
+an existing command group must add its name there or the drift guard
+fails the same way (spec 124 registered `ready-check` and `clarify` for
+the new `bead ready-check`/`bead clarify` verbs).
+
 ### Config
 
 ```go

@@ -806,3 +806,114 @@ func TestGetMetadata(t *testing.T) {
 		}
 	})
 }
+
+// --- DeleteMetadataKeys tests (spec 124 final-review r1 G3-OVERRIDE-ORPHAN) ---
+
+// TestDeleteMetadataKeys_UsesUnsetMetadataFlag pins the rollback
+// primitive's core contract: the delete goes through bd's dedicated
+// `--unset-metadata <key>` flag, naming exactly the requested key —
+// NEVER through a `--metadata` replace-write (current bd MERGES a
+// `--metadata` payload, so omitting a key cannot remove it; the spec 124
+// rollback e2e caught exactly that false-delete).
+func TestDeleteMetadataKeys_UsesUnsetMetadataFlag(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	before := map[string]interface{}{
+		"mindspec_readiness_override": map[string]interface{}{"signals": []interface{}{"MF-1"}},
+		"mindspec_phase":              "implement",
+		"spec_num":                    float64(124),
+	}
+	beforeJSON, err := json.Marshal([]map[string]interface{}{{"metadata": before}})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+
+	var capturedUpdate []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("echo", string(beforeJSON))
+		}
+		if len(args) > 0 && args[0] == "update" {
+			capturedUpdate = append([]string{name}, args...)
+			return exec.Command("echo", "updated")
+		}
+		t.Errorf("unexpected command: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+
+	if err := DeleteMetadataKeys("epic-124", MetaKeyReadinessOverride); err != nil {
+		t.Fatalf("DeleteMetadataKeys: %v", err)
+	}
+	want := []string{"bd", "update", "epic-124", "--unset-metadata", MetaKeyReadinessOverride}
+	if len(capturedUpdate) != len(want) {
+		t.Fatalf("unexpected update invocation: %v (want %v)", capturedUpdate, want)
+	}
+	for i := range want {
+		if capturedUpdate[i] != want[i] {
+			t.Fatalf("unexpected update invocation: %v (want %v)", capturedUpdate, want)
+		}
+	}
+	for _, banned := range capturedUpdate {
+		if banned == "--metadata" {
+			t.Fatalf("delete must never replace-write via --metadata (bd merges it): %v", capturedUpdate)
+		}
+	}
+}
+
+// TestDeleteMetadataKeys_NoOpWhenAbsent pins that deleting an
+// already-absent key performs NO bd write at all (nil, zero mutation) —
+// the rollback path stays idempotent and a plain refusal that never
+// wrote a marker never triggers a write here either.
+func TestDeleteMetadataKeys_NoOpWhenAbsent(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("echo", `[{"metadata":{"mindspec_phase":"implement"}}]`)
+		}
+		t.Errorf("expected NO write for an absent key, got: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+
+	if err := DeleteMetadataKeys("epic-124", MetaKeyReadinessOverride); err != nil {
+		t.Fatalf("DeleteMetadataKeys (absent key): %v", err)
+	}
+}
+
+// TestDeleteMetadataKeys_FailClosedOnReadError mirrors MergeMetadata's
+// fail-closed contract: a metadata-read failure returns the error and
+// performs no replace-write (which would otherwise erase every key).
+func TestDeleteMetadataKeys_FailClosedOnReadError(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if len(args) > 0 && args[0] == "show" {
+			return exec.Command("false")
+		}
+		t.Errorf("expected NO write after a read failure, got: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+
+	if err := DeleteMetadataKeys("epic-124", MetaKeyReadinessOverride); err == nil {
+		t.Fatal("expected an error on a metadata read failure")
+	}
+}
+
+// TestDeleteMetadataKeys_MalformedBeadID pins the class-2 ingress gate:
+// a hostile id refuses before any bd spawn.
+func TestDeleteMetadataKeys_MalformedBeadID(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Fatalf("no bd call expected for a malformed bead id: %s %v", name, args)
+		return exec.Command("echo", "")
+	}
+	for _, id := range []string{"mindspec-1\n--help", "mindspec-1;evil", ""} {
+		if err := DeleteMetadataKeys(id, MetaKeyReadinessOverride); err == nil {
+			t.Errorf("DeleteMetadataKeys(%q): expected a refusal", id)
+		}
+	}
+}

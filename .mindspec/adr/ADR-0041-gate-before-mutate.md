@@ -114,6 +114,33 @@ preflight refusal would need to have prevented. Treating it as part of
 "phase 1" would be equally correct; it is called out explicitly here so a
 future reviewer does not mistake it for an ordering violation.
 
+**Fourth-verb clause (spec 124):** `mindspec next` is a preflight-leg-only addition.
+`mindspec next` — which claims the selected bead in bd
+(`bd update --claim`), records session/recording state, and creates the
+`bead/<id>` branch and its worktree — adopts the **preflight leg** of this
+contract for bead readiness: the mechanical readiness floor (the four
+`mindspec bead ready-check` signals MF-1..MF-4) is evaluated after bead
+selection and **before any mutation** — no claim, no branch, no worktree —
+and a NOT-READY refusal exits non-zero leaving bd state, branches, and
+worktrees **byte-identical** to their pre-call state (exit non-zero implies
+nothing changed). The distinct `--allow-not-ready` override proceeds past a
+failing floor, emits a warning naming every failing signal, and records a
+durable override marker on the bead; it is orthogonal to the pre-existing
+`--force` (session-freshness only), which gains no readiness authority.
+
+This clause is a **preflight-leg-only addition** — a scope-deferral, not a
+governance certification. It brings ONLY the readiness preflight under this
+contract and makes **no claim** about `next`'s existing success-path
+claim/branch/worktree mutation chain, which retains whatever
+commit/forward-reconcile contract it already carries (spec 124 neither
+grants nor removes one). In particular, this clause is NOT a certification
+that `next`'s success path needs no commit/reconcile phase — that path DOES
+mutate. Where this section says "all three verbs", read `next` as a fourth
+member **for the preflight leg only**. Alternatives §1 below anticipated
+exactly this shape: a fourth verb must not silently re-introduce the
+gate-after-mutate defect; this clause records `next`'s adoption instead of
+leaving the enumerated scope false.
+
 ### 2. Forward-reconcile, never rollback
 
 When phase 2 is interrupted — a process kill, an infrastructure failure, an

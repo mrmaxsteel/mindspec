@@ -71,12 +71,47 @@ Use `/spec-init` or create manually:
 
 ### Execute an Implementation Bead
 
-1. Create worktree: `worktree-<bead-id>`
-2. Load context pack for the bead
-3. Implement within the bead's scope
-4. Capture proof (test outputs, command results)
-5. Update documentation
-6. Close bead with evidence
+1. Claim via `mindspec next` — the mechanical readiness floor (MF-1..MF-4)
+   is evaluated BEFORE the claim; a NOT-READY refusal mutates nothing
+   (spec 124). `mindspec bead ready-check <bead-id>` prints the same
+   per-signal report standalone at any time (pure read).
+2. Create worktree: `worktree-<bead-id>`
+3. Load context pack for the bead
+4. Dispatch via `/ms-bead-impl` — its ingress re-runs `ready-check` on
+   every dispatch path, and the staged prompt's Phase 0 has the subagent
+   judge the semantic signals (SR-1..SR-5) before any edit
+5. Implement within the bead's scope
+6. Capture proof (test outputs, command results)
+7. Update documentation
+8. Close bead with evidence
+
+### Triage a NOT-READY bead (spec 124 R5/R8)
+
+A subagent return whose first line is `NOT READY: <bead-id>` is a
+pre-damage refusal, not an implementation failure: no panel round is
+consumed, it does not count toward `max_consecutive_impl_failures`, it
+never routes to `/ms-bead-fix`, and the worktree is intact (zero
+commits). Choose exactly one disposition:
+
+1. **ACCEPT (default)** — halt the bead, surface the ordinal-numbered
+   report, revise the plan/spec section the reasons quote, re-dispatch
+   via `/ms-bead-impl`.
+2. **Clarify (once per bead, ever)** — author the reason-keyed record
+   (each entry: ordinal, verbatim reason, concrete answer, authoritative
+   source span) and write it:
+   ```bash
+   mindspec bead clarify <bead-id> --file <record.json>
+   ```
+   then re-dispatch; the ingress pairs each original reason with its
+   clarification for the fresh Phase-0 judgment. The cap is categorical
+   and restart-proof — a second `bead clarify` on the same bead is
+   refused by the verb; the next NOT READY must ACCEPT.
+
+A clarification can only DISAMBIGUATE existing spec/plan/landed-code
+authority — when no span supports the answer, ACCEPT is correct, not
+clarify. For a known-acceptable MECHANICAL fail, the lever is
+`mindspec next --allow-not-ready` (recorded override marker), never
+`bead clarify` — the two are not interchangeable.
 
 ### Handle ADR Divergence
 
