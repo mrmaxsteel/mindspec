@@ -20,6 +20,7 @@ package setup
 // not one-revert-one-row.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,6 +52,7 @@ var reviewDisciplineFragmentRows = []fragmentRow{
 	{ac: "AC-4", desc: "ms-panel-run mutation-isolation worktree command", surface: "ms-panel-run", want: "git worktree add --detach"},
 	{ac: "AC-4", desc: "ms-spec-final-review mutation-isolation worktree command", surface: "ms-spec-final-review", want: "git worktree add --detach"},
 	{ac: "AC-4", desc: "ms-panel-tally contested-finding re-verify fragment", surface: "ms-panel-tally", want: "re-verify it yourself in a fresh detached checkout"},
+	{ac: "AC-4", desc: "ms-spec-final-review worktree-cleanup clause (removed when reviewer done)", surface: "ms-spec-final-review", want: "removed when the reviewer is done"},
 
 	// AC-5 (R3) — verify-never-confirm.
 	{ac: "AC-5", desc: "ms-bead-cycle no longer blindly trusts the empirical check", surface: "ms-bead-cycle", want: "trust the empirical check", negate: true},
@@ -127,6 +129,24 @@ func TestReviewDiscipline_ADR0044ExistsAccepted(t *testing.T) {
 	}
 }
 
+// TestReviewDiscipline_ADR0044Spec121Provenance proves ADR-0044's Context
+// records the spec-121 Bead-2 incident (a summarised BRIEF silently
+// dropping an AC clause, sailing an 8/8 panel) alongside the other
+// incidents — codex G1-M3 found this provenance missing even though the
+// plan's AC-14 requires it as R5's ADR-only incident record (never in
+// shipped skill text — see the portability grep in the AC-10 tests above).
+func TestReviewDiscipline_ADR0044Spec121Provenance(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, ".mindspec", "adr", "ADR-0044-panel-review-conduct.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	if !strings.Contains(string(data), "spec-121") {
+		t.Errorf("ADR-0044 Context must record the spec-121 Bead-2 provenance (summarised-BRIEF/verbatim-AC incident); got:\n%s", data)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AC-10 — portability scan-plus-allowlist (Non-Goal filter).
 // ---------------------------------------------------------------------------
@@ -136,13 +156,38 @@ func TestReviewDiscipline_ADR0044ExistsAccepted(t *testing.T) {
 // claude-4.5, and bare family names.
 var acTenModelRE = regexp.MustCompile(`(?i)\b(opus|sonnet|haiku|fable|claude-[0-9][.\w-]*|gpt-[0-9][.\w-]*|o[0-9]+(-[a-z]+)?)\b`)
 
-// acTenLoreMarkers is pattern class (ii): mindspec-self-development lore
-// that must never ship in a consumer skill.
-var acTenLoreMarkers = []string{
-	"go test -short",
-	"argv-ratchet",
-	"internal/harness",
-	"internal/instruct",
+// Pattern class (ii): mindspec-self-development lore that must never ship
+// in a consumer skill. Each var is a CATEGORY regex covering its family's
+// known spelling variants, never a single literal string, so a paraphrase
+// within the same lore category is still caught. The first four cover the
+// AC-10 Non-Goal's original four classes; the last three (added after codex
+// G1-M1 found the scan silently missing them, spec.md's Non-Goal / AC-10)
+// cover gofmt-corruption, git-ref-probe, and bd-off-PATH lore.
+var (
+	acTenLoreShortTestRE   = regexp.MustCompile(`go test -short`)
+	acTenLoreArgvRatchetRE = regexp.MustCompile(`argv-ratchet`)
+	acTenLoreHarnessRE     = regexp.MustCompile(`internal/harness`)
+	acTenLoreInstructRE    = regexp.MustCompile(`internal/instruct`)
+	// acTenLoreGofmtRE: gofmt's Go 1.19+ doc-comment code-span corruption
+	// gotcha (spec-113 CI lore) — "gofmt corruption", "gofmt-corrupts",
+	// "gofmt doc-comment corruption", etc.
+	acTenLoreGofmtRE = regexp.MustCompile(`(?i)gofmt[\s-]*(?:doc-comment[\s-]*)?corrupt\w*`)
+	// acTenLoreGitRefProbeRE: the git-ref-probe / `show-ref --exists` lore.
+	acTenLoreGitRefProbeRE = regexp.MustCompile(`(?i)git[\s-]*ref[\s-]*probe|show-ref\s+--exists`)
+	// acTenLoreBdOffPathRE: the bd-off-PATH choreography lore — bd missing
+	// from PATH in a stripped-down shell, `PATH=<no-bd>` and its kin.
+	acTenLoreBdOffPathRE = regexp.MustCompile(`(?i)bd[\s-]*off[\s-]*PATH|PATH=<no-bd>|bd\s+(?:is\s+)?not\s+(?:on|found\s+on)\s+PATH`)
+)
+
+// acTenLoreRE is the full pattern-class-(ii) list the scanner walks.
+var acTenLoreRE = []*regexp.Regexp{
+	acTenLoreShortTestRE,
+	acTenLoreArgvRatchetRE,
+	acTenLoreHarnessRE,
+	acTenLoreInstructRE,
+	acTenLoreGofmtRE,
+	acTenLoreGitRefProbeRE,
+	acTenLoreBdOffPathRE,
 }
 
 // acTenHomePathRE is pattern class (iii): absolute operator-home paths
@@ -152,33 +197,41 @@ var acTenHomePathRE = regexp.MustCompile(`/Users/|/home/|/root/`)
 // acTenSpecIDRE is pattern class (iv): this project's own incident IDs.
 var acTenSpecIDRE = regexp.MustCompile(`spec-[0-9]+`)
 
-// acTenHit is one occurrence of a scanned pattern in one surface.
+// acTenHit is one occurrence of a scanned pattern in one surface, carrying
+// the 1-based LINE NUMBER the match landed on (recomputed fresh from the
+// surface's live content on every scan). The line is what makes the
+// allowlist location-load-bearing rather than decorative: codex G1-B1
+// proved that keying purely on (surface, matched text) lets an allowed
+// token be moved off its declared spot and reintroduced elsewhere for free.
 type acTenHit struct {
 	surface string
 	matched string
+	line    int
+}
+
+// acTenLineOf returns the 1-based line number containing byte offset off in
+// content.
+func acTenLineOf(content string, off int) int {
+	return strings.Count(content[:off], "\n") + 1
 }
 
 // acTenScanContent runs all four pattern classes over one surface's bytes,
-// emitting one acTenHit per occurrence — a matched text repeated N times in
-// one surface yields N hits, which is what makes occurrence-accounted
-// allowlisting possible (an allowlist entry authorizes a COUNT of a given
-// matched text within a given surface, never "any hit here").
+// emitting one acTenHit per occurrence (each carrying the line it landed
+// on) — a matched text repeated N times in one surface yields N hits, which
+// is what makes occurrence-AND-location-accounted allowlisting possible.
 func acTenScanContent(surface, content string) []acTenHit {
 	var hits []acTenHit
-	for _, m := range acTenModelRE.FindAllString(content, -1) {
-		hits = append(hits, acTenHit{surface, m})
-	}
-	for _, marker := range acTenLoreMarkers {
-		for i := 0; i < strings.Count(content, marker); i++ {
-			hits = append(hits, acTenHit{surface, marker})
+	scanRE := func(re *regexp.Regexp) {
+		for _, loc := range re.FindAllStringIndex(content, -1) {
+			hits = append(hits, acTenHit{surface: surface, matched: content[loc[0]:loc[1]], line: acTenLineOf(content, loc[0])})
 		}
 	}
-	for _, m := range acTenHomePathRE.FindAllString(content, -1) {
-		hits = append(hits, acTenHit{surface, m})
+	scanRE(acTenModelRE)
+	for _, re := range acTenLoreRE {
+		scanRE(re)
 	}
-	for _, m := range acTenSpecIDRE.FindAllString(content, -1) {
-		hits = append(hits, acTenHit{surface, m})
-	}
+	scanRE(acTenHomePathRE)
+	scanRE(acTenSpecIDRE)
 	return hits
 }
 
@@ -191,19 +244,52 @@ func acTenScanSurfaces(surfaces map[string]string) []acTenHit {
 	return hits
 }
 
-// acTenAllowEntry is one occurrence-accounted allowlist entry: (surface,
-// matched text) authorizes exactly `count` occurrences of that EXACT
-// matched text within that surface — never "any hit in this file". locator
-// is a human-readable, line-number-independent pointer for reviewers; it
-// plays no role in the matching logic itself (matching is by
-// surface+matched-text+count only, so an entry survives line-number drift,
-// per plan.md's "robust to line-number drift" requirement).
+// acTenAllowEntry is one occurrence-AND-location-accounted allowlist entry:
+// (surface, resolved anchor line, matched text) authorizes exactly `count`
+// occurrences of that EXACT matched text ON THAT LINE — never "any hit
+// anywhere in this file". `locator` is a LITERAL, VERBATIM substring lifted
+// from the real surface's surrounding prose (deliberately excluding the
+// matched token itself) that must resolve to EXACTLY ONE line in the live
+// surface content; that resolved line is what matching keys on. This is
+// what makes the allowlist location-load-bearing rather than decorative
+// (codex G1-B1): moving an allowed token off its declared locator's line
+// desyncs the (surface, line, matched) key, which both strands the
+// allowlist entry as unused AND produces a fresh unallowlisted hit wherever
+// the token landed instead. The anchor text survives line-number drift from
+// unrelated edits — it is re-resolved from live content on every run, never
+// pinned to a literal integer — per plan.md's "robust to line-number drift"
+// requirement.
 type acTenAllowEntry struct {
 	surface string
 	locator string
 	matched string
 	count   int
 	reason  string
+}
+
+// acTenResolveLocator finds the 1-based line number in content that
+// contains the anchor substring locator, verbatim. Returns ok=false (with a
+// diagnostic) if the anchor is absent or ambiguous (matches more than one
+// line) — an unresolvable locator can never authorize a hit, so callers
+// must treat that as a validation problem, not a silent pass.
+func acTenResolveLocator(content, locator string) (line int, diag string, ok bool) {
+	lines := strings.Split(content, "\n")
+	matchLine := 0
+	count := 0
+	for i, l := range lines {
+		if strings.Contains(l, locator) {
+			count++
+			matchLine = i + 1
+		}
+	}
+	switch count {
+	case 0:
+		return 0, "locator anchor not found in surface content", false
+	case 1:
+		return matchLine, "", true
+	default:
+		return 0, fmt.Sprintf("locator anchor is ambiguous: matched %d lines", count), false
+	}
 }
 
 // reviewDisciplineAC10Allowlist is the FULL retained allowlist, verified at
@@ -214,71 +300,97 @@ type acTenAllowEntry struct {
 // classes (i) model values, (ii) lore markers, and (iii) home paths all
 // scan ZERO hits across the real embedded surfaces (verified) — their
 // categorical enforcement burden is carried entirely by the negative
-// mutation tests below, not by any allowlist entry.
+// mutation tests below, not by any allowlist entry. Each `locator` below is
+// a verbatim substring of the REAL line adjacent to the allowed token(s),
+// deliberately chosen to EXCLUDE the token itself so the anchor keeps
+// resolving even if the token is later mutated in place (see
+// TestReviewDiscipline_AC10NegativeLocatorMismatch).
 var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 	{
 		surface: "ms-panel-run",
-		locator: "Inputs section, panel-slug worked example",
+		locator: "panel-slug` (required)",
 		matched: "spec-050",
 		count:   2,
 		reason:  "intentionally retained neutral example slugs — the round-1 (`spec-050-bead2`) and round-2 (`spec-050-bead2-r2`) forms on the one Inputs line, AC-10's own worked example",
 	},
 	{
 		surface: "ms-bead-cycle",
-		locator: "step-0 bd-vs-plan disagreement case history",
+		locator: "showed Bead 5 ready while the plan said it depended on Beads 1-4",
 		matched: "spec-050",
 		count:   1,
 		reason:  "deliberately kept cross-project case history (R7); not a mindspec incident ID",
 	},
 	{
 		surface: "ms-panel-tally",
-		locator: "lola-f4a8 $417 postmortem line (Artifact gates section)",
+		locator: "Postmortem: `bd show lola-f4a8`",
 		matched: "spec-050",
 		count:   2,
 		reason:  "cross-project provenance powering the artifact-gate HARD-block rationale; both occurrences on the one postmortem line",
 	},
 	{
 		surface: "ms-spec-final-review",
-		locator: "escape-hatch fix-commit provenance line",
+		locator: "revert stray files + PR body precision",
 		matched: "spec-050",
 		count:   1,
 		reason:  "cross-project provenance for the escape-hatch legitimacy rule",
 	},
 	{
 		surface: "ms-bead-impl",
-		locator: "case history (Inputs area)",
+		locator: "single biggest quality lever on impl-subagent output",
 		matched: "spec-050",
 		count:   1,
 		reason:  "pre-existing case history in a skill this spec does not edit, but the AC-10 scan runs over ALL embedded skills, so it still needs its own entry",
 	},
 }
 
-// acTenValidate checks hits against the allowlist, consuming entries
-// ONE-TO-ONE (matched text AND count must both agree). It is a pure
-// function — it returns problem strings instead of calling t.Errorf — so
-// the SAME logic can be exercised both for the real positive guard and for
-// the negative mutation tests below without one masking the other's
-// failures. FAILS (returns a non-empty slice) on (a) any scan hit not
-// matched by an entry, and (b) any allowlist entry left unconsumed.
-func acTenValidate(hits []acTenHit, allowlist []acTenAllowEntry) []string {
-	type key struct{ surface, matched string }
+// acTenValidate checks hits against the allowlist, resolving each entry's
+// locator to a concrete (surface, line) key against the LIVE surfaces map
+// and consuming hits ONE-TO-ONE against that resolved key (matched text AND
+// count must both agree, AT that specific line). It is a pure function —
+// it returns problem strings instead of calling t.Errorf — so the SAME
+// logic can be exercised both for the real positive guard and for the
+// negative mutation tests below without one masking the other's failures.
+// FAILS (returns a non-empty slice) on (a) any allowlist entry whose
+// locator cannot be uniquely resolved in its surface, (b) any scan hit not
+// matched by a resolved entry AT THE ENTRY'S RESOLVED LINE — including a
+// hit whose text is allowlisted elsewhere in the same surface but landed on
+// the WRONG line, the locator-mismatch case codex G1-B1 found silently
+// passing — and (c) any allowlist entry left unconsumed (its resolved line
+// never saw the expected count of hits).
+func acTenValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[string]string) []string {
+	type key struct {
+		surface string
+		line    int
+		matched string
+	}
 	remaining := make(map[key]int)
+	var problems []string
+
 	for _, e := range allowlist {
-		remaining[key{e.surface, e.matched}] += e.count
+		content, ok := surfaces[e.surface]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unresolvable: surface=%s locator=%q matched=%s: surface not present among scanned surfaces", e.surface, e.locator, e.matched))
+			continue
+		}
+		line, diag, ok := acTenResolveLocator(content, e.locator)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unresolvable: surface=%s locator=%q matched=%s: %s", e.surface, e.locator, e.matched, diag))
+			continue
+		}
+		remaining[key{e.surface, line, e.matched}] += e.count
 	}
 
-	var problems []string
 	for _, h := range hits {
-		k := key{h.surface, h.matched}
+		k := key{h.surface, h.line, h.matched}
 		if remaining[k] > 0 {
 			remaining[k]--
 			continue
 		}
-		problems = append(problems, "AC-10 scan: unallowlisted hit in "+h.surface+": "+h.matched)
+		problems = append(problems, fmt.Sprintf("AC-10 scan: unallowlisted hit in %s at line %d: %s", h.surface, h.line, h.matched))
 	}
 	for k, n := range remaining {
 		if n > 0 {
-			problems = append(problems, "AC-10 allowlist entry unused (or under-consumed): surface="+k.surface+" matched="+k.matched)
+			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unused (or under-consumed): surface=%s line=%d matched=%s", k.surface, k.line, k.matched))
 		}
 	}
 	return problems
@@ -300,21 +412,24 @@ func ac10Surfaces() map[string]string {
 }
 
 // TestReviewDiscipline_AC10ScanPlusAllowlist is the [CI] guard for AC-10: it
-// scans every embedded skill and lifecycle literal for the four pattern
-// classes and fails on any hit the allowlist above does not account for
-// (exact surface + exact matched text + count), and on any allowlist entry
-// left unconsumed.
+// scans every embedded skill and lifecycle literal for the pattern classes
+// and fails on any hit the allowlist above does not account for at its
+// resolved locator line (exact surface + resolved line + exact matched text
+// + count), and on any allowlist entry left unconsumed or whose locator
+// fails to resolve.
 func TestReviewDiscipline_AC10ScanPlusAllowlist(t *testing.T) {
-	hits := acTenScanSurfaces(ac10Surfaces())
-	for _, problem := range acTenValidate(hits, reviewDisciplineAC10Allowlist) {
+	surfaces := ac10Surfaces()
+	hits := acTenScanSurfaces(surfaces)
+	for _, problem := range acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces) {
 		t.Error(problem)
 	}
 }
 
 // TestReviewDiscipline_AC10NegativeCategoricalHits proves the scan REDs on
-// each of the three mandated categorical negatives (spec.md's spec-gate
-// G2), injected into a synthetic fixture surface — never a real shipped
-// file.
+// each of the mandated categorical negatives (spec.md's spec-gate G2, plus
+// the 3 lore classes G1-M1 added: gofmt-corruption, git-ref-probe,
+// bd-off-PATH), injected into a synthetic fixture surface — never a real
+// shipped file.
 func TestReviewDiscipline_AC10NegativeCategoricalHits(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -323,6 +438,9 @@ func TestReviewDiscipline_AC10NegativeCategoricalHits(t *testing.T) {
 		{"gpt-4o", "the model gpt-4o handled this probe"},
 		{"o4-mini", "routed to o4-mini for the empirical check"},
 		{"root-agent-path", "wrote scratch to /root/agent/notes.md"},
+		{"gofmt-corruption-lore", "watch for the gofmt doc-comment corruption bug in Go 1.19+"},
+		{"git-ref-probe-lore", "avoid the git-ref-probe flake by using show-ref --exists instead"},
+		{"bd-off-path-lore", "handle the bd-off-PATH case when the shell runs with PATH=<no-bd>"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := map[string]string{"fixture-surface": tc.inject}
@@ -330,20 +448,37 @@ func TestReviewDiscipline_AC10NegativeCategoricalHits(t *testing.T) {
 			if len(hits) == 0 {
 				t.Fatalf("fixture assumption broken: %q produced no scan hits at all", tc.inject)
 			}
-			if problems := acTenValidate(hits, nil); len(problems) == 0 {
+			if problems := acTenValidate(hits, nil, fixture); len(problems) == 0 {
 				t.Fatalf("expected the AC-10 scan to RED on %q, but it found no problems", tc.inject)
 			}
 		})
 	}
 }
 
+// TestReviewDiscipline_AC10NewLoreClassesZeroOnRealSurfaces proves the 3
+// lore classes G1-M1 added (gofmt-corruption, git-ref-probe, bd-off-PATH)
+// currently produce ZERO hits across the real embedded surfaces — the
+// classes are enforced categorically for the future, not because any
+// shipped skill presently carries this lore.
+func TestReviewDiscipline_AC10NewLoreClassesZeroOnRealSurfaces(t *testing.T) {
+	surfaces := ac10Surfaces()
+	for _, re := range []*regexp.Regexp{acTenLoreGofmtRE, acTenLoreGitRefProbeRE, acTenLoreBdOffPathRE} {
+		for surface, content := range surfaces {
+			if m := re.FindString(content); m != "" {
+				t.Errorf("surface %s unexpectedly contains a new-lore-class match %q; portable skill text must not carry this mindspec-self-development lore", surface, m)
+			}
+		}
+	}
+}
+
 // TestReviewDiscipline_AC10NegativeDuplicateToken proves the occurrence
 // accounting bites: an extra, UNALLOWLISTED occurrence of an already-
-// allowlisted token in the SAME surface (ms-panel-tally is allowlisted for
-// exactly 2 "spec-050" occurrences) REDs the scan even though the token
-// itself is on the allowlist — the count, not just the token identity, is
-// enforced. Mutation applied to a fixture copy of the real surfaces map,
-// never the shipped file.
+// allowlisted token on a DIFFERENT line in the SAME surface (ms-panel-tally
+// is allowlisted for exactly 2 "spec-050" occurrences on its postmortem
+// line) REDs the scan even though the token itself is on the allowlist —
+// the (line, count), not just the token identity, is enforced. Mutation
+// applied to a fixture copy of the real surfaces map, never the shipped
+// file.
 func TestReviewDiscipline_AC10NegativeDuplicateToken(t *testing.T) {
 	surfaces := ac10Surfaces()
 	original := surfaces["ms-panel-tally"]
@@ -353,9 +488,9 @@ func TestReviewDiscipline_AC10NegativeDuplicateToken(t *testing.T) {
 	surfaces["ms-panel-tally"] = original + "\n\nA third spec-050 reference injected for the test.\n"
 
 	hits := acTenScanSurfaces(surfaces)
-	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist)
+	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces)
 	if len(problems) == 0 {
-		t.Fatal("expected a 3rd spec-050 occurrence in ms-panel-tally (allowlisted for exactly 2) to RED the scan")
+		t.Fatal("expected a 3rd spec-050 occurrence in ms-panel-tally (allowlisted for exactly 2, on one line) to RED the scan")
 	}
 	for _, p := range problems {
 		if !strings.Contains(p, "ms-panel-tally") {
@@ -364,12 +499,67 @@ func TestReviewDiscipline_AC10NegativeDuplicateToken(t *testing.T) {
 	}
 }
 
+// TestReviewDiscipline_AC10NegativeLocatorMismatch is the codex G1-B1 proof:
+// replacing an allowlisted token AT its declared locator with a decoy that
+// no longer matches acTenSpecIDRE, AND separately reintroducing the SAME
+// token+count on a DIFFERENT line in the SAME surface, must RED — even
+// though the token+count both still appear somewhere in the file. Before
+// the location-keyed fix this passed cleanly, because the allowlist only
+// ever keyed on surface+matched-text: moving ms-panel-run's spec-050 tokens
+// off their declared "panel-slug` (required)" locator line and
+// reintroducing the same tokens, unchanged, elsewhere in the file left the
+// scan green.
+func TestReviewDiscipline_AC10NegativeLocatorMismatch(t *testing.T) {
+	surfaces := ac10Surfaces()
+	original, ok := surfaces["ms-panel-run"]
+	if !ok {
+		t.Fatal("fixture assumption broken: ms-panel-run missing from ac10Surfaces()")
+	}
+	if !strings.Contains(original, "spec-050-bead2-r2") || !strings.Contains(original, "spec-050-bead2") {
+		t.Fatal("fixture assumption broken: ms-panel-run no longer carries its declared spec-050 worked-example tokens")
+	}
+
+	// Replace BOTH spec-050 occurrences on the declared "panel-slug`
+	// (required)" locator line with a decoy that no longer matches
+	// acTenSpecIDRE (`case-050`, not `spec-050`).
+	replacer := strings.NewReplacer("spec-050-bead2-r2", "case-050-bead2-r2", "spec-050-bead2", "case-050-bead2")
+	mutated := replacer.Replace(original)
+	if strings.Contains(mutated, "spec-050") {
+		t.Fatal("fixture assumption broken: locator-line substitution left a spec-050 behind")
+	}
+	// Reintroduce the SAME token+count, unchanged, on a wholly different
+	// line in the same surface.
+	mutated += "\n\nElsewhere in this file, purely for the fixture: spec-050 and spec-050 again.\n"
+
+	surfaces["ms-panel-run"] = mutated
+	hits := acTenScanSurfaces(surfaces)
+	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces)
+	if len(problems) == 0 {
+		t.Fatal("expected moving the allowlisted ms-panel-run spec-050 tokens off their declared locator (while reintroducing the same token+count elsewhere) to RED the AC-10 scan")
+	}
+	sawUnused, sawUnallowlisted := false, false
+	for _, p := range problems {
+		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unused") {
+			sawUnused = true
+		}
+		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unallowlisted") {
+			sawUnallowlisted = true
+		}
+	}
+	if !sawUnused {
+		t.Errorf("expected an 'unused' problem for ms-panel-run's now-empty locator line; got: %v", problems)
+	}
+	if !sawUnallowlisted {
+		t.Errorf("expected an 'unallowlisted hit' problem for the relocated spec-050 tokens; got: %v", problems)
+	}
+}
+
 // TestReviewDiscipline_AC10NegativeCountPreservingSubstitution proves a
 // disallowed class cannot consume an allowed locator/count slot: ONE
 // allowed "spec-050" occurrence at an allowlisted locator is replaced with
 // "gpt-4o" — the locator's TOTAL token count is unchanged (still two
 // tokens) — and the scan must still RED, because the allowlist key is
-// (surface, EXACT matched text), not a raw hit count.
+// (surface, line, EXACT matched text), not a raw hit count.
 func TestReviewDiscipline_AC10NegativeCountPreservingSubstitution(t *testing.T) {
 	// Shaped like ms-panel-tally's allowlisted locator: two spec-050
 	// occurrences at one spot.
@@ -383,7 +573,7 @@ func TestReviewDiscipline_AC10NegativeCountPreservingSubstitution(t *testing.T) 
 	surfaces["ms-panel-tally"] = mutated // total token count at this surface unchanged: still 2
 
 	hits := acTenScanSurfaces(surfaces)
-	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist)
+	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces)
 	if len(problems) == 0 {
 		t.Fatal("expected the count-preserving spec-050->gpt-4o substitution to RED the AC-10 scan")
 	}
@@ -392,7 +582,8 @@ func TestReviewDiscipline_AC10NegativeCountPreservingSubstitution(t *testing.T) 
 // TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry proves the OTHER
 // residual the occurrence-accounted allowlist must catch: an allowlist
 // entry that no scan hit ever consumes (e.g. left behind after a future
-// cleanup) REDs too, so a stale entry cannot linger as a silent hole.
+// cleanup, or whose locator is simply wrong) REDs too, so a stale entry
+// cannot linger as a silent hole.
 func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 	extended := append([]acTenAllowEntry{}, reviewDisciplineAC10Allowlist...)
 	extended = append(extended, acTenAllowEntry{
@@ -400,11 +591,12 @@ func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 		locator: "synthetic — never actually present in the shipped skill",
 		matched: "spec-999",
 		count:   1,
-		reason:  "test-only: demonstrates an unconsumed allowlist entry REDs",
+		reason:  "test-only: demonstrates an unconsumed/unresolvable allowlist entry REDs",
 	})
 
-	hits := acTenScanSurfaces(ac10Surfaces())
-	problems := acTenValidate(hits, extended)
+	surfaces := ac10Surfaces()
+	hits := acTenScanSurfaces(surfaces)
+	problems := acTenValidate(hits, extended, surfaces)
 	if len(problems) == 0 {
 		t.Fatal("expected an unused allowlist entry to RED the AC-10 scan")
 	}
