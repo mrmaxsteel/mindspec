@@ -46,6 +46,7 @@ loop:
 | `max-rounds-per-bead` exceeded on any bead | Halt, leave bead `in_progress` |
 | `bd ready` shows beads but none satisfy plan deps | Halt, report dep-graph mismatch |
 | Two consecutive impl-subagent failures on same bead | Halt, ask user |
+| Bead returns an ACCEPTed `NOT READY` (spec 124 R5) | Halt at the bead level; surface the ordinal-numbered report + revision routing; do NOT proceed to the next bead |
 
 ## Reporting
 
