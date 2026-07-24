@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
@@ -23,7 +24,16 @@ import (
 // ID like "bead-one" ever collided with a real tracked issue). Tests that
 // exercise the binding leg itself install their own stub and restore this
 // default via t.Cleanup.
+// landedBindingMetadataFnDefault captures the PRODUCTION default of
+// landedBindingMetadataFn before TestMain substitutes the hermetic stub,
+// so the spec 125 F3-2 pointer pin
+// (TestLandedBindingMetadataFnDefaultPinned) can still assert the real
+// default is bead.GetMetadata — the read gate cannot go hollow even
+// though every test in this package runs behind the stub.
+var landedBindingMetadataFnDefault func(string) (map[string]interface{}, error)
+
 func TestMain(m *testing.M) {
+	landedBindingMetadataFnDefault = landedBindingMetadataFn
 	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}
@@ -1237,5 +1247,542 @@ func TestFindLandedMerge_BindingContradictsDifferentMerge(t *testing.T) {
 	var noEvidence *LandedMergeNoEvidence
 	if errors.As(err, &noEvidence) {
 		t.Error("a CONTRADICTED binding must not surface as LandedMergeNoEvidence (that implies no datum was even available)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Spec 125 Bead 3 — the exact-second-parent OWNERSHIP identity suite
+// (R5, AC-2b/AC-2c/AC-2d/AC-2e/AC-2f + the G1-F2 binding-SHA path and the
+// G2-2 parser-conservatism pins). Per the plan's RED discipline these are
+// RED-against-the-WRONG-impl fixtures: each names its deviation target
+// in-test (naive newest-first ancestor-consistent scan / newest-ancestor on
+// no-exact-match / topology-only cache trust / newest-anchored content
+// check / prefix-substring ownership), and passes ONLY against the
+// exact-match-required, ownership-named, fail-closed mechanism.
+// ---------------------------------------------------------------------------
+
+// TestParseMergeSubjectBeadBranch pins the G2-2 CONSERVATIVE three-state
+// parser contract: (branch, true) whenever ANY bead/… token is present —
+// including unrecognized formats, which nominate the token they carry and
+// are NEVER collapsed into the no-bead bucket — and ("", false) ONLY when
+// genuinely no bead/… token appears (the true anonymous-subject case).
+func TestParseMergeSubjectBeadBranch(t *testing.T) {
+	cases := []struct {
+		subject     string
+		wantBranch  string
+		wantPresent bool
+	}{
+		// gitutil.MergeInto's deterministic form.
+		{"Merge bead/mindspec-x.1", "bead/mindspec-x.1", true},
+		// git's default conflict-recovery forms (quoted target and bare).
+		{"Merge branch 'bead/mindspec-x.1' into spec/125-foo", "bead/mindspec-x.1", true},
+		{"Merge branch 'bead/mindspec-x.1' into 'spec/125-foo'", "bead/mindspec-x.1", true},
+		{"Merge branch 'bead/mindspec-x.1'", "bead/mindspec-x.1", true},
+		// Prefix-colliding IDs parse to their FULL token (AC-2f's substrate).
+		{"Merge bead/mindspec-8nhe.12", "bead/mindspec-8nhe.12", true},
+		{"Merge branch 'bead/mindspec-8nhe.12' into spec/125-foo", "bead/mindspec-8nhe.12", true},
+		// Unrecognized formats carrying a bead/… token: PRESENT-and-named
+		// (G2-2) — never ("", false).
+		{"custom pipeline landed [bead/mindspec-z.9] artifacts", "bead/mindspec-z.9", true},
+		{"Revert \"Merge bead/mindspec-z.9\"", "bead/mindspec-z.9", true},
+		{"Merge remote-tracking branch 'origin/bead/mindspec-x.1'", "bead/mindspec-x.1", true},
+		// Genuinely NO bead token: the anonymous-subject state.
+		{"chore: commit remaining spec artifacts", "", false},
+		{"Merge branch 'feature/no-bead-here'", "", false},
+		{"land the payload work via custom ceremony", "", false},
+	}
+	for _, c := range cases {
+		branch, present := parseMergeSubjectBeadBranch(c.subject)
+		if present != c.wantPresent || branch != c.wantBranch {
+			t.Errorf("parseMergeSubjectBeadBranch(%q) = (%q, %v), want (%q, %v)",
+				c.subject, branch, present, c.wantBranch, c.wantPresent)
+		}
+	}
+}
+
+// mergeBeadDefaultSubject is mergeBead's sibling for spec 125's R5
+// conflict-recovery shape: the merge commit carries git's DEFAULT
+// recovery-form subject (`Merge branch 'bead/<id>' into <spec>`), written
+// explicitly with -m for determinism across git builds — the exact shape
+// the retired exact-subject scan could never match.
+func mergeBeadDefaultSubject(t *testing.T, run func(args ...string), dir, beadID, specBranch string) {
+	t.Helper()
+	run("checkout", "-b", "bead/"+beadID)
+	os.WriteFile(filepath.Join(dir, beadID+".txt"), []byte(beadID+"\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work "+beadID)
+	run("checkout", specBranch)
+	run("merge", "--no-ff", "-m", "Merge branch 'bead/"+beadID+"' into "+specBranch, "bead/"+beadID)
+}
+
+// TestFindLandedMerge_DefaultSubjectIdentified is the R5 core (RED on the
+// spec-init SHA): a merge carrying git's DEFAULT conflict-recovery subject
+// — never the exact `Merge bead/<id>` — whose second parent IS the bead's
+// landed tip must be identified. Ownership comes from the parsed
+// bead-branch name in the default subject; landed-ness from the surviving
+// branch tip EQUALING the second parent. The pre-125 exact-subject gate
+// finds no candidate here at all.
+func TestFindLandedMerge_DefaultSubjectIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBeadDefaultSubject(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("a default-subject merge with an exact second-parent match must identify (R5), got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_DescendantMergeNeverMisattributed is AC-2b (RED
+// against the naive newest-first ancestor-consistent scan — the deviation
+// target named by the AC): bead X lands, then a DESCENDANT bead Y branches
+// off spec AFTER X and lands, BOTH with git's default recovery subject, so
+// X's tip is an ancestor of Y's tip and both merges are subject-ambiguous
+// to any non-parsing scan. FindLandedMerge(X) must return M_X (the
+// exact-second-parent match), NEVER M_Y — a naive
+// IsAncestor(X_tip, secondParent) newest-first scan returns M_Y here. And
+// after a `git revert` of ONLY X's content, FindLandedMerge(X) REFUSES:
+// the revert-leg reads M_X's content, not M_Y's (which would still be
+// present and would mask the revert).
+func TestFindLandedMerge_DescendantMergeNeverMisattributed(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBeadDefaultSubject(t, run, dir, "bead-x", "spec/119-test")
+	mX := revParseIn(t, dir, "spec/119-test")
+	xTip := revParseIn(t, dir, "bead/bead-x")
+
+	// Y branches off spec AFTER X landed → X_tip is an ancestor of Y_tip.
+	mergeBeadDefaultSubject(t, run, dir, "bead-y", "spec/119-test")
+	mY := revParseIn(t, dir, "spec/119-test")
+	if mX == mY {
+		t.Fatal("fixture: expected two distinct merges")
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err != nil {
+		t.Fatalf("X's own exact match exists and its surviving branch tip equals it — must identify, got: %v", err)
+	}
+	if landed.SHA != mX {
+		t.Errorf("SHA = %q, want M_X %q — returning M_Y %q is the naive ancestor-consistent misattribution", landed.SHA, mX, mY)
+	}
+	if landed.SecondParent != xTip {
+		t.Errorf("SecondParent = %q, want X's tip %q", landed.SecondParent, xTip)
+	}
+
+	// Revert ONLY X's content: the revert-leg must read M_X (refuse), not
+	// M_Y (whose content is still present — identification would mask the
+	// revert).
+	run("revert", "--no-edit", "-m", "1", mX)
+	_, err = FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("after reverting only X's content, FindLandedMerge(X) must refuse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no longer present") {
+		t.Errorf("expected the revert-leg refusal (anchored on M_X), got: %v", err)
+	}
+	// Y is untouched by X's revert and must still identify.
+	landedY, err := FindLandedMerge(dir, "spec/119-test", "bead-y")
+	if err != nil || landedY.SHA != mY {
+		t.Errorf("Y must still identify its own merge %q, got %+v err=%v", mY, landedY, err)
+	}
+}
+
+// TestFindLandedMerge_NoExactMatchAncestorPanelRefuses is AC-2c's first
+// half (RED against BOTH tempting impls it names): X lands (default
+// subject), then descendant Y lands; X's branch is DELETED, X has NO
+// binding, and the only datum is a registered panel's reviewed_head_sha
+// recording an EARLIER head of X — an ANCESTOR of X's landed tip, EQUAL to
+// no merge's second parent. FindLandedMerge(X) MUST REFUSE:
+//   - a newest-first ancestor-consistent scan (subject-blind) returns the
+//     newest merge M_Y — the reopened misattribution;
+//   - the pre-125 ancestor-TOLERANT reviewed_head_sha leg confirms M_X
+//     from the ancestor datum — a positive identification with NO exact
+//     match, which R5 forbids.
+func TestFindLandedMerge_NoExactMatchAncestorPanelRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+
+	// X: two commits — the panel reviews the EARLIER head, the merge lands
+	// the LATER tip.
+	run("checkout", "-b", "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "x1.txt"), []byte("x1\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "x work 1")
+	xEarly := revParseIn(t, dir, "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "x2.txt"), []byte("x2\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "x work 2")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge branch 'bead/bead-x' into spec/119-test", "bead/bead-x")
+
+	// Descendant Y lands after X — the newest ancestor-consistent decoy.
+	mergeBeadDefaultSubject(t, run, dir, "bead-y", "spec/119-test")
+	mY := revParseIn(t, dir, "spec/119-test")
+
+	run("branch", "-D", "bead/bead-x")
+
+	origScan := landedPanelScanFn
+	t.Cleanup(func() { landedPanelScanFn = origScan })
+	beadID := "bead-x"
+	landedPanelScanFn = func(roots ...string) []panel.Registration {
+		return []panel.Registration{{Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: xEarly}}}
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err == nil {
+		t.Fatalf("an ancestor-only reviewed_head_sha must NEVER positively identify (got %+v; M_Y is %s) — exact-equality corroboration is required", landed, mY)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected a fail-closed ErrLandedMergeNotFound refusal, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_ForgedBindingNoRealMergeRefuses is AC-2c's second
+// half (the G1-3 forgery): a binding on X whose recorded SHAs are
+// well-formed but match NO real merge on spec — neither the merge-SHA nor
+// the second-parent resolves to an exact match — is DISCARDED, never
+// followed: identification refuses (fail-closed), it does not fall back to
+// trusting the cache or to any ancestor-consistent pick.
+func TestFindLandedMerge_ForgedBindingNoRealMergeRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBeadDefaultSubject(t, run, dir, "bead-x", "spec/119-test")
+	run("branch", "-D", "bead/bead-x")
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     "1111111111111111111111111111111111111111",
+			"mindspec_landed_second_parent": "2222222222222222222222222222222222222222",
+		}, nil
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("a forged binding pointing at no real exact merge must be discarded and identification must refuse, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_BindingAtOtherBeadsMergeRefuses is AC-2d (RED
+// against the topology-only cache-trust impl it names): X and Z each
+// landed a REAL exact merge; X carries a stale/forged binding recording
+// Z's merge SHA and Z's landed tip. The binding IS git-corroborated as a
+// real two-parent exact merge — topology passes — but that merge's subject
+// names bead/Z, not bead/X: the OWNERSHIP check discards it, and
+// FindLandedMerge(X) REFUSES rather than returning Z's merge as X's. A
+// trust-the-binding's-SHA-blindly impl (topology corroboration without the
+// subject-ownership check) returns Z's merge here.
+func TestFindLandedMerge_BindingAtOtherBeadsMergeRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-x", "spec/119-test")
+	mergeBead(t, run, dir, "bead-z", "spec/119-test")
+	mZ := revParseIn(t, dir, "spec/119-test")
+	zTip := revParseIn(t, dir, "bead/bead-z")
+	run("branch", "-D", "bead/bead-x")
+	run("branch", "-D", "bead/bead-z")
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     mZ,
+			"mindspec_landed_second_parent": zTip,
+		}, nil
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err == nil {
+		t.Fatalf("a cache pointing at ANOTHER bead's real merge must be discarded on ownership, got identification %+v (Z's merge is %s)", landed, mZ)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected a fail-closed refusal, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_RemergeMaskedRevertRefusesOldestAnchor is AC-2e (RED
+// against a newest-anchored impl for EITHER parameter of the R3 check):
+// bead X lands (M₁, second parent = X_tip); X's content is REVERTED on
+// spec; then the SAME second parent is re-merged as an EMPTY no-op merge
+// M₂ (no content reintroduced) — so X's landed content is ABSENT at the
+// tip, but M₂'s own first parent is the POST-REVERT state. The
+// landed-vs-reverted check MUST be Requirement 3's three-way anchored on
+// the OLDEST merge M₁ — ContentSubsumedOutcome(base=M₁^1, ref=M₁,
+// target=tip) → CleanDivergence → RevertShape → REFUSE. An impl anchoring
+// base or theirs on M₂ reads "no change" (SubsumptionLanded) and
+// mis-attests the reverted bead. Recording wrappers pin BOTH parameters.
+func TestFindLandedMerge_RemergeMaskedRevertRefusesOldestAnchor(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-x")
+	xTip := revParseIn(t, dir, "bead/bead-x")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-x", "bead/bead-x")
+	m1 := revParseIn(t, dir, "spec/119-test")
+	m1FirstParent := revParseIn(t, dir, m1+"^1")
+
+	// Revert X's content, then re-merge the SAME second parent as an
+	// EMPTY merge (tree = the post-revert tree; commitResolvedMerge
+	// fast-forwards spec onto it).
+	run("revert", "--no-edit", "-m", "1", m1)
+	postRevertTip := revParseIn(t, dir, "spec/119-test")
+	m2 := commitResolvedMerge(t, dir, postRevertTip, xTip, "Merge bead/bead-x")
+
+	// Recording wrappers: the R3 check must be anchored on M₁ for BOTH
+	// the base and the theirs/ref parameter, and the revert-shape
+	// sub-classification on M₁ too — never M₂ (the newest).
+	var subBase, subRef string
+	origSub := landedContentSubsumedFn
+	t.Cleanup(func() { landedContentSubsumedFn = origSub })
+	landedContentSubsumedFn = func(workdir, base, ref, target string) (gitutil.Subsumption, error) {
+		subBase, subRef = base, ref
+		return origSub(workdir, base, ref, target)
+	}
+	var revAnchor string
+	origRev := landedRevertShapeFn
+	t.Cleanup(func() { landedRevertShapeFn = origRev })
+	landedRevertShapeFn = func(workdir, mergeSHA, target string) (bool, error) {
+		revAnchor = mergeSHA
+		return origRev(workdir, mergeSHA, target)
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("a revert-then-empty-re-merge (content ABSENT at tip) must classify REVERTED and refuse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no longer present") {
+		t.Errorf("expected the reverted-content refusal, got: %v", err)
+	}
+	if subRef != m1 {
+		t.Errorf("R3 theirs/ref anchored on %q, want the OLDEST merge M₁ %q (newest M₂ is %q — the G2-R4-B1 masked-revert)", subRef, m1, m2)
+	}
+	if subBase != m1FirstParent {
+		t.Errorf("R3 base anchored on %q, want M₁^1 %q (M₂^1 is the post-revert state %q)", subBase, m1FirstParent, postRevertTip)
+	}
+	if revAnchor != m1 {
+		t.Errorf("revert-shape anchored on %q, want the OLDEST merge M₁ %q", revAnchor, m1)
+	}
+}
+
+// TestFindLandedMerge_RemergeReintroducedNewestNamesSHA is AC-2e's
+// positive direction: a revert-then-re-merge that DOES reintroduce X's
+// content (the tip carries it again) identifies — and the returned
+// *LandedMerge.SHA is the NEWEST same-second-parent exact match M₂
+// (nearest the tip), never the oldest, while the content-check still ran
+// against M₁ (single anchor, asserted by the masked-revert sibling above).
+func TestFindLandedMerge_RemergeReintroducedNewestNamesSHA(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-x")
+	xTip := revParseIn(t, dir, "bead/bead-x")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-x", "bead/bead-x")
+	m1 := revParseIn(t, dir, "spec/119-test")
+
+	run("revert", "--no-edit", "-m", "1", m1)
+	postRevertTip := revParseIn(t, dir, "spec/119-test")
+	// The re-merge REINTRODUCES the content (stage it back before
+	// commitResolvedMerge snapshots the index as the merge tree).
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	m2 := commitResolvedMerge(t, dir, postRevertTip, xTip, "Merge bead/bead-x")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err != nil {
+		t.Fatalf("a re-merge that reintroduced the content must identify, got: %v", err)
+	}
+	if landed.SHA != m2 {
+		t.Errorf("SHA = %q, want the NEWEST same-second-parent match M₂ %q (M₁ is %q)", landed.SHA, m2, m1)
+	}
+	if landed.SecondParent != xTip {
+		t.Errorf("SecondParent = %q, want %q", landed.SecondParent, xTip)
+	}
+}
+
+// TestFindLandedMerge_PrefixCollisionFailsSafe is AC-2f (RED against a
+// HasPrefix/Contains ownership impl — the deviation target): beads
+// mindspec-8nhe.1 and mindspec-8nhe.12 each land a real exact merge (the
+// .12 merge NEWER, so a prefix match would evaluate it first for .1 and
+// either misattribute or spuriously contradict). Full branch-name EQUALITY
+// resolves each bead ONLY to its own merge.
+func TestFindLandedMerge_PrefixCollisionFailsSafe(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "mindspec-8nhe.1", "spec/119-test")
+	m1 := revParseIn(t, dir, "spec/119-test")
+	mergeBead(t, run, dir, "mindspec-8nhe.12", "spec/119-test")
+	m12 := revParseIn(t, dir, "spec/119-test")
+
+	landed1, err := FindLandedMerge(dir, "spec/119-test", "mindspec-8nhe.1")
+	if err != nil {
+		t.Fatalf("mindspec-8nhe.1 must resolve its own merge (a prefix impl evaluates .12's newer merge and fails), got: %v", err)
+	}
+	if landed1.SHA != m1 {
+		t.Errorf("mindspec-8nhe.1 SHA = %q, want its own merge %q (cross-attributing %q is the prefix collision)", landed1.SHA, m1, m12)
+	}
+	landed12, err := FindLandedMerge(dir, "spec/119-test", "mindspec-8nhe.12")
+	if err != nil {
+		t.Fatalf("mindspec-8nhe.12 must resolve its own merge, got: %v", err)
+	}
+	if landed12.SHA != m12 {
+		t.Errorf("mindspec-8nhe.12 SHA = %q, want %q", landed12.SHA, m12)
+	}
+}
+
+// TestFindLandedMerge_PrefixCollisionUnmatchedRefuses is AC-2f's second
+// assertion: a colliding-but-UNMATCHED bead (only mindspec-8nhe.12's merge
+// exists; mindspec-8nhe.1 never landed) REFUSES rather than
+// false-attributing the longer-named sibling's merge — a collision fails
+// SAFE (no positive ID), never a false attribution.
+func TestFindLandedMerge_PrefixCollisionUnmatchedRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "mindspec-8nhe.12", "spec/119-test")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "mindspec-8nhe.1")
+	if err == nil {
+		t.Fatalf("a bead with no landed merge must refuse — got %+v (a Contains/HasPrefix ownership impl attributes mindspec-8nhe.12's merge)", landed)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected ErrLandedMergeNotFound, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_AnonymousSubjectBindingRefuses pins the G-1
+// BLOCKING fix (codex final-review): a merge whose subject names NO bead
+// (a wholly-custom subject) is NOT automatically identifiable, EVEN with a
+// valid-looking complete-time binding pointing at that real exact merge.
+// The binding git-corroborates only that the merge is REAL with this exact
+// second parent — NOT that it is THIS bead's — so admitting it would make
+// the agent-writable binding an independent OWNERSHIP authority (a
+// metadata-forge, below the git-history threat boundary). The automatic
+// path FAILS CLOSED; the audited `mindspec reattest` (Bead 4) is the
+// correct recovery for an anonymous subject. RED against the removed
+// binding-SHA-for-anonymous impl.
+func TestFindLandedMerge_AnonymousSubjectBindingRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-x")
+	xTip := revParseIn(t, dir, "bead/bead-x")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "land the payload work via custom ceremony", "bead/bead-x")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+	run("branch", "-D", "bead/bead-x")
+
+	// Sanity: the subject genuinely names no bead (the parser's
+	// present==false state), so the subject-scan path cannot own it.
+	if _, present := parseMergeSubjectBeadBranch("land the payload work via custom ceremony"); present {
+		t.Fatal("fixture: the custom subject must name NO bead")
+	}
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     mergeSHA,
+			"mindspec_landed_second_parent": xTip,
+		}, nil
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("an anonymous-subject merge must NOT be auto-identified on the binding alone (G-1) — expected a fail-closed refusal, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_ForgedBindingAtRealAnonymousMergeRefuses is the G-1
+// exploit pin (RED against the removed binding-SHA-for-anonymous impl):
+// bead X NEVER landed (no merge of X's own tip exists), but a party who
+// can WRITE bd metadata (a metadata-forge — EASIER than a commit-forge,
+// so BELOW the documented git-history threat boundary) plants a binding on
+// X pointing at some OTHER work's real anonymous-subject merge. The old
+// binding-SHA path would positively identify that unrelated merge as X's
+// landed merge — an unsafe false-positive. FindLandedMerge MUST refuse.
+func TestFindLandedMerge_ForgedBindingAtRealAnonymousMergeRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+
+	// Some OTHER work lands via a merge with a wholly-custom subject
+	// (naming no bead) — a real two-parent merge, not X's.
+	run("checkout", "-b", "other-work")
+	os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "other work")
+	otherTip := revParseIn(t, dir, "other-work")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "custom ceremony landing unrelated work", "other-work")
+	anonMerge := revParseIn(t, dir, "spec/119-test")
+
+	// bead X never even branched. Forge a binding on X pointing at the
+	// real anonymous merge above.
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     anonMerge,
+			"mindspec_landed_second_parent": otherTip,
+		}, nil
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err == nil {
+		t.Fatalf("a forged binding on a never-landed bead pointing at a real anonymous merge must be refused (G-1), got identification %+v", landed)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected a fail-closed ErrLandedMergeNotFound refusal, got: %v", err)
+	}
+}
+
+// TestFindLandedMerge_BindingUnrecognizedOtherBeadTokenRefuses is the
+// G2-2 REJECT direction: a binding-SHA candidate whose merge subject
+// carries a DIFFERENT bead's bead/… token in a format the parser does not
+// fully recognize is DISCARDED on ownership — the parser reports it
+// PRESENT-and-named (nominating bead/bead-z), never the no-bead state, so
+// it can never slip through the names-no-bead binding exception. RED
+// against a parser that collapses unrecognized formats into ("", false).
+func TestFindLandedMerge_BindingUnrecognizedOtherBeadTokenRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-z")
+	os.WriteFile(filepath.Join(dir, "z.txt"), []byte("z\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-z")
+	zTip := revParseIn(t, dir, "bead/bead-z")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "custom pipeline landed [bead/bead-z] artifacts", "bead/bead-z")
+	mZ := revParseIn(t, dir, "spec/119-test")
+	run("branch", "-D", "bead/bead-z")
+
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"mindspec_landed_merge_sha":     mZ,
+			"mindspec_landed_second_parent": zTip,
+		}, nil
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-x")
+	if err == nil {
+		t.Fatalf("a binding at a merge whose unrecognized-format subject names ANOTHER bead must be discarded on ownership, got %+v", landed)
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("expected a fail-closed refusal, got: %v", err)
+	}
+}
+
+// TestLandedBindingMetadataFnDefaultPinned is the spec 125 F3-2 pointer
+// pin: the PRE-EXISTING lifecycle read seam landedBindingMetadataFn
+// defaults to the real bead.GetMetadata (captured by TestMain before the
+// hermetic stub is installed), so the binding-read gate provably exercises
+// the real bd read path and cannot be silently rewired off it.
+func TestLandedBindingMetadataFnDefaultPinned(t *testing.T) {
+	if landedBindingMetadataFnDefault == nil {
+		t.Fatal("TestMain did not capture the production default")
+	}
+	if reflect.ValueOf(landedBindingMetadataFnDefault).Pointer() != reflect.ValueOf(bead.GetMetadata).Pointer() {
+		t.Fatal("landedBindingMetadataFn must default to bead.GetMetadata (spec 125 F3-2 anti-drift: the landed-binding read gate must exercise the real bd read path)")
 	}
 }
