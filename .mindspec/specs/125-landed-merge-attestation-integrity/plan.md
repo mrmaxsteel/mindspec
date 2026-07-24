@@ -197,25 +197,41 @@ choices" paragraph), resolved:**
   that goes loud under the structural classifier and silently passes
   under a count classifier.
 - **Bead-anonymous-subject reconciliation (R1 residual vs R5
-  ownership wording), stated for the plan gate.** R5 trusts a cached
-  binding "ONLY when it resolves to a real merge that BOTH
-  exact-matches AND whose subject names THIS bead"; R1's residual
-  simultaneously guarantees "a merge with a wholly-custom subject
-  naming NO bead is READ-identifiable only via a binding written at
-  complete-time". These compose in Bead 3 via TWO candidate-generation
-  entry points: the SUBJECT-SCAN path (names THIS bead, either subject
-  form) AND the BINDING-SHA path (the binding's recorded merge-SHA
-  admitted DIRECTLY as a candidate — G1-F2 — because an anonymous-
-  subject merge is UNFINDABLE by a subject-scan). The binding-SHA
-  candidate is git-corroborated (real two-parent first-parent merge,
-  exact second parent) and its ownership passes when the merge subject
-  names THIS bead OR genuinely names NO bead; it is DISCARDED when the
-  subject names a DIFFERENT bead — including a `bead/…` token in an
-  unrecognized format, which the parser reports as present-but-not-
-  this-bead rather than no-bead (G2-2). Bead 3 implements and documents
-  exactly this at the binding leg, and pins BOTH the anonymous-accept
-  and the different-bead-format-reject directions with dedicated
-  tests.
+  ownership wording), stated for the plan gate — REVISED by the codex
+  final-review G-1 BLOCKING fix.** R5 trusts a cached binding "ONLY
+  when it resolves to a real merge that BOTH exact-matches AND whose
+  subject names THIS bead". R1's residual notes that a merge with a
+  wholly-custom subject naming NO bead has no surviving subject-side
+  ownership signal. The ORIGINAL plan proposed a second BINDING-SHA
+  candidate-generation entry point admitting such an anonymous merge
+  directly on its binding; **that path is REMOVED as a forgery hole
+  (G-1).** Git-corroborating a binding proves only that the merge is
+  REAL with a given exact second parent — NOT that the merge is THIS
+  bead's — so admitting an anonymous merge on the binding alone makes
+  the agent-writable binding an independent OWNERSHIP authority: a
+  METADATA-forge (EASIER than a commit-forge, so BELOW the documented
+  git-history threat boundary) on a never-landed bead X, pointing at any
+  real anonymous merge, would make `FindLandedMerge(X)` positively
+  identify a merge that isn't X's — an unsafe false-positive.
+  Therefore the AUTOMATIC path has exactly ONE candidate-generation
+  entry point: the SUBJECT-SCAN (the merge's subject NAMES this bead,
+  either subject form, full branch-name equality). The binding stays an
+  ownership CACHE **only** for a candidate whose subject already names
+  THIS bead (this-bead only — no longer this-bead-OR-no-bead); it is
+  DISCARDED when the subject names a DIFFERENT bead, including a `bead/…`
+  token in an unrecognized format (G2-2). Because mindspec's OWN merges
+  ALWAYS name the bead (both `MergeInto`'s `Merge <branch>` and git's
+  conflict-recovery default `Merge branch 'bead/X' into …` carry the
+  branch name), the anonymous-subject case arises only from a
+  hand-crafted operator merge with a wholly-custom message — rare, and
+  recovered ONLY through the EXPLICIT, operator-vouched, AUDITED
+  `mindspec reattest` (Bead 4), never a binding-alone automatic
+  identification. So R1's residual reconciles as FAIL-CLOSED on the
+  automatic path (safe refusal → the audited explicit surface), not a
+  binding-alone read. Bead 3 pins the anonymous-subject-REFUSES
+  direction AND the forged-binding-at-a-real-anonymous-merge exploit
+  (RED against the removed impl), and keeps the different-bead-format
+  reject green.
 - **Audit-record keys (constrained by AC-7's auditability
   assertion):** flat keys in the existing bd metadata map, written in
   the SAME `MergeMetadata` call as the binding —
@@ -622,37 +638,38 @@ ambiguity, oldest-anchored on same-second-parent re-merges.
    only, never a git operand, and is `termsafe.Escape`-d in any
    refusal message (the G2-1 discipline already at `:331`).
 2. Rewrite the `FindLandedMerge` identity loop (`:257-345`):
-   - Candidate generation, TWO admissible entry points: (a) the
-     SUBJECT-SCAN path — two-parent first-parent merges on `spec`
-     whose subject names THIS bead (ownership), via the parser over
-     the existing `firstParentMergesFn` scan; and (b) the
-     BINDING-SHA path (plan-gate G1-F2) — when a landed-binding
-     records a `mindspec_landed_merge_sha`, that SHA is admitted as a
-     candidate DIRECTLY (git-corroborated: it must resolve to a real
-     two-parent first-parent merge on `spec` whose EXACT second parent
-     matches the binding's `mindspec_landed_second_parent`), WITHOUT
-     requiring a subject match. Path (b) is what identifies the R1
-     wholly-custom-subject / anonymous-subject merge — a merge whose
-     subject names NO bead is UNFINDABLE by the subject-scan and is
-     read-identifiable ONLY through its complete-time binding, exactly
-     as R1's residual states. Bead 1's `ExactSecondParentMerges` is
-     reused for topology corroboration on both paths.
+   - Candidate generation, ONE admissible entry point (REVISED by the
+     codex final-review G-1 BLOCKING fix): the SUBJECT-SCAN path —
+     two-parent first-parent merges on `spec` whose subject NAMES THIS
+     bead (ownership, either subject form), via the parser over the
+     existing `firstParentMergesFn` scan. The originally-planned
+     BINDING-SHA anonymous-subject entry point (G1-F2) is **REMOVED**:
+     git-corroborating a binding proves only that the merge is REAL
+     with a given exact second parent — NOT that it is THIS bead's — so
+     a binding-alone entry point makes the agent-writable binding an
+     independent OWNERSHIP authority, and a METADATA-forge (below the
+     git-history threat boundary) on a never-landed bead pointing at any
+     real anonymous merge would be identified (an unsafe false-positive).
+     A merge whose subject names NO bead is therefore NOT auto-
+     identifiable and FAILS CLOSED; its recovery is the EXPLICIT audited
+     `mindspec reattest` (Bead 4). Bead 1's `ExactSecondParentMerges` is
+     reused for topology corroboration.
    - Corroborating data are EXACT-EQUALITY only: surviving branch tip
      == second parent; `reviewed_head_sha` == second parent; binding
      resolving to a REAL exact merge. The current ancestor-TOLERANT
      confirmation legs (`:285-294`, `:301-307`, `:323-333`) are
      REMOVED — an ancestor-only-consistent candidate is never a
      positive identification (AC-2b/AC-2c).
-   - Ownership of a binding-SHA candidate (path b): its merge's
-     subject must EITHER name THIS bead OR name NO bead at all (the
-     parser's genuine `present == false` state — the complete-time
-     ground-truth write case; documented at the leg). A binding
-     pointing at a merge whose subject names a DIFFERENT bead (parser
-     `present == true`, different name — including the unrecognized-
-     format case per Step 1's conservative rule) is DISCARDED on the
-     ownership check and identification refuses (AC-2d); one pointing
-     at no real exact merge is discarded (forgery, AC-2c's second
-     half).
+   - The binding is an ownership CACHE over an already-subject-OWNED
+     candidate ONLY (this-bead only — no longer this-bead-OR-no-bead):
+     it confirms a candidate whose subject already names THIS bead. A
+     binding pointing at a merge whose subject names a DIFFERENT bead
+     (parser `present == true`, different name — including the
+     unrecognized-format case per Step 1's conservative rule) never
+     even generates a candidate (AC-2d); one pointing at no real exact
+     merge is discarded (forgery, AC-2c's second half); one pointing at
+     a real ANONYMOUS merge cannot generate a candidate either (G-1
+     fail-closed).
    - Preserve Bead 2's just-landed CleanDivergence/Conflict split
      VERBATIM (plan-gate O1-2): the loop rewrite touches candidate
      GENERATION and corroboration, NOT the revert-leg
@@ -682,19 +699,21 @@ ambiguity, oldest-anchored on same-second-parent re-merges.
    parameter. **AC-2f** — `mindspec-8nhe.1` vs `mindspec-8nhe.12`
    full-name equality, collision fails SAFE. **AC-10** — the
    no-datum `*LandedMergeNoEvidence` guard stays green.
-   **Anonymous-subject ACCEPT direction (plan-gate G1-F2/F2-1):** a
-   merge whose subject names NO bead (a wholly-custom subject) but
-   which carries a valid complete-time binding (`mindspec_landed_
-   merge_sha`/`_second_parent` pointing at that real exact merge) is
-   POSITIVELY identified via the binding-SHA path — pins R1's promise
-   in the ACCEPT direction (all other fixtures use the bead-naming
-   default subject, so a silent tighten-to-reject would otherwise go
-   unnoticed; the failure mode is a safe refuse, but pin the accept).
-   **Different-bead-unrecognized-format REJECT (plan-gate G2-2):** a
-   binding-SHA candidate whose merge subject references `bead/Z` in a
-   format the parser does not fully recognize is DISCARDED on
-   ownership (parser reports present-but-not-this-bead), refuse — never
-   admitted through the names-no-bead exception.
+   **Anonymous-subject REFUSE direction (codex final-review G-1
+   BLOCKING fix — was ACCEPT):** a merge whose subject names NO bead (a
+   wholly-custom subject), EVEN with a valid-looking complete-time
+   binding pointing at that real exact merge, is NOT auto-identified —
+   the automatic path FAILS CLOSED (the binding cannot supply ownership
+   independently). Pinned by `TestFindLandedMerge_AnonymousSubject
+   BindingRefuses` AND the exploit
+   `TestFindLandedMerge_ForgedBindingAtRealAnonymousMergeRefuses` (a
+   forged binding on a NEVER-landed bead pointing at some OTHER work's
+   real anonymous merge → refuse; RED against the removed binding-SHA
+   impl, which identifies the unrelated merge). **Different-bead-
+   unrecognized-format REJECT (plan-gate G2-2):** a merge whose subject
+   references `bead/Z` in a format the parser does not fully recognize
+   nominates `bead/Z` (present-but-not-this-bead), so it never generates
+   a candidate for X even with a corroborating binding — refuse.
 4. NEW `internal/executor/landed_e2e_test.go` (external
    `executor_test` package; imports `internal/lifecycle` TEST-ONLY —
    the production import boundary stands): **AC-1b** — the full R6(a)
