@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -642,6 +643,23 @@ var reviewDisciplineBead3FragmentRows = []fragmentRow{
 	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped default: 6 reviewers"},
 	{ac: "AC-1", desc: "ms-panel-tally ASCII n-1 threshold fragment", surface: "ms-panel-tally", want: "n-1"},
 
+	// AC-1 (panel F1 MINOR) — the two DEFAULT-lens-relabel sentences pinned
+	// as fragments, so a LABEL-ONLY deletion REDs here even before the
+	// structural six-row-table check below notices the table lost its label.
+	{ac: "AC-1", desc: "ms-panel-run slot-lens table DEFAULT label", surface: "ms-panel-run", want: "DEFAULT lens assignment for the shipped 6-slot mix"},
+	{ac: "AC-1", desc: "ms-panel-run slot-lens table scaled-mix assignment rule", surface: "ms-panel-run", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
+	{ac: "AC-1", desc: "ms-spec-final-review lens table DEFAULT label", surface: "ms-spec-final-review", want: "DEFAULT lens assignment for the shipped mix"},
+	{ac: "AC-1", desc: "ms-spec-final-review lens table scaled-mix assignment rule", surface: "ms-spec-final-review", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
+
+	// AC-1 (panel S2) — the swept ms-bead-cycle / ms-spec-autopilot residuals'
+	// REPLACEMENT wording pinned positively; the sweep patterns below RED the
+	// old fixed-six forms if restored, and these rows RED if the replacement
+	// text silently disappears.
+	{ac: "AC-1", desc: "ms-bead-cycle Sequence diagram derives fan-out from the configured mix", surface: "ms-bead-cycle", want: "then the configured reviewers fan out"},
+	{ac: "AC-1", desc: "ms-bead-cycle family-asymmetry headline is topology-neutral", surface: "ms-bead-cycle", want: "every Claude-family slot APPROVEs"},
+	{ac: "AC-1", desc: "ms-spec-autopilot parallelism note derives from the configured mix", surface: "ms-spec-autopilot", want: "across the configured panel reviewers + the impl subagent"},
+	{ac: "AC-1", desc: "ms-spec-autopilot report template uses <N>/<N>, not a literal tally", surface: "ms-spec-autopilot", want: "<N>/<N> APPROVE"},
+
 	// AC-6 (R4b/c) — document-gate lens defaults table (the plugin-skill
 	// half; the lifecycle-literal half is reviewDisciplineLiteralFragmentRows
 	// below).
@@ -924,9 +942,12 @@ func TestReviewDiscipline_AC2LadderExampleNegativeModelKey(t *testing.T) {
 // DEFAULT-labelled lens tables, and the fenced ladder example.
 // ---------------------------------------------------------------------------
 
-// acOneSweepPatterns is the pattern set the plan mandates, each entry named
-// for clear failure messages. Deliberately separate from acTenModelRE et al
-// above — a different AC, a different (much smaller) allowlist.
+// acOneSweepPatterns is the pattern set the plan mandates PLUS the six
+// classes the round-1 panel (F1 + codex G1) proved the original 11 miss —
+// each entry named for clear failure messages. Deliberately separate from
+// acTenModelRE et al above — a different AC, a different (much smaller)
+// allowlist. Every class has a categorical negative-inject fixture in
+// TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits proving it REDs.
 var acOneSweepPatterns = []struct {
 	name string
 	re   *regexp.Regexp
@@ -942,6 +963,26 @@ var acOneSweepPatterns = []struct {
 	{"R1-R3 / R1–R3 family partition (hyphen or en-dash)", regexp.MustCompile(`R1[-–]R3`)},
 	{"R4-R6 / R4–R6 family partition (hyphen or en-dash)", regexp.MustCompile(`R4[-–]R6`)},
 	{"/3 claude|codex hard-coded family denominator", regexp.MustCompile(`/3\s*(?:claude|codex)`)},
+
+	// --- panel round-1 additions (F1 + G1): paired-count wording ---
+	{"3+3 literal paired family count", regexp.MustCompile(`3\s*\+\s*3`)},
+	{"three per family", regexp.MustCompile(`(?i)three\s+per\s+family`)},
+	{"three Agent calls (paired-count launch wording, old ms-panel-run:8 form)", regexp.MustCompile(`(?i)three\s+agent\s+calls`)},
+	{"three claude(s)/codex spelled family count", regexp.MustCompile(`(?i)\bthree\s+(?:claudes?|codex)\b`)},
+	// The digit twin of the previous class. The canonical shipped-default
+	// sentences write the families BACKTICKED ("3 `claude` + 3 `codex`"),
+	// which this pattern deliberately does not match — bare "3 Claude
+	// APPROVE"-style topology wording does.
+	{"3 claude(s)/codex digit family count (unbackticked)", regexp.MustCompile(`(?i)\b3\s+(?:claudes?|codex)\b`)},
+
+	// --- panel round-1 additions (F1 + G1): fixed-denominator verdict math ---
+	{"<d>/6 verdict fraction (5/6 form, old ms-panel-tally:127 form)", regexp.MustCompile(`\b[0-9]+\s*/\s*6\b`)},
+	{"<d>-of-6 verdict fraction (5-of-6 form)", regexp.MustCompile(`(?i)\b[0-9]+-of-6\b`)},
+
+	// --- panel round-1 additions (F1 + G1): hard-coded registration + fan-out ---
+	{"expected_reviewers hard-coded digit (old ms-spec-final-review:40 form)", regexp.MustCompile(`(?i)expected_reviewers\W{0,4}[0-9]`)},
+	{"fan out 6/six", regexp.MustCompile(`(?i)fan[\s-]*out\s+(?:6|six)\b`)},
+	{"6-slot / six-slot / six slot", regexp.MustCompile(`(?i)\b(?:6|six)[- ]slot`)},
 }
 
 // acOneScanContent runs every AC-1 sweep pattern over one surface's bytes,
@@ -965,33 +1006,126 @@ func acOneScanSurfaces(surfaces map[string]string) []acTenHit {
 	return hits
 }
 
-// acOneSurfaces is the AC-1 sweep's OWN surface set: the three R1 skills
-// (ms-panel-run, ms-panel-tally, ms-spec-final-review) PLUS the claude.go
-// CLAUDE.md skills-table template (claudeMDManagedBlock) — per plan.md's
-// "the same pattern set ALSO runs over the in-package CLAUDE.md skills-table
-// template" instruction. Deliberately NARROWER than ac10Surfaces() (AC-10 is
-// the broad backstop over every embedded skill plus all four lifecycle
-// literals; AC-1 targets exactly the surfaces the R1 rewrite touched). Built
-// fresh per call so callers may mutate the returned map freely.
-func acOneSurfaces() map[string]string {
-	skills := pluginmindspec.SkillFiles()
-	return map[string]string{
-		"ms-panel-run":                   skills["ms-panel-run"],
-		"ms-panel-tally":                 skills["ms-panel-tally"],
-		"ms-spec-final-review":           skills["ms-spec-final-review"],
-		"claude.go:claudeMDManagedBlock": claudeMDManagedBlock,
+// ---------------------------------------------------------------------------
+// AC-1 — STRUCTURAL six-row slot-table detection (panel F1 + G1): a six-row
+// R1..R6 / F1..F6 (any single-letter prefix) lens/slot table is itself a
+// fixed-six topology statement that no substring pattern above can see —
+// the rows individually look innocent. Such a table is a violation UNLESS
+// its introducing prose carries BOTH the exact DEFAULT label and the
+// scaled-mix assignment rule (the ms-panel-run:§ Slot lens defaults and
+// ms-spec-final-review step-4 forms), which is what turns a fixed
+// enumeration into a labelled shipped-default the operator derives from.
+// ---------------------------------------------------------------------------
+
+// acOneSlotTableRowRE matches one markdown table row whose FIRST cell is a
+// single-uppercase-letter slot id (R1, F6, S3, ...), leading indent allowed
+// (ms-spec-final-review's table sits inside a numbered list item).
+var acOneSlotTableRowRE = regexp.MustCompile(`^[ \t]*\|\s*([A-Z])([0-9]+)\s*\|`)
+
+// The two fragments a six-row slot table's introducing prose MUST carry
+// (within acOneTableContextWindow lines above the first slot row) to be the
+// labelled shipped default rather than a residual fixed-six instruction.
+// These are verbatim from the two real labelled tables; the Bead3 fragment
+// rows pin the full sentences so a label-only rewording REDs there too.
+const (
+	acOneTableDefaultLabelFragment  = "DEFAULT lens assignment for the shipped"
+	acOneTableScaledMixRuleFragment = "assign each configured slot a distinct lens, reusing or splitting this default set"
+	acOneTableContextWindow         = 12
+)
+
+// acOneSixRowTableProblems returns one problem per contiguous slot-row table
+// in content that enumerates a complete <letter>1..<letter>6 row set without
+// the DEFAULT label + scaled-mix rule in the window above it.
+func acOneSixRowTableProblems(surface, content string) []string {
+	lines := strings.Split(content, "\n")
+	var problems []string
+	i := 0
+	for i < len(lines) {
+		if acOneSlotTableRowRE.FindStringSubmatch(lines[i]) == nil {
+			i++
+			continue
+		}
+		start := i
+		seen := map[string]map[int]bool{}
+		for i < len(lines) {
+			m := acOneSlotTableRowRE.FindStringSubmatch(lines[i])
+			if m == nil {
+				break
+			}
+			n, err := strconv.Atoi(m[2])
+			if err != nil {
+				break // unreachable given the [0-9]+ group; defensive
+			}
+			if seen[m[1]] == nil {
+				seen[m[1]] = map[int]bool{}
+			}
+			seen[m[1]][n] = true
+			i++
+		}
+		for letter, nums := range seen {
+			complete := true
+			for k := 1; k <= 6; k++ {
+				if !nums[k] {
+					complete = false
+					break
+				}
+			}
+			if !complete {
+				continue
+			}
+			ctxStart := start - acOneTableContextWindow
+			if ctxStart < 0 {
+				ctxStart = 0
+			}
+			ctx := strings.Join(lines[ctxStart:start], "\n")
+			if !strings.Contains(ctx, acOneTableDefaultLabelFragment) || !strings.Contains(ctx, acOneTableScaledMixRuleFragment) {
+				problems = append(problems, fmt.Sprintf(
+					"AC-1 structural sweep: %s carries a six-row %s1..%s6 slot table (first row at line %d) without the DEFAULT label (%q) plus the scaled-mix assignment rule (%q) in the %d lines above it — a fixed six-slot enumeration must be the labelled shipped default the operator derives a scaled mix from, never a bare execution instruction",
+					surface, letter, letter, start+1, acOneTableDefaultLabelFragment, acOneTableScaledMixRuleFragment, acOneTableContextWindow))
+			}
+		}
 	}
+	return problems
 }
 
-// reviewDisciplineAC1Allowlist is the explicit allowlist: exactly the ONE
-// labelled shipped-DEFAULT sentence per surface that carries it. (The
-// DEFAULT-labelled lens tables and the fenced ladder example currently
-// produce ZERO AC-1 sweep hits — verified by
-// TestReviewDiscipline_AC1SweepGuardZeroHitsOutsideAllowlist's own
-// precondition checks below — because they were deliberately worded to
-// avoid every sweep pattern; a future edit that needs a digit/enumeration in
-// one of those sections should add its OWN locator-keyed entry here rather
-// than loosen a pattern.)
+// acOneStructuralTableProblems runs the six-row-table detection over every
+// surface — the structural half the [CI] guard adds to the pattern half.
+func acOneStructuralTableProblems(surfaces map[string]string) []string {
+	var problems []string
+	for surface, content := range surfaces {
+		problems = append(problems, acOneSixRowTableProblems(surface, content)...)
+	}
+	return problems
+}
+
+// acOneSurfaces is the AC-1 sweep's surface set: EVERY embedded plugin skill
+// plus all four lifecycle-literal VALUES (ac10Surfaces(), the same broad
+// backstop AC-10 scans) plus the claude.go CLAUDE.md skills-table template
+// (claudeMDManagedBlock). The original Bead-3 cut scanned only the three R1
+// skills + the template; the round-1 panel (S2) proved that under-complete —
+// residual fixed-six instructions were LIVE in ms-bead-cycle ("then 6
+// reviewers fan out") and ms-spec-autopilot ("across the 6 reviewers",
+// "6/6 APPROVE") while CI stayed green, violating R1's single-authority
+// AC-1 clause. A residual fixed-six in ANY shipped skill is a violation, so
+// the sweep now covers them all. Built fresh per call so callers may mutate
+// the returned map freely.
+func acOneSurfaces() map[string]string {
+	surfaces := ac10Surfaces()
+	surfaces["claude.go:claudeMDManagedBlock"] = claudeMDManagedBlock
+	return surfaces
+}
+
+// reviewDisciplineAC1Allowlist is the explicit allowlist, enumerated over
+// the FULL expanded surface set + pattern set: the ONE labelled
+// shipped-DEFAULT sentence per surface that carries it, plus the ONE
+// DEFAULT-label token the "6-slot" pattern class itself matches inside
+// ms-panel-run's labelled lens-table heading. Every other legitimate
+// "6"/"six" mention on the expanded surfaces (the DEFAULT-labelled lens
+// tables' prose, the fenced ladder example's `count:` values, ms-panel-run's
+// "never a literal six"/"never a literal 4-6 range" anti-fixed-six clauses,
+// ms-bead-impl's "6." list ordinal) produces ZERO sweep hits by wording —
+// a future edit that needs a digit/enumeration in one of those sections
+// should add its OWN locator-keyed entry here rather than loosen a pattern.
 var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
 	{
 		surface: "ms-panel-run",
@@ -1006,6 +1140,27 @@ var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
 		matched: "6 reviewers",
 		count:   1,
 		reason:  "the ONE canonical labelled shipped-default sentence (AC-1a), Step 1",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "(bead-target panels)",
+		matched: "6-slot",
+		count:   1,
+		reason:  "the DEFAULT-labelled lens-table heading sentence (§ Slot lens defaults) — the exact label + scaled-mix rule the structural six-row-table check REQUIRES; pinned positively by the Bead3 fragment rows so a label-only deletion REDs",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "then launch one reviewer per configured slot",
+		matched: "3 Claude",
+		count:   1,
+		reason:  "the frontmatter description's labelled shipped-default parenthetical (\"shipped default: 3 Claude Agents + 3 Codex CLI sessions\") — the AC-1a labelled-default form, not an execution instruction; frontmatter cannot carry backticks the way the Inputs sentence does",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "then launch one reviewer per configured slot",
+		matched: "3 Codex",
+		count:   1,
+		reason:  "second token of the same labelled shipped-default frontmatter parenthetical",
 	},
 }
 
@@ -1053,15 +1208,20 @@ func acOneValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[st
 	return problems
 }
 
-// TestReviewDiscipline_AC1SweepGuard is the [CI] guard: every configured
-// occurrence of a fixed-six-topology pattern across ms-panel-run,
-// ms-panel-tally, ms-spec-final-review, and the claude.go CLAUDE.md template
-// must be accounted for by reviewDisciplineAC1Allowlist — any residual
-// execution instruction still hard-coding the topology REDs here.
+// TestReviewDiscipline_AC1SweepGuard is the [CI] guard: every occurrence of
+// a fixed-six-topology pattern across ALL embedded plugin skills, all four
+// lifecycle literals, and the claude.go CLAUDE.md template must be accounted
+// for by reviewDisciplineAC1Allowlist, AND no surface may carry an
+// unlabelled six-row slot table (the structural half) — any residual
+// execution instruction still hard-coding the topology REDs here, in any
+// shipped skill, not just the three the R1 rewrite touched (panel S2).
 func TestReviewDiscipline_AC1SweepGuard(t *testing.T) {
 	surfaces := acOneSurfaces()
 	hits := acOneScanSurfaces(surfaces)
 	for _, problem := range acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces) {
+		t.Error(problem)
+	}
+	for _, problem := range acOneStructuralTableProblems(surfaces) {
 		t.Error(problem)
 	}
 }
@@ -1149,6 +1309,26 @@ func TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits(t *testing.T) {
 		{"codex-slot-enum", "for each of R4, R5, R6"},
 		{"claude-range-hyphen", "split R1-R3 claude vs R4-R6 codex"},
 		{"family-denominator", "family split <claude>/3 claude"},
+
+		// Panel round-1 additions (F1 + G1) — one categorical negative per
+		// newly added pattern class; before those classes existed, every one
+		// of these restored forms stayed GREEN.
+		{"three-agent-calls-and-three-codex", "launch three Agent calls (Claude) and three codex CLI sessions"},
+		{"three-per-family", "keep the mix at three per family"},
+		{"3-plus-3", "the classic 3+3 family split"},
+		{"three-claudes-spelled", "when all three Claudes APPROVE"},
+		{"3-claude-digit", "3 Claude APPROVE, 1+ Codex REQUEST_CHANGES"},
+		{"3-codex-digit", "3 Codex APPROVE, 1+ Claude REQUEST_CHANGES"},
+		{"five-slash-six-fraction", "pass requires 5/6 for the default panel"},
+		{"six-slash-six-fraction", "round K: 6/6 APPROVE"},
+		{"five-of-six-hyphenated", "a 5-of-6 supermajority approves"},
+		{"expected-reviewers-digit", "set expected_reviewers 6 before launch"},
+		{"expected-reviewers-json-digit", `"expected_reviewers": 6`},
+		{"fan-out-6", "then fan out 6 and wait for verdicts"},
+		{"fan-out-six", "then fan out six and wait for verdicts"},
+		{"6-slot-unlabelled", "reuse the 6-slot defaults"},
+		{"six-slot-hyphenated", "the six-slot lens table"},
+		{"six-slot-spaced", "use the six slot assignments"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := map[string]string{"fixture-surface": tc.inject}
@@ -1158,6 +1338,160 @@ func TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits(t *testing.T) {
 			}
 			if problems := acOneValidate(hits, nil, fixture); len(problems) == 0 {
 				t.Fatalf("expected the AC-1 sweep to RED on %q, but it found no problems", tc.inject)
+			}
+		})
+	}
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals proves the
+// EXACT residual fixed-six instructions the round-1 panel (S2) found LIVE in
+// the two orchestrator skills RED if restored — each mutation applied to a
+// FIXTURE copy of the real surface (never the shipped file), restoring the
+// pre-sweep wording verbatim.
+func TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		surface  string
+		swept    string // the replacement wording now shipped (fixture precondition)
+		restored string // the pre-sweep fixed-six wording
+	}{
+		{
+			name:     "ms-bead-cycle sequence-diagram fan-out",
+			surface:  "ms-bead-cycle",
+			swept:    "then the configured reviewers fan out",
+			restored: "then 6 reviewers fan out",
+		},
+		{
+			name:     "ms-bead-cycle family-asymmetry headline",
+			surface:  "ms-bead-cycle",
+			swept:    "every Claude-family slot APPROVEs",
+			restored: "all three Claudes APPROVE",
+		},
+		{
+			name:     "ms-spec-autopilot parallelism note",
+			surface:  "ms-spec-autopilot",
+			swept:    "across the configured panel reviewers",
+			restored: "across the 6 reviewers",
+		},
+		{
+			name:     "ms-spec-autopilot 6/6 report tally",
+			surface:  "ms-spec-autopilot",
+			swept:    "<N>/<N> APPROVE",
+			restored: "6/6 APPROVE",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			surfaces := acOneSurfaces()
+			original, ok := surfaces[tc.surface]
+			if !ok {
+				t.Fatalf("fixture assumption broken: %s missing from acOneSurfaces()", tc.surface)
+			}
+			if !strings.Contains(original, tc.swept) {
+				t.Fatalf("fixture assumption broken: %s no longer carries the swept replacement wording %q", tc.surface, tc.swept)
+			}
+			mutated := strings.Replace(original, tc.swept, tc.restored, 1)
+			if mutated == original {
+				t.Fatal("fixture assumption broken: restore substitution had no effect")
+			}
+			surfaces[tc.surface] = mutated
+
+			hits := acOneScanSurfaces(surfaces)
+			problems := acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces)
+			if len(problems) == 0 {
+				t.Fatalf("expected restoring %q in %s to RED the AC-1 sweep guard", tc.restored, tc.surface)
+			}
+			found := false
+			for _, p := range problems {
+				if strings.Contains(p, tc.surface) && strings.Contains(p, "unallowlisted") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected an unallowlisted-hit problem naming %s; got: %v", tc.surface, problems)
+			}
+		})
+	}
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable proves the
+// structural half REDs on a bare six-row slot table (R1..R6 and F1..F6
+// forms) injected into a synthetic fixture surface, stays GREEN when the
+// SAME table carries the exact DEFAULT label + scaled-mix assignment rule,
+// and does not over-reach onto a five-row table.
+func TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable(t *testing.T) {
+	mkTable := func(letter string, n int) string {
+		var b strings.Builder
+		b.WriteString("| Slot | Lens |\n|:-----|:-----|\n")
+		for i := 1; i <= n; i++ {
+			fmt.Fprintf(&b, "| %s%d | lens %d |\n", letter, i, i)
+		}
+		return b.String()
+	}
+
+	t.Run("bare R1..R6 REDs", func(t *testing.T) {
+		content := "Use the slot assignments below.\n\n" + mkTable("R", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) == 0 {
+			t.Fatal("expected a bare six-row R1..R6 table to RED the structural sweep")
+		}
+	})
+	t.Run("bare F1..F6 REDs", func(t *testing.T) {
+		content := "Final-review lenses:\n\n" + mkTable("F", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) == 0 {
+			t.Fatal("expected a bare six-row F1..F6 table to RED the structural sweep")
+		}
+	})
+	t.Run("labelled DEFAULT table stays GREEN", func(t *testing.T) {
+		content := "The table below is the " + acOneTableDefaultLabelFragment + " mix. For a scaled mix, " +
+			acOneTableScaledMixRuleFragment + ".\n\n" + mkTable("R", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) != 0 {
+			t.Fatalf("expected the labelled DEFAULT six-row table to stay GREEN; got: %v", problems)
+		}
+	})
+	t.Run("five-row table stays GREEN (no over-reach)", func(t *testing.T) {
+		content := "Partial enumeration:\n\n" + mkTable("R", 5)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) != 0 {
+			t.Fatalf("expected a five-row table to stay GREEN; got: %v", problems)
+		}
+	})
+	t.Run("label alone without the scaled-mix rule REDs", func(t *testing.T) {
+		content := "The table below is the " + acOneTableDefaultLabelFragment + " mix.\n\n" + mkTable("R", 6)
+		if problems := acOneSixRowTableProblems("fixture-surface", content); len(problems) == 0 {
+			t.Fatal("expected a DEFAULT label without the scaled-mix assignment rule to RED the structural sweep")
+		}
+	})
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped proves the
+// structural half bites on the REAL surfaces: stripping the DEFAULT-label
+// sentence off either shipped lens table (a fixture copy, never the real
+// file) leaves a bare six-row table that REDs — a label-only deletion cannot
+// survive even if every substring pattern stays quiet.
+func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) {
+	for _, tc := range []struct {
+		surface string
+		label   string
+	}{
+		{"ms-panel-run", "DEFAULT lens assignment for the shipped 6-slot mix"},
+		{"ms-spec-final-review", "DEFAULT lens assignment for the shipped mix"},
+	} {
+		t.Run(tc.surface, func(t *testing.T) {
+			surfaces := acOneSurfaces()
+			original, ok := surfaces[tc.surface]
+			if !ok {
+				t.Fatalf("fixture assumption broken: %s missing from acOneSurfaces()", tc.surface)
+			}
+			if !strings.Contains(original, tc.label) {
+				t.Fatalf("fixture assumption broken: %s no longer carries the DEFAULT label %q", tc.surface, tc.label)
+			}
+			if problems := acOneSixRowTableProblems(tc.surface, original); len(problems) != 0 {
+				t.Fatalf("precondition broken: the labelled real %s table should be structurally GREEN; got: %v", tc.surface, problems)
+			}
+			mutated := strings.Replace(original, tc.label, "lens assignment", 1)
+			if mutated == original {
+				t.Fatal("fixture assumption broken: label strip had no effect")
+			}
+			if problems := acOneSixRowTableProblems(tc.surface, mutated); len(problems) == 0 {
+				t.Fatalf("expected stripping the DEFAULT label from %s's lens table to RED the structural sweep", tc.surface)
 			}
 		})
 	}
