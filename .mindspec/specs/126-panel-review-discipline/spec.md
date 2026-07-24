@@ -143,8 +143,8 @@ and an upgraded install both receive every change in this spec (AC-16).
   render surface, and no new core-owned token or grammar — verified against
   `internal/redact/` (redact.go + falsifiability/mutation/golden-corpus
   tests untouched).
-- **NOT impacted**: `execution`, `context-system`; `internal/panel` decision
-  logic; the panel.json/verdict schema; `bd`.
+Not impacted (no domain edits): `execution`, `context-system`; `internal/panel`
+decision logic; the panel.json/verdict schema; `bd`.
 
 ## ADR Touchpoints
 
