@@ -27,7 +27,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	pluginmindspec "github.com/mrmaxsteel/mindspec/plugins/mindspec"
+	"gopkg.in/yaml.v3"
 )
 
 // ---------------------------------------------------------------------------
@@ -608,5 +610,555 @@ func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected the unused-entry problem to name surface=ms-bead-fix matched=spec-999; got: %v", problems)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bead 3 (mindspec-xurf.3) appends below: AC-1 (one authoritative panel-size
+// story, incl. the NEGATIVE structural fixed-six sweep guard), AC-2 (the
+// panel.gates ladder example, structural — parsed, not grepped), AC-6
+// (lifecycle-literal + document-gate lens table completeness), AC-7
+// (verbatim-AC BRIEF replaces the summarise-only guidance), and the two
+// literal AC-13 citation rows completing the seven-surface set. Reuses
+// acTenHit / acTenAllowEntry (generic (surface, line, matched-text, count)
+// shapes) and acTenLineOf / acTenResolveLocator (generic scan/locator
+// helpers) from Bead 1's AC-10 section above; does NOT reuse acTenValidate
+// itself (its problem messages are hardcoded "AC-10 ..." — reusing it here
+// would mislabel AC-1 sweep failures as AC-10 scan failures), so this
+// section defines its own acOneValidate with AC-1-flavored messages instead.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// AC-1 (embedded-fragment half) / AC-6 (plugin-skill document-gate lens
+// table) / AC-7 (verbatim-AC BRIEF) — plugin-skill fragment rows.
+// ---------------------------------------------------------------------------
+
+var reviewDisciplineBead3FragmentRows = []fragmentRow{
+	// AC-1 (R1a) — the shipped default stated ONCE in canonical form, per
+	// surface, plus the ASCII "n-1" fragment (the pre-existing text only
+	// ever used the unicode "N − 1"/"N−1" forms).
+	{ac: "AC-1", desc: "ms-panel-run canonical shipped-default sentence", surface: "ms-panel-run", want: "shipped default: 6 reviewers"},
+	{ac: "AC-1", desc: "ms-panel-run ASCII n-1 threshold fragment", surface: "ms-panel-run", want: "n-1"},
+	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped default: 6 reviewers"},
+	{ac: "AC-1", desc: "ms-panel-tally ASCII n-1 threshold fragment", surface: "ms-panel-tally", want: "n-1"},
+
+	// AC-6 (R4b/c) — document-gate lens defaults table (the plugin-skill
+	// half; the lifecycle-literal half is reviewDisciplineLiteralFragmentRows
+	// below).
+	{ac: "AC-6", desc: "ms-panel-run document-gate lens table heading", surface: "ms-panel-run", want: "Document-gate lens defaults"},
+	{ac: "AC-6", desc: "ms-panel-run document-gate lens: falsifiability of ACs", surface: "ms-panel-run", want: "Falsifiability of ACs"},
+
+	// AC-7 (R5) — BRIEF verbatim-AC rule replaces the old summarise-only
+	// guidance; the AC-provenance reviewer duty is named.
+	{ac: "AC-7", desc: "ms-panel-run BRIEF verbatim-AC rule: additive, never a replacement", surface: "ms-panel-run", want: "additive, never a replacement"},
+	{ac: "AC-7", desc: "ms-panel-run no longer tells the skill to merely summarise the plan", surface: "ms-panel-run", want: "Don't paste the plan; summarise it.", negate: true},
+	{ac: "AC-7", desc: "ms-panel-run names the AC-provenance reviewer duty", surface: "ms-panel-run", want: "AC-provenance duty"},
+}
+
+// TestReviewDiscipline_Bead3Fragments is Bead 3's table-driven [CI] guard,
+// same shape as TestReviewDiscipline_Fragments above but scoped to this
+// bead's own rows — kept as a separate slice/function for per-bead
+// traceability (AC-12), not because the underlying mechanism differs.
+func TestReviewDiscipline_Bead3Fragments(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	for _, row := range reviewDisciplineBead3FragmentRows {
+		row := row
+		t.Run(row.ac+"/"+row.desc, func(t *testing.T) {
+			content, ok := skills[row.surface]
+			if !ok {
+				t.Fatalf("pluginmindspec.SkillFiles() has no %q entry", row.surface)
+			}
+			has := strings.Contains(content, row.want)
+			switch {
+			case row.negate && has:
+				t.Errorf("%s: %s must NOT contain %q, but it does", row.surface, row.ac, row.want)
+			case !row.negate && !has:
+				t.Errorf("%s: %s is missing the required fragment %q", row.surface, row.ac, row.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC-6 (lifecycle-literal half, completeness) / AC-13 (the two literal
+// citation rows completing the seven-surface set) — lifecycleSkillFiles()
+// fragment rows.
+//
+// The PRIMARY RED-on-revert pin for these two literals' Step-1 edits is
+// Bead 2's own internal/setup/lifecycle_gate_step_test.go (a sibling file,
+// per plan.md's W1-parallelism note). These rows are this bead's OWNERSHIP
+// of AC-6/AC-13 completing the full seven-surface assertion (plan.md's
+// Provenance table) — intentionally redundant with Bead 2's self-pin, not a
+// substitute for it.
+// ---------------------------------------------------------------------------
+
+type literalFragmentRow struct {
+	ac      string
+	desc    string
+	surface string // lifecycleSkillFiles() key
+	want    string
+}
+
+var reviewDisciplineLiteralFragmentRows = []literalFragmentRow{
+	{ac: "AC-6", desc: "ms-spec-approve literal names --gate spec_approve", surface: "ms-spec-approve", want: "--gate spec_approve"},
+	{ac: "AC-6", desc: "ms-plan-approve literal names --gate plan_approve", surface: "ms-plan-approve", want: "--gate plan_approve"},
+	{ac: "AC-13", desc: "ms-spec-approve literal cites ADR-0044", surface: "ms-spec-approve", want: "ADR-0044"},
+	{ac: "AC-13", desc: "ms-plan-approve literal cites ADR-0044", surface: "ms-plan-approve", want: "ADR-0044"},
+}
+
+func TestReviewDiscipline_LiteralFragments(t *testing.T) {
+	literals := lifecycleSkillFiles()
+	for _, row := range reviewDisciplineLiteralFragmentRows {
+		row := row
+		t.Run(row.ac+"/"+row.desc, func(t *testing.T) {
+			content, ok := literals[row.surface]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", row.surface)
+			}
+			if !strings.Contains(content, row.want) {
+				t.Errorf("%s: %s is missing the required fragment %q", row.surface, row.ac, row.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC-1(c)/(d) — the DefaultConfig structural surface and the ADR-0043
+// amendment marker: the other two of the three surfaces AC-1 requires to
+// agree (the embedded-fragment surface is reviewDisciplineBead3FragmentRows
+// above).
+// ---------------------------------------------------------------------------
+
+// TestReviewDiscipline_AC1PanelSizeConsistency is AC-1(c)/(d)'s structural
+// half: config.DefaultConfig().Panel resolves to exactly 6 reviewer slots
+// across exactly the families {claude, codex} (3+3), ApproveThreshold ==
+// "n-1". This is a separate row from the embedded-fragment checks above by
+// construction — reverting a DefaultConfig VALUE reds THIS test without
+// touching a single skill byte, exactly the "any one surface alone reds"
+// property AC-1(c) requires.
+func TestReviewDiscipline_AC1PanelSizeConsistency(t *testing.T) {
+	panel := config.DefaultConfig().Panel
+	if panel.ApproveThreshold != "n-1" {
+		t.Errorf("DefaultConfig().Panel.ApproveThreshold = %q, want \"n-1\"", panel.ApproveThreshold)
+	}
+	families := map[string]int{}
+	total := 0
+	for _, r := range panel.Reviewers {
+		families[r.Family] += r.CountValue()
+		total += r.CountValue()
+	}
+	if total != 6 {
+		t.Errorf("DefaultConfig().Panel.Reviewers sums to %d, want 6", total)
+	}
+	if len(families) != 2 {
+		t.Errorf("DefaultConfig().Panel.Reviewers spans families %v (%d distinct), want exactly {claude, codex}", families, len(families))
+	}
+	if families["claude"] != 3 {
+		t.Errorf("DefaultConfig().Panel claude slots = %d, want 3", families["claude"])
+	}
+	if families["codex"] != 3 {
+		t.Errorf("DefaultConfig().Panel codex slots = %d, want 3", families["codex"])
+	}
+}
+
+// TestReviewDiscipline_ADR0043Amendment is AC-1(c)'s third surface / AC-3's
+// [doc] grep marker: ADR-0043 carries the "## Amendment (Spec 126)" heading
+// distinguishing the shipped 6/n-1 default from the operator-scaled ladder
+// (plan.md's ADR Fitness section names this heading as the AC-1/AC-3 grep
+// marker).
+func TestReviewDiscipline_ADR0043Amendment(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, ".mindspec", "adr", "ADR-0043-panel-disposition-telemetry-store.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	if !strings.Contains(string(data), "## Amendment (Spec 126)") {
+		t.Errorf("ADR-0043 is missing the '## Amendment (Spec 126)' marker heading; got:\n%s", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC-2 — the panel.gates ladder EXAMPLE, structural (parsed, not grepped).
+// ---------------------------------------------------------------------------
+
+// acTwoLadderReviewerEntry decodes one panel.gates.<gate>.reviewers[] entry
+// as a raw key-set (not a typed struct) so the test can see EVERY key
+// present, including one a typed struct would silently drop — a `model:`
+// key is exactly the disallowed case AC-2 exists to catch.
+type acTwoLadderReviewerEntry map[string]interface{}
+
+type acTwoLadderGate struct {
+	Reviewers []acTwoLadderReviewerEntry `yaml:"reviewers"`
+}
+
+type acTwoLadder struct {
+	Panel struct {
+		Gates map[string]acTwoLadderGate `yaml:"gates"`
+	} `yaml:"panel"`
+}
+
+// acTwoExtractFencedYAML finds the FIRST ```yaml fenced block in content and
+// strips its per-line "# " comment-marker prefix — the ladder example ships
+// as a commented, paste-into-config.yaml block — returning the resulting
+// plain YAML text. ok=false if no ```yaml block exists, or if any non-blank
+// line inside it is not commented (a block the operator could not safely
+// uncomment-and-paste as shown).
+func acTwoExtractFencedYAML(content string) (yamlText string, ok bool) {
+	const open = "```yaml"
+	const closeFence = "```"
+	start := strings.Index(content, open)
+	if start == -1 {
+		return "", false
+	}
+	rest := content[start+len(open):]
+	end := strings.Index(rest, closeFence)
+	if end == -1 {
+		return "", false
+	}
+	block := rest[:end]
+	var lines []string
+	for _, l := range strings.Split(block, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if !strings.HasPrefix(l, "#") {
+			return "", false
+		}
+		lines = append(lines, strings.TrimPrefix(l, "# "))
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+// acTwoParseLadder YAML-parses the (already comment-stripped) ladder text.
+func acTwoParseLadder(yamlText string) (acTwoLadder, error) {
+	var ladder acTwoLadder
+	err := yaml.Unmarshal([]byte(yamlText), &ladder)
+	return ladder, err
+}
+
+// acTwoCheckReviewerKeys returns one problem string per reviewer-entry key
+// outside {family, count}, across every gate — the shared assertion both the
+// positive test and the negative model-key fixture drive.
+func acTwoCheckReviewerKeys(ladder acTwoLadder) []string {
+	var problems []string
+	for gateName, g := range ladder.Panel.Gates {
+		for i, r := range g.Reviewers {
+			for k := range r {
+				if k != "family" && k != "count" {
+					problems = append(problems, fmt.Sprintf("panel.gates.%s.reviewers[%d] carries disallowed key %q (only family/count allowed); entry=%v", gateName, i, k, r))
+				}
+			}
+		}
+	}
+	return problems
+}
+
+// TestReviewDiscipline_AC2LadderExampleStructural extracts the real
+// panel.gates ladder example from the embedded ms-panel-run bytes, parses
+// it, and asserts (i) it names gates bead/spec_approve/final_review and (ii)
+// every reviewer entry carries ONLY family/count keys.
+func TestReviewDiscipline_AC2LadderExampleStructural(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	content, ok := skills["ms-panel-run"]
+	if !ok {
+		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-panel-run" entry`)
+	}
+	yamlText, ok := acTwoExtractFencedYAML(content)
+	if !ok {
+		t.Fatal("could not extract a commented ```yaml fenced panel.gates ladder example from ms-panel-run")
+	}
+	ladder, err := acTwoParseLadder(yamlText)
+	if err != nil {
+		t.Fatalf("parsing the extracted panel.gates ladder example: %v\n%s", err, yamlText)
+	}
+	for _, gate := range []string{"bead", "spec_approve", "final_review"} {
+		if _, ok := ladder.Panel.Gates[gate]; !ok {
+			t.Errorf("panel.gates ladder example is missing gate %q", gate)
+		}
+	}
+	for _, p := range acTwoCheckReviewerKeys(ladder) {
+		t.Error(p)
+	}
+}
+
+// TestReviewDiscipline_AC2LadderExampleNegativeModelKey proves the structural
+// check is not vacuous: hand-injecting a `model: opus` line into a copy of
+// the extracted example (never the real file) must RED the SAME
+// key-set assertion the positive test uses.
+func TestReviewDiscipline_AC2LadderExampleNegativeModelKey(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	content, ok := skills["ms-panel-run"]
+	if !ok {
+		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-panel-run" entry`)
+	}
+	yamlText, ok := acTwoExtractFencedYAML(content)
+	if !ok {
+		t.Fatal("could not extract the panel.gates ladder example fixture")
+	}
+
+	countLineRE := regexp.MustCompile(`(?m)^([ \t]*)count: 4\n`)
+	loc := countLineRE.FindStringSubmatchIndex(yamlText)
+	if loc == nil {
+		t.Fatal("fixture assumption broken: could not locate a 'count: 4' line to inject a model: key after")
+	}
+	indent := yamlText[loc[2]:loc[3]]
+	insertAt := loc[1]
+	mutated := yamlText[:insertAt] + indent + "model: opus\n" + yamlText[insertAt:]
+	if mutated == yamlText {
+		t.Fatal("fixture assumption broken: injection had no effect")
+	}
+
+	ladder, err := acTwoParseLadder(mutated)
+	if err != nil {
+		t.Fatalf("parsing the mutated fixture: %v\n%s", err, mutated)
+	}
+	if problems := acTwoCheckReviewerKeys(ladder); len(problems) == 0 {
+		t.Fatal("expected the injected model: key to RED the reviewer-entry key-set check, but it found no problems")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC-1 — NEGATIVE structural sweep guard: no residual fixed-six-topology
+// EXECUTION instruction survives outside the labelled-default sentence, the
+// DEFAULT-labelled lens tables, and the fenced ladder example.
+// ---------------------------------------------------------------------------
+
+// acOneSweepPatterns is the pattern set the plan mandates, each entry named
+// for clear failure messages. Deliberately separate from acTenModelRE et al
+// above — a different AC, a different (much smaller) allowlist.
+var acOneSweepPatterns = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	{"all six", regexp.MustCompile(`(?i)all six`)},
+	{"six reviewers (spelled out)", regexp.MustCompile(`(?i)six reviewers`)},
+	{"6[- ]reviewers? (separator-tolerant, catches the hyphenated heading form)", regexp.MustCompile(`(?i)6[- ]reviewers?`)},
+	{"six distinct", regexp.MustCompile(`(?i)six distinct`)},
+	{"Six verdicts", regexp.MustCompile(`(?i)six verdicts`)},
+	{"r{4,5,6} literal slot range", regexp.MustCompile(`r\{4,5,6\}`)},
+	{"R1, R2, R3 slot enumeration", regexp.MustCompile(`R1,\s*R2,\s*R3`)},
+	{"R4, R5, R6 slot enumeration", regexp.MustCompile(`R4,\s*R5,\s*R6`)},
+	{"R1-R3 / R1–R3 family partition (hyphen or en-dash)", regexp.MustCompile(`R1[-–]R3`)},
+	{"R4-R6 / R4–R6 family partition (hyphen or en-dash)", regexp.MustCompile(`R4[-–]R6`)},
+	{"/3 claude|codex hard-coded family denominator", regexp.MustCompile(`/3\s*(?:claude|codex)`)},
+}
+
+// acOneScanContent runs every AC-1 sweep pattern over one surface's bytes,
+// reusing acTenHit's generic (surface, matched, line) shape and acTenLineOf
+// to resolve the 1-based line for each hit.
+func acOneScanContent(surface, content string) []acTenHit {
+	var hits []acTenHit
+	for _, p := range acOneSweepPatterns {
+		for _, loc := range p.re.FindAllStringIndex(content, -1) {
+			hits = append(hits, acTenHit{surface: surface, matched: content[loc[0]:loc[1]], line: acTenLineOf(content, loc[0])})
+		}
+	}
+	return hits
+}
+
+func acOneScanSurfaces(surfaces map[string]string) []acTenHit {
+	var hits []acTenHit
+	for surface, content := range surfaces {
+		hits = append(hits, acOneScanContent(surface, content)...)
+	}
+	return hits
+}
+
+// acOneSurfaces is the AC-1 sweep's OWN surface set: the three R1 skills
+// (ms-panel-run, ms-panel-tally, ms-spec-final-review) PLUS the claude.go
+// CLAUDE.md skills-table template (claudeMDManagedBlock) — per plan.md's
+// "the same pattern set ALSO runs over the in-package CLAUDE.md skills-table
+// template" instruction. Deliberately NARROWER than ac10Surfaces() (AC-10 is
+// the broad backstop over every embedded skill plus all four lifecycle
+// literals; AC-1 targets exactly the surfaces the R1 rewrite touched). Built
+// fresh per call so callers may mutate the returned map freely.
+func acOneSurfaces() map[string]string {
+	skills := pluginmindspec.SkillFiles()
+	return map[string]string{
+		"ms-panel-run":                   skills["ms-panel-run"],
+		"ms-panel-tally":                 skills["ms-panel-tally"],
+		"ms-spec-final-review":           skills["ms-spec-final-review"],
+		"claude.go:claudeMDManagedBlock": claudeMDManagedBlock,
+	}
+}
+
+// reviewDisciplineAC1Allowlist is the explicit allowlist: exactly the ONE
+// labelled shipped-DEFAULT sentence per surface that carries it. (The
+// DEFAULT-labelled lens tables and the fenced ladder example currently
+// produce ZERO AC-1 sweep hits — verified by
+// TestReviewDiscipline_AC1SweepGuardZeroHitsOutsideAllowlist's own
+// precondition checks below — because they were deliberately worded to
+// avoid every sweep pattern; a future edit that needs a digit/enumeration in
+// one of those sections should add its OWN locator-keyed entry here rather
+// than loosen a pattern.)
+var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
+	{
+		surface: "ms-panel-run",
+		locator: "so there is nothing to pass here",
+		matched: "6 reviewers",
+		count:   1,
+		reason:  "the ONE canonical labelled shipped-default sentence (AC-1a), Inputs section",
+	},
+	{
+		surface: "ms-panel-tally",
+		locator: "see `ms-panel-run`'s § Panel-size ladder",
+		matched: "6 reviewers",
+		count:   1,
+		reason:  "the ONE canonical labelled shipped-default sentence (AC-1a), Step 1",
+	},
+}
+
+// acOneValidate mirrors acTenValidate's occurrence-and-location-accounted
+// matching (surface, resolved-locator-line, exact matched text, count) but
+// keeps its OWN AC-1-flavored problem messages — deliberately NOT reusing
+// acTenValidate itself, whose messages are hardcoded "AC-10 ...", which would
+// mislabel an AC-1 sweep failure as an AC-10 scan failure.
+func acOneValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[string]string) []string {
+	type key struct {
+		surface string
+		line    int
+		matched string
+	}
+	remaining := make(map[key]int)
+	var problems []string
+
+	for _, e := range allowlist {
+		content, ok := surfaces[e.surface]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("AC-1 sweep allowlist entry unresolvable: surface=%s locator=%q matched=%s: surface not present among scanned surfaces", e.surface, e.locator, e.matched))
+			continue
+		}
+		line, diag, ok := acTenResolveLocator(content, e.locator)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("AC-1 sweep allowlist entry unresolvable: surface=%s locator=%q matched=%s: %s", e.surface, e.locator, e.matched, diag))
+			continue
+		}
+		remaining[key{e.surface, line, e.matched}] += e.count
+	}
+
+	for _, h := range hits {
+		k := key{h.surface, h.line, h.matched}
+		if remaining[k] > 0 {
+			remaining[k]--
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("AC-1 sweep: unallowlisted fixed-six-topology hit in %s at line %d: %q", h.surface, h.line, h.matched))
+	}
+	for k, n := range remaining {
+		if n > 0 {
+			problems = append(problems, fmt.Sprintf("AC-1 sweep allowlist entry unused (or under-consumed): surface=%s line=%d matched=%s", k.surface, k.line, k.matched))
+		}
+	}
+	return problems
+}
+
+// TestReviewDiscipline_AC1SweepGuard is the [CI] guard: every configured
+// occurrence of a fixed-six-topology pattern across ms-panel-run,
+// ms-panel-tally, ms-spec-final-review, and the claude.go CLAUDE.md template
+// must be accounted for by reviewDisciplineAC1Allowlist — any residual
+// execution instruction still hard-coding the topology REDs here.
+func TestReviewDiscipline_AC1SweepGuard(t *testing.T) {
+	surfaces := acOneSurfaces()
+	hits := acOneScanSurfaces(surfaces)
+	for _, problem := range acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces) {
+		t.Error(problem)
+	}
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeHeadingForm proves the guard REDs
+// when the OLD "# Run a 6-Reviewer Panel" heading is reintroduced into a
+// FIXTURE copy of ms-panel-run's bytes (never the real file), while the
+// allowlisted "shipped default: 6 reviewers" sentence is untouched and must
+// NOT be implicated — the RED-on-revert demo the plan's Verification section
+// names explicitly (G1-1-R2: the hyphenated heading form is exactly what the
+// separator-tolerant 6[- ]reviewers? pattern exists to catch).
+func TestReviewDiscipline_AC1SweepGuardNegativeHeadingForm(t *testing.T) {
+	surfaces := acOneSurfaces()
+	original, ok := surfaces["ms-panel-run"]
+	if !ok {
+		t.Fatal("fixture assumption broken: ms-panel-run missing from acOneSurfaces()")
+	}
+	if !strings.Contains(original, "# Run a Review Panel") {
+		t.Fatal("fixture assumption broken: ms-panel-run no longer carries the reworded topology-neutral heading")
+	}
+	mutated := strings.Replace(original, "# Run a Review Panel", "# Run a 6-Reviewer Panel", 1)
+	if mutated == original {
+		t.Fatal("fixture assumption broken: heading substitution had no effect")
+	}
+	surfaces["ms-panel-run"] = mutated
+
+	hits := acOneScanSurfaces(surfaces)
+	problems := acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces)
+	if len(problems) == 0 {
+		t.Fatal("expected restoring '# Run a 6-Reviewer Panel' to RED the AC-1 sweep guard")
+	}
+	// The allowlisted default-sentence entry must stay fully consumed (its
+	// locator line is untouched by this mutation) — no "unused" complaint
+	// about ms-panel-run's default-sentence entry should appear alongside
+	// the genuine unallowlisted heading-hit complaint.
+	for _, p := range problems {
+		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unused") {
+			t.Errorf("mutation probe over-fired on the allowlisted default sentence (should remain fully consumed): %s", p)
+		}
+	}
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeClaudeMDTemplate proves the guard
+// also covers the claude.go CLAUDE.md skills-table template surface:
+// reintroducing "launch 6 reviewers" into a FIXTURE copy of
+// claudeMDManagedBlock (never the real constant) REDs.
+func TestReviewDiscipline_AC1SweepGuardNegativeClaudeMDTemplate(t *testing.T) {
+	surfaces := acOneSurfaces()
+	original, ok := surfaces["claude.go:claudeMDManagedBlock"]
+	if !ok {
+		t.Fatal("fixture assumption broken: claude.go:claudeMDManagedBlock missing from acOneSurfaces()")
+	}
+	const rewordedPhrase = "then launch the configured reviewer panel and collect verdicts"
+	if !strings.Contains(original, rewordedPhrase) {
+		t.Fatal("fixture assumption broken: claudeMDManagedBlock no longer carries the reworded phrase")
+	}
+	mutated := strings.Replace(original, rewordedPhrase, "then launch 6 reviewers and collect verdicts", 1)
+	if mutated == original {
+		t.Fatal("fixture assumption broken: substitution had no effect")
+	}
+	surfaces["claude.go:claudeMDManagedBlock"] = mutated
+
+	hits := acOneScanSurfaces(surfaces)
+	problems := acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces)
+	if len(problems) == 0 {
+		t.Fatal("expected restoring 'launch 6 reviewers' in the CLAUDE.md template fixture to RED the AC-1 sweep guard")
+	}
+}
+
+// TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits proves each
+// remaining sweep pattern REDs on its own synthetic fixture surface, never a
+// real shipped file — the plan's "reverting ANY part of the sweep is RED,
+// not just the headline fragments" requirement, exercised per pattern class.
+func TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		inject string
+	}{
+		{"all-six", "run all six reviewers now"},
+		{"six-reviewers-spelled", "the panel launches six reviewers by default"},
+		{"six-distinct", "six distinct lenses keep it honest"},
+		{"six-verdicts", "Six verdicts x 3 items each"},
+		{"r-slot-range", "write /tmp/codex_x_r{4,5,6}.md"},
+		{"claude-slot-enum", "for each of R1, R2, R3"},
+		{"codex-slot-enum", "for each of R4, R5, R6"},
+		{"claude-range-hyphen", "split R1-R3 claude vs R4-R6 codex"},
+		{"family-denominator", "family split <claude>/3 claude"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := map[string]string{"fixture-surface": tc.inject}
+			hits := acOneScanSurfaces(fixture)
+			if len(hits) == 0 {
+				t.Fatalf("fixture assumption broken: %q produced no AC-1 sweep hits at all", tc.inject)
+			}
+			if problems := acOneValidate(hits, nil, fixture); len(problems) == 0 {
+				t.Fatalf("expected the AC-1 sweep to RED on %q, but it found no problems", tc.inject)
+			}
+		})
 	}
 }

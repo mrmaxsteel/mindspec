@@ -166,3 +166,32 @@ authenticated exactly like the verdict files it summarizes.
   safe-render sinks, the render ratchet, the gate-before-mutate ordering, the
   transactional atomicity contract, and CI-runnable regression tests — every one of
   which the spec mandates. A Go verb inherits all five.
+
+## Amendment (Spec 126): shipped default vs operator ladder
+
+Context lines 15-17 above cite "spec/plan ≈ 9–12 slots, bead = 8, final = 12"
+as a description of the panel sizes THIS PROJECT (mindspec's own
+self-development) actually runs. Spec 126 (panel/review-discipline
+hardening) found that citation read, uncorrected, as if it described the
+PRODUCT's shipped shape — a contradiction with `config.DefaultConfig().Panel`,
+which resolves 6 reviewer slots (3 `claude` + 3 `codex`, threshold `n-1`) for
+every gate absent configuration. This amendment resolves the ambiguity
+without touching the Decision above (the telemetry-store design is
+unaffected by panel SIZE):
+
+- **The shipped default is 6 / `n-1`, unconditionally.** `DefaultConfig`
+  panel VALUES are unchanged by spec 126 and remain the product's out-of-box
+  shape for every gate (bead, spec_approve, plan_approve, final_review,
+  adhoc) — a zero-config install keeps this size.
+- **The "9–12 / 8 / 12" ladder is this ORIGIN PROJECT's own operator-scaled
+  configuration**, expressed the same way any operator would: as a
+  documented `panel.gates` example (family-level only — `family` + `count`
+  keys, never `model:`) in `ms-panel-run`'s § Panel-size ladder. It was never
+  a second product default; it is one project's `.mindspec/config.yaml`
+  choice, now shipped as a commented, explicitly-labelled EXAMPLE rather than
+  read off this ADR's Context as though it were the shipped shape.
+- Context lines 15-17 are retained as historical record of what motivated
+  the telemetry store (panels of THAT scale are what made hand-tabulation
+  infeasible) — read them as project history, not as the product's
+  documented default; this Amendment is the disambiguating cross-reference
+  `internal/setup`'s [CI] guard greps for.
