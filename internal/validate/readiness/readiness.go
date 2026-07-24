@@ -385,6 +385,11 @@ type claimToken struct {
 	letter      string
 	subLettered bool
 	raw         string
+	// start/end are the token's byte-offset span within its source line
+	// (raw's span, including any recognized parenthetical) — the
+	// adjacency input for the foreign-citation SPAN exclusion below.
+	start int
+	end   int
 }
 
 // classifyParenthetical classifies a parenthetical's content by FORM (spec
@@ -409,28 +414,103 @@ func classifyParenthetical(content string) (isEnumerator bool, subLetter string,
 
 // harvestClaims extracts the bead's OWN claimed R<n>/AC-<n> tokens from
 // text (bd description or plan section), applying the three plan-level
-// harvest rules: code-span/fence exclusion, foreign-citation exclusion
-// (per line), and clause-enumerator normalization.
+// harvest rules: code-span/fence exclusion, foreign-citation SPAN
+// exclusion, and clause-enumerator normalization.
 func harvestClaims(text string, ownSpecNum int) []claimToken {
 	stripped := stripCodeSpans(text)
 	var out []claimToken
 	for _, line := range strings.Split(stripped, "\n") {
-		if lineHasForeignCitation(line, ownSpecNum) {
-			continue
-		}
-		out = append(out, extractLineClaims(line)...)
+		out = append(out, harvestLineClaims(line, ownSpecNum)...)
 	}
 	return out
 }
 
-func lineHasForeignCitation(line string, ownSpecNum int) bool {
-	for _, m := range foreignSpecRe.FindAllStringSubmatch(line, -1) {
-		n, err := strconv.Atoi(m[1])
+type citationSpan struct{ start, end int }
+
+// foreignCitationSpans returns the byte-offset spans of every foreign-spec
+// citation ("spec <digits>" where <digits> differs from the owning spec's
+// number) on line.
+func foreignCitationSpans(line string, ownSpecNum int) []citationSpan {
+	var spans []citationSpan
+	for _, m := range foreignSpecRe.FindAllStringSubmatchIndex(line, -1) {
+		n, err := strconv.Atoi(line[m[2]:m[3]])
 		if err == nil && n != ownSpecNum {
-			return true
+			spans = append(spans, citationSpan{start: m[0], end: m[1]})
 		}
 	}
-	return false
+	return spans
+}
+
+// citationGapRe: the characters that may separate a foreign-spec citation
+// from the claim tokens belonging to that citation — whitespace and the
+// token-chain separators `/`, `+`, `&` ("spec 097 R3/R4"). Clause
+// punctuation (`,`, `;`, `:`, `.`, parens, dashes) deliberately BREAKS
+// adjacency: a token in a different clause of the same line is the bead's
+// own claim, not part of the citation.
+var citationGapRe = regexp.MustCompile(`^[ \t/+&]*$`)
+
+// harvestLineClaims extracts one line's claim tokens, excluding ONLY the
+// tokens belonging to a foreign-spec citation's own span — the citation
+// itself plus the chain of claim tokens strictly adjacent to it
+// (separated by citationGapRe characters only), extended in both
+// directions. Final-review r1 G1-MF2-MIXED-CITATION-LINE: the previous
+// WHOLE-LINE exclusion dropped every token on a mixed line, so a dangling
+// owning-spec token sharing a line with a benign foreign citation
+// ("Preserve the spec 123 AC-17 pattern while satisfying AC-999") was
+// never harvested — a false NEGATIVE the fixture pair now pins closed.
+// "the spec 123 AC-17 pattern" still excludes AC-17 (adjacent to the
+// citation); AC-999 elsewhere on the line is harvested and resolved.
+func harvestLineClaims(line string, ownSpecNum int) []claimToken {
+	tokens := extractLineClaims(line)
+	spans := foreignCitationSpans(line, ownSpecNum)
+	if len(spans) == 0 || len(tokens) == 0 {
+		return tokens
+	}
+
+	adjacentGap := func(from, to int) bool {
+		return from <= to && citationGapRe.MatchString(line[from:to])
+	}
+	excluded := make([]bool, len(tokens))
+	// Forward pass (tokens arrive in left-to-right order): a token
+	// directly after a citation span — or after an already-excluded
+	// token — across a separator-only gap belongs to the citation.
+	for i, tok := range tokens {
+		for _, sp := range spans {
+			if adjacentGap(sp.end, tok.start) {
+				excluded[i] = true
+			}
+		}
+		if !excluded[i] && i > 0 && excluded[i-1] && adjacentGap(tokens[i-1].end, tok.start) {
+			excluded[i] = true
+		}
+	}
+	// Backward pass: the mirror-image chain for tokens STRICTLY adjacent
+	// before the citation ("AC-17 spec 123" shapes) — connector words
+	// ("of", "per") deliberately break adjacency, keeping the exclusion
+	// narrow: a doubtful token is harvested (visible, fixable) rather
+	// than silently dropped.
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if excluded[i] {
+			continue
+		}
+		tok := tokens[i]
+		for _, sp := range spans {
+			if adjacentGap(tok.end, sp.start) {
+				excluded[i] = true
+			}
+		}
+		if !excluded[i] && i < len(tokens)-1 && excluded[i+1] && adjacentGap(tok.end, tokens[i+1].start) {
+			excluded[i] = true
+		}
+	}
+
+	out := make([]claimToken, 0, len(tokens))
+	for i, tok := range tokens {
+		if !excluded[i] {
+			out = append(out, tok)
+		}
+	}
+	return out
 }
 
 func extractLineClaims(line string) []claimToken {
@@ -452,18 +532,18 @@ func extractLineClaims(line string) []claimToken {
 				if isEnumerator, subLetter, recognized := classifyParenthetical(content); recognized {
 					raw = line[m[0] : end+closeIdx+1]
 					if isEnumerator {
-						out = append(out, claimToken{base: base, raw: raw})
+						out = append(out, claimToken{base: base, raw: raw, start: m[0], end: end + closeIdx + 1})
 					} else {
-						out = append(out, claimToken{base: base, letter: subLetter, subLettered: true, raw: raw})
+						out = append(out, claimToken{base: base, letter: subLetter, subLettered: true, raw: raw, start: m[0], end: end + closeIdx + 1})
 					}
 					continue
 				}
 			}
 		}
 		if letter != "" {
-			out = append(out, claimToken{base: base, letter: letter, subLettered: true, raw: raw})
+			out = append(out, claimToken{base: base, letter: letter, subLettered: true, raw: raw, start: m[0], end: m[1]})
 		} else {
-			out = append(out, claimToken{base: base, raw: raw})
+			out = append(out, claimToken{base: base, raw: raw, start: m[0], end: m[1]})
 		}
 	}
 	return out

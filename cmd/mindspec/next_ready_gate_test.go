@@ -457,3 +457,93 @@ func equalStringSlices(a, b []string) bool {
 	}
 	return true
 }
+
+// installClaimFailingBD mirrors installMetadataFailingBD: a fake `bd`
+// forwards every call to the real bd UNLESS the FAKE_BD_FAIL_CLAIM env
+// var is set AND the call carries `--claim`, in which case it exits
+// non-zero — forcing ClaimBead to fail AFTER the Step 4.6 override
+// marker landed (the G3-OVERRIDE-ORPHAN window, spec 124 final-review
+// r1). Must run BEFORE nextReadyGateSetupSandbox so the fake sits ahead
+// of the real bd when the sandbox composes its shim.
+func installClaimFailingBD(t *testing.T) {
+	t.Helper()
+	realBD, err := exec.LookPath("bd")
+	if err != nil {
+		t.Fatalf("real bd required to build the claim-failing fake: %v", err)
+	}
+
+	fakeDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ -n \"$FAKE_BD_FAIL_CLAIM\" ]; then\n" +
+		"  for arg in \"$@\"; do\n" +
+		"    if [ \"$arg\" = \"--claim\" ]; then\n" +
+		"      echo \"fake bd: claim forced to fail (spec 124 G3-OVERRIDE-ORPHAN rollback test)\" >&2\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"  done\n" +
+		"fi\n" +
+		"exec \"" + realBD + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	os.Setenv("PATH", fakeDir+string(os.PathListSeparator)+origPath)
+	t.Cleanup(func() { os.Setenv("PATH", origPath) })
+}
+
+// TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker pins the
+// G3-OVERRIDE-ORPHAN fix (spec 124 final-review r1): the override marker
+// is written BEFORE ClaimBead (AC-4 fail-closed), so when ClaimBead then
+// FAILS, the marker must be ROLLED BACK — a failed claim leaves the bead
+// unclaimed with NO orphaned override marker authorizing a claim this
+// run never made, and no branch/worktree. RED-on-revert: removing the
+// rollback call from cmd/mindspec/next.go's claim-failure branch leaves
+// the marker behind and turns this red.
+func TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker(t *testing.T) {
+	installClaimFailingBD(t)
+
+	sb := nextReadyGateSetupSandbox(t)
+
+	epicID := nextReadyGateApproveSingleBeadPlan(t, sb,
+		"992-readiness-gate-claim-fail", nextReadyGateNegativeSpecMD,
+		strings.ReplaceAll(nextReadyGateNegativePlanMD, "996-readiness-gate-negative", "992-readiness-gate-claim-fail"))
+	beadID := epicID + ".1"
+
+	statusBefore, _ := nextReadyGateBDStatus(t, sb, beadID)
+	branchesBefore := sb.ListBranches("bead/")
+	worktreesBefore := sb.ListWorktrees()
+
+	// Flip the claim failure on ONLY for this invocation (the marker
+	// write itself must SUCCEED — the orphan window under test is
+	// marker-landed-then-claim-lost).
+	os.Setenv("FAKE_BD_FAIL_CLAIM", "1")
+	defer os.Unsetenv("FAKE_BD_FAIL_CLAIM")
+
+	out, err := sb.Run("mindspec", "next", beadID, "--allow-not-ready")
+	if err == nil {
+		t.Fatalf("expected `mindspec next %s --allow-not-ready` to fail when the claim fails, got exit 0:\n%s", beadID, out)
+	}
+	if !strings.Contains(strings.ToLower(out), "rolled back") {
+		t.Errorf("expected the failure output to report the override-marker rollback, got:\n%s", out)
+	}
+
+	// The bead is unclaimed, the marker is GONE, and no branch/worktree
+	// was created — the failed claim left no orphaned override.
+	statusAfter, metadata := nextReadyGateBDStatus(t, sb, beadID)
+	if statusAfter != statusBefore {
+		t.Errorf("bead status changed despite the failed claim: before=%q after=%q", statusBefore, statusAfter)
+	}
+	if statusAfter == "in_progress" {
+		t.Errorf("bead %s claimed despite the forced claim failure", beadID)
+	}
+	if _, ok := metadata["mindspec_readiness_override"]; ok {
+		t.Errorf("ORPHANED override marker left behind after the failed claim (G3-OVERRIDE-ORPHAN); got metadata %v", metadata)
+	}
+	if !equalStringSlices(branchesBefore, sb.ListBranches("bead/")) {
+		t.Errorf("bead branch list changed despite the failed claim: before=%v after=%v", branchesBefore, sb.ListBranches("bead/"))
+	}
+	if !equalStringSlices(worktreesBefore, sb.ListWorktrees()) {
+		t.Errorf("worktree list changed despite the failed claim: before=%v after=%v", worktreesBefore, sb.ListWorktrees())
+	}
+}

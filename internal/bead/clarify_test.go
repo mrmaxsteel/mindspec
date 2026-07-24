@@ -230,6 +230,124 @@ func TestWriteAttemptRecord_RefusesDuplicateOrNonPositiveOrdinal(t *testing.T) {
 	}
 }
 
+// TestWriteAttemptRecord_RefusesUncoveredReportOrdinal pins the reason-
+// pairing bijection (final-review r1 G2-R8-01): a record answering only
+// SOME cited reasons is refused, zero write — the unaddressed reason
+// means the bead is still NOT READY, and a partial clarify would consume
+// the categorical one-round cap while leaving cited ambiguity durably
+// unanswered. RED-on-revert: dropping the coverage loop from
+// validateAttemptRecord turns this red.
+func TestWriteAttemptRecord_RefusesUncoveredReportOrdinal(t *testing.T) {
+	updates := clarifyFakeStore(t, nil)
+
+	record := AttemptRecord{
+		Report: []ReportEntry{
+			{Ordinal: 1, Signal: "SR-2", Reason: "Which of A or B?"},
+			{Ordinal: 2, Signal: "SR-5", Reason: "What check decides AC-7?"},
+		},
+		Clarifications: []ClarificationEntry{
+			{Ordinal: 1, Reason: "Which of A or B?", Answer: "Behavior A, per the cited span", Span: "spec.md §R2"},
+		},
+	}
+	err := WriteAttemptRecord("mindspec-abcd.3", record)
+	if err == nil {
+		t.Fatal("expected a refusal when a cited report ordinal has no paired clarification")
+	}
+	if !strings.Contains(err.Error(), "ordinal 2") {
+		t.Errorf("expected the refusal to name the uncovered ordinal 2, got: %v", err)
+	}
+	if len(*updates) != 0 {
+		t.Errorf("expected NO metadata write, got %d", len(*updates))
+	}
+}
+
+// TestWriteAttemptRecord_RefusesDuplicateClarificationOrdinal pins the
+// exactly-one side of the bijection (G2-R8-01): two clarifications for
+// one report ordinal are refused, zero write.
+func TestWriteAttemptRecord_RefusesDuplicateClarificationOrdinal(t *testing.T) {
+	updates := clarifyFakeStore(t, nil)
+
+	record := AttemptRecord{
+		Report: validReport(),
+		Clarifications: []ClarificationEntry{
+			{Ordinal: 1, Reason: "AC-7 has no decidable check", Answer: "first answer", Span: "spec.md §R1"},
+			{Ordinal: 1, Reason: "AC-7 has no decidable check", Answer: "second answer", Span: "spec.md §R2"},
+		},
+	}
+	if err := WriteAttemptRecord("mindspec-abcd.3", record); err == nil {
+		t.Fatal("expected a refusal for a duplicate clarification ordinal")
+	}
+	if len(*updates) != 0 {
+		t.Errorf("expected NO metadata write, got %d", len(*updates))
+	}
+}
+
+// TestWriteAttemptRecord_RefusesNonVerbatimReason pins the verbatim
+// reason-keying (G2-R8-01): a clarification whose Reason is not the
+// EXACT paired report Reason (a paraphrase or a never-reported
+// substitute) is refused, zero write — the re-dispatch injection renders
+// this pairing, so a substituted reason would break the anti-browbeat
+// judgment.
+func TestWriteAttemptRecord_RefusesNonVerbatimReason(t *testing.T) {
+	updates := clarifyFakeStore(t, nil)
+
+	record := AttemptRecord{
+		Report: validReport(),
+		Clarifications: []ClarificationEntry{
+			{Ordinal: 1, Reason: "a different reason that was never reported", Answer: "Behavior C is fine", Span: "spec.md §R1"},
+		},
+	}
+	err := WriteAttemptRecord("mindspec-abcd.3", record)
+	if err == nil {
+		t.Fatal("expected a refusal for a non-verbatim clarification reason")
+	}
+	if !strings.Contains(err.Error(), "VERBATIM") {
+		t.Errorf("expected the refusal to name the verbatim-pairing rule, got: %v", err)
+	}
+	if len(*updates) != 0 {
+		t.Errorf("expected NO metadata write, got %d", len(*updates))
+	}
+}
+
+// TestWriteAttemptRecord_RefusesEmptyAnswer pins the answer presence
+// check (G2-R8-01): an empty/whitespace-only Answer is refused.
+func TestWriteAttemptRecord_RefusesEmptyAnswer(t *testing.T) {
+	for _, answer := range []string{"", "   "} {
+		updates := clarifyFakeStore(t, nil)
+		record := AttemptRecord{
+			Report: validReport(),
+			Clarifications: []ClarificationEntry{
+				{Ordinal: 1, Reason: "AC-7 has no decidable check", Answer: answer, Span: "spec.md §R1"},
+			},
+		}
+		if err := WriteAttemptRecord("mindspec-abcd.3", record); err == nil {
+			t.Errorf("expected a refusal for answer %q", answer)
+		}
+		if len(*updates) != 0 {
+			t.Errorf("expected NO metadata write for answer %q, got %d", answer, len(*updates))
+		}
+	}
+}
+
+// TestWriteAttemptRecord_RefusesInvalidSignal pins the closed SR-1..SR-5
+// signal set (G2-R8-01): a report entry tagged outside the Phase-0
+// semantic-signal enum is refused, zero write.
+func TestWriteAttemptRecord_RefusesInvalidSignal(t *testing.T) {
+	for _, signal := range []string{"", "SR-9", "MF-1", "sr-1"} {
+		updates := clarifyFakeStore(t, nil)
+		record := AttemptRecord{
+			Report:         []ReportEntry{{Ordinal: 1, Signal: signal, Reason: "some reason"}},
+			Clarifications: []ClarificationEntry{{Ordinal: 1, Reason: "some reason", Answer: "x", Span: "spec.md §R1"}},
+		}
+		if err := WriteAttemptRecord("mindspec-abcd.3", record); err == nil {
+			t.Errorf("expected a refusal for signal %q", signal)
+		}
+		if len(*updates) != 0 {
+			t.Errorf("expected NO metadata write for signal %q, got %d", signal, len(*updates))
+		}
+	}
+}
+
 // TestWriteAttemptRecord_MalformedBeadID pins the ingress refusal: a
 // hostile bead-ID argument is refused at idvalidate before any bd read.
 func TestWriteAttemptRecord_MalformedBeadID(t *testing.T) {
@@ -265,7 +383,7 @@ func TestWriteAttemptRecord_ReadFailurePropagates(t *testing.T) {
 		return exec.Command("echo", "unexpected")
 	}
 
-	if err := WriteAttemptRecord("mindspec-abcd.3", AttemptRecord{Report: validReport()}); err == nil {
+	if err := WriteAttemptRecord("mindspec-abcd.3", AttemptRecord{Report: validReport(), Clarifications: validClarifications()}); err == nil {
 		t.Fatal("expected an error on a metadata read failure")
 	}
 	if updateCalled {

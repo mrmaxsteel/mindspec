@@ -266,9 +266,10 @@ team lead spawns fresh agents per bead.`,
 		// refusal-zero-mutation intact — a plain refusal (no
 		// --allow-not-ready) never reaches here (gateErr returned above),
 		// and a marker-write failure refuses with nothing claimed, no
-		// worktree created. If the marker lands but ClaimBead then fails,
-		// the marker on an unclaimed bead is harmless advisory metadata a
-		// subsequent claim finds.
+		// worktree created. If the marker lands but ClaimBead then FAILS,
+		// the claim-failure branch below ROLLS BACK the marker (final-
+		// review r1 G3-OVERRIDE-ORPHAN) — a lost claim must not leave an
+		// authorizing override on a bead this run never claimed.
 		if len(gateResult.FailingSignals) > 0 {
 			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
 				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
@@ -283,6 +284,23 @@ team lead spawns fresh agents per bead.`,
 		// Step 5: Claim
 		fmt.Print(formatClaimLine(selected.ID, selected.Title))
 		if err := next.ClaimBead(selected.ID); err != nil {
+			// G3-OVERRIDE-ORPHAN (spec 124 final-review r1): the Step 4.6
+			// override marker landed BEFORE this claim; a failed claim
+			// must not leave that authorizing marker orphaned on an
+			// unclaimed bead. Roll it back (best-effort — the claim
+			// failure below stays the primary error) and warn LOUDLY if
+			// the rollback itself also fails, naming the orphaned key.
+			if len(gateResult.FailingSignals) > 0 {
+				if rbErr := next.RollbackReadinessOverride(selected.ID); rbErr != nil {
+					fmt.Fprintf(os.Stderr,
+						"WARNING: claim failed AND rolling back the --allow-not-ready override marker on %s also failed: %v — an orphaned mindspec_readiness_override marker may remain; remove that metadata key before re-claiming or dispatching this bead\n",
+						idrender.Bead(selected.ID), rbErr)
+				} else {
+					fmt.Fprintf(os.Stderr,
+						"note: rolled back the --allow-not-ready override marker on %s (claim failed — no override left behind)\n",
+						idrender.Bead(selected.ID))
+				}
+			}
 			// Spec 093 Req 3: the recovery recipe lives at this caller —
 			// it has the root/specFlag context the interpolation needs.
 			// The wiring (which error to return) is pinned by

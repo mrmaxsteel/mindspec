@@ -5,13 +5,17 @@
 // lifecycle state and are never read by any mechanical readiness signal).
 //
 // Both keys are written EXCLUSIVELY via the existing bead.MergeMetadata
-// helper by their owning verbs:
+// helper by their owning verbs (the override key is additionally REMOVED
+// via DeleteMetadataKeys on `next`'s claim-failure rollback path —
+// final-review r1 G3-OVERRIDE-ORPHAN):
 //   - MetaKeyReadinessOverride is written by `mindspec next --allow-not-ready`
-//     (spec 124 Bead 2 / R3) immediately after a claim succeeds, naming the
-//     mechanical signals (MF-1..MF-4) the operator deliberately bypassed
-//     plus a UTC timestamp — the durable override marker the R4 dispatch
-//     ingress re-check (Bead 3) honors instead of re-blocking a deliberately
-//     force-claimed bead.
+//     (spec 124 Bead 2 / R3) immediately BEFORE ClaimBead (marker-before-
+//     claim, FAIL-CLOSED — `--allow-not-ready` success guarantees a durable
+//     marker, and a claim failure after the write rolls the marker back),
+//     naming the mechanical signals (MF-1..MF-4) the operator deliberately
+//     bypassed plus a UTC timestamp — the durable override marker the R4
+//     dispatch ingress re-check (Bead 3) honors, for exactly the recorded
+//     signals, instead of re-blocking a deliberately force-claimed bead.
 //   - MetaKeyReadinessAttempt is written by `mindspec bead clarify` (spec 124
 //     Bead 3 / R8) exactly once per bead — the append-only readiness-attempt
 //     record: the original ordinal-keyed NOT-READY report plus the

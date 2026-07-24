@@ -436,8 +436,9 @@ Unit tests.
 This bead claims R5 in full and AC-9(i).
 
 It follows the spec 123 AC-17 pattern for its harvest-exclusion fixture
-(a citation, not a claim — the whole-line foreign-citation exclusion
-applies to this sentence, not the claim above). See the ` + "`TBD`" + `/` + "`OPEN QUESTION`" + `
+(a citation, not a claim — the foreign-citation SPAN exclusion covers
+exactly the citation's own adjacent tokens, never the rest of the line
+or the claim above). See the ` + "`TBD`" + `/` + "`OPEN QUESTION`" + `
 convention quoted here as fixture data, inside backticks.
 
 **Depends on**

@@ -235,3 +235,97 @@ func TestMsSpecAutopilotSkill_AcceptedNotReadyHaltRow(t *testing.T) {
 		t.Error("expected the halt row to say not to proceed to the next bead")
 	}
 }
+
+// --- Final-review r1 G1/G3-OVERRIDE-COVERAGE: stale-override coverage ---
+
+// mutationProbeOverrideCoveragePresent isolates the override-coverage
+// requirement (final-review r1 G1-STALE-OVERRIDE-COVERAGE /
+// G3-OVERRIDE-COVERAGE / O1-1): the ingress must compare the FRESH
+// ready-check's currently-failing signals against the marker's recorded
+// `signals` set, proceed ONLY on full coverage, and STOP (re-gate) on
+// any uncovered new failure.
+func mutationProbeOverrideCoveragePresent(content string) bool {
+	return strings.Contains(content, "ONLY if EVERY currently-failing signal is present in that recorded set") &&
+		strings.Contains(content, "PRESENCE alone is NOT authority to dispatch") &&
+		strings.Contains(content, "naming each uncovered signal")
+}
+
+// TestMsBeadImplSkill_OverrideCoverageCheckShipped pins that a stale
+// override marker cannot bypass NEW failing signals: dispatch on the
+// FAIL-with-marker branch requires the marker's recorded signal set to
+// COVER every currently-failing signal from the fresh ready-check, and
+// an uncovered failure re-blocks (NOT READY routing).
+func TestMsBeadImplSkill_OverrideCoverageCheckShipped(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeOverrideCoveragePresent(content) {
+		t.Error("expected the shipped ms-bead-impl ingress to require override-marker COVERAGE of every currently-failing signal (stale marker must not bypass new failures)")
+	}
+	if !strings.Contains(content, "STOP and treat this exactly like the FAIL-no-override branch") {
+		t.Error("expected the uncovered-signal outcome to re-gate via the FAIL-no-override branch (NOT READY routing)")
+	}
+}
+
+// TestMsBeadImplSkill_OverrideCoverageMutationProbe proves the coverage
+// pin is not vacuous: stripping the coverage comparison out of a copy of
+// the shipped content turns the SAME predicate red.
+func TestMsBeadImplSkill_OverrideCoverageMutationProbe(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeOverrideCoveragePresent(content) {
+		t.Fatal("precondition failed: the shipped content must carry the override-coverage rule")
+	}
+	// Simulate the pre-fix regression: proceed on marker PRESENCE alone.
+	mutated := strings.Replace(content,
+		"ONLY if EVERY currently-failing signal is present in that recorded set", "when the marker is present", 1)
+	if mutationProbeOverrideCoveragePresent(mutated) {
+		t.Fatal("mutation probe failed: dropping the coverage comparison should turn the pin red")
+	}
+}
+
+// --- Final-review r1 G2-R8-01: ALL cited reasons rendered on re-dispatch ---
+
+// mutationProbeAllReasonsRenderedPresent isolates the render-ALL-reasons
+// requirement (final-review r1 G2-R8-01): the re-dispatch injection
+// iterates the record's `report` array (every originally-cited reason,
+// never a subset), and a report ordinal with no paired clarification is
+// still rendered — `clarification: (none recorded)` — so the fresh
+// Phase 0 re-reports NOT READY for the unaddressed reason.
+func mutationProbeAllReasonsRenderedPresent(content string) bool {
+	return strings.Contains(content, "EVERY originally-cited reason is rendered, never a subset") &&
+		strings.Contains(content, "clarification: (none recorded)")
+}
+
+// TestMsBeadImplSkill_AllCitedReasonsRenderedShipped pins the G2-R8-01
+// fix: the anti-browbeat rule cannot be evaded by clarifying only some
+// reasons, because every cited reason — clarified or not — reaches the
+// re-dispatched Phase 0, and an unaddressed one re-reports NOT READY.
+func TestMsBeadImplSkill_AllCitedReasonsRenderedShipped(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeAllReasonsRenderedPresent(content) {
+		t.Error("expected the shipped ms-bead-impl re-dispatch injection to render ALL originally-cited reasons from the record's report array, including unclarified ones as 'clarification: (none recorded)'")
+	}
+	if !strings.Contains(content, "re-reports NOT READY for it") {
+		t.Error("expected the unaddressed-reason outcome (Phase 0 re-reports NOT READY) stated at the injection site")
+	}
+	if !strings.Contains(content, "fail closed to the NOT-READY routing") {
+		t.Error("expected the malformed-record ingress to fail CLOSED (no dispatch on a partial injection)")
+	}
+}
+
+// TestMsBeadImplSkill_AllReasonsRenderedMutationProbe proves the pin is
+// not vacuous: dropping the unaddressed-reason rendering turns the SAME
+// predicate red.
+func TestMsBeadImplSkill_AllReasonsRenderedMutationProbe(t *testing.T) {
+	content := readinessSkillFile(t, "ms-bead-impl")
+	if !mutationProbeAllReasonsRenderedPresent(content) {
+		t.Fatal("precondition failed: the shipped content must carry the render-all-reasons rule")
+	}
+	mutated := strings.ReplaceAll(content, "clarification: (none recorded)", "")
+	if mutationProbeAllReasonsRenderedPresent(mutated) {
+		t.Fatal("mutation probe failed: dropping the unaddressed-reason rendering should turn the pin red")
+	}
+	mutated2 := strings.Replace(content,
+		"EVERY originally-cited reason is rendered, never a subset", "the clarified reasons are rendered", 1)
+	if mutationProbeAllReasonsRenderedPresent(mutated2) {
+		t.Fatal("mutation probe failed: dropping the report-array iteration rule should turn the pin red")
+	}
+}

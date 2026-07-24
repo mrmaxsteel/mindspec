@@ -5,9 +5,11 @@ package next
 // mutate preflight leg ADR-0041's fourth-verb clause names (spec 124 R3 /
 // R9 / AC-4 / AC-16): GateReadiness runs after bead selection and BEFORE
 // any claim/branch/worktree mutation; RecordReadinessOverride writes the
-// durable `--allow-not-ready` marker AFTER a claim succeeds and BEFORE the
-// worktree is created (the write-ordering choice recorded in the spec 124
-// plan preamble: a claim lost to contention leaves no stray marker).
+// durable `--allow-not-ready` marker BEFORE ClaimBead, FAIL-CLOSED (the
+// marker-before-claim ordering the spec 124 plan preamble records: AC-4
+// makes `--allow-not-ready` success a GUARANTEE that the marker exists,
+// and if ClaimBead then fails, the caller rolls the marker back via
+// RollbackReadinessOverride so a lost claim leaves no orphaned override).
 
 import (
 	"fmt"
@@ -25,8 +27,9 @@ import (
 // RecordReadinessOverride without a real bd process or a real
 // internal/validate/readiness engine evaluation.
 var (
-	evaluateReadinessFn = readiness.EvaluateReadiness
-	mergeMetadataFn     = bead.MergeMetadata
+	evaluateReadinessFn  = readiness.EvaluateReadiness
+	mergeMetadataFn      = bead.MergeMetadata
+	deleteMetadataKeysFn = bead.DeleteMetadataKeys
 )
 
 // GateResult is GateReadiness's outcome when the gate does not refuse.
@@ -55,8 +58,8 @@ type GateResult struct {
 //
 // On a failing floor with allowNotReady=true, it returns a nil error and a
 // GateResult naming every failing signal — the caller emits the R3
-// stderr warning and, once ClaimBead succeeds, calls
-// RecordReadinessOverride with this same list.
+// stderr warning and calls RecordReadinessOverride with this same list
+// BEFORE invoking ClaimBead (marker-before-claim, fail-closed).
 //
 // On a passing floor it returns a nil error and an empty GateResult — no
 // interactive step, no output beyond the caller's existing claim lines
@@ -111,4 +114,20 @@ func RecordReadinessOverride(beadID string, signals []string) error {
 			"overridden": time.Now().UTC().Format(time.RFC3339),
 		},
 	})
+}
+
+// RollbackReadinessOverride deletes the durable `--allow-not-ready`
+// override marker RecordReadinessOverride wrote (final-review r1
+// G3-OVERRIDE-ORPHAN). The marker is written BEFORE ClaimBead (the AC-4
+// fail-closed guarantee), so if ClaimBead then FAILS — a claim lost to
+// contention, a bd error — the caller invokes this rollback so the
+// failed invocation leaves no authorizing marker on a bead this run
+// never claimed (an orphaned marker would otherwise let the dispatch
+// ingress treat a LATER, independent claim as a deliberate readiness
+// bypass). Best-effort at the call site: the caller surfaces a rollback
+// failure LOUDLY (naming the orphaned key) but still reports the claim
+// failure as the primary error. Deleting a key that is already absent
+// is a no-op (nil).
+func RollbackReadinessOverride(beadID string) error {
+	return deleteMetadataKeysFn(beadID, bead.MetaKeyReadinessOverride)
 }

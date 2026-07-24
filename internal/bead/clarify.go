@@ -67,12 +67,22 @@ type AttemptRecord struct {
 //     ANY prior attempt record forces escalation to plan/spec revision,
 //     never a second `bead clarify`
 //   - the record's own Report is empty (nothing to clarify against), or
-//     carries a non-positive or duplicate ordinal
-//   - any Clarifications entry cites an ordinal absent from Report
-//   - any Clarifications entry carries an empty/whitespace-only Span
-//     (a PRESENCE check only — R8b: whether the span SUPPORTS the
-//     answer is the fresh Phase-0 subagent's judgment, never verified
-//     here)
+//     carries a non-positive or duplicate ordinal, an empty/whitespace
+//     Reason, or a Signal outside the closed SR-1..SR-5 set
+//   - the record is not a reason-keyed BIJECTION (final-review r1
+//     G2-R8-01): every Report ordinal must carry EXACTLY ONE paired
+//     Clarifications entry — no missing coverage (clarifying only SOME
+//     cited reasons is the ACCEPT disposition, not a valid clarify), no
+//     duplicate clarification ordinals, no clarification citing an
+//     ordinal absent from Report
+//   - any Clarifications entry's Reason is not the VERBATIM Reason of
+//     its paired Report entry (the pairing the re-dispatch injection
+//     renders must be the reason that was actually cited, not a
+//     paraphrase or a never-reported substitute)
+//   - any Clarifications entry carries an empty/whitespace-only Answer
+//     or Span (PRESENCE checks only — R8b: whether the span SUPPORTS
+//     the answer is the fresh Phase-0 subagent's judgment, never
+//     verified here)
 //
 // On success it performs exactly ONE MergeMetadata write. There is no
 // update/finalize surface: the terminal disposition (READY-after-
@@ -136,23 +146,59 @@ func validateAttemptRecord(record AttemptRecord) error {
 	if len(record.Report) == 0 {
 		return fmt.Errorf("the attempt record's report is empty — nothing to clarify against")
 	}
-	ordinals := map[int]bool{}
+	reportByOrdinal := map[int]ReportEntry{}
 	for _, e := range record.Report {
 		if e.Ordinal <= 0 {
 			return fmt.Errorf("report entry has a non-positive ordinal: %d", e.Ordinal)
 		}
-		if ordinals[e.Ordinal] {
+		if _, dup := reportByOrdinal[e.Ordinal]; dup {
 			return fmt.Errorf("report entry ordinal %d appears more than once", e.Ordinal)
 		}
-		ordinals[e.Ordinal] = true
+		if !validSRSignals[e.Signal] {
+			return fmt.Errorf("report entry ordinal %d carries signal %q — the Phase-0 semantic signals are the closed set SR-1..SR-5", e.Ordinal, e.Signal)
+		}
+		if strings.TrimSpace(e.Reason) == "" {
+			return fmt.Errorf("report entry ordinal %d carries an empty reason — the record must preserve the verbatim cited reason", e.Ordinal)
+		}
+		reportByOrdinal[e.Ordinal] = e
 	}
+	// Reason-pairing bijection (final-review r1 G2-R8-01): exactly one
+	// clarification per report ordinal, verbatim reason-keyed. A record
+	// answering only SOME cited reasons is refused — the unaddressed
+	// reasons mean the bead is still NOT READY, and the correct
+	// disposition for them is ACCEPT (plan/spec revision), never a
+	// partial clarify that would consume the categorical one-round cap
+	// while leaving cited ambiguity durably unanswered.
+	clarified := map[int]bool{}
 	for _, c := range record.Clarifications {
-		if !ordinals[c.Ordinal] {
+		paired, ok := reportByOrdinal[c.Ordinal]
+		if !ok {
 			return fmt.Errorf("clarification cites ordinal %d, which is absent from the recorded report", c.Ordinal)
+		}
+		if clarified[c.Ordinal] {
+			return fmt.Errorf("ordinal %d carries more than one clarification — the record must pair exactly one clarification with each cited reason", c.Ordinal)
+		}
+		clarified[c.Ordinal] = true
+		if c.Reason != paired.Reason {
+			return fmt.Errorf("clarification for ordinal %d does not repeat the paired report reason VERBATIM (spec 124 R8b — the re-dispatch renders this pairing; a paraphrased or substituted reason breaks the anti-browbeat judgment)", c.Ordinal)
+		}
+		if strings.TrimSpace(c.Answer) == "" {
+			return fmt.Errorf("clarification for ordinal %d carries no answer — every clarification must actually answer its cited reason (spec 124 R8b)", c.Ordinal)
 		}
 		if strings.TrimSpace(c.Span) == "" {
 			return fmt.Errorf("clarification for ordinal %d carries no source span — every clarification must cite an authoritative span (spec 124 R8b)", c.Ordinal)
 		}
 	}
+	for ordinal := range reportByOrdinal {
+		if !clarified[ordinal] {
+			return fmt.Errorf("cited reason ordinal %d has no paired clarification — every cited NOT-READY reason must be answered (or the disposition is ACCEPT, not clarify; final-review r1 G2-R8-01)", ordinal)
+		}
+	}
 	return nil
+}
+
+// validSRSignals is the closed Phase-0 semantic-signal set (spec 124 R4b)
+// a report entry may cite.
+var validSRSignals = map[string]bool{
+	"SR-1": true, "SR-2": true, "SR-3": true, "SR-4": true, "SR-5": true,
 }

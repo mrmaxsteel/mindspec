@@ -85,7 +85,7 @@ merge terminal         (panel-approved bead — mindspec complete)
 On a NOT READY, choose exactly one of two dispositions:
 
 - **ACCEPT (the default)** — halt the bead and surface the reasons (the full ordinal-numbered report) to the user/orchestrator, with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch (back to `/ms-bead-impl`, which re-runs the ingress ready-check and re-stages Phase 0 fresh). `/ms-spec-autopilot` treats an ACCEPTed NOT READY as its existing bead-level halt class — do not proceed to the next bead.
-- **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (each entry: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
+- **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (one entry for EVERY cited ordinal, each: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — the verb REFUSES a partial record (an unanswered cited reason means the bead is still not ready — that is ACCEPT territory) and a paraphrased reason (the pairing must repeat the cited reason verbatim); a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
   ```bash
   mindspec bead clarify <bead-id> --file <record.json>
   ```

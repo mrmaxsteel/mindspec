@@ -210,3 +210,47 @@ func TestRecordReadinessOverride_PropagatesWriteFailure(t *testing.T) {
 		t.Fatal("expected the MergeMetadata failure to propagate, got nil")
 	}
 }
+
+// TestRollbackReadinessOverride_DeletesExactlyTheMarkerKey pins the
+// G3-OVERRIDE-ORPHAN rollback shape (spec 124 final-review r1): a failed
+// ClaimBead after the marker-before-claim write must delete EXACTLY the
+// bead.MetaKeyReadinessOverride key, via the deleteMetadataKeysFn seam.
+func TestRollbackReadinessOverride_DeletesExactlyTheMarkerKey(t *testing.T) {
+	orig := deleteMetadataKeysFn
+	t.Cleanup(func() { deleteMetadataKeysFn = orig })
+
+	var gotID string
+	var gotKeys []string
+	deleteMetadataKeysFn = func(issueID string, keys ...string) error {
+		gotID = issueID
+		gotKeys = keys
+		return nil
+	}
+
+	if err := RollbackReadinessOverride("mindspec-abcd.1"); err != nil {
+		t.Fatalf("RollbackReadinessOverride: %v", err)
+	}
+	if gotID != "mindspec-abcd.1" {
+		t.Errorf("expected issueID %q, got %q", "mindspec-abcd.1", gotID)
+	}
+	if len(gotKeys) != 1 || gotKeys[0] != bead.MetaKeyReadinessOverride {
+		t.Errorf("expected exactly the %q key, got %v", bead.MetaKeyReadinessOverride, gotKeys)
+	}
+}
+
+// TestRollbackReadinessOverride_PropagatesDeleteFailure pins that a
+// delete failure surfaces to the caller — cmd/mindspec/next.go's
+// claim-failure branch warns LOUDLY (naming the orphaned key) instead of
+// silently swallowing a rollback that left the marker behind.
+func TestRollbackReadinessOverride_PropagatesDeleteFailure(t *testing.T) {
+	orig := deleteMetadataKeysFn
+	t.Cleanup(func() { deleteMetadataKeysFn = orig })
+
+	deleteMetadataKeysFn = func(issueID string, keys ...string) error {
+		return errors.New("bd metadata delete-write failed")
+	}
+
+	if err := RollbackReadinessOverride("mindspec-abcd.1"); err == nil {
+		t.Fatal("expected the delete failure to propagate, got nil")
+	}
+}

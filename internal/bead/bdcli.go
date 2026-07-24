@@ -356,6 +356,55 @@ func MergeMetadata(issueID string, updates map[string]interface{}) error {
 	return nil
 }
 
+// DeleteMetadataKeys removes the named metadata keys from issueID via
+// bd's dedicated `--unset-metadata` flag (NOT via a `--metadata`
+// replace-write: current bd MERGES a `--metadata` payload into the
+// existing map, so omitting a key never removes it — verified
+// empirically by the spec 124 rollback e2e). Keys already absent are a
+// no-op; when NONE of the named keys are present, no bd write is
+// performed at all and nil is returned.
+//
+// Introduced for spec 124's final-review r1 G3-OVERRIDE-ORPHAN fix: the
+// `mindspec next --allow-not-ready` claim-failure branch rolls back the
+// durable readiness-override marker it wrote at Step 4.6, so a claim
+// lost to contention leaves no orphaned override authorizing a claim
+// that never happened. Like MergeMetadata, a read/parse failure of the
+// existing metadata RETURNS the error (fail-closed) rather than
+// guessing at the store's state.
+func DeleteMetadataKeys(issueID string, keys ...string) error {
+	// Class-2 consumer boundary (ADR-0042 §1): issueID and the key names
+	// feed the `bd update --unset-metadata` argv build below — validated
+	// BEFORE any bd spawn.
+	if err := idvalidate.BeadID(issueID); err != nil {
+		return fmt.Errorf("invalid bead id %s: %w", idrender.Bead(issueID), err)
+	}
+	for _, k := range keys {
+		if k == "" || strings.HasPrefix(k, "-") || strings.ContainsAny(k, " \t\r\n") {
+			return fmt.Errorf("invalid metadata key %q for delete", k)
+		}
+	}
+	existing, err := GetMetadata(issueID)
+	if err != nil {
+		return fmt.Errorf("bd metadata delete-read failed for %s: %w", issueID, err)
+	}
+
+	args := []string{"update", issueID}
+	present := false
+	for _, k := range keys {
+		if _, ok := existing[k]; ok {
+			args = append(args, "--unset-metadata", k)
+			present = true
+		}
+	}
+	if !present {
+		return nil
+	}
+	if _, err := tracedCombined("update", args); err != nil {
+		return fmt.Errorf("bd metadata delete-write failed for %s: %w", issueID, err)
+	}
+	return nil
+}
+
 // GetMetadata reads issueID's current metadata via `bd show <id> --json` and
 // returns the parsed map (Spec 114 R2/Bead 2, carry-forward #1). A
 // genuinely-absent metadata field (an existing bead with no metadata, or an

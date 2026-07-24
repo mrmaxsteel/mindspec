@@ -331,6 +331,14 @@ func TestReadiness_MF2AllClasses(t *testing.T) {
 		{"iii wholly dangling token fails", "This bead claims AC-99.", "- [ ] AC-1 — some criterion.", false},
 		{"iv foreign citation excluded from harvest", "This bead follows the spec 123 AC-17 pattern.", "- [ ] AC-1 — some criterion.", true},
 		{"iv control: bare AC-17 without citation dangles", "This bead follows the AC-17 pattern.", "- [ ] AC-1 — some criterion.", false},
+		// Final-review r1 G1-MF2-MIXED-CITATION-LINE: the exclusion is
+		// SPAN-scoped, never whole-line — a dangling OWNING-spec token
+		// sharing a line with a benign foreign citation must still be
+		// harvested and FAIL. Reverting to the whole-line exclusion
+		// turns the first case green-to-red here (RED-on-revert).
+		{"iv mixed line: dangling owning token beside a foreign citation FAILs", "Preserve the spec 123 AC-17 pattern while satisfying AC-999.", "- [ ] AC-1 — some criterion.", false},
+		{"iv mixed line: resolvable owning token beside a foreign citation passes", "Preserve the spec 123 AC-17 pattern while satisfying AC-1.", "- [ ] AC-1 — some criterion.", true},
+		{"iv citation token chain excluded (slash-separated)", "This bead follows the spec 123 AC-17/AC-18 conventions.", "- [ ] AC-1 — some criterion.", true},
 		{"enumerator basic: AC-9(i) resolves via bare AC-9", "This bead claims AC-9(i).", "- [ ] AC-9 — some criterion.", true},
 		{"enumerator collision: AC-9(i) still resolves via base, even though AC-9i also exists", "This bead claims AC-9(i).", "- [ ] AC-9i — some criterion.", true},
 		{"direct sub-letter (no parens) AC-9i dangles against bare AC-9 only", "This bead claims AC-9i directly.", "- [ ] AC-9 — some criterion.", false},

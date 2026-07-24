@@ -171,14 +171,22 @@ bead (read-only probe targets are never declared there):
   description, and bd dependency edges — NEVER issue metadata — so the
   AC-12 invariance holds by construction, and Bead 1 pins it by seeding
   the key directly.
-- **Override-marker write ordering** (Bead 2): the marker is written
-  immediately AFTER `ClaimBead` succeeds and before worktree creation —
-  so the refusal path stays zero-mutation (AC-4's byte-identical audit)
-  and a claim lost to contention leaves no stray marker. If the process
-  dies between claim and marker write, the dispatch ingress blocks and
-  the documented recovery is re-running `mindspec next` (which re-gates
-  and re-offers `--allow-not-ready`) — forward-reconcilable, never
-  corrupting.
+- **Override-marker write ordering** (Bead 2) — **superseded as shipped
+  (Bead-2 codex fixup + final-review r1 F1-2/G3)**: this bullet's
+  original AFTER-claim design was flipped to **marker-BEFORE-ClaimBead,
+  FAIL-CLOSED**, because AC-4 makes `--allow-not-ready` success a
+  GUARANTEE that the durable marker exists — a marker-write failure now
+  refuses with nothing claimed and no worktree, and the refusal path
+  stays zero-mutation (AC-4's byte-identical audit; a plain refusal
+  without `--allow-not-ready` never reaches the write). If `ClaimBead`
+  then FAILS after the marker landed (a claim lost to contention), the
+  claim-failure branch ROLLS BACK the marker — best-effort delete, loud
+  warning naming the orphaned key if the delete also fails — so a lost
+  claim leaves no stray authorizing override (final-review r1
+  G3-OVERRIDE-ORPHAN). If the process dies between marker write and
+  claim, the documented recovery is re-running `mindspec next` (which
+  re-gates and re-offers `--allow-not-ready`) — forward-reconcilable,
+  never corrupting.
 - **`bead clarify` invocation shape** (constrained by AC-9/AC-15):
   `mindspec bead clarify <bead-id> --file <record.json>` — one JSON file
   carrying the original NOT-READY report (ordinals, verbatim reasons,
@@ -192,11 +200,19 @@ bead (read-only probe targets are never declared there):
 - **MF-2 harvest heuristic** (spec: "harvest heuristic plan-level, pinned
   by the POSITIVE fixture's benign feature (iv)"), three plan-level rules,
   each fixture-pinned:
-  - **(1) Foreign-citation exclusion.** An `R<n>`/`AC-<n>` token is
-    EXCLUDED when the same line contains a foreign-spec reference
-    (`spec <digits>` / `Spec <digits>` where `<digits>` differs from the
-    owning spec's number) — "the spec 123 AC-17 pattern" cites, never
-    claims. Pinned by AC-14(iv).
+  - **(1) Foreign-citation exclusion — SPAN-scoped as shipped
+    (final-review r1 G1-MF2-MIXED-CITATION-LINE narrowed this rule's
+    original whole-line form).** An `R<n>`/`AC-<n>` token is EXCLUDED
+    only when it belongs to a foreign-spec citation's own span: the
+    `spec <digits>` / `Spec <digits>` reference (where `<digits>`
+    differs from the owning spec's number) plus the chain of tokens
+    strictly adjacent to it (separated by whitespace or the `/`, `+`,
+    `&` token-chain separators only) — "the spec 123 AC-17 pattern"
+    cites AC-17, never claims it. A token ELSEWHERE on the same line
+    (across clause punctuation or intervening words) is the bead's own
+    claim and IS harvested — so a dangling owning-spec token sharing a
+    line with a benign foreign citation still FAILs MF-2. Pinned by
+    AC-14(iv) plus the mixed-line fixture arms.
   - **(2) Code-span exclusion (plan-gate F2-3, consistent with the
     spec's MF-4 code-fence rule).** Token harvest scans OUTSIDE inline-code
     spans (`` `…` ``) and fenced code blocks — the SAME exclusion MF-4
