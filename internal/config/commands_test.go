@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -153,4 +156,141 @@ func TestRenderBuildTestSection_HeadingLevel(t *testing.T) {
 			t.Errorf("RenderBuildTestSection(2) missing %q, got:\n%s", want, got2)
 		}
 	}
+}
+
+// TestRenderBuildTestSection_CiRendersInVocabularyPosition pins spec 126
+// R8a/AC-17: RenderBuildTestSection (config.go:320) on a fixture declaring
+// build, test, ci, AND an extension key that sorts lexically BEFORE "ci"
+// (fixture key "aa") must render the lines in exactly build, test, ci,
+// aa order — "ci" in ITS OWN vocabulary position, ahead of the
+// lexically-earlier extension key. The sorted-rest fallback in
+// CommandLines already renders any declared key regardless of the
+// commandOrder entry, so presence of the "ci" line ALONE cannot pass this
+// test — only the ORDER can. Reverting the commandOrder "ci" entry
+// (config.go:233) reorders "ci" after "aa" and REDs this test.
+func TestRenderBuildTestSection_CiRendersInVocabularyPosition(t *testing.T) {
+	cfg := &Config{Commands: map[string]string{
+		"aa":    "aa-command",
+		"ci":    "ci-command",
+		"test":  "test-command",
+		"build": "build-command",
+	}}
+	got := cfg.RenderBuildTestSection(2)
+
+	wantOrder := []string{
+		"build-command   # build",
+		"test-command   # test",
+		"ci-command   # ci",
+		"aa-command   # aa",
+	}
+	var idx []int
+	for _, w := range wantOrder {
+		i := strings.Index(got, w)
+		if i < 0 {
+			t.Fatalf("RenderBuildTestSection(2) missing line %q, got:\n%s", w, got)
+		}
+		idx = append(idx, i)
+	}
+	for i := 1; i < len(idx); i++ {
+		if idx[i] <= idx[i-1] {
+			t.Fatalf("RenderBuildTestSection(2) lines out of order — want exactly build, test, ci, aa; got:\n%s", got)
+		}
+	}
+}
+
+// TestCommandsFieldComment_DocumentsCiKey is the spec 126 R8a/AC-11
+// config-half pin: the Commands field's doc comment in config.go must
+// name the "ci" vocabulary key beside build/test, AND must document the
+// undeclared-ci -> test fallback via the DISTINCTIVE "commands.test"
+// token — not the bare vocabulary word "test", which already appears
+// earlier in the same comment (in the "build", "test", and "ci" key
+// list) and would make a bare-"test" guard pass vacuously even after the
+// fallback sentence itself is deleted. A source-level grep
+// (runtime.Caller(0)-resolved, the same technique
+// internal/panel/leaf_imports_test.go uses to locate its own package
+// file) rather than a mirrored string constant, so a future comment
+// rewrite that silently drops "ci" is caught without this test also
+// having to duplicate the exact wording.
+func TestCommandsFieldComment_DocumentsCiKey(t *testing.T) {
+	src := readConfigGoSource(t)
+	comment := commandsFieldComment(t, src)
+
+	if !strings.Contains(comment, `"ci"`) {
+		t.Errorf("Commands field comment does not name the \"ci\" vocabulary key:\n%s", comment)
+	}
+	if !commandsFieldCommentDocumentsFallback(comment) {
+		t.Errorf("Commands field comment does not document the commands.test fallback semantics (missing the distinctive \"commands.test\" token):\n%s", comment)
+	}
+}
+
+// TestCommandsFieldComment_FallbackSentenceDeletionReds is the mutation
+// probe for the guard above: deleting ONLY the undeclared-ci -> test
+// fallback sentence (while leaving the "build"/"test"/"ci" vocabulary
+// list intact — the bare word "test" still appears there) must turn
+// commandsFieldCommentDocumentsFallback false. Before the "commands.test"
+// token was introduced, the guard used `!Contains("commands.test") &&
+// !Contains(\`"test"\`)`, which this exact deletion left green (the
+// vocabulary word alone satisfied it).
+func TestCommandsFieldComment_FallbackSentenceDeletionReds(t *testing.T) {
+	src := readConfigGoSource(t)
+	comment := commandsFieldComment(t, src)
+
+	if !commandsFieldCommentDocumentsFallback(comment) {
+		t.Fatal("precondition failed: the shipped Commands field comment must currently document the fallback")
+	}
+
+	const fallbackSentence = "when \"ci\" is undeclared,\n\t// commands.test is the documented fallback."
+	if !strings.Contains(comment, fallbackSentence) {
+		t.Fatalf("fixture assumption broken: could not locate the exact fallback sentence to delete in:\n%s", comment)
+	}
+	mutated := strings.Replace(comment, fallbackSentence, "", 1)
+
+	// Sanity: the vocabulary word "test" still survives the deletion (it
+	// lives in the earlier "build"/"test"/"ci" key list), so a bare-word
+	// guard would stay green — only the distinctive-token guard may RED.
+	if !strings.Contains(mutated, `"test"`) {
+		t.Fatal("fixture assumption broken: deleting the fallback sentence must not remove the earlier vocabulary-list \"test\" mention")
+	}
+	if commandsFieldCommentDocumentsFallback(mutated) {
+		t.Errorf("mutation probe failed: deleting the fallback sentence should turn commandsFieldCommentDocumentsFallback false, got true for:\n%s", mutated)
+	}
+}
+
+// readConfigGoSource reads config.go's full source from disk, resolving
+// its path relative to this test file via runtime.Caller(0).
+func readConfigGoSource(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed to resolve this test file's path")
+	}
+	configPath := filepath.Join(filepath.Dir(thisFile), "config.go")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", configPath, err)
+	}
+	return string(data)
+}
+
+// commandsFieldComment extracts the Commands field's doc comment block
+// from config.go's source text.
+func commandsFieldComment(t *testing.T, src string) string {
+	t.Helper()
+	commentStart := strings.Index(src, "// Commands declares the CONSUMER's build/test guidance")
+	if commentStart < 0 {
+		t.Fatal("could not locate the Commands field's doc comment in config.go")
+	}
+	fieldIdx := strings.Index(src[commentStart:], "Commands map[string]string")
+	if fieldIdx < 0 {
+		t.Fatal("could not locate the Commands field declaration following its doc comment")
+	}
+	return src[commentStart : commentStart+fieldIdx]
+}
+
+// commandsFieldCommentDocumentsFallback requires the DISTINCTIVE
+// "commands.test" token, never the bare vocabulary word "test" (which
+// the comment's earlier "build"/"test"/"ci" key list already contains
+// regardless of whether the fallback sentence exists).
+func commandsFieldCommentDocumentsFallback(comment string) bool {
+	return strings.Contains(comment, "commands.test")
 }

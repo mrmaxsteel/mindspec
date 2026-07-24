@@ -814,12 +814,20 @@ managed-by: mindspec
 # Spec Approval
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
-3. If approval fails, show the validation errors and help the user fix them
-4. If validation flags the unchecked ` + "`grill deferred: headless session`" + ` marker:
+2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
+   ` + "`mindspec panel create <slug> --spec <id> --gate spec_approve --target <ref>`" + `
+   against the spec DOCUMENT (not a code diff), and do NOT run
+   ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
+   ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
+   assignments (ADR-0044). This step is guidance, not a mechanized
+   preflight: binary enforcement of these gates is a separate, tracked
+   enhancement.
+3. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
+4. If approval fails, show the validation errors and help the user fix them
+5. If validation flags the unchecked ` + "`grill deferred: headless session`" + ` marker:
    run /ms-spec-grill interactively and resolve it, or — in an orchestrated run
    whose spec review panel has PASSED — check the box, citing the panel.
-5. On success: immediately begin planning (the approval is the authorization)
+6. On success: immediately begin planning (the approval is the authorization)
 `,
 
 		"ms-plan-approve": `---
@@ -831,9 +839,17 @@ managed-by: mindspec
 # Plan Approval
 
 1. Identify the active spec/plan via ` + "`mindspec state show`" + `
-2. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
-3. If approval fails, show the validation errors and help the user fix them
-4. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
+2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
+   ` + "`mindspec panel create <slug> --spec <id> --gate plan_approve --target <ref>`" + `
+   against the plan DOCUMENT (not a code diff), and do NOT run
+   ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
+   ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
+   assignments (ADR-0044). This step is guidance, not a mechanized
+   preflight: binary enforcement of these gates is a separate, tracked
+   enhancement.
+3. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
+4. If approval fails, show the validation errors and help the user fix them
+5. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
 `,
 
 		"ms-impl-approve": `---
@@ -915,7 +931,7 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 
 | Skill | Purpose |
 |:------|:--------|
-| ` + "`/ms-panel-run`" + ` | Step 0 writes the panel dir + BRIEF + ` + "`panel.json`" + `; then launch 6 reviewers and collect verdicts |
+| ` + "`/ms-panel-run`" + ` | Step 0 writes the panel dir + BRIEF + ` + "`panel.json`" + `; then launch the configured reviewer panel and collect verdicts |
 | ` + "`/ms-panel-tally`" + ` | Single decision authority: decision matrix, artifact gates, consolidation, halt-recovery |
 
 ### Orchestrators

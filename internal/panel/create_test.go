@@ -681,3 +681,52 @@ func TestPanelSchemaDoc_SectionScoped_RejectsRenamedNormativeName(t *testing.T) 
 		t.Errorf("expected a problem naming the missing panel.json literal, got: %v", problems)
 	}
 }
+
+// TestBriefStubBody_ContainsAcceptanceCriteriaHeading pins spec 126 R5/AC-15:
+// briefStubBody (create.go:26) — the skeleton a first `create` writes below
+// the machine-managed header — must carry an
+// "## Acceptance Criteria (verbatim from spec.md)" heading with its
+// TODO(skill) stub comment, so a fresh install's very first BRIEF skeleton
+// demands the verbatim ACs. In-package (package panel) because the constant
+// is unexported and internal/setup does not import internal/panel. Reverting
+// the create.go:26 heading edit REDs this test.
+func TestBriefStubBody_ContainsAcceptanceCriteriaHeading(t *testing.T) {
+	if !strings.Contains(briefStubBody, "## Acceptance Criteria (verbatim from spec.md)") {
+		t.Fatalf("briefStubBody missing the '## Acceptance Criteria (verbatim from spec.md)' heading:\n%s", briefStubBody)
+	}
+	if !strings.Contains(briefStubBody, "<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->") {
+		t.Errorf("briefStubBody missing the AC-heading's TODO(skill) stub comment:\n%s", briefStubBody)
+	}
+}
+
+// TestRenderBriefHeader_GoldenUnchanged is the AC-15 companion golden guard:
+// spec 126 R5 targets ONLY the skill-authored briefStubBody, and
+// renderBriefHeader (create.go:186-208) — the machine-managed BRIEF
+// region — must stay byte-unchanged. A fixed-input golden string compare so
+// any future edit to renderBriefHeader's output is a conscious, test-visible
+// decision, not an accidental byte-drift alongside the briefStubBody edit.
+func TestRenderBriefHeader_GoldenUnchanged(t *testing.T) {
+	got := renderBriefHeader("demo-slug", 1, "bead/mindspec-x.1", "abc1234abc1234abc1234abc1234abc1234abc1")
+	want := "<!-- mindspec:panel-header -->" +
+		"\n## Panel Registration\n\n" +
+		"- **Slug**: `demo-slug`\n" +
+		"- **Round**: 1\n" +
+		"- **Branch**: `bead/mindspec-x.1`\n" +
+		"- **Reviewed commit**: `abc1234abc1234abc1234abc1234abc1234abc1`\n" +
+		"\n## Your job\n\n" +
+		"Review the diff at the reviewed commit above and write your verdict as\n" +
+		"a single JSON file named `<your-slot>-round-1.json` beside this BRIEF\n" +
+		"(the panel artifact schema — see `.mindspec/domains/workflow/interfaces.md`\n" +
+		"§ Panel Artifact Schema). Required and optional top-level fields:\n\n" +
+		"- `verdict` (required): one of `APPROVE`, `REQUEST_CHANGES`, `REJECT`.\n" +
+		"- `hard_block` (optional boolean, a top-level sibling of `verdict` — never\n" +
+		"  a per-finding field): set `true` only for an evidence-bearing halt that\n" +
+		"  no vote count may override.\n" +
+		"- `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`,\n" +
+		"  `findings`: reviewer-authored context, read presentation-only by\n" +
+		"  `mindspec panel tally` — not consumed by the gate decision.\n" +
+		"<!-- /mindspec:panel-header -->"
+	if got != want {
+		t.Fatalf("renderBriefHeader output changed (spec 126 R5 must not touch renderBriefHeader):\ngot:  %q\nwant: %q", got, want)
+	}
+}
