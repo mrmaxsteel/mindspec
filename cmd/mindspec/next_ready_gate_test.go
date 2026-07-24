@@ -400,6 +400,9 @@ func installMetadataFailingBD(t *testing.T) {
 // bead is NOT claimed, and no worktree is created — never the prior
 // swallow-and-continue partial state (claimed + worktree, no marker).
 func TestNextReadyGate_AllowNotReady_MarkerWriteFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-bd/real-git end-to-end flow under -short")
+	}
 	installMetadataFailingBD(t)
 
 	sb := nextReadyGateSetupSandbox(t)
@@ -501,6 +504,9 @@ func installClaimFailingBD(t *testing.T) {
 // rollback call from cmd/mindspec/next.go's claim-failure branch leaves
 // the marker behind and turns this red.
 func TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-bd/real-git end-to-end flow under -short")
+	}
 	installClaimFailingBD(t)
 
 	sb := nextReadyGateSetupSandbox(t)
