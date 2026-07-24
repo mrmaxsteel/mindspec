@@ -96,7 +96,9 @@ journal event carry a `Command` value — an unregistered command's events
 are silently DROPPED, not merely unredacted. `TestRedactEnum_NoCobraDrift`
 (`cmd/mindspec/redact_enum_drift_test.go`) walks the real cobra tree and
 fails on drift, catching a missed registration at test time rather than
-silently at runtime (spec 109 Bead 4 hit this adding `config`).
+silently at runtime (spec 109 Bead 4 hit this adding `config`; spec 125
+followed the same rule adding `reattest` — a one-token, core-owned
+registration for the workflow domain's new verb, no other core change).
 
 ### Config
 
