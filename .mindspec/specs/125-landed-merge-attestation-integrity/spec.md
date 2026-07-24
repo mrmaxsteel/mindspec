@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-24T08:32:30Z"
+approved_by: user
+status: Approved
 ---
 # Spec 125-landed-merge-attestation-integrity: Landed-merge attestation integrity
 
@@ -186,7 +186,7 @@ Recorded as plan-level choices (not open questions): the re-attest verb's name a
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-24
+- **Notes**: Approved via mindspec approve spec
