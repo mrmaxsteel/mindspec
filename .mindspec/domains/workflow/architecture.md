@@ -775,3 +775,136 @@ markdown noise from domain tokens before normalization (spec 087 Bead 1
 fixup) — but its regression PIN is DEFERRED to a follow-up bead per the
 plan's PF-3 decision, to avoid pulling the spec-excluded `context-system`
 domain into this spec's scope. It is NOT a Bead 4 deliverable.
+
+## Impl-readiness gate: mechanical floor + semantic Phase 0 (spec 124)
+
+Spec 124 (beads `mindspec-8nhe.1` through `.3`) puts a readiness gate in
+front of bead implementation, split along the ADR-0040 line — the binary
+validates STRUCTURE deterministically; the dispatched model judges
+MEANING:
+
+- a **mechanical floor** in the binary: four deterministic signals
+  (MF-1..MF-4, `internal/validate/readiness`) surfaced by the read-only
+  verb `mindspec bead ready-check <id>` and enforced gate-before-mutate
+  inside `mindspec next`;
+- a **semantic Phase-0 review** in the skill layer: the impl subagent's
+  own five-signal readiness judgment (SR-1..SR-5, staged into every
+  `/ms-bead-impl` prompt) rendered as a `NOT READY: <bead-id>` report
+  when it fails, with a bounded clarification loop (R8).
+
+### The mechanical floor (MF-1..MF-4)
+
+`readiness.EvaluateReadiness(root, beadID)` is a pure read — no bd
+write, no git write, no file write on any path — that always returns
+exactly four signals in stable order:
+
+- **MF-1 — plan section concrete-by-structure.** plan.md has a
+  `## Bead N` section whose Acceptance Criteria block carries an entry
+  beyond the scaffold placeholder, and the frontmatter has a
+  `work_chunks` entry with `id: N` and non-empty `key_file_paths`.
+- **MF-2 — claimed tokens resolve.** Every `R<n>`/`AC-<n>` token the
+  bead's plan section or bd description claims resolves in the owning
+  spec's spec.md, under three exact harvest rules: code-span/fence
+  exclusion (CommonMark-correct for ANY backtick run length), per-line
+  foreign-citation exclusion (a line naming a DIFFERENT `spec <NNN>` is
+  a citation, never a claim), and parenthetical **form-classification**
+  — a lowercase Roman-numeral sequence built only from i/v/x (`R5(ii)`)
+  is a clause ENUMERATOR and degrades to the base token, while a single
+  non-Roman lowercase letter (`AC-2(b)`) is a SUB-LETTER claim; the
+  closed i/v/x set is the FORM the spec pins, so `(d)`/`(c)` classify as
+  sub-letters even though they are Roman-numeral-valid symbols.
+- **MF-3 — dependencies landed, not just closed.** Every `blocks`
+  dependency edge must be `closed` in bd AND positively landed-merged
+  into the spec branch via `internal/lifecycle.FindLandedMerge` — three
+  distinct refusals: not closed; closed but no landed merge found; a
+  candidate merge exists but no admissible datum corroborates it
+  (`LandedMergeNoEvidence`).
+- **MF-4 — no genuine blocking marker.** A `TBD`/`OPEN QUESTION` marker
+  or an unchecked `- [ ]` item under a blocking-region header in the
+  bead's plan section or bd description fails; markers inside code
+  spans/fences are invisible (the same exclusion rule as MF-2).
+
+Owning-spec resolution is LINEAGE-authoritative (bead → epic → spec via
+`phase.FindEpicForBead`), never cwd-derived. The engine lives in the
+sub-package `internal/validate/readiness` — NOT `internal/validate`
+itself — because it consumes `lifecycle.FindLandedMerge` and placing it
+in `internal/validate` would close the `lifecycle[test] → validate →
+lifecycle` import cycle. Its COMPLETE bd read-set is routed through
+injectable func-var seams so the unit tests are hermetic with `bd`
+absent from PATH (never a `t.Skip` — the spec-119 lesson); MF-3's
+landed-merge leg is exercised over real temp git repos. There is ONE
+renderer (`readiness.Render`) shared by `bead ready-check` and `next`'s
+refusal, so the per-signal report format cannot drift between call
+sites (ADR-0040 no-restate); every bead/plan-derived byte in it passes
+through `termsafe.Escape`, and each FAILing signal carries exactly one
+operator-authored `recovery:` line.
+
+### `mindspec next`: gate-before-mutate + `--allow-not-ready`
+
+`mindspec next` adopts ADR-0041's **preflight leg only** (the ADR's
+fourth-verb clause — a scope-deferral, not a certification of `next`'s
+existing success-path mutation chain): `next.GateReadiness` runs after
+bead selection and BEFORE any mutation, so a NOT-READY refusal exits
+non-zero leaving bd status, git branches, and worktrees byte-identical
+to their pre-call state — no claim, no `bead/<id>` branch, no worktree.
+The refusal renders the same `readiness.Render` report plus each failing
+signal's recovery line and the two escape hatches: the standalone
+`bead ready-check` report, and re-running with `--allow-not-ready`.
+
+`--allow-not-ready` is the deliberate, RECORDED bypass: it proceeds past
+a failing floor, warns on stderr naming every failing signal, and writes
+a durable override marker (`mindspec_readiness_override`: the bypassed
+signal IDs + a UTC timestamp) via `bead.MergeMetadata` BEFORE the claim,
+FAIL-CLOSED — a marker-write failure refuses the whole command with
+nothing claimed, so `--allow-not-ready` success guarantees (marker
+durably written AND bead claimed). It is orthogonal to the pre-existing
+`--force` (session-freshness only), which gains no readiness authority.
+A passing floor adds no interactive step and no extra output.
+
+### The semantic Phase 0 + NOT-READY routing (skill layer)
+
+`/ms-bead-impl`'s dispatch ingress runs `mindspec bead ready-check`
+FIRST on EVERY dispatch path (fresh Phase A, supplied `prompt-path`,
+or the manual-claim fallback): FAIL without an override marker stops
+before any prompt is staged; FAIL with the `mindspec_readiness_override`
+marker proceeds with a warning (a force-claimed bead gets a coherent
+path instead of dead-ending). The staged prompt's Phase 0 has the
+subagent judge five semantic signals — SR-1 implementable without
+inventing behavior, SR-2 ACs decidable, SR-3 named helpers actually
+exist, SR-4 no contradiction with spec/sibling landed work, SR-5 no
+ambiguity forcing materially different implementations — and on any
+failure return, with ZERO commits, a report whose first line is exactly
+`NOT READY: <bead-id>`, reasons ordinal-numbered, SR-tagged, and
+span-quoting.
+
+**NOT READY is its own outcome** (`/ms-bead-cycle`), distinct from an
+implementation failure: no panel round is consumed, it is EXCLUDED from
+`loop.halt.max_consecutive_impl_failures` (that brake stops repeated
+post-damage failures; this is the pre-damage refusal that prevents
+them), it never routes to `/ms-bead-fix`, and the worktree stays intact.
+`/ms-spec-autopilot` treats an ACCEPTed NOT READY as a bead-level halt.
+Exactly two dispositions: **ACCEPT** (default — halt, surface the
+ordinal report, revise plan/spec, re-dispatch) or **clarify** (R8).
+
+### The R8 clarification loop (bounded, restart-proof)
+
+`mindspec bead clarify <id> --file <record.json>` writes the
+append-only readiness-attempt record (`mindspec_readiness_attempt`): the
+FULL original ordinal-keyed NOT-READY report plus one grounded
+clarification per cited ordinal (`{ordinal, reason, answer, span}` —
+span presence is validated; whether it SUPPORTS the answer is the fresh
+Phase-0 subagent's judgment). The cap is **categorical and durable**:
+exactly one write per bead, ever — the verb refuses a second write
+regardless of whether the next NOT READY repeats or raises new reasons,
+so the cap survives orchestrator restart. There is NO update/finalize
+surface (R8e derive-don't-write): the terminal READY/escalated
+disposition is DERIVED from the re-dispatch outcome. On re-dispatch the
+ingress renders, per ordinal, the original reason PAIRED with its
+clarification, so Phase 0 can apply the anti-browbeat rule — an
+ungrounded or non-resolving clarification is re-reported NOT READY.
+
+Both metadata keys are ADVISORY (ADR-0023: bd/Dolt stays the lifecycle
+authority) and are NEVER read by any mechanical signal — the layer
+boundary (AC-12) holds by construction, so a clarification can never
+flip a mechanical PASS/FAIL, and `--allow-not-ready` never touches the
+semantic review. The two levers are not interchangeable.

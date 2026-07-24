@@ -55,6 +55,56 @@ func Close(ids ...string) error               // Close beads
 func WorktreeList() ([]WorktreeListEntry, error)
 ```
 
+### Readiness Engine (`internal/validate/readiness/`, spec 124)
+
+```go
+package readiness
+
+// Signal IDs, stable across releases: "MF-1" (plan section concrete-by-
+// structure), "MF-2" (claimed R/AC tokens resolve), "MF-3" (dependencies
+// closed AND landed-merged), "MF-4" (no genuine blocking marker).
+const (
+    SignalPlanSection  = "MF-1"
+    SignalTokens       = "MF-2"
+    SignalDependencies = "MF-3"
+    SignalBlocking     = "MF-4"
+)
+
+// EvaluateReadiness evaluates the four mechanical-floor signals for a
+// bead. Pure read: no bd write, no git write, no file write. Owning-spec
+// resolution is lineage-authoritative (bead -> epic -> spec), never cwd.
+func EvaluateReadiness(root, beadID string) (*Report, error)
+
+// Report always carries exactly four signals, ordered MF-1..MF-4.
+func (r *Report) AllPass() bool
+func (r *Report) FailingSignals() []Signal
+func (r *Report) RecoveryCommands() []string // one recovery line per FAIL
+
+// Render is the SOLE renderer of the per-signal report — shared by
+// `bead ready-check` and `next`'s gate refusal (ADR-0040 no-restate).
+// Agent-influenced detail text passes through termsafe.Escape here.
+func Render(r *Report) string
+```
+
+The gate-before-mutate wiring lives in `internal/next/ready_gate.go`:
+
+```go
+package next
+
+// GateReadiness runs after bead selection and BEFORE any claim/branch/
+// worktree mutation (ADR-0041 fourth-verb preflight leg). On a failing
+// floor: allowNotReady=false returns a guard refusal (zero mutation);
+// allowNotReady=true returns the failing signal IDs for the caller's
+// stderr warning + override marker.
+func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error)
+
+// RecordReadinessOverride writes the durable --allow-not-ready marker
+// (bead metadata key "mindspec_readiness_override": bypassed signal IDs
+// + UTC timestamp). Called BEFORE ClaimBead, fail-closed — a marker-write
+// failure refuses the whole `next` invocation with nothing claimed.
+func RecordReadinessOverride(beadID string, signals []string) error
+```
+
 ### Panel Artifact Schema (Spec 110 Bead 1, ADR-0040 portability contract)
 
 The review-panel lifecycle's on-disk shapes are the agent-neutral
@@ -246,7 +296,10 @@ complete-gated.
 | `mindspec state set` | Set current mode and active work |
 | `mindspec state show` | Display current state |
 | `mindspec instruct` | Emit mode-appropriate operating guidance |
-| `mindspec next` | Discover, claim, and start next bead |
+| `mindspec next` | Discover, claim, and start next bead — evaluates the mechanical readiness floor gate-before-mutate: a NOT-READY refusal claims nothing, creates no branch/worktree (spec 124 R3, ADR-0041 fourth-verb preflight leg) |
+| `mindspec next --allow-not-ready` | Proceed past a failing readiness floor deliberately — warns naming every failing signal and records the durable `mindspec_readiness_override` marker BEFORE claiming, fail-closed (spec 124 R3/AC-4); orthogonal to `--force` (session-freshness only) |
+| `mindspec bead ready-check <id>` | Read-only per-signal readiness report (MF-1..MF-4); exit 0 when all pass, else one `recovery:` line per failing signal (spec 124 R1) |
+| `mindspec bead clarify <id> --file <record.json>` | Write the append-only readiness-attempt record for a NOT-READY bead — original ordinal-keyed report + span-grounded clarifications; refuses a second write per bead, the categorical R8 cap (spec 124 R8) |
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |

@@ -63,6 +63,27 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | `MindspecExecutor` | `internal/executor/mindspec_executor.go` | Production: real git+worktree operations |
 | `MockExecutor` | `internal/executor/mock.go` | Testing: records calls, returns configured errors |
 
+## Readiness advisory metadata (`internal/bead`, spec 124)
+
+`internal/bead` names the two dedicated bd metadata keys spec 124's
+readiness gate writes — advisory audit annotations only (ADR-0023: bd/
+Dolt stays the single lifecycle-state authority; these are never
+lifecycle state, and no mechanical readiness signal ever reads them —
+the spec 124 R8e/AC-12 layer boundary holds by construction):
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `MetaKeyReadinessOverride` (`"mindspec_readiness_override"`) | Durable `--allow-not-ready` override marker written by `mindspec next` (workflow domain) via `MergeMetadata`: the bypassed MF signal IDs + a UTC timestamp. |
+| `MetaKeyReadinessAttempt` (`"mindspec_readiness_attempt"`) | The append-only readiness-attempt record written by `mindspec bead clarify`: the original ordinal-keyed NOT-READY report plus span-grounded clarification entries. |
+| `WriteAttemptRecord(beadID, AttemptRecord)` (`clarify.go`) | The ONLY writer of the attempt key — exactly one `MergeMetadata` write per bead, ever. Refuses fail-closed (zero write) on: a malformed bead ID; an EXISTING attempt record (the categorical, restart-proof R8d cap); an empty report or non-positive/duplicate ordinals; a clarification citing an ordinal absent from the report; an empty `span` (presence check only — whether the span SUPPORTS the answer is the re-dispatched Phase-0 subagent's judgment, never verified here). No update/finalize API exists (R8e derive-don't-write): the terminal READY/escalated disposition is derived from the re-dispatch outcome. |
+
+`AttemptRecord` is `{report: [{ordinal, signal, reason}], clarifications:
+[{ordinal, reason, answer, span}]}` — the record carries the FULL
+original report so a later reader (`bd show`, the dispatch ingress, an
+auditor) never needs the long-gone subagent transcript. `internal/bead`
+itself never interprets the values under either key; it only names them
+so every writer/reader shares one literal definition.
+
 ## Merge-conflict hardening (spec 092 Reqs 13–15, 18)
 
 - `internal/gitutil` merge-state helpers: `MergeInProgress(workdir)`,

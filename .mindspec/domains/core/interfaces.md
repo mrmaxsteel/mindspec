@@ -98,6 +98,12 @@ are silently DROPPED, not merely unredacted. `TestRedactEnum_NoCobraDrift`
 fails on drift, catching a missed registration at test time rather than
 silently at runtime (spec 109 Bead 4 hit this adding `config`).
 
+The same registration duty applies to SUBcommand names via the sibling
+closed-set enum `internal/redact.SubcommandTokens` — a new subcommand on
+an existing command group must add its name there or the drift guard
+fails the same way (spec 124 registered `ready-check` and `clarify` for
+the new `bead ready-check`/`bead clarify` verbs).
+
 ### Config
 
 ```go
