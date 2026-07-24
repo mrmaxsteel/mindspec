@@ -197,8 +197,14 @@ var acTenLoreRE = []*regexp.Regexp{
 // (POSIX only; Windows C:\Users\ is explicitly out of scope per spec.md).
 var acTenHomePathRE = regexp.MustCompile(`/Users/|/home/|/root/`)
 
-// acTenSpecIDRE is pattern class (iv): this project's own incident IDs.
-var acTenSpecIDRE = regexp.MustCompile(`spec-[0-9]+`)
+// acTenSpecIDRE is pattern class (iv): this project's own incident IDs, in
+// BOTH the hyphenated (spec-113) and unhyphenated (spec 113 / Spec 113)
+// forms — the final-review S3 finding: the original `spec-[0-9]+` required
+// the hyphen and silently missed every "spec NNN" prose form (~17 live
+// occurrences at fix time, enumerated in the allowlist below). Bounded to
+// 2-3 digits (every real spec ID) so 4+-digit numerics never bind; [\s-]+
+// (which crosses a line-wrap) is the separator class.
+var acTenSpecIDRE = regexp.MustCompile(`(?i)\bspec[\s-]+[0-9]{2,3}\b`)
 
 // acTenHit is one occurrence of a scanned pattern in one surface, carrying
 // the 1-based LINE NUMBER the match landed on (recomputed fresh from the
@@ -295,18 +301,26 @@ func acTenResolveLocator(content, locator string) (line int, diag string, ok boo
 	}
 }
 
-// reviewDisciplineAC10Allowlist is the FULL retained allowlist, verified at
-// base commit 7ec96295 (plan.md's AC-10 inventory table): 8 base
-// spec-[0-9]+ occurrences at that commit, one of which (ms-panel-run's
-// retry-note "lola spec-050" citation) this bead GENERALIZES away in the
-// R7 sweep, leaving 7 retained occurrences across five surfaces. Pattern
-// classes (i) model values, (ii) lore markers, and (iii) home paths all
-// scan ZERO hits across the real embedded surfaces (verified) — their
-// categorical enforcement burden is carried entirely by the negative
-// mutation tests below, not by any allowlist entry. Each `locator` below is
-// a verbatim substring of the REAL line adjacent to the allowed token(s),
-// deliberately chosen to EXCLUDE the token itself so the anchor keeps
-// resolving even if the token is later mutated in place (see
+// reviewDisciplineAC10Allowlist is the FULL retained allowlist. Hyphenated
+// half, verified at base commit 7ec96295 (plan.md's AC-10 inventory table):
+// 8 base spec-[0-9]+ occurrences at that commit, one of which
+// (ms-panel-run's retry-note "lola spec-050" citation) Bead 1 GENERALIZED
+// away in the R7 sweep, leaving 7 retained occurrences across five
+// surfaces. Unhyphenated half (final-review S3 widening): the widened
+// acTenSpecIDRE surfaced 17 additional "spec NNN"/"Spec NNN" prose hits,
+// enumerated one-by-one at fix time — 15 PRE-EXISTING feature-provenance
+// cross-refs (each allowlisted below; prose generalization tracked in
+// mindspec-dtnj), 1 legitimate verbatim citation of ADR-0043's
+// `## Amendment (Spec 126)` heading (allowlisted), and 1 that spec 126
+// itself ADDED (ms-spec-final-review's "spec 106 flat layout") which was
+// GENERALIZED to portable wording instead of allowlisted, so 126 ships no
+// new leak. Pattern classes (i) model values, (ii) lore markers, and (iii)
+// home paths all scan ZERO hits across the real embedded surfaces
+// (verified) — their categorical enforcement burden is carried entirely by
+// the negative mutation tests below, not by any allowlist entry. Each
+// `locator` below is a verbatim substring of the REAL line adjacent to the
+// allowed token(s), deliberately chosen to EXCLUDE the token itself so the
+// anchor keeps resolving even if the token is later mutated in place (see
 // TestReviewDiscipline_AC10NegativeLocatorMismatch).
 var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 	{
@@ -343,6 +357,117 @@ var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 		matched: "spec-050",
 		count:   1,
 		reason:  "pre-existing case history in a skill this spec does not edit, but the AC-10 scan runs over ALL embedded skills, so it still needs its own entry",
+	},
+
+	// --- Unhyphenated "spec NNN" hits surfaced by the S3-widened pattern.
+	// Every entry below is a PRE-EXISTING feature-provenance cross-ref
+	// (present at base 7ec96295, untouched by spec 126) unless its reason
+	// says otherwise; prose generalization of the pre-existing set is
+	// tracked in mindspec-dtnj.
+	{
+		surface: "ms-bead-fix",
+		locator: "panel artifacts are co-located under",
+		matched: "spec 106",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-bead-impl",
+		locator: "prep prompts and panel artifacts are co-located",
+		matched: "spec 106",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-bead-impl",
+		locator: "None of those paths may bypass this check",
+		matched: "spec 124",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (readiness-gate provenance); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-spec-autopilot",
+		locator: "Halt at the bead level",
+		matched: "spec 124",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (NOT-READY halt row); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-bead-cycle",
+		locator: "panel and prep artifacts are co-located",
+		matched: "spec 106",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-bead-cycle",
+		locator: "pre-damage triage (",
+		matched: "spec 124",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (NOT-READY triage heading); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-bead-cycle",
+		locator: "superseded by CLI checks",
+		matched: "Spec 093",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (complete-gate provenance); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "the workflow cannot read config itself",
+		matched: "spec 109",
+		count:   2,
+		reason:  "pre-existing feature-provenance cross-refs (workflow-path mix/substitution provenance, both on the one runner-dispatch line); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "the workflow cannot read config itself",
+		matched: "spec 111",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (workflow R1-R5 provenance, same runner-dispatch line); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "`<spec-dir>` / co-located reviews",
+		matched: "spec 106",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "`--gate adhoc` is refused",
+		matched: "spec 123",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (adhoc-gate refusal provenance); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-run",
+		locator: "a zero-config install keeps its sizes",
+		matched: "Spec 126",
+		count:   1,
+		reason:  "legitimate verbatim citation of ADR-0043's `## Amendment (Spec 126)` heading — the exact AC-1/AC-3 amendment marker the guard tests pin; renaming it here would orphan the citation, so it is an ADR citation, not incident lore",
+	},
+	{
+		surface: "ms-panel-tally",
+		locator: "the location the `mindspec complete` gate scans",
+		matched: "spec 106",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-tally",
+		locator: "pre-rendered in the workflow result",
+		matched: "spec 111",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (workflow-path tally provenance); prose generalization tracked in mindspec-dtnj",
+	},
+	{
+		surface: "ms-panel-tally",
+		locator: "Two DIFFERENT spec identifiers appear below",
+		matched: "spec 117",
+		count:   1,
+		reason:  "pre-existing feature-provenance cross-ref (disposition-telemetry provenance); prose generalization tracked in mindspec-dtnj",
 	},
 }
 
@@ -440,6 +565,10 @@ func TestReviewDiscipline_AC10NegativeCategoricalHits(t *testing.T) {
 	}{
 		{"gpt-4o", "the model gpt-4o handled this probe"},
 		{"o4-mini", "routed to o4-mini for the empirical check"},
+		// The S3-widened incident-ID class: the unhyphenated prose form the
+		// original `spec-[0-9]+` pattern silently missed.
+		{"spec-id-unhyphenated", "this regressed once in spec 999 — see the postmortem"},
+		{"spec-id-unhyphenated-capitalized", "the Spec 999 incident write-up"},
 		{"root-agent-path", "wrote scratch to /root/agent/notes.md"},
 		{"gofmt-corruption-lore", "watch for the gofmt doc-comment corruption bug in Go 1.19+"},
 		{"git-ref-probe-lore", "avoid the git-ref-probe flake by using show-ref --exists instead"},
@@ -1633,12 +1762,15 @@ func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) 
 // ---------------------------------------------------------------------------
 
 var reviewDisciplineBead4FragmentRows = []fragmentRow{
-	// AC-11 (R8b) — the F2 full-regression slot's CI-parity instruction:
-	// commands.ci, the commands.test fallback, and the no-declaration
-	// advisory, all named as config keys — never a concrete invocation.
-	{ac: "AC-11", desc: "ms-spec-final-review F2 slot names commands.ci", surface: "ms-spec-final-review", want: "commands.ci"},
-	{ac: "AC-11", desc: "ms-spec-final-review F2 slot names the commands.test fallback", surface: "ms-spec-final-review", want: "commands.test"},
-	{ac: "AC-11", desc: "ms-spec-final-review F2 slot records the no-declaration advisory verbatim", surface: "ms-spec-final-review", want: "no declared CI invocation — CI parity not reproduced"},
+	// AC-11 (R8b) — the F2 full-regression slot's CI-parity instruction
+	// (commands.ci, the commands.test fallback, the no-declaration
+	// advisory) is asserted BOUND to the named F2 slot row by
+	// TestReviewDiscipline_AC11F2SlotBinding below, NOT as whole-body rows
+	// here — the final-review codex G1 finding: whole-body strings.Contains
+	// rows stayed GREEN when the instruction was moved out of the F2 row
+	// into an unrelated section. Only the Not-a-CI-substitute fragments
+	// (which live in the "What this skill is NOT" section, not the F2 row)
+	// and the negative tripwires remain body-wide rows.
 	{ac: "AC-11", desc: "ms-spec-final-review extends Not-a-CI-substitute with the local-green vs CI-green rationale", surface: "ms-spec-final-review", want: "not the same signal as CI-green on the PR"},
 	// This row pins the NEW closing clause this bead ADDED to the
 	// Not-a-CI-substitute bullet — not the pre-existing "Not a CI
@@ -1680,6 +1812,117 @@ func TestReviewDiscipline_Bead4Fragments(t *testing.T) {
 				t.Errorf("%s: %s is missing the required fragment %q", row.surface, row.ac, row.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC-11 (R8b) — the CI-parity instruction BOUND to the named F2 slot
+// (final-review codex G1 fix): the assertion extracts the SINGLE F2 table
+// row from the embedded ms-spec-final-review bytes and requires the
+// commands.ci / commands.test-fallback / no-declaration-advisory fragments
+// INSIDE that row, so moving the instruction into an unrelated section can
+// no longer stay GREEN.
+// ---------------------------------------------------------------------------
+
+// acElevenF2RowRE matches the ms-spec-final-review lens table's F2 slot row:
+// a markdown table row (leading indent allowed — the table sits inside a
+// numbered list item) whose FIRST cell is F2, tolerating inline Markdown
+// formatting around the slot id the same way acOneSlotTableRowRE does. The
+// row is one physical line, so (?m)'s per-line `.*$` captures exactly it.
+// An interpreted string because a Go raw string cannot contain the backtick
+// the formatting class must include.
+var acElevenF2RowRE = regexp.MustCompile("(?m)^[ \t]*\\|[ \t`*_]*F2[ \t`*_]*\\|.*$")
+
+// acElevenF2SlotRow extracts the single F2 slot row from content. ok=false
+// (with a diagnostic) when the row is missing or ambiguous — an absent or
+// duplicated F2 row can never satisfy the slot binding, so callers must
+// treat that as a failure, never a silent pass.
+func acElevenF2SlotRow(content string) (row, diag string, ok bool) {
+	rows := acElevenF2RowRE.FindAllString(content, -1)
+	switch len(rows) {
+	case 0:
+		return "", "no F2 slot table row found", false
+	case 1:
+		return rows[0], "", true
+	default:
+		return "", fmt.Sprintf("F2 slot table row is ambiguous: %d rows match", len(rows)), false
+	}
+}
+
+// reviewDisciplineAC11F2SlotFragments are the CI-parity fragments that must
+// occur INSIDE the F2 slot row itself — never merely anywhere in the body.
+var reviewDisciplineAC11F2SlotFragments = []struct {
+	desc string
+	want string
+}{
+	{"names commands.ci", "commands.ci"},
+	{"names the commands.test fallback", "commands.test"},
+	{"records the no-declaration advisory verbatim", "no declared CI invocation — CI parity not reproduced"},
+}
+
+// TestReviewDiscipline_AC11F2SlotBinding is the F2-slot-bound half of the
+// AC-11 guard: each CI-parity fragment is required within the F2 table row
+// extracted from the live embedded skill bytes.
+func TestReviewDiscipline_AC11F2SlotBinding(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	content, ok := skills["ms-spec-final-review"]
+	if !ok {
+		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-spec-final-review" entry`)
+	}
+	row, diag, ok := acElevenF2SlotRow(content)
+	if !ok {
+		t.Fatalf("extracting the F2 slot row from ms-spec-final-review: %s", diag)
+	}
+	for _, f := range reviewDisciplineAC11F2SlotFragments {
+		if !strings.Contains(row, f.want) {
+			t.Errorf("AC-11: the ms-spec-final-review F2 slot row (%s) is missing %q — the CI-parity instruction must be assigned to the NAMED F2 slot, not merely appear somewhere in the body", f.desc, f.want)
+		}
+	}
+}
+
+// acElevenF2CIParityInstruction is the full CI-parity instruction sentence
+// as shipped inside the F2 slot row — the move-out mutation's payload.
+const acElevenF2CIParityInstruction = "Then, in that same checkout and before sign-off, reproduce the project's declared CI invocation VERBATIM: run `commands.ci` when the project's config declares it, falling back to `commands.test` when `commands.ci` is undeclared. When the project's config declares NEITHER key, do not skip the check silently — record the explicit advisory finding \"no declared CI invocation — CI parity not reproduced\"."
+
+// TestReviewDiscipline_AC11F2SlotBindingMutationProbe proves the slot
+// binding is not vacuous by applying the SAME production predicate
+// (acElevenF2SlotRow + per-fragment Contains) to a mutated copy in which
+// the CI-parity instruction is moved OUT of the F2 row into an unrelated
+// trailing section — the exact codex G1 mutation the pre-fix whole-body
+// rows stayed GREEN under (the fixture sanity check below re-proves that).
+func TestReviewDiscipline_AC11F2SlotBindingMutationProbe(t *testing.T) {
+	skills := pluginmindspec.SkillFiles()
+	content, ok := skills["ms-spec-final-review"]
+	if !ok {
+		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-spec-final-review" entry`)
+	}
+	if !strings.Contains(content, acElevenF2CIParityInstruction) {
+		t.Fatal("fixture assumption broken: the shipped F2 CI-parity instruction no longer appears verbatim — update acElevenF2CIParityInstruction alongside the skill edit")
+	}
+	mutated := strings.Replace(content, acElevenF2CIParityInstruction, "", 1)
+	if mutated == content {
+		t.Fatal("fixture assumption broken: move-out replacement had no effect")
+	}
+	mutated += "\n\n" + acElevenF2CIParityInstruction + "\n"
+
+	// Fixture sanity: the pre-fix HOLLOW whole-body check still passes on
+	// this mutation — every fragment remains present in the body.
+	for _, f := range reviewDisciplineAC11F2SlotFragments {
+		if !strings.Contains(mutated, f.want) {
+			t.Fatalf("fixture assumption broken: %q vanished from the mutated body entirely", f.want)
+		}
+	}
+
+	// The SAME production predicate must now fail: the F2 row still exists
+	// but no longer carries the instruction.
+	row, diag, ok := acElevenF2SlotRow(mutated)
+	if !ok {
+		t.Fatalf("fixture assumption broken: the mutated copy should still carry exactly one F2 row: %s", diag)
+	}
+	for _, f := range reviewDisciplineAC11F2SlotFragments {
+		if strings.Contains(row, f.want) {
+			t.Errorf("mutation probe failed: %q should have moved out of the F2 slot row", f.want)
+		}
 	}
 }
 

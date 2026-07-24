@@ -38,7 +38,7 @@ package setup
 // them Refreshed, because matchesShipped only asks "does this match
 // something shipped" and the bad fixture answers its own question.
 //
-// Base commit for the five plugin-skill snapshots: 7ec96295 (recorded in
+// Base commit for the six plugin-skill snapshots: 7ec96295 (recorded in
 // plan.md as `git merge-base origin/main HEAD` at plan time; re-verified
 // identical at this bead's capture time). Capture command:
 //

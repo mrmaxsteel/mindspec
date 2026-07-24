@@ -17,7 +17,7 @@ Read the effective `runner:` value before doing anything else — it selects **w
 mindspec config show | grep '^runner:'
 ```
 
-- **`claude-code-workflow`** (workflow-path) — compose the slot lenses (§ Slot lens defaults below; the retained judgment step) then invoke the `/ms-panel` workflow **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}` (`mix` is the resolved `panel:` reviewer mix, spec 109; `claude_sub_on_quota` is resolved the same way, from config `panel.substitution.claude_sub_on_quota`, spec 109 — the workflow cannot read config itself and fail-closes an omitted flag to `false`). The workflow performs registration (`mindspec panel create`), reviewer fan-out, the parse-retry/quota-wall-substitution ladder, and the verify/tally-return itself (spec 111 R1–R5) — do not separately walk Step 0 through the Anti-patterns section below on this path; those sections are labelled **claude-code-skills path only** and are superseded here.
+- **`claude-code-workflow`** (workflow-path) — compose the slot lenses (§ Slot lens defaults below — or § Document-gate lens defaults below for `spec_approve`/`plan_approve` document panels; the retained judgment step) then invoke the `/ms-panel` workflow **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}` (`mix` is the resolved `panel:` reviewer mix, spec 109; `claude_sub_on_quota` is resolved the same way, from config `panel.substitution.claude_sub_on_quota`, spec 109 — the workflow cannot read config itself and fail-closes an omitted flag to `false`). The workflow performs registration (`mindspec panel create`), reviewer fan-out, the parse-retry/quota-wall-substitution ladder, and the verify/tally-return itself (spec 111 R1–R5) — do not separately walk Step 0 through the Anti-patterns section below on this path; those sections are labelled **claude-code-skills path only** and are superseded here.
 - **`claude-code-skills`** (skills-path — the **default** until the workflow path is proven) — the existing manual launch path runs **unchanged**: Step 0 through the Anti-patterns section below, exactly as written.
 - **`external`** — a documented out-of-scope **stub**: no adapter ships for this runner. The panel runs human/skills-path per ADR-0040 degraded modes.
 
@@ -70,7 +70,7 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 
    Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets by hand, directly in `panel.json`: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned) — a plain file edit, not something `panel create` writes.
 
-2. **Fill in the BRIEF.md stub** `create` wrote. The machine-managed header (delimited by `<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`) already carries the slug, round, branch, reviewed commit, and the "## Your job" verdict-JSON contract (`verdict`, top-level `hard_block`, `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`, `findings`) — never edit inside it; it is machine-managed and gets rewritten wholesale on every `create`. Below it, `create` left a stub with four headings for the skill to fill:
+2. **Fill in the BRIEF.md stub** `create` wrote. The machine-managed header (delimited by `<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`) already carries the slug, round, branch, reviewed commit, and the "## Your job" verdict-JSON contract (`verdict`, top-level `hard_block`, `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`, `findings`) — never edit inside it; it is machine-managed and gets rewritten wholesale on every `create`. Below it, `create` left a stub with five headings for the skill to fill:
 
    ```markdown
    ## Summary
@@ -270,7 +270,7 @@ The configured panel mix is the single authority (§ Inputs above), and `Default
 #           count: 6
 ```
 
-Uncomment and edit `.mindspec/config.yaml` to opt in. Every reviewer entry above carries ONLY `family` + `count` — never a `model:` key; per-model pinning belongs in `panel.reviewers`/`panel.gates.<gate>.reviewers` directly, not in this documented example.
+Uncomment and edit `.mindspec/config.yaml` to opt in. Every reviewer entry above carries ONLY `family` + `count` — never a `model:` key: this documented ladder example is deliberately family-level guidance. An operator who needs per-model pinning sets the `model:` key on reviewer entries in their OWN `.mindspec/config.yaml` — an operator-local choice this example intentionally never prescribes.
 
 ## Reviewer conduct
 

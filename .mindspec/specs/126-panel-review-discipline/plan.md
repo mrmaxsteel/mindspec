@@ -148,9 +148,10 @@ anything downstream consumes it.
 
 **Snapshot-timing decision (AC-16), settled: snapshots land in Bead 4
 (LAST), captured from the BASE ref — never from a sibling bead's edited
-tree.** The seven `internal/setup/historical_skills/<name>.pre126.md`
+tree.** The eight `internal/setup/historical_skills/<name>.pre126.md`
 files must be the BYTE-EXACT bodies a pre-126 install carries. Capture
-rule: for the five plugin skills,
+rule: for the six plugin skills (including `ms-spec-autopilot`, which
+Bead 3's AC-1 sweep edited — added post-review as the sixth),
 `git show $(git merge-base origin/main HEAD):plugins/mindspec/skills/<name>/SKILL.md`
 (base = `7ec96295` at plan time) — byte-exact by construction and
 IMMUNE to bead ordering, so no early "snapshot bead" is needed; for the
@@ -177,21 +178,25 @@ in the shipped-history set by construction), and still classifies
 `Refreshed`. The earlier draft's claim that "a wrong snapshot matches NO
 shipped revision → REDs" was FALSE and is withdrawn. Therefore the [CI]
 AC-16 test (`upgrade_refresh_pre126_test.go`) **pins a reviewed SHA-256
-digest for each of the seven base artifacts and asserts each embedded
+digest for each of the eight base artifacts and asserts each embedded
 `.pre126.md` body hashes to its pinned digest BEFORE seeding** — an
 external oracle the fixture cannot satisfy by merely existing. Digest
 provenance, recorded here as the proof-of-record:
 
 - Base commit: **`7ec96295`** (= `git merge-base origin/main HEAD` at
   plan time).
-- Five plugin skills — capture command
+- Six plugin skills — capture command
   `git show 7ec96295:plugins/mindspec/skills/<name>/SKILL.md | shasum -a 256`,
-  reviewed values (computed at plan time; the test pins these):
+  reviewed values (computed at plan time; the test pins these;
+  `ms-spec-autopilot` added at Bead 4 after its panel found Bead 3's
+  AC-1 sweep had made it a SIXTH edited plugin skill, digest computed
+  by the same capture command):
   - `ms-panel-run` `1ae112ef731ee1b489dac7226b73684d5357678a913900fe27e45a1d2afbb11f`
   - `ms-panel-tally` `687dc90613f067b88bc7e3c1b7c490f93a8a99993904bb4489ae55b9c197354a`
   - `ms-bead-cycle` `679b580e33412870fe5449d0ceef8240a4ed5cbbebbd41722bf142ce41796ba8`
   - `ms-bead-fix` `d481f5297960b45f53404ddba3a4ad69be975fb205bb85746f7c9fed005aaf8e`
   - `ms-spec-final-review` `26c09c05b9d083495d54de1f0b99393c822037bb6026dd68a2194a45829a9ce3`
+  - `ms-spec-autopilot` `0dc49db17e0e1806f8f33b69c7a024f58f2ddbfba3e05da732701d7c4355fe76`
 - Two lifecycle literals (`ms-spec-approve`, `ms-plan-approve`) —
   capture: build the base binary from a detached `7ec96295` worktree,
   run `mindspec setup claude` into a throwaway dir, `shasum -a 256` the
@@ -854,7 +859,7 @@ edited surface from its base bytes.
    substitute" line (`:62`) with the local-green ≠ CI-green rationale.
    ABSTRACT only: config keys, never a concrete invocation (no
    `go test`, no `bd` choreography — R8c).
-2. Capture the seven byte-exact pre-126 snapshots into
+2. Capture the eight byte-exact pre-126 snapshots into
    `internal/setup/historical_skills/`: `ms-panel-run.pre126.md`,
    `ms-panel-tally.pre126.md`, `ms-bead-cycle.pre126.md`,
    `ms-bead-fix.pre126.md`, `ms-spec-final-review.pre126.md` from
@@ -870,8 +875,8 @@ edited surface from its base bytes.
 3. NEW `internal/setup/upgrade_refresh_pre126_test.go` (AC-16),
    following the `skills_test.go:236-244` seeding precedent. **FIRST
    leg — the provenance-digest oracle (plan-gate correction):** for
-   each of the seven snapshots, assert the embedded `.pre126.md` body
-   hashes (SHA-256) to its PINNED digest — the five plugin-skill
+   each of the eight snapshots, assert the embedded `.pre126.md` body
+   hashes (SHA-256) to its PINNED digest — the six plugin-skill
    digests recorded in this plan's snapshot-provenance block
    (computed from base `7ec96295`), the two lifecycle-literal digests
    computed by the recorded base-binary install-capture procedure and
@@ -880,7 +885,7 @@ edited surface from its base bytes.
    every downstream leg, because `matchesShipped` trusts whatever
    bytes sit in `historical_skills/` (the bad fixture is itself in
    the shipped-history set). THEN the behavioral legs: for EACH
-   of the seven edited skills, seed the `.pre126.md` bytes on disk in
+   of the eight edited skills, seed the `.pre126.md` bytes on disk in
    `t.TempDir()`, run `installSkills` with the current canonical
    `wanted` set, assert the file is classified **Refreshed**
    (`Result.Refreshed`) and its bytes now equal the new canonical;
@@ -905,8 +910,8 @@ edited surface from its base bytes.
 
 **Verification**
 - [ ] `go test -short ./internal/setup/ -run 'ReviewDiscipline|UpgradeRefresh'` PASS; `git rm` any one `.pre126.md` → its digest row AND seed row FAIL → restore → PASS (AC-16 RED-on-revert); corrupt one byte of a snapshot in a scratch copy → digest row alone REDs (the wrong-capture case the behavioral legs cannot catch)
-- [ ] Digest pins verified against the plan's snapshot-provenance block: the five plugin digests in the test byte-match the plan-recorded `7ec96295` values; the two literal digests match the install-capture, cross-checked against `git show 7ec96295:internal/setup/claude.go`
-- [ ] Byte-exactness recorded (one-time Validation Proofs — the standing [CI] guard is the digest assertion, NOT these diffs): `git show <base>:plugins/mindspec/skills/<name>/SKILL.md | diff - internal/setup/historical_skills/<name>.pre126.md` → empty, ×5; literal-snapshot capture method + diff evidence recorded for the two lifecycle files
+- [ ] Digest pins verified against the plan's snapshot-provenance block: the six plugin digests in the test byte-match the plan-recorded `7ec96295` values; the two literal digests match the install-capture, cross-checked against `git show 7ec96295:internal/setup/claude.go`
+- [ ] Byte-exactness recorded (one-time Validation Proofs — the standing [CI] guard is the digest assertion, NOT these diffs): `git show <base>:plugins/mindspec/skills/<name>/SKILL.md | diff - internal/setup/historical_skills/<name>.pre126.md` → empty, ×6; literal-snapshot capture method + diff evidence recorded for the two lifecycle files
 - [ ] Throwaway-repo upgrade proof (spec Validation Proofs): install PRE-126 bodies, run post-126 `mindspec setup claude` → each edited skill reported Refreshed and carrying the new fragments; a hand-edited body left in place with the HC-6 notice. Fresh-install proof: stock `mindspec setup claude` → `ms-spec-approve` carries the `--gate spec_approve` step; `ms-panel-run` carries the AC-4/7/8 fragments
 - [ ] `grep -nE 'go test|npm test|pytest|make test' plugins/mindspec/skills/ms-spec-final-review/SKILL.md` → no match; `commands.ci` present
 - [ ] `go build ./... && go test -short ./... && golangci-lint run ./...` clean; `mindspec validate spec 126-…`; worktree clean; zero `--override-adr`
@@ -914,7 +919,7 @@ edited surface from its base bytes.
 **Acceptance Criteria**
 - [ ] AC-11 — named-slot CI-reproduction instruction with `commands.ci`/`commands.test` fallback + advisory; concrete-invocation tripwires green (config-comment half landed and pinned by Bead 2 — split-property note below)
 - [ ] AC-12 — the R1c table complete: per-fragment rows for AC-1/2/4/5/6/7/8/9/10/11, plain `go test ./internal/setup/`
-- [ ] AC-16 — seven byte-exact pre-126 snapshots, each pinned to a reviewed SHA-256 digest from base `7ec96295` (asserted before seeding) + Refreshed/user-modified upgrade proof; delete-one-snapshot REDs digest + seed rows; wrong-capture REDs the digest row
+- [ ] AC-16 — eight byte-exact pre-126 snapshots, each pinned to a reviewed SHA-256 digest from base `7ec96295` (asserted before seeding) + Refreshed/user-modified upgrade proof; delete-one-snapshot REDs digest + seed rows; wrong-capture REDs the digest row
 
 **Depends on**
 Bead 3 (third sequential editor of `ms-spec-final-review` and of the

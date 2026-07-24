@@ -60,6 +60,25 @@ var lifecycleGateCases = []lifecycleGateCase{
 	},
 }
 
+// panelCreateGateRE binds the `--gate <gate>` flag to the SAME backticked
+// `mindspec panel create` invocation — the final-review codex G1 finding:
+// the original bare `strings.Contains(content, "--gate <gate>")` pin was
+// semantically hollow, staying GREEN when the flag was detached from the
+// panel-create command and parked on an unrelated line. The [^`] character
+// class (which, unlike `.`, crosses newlines) tolerates the literal's
+// line-wrapping INSIDE the one backtick-delimited command; the {0,300}
+// bounds keep the match a single invocation, never a document-spanning
+// bridge from one command's opening backtick to another command's closer.
+func panelCreateGateRE(gate string) *regexp.Regexp {
+	return regexp.MustCompile(
+		"`mindspec panel create[^`]{0,300}--gate " + regexp.QuoteMeta(gate) + "[^`]{0,300}`",
+	)
+}
+
+func panelCreateGatePresent(content, gate string) bool {
+	return panelCreateGateRE(gate).MatchString(content)
+}
+
 // notBeforeTallyVerbRE ties "do NOT run `<verb>`" to "until
 // `/ms-panel-tally` returns Allow" as a BOUNDED single fragment (not
 // three independent strings.Contains calls) — a literal that names the
@@ -94,7 +113,8 @@ func enforcementNotePresent(content string) bool {
 
 // TestLifecycleGateStep_NamesGateVerbAndEnforcementNote is the
 // table-driven positive pin for AC-6's ms-spec-approve/ms-plan-approve
-// literal half: each literal names its own `--gate <gate>` flag, binds
+// literal half: each literal names its own `--gate <gate>` flag INSIDE a
+// `mindspec panel create` invocation (bounded — codex G1), binds
 // "do NOT run <the CORRECT approve verb>" to the
 // "until `/ms-panel-tally` returns Allow" instruction (bounded, in the
 // SAME literal — a wrong-verb swap REDs this), cites ADR-0044, and
@@ -108,8 +128,8 @@ func TestLifecycleGateStep_NamesGateVerbAndEnforcementNote(t *testing.T) {
 			if !ok {
 				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
 			}
-			if !strings.Contains(content, "--gate "+tc.gate) {
-				t.Errorf("%s literal missing the '--gate %s' panel-invocation fragment", tc.name, tc.gate)
+			if !panelCreateGatePresent(content, tc.gate) {
+				t.Errorf("%s literal missing a `mindspec panel create ... --gate %s` invocation — the flag must be bound inside the panel-create command itself, not merely present somewhere in the document", tc.name, tc.gate)
 			}
 			if !notBeforeTallyVerbPresent(content, tc.verb) {
 				t.Errorf("%s literal missing the bounded \"do NOT run `%s` ... until `/ms-panel-tally` returns Allow\" fragment", tc.name, tc.verb)
@@ -209,13 +229,46 @@ func TestLifecycleGateStep_MutationProbe(t *testing.T) {
 			if !ok {
 				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
 			}
-			flag := "--gate " + tc.gate
-			if !strings.Contains(content, flag) {
-				t.Fatalf("precondition failed: the shipped %s literal must carry the %q fragment", tc.name, flag)
+			if !panelCreateGatePresent(content, tc.gate) {
+				t.Fatalf("precondition failed: the shipped %s literal must carry a bound `mindspec panel create ... --gate %s` invocation", tc.name, tc.gate)
 			}
+			flag := "--gate " + tc.gate
 			mutated := strings.Replace(content, flag, "", 1)
-			if strings.Contains(mutated, flag) {
-				t.Errorf("mutation probe failed: stripping %q from %s should remove it", flag, tc.name)
+			if mutated == content {
+				t.Fatalf("fixture assumption broken: could not strip %q from %s", flag, tc.name)
+			}
+			// The SAME production predicate must now fail.
+			if panelCreateGatePresent(mutated, tc.gate) {
+				t.Errorf("mutation probe failed: stripping %q from %s should turn panelCreateGatePresent false", flag, tc.name)
+			}
+		}
+	})
+
+	t.Run("gate_flag_detached_from_panel_create_reds", func(t *testing.T) {
+		// The codex G1 hollow-guard mutation: DETACH the flag from the
+		// panel-create command and park it on an unrelated line — the
+		// document still contains both `mindspec panel create` and
+		// `--gate <gate>`, so the pre-fix bare-substring pin stayed GREEN;
+		// the bounded production predicate must RED.
+		for _, tc := range lifecycleGateCases {
+			content, ok := files[tc.name]
+			if !ok {
+				t.Fatalf("lifecycleSkillFiles() has no %q entry", tc.name)
+			}
+			flag := " --gate " + tc.gate
+			if !strings.Contains(content, flag) {
+				t.Fatalf("precondition failed: the shipped %s literal must carry %q inside the panel-create command", tc.name, flag)
+			}
+			mutated := strings.Replace(content, flag, "", 1) +
+				"\nUnrelated prose that mentions --gate " + tc.gate + " far away from any command.\n"
+			// Fixture sanity: the hollow pre-fix check would still pass here.
+			if !strings.Contains(mutated, "--gate "+tc.gate) || !strings.Contains(mutated, "mindspec panel create") {
+				t.Fatalf("fixture assumption broken: the detached %s copy must still carry both substrings somewhere", tc.name)
+			}
+			// The SAME production predicate must now fail: the flag is no
+			// longer part of any panel-create invocation.
+			if panelCreateGatePresent(mutated, tc.gate) {
+				t.Errorf("mutation probe failed: detaching --gate %s from the panel-create command in %s should turn panelCreateGatePresent false", tc.gate, tc.name)
 			}
 		}
 	})

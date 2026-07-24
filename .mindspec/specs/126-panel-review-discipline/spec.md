@@ -90,7 +90,7 @@ test, and (d) the pre-126 historical snapshots that make the skill edits
 reach EXISTING installs (see Delivery reach). Gate/tally decision logic is
 untouched.
 
-**Delivery reach.** All five orchestration skills are compiled into the
+**Delivery reach.** All six edited orchestration skills are compiled into the
 binary via `go:embed` (`plugins/mindspec/embed.go:19`,
 `pluginmindspec.SkillFiles()` at `embed.go:25`); the four lifecycle gate
 skills are raw-string literals in `internal/setup/claude.go:784`
@@ -108,7 +108,8 @@ capturing its pre-edit bytes as a snapshot therefore strands every existing
 install on the old text. This spec accordingly ships a byte-exact pre-126
 snapshot (`<name>.pre126.md`, per the `<name>.<tag>.md` convention
 documented at `skills.go:26-36` and the spec-106 `*.pre106.md` precedent)
-for EVERY shipped skill it edits — the 5 plugin skills AND the
+for EVERY shipped skill it edits — the 6 plugin skills (the AC-1 sweep
+also edits `ms-spec-autopilot`) AND the
 `ms-spec-approve`/`ms-plan-approve` lifecycle literals — so a fresh install
 and an upgraded install both receive every change in this spec (AC-16).
 
@@ -361,8 +362,9 @@ abstract; the value is per-project config.
 - `internal/setup/claude.go` — `lifecycleSkillFiles` literals for
   `ms-spec-approve`/`ms-plan-approve` (R4)
 - `internal/setup/historical_skills/` — byte-exact pre-126 snapshots
-  (`<name>.pre126.md`) of EVERY shipped skill this spec edits: all 5 plugin
-  skills above PLUS `ms-spec-approve` and `ms-plan-approve`, so
+  (`<name>.pre126.md`) of EVERY shipped skill this spec edits: all 6 plugin
+  skills (the five listed above plus `ms-spec-autopilot`, edited by the
+  AC-1 sweep) PLUS `ms-spec-approve` and `ms-plan-approve`, so
   `installSkills`/`previouslyShippedSkills` refresh existing installs
   (Delivery reach; AC-16)
 - `internal/setup/` — new consistency/fragment-guard test (R1c, AC-12) AND

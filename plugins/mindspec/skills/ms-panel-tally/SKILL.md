@@ -68,7 +68,7 @@ When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) disp
    ```
    `check` FAILS, naming the panel and the first uncovered slot, if any manifest slot whose terminal verdict is `REQUEST_CHANGES`/`REJECT` has no disposition row naming it as `reviewer` or in `convergent_with[]` — every such slot must be covered before this panel is considered captured.
 
-4. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs per configured family — the claude-family slots vs the codex-family slots, see the per-slot table above), and the consolidated-changes path, with denominators DERIVED from the mix (`panel.json`'s slot sets), never a hard-coded partition:
+4. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs per configured family — the claude-family slots vs the codex-family slots, see the per-slot table above), and the consolidated-changes path, with denominators DERIVED from the configured mix — count the verdict files' `reviewer_id`s per family (`panel.json` carries only `expected_reviewers`, not per-slot sets) — never a hard-coded partition:
    ```
    <mindspec panel tally output>
    Family split (APPROVEs): <claude-approves>/<claude-slots> claude, <codex-approves>/<codex-slots> codex
