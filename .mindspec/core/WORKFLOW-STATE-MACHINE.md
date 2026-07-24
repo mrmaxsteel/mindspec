@@ -94,7 +94,7 @@ MindSpec tracks three things:
 
 | Category | What happens |
 |:---------|:-------------|
-| **Guard** | Location-agnostic (Spec 079) — runs from main, the spec worktree, or a bead worktree, auto-resolving the active spec; clean tree required (user-authored dirt blocks; `.beads/issues.jsonl` artifact dirt is auto-normalized per ADR-0025); session freshness gate |
+| **Guard** | Location-agnostic (Spec 079) — runs from main, the spec worktree, or a bead worktree, auto-resolving the active spec; clean tree required (user-authored dirt blocks; `.beads/issues.jsonl` artifact dirt is auto-normalized per ADR-0025); session freshness gate; mechanical readiness floor (MF-1..MF-4, Spec 124) evaluated gate-before-mutate — a NOT-READY bead refuses with zero mutation, and `--allow-not-ready` proceeds deliberately, recording a durable override marker on the bead (`--force` remains session-freshness-only and gains no readiness authority) |
 | **Git** | Creates branch `bead/<beadID>` from spec branch; creates worktree `.worktrees/worktree-<beadID>` under the spec worktree |
 | **Files created** | Bead worktree directory with `.mindspec/focus` |
 | **Beads** | Queries `bd ready` for the spec's epic; claims the selected bead (`status=in_progress`) |

@@ -48,6 +48,7 @@ team lead spawns fresh agents per bead.`,
 		specFlag, _ := cmd.Flags().GetString("spec")
 		force, _ := cmd.Flags().GetBool("force")
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
+		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
 
 		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
 		// mutually exclusive selectors — the positional names a specific bead,
@@ -243,9 +244,63 @@ team lead spawns fresh agents per bead.`,
 			return fmt.Errorf("selecting work: %w", err)
 		}
 
+		// Step 4.5: Gate-before-mutate readiness floor (spec 124 R3;
+		// ADR-0041's "preflight-leg-only addition" fourth-verb clause —
+		// mindspec next adopts ONLY the preflight leg of the gate-before-
+		// mutate contract for bead readiness). This MUST run after
+		// selection and BEFORE any claim/branch/worktree mutation below,
+		// so a NOT-READY refusal leaves bd state, branches, and worktrees
+		// byte-identical to their pre-call state (AC-4).
+		gateResult, gateErr := next.GateReadiness(root, selected.ID, allowNotReady)
+		if gateErr != nil {
+			return gateErr
+		}
+
+		// Step 4.6: On the --allow-not-ready proceed path, write the
+		// durable override marker (spec 124 R3 / AC-4) BEFORE any
+		// claim/branch/worktree mutation, FAIL-CLOSED. AC-4 requires the
+		// marker as a GUARANTEE, not best-effort: `--allow-not-ready`
+		// success ⟹ (marker durably written AND bead claimed). Writing
+		// advisory metadata to the not-yet-claimed bead is safe (the bead
+		// exists in bd regardless of claim status), and it keeps AC-4's
+		// refusal-zero-mutation intact — a plain refusal (no
+		// --allow-not-ready) never reaches here (gateErr returned above),
+		// and a marker-write failure refuses with nothing claimed, no
+		// worktree created. If the marker lands but ClaimBead then FAILS,
+		// the claim-failure branch below ROLLS BACK the marker (final-
+		// review r1 G3-OVERRIDE-ORPHAN) — a lost claim must not leave an
+		// authorizing override on a bead this run never claimed.
+		if len(gateResult.FailingSignals) > 0 {
+			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
+				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
+			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
+				return guard.NewFailure(
+					fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(selected.ID), err),
+					"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+				)
+			}
+		}
+
 		// Step 5: Claim
 		fmt.Print(formatClaimLine(selected.ID, selected.Title))
 		if err := next.ClaimBead(selected.ID); err != nil {
+			// G3-OVERRIDE-ORPHAN (spec 124 final-review r1): the Step 4.6
+			// override marker landed BEFORE this claim; a failed claim
+			// must not leave that authorizing marker orphaned on an
+			// unclaimed bead. Roll it back (best-effort — the claim
+			// failure below stays the primary error) and warn LOUDLY if
+			// the rollback itself also fails, naming the orphaned key.
+			if len(gateResult.FailingSignals) > 0 {
+				if rbErr := next.RollbackReadinessOverride(selected.ID); rbErr != nil {
+					fmt.Fprintf(os.Stderr,
+						"WARNING: claim failed AND rolling back the --allow-not-ready override marker on %s also failed: %v — an orphaned mindspec_readiness_override marker may remain; remove that metadata key before re-claiming or dispatching this bead\n",
+						idrender.Bead(selected.ID), rbErr)
+				} else {
+					fmt.Fprintf(os.Stderr,
+						"note: rolled back the --allow-not-ready override marker on %s (claim failed — no override left behind)\n",
+						idrender.Bead(selected.ID))
+				}
+			}
 			// Spec 093 Req 3: the recovery recipe lives at this caller —
 			// it has the root/specFlag context the interpolation needs.
 			// The wiring (which error to return) is pinned by
@@ -504,4 +559,5 @@ func init() {
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
 	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
+	nextCmd.Flags().Bool("allow-not-ready", false, "Proceed past a failing readiness floor (spec 124); records a durable override marker naming the bypassed signals")
 }

@@ -194,11 +194,12 @@ Runs `mindspec approve plan <id>`
 1. **Clean tree check** — fails if uncommitted changes
 2. **Query ready work** — requires a valid molecule binding for `--spec` targets, then queries `bd ready --mol <mol-id>` for molecule-ready steps (fallbacks to global `bd ready` when no active molecule context exists)
 3. **Display & select** — shows available beads, picks first (or `--pick=N`)
-4. **Claim** — `bd update <id> in_progress`
-5. **Create worktree** — `bd worktree create worktree-<beadID> bead/<beadID>`
-6. **Resolve mode** — maps bead type to MindSpec mode (extracts spec ID from bracket-prefix titles like `[IMPL 009-feature.1] Chunk title`)
-7. **Update cursor** — `state.json` cursor updated to point at the claimed bead (mode derived from molecule, ADR-0015)
-8. **Instruct-tail** — emits Implementation Mode guidance with bead scope and obligations
+4. **Readiness gate (before any mutation)** — evaluates the four mechanical readiness signals (MF-1..MF-4, spec 124) for the selected bead. A NOT-READY refusal exits non-zero having claimed nothing and created no branch or worktree; the report names each failing signal with a `recovery:` line. `--allow-not-ready` proceeds deliberately, warning per failing signal and durably recording an override marker on the bead first (fail-closed)
+5. **Claim** — `bd update <id> in_progress`
+6. **Create worktree** — `bd worktree create worktree-<beadID> bead/<beadID>`
+7. **Resolve mode** — maps bead type to MindSpec mode (extracts spec ID from bracket-prefix titles like `[IMPL 009-feature.1] Chunk title`)
+8. **Update cursor** — `state.json` cursor updated to point at the claimed bead (mode derived from molecule, ADR-0015)
+9. **Instruct-tail** — emits Implementation Mode guidance with bead scope and obligations
 
 The instruct-tail checks if a worktree exists for the active bead and tells the agent to switch to it if needed.
 
@@ -330,8 +331,11 @@ Work is not complete until changes are committed.
 | `/spec-approve` | Approve spec → plan transition |
 | `/plan-approve` | Approve plan → implement transition |
 | `/impl-approve` | Approve implementation → idle |
-| `mindspec next` | Claim the next ready bead |
+| `mindspec next` | Claim the next ready bead (refuses, mutation-free, when the readiness floor fails — spec 124) |
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
+| `mindspec next --allow-not-ready` | Claim deliberately despite a failing readiness floor; records a durable override marker naming the bypassed signals |
+| `mindspec bead ready-check <bead-id>` | Read-only MF-1..MF-4 readiness report for a bead (exit 0 = all pass) |
+| `mindspec bead clarify <bead-id> --file <record.json>` | Record the one-per-bead grounded clarification for a NOT-READY bead, then re-dispatch |
 | `mindspec complete` | Close current bead and advance |
 | `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |
 | `mindspec reattest <bead-id> [--spec-branch spec/<id>]` | Re-attest an already-merged bead's landed-binding from independent git topology — explicit, fail-closed, audited (`mindspec_landed_reattest_*`); `--spec-branch` is scoping-only, used when the epic linkage is underivable (ADR-0041 §2(ii), spec 125) |

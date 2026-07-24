@@ -152,6 +152,56 @@ func TestCeremonyNonInflation_HelpFlags(t *testing.T) {
 	}
 }
 
+// commandSubcommandNameSet returns the set of immediate child subcommand
+// NAMES (cmd.Name(), the first Use token) a cobra command exposes — the
+// same shape commandFlagSet extracts for flags, but for the subcommand
+// tree (spec 124 Bead 1's `mindspec bead` pin: a subcommand-set surface,
+// not a flag-set surface).
+func commandSubcommandNameSet(cmd *cobra.Command) map[string]bool {
+	set := map[string]bool{}
+	for _, c := range cmd.Commands() {
+		set[c.Name()] = true
+	}
+	return set
+}
+
+// TestCeremonyNonInflation_BeadSubcommands pins spec 124's cumulative
+// AC-9(i) baseline: the `mindspec bead` subcommand set, recorded from the
+// real beadCmd children — the pre-spec-124 five (spec/plan/worktree/
+// hygiene/create-from-plan) PLUS Bead 1's `ready-check` PLUS Bead 3's
+// `clarify` — and each new subcommand's own flag set (`--help`/`--trace`
+// only, plus Bead 3's `--file`). A future subcommand or flag added to
+// either surface without updating this baseline trips this guard red,
+// exactly the AC-9(i) mechanism. This is the FINAL, cumulative slice
+// (spec 124 plan preamble: the ceremony guard is edited by all three
+// beads, strictly sequentially — Bead 3's diff is the single verifying
+// assertion across Beads 1-3's full surface).
+func TestCeremonyNonInflation_BeadSubcommands(t *testing.T) {
+	gotSub := commandSubcommandNameSet(resolveCommand(t, "bead"))
+	wantSub := setOf("spec", "plan", "worktree", "hygiene", "create-from-plan", "ready-check", "clarify")
+	assertSetEqual(t, "mindspec bead (subcommands)", gotSub, wantSub)
+
+	gotFlags := commandFlagSet(resolveCommand(t, "bead", "ready-check"))
+	wantFlags := setOf("--help", "--trace")
+	assertSetEqual(t, "mindspec bead ready-check", gotFlags, wantFlags)
+
+	gotClarifyFlags := commandFlagSet(resolveCommand(t, "bead", "clarify"))
+	wantClarifyFlags := setOf("--help", "--trace", "--file")
+	assertSetEqual(t, "mindspec bead clarify", gotClarifyFlags, wantClarifyFlags)
+}
+
+// TestCeremonyNonInflation_NextFlags pins spec 124 Bead 2's AC-9(i)
+// baseline addition: the `mindspec next` flag set, recorded from pflag
+// metadata — the pre-spec-124 six (--pick/--spec/--force/--emit-only/
+// --help/--trace) PLUS the new `--allow-not-ready` this bead adds. A
+// future flag added to this surface without updating this baseline trips
+// this guard red, exactly the AC-9(i) mechanism.
+func TestCeremonyNonInflation_NextFlags(t *testing.T) {
+	got := commandFlagSet(resolveCommand(t, "next"))
+	want := setOf("--pick", "--spec", "--force", "--emit-only", "--help", "--trace", "--allow-not-ready")
+	assertSetEqual(t, "mindspec next", got, want)
+}
+
 // TestCeremonyNonInflation_FlagGuardCatchesUnderscore is the guard-of-the-
 // guard for FX-2: it proves the metadata extractor sees an underscore-named
 // flag as its WHOLE name (so assertSetEqual would flag it as inflation),

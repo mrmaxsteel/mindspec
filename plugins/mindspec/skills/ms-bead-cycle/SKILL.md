@@ -73,6 +73,28 @@ step 0                 (pick + claim the next eligible bead, create worktree)
 merge terminal         (panel-approved bead — mindspec complete)
 ```
 
+## NOT READY — pre-damage triage (spec 124 R5/R8)
+
+`/ms-bead-impl`'s dispatch ingress (`mindspec bead ready-check`, plus the staged prompt's Phase 0) can refuse a bead before any code is written. A subagent return whose first line is `NOT READY: <bead-id>` is its OWN outcome, handled distinctly from every other outcome:
+
+- **No panel round is consumed** — nothing was implemented, so there is nothing to review.
+- **Excluded from `loop.halt.max_consecutive_impl_failures`** — that brake stops *repeated failed implementations* (post-damage); NOT READY is the pre-damage refusal that PREVENTS them. Counting it toward the same brake would punish the gate for working.
+- **Never routed to `/ms-bead-fix`** — there is no implementation to fix.
+- **The bead worktree remains intact** — zero commits were made.
+
+On a NOT READY, choose exactly one of two dispositions:
+
+- **ACCEPT (the default)** — halt the bead and surface the reasons (the full ordinal-numbered report) to the user/orchestrator, with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch (back to `/ms-bead-impl`, which re-runs the ingress ready-check and re-stages Phase 0 fresh). `/ms-spec-autopilot` treats an ACCEPTed NOT READY as its existing bead-level halt class — do not proceed to the next bead.
+- **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (one entry for EVERY cited ordinal, each: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — the verb REFUSES a partial record (an unanswered cited reason means the bead is still not ready — that is ACCEPT territory) and a paraphrased reason (the pairing must repeat the cited reason verbatim); a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
+  ```bash
+  mindspec bead clarify <bead-id> --file <record.json>
+  ```
+  then re-dispatch. The cap is **categorical and durable**: ANY prior attempt record on the bead (from an earlier `bead clarify` call, even in a different session) forces the NEXT NOT READY — whether it repeats an addressed reason or raises an entirely new one — to ACCEPT. The verb itself enforces this (a second `bead clarify` on the same bead is refused), so the cap survives orchestrator restart / context loss — it is not a rule this skill has to remember to apply.
+
+  **Cap threat boundary.** The cap stops the accidental/naive unbounded clarify↔re-dispatch loop and survives process restart. It does NOT stop a deliberate, out-of-band DELETION of the bead's readiness-attempt metadata (a manual reset) — that is a conscious operator act, analogous to `--allow-not-ready` for the mechanical floor, and it destroys the append-only audit trail (visible in the record's absence). Do not delete the record to "get another round"; if the plan genuinely needs revision, ACCEPT and revise it.
+
+**Clarify vs. `--allow-not-ready` — never interchangeable.** `bead clarify` resolves a SEMANTIC Phase-0 concern with cited evidence (SR-1..SR-5 — implementability, decidability, helper existence, contradiction, ambiguity); it can never move a MECHANICAL MF-1..MF-4 signal (the layer boundary holds by construction — a clarification's dedicated metadata key is off the mechanical scan surface). `mindspec next --allow-not-ready` is the blunt, RECORDED bypass of a failing mechanical floor at claim time — a deliberate "proceed anyway," not a resolution. Never substitute one for the other: clarifying a mechanical FAIL does nothing (the floor still refuses), and `--allow-not-ready` does not touch the semantic Phase-0 review at all.
+
 ## Merge terminal — `mindspec complete`
 
 The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec complete` gate enforces it). Close the bead in `bd`, merge `bead/<id>` into the spec branch, and remove the bead worktree — this is `mindspec complete` plus a one-line verify.
