@@ -775,3 +775,140 @@ markdown noise from domain tokens before normalization (spec 087 Bead 1
 fixup) — but its regression PIN is DEFERRED to a follow-up bead per the
 plan's PF-3 decision, to avoid pulling the spec-excluded `context-system`
 domain into this spec's scope. It is NOT a Bead 4 deliverable.
+
+## Landed-merge attestation integrity (spec 125, ADR-0041 §2(ii) amendment)
+
+Spec 125 (beads `mindspec-xhd5.1` through `.4`) makes the landed-merge
+attestation substrate ADR-0041 §2(ii) relies on actually hold in the
+real topology. Write side (execution domain — see its architecture doc):
+`complete`/`FinalizeEpic` persist the binding via bead-tip
+`gitutil.ExactSecondParentMerges` ground truth regardless of the merge's
+subject format, and a genuine locate miss on a bead that DID land is
+LOUD and cleanup-suppressing, never silently swallowed. Read side
+(this domain): `FindLandedMerge` is rebuilt on a two-source
+ownership/landed-ness model, the revert-vs-evolved discrimination gains
+the `RevertShape` sub-classification, and the new `mindspec reattest`
+verb is the explicit audited recovery. ADR-0041 carries the codifying
+record as its `## Amendment (Spec 125): Re-attested landed-bindings
+under §2(ii)` section, finalized by Bead 4 with the first citing code
+(the 122/123 amendment-lifecycle precedent).
+
+### `FindLandedMerge`: two-source ownership identity (R5)
+
+Two orthogonal facts from two different sources, neither alone
+sufficient:
+
+- **OWNERSHIP** ("which bead") is the merge SUBJECT's bead-branch name —
+  `parseMergeSubjectBeadBranch` recognizes BOTH subject forms
+  (`MergeInto`'s `Merge bead/<id>` and git's default conflict-recovery
+  `Merge branch 'bead/<id>' into …`), matched by FULL branch-name
+  equality, never prefix/substring (AC-2f). The parser is deliberately
+  conservative (G2-2): a `bead/…` token in an unrecognized subject shape
+  still NOMINATES that bead (so a different bead's token rejects on the
+  equality check) and is never collapsed into the names-no-bead state.
+- **LANDED-NESS** ("did it land") is git TOPOLOGY: a two-parent
+  first-parent merge on the spec branch whose second parent EQUALS the
+  bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
+  (panel `reviewed_head_sha`, surviving branch tip, binding second
+  parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
+  every corroboration is now exact-equality only, and a non-equal datum
+  is a fail-closed contradiction (AC-2b/AC-2c/AC-2d), never a softened
+  confirm. With no exact-and-owned match the function REFUSES rather
+  than picking the newest ancestor-consistent merge.
+
+The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
+over an already-subject-owned candidate — never an ownership authority
+of its own. The binding leg is PAIR-CONSISTENT (final-review FIX-2a,
+mirroring the write-side two-key check): every present binding key must
+agree with the SAME real merge — a present-but-contradictory merge SHA
+or second parent fails closed, never ignored because the other key
+matches. Same-second-parent re-merges (one bead's repeated landings)
+are resolved newest-names-the-merge, but the R5(d) content check is
+anchored on the OLDEST such merge M₁ (AC-2e): a later re-merge's own
+first parent can itself be the post-revert state, so a newest-anchored
+three-way would mis-attest reverted content. The single-merge case
+reduces exactly to R3. Owned candidates with DIFFERENT second parents
+are genuine ambiguity and FAIL CLOSED (final-review FIX-2b) — the same
+refusal the reattest surface applies — never silently resolved to the
+newest.
+
+**Anonymous-subject merges FAIL CLOSED (G-1 — supersedes the spec's R1
+residual wording).** spec.md's R1 residual originally said a merge with
+a wholly-custom subject naming NO bead remains read-identifiable via a
+complete-time binding. Bead 3 shipped the SAFER behavior and the docs
+describe what shipped: there is deliberately NO anonymous-subject
+binding-SHA entry point in `FindLandedMerge`. Git-corroborating a
+binding proves the merge is REAL with that exact second parent — it does
+NOT prove the merge is THIS bead's — so admitting an anonymous merge on
+the binding alone would make the agent-writable binding an independent
+ownership authority: a forged binding (a metadata-forge, easier than a
+commit-forge and thus below the documented git-history threat boundary)
+on a never-landed bead pointing at any real anonymous merge would be
+positively identified. mindspec's own merges ALWAYS name the bead (both
+subject forms carry the branch name), so an anonymous subject arises
+only from a hand-crafted operator merge — and it is NOT auto-recoverable
+via `mindspec reattest` either: reattest's ownership nominator is the
+same subject parse, so it refuses an anonymous-subject merge too (it
+cannot nominate a merge whose subject names no bead). The honest
+recovery is to re-merge the work under a bead-naming subject, or to
+accept the safe fail-closed (MF-3 refuses that dependency); the audited
+ADR-0035 `mindspec-q9ea` human attested-restore is the last-resort exit.
+The spec's forward-only residual text is superseded by this fail-closed
+shape.
+
+### Revert-vs-evolved discrimination (R3, the 8nhe.2 fix)
+
+`FindLandedMerge`'s R5(d) content check still discriminates
+`ContentSubsumedOutcome(base=M₁^1, ours=tip, theirs=M₁)`: Landed →
+identified; Conflict → identified (landed-then-evolved, the spec-121
+F2-2r arm, byte-identically UNTOUCHED by 125 — including its documented
+pre-existing Conflict-hides-revert false-positive residual, a named
+follow-up). What 125 changes is ONLY the `SubsumptionCleanDivergence`
+arm, which used to refuse wholesale and thereby false-rejected
+evolved-but-present content (bead `mindspec-8nhe.2`): it is now
+SUB-CLASSIFIED by `gitutil.RevertShape` (`landedRevertShapeFn`, pinned
+to the real primitive by an anti-drift test) — the reverse un-apply,
+rename-safe (`merge.renames=false`) no-op test. Only the revert SHAPE —
+the tip carries NONE of M's introduced content (a true `git revert M`,
+or the content-indistinguishable clean-full-removal residual, a
+deliberate false-negative floor) — refuses; a clean divergence that
+RETAINS part of M's content (partial supersession by later honest work)
+identifies. A RevertShape error is an UNDETERMINED result and
+propagates — never mapped to either classification.
+
+### `mindspec reattest <bead-id>`: explicit, git-corroborated, audited recovery (R4)
+
+`cmd/mindspec/reattest.go` + `internal/lifecycle.ReattestLandedMerge`
+are the operator-invoked recovery for an already-merged bead whose
+binding is missing or stale (the pre-125 fleet state: 755/757 beads).
+The engine DERIVES the binding from an independent git scan — a
+two-parent first-parent merge whose subject names this bead (ownership)
+and whose exact second-parent topology proves it landed — and writes
+ONLY scan-derived SHAs. Non-circular by construction: there is no
+parameter, flag, or argument through which a caller can assert a
+merge/second-parent pair (AC-8), no bypass flag, no `--all` fleet mode
+(mass mutation stays a scripted sequence of explicit per-bead
+invocations), and `doctor` never writes through it. Fail-closed on
+every ambiguity: no owned exact merge → refuse to the audited ADR-0035
+`mindspec-q9ea` human attested-restore exit BY NAME; owned candidates
+with different second parents → ambiguity refusal; a contradicting
+surviving tip or panel SHA → refusal; a REVERTED classification (the
+same R3 discrimination, M₁-anchored) → refusal — re-attesting reverted
+content would forge landed evidence. Every write carries the
+`mindspec_landed_reattest_*` audit keys in the same metadata call as
+the binding: actor (`user@host via argv0`), timestamp, operation,
+corroborating datum, prior before-values, and the scanned branch —
+inspectable via `bd show <id> --json`; detectable-by-inspection, not
+cryptographically tamper-proof, exactly as the amendment claims.
+
+`--spec-branch` is SCOPING input only (WHERE to scan), consulted ONLY
+when the bead's epic linkage is cleanly, determinately ABSENT (no epic
+link recorded; linkage wins whenever derivable, and a
+supplied-but-ignored flag says so loudly). A lineage LOOKUP ERROR is
+indeterminate ownership and fails CLOSED even with the flag
+(final-review FIX-1) — the flag never substitutes for a lookup that
+might have derived a different branch. It is never a corroboration
+substitute, and the branch actually scanned is recorded in the audit
+either way. The verb registered its `reattest` token in
+core-owned `internal/redact.CommandTokens` (the standing new-top-level-
+command rule — see the core domain interfaces doc).

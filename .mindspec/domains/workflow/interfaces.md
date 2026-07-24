@@ -260,6 +260,7 @@ complete-gated.
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create an ADR with a slugged filename `ADR-NNNN-<slug>.md` derived from the title (or `--slug` override); every surface reports/accepts the canonical `ADR-NNNN` ID (spec 123 R5) |
 | `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc panel WITHOUT `--spec` at `.mindspec/reviews/<slug>/` (flat layout) — talliable via `panel tally`, never scanned by `mindspec complete`'s gate (spec 123 R8, ADR-0037 scope) |
 | `mindspec domain add <name>` | Scaffold a domain AND converge from any partial state: backfills missing standard files and the context-map entry; refuses "already exists" only when fully scaffolded and mapped (spec 123 R2) |
+| `mindspec reattest <bead-id> [--spec-branch spec/<id>]` | Explicit, operator-invoked, git-corroborated re-attest of an already-merged bead's landed-binding — derives the SHAs from an independent exact-second-parent scan (never operator-asserted; no bypass, no `--all`), fail-closed on ambiguity/anonymous-subject/reverted content, audited via `mindspec_landed_reattest_*` metadata; `--spec-branch` is scoping-only, consulted only when the epic linkage is underivable (spec 125 R4, ADR-0041 §2(ii) amendment) |
 
 ## Agent Skills
 

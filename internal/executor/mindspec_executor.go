@@ -1443,96 +1443,150 @@ var (
 )
 
 // errNoLandedMergeIdentified is locateLandedMergeByIdentity's local
-// not-found sentinel (test via errors.Is): a trivially-ancestor bead
-// branch (zero own commits since its spec-branch fork point) produces no
-// "Merge bead/<id>" commit by construction — `git merge --no-ff` of an
-// already-ancestor branch performs no merge and creates no commit — so
-// this is "nothing to bind", never an error.
+// not-found sentinel (test via errors.Is): the exact-second-parent scan
+// found no first-parent merge on specBranch whose second parent equals
+// beadBranch's tip. Spec 125 R2: this is NOT itself "nothing to bind" —
+// it is a locate MISS, and ensureLandedBinding is the one that classifies
+// a miss as either the legitimate nothing-to-bind state (a trivially-
+// ancestor branch that never diverged, so no merge commit was ever
+// created for it) or a genuine bind failure that must go LOUD.
 var errNoLandedMergeIdentified = errors.New("no landed merge commit identified by identity")
 
-// locateLandedMergeByIdentity is the executor-local, gitutil-only
-// counterpart of internal/lifecycle.FindLandedMerge (spec 121 R5(b),
-// ADR-0041 §2(ii)). internal/executor must not import internal/lifecycle —
-// it transitively pulls internal/phase, an enforcement package this
+// locateLandedMergeByIdentity is the executor-local ground-truth locate
+// behind the merge-time landed-binding write (ADR-0041 §2(ii), spec 125
+// R1/R2/R5). internal/executor must not import internal/lifecycle — it
+// transitively pulls internal/phase, an enforcement package this
 // package's own contract (see the doc comment atop executor.go) forbids
-// importing — so the merge-time binding write locates its own subject
-// candidate directly via gitutil.FirstParentMerges, corroborated ONLY by
-// beadBranch's own surviving tip (the one datum available at merge/write
-// time, before any panel/binding read makes sense — this function IS the
-// write side of that third datum). Deliberately NEVER a rev-parse of the
-// current tip/HEAD: on a no-op re-run (MergeInto sees an already-ancestor
-// branch and performs no new merge) HEAD is NOT the merge commit, so the
-// newest subject-matching commit — the SAME merge every prior run would
-// have identified — is scanned for instead; one code path serves both the
-// first run and every re-run.
+// importing — so this is the executor-local counterpart of
+// internal/lifecycle.FindLandedMerge. This WRITE side consumes
+// gitutil.ExactSecondParentMerges; the READ side (FindLandedMerge /
+// ReattestLandedMerge) applies the same two-parent + exact-second-parent
+// equality INLINE over the same gitutil.FirstParentMerges scan (it needs
+// every owned merge, not one tip's) — logically equivalent filters, but
+// two code paths, not one shared primitive. Nor does this side share the
+// read side's ownership nomination: this function KNOWS the bead's
+// identity directly (it is
+// completing/finalizing bead beadBranch) and so it never parses a merge
+// subject to establish ownership — this is precisely why R1 persists the
+// binding REGARDLESS OF THE MERGE'S SUBJECT FORMAT (the default
+// conflict-recovery subject, or the exact "Merge bead/<id>" MergeInto
+// itself writes): identity here is corroborated ONLY by beadBranch's own
+// tip exact-matching a real merge's second parent on specBranch — the one
+// ground-truth datum available at merge/bind time, before the branch is
+// ever deleted. Subject-name parsing (the ownership NOMINATOR) is a
+// read-side concern only (internal/lifecycle.FindLandedMerge, and the R4
+// re-attest surface) reading an unattributed HISTORICAL merge with no
+// surviving write-time ground truth.
+//
+// Deliberately NEVER a rev-parse of the current tip/HEAD of specBranch:
+// on a no-op re-run (MergeInto sees an already-ancestor branch and
+// performs no new merge) HEAD is NOT the merge commit, so scanning by
+// beadBranch's OWN tip (unchanged across re-runs) finds the SAME merge
+// every time — one code path serves both the first run and every re-run.
 func locateLandedMergeByIdentity(root, specBranch, beadBranch string) (mergeSHA, secondParent string, err error) {
-	wantSubject := "Merge " + beadBranch
-	merges, err := gitutil.FirstParentMerges(root, specBranch)
+	tip, tipErr := gitutil.RevParseRef(root, beadBranch)
+	if tipErr != nil {
+		if errors.Is(tipErr, gitutil.ErrRefNotFound) {
+			return "", "", errNoLandedMergeIdentified
+		}
+		return "", "", fmt.Errorf("resolving %s: %w", beadBranch, tipErr)
+	}
+	merges, err := gitutil.ExactSecondParentMerges(root, specBranch, tip)
 	if err != nil {
 		return "", "", fmt.Errorf("scanning %s for a landed merge of %s: %w", specBranch, beadBranch, err)
 	}
-
-	var branchTip string
-	var branchSurvives bool
-	if tip, tipErr := gitutil.RevParseRef(root, beadBranch); tipErr != nil {
-		if !errors.Is(tipErr, gitutil.ErrRefNotFound) {
-			return "", "", fmt.Errorf("resolving %s: %w", beadBranch, tipErr)
-		}
-		// Genuinely absent — proceed uncorroborated below (a subject match
-		// is unique per bead in the normal lifecycle, so the newest one is
-		// the intended target regardless).
-	} else {
-		branchTip, branchSurvives = tip, true
+	if len(merges) == 0 {
+		return "", "", errNoLandedMergeIdentified
 	}
+	newest := merges[0]
+	return newest.SHA, newest.Parents[1], nil
+}
 
-	for _, m := range merges {
-		if m.Subject != wantSubject || len(m.Parents) < 2 {
-			continue
+// locateLandedMergeFn is the package seam over locateLandedMergeByIdentity
+// (spec 125 R2/AC-11(i)): ensureLandedBinding calls through this variable,
+// never the function directly, so a test can force a locate MISS on a
+// bead that DID actually merge — the exact fixture AC-3/AC-4b need to pin
+// that a genuine miss is LOUD, never re-hidden by a count/merge-base
+// classifier. The production default is pinned to the real function by an
+// anti-drift pointer-equality test so the gate cannot go hollow.
+var locateLandedMergeFn = locateLandedMergeByIdentity
+
+// beadTipLandedOnSpec answers the R2 first-parent-MEMBERSHIP question
+// DIRECTLY via gitutil — never through locateLandedMergeFn above — so a
+// test that forces the seam to lie cannot also mask this structural
+// check: is beadBranch's tip the second parent of ANY first-parent merge
+// on specBranch? A true bd_close orphan (zero own commits, still an
+// ancestor of specBranch) is not; a bead that DID merge — regardless of
+// whether the seam-mediated locate above found it — is. This is the ONE
+// discriminator ensureLandedBinding uses to classify a locate miss
+// (Background/R2: an own-commit-count or merge-base classifier is
+// PROVEN INSUFFICIENT — after the merge, a merged-then-ancestor bead is
+// byte-identical to a true orphan under both metrics, because
+// ensureLandedBinding runs AFTER the merge).
+func beadTipLandedOnSpec(root, specBranch, beadBranch string) (bool, error) {
+	tip, tipErr := gitutil.RevParseRef(root, beadBranch)
+	if tipErr != nil {
+		if errors.Is(tipErr, gitutil.ErrRefNotFound) {
+			return false, nil
 		}
-		candidateSecondParent := m.Parents[1]
-		if branchSurvives && branchTip != candidateSecondParent {
-			anc, ancErr := gitutil.IsAncestor(root, branchTip, candidateSecondParent)
-			if ancErr != nil || !anc {
-				continue
-			}
-		}
-		return m.SHA, candidateSecondParent, nil
+		return false, fmt.Errorf("resolving %s: %w", beadBranch, tipErr)
 	}
-	return "", "", errNoLandedMergeIdentified
+	merges, err := gitutil.ExactSecondParentMerges(root, specBranch, tip)
+	if err != nil {
+		return false, fmt.Errorf("scanning %s for %s's landed merge: %w", specBranch, beadBranch, err)
+	}
+	return len(merges) > 0, nil
 }
 
 // ensureLandedBinding locates beadBranch's landed merge on specBranch by
-// identity and, when the merge-time binding is not yet recorded for
-// beadID, writes it via mergeBindingFn — fail-closed and BEFORE any
-// cleanup at either producer leg (ADR-0041 §2(ii)). A locate MISS
-// (errNoLandedMergeIdentified) is never itself an error: a trivially-
-// ancestor branch that never diverged (e.g. a bd_close orphan with zero
-// own commits) legitimately has nothing to bind. Only a genuine locate
-// infra failure, or a binding-write failure, is returned as an error —
-// the caller's job is to translate that into the fail-closed,
-// cleanup-suppressing refusal (CompleteBead / FinalizeEpic below).
+// identity and, when the merge-time binding is not yet recorded (or not
+// yet CONSISTENT, see the G2-1 tightening below) for beadID, writes it via
+// mergeBindingFn — fail-closed and BEFORE any cleanup at either producer
+// leg (ADR-0041 §2(ii)).
+//
+// Spec 125 R2: a locate MISS is no longer silently treated as "nothing to
+// bind" (the pre-125 design assumed the only miss was a legitimate
+// zero-own-commits ancestor branch; in real practice the locate missed
+// for beads that DID merge with real commits — the common case, not the
+// exception). A miss is now classified STRUCTURALLY, by first-parent
+// MEMBERSHIP computed directly via gitutil (beadTipLandedOnSpec, never
+// through the seam): the bead's tip is the second parent of NO
+// first-parent merge on specBranch ⟹ true nothing-to-bind, quiet, no
+// binding, no warning. The tip IS such a second parent (it did merge) but
+// the locate missed, or the write below fails ⟹ this is a genuine bind
+// failure and MUST go LOUD — returned as an error the caller (CompleteBead
+// / FinalizeEpic) translates into a guard.NewFailure that suppresses
+// cleanup and names the recovery (re-run the lifecycle command): the
+// branch survives as the corroborating datum and the re-invocation
+// converges.
 func (g *MindspecExecutor) ensureLandedBinding(beadID, specBranch, beadBranch string) error {
-	mergeSHA, secondParent, locErr := locateLandedMergeByIdentity(g.Root, specBranch, beadBranch)
+	mergeSHA, secondParent, locErr := locateLandedMergeFn(g.Root, specBranch, beadBranch)
 	if locErr != nil {
-		if errors.Is(locErr, errNoLandedMergeIdentified) {
-			return nil
+		if !errors.Is(locErr, errNoLandedMergeIdentified) {
+			return fmt.Errorf("locating landed merge of %s on %s: %w", beadBranch, specBranch, locErr)
 		}
-		return fmt.Errorf("locating landed merge of %s on %s: %w", beadBranch, specBranch, locErr)
+		landed, memErr := beadTipLandedOnSpec(g.Root, specBranch, beadBranch)
+		if memErr != nil {
+			return fmt.Errorf("checking whether %s has landed on %s: %w", beadBranch, specBranch, memErr)
+		}
+		if !landed {
+			return nil // true nothing-to-bind: a trivially-ancestor branch that never diverged
+		}
+		return fmt.Errorf("bead branch %s has landed on %s (its tip is the second parent of a first-parent merge there) but the landed-merge commit could not be located by identity — refusing to record the binding rather than silently leaving it unrecorded", beadBranch, specBranch)
 	}
 
-	// Spec 121 final-review G3-1: "already bound" means bound TO THE
-	// LOCATED MERGE — the prior skip returned nil on ANY non-empty stored
-	// SHA without comparing it to mergeSHA, so a stale/contradictory
-	// pre-existing binding (a reopened bead, or a crafted value) silently
-	// survived while the caller's cleanup destroyed the surviving-branch
-	// datum, leaving a WRONG binding for FindLandedMerge to contradict
-	// later (stuck in attested-restore). Skip only when the existing
-	// binding is CONSISTENT with the located merge; a mismatch falls
-	// through to the write below, which OVERWRITES it with the located
-	// merge's SHAs — and a failed overwrite fails closed via the write
-	// error, suppressing cleanup and preserving the branch.
+	// Spec 121 final-review G3-1, tightened by spec 125's G2-1: "already
+	// bound" means bound to BOTH the located merge's SHA AND its second
+	// parent — the prior skip keyed ONLY on the stored merge SHA matching,
+	// so a binding with the correct merge SHA but an EMPTY or WRONG stored
+	// second parent survived as a latent bad binding forever. A mismatch
+	// on EITHER key now falls through to the write below, which OVERWRITES
+	// with the located merge's SHAs — and a failed overwrite fails closed
+	// via the write error, suppressing cleanup and preserving the branch.
 	if existing, readErr := mergeBindingReadFn(beadID); readErr == nil {
-		if sha, _ := existing["mindspec_landed_merge_sha"].(string); strings.TrimSpace(sha) == mergeSHA {
+		sha, _ := existing["mindspec_landed_merge_sha"].(string)
+		sp, _ := existing["mindspec_landed_second_parent"].(string)
+		if strings.TrimSpace(sha) == mergeSHA && strings.TrimSpace(sp) == secondParent {
 			return nil // already bound to this located merge — convergent no-op
 		}
 	}
@@ -1597,6 +1651,17 @@ func abortMergeState(workdir string) (conflicted []string, note string) {
 // `mindspec impl approve <spec-id>`); both converge after a manual
 // merge because the re-attempted merge sees the bead branch as an
 // ancestor.
+//
+// Spec 125 R5/AC-1b: the printed recovery merge now supplies
+// `-m "Merge <beadBranch>"` — the diagnosed root cause (Background) is
+// that an operator following the OLD `-m`-less line verbatim produced
+// git's default conflict-recovery subject
+// (`Merge branch '<beadBranch>' into '<specBranch>'`), which the
+// (now-retired) exact-subject identity scan never matched, so the
+// merge-time binding silently went unrecorded. Identity is now
+// corroborated by second-parent match, not subject text (R1/R2/R5), so
+// this fix is belt-and-suspenders: the recovery ALSO produces an
+// identifiable exact subject for any reader that still greps by it.
 func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string, mergeErr error) error {
 	conflicted, note := abortMergeState(specWtPath)
 	var b strings.Builder
@@ -1620,7 +1685,7 @@ func beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, rerun string,
 	fmt.Fprintf(&b, "\nresolve in the spec worktree (%s): re-run the merge there, fix the conflicts, commit the merge, then re-run the lifecycle command", specWtPath)
 	return guard.NewFailure(b.String(),
 		containment.EmitCd(specWtPath),
-		"git merge --no-ff "+beadBranch,
+		fmt.Sprintf(`git merge --no-ff -m "Merge %s" %s`, beadBranch, beadBranch),
 		rerun,
 	)
 }

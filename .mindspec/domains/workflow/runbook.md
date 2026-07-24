@@ -95,6 +95,40 @@ Check current mode with `/spec-status`. If unclear:
 - Approved spec but no approved plan? You're in Plan Mode.
 - Both approved + active bead? You're in Implementation Mode.
 
+### Missing or stale landed-binding on a merged bead (spec 125)
+
+Symptom: `FindLandedMerge`-backed surfaces (`complete`'s
+merged-unclosed reconcile, `doctor`, `next`) refuse to identify a bead
+that you know merged — typically a pre-125 bead (the fleet state spec
+125 fixed forward: the old exact-subject scan missed every
+conflict-recovery merge and silently swallowed the miss) or a
+hand-crafted operator merge.
+
+Recovery: `mindspec reattest <bead-id>`. It derives the binding from an
+independent exact-second-parent git scan of the spec branch (resolved
+from the bead's epic linkage; pass `--spec-branch spec/<id>` only when
+the linkage is underivable) and writes the scan-derived SHAs plus a
+`mindspec_landed_reattest_*` audit record — inspect with
+`bd show <bead-id> --json`. It is fail-closed: on no owned exact merge
+it refuses and names the audited ADR-0035 `mindspec-q9ea` human
+attested-restore as the only exit (inspect
+`git log --first-parent --merges <spec-branch>`, VERIFY the candidate's
+diff, then `git branch bead/<id> <verified-second-parent-sha>` — never
+blind); on ambiguity, a contradicting datum, or reverted content it
+refuses and writes nothing. A merge whose subject names NO bead is not
+auto-identifiable anywhere (fail-closed by design — the binding alone is
+never an ownership authority), and `reattest` CANNOT recover it either:
+it too requires a subject-nominated merge. The honest recovery there is
+to re-merge the work under a bead-naming subject (mindspec's own merges
+always name the bead), or accept the safe fail-closed; the audited
+q9ea attested-restore above is the last-resort exit.
+
+Also: if `mindspec complete` refuses with "has landed … but the
+landed-merge commit could not be located by identity", that is the spec
+125 loud-miss guard — cleanup was suppressed and the bead branch
+survives; re-run the lifecycle command after addressing the named
+cause rather than deleting the branch.
+
 ## Maintenance Notes
 
 - **2026-07-02 (spec 107 wave 1):** The hidden `spec init` alias
@@ -171,3 +205,15 @@ Check current mode with `/spec-status`. If unclear:
   `TestRun_IdleNoBeads` no longer reads live lifecycle state when `go
   test` happens to run from inside an active bead worktree
   (mindspec-z4ps).
+- **2026-07-24 (spec 125):** The landed-merge attestation substrate is
+  rebuilt on exact-second-parent git topology (see this domain's
+  architecture doc, § Landed-merge attestation integrity): `complete`
+  persists the binding regardless of the merge's subject format, a
+  genuine locate miss is loud and cleanup-suppressing, the bead→spec
+  conflict-recovery message now supplies `-m "Merge <beadBranch>"`,
+  `FindLandedMerge` corroborates by exact equality only (ancestor
+  tolerance removed; anonymous-subject merges fail closed), the
+  CleanDivergence arm is sub-classified by `gitutil.RevertShape` so
+  evolved-but-present content identifies while true reverts refuse, and
+  the new `mindspec reattest <bead-id>` verb is the explicit audited
+  recovery (troubleshooting entry above).

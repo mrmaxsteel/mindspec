@@ -119,6 +119,25 @@ func TestOtelHelpListsExactlySetupAndStatus(t *testing.T) {
 	}
 }
 
+// TestRootHelpListsReattest pins the spec 125 R4 verb on the help
+// surface: `mindspec --help` lists `reattest` as a visible top-level
+// command (it is an EXPLICIT operator-invoked recovery, so unlike the
+// deprecation shims it must be discoverable, never hidden).
+func TestRootHelpListsReattest(t *testing.T) {
+	bin := buildMindspecBinary(t)
+
+	cmd := exec.Command(bin, "--help")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("mindspec --help: %v\nstderr=%q", err, stderr.String())
+	}
+	if !containsToken(stdout.String(), "reattest") {
+		t.Errorf("mindspec --help must list the reattest verb (spec 125 R4)\n--- output ---\n%s\n--- end ---", stdout.String())
+	}
+}
+
 // containsToken returns true if s contains tok as a word-ish token
 // (surrounded by non-alphanumeric / start-or-end). Without this guard
 // "service" would falsely match "serve". Both inputs are lowercased

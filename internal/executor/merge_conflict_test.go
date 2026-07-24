@@ -139,6 +139,14 @@ func TestCompleteBead_MergeConflictAbortsAndPreserves(t *testing.T) {
 	if !strings.Contains(msg, "recovery: mindspec complete mindspec-x.1") {
 		t.Errorf("recovery should include the converging re-run `mindspec complete mindspec-x.1`; got:\n%s", msg)
 	}
+	// Spec 125 R5/AC-1b: the printed recovery merge line now supplies
+	// `-m "Merge <beadBranch>"` so an operator following it verbatim
+	// produces an IDENTIFIABLE exact subject too — belt (second-parent
+	// identity, subject-independent) and suspenders (an identifiable
+	// recovery subject).
+	if !strings.Contains(msg, `recovery: git merge --no-ff -m "Merge bead/mindspec-x.1" bead/mindspec-x.1`) {
+		t.Errorf("recovery should print an identifiable exact-subject merge; got:\n%s", msg)
+	}
 
 	// No warn-and-continue cleanup: bead worktree + branch preserved.
 	if len(fake.removeCalls) != 0 {

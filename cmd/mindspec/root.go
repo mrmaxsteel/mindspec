@@ -229,7 +229,8 @@ func init() {
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(panelCmd) // spec 110 R1/R2/R3: `panel create|verify|tally`
 	rootCmd.AddCommand(planCmd)
-	rootCmd.AddCommand(releaseCmd) // Spec 101 R2: reverse a claim
+	rootCmd.AddCommand(reattestCmd) // spec 125 R4: explicit git-corroborated landed-binding re-attest
+	rootCmd.AddCommand(releaseCmd)  // Spec 101 R2: reverse a claim
 	rootCmd.AddCommand(repairCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(specCmd)
