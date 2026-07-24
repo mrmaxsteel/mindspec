@@ -1,10 +1,18 @@
 package setup
 
 // upgrade_refresh_pre126_test.go — spec 126 Bead 4 (mindspec-xurf.4), AC-16:
-// the seven byte-exact pre-126 snapshots in historical_skills/*.pre126.md
-// (five plugin skills + the two ms-spec-approve/ms-plan-approve lifecycle
+// the eight byte-exact pre-126 snapshots in historical_skills/*.pre126.md
+// (six plugin skills + the two ms-spec-approve/ms-plan-approve lifecycle
 // literals) prove an EXISTING pre-126 install upgrades cleanly to the new
 // canonical content.
+//
+// ms-spec-autopilot was added after this bead's panel review (O2/S3
+// finding): Bead 3's AC-1 sweep (commit e9f46dfe) also edited
+// ms-spec-autopilot/SKILL.md ("6 reviewers"→"configured panel reviewers",
+// "6/6"→"<N>/<N>"), making it a SIXTH edited plugin skill with no pre-126
+// snapshot — existing installs of that file would have been misclassified
+// user-modified and stranded. Captured the same way as the other five
+// plugin skills below.
 //
 // FIRST leg — the provenance-digest oracle (plan-gate correction, plan.md's
 // "Snapshot PROVENANCE is pinned by digest, not inferred from history"
@@ -16,7 +24,7 @@ package setup
 // DigestOracle is the external oracle a fixture cannot satisfy by merely
 // existing: it hashes each embedded .pre126.md body and compares it against
 // a digest PINNED in this file (computed independently, at capture time, by
-// `git show <base>:<path> | shasum -a 256` for the five plugin skills and by
+// `git show <base>:<path> | shasum -a 256` for the six plugin skills and by
 // the base-binary install-capture procedure for the two lifecycle literals —
 // never derived from the snapshot file under test).
 //
@@ -53,16 +61,17 @@ import (
 )
 
 // upgradeRefreshPre126Digests pins the reviewed SHA-256 digest for each of
-// the seven base artifacts. THESE ARE NOT DERIVED FROM THE SNAPSHOT FILE
+// the eight base artifacts. THESE ARE NOT DERIVED FROM THE SNAPSHOT FILE
 // UNDER TEST — they are independently-computed values recorded here as the
 // proof-of-record, per plan.md's snapshot-provenance block.
 var upgradeRefreshPre126Digests = map[string]string{
-	// Five plugin skills — git show 7ec96295:plugins/mindspec/skills/<name>/SKILL.md | shasum -a 256
+	// Six plugin skills — git show 7ec96295:plugins/mindspec/skills/<name>/SKILL.md | shasum -a 256
 	"ms-panel-run":         "1ae112ef731ee1b489dac7226b73684d5357678a913900fe27e45a1d2afbb11f",
 	"ms-panel-tally":       "687dc90613f067b88bc7e3c1b7c490f93a8a99993904bb4489ae55b9c197354a",
 	"ms-bead-cycle":        "679b580e33412870fe5449d0ceef8240a4ed5cbbebbd41722bf142ce41796ba8",
 	"ms-bead-fix":          "d481f5297960b45f53404ddba3a4ad69be975fb205bb85746f7c9fed005aaf8e",
 	"ms-spec-final-review": "26c09c05b9d083495d54de1f0b99393c822037bb6026dd68a2194a45829a9ce3",
+	"ms-spec-autopilot":    "0dc49db17e0e1806f8f33b69c7a024f58f2ddbfba3e05da732701d7c4355fe76",
 	// Two lifecycle literals — base-binary install-capture, cross-checked
 	// against git show 7ec96295:internal/setup/claude.go at Bead 4 capture
 	// time (this bead).
@@ -78,6 +87,7 @@ var upgradeRefreshPre126Skills = []string{
 	"ms-bead-cycle",
 	"ms-bead-fix",
 	"ms-spec-final-review",
+	"ms-spec-autopilot",
 	"ms-spec-approve",
 	"ms-plan-approve",
 }
@@ -119,7 +129,7 @@ func TestUpgradeRefreshPre126_DigestOracle(t *testing.T) {
 }
 
 // TestUpgradeRefreshPre126_RefreshesEachEditedSkill is the behavioral leg:
-// for EACH of the seven edited skills, seed the pre-126 body on disk (a
+// for EACH of the eight edited skills, seed the pre-126 body on disk (a
 // stand-in for an existing install that predates this spec), run
 // installSkills with the current canonical `wanted` set, and assert the
 // file is classified Refreshed and its bytes now equal the new canonical.

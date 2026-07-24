@@ -1640,7 +1640,14 @@ var reviewDisciplineBead4FragmentRows = []fragmentRow{
 	{ac: "AC-11", desc: "ms-spec-final-review F2 slot names the commands.test fallback", surface: "ms-spec-final-review", want: "commands.test"},
 	{ac: "AC-11", desc: "ms-spec-final-review F2 slot records the no-declaration advisory verbatim", surface: "ms-spec-final-review", want: "no declared CI invocation — CI parity not reproduced"},
 	{ac: "AC-11", desc: "ms-spec-final-review extends Not-a-CI-substitute with the local-green vs CI-green rationale", surface: "ms-spec-final-review", want: "not the same signal as CI-green on the PR"},
-	{ac: "AC-11", desc: "ms-spec-final-review retains the original Not-a-CI-substitute line", surface: "ms-spec-final-review", want: "Not a CI substitute"},
+	// This row pins the NEW closing clause this bead ADDED to the
+	// Not-a-CI-substitute bullet — not the pre-existing "Not a CI
+	// substitute" lead-in, which already existed verbatim at this bead's
+	// parent commit (7ec96295) and so would stay present (and this row
+	// would stay GREEN) even if this bead's own edit were fully reverted.
+	// Pinning the new closing clause instead means a revert of the Bead-4
+	// edit genuinely REDs this row.
+	{ac: "AC-11", desc: "ms-spec-final-review Not-a-CI-substitute extension's closing clause (new text, absent at parent)", surface: "ms-spec-final-review", want: "F2's result is reviewer-side parity evidence, never a substitute for the PR's own CI run"},
 
 	// AC-11 negative tripwires (honest, per spec.md's own framing — NOT a
 	// proof of absence for every possible concrete invocation, just these
@@ -1712,10 +1719,12 @@ func TestReviewDiscipline_AC12Completeness(t *testing.T) {
 	// are asserted structurally, not via the fragmentRow substring shape —
 	// named here as explicitly covered, backstopped by the dedicated tests
 	// TestReviewDiscipline_AC2LadderExampleStructural and
-	// TestReviewDiscipline_AC10ScanPlusAllowlist actually existing (checked
-	// below via reflection-free presence: both are referenced by name in
-	// this very file, so a compile failure here would already RED if either
-	// were deleted).
+	// TestReviewDiscipline_AC10ScanPlusAllowlist. That backstop is made real
+	// by the package-scope `var _ = TestReviewDiscipline_AC2LadderExampleStructural`
+	// / `var _ = TestReviewDiscipline_AC10ScanPlusAllowlist` references below
+	// this function: deleting or renaming either backing test is a COMPILE
+	// ERROR for this file, not merely a comment claim, so AC-2/AC-10 cannot
+	// silently lose their structural coverage while this file still builds.
 	covered["AC-2"] = true
 	covered["AC-10"] = true
 
@@ -1744,3 +1753,16 @@ func TestReviewDiscipline_AC12Completeness(t *testing.T) {
 		}
 	}
 }
+
+// reviewDisciplineAC2StructuralBackstop and reviewDisciplineAC10StructuralBackstop
+// are compile-load-bearing references to the two dedicated tests that back
+// AC-12's "covered" claim for AC-2 and AC-10 (see the comment above). They
+// exist ONLY so that deleting or renaming
+// TestReviewDiscipline_AC2LadderExampleStructural or
+// TestReviewDiscipline_AC10ScanPlusAllowlist fails `go vet`/`go build` for
+// this package, rather than silently leaving TestReviewDiscipline_AC12Completeness
+// green with a stale hardcoded covered[...] = true and no backing test.
+var (
+	reviewDisciplineAC2StructuralBackstop  = TestReviewDiscipline_AC2LadderExampleStructural
+	reviewDisciplineAC10StructuralBackstop = TestReviewDiscipline_AC10ScanPlusAllowlist
+)
