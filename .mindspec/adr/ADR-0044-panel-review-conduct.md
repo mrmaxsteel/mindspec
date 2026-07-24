@@ -27,6 +27,11 @@ of not shipping it:
   checkout" claims, all refuted by reproducing in a clean detached checkout,
   plus 3 wrong "hollow fixture" BLOCKINGs — while the shipped cycle skill
   carried only the dangerous half ("trust the empirical check").
+- **spec-121 Bead-2**: a summarised BRIEF silently dropped an AC clause; the
+  panel reviewed the summary, not the AC, and the gap sailed unanimous
+  approval — while `ms-bead-impl` mandates verbatim quoting for impl
+  prompts and `ms-panel-run` said the opposite for the BRIEF ("Don't paste
+  the plan; summarise it.").
 - **2026-07-08 run**: reviewer relative-path scratch writes plus harness
   cwd-resets corrupted SIBLING worktrees; the gate's dirty-tree Block caught
   the strays only after the mess existed.

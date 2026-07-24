@@ -51,6 +51,10 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-s
    - Test summary (pass/fail/skip)
    - Any flagged deviations — these go into the next BRIEF's deviations section
 
+## Scratch discipline (ADR-0044)
+
+Every scratch file the fix subagent writes — notes, throwaway diffs, temp scripts, reproduction checkouts — lives at an ABSOLUTE path under `/tmp`, never a relative path: harness cwd-resets turn a relative write into sibling-worktree corruption. See ADR-0044 for the full reviewer/fixer-conduct doctrine.
+
 ## Commit-gate coverage (C2-1)
 
 mindspec blocks direct commits to **protected branches** (any mode) and to `spec/<slug>` branches **during implement mode** — `bead/<id>` branches always pass, so the fix subagent's single commit on the bead branch lands without any escape hatch. The CLI's own block message carries the full when-is-it-legitimate context (point-of-use); no skill prose duplicates the workaround. For panel-driven bead fix-ups, the commit lands on the bead branch and merges through `mindspec complete` — the gate is not in your way.
