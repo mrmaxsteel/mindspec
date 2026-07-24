@@ -53,7 +53,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ bead-id + worktree + branch
 /ms-bead-impl          (round 1 implementation — Phase A stages the prompt, Phase B dispatches)
   ↓ commit SHA + flagged deviations
-/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then 6 reviewers fan out)
+/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then the configured reviewers fan out)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
   ↓ decide:
@@ -128,14 +128,14 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
 
 ## Family-asymmetry handling
 
-The headline signal is when all three Claudes APPROVE while one or more Codex REQUEST_CHANGES (or vice versa). Pay particular attention:
+The headline signal is when every Claude-family slot APPROVEs while one or more Codex slots REQUEST_CHANGES (or vice versa). Pay particular attention:
 
 The field evidence runs BOTH directions, stated portably: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed (ADR-0044): reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
 
 | Pattern | Likely meaning | Action |
 |:--------|:---------------|:-------|
-| 3 Claude APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex claims to have run something and found a bug the Claudes missed | Verify, never confirmed: reproduce the claim yourself in an isolated checkout before treating it as a confirmed REQUEST_CHANGES |
-| 3 Codex APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
+| All Claude slots APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex claims to have run something and found a bug the Claudes missed | Verify, never confirmed: reproduce the claim yourself in an isolated checkout before treating it as a confirmed REQUEST_CHANGES |
+| All Codex slots APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
 | Unanimous APPROVE | Genuine consensus | Proceed to merge |
 | Unanimous REQUEST_CHANGES | The implementation is genuinely off; fix or rewrite |
 

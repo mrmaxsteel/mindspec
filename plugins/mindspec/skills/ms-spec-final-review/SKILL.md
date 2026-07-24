@@ -37,11 +37,11 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    ```
    Record the totals — files touched, +X/-Y lines, file count by directory. The bead-level panels saw this incrementally; the final reviewers see it as one thing.
 
-3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<spec-dir>/reviews/<spec-slug>-final/` (where `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/` — reviews are co-located under the spec per the spec 106 flat layout), writes `panel.json` (`bead_id` null, `expected_reviewers` 6, `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
+3. **Create the panel via `/ms-panel-run` step 0** with `target=spec/<spec-slug>`. Step 0 creates `<spec-dir>/reviews/<spec-slug>-final/` (where `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/` — reviews are co-located under the spec per the spec 106 flat layout), writes `panel.json` (`bead_id` null, `expected_reviewers` from the configured mix for this gate — final-review is commonly operator-scaled via `panel.gates`, see `ms-panel-run`'s § Panel-size ladder, family-level only, no model values — `reviewed_head_sha` = the spec-branch tip), and writes `BRIEF.md`. Do NOT hand-roll `mkdir` + BRIEF — routing through step 0 is what makes the final-review panel emit `panel.json` so it appears in `mindspec instruct --panel-state` and the gate plumbing.
 
    The BRIEF (composed by step 0, with the final-review specifics) carries: PR link, spec.md scope summary, cumulative diff stat, list of merged beads (with round-N commit SHAs), known fix-author deviations from each round-2 panel that the final reviewer should re-assess in cumulative context.
 
-4. **Fan out 6 reviewers with the FINAL-REVIEW lenses (different from bead lenses):**
+4. **Fan out one reviewer per configured slot with the FINAL-REVIEW lenses (different from bead lenses):** the table below is the **DEFAULT lens assignment for the shipped mix**; for a scaled mix, assign each configured slot a distinct lens, reusing or splitting this default set.
 
    | Slot | Lens | Focus |
    |:-----|:-----|:------|
