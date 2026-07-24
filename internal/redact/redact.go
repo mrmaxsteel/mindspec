@@ -153,6 +153,7 @@ var SubcommandTokens = map[string]struct{}{
 	"bash":             {}, // completion bash (cobra built-in)
 	"bead":             {}, // context bead
 	"check":            {}, // panel disposition check (spec 117 Bead 2 R1(b) completeness floor)
+	"clarify":          {}, // bead clarify (spec 124 R8 readiness-attempt record verb)
 	"claude":           {},
 	"cleanup":          {},
 	"codex":            {},
