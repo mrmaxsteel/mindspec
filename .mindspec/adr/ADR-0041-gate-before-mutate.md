@@ -362,15 +362,12 @@ what it claims to (asserting "the run stopped" when nothing made it stop).
 The classification in §3 names this distinction explicitly instead of
 letting it stay implicit and get faked under time pressure.
 
-<!-- PRE-DRAFT (spec 125, plan-time): this amendment is FINALIZED by the
-     spec-125 R4 bead (the re-attest surface) — the 122/123 amendment-
-     lifecycle precedent (pre-drafted at plan time, landed by the bead
-     that lands the first citing code, so the ADR-divergence gate sees
-     the declared touchpoint). That bead removes this marker and may
-     adjust wording only where the concrete implementation forces it;
-     spec-125 AC-11 pins that the marker is gone and the anchors remain. -->
-
 ## Amendment (Spec 125): Re-attested landed-bindings under §2(ii)
+
+*(Finalized by the spec-125 R4 bead that lands the first citing code —
+the explicit `mindspec reattest` surface,
+`internal/lifecycle.ReattestLandedMerge` — per the 122/123
+amendment-lifecycle precedent.)*
 
 §2(ii) above admits "the merge-time landed-binding" as a corroborating
 datum. This amendment records that the binding's ADMISSIBILITY derives
