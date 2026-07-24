@@ -182,6 +182,18 @@ func TestCeremonyNonInflation_BeadSubcommands(t *testing.T) {
 	assertSetEqual(t, "mindspec bead ready-check", gotFlags, wantFlags)
 }
 
+// TestCeremonyNonInflation_NextFlags pins spec 124 Bead 2's AC-9(i)
+// baseline addition: the `mindspec next` flag set, recorded from pflag
+// metadata — the pre-spec-124 six (--pick/--spec/--force/--emit-only/
+// --help/--trace) PLUS the new `--allow-not-ready` this bead adds. A
+// future flag added to this surface without updating this baseline trips
+// this guard red, exactly the AC-9(i) mechanism.
+func TestCeremonyNonInflation_NextFlags(t *testing.T) {
+	got := commandFlagSet(resolveCommand(t, "next"))
+	want := setOf("--pick", "--spec", "--force", "--emit-only", "--help", "--trace", "--allow-not-ready")
+	assertSetEqual(t, "mindspec next", got, want)
+}
+
 // TestCeremonyNonInflation_FlagGuardCatchesUnderscore is the guard-of-the-
 // guard for FX-2: it proves the metadata extractor sees an underscore-named
 // flag as its WHOLE name (so assertSetEqual would flag it as inflation),

@@ -114,13 +114,6 @@ preflight refusal would need to have prevented. Treating it as part of
 "phase 1" would be equally correct; it is called out explicitly here so a
 future reviewer does not mistake it for an ordering violation.
 
-<!-- PRE-DRAFT (spec 124 plan time): this fourth-verb clause is pre-drafted
-     per the spec-117/122 amendment lifecycle and is FINALIZED by the spec
-     124 bead that lands the `mindspec next` readiness gate (Bead 2 —
-     marker comment removed there; wording adjusted only where the concrete
-     implementation forces it). Requirement 9 / AC-16 pin its presence and
-     its "preflight-leg-only addition" anchor. -->
-
 **Fourth-verb clause (spec 124):** `mindspec next` is a preflight-leg-only addition.
 `mindspec next` — which claims the selected bead in bd
 (`bd update --claim`), records session/recording state, and creates the
