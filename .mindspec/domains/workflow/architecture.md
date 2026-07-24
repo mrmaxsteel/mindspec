@@ -818,12 +818,19 @@ sufficient:
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
 over an already-subject-owned candidate — never an ownership authority
-of its own. Same-second-parent re-merges (one bead's repeated landings)
+of its own. The binding leg is PAIR-CONSISTENT (final-review FIX-2a,
+mirroring the write-side two-key check): every present binding key must
+agree with the SAME real merge — a present-but-contradictory merge SHA
+or second parent fails closed, never ignored because the other key
+matches. Same-second-parent re-merges (one bead's repeated landings)
 are resolved newest-names-the-merge, but the R5(d) content check is
 anchored on the OLDEST such merge M₁ (AC-2e): a later re-merge's own
 first parent can itself be the post-revert state, so a newest-anchored
 three-way would mis-attest reverted content. The single-merge case
-reduces exactly to R3.
+reduces exactly to R3. Owned candidates with DIFFERENT second parents
+are genuine ambiguity and FAIL CLOSED (final-review FIX-2b) — the same
+refusal the reattest surface applies — never silently resolved to the
+newest.
 
 **Anonymous-subject merges FAIL CLOSED (G-1 — supersedes the spec's R1
 residual wording).** spec.md's R1 residual originally said a merge with
@@ -839,9 +846,15 @@ commit-forge and thus below the documented git-history threat boundary)
 on a never-landed bead pointing at any real anonymous merge would be
 positively identified. mindspec's own merges ALWAYS name the bead (both
 subject forms carry the branch name), so an anonymous subject arises
-only from a hand-crafted operator merge; its recovery is the explicit,
-audited `mindspec reattest` — never automatic identification. The spec's
-forward-only residual text is superseded by this fail-closed shape.
+only from a hand-crafted operator merge — and it is NOT auto-recoverable
+via `mindspec reattest` either: reattest's ownership nominator is the
+same subject parse, so it refuses an anonymous-subject merge too (it
+cannot nominate a merge whose subject names no bead). The honest
+recovery is to re-merge the work under a bead-naming subject, or to
+accept the safe fail-closed (MF-3 refuses that dependency); the audited
+ADR-0035 `mindspec-q9ea` human attested-restore is the last-resort exit.
+The spec's forward-only residual text is superseded by this fail-closed
+shape.
 
 ### Revert-vs-evolved discrimination (R3, the 8nhe.2 fix)
 
@@ -889,9 +902,13 @@ inspectable via `bd show <id> --json`; detectable-by-inspection, not
 cryptographically tamper-proof, exactly as the amendment claims.
 
 `--spec-branch` is SCOPING input only (WHERE to scan), consulted ONLY
-when the bead's epic linkage is underivable (linkage wins whenever
-derivable, and a supplied-but-ignored flag says so loudly); it is never
-a corroboration substitute, and the branch actually scanned is recorded
-in the audit either way. The verb registered its `reattest` token in
+when the bead's epic linkage is cleanly, determinately ABSENT (no epic
+link recorded; linkage wins whenever derivable, and a
+supplied-but-ignored flag says so loudly). A lineage LOOKUP ERROR is
+indeterminate ownership and fails CLOSED even with the flag
+(final-review FIX-1) — the flag never substitutes for a lookup that
+might have derived a different branch. It is never a corroboration
+substitute, and the branch actually scanned is recorded in the audit
+either way. The verb registered its `reattest` token in
 core-owned `internal/redact.CommandTokens` (the standing new-top-level-
 command rule — see the core domain interfaces doc).

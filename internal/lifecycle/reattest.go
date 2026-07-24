@@ -57,9 +57,15 @@
 // mis-scoped --spec-branch invocation is reconstructable). It lives in
 // the same mutable bd metadata map: detectable-by-inspection, NOT
 // cryptographically tamper-proof — exactly the amendment's claim, no
-// more. An already-correct binding is a byte-identical NO-OP: nothing
+// more. An already-correct binding — one already naming the NEWEST
+// same-second-parent merge (the same merge FindLandedMerge's
+// newest-names-SHA rule derives) — is a byte-identical NO-OP: nothing
 // is written at all (no duplicate audit churn, and the time-bearing
-// reattest_at key cannot dirty a converged state). A CONTRADICTORY
+// reattest_at key cannot dirty a converged state). A binding naming an
+// OLDER member of the same-second-parent re-merge group is STALE, not
+// converged (spec 125 final-review FIX-3): it is re-written to the
+// newest, audited, so the binding and FindLandedMerge's derived
+// identity converge on the same merge. A CONTRADICTORY
 // existing binding follows the G3-1 discipline: overwritten ONLY with
 // the git-corroborated exact identity, the prior value recorded in the
 // audit — never silently kept, never replaced uncorroborated.
@@ -73,6 +79,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -269,9 +276,13 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 	// derived second parent.
 	if reviewed, haveReviewed := reviewedHeadSHAForBead(root, specBranch, beadID); haveReviewed && reviewed != "" {
 		if reviewed != secondParent {
+			// FIX-5 (final-review): reviewed_head_sha comes from the
+			// AGENT-WRITABLE panel.json and this Detail reaches terminal
+			// output via the cmd refusal rendering — render it escaped so
+			// it can never carry a raw hostile value.
 			return nil, &ReattestRefusal{
 				BeadID: beadID, SpecBranch: specBranch, State: ReattestStatePanelContradiction,
-				Detail: fmt.Sprintf("registered panel reviewed_head_sha %s contradicts owned merge %s's second parent %s", reviewed, newest.SHA, secondParent),
+				Detail: fmt.Sprintf("registered panel reviewed_head_sha %s contradicts owned merge %s's second parent %s", termsafe.Escape(reviewed), newest.SHA, secondParent),
 			}
 		}
 		corroboration += fmt.Sprintf("; (c) panel reviewed_head_sha %s", reviewed)
@@ -317,25 +328,25 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 	}
 
 	// Datum (d): an existing binding is trusted ONLY when git-corroborated
-	// per R5 — its recorded merge SHA names an owned exact match in this
-	// same-second-parent group AND its recorded second parent equals the
-	// derived one. That is the ALREADY-CORRECT convergent state: a
-	// byte-identical no-op, nothing written, no audit churn (this is also
-	// what keeps the time-bearing reattest_at key from dirtying a
-	// converged state on every re-run).
-	if priorMerge != "" && wellFormedGitObjectID(priorMerge) && priorSecond == secondParent {
-		for _, c := range candidates {
-			if c.SHA == priorMerge {
-				return &ReattestResult{
-					BeadID: beadID, SpecBranch: specBranch,
-					MergeSHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent,
-					Corroboration:     corroboration + fmt.Sprintf("; (d) existing binding %s git-corroborated", priorMerge),
-					Wrote:             false,
-					PriorMergeSHA:     priorMerge,
-					PriorSecondParent: priorSecond,
-				}, nil
-			}
-		}
+	// per R5 — and the ALREADY-CORRECT convergent state (spec 125
+	// final-review FIX-3) requires it to name the NEWEST
+	// same-second-parent merge, i.e. exactly the scan-derived identity
+	// FindLandedMerge's newest-names-SHA rule produces. Only then is the
+	// re-run a byte-identical no-op: nothing written, no audit churn
+	// (this is also what keeps the time-bearing reattest_at key from
+	// dirtying a converged state on every re-run). A binding naming an
+	// OLDER member of the re-merge group is STALE — it falls through to
+	// the write below and is re-written to the newest, audited, with the
+	// prior values recorded.
+	if priorMerge == newest.SHA && priorSecond == secondParent {
+		return &ReattestResult{
+			BeadID: beadID, SpecBranch: specBranch,
+			MergeSHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent,
+			Corroboration:     corroboration + fmt.Sprintf("; (d) existing binding %s git-corroborated", priorMerge),
+			Wrote:             false,
+			PriorMergeSHA:     priorMerge,
+			PriorSecondParent: priorSecond,
+		}, nil
 	}
 
 	// Write ONLY the scan-derived SHAs (never a caller-supplied value —

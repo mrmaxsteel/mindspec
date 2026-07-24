@@ -16,9 +16,13 @@ package main
 //   - never invoked or written-through by `doctor` — writes happen
 //     ONLY under this explicit verb;
 //   - --spec-branch is SCOPING input only (WHERE to scan), consulted
-//     ONLY when the bead's epic linkage is underivable (fallback-only,
-//     plan-gate F2-2); the branch actually scanned is recorded in the
-//     audit (mindspec_landed_reattest_scanned_branch) either way.
+//     ONLY when the bead's epic linkage is cleanly, determinately
+//     ABSENT (no lineage recorded — fallback-only, plan-gate F2-2). A
+//     lineage LOOKUP ERROR is INDETERMINATE ownership and fails CLOSED
+//     (spec 125 final-review FIX-1): the flag must never scope a scan
+//     whose ownership could not be established — fix the lookup and
+//     re-run. The branch actually scanned is recorded in the audit
+//     (mindspec_landed_reattest_scanned_branch) either way.
 
 import (
 	"errors"
@@ -58,10 +62,12 @@ bypass flag, and no way to assert a merge/second-parent pair — an
 operator-asserted pair corroborating itself is circular and
 inadmissible (ADR-0041 §2(ii), spec 125 amendment).
 
---spec-branch names WHERE to scan when the bead's epic linkage cannot
-be derived; the linkage wins whenever derivable. It is scoping input
-only — never a corroboration substitute — and the branch actually
-scanned is recorded in the audit.`,
+--spec-branch names WHERE to scan when the bead has NO epic linkage
+recorded; the linkage wins whenever derivable, and a FAILED linkage
+lookup (indeterminate ownership) refuses even with the flag — fix the
+lookup and re-run. It is scoping input only — never a corroboration
+substitute — and the branch actually scanned is recorded in the
+audit.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		beadID := strings.TrimSpace(args[0])
@@ -106,8 +112,10 @@ scanned is recorded in the audit.`,
 type reattestDeps struct {
 	// deriveSpecBranch resolves the bead's owning spec branch from its
 	// epic linkage (bead → parent epic → spec/<id>). ("", nil) means the
-	// linkage is genuinely underivable (no lineage); an error is a real
-	// lookup failure.
+	// linkage is cleanly, determinately ABSENT (no lineage recorded); an
+	// error is a real lookup failure — INDETERMINATE ownership, on which
+	// runReattest fails closed even when --spec-branch was supplied
+	// (FIX-1).
 	deriveSpecBranch func(beadID string) (string, error)
 	// reattest is the derivation engine (lifecycle.ReattestLandedMerge).
 	reattest func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error)
@@ -120,8 +128,8 @@ type reattestDeps struct {
 // deriveSpecBranchFromLineage is the production linkage resolver: bead →
 // parent epic → spec ID → spec/<id> via the workspace composition waist.
 // A genuinely-lineage-less bead yields ("", nil); real lookup failures
-// propagate (runReattest degrades to --spec-branch only when the caller
-// supplied one, and says so).
+// propagate, and runReattest FAILS CLOSED on them — --spec-branch never
+// substitutes for an indeterminate lookup (FIX-1).
 func deriveSpecBranchFromLineage(beadID string) (string, error) {
 	_, specID, err := phase.FindEpicForBead(beadID)
 	if err != nil {
@@ -169,9 +177,10 @@ func reattestActor() string {
 }
 
 // runReattest resolves the branch to scan (linkage FIRST and WINNING;
-// --spec-branch fallback-only scoping), invokes the derivation engine,
-// and renders every fail-closed refusal as an ADR-0035 guard failure
-// with a named forward exit.
+// --spec-branch consulted ONLY when the lineage is cleanly ABSENT — a
+// lineage LOOKUP ERROR fails closed even with the flag, FIX-1), invokes
+// the derivation engine, and renders every fail-closed refusal as an
+// ADR-0035 guard failure with a named forward exit.
 func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 	beadBranch, err := workspace.BeadBranch(beadID)
 	if err != nil {
@@ -182,9 +191,21 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 	derived, deriveErr := deps.deriveSpecBranch(beadID)
 	var scanned string
 	switch {
-	case deriveErr == nil && derived != "":
+	case deriveErr != nil:
+		// FIX-1 (spec 125 final-review, MAJOR): a lineage LOOKUP ERROR is
+		// INDETERMINATE ownership — not the determinate no-lineage state
+		// the flag fallback exists for. Refuse even when --spec-branch was
+		// supplied: an operator flag must never scope a scan whose
+		// ownership could not be established (the flag would silently
+		// substitute for a lookup that might have derived a DIFFERENT
+		// branch). The forward exit is fixing the lookup, not the flag.
+		return guard.NewFailure(
+			fmt.Sprintf("cannot resolve the spec branch for bead %s: the epic-linkage lookup FAILED (%s). This is an indeterminate-ownership state, so --spec-branch is refused too — the flag scopes only a bead whose lineage is cleanly absent, never one whose lookup errored.", safeBeadID, termsafe.Escape(deriveErr.Error())),
+			fmt.Sprintf("bd show %s --json   (verify the bead and its epic linkage, fix the lookup failure, then re-run mindspec reattest %s)", safeBeadID, safeBeadID),
+		)
+	case derived != "":
 		// Epic linkage derivable — it WINS. --spec-branch is consulted
-		// ONLY when the linkage is underivable (plan-gate F2-2), so a
+		// ONLY when the linkage is cleanly absent (plan-gate F2-2), so a
 		// supplied flag is ignored, loudly.
 		scanned = derived
 		if strings.TrimSpace(specBranchFlag) != "" {
@@ -192,8 +213,9 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 				termsafe.Escape(specBranchFlag), derived)
 		}
 	case strings.TrimSpace(specBranchFlag) != "":
-		// Linkage underivable (or the lookup failed) and the operator
-		// scoped the scan explicitly.
+		// Lineage cleanly, determinately ABSENT (no epic link exists, no
+		// error) and the operator scoped the scan explicitly — the ONLY
+		// state in which the flag is honored.
 		normalized, normErr := normalizeSpecBranchFlag(specBranchFlag)
 		if normErr != nil {
 			return guard.NewFailure(
@@ -202,15 +224,6 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 			)
 		}
 		scanned = normalized
-		if deriveErr != nil {
-			fmt.Fprintf(deps.stderr, "warning: resolving %s's epic linkage failed (%s) — scanning the operator-scoped %s instead; the scanned branch is recorded in the audit\n",
-				safeBeadID, termsafe.Escape(deriveErr.Error()), scanned)
-		}
-	case deriveErr != nil:
-		return guard.NewFailure(
-			fmt.Sprintf("cannot resolve the spec branch for bead %s: the epic-linkage lookup failed: %s", safeBeadID, termsafe.Escape(deriveErr.Error())),
-			fmt.Sprintf("mindspec reattest %s --spec-branch spec/<spec-id>   (name the branch to scan explicitly)", safeBeadID),
-		)
 	default:
 		return guard.NewFailure(
 			fmt.Sprintf("cannot derive the spec branch for bead %s from its epic linkage (no lineage recorded)", safeBeadID),

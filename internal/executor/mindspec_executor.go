@@ -1458,9 +1458,14 @@ var errNoLandedMergeIdentified = errors.New("no landed merge commit identified b
 // transitively pulls internal/phase, an enforcement package this
 // package's own contract (see the doc comment atop executor.go) forbids
 // importing — so this is the executor-local counterpart of
-// internal/lifecycle.FindLandedMerge, sharing gitutil's ONE exact-match
-// primitive (gitutil.ExactSecondParentMerges) but not its ownership
-// nomination: this function KNOWS the bead's identity directly (it is
+// internal/lifecycle.FindLandedMerge. This WRITE side consumes
+// gitutil.ExactSecondParentMerges; the READ side (FindLandedMerge /
+// ReattestLandedMerge) applies the same two-parent + exact-second-parent
+// equality INLINE over the same gitutil.FirstParentMerges scan (it needs
+// every owned merge, not one tip's) — logically equivalent filters, but
+// two code paths, not one shared primitive. Nor does this side share the
+// read side's ownership nomination: this function KNOWS the bead's
+// identity directly (it is
 // completing/finalizing bead beadBranch) and so it never parses a merge
 // subject to establish ownership — this is precisely why R1 persists the
 // binding REGARDLESS OF THE MERGE'S SUBJECT FORMAT (the default

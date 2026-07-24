@@ -117,9 +117,11 @@ diff, then `git branch bead/<id> <verified-second-parent-sha>` — never
 blind); on ambiguity, a contradicting datum, or reverted content it
 refuses and writes nothing. A merge whose subject names NO bead is not
 auto-identifiable anywhere (fail-closed by design — the binding alone is
-never an ownership authority); `reattest` is likewise the recovery
-path there only after the merge subject situation is understood — it
-too requires a subject-nominated merge.
+never an ownership authority), and `reattest` CANNOT recover it either:
+it too requires a subject-nominated merge. The honest recovery there is
+to re-merge the work under a bead-naming subject (mindspec's own merges
+always name the bead), or accept the safe fail-closed; the audited
+q9ea attested-restore above is the last-resort exit.
 
 Also: if `mindspec complete` refuses with "has landed … but the
 landed-merge commit could not be located by identity", that is the spec

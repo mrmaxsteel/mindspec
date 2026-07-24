@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,6 +131,41 @@ func TestReattestPrecedence_FlagFallbackOnly(t *testing.T) {
 	err := runReattest(deps, t.TempDir(), "mindspec-x1", "spec/../evil")
 	if err == nil || !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Fatalf("malformed --spec-branch must refuse with a recovery line, got %v", err)
+	}
+}
+
+// TestReattestLineageLookupErrorRefusesEvenWithFlag is the spec 125
+// final-review FIX-1 pin (RED against the pre-fix fallback): a lineage
+// LOOKUP ERROR is INDETERMINATE ownership — not the determinate
+// no-lineage state the --spec-branch fallback exists for — and must
+// fail CLOSED even when the operator supplied the flag. The pre-fix
+// switch degraded a failed lookup to operator scoping with only a
+// stderr warning, letting --spec-branch scope a scan whose ownership
+// the lookup might have derived differently.
+func TestReattestLineageLookupErrorRefusesEvenWithFlag(t *testing.T) {
+	for _, flagVal := range []string{"spec/125-fallback", ""} {
+		t.Run("flag="+flagVal, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			deps := reattestDeps{
+				deriveSpecBranch: func(string) (string, error) {
+					return "", errors.New("bd lookup exploded")
+				},
+				reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+					t.Fatalf("engine must not run on an INDETERMINATE lineage lookup (flag=%q scoped the scan)", flagVal)
+					return nil, nil
+				},
+				actor:  "tester",
+				stdout: &stdout,
+				stderr: &stderr,
+			}
+			err := runReattest(deps, t.TempDir(), "mindspec-x1", flagVal)
+			if err == nil || !guard.HasFinalRecoveryLine(err.Error()) {
+				t.Fatalf("a lineage lookup error must refuse with a recovery line, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "lookup FAILED") {
+				t.Errorf("refusal must name the failed lookup (indeterminate ownership), got %v", err)
+			}
+		})
 	}
 }
 

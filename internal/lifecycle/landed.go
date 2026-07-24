@@ -45,14 +45,29 @@ var ErrLandedMergeNotFound = errors.New("no landed merge commit positively ident
 // attested-restore forward exit — the one deliberately non-mechanical
 // recovery line in the tree: the operator must VERIFY the named merge
 // before recreating the branch against it.
+//
+// It is ALSO returned (spec 125 final-review FIX-2b, R5 fail-closed) when
+// multiple owned candidates carry DIFFERENT second parents — genuine
+// ambiguity about which landing is this bead's tip (as opposed to
+// same-second-parent re-merges, which are one bead's repeated landings).
+// ConflictingSecondParent is non-empty in that case, and identification
+// refuses rather than silently picking one.
 type LandedMergeNoEvidence struct {
 	BeadID       string
 	SpecBranch   string
 	MergeSHA     string
 	SecondParent string
+	// ConflictingSecondParent, when non-empty, marks the ambiguity
+	// refusal: a second owned candidate merge carries THIS different
+	// second parent, so no single landing can be attested.
+	ConflictingSecondParent string
 }
 
 func (e *LandedMergeNoEvidence) Error() string {
+	if e.ConflictingSecondParent != "" {
+		return fmt.Sprintf("%s: %s on %s (owned merges disagree on the landed tip — candidate merge %s's second parent %s vs another owned merge's second parent %s — refusing to pick one)",
+			ErrLandedMergeNotFound, e.BeadID, e.SpecBranch, e.MergeSHA, e.SecondParent, e.ConflictingSecondParent)
+	}
 	return fmt.Sprintf("%s: %s on %s (candidate merge %s, second parent %s — no admissible datum confirms it)",
 		ErrLandedMergeNotFound, e.BeadID, e.SpecBranch, e.MergeSHA, e.SecondParent)
 }
@@ -224,9 +239,14 @@ func resolveBranchTip(root, branch string) (tip string, survives bool, err error
 //     rather than slipping through the names-no-bead binding exception.
 //   - ("", false) ONLY when genuinely NO `bead/…` token appears anywhere
 //     in the subject — the true anonymous-subject case. Such a merge is
-//     NOT automatically identifiable (G-1): the automatic path has no
-//     binding-alone entry point, so an anonymous subject FAILS CLOSED and
-//     is recovered only via the explicit audited `mindspec reattest`.
+//     NOT identifiable on ANY path (G-1): the automatic path has no
+//     binding-alone entry point, and `mindspec reattest` ALSO refuses it
+//     (its ownership nominator is the same subject parse — it cannot
+//     nominate a merge whose subject names no bead). The honest recovery
+//     is to re-merge the work under a bead-naming subject (mindspec's own
+//     merges always name the bead) or accept the safe fail-closed (MF-3
+//     refuses that dependency); the audited ADR-0035 mindspec-q9ea human
+//     attested-restore is the last-resort exit.
 //
 // The returned token is COMPARED DATA only — callers match it by FULL
 // branch-name EQUALITY against workspace.BeadBranch(beadID) (never
@@ -315,10 +335,14 @@ func cutBranchToken(s string) string {
 // (below the git-history threat boundary) on a never-landed bead point at
 // any real anonymous merge and be identified. Because mindspec's OWN
 // merges ALWAYS name the bead, an anonymous subject is a hand-crafted
-// operator merge; its recovery is the EXPLICIT, audited `mindspec
-// reattest` (Bead 4), never a binding-alone automatic identification. R1's
-// residual is therefore reconciled as FAIL-CLOSED here (safe refusal),
-// with the audited explicit surface as the forward exit.
+// operator merge — and it is NOT recoverable via `mindspec reattest`
+// either (spec 125 final-review FIX-4): reattest's ownership nominator is
+// the SAME subject parse, so it refuses an anonymous merge too. The
+// honest recovery is to re-merge the work under a bead-naming subject, or
+// accept the safe fail-closed (MF-3 refuses that dependency); the audited
+// ADR-0035 mindspec-q9ea human attested-restore is the last-resort exit.
+// R1's residual is therefore reconciled as FAIL-CLOSED here (safe
+// refusal).
 //
 // A subject-named candidate is positively identified ONLY when at least
 // one admissible datum EXACT-matches it AND no available datum
@@ -329,10 +353,16 @@ func cutBranchToken(s string) string {
 //     specID is derivable from specBranch, the spec's own co-located
 //     reviews/ directory);
 //   - a surviving bead/<id> branch's tip EQUAL to the second parent;
-//   - the merge-time landed-binding resolving to this candidate (recorded
-//     merge SHA naming it, or recorded second parent equal to its second
-//     parent) — a git-corroborated CACHE over an already-subject-OWNED
-//     candidate, never an ownership authority of its own.
+//   - the merge-time landed-binding, PAIR-CONSISTENTLY resolving to this
+//     candidate (spec 125 final-review FIX-2a, mirroring B1's write-side
+//     two-key check): every PRESENT binding key must agree with the SAME
+//     real merge — a recorded merge SHA must name an owned exact match in
+//     the same-second-parent group, AND a recorded second parent must
+//     equal that group's second parent. A present-but-contradictory value
+//     in EITHER key fails closed (contradiction) — it is never ignored
+//     because the other key happens to match. The binding is a
+//     git-corroborated CACHE over an already-subject-OWNED candidate,
+//     never an ownership authority of its own.
 //
 // The binding and the panel SHA are a git-corroborated CACHE, never an
 // authority (§2(ii) "never subject text alone" is preserved: the subject
@@ -353,6 +383,13 @@ func cutBranchToken(s string) string {
 // newest-anchored three-way reads "no change" and would MIS-attest a bead
 // whose content is actually reverted at the tip. The single-merge case
 // reduces exactly to R3 (M₁ == the one merge).
+//
+// Owned candidates with DIFFERENT second parents (spec 125 final-review
+// FIX-2b, R5 fail-closed) are GENUINE ambiguity about which landing is
+// this bead's tip — the same shape the explicit reattest surface refuses
+// as ReattestStateAmbiguous. Identification FAILS CLOSED with a
+// *LandedMergeNoEvidence (ConflictingSecondParent set) rather than
+// silently evaluating the newest candidate.
 //
 // R5(d) revert/reapply-awareness: once a candidate is positively
 // corroborated, the three-way outcome of its OWN content-introducing
@@ -407,9 +444,10 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 
 	binding, haveBinding := landedBindingForBead(beadID)
 
-	// Candidate generation — the two admissible entry points (doc comment
-	// above). merges is newest-first (gitutil.FirstParentMerges), so
-	// candidates is too.
+	// Candidate generation — exactly ONE admissible entry point, the
+	// subject scan (doc comment above; the anonymous-subject binding-SHA
+	// entry point was removed by the G-1 fix). merges is newest-first
+	// (gitutil.FirstParentMerges), so candidates is too.
 	var candidates []gitutil.MergeCommit
 	for _, m := range merges {
 		// Spec 125 R3's octopus/parent guard (AC-6): bead->spec merges are
@@ -456,20 +494,25 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 		return nil, fmt.Errorf("%w: %s on %s", ErrLandedMergeNotFound, beadID, specBranch)
 	}
 
-	// The NEWEST admitted candidate is evaluated (and, on identification,
-	// names the returned *LandedMerge.SHA); its same-second-parent
-	// siblings form the re-merge group whose OLDEST member anchors the
-	// content-check (AC-2e). A contradicted newest candidate REFUSES —
-	// identification never keeps scanning past a contradiction to an
-	// older, differently-parented match.
+	// All owned candidates must agree on ONE second parent (FIX-2b, the
+	// same R5 fail-closed rule ReattestLandedMerge applies): candidates
+	// with DIFFERENT second parents are genuine ambiguity about which
+	// landing is this bead's tip, and identification refuses rather than
+	// silently evaluating the newest. Same-second-parent duplicates are
+	// one bead's re-merges: the NEWEST names the returned *LandedMerge.SHA
+	// and the OLDEST anchors the content-check (AC-2e).
 	newest := candidates[0]
 	secondParent := newest.Parents[1]
-	var group []gitutil.MergeCommit
-	for _, c := range candidates {
-		if c.Parents[1] == secondParent {
-			group = append(group, c)
+	for _, c := range candidates[1:] {
+		if c.Parents[1] != secondParent {
+			return nil, &LandedMergeNoEvidence{
+				BeadID: beadID, SpecBranch: specBranch,
+				MergeSHA: newest.SHA, SecondParent: secondParent,
+				ConflictingSecondParent: c.Parents[1],
+			}
 		}
 	}
+	group := candidates
 	oldest := group[len(group)-1]
 
 	confirmed := false
@@ -483,8 +526,14 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			// the pre-125 ancestor-tolerant confirmation (a panel that
 			// reviewed an EARLIER head "confirming" a later merge) is the
 			// misattribution vector this spec removes.
+			//
+			// FIX-5 (final-review): reviewed_head_sha comes from the
+			// AGENT-WRITABLE panel.json and this message reaches terminal
+			// output (complete/reattest stderr) — render it escaped, like
+			// the sibling binding-contradiction branch, so it can never
+			// carry a raw hostile value.
 			return nil, fmt.Errorf("%w: %s on %s (reviewed_head_sha %s contradicts merge %s's second parent %s)",
-				ErrLandedMergeNotFound, beadID, specBranch, reviewedHeadSHA, newest.SHA, secondParent)
+				ErrLandedMergeNotFound, beadID, specBranch, termsafe.Escape(reviewedHeadSHA), newest.SHA, secondParent)
 		}
 	}
 	if branchSurvives {
@@ -499,29 +548,35 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 		}
 	}
 	if haveBinding {
+		// PAIR-CONSISTENCY (spec 125 final-review FIX-2a — mirrors B1's
+		// write-side two-key check on the read side): the executor writes
+		// both binding keys together from ONE real merge, so every key
+		// that is PRESENT here must agree with the SAME real merge in this
+		// same-second-parent group. A present-but-contradictory value in
+		// EITHER key fails closed — it is never ignored because the other
+		// key happens to match (the pre-fix OR let a binding whose
+		// recorded merge SHA named a group member confirm even with a
+		// CONTRADICTORY recorded second parent).
 		bindingNamesGroupMember := false
 		if binding.mergeSHA != "" {
 			for _, c := range group {
 				if c.SHA == binding.mergeSHA {
+					// Possibly the OLDEST of a re-merge chain — the
+					// complete-time write of the first landing.
 					bindingNamesGroupMember = true
 					break
 				}
 			}
 		}
+		secondParentContradicts := binding.secondParent != "" && binding.secondParent != secondParent
+		mergeSHAContradicts := binding.mergeSHA != "" && !bindingNamesGroupMember
 		switch {
-		case bindingNamesGroupMember:
-			// The recorded merge SHA names an owned exact match in this
-			// group (possibly the OLDEST of a re-merge chain — the
-			// complete-time write of the first landing).
-			confirmed = true
-		case binding.secondParent != "" && binding.secondParent == secondParent:
-			confirmed = true
-		case binding.secondParent != "":
+		case secondParentContradicts || mergeSHAContradicts:
 			// Exact-equality only (spec 125 R5, AC-2c/AC-2d): a recorded
-			// second parent that matches no real exact merge here is a
-			// forged/stale cache — DISCARDED as confirmation and treated
-			// as a contradiction, never followed and never softened by
-			// the pre-125 ancestor tolerance.
+			// key that matches no real exact merge here is a forged/stale
+			// cache — DISCARDED as confirmation and treated as a
+			// contradiction, never followed and never softened by the
+			// pre-125 ancestor tolerance.
 			//
 			// G2-1: binding.mergeSHA/binding.secondParent come from
 			// agent-writable bd metadata — the provenance gate
@@ -530,6 +585,11 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			// this message can never carry a raw hostile value.
 			return nil, fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)",
 				ErrLandedMergeNotFound, beadID, specBranch, termsafe.Escape(binding.mergeSHA), termsafe.Escape(binding.secondParent), newest.SHA, secondParent)
+		case bindingNamesGroupMember, binding.secondParent == secondParent:
+			// Every present key agrees with the same real merge (a
+			// single-key binding confirms on its one present key — the
+			// pre-121 partial-binding shape).
+			confirmed = true
 		}
 	}
 

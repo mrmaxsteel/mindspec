@@ -228,7 +228,17 @@ choices" paragraph), resolved:**
   `mindspec reattest` (Bead 4), never a binding-alone automatic
   identification. So R1's residual reconciles as FAIL-CLOSED on the
   automatic path (safe refusal → the audited explicit surface), not a
-  binding-alone read. Bead 3 pins the anonymous-subject-REFUSES
+  binding-alone read.
+  *(**Superseded — final-review G1-F3/FIX-4:** `mindspec reattest` does
+  NOT recover an anonymous-subject merge either — its ownership nominator
+  is the SAME subject parse, so it refuses a merge whose subject names no
+  bead. The shipped behavior fail-closes an anonymous-subject merge on
+  EVERY path. The honest recovery is to re-merge the work under a
+  bead-naming subject (mindspec's own merges always name the bead), or
+  accept the safe MF-3 fail-closed dependency; the ADR-0035
+  `mindspec-q9ea` human attested-restore is the last-resort exit.
+  reattest is the recovery only for a SUBJECT-NOMINATED historical merge
+  with a missing/stale binding, not for an anonymous one.)* Bead 3 pins the anonymous-subject-REFUSES
   direction AND the forged-binding-at-a-real-anonymous-merge exploit
   (RED against the removed impl), and keeps the different-bead-format
   reject green.
@@ -654,6 +664,14 @@ ambiguity, oldest-anchored on same-second-parent re-merges.
      identifiable and FAILS CLOSED; its recovery is the EXPLICIT audited
      `mindspec reattest` (Bead 4). Bead 1's `ExactSecondParentMerges` is
      reused for topology corroboration.
+     *(**Superseded — final-review G1-F3/FIX-4:** `mindspec reattest`
+     does NOT recover an anonymous-subject merge — reattest's ownership
+     nominator is the same subject parse and refuses a no-bead subject
+     too. An anonymous-subject merge fail-closes on EVERY path; the
+     honest recovery is to re-merge under a bead-naming subject, or
+     accept the safe MF-3 fail-closed, with the q9ea attested-restore as
+     last resort. reattest recovers only a SUBJECT-NOMINATED merge whose
+     binding is missing/stale.)*
    - Corroborating data are EXACT-EQUALITY only: surviving branch tip
      == second parent; `reviewed_head_sha` == second parent; binding
      resolving to a REAL exact merge. The current ancestor-TOLERANT

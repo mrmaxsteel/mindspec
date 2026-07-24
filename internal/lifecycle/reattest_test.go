@@ -514,6 +514,120 @@ func TestReattest_MaskedRevertOldestAnchored(t *testing.T) {
 	}
 }
 
+// TestReattest_StaleOlderRemergeBindingRewrittenToNewest is the spec 125
+// final-review FIX-3 pin (RED against the pre-fix any-group-member
+// no-op): the bead's SAME second parent was re-merged (revert then
+// reintroducing re-merge M₂), and the existing binding still points at
+// the OLDER merge M₁. The scan-derived identity is the NEWEST merge
+// (FindLandedMerge's newest-names-SHA rule), so the binding is STALE —
+// the engine must RE-WRITE it to M₂ (audited, prior values recorded),
+// never treat "points at any group member" as already-correct. Once
+// converged on M₂ the re-run IS the byte-identical no-op.
+func TestReattest_StaleOlderRemergeBindingRewrittenToNewest(t *testing.T) {
+	dir, run := initLandedRepo(t, "125-test")
+	run("checkout", "-b", "bead/bead-x")
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-x")
+	xTip := revParseIn(t, dir, "bead/bead-x")
+	run("checkout", "spec/125-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-x", "bead/bead-x")
+	m1 := revParseIn(t, dir, "spec/125-test")
+	run("revert", "--no-edit", "-m", "1", m1)
+	postRevertTip := revParseIn(t, dir, "spec/125-test")
+	// The re-merge REINTRODUCES the content (same second parent xTip).
+	os.WriteFile(filepath.Join(dir, "payload.txt"), []byte("the payload\n"), 0644)
+	run("add", ".")
+	m2 := commitResolvedMerge(t, dir, postRevertTip, xTip, "Merge bead/bead-x")
+	run("branch", "-D", "bead/bead-x")
+
+	// The stale binding: the OLDER merge M₁ of the re-merge group.
+	stubBindingRead(t, map[string]interface{}{
+		"mindspec_landed_merge_sha":     m1,
+		"mindspec_landed_second_parent": xTip,
+	})
+
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-x", "test-actor")
+	if err != nil {
+		t.Fatalf("ReattestLandedMerge: %v", err)
+	}
+	if !res.Wrote {
+		t.Fatal("a binding at an OLDER same-second-parent re-merge is STALE and must be re-written to the newest — the pre-fix impl no-opped on any group member")
+	}
+	if res.MergeSHA != m2 {
+		t.Errorf("derived merge = %q, want the NEWEST same-second-parent merge M₂ %q (M₁ is %q)", res.MergeSHA, m2, m1)
+	}
+	if len(*writes) != 1 {
+		t.Fatalf("writes = %d, want 1", len(*writes))
+	}
+	w := (*writes)[0]
+	if got := str(t, w.updates, "mindspec_landed_merge_sha"); got != m2 {
+		t.Errorf("re-written merge sha = %q, want the newest %q", got, m2)
+	}
+	if got := str(t, w.updates, "mindspec_landed_second_parent"); got != xTip {
+		t.Errorf("re-written second parent = %q, want %q", got, xTip)
+	}
+	// The audit records the STALE prior values (G3-1 reconstructability).
+	if got := str(t, w.updates, "mindspec_landed_reattest_prior_merge_sha"); got != m1 {
+		t.Errorf("audit prior merge sha = %q, want the stale M₁ %q", got, m1)
+	}
+	if got := str(t, w.updates, "mindspec_landed_reattest_prior_second_parent"); got != xTip {
+		t.Errorf("audit prior second parent = %q, want %q", got, xTip)
+	}
+
+	// Converged on the NEWEST: the re-run is the byte-identical no-op.
+	stubBindingRead(t, w.updates)
+	res2, err := ReattestLandedMerge(dir, "spec/125-test", "bead-x", "test-actor")
+	if err != nil {
+		t.Fatalf("re-run after convergence: %v", err)
+	}
+	if res2.Wrote {
+		t.Error("a binding already at the NEWEST merge must be the convergent no-op")
+	}
+	if len(*writes) != 1 {
+		t.Errorf("converged re-run wrote again (writes=%d)", len(*writes))
+	}
+}
+
+// TestReattest_HostilePanelSHAEscapedInRefusal is the spec 125
+// final-review FIX-5 pin for the reattest.go site: a registered panel's
+// reviewed_head_sha is AGENT-WRITABLE and the panel-contradiction
+// refusal Detail reaches terminal output via the cmd rendering — a
+// control-byte/ANSI value must be escaped, never raw.
+func TestReattest_HostilePanelSHAEscapedInRefusal(t *testing.T) {
+	dir, run := initLandedRepo(t, "125-test")
+	mergeBeadDefaultSubject(t, run, dir, "bead-one", "spec/125-test")
+	run("branch", "-D", "bead/bead-one")
+
+	hostile := "abc\x1b[2Jdef\x07ghi"
+	beadID := "bead-one"
+	origScan := landedPanelScanFn
+	t.Cleanup(func() { landedPanelScanFn = origScan })
+	landedPanelScanFn = func(roots ...string) []panel.Registration {
+		return []panel.Registration{{
+			Dir:   "/fake/review/one",
+			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: hostile},
+		}}
+	}
+
+	writes := installReattestRecorder(t)
+	_, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	var refusal *ReattestRefusal
+	if !errors.As(err, &refusal) || refusal.State != ReattestStatePanelContradiction {
+		t.Fatalf("expected %s refusal, got %v", ReattestStatePanelContradiction, err)
+	}
+	if strings.ContainsAny(refusal.Detail, "\x1b\x07") {
+		t.Errorf("the refusal Detail renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", refusal.Detail)
+	}
+	if strings.ContainsAny(err.Error(), "\x1b\x07") {
+		t.Errorf("the refusal error renders raw control bytes: %q", err.Error())
+	}
+	if len(*writes) != 0 {
+		t.Errorf("panel-contradicted candidate attested (%d writes)", len(*writes))
+	}
+}
+
 // TestReattest_WriteFailurePropagates: a failed binding write is an
 // ERROR (never a silent success and never a refusal-shaped state).
 func TestReattest_WriteFailurePropagates(t *testing.T) {

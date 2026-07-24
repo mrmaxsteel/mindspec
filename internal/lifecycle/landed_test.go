@@ -1773,6 +1773,139 @@ func TestFindLandedMerge_BindingUnrecognizedOtherBeadTokenRefuses(t *testing.T) 
 	}
 }
 
+// TestFindLandedMerge_BindingPairInconsistentRefuses is the spec 125
+// final-review FIX-2a pin (RED against the pre-fix OR corroboration):
+// the binding's two keys are written together from ONE real merge, so
+// every PRESENT key must agree with the SAME real merge — a
+// present-but-contradictory value in EITHER key is a fail-closed
+// contradiction, never ignored because the other key happens to match.
+func TestFindLandedMerge_BindingPairInconsistentRefuses(t *testing.T) {
+	t.Run("mergeSHA-matches-but-secondParent-contradicts", func(t *testing.T) {
+		// The pre-fix hole: binding.mergeSHA names the real merge, so the
+		// OR confirmed — even though the recorded second parent
+		// CONTRADICTS that same merge's real second parent.
+		dir, run := initLandedRepo(t, "119-test")
+		mergeBead(t, run, dir, "bead-one", "spec/119-test")
+		mergeSHA := revParseIn(t, dir, "spec/119-test")
+		run("branch", "-D", "bead/bead-one")
+
+		origBinding := landedBindingMetadataFn
+		t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+		landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"mindspec_landed_merge_sha":     mergeSHA,
+				"mindspec_landed_second_parent": "cccccccccccccccccccccccccccccccccccccccc",
+			}, nil
+		}
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err == nil {
+			t.Fatalf("a matching merge SHA must not outvote a CONTRADICTORY recorded second parent (the OR hole), got %+v", landed)
+		}
+		if !errors.Is(err, ErrLandedMergeNotFound) {
+			t.Fatalf("expected a fail-closed refusal, got: %v", err)
+		}
+		var noEvidence *LandedMergeNoEvidence
+		if errors.As(err, &noEvidence) {
+			t.Error("a CONTRADICTED binding must not surface as LandedMergeNoEvidence (a datum WAS available — it contradicted)")
+		}
+	})
+
+	t.Run("secondParent-matches-but-mergeSHA-names-no-merge", func(t *testing.T) {
+		// The symmetric hole: binding.secondParent equals the real second
+		// parent, but the recorded merge SHA names NO real owned merge —
+		// pair-inconsistent, refused (the pre-fix OR confirmed on the
+		// second-parent leg alone).
+		dir, run := initLandedRepo(t, "119-test")
+		mergeBead(t, run, dir, "bead-one", "spec/119-test")
+		secondParent := revParseIn(t, dir, "bead/bead-one")
+		run("branch", "-D", "bead/bead-one")
+
+		origBinding := landedBindingMetadataFn
+		t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+		landedBindingMetadataFn = func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"mindspec_landed_merge_sha":     "1111111111111111111111111111111111111111",
+				"mindspec_landed_second_parent": secondParent,
+			}, nil
+		}
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err == nil {
+			t.Fatalf("a matching second parent must not outvote a merge SHA naming NO real merge, got %+v", landed)
+		}
+		if !errors.Is(err, ErrLandedMergeNotFound) {
+			t.Fatalf("expected a fail-closed refusal, got: %v", err)
+		}
+	})
+}
+
+// TestFindLandedMerge_AmbiguousOwnedSecondParentsRefuses is the spec 125
+// final-review FIX-2b pin (RED against the pre-fix newest-first pick):
+// two owned merges name the SAME bead but carry DIFFERENT second parents
+// — genuine ambiguity about which landing is the bead's tip, the same
+// shape ReattestLandedMerge refuses as ReattestStateAmbiguous. The
+// surviving branch tip EQUALS the newest merge's second parent, so the
+// pre-fix impl positively identified the newest candidate; the fix
+// FAILS CLOSED with a *LandedMergeNoEvidence naming the conflict.
+func TestFindLandedMerge_AmbiguousOwnedSecondParentsRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	// The branch advances and is merged AGAIN — a second landing with a
+	// DIFFERENT second parent.
+	run("checkout", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "more.txt"), []byte("more\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "more work")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err == nil {
+		t.Fatalf("owned merges with DIFFERENT second parents must fail closed, got %+v (the pre-fix impl silently evaluated the newest)", landed)
+	}
+	var noEvidence *LandedMergeNoEvidence
+	if !errors.As(err, &noEvidence) {
+		t.Fatalf("expected *LandedMergeNoEvidence on genuine ownership ambiguity, got %v", err)
+	}
+	if noEvidence.ConflictingSecondParent == "" {
+		t.Error("the ambiguity refusal must name the conflicting second parent")
+	}
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Error("the ambiguity refusal must still satisfy errors.Is(err, ErrLandedMergeNotFound)")
+	}
+}
+
+// TestFindLandedMerge_HostilePanelSHAEscapedInRefusal is the spec 125
+// final-review FIX-5 pin for the landed.go site: reviewed_head_sha comes
+// from the AGENT-WRITABLE panel.json, and the panel-contradiction refusal
+// interpolates it into an error that reaches terminal output — a
+// control-byte/ANSI value must be rendered escaped (like the sibling
+// binding-contradiction branch), never raw.
+func TestFindLandedMerge_HostilePanelSHAEscapedInRefusal(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+
+	hostile := "deadbee\x1b[2J\x07f0rged"
+	beadID := "bead-one"
+	origScan := landedPanelScanFn
+	t.Cleanup(func() { landedPanelScanFn = origScan })
+	landedPanelScanFn = func(roots ...string) []panel.Registration {
+		return []panel.Registration{{
+			Dir:   "/fake/review/one",
+			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: hostile},
+		}}
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("a contradicting panel SHA must refuse, got %v", err)
+	}
+	if strings.ContainsAny(err.Error(), "\x1b\x07") {
+		t.Errorf("the refusal renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", err.Error())
+	}
+}
+
 // TestLandedBindingMetadataFnDefaultPinned is the spec 125 F3-2 pointer
 // pin: the PRE-EXISTING lifecycle read seam landedBindingMetadataFn
 // defaults to the real bead.GetMetadata (captured by TestMain before the

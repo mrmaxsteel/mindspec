@@ -138,8 +138,17 @@ EQUALS `tip` exactly (newest-first). Landed-ness is git TOPOLOGY, never
 subject text; octopus (>2-parent) candidates are excluded, and an
 ancestor-consistent-but-not-equal second parent is excluded too —
 ancestor tolerance is exactly the misattribution vector spec 125
-removes. Both the executor write path and the lifecycle read path
-consume THIS primitive, so the two sides cannot drift.
+removes. The executor WRITE path (`locateLandedMergeByIdentity`,
+`beadTipLandedOnSpec`) consumes this primitive directly; the
+workflow-domain READ path (`FindLandedMerge`/`ReattestLandedMerge` in
+`internal/lifecycle`) instead scans the same `FirstParentMerges` stream
+and applies the same two-parent + exact-second-parent equality filter
+INLINE (it must evaluate every owned merge for subject-nominated
+ownership, not just one tip's matches). The two sides are logically
+equivalent — same scan, same exact-match semantics — but they are two
+code paths, not one shared call site, and no cross-side anti-drift test
+pins their equivalence; a change to either filter must be mirrored by
+hand.
 
 ### Ground-truth binding persistence + loud fail-closed miss
 
