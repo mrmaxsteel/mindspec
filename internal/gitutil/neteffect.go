@@ -107,7 +107,41 @@ type mergeTreeResult struct {
 var mergeTreeWriteTreeFn = execMergeTreeWriteTree
 
 func execMergeTreeWriteTree(workdir, base, ours, theirs string) (mergeTreeResult, error) {
-	cmd := execCommand("git", gitArgs(workdir, "merge-tree", "--write-tree", "--merge-base="+base, ours, theirs)...)
+	return runMergeTreeWriteTree(workdir, base, ours, theirs, false)
+}
+
+// mergeTreeWriteTreeNoRenamesFn is the injectable seam over `git merge-tree
+// --write-tree` with rename/copy detection DISABLED (spec 125 G-BLOCK-1) —
+// used ONLY by RevertShape's reverse un-apply. merge-ort does rename
+// detection by default, which lets a coincidentally-identical blob at an
+// UNRELATED path count as M's "moved" content: a true revert of M (its
+// content removed at its original path) plus unrelated later work that
+// happens to recreate the same blob elsewhere merges as a rename/delete
+// CONFLICT instead of a clean no-op, so a rename-detecting RevertShape
+// would misread the revert as evolved and IDENTIFY it — an unsafe
+// false-positive landed attestation. With `-c merge.renames=false` the
+// un-apply is PATH-based: M's content counts only at its original paths.
+// (Verified effective on the repo's git 2.51: the rename/delete conflict
+// collapses to a clean tree-equal no-op.)
+var mergeTreeWriteTreeNoRenamesFn = execMergeTreeWriteTreeNoRenames
+
+func execMergeTreeWriteTreeNoRenames(workdir, base, ours, theirs string) (mergeTreeResult, error) {
+	return runMergeTreeWriteTree(workdir, base, ours, theirs, true)
+}
+
+// runMergeTreeWriteTree is the shared exec + exit-code classification for
+// both the rename-detecting (leg-(a) / ContentSubsumedOutcome) and the
+// rename-disabled (RevertShape) merge-tree calls. When noRenames is set a
+// top-level `-c merge.renames=false` config override precedes the
+// subcommand, suppressing ort's rename/copy detection.
+func runMergeTreeWriteTree(workdir, base, ours, theirs string, noRenames bool) (mergeTreeResult, error) {
+	var argv []string
+	if noRenames {
+		argv = gitArgs(workdir, "-c", "merge.renames=false", "merge-tree", "--write-tree", "--merge-base="+base, ours, theirs)
+	} else {
+		argv = gitArgs(workdir, "merge-tree", "--write-tree", "--merge-base="+base, ours, theirs)
+	}
+	cmd := execCommand("git", argv...)
 	out, err := cmd.Output()
 	if err == nil {
 		return mergeTreeResult{treeOID: strings.TrimSpace(firstLine(string(out)))}, nil
@@ -256,6 +290,90 @@ func ContentSubsumed(workdir, base, ref, target string) (bool, error) {
 		return false, err
 	}
 	return outcome == SubsumptionLanded, nil
+}
+
+// RevertShape is spec 125 R3's sub-classification of a
+// SubsumptionCleanDivergence outcome: the REVERSE "un-apply" no-op test.
+// Where ContentSubsumedOutcome(base=M^1, ref=M, target=tip) asks "what
+// happens if M's change is RE-APPLIED to the tip?", RevertShape asks the
+// reverse — "does UN-applying M's change from the tip do anything?" — as
+// the three-way merge-tree(base = M, ours = target's tip, theirs = M^1)
+// with rename/copy detection DISABLED.
+//
+// It reports revert-shape (true) iff the un-apply is CLEAN and its result
+// tree EQUALS target's current tree: the tip already carries NONE of M's
+// introduced content AT ITS ORIGINAL PATHS, so backing M out changes
+// nothing — exactly what `git revert M` leaves behind, and ALSO the
+// clean-full-removal residual (M's content later removed cleanly and fully
+// by honest work), which is content-INDISTINGUISHABLE from a revert. That
+// residual refusing is a DELIBERATE false-negative floor: any datum that
+// accepted clean full removal would accept every real revert too. Any
+// other outcome is NOT revert-shape (false): the un-apply CHANGES the tip
+// (M's content is present at the tip, wholly or PARTIALLY — the
+// partial-supersession evolved shape) or CONFLICTS (the tip built on M's
+// region — evolved).
+//
+// G-BLOCK-1 (rename-safety, load-bearing): the un-apply MUST be
+// PATH-based, so rename/copy detection is disabled
+// (mergeTreeWriteTreeNoRenamesFn). merge-ort's default rename detection
+// would let a coincidentally-identical blob at an UNRELATED later path
+// count as M's "moved" content — a true revert of M plus unrelated work
+// that recreates the same blob elsewhere merges as a rename/delete
+// CONFLICT instead of a clean no-op, so a rename-detecting RevertShape
+// would misread the revert as evolved and IDENTIFY it (an UNSAFE
+// false-positive landed attestation). This is why RevertShape does NOT
+// route through ContentSubsumedOutcome (whose leg-(a) merge-tree keeps
+// rename detection ON for the spec-121 forward semantics): the reverse
+// un-apply needs the rename-off posture specifically.
+//
+// mergeSHA must be a real merge: M^1 and M^2 are resolved explicitly and a
+// <2-parent commit fails with an error — never a first-parent guess.
+// (Callers additionally exclude octopus/non-bead candidates before ever
+// consulting the discrimination; see internal/lifecycle.FindLandedMerge.)
+// The internally-resolved M^1 is by construction the same commit as the
+// merge's Parents[0] in a FirstParentMerges scan, so the forward re-apply
+// check and this reverse un-apply check share the same base anchoring.
+//
+// Infra-error discipline (spec 125 plan-gate O2-1): on ANY git/tree-
+// resolution failure — including `git merge-tree --write-tree` being
+// unsupported (git < 2.38) or exiting >= 2 — the error is PROPAGATED as
+// (false, non-nil error). An undetermined result is never mapped to a
+// definite classification in either direction; the caller must fail
+// closed on a non-nil error, never read it as "identify" or "refuse".
+func RevertShape(workdir, mergeSHA, target string) (bool, error) {
+	if err := rejectOptionLike(mergeSHA); err != nil {
+		return false, err
+	}
+	if err := rejectOptionLike(target); err != nil {
+		return false, err
+	}
+	firstParent, err := RevParseRef(workdir, mergeSHA+"^1")
+	if err != nil {
+		return false, fmt.Errorf("resolving first parent of merge %s: %w", mergeSHA, err)
+	}
+	if _, err := RevParseRef(workdir, mergeSHA+"^2"); err != nil {
+		return false, fmt.Errorf("revert-shape check requires a >=2-parent merge, but %s has no second parent: %w", mergeSHA, err)
+	}
+
+	targetTree, err := treeOIDFn(workdir, target)
+	if err != nil {
+		return false, fmt.Errorf("resolving tree of %s: %w", target, err)
+	}
+	// Reverse un-apply, rename detection OFF (G-BLOCK-1):
+	// base = M, ours = target's tip, theirs = M^1.
+	res, err := mergeTreeWriteTreeNoRenamesFn(workdir, mergeSHA, target, firstParent)
+	if err != nil {
+		return false, err
+	}
+	if res.conflict {
+		// The tip built on M's own region — un-applying M conflicts with
+		// the tip's own later edits there → evolved, NOT revert-shape.
+		return false, nil
+	}
+	// Revert-shape iff the un-apply is a clean no-op (result tree equals
+	// the tip's current tree — the tip carries none of M's content at its
+	// original paths).
+	return res.treeOID == targetTree, nil
 }
 
 // parseIssueStatuses parses a .beads/issues.jsonl blob (one JSON object per

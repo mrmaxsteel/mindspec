@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -776,6 +778,334 @@ func TestFindLandedMerge_CleanMergeContentRewrittenLaterIdentified(t *testing.T)
 	}
 	if _, ok, err := MergedUnclosed(dir, "spec/119-test", "bead-one"); err != nil || !ok {
 		t.Errorf("expected merged-unclosed (ok=true, err=nil), got ok=%v err=%v", ok, err)
+	}
+}
+
+// TestFindLandedMerge_EvolvedCleanDivergenceIdentified is spec 125 AC-5's
+// core (RED on the spec-init SHA — refused as "reverted after landing"):
+// the 8nhe.2 PARTIAL-SUPERSESSION shape. Merge M lands content across TWO
+// surfaces; later first-parent commits remove-AND-replace ONE surface (its
+// content superseded at a different path) while M's OTHER content remains
+// at the tip — explicitly NOT a pure delete/relocate of all of M's paths
+// (that is the stated indistinguishable residual, pinned separately by
+// TestFindLandedMerge_CleanFullRemovalRefusesResidualFloor). The fixture
+// ASSERTS ITS OWN SHAPE-PRECONDITION — today's forward primitive reads it
+// as SubsumptionCleanDivergence — so it cannot drift into the already-green
+// conflict shape. FindLandedMerge must identify M: content evolved by later
+// honest work is EVOLVED, never a revert.
+func TestFindLandedMerge_EvolvedCleanDivergenceIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	run("checkout", "-b", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "surface-a.txt"), []byte("alpha payload\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "surface-b.txt"), []byte("beta payload\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-one: two surfaces")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// Later honest first-parent work: surface-a removed AND replaced at a
+	// different path; surface-b (M's other content) remains at the tip.
+	run("rm", "surface-a.txt")
+	os.WriteFile(filepath.Join(dir, "surface-a2.txt"), []byte("superseding replacement for alpha\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "supersede surface-a with surface-a2")
+
+	// AC-5 shape-precondition: TODAY's primitive classifies this fixture
+	// as SubsumptionCleanDivergence — the arm this spec sub-classifies.
+	outcome, err := gitutil.ContentSubsumedOutcome(dir, mergeSHA+"^1", mergeSHA, "spec/119-test")
+	if err != nil {
+		t.Fatalf("shape-precondition check: %v", err)
+	}
+	if outcome != gitutil.SubsumptionCleanDivergence {
+		t.Fatalf("fixture shape drifted: want SubsumptionCleanDivergence from the forward check, got %v", outcome)
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("an evolved-content-PRESENT CleanDivergence shape must identify (AC-5, the 8nhe.2 fix), got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the merge %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_DifferentRegionLaterWorkIdentified is AC-5's SEPARATE
+// sub-case — a GREEN anti-false-ID regression guard, NOT a RED-today
+// assertion (plan F1 MINOR): later work on a DIFFERENT region of a file M
+// also touched leaves M's own content present, so M identifies. This shape
+// resolves to SubsumptionLanded on today's primitive already (asserted, so
+// the guard's target is documented); it guards against a per-file-path
+// REGRESSION ("M's file was touched later ⇒ reverted"), which would wrongly
+// refuse here.
+func TestFindLandedMerge_DifferentRegionLaterWorkIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	// A multi-region file seeded on the spec branch BEFORE the bead forks,
+	// with enough separation that edits at the two ends never conflict.
+	seed := "top: original\n" + strings.Repeat("filler line\n", 10) + "bottom: original\n"
+	os.WriteFile(filepath.Join(dir, "shared.txt"), []byte(seed), 0644)
+	run("add", ".")
+	run("commit", "-m", "seed shared multi-region file")
+
+	run("checkout", "-b", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("top: bead-one's change\n"+strings.Repeat("filler line\n", 10)+"bottom: original\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "bead edits the TOP region")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// Later honest work on a DIFFERENT region of the same file.
+	os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("top: bead-one's change\n"+strings.Repeat("filler line\n", 10)+"bottom: later work\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "later work edits the BOTTOM region")
+
+	// Documented guard target: this shape is SubsumptionLanded today (M's
+	// top-region change re-applies as a no-op) — already identified; the
+	// assertion pins the sub-case against a future per-file-path rule.
+	outcome, err := gitutil.ContentSubsumedOutcome(dir, mergeSHA+"^1", mergeSHA, "spec/119-test")
+	if err != nil {
+		t.Fatalf("shape check: %v", err)
+	}
+	if outcome != gitutil.SubsumptionLanded {
+		t.Fatalf("guard fixture shape drifted: want SubsumptionLanded, got %v", outcome)
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("later work on a DIFFERENT region of M's file must never read as a revert of M, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the merge %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_CleanFullRemovalRefusesResidualFloor is spec 125
+// AC-6's residual-floor guard: a pure, full, clean removal of M's paths
+// with nothing replacing the content leaves the tip carrying NONE of M's
+// introduced content — content-INDISTINGUISHABLE from a `git revert M` —
+// so it REFUSES. This is the DELIBERATE false-negative floor R3 states
+// (not a bug): any datum that accepted clean full removal would accept
+// every real revert too.
+func TestFindLandedMerge_CleanFullRemovalRefusesResidualFloor(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	run("rm", "bead-one.txt")
+	run("commit", "-m", "remove bead-one's file cleanly and fully")
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("a clean full removal of M's content must refuse (the deliberate residual floor), got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no longer present") {
+		t.Errorf("expected the refusal to name the content-absence honestly, got: %v", err)
+	}
+	var noEvidence *LandedMergeNoEvidence
+	if errors.As(err, &noEvidence) {
+		t.Error("the residual-floor refusal must not surface as LandedMergeNoEvidence (corroboration succeeded; the content is absent)")
+	}
+}
+
+// TestFindLandedMerge_TrueRevertWithCoincidentalBlobRefuses is the
+// G-BLOCK-1 end-to-end guard (RED against a rename-detection-ON
+// RevertShape): merge M lands a distinctive blob at path X; M is genuinely
+// reverted (X removed); unrelated later first-parent work recreates the
+// IDENTICAL blob at a DIFFERENT path Y. A rename-detecting reverse un-apply
+// would see "X renamed to Y", classify EVOLVED, and IDENTIFY the reverted
+// merge — an unsafe false-positive. With rename detection OFF the merge
+// correctly REFUSES.
+func TestFindLandedMerge_TrueRevertWithCoincidentalBlobRefuses(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	blob := "line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\n"
+	run("checkout", "-b", "bead/bead-one")
+	os.WriteFile(filepath.Join(dir, "X.txt"), []byte(blob), 0644)
+	run("add", ".")
+	run("commit", "-m", "work bead-one: introduce X")
+	run("checkout", "spec/119-test")
+	run("merge", "--no-ff", "-m", "Merge bead/bead-one", "bead/bead-one")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	// Genuine revert of M (X removed).
+	run("revert", "--no-edit", "-m", "1", mergeSHA)
+	// Unrelated later work recreates the identical blob at a DIFFERENT path.
+	os.WriteFile(filepath.Join(dir, "Y.txt"), []byte(blob), 0644)
+	run("add", ".")
+	run("commit", "-m", "unrelated: identical blob at Y")
+
+	// Shape-precondition: the FORWARD check still reads this as
+	// CleanDivergence (the arm sub-classified) — pins the fixture drives
+	// the revert-shape leg, not the already-green Landed/Conflict arms.
+	outcome, err := gitutil.ContentSubsumedOutcome(dir, mergeSHA+"^1", mergeSHA, "spec/119-test")
+	if err != nil {
+		t.Fatalf("shape-precondition check: %v", err)
+	}
+	if outcome != gitutil.SubsumptionCleanDivergence {
+		t.Fatalf("fixture shape drifted: want SubsumptionCleanDivergence, got %v", outcome)
+	}
+
+	_, err = FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("a true revert must refuse even with a coincidental identical blob at another path (G-BLOCK-1), got: %v", err)
+	}
+	var noEvidence *LandedMergeNoEvidence
+	if errors.As(err, &noEvidence) {
+		t.Error("the revert refusal must not surface as LandedMergeNoEvidence (corroboration succeeded; the content was reverted)")
+	}
+}
+
+// TestFindLandedMerge_ConflictOutcomeStillIdentifies is spec 125 AC-6's
+// Conflict-arm guard, asserted as BEHAVIOR (not a line-span): a
+// SubsumptionConflict outcome still falls through to identify (the
+// spec-121 F2-2r contract), and is NEVER routed through the new
+// revert-shape sub-classification — spec 125 confines its change to the
+// CleanDivergence arm, so the documented pre-existing
+// Conflict-hides-revert residual is neither fixed nor worsened here.
+func TestFindLandedMerge_ConflictOutcomeStillIdentifies(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+	mergeSHA := revParseIn(t, dir, "spec/119-test")
+
+	origSub := landedContentSubsumedFn
+	t.Cleanup(func() { landedContentSubsumedFn = origSub })
+	landedContentSubsumedFn = func(workdir, base, ref, target string) (gitutil.Subsumption, error) {
+		return gitutil.SubsumptionConflict, nil
+	}
+	origRev := landedRevertShapeFn
+	t.Cleanup(func() { landedRevertShapeFn = origRev })
+	landedRevertShapeFn = func(workdir, mergeSHA, target string) (bool, error) {
+		t.Error("a SubsumptionConflict outcome must never be routed through the revert-shape discrimination (spec 125's change is confined to the CleanDivergence arm)")
+		return false, nil
+	}
+
+	landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+	if err != nil {
+		t.Fatalf("a SubsumptionConflict outcome must still fall through to identify, got: %v", err)
+	}
+	if landed.SHA != mergeSHA {
+		t.Errorf("SHA = %q, want the merge %q", landed.SHA, mergeSHA)
+	}
+}
+
+// TestFindLandedMerge_RevertShapeInfraErrorPropagates is the plan-gate
+// O2-1 pin at the CONSUMER: when the CleanDivergence arm's reverse check
+// fails on infra (e.g. git < 2.38's unsupported --write-tree), the error
+// PROPAGATES as a fail-closed infra refusal — never mapped to "identify"
+// (a false-positive attestation on an undetermined result) and never
+// classified as the not-found/reverted refusal. Both boolean polarities of
+// the erroring seam are pinned, so an `if rev {...} else {identify}` that
+// swallows the error fails this test in each direction.
+func TestFindLandedMerge_RevertShapeInfraErrorPropagates(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	mergeBead(t, run, dir, "bead-one", "spec/119-test")
+
+	origSub := landedContentSubsumedFn
+	t.Cleanup(func() { landedContentSubsumedFn = origSub })
+	landedContentSubsumedFn = func(workdir, base, ref, target string) (gitutil.Subsumption, error) {
+		return gitutil.SubsumptionCleanDivergence, nil
+	}
+	origRev := landedRevertShapeFn
+	t.Cleanup(func() { landedRevertShapeFn = origRev })
+
+	for _, staleBool := range []bool{false, true} {
+		simulated := errors.New(`fatal: unknown option '--write-tree'`)
+		landedRevertShapeFn = func(workdir, mergeSHA, target string) (bool, error) {
+			return staleBool, simulated
+		}
+
+		landed, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
+		if err == nil {
+			t.Fatalf("staleBool=%v: an infra failure in the reverse check must propagate, got identification %+v", staleBool, landed)
+		}
+		if !errors.Is(err, simulated) {
+			t.Errorf("staleBool=%v: expected the propagated error to wrap the infra failure, got: %v", staleBool, err)
+		}
+		if errors.Is(err, ErrLandedMergeNotFound) {
+			t.Errorf("staleBool=%v: an UNDETERMINED reverse check must not be classified as not-found/reverted, got: %v", staleBool, err)
+		}
+	}
+}
+
+// TestFindLandedMerge_OctopusCandidateExcluded is spec 125 AC-6's
+// octopus/parent guard: a >2-parent merge — even one carrying the exact
+// bead-naming subject AND a binding that would corroborate its second
+// parent — is EXCLUDED as a candidate, never run through corroboration or
+// the revert/evolved discrimination (whose M^1/M^2 anchoring is only
+// meaningful for a two-parent merge). Both discrimination seams fail the
+// test if consulted.
+func TestFindLandedMerge_OctopusCandidateExcluded(t *testing.T) {
+	dir, run := initLandedRepo(t, "119-test")
+	specTip := revParseIn(t, dir, "spec/119-test")
+
+	run("checkout", "-b", "side-one")
+	os.WriteFile(filepath.Join(dir, "side-one.txt"), []byte("s1\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "side one work")
+	sideOne := revParseIn(t, dir, "side-one")
+
+	run("checkout", "-b", "side-two", "spec/119-test")
+	os.WriteFile(filepath.Join(dir, "side-two.txt"), []byte("s2\n"), 0644)
+	run("add", ".")
+	run("commit", "-m", "side two work")
+	sideTwo := revParseIn(t, dir, "side-two")
+
+	// Hand-craft a THREE-parent (octopus) merge with the bead-naming
+	// subject, and fast-forward the spec branch onto it.
+	run("checkout", "spec/119-test")
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	tree := git("write-tree")
+	octopus := git("commit-tree", tree, "-p", specTip, "-p", sideOne, "-p", sideTwo, "-m", "Merge bead/octo-one")
+	git("reset", "--hard", octopus)
+
+	// A binding that WOULD corroborate the octopus's Parents[1] — so a
+	// non-excluding impl (the pre-125 `len(m.Parents) < 2` filter) would
+	// confirm the candidate and reach the discrimination, failing below.
+	origBinding := landedBindingMetadataFn
+	t.Cleanup(func() { landedBindingMetadataFn = origBinding })
+	landedBindingMetadataFn = func(issueID string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_landed_second_parent": sideOne}, nil
+	}
+
+	origSub := landedContentSubsumedFn
+	t.Cleanup(func() { landedContentSubsumedFn = origSub })
+	landedContentSubsumedFn = func(workdir, base, ref, target string) (gitutil.Subsumption, error) {
+		t.Error("an octopus candidate must never be run through the forward content discrimination")
+		return gitutil.SubsumptionLanded, nil
+	}
+	origRev := landedRevertShapeFn
+	t.Cleanup(func() { landedRevertShapeFn = origRev })
+	landedRevertShapeFn = func(workdir, mergeSHA, target string) (bool, error) {
+		t.Error("an octopus candidate must never be run through the revert-shape discrimination")
+		return false, nil
+	}
+
+	_, err := FindLandedMerge(dir, "spec/119-test", "octo-one")
+	if !errors.Is(err, ErrLandedMergeNotFound) {
+		t.Fatalf("an octopus candidate must be excluded (not-found), got: %v", err)
+	}
+	if sideTwo == "" { // sideTwo is fixture plumbing; keep it referenced
+		t.Fatal("fixture: sideTwo tip missing")
+	}
+}
+
+// TestLandedRevertShapeFnDefaultPinned is spec 125's anti-drift pointer
+// pin (the netEffectLandedFn/AC-17 pattern): landedRevertShapeFn's
+// production default IS gitutil.RevertShape, so the hermetic fixtures
+// above provably exercise the real reverse un-apply primitive and the
+// seam cannot be silently rewired off it.
+func TestLandedRevertShapeFnDefaultPinned(t *testing.T) {
+	if reflect.ValueOf(landedRevertShapeFn).Pointer() != reflect.ValueOf(gitutil.RevertShape).Pointer() {
+		t.Fatal("landedRevertShapeFn must default to gitutil.RevertShape (spec 125 anti-drift: the CleanDivergence sub-classification must invoke the real reverse un-apply primitive)")
 	}
 }
 

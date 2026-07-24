@@ -103,6 +103,18 @@ var (
 	// later work built on it (a three-way CONFLICT); only the CLEAN
 	// not-subsumed shape — a genuine backout — refuses.
 	landedContentSubsumedFn = gitutil.ContentSubsumedOutcome
+	// landedRevertShapeFn is spec 125 R3's reverse un-apply
+	// sub-classification (gitutil.RevertShape), consulted ONLY on a
+	// SubsumptionCleanDivergence outcome from landedContentSubsumedFn —
+	// never on the Landed or Conflict arms: revert-shape (the tip carries
+	// NONE of M's introduced content — a true `git revert M`, or the
+	// clean-full-removal residual, content-indistinguishable from one)
+	// refuses; NOT revert-shape (SOME of M's content survives at the tip —
+	// partial supersession by later honest work, the 8nhe.2 evolved case)
+	// identifies. A non-nil error is an UNDETERMINED result and is
+	// propagated (plan-gate O2-1), never mapped to either classification.
+	// Default pinned to the real primitive by a pointer anti-drift test.
+	landedRevertShapeFn = gitutil.RevertShape
 )
 
 // landedBinding is the merge-time landed-binding datum read back from bd
@@ -227,10 +239,14 @@ func resolveBranchTip(root, branch string) (tip string, survives bool, err error
 // its final-review-r2 trichotomy form) decides identification: content
 // still subsumed → identified; a three-way CONFLICT (the tip itself
 // advanced past M^1 on M's region — later honest work built on/superseding
-// M) → identified (landed-then-evolved, the F2-2r fix); only a CLEAN
-// divergence (the tip sits at the base state on M's paths — the change was
-// genuinely backed out, exactly a `git revert M`'s shape) is NOT
-// identified. A revert-then-reapply, in either shape (a later commit
+// M) → identified (landed-then-evolved, the F2-2r fix); a CLEAN divergence
+// is SUB-CLASSIFIED by the reverse un-apply test (gitutil.RevertShape,
+// spec 125 R3): only the revert SHAPE — the tip carries NONE of M's
+// introduced content (a genuine `git revert M`, or its
+// content-indistinguishable clean-full-removal residual) — is NOT
+// identified; a clean divergence that RETAINS part of M's content
+// (partial supersession by later honest work) identifies.
+// A revert-then-reapply, in either shape (a later commit
 // re-introducing the same net changes, or a cherry-pick of them), leaves
 // the content subsumed, so M is identified by construction. "Ever
 // reverted ⇒ reject" is structurally inexpressible under this mechanism.
@@ -271,7 +287,13 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 	binding, haveBinding := landedBindingForBead(beadID)
 
 	for _, m := range merges {
-		if m.Subject != wantSubject || len(m.Parents) < 2 {
+		// Spec 125 R3's octopus/parent guard (AC-6): bead->spec merges are
+		// exactly two-parent (gitutil.MergeInto), so an octopus (>2-parent)
+		// candidate is EXCLUDED here — never run through corroboration or
+		// the revert/evolved discrimination, whose M^1/M^2 anchoring is
+		// only meaningful for a two-parent merge. (Non-bead merges are
+		// already excluded by the deterministic-subject filter.)
+		if m.Subject != wantSubject || len(m.Parents) != 2 {
 			continue
 		}
 		firstParent, secondParent := m.Parents[0], m.Parents[1]
@@ -363,22 +385,44 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 		//     the only exits were the bd-close bypass or reverting
 		//     legitimate later work — the §2(i) class ADR-0041 forbids.
 		//   - SubsumptionCleanDivergence — the three-way applies M's
-		//     change CLEANLY but the result differs from the tip: the tip
-		//     sits at the base state on M's own paths, i.e. the change
-		//     was genuinely BACKED OUT (exactly what a `git revert M`
-		//     leaves behind) → NOT identified (AC-10(i) RED-on-revert).
-		//     Conservative residual: content later removed cleanly and
-		//     fully by honest work is content-indistinguishable from a
-		//     revert, so it also refuses — by design, since any datum
-		//     here that accepted clean removal would accept every real
-		//     revert too.
+		//     change CLEANLY but the result differs from the tip: at
+		//     least PART of M's content is no longer at the tip. Spec 125
+		//     R3 (AC-5): this arm ALONE cannot distinguish "genuinely
+		//     backed out" from "partially superseded by later honest
+		//     work" (the 8nhe.2 false-negative — evolved content wrongly
+		//     refused), so it is SUB-CLASSIFIED by landedRevertShapeFn
+		//     (gitutil.RevertShape), the reverse un-apply no-op test:
+		//     revert-shape — the tip carries NONE of M's introduced
+		//     content (exactly what `git revert M` leaves behind, or the
+		//     conservative clean-full-removal residual, which is
+		//     content-indistinguishable from a revert and refuses by
+		//     design: any datum here that accepted clean full removal
+		//     would accept every real revert too) → NOT identified
+		//     (AC-10(i) RED-on-revert preserved); NOT revert-shape — SOME
+		//     of M's content survives at the tip (partial supersession)
+		//     → identified (landed-then-evolved).
 		outcome, subErr := landedContentSubsumedFn(root, firstParent, m.SHA, specBranch)
 		if subErr != nil {
 			return nil, fmt.Errorf("checking net effect of merge %s since it landed: %w", m.SHA, subErr)
 		}
 		if outcome == gitutil.SubsumptionCleanDivergence {
-			return nil, fmt.Errorf("%w: %s on %s (merge %s's content is no longer present at %s's current tip — it was reverted after landing)",
-				ErrLandedMergeNotFound, beadID, specBranch, m.SHA, specBranch)
+			// Infra-error discipline (plan-gate O2-1): a non-nil error
+			// from the reverse check is an UNDETERMINED result and is
+			// propagated — the same fail-closed posture as subErr above —
+			// never mapped to "identify" (a false-positive attestation on
+			// an undetermined result) and never to "refuse".
+			rev, revErr := landedRevertShapeFn(root, m.SHA, specBranch)
+			if revErr != nil {
+				return nil, fmt.Errorf("checking revert shape of merge %s against %s's current tip: %w", m.SHA, specBranch, revErr)
+			}
+			if rev {
+				return nil, fmt.Errorf("%w: %s on %s (merge %s's content is no longer present at %s's current tip — it was reverted or cleanly removed after landing)",
+					ErrLandedMergeNotFound, beadID, specBranch, m.SHA, specBranch)
+			}
+			// NOT revert-shape: part of M's content is still present at
+			// the tip — later honest work partially superseded M's
+			// surface (the 8nhe.2 evolved case) → fall through to
+			// identify.
 		}
 
 		return &LandedMerge{SHA: m.SHA, FirstParent: firstParent, SecondParent: secondParent}, nil
