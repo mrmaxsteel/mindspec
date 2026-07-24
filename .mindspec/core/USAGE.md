@@ -334,6 +334,7 @@ Work is not complete until changes are committed.
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
 | `mindspec complete` | Close current bead and advance |
 | `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |
+| `mindspec reattest <bead-id>` | Re-attest an already-merged bead's landed-binding from independent git topology — explicit, fail-closed, audited (ADR-0041 §2(ii), spec 125) |
 | `mindspec domain add <name>` | Scaffold a domain + its context-map entry; re-run to backfill any partial state (spec 123) |
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create a slugged ADR file; canonical `ADR-NNNN` stays the ID everywhere (spec 123) |
 | `mindspec models populate` | Print the prompt for declaring the per-phase `models:` protocol (writes nothing) |
