@@ -336,7 +336,7 @@ func applyExceptions(findings []truthFinding, exceptions []docsTruthException) (
 func TestDocsTruthReal(t *testing.T) {
 	repoRoot := realRepoRoot(t)
 
-	cmdRoot, err := buildCmdTree(realCmdDir(t))
+	cmdRoot, err := buildCmdTree(t)
 	if err != nil {
 		t.Fatalf("buildCmdTree: %v", err)
 	}
@@ -467,7 +467,7 @@ func fixtureDoc(t *testing.T, name, content string) *docFile {
 
 func sharedCmdRoot(t *testing.T) *cmdNode {
 	t.Helper()
-	root, err := buildCmdTree(realCmdDir(t))
+	root, err := buildCmdTree(t)
 	if err != nil {
 		t.Fatalf("buildCmdTree: %v", err)
 	}
@@ -778,15 +778,54 @@ func TestExpandAlternatives_GluedFormPreservesTail(t *testing.T) {
 	requireFindingContains(t, findings, "spec verify --title x", `no subcommand "verify"`)
 }
 
-// --- resolveHelperCall: one-level helper indirection (O2-3) -----------
+// TestExpandAlternatives_TrailingBarePipeDoesNotPanic is the
+// RED-on-inject regression test for mindspec-ng3g (W0 Bead 9): before
+// this fix, expandAlternatives paniced with "index out of range" on
+// any token list ending in an unpaired "|" — reproduced here with the
+// exact two inputs the panic was found with
+// (`mindspec panel create |` -> index out of range [4] with length 4;
+// `mindspec |` -> index out of range [2] with length 2). Before the
+// fix, EACH sub-case below crashed this whole test binary; running to
+// completion is the assertion — the specific resolved/unresolved
+// verdict for a malformed, truncated invocation is not the point of
+// this fixture.
+func TestExpandAlternatives_TrailingBarePipeDoesNotPanic(t *testing.T) {
+	cases := []string{
+		"Run `mindspec panel create |`.\n",
+		"Run `mindspec |`.\n",
+	}
+	for _, content := range cases {
+		df := fixtureDoc(t, "fixture.md", content)
+		_ = checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t)) // must not panic
+	}
+}
 
-// TestResolveHelperCall_ChildrenAndFlagsVisible is the regression test
-// for O2-3: a command built by one-level helper indirection
-// (`reportCmd = newReportCmd()`, report.go:81-103) previously modeled
-// as a childless, flagless leaf — so ANY invented subcommand resolved
-// true via the leaf-positional-args arm, and the real `--resolve`
-// flag on `report list` false-positived as unregistered. All three
-// must now resolve correctly against the real tree.
+// TestExpandAlternatives_ShellPipeWithFollowingWordDoesNotPanic pins
+// the OTHER shape the same finding named: a "|" WITH a following word
+// — an ordinary shell pipe into a different program
+// (ms-panel-run/SKILL.md:18's `mindspec config show | grep runner`,
+// outside docsScopeRoots so never actually checked by this lint
+// today), not a dangling pipe — never panicked before this fix
+// either. Kept as a companion fixture so a future change to the
+// dangling-pipe guard (expandAlternatives' doc comment) can't
+// silently regress this shape while fixing that one.
+func TestExpandAlternatives_ShellPipeWithFollowingWordDoesNotPanic(t *testing.T) {
+	df := fixtureDoc(t, "fixture.md", "Run `mindspec config show | grep runner`.\n")
+	_ = checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t)) // must not panic
+}
+
+// --- report's children/flags: ground-truth smoke test -----------------
+
+// TestResolveHelperCall_ChildrenAndFlagsVisible predates mindspec-ng3g
+// (W0 Bead 9)'s AST-to-binary swap, where it was the regression test
+// for an AST-modeling defect (one-level helper indirection —
+// `reportCmd = newReportCmd()`, report.go — modeled as a childless,
+// flagless leaf, so any invented subcommand resolved true and the
+// real `--resolve` flag false-positived as unregistered). That defect
+// class cannot recur under B: report's children and flags now come
+// straight off the real, running cobra tree, with no
+// modeling/extraction step of any kind to get wrong. Kept, retitled
+// only in this comment, as a plain ground-truth smoke test.
 func TestResolveHelperCall_ChildrenAndFlagsVisible(t *testing.T) {
 	root := sharedCmdRoot(t)
 
@@ -801,14 +840,19 @@ func TestResolveHelperCall_ChildrenAndFlagsVisible(t *testing.T) {
 	}
 }
 
-// --- auto-registered cobra flags: --help/-h/--version (O2-6) ---------
+// --- auto-registered cobra flags: --help/-h/--version -----------------
 
-// TestAutoFlags_HelpAndVersionResolve is the regression test for
-// O2-6: cobra auto-registers --help/-h on every command and --version
-// on root (root.go:57 sets Version), but Pass 3 only records explicit
-// Flags()/PersistentFlags() calls, so resolve() previously reported
+// TestAutoFlags_HelpAndVersionResolve predates mindspec-ng3g (W0 Bead
+// 9)'s AST-to-binary swap, where it was the regression test for an
+// AST-modeling gap (cobra auto-registers --help/-h on every command
+// and --version on root, but the AST-only Pass 3 only recorded
+// explicit Flags()/PersistentFlags() calls, so resolve() reported
 // "flag --help not registered" on the most ordinary true invocation a
-// doc can contain.
+// doc can contain). Under B, --help/-h/--version come from actually
+// calling cobra's own InitDefaultHelpFlag/InitDefaultVersionFlag
+// during the dump (cmd/mindspec/cmdtree_dump.go), so there is no
+// separate auto-flag model left to drift from cobra's real behavior.
+// Kept as a plain ground-truth smoke test.
 func TestAutoFlags_HelpAndVersionResolve(t *testing.T) {
 	root := sharedCmdRoot(t)
 	cases := [][]string{
@@ -875,345 +919,5 @@ func TestR5SpecInitAliasResolvesLive(t *testing.T) {
 	res := sharedCmdRoot(t).resolve([]string{"mindspec", "spec-init"})
 	if !res.Resolved {
 		t.Fatalf("expected mindspec spec-init to resolve live, got unresolved: %s", res.Reason)
-	}
-}
-
-// writeSyntheticCmdDir writes files (relative name -> Go source) into
-// a fresh temp dir shaped like cmd/mindspec, for R5/O1-3/O1-5 fixtures
-// that must NOT depend on any real, shipped verb name — O1-4's
-// finding (see TestR5InlineLiteralStubDoesNotResolve below): a fixture
-// keyed on a real verb name goes vacuously green the moment that verb
-// is deleted from cmd/mindspec, silently losing its coverage. Every
-// file must be valid, self-contained Go — buildCmdTree parses real
-// source, not a mock.
-func writeSyntheticCmdDir(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatalf("write synthetic %s: %v", name, err)
-		}
-	}
-	return dir
-}
-
-// TestR5InlineLiteralStubDoesNotResolve is O1-4's fix: R5's negative
-// fixture used to be TestR5BenchStubDoesNotResolve, keyed on the real
-// `bench` verb — which goes vacuously green the moment
-// deprecated_commands.go is deleted (its own header says a follow-up
-// does exactly that, one release after spec 084), silently losing R5
-// negative coverage entirely. This constructs its OWN inline-literal
-// stub shape (Run set directly on the composite literal, the
-// discriminator's simplest form) rather than naming a shipped verb.
-func TestR5InlineLiteralStubDoesNotResolve(t *testing.T) {
-	dir := writeSyntheticCmdDir(t, map[string]string{
-		"main.go": `package main
-
-import "github.com/spf13/cobra"
-
-var rootCmd = &cobra.Command{Use: "mindspec"}
-
-var stubCmd = &cobra.Command{
-	Use:    "syntheticstub",
-	Hidden: true,
-	Run: func(cmd *cobra.Command, args []string) {},
-}
-
-func init() {
-	rootCmd.AddCommand(stubCmd)
-}
-`,
-	})
-	root, err := buildCmdTree(dir)
-	if err != nil {
-		t.Fatalf("buildCmdTree: %v", err)
-	}
-	res := root.resolve([]string{"mindspec", "syntheticstub"})
-	if res.Resolved {
-		t.Fatal("expected mindspec syntheticstub to NOT resolve (inline-literal deprecation stub)")
-	}
-	if !containsSub(res.Reason, "deprecation stub") {
-		t.Fatalf("expected reason to cite the deprecation-stub signal, got: %s", res.Reason)
-	}
-}
-
-// --- O1-3: out-of-line Run/RunE assignment (Pass 4) --------------------
-
-// TestR5OutOfLineRunIsStub is O1-3's core regression test — R5's
-// FOURTH wrong version, orchestrator-reproduced at 05cc8f7e: the
-// pre-fix discriminator read Run/RunE off the `&cobra.Command{...}`
-// LITERAL only. This fixture's stub command's literal sets NEITHER
-// field — its Run is assigned out-of-line inside init(), the exact
-// idiom cmd/mindspec/spec_init.go:18 already uses for a genuinely live
-// command (RunE, not Run). Before Pass 4 existed, this classified
-// live: a doc claiming this verb works would have passed.
-func TestR5OutOfLineRunIsStub(t *testing.T) {
-	dir := writeSyntheticCmdDir(t, map[string]string{
-		"main.go": `package main
-
-import (
-	"fmt"
-	"os"
-
-	"github.com/spf13/cobra"
-)
-
-var rootCmd = &cobra.Command{Use: "mindspec"}
-
-var probeCmd = &cobra.Command{
-	Use:    "probeverb",
-	Hidden: true,
-}
-
-func init() {
-	probeCmd.Run = func(cmd *cobra.Command, args []string) {
-		fmt.Fprintln(os.Stderr, "probeverb moved: see ADR-0000")
-		os.Exit(2)
-	}
-	rootCmd.AddCommand(probeCmd)
-}
-`,
-	})
-	root, err := buildCmdTree(dir)
-	if err != nil {
-		t.Fatalf("buildCmdTree: %v", err)
-	}
-	res := root.resolve([]string{"mindspec", "probeverb"})
-	if res.Resolved {
-		t.Fatal("expected mindspec probeverb to NOT resolve (out-of-line Run makes it a deprecation stub)")
-	}
-	if !containsSub(res.Reason, "deprecation stub") {
-		t.Fatalf("expected reason to cite the deprecation-stub signal, got: %s", res.Reason)
-	}
-}
-
-// TestR5OutOfLineRunEIsLive is the live counterpart, decoupled from
-// real spec_init.go (which TestR5SpecInitAliasResolvesLive above
-// already covers and must keep covering — this is additional, not a
-// replacement): a command whose literal sets neither Run nor RunE, but
-// whose RunE IS assigned out-of-line in init(), must resolve live.
-// Without this, Pass 4 could have been implemented to treat ANY
-// out-of-line Run/RunE assignment as suspect rather than resolving the
-// real field value — this proves the out-of-line RunE case is
-// correctly classified live, not just the out-of-line Run case stub.
-func TestR5OutOfLineRunEIsLive(t *testing.T) {
-	dir := writeSyntheticCmdDir(t, map[string]string{
-		"main.go": `package main
-
-import "github.com/spf13/cobra"
-
-var rootCmd = &cobra.Command{Use: "mindspec"}
-
-var aliasCmd = &cobra.Command{
-	Use:    "aliasverb",
-	Hidden: true,
-}
-
-var realCmd = &cobra.Command{
-	Use: "realverb",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-
-func init() {
-	aliasCmd.RunE = realCmd.RunE
-	rootCmd.AddCommand(aliasCmd)
-	rootCmd.AddCommand(realCmd)
-}
-`,
-	})
-	root, err := buildCmdTree(dir)
-	if err != nil {
-		t.Fatalf("buildCmdTree: %v", err)
-	}
-	res := root.resolve([]string{"mindspec", "aliasverb"})
-	if !res.Resolved {
-		t.Fatalf("expected mindspec aliasverb to resolve live (out-of-line RunE), got unresolved: %s", res.Reason)
-	}
-}
-
-// --- O1-5: variadic AddCommand(a, b, c) ---------------------------------
-
-// TestO1_5VariadicAddCommandWalksAllChildren is the regression fixture
-// for the multi-argument `AddCommand(a, b, c)` form — cobra's
-// AddCommand is variadic, but the pre-fix extraction only ever took a
-// single-argument call's lone arg, so every child registered via the
-// multi-arg form was invisible to the tree entirely. This does NOT
-// fail loudly as "no subcommand": resolve()'s leaf arm treats an
-// unresolvable trailing word as a POSITIONAL ARGUMENT of the deepest
-// node actually reached (here, `parent`, which the tree shows as
-// childless) and still reports Resolved=true — the exact
-// "positional-args arm swallows it" failure mode resolveHelperCall's
-// own doc comment already names for the one-level-helper-indirection
-// case. So this fixture asserts not just Resolved, but that the
-// resolved NODE is actually the child itself.
-func TestO1_5VariadicAddCommandWalksAllChildren(t *testing.T) {
-	dir := writeSyntheticCmdDir(t, map[string]string{
-		"main.go": `package main
-
-import "github.com/spf13/cobra"
-
-var rootCmd = &cobra.Command{Use: "mindspec"}
-
-var parentCmd = &cobra.Command{Use: "parent"}
-
-var childACmd = &cobra.Command{
-	Use: "childa",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-var childBCmd = &cobra.Command{
-	Use: "childb",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-var childCCmd = &cobra.Command{
-	Use: "childc",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-
-func init() {
-	parentCmd.AddCommand(childACmd, childBCmd, childCCmd)
-	rootCmd.AddCommand(parentCmd)
-}
-`,
-	})
-	root, err := buildCmdTree(dir)
-	if err != nil {
-		t.Fatalf("buildCmdTree: %v", err)
-	}
-	for _, child := range []string{"childa", "childb", "childc"} {
-		res := root.resolve([]string{"mindspec", "parent", child})
-		if !res.Resolved {
-			t.Errorf("expected mindspec parent %s to resolve (variadic AddCommand), got unresolved: %s", child, res.Reason)
-			continue
-		}
-		// Checking Resolved alone is not enough: without the fix,
-		// parentCmd has ZERO children in the tree (the variadic
-		// AddCommand call is invisible), so resolve()'s leaf arm
-		// treats "childa" as a POSITIONAL ARGUMENT of `parent` itself
-		// and still reports Resolved=true — just against the wrong
-		// node. Asserting the resolved node's own name is what
-		// actually catches the regression.
-		if res.Node == nil || res.Node.Name != child {
-			gotName := "<nil>"
-			if res.Node != nil {
-				gotName = res.Node.Name
-			}
-			t.Errorf("expected mindspec parent %s to resolve TO the %s node itself, got node %q (likely swallowed as a positional arg of `parent`)", child, child, gotName)
-		}
-	}
-}
-
-// TestO1_5VariadicAddCommandInHelperBodyWalksAllChildren is
-// TestO1_5VariadicAddCommandWalksAllChildren's sibling for the OTHER
-// code path the variadic form must be fixed in: a parent built via
-// one-level helper indirection (`parentCmd = newParentCmd()`,
-// report.go:81's real idiom) registers its children INSIDE the
-// helper's own body (`c.AddCommand(...)`), extracted by
-// addCommandArgsForLocal — a separate function from Pass 2's
-// package-level walk, with its own single-arg-only bug to fix.
-func TestO1_5VariadicAddCommandInHelperBodyWalksAllChildren(t *testing.T) {
-	dir := writeSyntheticCmdDir(t, map[string]string{
-		"main.go": `package main
-
-import "github.com/spf13/cobra"
-
-var rootCmd = &cobra.Command{Use: "mindspec"}
-
-var childACmd = &cobra.Command{
-	Use: "childa",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-var childBCmd = &cobra.Command{
-	Use: "childb",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return nil
-	},
-}
-
-func newParentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "parent"}
-	c.AddCommand(childACmd, childBCmd)
-	return c
-}
-
-var parentCmd = newParentCmd()
-
-func init() {
-	rootCmd.AddCommand(parentCmd)
-}
-`,
-	})
-	root, err := buildCmdTree(dir)
-	if err != nil {
-		t.Fatalf("buildCmdTree: %v", err)
-	}
-	for _, child := range []string{"childa", "childb"} {
-		res := root.resolve([]string{"mindspec", "parent", child})
-		if !res.Resolved {
-			t.Errorf("expected mindspec parent %s to resolve (variadic AddCommand in a helper body), got unresolved: %s", child, res.Reason)
-			continue
-		}
-		if res.Node == nil || res.Node.Name != child {
-			gotName := "<nil>"
-			if res.Node != nil {
-				gotName = res.Node.Name
-			}
-			t.Errorf("expected mindspec parent %s to resolve TO the %s node itself, got node %q", child, child, gotName)
-		}
-	}
-}
-
-// --- degradation: deprecated_commands.go eventually goes away --------
-
-// TestCmdTreeDegradesWithoutDeprecatedFile proves the fragility
-// handling mandated by the bead brief: deprecated_commands.go's own
-// header says a follow-up deletes the whole file one release after
-// spec 084. Copy cmd/mindspec to a temp dir with that one file
-// physically removed and confirm buildCmdTree still succeeds (no
-// crash, no error) and that the six retired verbs are simply absent —
-// R1 then catches any doc mention of them as a plain unresolved verb,
-// with no special-casing anywhere in this lint.
-func TestCmdTreeDegradesWithoutDeprecatedFile(t *testing.T) {
-	srcDir := realCmdDir(t)
-	dstDir := t.TempDir()
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", srcDir, err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || e.Name() == "deprecated_commands.go" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		if err := os.WriteFile(filepath.Join(dstDir, e.Name()), data, 0o644); err != nil {
-			t.Fatalf("write %s: %v", e.Name(), err)
-		}
-	}
-
-	root, err := buildCmdTree(dstDir)
-	if err != nil {
-		t.Fatalf("buildCmdTree without deprecated_commands.go: %v", err)
-	}
-
-	for _, verb := range []string{"agentmind", "viz", "bench"} {
-		res := root.resolve([]string{"mindspec", verb})
-		if res.Resolved {
-			t.Errorf("expected %q to be absent once deprecated_commands.go is gone, but it resolved", verb)
-		}
-		if containsSub(res.Reason, "stub") {
-			t.Errorf("expected a plain %q not-found reason once the file is gone, got a stub-classification reason: %s", verb, res.Reason)
-		}
 	}
 }

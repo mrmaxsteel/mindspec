@@ -1,137 +1,184 @@
-// docs_truth_cmdtree_test.go builds a structural model of the real
-// cobra.Command tree registered by cmd/mindspec, entirely from the AST —
-// no build step, no binary, no hand-maintained verb list. It is the R1
-// ground truth consumed by docs_truth_test.go (mindspec-ks4u, spec
-// w0-docs-truth Bead 2).
+// docs_truth_cmdtree_test.go builds internal/lint's model of the real
+// cobra.Command tree from GROUND TRUTH — the compiled cmd/mindspec
+// binary's own `__cmdtree` introspection dump (cmd/mindspec/
+// cmdtree_dump.go) — rather than reconstructing it from source AST.
+// It is the R1 ground truth consumed by docs_truth_test.go
+// (mindspec-ng3g, W0 Bead 9).
 //
-// # Why AST, not a built binary
+// # Why a built binary, not the AST
 //
-// The alternative (behavioral: build the binary, exec it, read exit
-// codes) is truer to ground truth but costs a build step on every test
-// run and needs no special git/bd ratchet accounting. The AST route
-// keeps the lint fast, build-free, and hermetic, matching every other
-// lint in this package (boundary_test.go, scaffold_test.go). Its one
-// real cost is coupling to cmd/mindspec's construction idioms; see the
-// stub-detection doc comment below for how that coupling is kept
-// structural rather than a hardcoded verb list.
+// This file previously (through 4ef82ee4) reconstructed the tree by
+// parsing cmd/mindspec's own .go source and re-implementing enough of
+// cobra's construction/registration semantics to answer "what verbs,
+// flags, and stub-vs-live handlers does this binary actually have".
+// That approach had to be independently re-specified WRONG FIVE TIMES
+// trying to answer one question — "is this verb live, or a one-shot
+// deprecation stub" — because every version checked a PROXY for a
+// property the binary states exactly (tree membership, then Hidden,
+// then Hidden&&DisableFlagParsing, then a literal-only Run/RunE read,
+// then a Run/RunE read that didn't scope the assignment's receiver —
+// see the binding ruling for the full history). It also could not see
+// cobra's own auto-registered `help`/`completion` commands at all
+// (they don't exist anywhere in cmd/mindspec's source — cobra adds
+// them at Execute() time), so a doc mentioning either was a guaranteed
+// false positive.
 //
-// # Tree construction
+// cmd/mindspec already builds and executes itself at 30+ call sites
+// in its own test suite (cmd/mindspec/testhelpers_test.go's
+// buildMindspecBinary + strippedEnv), most without a `-short` guard,
+// so reading ground truth off the real binary is an idiom this repo
+// has already proven in CI, not a new one — reused here (see
+// stripCmdTreeEnv) rather than re-invented. Measured cost (the
+// binding ruling, /tmp/w0-panel/JUDGMENT.json): ~1.6s for a
+// from-scratch build, ~8ms per exec. buildCmdTree's sync.Once pays
+// that cost exactly once per `go test` run, regardless of how many
+// tests in this package ask for the tree.
 //
-// cmd/mindspec's non-test .go files build cobra.Command values three
-// ways, all handled here:
+// # The stub signal — two independent signals, disagreement is a hard failure
 //
-//  1. Direct: `var xCmd = &cobra.Command{Use: "...", ...}`.
-//  2. One-level function indirection: `var xCmd = helper(args...)` where
-//     helper is a same-package func whose body constructs and returns
-//     a `*cobra.Command`. Fields on the returned literal that read a
-//     helper parameter (e.g. `Use: use`) are resolved by mapping the
-//     parameter's position back to the literal argument at the call
-//     site — see resolveHelperCall.
-//  3. Immediately-invoked func literal: `var xCmd = func() *cobra.Command
-//     { c := &cobra.Command{...}; c.AddCommand(...); return c }()`. The
-//     literal's body is unwrapped in place (unwrapIIFE): the local
-//     variable built from the composite literal becomes this node, and
-//     any AddCommand calls on that local become child edges, with
-//     inline stubDeprecated(...)-shaped call args becoming anonymous
-//     stub children.
+// The property this lint wants is "does invoking this command run
+// cobra's normal handler, or cmd/mindspec's one-shot deprecation
+// message followed by os.Exit(2)". Per the binding ruling, that is
+// answered with TWO INDEPENDENT signals that MUST AGREE — disagreement
+// is a hard test failure, never a silent tie-break, because every
+// prior (AST-only) version failed by trusting a single signal:
 //
-// Parent/child edges elsewhere in the package (the ordinary case: an
-// init() doing `parentCmd.AddCommand(childCmd)`) are collected by a
-// single pass over every CallExpr in every file.
+//   - BEHAVIOURAL: the exit code of `<binary> <path...> --help`, run
+//     with explicit argv (probeBehavioralStub). A genuine stub sets
+//     DisableFlagParsing, so cobra never intercepts `--help` as a
+//     flag — it falls straight through to the stub's Run, which
+//     unconditionally prints one line and os.Exit(2)s. A live command
+//     has flag parsing enabled, so cobra intercepts `--help` centrally
+//     and returns before Run/RunE ever runs, exiting 0.
+//   - STRUCTURAL: the dump's HasRun && !HasRunE && DisableFlagParsing
+//     (structuralStub). The DisableFlagParsing conjunct is this file's
+//     one addition beyond the ruling's literal text — see below.
 //
-// # Stub detection (R5) — the discriminator, its history, and why it
-// is not Hidden/DisableFlagParsing
+// ## Why DisableFlagParsing had to join the structural signal
 //
-// The property this lint actually wants is "does invoking this
-// command run cobra's normal handler, or a one-shot deprecation
-// message followed by os.Exit(2)". That property has been specified
-// wrong three times before landing on the current, fourth version —
-// each wrong version checked a PROXY for the property instead of the
-// property itself:
+// The ruling's stub_signal section specifies the structural half as
+// bare `Run != nil && RunE == nil`, reasoned to become vacuous (never
+// wrong) once deprecated_commands.go is eventually deleted, "because
+// neither signal is a list". That reasoning implicitly assumed every
+// Run-set/RunE-unset node comes from cmd/mindspec's own stub
+// constructor — true within cmd/mindspec's OWN source, but the
+// judge's 93-path measurement was taken against the AST tree, which
+// never contained cobra's auto-registered `help` command (AST
+// couldn't see it — see above). Once B makes `help` a real node
+// (exactly the divergence B exists to fix), it is a PERMANENT,
+// unavoidable counterexample to the bare rule: cobra's own
+// InitDefaultHelpCmd (spf13/cobra@v1.8.1 command.go:1262) sets `Run`,
+// never `RunE`, for every cobra program that has ever existed — and
+// `help` is obviously, permanently live (verified:
+// `mindspec help --help` exits 0). Bare Run-set/RunE-unset therefore
+// structurally disagrees with the behavioural signal for `help`
+// forever, which would make this lint permanently unbuildable if the
+// two signals must agree unconditionally.
 //
-//  1. "does the verb resolve in the cobra tree at all" — a stub IS a
-//     tree node, so this passes `bench report` as live. Wrong: proxy
-//     was tree membership, not handler shape.
-//  2. "a Hidden command doesn't count" — fails `spec-init`, a fully
-//     live Hidden alias (see below). Wrong: proxy was visibility, not
-//     handler shape.
-//  3. "Hidden && DisableFlagParsing" — happens to match
-//     stubDeprecated's own body, but that combination is a
-//     coincidence of ONE helper's implementation, not a contract any
-//     other stub (or any live command) is bound to. Wrong: proxy was
-//     two unrelated cobra fields that merely correlate with stubs
-//     TODAY.
-//  4. (current) `Run` set and `RunE` not set, read off the
-//     `&cobra.Command{...}` LITERAL only. Closer — every genuine
-//     command in cmd/mindspec sets RunE (so cobra's error surface and
-//     exit-code plumbing apply uniformly), and stubDeprecated's
-//     returned literal sets Run, not RunE, for the one documented,
-//     load-bearing reason in that file's own doc comment (cobra's
-//     default RunE error surface can't guarantee "exactly one stderr
-//     line, exit code 2"). But reading the literal ALONE is still a
-//     proxy for "has a RunE", not the property itself: cobra.Command's
-//     Run/RunE are ordinary exported fields, assignable after
-//     construction, and cmd/mindspec already does this —
-//     spec_init.go:18 sets `specInitCmd.RunE = specCreateCmd.RunE`
-//     inside init() to reuse spec-create's handler. specInitCmd's own
-//     literal sets neither field, the exact shape a stub built the
-//     same way would also have.
+// DisableFlagParsing is what actually explains the correlation the
+// ruling is trying to capture: a stub's exit-2-on-`--help` behaviour
+// depends on DisableFlagParsing, not on Run-vs-RunE per se (RunE could
+// just as well be used by a hypothetical future stub). Every one of
+// cmd/mindspec's six real stubs sets it; cobra's `help` does not
+// (verified below, TestCmdTree_HelpIsLiveNotStub). This is a narrow,
+// evidence-driven repair of an unmeasured gap in the ruling's literal
+// text — escalated to, and APPROVED by, the bead author (mindspec-ng3g)
+// per the ruling's own sign-off instruction, with one required
+// refinement recorded in the three points below.
 //
-// The fix (Pass 4 in scanCmdDir, O1-3) is to check the actual
-// property as closely as this AST-only lint can: resolve Run/RunE
-// from EVERY assignment to a known command var's `.Run`/`.RunE`
-// selector anywhere in the package, not just its literal — see Pass
-// 4's own doc comment for exactly what is and is not resolved this
-// way. `Hidden` and `DisableFlagParsing` remain no part of the signal:
-// both are also true of the live hidden alias `spec-init`, which sets
-// neither Run nor RunE on its literal and is correctly classified
-// live only because Pass 4 finds its out-of-line RunE assignment. See
-// TestR5SpecInitAliasResolvesLive / the out-of-line fixture tests
-// below and docs_truth_test.go's R5 cases.
+// IMPORTANT, per that sign-off: DisableFlagParsing is a CORRELATE, not
+// the property. It explains WHY a stub happens to exit 2 on `--help`
+// today; it does not define what a stub IS. Its use here is safe for
+// exactly one reason, and the reasoning must not be separated from it:
 //
-// This signal needs no name of deprecated_commands.go or of any verb:
-// if that file is deleted (its own header says a follow-up will, after
-// one release), no literal or assignment ever sets Run without RunE in
-// the remaining files, no node is ever marked stub, and the six
-// retired verbs simply vanish from the tree — R1 catches them as plain
-// unresolved verbs. TestCmdTreeDegradesWithoutDeprecatedFile below
-// proves this on a copy of the tree with that file physically removed.
+//  1. It is the STRUCTURAL half of a two-signal check, cross-checked
+//     against an INDEPENDENT behavioural signal (the real exit code).
+//  2. Safety rests entirely on that cross-check. If a future stub is
+//     ever built WITHOUT setting DisableFlagParsing, the structural
+//     signal reports "live" while the behavioural signal (still
+//     exit 2, because the stub's Run still os.Exit(2)s once cobra's
+//     flag parsing lets it run) reports "stub" — disagreement, and the
+//     build HARD-FAILS LOUDLY. That is the correct, safe direction: a
+//     loud break, not a silent misclassification.
+//  3. Consequently, THE STRUCTURAL SIGNAL MUST NEVER BE USED ALONE.
+//     Collapsing to bare "HasRun && !HasRunE && DisableFlagParsing"
+//     with no live behavioural cross-check would be, verbatim, wrong
+//     version #3 from the ruling's own history ("Hidden &&
+//     DisableFlagParsing... a coincidence of ONE helper's
+//     implementation, not a contract any other stub is bound to") —
+//     this is discriminator attempt SIX, and the only reason it is not
+//     also wrong is the cross-check in point 1. A future maintainer
+//     tempted to "simplify" by deleting the behavioural probe and
+//     trusting the structural signal alone would silently resurrect
+//     that exact, already-rejected failure mode.
 //
-// A fifth evasion shape remains structurally reachable and is NOT
-// resolved by Pass 4: assignment through indirection — a helper
-// function that takes the command as a parameter and assigns to it
-// internally, a method value, or a command reached via a slice/map
-// element rather than a bare package-level identifier on the
-// assignment's left-hand side. Pass 4 only resolves the direct
-// `<known-var>.Run = ...` / `<known-var>.RunE = ...` shape (which is
-// the only shape cmd/mindspec currently uses, per its own doc
-// comment). This is the documented, explicit limit rather than a
-// fifth proxy: a future indirect-assignment idiom would need Pass 4
-// extended, not silently trusted.
+// A cleaner alternative EXISTS and was NOT taken: exclude cobra's
+// auto-registered builtins (`help`, `completion` and its children) by
+// PROVENANCE — they come from InitDefaultHelpCmd/InitDefaultCompletionCmd,
+// never from cmd/mindspec's own source — which would let the structural
+// signal stay the ruling's literal bare `HasRun && !HasRunE` with no
+// correlate field needed at all. That is more principled in the
+// abstract (no reliance on a field that merely correlates); it was not
+// implemented here because distinguishing "cobra-authored" from
+// "cmd/mindspec-authored" from OUTSIDE the cobra package, at dump time,
+// has no clean signal of its own (cobra does not expose command
+// provenance), and the two-signal design this ruling already mandates
+// makes the correlate-plus-cross-check approach above sufficient and
+// no less safe. Recorded here for whichever future author next touches
+// this discriminator.
+//
+// `__complete`, the OTHER Run-set/RunE-unset cobra builtin, never
+// appears in the dump at all: cobra registers it transiently, deep
+// inside Find()'s dynamic completion-request detection, and removes
+// it again before returning (spf13/cobra@v1.8.1 completions.go:195,
+// :263-291) — it is not part of the tree ExecuteC's
+// InitDefaultHelpCmd/InitDefaultCompletionCmd calls install up front,
+// so there is nothing here for it to disagree about.
+//
+// When deprecated_commands.go is eventually deleted, the structural
+// signal (now DisableFlagParsing-qualified) still degrades correctly:
+// no node in the remaining source sets DisableFlagParsing at all, so
+// no node is ever marked stub, `--help` behaviourally returns 0
+// everywhere, the two signals still agree ("no stubs"), and R5 simply
+// never fires — the exact vacuous-not-wrong degradation the ruling
+// requires, just anchored on the field that actually causes it.
 package lint
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
-// cmdNode is one node of the reconstructed cobra command tree.
+// cmdFlag is one flag visible on a node — its own, or inherited from
+// an ancestor's persistent flags (already resolved transitively by
+// cmd/mindspec's dump via cobra's own InheritedFlags(), so this file
+// never needs to walk ancestors itself). Type is pflag's
+// Value.Type() ("bool", "string", "int", ...) — see resolve()'s
+// flag-value-skip logic for why this ends a heuristic the AST model
+// was stuck guessing at.
+type cmdFlag struct {
+	Name      string
+	Shorthand string
+	Type      string
+}
+
+// cmdNode is one node of the real command tree, built once from
+// cmd/mindspec's __cmdtree dump.
 type cmdNode struct {
 	Use      string
 	Name     string // first whitespace-delimited field of Use
 	IsStub   bool
-	ArgMax   int             // max positional args this node's Args validator allows; -1 = unconstrained (O2-8) — see cobraArgMax
-	Flags    map[string]bool // flags registered directly on this node (Flags()/PersistentFlags()), PLUS cobra's auto-registered --help/-h (every node) and --version (root, when its literal sets Version) — see autoFlags (O2-6)
-	Persist  map[string]bool // flags registered via PersistentFlags() — inherited by descendants
+	ArgMax   int                // max positional args this node's Args validator allows; -1 = unconstrained
+	Flags    map[string]cmdFlag // keyed by both long name and shorthand (when set) — see linkDumpedNode
 	Parent   *cmdNode
 	Children []*cmdNode
 }
@@ -145,18 +192,15 @@ func (n *cmdNode) findChild(name string) *cmdNode {
 	return nil
 }
 
-// hasFlag reports whether name is registered on n or inherited from an
-// ancestor's persistent flag set.
+// hasFlag reports whether name (a long flag name, or a single-char
+// shorthand) is visible at n. No ancestor walk is needed: the dump
+// already resolved inheritance transitively via cobra's own
+// InheritedFlags(), which itself walks the FULL ancestor chain (cobra
+// updateParentsPflags visits every parent, not just the immediate
+// one), so n.Flags already contains everything n can see.
 func (n *cmdNode) hasFlag(name string) bool {
-	for cur := n; cur != nil; cur = cur.Parent {
-		if cur.Flags[name] {
-			return true
-		}
-		if cur.Persist[name] {
-			return true
-		}
-	}
-	return false
+	_, ok := n.Flags[name]
+	return ok
 }
 
 // path returns the dotted verb path for diagnostics, e.g. "panel disposition validate".
@@ -181,9 +225,9 @@ type resolveResult struct {
 // real children exist, then treats any remaining non-flag words as
 // positional arguments (a leaf command's own business, not this
 // resolver's — except when the deepest node reached sets an Args
-// validator this lint models, O2-8's "at minimum" arity check: see the
-// ArgMax guard below) and checks any `--flag`/`-h` words against the
-// deepest node reached (plus its ancestors' persistent flags).
+// validator this lint models, the ArgMax guard below) and checks any
+// `--flag`/short-flag words against the deepest node reached (plus
+// its ancestors' persistent flags, already folded into Flags).
 func (root *cmdNode) resolve(words []string) resolveResult {
 	if len(words) == 0 {
 		return resolveResult{Resolved: false, Reason: "empty invocation"}
@@ -211,15 +255,13 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 	if cur.IsStub {
 		return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q resolves to a one-shot deprecation stub (Run, not RunE)", cur.path())}
 	}
-	// Single pass over the trailing words: validate every --flag/-h
-	// against cur, and collect whatever is left as candidate
-	// positionals for the ArgMax check below. A long flag not already
-	// in `--name=value` form is heuristically assumed to consume the
-	// NEXT word as its value (e.g. `report list --resolve abc123`,
-	// report.go:125) — this package has no flag-type info (string vs
-	// bool) to do better, and over-permissively skipping a value-taking
-	// flag's argument is the safe direction for a truth LINT (a missed
-	// arity violation, not a false positive on a true claim).
+	// Single pass over the trailing words: validate every --flag/short
+	// flag against cur, and collect whatever is left as candidate
+	// positionals for the ArgMax check below. A long flag without an
+	// inline `--name=value` is assumed to consume the NEXT word as its
+	// value UNLESS its registered Type is "bool" (a bool flag takes no
+	// value at all — this is the fidelity win real flag-type data gives
+	// over the AST model's blind "always skip" guess, O2-r2-4).
 	var positionals []string
 	skipNextAsFlagValue := false
 	for _, w := range words[i:] {
@@ -235,29 +277,31 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 				name = name[:eq]
 				hasInlineValue = true
 			}
-			if !cur.hasFlag(name) {
+			flag, ok := cur.Flags[name]
+			if !ok {
 				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
 			}
-			if !hasInlineValue {
+			if !hasInlineValue && flag.Type != "bool" {
 				skipNextAsFlagValue = true
 			}
-		case w == "-h":
-			if !cur.hasFlag("h") {
-				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -h not registered on %q", cur.path())}
+		case len(w) == 2 && w[0] == '-' && w != "--":
+			name := w[1:]
+			if !cur.hasFlag(name) {
+				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -%s not registered on %q", name, cur.path())}
 			}
 		default:
 			positionals = append(positionals, w)
 		}
 	}
-	// ArgMax >= 0 means cur's Args validator is one this lint models
-	// (cobra.NoArgs => 0, cobra.ExactArgs(n)/cobra.MaximumNArgs(n) =>
-	// n) and enforces an upper bound: placeholders are skipped (same
-	// reasoning as isPlaceholderWord's doc comment — a doc author's
-	// `<spec-id>` can't be told apart from zero or one real args, so
-	// only a concrete EXTRA word is ever reported), and the first
-	// concrete positional beyond the bound fails. ExactArgs(n)'s own
-	// LOWER bound (a doc invocation with too few args) is a documented
-	// residual gap, not enforced here, for the identical reason.
+	// ArgMax >= 0 means cur's Args validator has a bound this lint
+	// modeled by actually invoking it (probeArgArities, cmd/mindspec/
+	// cmdtree_dump.go): placeholders are skipped (same reasoning as
+	// isPlaceholderWord's doc comment — a doc author's `<spec-id>`
+	// can't be told apart from zero or one real args, so only a
+	// concrete EXTRA word is ever reported), and the first concrete
+	// positional beyond the bound fails. A validator's own LOWER bound
+	// (e.g. ExactArgs's minimum) is a documented residual gap, not
+	// enforced here, for the identical reason.
 	if cur.ArgMax >= 0 {
 		seen := 0
 		for _, w := range mergeQuotedPositionals(positionals) {
@@ -279,8 +323,7 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 // isPlaceholderWord reports whether w is doc metasyntax for "some
 // value goes here" (`<bead-id>`, `[--flag]`, a quoted string) rather
 // than a literal positional argument a doc author actually typed, so
-// the ArgMax arity check above (cobra.NoArgs, cobra.ExactArgs(n),
-// cobra.MaximumNArgs(n) — O2-8) doesn't false-positive on the ordinary
+// the ArgMax arity check above doesn't false-positive on the ordinary
 // placeholder forms docs use to describe a command's syntax.
 func isPlaceholderWord(w string) bool {
 	if strings.HasPrefix(w, "<") || strings.HasPrefix(w, "[") {
@@ -293,7 +336,7 @@ func isPlaceholderWord(w string) bool {
 // placeholder phrase back into one token before the ArgMax check
 // counts positionals. tokenizeInvocation is a plain whitespace split,
 // so `mindspec adr create "Use WebSockets for real-time updates"`
-// (project-docs/user/README.md:84, a TRUE claim: adr.go:22 sets Args:
+// (project-docs/user/README.md:84, a TRUE claim: adr.go sets Args:
 // cobra.ExactArgs(1)) arrives here as five separate words — `"Use`,
 // `WebSockets`, `for`, `real-time`, `updates"` — of which only the
 // first satisfies isPlaceholderWord's "starts with a quote" test; the
@@ -332,807 +375,185 @@ func mergeQuotedPositionals(words []string) []string {
 	return out
 }
 
-// --- AST extraction -------------------------------------------------
+// --- ground truth: build + introspect the real binary ----------------
 
-// commandDef is the intermediate record for one discovered
-// cobra.Command construction, keyed by its package-level var name (or
-// "" for anonymous stub children built inline, e.g.
-// stubDeprecated("serve", ...) passed directly to AddCommand).
-type commandDef struct {
-	VarName      string
-	Use          string
-	HasRun       bool
-	HasRunE      bool
-	HasVersion   bool // literal sets a Version field (root.go:57) — seeds the auto --version flag (O2-6)
-	ArgMax       int  // max positional args allowed; -1 = unconstrained (O2-8) — see cobraArgMax
-	flagsByVar   map[string]bool
-	persistByVar map[string]bool
+// cmdTreeFlagDump/cmdTreeDump mirror cmd/mindspec/cmdtree_dump.go's
+// JSON shape exactly (cmdTreeFlag/cmdTreeNode there).
+type cmdTreeFlagDump struct {
+	Name      string `json:"name"`
+	Shorthand string `json:"shorthand"`
+	Type      string `json:"type"`
 }
 
-func (d commandDef) isStub() bool { return d.HasRun && !d.HasRunE }
-
-// edge is a parent->child AddCommand relationship. Child is either a
-// package var name (resolved against the defs map) or, for an inline
-// anonymous stub, empty with AnonChild populated directly.
-type edge struct {
-	Parent    string
-	Child     string
-	AnonChild *commandDef
+type cmdTreeDump struct {
+	Name               string            `json:"name"`
+	Use                string            `json:"use"`
+	Hidden             bool              `json:"hidden"`
+	HasRun             bool              `json:"hasRun"`
+	HasRunE            bool              `json:"hasRunE"`
+	DisableFlagParsing bool              `json:"disableFlagParsing"`
+	OwnFlags           []cmdTreeFlagDump `json:"ownFlags"`
+	InheritedFlags     []cmdTreeFlagDump `json:"inheritedFlags"`
+	ArgArities         []int             `json:"argArities"`
+	ArgUnbounded       bool              `json:"argUnbounded"`
+	ArgProbeError      string            `json:"argProbeError"`
+	Children           []*cmdTreeDump    `json:"children"`
 }
 
-// cmdTreeBuild is the parsed-but-not-yet-linked result of scanning a
-// cmd/mindspec-shaped directory.
-type cmdTreeBuild struct {
-	Defs      map[string]*commandDef
-	Edges     []edge
-	FieldDefs map[string]*ast.FuncDecl // helper functions returning *cobra.Command, by name
+var (
+	cmdTreeOnce   sync.Once
+	cmdTreeCached *cmdNode
+	cmdTreeErr    error
+)
+
+// buildCmdTree returns the real cmd/mindspec command tree, built and
+// introspected exactly once per `go test` run (sync.Once) regardless
+// of how many tests call it — the binding ruling's measured cost
+// (~1.6s build + ~8ms/exec) is paid once, not per test. t is used only
+// to obtain a scratch TempDir for the build; the Once body never calls
+// a Fatal-style method on it (t.Fatalf inside a sync.Once.Do would
+// Goexit out of the closure, leaving cmdTreeCached/cmdTreeErr at their
+// zero values for every LATER caller — a silent-success-looking nil
+// tree). Every failure path here returns a plain error instead, for
+// the caller (same call shape docs_truth_test.go already uses) to
+// t.Fatalf on.
+func buildCmdTree(t *testing.T) (*cmdNode, error) {
+	t.Helper()
+	tmp := t.TempDir()
+	cmdTreeOnce.Do(func() {
+		cmdTreeCached, cmdTreeErr = buildCmdTreeOnce(tmp)
+	})
+	return cmdTreeCached, cmdTreeErr
 }
 
-// buildCmdTree parses every non-test .go file in dir (a package `main`
-// directory shaped like cmd/mindspec) and returns the reconstructed
-// root cobra.Command tree, rooted at the var named "rootCmd" whose Use
-// is "mindspec". Returns an error only on unparseable Go source or a
-// missing/malformed rootCmd — never on the absence of any particular
-// command file (see the package doc comment's degradation guarantee).
-func buildCmdTree(dir string) (*cmdNode, error) {
-	build, err := scanCmdDir(dir)
+func buildCmdTreeOnce(tmp string) (*cmdNode, error) {
+	binPath, err := buildMindspecBinaryHermetic(tmp)
 	if err != nil {
 		return nil, err
 	}
-	return linkCmdTree(build)
-}
 
-func scanCmdDir(dir string) (*cmdTreeBuild, error) {
-	entries, err := os.ReadDir(dir)
+	dumpOut, err := runMindspec(binPath, tmp, []string{"__cmdtree"})
 	if err != nil {
-		return nil, fmt.Errorf("read dir %s: %w", dir, err)
+		return nil, fmt.Errorf("%s __cmdtree: %w", binPath, err)
 	}
-	fset := token.NewFileSet()
-	build := &cmdTreeBuild{
-		Defs:      map[string]*commandDef{},
-		FieldDefs: map[string]*ast.FuncDecl{},
-	}
-	var files []*ast.File
-	for _, ent := range entries {
-		name := ent.Name()
-		if ent.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		full := filepath.Join(dir, name)
-		f, err := parser.ParseFile(fset, full, nil, parser.ParseComments)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", full, err)
-		}
-		files = append(files, f)
+	var dump cmdTreeDump
+	if err := json.Unmarshal(dumpOut, &dump); err != nil {
+		return nil, fmt.Errorf("unmarshal __cmdtree output: %w\noutput: %s", err, dumpOut)
 	}
 
-	// Pass 0: index every top-level func decl (candidates for the
-	// one-level helper-indirection rule).
-	for _, f := range files {
-		for _, decl := range f.Decls {
-			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
-				build.FieldDefs[fn.Name.Name] = fn
-			}
-		}
+	var disagreements []string
+	var probeErrors []string
+	root := linkDumpedNode(&dump, nil, binPath, tmp, &disagreements, &probeErrors)
+	if len(probeErrors) > 0 {
+		return nil, fmt.Errorf("Args validator probe failure(s), refusing to guess:\n  %s", strings.Join(probeErrors, "\n  "))
 	}
-
-	// Pass 1: package-level var decls that construct a *cobra.Command,
-	// directly, via one-level helper indirection, or via an IIFE.
-	for _, f := range files {
-		for _, decl := range f.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.VAR {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for i, name := range vs.Names {
-					if i >= len(vs.Values) {
-						continue
-					}
-					build.processVarValue(name.Name, vs.Values[i])
-				}
-			}
-		}
-	}
-
-	// Pass 2: every top-level `<ident>.AddCommand(<arg1>, <arg2>, ...)`
-	// call anywhere in the package (init() functions, registration
-	// helpers, etc.) — O1-5: cobra's AddCommand is variadic
-	// (`AddCommand(cmds ...*cobra.Command)`), so every arg is walked,
-	// not just a lone single argument. IIFE-internal AddCommand calls
-	// are already captured by processVarValue's IIFE unwrap and are
-	// not re-walked here (their receiver is a func-local var, not a
-	// package-level one, so this generic walk — keyed by known
-	// package var names — never matches them twice).
-	for _, f := range files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "AddCommand" {
-				return true
-			}
-			recv, ok := sel.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if _, known := build.Defs[recv.Name]; !known {
-				return true // not a tracked package-level command var (e.g. a local IIFE var)
-			}
-			for _, arg := range call.Args {
-				build.addEdgeFromArg(recv.Name, arg)
-			}
-			return true
-		})
-	}
-
-	// Pass 4: out-of-line Run/RunE assignments anywhere in the package
-	// — O1-3. A package-level command var's composite literal is not
-	// the whole truth about whether it is a live command or a one-shot
-	// deprecation stub: cmd/mindspec/spec_init.go:18 assigns
-	// `specInitCmd.RunE = specCreateCmd.RunE` inside init() to reuse
-	// spec-create's handler, so specInitCmd's own literal carries
-	// neither Run nor RunE. Without this pass, isStub() sees HasRun
-	// and HasRunE both false for such a var — the SAME shape a stub
-	// literal that assigns Run out-of-line instead of inline would
-	// also produce — and classifies it live only because, today, no
-	// stub happens to be built this way. This pass makes the
-	// classification correct regardless of which idiom a command
-	// (real or stub) uses: it walks every `<ident>.Run = ...` /
-	// `<ident>.RunE = ...` assignment (any function body, not just
-	// init() — the idiom is not special to init(), and a future stub
-	// wired from a different function must be caught the same way)
-	// where <ident> is a known package-level command var, and updates
-	// that def's HasRun/HasRunE accordingly. Chained/indirect
-	// assignment (e.g. through a helper function taking the command as
-	// a parameter, a method value, or a command reached via a
-	// slice/map rather than a bare package-level identifier) is NOT
-	// resolved — the assignment's LHS must be `<known-var>.Run` /
-	// `<known-var>.RunE` literally. Every current use in cmd/mindspec
-	// (grepped: exactly spec_init.go:18) is this direct shape; a
-	// future indirection would need to extend this pass, not be
-	// silently trusted.
-	for _, f := range files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			assign, ok := n.(*ast.AssignStmt)
-			if !ok || assign.Tok != token.ASSIGN {
-				return true
-			}
-			for _, lhs := range assign.Lhs {
-				sel, ok := lhs.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				recv, ok := sel.X.(*ast.Ident)
-				if !ok {
-					continue
-				}
-				def, known := build.Defs[recv.Name]
-				if !known {
-					continue
-				}
-				switch sel.Sel.Name {
-				case "Run":
-					def.HasRun = true
-				case "RunE":
-					def.HasRunE = true
-				}
-			}
-			return true
-		})
-	}
-
-	// Pass 3: flag registrations anywhere in the package:
-	// <ident>.Flags().Method(name, ...) / <ident>.PersistentFlags().Method(name, ...).
-	for _, f := range files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			methodName := sel.Sel.Name
-			inner, ok := sel.X.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			innerSel, ok := inner.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			var persistent bool
-			switch innerSel.Sel.Name {
-			case "Flags":
-				persistent = false
-			case "PersistentFlags":
-				persistent = true
-			default:
-				return true
-			}
-			recv, ok := innerSel.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			def, known := build.Defs[recv.Name]
-			if !known {
-				return true
-			}
-			argIdx := 0
-			if strings.HasSuffix(methodName, "VarP") || strings.HasSuffix(methodName, "Var") {
-				argIdx = 1
-			}
-			if len(call.Args) <= argIdx {
-				return true
-			}
-			flagName, ok := stringLitValue(call.Args[argIdx])
-			if !ok {
-				return true
-			}
-			if def.flagsByVar == nil {
-				def.flagsByVar = map[string]bool{}
-			}
-			if def.persistByVar == nil {
-				def.persistByVar = map[string]bool{}
-			}
-			if persistent {
-				def.persistByVar[flagName] = true
-			} else {
-				def.flagsByVar[flagName] = true
-			}
-			return true
-		})
-	}
-
-	return build, nil
-}
-
-// processVarValue attempts to classify a package-level var's RHS
-// expression as a cobra.Command construction (direct, helper-call, or
-// IIFE) and, if so, registers it (and any IIFE-internal AddCommand
-// edges) into the build.
-func (b *cmdTreeBuild) processVarValue(varName string, rhs ast.Expr) {
-	// Direct: `&cobra.Command{...}`.
-	if u, ok := rhs.(*ast.UnaryExpr); ok && u.Op == token.AND {
-		if cl, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(cl.Type) {
-			use, hasRun, hasRunE, hasVersion, argMax := inspectCommandLiteral(cl)
-			b.Defs[varName] = &commandDef{VarName: varName, Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, ArgMax: argMax}
-			return
-		}
-	}
-	// IIFE: `func() *cobra.Command { ... }()`.
-	if body, ok := isIIFECommandCall(rhs); ok {
-		def, edges := b.unwrapIIFE(varName, body)
-		if def != nil {
-			def.VarName = varName
-			b.Defs[varName] = def
-			b.Edges = append(b.Edges, edges...)
-		}
-		return
-	}
-	// One-level helper indirection: `helper(args...)`.
-	if call, ok := rhs.(*ast.CallExpr); ok {
-		if def, edges := b.resolveHelperCall(call, varName); def != nil {
-			def.VarName = varName
-			b.Defs[varName] = def
-			b.Edges = append(b.Edges, edges...)
-		}
-	}
-}
-
-func isCobraCommandType(t ast.Expr) bool {
-	sel, ok := t.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	pkg, ok := sel.X.(*ast.Ident)
-	return ok && pkg.Name == "cobra" && sel.Sel.Name == "Command"
-}
-
-// inspectCommandLiteral extracts Use/Run/RunE/Version/Args presence
-// from a &cobra.Command{...} composite literal's key-value fields.
-func inspectCommandLiteral(cl *ast.CompositeLit) (use string, hasRun, hasRunE, hasVersion bool, argMax int) {
-	argMax = -1
-	for _, elt := range cl.Elts {
-		kv, ok := elt.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := kv.Key.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		switch key.Name {
-		case "Use":
-			if s, ok := stringLitValue(kv.Value); ok {
-				use = s
-			}
-		case "Run":
-			hasRun = true
-		case "RunE":
-			hasRunE = true
-		case "Version":
-			hasVersion = true
-		case "Args":
-			if n, ok := cobraArgMax(kv.Value); ok {
-				argMax = n
-			}
-		}
-	}
-	return use, hasRun, hasRunE, hasVersion, argMax
-}
-
-// cobraArgMax reports the maximum positional-argument count e
-// enforces, for the three cobra.PositionalArgs forms this lint
-// models: `cobra.NoArgs` (max 0), `cobra.ExactArgs(n)` and
-// `cobra.MaximumNArgs(n)` (max n, literal integer argument only).
-// ExactArgs's own LOWER bound is not modeled — see resolve()'s ArgMax
-// guard for why — so ExactArgs(n) and MaximumNArgs(n) are treated
-// identically here. `cobra.MinimumNArgs`, `cobra.ArbitraryArgs`, a
-// custom func value, or no Args field at all all report ok=false
-// (unconstrained), which is the safe direction for a truth LINT (a
-// missed arity violation, never a false positive on a true claim).
-func cobraArgMax(e ast.Expr) (int, bool) {
-	if sel, ok := e.(*ast.SelectorExpr); ok {
-		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "cobra" && sel.Sel.Name == "NoArgs" {
-			return 0, true
-		}
-		return 0, false
-	}
-	call, ok := e.(*ast.CallExpr)
-	if !ok {
-		return 0, false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return 0, false
-	}
-	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != "cobra" {
-		return 0, false
-	}
-	switch sel.Sel.Name {
-	case "ExactArgs", "MaximumNArgs":
-	default:
-		return 0, false
-	}
-	if len(call.Args) != 1 {
-		return 0, false
-	}
-	lit, ok := call.Args[0].(*ast.BasicLit)
-	if !ok || lit.Kind != token.INT {
-		return 0, false
-	}
-	n, err := strconv.Atoi(lit.Value)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// resolveHelperCall implements the one-level function-call indirection
-// rule: v is `helper(args...)` where helper is a same-package function
-// whose body's sole cobra.Command construction is `return
-// &cobra.Command{...}` (optionally via a named result / local var).
-// Fields on that literal that read one of helper's own parameters are
-// resolved back through args at this call site.
-//
-// O2-3: it ALSO walks the helper's body for `<local>.AddCommand(...)`
-// and `<local>.Flags()/PersistentFlags().<Method>(name, ...)` calls on
-// the same local the returned literal was built from — the extraction
-// unwrapIIFE already performs for an inline IIFE body, reused here via
-// addCommandArgsForLocal/flagCallsForLocal — so a command built by
-// one-level helper indirection (`reportCmd = newReportCmd()`,
-// report.go:81-92) is modeled with its real children and flags instead
-// of as a childless, flagless leaf: without this, ANY invented
-// subcommand under such a parent resolves true (the leaf
-// positional-args arm swallows it), and a real flag on it
-// false-positives as unregistered, which is worse — it turns a TRUE
-// documented claim red and creates pressure to add an exception row.
-//
-// selfName is the var name this call's result will be known by in the
-// tree (the caller's own package-level var name, or a freshly minted
-// anonymous name for an inline helper call used directly as an
-// AddCommand argument) — used to parent any children discovered here,
-// and to seed further-nested anonymous children's names.
-func (b *cmdTreeBuild) resolveHelperCall(call *ast.CallExpr, selfName string) (*commandDef, []edge) {
-	fnIdent, ok := call.Fun.(*ast.Ident)
-	if !ok {
-		return nil, nil
-	}
-	fn, ok := b.FieldDefs[fnIdent.Name]
-	if !ok || fn.Body == nil {
-		return nil, nil
-	}
-	localName, cl := findReturnedCommandLiteralVar(fn.Body)
-	if cl == nil {
-		return nil, nil
-	}
-	paramIndex := map[string]int{}
-	if fn.Type.Params != nil {
-		idx := 0
-		for _, field := range fn.Type.Params.List {
-			for _, n := range field.Names {
-				paramIndex[n.Name] = idx
-				idx++
-			}
-		}
-	}
-	var use string
-	var hasRun, hasRunE, hasVersion bool
-	argMax := -1
-	for _, elt := range cl.Elts {
-		kv, ok := elt.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := kv.Key.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		switch key.Name {
-		case "Use":
-			if s, ok := stringLitValue(kv.Value); ok {
-				use = s
-			} else if paramRef, ok := kv.Value.(*ast.Ident); ok {
-				if idx, isParam := paramIndex[paramRef.Name]; isParam && idx < len(call.Args) {
-					if s, ok := stringLitValue(call.Args[idx]); ok {
-						use = s
-					}
-				}
-			}
-		case "Run":
-			hasRun = true
-		case "RunE":
-			hasRunE = true
-		case "Version":
-			hasVersion = true
-		case "Args":
-			if n, ok := cobraArgMax(kv.Value); ok {
-				argMax = n
-			}
-		}
-	}
-
-	flagsByVar, persistByVar := flagCallsForLocal(fn.Body, localName)
-
-	var edges []edge
-	anonCount := 0
-	for _, arg := range addCommandArgsForLocal(fn.Body, localName) {
-		switch a := arg.(type) {
-		case *ast.Ident:
-			edges = append(edges, edge{Parent: selfName, Child: a.Name})
-		case *ast.CallExpr:
-			anonCount++
-			childName := fmt.Sprintf("%s#anon%d", selfName, anonCount)
-			if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
-				childDef.VarName = childName
-				edges = append(edges, edge{Parent: selfName, AnonChild: childDef})
-				edges = append(edges, childEdges...)
-			}
-		}
-	}
-
-	def := &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, ArgMax: argMax, flagsByVar: flagsByVar, persistByVar: persistByVar}
-	return def, edges
-}
-
-// findReturnedCommandLiteralVar looks for a `return &cobra.Command{...}`
-// (possibly `return localVar` where localVar was assigned from such a
-// literal earlier in the same block) inside body. One level of local
-// alias resolution only. Returns the local variable name the literal
-// was built from — fed to flagCallsForLocal/addCommandArgsForLocal by
-// resolveHelperCall (O2-3) — or "" when the literal is returned
-// directly with no intermediate local (e.g. stubDeprecated's `return
-// &cobra.Command{...}`, deprecated_commands.go:66), in which case
-// those two scans correctly find nothing (no real identifier is ever
-// named "").
-func findReturnedCommandLiteralVar(body *ast.BlockStmt) (localName string, cl *ast.CompositeLit) {
-	locals := map[string]*ast.CompositeLit{}
-	for _, stmt := range body.List {
-		switch s := stmt.(type) {
-		case *ast.AssignStmt:
-			if len(s.Lhs) == 1 && len(s.Rhs) == 1 {
-				if id, ok := s.Lhs[0].(*ast.Ident); ok {
-					if u, ok := s.Rhs[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
-						if lit, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(lit.Type) {
-							locals[id.Name] = lit
-						}
-					}
-				}
-			}
-		case *ast.ReturnStmt:
-			if len(s.Results) == 1 {
-				if u, ok := s.Results[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
-					if lit, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(lit.Type) {
-						cl = lit
-						localName = ""
-					}
-				} else if id, ok := s.Results[0].(*ast.Ident); ok {
-					if lit, ok := locals[id.Name]; ok {
-						cl = lit
-						localName = id.Name
-					}
-				}
-			}
-		}
-	}
-	return localName, cl
-}
-
-// flagCallsForLocal scans node for `<local>.Flags().Method(name, ...)`
-// / `<local>.PersistentFlags().Method(name, ...)` calls and returns the
-// flag names found, split by persistence. The same extraction Pass 3
-// (scanCmdDir) performs for a known PACKAGE-LEVEL var, generalized to
-// any AST scope (a helper function body, an IIFE body) and any local
-// identifier — Pass 3 can't see flags registered on a helper's local
-// var (e.g. `c.Flags().String(...)` inside newReportListCmd,
-// report.go:125-126), because its receiver-identity check requires the
-// receiver to already be a tracked package-level def.
-func flagCallsForLocal(node ast.Node, localName string) (flags, persist map[string]bool) {
-	flags = map[string]bool{}
-	persist = map[string]bool{}
-	ast.Inspect(node, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		methodName := sel.Sel.Name
-		inner, ok := sel.X.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		innerSel, ok := inner.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		var isPersistent bool
-		switch innerSel.Sel.Name {
-		case "Flags":
-			isPersistent = false
-		case "PersistentFlags":
-			isPersistent = true
-		default:
-			return true
-		}
-		recv, ok := innerSel.X.(*ast.Ident)
-		if !ok || recv.Name != localName {
-			return true
-		}
-		argIdx := 0
-		if strings.HasSuffix(methodName, "VarP") || strings.HasSuffix(methodName, "Var") {
-			argIdx = 1
-		}
-		if len(call.Args) <= argIdx {
-			return true
-		}
-		flagName, ok := stringLitValue(call.Args[argIdx])
-		if !ok {
-			return true
-		}
-		if isPersistent {
-			persist[flagName] = true
-		} else {
-			flags[flagName] = true
-		}
-		return true
-	})
-	return flags, persist
-}
-
-// addCommandArgsForLocal scans node for `<local>.AddCommand(<args...>)`
-// calls and returns every arg — O1-5: cobra's AddCommand is variadic
-// (`AddCommand(cmds ...*cobra.Command)`), so a registration written as
-// `AddCommand(a, b, c)` must yield three children, not be silently
-// skipped (the old single-arg-only extraction returned nothing at all
-// for such a call, making every child in it invisible to the tree).
-func addCommandArgsForLocal(node ast.Node, localName string) []ast.Expr {
-	var out []ast.Expr
-	ast.Inspect(node, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "AddCommand" {
-			return true
-		}
-		recv, ok := sel.X.(*ast.Ident)
-		if !ok || recv.Name != localName {
-			return true
-		}
-		out = append(out, call.Args...)
-		return true
-	})
-	return out
-}
-
-// isIIFECommandCall reports whether rhs is `func() *cobra.Command {
-// ... }()` and, if so, returns the func literal's body.
-func isIIFECommandCall(rhs ast.Expr) (*ast.BlockStmt, bool) {
-	call, ok := rhs.(*ast.CallExpr)
-	if !ok || len(call.Args) != 0 {
-		return nil, false
-	}
-	flit, ok := call.Fun.(*ast.FuncLit)
-	if !ok || flit.Type.Results == nil || len(flit.Type.Results.List) != 1 {
-		return nil, false
-	}
-	star, ok := flit.Type.Results.List[0].Type.(*ast.StarExpr)
-	if !ok || !isCobraCommandType(star.X) {
-		return nil, false
-	}
-	return flit.Body, true
-}
-
-// unwrapIIFE processes an immediately-invoked func literal's body:
-// finds the local `c := &cobra.Command{...}` that becomes varName's
-// def, and every `c.AddCommand(<arg>)` call on that same local becomes
-// a child edge (with inline stubDeprecated(...)-shaped call args
-// resolved to anonymous stub commandDefs via resolveHelperCall).
-func (b *cmdTreeBuild) unwrapIIFE(varName string, body *ast.BlockStmt) (*commandDef, []edge) {
-	var localName string
-	var def *commandDef
-	for _, stmt := range body.List {
-		assign, ok := stmt.(*ast.AssignStmt)
-		if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
-			continue
-		}
-		id, ok := assign.Lhs[0].(*ast.Ident)
-		if !ok {
-			continue
-		}
-		u, ok := assign.Rhs[0].(*ast.UnaryExpr)
-		if !ok || u.Op != token.AND {
-			continue
-		}
-		cl, ok := u.X.(*ast.CompositeLit)
-		if !ok || !isCobraCommandType(cl.Type) {
-			continue
-		}
-		use, hasRun, hasRunE, hasVersion, argMax := inspectCommandLiteral(cl)
-		def = &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, ArgMax: argMax}
-		localName = id.Name
-	}
-	if def == nil {
-		return nil, nil
-	}
-	var edges []edge
-	anonCount := 0
-	for _, arg := range addCommandArgsForLocal(body, localName) {
-		switch a := arg.(type) {
-		case *ast.Ident:
-			edges = append(edges, edge{Parent: varName, Child: a.Name})
-		case *ast.CallExpr:
-			anonCount++
-			childName := fmt.Sprintf("%s#anon%d", varName, anonCount)
-			if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
-				childDef.VarName = childName
-				edges = append(edges, edge{Parent: varName, AnonChild: childDef})
-				edges = append(edges, childEdges...)
-			}
-		}
-	}
-	return def, edges
-}
-
-// addEdgeFromArg records parent->arg as an edge, resolving arg as
-// either a known var reference or an inline helper call (anonymous
-// stub child).
-func (b *cmdTreeBuild) addEdgeFromArg(parent string, arg ast.Expr) {
-	switch a := arg.(type) {
-	case *ast.Ident:
-		b.Edges = append(b.Edges, edge{Parent: parent, Child: a.Name})
-	case *ast.CallExpr:
-		childName := fmt.Sprintf("%s#anon%d", parent, len(b.Edges))
-		if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
-			childDef.VarName = childName
-			b.Edges = append(b.Edges, edge{Parent: parent, AnonChild: childDef})
-			b.Edges = append(b.Edges, childEdges...)
-		}
-	}
-}
-
-func stringLitValue(e ast.Expr) (string, bool) {
-	bl, ok := e.(*ast.BasicLit)
-	if !ok || bl.Kind != token.STRING {
-		return "", false
-	}
-	v, err := strconv.Unquote(bl.Value)
-	if err != nil {
-		return "", false
-	}
-	return v, true
-}
-
-// autoFlags returns the flag set for a command node: whatever
-// flagsByVar registered explicitly on it, plus cobra's own
-// auto-registered flags — O2-6: --help/-h on EVERY command (cobra's
-// InitDefaultHelpFlag), and --version additionally when the command's
-// own literal sets a Version field (root.go:57 sets Version on
-// rootCmd). Without this, resolve() reported "flag --help not
-// registered" on the most ordinary true invocation a doc can contain
-// (`mindspec --help`, `mindspec doctor --help`) — a guaranteed false
-// positive that pressures the exception table to grow for no reason.
-func autoFlags(flagsByVar map[string]bool, hasVersion bool) map[string]bool {
-	out := map[string]bool{"help": true, "h": true}
-	for k := range flagsByVar {
-		out[k] = true
-	}
-	if hasVersion {
-		out["version"] = true
-	}
-	return out
-}
-
-// linkCmdTree assembles the collected defs/edges into a *cmdNode tree
-// rooted at "rootCmd".
-func linkCmdTree(b *cmdTreeBuild) (*cmdNode, error) {
-	nodes := map[string]*cmdNode{}
-	for name, def := range b.Defs {
-		nodes[name] = &cmdNode{
-			Use:     def.Use,
-			Name:    firstField(def.Use),
-			IsStub:  def.isStub(),
-			ArgMax:  def.ArgMax,
-			Flags:   autoFlags(def.flagsByVar, def.HasVersion),
-			Persist: def.persistByVar,
-		}
-	}
-	// Materialize anonymous children discovered as edge.AnonChild.
-	anonKey := func(e edge) string {
-		if e.Child != "" {
-			return e.Child
-		}
-		return e.AnonChild.VarName
-	}
-	for _, e := range b.Edges {
-		if e.AnonChild != nil {
-			nodes[e.AnonChild.VarName] = &cmdNode{
-				Use:     e.AnonChild.Use,
-				Name:    firstField(e.AnonChild.Use),
-				IsStub:  e.AnonChild.isStub(),
-				ArgMax:  e.AnonChild.ArgMax,
-				Flags:   autoFlags(e.AnonChild.flagsByVar, e.AnonChild.HasVersion),
-				Persist: e.AnonChild.persistByVar,
-			}
-		}
-	}
-	for _, e := range b.Edges {
-		parent, ok := nodes[e.Parent]
-		if !ok {
-			continue
-		}
-		child, ok := nodes[anonKey(e)]
-		if !ok {
-			continue
-		}
-		if child.Parent != nil {
-			continue // already linked (defensive; shouldn't happen with well-formed AddCommand usage)
-		}
-		child.Parent = parent
-		parent.Children = append(parent.Children, child)
-	}
-	root, ok := nodes["rootCmd"]
-	if !ok {
-		return nil, fmt.Errorf("no rootCmd construction found")
+	if len(disagreements) > 0 {
+		return nil, fmt.Errorf("stub-signal disagreement(s) between behavioural and structural checks — this is ALWAYS a hard failure, never a silent tie-break:\n  %s", strings.Join(disagreements, "\n  "))
 	}
 	if root.Name != "mindspec" {
-		return nil, fmt.Errorf("rootCmd.Use %q does not start with \"mindspec\"", root.Use)
+		return nil, fmt.Errorf(`__cmdtree root Use %q does not start with "mindspec"`, dump.Use)
 	}
 	return root, nil
+}
+
+// buildMindspecBinaryHermetic builds ./cmd/mindspec into <tmp>/mindspec,
+// returning the binary path. Shared by buildCmdTreeOnce (the real,
+// cached tree) and any test that needs its OWN independent throwaway
+// binary (e.g. TestStubSignalDisagreement_IsHardFailure, which must
+// inject a false structural claim onto a real path without disturbing
+// the shared cache).
+//
+// Deliberately does NOT set cmd.Env (inherits the real environment,
+// same as cmd/mindspec/testhelpers_test.go's buildMindspecBinary):
+// stripCmdTreeEnv's scrubbed HOME/PATH is for EXECUTING the already-
+// built binary only, never for the build step itself — `go build`
+// needs the real HOME/GOPATH/GOCACHE/GOMODCACHE to reuse the existing
+// module cache rather than re-populating one from scratch under a
+// throwaway HOME (which is slow, needs network, and — module cache
+// files are marked read-only by the go tool — leaves files t.TempDir's
+// cleanup cannot remove).
+func buildMindspecBinaryHermetic(tmp string) (string, error) {
+	repoRoot, err := repoRootPlain()
+	if err != nil {
+		return "", err
+	}
+	binPath := filepath.Join(tmp, "mindspec")
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/mindspec")
+	buildCmd.Dir = repoRoot
+	var stderr strings.Builder
+	buildCmd.Stderr = &stderr
+	if err := buildCmd.Run(); err != nil {
+		return "", fmt.Errorf("go build ./cmd/mindspec: %w\nstderr: %s", err, stderr.String())
+	}
+	return binPath, nil
+}
+
+// linkDumpedNode recursively converts a cmdTreeDump into a *cmdNode,
+// computing IsStub via the two-signal cross-check for every node
+// (appending to disagreements on mismatch) and ArgMax from the dump's
+// probed arities (appending to probeErrors when the dump itself
+// reported an unreliable Args validator). words is the path of real
+// argv words from the root to this node's PARENT (empty at the root),
+// used to invoke `<binPath> <words...> <name> --help` for the
+// behavioural signal.
+func linkDumpedNode(d *cmdTreeDump, parent *cmdNode, binPath, tmp string, disagreements, probeErrors *[]string) *cmdNode {
+	n := &cmdNode{
+		Use:    d.Use,
+		Name:   firstField(d.Use),
+		Parent: parent,
+		Flags:  map[string]cmdFlag{},
+	}
+	for _, f := range d.OwnFlags {
+		addCmdFlag(n.Flags, f)
+	}
+	for _, f := range d.InheritedFlags {
+		addCmdFlag(n.Flags, f)
+	}
+
+	if d.ArgProbeError != "" {
+		*probeErrors = append(*probeErrors, fmt.Sprintf("%s: %s", n.path(), d.ArgProbeError))
+	}
+	switch {
+	case d.ArgUnbounded, len(d.ArgArities) == 0:
+		n.ArgMax = -1
+	default:
+		n.ArgMax = d.ArgArities[len(d.ArgArities)-1] // probeArgArities emits arities in ascending order
+	}
+
+	structuralStub := d.HasRun && !d.HasRunE && d.DisableFlagParsing
+	behavioralStub, err := probeBehavioralStub(binPath, tmp, pathWordsFromNode(n))
+	if err != nil {
+		*probeErrors = append(*probeErrors, fmt.Sprintf("%s: behavioural stub probe: %v", n.path(), err))
+	} else if behavioralStub != structuralStub {
+		*disagreements = append(*disagreements, fmt.Sprintf("%s: behavioural(exit-code-derived)=%v structural(hasRun&&!hasRunE&&disableFlagParsing)=%v", n.path(), behavioralStub, structuralStub))
+	} else {
+		n.IsStub = structuralStub
+	}
+
+	for _, cd := range d.Children {
+		n.Children = append(n.Children, linkDumpedNode(cd, n, binPath, tmp, disagreements, probeErrors))
+	}
+	return n
+}
+
+// pathWordsFromNode reconstructs the argv words from root to n
+// (inclusive) by walking n.Parent — used only during linkDumpedNode,
+// before n.path()'s own ancestor chain would otherwise be usable, so
+// it takes the same walk path() does.
+func pathWordsFromNode(n *cmdNode) []string {
+	var parts []string
+	for cur := n; cur != nil; cur = cur.Parent {
+		parts = append([]string{cur.Name}, parts...)
+	}
+	return parts
+}
+
+func addCmdFlag(m map[string]cmdFlag, f cmdTreeFlagDump) {
+	cf := cmdFlag{Name: f.Name, Shorthand: f.Shorthand, Type: f.Type}
+	m[f.Name] = cf
+	if f.Shorthand != "" {
+		m[f.Shorthand] = cf
+	}
 }
 
 func firstField(use string) string {
@@ -1143,18 +564,117 @@ func firstField(use string) string {
 	return fields[0]
 }
 
-// --- helpers shared with docs_truth_test.go --------------------------
+// probeBehavioralStub runs `<binPath> <pathWords[1:]...> --help` and
+// reports whether the exit code matches a one-shot deprecation stub
+// (exit 2) or a live command (exit 0) — the BEHAVIOURAL half of the
+// two-signal stub check. --help is used, never a bare invocation:
+// bare `mindspec doctor` does real work (the judge measured this;
+// see the binding ruling), but `--help` on a live command is always
+// inert (intercepted centrally by cobra before Run/RunE), and on a
+// genuine stub (DisableFlagParsing=true) it is swallowed as a literal
+// arg and still fires the stub's Run. Any exit code other than 0 or 2
+// is an anomaly this lint refuses to interpret — returned as an error
+// rather than silently classified either way.
+func probeBehavioralStub(binPath, tmp string, pathWords []string) (bool, error) {
+	args := append(append([]string{}, pathWords[1:]...), "--help")
+	_, runErr := runMindspec(binPath, tmp, args)
+	if runErr == nil {
+		return false, nil // exit 0: live
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) {
+		return false, fmt.Errorf("exec %s %s: %w", binPath, strings.Join(args, " "), runErr)
+	}
+	switch exitErr.ExitCode() {
+	case 2:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s %s exited %d, expected 0 (live) or 2 (stub)", binPath, strings.Join(args, " "), exitErr.ExitCode())
+	}
+}
 
-// realCmdDir resolves the repo's cmd/mindspec directory relative to
-// this test file, independent of the test binary's working directory.
-func realCmdDir(t *testing.T) string {
-	t.Helper()
+// runMindspec execs binPath with args in a hermetic env, returning
+// combined stdout (stderr is discarded on success; included in the
+// wrapped error on failure via *exec.ExitError, which callers inspect
+// for its exit code — Stderr is intentionally not captured here since
+// no caller needs the stub's one-line message text, only its exit
+// code).
+func runMindspec(binPath, tmp string, args []string) ([]byte, error) {
+	cmd := exec.Command(binPath, args...)
+	cmd.Env = stripCmdTreeEnv(tmp)
+	return cmd.Output()
+}
+
+// stripCmdTreeEnv builds a hermetic environment for building/execing
+// the mindspec binary this file introspects — the SAME scrubbing
+// shape cmd/mindspec/testhelpers_test.go's strippedEnv already
+// establishes and exercises in CI (spec 084 Bead 2/3): no inherited
+// AGENTMIND_BIN, an empty PATH (via emptyDir), a fresh HOME (so config
+// probes can't pick up developer-host state), and no OTEL_*/
+// CLAUDE_CODE_ENABLE_TELEMETRY leakage. Duplicated rather than
+// imported: cmd/mindspec/testhelpers_test.go is a _test.go file in a
+// different package (main), and Go does not allow importing another
+// package's test-only sources — the binding ruling's mandate to REUSE
+// this shape (not invent a second, subtly different hermetic-env
+// idiom) is honored by copying the exact same env-var list, not by a
+// cross-package import that does not exist as a possibility.
+// emptyDir/homeDir are subdirectories of the caller-supplied tmp
+// (itself a t.TempDir(), so both are cleaned up with it) rather than
+// fresh t.TempDir() calls, because this runs from inside buildCmdTree's
+// sync.Once body, which — per that function's own doc comment — must
+// never touch a *testing.T once linkDumpedNode's exec loop begins.
+func stripCmdTreeEnv(tmp string) []string {
+	emptyDir := filepath.Join(tmp, "empty-path")
+	homeDir := filepath.Join(tmp, "home")
+	_ = os.MkdirAll(emptyDir, 0o755)
+	_ = os.MkdirAll(homeDir, 0o755)
+
+	out := []string{}
+	for _, kv := range os.Environ() {
+		switch {
+		case strings.HasPrefix(kv, "AGENTMIND_BIN="),
+			strings.HasPrefix(kv, "PATH="),
+			strings.HasPrefix(kv, "HOME="),
+			strings.HasPrefix(kv, "OTEL_"),
+			strings.HasPrefix(kv, "CLAUDE_CODE_ENABLE_TELEMETRY="):
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "PATH="+emptyDir)
+	out = append(out, "HOME="+homeDir)
+	out = append(out, "AGENTMIND_BIN=")
+	return out
+}
+
+// repoRootPlain returns the mindspec repository root by walking up
+// from this source file's own directory until go.mod names the
+// mindspec module — the runtime.Caller-based equivalent of
+// docs_truth_skills_test.go's realRepoRoot(t), but error-returning
+// (never t.Fatal) because it runs inside buildCmdTree's sync.Once
+// body — see that function's doc comment for why.
+func repoRootPlain() (string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("runtime.Caller failed")
+		return "", fmt.Errorf("runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "cmd", "mindspec")
+	dir := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	gm := filepath.Join(dir, "go.mod")
+	data, err := os.ReadFile(gm)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", gm, err)
+	}
+	if !strings.Contains(string(data), "module github.com/mrmaxsteel/mindspec") {
+		return "", fmt.Errorf("%s does not declare the mindspec module", gm)
+	}
+	return dir, nil
 }
+
+// --- helpers shared with docs_truth_test.go --------------------------
+//
+// realRepoRoot(t) — the t-taking equivalent of repoRootPlain, used by
+// docs_truth_test.go/docs_truth_skills_test.go — already lives in
+// docs_truth_skills_test.go; not redefined here.
 
 // dumpTree is a debugging aid (unused by any assertion; kept for
 // developer sanity-checking with `go test -run TestDumpCmdTree -v`).
@@ -1174,7 +694,7 @@ func dumpTree(n *cmdNode, depth int) []string {
 }
 
 func TestDumpCmdTree(t *testing.T) {
-	root, err := buildCmdTree(realCmdDir(t))
+	root, err := buildCmdTree(t)
 	if err != nil {
 		t.Fatalf("buildCmdTree: %v", err)
 	}
@@ -1182,5 +702,132 @@ func TestDumpCmdTree(t *testing.T) {
 		for _, line := range dumpTree(root, 0) {
 			t.Log(line)
 		}
+	}
+}
+
+// TestCmdTree_HelpIsLiveNotStub is the regression fixture for the one
+// documented, evidence-driven deviation from the ruling's literal
+// structural-signal text (see the package doc comment): cobra's own
+// `help` command is Run-set/RunE-unset — the AST-era stub shape — but
+// is obviously, permanently live. Without the DisableFlagParsing
+// conjunct this file adds to the structural signal, this would be a
+// standing two-signal disagreement (a hard failure) on every single
+// run, for a command cmd/mindspec never even wrote.
+func TestCmdTree_HelpIsLiveNotStub(t *testing.T) {
+	root, err := buildCmdTree(t)
+	if err != nil {
+		t.Fatalf("buildCmdTree: %v", err)
+	}
+	res := root.resolve([]string{"mindspec", "help", "doctor"})
+	if !res.Resolved {
+		t.Fatalf("expected mindspec help doctor to resolve live, got unresolved: %s", res.Reason)
+	}
+	res = root.resolve([]string{"mindspec", "help"})
+	if !res.Resolved {
+		t.Fatalf("expected mindspec help to resolve live, got unresolved: %s", res.Reason)
+	}
+}
+
+// TestCmdTree_CompletionAutoCommandsResolve pins the fix that
+// motivated B: the AST model reported completion (and its zsh/bash
+// children) as nonexistent, because cobra installs them at Execute()
+// time, invisible to any static reading of cmd/mindspec's source.
+// Reading the real, fully-initialised tree makes them ordinary,
+// correctly-live nodes.
+func TestCmdTree_CompletionAutoCommandsResolve(t *testing.T) {
+	root, err := buildCmdTree(t)
+	if err != nil {
+		t.Fatalf("buildCmdTree: %v", err)
+	}
+	for _, words := range [][]string{
+		{"mindspec", "completion", "zsh"},
+		{"mindspec", "completion", "bash"},
+	} {
+		if res := root.resolve(words); !res.Resolved {
+			t.Errorf("expected %q to resolve, got: %s", joinWords(words), res.Reason)
+		}
+	}
+}
+
+// TestStubSignalDisagreement_IsHardFailure is the RED-on-inject
+// regression test for the ruling's core anti-proxy requirement: the
+// two signals disagreeing must be a hard failure, never a silent
+// tie-break. It builds its OWN throwaway binary (independent of the
+// shared buildCmdTree cache — this must not pollute or depend on
+// timing with the cached tree's own tempdir lifecycle) and injects a
+// FALSE structural claim onto a REAL, known path in each direction,
+// observing linkDumpedNode actually append to disagreements against
+// the genuine behavioural signal from that real binary:
+//
+//   - "doctor" is a real, live command (HasRunE set, no
+//     DisableFlagParsing) — behaviourally `mindspec doctor --help`
+//     exits 0. Injecting HasRun=true/HasRunE=false/
+//     DisableFlagParsing=true (a fabricated stub claim) must disagree.
+//   - "bench" is a real deprecation stub (deprecated_commands.go) —
+//     behaviourally `mindspec bench --help` exits 2. Injecting
+//     HasRun=false/HasRunE=true (a fabricated live claim) must
+//     disagree.
+func TestStubSignalDisagreement_IsHardFailure(t *testing.T) {
+	binPath, err := buildMindspecBinaryHermetic(t.TempDir())
+	if err != nil {
+		t.Fatalf("buildMindspecBinaryHermetic: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		nodeUse string
+		fake    cmdTreeDump // HasRun/HasRunE/DisableFlagParsing only
+	}{
+		{"live path falsely claimed stub", "doctor", cmdTreeDump{HasRun: true, HasRunE: false, DisableFlagParsing: true}},
+		{"stub path falsely claimed live", "bench", cmdTreeDump{HasRun: false, HasRunE: true, DisableFlagParsing: false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			child := c.fake
+			child.Use = c.nodeUse
+			root := &cmdTreeDump{Use: "mindspec", Children: []*cmdTreeDump{&child}}
+
+			var disagreements, probeErrors []string
+			linkDumpedNode(root, nil, binPath, t.TempDir(), &disagreements, &probeErrors)
+
+			if len(probeErrors) != 0 {
+				t.Fatalf("expected no probe errors (real binary, real path), got: %v", probeErrors)
+			}
+			found := false
+			for _, d := range disagreements {
+				if strings.Contains(d, "mindspec "+c.nodeUse+":") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("expected a disagreement naming %q, got: %v", c.nodeUse, disagreements)
+			}
+		})
+	}
+}
+
+// TestArgProbeError_IsHardFailure is the analogous regression test for
+// the OTHER refuse-to-guess requirement: an Args validator that
+// panics or answers non-deterministically must fail loudly
+// (probeArgArities, cmd/mindspec/cmdtree_dump.go), never report a
+// guessed arity. Exercised directly against the dump's own JSON shape
+// (ArgProbeError non-empty), the same field linkDumpedNode checks.
+func TestArgProbeError_IsHardFailure(t *testing.T) {
+	d := &cmdTreeDump{Use: "mindspec", ArgProbeError: "Args(2 args) panicked: boom"}
+	var disagreements, probeErrors []string
+	// binPath deliberately does not exist: linkDumpedNode also runs the
+	// behavioural stub probe against it, which fails independently (a
+	// second, unrelated probeErrors entry) — asserting the SPECIFIC
+	// "boom" text below proves the ArgProbeError path itself surfaced,
+	// not merely that probeErrors is non-empty for some other reason.
+	linkDumpedNode(d, nil, "/nonexistent/mindspec-binary-not-invoked", t.TempDir(), &disagreements, &probeErrors)
+	found := false
+	for _, e := range probeErrors {
+		if strings.Contains(e, "boom") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected ArgProbeError text to be surfaced in probeErrors, got: %v", probeErrors)
 	}
 }

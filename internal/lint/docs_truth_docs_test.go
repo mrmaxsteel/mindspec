@@ -340,13 +340,56 @@ func tokenizeInvocation(text string) []string {
 // spec create|verify --title x` generated garbage candidates
 // (`spec --title`, `spec x`) and never checked the true claim `spec
 // create --title x` / `spec verify --title x`.
+//
+// # The trailing-bare-pipe panic (W0 Bead 9, mindspec-ng3g) and the
+// # alternation-vs-shell-pipe rule
+//
+// A token list ending in a bare, unpaired "|" — `mindspec panel
+// create |` (index out of range [4] with length 4), or just
+// `mindspec |` (index out of range [2] with length 2) — panicked: the
+// space-separated-form loop consumed the "|" (line "i++; continue")
+// assuming a following word always exists, then indexed tokens[i] one
+// past the end. `mindspec config show | grep runner` never panicked
+// (the "|" there has a following word, "grep"), which is also why the
+// prior version's own comment never surfaced the bug.
+//
+// The fix is the same guard in both places bare "|" is recognized as
+// a separator: a "|" only introduces another alternative when a real
+// word follows it in the SAME token list (checked before consuming
+// it, both at the split-point search below and inside the
+// alternative-collecting loop). This is also this function's answer
+// to the "how is an alternation pipe told apart from an ordinary
+// SHELL pipe" question the bead brief asks to state explicitly:
+// alternation requires a word on BOTH sides within one extracted
+// invocation's tokens (`create | verify`, `create|verify`); a
+// trailing bare "|" with nothing after it is neither shape and is
+// left untouched in the tail rather than treated as a separator — it
+// most likely means a doc's invocation text was truncated or
+// malformed, not that a real alternation or shell pipe was intended.
+// A residual, PRE-EXISTING and UNCHANGED limitation this fix does not
+// attempt to close (out of this bead's narrow scope — the panic and
+// the stated rule, not a rewrite of the alternation model): a genuine
+// shell pipe INTO A DIFFERENT PROGRAM whose right-hand side is a
+// single bare word with something after IT too (`mindspec config show
+// | grep runner`, plugins/mindspec/skills/ms-panel-run/SKILL.md:18 —
+// outside docsScopeRoots, so never actually reached by this lint
+// today) is syntactically indistinguishable from `create | verify`
+// alternation and would still be misread as an alternative between
+// "show" and "grep". Closing that would require resolving each
+// alternative against the real command tree from inside this
+// doc-side-only function, which is a materially larger change than
+// "fix the panic and state the rule".
 func expandAlternatives(tokens []string) [][]string {
 	splitAt := -1
 	for i, t := range tokens {
-		if strings.Contains(t, "|") {
-			splitAt = i
-			break
+		if !strings.Contains(t, "|") {
+			continue
 		}
+		if t == "|" && (i == 0 || i+1 >= len(tokens)) {
+			continue // dangling bare pipe: no left or right neighbor to alternate
+		}
+		splitAt = i
+		break
 	}
 	if splitAt < 0 {
 		return [][]string{tokens}
@@ -372,11 +415,15 @@ func expandAlternatives(tokens []string) [][]string {
 		}
 		i++
 	} else {
-		// Space-separated form: consume WORD ("|" WORD)*.
-		for {
+		// Space-separated form: consume WORD ("|" WORD)*, but only
+		// consume a "|" that has a WORD after it (i+1 < len(tokens)) —
+		// a dangling trailing "|" is left for tail below instead of
+		// panicking on an out-of-range index or being folded in as a
+		// meaningless extra alternative.
+		for i < len(tokens) {
 			alts = append(alts, tokens[i])
 			i++
-			if i < len(tokens) && tokens[i] == "|" {
+			if i < len(tokens) && tokens[i] == "|" && i+1 < len(tokens) {
 				i++
 				continue
 			}

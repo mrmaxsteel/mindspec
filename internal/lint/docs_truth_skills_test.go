@@ -49,6 +49,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -141,6 +142,25 @@ func extractLifecycleSkillNames(path string) ([]string, error) {
 		})
 	}
 	return names, nil
+}
+
+// stringLitValue extracts the Go string value of e when e is a string
+// literal (`"foo"`), used by extractLifecycleSkillNames above to read
+// composite-literal map keys. Previously shared with the AST-based
+// command-tree model (docs_truth_cmdtree_test.go), deleted when
+// mindspec-ng3g (W0 Bead 9) replaced that model with the real binary's
+// own __cmdtree introspection dump; kept here as this file's own
+// (now sole) consumer.
+func stringLitValue(e ast.Expr) (string, bool) {
+	bl, ok := e.(*ast.BasicLit)
+	if !ok || bl.Kind != token.STRING {
+		return "", false
+	}
+	v, err := strconv.Unquote(bl.Value)
+	if err != nil {
+		return "", false
+	}
+	return v, true
 }
 
 // retiredPreRenameNames derives, from skills itself, the set of bare
