@@ -354,13 +354,15 @@ records.
   manual tweaks) produces no exact tree match and is MISSED by this
   leg** — a stated limitation, review-caught, the same honesty posture
   as R5(a)'s finite floor; the supersession leg remains the primary
-  catcher of the real #218 branches (below). **Spec-text deviation,
-  flagged for the plan-approve ruling:** the spec's class-3
-  parenthetical pins the authored range as `merge-base(B,T)..B`, and
-  under exactly that definition the class is empty (the probes above);
-  this plan implements the class's stated intent — "deletions that are
-  artifacts of B's staleness, not authored changes" — with authorship
-  grounded in the branch's novel content rather than range membership.
+  catcher of the real #218 branches (below). **Spec-text deviation, flagged
+  for and RESOLVED at the plan-approve ruling (spec amended,
+  `c43e3c93`):** the spec's class-3 parenthetical originally pinned
+  the authored range as `merge-base(B,T)..B`, under exactly which
+  definition the class is empty (the probes above); the ruling amended
+  the class-3 sentence to ground authorship in the branch's novel
+  content rather than range membership — the definition this plan
+  implements, preserving the class's stated intent ("deletions that are
+  artifacts of B's staleness, not authored changes").
   `ChangedPathsInRange` is CUT (its only consumer was the empty
   subtraction). **The #218 shape itself classifies SUPERSEDED, not
   stale-deletion** (P1-6, matching the spec's mapping: AC-3(i)
