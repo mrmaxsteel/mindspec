@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-25
+
+Three specs since v0.13.0. The theme is **lifecycle-integrity** — an impl-readiness gate that stops a bead being built before its contract is genuinely ready (spec 124), on top of a landed-merge attestation substrate that makes `mindspec complete` actually record what it merged (spec 125) — and **review discipline reaching fresh installs**: the panel discipline that used to live only in operator memory now ships in the installed skills, so a fresh `mindspec setup` runs its panels the same way the origin project does (spec 126). No breaking changes: clean inputs and well-formed repos behave as v0.13.0.
+
+### Added
+- **Impl-readiness gate (spec 124)** — a bead can no longer be claimed and built before its contract is ready. `mindspec bead ready-check` is a mechanical MF-1..MF-4 floor (acceptance criteria present, dependencies closed AND landed-merged, citations resolve, no unresolved TBD/OPEN-QUESTION), layered under a Phase-0 semantic re-derivation; `mindspec next` gates before it mutates state; `--allow-not-ready` proceeds past the floor while recording a durable override marker naming exactly the bypassed signals; and a new append-only `mindspec bead clarify` loop captures the resolution of a not-ready finding.
+- **Landed-merge attestation & recovery (spec 125)** — a new `mindspec reattest <bead-id>` verb re-attests an already-merged bead's landed-merge binding, deriving it from an independent git scan (git-corroborated, non-circular, fail-closed on ambiguity/anonymous/reverted, audited — never from operator input). Recorded as an ADR-0041 §2(ii) amendment.
+- **Review discipline in the shipped product (spec 126)** — the portable review-panel discipline now ships in the installed skills, so a fresh install runs its panels with the same rigor: one authoritative panel-size story (every fixed-six instruction derives from the configured mix; a structural guard keeps it that way), reviewer mutation-isolation (probe in an isolated checkout, not the shared worktree), verify-never-confirm for CLI-reviewer findings, first-class spec/plan-gate document panels, panel briefs that paste acceptance criteria verbatim, findings-never-out-voted stated reviewer-facing, absolute-scratch discipline, and a portable CI-parity kernel (reviewers reproduce the project's declared CI invocation). New ADR-0044 is the single home for the conduct doctrine (incident provenance lives there, never in shipped skills), and ADR-0043 is amended to distinguish the shipped 6 / N−1 default from an operator-scaled ladder. A portability guard keeps mindspec-self material (incident IDs, model values, home paths) out of consumer skills, and pre-126 historical snapshots ensure existing installs upgrade their skills rather than strand on the old text.
+- **`mindspec spec create` accepts a bare slug (GH #219)** — supplying `<slug>` without a leading `<NNN>-` now auto-allocates `max(existing spec numbers) + 1`, printing the chosen id; the explicit `<NNN>-<slug>` form is unchanged.
+
+### Fixed
+- **`mindspec complete` durably persists the landed-merge binding (spec 125)** — the substrate where a subject mismatch after a conflict-recovery merge left `complete` silently not recording the landed binding is fixed: the binding is now written from git ground truth (subject-independent), the identity model is revert-aware, and a genuine locate-miss fails loud instead of silently doing nothing.
+- **Pre-epic spec/plan-gate panels resolve in `verify`/`tally` (GH #222)** — a `spec_approve`/`plan_approve` panel created before `plan approve` (when no epic bead exists yet) is written into the spec worktree; `mindspec panel verify`/`tally` now also scan worktree spec dirs, so the panel resolves instead of erroring `no registered panel found` — making the spec/plan-gate document-panel workflow (spec 126) work at the gate it exists for.
+
 ## [0.13.0] - 2026-07-23
 
 Five specs since v0.12.0. The headline is a **much better first hour** in a fresh consuming repo (spec 123) and **truthful domain/ADR gates** that stop forcing `--override-adr` on every bead (spec 122), on top of panel-review telemetry, lifecycle-completion integrity, and a trust-boundary render/derivation audit. No breaking changes: clean inputs and well-formed repos behave as v0.12.0.
@@ -150,7 +164,8 @@ A large release headlined by the **flattened `.mindspec/` layout**, plus ten spe
 
 Release notes for v0.9.0 and prior are on the [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases) page.
 
-[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.11.1...v0.12.0
 [0.11.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.10.0...v0.11.0
