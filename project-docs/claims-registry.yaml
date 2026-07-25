@@ -1,0 +1,90 @@
+# Docs claims registry — the machine-readable side of the
+# "declared vs enforced" documentation convention.
+#
+# THE CONVENTION
+#
+#   A config surface can exist — parsed, defaulted, validated, and printed
+#   by `mindspec config show` — without anything reading it to change
+#   behavior. Docs distinguish three layers, and must never describe a
+#   lower layer as a higher one:
+#
+#     enforced in the binary   a gate or verb that exits non-zero / behaves
+#     enforced in prompt-space a skill reads the key and obeys it
+#     declared only            parsed + validated + surfaced, read by nothing
+#
+#   Declared-only surfaces are described in docs with the same annotation
+#   the binary prints: "declared, not yet enforced". Prose may describe
+#   what an unshipped capability or unenforced key WILL do only in future
+#   tense, under an inline planned-claim marker whose id resolves to an
+#   entry in this file.
+#
+# CONTRACT (consumed by the docs-truth lint):
+#
+# 1. Public docs (README.md and project-docs/user/**) may describe a
+#    capability absent from the shipped binary/skills ONLY when the claim
+#    carries the inline marker below AND the marker's id is registered
+#    here. An unlabelled future-capability claim, or a marker whose id is
+#    not registered, fails the lint. Anonymous "coming soon" prose is not
+#    a label — it is the failure mode this registry exists to prevent.
+#
+# 2. Inline marker grammar (exact):
+#
+#        *(planned — claim `<id>`, <free text>)*
+#
+#    <id> matches [a-z0-9][a-z0-9-]* and names a key under `claims:`.
+#    Lint regex:  \*\(planned — claim `([a-z0-9][a-z0-9-]*)`[^)]*\)\*
+#    Placement: in the sentence making the claim, or in the paragraph
+#    introducing the section/code block that contains it; a marker covers
+#    content up to the next heading of equal or higher level.
+#
+# 3. `tokens` are the literal strings, as they appear in docs, whose
+#    presence asserts the claim. The lint checks both directions: every
+#    token occurrence inside the scanned surface sits under a marker, and
+#    every entry here has at least one marked site in `locations`.
+#
+# 4. When the owning work lands, the entry is DELETED and its markers come
+#    off in the same change (the lint's both-direction check forces this).
+#    An entry without a named owner never enters this file: a claim nobody
+#    has committed to build gets retracted from the docs, not registered.
+
+version: 1
+
+claims:
+  loop-status:
+    tokens:
+      - "mindspec loop status"
+    owner: "roadmap Core 4 — governed-autonomy kernel (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/autonomy.md
+    becomes_true_when: >-
+      `mindspec loop status` exists as a binary verb and reports open
+      panels, rounds, budget consumed, and halt state derived from repo
+      state.
+
+  loop-governance:
+    tokens:
+      - "gate_authority"
+      - "handoff_log"
+      - "max_beads_per_wake"
+    owner: "roadmap Core 4 — governed-autonomy kernel (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/autonomy.md
+    becomes_true_when: >-
+      the binary reads loop.* to change behavior — gate authority consulted
+      at the approve gates, halt conditions checked, budget ceilings
+      enforced, handoff log written — and `mindspec config show` drops the
+      "declared, not yet enforced" annotation on loop:.
+
+  fix-cycle:
+    tokens:
+      - "/ms-fix-cycle"
+    owner: "roadmap Core 6 — governed fix lane (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/brownfield.md
+    becomes_true_when: >-
+      plugins/mindspec/skills/ms-fix-cycle/SKILL.md exists and runs the
+      discover -> reproduce -> one-commit patch -> panel -> PR lane
+      end-to-end on a repo with no .mindspec/.

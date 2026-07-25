@@ -45,7 +45,7 @@ Tallying is not a judgment call. The decision is a pure function in the binary �
 - **Approval threshold: N−1.** On a six-reviewer panel, five APPROVEs pass; one dissent is tolerated. (The threshold scales with panel size and is pinned in `panel.json` at creation, so it can't drift mid-round.)
 - **Below threshold → fix round.** The `concrete_changes_required` lists from all reviewers are consolidated into one mechanical change list; a fix-up agent applies it; the round number and `reviewed_head_sha` bump together, and the panel re-reviews the new head. Stale verdicts — verdicts for a commit that is no longer HEAD — never count.
 - **Any REJECT → halt.** A REJECT stops the track for a human. It is never auto-fixed: a rejection that gets quietly patched over is precisely the verification debt the panel exists to prevent.
-- **Bounded rounds.** A bead that keeps failing its panel halts after a configured maximum rather than looping forever.
+- **Bounded rounds.** A bead that keeps failing its panel halts after the orchestrating skill's `max-rounds` cap (default 3) rather than looping forever. (The `loop.halt` config keys that will govern this in the binary are declared, not yet enforced — today the cap lives in the skill.)
 
 ### Artifact hard gates
 
@@ -66,10 +66,11 @@ panel:
                                 # substitute fills the SAME slot id — the panel
                                 # never silently shrinks
 
-models:                          # optional per-phase model selection
-  implement: <model-id>          # phases: implement, review, authoring,
-  review: <model-id>             #         grill, final_review
-  final_review: <model-id>
+models:                          # declared, not yet enforced — an advisory
+  implement: <model-id>          # per-phase model protocol for orchestrating
+  review: <model-id>             # agents; nothing in the binary reads it to
+  final_review: <model-id>       # select a model (mindspec models populate
+                                 # emits the prompt to fill it in)
 
 runner: claude-code-skills       # who executes the panel plumbing (see below)
 ```
@@ -99,7 +100,7 @@ The **runner** selects who executes the plumbing between those verbs — launchi
 - `claude-code-workflow` — the `/ms-panel` workflow runs the whole round as one deterministic fan-out and returns a single compact result, keeping six reviewers' transcripts out of your session's context. Recommended once you're running loops.
 - `external` — bring your own orchestrator; anything that can exec the three verbs and write verdict JSONs can run a panel.
 
-Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip.
+Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip. The dispatch on `runner:` happens in the panel-run skill (prompt-space) — the binary itself never reads the key, which is why `mindspec config show` annotates it *declared, not yet enforced*.
 
 ## Escape hatch
 
@@ -111,5 +112,5 @@ Six frontier-model reviewers per round is a real cost, and it's the right defaul
 
 ## Related
 
-- [Autonomy guide](autonomy.md) — panels as gate authority at levels 2+
+- [Autonomy guide](autonomy.md) — panels as gate authority at the planned levels 2+
 - [README § Review panels](../../../README.md#review-panels) — the short version
