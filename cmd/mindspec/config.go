@@ -16,10 +16,24 @@ import (
 )
 
 // inertAnnotation marks a config block that is parsed, defaulted, validated,
-// and surfaced here, but INERT: nothing in this binary reads it to change
-// behavior yet (spec 109 R9). Only panel: and the pre-existing top-level
-// keys drive in-binary behavior today.
+// and surfaced here, but INERT: nothing reads it at all yet, in this binary
+// or anywhere else (spec 109 R9). Only panel: and the pre-existing
+// top-level keys drive in-binary behavior today; models: and loop: are
+// truly unread. runner: is NOT one of these — see skillReadAnnotation.
 const inertAnnotation = "declared, not yet enforced"
+
+// skillReadAnnotation marks a config key that this binary never reads to
+// change its own behavior, but that IS read and dispatched on by a shipped
+// skill or workflow in prompt-space. runner: is the sole example today:
+// plugins/mindspec/skills/ms-panel-run/SKILL.md reads it via `mindspec
+// config show | grep '^runner:'` to choose between the workflow path and
+// the skills path, and plugins/mindspec/workflows/ms-panel.js is the real
+// workflow adapter it can select (spec 111). Calling that "declared, not
+// yet enforced" would mischaracterize a skill-read key as declared-only,
+// which CONTRIBUTING.md's docs-truth convention forbids in both
+// directions: never describe a key as a higher layer than it occupies,
+// and never demote one either.
+const skillReadAnnotation = "declared; read by skills, not enforced by the binary"
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -32,11 +46,14 @@ var configShowCmd = &cobra.Command{
 	Long: `Print the effective config — including the panel:, models:, commands:,
 loop:, and runner: orchestration blocks (specs 109/123) alongside the
 pre-existing keys — to stdout. Read-only: it writes no file and exits 0
-on a valid config. The models:, loop:, and runner: blocks are annotated
-"` + inertAnnotation + `" because only panel: and the pre-existing keys
-drive in-binary behavior in this release; commands: (spec 123 R7b) is
-NOT annotated inert — a populated commands: key changes the managed
-AGENTS.md "Build & Test" section init/setup render today.
+on a valid config. The models: and loop: blocks are annotated
+"` + inertAnnotation + `" because nothing reads them yet, in this binary
+or elsewhere; runner: is annotated "` + skillReadAnnotation + `" instead,
+because plugins/mindspec/skills/ms-panel-run/SKILL.md dispatches on it
+even though this binary does not (spec 109 R10, spec 111). commands:
+(spec 123 R7b) is NOT annotated inert at all — a populated commands: key
+changes the managed AGENTS.md "Build & Test" section init/setup render
+today.
 
 With --gate <name> (spec 112 R8/R9), prints that single gate's resolved
 creation-time defaults instead — the expanded reviewer slots, expected
@@ -270,9 +287,13 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintf(&b, "  handoff_log: %s\n", escapeConfigValue(cfg.Loop.HandoffLog))
 	fmt.Fprintln(&b)
 
-	// runner: orchestration adapter selector, INERT (spec 109 R10) — no
-	// adapter dispatch is wired in this release.
-	fmt.Fprintf(&b, "runner: %s  # %s\n", escapeConfigValue(cfg.Runner), inertAnnotation)
+	// runner: orchestration adapter selector (spec 109 R10). This binary
+	// never dispatches on it, but plugins/mindspec/skills/ms-panel-run/
+	// SKILL.md does (claude-code-workflow vs claude-code-skills vs the
+	// external stub), and plugins/mindspec/workflows/ms-panel.js is the
+	// real workflow adapter it can select (spec 111) — so this is NOT
+	// declared-only, and is annotated skillReadAnnotation instead.
+	fmt.Fprintf(&b, "runner: %s  # %s\n", escapeConfigValue(cfg.Runner), skillReadAnnotation)
 
 	return b.String(), nil
 }

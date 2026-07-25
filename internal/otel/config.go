@@ -325,12 +325,25 @@ func replaceOtelBlock(existing string) (string, bool) {
 // RenderCodexConfigToml renders an OTEL Config into a Codex
 // ~/.codex/config.toml string, merging into existingToml if non-empty.
 //
-// Merge semantics per spec 084 Hard Constraint #5:
-//   - The [otel.exporter] table is REPLACED whole (no key-level merge
-//     inside it).
-//   - The [otel] table's mindspec-owned keys (exporter, trace_exporter,
-//     log_user_prompt) are upserted.
-//   - All other top-level tables and keys are preserved byte-for-byte.
+// Spec 084 Hard Constraint #5 documents an upsert-and-byte-preserve merge
+// contract, but that is NOT what this function does today; this comment
+// describes the ACTUAL behavior (verified by probe, see mindspec-hw2n).
+// Whether the code or spec 084 HC#5 is authoritative is an open decision
+// tracked as mindspec-tnf6 — do not restate the old upsert/byte-preserve
+// claim elsewhere until that is resolved.
+//
+// Actual merge semantics:
+//   - The entire [otel] table — including a nested [otel.exporter] — is
+//     REPLACED wholesale with the canonical block below. This is NOT a
+//     key-level upsert: any non-mindspec key co-located under [otel] in
+//     existingToml (e.g. a hand-added `environment = "..."`) is
+//     destroyed, and log_user_prompt is unconditionally hardcoded to
+//     false in the canonical block, so a user's prior explicit
+//     `log_user_prompt = true` does NOT survive a re-render.
+//   - Top-level tables outside the otel namespace keep their contents,
+//     but NOT byte-for-byte: replaceOtelBlock can reorder tables
+//     relative to the stripped [otel] zone, and collapseBlankRuns
+//     normalizes blank-line runs.
 //   - If existingToml is empty, a fresh document is returned.
 //   - sha256 idempotency: re-running with identical inputs against the
 //     output produces a byte-identical result.
