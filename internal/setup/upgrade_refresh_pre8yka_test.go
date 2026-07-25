@@ -19,15 +19,19 @@ package setup
 // snapshots, pinned to its own, independent base commit.
 //
 // Provenance: the snapshot's bytes are identical to
-// plugins/mindspec/skills/ms-bead-cycle/SKILL.md as of commit
-// e9f46dfe (verified independently: `git show
+// plugins/mindspec/skills/ms-bead-cycle/SKILL.md AS OF commit e9f46dfe
+// (verified independently: `git show
 // e9f46dfe:plugins/mindspec/skills/ms-bead-cycle/SKILL.md | shasum -a
 // 256` matches both the digest pinned below and the embedded file's
-// own hash) — the version before that same commit's own edit
-// (e9f46dfe999f7d768efb5c8fc9f4029a4597786d, referenced by
-// upgrade_refresh_pre126_test.go's own header comment as
-// "Bead 3's AC-1 sweep") rewrote ms-bead-cycle/SKILL.md into its
-// current, much larger, step-0-owning shape.
+// own hash) — i.e. the last state before THIS BRANCH's own 213330ce
+// ("docs(w0): truth pass round 2") edited ms-bead-cycle/SKILL.md into
+// its current, much larger, step-0-owning shape. (Final-gate finding
+// L3-3: an earlier version of this comment glossed e9f46dfe itself as
+// "the version before that same commit's own edit" — `git show
+// e9f46dfe^:plugins/mindspec/skills/ms-bead-cycle/SKILL.md | shasum -a
+// 256` hashes to a DIFFERENT file than the pinned digest, so that
+// clause described the wrong commit; the snapshot is AT e9f46dfe, not
+// before it.)
 import (
 	"crypto/sha256"
 	"encoding/hex"

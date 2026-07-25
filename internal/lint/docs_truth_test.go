@@ -16,8 +16,9 @@
 //	    covered by a marker bearing that id (both directions, per the
 //	    registry's own contract).
 //	R5  a command that structurally resolves to a one-shot deprecation
-//	    stub (Run, not RunE — see docs_truth_cmdtree_test.go) does NOT
-//	    count as "resolves" for R1.
+//	    stub (source-added, Run-set/RunE-unset, cross-checked against a
+//	    behavioural `--help`-exit-code probe — see
+//	    docs_truth_cmdtree_test.go) does NOT count as "resolves" for R1.
 //
 // # Finding: an unlintable residue beyond the one Bead 1 already named
 //
@@ -56,21 +57,37 @@
 // # What is, and is not, mechanically checked (O2-9)
 //
 // An inert config key (declared, parsed, validated, printed —
-// cmd/mindspec/config.go's inertAnnotation, currently models:/loop:/
-// runner:) described in prose as though it behaves is NOT checked here
-// — a doc paragraph asserting behavior for such a key produces zero
+// cmd/mindspec/config.go's inertAnnotation, currently models:/loop:
+// ONLY) described in prose as though it behaves is NOT checked here —
+// a doc paragraph asserting behavior for such a key produces zero
 // findings from R1/R2/R3, because the untruth is in the VERB ("selects
 // which model runs"), not in a resolvable command/skill token. That
 // half genuinely needs prose understanding, same as the
 // removed-verb-retrospective-prose class above. But the inert KEY SET
-// itself is not similarly unknowable: it is exactly the const at
-// cmd/mindspec/config.go:22, consumed at its three inertAnnotation call
-// sites (:209/:211 models:, :249 loop:, :275 runner:) — a mechanical
-// half-measure (require the literal "declared, not yet enforced" in
-// any doc section mentioning one of those keys) was available and is
-// deferred, not built, in this bead. Tracked for a follow-up rather
-// than silently treated as part of the "not mechanically lintable"
-// claim this comment used to overstate.
+// itself is not similarly unknowable: it is exactly the inertAnnotation
+// const in cmd/mindspec/config.go, consumed at its models:/loop: call
+// sites — a mechanical half-measure (require the literal "declared,
+// not yet enforced" in any doc section mentioning one of those keys)
+// was available and is deferred, not built, in this bead. Tracked for
+// a follow-up rather than silently treated as part of the "not
+// mechanically lintable" claim this comment used to overstate.
+//
+// L2-F2 (final gate): this paragraph is deliberately corrected to name
+// line numbers by CONST NAME rather than by number — cmd/mindspec/
+// config.go's line numbers churn on ordinary edits (an EARLIER version
+// of this paragraph cited ":209/:211 models:, :249 loop:, :275
+// runner:" and went stale the moment ff65b307 gave runner: its own
+// annotation) and stale line citations in the truth lint's OWN
+// self-description are the third recurrence of the exact
+// stranded-quote failure mode this lane exists to close. runner: is
+// NOT in the inert set: it is skillReadAnnotation ("declared; read by
+// skills, not enforced by the binary" — spec 111's runner: dispatch is
+// a skill-read, not inert), a THIRD layer distinct from both "inert"
+// and "enforced in the binary". A future mechanical half-measure for
+// the inert set must require inertAnnotation's literal text only for
+// models:/loop:; requiring it for runner: too would mechanically FORCE
+// docs to re-demote a skill-read key to declared-only, reintroducing
+// with lint enforcement the exact untruth ff65b307 fixed by hand.
 package lint
 
 import (
@@ -595,6 +612,60 @@ func TestR2CoverageDoesNotBleedIntoSiblingListItem(t *testing.T) {
 	}
 }
 
+// TestCoverageDoesNotBleedIntoSiblingTableRow is the RED-on-inject
+// regression fixture for final-gate finding L1-3's table-row half:
+// before tableRowStartRe was added as a paragraphCoverageEnd block
+// boundary, a marker in one table cell covered every remaining row of
+// that table — a marked row and an unlabelled sibling row repeating
+// the exact same real, registered loop-status token both passed
+// silently. After the fix, the sibling row is uncovered and must fire
+// BOTH R1 (the invocation still doesn't resolve) and R3 (the token
+// occurrence on that row is not covered by the marker).
+func TestCoverageDoesNotBleedIntoSiblingTableRow(t *testing.T) {
+	content := "## Roadmap\n\n" +
+		"| Verb | Status |\n" +
+		"| --- | --- |\n" +
+		"| `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)* | planned |\n" +
+		"| `mindspec loop status` | works today |\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	reg := sharedRegistry(t)
+
+	r1 := checkR1([]*docFile{df}, sharedCmdRoot(t), reg)
+	requireFindingContains(t, r1, "loop status", `no subcommand "loop"`)
+	for _, f := range r1 {
+		if f.Line == 5 {
+			t.Errorf("the marker's own row (line 5) must still pass R1; got an unexpected finding for it: %s", f)
+		}
+	}
+
+	r3 := checkR3([]*docFile{df}, reg)
+	requireFindingContains(t, r3, "mindspec loop status", "not covered by a claim-`loop-status` marker")
+}
+
+// TestCoverageDoesNotBleedIntoSiblingBlockquoteLine is L1-3's
+// blockquote-line half: before blockquoteStartRe was added, a marker
+// on one `>` line covered the rest of the quote. A marked quote line
+// and an unlabelled sibling quote line repeating the same token must
+// fire both R1 and R3 for the sibling after the fix.
+func TestCoverageDoesNotBleedIntoSiblingBlockquoteLine(t *testing.T) {
+	content := "## Section\n\n" +
+		"> Progress: `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)*\n" +
+		"> Also see `mindspec loop status` mentioned again right here.\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	reg := sharedRegistry(t)
+
+	r1 := checkR1([]*docFile{df}, sharedCmdRoot(t), reg)
+	requireFindingContains(t, r1, "loop status", `no subcommand "loop"`)
+	for _, f := range r1 {
+		if f.Line == 3 {
+			t.Errorf("the marker's own quote line (line 3) must still pass R1; got an unexpected finding for it: %s", f)
+		}
+	}
+
+	r3 := checkR3([]*docFile{df}, reg)
+	requireFindingContains(t, r3, "mindspec loop status", "not covered by a claim-`loop-status` marker")
+}
+
 // TestR4AbsentSkill: an absent skill, unmarked, must fire R2.
 func TestR4AbsentSkill(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Run the fix lane with /ms-fix-cycle.\n")
@@ -725,6 +796,48 @@ func TestR3RegistryDirection2_StaleEntryFails(t *testing.T) {
 	}}
 	findings := checkR3([]*docFile{df}, reg)
 	requireFindingContains(t, findings, "claim `orphaned-claim`", "no marked site")
+}
+
+// TestMarkerInHTMLCommentOnHeadingDoesNotExempt is the RED-on-inject
+// regression fixture for final-gate finding L4-FINAL-1: a planned-claim
+// marker hidden inside an HTML comment on a heading line must NOT grant
+// that hidden marker whole-section coverage, because the comment (and
+// therefore the marker) is invisible in rendered docs — exactly the
+// shape the adversary's probe used: `## Heading <!-- *(planned — claim
+// `loop-status`, ...)* -->` followed by an unmarked-looking `mindspec
+// loop status` invocation. Uses the REAL, registered loop-status claim
+// (sharedRegistry) so this is an integrated probe against real ground
+// truth, not just a synthetic registry: before the fix, parseDocFile
+// recognized the in-comment marker, headingCoverageEnd granted it the
+// whole section, and checkR1 produced zero findings for the absent
+// token — silently exempting exactly the untruth class W0 exists to
+// catch. After the fix, the marker is never added to df.Markers at
+// all, so it grants no coverage and the invocation is reported.
+func TestMarkerInHTMLCommentOnHeadingDoesNotExempt(t *testing.T) {
+	content := "## Probe live-looking command <!-- *(planned — claim `loop-status`, hidden from rendered docs)* -->\n\n" +
+		"Run `mindspec loop status` now.\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "loop status", `no subcommand "loop"`)
+}
+
+// TestMarkerInFencedCodeBlockDoesNotExempt is the RED-on-inject
+// regression fixture for the pre-existing, related L1-6 finding: a
+// marker written INSIDE a fenced code block is not reader-visible
+// prose either (parseDocFile already skips fenced lines when
+// collecting headings, for the identical reason) and must not be
+// recognized as a real marker. Reproduces the exact shape from the
+// finding: a fence containing both the marker (as a comment line) and
+// the `mindspec loop status` invocation it would otherwise exempt.
+func TestMarkerInFencedCodeBlockDoesNotExempt(t *testing.T) {
+	content := "## X\n\n" +
+		"```\n" +
+		"# *(planned — claim `loop-status`, roadmap Core 4)*\n" +
+		"mindspec loop status\n" +
+		"```\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "loop status", `no subcommand "loop"`)
 }
 
 // TestR3TokenCoverage_UncoveredOccurrenceFails proves the token-level
@@ -875,6 +988,28 @@ func TestResolveHelperCall_ChildrenAndFlagsVisible(t *testing.T) {
 	}
 }
 
+// TestResolve_FlagBeforeVerbStillDescends is the RED-on-inject
+// regression fixture for final-gate finding L4-FINAL-2: resolve() used
+// to stop descending into subcommands at the FIRST flag-shaped word in
+// the invocation, no matter where it appeared, so a real root flag
+// preceding a bogus verb (`mindspec --trace x totallybogus`, mirroring
+// the finding's own reproduction against the built binary — which
+// exits 1 with `unknown command "totallybogus"`) resolved successfully
+// instead of being checked against cur's real children. The companion
+// case proves the fix doesn't just refuse everything after a flag: a
+// root flag before a VALID nested subcommand path must still resolve.
+func TestResolve_FlagBeforeVerbStillDescends(t *testing.T) {
+	root := sharedCmdRoot(t)
+
+	if res := root.resolve([]string{"mindspec", "--trace", "x", "totallybogus"}); res.Resolved {
+		t.Error("expected mindspec --trace x totallybogus to NOT resolve — totallybogus is not a real subcommand, and a preceding flag must not smuggle it past the check")
+	}
+
+	if res := root.resolve([]string{"mindspec", "--trace", "x", "panel", "disposition", "validate"}); !res.Resolved {
+		t.Errorf("expected a root flag before a VALID nested subcommand path to still resolve, got: %s", res.Reason)
+	}
+}
+
 // --- auto-registered cobra flags: --help/-h/--version -----------------
 
 // TestAutoFlags_HelpAndVersionResolve predates mindspec-ng3g (W0 Bead
@@ -948,8 +1083,11 @@ func TestR1ExactArgsQuotedMultiWordTitlePasses(t *testing.T) {
 // important test in this file: `spec-init` is Hidden AND (transitively,
 // via specCreateCmd) shares flag-parsing behavior, yet it is a fully
 // live alias (spec_init.go wires RunE = specCreateCmd.RunE in init()).
-// A lint that used Hidden, or Hidden&&DisableFlagParsing, as its stub
-// signal would wrongly flag this. Ours must not.
+// A lint that used Hidden, Hidden&&DisableFlagParsing, or bare
+// Run/RunE with no cross-check, as its stub signal would wrongly flag
+// this. Ours must not: spec-init sets RunE (never Run), so the current
+// structural signal (!AutoRegistered && HasRun && !HasRunE) is false
+// for it regardless of any other field.
 func TestR5SpecInitAliasResolvesLive(t *testing.T) {
 	res := sharedCmdRoot(t).resolve([]string{"mindspec", "spec-init"})
 	if !res.Resolved {

@@ -53,7 +53,7 @@ agentmind serve                                                # the standalone 
 mindspec otel setup --endpoint http://localhost:4318 --codex
 ```
 
-This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and keeps prompt logging redacted by default (`otel.log_user_prompt = false`).
+This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and always writes `otel.log_user_prompt = false` (prompt text stays redacted; a hand-set `true` does not survive a re-run — see the [AgentMind guide](agentmind.md) for the full merge-semantics caveat).
 
 ## The Workflow
 

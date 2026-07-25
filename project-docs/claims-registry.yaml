@@ -32,12 +32,16 @@
 #
 # CONTRACT (consumed by the docs-truth lint):
 #
-# 1. Public docs (README.md and project-docs/user/**) may describe a
-#    capability absent from the shipped binary/skills ONLY when the claim
-#    carries the inline marker below AND the marker's id is registered
-#    here. An unlabelled future-capability claim, or a marker whose id is
-#    not registered, fails the lint. Anonymous "coming soon" prose is not
-#    a label — it is the failure mode this registry exists to prevent.
+# 1. Public docs (README.md and project-docs/**, excluding
+#    project-docs/user/archive/ and this file — see docsScopeRoots /
+#    docsScopeExcludeDirs / docsScopeExcludeFiles in
+#    internal/lint/docs_truth_docs_test.go for the exact boundary) may
+#    describe a capability absent from the shipped binary/skills ONLY
+#    when the claim carries the inline marker below AND the marker's id
+#    is registered here. An unlabelled future-capability claim, or a
+#    marker whose id is not registered, fails the lint. Anonymous
+#    "coming soon" prose is not a label — it is the failure mode this
+#    registry exists to prevent.
 #
 # 2. Inline marker grammar (exact):
 #
@@ -54,11 +58,14 @@
 #        the heading is itself the reader-visible label for everything
 #        under it (e.g. autonomy.md's per-level headings, whose sections
 #        legitimately bury a config-key token several lines below).
-#      - ANYWHERE ELSE (a sentence, a list item, a table cell): the
-#        marker names only its own paragraph/list item — coverage ends at
-#        the next blank line, the next list item, or the next heading,
-#        whichever comes first. It no longer bleeds into a sibling list
-#        item or a later paragraph in the same section. The one
+#      - ANYWHERE ELSE (a sentence, a list item, a table cell, a
+#        blockquote line): the marker names only its own paragraph/list
+#        item/table row/quote line — coverage ends at the next blank
+#        line, the next list item, the next table row, the next
+#        blockquote line, or the next heading, whichever comes first.
+#        It no longer bleeds into a sibling list item, a later row of
+#        the same table, a later line of the same quote, or a later
+#        paragraph in the same section. The one
 #        exception: if that paragraph is immediately followed (skipping
 #        only blank lines) by a fenced code block, coverage extends
 #        through that code block too — "the paragraph introducing the
@@ -71,18 +78,28 @@
 #    every entry here has at least one marked site in `locations`.
 #
 # 4. When a claim's token is itself a `mindspec ...` invocation or a
-#    `/ms-*` skill/workflow reference, the lint enforces deletion
+#    `/ms-*` skill/workflow reference, the lint MAY enforce deletion
 #    mechanically (checkClaimsLanded, internal/lint/docs_truth_registry_test.go):
 #    once that exact token resolves against the real command tree or skill
 #    universe — the SAME ground truth R1/R2 check docs against — the entry
 #    and its markers must be removed in the same change, or the lint fails.
+#    "May", not "always": existence-resolution can only prove that a
+#    referent EXISTS, never that it satisfies a becomes_true_when
+#    demanding more (claimLandedRequiresBehavior, same file — a
+#    placeholder Cobra command that merely resolves, or a stub SKILL.md
+#    that merely exists, is not the same as the behavior actually
+#    landing). As of this writing BOTH real invocation/skill-shaped
+#    claims below (loop-status, fix-cycle) are in that excluded set —
+#    their becomes_true_when describes behavior beyond existence, so
+#    mechanical enforcement does not fire for them today; deletion stays
+#    review-driven until a claim-specific behavioral oracle is written.
 #    A claim whose tokens are plain config-key names (asserting a BEHAVIOR
 #    change, not an existence fact — e.g. loop-governance's gate_authority/
-#    handoff_log/max_beads_per_wake) is not landed-checkable this way and
-#    still relies on the author deleting it by hand when the owning work
-#    lands. An entry without a named owner never enters this file: a claim
-#    nobody has committed to build gets retracted from the docs, not
-#    registered.
+#    handoff_log/max_beads_per_wake) is not landed-checkable this way
+#    either, for the same underlying reason, and also relies on the
+#    author deleting it by hand when the owning work lands. An entry
+#    without a named owner never enters this file: a claim nobody has
+#    committed to build gets retracted from the docs, not registered.
 #
 # 5. `owner`, `locations`, and `becomes_true_when` are read and validated
 #    by the lint (checkClaimFieldsValid): `owner` and `becomes_true_when`

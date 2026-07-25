@@ -287,14 +287,30 @@ var tomlSectionHeaderRegex = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
 
 // replaceOtelBlock removes any existing [otel] table and any
 // [otel.<subtable>] tables from `existing` and returns (cleaned,
-// hadOtel). The cleaned string preserves all other top-level tables
-// byte-for-byte (except for blank-line collapsing handled later).
+// hadOtel). The cleaned string preserves every other STANDARD
+// (`[name]`) top-level table's contents (except for blank-line
+// collapsing handled later, and not necessarily byte-for-byte — see
+// RenderCodexConfigToml's own doc comment).
 //
 // A table is considered "otel-namespace" iff its header is `[otel]`
 // or matches `[otel.*]`. The parser walks line by line and treats a
 // header `[name]` as ending the otel zone iff `name` is not in the
 // otel namespace. Lines inside string values that happen to contain
 // `[` no longer truncate the block (the prior regex did).
+//
+// NOT preserved (final-gate finding L2-F1): tomlSectionHeaderRegex
+// matches only a SINGLE-bracket header (`^\s*\[([^\]]+)\]\s*$`), never
+// a TOML array-of-tables header (`[[name]]`, two brackets). Once the
+// otel zone has been entered (by a preceding `[otel]`/`[otel.*]`
+// header) an `[[name]]` header therefore never registers as "ending
+// the otel zone" — inOtelZone simply stays true — so a `[[name]]`
+// table positioned AFTER the [otel] zone, and every key inside it, is
+// silently swallowed and destroyed along with the otel block itself.
+// Verified by probe: rendering over `[otel]\nlog_user_prompt =
+// true\n\n[[widgets]]\nname = "a"\n\n[[widgets]]\nname = "b"\n`
+// returns only the canonical [otel] block — both [[widgets]] tables
+// are gone. Tracked with mindspec-tnf6 alongside the other frozen
+// merge-semantics gaps; not fixed on this branch.
 func replaceOtelBlock(existing string) (string, bool) {
 	lines := strings.Split(existing, "\n")
 	out := make([]string, 0, len(lines))
@@ -340,10 +356,14 @@ func replaceOtelBlock(existing string) (string, bool) {
 //     destroyed, and log_user_prompt is unconditionally hardcoded to
 //     false in the canonical block, so a user's prior explicit
 //     `log_user_prompt = true` does NOT survive a re-render.
-//   - Top-level tables outside the otel namespace keep their contents,
-//     but NOT byte-for-byte: replaceOtelBlock can reorder tables
-//     relative to the stripped [otel] zone, and collapseBlankRuns
-//     normalizes blank-line runs.
+//   - Standard (`[name]`) top-level tables outside the otel namespace
+//     keep their contents, but NOT byte-for-byte: replaceOtelBlock can
+//     reorder tables relative to the stripped [otel] zone, and
+//     collapseBlankRuns normalizes blank-line runs. An array-of-tables
+//     header (`[[name]]`) positioned AFTER the [otel] zone is NOT
+//     preserved at all — it and its keys are destroyed along with the
+//     otel block (final-gate finding L2-F1; see replaceOtelBlock's own
+//     doc comment for why). Tracked with mindspec-tnf6.
 //   - If existingToml is empty, a fresh document is returned.
 //   - sha256 idempotency: re-running with identical inputs against the
 //     output produces a byte-identical result.

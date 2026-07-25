@@ -123,6 +123,13 @@ func listScopedDocs(repoRoot string) ([]string, error) {
 // from): *(planned — claim `<id>`, <free text>)*
 var markerRegex = regexp.MustCompile("\\*\\(planned — claim `([a-z0-9][a-z0-9-]*)`[^)]*\\)\\*")
 
+// htmlCommentRe matches an HTML comment span, `(?s)` letting `.` cross
+// line boundaries so a comment opened on one line and closed on a
+// later one is still recognized as one span. Used by parseDocFile to
+// exclude a marker written inside `<!-- ... -->` from df.Markers — see
+// that function's doc comment for why (final-gate finding L4-FINAL-1).
+var htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
+
 type markerHit struct {
 	ID   string
 	Line int // 1-indexed
@@ -144,6 +151,20 @@ type docFile struct {
 	Markers  []markerHit
 }
 
+// parseDocFile parses relPath into a docFile. Markers are recognized
+// ONLY in rendered, reader-visible positions (final-gate finding
+// L4-FINAL-1, plus its pre-existing L1-6 sibling): a marker written
+// inside a fenced code block, or inside an HTML comment, is never
+// added to df.Markers, however the marker grammar itself matches,
+// because neither position is visible to a human reading the
+// rendered document — exactly the reader/lint divergence the
+// heading/non-heading coverage narrowing (F2-r2-1/A2) already closed
+// for coverage SPAN, now closed for marker RECOGNITION too. Without
+// this, a marker hidden in `<!-- *(planned — claim `x`) --> ` on a
+// heading line grants that hidden marker full heading-section
+// authority while being invisible in rendered docs — defeating R1/R3
+// through a channel neither the id+token rule nor the narrowed
+// coverage checks.
 func parseDocFile(repoRoot, relPath string) (*docFile, error) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, relPath))
 	if err != nil {
@@ -152,14 +173,17 @@ func parseDocFile(repoRoot, relPath string) (*docFile, error) {
 	raw := string(data)
 	df := &docFile{Path: relPath, Raw: raw, Lines: strings.Split(raw, "\n")}
 
+	inFenceByLine := make([]bool, len(df.Lines))
 	inFence := false
 	headingRe := regexp.MustCompile(`^(#{1,6})\s`)
 	for i, line := range df.Lines {
 		trimmed := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
+			inFenceByLine[i] = true // the delimiter line itself is not prose either
 			continue
 		}
+		inFenceByLine[i] = inFence
 		if inFence {
 			continue
 		}
@@ -168,8 +192,24 @@ func parseDocFile(repoRoot, relPath string) (*docFile, error) {
 		}
 	}
 
+	htmlCommentSpans := htmlCommentRe.FindAllStringIndex(raw, -1)
+	inHTMLComment := func(pos int) bool {
+		for _, span := range htmlCommentSpans {
+			if pos >= span[0] && pos < span[1] {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, m := range markerRegex.FindAllStringSubmatchIndex(raw, -1) {
 		line := 1 + strings.Count(raw[:m[0]], "\n")
+		if inFenceByLine[line-1] {
+			continue // fenced/code content is not reader-visible prose (L1-6)
+		}
+		if inHTMLComment(m[0]) {
+			continue // invisible in rendered docs (L4-FINAL-1)
+		}
 		id := raw[m[2]:m[3]]
 		df.Markers = append(df.Markers, markerHit{ID: id, Line: line})
 	}
@@ -206,6 +246,19 @@ func (df *docFile) isHeadingLine(line int) bool {
 // (bulleted or ordered), used by paragraphCoverageEnd below as a block
 // boundary distinct from a plain blank line.
 var listItemStartRe = regexp.MustCompile(`^\s*([-*+]|\d+\.)\s`)
+
+// tableRowStartRe and blockquoteStartRe are paragraphCoverageEnd's
+// other two block-boundary shapes (final-gate finding L1-3): a
+// markdown table row and a blockquote line, treated exactly like
+// listItemStartRe. Without these, a marker in a table cell covered
+// every remaining row of that table, and a marker on a `>` line
+// covered the rest of the quote — both containers the registry
+// contract's own clause 2 names as narrow-coverage shapes ("a
+// sentence, a list item, a table cell"), and the exact smuggle the
+// list-item narrowing was built to close, surviving in the two block
+// shapes nobody added a boundary for.
+var tableRowStartRe = regexp.MustCompile(`^\s*\|`)
+var blockquoteStartRe = regexp.MustCompile(`^\s*>`)
 
 // isFenceDelimLine reports whether line is a fenced-code-block
 // delimiter (``` or ~~~ after leading whitespace), the same test
@@ -272,18 +325,26 @@ func (df *docFile) headingCoverageEnd(markerLine int) int {
 }
 
 // paragraphCoverageEnd is coverageEnd's new, narrow behavior for a
-// marker NOT on a heading line: the marker's own contiguous
-// block (ending at the next blank line, the next list-item-start line,
-// the next heading, or EOF — whichever comes first), plus, if that
-// block is immediately followed by a fenced code block (skipping only
-// blank lines to find it), the whole of that code block too.
+// marker NOT on a heading line: the marker's own contiguous block
+// (ending at the next blank line, the next list-item-start line, the
+// next table row, the next blockquote line, the next heading, or EOF
+// — whichever comes first), plus, if that block is immediately
+// followed by a fenced code block (skipping only blank lines to find
+// it), the whole of that code block too. The table-row and
+// blockquote-line boundaries (final-gate finding L1-3) close the same
+// smuggle the list-item boundary closes, for the two other container
+// shapes the registry contract's clause 2 names ("a sentence, a list
+// item, a table cell") but this function did not yet narrow: a marker
+// in a table cell used to cover every remaining row of that table,
+// and a marker on a `>` line used to cover the rest of the quote.
 func (df *docFile) paragraphCoverageEnd(markerLine int) int {
 	n := len(df.Lines)
 
 	end := markerLine + 1
 	for end <= n {
 		line := df.Lines[end-1]
-		if strings.TrimSpace(line) == "" || df.isHeadingLine(end) || listItemStartRe.MatchString(line) {
+		if strings.TrimSpace(line) == "" || df.isHeadingLine(end) ||
+			listItemStartRe.MatchString(line) || tableRowStartRe.MatchString(line) || blockquoteStartRe.MatchString(line) {
 			break
 		}
 		end++

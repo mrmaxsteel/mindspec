@@ -39,93 +39,99 @@
 // The property this lint wants is "does invoking this command run
 // cobra's normal handler, or cmd/mindspec's one-shot deprecation
 // message followed by os.Exit(2)". Per the binding ruling, that is
-// answered with TWO INDEPENDENT signals that MUST AGREE — disagreement
-// is a hard test failure, never a silent tie-break, because every
-// prior (AST-only) version failed by trusting a single signal:
+// answered with TWO signals that MUST AGREE — disagreement is a hard
+// test failure, never a silent tie-break, because every prior
+// (AST-only) version failed by trusting a single signal:
 //
+//   - STRUCTURAL: the dump's !AutoRegistered && HasRun && !HasRunE
+//     (structuralStub) — the ruling's literal `Run != nil && RunE ==
+//     nil` text, scoped by PROVENANCE (cmd/mindspec/cmdtree_dump.go's
+//     AutoRegistered field) rather than by any field describing how
+//     the node happens to BEHAVE. A node is structurally a stub only
+//     if cmd/mindspec's own source added it (not cobra's
+//     InitDefaultHelpCmd/InitDefaultCompletionCmd) and it is
+//     Run-set/RunE-unset.
 //   - BEHAVIOURAL: the exit code of `<binary> <path...> --help`, run
 //     with explicit argv (probeBehavioralStub). A genuine stub sets
 //     DisableFlagParsing, so cobra never intercepts `--help` as a
 //     flag — it falls straight through to the stub's Run, which
 //     unconditionally prints one line and os.Exit(2)s. A live command
-//     has flag parsing enabled, so cobra intercepts `--help` centrally
-//     and returns before Run/RunE ever runs, exiting 0.
-//   - STRUCTURAL: the dump's HasRun && !HasRunE && DisableFlagParsing
-//     (structuralStub). The DisableFlagParsing conjunct is this file's
-//     one addition beyond the ruling's literal text — see below.
+//     (or a stub that OMITS DisableFlagParsing) has flag parsing
+//     enabled, so cobra intercepts `--help` centrally and returns
+//     before Run/RunE ever runs, exiting 0.
 //
-// ## Why DisableFlagParsing had to join the structural signal
+// ## The honest independence property (final-gate finding L1-1)
 //
-// The ruling's stub_signal section specifies the structural half as
-// bare `Run != nil && RunE == nil`, reasoned to become vacuous (never
-// wrong) once deprecated_commands.go is eventually deleted, "because
-// neither signal is a list". That reasoning implicitly assumed every
-// Run-set/RunE-unset node comes from cmd/mindspec's own stub
-// constructor — true within cmd/mindspec's OWN source, but the
-// judge's 93-path measurement was taken against the AST tree, which
-// never contained cobra's auto-registered `help` command (AST
-// couldn't see it — see above). Once B makes `help` a real node
-// (exactly the divergence B exists to fix), it is a PERMANENT,
-// unavoidable counterexample to the bare rule: cobra's own
-// InitDefaultHelpCmd (spf13/cobra@v1.8.1 command.go:1262) sets `Run`,
-// never `RunE`, for every cobra program that has ever existed — and
-// `help` is obviously, permanently live (verified:
-// `mindspec help --help` exits 0). Bare Run-set/RunE-unset therefore
-// structurally disagrees with the behavioural signal for `help`
-// forever, which would make this lint permanently unbuildable if the
-// two signals must agree unconditionally.
+// An EARLIER version of this file used `HasRun && !HasRunE &&
+// DisableFlagParsing` as the structural signal — DisableFlagParsing as
+// a stand-in for "is this cobra's own auto-registered `help`, or one
+// of our real stubs". That was wrong, and the doc comment that shipped
+// alongside it recorded a FALSE safety argument: it claimed a future
+// stub that omitted DisableFlagParsing would make the two signals
+// disagree and hard-fail. It does not, because BOTH signals as written
+// were functions of DisableFlagParsing: behaviourally, cobra only
+// intercepts `--help` centrally (exit 0) when flag parsing is
+// enabled, i.e. when DisableFlagParsing is false; structurally, the
+// old formula reports "live" whenever DisableFlagParsing is false, for
+// exactly the same reason. In the dfp=false half of the space the two
+// signals therefore constant-agreed on "live" and could never
+// disagree — a dfp-less stub was silently classified live, with no
+// disagreement and no hard failure. This was discriminator attempt
+// SIX; see the final-gate verdict (L1-1) for the empirical probe that
+// found it (a Hidden, Run-set/RunE-unset, os.Exit(2) command with no
+// DisableFlagParsing: `--help` on it exits 0, a bare invocation exits
+// 2 — exactly the disagreement the old formula could never see).
 //
-// DisableFlagParsing is what actually explains the correlation the
-// ruling is trying to capture: a stub's exit-2-on-`--help` behaviour
-// depends on DisableFlagParsing, not on Run-vs-RunE per se (RunE could
-// just as well be used by a hypothetical future stub). Every one of
-// cmd/mindspec's six real stubs sets it; cobra's `help` does not
-// (verified below, TestCmdTree_HelpIsLiveNotStub). This is a narrow,
-// evidence-driven repair of an unmeasured gap in the ruling's literal
-// text — escalated to, and APPROVED by, the bead author (mindspec-ng3g)
-// per the ruling's own sign-off instruction, with one required
-// refinement recorded in the three points below.
+// THIS version replaces the DisableFlagParsing conjunct with
+// AutoRegistered — a fact about WHO added the node (provenance,
+// snapshotted before cobra's Execute() ever runs; see
+// cmd/mindspec/cmdtree_dump.go), not a fact about how the node
+// happens to behave at runtime. That makes the two signals genuinely
+// independent along the axis that matters:
 //
-// IMPORTANT, per that sign-off: DisableFlagParsing is a CORRELATE, not
-// the property. It explains WHY a stub happens to exit 2 on `--help`
-// today; it does not define what a stub IS. Its use here is safe for
-// exactly one reason, and the reasoning must not be separated from it:
+//   - The STRUCTURAL signal is a pure function of (provenance, Run,
+//     RunE) — it never reads DisableFlagParsing and therefore cannot
+//     move with it. A dfp-less, source-added, Run-set/RunE-unset node
+//     is unconditionally reported "stub" structurally, regardless of
+//     dfp.
+//   - The BEHAVIOURAL signal is a pure function of runtime dispatch
+//     (does `--help` reach Run) and therefore DOES still depend on
+//     dfp — that dependency is real and is not being removed; it is
+//     no longer ALSO baked into the structural signal, which is what
+//     made the two move together before.
 //
-//  1. It is the STRUCTURAL half of a two-signal check, cross-checked
-//     against an INDEPENDENT behavioural signal (the real exit code).
-//  2. Safety rests entirely on that cross-check. If a future stub is
-//     ever built WITHOUT setting DisableFlagParsing, the structural
-//     signal reports "live" while the behavioural signal (still
-//     exit 2, because the stub's Run still os.Exit(2)s once cobra's
-//     flag parsing lets it run) reports "stub" — disagreement, and the
-//     build HARD-FAILS LOUDLY. That is the correct, safe direction: a
-//     loud break, not a silent misclassification.
-//  3. Consequently, THE STRUCTURAL SIGNAL MUST NEVER BE USED ALONE.
-//     Collapsing to bare "HasRun && !HasRunE && DisableFlagParsing"
-//     with no live behavioural cross-check would be, verbatim, wrong
-//     version #3 from the ruling's own history ("Hidden &&
-//     DisableFlagParsing... a coincidence of ONE helper's
-//     implementation, not a contract any other stub is bound to") —
-//     this is discriminator attempt SIX, and the only reason it is not
-//     also wrong is the cross-check in point 1. A future maintainer
-//     tempted to "simplify" by deleting the behavioural probe and
-//     trusting the structural signal alone would silently resurrect
-//     that exact, already-rejected failure mode.
+// Concretely: a hypothetical future stub with Run set, RunE unset, and
+// DisableFlagParsing OMITTED is structurally "stub" (not auto-
+// registered, Run-set/RunE-unset — dfp plays no part) while
+// behaviourally "live" (`--help` exits 0, since dfp=false lets cobra
+// intercept it) — a genuine disagreement, and the build HARD-FAILS
+// LOUDLY. TestCmdTree_DfpLessStubIsCaughtByProvenanceSignal below
+// proves this against a REAL built binary containing exactly that
+// shape, reproducing the final-gate probe as a permanent regression
+// fixture.
 //
-// A cleaner alternative EXISTS and was NOT taken: exclude cobra's
-// auto-registered builtins (`help`, `completion` and its children) by
-// PROVENANCE — they come from InitDefaultHelpCmd/InitDefaultCompletionCmd,
-// never from cmd/mindspec's own source — which would let the structural
-// signal stay the ruling's literal bare `HasRun && !HasRunE` with no
-// correlate field needed at all. That is more principled in the
-// abstract (no reliance on a field that merely correlates); it was not
-// implemented here because distinguishing "cobra-authored" from
-// "cmd/mindspec-authored" from OUTSIDE the cobra package, at dump time,
-// has no clean signal of its own (cobra does not expose command
-// provenance), and the two-signal design this ruling already mandates
-// makes the correlate-plus-cross-check approach above sufficient and
-// no less safe. Recorded here for whichever future author next touches
-// this discriminator.
+// ## The one residual region where the two signals cannot disagree
+//
+// Stated honestly rather than assumed: for every AUTO-REGISTERED node
+// (`help`, `completion` and its children), the structural signal is
+// forced to "live" unconditionally — AutoRegistered short-circuits the
+// Run/RunE check entirely, so no auto-registered node can ever be
+// reported "stub" no matter what its Run/RunE/dfp shape is. This is
+// safe only because cmd/mindspec's own source never writes to those
+// nodes — their Run/RunE bodies are cobra's, not ours, and cobra has
+// never shipped one that os.Exit(2)s as a deprecation message. If that
+// ever stopped being true (cobra itself shipped an auto-registered
+// command shaped like a stub), this scheme could not detect it; that
+// is a fact about cobra's own behavior being outside this repo's
+// control, not a gap this lint's two-signal design is trying to close.
+//
+// THE STRUCTURAL SIGNAL MUST NEVER BE USED ALONE regardless: collapsing
+// to bare "!AutoRegistered && HasRun && !HasRunE" with no live
+// behavioural cross-check would remove the only thing that makes a
+// wrong provenance computation, or a future cobra change to how
+// auto-registered commands are shaped, visible. A future maintainer
+// tempted to "simplify" by deleting the behavioural probe and trusting
+// the structural signal alone must not.
 //
 // `__complete`, the OTHER Run-set/RunE-unset cobra builtin, never
 // appears in the dump at all: cobra registers it transiently, deep
@@ -136,12 +142,11 @@
 // so there is nothing here for it to disagree about.
 //
 // When deprecated_commands.go is eventually deleted, the structural
-// signal (now DisableFlagParsing-qualified) still degrades correctly:
-// no node in the remaining source sets DisableFlagParsing at all, so
-// no node is ever marked stub, `--help` behaviourally returns 0
-// everywhere, the two signals still agree ("no stubs"), and R5 simply
-// never fires — the exact vacuous-not-wrong degradation the ruling
-// requires, just anchored on the field that actually causes it.
+// signal still degrades correctly: no remaining source-added node sets
+// Run without RunE, so no node is ever marked stub, `--help`
+// behaviourally returns 0 everywhere, the two signals still agree
+// ("no stubs"), and R5 simply never fires — the exact vacuous-not-wrong
+// degradation the ruling requires.
 package lint
 
 import (
@@ -228,6 +233,24 @@ type resolveResult struct {
 // validator this lint models, the ArgMax guard below) and checks any
 // `--flag`/short-flag words against the deepest node reached (plus
 // its ancestors' persistent flags, already folded into Flags).
+// resolve's single unified pass replaces an earlier two-phase design
+// (descend-until-first-flag, THEN validate flags/positionals against
+// wherever descent stopped) that had a seam final-gate finding
+// L4-FINAL-2 found: a real root flag preceding a bogus verb (e.g.
+// `mindspec --trace x totallybogus`) made the OLD descent loop stop at
+// "--trace" — the FIRST flag-shaped word, no matter where in the
+// invocation it appeared — and hand everything after it, including a
+// real subcommand word like "totallybogus", to the trailing
+// flag/positional loop as an unconstrained positional against
+// whichever (possibly still-root) node descent had reached, never
+// consulting cur.findChild again. A routine "global flag before the
+// verb" invocation shape therefore smuggled an absent command past R1
+// even though the real command tree data (Bead 9) was correct — the
+// consumer simply stopped asking it. This version interleaves flag
+// recognition and subcommand descent in ONE pass, so a flag anywhere
+// in the invocation never stops descent into a LATER real subcommand
+// word, and an absent word is still checked against cur's real
+// children no matter how many flags precede it.
 func (root *cmdNode) resolve(words []string) resolveResult {
 	if len(words) == 0 {
 		return resolveResult{Resolved: false, Reason: "empty invocation"}
@@ -236,62 +259,69 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 		return resolveResult{Resolved: false, Reason: fmt.Sprintf("root name mismatch: %q", words[0])}
 	}
 	cur := root
-	i := 1
-	for i < len(words) {
-		w := words[i]
-		if strings.HasPrefix(w, "-") {
-			break
-		}
-		if len(cur.Children) == 0 {
-			break // leaf command: remaining words are positional args
-		}
-		child := cur.findChild(w)
-		if child == nil {
-			return resolveResult{Resolved: false, Reason: fmt.Sprintf("no subcommand %q under %q", w, cur.path())}
-		}
-		cur = child
-		i++
-	}
-	if cur.IsStub {
-		return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q resolves to a one-shot deprecation stub (Run, not RunE)", cur.path())}
-	}
-	// Single pass over the trailing words: validate every --flag/short
-	// flag against cur, and collect whatever is left as candidate
-	// positionals for the ArgMax check below. A long flag without an
-	// inline `--name=value` is assumed to consume the NEXT word as its
-	// value UNLESS its registered Type is "bool" (a bool flag takes no
-	// value at all — this is the fidelity win real flag-type data gives
-	// over the AST model's blind "always skip" guess, O2-r2-4).
 	var positionals []string
 	skipNextAsFlagValue := false
-	for _, w := range words[i:] {
+	sawDoubleDash := false // "--": cobra's own end-of-flags marker; everything after is literal, never a flag or a subcommand name.
+	for _, w := range words[1:] {
 		if skipNextAsFlagValue {
 			skipNextAsFlagValue = false
 			continue
 		}
-		switch {
-		case strings.HasPrefix(w, "--"):
-			name := strings.TrimPrefix(w, "--")
-			hasInlineValue := false
-			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				name = name[:eq]
-				hasInlineValue = true
+		if !sawDoubleDash {
+			switch {
+			case w == "--":
+				sawDoubleDash = true
+				continue
+			case strings.HasPrefix(w, "--"):
+				// A long flag without an inline `--name=value` is
+				// assumed to consume the NEXT word as its value UNLESS
+				// its registered Type is "bool" (a bool flag takes no
+				// value at all — the fidelity win real flag-type data
+				// gives over the AST model's blind "always skip" guess,
+				// O2-r2-4). Checked against cur — wherever descent has
+				// reached SO FAR, which is exactly right: cobra resolves
+				// each command's own (and inherited) flags at whatever
+				// point in the argv it is currently parsing.
+				name := strings.TrimPrefix(w, "--")
+				hasInlineValue := false
+				if eq := strings.IndexByte(name, '='); eq >= 0 {
+					name = name[:eq]
+					hasInlineValue = true
+				}
+				flag, ok := cur.Flags[name]
+				if !ok {
+					return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
+				}
+				if !hasInlineValue && flag.Type != "bool" {
+					skipNextAsFlagValue = true
+				}
+				continue
+			case len(w) == 2 && w[0] == '-':
+				name := w[1:]
+				if !cur.hasFlag(name) {
+					return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -%s not registered on %q", name, cur.path())}
+				}
+				continue
 			}
-			flag, ok := cur.Flags[name]
-			if !ok {
-				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
-			}
-			if !hasInlineValue && flag.Type != "bool" {
-				skipNextAsFlagValue = true
-			}
-		case len(w) == 2 && w[0] == '-' && w != "--":
-			name := w[1:]
-			if !cur.hasFlag(name) {
-				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -%s not registered on %q", name, cur.path())}
-			}
-		default:
-			positionals = append(positionals, w)
 		}
+		// A non-flag word: descend into a matching child while cur still
+		// HAS children (a leaf's own business is its positional args,
+		// never a subcommand lookup — unchanged from before); report
+		// unresolved if it does not match any real child. Once cur has
+		// no children left (or "--" was seen), every remaining non-flag
+		// word is a candidate positional for the ArgMax check below.
+		if !sawDoubleDash && len(cur.Children) > 0 {
+			child := cur.findChild(w)
+			if child == nil {
+				return resolveResult{Resolved: false, Reason: fmt.Sprintf("no subcommand %q under %q", w, cur.path())}
+			}
+			cur = child
+			continue
+		}
+		positionals = append(positionals, w)
+	}
+	if cur.IsStub {
+		return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q resolves to a one-shot deprecation stub (source-added, Run-set/RunE-unset — see docs_truth_cmdtree_test.go's two-signal cross-check)", cur.path())}
 	}
 	// ArgMax >= 0 means cur's Args validator has a bound this lint
 	// modeled by actually invoking it (probeArgArities, cmd/mindspec/
@@ -391,6 +421,7 @@ type cmdTreeDump struct {
 	Hidden             bool              `json:"hidden"`
 	HasRun             bool              `json:"hasRun"`
 	HasRunE            bool              `json:"hasRunE"`
+	AutoRegistered     bool              `json:"autoRegistered"`
 	DisableFlagParsing bool              `json:"disableFlagParsing"`
 	OwnFlags           []cmdTreeFlagDump `json:"ownFlags"`
 	InheritedFlags     []cmdTreeFlagDump `json:"inheritedFlags"`
@@ -444,16 +475,35 @@ func buildCmdTreeOnce(tmp string) (*cmdNode, error) {
 	var disagreements []string
 	var probeErrors []string
 	root := linkDumpedNode(&dump, nil, binPath, tmp, &disagreements, &probeErrors)
-	if len(probeErrors) > 0 {
-		return nil, fmt.Errorf("Args validator probe failure(s), refusing to guess:\n  %s", strings.Join(probeErrors, "\n  "))
-	}
-	if len(disagreements) > 0 {
-		return nil, fmt.Errorf("stub-signal disagreement(s) between behavioural and structural checks — this is ALWAYS a hard failure, never a silent tie-break:\n  %s", strings.Join(disagreements, "\n  "))
+	if err := escalateTreeProblems(disagreements, probeErrors); err != nil {
+		return nil, err
 	}
 	if root.Name != "mindspec" {
 		return nil, fmt.Errorf(`__cmdtree root Use %q does not start with "mindspec"`, dump.Use)
 	}
 	return root, nil
+}
+
+// escalateTreeProblems is the sole gate between a collected
+// disagreement/probe-error and a hard build failure — extracted to a
+// pure, independently-callable function (final-gate finding L1-2)
+// specifically so a fixture can assert the escalation itself, rather
+// than only asserting that linkDumpedNode appended to a slice. Before
+// this extraction, nothing in this package's tests exercised the `if
+// len(disagreements) > 0` check that turns a detected disagreement
+// into an aborted build — deleting or short-circuiting it (e.g. `if
+// false && len(disagreements) > 0`) left the whole suite green, which
+// is exactly the "safety mechanism whose own failure is invisible"
+// class this lane keeps re-finding. See
+// TestEscalateTreeProblems_DisagreementIsHardFailure.
+func escalateTreeProblems(disagreements, probeErrors []string) error {
+	if len(probeErrors) > 0 {
+		return fmt.Errorf("Args validator probe failure(s), refusing to guess:\n  %s", strings.Join(probeErrors, "\n  "))
+	}
+	if len(disagreements) > 0 {
+		return fmt.Errorf("stub-signal disagreement(s) between behavioural and structural checks — this is ALWAYS a hard failure, never a silent tie-break:\n  %s", strings.Join(disagreements, "\n  "))
+	}
+	return nil
 }
 
 // buildMindspecBinaryHermetic builds ./cmd/mindspec into <tmp>/mindspec,
@@ -520,13 +570,22 @@ func linkDumpedNode(d *cmdTreeDump, parent *cmdNode, binPath, tmp string, disagr
 		n.ArgMax = d.ArgArities[len(d.ArgArities)-1] // probeArgArities emits arities in ascending order
 	}
 
-	structuralStub := d.HasRun && !d.HasRunE && d.DisableFlagParsing
+	structuralStub := !d.AutoRegistered && d.HasRun && !d.HasRunE
 	behavioralStub, err := probeBehavioralStub(binPath, tmp, pathWordsFromNode(n))
-	if err != nil {
+	switch {
+	case err != nil:
 		*probeErrors = append(*probeErrors, fmt.Sprintf("%s: behavioural stub probe: %v", n.path(), err))
-	} else if behavioralStub != structuralStub {
-		*disagreements = append(*disagreements, fmt.Sprintf("%s: behavioural(exit-code-derived)=%v structural(hasRun&&!hasRunE&&disableFlagParsing)=%v", n.path(), behavioralStub, structuralStub))
-	} else {
+		// Fail CLOSED (final-gate finding L1-2): an unclassifiable node
+		// must not silently count as a resolvable live verb. This only
+		// matters if escalateTreeProblems is ever bypassed — the
+		// non-empty probeErrors already aborts the whole build via
+		// escalateTreeProblems — but a regression in THAT escalation
+		// must degrade safely, not open R5.
+		n.IsStub = true
+	case behavioralStub != structuralStub:
+		*disagreements = append(*disagreements, fmt.Sprintf("%s: behavioural(exit-code-derived)=%v structural(!autoRegistered&&hasRun&&!hasRunE)=%v", n.path(), behavioralStub, structuralStub))
+		n.IsStub = true // fail CLOSED — see the case above.
+	default:
 		n.IsStub = structuralStub
 	}
 
@@ -599,8 +658,21 @@ func probeBehavioralStub(binPath, tmp string, pathWords []string) (bool, error) 
 // for its exit code — Stderr is intentionally not captured here since
 // no caller needs the stub's one-line message text, only its exit
 // code).
+// runMindspec sets cmd.Dir = tmp (final-gate finding L3-2): every exec
+// site here runs the built binary from INSIDE this repo's own working
+// directory otherwise (there is no other cwd to inherit — this file's
+// tests run as part of `go test ./internal/lint/`), so a relative
+// MINDSPEC_TRACE — or any future flag/env var this binary resolves
+// relative to cwd — would drop an untracked artifact straight into the
+// tracked source tree instead of the throwaway tmp this function
+// already receives for exactly this purpose. Every other stateful
+// binary-exec site in cmd/mindspec's OWN test suite
+// (approval_gates_test.go, doctor_migration_test.go,
+// greenfield_e2e_test.go, otel_test.go, next_dirty_test.go) sets
+// cmd.Dir to a temp dir; this one now matches that idiom.
 func runMindspec(binPath, tmp string, args []string) ([]byte, error) {
 	cmd := exec.Command(binPath, args...)
+	cmd.Dir = tmp
 	cmd.Env = stripCmdTreeEnv(tmp)
 	return cmd.Output()
 }
@@ -608,15 +680,30 @@ func runMindspec(binPath, tmp string, args []string) ([]byte, error) {
 // stripCmdTreeEnv builds a hermetic environment for building/execing
 // the mindspec binary this file introspects — the SAME scrubbing
 // shape cmd/mindspec/testhelpers_test.go's strippedEnv already
-// establishes and exercises in CI (spec 084 Bead 2/3): no inherited
-// AGENTMIND_BIN, an empty PATH (via emptyDir), a fresh HOME (so config
-// probes can't pick up developer-host state), and no OTEL_*/
-// CLAUDE_CODE_ENABLE_TELEMETRY leakage. Duplicated rather than
-// imported: cmd/mindspec/testhelpers_test.go is a _test.go file in a
-// different package (main), and Go does not allow importing another
-// package's test-only sources — the binding ruling's mandate to REUSE
-// this shape (not invent a second, subtly different hermetic-env
-// idiom) is honored by copying the exact same env-var list, not by a
+// establishes and exercises in CI (spec 084 Bead 2/3), PLUS one
+// addition this file needs and strippedEnv's own callers do not
+// (final-gate finding L3-2): no inherited AGENTMIND_BIN, an empty PATH
+// (via emptyDir), a fresh HOME (so config probes can't pick up
+// developer-host state), no OTEL_*/CLAUDE_CODE_ENABLE_TELEMETRY
+// leakage, and — the addition — no ambient MINDSPEC_* leakage either.
+// strippedEnv's own callers never needed that: they invoke the binary
+// from a scratch workspace dir they control end to end, so an
+// ambient MINDSPEC_TRACE pointed somewhere reasonable is (at worst)
+// harmless there. This file is different: runMindspec execs FROM
+// INSIDE the repo (see its own doc comment), so an ambient
+// MINDSPEC_TRACE with a RELATIVE path would write into the tracked
+// source tree, and an unwritable one would make every `__cmdtree`
+// call exit 1 with an opaque, env-var-blind error — the whole
+// docs-truth suite becomes unrunnable and the failure is
+// undiagnosable from the error text alone. Scrubbing it here removes
+// that failure mode entirely; it is not merely "the same shape",
+// deliberately stricter for a reason specific to how this file execs.
+// Duplicated rather than imported: cmd/mindspec/testhelpers_test.go is
+// a _test.go file in a different package (main), and Go does not
+// allow importing another package's test-only sources — the binding
+// ruling's mandate to REUSE this shape (not invent a second, subtly
+// different hermetic-env idiom) is honored by copying the same
+// env-var list (plus the one documented addition), not by a
 // cross-package import that does not exist as a possibility.
 // emptyDir/homeDir are subdirectories of the caller-supplied tmp
 // (itself a t.TempDir(), so both are cleaned up with it) rather than
@@ -636,7 +723,8 @@ func stripCmdTreeEnv(tmp string) []string {
 			strings.HasPrefix(kv, "PATH="),
 			strings.HasPrefix(kv, "HOME="),
 			strings.HasPrefix(kv, "OTEL_"),
-			strings.HasPrefix(kv, "CLAUDE_CODE_ENABLE_TELEMETRY="):
+			strings.HasPrefix(kv, "CLAUDE_CODE_ENABLE_TELEMETRY="),
+			strings.HasPrefix(kv, "MINDSPEC_"):
 			continue
 		}
 		out = append(out, kv)
@@ -709,10 +797,10 @@ func TestDumpCmdTree(t *testing.T) {
 // documented, evidence-driven deviation from the ruling's literal
 // structural-signal text (see the package doc comment): cobra's own
 // `help` command is Run-set/RunE-unset — the AST-era stub shape — but
-// is obviously, permanently live. Without the DisableFlagParsing
-// conjunct this file adds to the structural signal, this would be a
-// standing two-signal disagreement (a hard failure) on every single
-// run, for a command cmd/mindspec never even wrote.
+// is obviously, permanently live. Without the AutoRegistered exclusion
+// this file adds to the structural signal, this would be a standing
+// two-signal disagreement (a hard failure) on every single run, for a
+// command cmd/mindspec never even wrote.
 func TestCmdTree_HelpIsLiveNotStub(t *testing.T) {
 	root, err := buildCmdTree(t)
 	if err != nil {
@@ -761,12 +849,22 @@ func TestCmdTree_CompletionAutoCommandsResolve(t *testing.T) {
 //
 //   - "doctor" is a real, live command (HasRunE set, no
 //     DisableFlagParsing) — behaviourally `mindspec doctor --help`
-//     exits 0. Injecting HasRun=true/HasRunE=false/
-//     DisableFlagParsing=true (a fabricated stub claim) must disagree.
+//     exits 0. Injecting HasRun=true/HasRunE=false (a fabricated stub
+//     claim) must disagree.
 //   - "bench" is a real deprecation stub (deprecated_commands.go) —
 //     behaviourally `mindspec bench --help` exits 2. Injecting
 //     HasRun=false/HasRunE=true (a fabricated live claim) must
 //     disagree.
+//   - "doctor" again, this time with DisableFlagParsing left false (a
+//     dfp-less stub claim, AutoRegistered also left false since
+//     doctor is source-registered) — proving the fix is genuinely
+//     independent of dfp: under the OLD (pre-L1-1) formula
+//     `HasRun&&!HasRunE&&DisableFlagParsing`, this exact injection
+//     would compute structuralStub=false (since dfp=false), agree
+//     with doctor's real behavioural signal (also live), and MISS the
+//     fabricated claim entirely — the precise bug the final gate
+//     found. The current formula (!AutoRegistered&&HasRun&&!HasRunE)
+//     ignores dfp and correctly disagrees.
 func TestStubSignalDisagreement_IsHardFailure(t *testing.T) {
 	binPath, err := buildMindspecBinaryHermetic(t.TempDir())
 	if err != nil {
@@ -776,10 +874,11 @@ func TestStubSignalDisagreement_IsHardFailure(t *testing.T) {
 	cases := []struct {
 		name    string
 		nodeUse string
-		fake    cmdTreeDump // HasRun/HasRunE/DisableFlagParsing only
+		fake    cmdTreeDump // HasRun/HasRunE/DisableFlagParsing/AutoRegistered only
 	}{
 		{"live path falsely claimed stub", "doctor", cmdTreeDump{HasRun: true, HasRunE: false, DisableFlagParsing: true}},
 		{"stub path falsely claimed live", "bench", cmdTreeDump{HasRun: false, HasRunE: true, DisableFlagParsing: false}},
+		{"dfp-less stub claim on a live path (would have been MISSED by the pre-L1-1 formula)", "doctor", cmdTreeDump{HasRun: true, HasRunE: false, DisableFlagParsing: false}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -788,7 +887,7 @@ func TestStubSignalDisagreement_IsHardFailure(t *testing.T) {
 			root := &cmdTreeDump{Use: "mindspec", Children: []*cmdTreeDump{&child}}
 
 			var disagreements, probeErrors []string
-			linkDumpedNode(root, nil, binPath, t.TempDir(), &disagreements, &probeErrors)
+			linked := linkDumpedNode(root, nil, binPath, t.TempDir(), &disagreements, &probeErrors)
 
 			if len(probeErrors) != 0 {
 				t.Fatalf("expected no probe errors (real binary, real path), got: %v", probeErrors)
@@ -802,7 +901,205 @@ func TestStubSignalDisagreement_IsHardFailure(t *testing.T) {
 			if !found {
 				t.Fatalf("expected a disagreement naming %q, got: %v", c.nodeUse, disagreements)
 			}
+			// Fail-closed pin (L1-2): a disagreeing node's IsStub must be
+			// true, not the false zero-value, so a future regression in
+			// escalateTreeProblems degrades to "everything unresolved",
+			// never to "everything silently live".
+			if len(linked.Children) != 1 || !linked.Children[0].IsStub {
+				t.Fatalf("expected the disagreeing node's IsStub to be fail-closed true, got: %+v", linked.Children)
+			}
 		})
+	}
+}
+
+// dfpLessStubProbeSource is appended, via `go build -overlay`, to a
+// COPY of cmd/mindspec/cmdtree_dump.go's real content — never written
+// to the actual repo tree (see buildDfpLessStubProbeBinary) — to
+// produce a real binary containing a genuine, Hidden, Run-set/
+// RunE-unset, os.Exit(2) command that OMITS DisableFlagParsing: the
+// exact shape the final gate's L1-1 probe used (a `zzprobe`-style
+// command) to prove the pre-fix discriminator's dfp=false blind spot.
+// Appending to cmdtree_dump.go specifically (rather than any other
+// production file) is incidental — it already imports cobra and
+// "fmt", so only "os" needs adding — and has no effect on the probe:
+// the injected command is registered via its own init(), independent
+// of anything else in that file.
+const dfpLessStubProbeSource = `
+
+// zzDfpLessStubProbeCmd is a synthetic, TEST-ONLY command injected via
+// go build -overlay — see TestCmdTree_DfpLessStubIsCaughtByProvenanceSignal
+// in internal/lint. It is never part of any binary MindSpec ships.
+var zzDfpLessStubProbeCmd = &cobra.Command{
+	Use:    "zzprobe-dfpless",
+	Hidden: true,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprintln(os.Stderr, "zzprobe stub message")
+		os.Exit(2)
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(zzDfpLessStubProbeCmd)
+}
+`
+
+// buildDfpLessStubProbeBinary builds a probe binary containing exactly
+// the dfp-less stub shape above, WITHOUT writing anything to the real
+// repository tree: it reads cmd/mindspec/cmdtree_dump.go's real
+// content from disk, appends dfpLessStubProbeSource plus an "os"
+// import to a COPY written under tmp, and points `go build -overlay`
+// at that copy in place of the real file for this build only. `go
+// build -overlay` cannot ADD a new file to a package's file list in
+// this Go toolchain (verified empirically: `go list -f
+// '{{len .GoFiles}}'` is unchanged when the overlay names a path that
+// doesn't already exist on disk) — it CAN replace an EXISTING file's
+// content, which is what this does, so `git status` in the real repo
+// stays clean throughout.
+func buildDfpLessStubProbeBinary(tmp string) (string, error) {
+	repoRoot, err := repoRootPlain()
+	if err != nil {
+		return "", err
+	}
+	srcPath := filepath.Join(repoRoot, "cmd", "mindspec", "cmdtree_dump.go")
+	orig, err := os.ReadFile(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", srcPath, err)
+	}
+	const importNeedle = "\"encoding/json\"\n\t\"fmt\"\n"
+	patched := strings.Replace(string(orig), importNeedle, "\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n", 1)
+	if patched == string(orig) {
+		return "", fmt.Errorf("could not locate import block to patch in %s (expected %q)", srcPath, importNeedle)
+	}
+	patched += dfpLessStubProbeSource
+
+	patchedPath := filepath.Join(tmp, "cmdtree_dump_dfpless_probe.go")
+	if err := os.WriteFile(patchedPath, []byte(patched), 0o644); err != nil {
+		return "", err
+	}
+	overlay := struct{ Replace map[string]string }{Replace: map[string]string{srcPath: patchedPath}}
+	overlayBytes, err := json.Marshal(overlay)
+	if err != nil {
+		return "", err
+	}
+	overlayPath := filepath.Join(tmp, "overlay.json")
+	if err := os.WriteFile(overlayPath, overlayBytes, 0o644); err != nil {
+		return "", err
+	}
+
+	binPath := filepath.Join(tmp, "mindspec-dfpless-probe")
+	buildCmd := exec.Command("go", "build", "-overlay", overlayPath, "-o", binPath, "./cmd/mindspec")
+	buildCmd.Dir = repoRoot
+	var stderr strings.Builder
+	buildCmd.Stderr = &stderr
+	if err := buildCmd.Run(); err != nil {
+		return "", fmt.Errorf("go build -overlay ./cmd/mindspec: %w\nstderr: %s", err, stderr.String())
+	}
+	return binPath, nil
+}
+
+// TestCmdTree_DfpLessStubIsCaughtByProvenanceSignal is the permanent
+// regression fixture for final-gate finding L1-1's required change (c):
+// build a REAL throwaway binary containing a Run+os.Exit(2) command
+// with no DisableFlagParsing, and assert the two-signal cross-check
+// records a disagreement for it. This reproduces the exact probe the
+// final gate used (a Hidden `zzprobe`-shaped command), end to end,
+// through the actual __cmdtree dump + linkDumpedNode pipeline — not a
+// fabricated cmdTreeDump struct (that is what
+// TestStubSignalDisagreement_IsHardFailure's third case already
+// covers, more cheaply; this test additionally proves the REAL
+// AutoRegistered computation in cmd/mindspec/cmdtree_dump.go correctly
+// marks a genuinely-new, source-added command as NOT auto-registered,
+// which a fabricated-struct fixture cannot exercise).
+func TestCmdTree_DfpLessStubIsCaughtByProvenanceSignal(t *testing.T) {
+	tmp := t.TempDir()
+	binPath, err := buildDfpLessStubProbeBinary(tmp)
+	if err != nil {
+		t.Fatalf("buildDfpLessStubProbeBinary: %v", err)
+	}
+
+	// Sanity-check the probe's own real, un-linked behaviour first —
+	// this is the exact pair of exit codes the final gate's evidence
+	// recorded (--help exits 0 despite the command being a real stub;
+	// a bare invocation exits 2), confirming the built probe actually
+	// reproduces the reported shape before asking linkDumpedNode
+	// anything about it.
+	if _, err := runMindspec(binPath, tmp, []string{"zzprobe-dfpless", "--help"}); err != nil {
+		t.Fatalf("zzprobe-dfpless --help: expected exit 0 (dfp=false lets cobra intercept --help), got: %v", err)
+	}
+	if _, err := runMindspec(binPath, tmp, []string{"zzprobe-dfpless"}); err == nil {
+		t.Fatal("zzprobe-dfpless (bare): expected a non-zero exit (the stub's Run os.Exit(2)s), got success")
+	}
+
+	dumpOut, err := runMindspec(binPath, tmp, []string{"__cmdtree"})
+	if err != nil {
+		t.Fatalf("%s __cmdtree: %v", binPath, err)
+	}
+	var dump cmdTreeDump
+	if err := json.Unmarshal(dumpOut, &dump); err != nil {
+		t.Fatalf("unmarshal __cmdtree output: %v\noutput: %s", err, dumpOut)
+	}
+
+	var probeNode *cmdTreeDump
+	for _, c := range dump.Children {
+		if c.Use == "zzprobe-dfpless" {
+			probeNode = c
+		}
+	}
+	if probeNode == nil {
+		t.Fatalf("zzprobe-dfpless node not found in __cmdtree dump")
+	}
+	if probeNode.AutoRegistered {
+		t.Fatal("expected zzprobe-dfpless (a real command added by an init(), same as cmd/mindspec's own stubs) to be AutoRegistered=false")
+	}
+	if probeNode.DisableFlagParsing {
+		t.Fatal("test setup error: expected the injected probe to have DisableFlagParsing=false (that is the whole point of this fixture)")
+	}
+
+	var disagreements, probeErrors []string
+	linkDumpedNode(&dump, nil, binPath, tmp, &disagreements, &probeErrors)
+	if len(probeErrors) != 0 {
+		t.Fatalf("expected no probe errors, got: %v", probeErrors)
+	}
+	found := false
+	for _, d := range disagreements {
+		if strings.Contains(d, "mindspec zzprobe-dfpless:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a disagreement naming zzprobe-dfpless (structural=stub, behavioural=live via --help), got: %v", disagreements)
+	}
+}
+
+// TestEscalateTreeProblems_DisagreementIsHardFailure is the regression
+// fixture for final-gate finding L1-2: before escalateTreeProblems was
+// extracted, the escalation from a collected disagreement to a hard
+// build failure was inline in buildCmdTreeOnce and exercised by NO
+// fixture — TestStubSignalDisagreement_IsHardFailure only asserted
+// that linkDumpedNode appended to the disagreements slice, never that
+// a non-empty slice actually aborts anything. This calls
+// escalateTreeProblems directly and asserts a non-nil error naming the
+// disagreeing path, for both the disagreement and the probe-error
+// case.
+func TestEscalateTreeProblems_DisagreementIsHardFailure(t *testing.T) {
+	err := escalateTreeProblems([]string{"mindspec zzprobe: behavioural(exit-code-derived)=false structural(...)=true"}, nil)
+	if err == nil {
+		t.Fatal("expected a non-nil error for a non-empty disagreements slice")
+	}
+	if !strings.Contains(err.Error(), "mindspec zzprobe") {
+		t.Fatalf("expected the error to name the disagreeing path, got: %v", err)
+	}
+
+	err = escalateTreeProblems(nil, []string{"mindspec bogus: Args(2 args) panicked: boom"})
+	if err == nil {
+		t.Fatal("expected a non-nil error for a non-empty probeErrors slice")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected the error to surface the probe-error text, got: %v", err)
+	}
+
+	if err := escalateTreeProblems(nil, nil); err != nil {
+		t.Fatalf("expected nil error for two empty slices, got: %v", err)
 	}
 }
 
