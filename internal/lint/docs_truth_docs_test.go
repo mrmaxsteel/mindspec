@@ -438,6 +438,36 @@ func extractSkillRefs(df *docFile) []skillRefOccurrence {
 	return out
 }
 
+// extractRetiredSlashRefs finds slash-prefixed occurrences of a
+// RETIRED pre-"ms-"-rename name (O2-7 residual: see
+// retiredPreRenameNames, docs_truth_skills_test.go). Unlike
+// skillRefRe, which matches any `ms-[a-z0-9-]+` shape generically,
+// this matches only the exact retired names passed in, via
+// alternation — deliberately NOT a generic "any slash-prefixed
+// hyphenated word" pattern, which would false-positive on ordinary
+// prose slashes sharing no structural signal with a command reference
+// (`and/or`, `on/off`, date and fraction notation). A name is only
+// reported here if it is BOTH slash-prefixed AND an exact former
+// skill/workflow spelling; retired returns nil short-circuits to no
+// matches when there is nothing to look for.
+func extractRetiredSlashRefs(df *docFile, retired map[string]bool) []skillRefOccurrence {
+	if len(retired) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(retired))
+	for n := range retired {
+		names = append(names, regexp.QuoteMeta(n))
+	}
+	re := regexp.MustCompile(`(^|[^a-zA-Z0-9/])/(` + strings.Join(names, "|") + `)([^a-zA-Z0-9-]|$)`)
+	var out []skillRefOccurrence
+	for i, line := range df.Lines {
+		for _, m := range re.FindAllStringSubmatchIndex(line, -1) {
+			out = append(out, skillRefOccurrence{Name: line[m[4]:m[5]], Line: i + 1})
+		}
+	}
+	return out
+}
+
 // --- claims registry ----------------------------------------------------
 
 // claimEntry mirrors one entry under `claims:` in

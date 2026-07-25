@@ -143,6 +143,26 @@ func extractLifecycleSkillNames(path string) ([]string, error) {
 	return names, nil
 }
 
+// retiredPreRenameNames derives, from skills itself, the set of bare
+// names that used to be valid slash commands before the "ms-" prefix
+// convention (spec 105) was adopted — e.g. "ms-spec-approve" yields
+// "spec-approve". O2-7: the codex/copilot comparison tables used
+// exactly this pre-rename spelling (`/spec-approve`), which
+// skillRefRe's `ms-` anchor lets escape R2 entirely, since it never
+// even gets extracted as a candidate reference. This is a STRUCTURAL
+// derivation, not a hand-maintained list of retired verbs: a future
+// ms- rename (a 5th gate skill, say) makes its own old bare name
+// checked automatically, with no change needed here.
+func retiredPreRenameNames(skills skillUniverse) map[string]bool {
+	out := map[string]bool{}
+	for name := range skills {
+		if bare, ok := strings.CutPrefix(name, "ms-"); ok && bare != "" {
+			out[bare] = true
+		}
+	}
+	return out
+}
+
 func realRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
