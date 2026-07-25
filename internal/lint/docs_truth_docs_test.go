@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -375,8 +374,12 @@ func (df *docFile) findAllLiteral(token string) []int {
 	return lines
 }
 
-// quoteWord is a small diagnostic helper: renders a word list back as a
-// single quoted invocation string for error messages.
-func quoteWords(words []string) string {
-	return strconv.Quote(strings.Join(words, " "))
+// joinWords renders a resolved word list back into a plain (unquoted)
+// invocation string. Used as the content-identity key for
+// knownDocsTruthExceptions (docs_truth_test.go) — callers that want a
+// human-readable, quoted form for error output apply %q themselves
+// (see truthFinding.String) rather than baking quoting into the value
+// that identity matching compares.
+func joinWords(words []string) string {
+	return strings.Join(words, " ")
 }

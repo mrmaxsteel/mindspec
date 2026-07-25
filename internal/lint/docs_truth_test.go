@@ -29,13 +29,16 @@
 // "deprecation stubs") — accurate statements that a mechanical checker
 // cannot distinguish from a wrongly-live-presented claim without prose
 // understanding. knownDocsTruthExceptions below is this lint's
-// deliberately narrow, audited answer: exactly these five sites, each
-// justified, is-matched, and re-verified every run — the same
-// ratchet idiom ratchet_argv_table_test.go already uses in this
-// package for its own audited-but-unenforceable call sites. Anything
-// NOT on this list still fails. This is not a loosening of R1/R2/R3;
-// it is the visible, auditable form of the exemption the bead brief
-// says already exists by (undocumented, unenforced) convention.
+// deliberately narrow, audited answer: exactly these sites, each
+// justified, keyed on File+Text (never Line — see the type's doc
+// comment for why a line-keyed table is itself a hiding place),
+// is-matched, and re-verified every run — the same ratchet idiom
+// ratchet_argv_table_test.go already uses in this package for its own
+// audited-but-unenforceable call sites (a semantic identity, never a
+// position). Anything NOT on this list still fails. This is not a
+// loosening of R1/R2/R3; it is the visible, auditable form of the
+// exemption the bead brief says already exists by (undocumented,
+// unenforced) convention.
 //
 // A second, unrelated finding is on the list for a different reason:
 // `/ms-explore` (project-docs/user/CLAUDE.md, guides/claude-code.md)
@@ -65,7 +68,7 @@ type truthFinding struct {
 }
 
 func (f truthFinding) String() string {
-	return fmt.Sprintf("%s:%d: %s — %s", f.File, f.Line, f.Text, f.Why)
+	return fmt.Sprintf("%s:%d: %q — %s", f.File, f.Line, f.Text, f.Why)
 }
 
 // checkR1 walks every extracted `mindspec ...` invocation in each doc
@@ -83,7 +86,7 @@ func checkR1(docs []*docFile, cmdRoot *cmdNode) []truthFinding {
 				if covered, _ := df.coveredBy(occ.Line, ""); covered {
 					continue
 				}
-				out = append(out, truthFinding{File: df.Path, Line: occ.Line, Text: quoteWords(words), Why: res.Reason})
+				out = append(out, truthFinding{File: df.Path, Line: occ.Line, Text: joinWords(words), Why: res.Reason})
 			}
 		}
 	}
@@ -157,28 +160,85 @@ func checkR3(docs []*docFile, reg *claimsRegistryDoc) []truthFinding {
 // docsTruthException is one audited, pre-existing exception to R1/R2 —
 // see the package doc comment above for what these two classes are and
 // why they are not simply fixed or suppressed silently.
+//
+// Anchored on File+Text, NOT File+Line. Line numbers drift under
+// perfectly ordinary edits (inserting a paragraph above shifts every
+// line below it) — a line-keyed entry would then silently exempt
+// whatever unrelated claim happens to land on the old line number,
+// which is exactly the "anonymous label becomes the next hiding
+// place" failure R3 already guards against for markers. Text is the
+// exact, normalized invocation/skill-reference string the check
+// produced (docs_truth_test.go's joinWords / the "/name" form) — the
+// same content-identity idiom ratchet_argv_table_test.go uses (a
+// semantic key, never a line number) rather than the position-based
+// shape this table used before this fix. Line is kept only as
+// diagnostic context in comments/output, never compared.
 type docsTruthException struct {
 	File   string
-	Line   int
+	Text   string
+	Line   int // diagnostic only — NOT part of the matching key
 	Reason string
 }
 
 var knownDocsTruthExceptions = []docsTruthException{
-	{File: "project-docs/user/README.md", Line: 112, Reason: "truthful retrospective prose: \"(The old `mindspec agentmind|viz|bench` verbs moved to ... hidden deprecation stubs ...)\" — inert-referent-described-as-live class, extended to removed (not just absent) referents; see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Reason: "truthful retrospective prose: \"If you remember the old verbs: ... were removed by spec 084 ... hidden deprecation stubs\" — same class as above"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 52, Reason: "truthful retrospective prose: \"(formerly `mindspec bench`) moved to the agentmind repo ... deprecation stubs\" — same class as above"},
-	{File: "project-docs/user/CLAUDE.md", Line: 20, Reason: "genuine gap, not convention: /ms-explore has no install code path in internal/setup or plugins/mindspec (see docs_truth_skills_test.go) — flagged here as a tracked finding pending a product decision, not fixed by this bead"},
-	{File: "project-docs/user/guides/claude-code.md", Line: 94, Reason: "same /ms-explore gap as above"},
+	// project-docs/user/README.md:112 — "(The old `mindspec
+	// agentmind|viz|bench` verbs moved to ... hidden deprecation
+	// stubs ...)": truthful retrospective prose, the
+	// inert-referent-described-as-live class extended to removed (not
+	// just absent) referents. See package doc comment.
+	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec agentmind", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+
+	// project-docs/user/guides/agentmind.md:7 — "If you remember the
+	// old verbs: ... were removed by spec 084 ... hidden deprecation
+	// stubs": same class as above.
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind serve", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind replay", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec bench …", Reason: "truthful retrospective prose about a removed verb (literal trailing ellipsis from the source text) — see package doc comment"},
+
+	// project-docs/user/guides/agentmind.md:52 — "(formerly `mindspec
+	// bench`) moved to the agentmind repo ... deprecation stubs": same
+	// class as above.
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench collect", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench report", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+
+	// /ms-explore: a genuine gap, not a convention — see
+	// docs_truth_skills_test.go's doc comment. Listed here (rather than
+	// fixed) because the fix is a product decision (ship it for real,
+	// or retract the doc claim) outside this bead's scope.
+	{File: "project-docs/user/CLAUDE.md", Line: 20, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap, tracked pending a product decision — not fixed by this bead"},
+	{File: "project-docs/user/guides/claude-code.md", Line: 94, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap, tracked pending a product decision — not fixed by this bead"},
 }
 
-func matchesException(f truthFinding) bool {
-	for i := range knownDocsTruthExceptions {
-		e := &knownDocsTruthExceptions[i]
-		if e.File == f.File && e.Line == f.Line {
-			return true
+// applyExceptions partitions findings into those covered by a
+// File+Text-matching entry in exceptions and those that are not
+// (unexpected — these must fail the caller's test), and reports which
+// exception entries were matched at least once (an unmatched entry is
+// stale and must also fail the caller's test, per R3's own
+// both-directions discipline). Matching is deliberately on File+Text
+// only — see docsTruthException's doc comment for why Line is
+// excluded from the key.
+func applyExceptions(findings []truthFinding, exceptions []docsTruthException) (unexpected []truthFinding, matched []bool) {
+	matched = make([]bool, len(exceptions))
+	for _, f := range findings {
+		hit := false
+		for i := range exceptions {
+			e := &exceptions[i]
+			if e.File == f.File && e.Text == f.Text {
+				matched[i] = true
+				hit = true
+			}
+		}
+		if !hit {
+			unexpected = append(unexpected, f)
 		}
 	}
-	return false
+	return unexpected, matched
 }
 
 // TestDocsTruthReal runs R1+R2+R3 against the real, live docs surface.
@@ -224,21 +284,7 @@ func TestDocsTruthReal(t *testing.T) {
 	findings = append(findings, checkR2(docs, skills)...)
 	findings = append(findings, checkR3(docs, reg)...)
 
-	matched := make([]bool, len(knownDocsTruthExceptions))
-	var unexpected []truthFinding
-	for _, f := range findings {
-		hit := false
-		for i := range knownDocsTruthExceptions {
-			e := &knownDocsTruthExceptions[i]
-			if e.File == f.File && e.Line == f.Line {
-				matched[i] = true
-				hit = true
-			}
-		}
-		if !hit {
-			unexpected = append(unexpected, f)
-		}
-	}
+	unexpected, matched := applyExceptions(findings, knownDocsTruthExceptions)
 
 	if len(unexpected) > 0 {
 		var b []string
@@ -252,6 +298,56 @@ func TestDocsTruthReal(t *testing.T) {
 			t.Errorf("stale exception entry (no longer reproduces — fix the doc drift, or remove this entry): %s:%d %q",
 				knownDocsTruthExceptions[i].File, knownDocsTruthExceptions[i].Line, knownDocsTruthExceptions[i].Reason)
 		}
+	}
+}
+
+// TestExceptionsAreContentAnchoredNotLineAnchored is the regression
+// test for the defect a File+Line-keyed exception table had: an
+// unrelated edit inserting a paragraph above an exempted claim shifts
+// it to a new line, AND leaves whatever unrelated (possibly untrue)
+// claim now occupies the OLD line silently exempted too. Content
+// (File+Text) anchoring must fix both halves of that failure:
+//
+//  1. the real exempted claim keeps matching even after it moves to a
+//     different line (the "doc got edited, nothing actually changed
+//     about this claim" case — must NOT become a stale-entry failure);
+//  2. a DIFFERENT, untrue claim that lands at the exact file+line an
+//     exemption used to occupy must still be reported — the exact
+//     "one unrelated edit converts an audited exception into a blind
+//     spot" scenario the fix closes.
+func TestExceptionsAreContentAnchoredNotLineAnchored(t *testing.T) {
+	exceptions := []docsTruthException{
+		{File: "guide.md", Line: 7, Text: "mindspec viz", Reason: "test fixture: truthful historical mention"},
+	}
+
+	// Simulates the doc after an unrelated paragraph was inserted
+	// above: the real exempted claim is now three lines lower...
+	movedRealClaim := truthFinding{File: "guide.md", Line: 10, Text: "mindspec viz", Why: "resolves to a one-shot deprecation stub"}
+	// ...and a completely different, untrue claim an author
+	// introduced in that same edit now sits at line 7, the exact
+	// position the exception used to anchor on.
+	differentUntrueClaim := truthFinding{File: "guide.md", Line: 7, Text: "mindspec onboard --infer", Why: `no subcommand "onboard" under "mindspec"`}
+
+	unexpected, matched := applyExceptions([]truthFinding{movedRealClaim, differentUntrueClaim}, exceptions)
+
+	if !matched[0] {
+		t.Error("expected the real claim's exception to still match after it moved to a new line — content anchoring must not care about position")
+	}
+	foundMoved := false
+	foundDifferent := false
+	for _, f := range unexpected {
+		if f.Text == "mindspec viz" {
+			foundMoved = true
+		}
+		if f.Text == "mindspec onboard --infer" {
+			foundDifferent = true
+		}
+	}
+	if foundMoved {
+		t.Error("the real exempted claim must not appear as unexpected just because it moved lines")
+	}
+	if !foundDifferent {
+		t.Fatal("the different, untrue claim that landed at the exempted line/position must still be reported — a line-keyed table would have silently swallowed this")
 	}
 }
 
