@@ -80,7 +80,7 @@ Once the governed-loop kernel lands, `gate_authority: panel` on a gate will mean
 
 ### Halt conditions
 
-A governed loop's most important behavior is stopping. These are the named halts the design commits to — every halt named, logged, leaving state that a human (or a fresh controller) can pick up, because lifecycle state is derived from beads and git, never from the halted session's memory. (Today the bounded-rounds and reject-halts behavior is enforced by the level-1 autopilot skills; the `loop.halt` config keys that will govern it in the binary are declared, not yet enforced.)
+A governed loop's most important behavior is stopping. These are the named halts the design commits to — every halt named, logged, leaving state that a human (or a fresh controller) can pick up, because lifecycle state is derived from beads and git, never from the halted session's memory. (Today the bounded-rounds behavior is implemented by the level-1 autopilot skills — an instruction-level cap that binds a compliant agent, not a gate the binary checks; a REJECT does halt in the binary, via `mindspec complete`'s panel gate. The `loop.halt` config keys that will govern this in the binary are declared, not yet enforced.)
 
 | Halt | Trigger | Typical recovery |
 |:-----|:--------|:-----------------|

@@ -29,7 +29,7 @@ mindspec otel setup --endpoint http://localhost:4318 --target env  # print POSIX
 mindspec otel status                                            # read-only: show what's configured
 ```
 
-For Claude Code this writes the telemetry env block into `.claude/settings.local.json`; for Codex it writes the `[otel]` exporter block (keeping `log_user_prompt = false` so prompt text stays out of telemetry unless you opt in). If a config already points at another OTEL collector, mindspec warns and leaves it unchanged.
+For Claude Code this writes the telemetry env block into `.claude/settings.local.json`, overwriting the OTEL keys and preserving every other setting; for Codex it replaces the `[otel.exporter]` table whole and upserts the mindspec-owned `[otel]` keys (keeping `log_user_prompt = false` so prompt text stays out of telemetry unless you opt in), preserving all other tables byte-for-byte. It does **not** detect or warn about an existing endpoint: re-running `otel setup` against a config that already points at another OTEL collector silently replaces that endpoint. Check with `mindspec otel status` first if you're not sure what's configured.
 
 Any OTLP-compatible agent works without mindspec's help: point the standard OpenTelemetry environment variables (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.) at `http://localhost:4318`. And the receiver doesn't have to be AgentMind — anything that speaks OTLP/HTTP works (Honeycomb, Tempo, Jaeger, opentelemetry-collector-contrib).
 

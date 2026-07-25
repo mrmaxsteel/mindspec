@@ -48,7 +48,7 @@ Every phase transition is a gate. What a gate checks is fixed in the binary; the
 
 **Plan** — decompose the spec into beads: independently completable work items with per-bead acceptance criteria. The plan validator checks decomposition against published research thresholds and requires ADR citations covering every impacted domain. If the plan needs to deviate from a cited ADR, it stops and escalates — you approve a superseding ADR or reject the divergence.
 
-**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic, token-budgeted context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
+**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
 
 **Review** — after the last bead merges, a final panel reviews the cumulative spec branch against main: scope drift, inter-bead coherence, release readiness. Approval merges spec → main via PR, and the lifecycle returns to idle.
 
@@ -62,7 +62,7 @@ MindSpec tracks work in [Beads](https://github.com/gastownhall/beads) — a git-
 
 This is not an incidental choice; it's what makes the loop possible.
 
-Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
+Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id> --max-tokens <n>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
 
 Fresh context per work item isn't a suggestion, it's enforced: the session-freshness gate hard-errors if an agent tries to claim a bead from a stale, compacted, or already-claimed session. Context quality degrades as sessions age; MindSpec makes the fresh start mandatory rather than hopeful.
 
@@ -254,7 +254,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 ```
 your-project/
 ├── .mindspec/
-│   ├── config.yaml          # panels; models/runner/loop (declared, not yet enforced)
+│   ├── config.yaml          # panels; runner (skill-read); models/loop (declared, not yet enforced)
 │   ├── specs/               # versioned specs + plans + panel verdicts
 │   ├── adr/                 # Architecture Decision Records
 │   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests

@@ -10,7 +10,7 @@ AI coding agents are powerful but unstructured. Without guardrails they:
 - **Skip documentation** — code ships, docs rot
 - **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
 
-MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and **OTLP telemetry export** that pairs with [AgentMind](https://github.com/mrmaxsteel/agentmind), a standalone observability dashboard that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from the spec, plan, domain docs, and cited ADRs so the agent gets exactly the right context without manual prompt engineering — and **OTLP telemetry export** that pairs with [AgentMind](https://github.com/mrmaxsteel/agentmind), a standalone observability dashboard that shows you exactly what your agent is doing, spending, and how efficiently it's working.
 
 ## The Workflow
 
@@ -74,7 +74,7 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 
 ### Context Packs
 
-MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets. There is no standalone command to invoke this yourself: a context pack is generated automatically at each approval gate (`mindspec spec approve`, `mindspec plan approve`).
+Context packs are bead-scoped. When a plan is approved, each bead is pre-populated with its context fields (requirements, acceptance criteria, cited ADRs, file paths); `mindspec context bead <bead-id>` renders that into a deterministic context document, and `mindspec context bead <bead-id> --max-tokens <n>` emits the token-budgeted layout — spec, plan section, cited ADR decisions, domain docs, and file paths, with a SHA-256 provenance record of every input.
 
 ### Architecture Decision Records
 
@@ -95,7 +95,7 @@ mindspec instruct
 
 ### Domain-Driven Design
 
-Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs route through the Context Map, expanding one hop to include neighboring bounded contexts. Domain-scoped ADRs live alongside domain docs.
+Bounded contexts reduce ambiguity. Specs declare impacted domains. Domain-scoped ADRs live alongside domain docs, and the Context Map records the relationships between domains.
 
 ---
 
@@ -118,10 +118,10 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 | `mindspec instruct` | Emit mode-appropriate agent guidance |
 | `mindspec state show` | Show current mode and active work |
 | `mindspec next` | Claim next ready bead, create worktree |
-| `mindspec complete` | Close bead, remove worktree, advance state |
-| `mindspec approve spec <id>` | Approve spec, transition to Plan Mode |
-| `mindspec approve plan <id>` | Approve plan, transition to Implementation |
-| `mindspec approve impl <id>` | Approve implementation, return to Idle |
+| `mindspec complete <bead-id>` | Close bead, remove worktree, advance state |
+| `mindspec spec approve <id>` | Approve spec, transition to Plan Mode |
+| `mindspec plan approve <id>` | Approve plan, transition to Implementation |
+| `mindspec impl approve <id>` | Approve implementation, return to Idle |
 
 ### Context & Documentation
 
@@ -135,10 +135,10 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 | Command | Description |
 |:--------|:------------|
 | `mindspec init` | Bootstrap project structure and AGENTS.md |
-| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
-| `mindspec setup copilot` | Configure GitHub Copilot integration (instructions, prompt files) |
+| `mindspec setup claude` | Configure Claude Code integration (hooks, skills, CLAUDE.md) |
+| `mindspec setup copilot` | Configure GitHub Copilot integration (instructions, hooks, skills) |
 | `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
-| `mindspec spec-init <id>` | Create new specification |
+| `mindspec spec create <id>` | Create new specification |
 | `mindspec doctor` | Project health checks |
 
 ## Project Structure
@@ -146,13 +146,17 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 ```
 your-project/
 ├── .mindspec/
-│   ├── docs/                   # Canonical docs (core, domains, adr, specs, guides)
-│   ├── policies.yml            # Canonical architecture policies
-│   └── state.json              # Current mode, active spec/bead (committed)
-├── .beads/                     # Beads work graph (committed)
-├── docs_archive/               # Migration archive outputs by run-id
-├── AGENTS.md                   # Minimal bootstrap (points to CLI)
-└── CLAUDE.md                   # Minimal bootstrap (points to CLI)
+│   ├── config.yaml          # panels; runner (skill-read); models/loop (declared, not yet enforced)
+│   ├── specs/               # versioned specs + plans + panel verdicts
+│   ├── adr/                 # Architecture Decision Records
+│   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests
+│   ├── context-map.md       # relationships between domains
+│   ├── reviews/             # ad-hoc review panels
+│   └── core/                # reference docs (USAGE, MODES, state machine)
+├── .beads/                  # the work graph (committed, git-native)
+├── .claude/                 # agent integration (or .agents/, .github/)
+├── AGENTS.md                # cross-agent conventions
+└── CLAUDE.md                # Claude Code entry point
 ```
 
 ## Design Principles

@@ -5,12 +5,24 @@
 #
 #   A config surface can exist — parsed, defaulted, validated, and printed
 #   by `mindspec config show` — without anything reading it to change
-#   behavior. Docs distinguish three layers, and must never describe a
-#   lower layer as a higher one:
+#   behavior. Docs distinguish three layers, and must describe each
+#   surface as the layer it actually occupies — never a lower layer as a
+#   higher one, and never a higher layer as a lower one (a skill-read key
+#   documented as declared-only misleads exactly as badly: a reader sets
+#   or ignores it "because it does nothing" and a skill silently changes
+#   behavior on it):
 #
 #     enforced in the binary   a gate or verb that exits non-zero / behaves
 #     enforced in prompt-space a skill reads the key and obeys it
+#                              (instruction-level: this binds a compliant
+#                              agent; the binary does not check it, and a
+#                              non-compliant agent can ignore it)
 #     declared only            parsed + validated + surfaced, read by nothing
+#
+#   Scope note: the shipped skills corpus (plugins/mindspec/skills/**,
+#   installed into consumer repos by `mindspec setup`) is a live public
+#   surface but is NOT yet scanned by the docs-truth lint; layer
+#   truthfulness there is maintained by review, not mechanically.
 #
 #   Declared-only surfaces are described in docs with the same annotation
 #   the binary prints: "declared, not yet enforced". Prose may describe
