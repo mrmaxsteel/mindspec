@@ -23,7 +23,7 @@ When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) disp
    ```bash
    mindspec panel tally <panel-slug>
    ```
-   This prints, in one shot: the per-slot verdict table (`verdict` + `hard_block`, malformed files named and counted as missing), the aggregate APPROVE / REQUEST_CHANGES / REJECT counts against the resolved threshold — the configured panel mix (shipped default: 6 reviewers — 3 `claude` + 3 `codex` — threshold `n-1`; see `ms-panel-run`'s § Panel-size ladder for how an operator scales this per gate) — the `panel.PanelGateDecision` decision (PASS / PASS with advisory / BLOCK), and the aggregated `concrete_changes_required` — read presentation-only from each REQUEST_CHANGES/REJECT verdict file, never feeding the decision. The exit code tracks the decision alone: `0` on Allow, `0` with the advisory printed on Warn, non-zero with a final recovery line (ADR-0035) on Block.
+   This prints, in one shot: the per-slot verdict table (`verdict` + `hard_block`, malformed files named and counted as missing), the aggregate APPROVE / REQUEST_CHANGES / REJECT counts against the resolved threshold (**N − 1** by default — 5-of-6 for the standard 6-reviewer panel), the `panel.PanelGateDecision` decision (PASS / PASS with advisory / BLOCK), and the aggregated `concrete_changes_required` — read presentation-only from each REQUEST_CHANGES/REJECT verdict file, never feeding the decision. The exit code tracks the decision alone: `0` on Allow, `0` with the advisory printed on Warn, non-zero with a final recovery line (ADR-0035) on Block.
 
    This is the identical decision the in-binary `mindspec complete` gate enforces — including the filename-derived `max(N)` over `*-round-<N>.json` (never a possibly-lagging `panel.json.round`) and the `reviewed_head_sha` freshness check — so there is nothing left to hand-tabulate. On a Block from staleness, see § After a halt — recovery below.
 
@@ -42,8 +42,6 @@ When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) disp
       - **Documentation / prose** — fix if user-facing, defer otherwise
 
    d. Write the consolidated list to `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md` for the fix subagent to read.
-
-   e. **Contested-finding re-verify (ADR-0044).** Before acting on an empirical claim another slot or the fix author disputes, re-verify it yourself in a fresh detached checkout at the reviewed SHA (same `git worktree add --detach` mechanics as `/ms-panel-run`'s Reviewer conduct section) — the reproduction (or its failure) IS the refutation evidence. More broadly: every BLOCKING finding from a non-interactive CLI reviewer must be reproduced in isolation before fix-dispatch or refutation — verify, never confirmed. Never out-vote by count in either direction; weight the reviewer that did the deeper code trace over a simple tally (extends the confidence/single-dissent notes in § Anti-patterns below). See ADR-0044 for the full doctrine.
 
 3. **Capture dispositions (spec 117 — durable telemetry).** As you — the single decision authority — resolve each DISTINCT finding above, whether at this consolidation pass, at a later fix-round confirmation, via the § After a halt refutation procedure (item 5), or when filing a follow-up bead for a `deferred` finding, append ONE row per distinct finding to that panel's durable store with the canonical write op — `mindspec panel disposition append` — never a hand-edited file. **Two DIFFERENT spec identifiers appear below, do not conflate them:** the `--spec` FLAG takes the full `<NNN-slug>` spec id (e.g. `117-panel-review-telemetry`), the same value `mindspec validate spec` takes; the `spec` FIELD inside the row/manifest JSON is the BARE number `<NNN>` (e.g. `116`), which is what the migrated seed carries and what Q-queries group on.
    **NEVER inline untrusted finding text into a shell-quoted `--data '{...}'` argument.** A crafted `summary`/`note`/`reviewer` (e.g. one containing `'; touch /tmp/x; echo '`) breaks the single quote and runs arbitrary shell BEFORE `mindspec` even starts. Instead, write the JSON to a temp file with a QUOTED heredoc — the quotes on `<<'JSON'` disable ALL shell expansion and command substitution inside the body, so no finding text can escape — then pass it with `--data @<file>` (`--data -` reads the same JSON from stdin). Do NOT pass an `id`: the CLI DERIVES the canonical row `id` from the record content (a hash of `{spec,panel,reviewer,summary}`), overriding anything you supply, which is exactly what makes a re-append of the same finding an idempotent retry rather than a duplicate.
@@ -68,10 +66,10 @@ When `runner: claude-code-workflow` (§ Runner dispatch in `/ms-panel-run`) disp
    ```
    `check` FAILS, naming the panel and the first uncovered slot, if any manifest slot whose terminal verdict is `REQUEST_CHANGES`/`REJECT` has no disposition row naming it as `reviewer` or in `convergent_with[]` — every such slot must be covered before this panel is considered captured.
 
-4. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs per configured family — the claude-family slots vs the codex-family slots, see the per-slot table above), and the consolidated-changes path, with denominators DERIVED from the configured mix — count the verdict files' `reviewer_id`s per family (`panel.json` carries only `expected_reviewers`, not per-slot sets) — never a hard-coded partition:
+4. **Report to the orchestrator** (`/ms-bead-cycle`): relay the tally's printed per-slot table + decision, a family-split note (APPROVEs among R1–R3 claude vs R4–R6 codex — see the per-slot table above), and the consolidated-changes path:
    ```
    <mindspec panel tally output>
-   Family split (APPROVEs): <claude-approves>/<claude-slots> claude, <codex-approves>/<codex-slots> codex
+   Family split (APPROVEs): <claude>/3 claude, <codex>/3 codex
    Consolidated changes: <path-to-md>
    ```
 
@@ -124,8 +122,8 @@ Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKI
 
 ## Anti-patterns
 
-- Don't auto-merge below the N−1 threshold. The threshold is N−1 — a floor derived from the configured mix (a **floor, not a sufficient condition**), and you should still note family asymmetry: clearing it does not pass the gate while any latest-round REQUEST_CHANGES stays unresolved.
-- Don't pass raw verdict JSONs to the fix subagent — dedupe first. N verdicts × ~3 items each = ~3N lines of duplicated asks otherwise.
+- Don't auto-merge below the N−1 threshold. The threshold is N−1 (5/6 for the default panel), and you should still note family asymmetry. Note the threshold is now a **floor, not a sufficient condition**: clearing it does not pass the gate while any latest-round REQUEST_CHANGES stays unresolved.
+- Don't pass raw verdict JSONs to the fix subagent — dedupe first. Six verdicts × ~3 items each = ~18 lines of duplicated asks otherwise.
 - Don't ignore `confidence`. A 0.96 REQUEST_CHANGES from one slot should outweigh a 0.70 APPROVE from another. `mindspec panel tally`'s printed table carries `verdict`/`hard_block` only, not `confidence` — read it from the underlying `<slot>-round-<N>.json` files when weighing verdicts, and note the weighting in the report.
 - Don't drop a REQUEST_CHANGES because "only one reviewer flagged it". A single empirically-grounded objection can be load-bearing — verify the claim before discarding — and the gate now BLOCKS on any unresolved REQUEST_CHANGES; the only per-slot escape is the audited refutation procedure (§ After a halt — recovery, item 5).
 - Don't satisfy an artifact-gate HARD block with a PR-body edit. The artifact must exist at the named path.

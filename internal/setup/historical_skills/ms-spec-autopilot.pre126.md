@@ -7,7 +7,7 @@ description: Whole-spec orchestrator — cycle every ready bead until the spec i
 
 The headline skill. Take a mindspec-approved plan and drive it bead-by-bead to completion. Each bead goes through `/ms-bead-cycle` (which owns pick + claim in its step 0). The autopilot sequences: it loops the cycle until no beads remain, then approves impl.
 
-**Beads run serially by design; parallelism lives inside each cycle** (across the configured panel reviewers + the impl subagent). There is no fan-out-across-beads mode — the cycle is the unit of work, one bead at a time.
+**Beads run serially by design; parallelism lives inside each cycle** (across the 6 reviewers + the impl subagent). There is no fan-out-across-beads mode — the cycle is the unit of work, one bead at a time.
 
 Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orchestrator rules apply across the whole loop (one push at end-of-spec, never raw-merge).
 
@@ -53,7 +53,7 @@ loop:
 After each bead merges, report to the user (concise):
 
 ```
-✓ <bead-id> merged in <K> rounds (round 1: <verdict tally>, round K: <N>/<N> APPROVE)
+✓ <bead-id> merged in <K> rounds (round 1: <verdict tally>, round K: 6/6 APPROVE)
   Commit: <merge sha>
   Test summary: <pass/fail/skip>
   Deviations folded into BRIEF for next round: <yes/no>

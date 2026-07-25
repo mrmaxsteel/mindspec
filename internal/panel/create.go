@@ -31,6 +31,10 @@ const briefStubBody = `## Summary
 
 <!-- TODO(skill): the files/paths this review covers -->
 
+## Acceptance Criteria (verbatim from spec.md)
+
+<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->
+
 ## Prior-Round Asks
 
 <!-- TODO(skill): concrete_changes_required from the previous round, if any -->

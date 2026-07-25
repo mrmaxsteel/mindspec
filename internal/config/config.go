@@ -68,8 +68,11 @@ type Config struct {
 	// Commands declares the CONSUMER's build/test guidance (spec 123
 	// R7b, ADR-0040's consumer-identity clause): a free-form task ->
 	// shell-command map beside Models, with the documented (not
-	// enforced) vocabulary keys "build" and "test" — the same advisory
-	// posture as Models' phase keys. UNLIKE Models/Loop/Runner, this key
+	// enforced) vocabulary keys "build", "test", and "ci" — the same
+	// advisory posture as Models' phase keys. "ci" (spec 126 R8a) names
+	// the project's declared CI invocation, reproduced by
+	// ms-spec-final-review's CI-parity check; when "ci" is undeclared,
+	// commands.test is the documented fallback. UNLIKE Models/Loop/Runner, this key
 	// is NOT inert: `mindspec init` and every `mindspec setup <agent>`
 	// verb render its populated entries as the managed AGENTS.md "Build
 	// & Test" section (see CommandLines/RenderBuildTestSection below) —
@@ -226,11 +229,11 @@ func KnownModels() []string {
 
 // commandOrder is the stable rendering order CommandLines/
 // RenderBuildTestSection apply: the documented vocabulary keys (build,
-// test) first when present, then every other declared key sorted — the
+// test, ci) first when present, then every other declared key sorted — the
 // single ordering rule so two independent renderers (bootstrap's starter
 // AGENTS.md, setup's managed block) can never disagree about order (spec
-// 123 R7b).
-var commandOrder = []string{"build", "test"}
+// 123 R7b; "ci" added by spec 126 R8a).
+var commandOrder = []string{"build", "test", "ci"}
 
 // hasNonBlankEntry reports whether m has at least one entry whose key AND
 // value are both non-blank after trimming (spec 123 FX-2, empty≠declared):
