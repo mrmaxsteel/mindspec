@@ -87,7 +87,8 @@ type cmdNode struct {
 	Use      string
 	Name     string // first whitespace-delimited field of Use
 	IsStub   bool
-	Flags    map[string]bool // flags registered directly on this node (Flags() or PersistentFlags())
+	NoArgs   bool            // literal sets Args: cobra.NoArgs (O2-8)
+	Flags    map[string]bool // flags registered directly on this node (Flags()/PersistentFlags()), PLUS cobra's auto-registered --help/-h (every node) and --version (root, when its literal sets Version) — see autoFlags (O2-6)
 	Persist  map[string]bool // flags registered via PersistentFlags() — inherited by descendants
 	Parent   *cmdNode
 	Children []*cmdNode
@@ -137,7 +138,9 @@ type resolveResult struct {
 // to be the root's own name, e.g. "mindspec") down the tree as far as
 // real children exist, then treats any remaining non-flag words as
 // positional arguments (a leaf command's own business, not this
-// resolver's) and checks any `--flag` words against the deepest node
+// resolver's — except when the deepest node reached sets Args:
+// cobra.NoArgs, O2-8's "at minimum" arity check: see the NoArgs guard
+// below) and checks any `--flag`/`-h` words against the deepest node
 // reached (plus its ancestors' persistent flags).
 func (root *cmdNode) resolve(words []string) resolveResult {
 	if len(words) == 0 {
@@ -150,7 +153,7 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 	i := 1
 	for i < len(words) {
 		w := words[i]
-		if strings.HasPrefix(w, "--") {
+		if strings.HasPrefix(w, "-") {
 			break
 		}
 		if len(cur.Children) == 0 {
@@ -166,19 +169,68 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 	if cur.IsStub {
 		return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q resolves to a one-shot deprecation stub (Run, not RunE)", cur.path())}
 	}
+	// Single pass over the trailing words: validate every --flag/-h
+	// against cur, and collect whatever is left as candidate
+	// positionals for the NoArgs check below. A long flag not already
+	// in `--name=value` form is heuristically assumed to consume the
+	// NEXT word as its value (e.g. `report list --resolve abc123`,
+	// report.go:125) — this package has no flag-type info (string vs
+	// bool) to do better, and over-permissively skipping a value-taking
+	// flag's argument is the safe direction for a truth LINT (a missed
+	// arity violation, not a false positive on a true claim).
+	var positionals []string
+	skipNextAsFlagValue := false
 	for _, w := range words[i:] {
-		if !strings.HasPrefix(w, "--") {
+		if skipNextAsFlagValue {
+			skipNextAsFlagValue = false
 			continue
 		}
-		name := strings.TrimPrefix(w, "--")
-		if eq := strings.IndexByte(name, '='); eq >= 0 {
-			name = name[:eq]
+		switch {
+		case strings.HasPrefix(w, "--"):
+			name := strings.TrimPrefix(w, "--")
+			hasInlineValue := false
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				name = name[:eq]
+				hasInlineValue = true
+			}
+			if !cur.hasFlag(name) {
+				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
+			}
+			if !hasInlineValue {
+				skipNextAsFlagValue = true
+			}
+		case w == "-h":
+			if !cur.hasFlag("h") {
+				return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -h not registered on %q", cur.path())}
+			}
+		default:
+			positionals = append(positionals, w)
 		}
-		if !cur.hasFlag(name) {
-			return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
+	}
+	if cur.NoArgs {
+		for _, w := range positionals {
+			if isPlaceholderWord(w) {
+				continue
+			}
+			return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q does not accept positional arguments (Args: cobra.NoArgs), got %q", cur.path(), w)}
 		}
 	}
 	return resolveResult{Resolved: true, Node: cur}
+}
+
+// isPlaceholderWord reports whether w is doc metasyntax for "some
+// value goes here" (`<bead-id>`, `[--flag]`, a quoted string) rather
+// than a literal positional argument a doc author actually typed, so
+// the NoArgs arity check above doesn't false-positive on the ordinary
+// placeholder forms docs use to describe a command's syntax. (Only
+// reachable today from the NoArgs guard; kept general so a future
+// ExactArgs/MaximumNArgs extension — see the package doc comment's
+// residue list — can reuse it without a second definition.)
+func isPlaceholderWord(w string) bool {
+	if strings.HasPrefix(w, "<") || strings.HasPrefix(w, "[") {
+		return true
+	}
+	return len(w) >= 2 && (w[0] == '"' || w[0] == '\'')
 }
 
 // --- AST extraction -------------------------------------------------
@@ -192,6 +244,8 @@ type commandDef struct {
 	Use          string
 	HasRun       bool
 	HasRunE      bool
+	HasVersion   bool // literal sets a Version field (root.go:57) — seeds the auto --version flag (O2-6)
+	NoArgs       bool // literal sets Args: cobra.NoArgs (O2-8)
 	flagsByVar   map[string]bool
 	persistByVar map[string]bool
 }
@@ -393,8 +447,8 @@ func (b *cmdTreeBuild) processVarValue(varName string, rhs ast.Expr) {
 	// Direct: `&cobra.Command{...}`.
 	if u, ok := rhs.(*ast.UnaryExpr); ok && u.Op == token.AND {
 		if cl, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(cl.Type) {
-			use, hasRun, hasRunE := inspectCommandLiteral(cl)
-			b.Defs[varName] = &commandDef{VarName: varName, Use: use, HasRun: hasRun, HasRunE: hasRunE}
+			use, hasRun, hasRunE, hasVersion, noArgs := inspectCommandLiteral(cl)
+			b.Defs[varName] = &commandDef{VarName: varName, Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, NoArgs: noArgs}
 			return
 		}
 	}
@@ -410,9 +464,10 @@ func (b *cmdTreeBuild) processVarValue(varName string, rhs ast.Expr) {
 	}
 	// One-level helper indirection: `helper(args...)`.
 	if call, ok := rhs.(*ast.CallExpr); ok {
-		if def := b.resolveHelperCall(call); def != nil {
+		if def, edges := b.resolveHelperCall(call, varName); def != nil {
 			def.VarName = varName
 			b.Defs[varName] = def
+			b.Edges = append(b.Edges, edges...)
 		}
 	}
 }
@@ -426,9 +481,9 @@ func isCobraCommandType(t ast.Expr) bool {
 	return ok && pkg.Name == "cobra" && sel.Sel.Name == "Command"
 }
 
-// inspectCommandLiteral extracts Use/Run/RunE presence from a
-// &cobra.Command{...} composite literal's key-value fields.
-func inspectCommandLiteral(cl *ast.CompositeLit) (use string, hasRun, hasRunE bool) {
+// inspectCommandLiteral extracts Use/Run/RunE/Version/Args presence
+// from a &cobra.Command{...} composite literal's key-value fields.
+func inspectCommandLiteral(cl *ast.CompositeLit) (use string, hasRun, hasRunE, hasVersion, noArgs bool) {
 	for _, elt := range cl.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -447,9 +502,28 @@ func inspectCommandLiteral(cl *ast.CompositeLit) (use string, hasRun, hasRunE bo
 			hasRun = true
 		case "RunE":
 			hasRunE = true
+		case "Version":
+			hasVersion = true
+		case "Args":
+			if isCobraNoArgs(kv.Value) {
+				noArgs = true
+			}
 		}
 	}
-	return use, hasRun, hasRunE
+	return use, hasRun, hasRunE, hasVersion, noArgs
+}
+
+// isCobraNoArgs reports whether e is the literal `cobra.NoArgs` — the
+// one Args validator O2-8's "at minimum" fix enforces. ExactArgs(n),
+// MaximumNArgs(n), and the other cobra.PositionalArgs forms are a
+// documented remaining gap (package doc comment).
+func isCobraNoArgs(e ast.Expr) bool {
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "cobra" && sel.Sel.Name == "NoArgs"
 }
 
 // resolveHelperCall implements the one-level function-call indirection
@@ -458,18 +532,37 @@ func inspectCommandLiteral(cl *ast.CompositeLit) (use string, hasRun, hasRunE bo
 // &cobra.Command{...}` (optionally via a named result / local var).
 // Fields on that literal that read one of helper's own parameters are
 // resolved back through args at this call site.
-func (b *cmdTreeBuild) resolveHelperCall(call *ast.CallExpr) *commandDef {
+//
+// O2-3: it ALSO walks the helper's body for `<local>.AddCommand(...)`
+// and `<local>.Flags()/PersistentFlags().<Method>(name, ...)` calls on
+// the same local the returned literal was built from — the extraction
+// unwrapIIFE already performs for an inline IIFE body, reused here via
+// addCommandArgsForLocal/flagCallsForLocal — so a command built by
+// one-level helper indirection (`reportCmd = newReportCmd()`,
+// report.go:81-92) is modeled with its real children and flags instead
+// of as a childless, flagless leaf: without this, ANY invented
+// subcommand under such a parent resolves true (the leaf
+// positional-args arm swallows it), and a real flag on it
+// false-positives as unregistered, which is worse — it turns a TRUE
+// documented claim red and creates pressure to add an exception row.
+//
+// selfName is the var name this call's result will be known by in the
+// tree (the caller's own package-level var name, or a freshly minted
+// anonymous name for an inline helper call used directly as an
+// AddCommand argument) — used to parent any children discovered here,
+// and to seed further-nested anonymous children's names.
+func (b *cmdTreeBuild) resolveHelperCall(call *ast.CallExpr, selfName string) (*commandDef, []edge) {
 	fnIdent, ok := call.Fun.(*ast.Ident)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	fn, ok := b.FieldDefs[fnIdent.Name]
 	if !ok || fn.Body == nil {
-		return nil
+		return nil, nil
 	}
-	cl := findReturnedCommandLiteral(fn.Body)
+	localName, cl := findReturnedCommandLiteralVar(fn.Body)
 	if cl == nil {
-		return nil
+		return nil, nil
 	}
 	paramIndex := map[string]int{}
 	if fn.Type.Params != nil {
@@ -482,7 +575,7 @@ func (b *cmdTreeBuild) resolveHelperCall(call *ast.CallExpr) *commandDef {
 		}
 	}
 	var use string
-	var hasRun, hasRunE bool
+	var hasRun, hasRunE, hasVersion, noArgs bool
 	for _, elt := range cl.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -507,29 +600,58 @@ func (b *cmdTreeBuild) resolveHelperCall(call *ast.CallExpr) *commandDef {
 			hasRun = true
 		case "RunE":
 			hasRunE = true
+		case "Version":
+			hasVersion = true
+		case "Args":
+			if isCobraNoArgs(kv.Value) {
+				noArgs = true
+			}
 		}
 	}
-	if use == "" && !hasRun && !hasRunE {
-		return nil
+
+	flagsByVar, persistByVar := flagCallsForLocal(fn.Body, localName)
+
+	var edges []edge
+	anonCount := 0
+	for _, arg := range addCommandArgsForLocal(fn.Body, localName) {
+		switch a := arg.(type) {
+		case *ast.Ident:
+			edges = append(edges, edge{Parent: selfName, Child: a.Name})
+		case *ast.CallExpr:
+			anonCount++
+			childName := fmt.Sprintf("%s#anon%d", selfName, anonCount)
+			if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
+				childDef.VarName = childName
+				edges = append(edges, edge{Parent: selfName, AnonChild: childDef})
+				edges = append(edges, childEdges...)
+			}
+		}
 	}
-	return &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE}
+
+	def := &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, NoArgs: noArgs, flagsByVar: flagsByVar, persistByVar: persistByVar}
+	return def, edges
 }
 
-// findReturnedCommandLiteral looks for a `return &cobra.Command{...}`
+// findReturnedCommandLiteralVar looks for a `return &cobra.Command{...}`
 // (possibly `return localVar` where localVar was assigned from such a
 // literal earlier in the same block) inside body. One level of local
-// alias resolution only.
-func findReturnedCommandLiteral(body *ast.BlockStmt) *ast.CompositeLit {
+// alias resolution only. Returns the local variable name the literal
+// was built from — fed to flagCallsForLocal/addCommandArgsForLocal by
+// resolveHelperCall (O2-3) — or "" when the literal is returned
+// directly with no intermediate local (e.g. stubDeprecated's `return
+// &cobra.Command{...}`, deprecated_commands.go:66), in which case
+// those two scans correctly find nothing (no real identifier is ever
+// named "").
+func findReturnedCommandLiteralVar(body *ast.BlockStmt) (localName string, cl *ast.CompositeLit) {
 	locals := map[string]*ast.CompositeLit{}
-	var found *ast.CompositeLit
 	for _, stmt := range body.List {
 		switch s := stmt.(type) {
 		case *ast.AssignStmt:
 			if len(s.Lhs) == 1 && len(s.Rhs) == 1 {
 				if id, ok := s.Lhs[0].(*ast.Ident); ok {
 					if u, ok := s.Rhs[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
-						if cl, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(cl.Type) {
-							locals[id.Name] = cl
+						if lit, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(lit.Type) {
+							locals[id.Name] = lit
 						}
 					}
 				}
@@ -537,18 +659,111 @@ func findReturnedCommandLiteral(body *ast.BlockStmt) *ast.CompositeLit {
 		case *ast.ReturnStmt:
 			if len(s.Results) == 1 {
 				if u, ok := s.Results[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
-					if cl, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(cl.Type) {
-						found = cl
+					if lit, ok := u.X.(*ast.CompositeLit); ok && isCobraCommandType(lit.Type) {
+						cl = lit
+						localName = ""
 					}
 				} else if id, ok := s.Results[0].(*ast.Ident); ok {
-					if cl, ok := locals[id.Name]; ok {
-						found = cl
+					if lit, ok := locals[id.Name]; ok {
+						cl = lit
+						localName = id.Name
 					}
 				}
 			}
 		}
 	}
-	return found
+	return localName, cl
+}
+
+// flagCallsForLocal scans node for `<local>.Flags().Method(name, ...)`
+// / `<local>.PersistentFlags().Method(name, ...)` calls and returns the
+// flag names found, split by persistence. The same extraction Pass 3
+// (scanCmdDir) performs for a known PACKAGE-LEVEL var, generalized to
+// any AST scope (a helper function body, an IIFE body) and any local
+// identifier — Pass 3 can't see flags registered on a helper's local
+// var (e.g. `c.Flags().String(...)` inside newReportListCmd,
+// report.go:125-126), because its receiver-identity check requires the
+// receiver to already be a tracked package-level def.
+func flagCallsForLocal(node ast.Node, localName string) (flags, persist map[string]bool) {
+	flags = map[string]bool{}
+	persist = map[string]bool{}
+	ast.Inspect(node, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		methodName := sel.Sel.Name
+		inner, ok := sel.X.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		innerSel, ok := inner.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		var isPersistent bool
+		switch innerSel.Sel.Name {
+		case "Flags":
+			isPersistent = false
+		case "PersistentFlags":
+			isPersistent = true
+		default:
+			return true
+		}
+		recv, ok := innerSel.X.(*ast.Ident)
+		if !ok || recv.Name != localName {
+			return true
+		}
+		argIdx := 0
+		if strings.HasSuffix(methodName, "VarP") || strings.HasSuffix(methodName, "Var") {
+			argIdx = 1
+		}
+		if len(call.Args) <= argIdx {
+			return true
+		}
+		flagName, ok := stringLitValue(call.Args[argIdx])
+		if !ok {
+			return true
+		}
+		if isPersistent {
+			persist[flagName] = true
+		} else {
+			flags[flagName] = true
+		}
+		return true
+	})
+	return flags, persist
+}
+
+// addCommandArgsForLocal scans node for single-argument
+// `<local>.AddCommand(<arg>)` calls and returns each arg. Mirrors
+// unwrapIIFE's existing single-arg-only extraction (a variadic
+// `AddCommand(a, b, c)` registration is a separate, out-of-scope
+// defect — O1-5 — left as-is here rather than incidentally fixed as a
+// side effect of this scan).
+func addCommandArgsForLocal(node ast.Node, localName string) []ast.Expr {
+	var out []ast.Expr
+	ast.Inspect(node, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "AddCommand" {
+			return true
+		}
+		recv, ok := sel.X.(*ast.Ident)
+		if !ok || recv.Name != localName || len(call.Args) != 1 {
+			return true
+		}
+		out = append(out, call.Args[0])
+		return true
+	})
+	return out
 }
 
 // isIIFECommandCall reports whether rhs is `func() *cobra.Command {
@@ -594,8 +809,8 @@ func (b *cmdTreeBuild) unwrapIIFE(varName string, body *ast.BlockStmt) (*command
 		if !ok || !isCobraCommandType(cl.Type) {
 			continue
 		}
-		use, hasRun, hasRunE := inspectCommandLiteral(cl)
-		def = &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE}
+		use, hasRun, hasRunE, hasVersion, noArgs := inspectCommandLiteral(cl)
+		def = &commandDef{Use: use, HasRun: hasRun, HasRunE: hasRunE, HasVersion: hasVersion, NoArgs: noArgs}
 		localName = id.Name
 	}
 	if def == nil {
@@ -603,31 +818,17 @@ func (b *cmdTreeBuild) unwrapIIFE(varName string, body *ast.BlockStmt) (*command
 	}
 	var edges []edge
 	anonCount := 0
-	for _, stmt := range body.List {
-		exprStmt, ok := stmt.(*ast.ExprStmt)
-		if !ok {
-			continue
-		}
-		call, ok := exprStmt.X.(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "AddCommand" {
-			continue
-		}
-		recv, ok := sel.X.(*ast.Ident)
-		if !ok || recv.Name != localName || len(call.Args) != 1 {
-			continue
-		}
-		switch arg := call.Args[0].(type) {
+	for _, arg := range addCommandArgsForLocal(body, localName) {
+		switch a := arg.(type) {
 		case *ast.Ident:
-			edges = append(edges, edge{Parent: varName, Child: arg.Name})
+			edges = append(edges, edge{Parent: varName, Child: a.Name})
 		case *ast.CallExpr:
-			if childDef := b.resolveHelperCall(arg); childDef != nil {
-				anonCount++
-				childDef.VarName = fmt.Sprintf("%s#anon%d", varName, anonCount)
+			anonCount++
+			childName := fmt.Sprintf("%s#anon%d", varName, anonCount)
+			if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
+				childDef.VarName = childName
 				edges = append(edges, edge{Parent: varName, AnonChild: childDef})
+				edges = append(edges, childEdges...)
 			}
 		}
 	}
@@ -642,9 +843,11 @@ func (b *cmdTreeBuild) addEdgeFromArg(parent string, arg ast.Expr) {
 	case *ast.Ident:
 		b.Edges = append(b.Edges, edge{Parent: parent, Child: a.Name})
 	case *ast.CallExpr:
-		if childDef := b.resolveHelperCall(a); childDef != nil {
-			childDef.VarName = fmt.Sprintf("%s#anon%d", parent, len(b.Edges))
+		childName := fmt.Sprintf("%s#anon%d", parent, len(b.Edges))
+		if childDef, childEdges := b.resolveHelperCall(a, childName); childDef != nil {
+			childDef.VarName = childName
 			b.Edges = append(b.Edges, edge{Parent: parent, AnonChild: childDef})
+			b.Edges = append(b.Edges, childEdges...)
 		}
 	}
 }
@@ -661,6 +864,26 @@ func stringLitValue(e ast.Expr) (string, bool) {
 	return v, true
 }
 
+// autoFlags returns the flag set for a command node: whatever
+// flagsByVar registered explicitly on it, plus cobra's own
+// auto-registered flags — O2-6: --help/-h on EVERY command (cobra's
+// InitDefaultHelpFlag), and --version additionally when the command's
+// own literal sets a Version field (root.go:57 sets Version on
+// rootCmd). Without this, resolve() reported "flag --help not
+// registered" on the most ordinary true invocation a doc can contain
+// (`mindspec --help`, `mindspec doctor --help`) — a guaranteed false
+// positive that pressures the exception table to grow for no reason.
+func autoFlags(flagsByVar map[string]bool, hasVersion bool) map[string]bool {
+	out := map[string]bool{"help": true, "h": true}
+	for k := range flagsByVar {
+		out[k] = true
+	}
+	if hasVersion {
+		out["version"] = true
+	}
+	return out
+}
+
 // linkCmdTree assembles the collected defs/edges into a *cmdNode tree
 // rooted at "rootCmd".
 func linkCmdTree(b *cmdTreeBuild) (*cmdNode, error) {
@@ -670,7 +893,8 @@ func linkCmdTree(b *cmdTreeBuild) (*cmdNode, error) {
 			Use:     def.Use,
 			Name:    firstField(def.Use),
 			IsStub:  def.isStub(),
-			Flags:   def.flagsByVar,
+			NoArgs:  def.NoArgs,
+			Flags:   autoFlags(def.flagsByVar, def.HasVersion),
 			Persist: def.persistByVar,
 		}
 	}
@@ -687,7 +911,8 @@ func linkCmdTree(b *cmdTreeBuild) (*cmdNode, error) {
 				Use:     e.AnonChild.Use,
 				Name:    firstField(e.AnonChild.Use),
 				IsStub:  e.AnonChild.isStub(),
-				Flags:   e.AnonChild.flagsByVar,
+				NoArgs:  e.AnonChild.NoArgs,
+				Flags:   autoFlags(e.AnonChild.flagsByVar, e.AnonChild.HasVersion),
 				Persist: e.AnonChild.persistByVar,
 			}
 		}

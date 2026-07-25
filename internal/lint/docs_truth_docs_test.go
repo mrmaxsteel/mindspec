@@ -14,11 +14,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// docsScopeRoots are the linted surfaces per the bead brief: the live,
-// forward-facing docs. Everything else (specs, migrations, ADRs,
-// docs_archive/, .beads/) is the immutable historical record and is
-// never linted or modified — a spec correctly describes the
-// architecture as of when it was written.
+// docsScopeRoots are the linted surfaces: the two roots the bead brief
+// named, README.md and project-docs. This is NOT "everything outside
+// is the immutable historical record" — an earlier version of this
+// comment claimed exactly that, and it was false (O2-5/O3-1): this
+// very commit modifies CONTRIBUTING.md, a file outside these roots,
+// and .mindspec/core/** is live, actively-maintained, publicly-linked
+// reference documentation (README.md and project-docs/user/README.md
+// both point readers at it as "the complete command reference"), not
+// a point-in-time historical record.
+//
+// A genuinely historical, point-in-time class DOES exist outside these
+// roots — .mindspec/specs/**, .mindspec/migrations/**, .mindspec/adr/**,
+// docs_archive/, .beads/ — and a spec correctly describing the
+// architecture as of when it was written is why THOSE stay unlinted.
+// But it is not the only thing excluded, and it is not why the OTHER
+// exclusions are unscanned: .mindspec/core/**, AGENTS.md, CLAUDE.md,
+// CONTRIBUTING.md, SECURITY.md, BENCH-MOVED.md, and
+// plugins/mindspec/** are live, public, contributor/agent-facing
+// surfaces this bead's scope simply does not reach yet. That gap
+// (including a real `mindspec explore` untruth in .mindspec/core/) is
+// tracked separately (mindspec-6ewu) rather than silently absorbed
+// into "historical record". Extending docsScopeRoots to cover them is
+// a deliberate follow-up, not something this bead does as a side
+// effect.
 var docsScopeRoots = []string{"README.md", "project-docs"}
 
 // docsScopeExcludeDirs are subtrees under project-docs/** carved out of
@@ -191,11 +210,19 @@ func (df *docFile) coverageEnd(markerLine int) int {
 	return len(df.Lines) + 1
 }
 
-// coveredBy reports whether line is within the coverage range of any
-// marker in df matching id (any id, if id == "").
+// coveredBy reports whether line is within the coverage range of a
+// marker in df bearing exactly id. Callers must always pass a specific
+// id — an earlier version of this function treated id == "" as "any
+// marker, any id", which is the marker-amnesty defect (F2-1/O2-1): a
+// marker's heading-scoped span exempted every unresolved
+// invocation/skill-ref in its range regardless of the marker's own id
+// or registered tokens, so any registered claim could be minted into a
+// blanket lint-off pragma anywhere in its section. checkR1/checkR2 no
+// longer call this with an empty id; see markerTokenCovers, the
+// id-typed and token-matched replacement for that use.
 func (df *docFile) coveredBy(line int, id string) (bool, string) {
 	for _, m := range df.Markers {
-		if id != "" && m.ID != id {
+		if m.ID != id {
 			continue
 		}
 		if m.Line <= line && line < df.coverageEnd(m.Line) {
@@ -203,6 +230,38 @@ func (df *docFile) coveredBy(line int, id string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+// markerTokenCovers is R1/R2's exemption rule (F2-1/O1-2/O2-1's
+// required change): an unresolved invocation/skill-ref at line, in df,
+// is exempted by a covering marker ONLY when that marker's id is
+// registered in reg AND text is exactly one of that claim's tokens —
+// the symmetric partner of R3's existing token-coverage clause (R3
+// enforces token-occurrence => marked; this enforces
+// exempted-failure => registered token). A marker therefore exempts
+// only the specific claim it names, never every unresolved claim
+// anywhere in its heading-scoped coverage range. text is the exact
+// content-identity string the caller would otherwise report as a
+// finding: joinWords(words) for R1, "/"+sref.Name for R2.
+func markerTokenCovers(df *docFile, line int, text string, reg *claimsRegistryDoc) bool {
+	if reg == nil {
+		return false
+	}
+	for _, m := range df.Markers {
+		if !(m.Line <= line && line < df.coverageEnd(m.Line)) {
+			continue
+		}
+		claim, ok := reg.Claims[m.ID]
+		if !ok {
+			continue
+		}
+		for _, tok := range claim.Tokens {
+			if tok == text {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // --- invocation extraction ---------------------------------------------
@@ -259,10 +318,28 @@ func tokenizeInvocation(text string) []string {
 
 // expandAlternatives handles the doc convention of listing several
 // subcommands sharing a prefix as one invocation, in either of the two
-// observed forms: a single pipe-joined token (`add|list|show`) or a
-// space-separated list with bare `|` separators (`create | verify |
-// tally`). Returns one word-list per alternative; if tokens contains no
-// "|" at all, returns the single unmodified word-list.
+// observed forms: a single pipe-joined token (`add|list|show`, also
+// what the escaped-pipe markdown-table form `add\|list\|show` becomes
+// after tokenizeInvocation normalizes it) or a space-separated list
+// with bare `|` separators (`create | verify | tally`). Returns one
+// word-list per alternative, with any tokens AFTER the alternation
+// group (flags, positional words) preserved on every generated
+// alternative; if tokens contains no "|" at all, returns the single
+// unmodified word-list.
+//
+// O1-1/O2-4: the previous version got both forms wrong. For the
+// space-separated form, it took the first PIPE-BEARING token as the
+// split point — but that token is the bare `|` itself, so the word
+// before it (the first real alternative) stayed glued into the prefix
+// and was never generated as its own candidate; `README.md:77`'s
+// `mindspec panel create | verify | tally` therefore checked only
+// `panel create`, never `panel verify` or `panel tally`. For the
+// glued single-token form, every word after the split point — flags
+// and flag VALUES included — was folded into the alternative list
+// instead of being carried along on each alternative, so `mindspec
+// spec create|verify --title x` generated garbage candidates
+// (`spec --title`, `spec x`) and never checked the true claim `spec
+// create --title x` / `spec verify --title x`.
 func expandAlternatives(tokens []string) [][]string {
 	splitAt := -1
 	for i, t := range tokens {
@@ -274,20 +351,49 @@ func expandAlternatives(tokens []string) [][]string {
 	if splitAt < 0 {
 		return [][]string{tokens}
 	}
-	prefix := tokens[:splitAt]
+
+	// A bare "|" token is a separator, not an alternative — its LEFT
+	// neighbor (which would otherwise stay glued into the prefix) is
+	// really the first alternative, so the alternation group starts one
+	// token earlier in that case. A glued token ("create|verify|tally")
+	// already contains every alternative and needs no earlier token.
+	groupStart := splitAt
+	if tokens[splitAt] == "|" && splitAt > 0 {
+		groupStart = splitAt - 1
+	}
+
 	var alts []string
-	for _, t := range tokens[splitAt:] {
-		for _, p := range strings.Split(t, "|") {
+	i := groupStart
+	if strings.Contains(tokens[i], "|") {
+		for _, p := range strings.Split(tokens[i], "|") {
 			if p != "" {
 				alts = append(alts, p)
 			}
 		}
+		i++
+	} else {
+		// Space-separated form: consume WORD ("|" WORD)*.
+		for {
+			alts = append(alts, tokens[i])
+			i++
+			if i < len(tokens) && tokens[i] == "|" {
+				i++
+				continue
+			}
+			break
+		}
 	}
-	var out [][]string
+	groupEnd := i
+
+	prefix := tokens[:groupStart]
+	tail := tokens[groupEnd:]
+
+	out := make([][]string, 0, len(alts))
 	for _, a := range alts {
-		cand := make([]string, 0, len(prefix)+1)
+		cand := make([]string, 0, len(prefix)+1+len(tail))
 		cand = append(cand, prefix...)
 		cand = append(cand, a)
+		cand = append(cand, tail...)
 		out = append(out, cand)
 	}
 	return out
@@ -295,38 +401,41 @@ func expandAlternatives(tokens []string) [][]string {
 
 // --- skill-reference extraction ----------------------------------------
 
-var skillRefRe = regexp.MustCompile(`/ms-[a-z0-9-]+`)
+// skillRefRe matches both the slashed form (`/ms-explore`) and the
+// slashless prose form ("the ms-fix-cycle skill") — O2-7 found the
+// slashless form escaping R2 (and R3's token clause, whose fix-cycle
+// token is literally `/ms-fix-cycle`) entirely: a retracted claim can
+// be reintroduced by simply dropping the leading slash, in text that
+// reads identically to a human reader. Group 1 is the leading-boundary
+// alternative (start-of-line, or one non-alnum-non-slash character);
+// group 2 is the name, always WITHOUT a leading slash, matching the
+// old Name field's format. The optional `/?` between them makes the
+// slash itself, when present, part of the boundary rather than the
+// name — see extractSkillRefs.
+var skillRefRe = regexp.MustCompile(`(^|[^a-zA-Z0-9/])/?(ms-[a-z0-9-]+)`)
 
 type skillRefOccurrence struct {
 	Name string // without leading slash
 	Line int
 }
 
-// extractSkillRefs finds every `/ms-*`-shaped reference in df, at any
-// position (inline prose, table cells, code spans) provided the
-// character immediately before the slash is not itself alphanumeric or
-// another slash (so a URL path segment like `.../foo/ms-bar` is not
-// mistaken for a skill reference — no such case is known in the
-// scanned corpus, but the guard costs nothing).
+// extractSkillRefs finds every `/ms-*`- or slashless `ms-*`-shaped
+// reference in df, at any position (inline prose, table cells, code
+// spans). skillRefRe's leading-boundary group replaces the old manual
+// isAlnum/prev=='/' guard: a URL path segment like `.../foo/ms-bar` is
+// still not mistaken for a skill reference (the character immediately
+// before "ms-bar" is "/", which the boundary group's char class
+// excludes, and the character before THAT is alphanumeric, so no
+// anchor position produces a match), whether or not the ms- name
+// itself happens to be preceded by a slash.
 func extractSkillRefs(df *docFile) []skillRefOccurrence {
 	var out []skillRefOccurrence
 	for i, line := range df.Lines {
-		for _, loc := range skillRefRe.FindAllStringIndex(line, -1) {
-			start := loc[0]
-			if start > 0 {
-				prev := line[start-1]
-				if isAlnum(prev) || prev == '/' {
-					continue
-				}
-			}
-			out = append(out, skillRefOccurrence{Name: line[start+1 : loc[1]], Line: i + 1})
+		for _, m := range skillRefRe.FindAllStringSubmatchIndex(line, -1) {
+			out = append(out, skillRefOccurrence{Name: line[m[4]:m[5]], Line: i + 1})
 		}
 	}
 	return out
-}
-
-func isAlnum(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // --- claims registry ----------------------------------------------------

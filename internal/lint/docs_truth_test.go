@@ -30,15 +30,17 @@
 // cannot distinguish from a wrongly-live-presented claim without prose
 // understanding. knownDocsTruthExceptions below is this lint's
 // deliberately narrow, audited answer: exactly these sites, each
-// justified, keyed on File+Text (never Line — see the type's doc
-// comment for why a line-keyed table is itself a hiding place),
-// is-matched, and re-verified every run — the same ratchet idiom
-// ratchet_argv_table_test.go already uses in this package for its own
-// audited-but-unenforceable call sites (a semantic identity, never a
-// position). Anything NOT on this list still fails. This is not a
-// loosening of R1/R2/R3; it is the visible, auditable form of the
-// exemption the bead brief says already exists by (undocumented,
-// unenforced) convention.
+// justified, keyed on File+Text+Count (never Line — see the type's doc
+// comment for why a line-keyed table is itself a hiding place, and
+// Count for why File+Text alone is a hiding place TOO — Bead 3's
+// finding F2-2/O1-2/O2-2/O3-2), is-matched, and re-verified every run —
+// the same ratchet idiom ratchet_argv_table_test.go already uses in
+// this package for its own audited-but-unenforceable call sites (a
+// semantic identity, never a position). Anything NOT on this list
+// still fails, and any occurrence beyond an entry's audited Count
+// still fails too. This is not a loosening of R1/R2/R3; it is the
+// visible, auditable form of the exemption the bead brief says already
+// exists by (undocumented, unenforced) convention.
 //
 // A second, unrelated finding is on the list for a different reason:
 // `/ms-explore` (project-docs/user/CLAUDE.md, guides/claude-code.md)
@@ -48,6 +50,25 @@
 // product decision (ship ms-explore for real, or retract the doc
 // claim) outside this bead's scope, and the alternative — silently
 // dropping it — would hide a real finding. See the bead report.
+//
+// # What is, and is not, mechanically checked (O2-9)
+//
+// An inert config key (declared, parsed, validated, printed —
+// cmd/mindspec/config.go's inertAnnotation, currently models:/loop:/
+// runner:) described in prose as though it behaves is NOT checked here
+// — a doc paragraph asserting behavior for such a key produces zero
+// findings from R1/R2/R3, because the untruth is in the VERB ("selects
+// which model runs"), not in a resolvable command/skill token. That
+// half genuinely needs prose understanding, same as the
+// removed-verb-retrospective-prose class above. But the inert KEY SET
+// itself is not similarly unknowable: it is exactly the const at
+// cmd/mindspec/config.go:22, consumed at its three inertAnnotation call
+// sites (:209/:211 models:, :249 loop:, :275 runner:) — a mechanical
+// half-measure (require the literal "declared, not yet enforced" in
+// any doc section mentioning one of those keys) was available and is
+// deferred, not built, in this bead. Tracked for a follow-up rather
+// than silently treated as part of the "not mechanically lintable"
+// claim this comment used to overstate.
 package lint
 
 import (
@@ -73,8 +94,12 @@ func (f truthFinding) String() string {
 
 // checkR1 walks every extracted `mindspec ...` invocation in each doc
 // and reports one finding per resolution failure that is not covered
-// by ANY marker (marker registration itself is R3's job).
-func checkR1(docs []*docFile, cmdRoot *cmdNode) []truthFinding {
+// by a marker whose registered claim's tokens include the specific
+// unresolved text (markerTokenCovers — F2-1/O2-1: a marker exempts
+// only the claim it was registered for, never every unresolved
+// invocation in its heading-scoped range; marker id registration
+// itself is R3's job).
+func checkR1(docs []*docFile, cmdRoot *cmdNode, reg *claimsRegistryDoc) []truthFinding {
 	var out []truthFinding
 	for _, df := range docs {
 		for _, occ := range extractInvocations(df) {
@@ -83,10 +108,11 @@ func checkR1(docs []*docFile, cmdRoot *cmdNode) []truthFinding {
 				if res.Resolved {
 					continue
 				}
-				if covered, _ := df.coveredBy(occ.Line, ""); covered {
+				text := joinWords(words)
+				if markerTokenCovers(df, occ.Line, text, reg) {
 					continue
 				}
-				out = append(out, truthFinding{File: df.Path, Line: occ.Line, Text: joinWords(words), Why: res.Reason})
+				out = append(out, truthFinding{File: df.Path, Line: occ.Line, Text: text, Why: res.Reason})
 			}
 		}
 	}
@@ -94,17 +120,18 @@ func checkR1(docs []*docFile, cmdRoot *cmdNode) []truthFinding {
 }
 
 // checkR2 is R1's analogue for `/ms-*` skill/workflow references.
-func checkR2(docs []*docFile, skills skillUniverse) []truthFinding {
+func checkR2(docs []*docFile, skills skillUniverse, reg *claimsRegistryDoc) []truthFinding {
 	var out []truthFinding
 	for _, df := range docs {
 		for _, sref := range extractSkillRefs(df) {
 			if _, ok := skills[sref.Name]; ok {
 				continue
 			}
-			if covered, _ := df.coveredBy(sref.Line, ""); covered {
+			text := "/" + sref.Name
+			if markerTokenCovers(df, sref.Line, text, reg) {
 				continue
 			}
-			out = append(out, truthFinding{File: df.Path, Line: sref.Line, Text: "/" + sref.Name, Why: "no such skill or workflow"})
+			out = append(out, truthFinding{File: df.Path, Line: sref.Line, Text: text, Why: "no such skill or workflow"})
 		}
 	}
 	return out
@@ -173,9 +200,24 @@ func checkR3(docs []*docFile, reg *claimsRegistryDoc) []truthFinding {
 // semantic key, never a line number) rather than the position-based
 // shape this table used before this fix. Line is kept only as
 // diagnostic context in comments/output, never compared.
+//
+// Count is the exact number of findings this entry is audited to
+// cover (F2-2/O1-2/O2-2/O3-2 — four independent panel slots, four
+// working exploits: File+Text alone exempts UNBOUNDED future
+// occurrences of that string in that file, so a plausible later edit
+// re-documenting the same removed verb, or reusing the bare
+// `mindspec bench`/`mindspec viz` spelling, in the same file, passed
+// silently). applyExceptions fails when the observed occurrence count
+// for an entry's File+Text differs from Count in EITHER direction: an
+// unmatched entry (0 observed) is the pre-existing stale-entry failure,
+// and — the new half — MORE than Count occurrences means a new,
+// unaudited claim landed under cover of an old audit and must be
+// reported like any other unexempted finding. Every current entry
+// audits exactly one site, so every Count below is 1.
 type docsTruthException struct {
 	File   string
 	Text   string
+	Count  int // exact audited occurrence count for File+Text — see doc comment above
 	Line   int // diagnostic only — NOT part of the matching key
 	Reason string
 }
@@ -186,56 +228,84 @@ var knownDocsTruthExceptions = []docsTruthException{
 	// stubs ...)": truthful retrospective prose, the
 	// inert-referent-described-as-live class extended to removed (not
 	// just absent) referents. See package doc comment.
-	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec agentmind", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/README.md", Line: 112, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/README.md", Line: 112, Count: 1, Text: "mindspec agentmind", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/README.md", Line: 112, Count: 1, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/README.md", Line: 112, Count: 1, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
 
 	// project-docs/user/guides/agentmind.md:7 — "If you remember the
 	// old verbs: ... were removed by spec 084 ... hidden deprecation
 	// stubs": same class as above.
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind serve", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind replay", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec agentmind setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 7, Text: "mindspec bench …", Reason: "truthful retrospective prose about a removed verb (literal trailing ellipsis from the source text) — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Count: 1, Text: "mindspec agentmind serve", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Count: 1, Text: "mindspec agentmind replay", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Count: 1, Text: "mindspec agentmind setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Count: 1, Text: "mindspec viz", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 7, Count: 1, Text: "mindspec bench …", Reason: "truthful retrospective prose about a removed verb (literal trailing ellipsis from the source text) — see package doc comment"},
 
 	// project-docs/user/guides/agentmind.md:52 — "(formerly `mindspec
 	// bench`) moved to the agentmind repo ... deprecation stubs": same
 	// class as above.
-	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench collect", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
-	{File: "project-docs/user/guides/agentmind.md", Line: 52, Text: "mindspec bench report", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Count: 1, Text: "mindspec bench", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Count: 1, Text: "mindspec bench setup", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Count: 1, Text: "mindspec bench collect", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
+	{File: "project-docs/user/guides/agentmind.md", Line: 52, Count: 1, Text: "mindspec bench report", Reason: "truthful retrospective prose about a removed verb — see package doc comment"},
 
 	// /ms-explore: a genuine gap, not a convention — see
 	// docs_truth_skills_test.go's doc comment. Listed here (rather than
 	// fixed) because the fix is a product decision (ship it for real,
-	// or retract the doc claim) outside this bead's scope.
-	{File: "project-docs/user/CLAUDE.md", Line: 20, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap, tracked pending a product decision — not fixed by this bead"},
-	{File: "project-docs/user/guides/claude-code.md", Line: 94, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap, tracked pending a product decision — not fixed by this bead"},
+	// or retract the doc claim) outside this bead's scope. O1-2
+	// sharpened this: the gap is a missing `mindspec explore` VERB, not
+	// only a missing install path (the skill's own body invokes
+	// `mindspec explore`, so there is no verb to wire an install path
+	// to) — the string exempted here is a KNOWN UNTRUTH pending a
+	// product decision, not audited-acceptable prose, which is exactly
+	// why the Count ratchet below matters most for these two rows: it
+	// stops the untruth from multiplying if `/ms-explore` gets
+	// mentioned again elsewhere in either file.
+	{File: "project-docs/user/CLAUDE.md", Line: 20, Count: 1, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap (no mindspec explore verb exists to install a path to), tracked pending a product decision — not fixed by this bead"},
+	{File: "project-docs/user/guides/claude-code.md", Line: 94, Count: 1, Text: "/ms-explore", Reason: "genuine /ms-explore install-path gap (no mindspec explore verb exists to install a path to), tracked pending a product decision — not fixed by this bead"},
 }
 
-// applyExceptions partitions findings into those covered by a
-// File+Text-matching entry in exceptions and those that are not
-// (unexpected — these must fail the caller's test), and reports which
-// exception entries were matched at least once (an unmatched entry is
-// stale and must also fail the caller's test, per R3's own
-// both-directions discipline). Matching is deliberately on File+Text
-// only — see docsTruthException's doc comment for why Line is
-// excluded from the key.
+// applyExceptions partitions findings into those covered by an
+// occurrence-count-respecting File+Text-matching entry in exceptions
+// and those that are not (unexpected — these must fail the caller's
+// test), and reports which exception entries were matched at least
+// once (an unmatched entry is stale and must also fail the caller's
+// test, per R3's own both-directions discipline). Matching is
+// deliberately on File+Text, never Line — see docsTruthException's
+// doc comment for why — but, per that same doc comment, is bounded by
+// Count: findings are grouped by (File, Text), and only the first
+// e.Count of each group are treated as covered; any beyond that are
+// new, unaudited occurrences and are returned as unexpected exactly
+// like any other unexempted finding.
 func applyExceptions(findings []truthFinding, exceptions []docsTruthException) (unexpected []truthFinding, matched []bool) {
 	matched = make([]bool, len(exceptions))
+
+	type key struct{ file, text string }
+	idxByKey := make(map[key]int, len(exceptions))
+	for i, e := range exceptions {
+		idxByKey[key{e.File, e.Text}] = i
+	}
+
+	byKey := make(map[key][]truthFinding)
+	var order []key
 	for _, f := range findings {
-		hit := false
-		for i := range exceptions {
-			e := &exceptions[i]
-			if e.File == f.File && e.Text == f.Text {
-				matched[i] = true
-				hit = true
-			}
+		k := key{f.File, f.Text}
+		if _, seen := byKey[k]; !seen {
+			order = append(order, k)
 		}
-		if !hit {
-			unexpected = append(unexpected, f)
+		byKey[k] = append(byKey[k], f)
+	}
+
+	for _, k := range order {
+		group := byKey[k]
+		i, known := idxByKey[k]
+		if !known {
+			unexpected = append(unexpected, group...)
+			continue
+		}
+		matched[i] = true
+		if extra := len(group) - exceptions[i].Count; extra > 0 {
+			unexpected = append(unexpected, group[len(group)-extra:]...)
 		}
 	}
 	return unexpected, matched
@@ -280,8 +350,8 @@ func TestDocsTruthReal(t *testing.T) {
 	}
 
 	var findings []truthFinding
-	findings = append(findings, checkR1(docs, cmdRoot)...)
-	findings = append(findings, checkR2(docs, skills)...)
+	findings = append(findings, checkR1(docs, cmdRoot, reg)...)
+	findings = append(findings, checkR2(docs, skills, reg)...)
 	findings = append(findings, checkR3(docs, reg)...)
 
 	unexpected, matched := applyExceptions(findings, knownDocsTruthExceptions)
@@ -317,7 +387,7 @@ func TestDocsTruthReal(t *testing.T) {
 //     spot" scenario the fix closes.
 func TestExceptionsAreContentAnchoredNotLineAnchored(t *testing.T) {
 	exceptions := []docsTruthException{
-		{File: "guide.md", Line: 7, Text: "mindspec viz", Reason: "test fixture: truthful historical mention"},
+		{File: "guide.md", Line: 7, Count: 1, Text: "mindspec viz", Reason: "test fixture: truthful historical mention"},
 	}
 
 	// Simulates the doc after an unrelated paragraph was inserted
@@ -397,6 +467,20 @@ func sharedSkills(t *testing.T) skillUniverse {
 	return skills
 }
 
+// sharedRegistry loads the real project-docs/claims-registry.yaml —
+// used by fixtures that need a real claim (e.g. loop-status) to prove
+// the marker+token exemption actually fires, as opposed to fixtures
+// that need to prove it does NOT fire for an unregistered/mismatched
+// claim, which pass an empty or synthetic registry instead.
+func sharedRegistry(t *testing.T) *claimsRegistryDoc {
+	t.Helper()
+	reg, err := loadClaimsRegistry(realRepoRoot(t))
+	if err != nil {
+		t.Fatalf("loadClaimsRegistry: %v", err)
+	}
+	return reg
+}
+
 // --- R4: negative fixtures, one per required class -------------------
 
 // TestR4AbsentVerbFlag: an absent flag on a real verb, unmarked, must
@@ -407,7 +491,7 @@ func sharedSkills(t *testing.T) skillUniverse {
 // `--fix` but not `--infer`.)
 func TestR4AbsentVerbFlag(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Run `mindspec doctor --infer` to auto-detect the mode.\n")
-	findings := checkR1([]*docFile{df}, sharedCmdRoot(t))
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
 	requireFindingContains(t, findings, "doctor --infer", "flag --infer not registered")
 }
 
@@ -417,27 +501,113 @@ func TestR4AbsentVerbFlag(t *testing.T) {
 // marker, not some blanket leniency, is what saves the real one.
 func TestR4AbsentSubcommand(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Poll progress with `mindspec loop status`.\n")
-	findings := checkR1([]*docFile{df}, sharedCmdRoot(t))
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
 	requireFindingContains(t, findings, "loop status", `no subcommand "loop"`)
 }
 
 // TestR4AbsentSubcommand_MarkedVersionPasses proves the marker escape
 // valve actually works (not just that its absence fails): the same
-// invocation, now carrying a valid registered-id marker, produces zero
-// R1 findings.
+// invocation, now carrying a valid registered-id marker WHOSE
+// REGISTERED TOKENS INCLUDE THE EXACT TEXT (the real registry's
+// loop-status claim tokens ["mindspec loop status"]), produces zero R1
+// findings.
 func TestR4AbsentSubcommand_MarkedVersionPasses(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Poll progress with `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)*.\n")
-	findings := checkR1([]*docFile{df}, sharedCmdRoot(t))
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
 	if len(findings) != 0 {
-		t.Fatalf("expected zero R1 findings on a marked absent-subcommand claim, got: %v", findings)
+		t.Fatalf("expected zero R1 findings on a marked absent-subcommand claim whose text matches the claim's registered tokens, got: %v", findings)
+	}
+}
+
+// TestR4MarkedButUnrelatedClaimStillFails is the regression test for
+// the marker-amnesty defect (F2-1/O1/O2-1): a marker's heading-scoped
+// coverage range must exempt ONLY the specific claim it names via its
+// registered tokens, never every unresolved claim that happens to fall
+// inside that range. Same section, same valid loop-status marker as
+// the passing fixture above — but a SECOND, unrelated absent-verb
+// claim in the same section, whose text is not one of loop-status's
+// registered tokens, must still fire R1. (This reproduces, in
+// miniature, the orchestrator's real-corpus repro: injecting
+// `mindspec onboard --infer` under autonomy.md's marker-covered
+// section passed before this fix.)
+func TestR4MarkedButUnrelatedClaimStillFails(t *testing.T) {
+	content := "## Status\n\n" +
+		"Poll progress with `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)*.\n" +
+		"Also try `mindspec bogusverb --nope`, which is unrelated to that claim.\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "bogusverb --nope", `no subcommand "bogusverb"`)
+	for _, f := range findings {
+		if f.Text == "mindspec loop status" {
+			t.Errorf("the marked, token-matched claim must still pass; got an unexpected finding for it: %s", f)
+		}
 	}
 }
 
 // TestR4AbsentSkill: an absent skill, unmarked, must fire R2.
 func TestR4AbsentSkill(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Run the fix lane with /ms-fix-cycle.\n")
-	findings := checkR2([]*docFile{df}, sharedSkills(t))
+	findings := checkR2([]*docFile{df}, sharedSkills(t), sharedRegistry(t))
 	requireFindingContains(t, findings, "/ms-fix-cycle", "no such skill or workflow")
+}
+
+// TestR4MarkedSkillPassesTokenMatch: the R2 analogue of
+// TestR4AbsentSubcommand_MarkedVersionPasses — the real fix-cycle
+// claim's marker (token "/ms-fix-cycle") exempts the matching skill
+// ref.
+func TestR4MarkedSkillPassesTokenMatch(t *testing.T) {
+	df := fixtureDoc(t, "fixture.md", "Run the fix lane with /ms-fix-cycle *(planned — claim `fix-cycle`, roadmap Core 6)*.\n")
+	findings := checkR2([]*docFile{df}, sharedSkills(t), sharedRegistry(t))
+	if len(findings) != 0 {
+		t.Fatalf("expected zero R2 findings on a marked absent-skill claim whose text matches the claim's registered tokens, got: %v", findings)
+	}
+}
+
+// TestR4MarkedButUnrelatedSkillStillFails is R2's analogue of
+// TestR4MarkedButUnrelatedClaimStillFails: a second, unrelated absent
+// skill ref in the same fix-cycle-marked section, not itself one of
+// that claim's registered tokens, must still fire R2.
+func TestR4MarkedButUnrelatedSkillStillFails(t *testing.T) {
+	content := "## Fix lane\n\n" +
+		"Run the fix lane with /ms-fix-cycle *(planned — claim `fix-cycle`, roadmap Core 6)*.\n" +
+		"Also see /ms-totally-bogus-skill for something unrelated.\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	findings := checkR2([]*docFile{df}, sharedSkills(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "/ms-totally-bogus-skill", "no such skill or workflow")
+	for _, f := range findings {
+		if f.Text == "/ms-fix-cycle" {
+			t.Errorf("the marked, token-matched skill ref must still pass; got an unexpected finding for it: %s", f)
+		}
+	}
+}
+
+// TestApplyExceptions_DuplicateOccurrenceStillFails is the regression
+// test for the exception-multiplicity defect (F2-2/O1-2/O2-2/O3-2 —
+// four independent panel slots, each with a working exploit): a single
+// audited File+Text entry must NOT exempt more occurrences of that
+// exact string than it was audited to cover. A second, genuinely new
+// occurrence of the same File+Text — the shape of the real exploit
+// (e.g. a future edit re-documenting `mindspec bench` as live in
+// project-docs/user/README.md, where the bare string was already
+// exempted for one truthful retrospective mention) — must be reported.
+func TestApplyExceptions_DuplicateOccurrenceStillFails(t *testing.T) {
+	exceptions := []docsTruthException{
+		{File: "guide.md", Line: 52, Count: 1, Text: "mindspec bench", Reason: "test fixture: one audited truthful retrospective mention"},
+	}
+	auditedOccurrence := truthFinding{File: "guide.md", Line: 52, Text: "mindspec bench", Why: "resolves to a one-shot deprecation stub"}
+	newUnauditedOccurrence := truthFinding{File: "guide.md", Line: 63, Text: "mindspec bench", Why: "resolves to a one-shot deprecation stub"}
+
+	unexpected, matched := applyExceptions([]truthFinding{auditedOccurrence, newUnauditedOccurrence}, exceptions)
+
+	if !matched[0] {
+		t.Error("expected the entry to match at least once")
+	}
+	if len(unexpected) != 1 {
+		t.Fatalf("expected exactly 1 unexpected finding (the occurrence beyond the audited Count), got %d: %v", len(unexpected), unexpected)
+	}
+	if unexpected[0].Line != 63 {
+		t.Errorf("expected the SECOND (new, unaudited) occurrence to be the one reported, got line %d", unexpected[0].Line)
+	}
 }
 
 // TestR4UnregisteredLabel: a marker whose id is NOT in the registry
@@ -507,6 +677,105 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// --- expandAlternatives: both alternation forms (O1-1/O2-4) -----------
+
+// TestExpandAlternatives_SpaceSeparatedFormChecksEveryAlternative is
+// the regression test for O1-1/O2-4's primary defect: the
+// space-separated bare-pipe form (README.md:77's own
+// `mindspec panel create | verify | tally`) previously folded the
+// FIRST alternative into the prefix and never generated it as its own
+// candidate, so a retired/renamed/bogus later alternative went
+// unchecked. `panel create`/`panel verify`/`panel tally` are all real
+// (cmd/mindspec/panel.go); substituting a bogus final alternative must
+// produce a finding for it, and neither real alternative may
+// spuriously appear as a finding.
+func TestExpandAlternatives_SpaceSeparatedFormChecksEveryAlternative(t *testing.T) {
+	df := fixtureDoc(t, "fixture.md", "Run `mindspec panel create | verify | bogusverb`.\n")
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "panel bogusverb", `no subcommand "bogusverb"`)
+	for _, f := range findings {
+		if containsSub(f.Text, "panel create") || containsSub(f.Text, "panel verify") {
+			t.Errorf("real alternatives must not appear as findings: %s", f)
+		}
+	}
+}
+
+// TestExpandAlternatives_GluedFormPreservesTail is the regression test
+// for O1-1/O2-4's second defect: the glued single-token form
+// (`create|verify`) previously folded every trailing word — including
+// flags and flag VALUES — into the alternative list instead of
+// carrying them along on each alternative, generating garbage
+// candidates (`spec --title`, `spec x`) and never checking the true
+// claim. `mindspec spec create` takes a real `--title` flag
+// (cmd/mindspec/spec.go:179); `spec verify` does not exist. The fixed
+// expansion must produce EXACTLY one finding — `spec verify --title
+// x` — and no noise about `--title` or `x` as bogus subcommands.
+func TestExpandAlternatives_GluedFormPreservesTail(t *testing.T) {
+	df := fixtureDoc(t, "fixture.md", "Run `mindspec spec create|verify --title x`.\n")
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly 1 finding (spec verify --title x), got %d: %v", len(findings), findings)
+	}
+	requireFindingContains(t, findings, "spec verify --title x", `no subcommand "verify"`)
+}
+
+// --- resolveHelperCall: one-level helper indirection (O2-3) -----------
+
+// TestResolveHelperCall_ChildrenAndFlagsVisible is the regression test
+// for O2-3: a command built by one-level helper indirection
+// (`reportCmd = newReportCmd()`, report.go:81-103) previously modeled
+// as a childless, flagless leaf — so ANY invented subcommand resolved
+// true via the leaf-positional-args arm, and the real `--resolve`
+// flag on `report list` false-positived as unregistered. All three
+// must now resolve correctly against the real tree.
+func TestResolveHelperCall_ChildrenAndFlagsVisible(t *testing.T) {
+	root := sharedCmdRoot(t)
+
+	if res := root.resolve([]string{"mindspec", "report", "list"}); !res.Resolved {
+		t.Errorf("expected mindspec report list to resolve, got: %s", res.Reason)
+	}
+	if res := root.resolve([]string{"mindspec", "report", "list", "--resolve", "abc123"}); !res.Resolved {
+		t.Errorf("expected mindspec report list --resolve abc123 to resolve, got: %s", res.Reason)
+	}
+	if res := root.resolve([]string{"mindspec", "report", "bogus-subcommand"}); res.Resolved {
+		t.Error("expected mindspec report bogus-subcommand to NOT resolve — it must not silently pass as a positional arg on a leaf")
+	}
+}
+
+// --- auto-registered cobra flags: --help/-h/--version (O2-6) ---------
+
+// TestAutoFlags_HelpAndVersionResolve is the regression test for
+// O2-6: cobra auto-registers --help/-h on every command and --version
+// on root (root.go:57 sets Version), but Pass 3 only records explicit
+// Flags()/PersistentFlags() calls, so resolve() previously reported
+// "flag --help not registered" on the most ordinary true invocation a
+// doc can contain.
+func TestAutoFlags_HelpAndVersionResolve(t *testing.T) {
+	root := sharedCmdRoot(t)
+	cases := [][]string{
+		{"mindspec", "--help"},
+		{"mindspec", "doctor", "--help"},
+		{"mindspec", "--version"},
+	}
+	for _, words := range cases {
+		if res := root.resolve(words); !res.Resolved {
+			t.Errorf("expected %q to resolve, got: %s", joinWords(words), res.Reason)
+		}
+	}
+}
+
+// --- Args: cobra.NoArgs arity enforcement (O2-8, "at minimum") -------
+
+// TestR1NoArgsRejectsPositional is the regression test for O2-8's
+// minimum required fix: resolve() previously ignored Args entirely, so
+// an invented positional argument on a cobra.NoArgs command (`version`,
+// version.go:27) resolved true even though the real binary rejects it.
+func TestR1NoArgsRejectsPositional(t *testing.T) {
+	df := fixtureDoc(t, "fixture.md", "Check the version with `mindspec version latest`.\n")
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), sharedRegistry(t))
+	requireFindingContains(t, findings, "version latest", "does not accept positional arguments")
 }
 
 // --- R5: stub vs. live-hidden-alias -----------------------------------
