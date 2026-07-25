@@ -511,3 +511,107 @@ func NetEffectLanded(workdir, ref, target string) (bool, error) {
 	}
 	return true, nil
 }
+
+// diffNameStatusBucketsFn is the injectable seam over diffNameStatusBuckets
+// (error-forcing for tests, default pointer-pinned).
+var diffNameStatusBucketsFn = diffNameStatusBuckets
+
+// diffNameStatusBuckets runs `git diff --name-status --find-renames from
+// to` and buckets the result into added (A-status: paths present at `to`
+// but absent at `from`) and deleted (D-status: paths present at `from` but
+// absent at `to`). Rename/copy status (R/C) counts as NEITHER added nor
+// deleted — the content moved, it was not introduced or removed — which is
+// exactly what --find-renames is pinned for (spec 127 bead 1): without it,
+// plumbing diffs default to no rename detection and a large move would
+// misread as a delete+add pair. `from`/`to` may be any commit-ish
+// (branch, SHA, or a bare tree OID, e.g. the result of a merge-tree
+// preview).
+func diffNameStatusBuckets(workdir, from, to string) (added, deleted []string, err error) {
+	if err := rejectOptionLike(from); err != nil {
+		return nil, nil, err
+	}
+	if err := rejectOptionLike(to); err != nil {
+		return nil, nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-status", "--find-renames", from, to)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("diff --name-status --find-renames %s %s: %w", from, to, err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(fields[0], "A"):
+			added = append(added, fields[len(fields)-1])
+		case strings.HasPrefix(fields[0], "D"):
+			deleted = append(deleted, fields[len(fields)-1])
+		}
+		// R<score>/C<score> (rename/copy) and M (modify): neither bucket.
+	}
+	return added, deleted, nil
+}
+
+// PreviewDeletedPaths is the read-only D-set primitive behind the spec 127
+// stale-deletion leg (internal/gitutil.EvaluateWorkDestruction): the paths
+// a non-mutating merge preview of branch into target would DELETE
+// relative to target's CURRENT tip tree.
+//
+// Mechanics: `git merge-tree --write-tree` (base = merge-base(target,
+// branch); ours = target; theirs = branch — the same three-way convention
+// ContentSubsumedOutcome uses, rename detection ON) previews the merge;
+// the resulting tree is then diffed against target's tip with
+// diffNameStatusBuckets (--find-renames pinned), keeping only the deleted
+// bucket. A large rename/directory-move (AC-8(ii)) therefore reads as
+// R-paths, never D-paths.
+//
+// A CONFLICTED preview (merge-tree exit 1) yields (nil, nil): no D-set is
+// derivable from a preview that never resolved to a tree, and by design a
+// conflicted merge never reaches the stale-deletion leg — the real merge
+// attempt's own content conflict is handled separately (spec 127 R5(d)'s
+// conflict-recovery re-entry), not by this predicate. Any git infra
+// failure — resolving the merge-base, the merge-tree preview itself
+// (exit >= 2, including "unknown option" on git < 2.38), or the trailing
+// diff — is always propagated as a non-nil error, never classified into
+// an empty D-set (the spec 125 O2-1 discipline: absence of evidence is
+// never safety).
+//
+// Non-mutating throughout: `git merge-tree --write-tree` writes only
+// unreferenced loose tree objects (the same discipline as
+// ContentSubsumedOutcome's own preview) — refs, the index, and the
+// worktree are untouched.
+func PreviewDeletedPaths(workdir, target, branch string) ([]string, error) {
+	if err := rejectOptionLike(target); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(branch); err != nil {
+		return nil, err
+	}
+
+	base, err := mergeBaseFn(workdir, target, branch)
+	if err != nil {
+		return nil, fmt.Errorf("finding merge-base of %s and %s: %w", target, branch, err)
+	}
+
+	res, err := mergeTreeWriteTreeFn(workdir, base, target, branch)
+	if err != nil {
+		return nil, err
+	}
+	if res.conflict {
+		// See doc comment: a conflicted preview carries no D-set — this is
+		// not an infra failure, and it is not this leg's concern.
+		return nil, nil
+	}
+
+	_, deleted, err := diffNameStatusBucketsFn(workdir, target, res.treeOID)
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
+}

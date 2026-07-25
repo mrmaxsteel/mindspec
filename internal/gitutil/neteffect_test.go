@@ -593,3 +593,204 @@ func TestRevertShape_RejectsOptionLikeOperands(t *testing.T) {
 		t.Error("expected a rejection for an option-like target operand")
 	}
 }
+
+// --- PreviewDeletedPaths (spec 127 bead 1) ---------------------------------
+
+// TestPreviewDeletedPaths_GenuineDeletion is the baseline positive: a
+// branch that actually removes a file target still carries reports that
+// file as a D-path.
+func TestPreviewDeletedPaths_GenuineDeletion(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "keep.txt", "keep\n")
+	neWriteFile(t, dir, "gone.txt", "gone\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add keep+gone")
+	neRunGit(t, dir, "checkout", "-b", "cleanup")
+	neRunGit(t, dir, "rm", "gone.txt")
+	neRunGit(t, dir, "commit", "-m", "remove gone.txt")
+	neRunGit(t, dir, "checkout", "main")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "cleanup")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "gone.txt" {
+		t.Errorf("PreviewDeletedPaths = %v, want [gone.txt]", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_LargeRenameNeverReadsAsDeletion is AC-8(ii)'s
+// primitive-level pin: a directory move/rename must surface as an R-path
+// via --find-renames, never as a D-path — the exact miss the pinned
+// rename detection exists to prevent (without it, plumbing diffs default
+// to no rename detection and a move misreads as delete+add).
+func TestPreviewDeletedPaths_LargeRenameNeverReadsAsDeletion(t *testing.T) {
+	dir := initGitRepo(t)
+	body := "content line one\nmore lines here to make similarity high\nline three\nline four\n"
+	for _, n := range []string{"1", "2", "3", "4", "5"} {
+		neWriteFile(t, dir, "dir/f"+n+".txt", body+n+"\n")
+	}
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add dir/")
+	neRunGit(t, dir, "checkout", "-b", "mover")
+	neRunGit(t, dir, "mv", "dir", "newdir")
+	neRunGit(t, dir, "commit", "-m", "move dir -> newdir")
+	neRunGit(t, dir, "checkout", "main")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "mover")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Errorf("PreviewDeletedPaths = %v, want none — a directory move must read as renames, never deletions", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_ConflictYieldsNoDSetNotError is the pinned
+// conflict disposition: a preview that CONFLICTS carries no D-set — it is
+// not this leg's concern, and it is NOT an infra error (a merge-tree exit
+// 1 is a definitive classification, per the package's own exit-code
+// trichotomy discipline).
+func TestPreviewDeletedPaths_ConflictYieldsNoDSetNotError(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "f.txt", "v1\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add f.txt")
+	neRunGit(t, dir, "checkout", "-b", "del")
+	neRunGit(t, dir, "rm", "f.txt")
+	neRunGit(t, dir, "commit", "-m", "delete f.txt")
+	neRunGit(t, dir, "checkout", "main")
+	neWriteFile(t, dir, "f.txt", "v2\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "modify f.txt")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "del")
+	if err != nil {
+		t.Fatalf("a conflicted preview must not be classified as an infra error, got: %v", err)
+	}
+	if deleted != nil {
+		t.Errorf("PreviewDeletedPaths on a conflicted preview = %v, want nil", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_MergeBaseInfraErrorPropagates and
+// TestPreviewDeletedPaths_MergeTreeInfraErrorPropagates prove PreviewDeletedPaths
+// never classifies a git infra failure into an empty (safe-looking) D-set
+// (the spec 125 O2-1 discipline, applied to this new primitive): both the
+// merge-base resolution and the merge-tree preview propagate.
+func TestPreviewDeletedPaths_MergeBaseInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := mergeBaseFn
+	t.Cleanup(func() { mergeBaseFn = orig })
+	simulated := errors.New("simulated merge-base failure")
+	mergeBaseFn = func(workdir, ref, target string) (string, error) { return "", simulated }
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the merge-base failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+func TestPreviewDeletedPaths_MergeTreeInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := mergeTreeWriteTreeFn
+	t.Cleanup(func() { mergeTreeWriteTreeFn = orig })
+	simulated := errors.New(`fatal: unknown option '--write-tree'`)
+	mergeTreeWriteTreeFn = func(workdir, base, ours, theirs string) (mergeTreeResult, error) {
+		return mergeTreeResult{}, simulated
+	}
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the merge-tree failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+// TestPreviewDeletedPaths_DiffInfraErrorPropagates: the trailing
+// name-status diff's own failure must propagate too, not just the
+// merge-tree leg's.
+func TestPreviewDeletedPaths_DiffInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := diffNameStatusBucketsFn
+	t.Cleanup(func() { diffNameStatusBucketsFn = orig })
+	simulated := errors.New("simulated diff failure")
+	diffNameStatusBucketsFn = func(workdir, from, to string) ([]string, []string, error) {
+		return nil, nil, simulated
+	}
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the diff failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+// TestPreviewDeletedPaths_RejectsOptionLikeOperands: the SEC-5 argv-hygiene
+// pin, same as every other gitutil ref-bearing entry point.
+func TestPreviewDeletedPaths_RejectsOptionLikeOperands(t *testing.T) {
+	dir := initGitRepo(t)
+	if _, err := PreviewDeletedPaths(dir, "-x", "main"); err == nil {
+		t.Error("expected a rejection for an option-like target operand")
+	}
+	if _, err := PreviewDeletedPaths(dir, "main", "-x"); err == nil {
+		t.Error("expected a rejection for an option-like branch operand")
+	}
+}
+
+// TestPreviewDeletedPaths_MutatesNothing asserts the non-mutating
+// discipline: refs and worktree status are byte-identical before and
+// after a PreviewDeletedPaths call (the same house check as
+// ContentSubsumedOutcome's own preview).
+func TestPreviewDeletedPaths_MutatesNothing(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "keep.txt", "keep\n")
+	neWriteFile(t, dir, "gone.txt", "gone\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add keep+gone")
+	neRunGit(t, dir, "checkout", "-b", "cleanup")
+	neRunGit(t, dir, "rm", "gone.txt")
+	neRunGit(t, dir, "commit", "-m", "remove gone.txt")
+	neRunGit(t, dir, "checkout", "main")
+
+	refsBefore := neRunGit(t, dir, "for-each-ref")
+	statusBefore := neRunGit(t, dir, "status", "--porcelain")
+
+	if _, err := PreviewDeletedPaths(dir, "main", "cleanup"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	refsAfter := neRunGit(t, dir, "for-each-ref")
+	statusAfter := neRunGit(t, dir, "status", "--porcelain")
+	if refsBefore != refsAfter {
+		t.Errorf("refs changed:\nbefore: %q\nafter:  %q", refsBefore, refsAfter)
+	}
+	if statusBefore != statusAfter {
+		t.Errorf("worktree/index status changed:\nbefore: %q\nafter:  %q", statusBefore, statusAfter)
+	}
+}
