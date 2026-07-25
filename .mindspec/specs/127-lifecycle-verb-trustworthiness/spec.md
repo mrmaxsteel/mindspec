@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-07-25T20:17:44Z"
+approved_by: user
+status: Approved
 ---
 # Spec 127-lifecycle-verb-trustworthiness: Destructive Recovery and the Externally-Merged Spec (the #218 cluster)
 
@@ -224,7 +224,7 @@ None. The draft's OQ-1 (block vs. warn) and OQ-2 (discriminator) are resolved in
 
 ## Approval
 
-- **Status**: DRAFT (revision 6 — post-round-6 re-gate)
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: Revision 6 is a **scope cut** ruled by the orchestrator after slot H empirically broke both revision-5 enforcement artifacts: the prescriptive-form discriminator (with its non-prescriptive-context registry) and the deny-by-default partition (with its safe-form inventory) are **cut, not redesigned** — pasteability does not separate safe from dangerous (H-r6-2), polarity cannot be tested (H-r6-3), and the partition was total only within {git, bd, rm} (H-r6-7). What stands in their place: the reviewed finite floor with an in-diff extension obligation and a plainly stated limitation (novel families are caught by review, not the guard — Non-Goals), global-option normalization closing the `git -C` bypass (H-r6-8), a content-pinned known-sites exemption list claiming only known-and-reviewed (eight entries, scan-derived — H-r6-4/-5), and the managed-block literals joining the swept canonical surface (H-r6-7's domain gap). Everything H did not break is unchanged: the R1b lattice, the resumption re-entry surface with the preserved-merge precondition, the AC-3 outcome oracle, and the opaque-struct AST invariant. Revision 5 was clause-level against a round in which no mechanism fell: the resumption surface with `abortMergeState` own-run precondition, preserved-merge precondition, no-merge-state worktree refusal, pinned resolution-step operands; R1b's fetch-route pin, enumeration-narrowing-as-error, distinct refusal-class wording, trigger-recording attestation markers; expanded floor families with option-cluster equivalence, the same-package construction invariant, and the reproducible pinned-input bootstrap for every seeded artifact. Revision 4 replaces the OID-pinned conflict recovery (broken empirically by round 4's nine-lab attack) with the preflighted product re-entry surface; hardens the outcome oracle (byte-match templates for `mindspec` lines, whole-line consumption, ground-truth independence clause, count-sentinel exhaustiveness); redesigns R1b as a three-valued lattice with remote corroboration and epic coverage; closes the classifier floor over the live discard families; makes the constructor type opaque and the scan exemption provenance-shaped; adds the canonical `internal/setup` literal surface to the sweep; pins operand provability by shape with an opaque-operand registry; and fixes the third dependency inversion (bead 7 last) with valves re-pointed at the heavy beads. Revision 3 replaced AC-3's execute-the-hint mechanism with the outcome oracle, named the FixFunc as a gated surface, moved the convention scan to `internal/lint`, and went to seven beads with the shared predicate first.
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-07-25
+- **Notes**: Approved via mindspec approve spec
