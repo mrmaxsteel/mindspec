@@ -1,115 +1,125 @@
 ---
-status: Draft
-spec_id: 127-lifecycle-verb-trustworthiness
-version: "1"
 adr_citations:
-  - ADR-0035
-  - ADR-0041
-  - ADR-0042
-  - ADR-0023
+    - ADR-0035
+    - ADR-0041
+    - ADR-0042
+    - ADR-0023
+approved_at: "2026-07-25T21:44:19Z"
+approved_by: user
+bead_ids:
+    - mindspec-2vtk.1
+    - mindspec-2vtk.2
+    - mindspec-2vtk.3
+    - mindspec-2vtk.4
+    - mindspec-2vtk.5
+    - mindspec-2vtk.6
+    - mindspec-2vtk.7
+spec_id: 127-lifecycle-verb-trustworthiness
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/guard/outcome.go
-      - internal/gitutil/workdestruction.go
-      - internal/gitutil/workdestruction_test.go
-      - internal/gitutil/neteffect.go
-      - internal/gitutil/neteffect_test.go
-      - internal/lifecycle/gitquery.go
-      - internal/lifecycle/gitquery_test.go
-      - internal/executor/merge_golden_test.go
-      - internal/executor/testdata/ac8i_ordinary_merge_golden.json
-  - id: 2
-    depends_on:
-      - 1
-    key_file_paths:
-      - internal/guard/classifier.go
-      - internal/guard/classifier_test.go
-      - internal/guard/constructor.go
-      - internal/guard/constructor_test.go
-      - internal/guard/registries.go
-      - internal/guard/registries_test.go
-      - internal/lint/destructive_guidance_test.go
-      - internal/lint/testdata/destructive_seed_manifest.txt
-      - internal/setup/claude.go
-      - internal/setup/codex.go
-      - .mindspec/adr/ADR-0035-agent-error-contract.md
-      - cmd/mindspec/adr0035_amendment_test.go
-  - id: 3
-    depends_on:
-      - 1
-      - 2
-    key_file_paths:
-      - internal/approve/adopt.go
-      - internal/approve/adopt_test.go
-      - internal/approve/adopt_lattice.go
-      - internal/approve/adopt_lattice_test.go
-      - internal/gitutil/gitops.go
-      - internal/gitutil/gitops_test.go
-      - internal/lifecycle/gitquery.go
-      - cmd/mindspec/impl.go
-      - cmd/mindspec/impl_adopt_test.go
-      - cmd/mindspec/help_golden_test.go
-  - id: 4
-    depends_on:
-      - 2
-      - 3
-      - 5
-    key_file_paths:
-      - internal/lifecycle/orphans.go
-      - internal/lifecycle/orphan_hints.go
-      - internal/lifecycle/orphan_hints_test.go
-      - internal/lifecycle/outcome_oracle_test.go
-      - internal/complete/complete.go
-      - internal/approve/impl.go
-      - internal/approve/adopt.go
-      - internal/doctor/orphaned_beads.go
-      - internal/doctor/orphaned_beads_test.go
-      - internal/guard/registries.go
-  - id: 5
-    depends_on:
-      - 2
-      - 3
-    key_file_paths:
-      - internal/approve/impl.go
-      - internal/approve/impl_test.go
-      - internal/approve/plan.go
-      - internal/approve/plan_provenance_test.go
-      - internal/guard/registries.go
-  - id: 6
-    depends_on:
-      - 1
-      - 2
-      - 4
-      - 5
-    key_file_paths:
-      - internal/executor/mindspec_executor.go
-      - internal/executor/merge_preflight_test.go
-      - internal/executor/reentry_test.go
-      - internal/complete/complete.go
-      - internal/approve/impl.go
-      - internal/approve/spec.go
-      - internal/approve/plan.go
-      - cmd/mindspec/complete.go
-      - cmd/mindspec/impl.go
-      - cmd/mindspec/selfemit.go
-      - internal/redact/redact.go
-      - internal/guard/registries.go
-  - id: 7
-    depends_on:
-      - 2
-      - 4
-      - 5
-      - 6
-    key_file_paths:
-      - .claude/agents/spec-orchestrator.md
-      - cmd/mindspec/release.go
-      - cmd/mindspec/release_test.go
-      - cmd/mindspec/named_invocation_test.go
-      - internal/guard/registries.go
-      - internal/guard/registries_test.go
-      - internal/lint/destructive_guidance_test.go
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/guard/outcome.go
+        - internal/gitutil/workdestruction.go
+        - internal/gitutil/workdestruction_test.go
+        - internal/gitutil/neteffect.go
+        - internal/gitutil/neteffect_test.go
+        - internal/lifecycle/gitquery.go
+        - internal/lifecycle/gitquery_test.go
+        - internal/executor/merge_golden_test.go
+        - internal/executor/testdata/ac8i_ordinary_merge_golden.json
+    - depends_on:
+        - 1
+      id: 2
+      key_file_paths:
+        - internal/guard/classifier.go
+        - internal/guard/classifier_test.go
+        - internal/guard/constructor.go
+        - internal/guard/constructor_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/destructive_guidance_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - internal/setup/claude.go
+        - internal/setup/codex.go
+        - .mindspec/adr/ADR-0035-agent-error-contract.md
+        - cmd/mindspec/adr0035_amendment_test.go
+    - depends_on:
+        - 1
+        - 2
+      id: 3
+      key_file_paths:
+        - internal/approve/adopt.go
+        - internal/approve/adopt_test.go
+        - internal/approve/adopt_lattice.go
+        - internal/approve/adopt_lattice_test.go
+        - internal/gitutil/gitops.go
+        - internal/gitutil/gitops_test.go
+        - internal/lifecycle/gitquery.go
+        - cmd/mindspec/impl.go
+        - cmd/mindspec/impl_adopt_test.go
+        - cmd/mindspec/help_golden_test.go
+    - depends_on:
+        - 2
+        - 3
+        - 5
+      id: 4
+      key_file_paths:
+        - internal/lifecycle/orphans.go
+        - internal/lifecycle/orphan_hints.go
+        - internal/lifecycle/orphan_hints_test.go
+        - internal/lifecycle/outcome_oracle_test.go
+        - internal/complete/complete.go
+        - internal/approve/impl.go
+        - internal/approve/adopt.go
+        - internal/doctor/orphaned_beads.go
+        - internal/doctor/orphaned_beads_test.go
+        - internal/guard/registries.go
+    - depends_on:
+        - 2
+        - 3
+      id: 5
+      key_file_paths:
+        - internal/approve/impl.go
+        - internal/approve/impl_test.go
+        - internal/approve/plan.go
+        - internal/approve/plan_provenance_test.go
+        - internal/guard/registries.go
+    - depends_on:
+        - 1
+        - 2
+        - 4
+        - 5
+      id: 6
+      key_file_paths:
+        - internal/executor/mindspec_executor.go
+        - internal/executor/merge_preflight_test.go
+        - internal/executor/reentry_test.go
+        - internal/complete/complete.go
+        - internal/approve/impl.go
+        - internal/approve/spec.go
+        - internal/approve/plan.go
+        - cmd/mindspec/complete.go
+        - cmd/mindspec/impl.go
+        - cmd/mindspec/selfemit.go
+        - internal/redact/redact.go
+        - internal/guard/registries.go
+    - depends_on:
+        - 2
+        - 4
+        - 5
+        - 6
+      id: 7
+      key_file_paths:
+        - .claude/agents/spec-orchestrator.md
+        - cmd/mindspec/release.go
+        - cmd/mindspec/release_test.go
+        - cmd/mindspec/named_invocation_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/destructive_guidance_test.go
 ---
 # Plan: 127-lifecycle-verb-trustworthiness
 
