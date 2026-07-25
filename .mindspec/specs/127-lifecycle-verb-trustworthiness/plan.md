@@ -12,10 +12,12 @@ work_chunks:
     depends_on: []
     key_file_paths:
       - internal/guard/outcome.go
-      - internal/lifecycle/workdestruction.go
-      - internal/lifecycle/workdestruction_test.go
+      - internal/gitutil/workdestruction.go
+      - internal/gitutil/workdestruction_test.go
       - internal/gitutil/neteffect.go
       - internal/gitutil/neteffect_test.go
+      - internal/lifecycle/gitquery.go
+      - internal/lifecycle/gitquery_test.go
       - internal/executor/merge_golden_test.go
       - internal/executor/testdata/ac8i_ordinary_merge_golden.json
   - id: 2
@@ -43,6 +45,9 @@ work_chunks:
       - internal/approve/adopt_test.go
       - internal/approve/adopt_lattice.go
       - internal/approve/adopt_lattice_test.go
+      - internal/gitutil/gitops.go
+      - internal/gitutil/gitops_test.go
+      - internal/lifecycle/gitquery.go
       - cmd/mindspec/impl.go
       - cmd/mindspec/impl_adopt_test.go
       - cmd/mindspec/help_golden_test.go
@@ -108,6 +113,22 @@ work_chunks:
 ---
 # Plan: 127-lifecycle-verb-trustworthiness
 
+**Revision 2, after the two-slot plan gate (P1/P2: 2/2
+REQUEST_CHANGES).** Two mechanisms are REPLACED, not repaired: the
+`guard.MergeClearance` producer-backstop design is deleted (it rested on
+a false import-graph premise, left the clearance mintable from inside
+the producer's own package, and carried a mint-to-verify staleness
+window — P1-1/-2/-3/-4/-7; the predicate now lives in `internal/gitutil`
+and every producer consults it LIVE at the merge moment), and the
+stale-deletion discriminator is re-derived (the prior set-subtraction
+form is provably empty and returned CLEAN on the destructive shape —
+P1-5, reviser-reproduced with real git; the corrected snapshot-revert
+signature was probed on six shapes at plan time). The #218 fixture
+class moves to SUPERSEDED per the spec's own mapping (P1-6); the AC-3(iii)
+convergence mechanism and the oracle independence check are pinned to
+implementable forms (P2-plan-1/-2); and three MINOR clauses are fixed
+in place (P2-plan-3/-4/-5).
+
 Seven beads implement the #218-cluster spec. **The decomposition is LIFTED
 from the spec's own Decomposition section, not re-derived** — the gate fixed
 three dependency inversions into that section by construction (predicate
@@ -131,9 +152,10 @@ sections below.
 
 **Why the two added edges (the 117 false-independence lesson):** the spec's
 edge set alone leaves {4,5} and {4,6} unordered, but they are NOT
-independent — `internal/approve/impl.go` is edited by beads 4 (the `:850`
-orphan-hint consumer conversion), 5 (the R3a branch-missing preflight and
-the §1 preflight-phase structure C-r4-7 assigns bead 5), and 6 (the
+independent — `internal/approve/impl.go` is edited by beads 4 (the
+orphan-hint consumer conversion: `implOrphanRefusal`, declared `:842`,
+emitter `:845-850`), 5 (the R3a branch-missing preflight and the §1
+preflight-phase structure C-r4-7 assigns bead 5), and 6 (the
 finalize-merge preflight consultation and the R5(d)(v) preserved-merge
 precondition); `internal/complete/complete.go` is edited by beads 4 (the
 `:520`/`:552` consumers) and 6 (complete's §1 preflight siting). The spec
@@ -151,8 +173,11 @@ spec's own edges already forced 6 of 7 beads into one chain
 independence over co-edited files, so nothing real is lost. The
 shared-file seam map is exhaustive over non-test source files:
 `impl.go` (4,5,6 — serialized), `complete.go` (4,6 — serialized),
-`plan.go` (5,6 — serialized), `adopt.go` (3,4 — serialized),
-`cmd/mindspec/impl.go` (3,6 — serialized via 3→5→6),
+`plan.go` (5,6 — serialized; symbols `checkExistingBeadsSafety` at
+`:810` and `beadCreateFailure` at `:703`), `adopt.go` (3,4 —
+serialized), `cmd/mindspec/impl.go` (3,6 — serialized via 3→5→6),
+`internal/lifecycle/gitquery.go` (1,3 — serialized via the 1→3 edge;
+bead 1 adds the predicate wrapper, bead 3 the fetch wrapper),
 `internal/guard/registries.go` (2,4,5,6,7 — all on the chain, each
 conversion bead exits its own seeded entries). No file is edited by two
 beads that can run concurrently.
@@ -201,36 +226,80 @@ records.
   (the `:1721` spec→main leg). One flag name, two leaves, both resolving
   per AC-11(a); the printed recovery lines name these invocations and
   nothing merge-shaped.
-- **Predicate home and the executor import boundary (bead 1 / R4).**
-  `internal/executor` MUST NOT import `internal/lifecycle` (it
-  transitively pulls `internal/phase`; the contract is recorded at
-  `mindspec_executor.go:1457-1461`). The spec homes the shared predicate
-  in lifecycle and R4a already anticipates the resolution: the
-  work-destruction facts are resolved **in each verb's §1 preflight
-  phase** — and the verb layer (`internal/complete`, `internal/approve`)
-  imports lifecycle freely — while "the producer-site consultation is a
-  backstop assertion that the preflight-phase evaluation ran in this run
-  for this bead→target pair". So: the predicate
-  `lifecycle.EvaluateWorkDestruction(workdir, branch, target string)
-  (guard.DestructionOutcome, WorkDestructionEvidence, error)` lives in
-  `internal/lifecycle` (bead 1); the closed outcome type lives in
-  `internal/guard` (`guard.DestructionOutcome` — guard is a leaf package
-  both sides already import: `gitutil` imports guard, so guard can import
-  neither gitutil nor lifecycle, and the enum needs zero imports); and
-  bead 6's producer-site backstop is a **clearance value**: the verb
-  layer evaluates the predicate in its §1 phase and mints
-  `guard.MergeClearance` (opaque, unexported fields, zero value invalid,
-  constructor requires a non-defaultable outcome plus the branch→target
-  pair), which the three executor producers require and verify
-  (pair-match + non-destructive-or-overridden outcome) before
-  `MergeInto`/`MergeBranch` — absent or mismatched clearance is the
-  evidence-error refusal. One evaluation, one implementation, no
-  executor→lifecycle import, no second independently-rewirable seam
-  (S3-r2-6: the predicate's supersession leg consumes
-  `gitutil.NetEffectLanded` through a lifecycle seam var whose default is
-  pointer-pinned to the same exported symbol the executor's
-  `netEffectLandedFn` (`mindspec_executor.go:1426`) and the doctor
-  consumer pin — it joins the spec-121 AC-17 anti-drift consumer set).
+- **Predicate home and the boundaries (bead 1 / R4) — REVISED per
+  P1-1/-2/-3/-4/-7: the clearance design is DELETED; the predicate lives
+  in `internal/gitutil` and every producer consults it live at the merge
+  moment.** Two premises of the prior resolution were false, corrected
+  on the record: (a) `internal/guard` is NOT a leaf — it directly
+  imports `internal/config`, `internal/phase`, `internal/termsafe`,
+  `internal/workspace`, and `internal/workspace/containment` (verified
+  `go list`); what licenses homing the outcome enum there is only that
+  guard is directly imported by both sides (executor, lifecycle, and by
+  gitutil itself) and the enum file adds zero NEW imports. (b) The
+  `mindspec_executor.go:1457` comment's transitive rationale for the
+  executor→lifecycle ban ("transitively pulls internal/phase") is
+  already violated in the tree: `go list -deps ./internal/executor`
+  includes `internal/phase` today, via executor→guard→phase and
+  executor→gitutil→guard→phase. The operative rule is the DIRECT-import
+  boundary in `executor.go`'s package doc ("must NOT import any
+  enforcement package" — internal/{validate,approve,complete,state,
+  phase}); the stale comment is filed as `mindspec-d8di` and is neither
+  fixed nor built on here. A second boundary the prior design (and the
+  gate briefs) missed outright: the **ADR-0030 `internal/lint` boundary**
+  (`internal/lint/boundary_test.go`) bans `internal/gitutil` and
+  `os/exec` imports from the enforcement packages — so the verb layer
+  could never call a gitutil predicate directly either; it must ride an
+  `internal/lifecycle` thin wrapper, the exact `lifecycle.IsAncestor`/
+  `lifecycle.BranchExists` house pattern (`gitquery.go:9-16`, whose doc
+  comment names this boundary). Resolution (adopting P1-7's simpler
+  home): the predicate `gitutil.EvaluateWorkDestruction(workdir, branch,
+  target string) (guard.DestructionOutcome, WorkDestructionEvidence,
+  error)` and its evidence struct live in `internal/gitutil` — which
+  already hosts the classification-shaped primitives (`NetEffectLanded`,
+  `ContentSubsumedOutcome`), imports only guard/termsafe/containment (no
+  cycle), and owns every decision primitive the predicate composes; the
+  closed outcome enum stays in `internal/guard`;
+  `internal/lifecycle/gitquery.go` gains the boundary wrapper as a
+  package-level **`var EvaluateWorkDestruction =
+  gitutil.EvaluateWorkDestruction`** — a var, not a func, so a
+  pointer-equality pin test asserts wrapper ≡ implementation (S3-r2-6's
+  no-second-rewirable-seam discipline, machine-checked; joins the
+  spec-121 AC-17 anti-drift consumer set). Consumption: the verb-layer
+  §1 preflights (`internal/complete`, `internal/approve`) consult the
+  lifecycle wrapper through in-package seam vars (the `implIsAncestorFn`
+  pattern, `impl.go:75-87`) — this is where the user-facing refusal
+  fires, before the materialization subphase (AC-7(v) unchanged); the
+  three executor producers consult `gitutil.EvaluateWorkDestruction`
+  directly at the merge moment through an in-package seam
+  `workDestructionFn` default-pinned to the same symbol (the
+  `netEffectLandedFn` pattern, `mindspec_executor.go:1426`). **What this
+  deletes and what it buys:** no `guard.MergeClearance` type and no
+  exported constructor a producer could call to self-certify (P1-2
+  dissolves — there is nothing to mint); no Executor-interface or
+  `mock.go` plumbing (P1-3 dissolves — no value crosses the package
+  boundary; `executor.go` and `mock.go` are untouched); and no
+  mint-to-verify staleness window: the producer evaluates the LIVE
+  operand tips, so target-side drift — which provably occurs inside
+  FinalizeEpic (`:576` commits into the spec worktree above the
+  auto-merge loop, and each `:703` merge advances the target for the
+  next bead) — is inside the evaluation by construction, not argued
+  away (P1-4 dissolves into bead 6's target-drift fixture). The
+  producer-site consultation satisfies R4(a)'s literal "consults …
+  before mutating" and strictly subsumes its backstop reading (the
+  evaluation runs at the producer, in this run, on this pair); the §1
+  preflight is not redundant — it owns the user-facing refusal siting
+  and its own AC-7(v) tests. Priced costs, recorded: the predicate runs
+  twice per merge (two read-only previews — accepted); a producer-site
+  refusal can fire only on state that changed between §1 and the merge
+  (branch-side self-drift is class-invariant per R4(a)'s disposition;
+  target-side drift is the NEW coverage), and it fails closed exactly
+  like the `:640-659` ancestry-error precedent — post-materialization,
+  mutating nothing further — with the disposition stated in bead 6
+  (mid-loop partial state named; re-run convergence via the `ancestor`
+  no-op leg). Residual TOCTOU is the merge-moment window only — the
+  same window every existing probe-then-merge site carries (e.g. the
+  `:819` protected-main probe) — strictly narrower than any design
+  separating evaluation from action.
 - **Which primitive answers which evidence class (the spec's "plan
   chooses mechanics"):** (1) *ancestry* — `gitutil.IsAncestor` (B onto T,
   then B onto `main`); (2) *supersession* — `gitutil.NetEffectLanded` /
@@ -240,19 +309,73 @@ records.
   need to name the landed merge (R2's derivation, R1b's per-bead
   coverage) — it enriches, never decides, the R4 refusal, which keeps the
   predicate's decision legs on symbols the whole consumer set can share;
-  (3) *stale-deletion* — a NEW read-only preview helper (the one the
-  spec's In Scope bullet anticipates): `gitutil.PreviewDeletedPaths
-  (workdir, target, branch) ([]string, error)` wrapping the existing
-  non-mutating `git merge-tree --write-tree` preview
-  (`neteffect.go:92-107`) plus a name-status diff of the preview tree
-  against T's tip, intersected against the authored range
-  (`git diff --name-status merge-base(B,T)..B`, via the same helper
-  file): preview-deleted paths that the authored range never touched →
-  stale-deletion. **No numeric leg is added** (the spec's MAY):
-  the AC-8(ii)/(iii) fixtures make any bare deleted-line floor
-  unimplementable, and a conservative tripwire would add a false-refusal
-  class for zero discriminating power over the three evidence classes —
-  declined, recorded here.
+  (3) *stale-deletion* — **REVISED per P1-5/P1-6; the prior mechanic is
+  provably empty and is replaced by the snapshot-revert signature,
+  probed with real git at plan time.** The prior form —
+  `PreviewDeletedPaths` minus `ChangedPathsInRange(merge-base(B,T)..B)`
+  — is empty by construction: a clean preview-deletion of a T-present
+  path requires a B-side deletion relative to the merge base, so the
+  subtracted set always contains the D-set; and on the destructive
+  recreated-branch shape the computed merge-base LIES (it is T's tip,
+  so the reverting commit "authors" the deletions), which made the
+  prior leg certify the destruction as CLEAN. Reviser-reproduced (not
+  taken on P1's word) in isolated `/tmp/core1-planrev-scratch/` repos:
+  seven probes, both destructive shapes CLEAN under the old form.
+  **Corrected discriminator:** with D = `gitutil.PreviewDeletedPaths
+  (workdir, target, branch)` non-empty (the read-only helper the spec's
+  In Scope bullet anticipates — the non-mutating `git merge-tree
+  --write-tree` preview, `neteffect.go:92-107`, plus a name-status diff
+  of the preview tree against T's tip, **rename detection pinned
+  `--find-renames`** so AC-8(ii)'s moves are R-paths, never D-paths; a
+  conflicted preview never reaches this leg — conflicts route to
+  R5(d)): compute N = the paths B adds relative to T's tip, strip N
+  from B's tip tree in a temporary `GIT_INDEX_FILE` (refs, real index,
+  and worktree untouched; writes only unreferenced loose tree objects,
+  exactly as the house preview already does), and scan `git rev-list
+  --format='%H %T' <target>` for an ancestor whose tree OID equals the
+  stripped tree. A hit means B reconstructs a prior state of T plus
+  novel work — its deletions are staleness artifacts →
+  `DestructionStaleDeletion`, evidence carrying the D-set and the
+  reconstructed ancestor; no hit → the deletions are authored → clean.
+  Plan-time probe results: recreated-from-tip-carrying-an-old-tree
+  (single- and multi-commit recreation) → FIRES; honest cleanup
+  (AC-8(iii) shape), large rename/move (AC-8(ii)), honest stale branch
+  → CLEAN; modify/delete → conflict path, outside the leg. **One
+  conservative corner, stated:** a cleanup whose deletions are exactly
+  the whole delta since some T-ancestor (the result tree equals that
+  ancestor's tree) fires the signature and refuses, override available
+  — that shape is byte-indistinguishable from un-landing the tip's own
+  change, and the arc's ruling ("is this text dangerous?" is not
+  decidable from the text) applies one level down: intent is not
+  decidable from the git state, so the tie breaks fail-closed; bead 1
+  fixtures the corner by name, and AC-8(iii)'s fixture is the generic
+  cleanup shape (an older file deleted with later content landed
+  since), which stays clean. **A hand-edited recreation (old tree plus
+  manual tweaks) produces no exact tree match and is MISSED by this
+  leg** — a stated limitation, review-caught, the same honesty posture
+  as R5(a)'s finite floor; the supersession leg remains the primary
+  catcher of the real #218 branches (below). **Spec-text deviation,
+  flagged for the plan-approve ruling:** the spec's class-3
+  parenthetical pins the authored range as `merge-base(B,T)..B`, and
+  under exactly that definition the class is empty (the probes above);
+  this plan implements the class's stated intent — "deletions that are
+  artifacts of B's staleness, not authored changes" — with authorship
+  grounded in the branch's novel content rather than range membership.
+  `ChangedPathsInRange` is CUT (its only consumer was the empty
+  subtraction). **The #218 shape itself classifies SUPERSEDED, not
+  stale-deletion** (P1-6, matching the spec's mapping: AC-3(i)
+  "superseded / landed-via-another-route (#218 shape)" vs AC-3(v)'s
+  separately-defined stale-deletion): the incident's stale bead branch
+  and a recreated-at-old-snapshot spec branch carry genuinely old fork
+  points and content that landed via another route — the supersession
+  primitives answer them; the stale-deletion class's constructible
+  witness is the recreated-from-current-tip-carrying-an-old-tree shape
+  (the probe above), which supersession does NOT catch (its net effect
+  — mass deletion — never landed anywhere). **No numeric leg is added**
+  (the spec's MAY): the AC-8(ii)/(iii) fixtures make any bare
+  deleted-line floor unimplementable, and a conservative tripwire would
+  add a false-refusal class for zero discriminating power over the
+  three evidence classes — declined, recorded here.
 - **Outcome enum mechanics (B-r4-3, pinned by the spec, named here so
   every bead builds the same thing):** `guard.DestructionOutcome` is an
   iota enum — `DestructionAncestor`, `DestructionSuperseded`,
@@ -367,8 +490,8 @@ without `complete`.
 - **ADR-0041 (Gate-Before-Mutate) — APPLIED, no amendment.** R3's
   branch-existence fact and R4's work-destruction facts are §1
   preflight-phase facts (for `complete`, resolved before the step-2.5/3
-  materialization subphase — the clearance design above is exactly this
-  siting); evidence-computation errors refuse fail-closed retryable per
+  materialization subphase — the live-consultation design above keeps
+  exactly this siting); evidence-computation errors refuse fail-closed retryable per
   §2(ii), mirroring `mindspec_executor.go:640-659`; adopt is a
   forward-reconcile, never a rollback.
 - **ADR-0042 (Render/Derivation Provenance) — unchanged, applied.**
@@ -384,12 +507,17 @@ without `complete`.
   bd metadata; no filesystem state authority, no new derivation rows,
   and no consumer gains lifecycle authority from any new value type.
 
-No ADR is superseded; no divergence requiring a human stop. The
-executor/lifecycle import boundary is preserved by the clearance design
-(no new executor import); `internal/gitutil` changes are read-only
-helpers only (`PreviewDeletedPaths` + the authored-range diff helper —
-non-mutating plumbing wrappers; no primitive's discrimination is
-extended, per Out of Scope).
+No ADR is superseded; no divergence requiring a human stop. Both import
+boundaries are preserved without a new edge: the executor's only new
+consumption is `internal/gitutil` (already a direct import), and the
+ADR-0030 lint boundary is respected by routing the verb layer through
+`internal/lifecycle/gitquery.go` wrappers (the house pattern).
+`internal/gitutil` gains read-only surfaces only —
+`EvaluateWorkDestruction` (a composition of the shipped 125 primitives,
+consumed as shipped; no primitive's discrimination is extended, per Out
+of Scope), `PreviewDeletedPaths`, and the workdir-taking fetch variant
+(bead 3) — non-mutating throughout (unreferenced loose objects only,
+same as the existing preview).
 
 ## Testing Strategy
 
@@ -400,10 +528,21 @@ extended, per Out of Scope).
   (`landed_test.go`); approve beads the in-package bd-runner seams.
   Remote corroboration (bead 3) uses **real bare local origins**
   (`finalize_orphan_test.go:65` pattern) — filesystem-path fetch, fully
-  hermetic, no network, no stub; `gitutil.FetchRemoteBranch`
-  (`gitops.go:250`) runs against the bare path for the poisoned-cache /
-  absent-branch / unreachable-remote rows (unreachable = a bare path
-  that does not exist).
+  hermetic, no network, no stub. **Fetch mechanism pinned (P2-plan-5):**
+  the existing `gitutil.FetchRemoteBranch` is cwd-bound by its own doc
+  (`gitops.go:250` — "runs … from the current working directory"),
+  which contradicts the explicit-root posture; bead 3 adds the
+  read-only workdir-taking variant `gitutil.FetchRemoteBranchIn(workdir,
+  remote, branch)` (a `cmd.Dir` plumbing wrapper beside it, same
+  `noPrompt` + `rejectOptionLike` hygiene — covered by the In-Scope
+  "new read-only gitutil helper" allowance), exposed to `internal/
+  approve` through a `lifecycle/gitquery.go` wrapper var (the ADR-0030
+  boundary bans a direct gitutil import from approve — a constraint the
+  prior revision's "approve calls gitutil.FetchRemoteBranch" wording
+  violated outright). Adopt fetches at the explicit root; fixtures
+  never chdir; the poisoned-cache / absent-branch / unreachable-remote
+  rows run against the bare path (unreachable = a bare path that does
+  not exist).
 - **CI-parity is a per-bead obligation**: everything runs in the bd-less
   `go test -short ./...` lane (GREEN at `09f62bd9`, R6). bd-touching
   legs ride in-package seams (`orphans.go`'s
@@ -422,20 +561,60 @@ extended, per Out of Scope).
   through the real orphan scan; ground truth re-derived ONLY via the
   pinned probe set (`git merge-base --is-ancestor`, `git rev-list`,
   `git for-each-ref`, `git diff --name-status`, test-side raw
-  `git merge-tree --write-tree`) — the oracle file imports/calls none of
-  the shared predicate, the hint derivation, or the exported
-  landed/net-effect classifiers (asserted by a small AST/imports check
-  inside the oracle file's own test, so the independence clause is
-  red-on-violation, not convention); byte-match templates consume whole
-  lines, shell metacharacters fail, and the two injection fixtures
-  (compound line, resolvable-but-wrong mutating leaf) pin fail-closed.
-  **No test anywhere executes a string the code under test emitted**;
-  AC-3(iii)'s convergence leg invokes the in-process `CompleteBead`
-  entrypoint with test-authored arguments.
+  `git merge-tree --write-tree`). **Independence mechanization pinned
+  (P2-plan-2 — an imports check alone is structurally vacuous for
+  same-package surfaces, and this arc has already cut one mechanism for
+  asserting enforcement no fixture performs):** two legs, both
+  red-on-violation. (1) A **file-scoped AST call/identifier scan of
+  `outcome_oracle_test.go`** asserting no CallExpr or selector/identifier
+  reference to a NAMED forbidden set — `EvaluateWorkDestruction` (the
+  gitutil symbol AND the same-package lifecycle wrapper var), the hint-
+  derivation entrypoint(s) bead 4 lands in `orphan_hints.go`,
+  `FindLandedMerge`, `NetEffectLanded`, `ContentSubsumedOutcome`,
+  `PreviewDeletedPaths` — plus (2) **no `internal/gitutil` import in the
+  oracle file** (the imports leg is meaningful only for the cross-package
+  classifiers; the call-scan leg covers the same-package wrapper and
+  derivation). **Confinement rule:** every ground-truth helper the
+  oracle consumes is defined IN the oracle file itself, so a sibling
+  test file (which legitimately calls the derivation for the AC-3
+  table) can never become an indirection outside the fence — the scan
+  asserts the oracle file's helper closure is file-local. Byte-match
+  templates consume whole lines, shell metacharacters fail, and the two
+  injection fixtures (compound line, resolvable-but-wrong mutating
+  leaf) pin fail-closed. **No test anywhere executes a string the code
+  under test emitted.** **AC-3(iii) convergence mechanism pinned
+  (P2-plan-1 — the real `CompleteBead`'s bd seams (`execBeadExportFn`
+  `:1412`, `mergeBindingFn`/`mergeBindingReadFn` `:1441-1442`) are
+  unexported in `internal/executor` with no setters, and the binding
+  write is fail-closed, so a cross-package test cannot stub them and a
+  bare bd-less run cannot go green):** the convergence leg drives the
+  REAL in-process `MindspecExecutor.CompleteBead` with test-authored
+  arguments under the **fake-bd PATH shim** (the
+  `internal/executor/landed_e2e_test.go:88-104` precedent — shim
+  resolved first on PATH, FATAL-not-skip, hermetic and `-short`-safe),
+  so the export and binding writes succeed for real. **Explicitly
+  forbidden:** satisfying the leg through an `executor.Executor`
+  wrapper/mock that fabricates the merge (the
+  `internal/complete/fault_injection_realgit_test.go:90`
+  `killAfterExecutor` embedding shape, repurposed as a stub) — that is
+  R6's named stub-hollowing ("an AC's stated mechanism is substituted
+  by a stub that fabricates the value the AC then asserts") and the
+  bead prompt carries the prohibition verbatim.
 - **AC-8(i) golden determinism (bead 1):** the ordinary-merge golden is
   captured by a deterministic fixture builder — pinned
   `GIT_AUTHOR_NAME/EMAIL/DATE` + `GIT_COMMITTER_*` env, fixed content,
-  fixture-root path templated out of the transcript — recording exit
+  fixture-root path templated out of the transcript, **and git-config
+  isolation on every git invocation, applied identically at capture and
+  replay (P2-plan-4): `GIT_CONFIG_GLOBAL=/dev/null` +
+  `GIT_CONFIG_NOSYSTEM=1`** — the golden records parent tips, so any
+  commit-object-altering config (`commit.gpgsign=true` in a dev's
+  global config is the live example) would otherwise capture local
+  state and fail everywhere else; the house per-repo defense
+  (`internal/complete/fault_injection_realgit_test.go:152`,
+  `internal/doctor/git_test.go:91`,
+  `internal/bootstrap/mergedriver_test.go:350` all set
+  `commit.gpgsign false`) is subsumed by the env-level isolation —
+  recording exit
   code, normalized output, merge-commit subject, parent count/tips, and
   result-tree paths; committed under `internal/executor/testdata/` with
   a provenance header (captured at the bead-1 tree, descended from
@@ -477,53 +656,75 @@ changes.
    (`DestructionAncestor`, `DestructionSuperseded`,
    `DestructionStaleDeletion`, `DestructionClean`,
    `DestructionEvidenceError`) with exported `DestructionOutcomeCount`
-   sentinel and a `String()` method. Zero imports — guard stays a leaf.
-2. `internal/gitutil/neteffect.go`: add the read-only helpers
+   sentinel and a `String()` method. The FILE adds zero imports (the
+   guard package itself is NOT a leaf — the preamble's P1-1 correction).
+2. `internal/gitutil/neteffect.go`: add the read-only helper
    `PreviewDeletedPaths(workdir, target, branch string) ([]string,
-   error)` (non-mutating `git merge-tree --write-tree` preview + a
+   error)` — non-mutating `git merge-tree --write-tree` preview + a
    name-status diff of the preview tree against target's tip, D-paths
-   only) and `ChangedPathsInRange(workdir, base, tip string) ([]string,
-   error)` (`git diff --name-status base..tip` name set). Both propagate
-   every git error (never classify on infra failure — the 125 O2-1
-   discipline); neither mutates refs, index, or worktree. Fixtures in
-   `neteffect_test.go` incl. a rename/move shape (paths reported as git
-   reports them; the predicate's set intersection, not path heuristics,
-   is the discriminator).
-3. `internal/lifecycle/workdestruction.go` (new):
+   only, **rename detection pinned `--find-renames`** (plumbing diffs
+   do not detect renames by default; without the pin a large move
+   reads as D-paths). Propagates every git error (never classify on
+   infra failure — the 125 O2-1 discipline); mutates no refs, index,
+   or worktree (unreferenced loose objects only, like the existing
+   preview). Fixtures in `neteffect_test.go` incl. the rename/move
+   shape (R-paths, never D-paths). `ChangedPathsInRange` is NOT built
+   (cut with the empty subtraction — preamble P1-5 disposition).
+3. `internal/gitutil/workdestruction.go` (new):
    `EvaluateWorkDestruction(workdir, branch, target string)
-   (guard.DestructionOutcome, WorkDestructionEvidence, error)`.
-   Evaluation order and mechanics (pinned in the plan preamble):
-   ancestry via `gitutil.IsAncestor` (→ `DestructionAncestor`);
-   supersession via a new in-package seam
-   `wdNetEffectLandedFn = gitutil.NetEffectLanded` (+
-   `ContentSubsumedOutcome` for the subsumed-vs-conflict distinction)
-   against target then `main` (→ `DestructionSuperseded`);
-   stale-deletion via `PreviewDeletedPaths` minus
-   `ChangedPathsInRange(merge-base(B,T)..B)` (→
-   `DestructionStaleDeletion`, evidence carrying the offending path
-   set); else `DestructionClean`. ANY infra error →
-   (`DestructionEvidenceError`, evidence naming the failed probe,
-   non-nil err) — absence of evidence is never safety.
-   `WorkDestructionEvidence` carries merge-base, per-class findings, and
+   (guard.DestructionOutcome, WorkDestructionEvidence, error)` — the
+   predicate home per the preamble's revised resolution. Evaluation
+   order and mechanics: ancestry via `IsAncestor` (→
+   `DestructionAncestor`); supersession via same-package DIRECT calls
+   to `NetEffectLanded` (+ `ContentSubsumedOutcome` for the
+   subsumed-vs-conflict distinction) against target then `main` (→
+   `DestructionSuperseded`) — no cross-package seam exists for a
+   decision leg at all (a strictly stronger form of S3-r2-6's
+   no-second-rewirable-seam demand); stale-deletion via the
+   **snapshot-revert signature** (preamble mechanics item (3), probed
+   at plan time: D-set from `PreviewDeletedPaths`; strip the branch's
+   novel paths from its tip tree in a temp `GIT_INDEX_FILE`; scan
+   `rev-list --format='%H %T'` of the target for an equal ancestor
+   tree) → `DestructionStaleDeletion`, evidence carrying the D-set and
+   the reconstructed ancestor; else `DestructionClean`. ANY infra
+   error → (`DestructionEvidenceError`, evidence naming the failed
+   probe, non-nil err) — absence of evidence is never safety.
+   Error-forcing for tests rides unexported in-package seam vars with
+   pointer-equality default pins (no exported knob).
+   `WorkDestructionEvidence` (same file — it is gitutil-shaped; in
+   guard it would cycle) carries merge-base, per-class findings, and
    the landed-merge attribution slot bead 4 fills via
-   `FindLandedMerge` (enrichment, never the decision — the plan
-   preamble's mechanics split). Doc comment states the per-consumer
-   outcome table pointer (R4c/F3-r2-1).
-4. `internal/lifecycle/workdestruction_test.go`: real-git table fixtures
+   `lifecycle.FindLandedMerge` (enrichment, never the decision — the
+   preamble's mechanics split; lifecycle imports gitutil, so the
+   attribution lives with the derivation, not in the predicate). Doc
+   comment states the per-consumer outcome table pointer (R4c/F3-r2-1).
+   `internal/lifecycle/gitquery.go` gains the ADR-0030 boundary
+   wrapper `var EvaluateWorkDestruction = gitutil.EvaluateWorkDestruction`
+   with a pointer-equality pin test in `gitquery_test.go` (wrapper ≡
+   implementation; joins the AC-17 anti-drift set).
+4. `internal/gitutil/workdestruction_test.go`: real-git table fixtures
    over ALL FIVE outcomes with `len(table) ==
    guard.DestructionOutcomeCount` (B-r4-3's sentinel discipline, the
    model every consumer copies), including the AC-8 boundary fixtures as
    this bead's own panel evidence: **AC-8(ii)** large rename/directory-
    move with no net content loss → `DestructionClean`; **AC-8(iii)**
-   honest cleanup bead whose authored range carries its deletions →
-   `DestructionClean` (these two make a bare deleted-line floor
-   unimplementable — red against a numeric-floor impl, named in-test);
-   the #218 shape (stale branch whose merge would delete landed work) →
-   `DestructionStaleDeletion`; a superseded snapshot →
-   `DestructionSuperseded`; probe forced to fail (seam) →
-   `DestructionEvidenceError`. Pointer pin: `wdNetEffectLandedFn ==
-   gitutil.NetEffectLanded` (joins the AC-17 anti-drift consumer set —
-   S3-r2-6).
+   honest cleanup bead whose authored range carries its deletions (the
+   generic shape: an older file deleted with later content landed
+   since) → `DestructionClean` (these two make a bare deleted-line
+   floor unimplementable — red against a numeric-floor impl, named
+   in-test); **the #218 shape (stale branch whose content landed via
+   another route) → `DestructionSuperseded`** (P1-6 — the spec's
+   AC-3(i) mapping; the prior revision filed it under stale-deletion,
+   contradicting the spec); **the stale-deletion witness** (P1-5):
+   branch recreated from the target's tip carrying an old tree plus
+   novel work → `DestructionStaleDeletion` — in BOTH the single-commit
+   and multi-commit recreation variants, red-on-revert against a
+   discriminator that returns clean for them (the plan-time probes,
+   committed as fixtures); **the conservative corner, fixtured by
+   name**: a cleanup whose result tree exactly equals a target-ancestor
+   tree → `DestructionStaleDeletion` (fail-closed by ruling, override
+   available — in-test comment cites the preamble); probe forced to
+   fail (seam) → `DestructionEvidenceError`.
 5. `internal/executor/merge_golden_test.go` + testdata: the AC-8(i)
    golden capture per the Testing Strategy (deterministic env, ordinary
    bead merge through production `CompleteBead`, transcript + merge
@@ -531,10 +732,12 @@ changes.
    + testdata to executor — no production executor edit.
 
 **Verification**
-- [ ] `go test -short ./internal/lifecycle/... ./internal/gitutil/... ./internal/executor/...` passes; test names per AC recorded in review evidence
+- [ ] `go test -short ./internal/gitutil/... ./internal/lifecycle/... ./internal/executor/...` passes; test names per AC recorded in review evidence
 - [ ] AC-8(ii)/(iii) fixtures green AND demonstrated red against a deleted-line-floor impl (deviation target named in-test); outcome-count sentinel test in place
-- [ ] Evidence-error leg proves error propagation (no infra failure classified); `PreviewDeletedPaths`/`ChangedPathsInRange` mutate nothing (`git for-each-ref` + status before/after identical in-test)
-- [ ] AC-8(i) golden committed with provenance header; replay green
+- [ ] Stale-deletion witness fixtures (single- and multi-commit recreation) FIRE and are red-on-revert; the #218 fixture asserts `DestructionSuperseded`; the corner fixture asserts the fail-closed ruling
+- [ ] Evidence-error leg proves error propagation (no infra failure classified); `PreviewDeletedPaths` and the predicate mutate nothing (`git for-each-ref` + status before/after identical in-test)
+- [ ] Wrapper pointer-pin green (`lifecycle.EvaluateWorkDestruction == gitutil.EvaluateWorkDestruction`)
+- [ ] AC-8(i) golden committed with provenance header (config-isolated env per Testing Strategy); replay green
 - [ ] Full gates: build/vet/gofmt/golangci-lint/`validate spec` clean; bead completes with zero `--override-adr`
 
 **Acceptance Criteria**
@@ -674,9 +877,13 @@ command); the R2-derived form arrives with bead 4 (R1g, declared).
    distinct, retry named first, attestation stated (AC-2(vi)).
 2. `internal/approve/adopt_lattice.go` (new): the R1b aggregation —
    per-source three-valued results over (i) the remote spec-branch ref,
-   **fetch route ONLY** (`gitutil.FetchRemoteBranch` then every probe at
-   the freshly fetched tip; the pre-fetch tracking ref is never
-   evidence; absent remote branch / unreachable remote → error), and
+   **fetch route ONLY** (the new workdir-taking
+   `gitutil.FetchRemoteBranchIn(root, remote, branch)` via its
+   `lifecycle/gitquery.go` wrapper — the Testing Strategy's P2-plan-5
+   pin; the existing `FetchRemoteBranch` is cwd-bound and approve may
+   not import gitutil (ADR-0030) — then every probe at the freshly
+   fetched tip; the pre-fetch tracking ref is never evidence; absent
+   remote branch / unreachable remote → error), and
    (ii) the epic's bead branches at strict AllStatuses breadth (the
    plan-preamble status resolution; resolution failure →
    evidence-error, never narrowing — F-r5-2), each surviving branch
@@ -736,7 +943,7 @@ allowlist entries (the four consumer sites) with named records.
 
 **Steps**
 1. `internal/lifecycle/orphan_hints.go` (new): the single derivation —
-   takes a `guard.DestructionOutcome` + `WorkDestructionEvidence`
+   takes a `guard.DestructionOutcome` + `gitutil.WorkDestructionEvidence`
    (cannot be called without one — O2-7's structural leg), returns the
    closed outcome plus rendered lines via bead 2's constructor. Pinned
    outcomes per R2(b): ancestor-of-main-not-of-spec → deletion hint
@@ -766,10 +973,18 @@ allowlist entries (the four consumer sites) with named records.
 4. `internal/lifecycle/outcome_oracle_test.go`: the AC-3 oracle per the
    Testing Strategy — byte-match per-outcome templates (whole-line,
    metacharacters fail, the two injection fixtures), probe-derived
-   ground truth with the independence clause asserted mechanically
-   (imports check), divergence = failure; harness executes only probes.
+   ground truth with the independence clause asserted mechanically per
+   the P2-plan-2 pin: the file-scoped AST call/identifier scan over the
+   named forbidden set PLUS the no-gitutil-import leg, with every
+   ground-truth helper confined to the oracle file; divergence =
+   failure; harness executes only probes.
 5. AC-3 table over all five outcomes through the REAL scan; leg (iii)
-   convergence via in-process `CompleteBead` (test-authored call);
+   convergence drives the REAL in-process `MindspecExecutor.CompleteBead`
+   (test-authored call) under the fake-bd PATH shim per the Testing
+   Strategy's P2-plan-1 pin (`landed_e2e_test.go:88-104` precedent,
+   FATAL-not-skip) — satisfying the leg through an `executor.Executor`
+   wrapper/mock that fabricates the merge is FORBIDDEN (R6
+   stub-hollowing, stated in the bead prompt);
    consumer-parity leg (all four production surfaces render identical
    derivation output). **AC-2(viii)** composite fixture: recreated spec
    branch + closed bead's stale branch → adopt refuses before mutation,
@@ -782,7 +997,7 @@ allowlist entries (the four consumer sites) with named records.
 **Verification**
 - [ ] `go test -short ./internal/lifecycle/... ./internal/complete/... ./internal/approve/... ./internal/doctor/...` passes
 - [ ] AC-3 legs (i)/(ii)/(iv)/(v) RED at `09f62bd9` (static string today), leg (iii) guard green, leg (vi) RED (FixFunc unconditional today); every leg oracle-judged; parity + emitter-enumeration green
-- [ ] AC-2(viii) RED today; oracle independence check red on a test-side import of the predicate/derivation/classifiers
+- [ ] AC-2(viii) RED today; oracle independence red on a test-side REFERENCE to any forbidden-set symbol (call-scan leg, same-package-capable) and on a gitutil import (imports leg) — both demonstrated by revert-shaped probes; convergence leg green under the fake-bd shim, with no Executor wrapper/mock in the leg's call path
 - [ ] Registry exit records named; sweep still green; full gates clean; zero `--override-adr`
 
 **Acceptance Criteria**
@@ -832,13 +1047,19 @@ preflight-phase structure bead 6 consumes (C-r4-7).
    table test over the provenance value (no bd, no git, no identity —
    CI-parity by construction). AC-4 fixtures: real-git deleted-branch
    repo (leg i), seam-forced probe error (leg ii).
-4. Registry exits: the `plan.go:823` seeded site exits with a named
-   bead-5 record (converted to constructor).
+4. Registry exits — TWO named bead-5 records (P2-plan-3: step 2
+   converts BOTH `plan.go` emitters, so both seeded entries must exit
+   or fixture β carries an unfalsifiable leftover): the closed-child
+   site (`checkExistingBeadsSafety`, seed at `:820-825`) AND the
+   partial-create site (`beadCreateFailure`, `:703-733` — its literal
+   `bd delete %s --force` Sprintf is a provable-shape floor match the
+   seed scan captures). Fixture β stays green with no dead entry
+   surviving to bead 7's burn-down.
 
 **Verification**
 - [ ] `go test -short ./internal/approve/...` passes; AC-4(i) RED at `09f62bd9` (raw merge-base error today), AC-6(i) RED (`plan.go:823` unconditional today); AC-4(ii) red-on-revert (new seam leg)
 - [ ] `exit status 128` appears nowhere in AC-4 output; adopt named in leg (i) only; AC-6 table pure (no I/O — asserted by the test's own construction)
-- [ ] Registry exit named; sweep green; full gates clean; zero `--override-adr`
+- [ ] Both registry exits named (closed-child + partial-create); sweep green; full gates clean; zero `--override-adr`
 
 **Acceptance Criteria**
 - [ ] AC-4 — branch-missing + indeterminate preflight legs (leg i RED today)
@@ -851,20 +1072,24 @@ Beads 2 and 3 (per the spec; the R3a refusal names adopt in full).
 
 ## Bead 6: R4 merge preflight on every producer + R3b + R5(d) re-entry
 
-The single mandatory work-destruction preflight (clearance design, plan
-preamble) on all three producers; `--allow-net-deletion` with friction
+The single mandatory work-destruction preflight (live-consultation
+design, plan preamble) on all three producers; `--allow-net-deletion` with friction
 registration; the chokepoint enumeration; the `:1688`/`:1721` conversion
 to the `--resolve-merge` resumption surface with the preserved-merge
 precondition across every committing path; AC-5. NOT split
 producer-wise (AC-7(iv) is a whole-set universal).
 
 **Steps**
-1. Verb-layer §1 preflights mint `guard.MergeClearance` from the
-   predicate: `internal/complete/complete.go` (before the step-2.5/3
-   materialization subphase — no R4 refusal leaves a tool-generated
-   commit, AC-7(v)); `internal/approve/impl.go` for FinalizeEpic's
-   per-bead auto-merge set and the direct spec→main leg (consuming bead
-   5's preflight-phase structure). Per-class outcomes (F3-r2-1):
+1. Verb-layer §1 preflights EVALUATE the predicate through the
+   `lifecycle.EvaluateWorkDestruction` wrapper behind in-package seam
+   vars (the `implIsAncestorFn` pattern; ADR-0030 — no clearance is
+   minted, nothing crosses a package boundary):
+   `internal/complete/complete.go` (before the step-2.5/3
+   materialization subphase — the user-facing R4 refusal fires here,
+   so no refusal leaves a tool-generated commit, AC-7(v));
+   `internal/approve/impl.go` for FinalizeEpic's per-bead auto-merge
+   set and the direct spec→main leg (consuming bead 5's
+   preflight-phase structure). Per-class outcomes (F3-r2-1):
    ancestor → proceed no-op; superseded/stale-deletion → refuse naming
    evidence + `--allow-net-deletion "<reason>"`; evidence-error →
    fail-closed retryable (the `:640-659` precedent). Spec→main leg
@@ -872,12 +1097,26 @@ producer-wise (AC-7(iv) is a whole-set universal).
    precedent at `:845-857`); refusal fires with every worktree/branch
    still present (AC-7(iii)).
 2. `internal/executor/mindspec_executor.go`: the three producers
-   (`:411`, `:703`, `:916`) require and verify the clearance
-   (pair-match + outcome) before `MergeInto`/`MergeBranch` — the
-   backstop assertion. Chokepoint anti-drift test enumerates every
+   (`:411`, `:703`, `:916`) consult the predicate LIVE at the merge
+   moment via the in-package seam `workDestructionFn =
+   gitutil.EvaluateWorkDestruction` (pointer-pinned, AC-17 set) over
+   the CURRENT operand tips, immediately before
+   `MergeInto`/`MergeBranch` — the preamble's revised R4 resolution.
+   A producer-site refusal is the fail-closed backstop for state that
+   changed since §1 (branch-side self-drift is class-invariant per
+   R4(a); target-side drift is the new coverage): it aborts exactly
+   like the `:640-659` ancestry-error precedent, mutating nothing
+   further, and its disposition is STATED — for `complete`, recovery
+   is re-running the verb, whose §1 preflight then refuses user-facing
+   before any new commit; for FinalizeEpic's loop at bead N, beads
+   1..N−1 are already merged with their landed bindings written — a
+   durable, legitimate partial state — and the re-run converges over
+   them via the `ancestor` no-op leg while §1 surfaces the refusal for
+   bead N. Chokepoint anti-drift test enumerates every
    `MergeInto`/`MergeBranch` call site in lifecycle/executor packages
-   and asserts each CONSULTS the preflight (consultation, not
-   adjacency) — AC-7(iv), whole and unstaged.
+   and asserts each CONSULTS the preflight — dataflow from a
+   `workDestructionFn` evaluation of that call's operand pair to the
+   merge call, not call-site adjacency — AC-7(iv), whole and unstaged.
 3. Override + friction: `--allow-net-deletion "<reason>"` recorded on
    epic metadata (the `--allow-doc-skew` pattern) AND registered in
    `cmd/mindspec/selfemit.go`'s `escapeHatchFlags` + `detectFriction`
@@ -916,7 +1155,13 @@ producer-wise (AC-7(iv) is a whole-set universal).
 6. Tests: **AC-7** all five legs (producer parity via the same evidence
    shape on all three; override fixture binds ONLY `--allow-net-
    deletion` — S3-r2-7; tracker-path refusal leaves the bead tip at the
-   panel-reviewed SHA). **AC-5** (R3b): recreated stale spec branch →
+   panel-reviewed SHA). **Target-drift backstop fixture (P1-4's
+   dissolution, demonstrated not asserted):** the target branch is
+   advanced to a destruction-shaped state between the §1 evaluation
+   and the producer's merge (seam/hook-forced) — the producer refuses,
+   bead N is unmerged, prior merges and bindings are intact, and the
+   re-run converges with the §1 refusal and no new tool-generated
+   commit. **AC-5** (R3b): recreated stale spec branch →
    finalize merge refused before mutation. **AC-8(i)** golden replay
    byte-identical (the common path untouched); **AC-8(iv)** seam-forced
    evidence error → retryable refusal naming the override; **AC-8(v)**
@@ -933,6 +1178,7 @@ producer-wise (AC-7(iv) is a whole-set universal).
 - [ ] AC-7(i)-(v) RED at `09f62bd9`; AC-5 RED; AC-9(v) legs each mapped to a named test; AC-8(i) golden byte-identical (guard); AC-8(v) convergence with zero override
 - [ ] No raw `git merge` string in either emitter's output (string-asserted + the internal/lint scan stays green); friction admission + epic metadata both present on the override fixture; redact token registered
 - [ ] Preserved-merge enumeration test covers the full call-site set; `abortMergeState` precondition fixture (never aborts a foreign merge)
+- [ ] Target-drift backstop fixture green (producer-site refusal on mid-run target drift; partial state + re-run convergence asserted); `workDestructionFn` pointer pin green
 - [ ] Full gates clean; zero `--override-adr` (this bead's own completion is the preflight's first live run — orchestrator note)
 
 **Acceptance Criteria**
