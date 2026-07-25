@@ -191,13 +191,74 @@ func (df *docFile) headingLevelActiveAt(line int) int {
 	return lvl
 }
 
-// coverageEnd returns the exclusive line bound of the section a marker
-// at markerLine covers: forward to (but not including) the next
-// heading of equal-or-higher level (lower-or-equal number), or past
-// EOF if none — per project-docs/claims-registry.yaml's contract §2
-// ("a marker covers content up to the next heading of equal or higher
-// level").
+// isHeadingLine reports whether line is itself one of df's recorded
+// heading lines.
+func (df *docFile) isHeadingLine(line int) bool {
+	for _, h := range df.Headings {
+		if h.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
+// listItemStartRe matches a line that opens a new markdown list item
+// (bulleted or ordered), used by paragraphCoverageEnd below as a block
+// boundary distinct from a plain blank line.
+var listItemStartRe = regexp.MustCompile(`^\s*([-*+]|\d+\.)\s`)
+
+// isFenceDelimLine reports whether line is a fenced-code-block
+// delimiter (``` or ~~~ after leading whitespace), the same test
+// parseDocFile itself uses to toggle inFence.
+func isFenceDelimLine(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t")
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+}
+
+// coverageEnd returns the exclusive line bound of the region a marker
+// at markerLine covers. F2-r2-1 (A2): coverageEnd used to be
+// heading-scoped unconditionally, so an inline marker embedded mid-list
+// or mid-paragraph (e.g. autonomy.md:115, a single bulleted item)
+// inherited the same wide reach as a section-heading marker — up to
+// eight unrelated sibling bullets, in the real corpus, silently
+// "covered" by a marker that named none of them. The registry
+// contract's own placement clause (§2) actually describes two
+// different shapes, and they get two different spans:
+//
+//   - a marker ON a heading line names the whole section that heading
+//     introduces — headingCoverageEnd, UNCHANGED from before. This is
+//     legitimate and stays wide on purpose: the heading itself is the
+//     reader-visible label for everything under it, exactly the "the
+//     paragraph introducing the section... that contains it" case the
+//     contract already names, and every current wide-span claim in the
+//     real corpus (loop-governance's config-key tokens, buried inside
+//     the YAML examples several lines below their section's heading
+//     marker) depends on exactly this shape.
+//   - a marker on any OTHER line names only the sentence/paragraph/list
+//     item making the claim — paragraphCoverageEnd, NEW: narrowed to
+//     that block, plus (per the contract's other named shape, "the
+//     paragraph introducing... the code block that contains it") an
+//     immediately-following fenced code block, if the marker's
+//     paragraph is followed (across any number of blank lines, but no
+//     other content) directly by one. README.md:110 is exactly this
+//     shape: an inline paragraph, no heading, that introduces the
+//     `loop:` YAML example immediately below it.
+//
+// A marker never covers a SIBLING list item or a later paragraph in
+// the same section anymore unless it is itself heading-placed — this
+// is what closes the exploit (see TestR2CoverageDoesNotBleedIntoSiblingListItem).
 func (df *docFile) coverageEnd(markerLine int) int {
+	if df.isHeadingLine(markerLine) {
+		return df.headingCoverageEnd(markerLine)
+	}
+	return df.paragraphCoverageEnd(markerLine)
+}
+
+// headingCoverageEnd is coverageEnd's original, unchanged behavior for
+// a marker embedded in a heading line: forward to (but not including)
+// the next heading of equal-or-higher level (lower-or-equal number),
+// or past EOF if none.
+func (df *docFile) headingCoverageEnd(markerLine int) int {
 	activeLvl := df.headingLevelActiveAt(markerLine)
 	if activeLvl == 0 {
 		return len(df.Lines) + 1
@@ -208,6 +269,39 @@ func (df *docFile) coverageEnd(markerLine int) int {
 		}
 	}
 	return len(df.Lines) + 1
+}
+
+// paragraphCoverageEnd is coverageEnd's new, narrow behavior for a
+// marker NOT on a heading line: the marker's own contiguous
+// block (ending at the next blank line, the next list-item-start line,
+// the next heading, or EOF — whichever comes first), plus, if that
+// block is immediately followed by a fenced code block (skipping only
+// blank lines to find it), the whole of that code block too.
+func (df *docFile) paragraphCoverageEnd(markerLine int) int {
+	n := len(df.Lines)
+
+	end := markerLine + 1
+	for end <= n {
+		line := df.Lines[end-1]
+		if strings.TrimSpace(line) == "" || df.isHeadingLine(end) || listItemStartRe.MatchString(line) {
+			break
+		}
+		end++
+	}
+
+	probe := end
+	for probe <= n && strings.TrimSpace(df.Lines[probe-1]) == "" {
+		probe++
+	}
+	if probe > n || !isFenceDelimLine(df.Lines[probe-1]) {
+		return end
+	}
+	for closeLine := probe + 1; closeLine <= n; closeLine++ {
+		if isFenceDelimLine(df.Lines[closeLine-1]) {
+			return closeLine + 1
+		}
+	}
+	return n + 1 // unterminated fence: defensively cover to EOF
 }
 
 // coveredBy reports whether line is within the coverage range of a
@@ -520,9 +614,10 @@ func extractRetiredSlashRefs(df *docFile, retired map[string]bool) []skillRefOcc
 // claimEntry mirrors one entry under `claims:` in
 // project-docs/claims-registry.yaml.
 type claimEntry struct {
-	Tokens    []string `yaml:"tokens"`
-	Owner     string   `yaml:"owner"`
-	Locations []string `yaml:"locations"`
+	Tokens          []string `yaml:"tokens"`
+	Owner           string   `yaml:"owner"`
+	Locations       []string `yaml:"locations"`
+	BecomesTrueWhen string   `yaml:"becomes_true_when"`
 }
 
 type claimsRegistryDoc struct {

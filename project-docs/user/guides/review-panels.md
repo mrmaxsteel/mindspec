@@ -100,7 +100,7 @@ The **runner** selects who executes the plumbing between those verbs — launchi
 - `claude-code-workflow` — the `/ms-panel` workflow runs the whole round as one deterministic fan-out and returns a single compact result, keeping six reviewers' transcripts out of your session's context. Recommended once you're running loops.
 - `external` — bring your own orchestrator; anything that can exec the three verbs and write verdict JSONs can run a panel.
 
-Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip. The dispatch on `runner:` happens in the panel-run skill (prompt-space) — the binary itself never reads the key, which is why `mindspec config show` annotates it *declared, not yet enforced*.
+Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip. The dispatch on `runner:` happens in the panel-run skill (prompt-space) — the binary itself never reads the key, which is why `mindspec config show` annotates it *declared; read by skills, not enforced by the binary*.
 
 ## Escape hatch
 

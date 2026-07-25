@@ -560,6 +560,41 @@ func TestR4MarkedButUnrelatedClaimStillFails(t *testing.T) {
 	}
 }
 
+// TestR2CoverageDoesNotBleedIntoSiblingListItem is the RED-on-inject
+// regression fixture for F2-r2-1/A2 (docs_truth_docs_test.go's
+// coverageEnd rewrite), reproducing the orchestrator's exact real-corpus
+// repro: (a) an existing claim's tokens get ONE line widened to include
+// a wholly fictional verb, and (b) that fictional verb is documented on
+// an UNLABELLED sibling list item, immediately after the inline marker's
+// own bulleted line — the exact shape of autonomy.md:115's list, not the
+// plain-prose shape TestR4MarkedButUnrelatedClaimStillFails already
+// covers. Before the coverageEnd fix, the inline marker's heading-scoped
+// span reached every sibling bullet up to the next heading, so the
+// widened token matched and this produced ZERO findings. After the fix,
+// coverageEnd narrows a non-heading marker to its own list item, so the
+// sibling bullet is uncovered and R1 must report it.
+func TestR2CoverageDoesNotBleedIntoSiblingListItem(t *testing.T) {
+	content := "## Level 3 — Scheduled loop\n\n" +
+		"- Poll progress with `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)*.\n" +
+		"- Also see `mindspec telepathy sync --brainwave`, which is fictional.\n" +
+		"- CI as a gate, not a hope — unrelated bullet.\n" +
+		"\n" +
+		"## Level 4 — Fleet\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	// A synthetic registry standing in for the reported exploit: loop-status's
+	// real single token, PLUS the smuggled widened token an attacker would add.
+	reg := &claimsRegistryDoc{Version: 1, Claims: map[string]claimEntry{
+		"loop-status": {Tokens: []string{"mindspec loop status", "mindspec telepathy sync --brainwave"}},
+	}}
+	findings := checkR1([]*docFile{df}, sharedCmdRoot(t), reg)
+	requireFindingContains(t, findings, "telepathy sync --brainwave", `no subcommand "telepathy"`)
+	for _, f := range findings {
+		if f.Text == "mindspec loop status" {
+			t.Errorf("the marker's own line must still pass; got an unexpected finding for it: %s", f)
+		}
+	}
+}
+
 // TestR4AbsentSkill: an absent skill, unmarked, must fire R2.
 func TestR4AbsentSkill(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Run the fix lane with /ms-fix-cycle.\n")

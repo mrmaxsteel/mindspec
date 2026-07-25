@@ -45,19 +45,54 @@
 #
 #    <id> matches [a-z0-9][a-z0-9-]* and names a key under `claims:`.
 #    Lint regex:  \*\(planned — claim `([a-z0-9][a-z0-9-]*)`[^)]*\)\*
-#    Placement: in the sentence making the claim, or in the paragraph
-#    introducing the section/code block that contains it; a marker covers
-#    content up to the next heading of equal or higher level.
+#    Placement, and what it covers (F2-r2-1/A2 — coverage span must match
+#    placement, or an unlabelled line silently inherits a label no reader
+#    sees on it):
+#      - ON A HEADING LINE: the marker names the whole section that
+#        heading introduces. Coverage runs to (not including) the next
+#        heading of equal-or-higher level. This stays wide on purpose —
+#        the heading is itself the reader-visible label for everything
+#        under it (e.g. autonomy.md's per-level headings, whose sections
+#        legitimately bury a config-key token several lines below).
+#      - ANYWHERE ELSE (a sentence, a list item, a table cell): the
+#        marker names only its own paragraph/list item — coverage ends at
+#        the next blank line, the next list item, or the next heading,
+#        whichever comes first. It no longer bleeds into a sibling list
+#        item or a later paragraph in the same section. The one
+#        exception: if that paragraph is immediately followed (skipping
+#        only blank lines) by a fenced code block, coverage extends
+#        through that code block too — "the paragraph introducing the
+#        code block that contains it" (e.g. README.md:110's inline
+#        marker, introducing the `loop:` example immediately below it).
 #
 # 3. `tokens` are the literal strings, as they appear in docs, whose
 #    presence asserts the claim. The lint checks both directions: every
 #    token occurrence inside the scanned surface sits under a marker, and
 #    every entry here has at least one marked site in `locations`.
 #
-# 4. When the owning work lands, the entry is DELETED and its markers come
-#    off in the same change (the lint's both-direction check forces this).
-#    An entry without a named owner never enters this file: a claim nobody
-#    has committed to build gets retracted from the docs, not registered.
+# 4. When a claim's token is itself a `mindspec ...` invocation or a
+#    `/ms-*` skill/workflow reference, the lint enforces deletion
+#    mechanically (checkClaimsLanded, internal/lint/docs_truth_registry_test.go):
+#    once that exact token resolves against the real command tree or skill
+#    universe — the SAME ground truth R1/R2 check docs against — the entry
+#    and its markers must be removed in the same change, or the lint fails.
+#    A claim whose tokens are plain config-key names (asserting a BEHAVIOR
+#    change, not an existence fact — e.g. loop-governance's gate_authority/
+#    handoff_log/max_beads_per_wake) is not landed-checkable this way and
+#    still relies on the author deleting it by hand when the owning work
+#    lands. An entry without a named owner never enters this file: a claim
+#    nobody has committed to build gets retracted from the docs, not
+#    registered.
+#
+# 5. `owner`, `locations`, and `becomes_true_when` are read and validated
+#    by the lint (checkClaimFieldsValid): `owner` and `becomes_true_when`
+#    must be non-empty, and every entry in `locations` must resolve to a
+#    scanned file that itself carries a marker for this claim's id. A
+#    `tokens` edit on an EXISTING claim (widening, narrowing, or removing)
+#    is separately ratcheted (goldenClaimTokens, TestClaimsTokensMatchGolden):
+#    it fails until a paired Go-side golden table is updated in the same
+#    change, so the edit shows up as a reviewable diff rather than
+#    invisible YAML growth that inherits an existing claim's legitimacy.
 
 version: 1
 

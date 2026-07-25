@@ -209,7 +209,7 @@ For repos you don't want to onboard at all, a governed fix lane — discover, re
 
 **Claude Code is the first-class integration** — `mindspec setup claude` installs the hooks, the `ms-*` skill family, and the gates. **OpenAI Codex CLI** and **GitHub Copilot** are supported the same way (`mindspec setup codex|copilot`), and Codex additionally serves as the second model family on review panels.
 
-Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:` — dispatched on by the panel-run skill today; the binary itself annotates the key *declared, not yet enforced*), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
+Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:` — dispatched on by the panel-run skill today; the binary itself annotates the key *declared; read by skills, not enforced by the binary*), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
 
 MindSpec is CLI-first and works standalone: every gate, validator, and panel verb is a testable command, which is also what is designed to make the unattended rungs of the ladder trustworthy.
 
