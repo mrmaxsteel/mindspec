@@ -61,7 +61,8 @@
 #      - ANYWHERE ELSE (a sentence, a list item, a table cell, a
 #        blockquote line): the marker names only its own paragraph/list
 #        item/table row/quote line — coverage ends at the next blank
-#        line, the next list item, the next table row, the next
+#        line, the next list item, the next table row (leading-pipe
+#        markdown, pipe-less markdown, or HTML <tr>), the next
 #        blockquote line, or the next heading, whichever comes first.
 #        It no longer bleeds into a sibling list item, a later row of
 #        the same table, a later line of the same quote, or a later

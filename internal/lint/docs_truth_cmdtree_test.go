@@ -110,20 +110,68 @@
 // shape, reproducing the final-gate probe as a permanent regression
 // fixture.
 //
-// ## The one residual region where the two signals cannot disagree
+// ## Two regions worth naming precisely (confirm-round findings L1-C2, L4-CONFIRM-1)
 //
-// Stated honestly rather than assumed: for every AUTO-REGISTERED node
-// (`help`, `completion` and its children), the structural signal is
-// forced to "live" unconditionally — AutoRegistered short-circuits the
-// Run/RunE check entirely, so no auto-registered node can ever be
-// reported "stub" no matter what its Run/RunE/dfp shape is. This is
-// safe only because cmd/mindspec's own source never writes to those
-// nodes — their Run/RunE bodies are cobra's, not ours, and cobra has
-// never shipped one that os.Exit(2)s as a deprecation message. If that
-// ever stopped being true (cobra itself shipped an auto-registered
-// command shaped like a stub), this scheme could not detect it; that
-// is a fact about cobra's own behavior being outside this repo's
-// control, not a gap this lint's two-signal design is trying to close.
+// An earlier version of this comment claimed ONE residual region where
+// the two signals "cannot disagree", for auto-registered nodes. That
+// claim was itself imprecise in both directions — corrected below —
+// and named only one of the two regions that actually matter.
+//
+// ### Auto-registered nodes: the structural signal is PINNED, not the
+// ### two signals made unable to disagree
+//
+// For every AUTO-REGISTERED node (`help`, `completion` and its
+// children), AutoRegistered short-circuits structuralStub straight to
+// "live" — the Run/RunE check is never even reached. That is a
+// statement about ONE signal being pinned, not about disagreement
+// being unreachable: disagreement is reachable here, and it is exactly
+// what makes the empty-snapshot provenance hazard fail loudly rather
+// than silently.
+//
+// Concretely (final-gate confirm round, L4-CONFIRM-1): if
+// sourceRegisteredCommands (cmd/mindspec/cmdtree_dump.go) is ever empty
+// when `__cmdtree` runs — which happens if something invokes
+// rootCmd.Execute() in-process without going through main(), the only
+// place that snapshot is populated — every node, including cmd/mindspec's
+// own six real stubs, reports AutoRegistered=true. The PRODUCER is
+// silently wrong under that condition: an isolated in-process
+// `__cmdtree` invocation with an empty snapshot returns a valid,
+// successfully-encoded JSON document with every source node's
+// provenance mis-attributed, no error, nothing loud about it at all.
+// It is only THIS PACKAGE's consumer-side cross-check that turns that
+// into a hard failure: AutoRegistered=true forces structuralStub=false
+// for the six real stubs too, which disagrees with their correctly-stub
+// BEHAVIOURAL signal (`--help` still exits 2 for each of them,
+// independent of the dump), and escalateTreeProblems hard-fails on that
+// disagreement. Verified directly: neutralising
+// snapshotSourceRegisteredCommands's call in an isolated checkout
+// reproduces exactly this — six disagreements, one per real stub, hard
+// build failure.
+//
+// So: safety here is a property of the CONSUMER'S CROSS-CHECK, not a
+// guarantee the dump itself makes. Any future consumer of `__cmdtree`
+// that reads AutoRegistered without ALSO cross-checking it against an
+// independent behavioural signal (as this file does) inherits the
+// hazard silently — see cmd/mindspec/cmdtree_dump.go's own provenance
+// note, which this paragraph is the honest counterpart to.
+//
+// ### The one region that genuinely constant-agrees: a RunE-shaped one-shot stub
+//
+// structuralStub requires HasRun (Run set) && !HasRunE (RunE unset). A
+// node that is source-added, Hidden, one-shot (its handler prints a
+// message and os.Exit(2)s) but written with RunE instead of Run never
+// satisfies HasRun, so structuralStub is unconditionally false for it —
+// AutoRegistered and DisableFlagParsing play no part. Behaviourally, if
+// such a node also omits DisableFlagParsing, cobra intercepts `--help`
+// centrally and exits 0 before RunE ever runs — also "not stub". Both
+// signals silently agree "live" for a dfp-less, RunE-shaped one-shot
+// stub; this scheme cannot see it. There is no fixture proving this is
+// UNREACHABLE, because it is not: today's six real stubs all happen to
+// use Run (deprecated_commands.go's stubDeprecated), and that helper's
+// own doc comment explains why RunE cannot be used for a stub there
+// (RunE-returned errors exit 1, not the documented 2) — but that is a
+// fact about today's one call site, not a property this two-signal
+// design enforces.
 //
 // THE STRUCTURAL SIGNAL MUST NEVER BE USED ALONE regardless: collapsing
 // to bare "!AutoRegistered && HasRun && !HasRunE" with no live
@@ -132,6 +180,19 @@
 // auto-registered commands are shaped, visible. A future maintainer
 // tempted to "simplify" by deleting the behavioural probe and trusting
 // the structural signal alone must not.
+//
+// ### A rule for future authors, not just for the lint (final-gate finding L1-C3)
+//
+// The flip side of the structural signal being HasRun-based: an
+// ordinary, non-deprecated cobra command written with `Run:` (cobra's
+// own idiom, used throughout its docs) and no DisableFlagParsing is
+// structurally "stub" here while behaviourally live — a genuine
+// disagreement, and this build HARD-FAILS on it (the safe direction,
+// never a silent misclassification). In cmd/mindspec, `Run:` is
+// reserved for deprecated_commands.go's one-shot deprecation stubs;
+// any new, genuinely live command must use `RunE:`. The disagreement
+// error text (linkDumpedNode, below) says this explicitly so the
+// failure reads as "use RunE" rather than as a lint bug.
 //
 // `__complete`, the OTHER Run-set/RunE-unset cobra builtin, never
 // appears in the dump at all: cobra registers it transiently, deep
@@ -197,17 +258,6 @@ func (n *cmdNode) findChild(name string) *cmdNode {
 	return nil
 }
 
-// hasFlag reports whether name (a long flag name, or a single-char
-// shorthand) is visible at n. No ancestor walk is needed: the dump
-// already resolved inheritance transitively via cobra's own
-// InheritedFlags(), which itself walks the FULL ancestor chain (cobra
-// updateParentsPflags visits every parent, not just the immediate
-// one), so n.Flags already contains everything n can see.
-func (n *cmdNode) hasFlag(name string) bool {
-	_, ok := n.Flags[name]
-	return ok
-}
-
 // path returns the dotted verb path for diagnostics, e.g. "panel disposition validate".
 func (n *cmdNode) path() string {
 	var parts []string
@@ -260,11 +310,22 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 	}
 	cur := root
 	var positionals []string
-	skipNextAsFlagValue := false
+	// pendingFlag holds the flag TOKEN (e.g. "--trace" or "-f") that
+	// still needs a value, between seeing that flag and consuming the
+	// word after it — empty means nothing is pending. Final-gate
+	// finding L4-FINAL-2's second still-open case: the old
+	// `skipNextAsFlagValue bool` set this unconditionally and never
+	// checked afterward whether a value word actually arrived, so
+	// `mindspec --trace` (the flag as the LAST word, no value) silently
+	// resolved — the real binary's pflag.Parse rejects it with "flag
+	// needs an argument: --trace" (verified against the built binary).
+	// Naming the token (not just a bool) lets the end-of-loop check
+	// below report which flag was left dangling.
+	pendingFlag := ""
 	sawDoubleDash := false // "--": cobra's own end-of-flags marker; everything after is literal, never a flag or a subcommand name.
 	for _, w := range words[1:] {
-		if skipNextAsFlagValue {
-			skipNextAsFlagValue = false
+		if pendingFlag != "" {
+			pendingFlag = ""
 			continue
 		}
 		if !sawDoubleDash {
@@ -293,13 +354,55 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 					return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag --%s not registered on %q", name, cur.path())}
 				}
 				if !hasInlineValue && flag.Type != "bool" {
-					skipNextAsFlagValue = true
+					pendingFlag = w
 				}
 				continue
-			case len(w) == 2 && w[0] == '-':
-				name := w[1:]
-				if !cur.hasFlag(name) {
-					return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -%s not registered on %q", name, cur.path())}
+			case len(w) > 1 && w[0] == '-':
+				// A short flag WORD, one or more shorthand characters
+				// clustered together (pflag's parseShortArg /
+				// parseSingleShortArg, spf13/pflag@v1.0.5 flag.go:
+				// 1007-1074, the version this repo's go.sum pins):
+				// walk the characters left to right. A "bool"-typed
+				// shorthand (pflag sets NoOptDefVal for it) consumes no
+				// value, so the NEXT character starts a NEW shorthand
+				// in the SAME word — this is what makes `-hv` (help +
+				// version, final-gate finding L4-FINAL-2's reported
+				// false rejection: the real binary accepts it and
+				// prints help, verified against the built binary) two
+				// flags, not one unregistered flag named "hv". The
+				// first NON-bool shorthand ends the cluster: pflag
+				// takes an inline `-f=value`, or the REST of the word
+				// (`-fvalue`), as that flag's value; a bare trailing
+				// `-f` with nothing left in the word takes the NEXT
+				// word as its value, mirrored below with pendingFlag
+				// exactly as the long-flag case above.
+				shorthands := w[1:]
+				for len(shorthands) > 0 {
+					name := shorthands[:1]
+					flag, ok := cur.Flags[name]
+					if !ok {
+						return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag -%s not registered on %q", name, cur.path())}
+					}
+					switch {
+					case len(shorthands) > 2 && shorthands[1] == '=':
+						// "-f=value": inline value, cluster ends here.
+						shorthands = ""
+					case flag.Type == "bool":
+						// "-f" consumes nothing; keep walking the cluster.
+						shorthands = shorthands[1:]
+						continue
+					case len(shorthands) > 1:
+						// "-fvalue": rest of the word is f's value.
+						shorthands = ""
+					default:
+						// "-f" alone at the end of the word: f's value
+						// is the NEXT word (or nothing — the
+						// end-of-loop pendingFlag check below catches
+						// that case exactly like the long-flag form).
+						pendingFlag = "-" + name
+						shorthands = ""
+					}
+					break
 				}
 				continue
 			}
@@ -319,6 +422,30 @@ func (root *cmdNode) resolve(words []string) resolveResult {
 			continue
 		}
 		positionals = append(positionals, w)
+	}
+	if pendingFlag != "" {
+		return resolveResult{Resolved: false, Reason: fmt.Sprintf("flag needs an argument: %s (nothing follows it in this invocation)", pendingFlag)}
+	}
+	// A root-specific application behavior, NOT stock cobra's legacyArgs
+	// (root.Args is cobra.ArbitraryArgs, which accepts any positional
+	// count — legacyArgs never runs here): cmd/mindspec/root.go pairs
+	// that with a RunE that manually reproduces the "unknown command"
+	// error whenever it receives ANY leftover positional word
+	// (rootUnknownCommandError, spec 092 Req 10b — added so near-misses
+	// like `mindspec aprove impl` surface the canonical noun-verb gate
+	// commands instead of cobra's default message). The only way this
+	// resolver's own descent loop can hand root a non-empty positionals
+	// list is "--": every other word is always checked against
+	// findChild first (immediately above), so this reproduces
+	// rootUnknownCommandError's behavior exactly — including that it
+	// fires even when the leftover word happens to spell a real
+	// subcommand name, verified against the built binary
+	// (`mindspec -- doctor` -> "unknown command \"doctor\" for
+	// \"mindspec\"", exit 1; final-gate finding L4-FINAL-2's first
+	// reported false resolution, `mindspec -- panel disposition
+	// validate`).
+	if cur == root && len(positionals) > 0 {
+		return resolveResult{Resolved: false, Reason: fmt.Sprintf("unknown command %q for %q (root's RunE rejects any leftover positional word once descent stops at root — see rootUnknownCommandError in cmd/mindspec/root.go)", positionals[0], cur.path())}
 	}
 	if cur.IsStub {
 		return resolveResult{Resolved: false, Reason: fmt.Sprintf("%q resolves to a one-shot deprecation stub (source-added, Run-set/RunE-unset — see docs_truth_cmdtree_test.go's two-signal cross-check)", cur.path())}
@@ -583,7 +710,15 @@ func linkDumpedNode(d *cmdTreeDump, parent *cmdNode, binPath, tmp string, disagr
 		// must degrade safely, not open R5.
 		n.IsStub = true
 	case behavioralStub != structuralStub:
-		*disagreements = append(*disagreements, fmt.Sprintf("%s: behavioural(exit-code-derived)=%v structural(!autoRegistered&&hasRun&&!hasRunE)=%v", n.path(), behavioralStub, structuralStub))
+		// L1-C3: the most likely CAUSE of this disagreement in practice
+		// is not a lint bug but an ordinary cobra command written with
+		// `Run:` and no DisableFlagParsing — cmd/mindspec reserves bare
+		// Run for one-shot deprecation stubs (deprecated_commands.go's
+		// stubDeprecated); any other command must use RunE, or it is
+		// structurally "stub" here (!AutoRegistered && HasRun &&
+		// !HasRunE) while behaviourally live (`--help` still exits 0),
+		// exactly this disagreement.
+		*disagreements = append(*disagreements, fmt.Sprintf("%s: behavioural(exit-code-derived)=%v structural(!autoRegistered&&hasRun&&!hasRunE)=%v -- if this node is a genuinely live command, use RunE instead of Run; cmd/mindspec reserves Run for one-shot deprecation stubs (see deprecated_commands.go's stubDeprecated)", n.path(), behavioralStub, structuralStub))
 		n.IsStub = true // fail CLOSED — see the case above.
 	default:
 		n.IsStub = structuralStub

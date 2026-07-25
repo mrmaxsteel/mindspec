@@ -298,19 +298,25 @@ var tomlSectionHeaderRegex = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
 // otel namespace. Lines inside string values that happen to contain
 // `[` no longer truncate the block (the prior regex did).
 //
-// NOT preserved (final-gate finding L2-F1): tomlSectionHeaderRegex
-// matches only a SINGLE-bracket header (`^\s*\[([^\]]+)\]\s*$`), never
-// a TOML array-of-tables header (`[[name]]`, two brackets). Once the
-// otel zone has been entered (by a preceding `[otel]`/`[otel.*]`
-// header) an `[[name]]` header therefore never registers as "ending
-// the otel zone" — inOtelZone simply stays true — so a `[[name]]`
-// table positioned AFTER the [otel] zone, and every key inside it, is
-// silently swallowed and destroyed along with the otel block itself.
-// Verified by probe: rendering over `[otel]\nlog_user_prompt =
-// true\n\n[[widgets]]\nname = "a"\n\n[[widgets]]\nname = "b"\n`
-// returns only the canonical [otel] block — both [[widgets]] tables
-// are gone. Tracked with mindspec-tnf6 alongside the other frozen
-// merge-semantics gaps; not fixed on this branch.
+// NOT preserved (final-gate finding L2-F1, precision-narrowed by
+// confirm-round finding L2-C1): tomlSectionHeaderRegex matches only a
+// SINGLE-bracket header (`^\s*\[([^\]]+)\]\s*$`), never a TOML
+// array-of-tables header (`[[name]]`, two brackets), so it can never
+// itself register as "ending the otel zone" — inOtelZone only ever
+// changes state at a STANDARD `[name]` header. The precise condition,
+// verified by probe: an `[[name]]` header is destroyed along with the
+// otel block ONLY while the otel zone is still OPEN, i.e. only when NO
+// standard `[name]` header appears between the `[otel]`/`[otel.*]`
+// header that opened the zone and the `[[name]]` header in question —
+// `[otel]\nlog_user_prompt = true\n\n[[widgets]]\nname = "a"\n\n
+// [[widgets]]\nname = "b"\n` loses both [[widgets]] tables, but
+// `[otel]\n...\n\n[profiles.fast]\n...\n\n[[widgets]]\n...\n` does NOT:
+// the intervening `[profiles.fast]` header closes the zone (it is a
+// standard header outside the otel namespace) and the following
+// `[[widgets]]` table is preserved untouched. An `[[name]]` header can
+// never itself reopen or extend the zone — only a standard `[otel]`/
+// `[otel.*]` header can. Tracked with mindspec-tnf6 alongside the other
+// frozen merge-semantics gaps; not fixed on this branch.
 func replaceOtelBlock(existing string) (string, bool) {
 	lines := strings.Split(existing, "\n")
 	out := make([]string, 0, len(lines))
@@ -360,10 +366,13 @@ func replaceOtelBlock(existing string) (string, bool) {
 //     keep their contents, but NOT byte-for-byte: replaceOtelBlock can
 //     reorder tables relative to the stripped [otel] zone, and
 //     collapseBlankRuns normalizes blank-line runs. An array-of-tables
-//     header (`[[name]]`) positioned AFTER the [otel] zone is NOT
-//     preserved at all — it and its keys are destroyed along with the
-//     otel block (final-gate finding L2-F1; see replaceOtelBlock's own
-//     doc comment for why). Tracked with mindspec-tnf6.
+//     header (`[[name]]`) appearing after an `[otel]`/`[otel.*]` header,
+//     with NO intervening standard `[name]` header, is destroyed along
+//     with the otel block — but one that appears after an intervening
+//     standard header (which closes the otel zone) IS preserved (see
+//     replaceOtelBlock's own doc comment, final-gate finding L2-F1,
+//     precision-narrowed by confirm-round finding L2-C1). Tracked with
+//     mindspec-tnf6.
 //   - If existingToml is empty, a fresh document is returned.
 //   - sha256 idempotency: re-running with identical inputs against the
 //     output produces a byte-identical result.

@@ -152,19 +152,45 @@ type docFile struct {
 }
 
 // parseDocFile parses relPath into a docFile. Markers are recognized
-// ONLY in rendered, reader-visible positions (final-gate finding
-// L4-FINAL-1, plus its pre-existing L1-6 sibling): a marker written
-// inside a fenced code block, or inside an HTML comment, is never
-// added to df.Markers, however the marker grammar itself matches,
-// because neither position is visible to a human reading the
-// rendered document — exactly the reader/lint divergence the
-// heading/non-heading coverage narrowing (F2-r2-1/A2) already closed
-// for coverage SPAN, now closed for marker RECOGNITION too. Without
-// this, a marker hidden in `<!-- *(planned — claim `x`) --> ` on a
-// heading line grants that hidden marker full heading-section
-// authority while being invisible in rendered docs — defeating R1/R3
-// through a channel neither the id+token rule nor the narrowed
-// coverage checks.
+// ONLY in TWO reader-invisible positions this file knows how to detect
+// (final-gate finding L4-FINAL-1, plus its pre-existing L1-6 sibling):
+// a marker written inside a fenced code block, or inside an HTML
+// comment, is never added to df.Markers, however the marker grammar
+// itself matches, because neither position is visible to a human
+// reading the rendered document — exactly the reader/lint divergence
+// the heading/non-heading coverage narrowing (F2-r2-1/A2) already
+// closed for coverage SPAN, now closed for these two instances of
+// marker RECOGNITION too. Without this, a marker hidden in `<!--
+// *(planned — claim `x`) --> ` on a heading line grants that hidden
+// marker full heading-section authority while being invisible in
+// rendered docs — defeating R1/R3 through a channel neither the
+// id+token rule nor the narrowed coverage checks.
+//
+// RESIDUAL, stated rather than silently left (confirm-round finding
+// L4-FINAL-1, still open): the underlying requirement — "a marker
+// grants coverage only where a reader can actually see it" — is met
+// for these two channels, not for the class as a whole. Marker
+// recognition here operates on raw Markdown text, not a rendered or
+// semantic notion of visibility, so any OTHER way of hiding text from
+// a rendered view still works against it: an HTML element carrying a
+// `hidden` attribute or `aria-hidden="true"`, CSS `display:none` /
+// `visibility:hidden`, an unopened `<details>` section, or zero-width
+// Unicode characters splitting the marker's own text, none of which
+// this file detects. L4's probe (`<span hidden>*(planned — claim
+// `loop-status`...)*</span>` followed by unmarked live-looking prose)
+// demonstrates the `hidden`-attribute case concretely: zero R1 findings
+// for the unmarked prose, exactly the hazard this comment used to claim
+// was closed. Closing the general case requires either a real
+// HTML/Markdown rendering-and-visibility pass, or enumerating every
+// invisible-markup channel one at a time (Go's regexp package has no
+// backreferences, so even the single `hidden`-attribute case can't be
+// matched precisely against its own closing tag the way htmlCommentRe
+// matches `<!--`/`-->` — only approximated against the NEXT closing
+// tag of any name, an approximation that itself would need its own
+// false-exclusion audit before shipping). Given zero real-corpus
+// exposure to any of these channels today (unlike the fenced-code and
+// HTML-comment channels, both found in the real corpus), that is
+// tracked as an open gap rather than attempted under this change.
 func parseDocFile(repoRoot, relPath string) (*docFile, error) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, relPath))
 	if err != nil {
@@ -257,8 +283,49 @@ var listItemStartRe = regexp.MustCompile(`^\s*([-*+]|\d+\.)\s`)
 // sentence, a list item, a table cell"), and the exact smuggle the
 // list-item narrowing was built to close, surviving in the two block
 // shapes nobody added a boundary for.
+//
+// tableRowStartRe alone only recognizes a LEADING-PIPE table row
+// (`| cell | cell |`). Confirm-round finding L1-C4: GFM also permits
+// omitting the leading (and trailing) pipe on every row — a valid
+// `Verb | Status` line with no leading `|` — and an HTML `<tr><td>`
+// table row, neither of which tableRowStartRe matched, so a marker
+// still bled coverage past either shape while clause 2 promised
+// otherwise. isTableRowLine below recognizes both, in addition to the
+// leading-pipe shape.
 var tableRowStartRe = regexp.MustCompile(`^\s*\|`)
 var blockquoteStartRe = regexp.MustCompile(`^\s*>`)
+
+// htmlTableRowStartRe is the HTML half of L1-C4's fix: an HTML `<tr>`
+// table-row tag, the other container clause 2's "table cell" promise
+// covers that tableRowStartRe's markdown-only pattern cannot match.
+var htmlTableRowStartRe = regexp.MustCompile(`(?i)^\s*<tr\b`)
+
+// pipeRowCellSepRe matches a `|` surrounded by whitespace with
+// non-whitespace on both sides — the cell separator shape of a
+// pipe-LESS GFM table row (L1-C4's other markdown gap: `Verb | Status`,
+// no leading pipe, is valid GFM and tableRowStartRe's leading-`^\s*\|`
+// pattern never matches it). Matched only after stripping inline code
+// spans (this file's inlineCodeSpanRe, defined below and also used by
+// extractInvocations) — replacing each span with a single non-space
+// placeholder character, NOT with nothing, so a cell whose entire
+// content is a code span (e.g. a "mindspec loop status | works today"
+// row where the whole first cell is inline code) still has
+// non-whitespace immediately next to the pipe once stripped; deleting
+// the span outright would leave a bare leading space there and
+// silently miss the row. A literal shell pipe INSIDE backticks (the
+// span itself) is removed either way, so it is never mistaken for
+// this shape.
+var pipeRowCellSepRe = regexp.MustCompile(`\S\s+\|\s+\S`)
+
+// isTableRowLine reports whether line opens (or is) a markdown or HTML
+// table row, in any of the three shapes L1-3/L1-C4 narrow coverage for:
+// leading-pipe markdown, pipe-less markdown, or HTML <tr>.
+func isTableRowLine(line string) bool {
+	if tableRowStartRe.MatchString(line) || htmlTableRowStartRe.MatchString(line) {
+		return true
+	}
+	return pipeRowCellSepRe.MatchString(inlineCodeSpanRe.ReplaceAllString(line, "X"))
+}
 
 // isFenceDelimLine reports whether line is a fenced-code-block
 // delimiter (``` or ~~~ after leading whitespace), the same test
@@ -344,7 +411,7 @@ func (df *docFile) paragraphCoverageEnd(markerLine int) int {
 	for end <= n {
 		line := df.Lines[end-1]
 		if strings.TrimSpace(line) == "" || df.isHeadingLine(end) ||
-			listItemStartRe.MatchString(line) || tableRowStartRe.MatchString(line) || blockquoteStartRe.MatchString(line) {
+			listItemStartRe.MatchString(line) || isTableRowLine(line) || blockquoteStartRe.MatchString(line) {
 			break
 		}
 		end++

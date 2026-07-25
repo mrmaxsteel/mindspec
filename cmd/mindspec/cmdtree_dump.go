@@ -84,13 +84,29 @@ import (
 // rootCmd.Execute() IN-PROCESS at 20+ call sites (config_test.go,
 // otel_test.go, panel_test.go, ...), never through main(), so
 // sourceRegisteredCommands stays empty there — but none of those
-// tests invoke `__cmdtree` itself, so this is dormant today. If one
-// ever did, every node would report AutoRegistered=true (since the
-// map is empty), forcing structuralStub false everywhere; the six
-// real stubs would then disagree with their own correctly-stub
-// behavioral signal and the build would hard-fail LOUDLY — the safe
-// direction, not a silent misclassification, but worth knowing before
-// adding an in-process `__cmdtree` test.
+// tests invoke `__cmdtree` itself, so this is dormant today.
+//
+// If one ever did, this DUMP is silently wrong, not loud: confirm-round
+// finding L4-CONFIRM-1 verified that an isolated in-process
+// rootCmd.Execute() invocation of `__cmdtree` with an empty snapshot
+// returns a valid, successfully-encoded JSON document — every source
+// node reports AutoRegistered=true, with no error and nothing to
+// signal that the field is wrong. This function has no way to detect
+// its own precondition (it cannot tell "nothing has registered yet"
+// apart from "everything really is cobra's own"), so it does not try.
+//
+// Safety here is NOT a property this dump provides — it is a property
+// of internal/lint's CONSUMER, which cross-checks AutoRegistered
+// against an independent behavioral signal (`<path> --help`'s exit
+// code) rather than trusting it alone: with an empty snapshot, the six
+// real stubs would report structuralStub=false (forced by the wrong
+// AutoRegistered=true) while still behaviorally exiting 2 on --help, a
+// disagreement that consumer hard-fails on (verified: neutralizing this
+// function's call site reproduces exactly six such disagreements). Any
+// OTHER future consumer of `__cmdtree` that reads AutoRegistered
+// without performing an equivalent independent cross-check inherits
+// this hazard silently — see internal/lint/docs_truth_cmdtree_test.go's
+// package doc comment for the consumer-side half of this account.
 var sourceRegisteredCommands = map[*cobra.Command]bool{}
 
 // snapshotSourceRegisteredCommands walks c's tree and records every

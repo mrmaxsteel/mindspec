@@ -223,6 +223,131 @@ var claimLandedRequiresBehavior = map[string]bool{
 	"fix-cycle":   true,
 }
 
+// goldenClaimLandedRequiresBehavior is the audited, exact contents of
+// claimLandedRequiresBehavior — the ratchet's required update site, in
+// the same content-anchored idiom as goldenClaimTokens above. Confirm
+// round finding L1-C1: claimLandedRequiresBehavior's SCOPING is honest
+// (both real exclusions are reasoned and disclosed, above), but the
+// MAP ITSELF was unratcheted — nothing asserted its contents, so
+// adding an id silently exempted that id's claim from clause 4 with no
+// test going red (MUT-O: adding two more ids to
+// claimLandedRequiresBehavior, exempting every claim in the registry,
+// left the whole package GREEN). checkClaimLandedRequiresBehaviorRatchet
+// below closes that: any addition or removal from the live map now
+// needs an audited edit to this table in the SAME change, exactly like
+// a widened/narrowed goldenClaimTokens entry does.
+var goldenClaimLandedRequiresBehavior = map[string]bool{
+	"loop-status": true,
+	"fix-cycle":   true,
+}
+
+// checkClaimLandedRequiresBehaviorRatchet is the ratchet's actual
+// enforcement, extracted to a pure function so the RED-on-inject
+// fixtures below exercise the SAME comparison run against the real map
+// — L1-4's own lesson (a synthetic-only fixture that never calls the
+// real comparison pins nothing) applied to this sibling mechanism.
+// Three arms, mirroring checkClaimTokensAgainstGolden: an id in live
+// with no golden entry (an unaudited addition — the MUT-O smuggle),
+// a golden entry whose id is no longer in live (a stale golden entry,
+// the reverse case), and a value that differs between the two (an
+// audited-looking edit that still doesn't match what's recorded). A
+// fourth check, specific to this map rather than the token ratchet: any
+// id EXCLUDED here that no longer names a real claim in reg is a stale
+// exclusion left behind by that claim's own deletion — it must fail
+// the same way a stale entry in the package's other audited-exception
+// table (knownDocsTruthExceptions, docs_truth_test.go) already does,
+// rather than sit invisibly inert. reg may be nil (the synthetic
+// fixtures below don't need a registry to exercise the first three
+// arms).
+func checkClaimLandedRequiresBehaviorRatchet(live, golden map[string]bool, reg *claimsRegistryDoc) []truthFinding {
+	var out []truthFinding
+
+	ids := make([]string, 0, len(live)+len(golden))
+	seen := make(map[string]bool, len(live)+len(golden))
+	for id := range live {
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	for id := range golden {
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		liveVal, liveOK := live[id]
+		goldVal, goldOK := golden[id]
+		text := "claimLandedRequiresBehavior[`" + id + "`]"
+		switch {
+		case liveOK && !goldOK:
+			out = append(out, truthFinding{File: "internal/lint/docs_truth_registry_test.go", Text: text, Why: "has no entry in goldenClaimLandedRequiresBehavior -- add one, auditing why this id is exempt from clause 4, in this SAME change"})
+		case !liveOK && goldOK:
+			out = append(out, truthFinding{File: "internal/lint/docs_truth_registry_test.go", Text: text, Why: "golden entry no longer exists in claimLandedRequiresBehavior -- stale golden entry, remove it"})
+		case liveVal != goldVal:
+			out = append(out, truthFinding{File: "internal/lint/docs_truth_registry_test.go", Text: text, Why: fmt.Sprintf("value changed: live=%v golden=%v -- if this edit is audited, update goldenClaimLandedRequiresBehavior in this SAME change; if you did not make this edit, this is the exclusion-widening smuggle this ratchet exists to catch", liveVal, goldVal)})
+		}
+		if liveOK && reg != nil {
+			if _, ok := reg.Claims[id]; !ok {
+				out = append(out, truthFinding{File: "project-docs/claims-registry.yaml", Text: "claim `" + id + "`", Why: "claimLandedRequiresBehavior excludes this id from clause 4, but it no longer exists in the registry -- stale exclusion left behind by this claim's own deletion, remove it"})
+			}
+		}
+	}
+	return out
+}
+
+// TestClaimLandedRequiresBehaviorRatchet_RealMapMatchesGolden is the
+// positive check: the real, live claimLandedRequiresBehavior must match
+// goldenClaimLandedRequiresBehavior exactly, and every id it excludes
+// must still name a real registry claim.
+func TestClaimLandedRequiresBehaviorRatchet_RealMapMatchesGolden(t *testing.T) {
+	findings := checkClaimLandedRequiresBehaviorRatchet(claimLandedRequiresBehavior, goldenClaimLandedRequiresBehavior, sharedRegistry(t))
+	if len(findings) != 0 {
+		var b []string
+		for _, f := range findings {
+			b = append(b, f.String())
+		}
+		t.Fatalf("expected zero claimLandedRequiresBehavior-ratchet findings, got:\n  %s", joinLines(b))
+	}
+}
+
+// TestClaimLandedRequiresBehaviorRatchet_DetectsWidening is the
+// RED-on-inject regression fixture for L1-C1's MUT-O exploit: adding an
+// id to claimLandedRequiresBehavior with no matching golden entry (an
+// unaudited widening of the escape hatch) must fail.
+func TestClaimLandedRequiresBehaviorRatchet_DetectsWidening(t *testing.T) {
+	golden := map[string]bool{"already-golden": true}
+	widened := map[string]bool{"already-golden": true, "newly-exempted": true}
+	findings := checkClaimLandedRequiresBehaviorRatchet(widened, golden, nil)
+	requireFindingContains(t, findings, "claimLandedRequiresBehavior[`newly-exempted`]", "no entry in goldenClaimLandedRequiresBehavior")
+}
+
+// TestClaimLandedRequiresBehaviorRatchet_DetectsStaleGoldenEntry is the
+// reverse arm: a golden entry whose id was removed from the live map
+// must fail too.
+func TestClaimLandedRequiresBehaviorRatchet_DetectsStaleGoldenEntry(t *testing.T) {
+	golden := map[string]bool{"still-live": true, "long-gone": true}
+	live := map[string]bool{"still-live": true}
+	findings := checkClaimLandedRequiresBehaviorRatchet(live, golden, nil)
+	requireFindingContains(t, findings, "claimLandedRequiresBehavior[`long-gone`]", "stale golden entry")
+}
+
+// TestClaimLandedRequiresBehaviorRatchet_DetectsStaleExclusion is the
+// fourth arm, specific to this map: an id excluded here that no longer
+// names a real claim in the registry (left behind by that claim's own
+// deletion) must fail, exactly like TestDocsTruthReal's stale-exception
+// check for knownDocsTruthExceptions.
+func TestClaimLandedRequiresBehaviorRatchet_DetectsStaleExclusion(t *testing.T) {
+	reg := &claimsRegistryDoc{Version: 1, Claims: map[string]claimEntry{}}
+	live := map[string]bool{"ghost-claim": true}
+	golden := map[string]bool{"ghost-claim": true}
+	findings := checkClaimLandedRequiresBehaviorRatchet(live, golden, reg)
+	requireFindingContains(t, findings, "claim `ghost-claim`", "no longer exists in the registry")
+}
+
 // checkClaimsLanded enforces clause 4 for the checkable subset of
 // claims: a token shaped like a `mindspec ...` invocation is resolved
 // against cmdRoot (the same real-binary ground truth R1 uses); a

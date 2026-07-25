@@ -666,6 +666,84 @@ func TestCoverageDoesNotBleedIntoSiblingBlockquoteLine(t *testing.T) {
 	requireFindingContains(t, r3, "mindspec loop status", "not covered by a claim-`loop-status` marker")
 }
 
+// TestCoverageDoesNotBleedIntoSiblingPipelessTableRow is confirm-round
+// finding L1-C4's markdown half: tableRowStartRe's leading-`|` pattern
+// never matched a valid GFM row that omits the leading pipe (`Verb |
+// Status`, no leading `|`). Same shape as
+// TestCoverageDoesNotBleedIntoSiblingTableRow, but with the leading
+// pipe dropped from every row, so this only passes if isTableRowLine's
+// pipeRowCellSepRe half actually recognizes the row boundary.
+func TestCoverageDoesNotBleedIntoSiblingPipelessTableRow(t *testing.T) {
+	content := "## Roadmap\n\n" +
+		"Verb | Status\n" +
+		"--- | ---\n" +
+		"`mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)* | planned\n" +
+		"`mindspec loop status` | works today\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	reg := sharedRegistry(t)
+
+	r1 := checkR1([]*docFile{df}, sharedCmdRoot(t), reg)
+	requireFindingContains(t, r1, "loop status", `no subcommand "loop"`)
+	for _, f := range r1 {
+		if f.Line == 5 {
+			t.Errorf("the marker's own row (line 5) must still pass R1; got an unexpected finding for it: %s", f)
+		}
+	}
+
+	r3 := checkR3([]*docFile{df}, reg)
+	requireFindingContains(t, r3, "mindspec loop status", "not covered by a claim-`loop-status` marker")
+}
+
+// TestCoverageDoesNotBleedIntoSiblingHTMLTableRow is confirm-round
+// finding L1-C4's HTML half: an HTML `<tr><td>` table row, the other
+// container shape tableRowStartRe's markdown-only pattern never
+// matched.
+func TestCoverageDoesNotBleedIntoSiblingHTMLTableRow(t *testing.T) {
+	content := "## Roadmap\n\n" +
+		"<table>\n" +
+		"<tr><td>`mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)*</td><td>planned</td></tr>\n" +
+		"<tr><td>`mindspec loop status`</td><td>works today</td></tr>\n" +
+		"</table>\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	reg := sharedRegistry(t)
+
+	r1 := checkR1([]*docFile{df}, sharedCmdRoot(t), reg)
+	requireFindingContains(t, r1, "loop status", `no subcommand "loop"`)
+	for _, f := range r1 {
+		if f.Line == 4 {
+			t.Errorf("the marker's own row (line 4) must still pass R1; got an unexpected finding for it: %s", f)
+		}
+	}
+
+	r3 := checkR3([]*docFile{df}, reg)
+	requireFindingContains(t, r3, "mindspec loop status", "not covered by a claim-`loop-status` marker")
+}
+
+// TestExpandAlternatives_ShellPipeIsNotMistakenForPipelessTableRow is
+// the RED-on-inject regression fixture for pipeRowCellSepRe's own
+// exploit surface: a shell-pipe example inside backticks (the exact
+// shape TestExpandAlternatives_ShellPipeWithFollowingWordDoesNotPanic
+// already covers for panics) must NOT be treated as a table-row
+// boundary — inlineCodeSpanRe must strip the backtick span before
+// pipeRowCellSepRe ever sees the `|`. A real, registered token on the
+// line immediately below the shell-pipe example must still be covered
+// by a marker placed above both lines.
+func TestExpandAlternatives_ShellPipeIsNotMistakenForPipelessTableRow(t *testing.T) {
+	content := "## Roadmap\n\n" +
+		"Progress *(planned — claim `loop-status`, roadmap Core 4)*\n" +
+		"Run `mindspec config show | grep runner` to check.\n" +
+		"`mindspec loop status` reports it once shipped.\n"
+	df := fixtureDoc(t, "fixture.md", content)
+	reg := sharedRegistry(t)
+
+	r3 := checkR3([]*docFile{df}, reg)
+	for _, f := range r3 {
+		if f.Text == "mindspec loop status" {
+			t.Errorf("expected the shell-pipe line to NOT end the marker's coverage before the token line; got an unexpected finding: %s", f)
+		}
+	}
+}
+
 // TestR4AbsentSkill: an absent skill, unmarked, must fire R2.
 func TestR4AbsentSkill(t *testing.T) {
 	df := fixtureDoc(t, "fixture.md", "Run the fix lane with /ms-fix-cycle.\n")
@@ -1007,6 +1085,76 @@ func TestResolve_FlagBeforeVerbStillDescends(t *testing.T) {
 
 	if res := root.resolve([]string{"mindspec", "--trace", "x", "panel", "disposition", "validate"}); !res.Resolved {
 		t.Errorf("expected a root flag before a VALID nested subcommand path to still resolve, got: %s", res.Reason)
+	}
+}
+
+// TestResolve_DoubleDashAtRootRejectsLeftoverPositional is the
+// RED-on-inject regression fixture for the W0 confirm round's
+// L4-FINAL-2 finding, first reported false resolution:
+// `mindspec -- panel disposition validate` used to resolve true,
+// because once "--" was seen, resolve() stopped consulting
+// cur.findChild for good and just piled every remaining word into
+// positionals with no further check — and root's ArgMax is unbounded
+// (root.Args is cobra.ArbitraryArgs), so nothing caught it. The real
+// binary rejects this: `mindspec -- doctor` even fails, even though
+// "doctor" IS a real subcommand, because root's own RunE
+// (rootUnknownCommandError, cmd/mindspec/root.go) manually rejects ANY
+// leftover positional once cobra's descent stops — verified against
+// the built binary (both cases exit 1 with "unknown command ... for
+// \"mindspec\""). "mindspec --" alone (no trailing word) must still
+// resolve — it prints root's help, exit 0.
+func TestResolve_DoubleDashAtRootRejectsLeftoverPositional(t *testing.T) {
+	root := sharedCmdRoot(t)
+
+	if res := root.resolve([]string{"mindspec", "--", "panel", "disposition", "validate"}); res.Resolved {
+		t.Error(`expected "mindspec -- panel disposition validate" to NOT resolve — root's RunE rejects any leftover positional once "--" stops subcommand descent`)
+	}
+	if res := root.resolve([]string{"mindspec", "--", "doctor"}); res.Resolved {
+		t.Error(`expected "mindspec -- doctor" to NOT resolve — the leftover word spelling a real subcommand name does not save it once "--" has stopped descent (verified against the built binary)`)
+	}
+	if res := root.resolve([]string{"mindspec", "--"}); !res.Resolved {
+		t.Errorf(`expected "mindspec --" (no trailing word) to still resolve, got: %s`, res.Reason)
+	}
+}
+
+// TestResolve_MissingFlagValueAtEndRejected is the RED-on-inject
+// regression fixture for final-gate finding L4-FINAL-2's second
+// reported false resolution: a value-taking flag with nothing after it
+// (`mindspec --trace`, the flag as the LAST word) used to resolve true
+// — the old skipNextAsFlagValue bool was set unconditionally and never
+// checked again once the loop ended, so a dangling flag with no value
+// was silently forgiven. The real binary rejects it: pflag.Parse
+// returns "flag needs an argument: --trace", exit 1 (verified against
+// the built binary). A terminated value flag (`--trace x`) must still
+// resolve, proving the fix does not just reject every use of --trace.
+func TestResolve_MissingFlagValueAtEndRejected(t *testing.T) {
+	root := sharedCmdRoot(t)
+
+	if res := root.resolve([]string{"mindspec", "--trace"}); res.Resolved {
+		t.Error(`expected "mindspec --trace" (no value, end of invocation) to NOT resolve`)
+	}
+	if res := root.resolve([]string{"mindspec", "--trace", "x"}); !res.Resolved {
+		t.Errorf(`expected "mindspec --trace x" to still resolve, got: %s`, res.Reason)
+	}
+}
+
+// TestResolve_ShorthandClusterOfBoolFlagsResolves is the RED-on-inject
+// regression fixture for final-gate finding L4-FINAL-2's third reported
+// false resolution: `mindspec -hv` (the -h/--help and -v/--version
+// shorthands clustered into one word, pflag's own "-vvv"-style syntax)
+// used to be rejected — resolve() only ever recognized an exact
+// single-character short-flag word, so a real two-flag cluster was
+// reported "flag -hv not registered". The real binary accepts it and
+// prints help, exit 0 (verified against the built binary). A cluster
+// containing an UNREGISTERED shorthand must still fail.
+func TestResolve_ShorthandClusterOfBoolFlagsResolves(t *testing.T) {
+	root := sharedCmdRoot(t)
+
+	if res := root.resolve([]string{"mindspec", "-hv"}); !res.Resolved {
+		t.Errorf(`expected "mindspec -hv" (a cluster of two real bool shorthands) to resolve, got: %s`, res.Reason)
+	}
+	if res := root.resolve([]string{"mindspec", "-hz"}); res.Resolved {
+		t.Error(`expected "mindspec -hz" (a cluster with an unregistered shorthand) to NOT resolve`)
 	}
 }
 
