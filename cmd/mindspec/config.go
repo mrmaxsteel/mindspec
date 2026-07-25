@@ -586,8 +586,8 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 // `config show` (and `panel tally`/`panel verify` via
 // findPanelRegistration, panel.go) has no bead/spec context, so it
 // checks every convention that might hold a registered panel.
-// Best-effort: an unreadable specs directory yields just the repo root
-// plus the workspace dir.
+// Best-effort: an unreadable MAIN specs directory still falls through to
+// the repo root, the workspace dir, and the worktree spec dirs (below).
 //
 // GH #222: the list ALSO enumerates spec dirs inside existing worktrees
 // under the default worktrees root — pre-epic, a spec_approve/
