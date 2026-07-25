@@ -74,18 +74,14 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 
 ### Context Packs
 
-MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, glossary terms, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets.
-
-```bash
-mindspec context pack 009-my-feature
-```
+MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets. There is no standalone command to invoke this yourself: a context pack is generated automatically at each approval gate (`mindspec spec approve`, `mindspec plan approve`).
 
 ### Architecture Decision Records
 
 ADRs are a governed primitive. Plans must cite the ADRs they rely on. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a new superseding ADR or reject the divergence.
 
 ```bash
-mindspec adr create --title "Use WebSockets for real-time updates" --domain viz
+mindspec adr create "Use WebSockets for real-time updates" --domain viz
 mindspec adr list --status accepted
 ```
 
@@ -131,8 +127,6 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec context pack <id>` | Generate token-budgeted context pack |
-| `mindspec glossary list\|match\|show` | Term lookup and section extraction |
 | `mindspec adr create\|list\|show` | ADR lifecycle management |
 | `mindspec validate spec\|plan\|docs` | Pre-flight validation checks |
 
