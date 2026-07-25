@@ -23,6 +23,7 @@ paths:
   - plugins/mindspec/**
   - .claude/skills/**
   - .claude/workflows/**
+  - .claude/agents/**
   - .agents/skills/**
   - scripts/bd-jsonl-merge-driver.sh
   - .golangci.yml
