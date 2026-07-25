@@ -588,16 +588,56 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 // checks every convention that might hold a registered panel.
 // Best-effort: an unreadable specs directory yields just the repo root
 // plus the workspace dir.
+//
+// GH #222: the list ALSO enumerates spec dirs inside existing worktrees
+// under the default worktrees root — pre-epic, a spec_approve/
+// plan_approve panel is created via panelDirFor → workspace.SpecDir,
+// which is worktree-aware (tier 1/2: the spec dir exists ONLY on the
+// spec branch's worktree until the spec lands on main), so `panel
+// create` writes <worktree>/<spec-dir>/reviews/<slug>/panel.json.
+// Without the worktree tier here, `panel verify`/`panel tally` (via
+// findPanelRegistration) could not resolve the panel `panel create`
+// just registered. Like SpecDir, this deliberately scans the default
+// ".worktrees" root rather than honoring cfg.WorktreeRoot — it must
+// locate existing on-disk worktrees, which may have been created with
+// a different config at the time. panel.Scan dedupes overlapping roots
+// by symlink-resolved absolute path, so a spec dir reachable both ways
+// yields one registration.
 func configShowReviewRoots(root string) []string {
 	roots := []string{root, workspace.MindspecDir(root)}
 	specsDir := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				roots = append(roots, filepath.Join(specsDir, e.Name()))
+			}
+		}
+	}
+	wtEntries, err := os.ReadDir(workspace.DefaultWorktreesDir(root))
 	if err != nil {
 		return roots
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			roots = append(roots, filepath.Join(specsDir, e.Name()))
+	for _, wt := range wtEntries {
+		if !wt.IsDir() {
+			continue
+		}
+		wtRoot := filepath.Join(workspace.DefaultWorktreesDir(root), wt.Name())
+		// Mirror SpecDir's worktree tiers: flat (.mindspec/specs/<id>)
+		// and canonical (.mindspec/docs/specs/<id>).
+		for _, specsParent := range []string{
+			filepath.Join(wtRoot, ".mindspec", "specs"),
+			filepath.Join(wtRoot, ".mindspec", "docs", "specs"),
+		} {
+			specEntries, err := os.ReadDir(specsParent)
+			if err != nil {
+				continue
+			}
+			for _, se := range specEntries {
+				if se.IsDir() {
+					roots = append(roots, filepath.Join(specsParent, se.Name()))
+				}
+			}
 		}
 	}
 	return roots
