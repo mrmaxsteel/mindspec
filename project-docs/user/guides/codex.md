@@ -46,26 +46,14 @@ mindspec doctor
 
 ### 5. Optional: Enable AgentMind Observability
 
-Start AgentMind:
+[AgentMind](agentmind.md) is a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind). Start it, then configure Codex's OTEL export:
 
 ```bash
-./bin/mindspec agentmind serve
-```
-
-Configure Codex OTEL export for AgentMind:
-
-```bash
-./bin/mindspec agentmind setup codex
+agentmind serve                                                # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318 --codex
 ```
 
 This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and keeps prompt logging redacted by default (`otel.log_user_prompt = false`).
-
-Fallback import (if OTEL was not enabled during a session):
-
-```bash
-./bin/mindspec agentmind setup codex --session ~/.codex/sessions/<...>/rollout-<...>.jsonl --output /tmp/codex-session.ndjson
-./bin/mindspec agentmind replay /tmp/codex-session.ndjson
-```
 
 ## The Workflow
 

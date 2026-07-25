@@ -10,7 +10,7 @@ AI coding agents are powerful but unstructured. Without guardrails they:
 - **Skip documentation** — code ships, docs rot
 - **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
 
-MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and **OTLP telemetry export** that pairs with [AgentMind](https://github.com/mrmaxsteel/agentmind), a standalone observability dashboard that shows you exactly what your agent is doing, spending, and how efficiently it's working.
 
 ## The Workflow
 
@@ -36,38 +36,23 @@ Documentation stays current because the system won't let you skip it — beads c
 
 ## AgentMind — AI Agent Observability UI
 
-AgentMind gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working.
+[AgentMind](https://github.com/mrmaxsteel/agentmind) is a **standalone companion product** (its own repo, install, and docs — extracted from mindspec per ADR-0026/ADR-0027) that gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working: a 3D activity graph, per-model token and cost tracking, tool/MCP analytics, and session recording/replay — all from standard OpenTelemetry data.
 
-- **3D Activity Graph** — Agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
-- **Token & Cost Tracking** — Input tokens, output tokens, cache reads, cache creation tokens, and estimated USD cost — broken down per model
-- **Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized, with frequency histograms
-- **Model Statistics** — Per-model breakdown of API calls, token usage, and cost across multi-model sessions
-- **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
-- **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
-
-<!-- TODO: Add screenshot or GIF -->
-
-### Quick Start
+MindSpec's side of the integration is OTLP export configuration, nothing more:
 
 ```bash
-# 1. Build MindSpec
-make build
-
-# 2. Start AgentMind
-./bin/mindspec agentmind serve
+# 1. Install AgentMind from its repo, then start it
+agentmind serve
 # OTLP receiver on :4318, UI at http://localhost:8420
 
-# 3. Configure Claude Code
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+# 2. Point your agent's telemetry at it
+mindspec otel setup --endpoint http://localhost:4318   # Claude Code (default)
+mindspec otel setup --endpoint http://localhost:4318 --codex
 
-# 4. Open http://localhost:8420
+# 3. Open http://localhost:8420
 ```
 
-Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4318`.
+Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:4318` — and any OTLP/HTTP receiver can stand in for AgentMind.
 
 **Full guide:** [AgentMind guide](guides/agentmind.md)
 
@@ -80,7 +65,7 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 | **Full workflow with Claude Code** | [Claude Code guide](guides/claude-code.md) |
 | **Full workflow with GitHub Copilot** | [Copilot guide](guides/copilot.md) |
 | **Full workflow with Codex** | [Codex guide](guides/codex.md) |
-| **Visualize & benchmark agent activity** | [AgentMind guide](guides/agentmind.md) |
+| **Observability (OTLP export + the standalone AgentMind)** | [AgentMind guide](guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](../../.mindspec/core/USAGE.md) |
 
 ---
@@ -120,14 +105,15 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 
 ## CLI Reference
 
-### AgentMind & Observability
+### Observability
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec agentmind serve` | Start OTLP receiver + web UI (tokens, cost, tool analytics, 3D graph) |
-| `mindspec agentmind replay <file>` | Replay a recorded NDJSON session at any speed |
-| `mindspec bench setup\|collect\|report` | A/B/C benchmark agent workflows with comparative reporting |
+| `mindspec otel setup --endpoint <url>` | Write OTLP exporter config for Claude Code, Codex, or env exports |
+| `mindspec otel status` | Show the currently configured OTEL endpoint (read-only) |
 | `mindspec trace summary <file>` | Summarize NDJSON trace events |
+
+(The old `mindspec agentmind|viz|bench` verbs moved to the standalone [agentmind repo](https://github.com/mrmaxsteel/agentmind); they remain for one release as hidden deprecation stubs that print a pointer and exit 2.)
 
 ### Workflow
 

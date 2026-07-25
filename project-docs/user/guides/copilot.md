@@ -51,10 +51,11 @@ mindspec doctor
 
 ### 5. Optional: Enable AgentMind Observability
 
-Start AgentMind:
+[AgentMind](agentmind.md) is a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind). Start it, then point your agent's OTLP export at it:
 
 ```bash
-./bin/mindspec agentmind serve
+agentmind serve                                        # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318
 ```
 
 ## Copilot CLI (Terminal)

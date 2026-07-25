@@ -107,13 +107,12 @@ No need to maintain sprawling static instruction files. The CLI is the source of
 
 ## Observability
 
-Use [AgentMind](agentmind.md) to visualize agent activity in real time:
+Use [AgentMind](agentmind.md) — a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind) — to visualize agent activity in real time:
 
 ```bash
-mindspec agentmind serve    # Start the visualization server
+agentmind serve                                        # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318   # point Claude Code's OTLP export at it
 ```
-
-Then configure Claude Code's OTLP export to point to `http://localhost:4318`.
 
 ## Reference
 

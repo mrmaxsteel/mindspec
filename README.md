@@ -246,7 +246,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | The decomposition research behind the plan gate | [scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md) |
 | Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
 | Complete command reference | [USAGE.md](.mindspec/core/USAGE.md) |
-| Observability (OTEL + AgentMind) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver |
+| Observability (OTLP export; pairs with the standalone [AgentMind](https://github.com/mrmaxsteel/agentmind) dashboard) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` writes exporter config for any OTLP/HTTP receiver |
 | Release history | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Project structure
