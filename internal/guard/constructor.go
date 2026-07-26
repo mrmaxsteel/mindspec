@@ -21,37 +21,43 @@ import (
 // package guard can populate command/valid directly via a composite
 // literal — Go does not scope unexported-field access below the
 // package boundary, and a compiled probe during this bead's authoring
-// confirmed it (G-r5-3). SAME-package construction is sealed by the
-// internal/lint AST invariant instead (destructive_guidance_test.go's
-// scanSamePackageInvariant): the scan asserts every composite
-// literal, unexported-field write, or type CONVERSION producing this
-// type appears only inside NewDestructiveCommand's own body.
+// confirmed it (G-r5-3).
 //
-// This is a SYNTACTIC (AST-level, no go/types) resolver, comprehensive
-// against the concrete escape shapes two rounds of adversarial review
-// found and confirmed — never against "every possible Go spelling",
-// which no syntactic check can be (spec 127 bead-2 rework round 2's
-// own standing lesson): an arbitrary-depth chain of type aliases
-// and/or defined types (`type L1 = DestructiveCommand; type L2 = L1;
-// type L3 L2; ...`, resolved to a FIXED POINT, not merely one level —
-// round 1 shipped a single pass and G1-1/O2-1 confirmed a two-level
-// chain escaped it); a composite literal whose element TYPE IS
-// ELIDED — inferred from an enclosing array/slice/map literal's own
-// element type (`[]DestructiveCommand{{command: cmd, valid: true}}`,
-// `map[int]DestructiveCommand{0: {...}}`) or a KEYED struct field's
-// declared type (`someStruct{D: {command: cmd, valid: true}}`) —
-// resolved from that enclosing context, recursively, so nested
-// elisions keep resolving one level at a time (O2-1/O3-confirm-1: an
-// elided literal has node.Type == nil syntactically, so a check that
-// only inspects the literal's own Type field, never its parent, always
-// missed it). Not resolved, and not claimed: a value that reaches
-// this package only after passing through an interface{}/generic-type
-// indirection, or a same-named type re-exported through another
-// package's alias — either would need actual type-checking (go/types)
-// to resolve, which this scan deliberately does not add (spec 127
-// bead-2 rework round 2's own scoping call: Go has indefinitely many
-// spellings, and a syntactic scan closes the SHAPES adversarial review
-// has actually found, not an unbounded claim it cannot back).
+// SAME-package construction is REVIEW-CAUGHT by the internal/lint AST
+// invariant instead (destructive_guidance_test.go's
+// scanSamePackageInvariant), NOT sealed, NOT prevented, and NOT made
+// impossible — spec 127 bead-2 rework round 3's RULING 1 supersedes
+// every prior round's "comprehensive, bounded honestly" framing of
+// this mechanism, after three consecutive rounds of adversarial review
+// each found NEW same-package escape shapes the previous round's fix
+// did not close (an arbitrary-depth alias/defined-type chain in round
+// 1; an elided-type slice/map/struct-field literal in round 2; a
+// function-local type declaration, a named container type over the
+// sealed type, and an elided pointer element, all in round 3 — eleven
+// escapes across five rounds counting the confirm passes). The root
+// cause is not a gap this scan can eventually close by finding one
+// more shape: Go permits same-package code to write unexported fields
+// BY DESIGN, and offers unboundedly many ways to name a type — aliases
+// at any depth, defined types, conversions, elided literals in slice/
+// map/struct-field/pointer context, function-local declarations, and
+// possibly more this bead has not yet been shown. A SYNTACTIC
+// (AST-level, no go/types) check cannot enumerate that set from the
+// outside, so no future round should claim this mechanism
+// "comprehensive" again.
+//
+// What this scan actually does: flag every concrete escape shape
+// adversarial review has found and confirmed through this bead's
+// rework rounds (see scanSamePackageInvariant's own doc comment for
+// the current list) — a real, useful defense-in-depth catch for
+// convenient drift, layered UNDER human review of any same-package
+// change to this file, never a substitute for it. Not resolved, and
+// not claimed: a value that reaches this package only after passing
+// through an interface{}/generic-type indirection, or a same-named
+// type re-exported through another package's alias — either would need
+// actual type-checking (go/types) to resolve, which this scan
+// deliberately does not add (Go has indefinitely many spellings, and a
+// syntactic scan closes the SHAPES adversarial review has actually
+// found, not an unbounded claim it cannot back).
 // unsafe/reflect.NewAt bypasses of the struct are recorded OUTSIDE
 // this convention's threat model (R5(b)) — no Go-level guard survives
 // unsafe, and the convention targets convenient drift, not deliberate

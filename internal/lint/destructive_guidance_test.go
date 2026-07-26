@@ -484,21 +484,35 @@ func isNewDestructiveCommandCall(call *ast.CallExpr, file *rFile) bool {
 // (non-blank) identifier, followed somewhere later in the SAME body
 // by an `if errName != nil { ... }` whose block exits control flow
 // (return/panic/continue/break/goto) — the ordinary Go handle-and-bail
-// idiom. Three ways this returns false, each pinned by its own
-// negative fixture (bead-2 rework round 2, G1-C1's required change):
-//   - a SECOND assignment of name anywhere in the body voids
-//     provenance entirely — ambiguous which binding a later use
-//     traces to, the same single-assignment discipline localBinds
-//     (above) already applies to a plain fold ("overwritten binding");
+// idiom. Four ways this returns false, each pinned by its own negative
+// fixture (bead-2 rework round 2, G1-C1's required change; the fourth
+// added round 3, RULING 2/G1-confirm2-2):
+//   - a SECOND two-result NewDestructiveCommand bind of name anywhere
+//     in the body voids provenance entirely — ambiguous which binding
+//     a later use traces to, the same single-assignment discipline
+//     localBinds (above) already applies to a plain fold
+//     ("overwritten binding");
 //   - a blank (`_`) error identifier never gets a later check to find
 //     ("ignored" — the caller explicitly discarded the only signal
 //     that would prove the happy path was actually reached);
 //   - a real error identifier with no later handle-and-bail block
 //     ("error-unhandled" — same reasoning, checked structurally rather
-//     than by name).
+//     than by name);
+//   - a PLAIN reassignment of name (`name = <anything>`, not a second
+//     two-result NewDestructiveCommand bind) anywhere in the body also
+//     voids provenance (identReassignedAfter, below) — round 2's check
+//     only invalidated on a second matching TWO-RESULT bind, so a
+//     plain `d = guard.DestructiveCommand{}` after a correctly
+//     error-checked bind kept tracing as constructor-derived even
+//     though d no longer held the constructor's output.
+//
+// This is a TEXTUAL/structural check, not a control-flow reachability
+// proof — see errCheckedAfter's own doc comment (spec 127 bead-2
+// rework round 3, RULING 2) for what it does not establish.
 func identIsErrorHandledConstructorBind(name string, fnNode ast.Node, file *rFile) bool {
 	var bindErrName string
 	var bindEnd token.Pos
+	var bindStmt *ast.AssignStmt
 	count := 0
 	ast.Inspect(fnNode, func(n ast.Node) bool {
 		as, ok := n.(*ast.AssignStmt)
@@ -520,20 +534,77 @@ func identIsErrorHandledConstructorBind(name string, fnNode ast.Node, file *rFil
 		count++
 		bindErrName = errIdent.Name
 		bindEnd = as.End()
+		bindStmt = as
 		return true
 	})
 	if count != 1 || bindErrName == "" || bindErrName == "_" {
 		return false
 	}
+	if identReassignedAfter(name, fnNode, bindStmt) {
+		return false
+	}
 	return errCheckedAfter(fnNode, bindErrName, bindEnd)
+}
+
+// identReassignedAfter reports whether name is the target of any
+// *ast.AssignStmt in fnNode's body OTHER than exclude (the qualifying
+// constructor bind itself) — spec 127 bead-2 rework round 3, RULING 2/
+// G1-confirm2-2 (BLOCKING): a plain `name = <anything>` reassignment
+// after a correctly error-checked bind still passed round 2's SHAPE
+// check, because round 2 only invalidated on a second matching TWO-
+// RESULT NewDestructiveCommand bind, never on an ordinary single-value
+// reassignment — the value `.String()` is eventually called on may no
+// longer be the constructor's output at all. This is a cheap, TEXTUAL
+// invalidation: ANY reassignment voids provenance, regardless of
+// whether it would runtime-execute before or after the eventual
+// `.String()` call (this scan does not attempt control-flow ordering)
+// — not a claim that the bind is the value's ONLY possible source at
+// the .String() call site, which would need real dataflow (go/types +
+// SSA), out of this bead's scope.
+func identReassignedAfter(name string, fnNode ast.Node, exclude *ast.AssignStmt) bool {
+	found := false
+	ast.Inspect(fnNode, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok || as == exclude {
+			return true
+		}
+		for _, lhs := range as.Lhs {
+			if id, ok := lhs.(*ast.Ident); ok && id.Name == name {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // errCheckedAfter reports whether fnNode's body contains an
 // `if errName != nil { ... }` (either operand order) positioned after
 // pos, whose block exits control flow (blockExits, below).
+//
+// This is a TEXTUAL/structural check — a later-positioned exiting
+// `if` — not a control-flow REACHABILITY proof (spec 127 bead-2 rework
+// round 3, RULING 2/G1-confirm2-3, BLOCKING): it does not establish
+// that the check actually runs before any use of the bound identifier
+// at runtime. Never descending into an *ast.DeferStmt or *ast.GoStmt
+// closes the one concrete bypass adversarial review demonstrated: a
+// check placed inside `defer func() { if err != nil { panic(err) } }()`
+// is textually after the bind and syntactically an exiting block, so
+// it matched this shape, even though a deferred closure runs AFTER the
+// surrounding return expression — including any `.String()` call on
+// the same line — has already evaluated (a `go func(){...}()` launched
+// goroutine has the identical problem: it may not even have run yet).
+// Excluding both closes exactly the demonstrated escape; it is not a
+// claim that every possible way of writing a check that never
+// synchronously gates its guarded call is now caught — that would need
+// actual control-flow analysis, out of this scan's scope.
 func errCheckedAfter(fnNode ast.Node, errName string, pos token.Pos) bool {
 	found := false
 	ast.Inspect(fnNode, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.DeferStmt, *ast.GoStmt:
+			return false
+		}
 		ifs, ok := n.(*ast.IfStmt)
 		if !ok || ifs.Pos() < pos {
 			return true
@@ -1641,13 +1712,20 @@ func singleFileUniverse(t *testing.T, rel, src string) *rUniverse {
 // seals only CROSS-package construction of guard.DestructiveCommand;
 // any file inside package guard can populate its unexported fields
 // directly (Go does not scope unexported-field access below the
-// package). This invariant closes that gap: a populated composite
-// literal, an unexported-field write, or a type CONVERSION producing
-// the opaque type is red anywhere in a "package guard" file OUTSIDE
-// NewDestructiveCommand's own implementation. Package identity is by
-// PACKAGE CLAUSE name ("package guard"), not by repo path, so a
-// fixture universe need not live at a real "internal/guard" path to
-// be recognized.
+// package). This invariant FLAGS that gap — it does NOT close it, and
+// as of spec 127 bead-2 rework round 3's RULING 1 no comment in this
+// codebase should claim otherwise: a populated composite literal, an
+// unexported-field write, or a type CONVERSION producing the opaque
+// type is red anywhere in a "package guard" file OUTSIDE
+// NewDestructiveCommand's own implementation IN THE SHAPES LISTED
+// BELOW — a syntactic (AST-level, no go/types) check over an
+// unboundedly spellable language, layered UNDER human review of any
+// same-package change, never a substitute for it (see constructor.go's
+// own doc comment for the full accounting of why "comprehensive" was
+// the wrong word for this mechanism). Package identity is by PACKAGE
+// CLAUSE name ("package guard"), not by repo path, so a fixture
+// universe need not live at a real "internal/guard" path to be
+// recognized.
 //
 // Widened (spec 127 bead-2 rework, RULING 2/G1-r2-1/O2-r2-1): the
 // original check matched a composite literal's Type ONLY against the
@@ -1694,16 +1772,34 @@ func scanSamePackageInvariant(u *rUniverse) []string {
 	// "L1", not "DestructiveCommand", and no second pass ever
 	// revisited it). Also builds structFieldTypes — every struct type
 	// declared in package guard, field name -> declared field type —
-	// used below to resolve an ELIDED composite literal's effective
-	// type one level at a time (checkElidedComposites).
+	// and containerElemTypes — every named array/slice/map type over
+	// some other type, name -> that array/slice's element (or map's
+	// value) type — both used below to resolve an ELIDED composite
+	// literal's effective type one level at a time
+	// (checkElidedComposites).
+	//
+	// This walk visits EVERY *ast.GenDecl of kind TYPE anywhere in the
+	// file's AST, via ast.Inspect, not just file.file.Decls' top-level
+	// entries (spec 127 bead-2 rework round 3, RULING 1/G1-confirm2-1,
+	// BLOCKING): a `type` declaration inside a FUNCTION BODY is exactly
+	// as capable of forging a same-package value as a package-level
+	// one, and round 2's direct iteration over file.file.Decls never
+	// descended into a *ast.FuncDecl's Body to find one. Same-name
+	// collision between a function-local type and an unrelated
+	// identically-named type elsewhere in the package is an accepted,
+	// pre-existing limitation of this scan's flat, package-wide type
+	// namespace (this invariant's own header comment above: package
+	// identity is by package CLAUSE, not by real Go scoping) — this
+	// walk does not add a NEW one.
 	dcTypeNames := map[string]bool{"DestructiveCommand": true}
 	typeRHS := map[string]ast.Expr{}
 	structFieldTypes := map[string]map[string]ast.Expr{}
+	containerElemTypes := map[string]ast.Expr{}
 	for _, file := range guardFiles {
-		for _, decl := range file.file.Decls {
-			gd, ok := decl.(*ast.GenDecl)
+		ast.Inspect(file.file, func(n ast.Node) bool {
+			gd, ok := n.(*ast.GenDecl)
 			if !ok || gd.Tok != token.TYPE {
-				continue
+				return true
 			}
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
@@ -1711,17 +1807,34 @@ func scanSamePackageInvariant(u *rUniverse) []string {
 					continue
 				}
 				typeRHS[ts.Name.Name] = ts.Type
-				if st, ok := ts.Type.(*ast.StructType); ok && st.Fields != nil {
-					fields := map[string]ast.Expr{}
-					for _, f := range st.Fields.List {
-						for _, nm := range f.Names {
-							fields[nm.Name] = f.Type
+				switch rt := ts.Type.(type) {
+				case *ast.StructType:
+					if rt.Fields != nil {
+						fields := map[string]ast.Expr{}
+						for _, f := range rt.Fields.List {
+							for _, nm := range f.Names {
+								fields[nm.Name] = f.Type
+							}
 						}
+						structFieldTypes[ts.Name.Name] = fields
 					}
-					structFieldTypes[ts.Name.Name] = fields
+				case *ast.ArrayType:
+					// Spec 127 bead-2 rework round 3, RULING 1/O2c2-4
+					// (MAJOR): a composite literal whose OUTER type is a
+					// NAMED slice/array type over DestructiveCommand
+					// (`type zzWrapSlice []DestructiveCommand`) with an
+					// elided-type inner element resolves through this
+					// lookaside — the same kind of syntactic TypeSpec
+					// lookup already performed for `type X = Y`/
+					// `type X Y` identity chains above, one AST-node-
+					// kind short of what the seal already claimed to do.
+					containerElemTypes[ts.Name.Name] = rt.Elt
+				case *ast.MapType:
+					containerElemTypes[ts.Name.Name] = rt.Value
 				}
 			}
-		}
+			return true
+		})
 	}
 	for changed := true; changed; {
 		changed = false
@@ -1759,7 +1872,7 @@ func scanSamePackageInvariant(u *rUniverse) []string {
 					if id, ok := ast.Unparen(node.Type).(*ast.Ident); ok && dcTypeNames[id.Name] {
 						problems = append(problems, file.rel+":"+itoa(u.fset.Position(node.Pos()).Line)+": "+id.Name+" composite literal outside NewDestructiveCommand's implementation (same-package forge)")
 					}
-					checkElidedComposites(node, dcTypeNames, structFieldTypes, func(pos token.Pos, typeName string) {
+					checkElidedComposites(node, dcTypeNames, structFieldTypes, containerElemTypes, func(pos token.Pos, typeName string) {
 						problems = append(problems, file.rel+":"+itoa(u.fset.Position(pos).Line)+": "+typeName+" composite literal (elided type, resolved from its enclosing array/slice/map/struct-field context) outside NewDestructiveCommand's implementation (same-package forge)")
 					})
 				case *ast.CallExpr:
@@ -1799,17 +1912,26 @@ func scanSamePackageInvariant(u *rUniverse) []string {
 // Type field is nil (elided) — an array/slice/map literal's element
 // inherits parentType's Elt (array/slice) or Value (map) regardless of
 // key; a struct literal's KEYED field inherits that field's declared
-// type from structFieldTypes. Returns nil when parentType resolves to
+// type from structFieldTypes; a NAMED array/slice/map type's own
+// literal (`zzWrapSlice{{...}}`, parentType an *ast.Ident naming that
+// type) inherits its declared element/value type from
+// containerElemTypes (spec 127 bead-2 rework round 3, RULING 1/
+// O2c2-4) — checked BEFORE the key-based struct-field lookaside, since
+// a named container's own elements are ordinarily positional (key ==
+// nil), unlike struct fields. Returns nil when parentType resolves to
 // none of these shapes (e.g. an unresolved cross-package type, or a
 // struct literal using positional — unkeyed — elements, which this
 // scan does not attempt to resolve field-by-field).
-func elidedChildType(parentType ast.Expr, key ast.Expr, structFieldTypes map[string]map[string]ast.Expr) ast.Expr {
+func elidedChildType(parentType ast.Expr, key ast.Expr, structFieldTypes map[string]map[string]ast.Expr, containerElemTypes map[string]ast.Expr) ast.Expr {
 	switch pt := ast.Unparen(parentType).(type) {
 	case *ast.ArrayType:
 		return pt.Elt
 	case *ast.MapType:
 		return pt.Value
 	case *ast.Ident:
+		if elem, ok := containerElemTypes[pt.Name]; ok {
+			return elem
+		}
 		if key == nil {
 			return nil
 		}
@@ -1837,7 +1959,16 @@ func elidedChildType(parentType ast.Expr, key ast.Expr, structFieldTypes map[str
 // carries the resolved type forward) so a doubly-nested elision — a
 // slice of a struct with an elided-field elided-slice, say — keeps
 // resolving one level at a time.
-func checkElidedComposites(lit *ast.CompositeLit, dcTypeNames map[string]bool, structFieldTypes map[string]map[string]ast.Expr, report func(pos token.Pos, typeName string)) {
+//
+// The resolved child type is unwrapped through one *ast.StarExpr
+// before the Ident check (spec 127 bead-2 rework round 3, RULING 1/
+// O3-confirm2-NEW-1, BLOCKING): an elided-type literal of a POINTER
+// element (`[]*DestructiveCommand{{command: cmd, valid: true}}` — Go's
+// own composite-literal elision rule applies through a pointer element
+// type exactly as it does through a plain one) resolves its Elt to
+// `*DestructiveCommand`, not `DestructiveCommand` directly, so the
+// bare Ident assertion previously missed it.
+func checkElidedComposites(lit *ast.CompositeLit, dcTypeNames map[string]bool, structFieldTypes map[string]map[string]ast.Expr, containerElemTypes map[string]ast.Expr, report func(pos token.Pos, typeName string)) {
 	for _, elt := range lit.Elts {
 		var key, valueExpr ast.Expr
 		if kv, ok := elt.(*ast.KeyValueExpr); ok {
@@ -1850,16 +1981,20 @@ func checkElidedComposites(lit *ast.CompositeLit, dcTypeNames map[string]bool, s
 			continue
 		}
 		if childLit.Type != nil {
-			checkElidedComposites(childLit, dcTypeNames, structFieldTypes, report)
+			checkElidedComposites(childLit, dcTypeNames, structFieldTypes, containerElemTypes, report)
 			continue
 		}
-		childType := elidedChildType(lit.Type, key, structFieldTypes)
-		if id, ok := ast.Unparen(childType).(*ast.Ident); ok && dcTypeNames[id.Name] {
+		childType := elidedChildType(lit.Type, key, structFieldTypes, containerElemTypes)
+		resolved := ast.Unparen(childType)
+		if star, ok := resolved.(*ast.StarExpr); ok {
+			resolved = ast.Unparen(star.X)
+		}
+		if id, ok := resolved.(*ast.Ident); ok && dcTypeNames[id.Name] {
 			report(childLit.Pos(), id.Name)
 		}
 		synthetic := *childLit
 		synthetic.Type = childType
-		checkElidedComposites(&synthetic, dcTypeNames, structFieldTypes, report)
+		checkElidedComposites(&synthetic, dcTypeNames, structFieldTypes, containerElemTypes, report)
 	}
 }
 
@@ -2021,6 +2156,112 @@ func forgeViaElidedStructFieldLiteral(cmd string) DestructiveCommand {
 	// asserting >=1 keeps this test robust to either mechanism firing.
 	if len(problems) == 0 {
 		t.Fatal("expected the elided-type struct-field-literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_ElidedPointerElementLiteral is spec 127
+// bead-2 rework round 3's RULING 1/O3-confirm2-NEW-1 (BLOCKING): an
+// elided-type literal of a POINTER element (`[]*DestructiveCommand{
+// {...}}`, valid Go elision-through-pointer) resolved its Elt to
+// `*DestructiveCommand`, which the pre-fix bare-Ident assertion never
+// matched.
+func TestSamePackageInvariant_ElidedPointerElementLiteral(t *testing.T) {
+	src := `package guard
+
+func forgeViaElidedPointerElementLiteral(cmd string) DestructiveCommand {
+	return *[]*DestructiveCommand{{command: cmd, valid: true}}[0]
+}
+`
+	u := singleFileUniverse(t, "internal/guard/elided_pointer_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the elided-type pointer-element literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_NamedSliceTypeElidedLiteral is spec 127
+// bead-2 rework round 3's RULING 1/O2c2-4 (MAJOR): a composite literal
+// whose OUTER type is a NAMED slice type over DestructiveCommand
+// (not the type-identity chain dcTypeNames tracks, but a CONTAINER
+// type wrapping it) with an elided-type inner element. This needs no
+// go/types — resolving `type X []Y` to its Elt is the same syntactic
+// TypeSpec lookup already performed for `type X = Y`/`type X Y`
+// identity chains, via the new containerElemTypes lookaside.
+func TestSamePackageInvariant_NamedSliceTypeElidedLiteral(t *testing.T) {
+	src := `package guard
+
+type g1WrapSliceNamed []DestructiveCommand
+
+func forgeViaNamedSliceTypeElidedLiteral(cmd string) DestructiveCommand {
+	return g1WrapSliceNamed{{command: cmd, valid: true}}[0]
+}
+`
+	u := singleFileUniverse(t, "internal/guard/named_slice_type_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the named-slice-type elided literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_NamedMapTypeElidedLiteral mirrors the named
+// slice case above for a NAMED map type's elided VALUE type
+// (O2c2-4's second required fixture).
+func TestSamePackageInvariant_NamedMapTypeElidedLiteral(t *testing.T) {
+	src := `package guard
+
+type g1WrapMapNamed map[int]DestructiveCommand
+
+func forgeViaNamedMapTypeElidedLiteral(cmd string) DestructiveCommand {
+	return g1WrapMapNamed{0: {command: cmd, valid: true}}[0]
+}
+`
+	u := singleFileUniverse(t, "internal/guard/named_map_type_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the named-map-type elided literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_FunctionLocalTypeAliasForge is spec 127
+// bead-2 rework round 3's RULING 1/G1-confirm2-1 (BLOCKING): Pass 1's
+// fixed-point alias/defined-type resolution now walks the WHOLE file
+// AST (ast.Inspect), not just file.file.Decls' top-level entries — a
+// `type` declaration inside a FUNCTION BODY is exactly as capable of
+// forging a same-package value as a package-level one.
+func TestSamePackageInvariant_FunctionLocalTypeAliasForge(t *testing.T) {
+	src := `package guard
+
+func localAliasForge(cmd string) DestructiveCommand {
+	type localAlias = DestructiveCommand
+	return localAlias{command: cmd, valid: true}
+}
+`
+	u := singleFileUniverse(t, "internal/guard/local_alias_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the function-local type-alias composite literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_FunctionLocalDefinedTypeForge is
+// G1-confirm2-1's second required shape: a function-local DEFINED
+// type (not an alias), composite-literalled then converted back —
+// the same identity-chain resolution TestSamePackageInvariant_
+// DefinedTypeCompositeThenConvert already pins at package scope, now
+// pinned at function scope.
+func TestSamePackageInvariant_FunctionLocalDefinedTypeForge(t *testing.T) {
+	src := `package guard
+
+func localDefinedTypeForge(cmd string) DestructiveCommand {
+	type localDT DestructiveCommand
+	d := localDT{command: cmd, valid: true}
+	return DestructiveCommand(d)
+}
+`
+	u := singleFileUniverse(t, "internal/guard/local_defined_type_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the function-local defined-type composite-then-convert forge to be flagged")
 	}
 }
 
@@ -2248,6 +2489,61 @@ func overwrittenBindRefusal(branchA, branchB string, outcome guard.DestructionOu
 	}
 }
 
+// TestConstructorProvenance_PlainReassignmentRejected is spec 127
+// bead-2 rework round 3's required fixture (RULING 2/G1-confirm2-2,
+// BLOCKING): after a correctly error-checked bind, a PLAIN
+// reassignment of the bound identifier (not a second two-result
+// NewDestructiveCommand call) must still void provenance — the value
+// `.String()` is eventually called on may no longer be the
+// constructor's output at all.
+func TestConstructorProvenance_PlainReassignmentRejected(t *testing.T) {
+	src := `package approve
+
+import "github.com/mrmaxsteel/mindspec/internal/guard"
+
+func reassignedBindRefusal(branch string, outcome guard.DestructionOutcome) string {
+	d, err := guard.NewDestructiveCommand("git branch -D "+branch, outcome)
+	if err != nil {
+		return "fallback"
+	}
+	d = guard.DestructiveCommand{}
+	return d.String()
+}
+`
+	expr, fnNode, file := findSingleReturnAndFunc(t, singleFileUniverse(t, "internal/approve/reassigned_bind_fixture.go", src), "internal/approve/reassigned_bind_fixture.go")
+	if isConstructorDerived(expr, fnNode, file) {
+		t.Fatal("expected a plainly-reassigned constructor identifier to be REJECTED as provenance")
+	}
+}
+
+// TestConstructorProvenance_DeferredCheckRejected is spec 127 bead-2
+// rework round 3's required fixture (RULING 2/G1-confirm2-3,
+// BLOCKING): an error check that only ever runs inside a deferred
+// closure never gates the synchronous `.String()` call in the same
+// return statement — errCheckedAfter now never descends into an
+// *ast.DeferStmt, so this check is never found and the bind cannot
+// qualify as provenance.
+func TestConstructorProvenance_DeferredCheckRejected(t *testing.T) {
+	src := `package approve
+
+import "github.com/mrmaxsteel/mindspec/internal/guard"
+
+func deferredCheckRefusal(branch string, outcome guard.DestructionOutcome) string {
+	d, err := guard.NewDestructiveCommand("git branch -D "+branch, outcome)
+	defer func() {
+		if err != nil {
+			panic(err)
+		}
+	}()
+	return d.String()
+}
+`
+	expr, fnNode, file := findSingleReturnAndFunc(t, singleFileUniverse(t, "internal/approve/deferred_check_fixture.go", src), "internal/approve/deferred_check_fixture.go")
+	if isConstructorDerived(expr, fnNode, file) {
+		t.Fatal("expected a deferred-only error check to be REJECTED as provenance (it does not gate the synchronous .String() call)")
+	}
+}
+
 // findSingleReturnAndFunc locates u's registered file at rel, the
 // `return <expr>.String()`-shaped statement's expression (skipping
 // any other single-result return, e.g. a fixture's own `return
@@ -2289,19 +2585,24 @@ func findSingleReturnAndFunc(t *testing.T, u *rUniverse, rel string) (ast.Expr, 
 
 // ---------------------------------------------------------------------
 // Bootstrap discipline (spec 127 G-r5-4/H-r6-5): the committed seed
-// manifest and its TWO landed hermetic fixtures — registry identity
-// (β) and content regeneration (γ) — applied uniformly to all three
-// seeded artifacts. Fixture (α) — manifest-vs-independent-Background-
-// derived-enumeration reconciliation — is NOT landed (spec 127 bead-2
-// rework, O2-r2-4/O3-r2-3): it was cited as existing in two places
-// (this manifest's own header and registries.go's doc comments)
-// before either implemented it; both citations are now corrected to
-// state plainly that (α) does not exist, rather than leaving a named
-// fixture cited and absent. (β)+(γ) together still catch a hollow or
-// drifted entry; what only (α) would additionally catch — a
-// bead-introduced site entering the seed at the WRONG base — is
-// covered today by the manifest header's own reproducible
-// `git diff --stat` verification instead of a standing fixture.
+// manifest and its THREE landed hermetic fixtures — registry identity
+// (β), content regeneration (γ), and manifest-vs-Background
+// reconciliation (α) — applied uniformly to all three seeded artifacts
+// ((α) applies specifically to the known_sites_exemption_list section;
+// see TestBootstrapManifest_BackgroundReconciliation, below, for its
+// current scope). (α) was cited as existing before either
+// implementing it, in bead-2 rework round 1 (spec 127 bead-2 rework,
+// O2-r2-4/O3-r2-3) — that round deleted the false claim rather than
+// implementing it. Round 2 (O3-3) implemented (α)'s FORWARD direction
+// (every site spec.md Background reviewed is still present). Round 3
+// (RULING 4/O3-3, this rework round) added the REVERSE direction
+// (every manifest entry is accounted for by something Background
+// reviewed, or a named widening) after proving the forward direction
+// alone let a fabricated, unreviewed entry pass every landed fixture
+// undetected. This comment block itself went stale for a full round
+// between round 2 landing (α) and this correction — a standing lesson
+// for whoever next widens this mechanism: update THIS header, not only
+// the function doc comments below it.
 // ---------------------------------------------------------------------
 
 // manifestEntry is one parsed line of destructive_seed_manifest.txt.
@@ -2458,6 +2759,25 @@ var backgroundExpectedExemptions = []backgroundExpectedExemption{
 	{"agentsMDBlockTemplate", "Never merge a bead branch with raw `git merge bead/<id>`"},
 }
 
+// backgroundJustifiedWideningExemptions is the ONE named, recorded
+// widening backgroundExpectedExemptions itself does not cover — the
+// "ms-bead-cycle" canonical skill-map literal's own two matches
+// (registries.go's KnownSitesExemptionList doc comment, RULING 7):
+// spec.md Background's "eight sites" tally names the canonical literal
+// for ms-impl-approve's residual but not, by the same reasoning, for
+// ms-bead-cycle's two entries — a widening the mechanism's own design
+// justifies (every lifecycle-gate skill's canonical literal is swept,
+// not only the ones Background happened to name), not unreviewed
+// drift. Listed here, by name, so the reverse-direction reconciliation
+// below (fixture (α), spec 127 bead-2 rework round 3, RULING 4) can
+// account for it WITHOUT silently accepting every unnamed manifest
+// entry — anything NOT in this list and NOT in
+// backgroundExpectedExemptions is red.
+var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
+	{"ms-bead-cycle", "Never merge a bead branch with raw `git merge bead/<id>`"},
+	{"ms-bead-cycle", "stopped between bd-close and the actual git merge"},
+}
+
 // backgroundExpectedBypassBlockFamilies is spec.md Background's
 // bypass-block bullet for .claude/agents/spec-orchestrator.md: "raw
 // git merge --no-ff bead/<id>, git worktree remove ... --force, git
@@ -2483,9 +2803,9 @@ var backgroundExpectedBypassBlockFamilies = []guard.DestructiveFamily{
 // existed but did not implement it, which O3 ruled was NOT the same as
 // delivering AC-9(ii)'s reconciliation requirement).
 //
-// This checks the one direction that actually matters — everything
-// Background named, reviewed at spec time before any bead existed,
-// is still present — NOT exact equality against the manifest's full
+// Round 2 checked only the FORWARD direction — everything Background
+// named, reviewed at spec time before any bead existed, is still
+// present — NOT exact equality against the manifest's full
 // known_sites_exemption_list section. Background's own "eight sites"
 // tally does not separately enumerate the "ms-bead-cycle" canonical
 // skill-map literal's own two matches (it names the canonical literal
@@ -2494,13 +2814,33 @@ var backgroundExpectedBypassBlockFamilies = []guard.DestructiveFamily{
 // doc comment (RULING 7) already records this as a widening the
 // mechanism's own design justifies (every lifecycle-gate skill's
 // canonical literal is swept, not only the ones Background happened to
-// name), not as unreviewed drift. Asserting exact equality here would
-// either fail on that already-explained widening or require silently
-// narrowing this fixture's own claim to match it — this fixture states
-// the SUBSET claim it can actually back.
+// name), not as unreviewed drift.
+//
+// Spec 127 bead-2 rework round 3's O3-3 (RULING 4, BLOCKING) proved the
+// forward direction ALONE insufficient: a fabricated, unreviewed
+// exemption entry — added consistently to BOTH registries.go and this
+// manifest, so fixture (β)'s registry-vs-manifest identity check stayed
+// green too — passed every landed bootstrap fixture undetected,
+// directly falsifying this manifest's own header claim ("a bead
+// introducing an unreviewed site cannot enter this list unnoticed") and
+// AC-9(ii)'s stated purpose for (α). This now ALSO checks the REVERSE
+// direction below: every manifest entry (outside the orchestrator
+// surface, reconciled both directions already at family grain) must be
+// accounted for by something Background actually named
+// (backgroundExpectedExemptions) or by the recorded widening
+// (backgroundJustifiedWideningExemptions) — anything else is red.
+//
+// Neither direction is exact equality against the manifest's full
+// known_sites_exemption_list section at PER-ENTRY grain — that would
+// either fail on the already-explained, justified widening or require
+// silently narrowing this fixture's own claim to match it. This states
+// the two SUBSET claims it can actually back: nothing Background
+// reviewed has disappeared, and nothing outside what Background
+// reviewed (or the named widening) has appeared.
 func TestBootstrapManifest_BackgroundReconciliation(t *testing.T) {
 	sections := parseSeedManifest(t)
 	entries := sections["known_sites_exemption_list"]
+	const orchestratorSurface = ".claude/agents/spec-orchestrator.md"
 
 	bySurfaceText := map[string][]string{}
 	familiesBySurface := map[string]map[guard.DestructiveFamily]bool{}
@@ -2525,11 +2865,38 @@ func TestBootstrapManifest_BackgroundReconciliation(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("fixture (α): spec.md Background names %q at surface %q, reviewed at spec time before any bead existed — no manifest line at that surface contains it (a site Background never reviewed may have entered the seed, or one it DID review may have been dropped)", exp.quoted, exp.surface)
+			t.Errorf("fixture (α), forward direction: spec.md Background names %q at surface %q, reviewed at spec time before any bead existed — no manifest line at that surface contains it (a site Background never reviewed may have entered the seed, or one it DID review may have been dropped)", exp.quoted, exp.surface)
 		}
 	}
 
-	const orchestratorSurface = ".claude/agents/spec-orchestrator.md"
+	// Reverse direction (RULING 4, BLOCKING): every non-orchestrator
+	// manifest entry must be accounted for by something Background
+	// actually reviewed, or by the one named widening — not merely
+	// present in both registries.go and this manifest, which O3's
+	// fabricated-entry probe proved insufficient.
+	accountedFor := func(surface, text string) bool {
+		for _, exp := range backgroundExpectedExemptions {
+			if exp.surface == surface && strings.Contains(text, exp.quoted) {
+				return true
+			}
+		}
+		for _, exp := range backgroundJustifiedWideningExemptions {
+			if exp.surface == surface && strings.Contains(text, exp.quoted) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, e := range entries {
+		surface, text := e.fields[0], e.fields[1]
+		if surface == orchestratorSurface {
+			continue // reconciled both directions, at family grain, below
+		}
+		if !accountedFor(surface, text) {
+			t.Errorf("fixture (α), reverse direction: manifest entry at surface %q (text %q) is accounted for by NEITHER spec.md Background's own enumeration NOR the recorded widening exceptions — an unreviewed site may have entered the seed unnoticed", surface, text)
+		}
+	}
+
 	got := familiesBySurface[orchestratorSurface]
 	want := map[guard.DestructiveFamily]bool{}
 	for _, fam := range backgroundExpectedBypassBlockFamilies {
