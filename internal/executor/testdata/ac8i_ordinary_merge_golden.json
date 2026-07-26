@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "description": "spec 127 bead 1 AC-8(i): the ordinary bead-\u003espec merge golden, captured before any producer change.",
+    "captured_at_tree": "spec 127 bead 1 (mindspec-2vtk.1), descended from main@09f62bd9"
+  },
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "merge_commit_sha": "e923705471707dc51c33d8e42f4bf26d3a94c000",
+  "merge_commit_subject": "Merge bead/mindspec-ac8igolden.1",
+  "parent_count": 2,
+  "parent_tips": [
+    "d345857334c07e2dd62701ad2aa969e6f0b094a4",
+    "aa63e8b9d8124438d02649c1df6feb566d6f14ee"
+  ],
+  "result_tree_oid": "24241e956c289abbeb7412da8cdd2604fddf59f6",
+  "result_tree_paths": [
+    "bead-work.txt"
+  ]
+}

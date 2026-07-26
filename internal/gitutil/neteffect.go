@@ -92,11 +92,18 @@ func statusSubsumes(committed, changed string) bool {
 // mergeTreeResult is the exit-code-classified outcome of `git merge-tree
 // --write-tree`.
 type mergeTreeResult struct {
-	// treeOID is the resulting tree's OID, populated only on a clean merge
-	// (exit 0).
+	// treeOID is the resulting tree's OID. `git merge-tree --write-tree`
+	// prints the tree OID as its FIRST stdout line on BOTH exit 0 and exit
+	// 1 (spec 127 bead-1 fix round, O1-1/O2-1/O3-2): on a conflict the
+	// printed tree still contains every unconflicted path's merged content
+	// (conflicted paths carry conflict-marker blobs, plus the trailing
+	// numbered-stage/informational lines merge-tree also writes to
+	// stdout), so a D-set is derivable from it even when conflict is true.
+	// Verified on git 2.51.2: `git merge-tree --write-tree` exit 1 still
+	// emits the tree OID first, unconditionally.
 	treeOID string
 	// conflict is true on exit 1 — a leg-(a) NOT-landed answer, never an
-	// infra error.
+	// infra error. It no longer means "no tree is available": see treeOID.
 	conflict bool
 }
 
@@ -148,8 +155,12 @@ func runMergeTreeWriteTree(workdir, base, ours, theirs string, noRenames bool) (
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 		// CONFLICT (panel O1's trichotomy): a definitive leg-(a) NOT-landed
-		// answer, never infra — the caller must not treat this as a failure.
-		return mergeTreeResult{conflict: true}, nil
+		// answer, never infra — the caller must not treat this as a
+		// failure. The first stdout line is still the merged tree's OID
+		// (see mergeTreeResult.treeOID); capture it rather than discarding
+		// stdout, so a conflict-tolerant caller (PreviewDeletedPaths) can
+		// still derive a D-set.
+		return mergeTreeResult{conflict: true, treeOID: strings.TrimSpace(firstLine(string(out)))}, nil
 	}
 	// exit >= 2 (fatal git error, including "unknown option '--write-tree'"
 	// on git < 2.38) or a non-ExitError (git missing from PATH): infra,
@@ -510,4 +521,221 @@ func NetEffectLanded(workdir, ref, target string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// diffNameStatusBucketsFn is the injectable seam over diffNameStatusBuckets
+// (error-forcing for tests, default pointer-pinned).
+var diffNameStatusBucketsFn = diffNameStatusBuckets
+
+// diffNameStatusBuckets runs `git diff --name-status --find-renames -z from
+// to` and buckets the result into added (A-status: paths present at `to`
+// but absent at `from`), deleted (D-status: paths present at `from` but
+// absent at `to`), and modified (M-status: present at both, but content
+// and/or mode changed — git's plumbing reports a pure mode-only change as
+// "M" too, with an unchanged blob OID, so this bucket also carries
+// mode-only novel work). Rename/copy status (R/C) counts as NEITHER added,
+// deleted, nor modified — the content moved, it was not introduced,
+// removed, or edited in place — which is exactly what --find-renames is
+// pinned for (spec 127 bead 1): without it, plumbing diffs default to no
+// rename detection and a large move would misread as a delete+add pair.
+// `from`/`to` may be any commit-ish (branch, SHA, or a bare tree OID, e.g.
+// the result of a merge-tree preview).
+//
+// `-z` (spec 127 bead-1 fix round, S1-1/O1-2/G1-1): WITHOUT it, git
+// C-quotes any path byte that needs escaping — which by default (
+// core.quotepath defaults to true) includes every non-ASCII UTF-8 byte,
+// and ALWAYS includes control characters such as a literal tab or
+// newline — into a double-quoted, backslash/octal-escaped literal token,
+// and a tab inside a path also breaks the '\t'-field-splitting itself,
+// not merely the quoting. `-z` sidesteps quoting entirely: git emits
+// each record NUL-separated with paths raw and unescaped — status, then
+// one path (A/D/M/…) or two paths (R/C: from-path, to-path), each
+// terminated by a NUL, with no trailing record after the final NUL.
+// Parsing therefore walks fixed-width NUL-delimited records rather than
+// splitting a line on '\t'/'\n', so a literal tab or newline BYTE inside
+// a path can never be misread as a field or record boundary.
+//
+// Every status letter git can emit here is classified below WITH A
+// WRITTEN REASON (spec 127 bead-1 fix round 2, G1-N1's ruling): the prior
+// shape of this switch had a bare `default` arm that silently treated any
+// status this file's authors had not enumerated — T (typechange) among
+// them — as "none of the three buckets", identically to the deliberate
+// R/C exclusion, with no record that a decision had even been made. That
+// is the fail-open shape this predicate exists to eliminate everywhere
+// else, reappearing here: a caller (novelPaths, in workdestruction.go)
+// that trusted "not added, not deleted, not modified" to mean "untouched"
+// was wrong for T, and would be wrong again for the next status letter a
+// future git version introduces. Known statuses are each named with a
+// reason (T joins R/C's exclusion, not A/D/M's buckets — see the case
+// below); anything this switch has NOT been taught — including U
+// (unmerged, which should never appear when diffing two commit-ish/
+// tree-ish arguments, since both `from` and `to` here are never the
+// index or working tree) and X (git's own admission that it could not
+// classify the change) — fails CLOSED with an error instead of falling
+// through. novelPaths' caller (EvaluateWorkDestruction) turns that error
+// into DestructionEvidenceError, never a guessed outcome.
+func diffNameStatusBuckets(workdir, from, to string) (added, deleted, modified []string, err error) {
+	if err := rejectOptionLike(from); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := rejectOptionLike(to); err != nil {
+		return nil, nil, nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-status", "--find-renames", "-z", from, to)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("diff --name-status --find-renames -z %s %s: %w", from, to, err)
+	}
+	raw := string(out)
+	if raw == "" {
+		return nil, nil, nil, nil
+	}
+	fields := strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00")
+	for i := 0; i < len(fields); {
+		status := fields[i]
+		if status == "" {
+			// A trailing empty field from the final NUL (or a malformed
+			// record) — nothing left to consume either way.
+			break
+		}
+		switch status[0] {
+		case 'R', 'C':
+			// Two-path form: status, from-path, to-path. Renamed/copied
+			// content counts as none of the three buckets (see doc
+			// comment above).
+			if i+2 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated rename/copy record %q", from, to, status)
+			}
+			i += 3
+		case 'A':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated add record", from, to)
+			}
+			added = append(added, fields[i+1])
+			i += 2
+		case 'D':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated delete record", from, to)
+			}
+			deleted = append(deleted, fields[i+1])
+			i += 2
+		case 'M':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated modify record", from, to)
+			}
+			modified = append(modified, fields[i+1])
+			i += 2
+		case 'T':
+			// Type change (spec 127 bead-1 fix round 2, G1-N1): the path
+			// is present, under the SAME name, at both `from` and `to` —
+			// only its KIND changed (e.g. regular file <-> symlink, or
+			// file <-> gitlink), not merely its content. Structurally a
+			// single-path record, exactly like A/D/M. Deliberately
+			// excluded from all three buckets, for the SAME reason R/C
+			// is: this file's only caller that consumes the added
+			// bucket for anything beyond evidence (novelPaths, in
+			// workdestruction.go, via snapshotRevertMatch's strip)
+			// needs "paths the branch introduced at a location target
+			// never had" — T is by definition a path target ALREADY
+			// had, so it cannot belong in `added` regardless of which
+			// bucket a future caller might fold it into instead
+			// (corrected, spec 127 bead-1 fix round 3->4, O3r-1: the
+			// prior wording here said folding T into `modified` would
+			// reopen the A+M-masking over-match ruling 2 rolled back —
+			// no longer the live reason, since `modified` is discarded
+			// by snapshotRevertMatch's only caller as of that same
+			// ruling; that risk would need restating, not merely
+			// re-citing, if a future caller ever consumed `modified`
+			// again). So T stays a stated, fixtured miss (see
+			// StatedLimit_TypeChangeOfNovelWorkIsMissed in
+			// workdestruction_test.go) — named on purpose, unlike the
+			// silent `default` this case replaces.
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated type-change record", from, to)
+			}
+			i += 2
+		case 'U', 'X':
+			// Unmerged (U) and unknown (X) (spec 127 bead-1 fix round 2,
+			// G1-N1's ruling): neither has a bucket this predicate can
+			// place it in with a stated reason — U marks an index/
+			// working-tree conflict this predicate never diffs against,
+			// and X is git's own admission that it could not classify
+			// the change — so both fail CLOSED rather than silently
+			// landing in "none of the three buckets" the way the T-status
+			// hole did before this fix.
+			return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: unhandled diff status %q (git reported a change this predicate does not classify as added, deleted, or modified — failing closed rather than silently excluding it)", from, to, status)
+		default:
+			// Any status letter this switch has not been taught — a
+			// future git version, or a code this fix's authors did not
+			// anticipate — fails closed for the identical reason (spec
+			// 127 bead-1 fix round 2, G1-N1's ruling: "any diff status
+			// not explicitly classified with a written reason must fail
+			// CLOSED"). This inverts the prior default, which silently
+			// treated every unrecognized status — including T, the
+			// concrete hole G1-N1 found — as "none of the three
+			// buckets" with no record that a decision had even been
+			// made.
+			return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: unrecognized diff status %q", from, to, status)
+		}
+	}
+	return added, deleted, modified, nil
+}
+
+// PreviewDeletedPaths is the read-only D-set primitive behind the spec 127
+// stale-deletion leg (internal/gitutil.EvaluateWorkDestruction): the paths
+// a non-mutating merge preview of branch into target would DELETE
+// relative to target's CURRENT tip tree.
+//
+// Mechanics: `git merge-tree --write-tree` (base = merge-base(target,
+// branch); ours = target; theirs = branch — the same three-way convention
+// ContentSubsumedOutcome uses, rename detection ON) previews the merge;
+// the resulting tree is then diffed against target's tip with
+// diffNameStatusBuckets (--find-renames pinned), keeping only the deleted
+// bucket. A large rename/directory-move (AC-8(ii)) therefore reads as
+// R-paths, never D-paths.
+//
+// A CONFLICTED preview (merge-tree exit 1) does NOT short-circuit to an
+// empty D-set (spec 127 bead-1 fix round, O1-1/O2-1/O3-2 — reversing this
+// file's prior doc comment, which claimed "no D-set is derivable from a
+// preview that never resolved to a tree": FALSE on git >= 2.38, verified
+// end-to-end — `git merge-tree --write-tree` still prints the merged
+// tree's OID as its first line on exit 1, with every UNCONFLICTED path
+// merged normally; only the conflicted path(s) carry conflict-marker
+// content instead of a clean merge result). The D-set is derived from
+// that tree exactly as on a clean preview: a conflicting edit on ONE path
+// must never mask a genuine deletion on another, unrelated path — the
+// ordering-mask failure this predicate exists to prevent, at reduced
+// width, if it did. Any git infra failure — resolving the merge-base, the
+// merge-tree preview itself (exit >= 2, including "unknown option" on
+// git < 2.38), or the trailing diff — is always propagated as a non-nil
+// error, never classified into an empty D-set (the spec 125 O2-1
+// discipline: absence of evidence is never safety).
+//
+// Non-mutating throughout: `git merge-tree --write-tree` writes only
+// unreferenced loose tree objects (the same discipline as
+// ContentSubsumedOutcome's own preview) — refs, the index, and the
+// worktree are untouched.
+func PreviewDeletedPaths(workdir, target, branch string) ([]string, error) {
+	if err := rejectOptionLike(target); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(branch); err != nil {
+		return nil, err
+	}
+
+	base, err := mergeBaseFn(workdir, target, branch)
+	if err != nil {
+		return nil, fmt.Errorf("finding merge-base of %s and %s: %w", target, branch, err)
+	}
+
+	res, err := mergeTreeWriteTreeFn(workdir, base, target, branch)
+	if err != nil {
+		return nil, err
+	}
+
+	_, deleted, _, err := diffNameStatusBucketsFn(workdir, target, res.treeOID)
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }
