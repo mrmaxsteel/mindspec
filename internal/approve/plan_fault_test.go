@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -104,6 +105,28 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 	// uses phase.Cache.AllEpics, which is phase-package-internal).
 	restorePlanList := SetPlanListJSONForTest(queryFn)
 	t.Cleanup(restorePlanList)
+
+	// Spec 127 R3c: this fault-injection harness models a fake bd
+	// tracker with NO real git branches for its fixture bead IDs — root
+	// (setupPreflightPlan) is a plain temp dir, never `git init`'d. A
+	// closed child in these fixtures is, by every one of these tests'
+	// own construction, the interrupted-supersede/partial-create shape:
+	// no bead branch was ever created for it and no work of its could
+	// ever have landed. Default the provenance seams to that positive
+	// signature rather than leaving them at the real (git-requiring)
+	// functions, which would read "ambiguous" over a non-git root and
+	// silently change these tests' own intended, already-reviewed
+	// scenario (S3-r2-5's purity split: the resolution is I/O, so it
+	// needs a seam here exactly like every other bd/git-touching leg
+	// this harness already stubs).
+	origBranchExists := planBranchExistsInFn
+	planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+	t.Cleanup(func() { planBranchExistsInFn = origBranchExists })
+	origFindLanded := planFindLandedMergeFn
+	planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+		return nil, lifecycle.ErrLandedMergeNotFound
+	}
+	t.Cleanup(func() { planFindLandedMergeFn = origFindLanded })
 }
 
 // existingChildrenJSON renders ids (all status "open" unless closed) as the

@@ -86,10 +86,20 @@
 #
 # Format: one entry per line, sorted within each section:
 #   <surface-or-file>\t<func-or-surface-key>\t<detail-or-text>\t<family-or-blank>
+#
+# BEAD 5 EXIT (fixture (β)'s documented discipline —
+# TestBootstrapManifest_AllowlistRegistryIdentity's own doc comment: "A
+# later bead that converts a site removes BOTH the registries.go entry
+# and this manifest's corresponding line in the SAME commit"): the two
+# [destructive_guidance_allowlist] lines this seed originally carried for
+# internal/approve/plan.go's beadCreateFailure and checkExistingBeadsSafety
+# are REMOVED here — both call sites now route their `bd delete ... --force`
+# line through guard.NewDestructiveCommand (spec 127 R3c/R5(b)), so the
+# operand is constructor-derived and no longer a live allowlist finding.
+# See registries.go's own DestructiveGuidanceAllowlist doc comment for the
+# full accounting.
 
 [destructive_guidance_allowlist]
-internal/approve/plan.go	beadCreateFailure	bd delete %s --force	bd delete --force
-internal/approve/plan.go	checkExistingBeadsSafety	bd delete %s --force	bd delete --force
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	git merge	git merge
 internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git merge
 
@@ -119,6 +129,8 @@ internal/approve/adopt.go	adoptRefusalFailure	arg2:unprovable
 internal/approve/adopt.go	adoptStaleBranchPresentRefusal	arg1:unprovable
 internal/approve/adopt.go	adoptStaleBranchPresentRefusal	arg3:unprovable
 internal/approve/impl.go	ApproveImpl	arg1:unprovable
+internal/approve/impl.go	implBranchIndeterminateRefusal	arg1:unprovable
+internal/approve/impl.go	implBranchMissingRefusal	arg1:unprovable
 internal/approve/impl.go	implObligationRefusal	arg1:unprovable
 internal/approve/impl.go	implObligationRefusal	arg2:unprovable
 internal/approve/impl.go	implOrphanRefusal	arg1:unprovable
@@ -128,6 +140,7 @@ internal/approve/plan.go	ApprovePlan	arg1:unprovable
 internal/approve/plan.go	beadCreateFailure	arg1:unprovable
 internal/approve/plan.go	beadCreateFailure	arg2:unprovable
 internal/approve/plan.go	checkExistingBeadsSafety	arg1:unprovable
+internal/approve/plan.go	closedChildPreserveRefusal	arg1:unprovable
 internal/approve/plan.go	planValidationFailure	arg1:unprovable
 internal/approve/plan.go	queryExistingChildren	arg1:unprovable
 internal/approve/plan.go	resolvePlanApprovePreflight	arg1:unprovable

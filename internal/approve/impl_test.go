@@ -125,6 +125,111 @@ func TestApproveImpl_HappyPath(t *testing.T) {
 	}
 }
 
+// TestApproveImpl_MissingSpecBranchRefusesBeforeMergeBase is AC-4(i)
+// (spec 127 R3a, the #218 step-1 wedge): with the spec branch genuinely
+// absent from a REAL git repo at root (the real lifecycle.BranchExistsIn
+// is exercised here, not a stub), ApproveImpl refuses before
+// exec.MergeBase is EVER reached — no raw `exit status 128`, no wrapped
+// *exec.ExitError — and the refusal names the absent branch plus the R1
+// adopt path in full.
+func TestApproveImpl_MissingSpecBranchRefusesBeforeMergeBase(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	// A REAL git repo at root with NO spec/010-test branch (only main).
+	adoptGitRun(t, tmp, "init", "-q", "-b", "main")
+	adoptWriteFile(t, tmp, "README.md", "root\n")
+	adoptGitRun(t, tmp, "add", ".")
+	adoptGitRun(t, tmp, "commit", "-q", "-m", "root commit")
+
+	saveAndRestore(t)
+	// saveAndRestore's default stubs this seam to "exists" so the
+	// overwhelming majority of tests are unaffected by this new gate —
+	// this test restores the REAL probe to exercise it end to end.
+	implSpecBranchExistsFn = lifecycle.BranchExistsIn
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected a refusal for a missing spec branch")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "exit status 128") {
+		t.Errorf("raw `exit status 128` must never escape; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "ExitError") {
+		t.Errorf("a wrapped *exec.ExitError must never escape; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "spec/010-test") {
+		t.Errorf("refusal must name the absent branch; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, `mindspec impl adopt 010-test --reason "`) {
+		t.Errorf("refusal must name the full adopt invocation; got:\n%s", msg)
+	}
+	if calls := mock.CallsTo("MergeBase"); len(calls) != 0 {
+		t.Errorf("exec.MergeBase must never be reached — the preflight fact fires first; got %d call(s): %+v", len(calls), calls)
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must never be reached after a preflight refusal; got %d call(s)", len(calls))
+	}
+}
+
+// TestApproveImpl_BranchExistsProbeErrorRefusesDistinctly is AC-4(ii)
+// (O2-r2-8): a seam-forced probe FAILURE (a structural git error, never
+// a clean "no such ref") must render a DISTINCT, fail-closed, retryable
+// refusal that never collapses into the missing-branch wording and
+// never names adopt as the disposition — "could not determine" must
+// never become "absent".
+func TestApproveImpl_BranchExistsProbeErrorRefusesDistinctly(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	probeErr := fmt.Errorf("exit status 128: fatal: not a git repository")
+	implSpecBranchExistsFn = func(workdir, name string) (bool, error) {
+		return false, probeErr
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("expected a refusal for an indeterminate branch-existence probe")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "could not determine") {
+		t.Errorf("refusal must state existence could not be determined; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "does not exist") {
+		t.Errorf("a probe error must never render as the absent-branch wording; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "adopt") {
+		t.Errorf("a probe error must NEVER name adopt as the disposition (O2-r2-8); got:\n%s", msg)
+	}
+	if missingMsg := (func() string {
+		// Cross-check leg (i)'s own wording is genuinely distinct —
+		// guards against both legs accidentally sharing one template.
+		return implBranchMissingRefusal("010-test", "spec/010-test").Error()
+	})(); msg == missingMsg {
+		t.Error("the probe-error refusal must be textually distinct from the missing-branch refusal")
+	}
+	if calls := mock.CallsTo("MergeBase"); len(calls) != 0 {
+		t.Errorf("exec.MergeBase must never be reached — the preflight fact fires first; got %d call(s)", len(calls))
+	}
+}
+
 func TestApproveImpl_WrongMode(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -417,6 +522,7 @@ func saveAndRestore(t *testing.T) {
 	origWorktreeList := implWorktreeListFn
 	origIsAncestor := implIsAncestorFn
 	origBranchExists := implBranchExistsFn
+	origSpecBranchExists := implSpecBranchExistsFn
 	origGetMetadata := implGetMetadataFn
 	origCheckObligations := implCheckObligationsFn
 	t.Cleanup(func() {
@@ -431,6 +537,7 @@ func saveAndRestore(t *testing.T) {
 		implWorktreeListFn = origWorktreeList
 		implIsAncestorFn = origIsAncestor
 		implBranchExistsFn = origBranchExists
+		implSpecBranchExistsFn = origSpecBranchExists
 		implGetMetadataFn = origGetMetadata
 		implCheckObligationsFn = origCheckObligations
 	})
@@ -475,6 +582,11 @@ func saveAndRestore(t *testing.T) {
 	implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 	implIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) { return true, nil }
 	implBranchExistsFn = func(name string) bool { return false }
+	// Spec 127 R3a: the §1 branch-existence preflight defaults to
+	// "exists, no error" so every test that doesn't care about this new
+	// gate (the overwhelming majority) reaches its own assertions
+	// exactly as before — tests exercising AC-4 override this.
+	implSpecBranchExistsFn = func(workdir, name string) (bool, error) { return true, nil }
 	implGetMetadataFn = func(id string) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}
@@ -1905,6 +2017,17 @@ func TestImplPhaseMetadataFnDefaultsToBeadMergeMetadata(t *testing.T) {
 func TestImplGetwdFnDefaultsToOsGetwd(t *testing.T) {
 	if reflect.ValueOf(implGetwdFn).Pointer() != reflect.ValueOf(os.Getwd).Pointer() {
 		t.Fatal("implGetwdFn must default to os.Getwd (spec 092 Req 8)")
+	}
+}
+
+// TestImplSpecBranchExistsFnDefaultsToLifecycleBranchExistsIn is spec
+// 127 R3a's seam pin (the plan's "pointer pin" obligation on the new
+// §1 probe): every test swaps this seam in saveAndRestore, so a severed
+// default would go undetected without this identity check — same
+// pattern as the two pins above.
+func TestImplSpecBranchExistsFnDefaultsToLifecycleBranchExistsIn(t *testing.T) {
+	if reflect.ValueOf(implSpecBranchExistsFn).Pointer() != reflect.ValueOf(lifecycle.BranchExistsIn).Pointer() {
+		t.Fatal("implSpecBranchExistsFn must default to lifecycle.BranchExistsIn (spec 127 R3a)")
 	}
 }
 

@@ -506,6 +506,16 @@ func TestHandleExistingBeads_DeadEndsEndWithRecovery(t *testing.T) {
 		planListJSONFn = func(args ...string) ([]byte, error) {
 			return []byte(`[{"id":"bead-done","status":"closed"}]`), nil
 		}
+		// Spec 127 R3c: handleExistingBeads is the STANDALONE
+		// CreateBeadsFromPlan recovery path — it has no root, so it
+		// never calls resolveChildProvenance (that I/O only happens in
+		// the ApprovePlan preflight, resolvePlanApprovePreflight). Every
+		// closed child it sees therefore carries the zero-value
+		// provenanceUnresolved, which checkExistingBeadsSafety treats
+		// identically to provenanceAmbiguous: the record is preserved,
+		// never a `bd delete` hint (an unresolved value must never
+		// accidentally license a deletion — the fail-closed direction
+		// this bead exists to enforce).
 		err := handleExistingBeads("epic-123", "042-test", "version: 1\n")
 		if err == nil {
 			t.Fatal("closed child must still be rejected")
@@ -515,16 +525,17 @@ func TestHandleExistingBeads_DeadEndsEndWithRecovery(t *testing.T) {
 			t.Fatalf("rejection must end with a `recovery:` line; got:\n%s", msg)
 		}
 		cmd := finalRecoveryCommand(t, msg)
-		if cmd != "bd delete bead-done --force" {
-			t.Errorf("closed-child recovery must name the bead: want %q, got %q", "bd delete bead-done --force", cmd)
+		if cmd != "bd show bead-done --json   (inspect its recorded history before deciding)" {
+			t.Errorf("closed-child recovery must be an inspection command, never a deletion, over unresolved provenance: got %q", cmd)
 		}
 		if guard.IsBannedRecoveryCommand(cmd) {
 			t.Errorf("recovery command %q is banned (Req 19)", cmd)
 		}
-		// The prose names BOTH ways into this state, so an agent only
-		// deletes in the partial-create case.
-		if !strings.Contains(msg, "completed work") || !strings.Contains(msg, "partial") {
-			t.Errorf("prose must distinguish completed work from partial-create leftovers; got:\n%s", msg)
+		if strings.Contains(msg, "bd delete") {
+			t.Errorf("unresolved provenance must never draw a `bd delete` hint; got:\n%s", msg)
+		}
+		if !strings.Contains(msg, "ambiguous or could not be resolved") {
+			t.Errorf("prose must name the evidence as unresolved/ambiguous; got:\n%s", msg)
 		}
 	})
 
