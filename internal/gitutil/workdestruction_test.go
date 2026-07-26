@@ -859,9 +859,17 @@ func wdReplaceRefTruncatedHistoryFixture(t *testing.T) (dir, branch, target stri
 // wdGraftsTruncatedHistoryFixture is O1-3's THIRD truncation mechanism
 // (spec 127 bead-1 fix round 2): a legacy `.git/info/grafts` file
 // truncates rev-list identically to a replace ref, via a wholly separate
-// (deprecated but still-supported) git mechanism — neither
-// --is-shallow-repository nor refs/replace/* detects it, so both of the
-// other two probes alone would still fail open on this specific vector.
+// (deprecated but still-supported) git mechanism — detected, alongside a
+// replace ref, by the single differential measurement historyTruncated
+// performs (spec 127 bead-1 fix round 3->4: the differential replacing
+// hasGraftsFile; corrected again fix round 5, NEW-G1sub-6/O1g-A/O2G-1/
+// O3g-1, to a full (commit,tree)-sequence comparison — see
+// historyTruncated's doc comment), independently of isShallowRepo. A
+// prior version of this comment (spec 127 bead-1 fix round 2) described
+// this fixture against the two now-deleted presence probes
+// (--is-shallow-repository and refs/replace/*) that predated the
+// differential — corrected here, the tenth instance of this bead's
+// prose-surviving-deleted-code class (NEW-G1sub-8).
 func wdGraftsTruncatedHistoryFixture(t *testing.T) (dir, branch, target string) {
 	t.Helper()
 	dir, branch, target = wdStaleDeletionSingleCommitFixture(t)
@@ -1835,12 +1843,15 @@ func TestHistoryTruncated_BenignGraftsFileDoesNotOverRefuse(t *testing.T) {
 // resolves a replacement's ref name by concatenating that variable with
 // the target OID with NO normalization (verified empirically: a base of
 // "refs/myreplace" — no trailing slash — still works as a REAL
-// replacement, at the literal ref path "refs/myreplacemyreplace<hex>",
-// which a for-each-ref scan of either "refs/replace/" or
-// "refs/myreplace/" misses). So a genuinely truncating relocated
-// replace ref reported "not truncated" under the old design — the exact
-// fail-open this predicate exists to refuse, reappearing inside the
-// mechanism fix round 2 added to close it. historyTruncated's
+// replacement, at the literal ref path "refs/myreplace<hex>" (base plus
+// OID, one concatenation — spec 127 bead-1 fix round 5, NEW-G1sub-7: a
+// prior version of this comment doubled the base to
+// "refs/myreplacemyreplace<hex>", caught by direct verification against
+// `git for-each-ref`), which a for-each-ref scan of either
+// "refs/replace/" or "refs/myreplace/" misses). So a genuinely truncating
+// relocated replace ref reported "not truncated" under the old design —
+// the exact fail-open this predicate exists to refuse, reappearing
+// inside the mechanism fix round 2 added to close it. historyTruncated's
 // `--no-replace-objects` differential must catch this regardless of
 // relocation, because that flag disables replacement lookup
 // universally, not by ref-namespace enumeration.
@@ -1895,6 +1906,113 @@ func TestHistoryTruncated_RelocatedReplaceRefStillDetected(t *testing.T) {
 	if outcome != guard.DestructionEvidenceError {
 		t.Errorf("outcome = %s, want DestructionEvidenceError — a relocated replace ref must fail closed exactly like one at the default namespace (NEW-G1sub-1)", outcome)
 	}
+}
+
+// TestHistoryTruncated_CountPreservingSubstitutionCaught is the
+// RED-on-the-round-4-bug pin for spec 127 bead-1 fix round 5
+// (NEW-G1sub-6/NEW-O1g-A/NEW-O2G-1/NEW-O3g-1): a git-replace substitution
+// that keeps the reconstructed ancestor's EXACT parents — git-replace's
+// own documented PRIMARY use case, a content/metadata correction that
+// preserves ancestry by construction — but swaps in a DIFFERENT tree
+// changes neither `rev-list --count` nor the substituted commit's own
+// reported OID (rev-list's %H reports the ORIGINAL commit's hash even
+// through a replacement — verified directly below). The round-4
+// length-only differential answered "not truncated" on exactly this
+// shape, and findAncestorWithTree's scan then ran against a history
+// whose trees were not target's real ones, silently answering
+// DestructionClean on a genuine deletion. This pins the fixed
+// (commit,tree)-sequence differential in historyTruncated instead:
+// reverting it to a bare count comparison must turn this test red.
+func TestHistoryTruncated_CountPreservingSubstitutionCaught(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	controlOutcome, controlEvidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the pre-replace repo: %v", err)
+	}
+	if controlOutcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: pre-replace repo must classify DestructionStaleDeletion (the positive control), got %s", controlOutcome)
+	}
+	anc := controlEvidence.ReconstructedAncestor
+	if anc == "" {
+		t.Fatal("fixture invariant: ReconstructedAncestor must be populated by the positive control")
+	}
+
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	beforeHash := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--format=%H %T", target))
+
+	// Forge a same-parents, different-tree replacement for the
+	// reconstructed ancestor: read its real parents, then commit-tree a
+	// DIFFERENT (empty) tree onto those exact same parents.
+	parentFields := strings.Fields(strings.TrimSpace(neRunGit(t, dir, "rev-list", "--parents", "-n", "1", anc)))
+	var commitTreeArgs []string
+	for _, p := range parentFields[1:] {
+		commitTreeArgs = append(commitTreeArgs, "-p", p)
+	}
+	mktreeCmd := exec.Command("git", "-C", dir, "mktree")
+	mktreeCmd.Stdin = strings.NewReader("")
+	emptyTreeOut, merr := mktreeCmd.Output()
+	if merr != nil {
+		t.Fatalf("mktree: %v", merr)
+	}
+	emptyTree := strings.TrimSpace(string(emptyTreeOut))
+	forgedArgs := append([]string{"commit-tree", emptyTree, "-m", "forged same-parents different-tree replacement"}, commitTreeArgs...)
+	forged := strings.TrimSpace(neRunGit(t, dir, forgedArgs...))
+	neRunGit(t, dir, "replace", anc, forged)
+
+	// Fixture invariant: this replacement must be COUNT-PRESERVING (the
+	// shape the round-4 differential could not see) and must NOT change
+	// what rev-list reports for %H at any position (git-replace
+	// transparently substitutes CONTENT, not the OID used to reach it).
+	after := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	if before != after {
+		t.Fatalf("fixture invariant broken: this replacement must NOT change rev-list --count (before=%s after=%s) — otherwise it does not exercise the count-preserving shape this test pins", before, after)
+	}
+	afterHash := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--format=%H %T", target))
+	beforeSHAs := extractCommitSHAs(beforeHash)
+	afterSHAs := extractCommitSHAs(afterHash)
+	if strings.Join(beforeSHAs, ",") != strings.Join(afterSHAs, ",") {
+		t.Fatalf("fixture invariant broken: the replacement must not change any commit's OID as reported by rev-list (before=%v after=%v) — otherwise this is not the same-OID/different-tree shape the round-4 bug missed", beforeSHAs, afterSHAs)
+	}
+
+	truncated, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("unexpected error from historyTruncated: %v", terr)
+	}
+	if !truncated {
+		t.Fatalf("historyTruncated(%s) = false, want true — a count-preserving tree substitution must be detected (spec 127 bead-1 fix round 5, NEW-G1sub-6/NEW-O1g-A/NEW-O2G-1/NEW-O3g-1's fail-open)", target)
+	}
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected a non-nil error on a count-preserving substitution, got outcome=%s (the exact silent-Clean fail-open fix round 5 closed)", outcome)
+	}
+	if !errors.Is(err, errTruncatedHistory) {
+		t.Errorf("expected the propagated error to wrap errTruncatedHistory, got: %v", err)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError (absence of evidence from a count-preserving substitution must never read as DestructionClean)", outcome)
+	}
+	if evidence.FailedProbe != "snapshot-revert scan" {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
+	}
+}
+
+// extractCommitSHAs pulls the first field (the commit SHA) from each
+// "%H %T" data line rev-list --format produces, skipping its own
+// "commit <sha>" header lines — the same parsing findAncestorWithTree's
+// scan and revListCommitTrees both perform, duplicated here rather than
+// exported, since only this test needs it.
+func extractCommitSHAs(revListFormatOutput string) []string {
+	var shas []string
+	for _, line := range strings.Split(revListFormatOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] == "commit" {
+			continue
+		}
+		shas = append(shas, fields[0])
+	}
+	return shas
 }
 
 // TestEvaluateWorkDestruction_NoMainRefFailsClosedAndIsDocumented is
@@ -2103,8 +2221,21 @@ func TestEvaluateWorkDestruction_MutatesNothing(t *testing.T) {
 // fix round 3->4 (NEW-O1r-A/NEW-O2R-a/NEW-G1sub-1) collapsed both of
 // those into the single differential seam
 // workDestructionHistoryTruncatedFn, bringing this file's own count back
-// to eight (nine with diffNameStatusBucketsFn), and the stated universal
-// in this test's own comment and the code agree.
+// to eight.
+//
+// CORRECTED fix round 5 (NEW-G1sub-9/NEW-O2G-4): the universal above —
+// "every seam THIS FILE FORCES must default to the real production
+// symbol" — was true of the eight workDestruction*Fn seams plus
+// diffNameStatusBucketsFn, but this file also forces mergeBaseFn
+// (declared in neteffect.go, forced at
+// TestEvaluateWorkDestruction_MergeBaseProbeErrorPropagates and again in
+// the table-driven evidence-error test above) without ever pinning it —
+// present since fix round 1 introduced this test, missed when rounds 2
+// and 4 both edited this comment's seam count without checking the pin
+// list against the force list. Pinned below; the count is now eight
+// workDestruction*Fn seams plus diffNameStatusBucketsFn and mergeBaseFn
+// (ten total), and the universal now holds against every seam this file
+// forces, not merely against the ones already named here.
 func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionIsAncestorFn).Pointer() != reflect.ValueOf(IsAncestor).Pointer() {
 		t.Error("workDestructionIsAncestorFn must default to IsAncestor")
@@ -2132,6 +2263,9 @@ func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	}
 	if reflect.ValueOf(diffNameStatusBucketsFn).Pointer() != reflect.ValueOf(diffNameStatusBuckets).Pointer() {
 		t.Error("diffNameStatusBucketsFn must default to diffNameStatusBuckets")
+	}
+	if reflect.ValueOf(mergeBaseFn).Pointer() != reflect.ValueOf(gitMergeBase).Pointer() {
+		t.Error("mergeBaseFn must default to gitMergeBase")
 	}
 }
 

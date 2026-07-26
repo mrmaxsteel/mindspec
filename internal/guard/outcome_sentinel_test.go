@@ -49,6 +49,27 @@ package guard
 // loop. The one escape this still cannot see — an untyped spec whose
 // value merely evaluates to a DestructionOutcome by arithmetic — is
 // unchanged and still named honestly above.
+//
+// Widened a fifth time (spec 127 bead-1 fix round 5, NEW-O2G-3): the
+// rejection loop matched only `vs.Type` whose identifier is literally
+// "DestructionOutcome", so a variant declared through a type ALIAS —
+// `type DOAlias = DestructionOutcome` followed by `const
+// DestructionSixthVariant DOAlias = 99` — escaped, even though that spec
+// IS explicitly typed (unlike the untyped-arithmetic escape named above,
+// which this doc comment already disclaimed honestly). One level of
+// alias resolution closes it: a first pass over the same parsed package
+// collects every top-level `type X = DestructionOutcome` alias name
+// (token.TYPE declarations whose Spec is a *ast.TypeSpec with Assign set
+// — i.e. `=`, not a defined type `type X DestructionOutcome`, which is a
+// distinct type the compiler would not accept a DestructionOutcome value
+// as without a conversion, and is out of scope here) into a set; the
+// rejection loop then matches vs.Type's identifier against that set as
+// well as the literal name. A second-level alias (`type B = A` where A
+// is itself an alias of DestructionOutcome) is NOT resolved — one level
+// closes the shape a real author would plausibly reach for and this
+// walk's own on-disk mutation test targets; chasing arbitrarily deep
+// alias chains would be the same unbounded-generality trade the
+// untyped-arithmetic escape above already declines.
 
 import (
 	"go/ast"
@@ -120,11 +141,35 @@ func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 		t.Fatalf("DestructionOutcomeCount must be the FINAL spec in its const block (a variant appended after it escapes the len(table)==DestructionOutcomeCount discipline every consumer copies); got last spec %q, full block %v", last, names)
 	}
 
+	// NEW-O2G-3 (spec 127 bead-1 fix round 5): collect one level of type
+	// alias — `type X = DestructionOutcome`, Assign set — so the
+	// rejection loop below also catches a variant declared through an
+	// alias, not only the literal type name.
+	aliasNames := map[string]bool{}
+	for _, file := range pkg.Files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || ts.Assign == token.NoPos {
+					continue
+				}
+				if ident, ok := ts.Type.(*ast.Ident); ok && ident.Name == "DestructionOutcome" {
+					aliasNames[ts.Name.Name] = true
+				}
+			}
+		}
+	}
+
 	// NEW-O2-d, widened by NEW-O2R-c: no OTHER const OR var declaration
 	// anywhere in the package's non-test files may explicitly type a spec
-	// DestructionOutcome — that would be a variant declared outside the
-	// pinned block, invisible to both the check above and to every
-	// consumer's len(table)==DestructionOutcomeCount count.
+	// DestructionOutcome (or an alias of it, NEW-O2G-3) — that would be a
+	// variant declared outside the pinned block, invisible to both the
+	// check above and to every consumer's len(table)==DestructionOutcomeCount
+	// count.
 	for _, file := range pkg.Files {
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -137,14 +182,14 @@ func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 					continue
 				}
 				ident, ok := vs.Type.(*ast.Ident)
-				if !ok || ident.Name != "DestructionOutcome" {
+				if !ok || (ident.Name != "DestructionOutcome" && !aliasNames[ident.Name]) {
 					continue
 				}
 				var declared []string
 				for _, n := range vs.Names {
 					declared = append(declared, n.Name)
 				}
-				t.Fatalf("DestructionOutcome variant(s) %v declared OUTSIDE the pinned const block containing DestructionAncestor/DestructionOutcomeCount — this escapes the len(table)==DestructionOutcomeCount discipline every consumer copies", declared)
+				t.Fatalf("DestructionOutcome variant(s) %v declared OUTSIDE the pinned const block containing DestructionAncestor/DestructionOutcomeCount (type %q) — this escapes the len(table)==DestructionOutcomeCount discipline every consumer copies", declared, ident.Name)
 			}
 		}
 	}

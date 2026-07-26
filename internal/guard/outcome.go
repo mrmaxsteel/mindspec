@@ -46,11 +46,20 @@ package guard
 //     certification that the merge preserves work (spec 127 bead-1 fix
 //     round 3->4, NEW-O1r-B): DestructionClean means no destructive class
 //     was DETECTED, and the stale-deletion leg's detection is limited —
-//     it catches a recreation only when the branch's ENTIRE novel diff
-//     against target is A-status (added paths only); any rename, in-
-//     place edit, mode change, type change, or deletion anywhere in that
-//     novel diff — alone or mixed with genuine additions — is a stated,
-//     fixtured miss (see internal/gitutil's package doc comment and
+//     it requires branch's tip tree, with ONLY the paths branch ADDS
+//     relative to target removed, to exactly equal some commit tree in
+//     target's own history (CORRECTED spec 127 bead-1 fix round 5,
+//     NEW-O2G-2/NEW-O3g-2: a prior version of this bullet stated the miss
+//     surface as a rule over EVERY status in the whole novel diff against
+//     target, which this package's own fixture table falsifies — every
+//     detected recreation's novel diff necessarily has a D-status path,
+//     since the revert that defines the class IS that D-status). A
+//     rename/copy, an in-place edit (content or mode-only), or a type
+//     change in the branch's OWN novel work is a stated, fixtured miss,
+//     because that content exists nowhere in target's history and so
+//     survives the strip and matches no candidate ancestor; an M- or
+//     D-status path against target is NOT disqualifying merely by its
+//     status label (see internal/gitutil's package doc comment and
 //     snapshotRevertMatch's doc comment for the general rule, and
 //     workdestruction_test.go's StatedLimit_* rows for the fixtured
 //     instances). A consumer must not skip its own conflict/review
@@ -86,8 +95,11 @@ const (
 	// the branch never authored — a staleness artifact.
 	DestructionStaleDeletion
 	// DestructionClean: an ordinary merge; no destructive class was
-	// DETECTED — not a certification that none applies (see the package
-	// doc comment above, spec 127 bead-1 fix round 3->4, NEW-O1r-B).
+	// DETECTED — not a certification that none applies (see the
+	// DestructionOutcome doc comment above, spec 127 bead-1 fix round
+	// 3->4, NEW-O1r-B; corrected fix round 5, NEW-O3g-3 — package guard
+	// has no package doc comment in any file, so the prior wording
+	// pointed nowhere).
 	DestructionClean
 	// DestructionEvidenceError: the predicate could not be evaluated.
 	DestructionEvidenceError
