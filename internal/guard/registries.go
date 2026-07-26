@@ -517,6 +517,86 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "idrender-rendered: same shape as ClaimFailure above — `fmt.Sprintf(\"mindspec next --spec %s   (re-run detects the in-progress bead and auto-recovers the worktree)\", idrender.Spec(specID))`.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
+
+	// The ten entries below are spec 127 bead 3's own new adopt surface
+	// (internal/approve/adopt.go): every recovery/message line is a
+	// non-destructive `mindspec`/`git diff`/`git log`/`bd list`-led
+	// Sprintf whose ONLY destructive-floor line — the stale-branch
+	// deletion hint — is separately constructor-derived (provenance-
+	// exempt, never registered here; see adoptStaleBranchPresentRefusal's
+	// own comment for why its error path is a checked-and-returned
+	// shape rather than a reassignment). All ten share the same
+	// obligation as the "mindspec ..." template family above.
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "AdoptSpec",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the --reason-required refusal's message body substitutes idrender.Spec(specID), and specID is itself validate.SpecID-gated at this function's own entry before any Sprintf here runs.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptCurrentBranchPresentRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered/disclosed-residual: `fmt.Sprintf(\"spec %s's branch %s still exists and is current...\", idrender.Spec(specID), termsafe.Escape(specBranch))` — specBranch is a waist-composed `spec/<id>` branch name (scan (a)'s composition-helper allowlist covers its construction), termsafe-escaped for display.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptStaleBranchPresentRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered/disclosed-residual: the message body substitutes idrender.Spec(specID), termsafe.Escape(specBranch), and the DestructionOutcome's own String() (a small closed enum with no user input) — same shape as adoptCurrentBranchPresentRefusal above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptStaleBranchPresentRefusal",
+		Detail:     "arg3:unprovable",
+		Rationale:  "the constructor-derived deletion line's error-refusal FALLBACK path — `fmt.Sprintf(\"could not construct the stale-branch deletion recovery for %s: %v\", termsafe.Escape(specBranch), ctorErr)` — reached only when NewDestructiveCommand itself refuses (git branch -D is on the reviewed floor, so unreachable in practice); the SUCCESS path's deletion line is separately provenance-exempt, never registered.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptOrphanPresentRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the composite-incident interim refusal's message body substitutes idrender.Spec(specID), idrender.Bead(beadID), and termsafe.Escape(beadBranch) — beadBranch is a waist-composed `bead/<id>` branch name (scan (a) covers its composition).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptOrphanPresentRefusal",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: the inspection recovery line, `fmt.Sprintf(\"git diff main %s   (inspect %s's unlanded work...)\", beadBranch, idrender.Bead(beadID))` — same beadBranch/idrender.Bead shapes as arg1 above; `git diff` matches no floor family regardless.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptEvidenceErrorRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the fail-closed retryable refusal's message body substitutes idrender.Spec(specID) plus a caller-supplied, already-rendered detail string (every caller of this shared renderer idrender/termsafe-escapes its own dynamic content before composing detail).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptEvidenceErrorRefusal",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: the retry-named-first recovery line substitutes idrender.Spec(specID) — same guarantee as arg1 above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptRefusalFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the lattice-refusal message body, `fmt.Sprintf(\"%s: %s\", r.Marker, r.Detail)` — r.Marker is one of four pinned literal constants (adoptMarker*) and r.Detail is built by evaluateAdoptLattice from idrender/termsafe-escaped fragments.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptRefusalFailure",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: covers the shared attestLine (`mindspec impl adopt %s --reason \"<why>\" --attest-unverified ...`, substituting idrender.Spec(specID) and the pinned adoptAttestTrigger string) and the per-class inspection lines (`git log --first-parent --merges main`, a literal with no substitution; `bd list --parent <epic-id> --status=%s`, substituting a fixed literal-joined status list) — three call sites in this function collapse to this one key.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
 }
 
 // mindspecVerbTemplateObligation is the shared Obligation text for

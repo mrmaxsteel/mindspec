@@ -138,6 +138,25 @@ func TestRootHelpListsReattest(t *testing.T) {
 	}
 }
 
+// TestImplHelpListsAdopt pins spec 127 R1's verb on the help surface:
+// `mindspec impl --help` lists `adopt` as a subcommand (it is an
+// EXPLICIT operator-invoked recovery for the #218 cluster, so like
+// spec 125's reattest it must be discoverable, never hidden).
+func TestImplHelpListsAdopt(t *testing.T) {
+	bin := buildMindspecBinary(t)
+
+	cmd := exec.Command(bin, "impl", "--help")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("mindspec impl --help: %v\nstderr=%q", err, stderr.String())
+	}
+	if !containsToken(stdout.String(), "adopt") {
+		t.Errorf("mindspec impl --help must list the adopt verb (spec 127 R1)\n--- output ---\n%s\n--- end ---", stdout.String())
+	}
+}
+
 // containsToken returns true if s contains tok as a word-ish token
 // (surrounded by non-alphanumeric / start-or-end). Without this guard
 // "service" would falsely match "serve". Both inputs are lowercased

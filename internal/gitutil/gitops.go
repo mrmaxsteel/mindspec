@@ -101,6 +101,21 @@ func BranchExists(name string) bool {
 	return cmd.Run() == nil
 }
 
+// BranchExistsIn is the workdir-taking variant of BranchExists (spec 127
+// R1b): BranchExists checks the CALLING PROCESS's cwd (no `-C`), which is
+// unusable for a caller — the adopt surface's branch-present and
+// bead-branch-coverage checks — that must resolve branch existence AT AN
+// EXPLICIT ROOT without relying on the process having already chdir'd
+// there (the same cwd-bound problem FetchRemoteBranch has, and the same
+// fix: an explicit `-C workdir`).
+func BranchExistsIn(workdir, name string) bool {
+	if rejectOptionLike(name) != nil {
+		return false
+	}
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "refs/heads/"+name)...)
+	return cmd.Run() == nil
+}
+
 // CreateBranch creates a new branch from the given base.
 func CreateBranch(name, from string) error {
 	if err := rejectOptionLike(name); err != nil {
@@ -221,6 +236,24 @@ func HasRemote() bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
+// RemoteExistsIn reports whether a remote named name is configured in
+// workdir (`git config --get remote.<name>.url`), without attempting any
+// network I/O. Spec 127 R1b(i) needs this distinction: a repository with
+// NO remote configured at all (an ordinary local-only workspace) is a
+// different evidentiary state from a CONFIGURED remote that fails to
+// fetch (offline, auth failure) or lacks the wanted branch — the latter
+// two are R1b(i)'s "unreachable remote" / "absent remote branch" error
+// leg; the former means source (i) simply does not exist as a source,
+// exactly like a bead with no surviving branch. Same SEC-5
+// RejectOptionLike hygiene as every other boundary helper in this file.
+func RemoteExistsIn(workdir, name string) bool {
+	if rejectOptionLike(name) != nil {
+		return false
+	}
+	cmd := execCommand("git", gitArgs(workdir, "config", "--get", "remote."+name+".url")...)
+	return cmd.Run() == nil
+}
+
 // FetchRemote runs `git fetch <remote>` from the current working directory so
 // the remote-tracking refs (origin/*) are current before a branch is created
 // from them (Spec 101 R4). A non-zero exit (offline, auth failure, missing
@@ -258,6 +291,32 @@ func FetchRemoteBranch(remote, branch string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("fetching %s %s: %s", remote, branch, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// FetchRemoteBranchIn is the workdir-taking variant of FetchRemoteBranch
+// (spec 127 R1b(i)): FetchRemoteBranch runs from the CURRENT WORKING
+// DIRECTORY by its own doc comment above, which is unusable for a caller
+// that must operate at an explicit root without chdir'ing the process —
+// the adopt surface's fetch-route corroboration (internal/approve),
+// reached only through internal/lifecycle/gitquery.go's ADR-0030 boundary
+// wrapper (this package's own boundary bans a direct gitutil import from
+// approve). Same GIT_TERMINAL_PROMPT=0 fast-fail (noPrompt) and SEC-5
+// RejectOptionLike argv hygiene as FetchRemoteBranch; the only difference
+// is the explicit `-C workdir` (gitArgs), matching every other
+// workdir-taking helper in this file (IsAncestor, NetEffectLanded, ...).
+func FetchRemoteBranchIn(workdir, remote, branch string) error {
+	if err := rejectOptionLike(remote); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(branch); err != nil {
+		return err
+	}
+	cmd := noPrompt(execCommand("git", gitArgs(workdir, "fetch", remote, branch)...))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("fetching %s %s in %s: %s", remote, branch, workdir, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

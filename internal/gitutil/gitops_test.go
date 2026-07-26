@@ -1579,6 +1579,45 @@ func TestFetchRemoteBranch_RunsNarrowFetch(t *testing.T) {
 	}
 }
 
+// TestFetchRemoteBranchIn_RunsNarrowFetchAtWorkdir pins spec 127 R1b(i)'s
+// workdir-taking fetch variant: same narrow `fetch <remote> <branch>` as
+// FetchRemoteBranch, but with an explicit `-C workdir` prefix (gitArgs) so
+// the caller never depends on the process's current working directory —
+// the adopt surface's own requirement, since internal/approve must never
+// chdir the whole process to corroborate one spec's evidence.
+func TestFetchRemoteBranchIn_RunsNarrowFetchAtWorkdir(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := FetchRemoteBranchIn("/tmp/some-root", "origin", "spec/127-test"); err != nil {
+		t.Fatalf("FetchRemoteBranchIn: unexpected error: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/some-root", "fetch", "origin", "spec/127-test")
+
+	swapExec(t, "fatal: couldn't find remote ref spec/127-test", 1)
+	if err := FetchRemoteBranchIn("/tmp/some-root", "origin", "spec/127-test"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestFetchRemoteBranchIn_RejectsOptionLikeOperands mirrors the SEC-5
+// argv-hygiene fixture every other gitutil boundary helper carries: a
+// remote or branch operand beginning with "-" must never reach git argv
+// unrejected (it would be reinterpreted as an option).
+func TestFetchRemoteBranchIn_RejectsOptionLikeOperands(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if err := FetchRemoteBranchIn("/tmp/some-root", "--upload-pack=x", "main"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected rejection of an option-like remote operand")
+	}
+	if err := FetchRemoteBranchIn("/tmp/some-root", "origin", "-x"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected rejection of an option-like branch operand")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("expected no git invocation on a rejected operand, got %d", len(*calls))
+	}
+}
+
 // TestRemoteHeadSHA_ParsesLsRemote pins bug wu7t's three-way remote-state
 // probe: a present branch yields its SHA (first ls-remote field), an ABSENT
 // branch yields "" with a NIL error (empty output, zero exit), and a git
@@ -1815,4 +1854,77 @@ func TestDefaultBranch_SetsNoPromptEnv(t *testing.T) {
 	assertNoPromptEnv(t, (*calls)[0])
 	assertArgs(t, (*calls)[1].args, "remote", "show", "origin")
 	assertNoPromptEnv(t, (*calls)[1])
+}
+
+// TestBranchExistsIn_RunsAtExplicitWorkdir pins spec 127 R1b's
+// workdir-taking existence check: same `rev-parse --verify refs/heads/`
+// probe as BranchExists, but with an explicit `-C workdir` prefix so a
+// caller never depends on the process's current working directory.
+func TestBranchExistsIn_RunsAtExplicitWorkdir(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if !BranchExistsIn("/tmp/some-root", "bead/x.1") {
+		t.Fatal("BranchExistsIn: expected true on a zero-exit rev-parse")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/some-root", "rev-parse", "--verify", "refs/heads/bead/x.1")
+
+	swapExec(t, "", 1)
+	if BranchExistsIn("/tmp/some-root", "bead/x.1") {
+		t.Fatal("BranchExistsIn: expected false on a non-zero exit")
+	}
+}
+
+// TestBranchExistsIn_RejectsOptionLikeName mirrors BranchExists' own
+// SEC-5 hygiene: a `-`-prefixed name reads as false without ever
+// reaching git argv.
+func TestBranchExistsIn_RejectsOptionLikeName(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if BranchExistsIn("/tmp/some-root", "--upload-pack=x") {
+		t.Fatal("BranchExistsIn: expected false on an option-like name")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("expected no git invocation on a rejected name, got %d", len(*calls))
+	}
+}
+
+// TestBranchExistsIn_RealGitIsWorkdirScoped is the real-git regression
+// this helper exists to fix: BranchExists (no -C) answers for the
+// CALLING PROCESS's cwd, which is always this test binary's package
+// directory — never a temp fixture repo. BranchExistsIn must answer
+// correctly for an explicit OTHER directory without any chdir.
+func TestBranchExistsIn_RealGitIsWorkdirScoped(t *testing.T) {
+	dir := initGitRepo(t)
+	restore := swapRealExecCommand(t)
+	defer restore()
+
+	if out, err := exec.Command("git", "-C", dir, "branch", "bead/x.1").CombinedOutput(); err != nil {
+		t.Fatalf("git branch bead/x.1: %v\n%s", err, out)
+	}
+
+	if !BranchExistsIn(dir, "bead/x.1") {
+		t.Error("BranchExistsIn(dir, ...) must find a branch that genuinely exists in dir")
+	}
+	if BranchExistsIn(dir, "bead/does-not-exist") {
+		t.Error("BranchExistsIn(dir, ...) must not find a branch that does not exist in dir")
+	}
+	// The CALLING PROCESS's cwd (this test binary's package dir, part of
+	// the mindspec repo itself) certainly does not have a "bead/x.1"
+	// branch — proving BranchExistsIn is genuinely workdir-scoped, not
+	// silently answering for cwd like BranchExists does.
+	if BranchExists("bead/x.1") {
+		t.Skip("this repo unexpectedly has a bead/x.1 branch; the workdir-scoping contrast this test wants is not demonstrable here")
+	}
+}
+
+// swapRealExecCommand restores execCommand to the real exec.Command for
+// the duration of a test that needs genuine subprocess behavior (real
+// git), overriding whatever swapExec/swapExecFunc left in place from an
+// earlier test in the same process (execCommand is a package-level var).
+func swapRealExecCommand(t *testing.T) func() {
+	t.Helper()
+	orig := execCommand
+	execCommand = exec.Command
+	return func() { execCommand = orig }
 }

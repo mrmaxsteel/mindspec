@@ -486,6 +486,12 @@ func TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor(t *testing.T) {
 // of these Sprintf calls run — same single-token charset guarantee,
 // no render step.
 var mindspecVerbTemplateSites = []struct{ file, fn string }{
+	{"internal/approve/adopt.go", "AdoptSpec"},
+	{"internal/approve/adopt.go", "adoptCurrentBranchPresentRefusal"},
+	{"internal/approve/adopt.go", "adoptStaleBranchPresentRefusal"},
+	{"internal/approve/adopt.go", "adoptOrphanPresentRefusal"},
+	{"internal/approve/adopt.go", "adoptEvidenceErrorRefusal"},
+	{"internal/approve/adopt.go", "adoptRefusalFailure"},
 	{"cmd/mindspec/bead_clarify.go", "beadClarifyCmd"},
 	{"cmd/mindspec/panel.go", "panelCreateCmd"},
 	{"cmd/mindspec/panel.go", "findPanelRegistration"},
@@ -699,6 +705,15 @@ func TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor(t *testing.T) {
 	// mechanism deliberately DOES match would contradict that entry.
 	knownAllowlistTemplates := map[string]bool{
 		"bd delete %s --force": true,
+		// adopt.go's adoptStaleBranchPresentRefusal feeds this exact
+		// template to guard.NewDestructiveCommand — it is SUPPOSED to
+		// match FamilyGitBranchDeleteForce (that is the whole point of
+		// the constructor call); the resulting DestructiveCommand is
+		// provenance-exempt (R5(b)), never registered here. This
+		// obligation covers only the function's OTHER, genuinely opaque
+		// templates (arg1/arg3's fallback), same scoping as the
+		// bd-delete exclusion above.
+		"git branch -D %s": true,
 	}
 	totalTemplates := 0
 	for _, site := range mindspecVerbTemplateSites {
