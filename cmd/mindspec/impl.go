@@ -35,11 +35,83 @@ This is the final human gate in the spec lifecycle.`,
 	RunE: approveImplRunE,
 }
 
+// implAdoptCmd is spec 127 R1's audited, evidence-gated, MERGE-FREE
+// terminal transition for a review-state spec whose content already
+// reached main by another route (GH #218's cluster). A sibling verb to
+// `approve` (not a flag on it — R1(e)'s only-direct-call-site
+// discipline is cleanest with its own leaf; a merge-free terminal
+// transition must never share `approve`'s leaf with the merging one).
+var implAdoptCmd = &cobra.Command{
+	Use:   "adopt <spec-id>",
+	Short: "Adopt a review-state spec whose content already reached main outside the lifecycle (audited, merge-free)",
+	Long: `For the case where a spec's implementation reached main via an external
+route (e.g. a GitHub PR, with the spec branch deleted or superseded):
+adopt closes the epic, writes the finalize-export artifact, and records
+an audit marker — WITHOUT ever merging the spec branch into main. It
+requires positive landed evidence (a corroborated remote spec-branch ref,
+or the epic's surviving bead branches, each confirmed landed) before
+writing a VERIFIED marker; absent, negative, or erroring evidence
+refuses unless --attest-unverified is also given, which proceeds anyway
+and records that landing was NOT verified.
+
+--reason is required on every invocation.`,
+	Args: cobra.ExactArgs(1),
+	RunE: adoptSpecRunE,
+}
+
 func init() {
 	implApproveCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
 	implApproveCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on spec epic metadata)")
 	implApproveCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on spec epic metadata)")
 	implCmd.AddCommand(implApproveCmd)
+
+	implAdoptCmd.Flags().String("reason", "", "Required justification for adopting this spec (recorded in the audit marker)")
+	implAdoptCmd.Flags().Bool("attest-unverified", false, "Proceed without verified landed evidence, recording that landing was NOT verified and was operator-attested")
+	implCmd.AddCommand(implAdoptCmd)
+}
+
+// adoptSpecRunE is the only DIRECT production call site of
+// approve.AdoptSpec (R1(e), amended at bead-3 fix round 2 — pinned by
+// cmd/mindspec/impl_adopt_test.go's call-site enumeration, a
+// CallExpr/import-path-identity AST scan). Reachability through a
+// function value, method value, or wrapper-satisfied interface is not
+// mechanically detected by that scan and is review-caught.
+func adoptSpecRunE(cmd *cobra.Command, args []string) error {
+	specID := args[0]
+	// R3 explicit-ingress early gate (ADR-0042), same discipline as
+	// approveImplRunE above: a hostile args[0] refuses HERE, before any
+	// composition.
+	if err := idvalidate.SpecID(specID); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("%s is not a valid spec ID: %v", termsafe.Escape(specID), err),
+			"mindspec spec list   (pick a listed spec ID and re-run)",
+		)
+	}
+
+	root, err := findRoot()
+	if err != nil {
+		return err
+	}
+
+	reason, _ := cmd.Flags().GetString("reason")
+	attest, _ := cmd.Flags().GetBool("attest-unverified")
+
+	exec := newExecutor(root)
+	result, adoptErr := approve.AdoptSpec(root, specID, exec, approve.AdoptOpts{
+		Reason:           reason,
+		AttestUnverified: attest,
+	})
+	if adoptErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", adoptErr)
+		os.Exit(1)
+	}
+
+	if result.Verified {
+		fmt.Fprintf(os.Stdout, "Spec %s adopted (landed evidence VERIFIED). Epic %s closed, mode: idle.\n", result.SpecID, result.EpicID)
+	} else {
+		fmt.Fprintf(os.Stdout, "Spec %s adopted via attestation (landing was NOT verified; trigger=%s). Epic %s closed, mode: idle.\n", result.SpecID, result.Trigger, result.EpicID)
+	}
+	return nil
 }
 
 // approveImplRunE is shared between `impl approve` and `approve impl`.

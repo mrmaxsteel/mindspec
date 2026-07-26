@@ -94,6 +94,75 @@ func TestEvaluateWorkDestruction_ExportedFuncCallsThroughTheSeam(t *testing.T) {
 	}
 }
 
+// TestFetchRemoteBranchIn_WrapperPinnedToImplementation mirrors
+// TestEvaluateWorkDestruction_WrapperPinnedToImplementation above for
+// spec 127 bead 3's second wrapper: fetchRemoteBranchInFn must be
+// pointer-identical to gitutil.FetchRemoteBranchIn.
+func TestFetchRemoteBranchIn_WrapperPinnedToImplementation(t *testing.T) {
+	got := reflect.ValueOf(fetchRemoteBranchInFn).Pointer()
+	want := reflect.ValueOf(gitutil.FetchRemoteBranchIn).Pointer()
+	if got != want {
+		t.Fatalf("lifecycle.fetchRemoteBranchInFn must be pointer-identical to gitutil.FetchRemoteBranchIn (no-second-rewirable-seam); got %v, want %v", got, want)
+	}
+}
+
+// TestFetchRemoteBranchIn_WrapperPinFailsIfRepointed is the falsifiability
+// check for the pin above — see
+// TestEvaluateWorkDestruction_WrapperPinFailsIfRepointed's identical
+// rationale.
+func TestFetchRemoteBranchIn_WrapperPinFailsIfRepointed(t *testing.T) {
+	orig := fetchRemoteBranchInFn
+	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
+
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
+		return gitutil.FetchRemoteBranchIn(workdir, remote, branch)
+	}
+
+	got := reflect.ValueOf(fetchRemoteBranchInFn).Pointer()
+	want := reflect.ValueOf(gitutil.FetchRemoteBranchIn).Pointer()
+	if got == want {
+		t.Fatal("re-pointing the seam to a distinct (even behaviorally-identical) function must break the pointer-equality pin, but it still compared equal")
+	}
+}
+
+// TestFetchRemoteBranchIn_ExportedFuncCallsThroughTheSeam proves the
+// exported func genuinely delegates to fetchRemoteBranchInFn rather than
+// being a second, independent implementation.
+func TestFetchRemoteBranchIn_ExportedFuncCallsThroughTheSeam(t *testing.T) {
+	orig := fetchRemoteBranchInFn
+	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
+
+	sentinel := errors.New("sentinel-from-stubbed-fetch-seam")
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
+		return "", sentinel
+	}
+
+	if _, err := FetchRemoteBranchIn("workdir", "origin", "branch"); err != sentinel {
+		t.Errorf("FetchRemoteBranchIn must call through the seam, not bypass it; got %v, want %v", err, sentinel)
+	}
+}
+
+// TestFetchRemoteBranchIn_ReturnsFetchedSHAThroughTheSeam is S1-1's
+// wrapper-level proof that the SHA FetchRemoteBranchIn returns is
+// genuinely propagated (not dropped) by the exported wrapper.
+func TestFetchRemoteBranchIn_ReturnsFetchedSHAThroughTheSeam(t *testing.T) {
+	orig := fetchRemoteBranchInFn
+	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
+
+	const sentinelSHA = "deadbeefcafef00dfacade0123456789abcdef0"
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
+		return sentinelSHA, nil
+	}
+
+	sha, err := FetchRemoteBranchIn("workdir", "origin", "branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha != sentinelSHA {
+		t.Errorf("FetchRemoteBranchIn sha = %q, want %q (from the stubbed seam)", sha, sentinelSHA)
+	}
+}
+
 // repoRoot returns the absolute path to the mindspec repo root by walking
 // up from this test's runtime working directory (which `go test` sets to
 // the package directory) until go.mod is found — needed below as `go

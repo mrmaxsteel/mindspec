@@ -919,8 +919,12 @@ command); the R2-derived form arrives with bead 4 (R1g, declared).
    aggregate (F-r5-4).
 4. `cmd/mindspec/impl.go`: register `adopt <spec-id>` beside
    `approve <id>` with `--reason`/`--attest-unverified`;
-   `help_golden_test.go` updated; R1's call-site enumeration test
-   (the adopt entrypoint's only caller is its registered handler);
+   `help_golden_test.go` updated; R1(e)'s call-site enumeration test
+   (the adopt entrypoint's only *direct* call site — a `CallExpr`
+   resolving by import-path identity to the imported selector — is its
+   registered handler; reachability through a function value, method
+   value, or wrapper-satisfied interface is not mechanically detected
+   and is review-caught, per R1(e)'s bead-3-fix-round-2 amendment);
    `impl_adopt_test.go` leaf-identity registration/flag checks.
 5. Tests: **AC-1** happy path (bare-local-origin remote at the landed
    tip, corroboration asserted; epic-coverage asserted; audit marker

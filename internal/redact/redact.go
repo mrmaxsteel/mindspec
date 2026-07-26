@@ -148,6 +148,7 @@ var CommandTokens = map[string]struct{}{
 var SubcommandTokens = map[string]struct{}{
 	"":                 {},
 	"add":              {},
+	"adopt":            {}, // impl adopt (spec 127 R1: audited, merge-free terminal transition)
 	"adr":              {},
 	"append":           {}, // panel disposition append (spec 117 Bead 2 R6(b) transactional write op)
 	"approve":          {},
