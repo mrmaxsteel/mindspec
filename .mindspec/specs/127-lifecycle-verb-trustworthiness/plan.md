@@ -839,9 +839,15 @@ exactly what they can support.
 6. Bootstrap manifests + fixtures (G-r5-4, H-r6-5): committed sorted
    seed manifests (input SHA `09f62bd9`, scanner revision, generation
    command in header) for all three seeded artifacts; fixtures (α)
-   manifest ≡ Background-derived expected enumeration (at quoted-string
-   grain for the eight live exemption entries; command-family grain for
-   the four seed-only block entries per J-r7-1's honest scope), (β)
+   manifest reconciled against the Background-derived expected
+   enumeration plus its one named, count-pinned widening — NOT exact
+   equality (bead-2 rework round 3/4 narrowing, RULING 4 then RULING 3:
+   this reconciliation catches accidental drift against the named
+   expectation set, not a deliberate coordinated insertion, which is
+   review-caught rather than machine-prevented) — at quoted-string
+   grain for the eight Background-cited live exemption entries plus the
+   two named-widening entries (ten live total); command-family grain
+   for the four seed-only block entries per J-r7-1's honest scope), (β)
    registry ≡ manifest − named bead-exit records, (γ) classifier
    re-matches every entry's quoted line.
 7. ADR-0035 amendment: finalize the PRE-DRAFT (marker removed) +

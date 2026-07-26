@@ -299,8 +299,15 @@ var globalOptionStandalone = map[string]bool{
 // out not to match any family (O1-confirm2-2: those interior tokens,
 // already split OUT of the quoted span by tokenize's own quote-
 // oblivious pass, must never be individually re-examined as fresh
-// candidates by the outer scan). Returns t.len() as the index if the
-// stream runs out first (no subcommand present — not a match).
+// candidates by the outer scan) — and whether the returned index is
+// UNRESOLVED (spec 127 bead-2 rework round 4, RULING 2/G1-confirm3-1):
+// an unbalanced quote gives no sound boundary for the operand at all,
+// so the token skipGlobalOptions would otherwise stop on is not a
+// trustworthy subcommand candidate either way. When unresolved is
+// true, the returned index must NOT be read as a subcommand position
+// by matchGit — see consumeGlobalOptionOperand's doc comment below.
+// Returns t.len() as the index if the stream runs out first (no
+// subcommand present — not a match).
 //
 // Every globalOptionsWithOperand entry's operand is consumed via
 // consumeGlobalOptionOperand (below) — NOT a plain "next token"
@@ -322,7 +329,7 @@ var globalOptionStandalone = map[string]bool{
 // replaced). The fix that survives both directions scopes quote-
 // awareness to exactly the genuinely-shell positions in
 // globalOptionsWithOperand instead of the whole tokenizer.
-func skipGlobalOptions(raw string, t tokStream) (int, bool) {
+func skipGlobalOptions(raw string, t tokStream) (int, bool, bool) {
 	i := 1 // t.tok(0) == "git"
 	quotedSpanConsumed := false
 	for i < t.len() {
@@ -345,8 +352,11 @@ func skipGlobalOptions(raw string, t tokStream) (int, bool) {
 				// unchanged for both shapes: it only needs the current
 				// token's own end position, which consumeGlobalOptionOperand
 				// re-derives from t.starts[i] regardless.
-				var quoted bool
-				i, quoted = consumeGlobalOptionOperand(raw, t, i)
+				var quoted, unresolved bool
+				i, quoted, unresolved = consumeGlobalOptionOperand(raw, t, i)
+				if unresolved {
+					return i, false, true
+				}
 				quotedSpanConsumed = quotedSpanConsumed || quoted
 				matched = true
 				break
@@ -361,54 +371,75 @@ func skipGlobalOptions(raw string, t tokStream) (int, bool) {
 			}
 		}
 		if !matched {
-			return i, quotedSpanConsumed
+			return i, quotedSpanConsumed, false
 		}
 	}
-	return i, quotedSpanConsumed
+	return i, quotedSpanConsumed, false
 }
 
 // consumeGlobalOptionOperand returns the token index right past
-// globalOptionsWithOperand flag t.tok(i)'s operand, plus whether that
+// globalOptionsWithOperand flag t.tok(i)'s operand, whether that
 // operand was consumed as a MULTI-TOKEN quoted span (as opposed to a
-// single unquoted token). It re-examines the ORIGINAL text right after
-// the flag's own span for a quote character tokenize's general pass
-// does not treat specially:
+// single unquoted token), and whether the operand's boundary is
+// UNRESOLVED. It re-examines the ORIGINAL text right after the flag's
+// own span for a quote character tokenize's general pass does not
+// treat specially:
 //
 //   - no quote there (the ordinary case, `git -C ../wt reset --hard`,
 //     this repo's own house style, or a fused `--git-dir=` flag whose
 //     token already ended mid-word): the operand is exactly the next
-//     token, so this returns (i+2, false).
+//     token, so this returns (i+2, false, false).
 //   - a quote there, and it BALANCES (a matching close found before
 //     end of text — a backslash immediately before the SAME quote
 //     character escapes it, staying inside the span; a DIFFERENT quote
 //     character nested inside is literal content, not a new span):
 //     the operand is everything between the quotes. This returns
-//     (j, true), where j is the index of the first EXISTING token
-//     (from tokenize's own separate, quote-oblivious pass) whose start
-//     offset is at or past the closing quote — i.e., every token
+//     (j, true, false), where j is the index of the first EXISTING
+//     token (from tokenize's own separate, quote-oblivious pass) whose
+//     start offset is at or past the closing quote — i.e., every token
 //     tokenize already split OUT of the quoted span's interior is
 //     skipped over as a block, never individually re-examined as a
 //     candidate subcommand or flag by skipGlobalOptions' own caller.
-//   - a quote there, and it NEVER closes before end of text (spec 127
-//     bead-2 rework round 3, RULING 3/S1-confirm2-new-1): round 2
-//     swallowed the remainder as the operand, reasoning that nothing
-//     past a stray quote could then be misread as a fresh subcommand —
-//     S1 proved that reasoning backward. A hostile author is in this
-//     spec's threat model, and a swallow-to-end is an EVASION (it
-//     hides whatever REAL content follows the malformed quote, e.g. a
-//     genuine `git reset --hard` sitting in plain text right after
-//     it), not an honest miss. This falls back to the SAME single-
-//     next-token consumption the unquoted case uses — (i+2, false) —
-//     so scanning resumes normally afterward: fail toward matching,
-//     not toward swallowing.
-func consumeGlobalOptionOperand(raw string, t tokStream, i int) (int, bool) {
+//   - a quote there, and it NEVER closes before end of text: this
+//     boundary is UNRESOLVED, returned as (i+1, false, true) — the
+//     index right past the FLAG ITSELF ONLY, with nothing beyond it
+//     consumed as an operand.
+//
+// Spec 127 bead-2 rework round 3 (RULING 3/S1-confirm2-new-1) first
+// tried falling back to the ordinary single-next-token consumption
+// here, reasoning that a swallow-to-end-of-text (round 2's original
+// design) was the one forbidden direction because it could hide a
+// genuine destructive command sitting in plain text right after the
+// malformed quote. Round 4 (RULING 2/G1-confirm3-1) found that
+// "reasoning" was ALSO wrong, empirically, in the other direction:
+// `Documentation calls git -C "configuration reset behavior benign.`
+// — an honest sentence with a lone stray quote and the word "reset" —
+// tokenizes to the exact same shape as the genuinely-destructive fixture
+// this fallback was built to catch (`git -C "innocent\" reset --hard`):
+// flag, one bare word displaced by the broken quote, then "reset". The
+// single-token fallback cannot tell these apart, because it isn't
+// looking at anything that differs between them — there IS no signal
+// left, once the quote fails to close, that distinguishes "the next
+// word is real prose" from "the next word is the true subcommand".
+// Promoting it either always-match or always-swallow is a guess in one
+// direction dressed as a principle. The only honest answer is that an
+// unbalanced quote's operand boundary is UNRESOLVED: this returns i+1
+// (skipping only the flag itself) with unresolved=true, and the caller
+// (skipGlobalOptions/matchGit) must treat that as "no subcommand
+// resolved" rather than reading t.tok(i+1) — or any later token — as
+// one. This is a deliberate, acknowledged miss on the genuinely-
+// destructive shape (a real `reset --hard` sitting right after a
+// malformed quote is not caught by THIS invocation), traded for never
+// manufacturing a false refusal on honest prose containing a stray
+// quote — the one direction this scan's precision contract forbids.
+func consumeGlobalOptionOperand(raw string, t tokStream, i int) (int, bool, bool) {
 	flagEnd := t.starts[i] + len(t.tok(i))
 	pos := flagEnd
 	for pos < len(raw) && (raw[pos] == ' ' || raw[pos] == '\t') {
 		pos++
 	}
 	if pos >= len(raw) || !isQuoteByte(raw[pos]) {
-		return i + 2, false // unquoted: exactly the next token
+		return i + 2, false, false // unquoted: exactly the next token
 	}
 	quote := raw[pos]
 	pos++ // skip opening quote
@@ -427,9 +458,9 @@ func consumeGlobalOptionOperand(raw string, t tokStream, i int) (int, bool) {
 		pos++
 	}
 	if !closed {
-		// Unbalanced: fail toward matching, not toward swallowing (see
+		// Unbalanced: unresolved, not a guess in either direction (see
 		// this function's own doc comment above).
-		return i + 2, false
+		return i + 1, false, true
 	}
 	// pos is now just past the consumed quoted span. Find the first
 	// token whose own span starts at or after pos.
@@ -437,7 +468,7 @@ func consumeGlobalOptionOperand(raw string, t tokStream, i int) (int, bool) {
 	for j < t.len() && t.starts[j] < pos {
 		j++
 	}
-	return j, true
+	return j, true, false
 }
 
 // clusterHasFlag reports whether tok is either the exact long flag, or
@@ -518,11 +549,28 @@ func findArg(rest tokStream, pred func(string) bool) int {
 // when no quoted span was involved (the ordinary single-step scan,
 // unchanged), or the full distance through the quoted span otherwise —
 // rather than a bare 0.
+//
+// When skipGlobalOptions reports UNRESOLVED (spec 127 bead-2 rework
+// round 4, RULING 2/G1-confirm3-1: an unbalanced quote left no sound
+// operand boundary), this returns ok=false immediately WITHOUT reading
+// t.tok(subIdx) at all — reading it would be exactly the promotion
+// this ruling forbids, since the token sitting there is, by
+// construction, indistinguishable between "the true subcommand" and
+// "the next word of otherwise-honest prose". minSkip stops right past
+// the flag itself (not the whole rest of the text, and not one gambled
+// token further), so the outer scan resumes its ordinary one-token-at-
+// a-time walk from there — a later, genuinely distinct `git`/`bd`/`rm`
+// invocation is still found normally; the tokens displaced by the
+// malformed quote are simply never treated as a subcommand candidate,
+// in either direction.
 func matchGit(raw string, t tokStream) (DestructiveFamily, int, bool) {
-	subIdx, quotedSpanConsumed := skipGlobalOptions(raw, t)
+	subIdx, quotedSpanConsumed, unresolved := skipGlobalOptions(raw, t)
 	minSkip := 1
 	if quotedSpanConsumed {
 		minSkip = subIdx
+	}
+	if unresolved {
+		return "", subIdx, false
 	}
 	if subIdx >= t.len() {
 		return "", minSkip, false

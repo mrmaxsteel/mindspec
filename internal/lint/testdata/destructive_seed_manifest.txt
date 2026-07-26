@@ -3,8 +3,8 @@
 #
 # input_sha: 09f62bd97b28bae7b171054066117cb19a33874d (main, this spec's
 #   fork base — immutable, and prior to every bead)
-# scanner_revision: spec-127-bead-2-rework-round-2 (internal/lint/destructive_guidance_test.go,
-#   internal/guard/classifier.go, as landed by bead 2's SECOND rework
+# scanner_revision: spec-127-bead-2-rework-round-4 (internal/lint/destructive_guidance_test.go,
+#   internal/guard/classifier.go, as landed by bead 2's FOURTH rework
 #   round)
 # generation_command: no committed, runnable dump helper exists (O3-r2-7,
 #   spec 127 bead-2 rework) — this manifest was derived BY HAND at
@@ -18,18 +18,35 @@
 #   record those tests compare against, not itself the mechanism.
 #   Fixture (α) — the known_sites_exemption_list's manifest-vs-
 #   Background-inventory reconciliation — is landed as of round 2
-#   (TestBootstrapManifest_BackgroundReconciliation, O3-3): it checks
-#   the eight Background-cited quoted entries are present (a bead
-#   introducing an UNREVIEWED site cannot enter this list unnoticed)
-#   plus the spec-orchestrator.md bypass block at family grain; it does
-#   NOT assert exact equality against this section's full live count
-#   (ten, not eight — see that test's own doc comment for why, and
-#   registries.go's KnownSitesExemptionList doc comment, RULING 7). No
-#   equivalent (α) exists for the OTHER two sections below (the
-#   allowlist and the opaque-operand registry): Background inventories
-#   shipped GUIDANCE TEXT, never enumerates every PRODUCT diagnostic
-#   call site — there is no independent Background enumeration to
-#   reconcile those two sections against.
+#   (TestBootstrapManifest_BackgroundReconciliation, O3-3) and gained a
+#   REVERSE direction in round 3 (RULING 4/O3-3) after a fabricated,
+#   unreviewed entry added consistently to both registries.go and this
+#   manifest passed the round-2, forward-only check undetected: it now
+#   checks BOTH that the eight Background-cited quoted entries are
+#   present (a bead introducing an UNREVIEWED site cannot silently drop
+#   one) AND that every non-orchestrator manifest entry is accounted for
+#   by either that eight-entry set or the one recorded widening
+#   (backgroundJustifiedWideningExemptions, itself count-pinned as of
+#   round 4) — plus the spec-orchestrator.md bypass block at family
+#   grain. It does NOT assert exact equality against this section's
+#   full live count (ten, not eight — see that test's own doc comment
+#   for why, and registries.go's KnownSitesExemptionList doc comment,
+#   RULING 7). Round 4 (RULING 3/O3-confirm3-NEW-1, G1-confirm3-3)
+#   narrowed this fixture's OWN stated purpose after a simulated
+#   attacker bead — a fabricated site landed on a real skill file, with
+#   matching rows in registries.go, this manifest, AND the widening
+#   list, all in one diff — passed every bootstrap fixture: no in-repo
+#   mechanism can stop an author with commit access from widening an
+#   in-repo list in a coordinated diff. What (α) actually catches is
+#   ACCIDENTAL drift against the named expectation set (a site silently
+#   dropped, or an unnamed site appearing without its widening ever
+#   being recorded) — a DELIBERATE, coordinated insertion is
+#   review-caught, not machine-prevented. No equivalent (α) exists for
+#   the OTHER two sections below (the allowlist and the opaque-operand
+#   registry): Background inventories shipped GUIDANCE TEXT, never
+#   enumerates every PRODUCT diagnostic call site — there is no
+#   independent Background enumeration to reconcile those two sections
+#   against.
 #
 # ROUND 2 addition (spec 127 bead-2 rework round 2, O2c-1 BLOCKING):
 #   fixing foldExpr's fullyLiteral to actually propagate through

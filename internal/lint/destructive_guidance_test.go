@@ -2245,23 +2245,41 @@ func localAliasForge(cmd string) DestructiveCommand {
 
 // TestSamePackageInvariant_FunctionLocalDefinedTypeForge is
 // G1-confirm2-1's second required shape: a function-local DEFINED
-// type (not an alias), composite-literalled then converted back —
-// the same identity-chain resolution TestSamePackageInvariant_
-// DefinedTypeCompositeThenConvert already pins at package scope, now
-// pinned at function scope.
+// type (not an alias), composite-literalled — the same identity-chain
+// resolution TestSamePackageInvariant_DefinedTypeCompositeThenConvert
+// already pins at package scope, now pinned at function scope.
+//
+// Spec 127 bead-2 rework round 3's own doc comment above claimed this
+// fixture pins the round-3 Pass-1 ast.Inspect fix (the walk-whole-file
+// change that lets dcTypeNames see a function-local type declaration).
+// Round 4's O2c3-1 (MINOR) found that claim FALSE: the original
+// fixture ended in `return DestructiveCommand(d)`, an explicit
+// conversion to the always-seeded name "DestructiveCommand" that
+// Pass 2's pre-existing, unconditional CallExpr conversion check
+// catches regardless of whether `localDT` ever entered dcTypeNames —
+// verified by running this exact source against the PRE-round-3 code
+// and finding it already flagged (the conversion, not the composite
+// literal). The trailing conversion — and the DestructiveCommand
+// return type that made a same-package composite literal of the
+// sealed type itself an available, independently-flaggable substitute
+// — are both dropped so this fixture actually requires the round-3
+// fix: the function now returns nothing, so the ONLY expression
+// capable of tripping the scan is `localDT{...}` itself, resolvable
+// only via the fixed-point walk that lets dcTypeNames see the
+// function-local `type localDT DestructiveCommand` declaration.
 func TestSamePackageInvariant_FunctionLocalDefinedTypeForge(t *testing.T) {
 	src := `package guard
 
-func localDefinedTypeForge(cmd string) DestructiveCommand {
+func localDefinedTypeForge(cmd string) {
 	type localDT DestructiveCommand
 	d := localDT{command: cmd, valid: true}
-	return DestructiveCommand(d)
+	_ = d
 }
 `
 	u := singleFileUniverse(t, "internal/guard/local_defined_type_fixture.go", src)
 	problems := scanSamePackageInvariant(u)
 	if len(problems) == 0 {
-		t.Fatal("expected the function-local defined-type composite-then-convert forge to be flagged")
+		t.Fatal("expected the function-local defined-type composite literal forge to be flagged")
 	}
 }
 
@@ -2773,9 +2791,36 @@ var backgroundExpectedExemptions = []backgroundExpectedExemption{
 // account for it WITHOUT silently accepting every unnamed manifest
 // entry — anything NOT in this list and NOT in
 // backgroundExpectedExemptions is red.
+//
+// This list is ITSELF an escape hatch a future bead's diff could
+// widen in the same coordinated change as a fabricated manifest entry
+// and registries.go site — spec 127 bead-2 rework round 4's RULING 3
+// (O3-confirm3-NEW-1/G1-confirm3-3, BLOCKING) proved exactly that by
+// simulating a full attacker bead (a fabricated site inserted into a
+// REAL on-disk skill file, plus matching registries.go/manifest/this-
+// list rows): every TestBootstrapManifest_* fixture passed. No in-repo
+// mechanism can stop an author with commit access from appending to an
+// in-repo list — pinning this list's count (below) raises the cost of
+// a silent addition (a reviewer sees the diff to the sentinel) but does
+// NOT close the class; a coordinated, reviewed-looking diff that bumps
+// both the list and its sentinel together still lands. See
+// TestBootstrapManifest_BackgroundReconciliation's own doc comment for
+// what fixture (α) can and cannot claim as a result.
 var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
 	{"ms-bead-cycle", "Never merge a bead branch with raw `git merge bead/<id>`"},
 	{"ms-bead-cycle", "stopped between bd-close and the actual git merge"},
+}
+
+// TestBackgroundJustifiedWideningExemptions_CountSentinel pins this
+// list's own length (spec 127 bead-2 rework round 4, RULING 3): not a
+// closure over who may edit it — nothing in-repo can be — but a silent
+// widening now costs a reviewed sentinel-diff (the same discipline
+// registries_test.go's TestKnownSitesExemptionList_CountSentinel
+// already applies one layer up), rather than being invisible.
+func TestBackgroundJustifiedWideningExemptions_CountSentinel(t *testing.T) {
+	if got, want := len(backgroundJustifiedWideningExemptions), 2; got != want {
+		t.Errorf("len(backgroundJustifiedWideningExemptions) = %d, want %d", got, want)
+	}
 }
 
 // backgroundExpectedBypassBlockFamilies is spec.md Background's
@@ -2837,6 +2882,26 @@ var backgroundExpectedBypassBlockFamilies = []guard.DestructiveFamily{
 // the two SUBSET claims it can actually back: nothing Background
 // reviewed has disappeared, and nothing outside what Background
 // reviewed (or the named widening) has appeared.
+//
+// What this fixture's purpose IS, narrowed (spec 127 bead-2 rework
+// round 4, RULING 3 — O3-confirm3-NEW-1/G1-confirm3-3, BLOCKING):
+// spec.md R5(c) originally stated (α)'s purpose as "so a bead-
+// introduced site cannot enter the seed" — an unachievable claim, not
+// merely an unmet one. Round 4's attacker-bead simulation (a fabricated
+// site inserted into a REAL on-disk skill file, with matching rows
+// added consistently to registries.go, this manifest, AND
+// backgroundJustifiedWideningExemptions in the same diff) passed every
+// TestBootstrapManifest_* fixture. No in-repo mechanism can stop an
+// author with commit access from appending to an in-repo list — that
+// is not a gap in this fixture, it is a property of what a repo-local
+// reconciliation can ever prove. What (α) actually does: reconcile the
+// manifest against a NAMED expectation set (backgroundExpectedExemptions
+// plus the one recorded widening), which catches ACCIDENTAL drift — a
+// site silently dropped, or an unnamed site appearing without its
+// widening ever being recorded. A DELIBERATE, coordinated insertion
+// that edits the expectation set and the manifest together in one diff
+// is review-caught, not machine-prevented — exactly the same class of
+// limit R5(b)'s same-package AST invariant now states about itself.
 func TestBootstrapManifest_BackgroundReconciliation(t *testing.T) {
 	sections := parseSeedManifest(t)
 	entries := sections["known_sites_exemption_list"]

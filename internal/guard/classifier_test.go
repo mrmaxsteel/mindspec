@@ -363,52 +363,73 @@ func TestFindFloorMatches_QuotedGlobalOptionOperand(t *testing.T) {
 
 // TestFindFloorMatches_UnbalancedQuotedGlobalOptionOperand pins the
 // unbalanced-quote direction of consumeGlobalOptionOperand
-// (classifier.go) AS IT STANDS AFTER spec 127 bead-2 rework round 3,
-// RULING 3/S1-confirm2-new-1 — round 2's design swallowed the
-// REMAINDER of the text as the operand, reasoning that was the safe
-// direction; S1 proved that reasoning backward (a hostile author's
-// stray quote could hide a real destructive command that follows it,
-// see TestFindFloorMatches_UnbalancedQuoteFailsTowardMatching below,
-// the required positive fixture that replaces this claim). The fix
-// falls back to the SAME single-next-token consumption the unquoted
-// case uses instead of swallowing to end-of-text. This particular
-// fixture still ends up a non-match, but for a different, narrower
-// reason than round 2's swallow: the malformed operand here spans TWO
-// words ("/tmp/work tree"), so the single-token fallback lands one
-// token short of the real subcommand ("tree", not "reset") — an
-// inherent limit of guessing a boundary from a broken quote without
-// full shell-quoting semantics, not a re-introduction of the swallow.
+// (classifier.go) AS IT STANDS AFTER spec 127 bead-2 rework round 4
+// (RULING 2/G1-confirm3-1): an unbalanced quote gives no sound operand
+// boundary, so this is UNRESOLVED rather than a guess in either
+// direction — no subcommand is ever read out of the displaced tokens.
+// This particular fixture (a two-word malformed operand,
+// "/tmp/work tree") is a non-match for the same underlying reason as
+// the single-word cases below: the unresolved boundary means nothing
+// past the flag is ever tried as a subcommand candidate, regardless of
+// how many words the malformed operand happens to span.
 func TestFindFloorMatches_UnbalancedQuotedGlobalOptionOperand(t *testing.T) {
 	if matches := FindFloorMatches(`git -C "/tmp/work tree reset --hard`); len(matches) != 0 {
-		t.Fatalf("expected no match (single-token fallback lands short of the real subcommand in this multi-word-operand shape), got %+v", matches)
+		t.Fatalf("expected no match (unbalanced quote boundary is unresolved, not a guess), got %+v", matches)
 	}
 }
 
-// TestFindFloorMatches_UnbalancedQuoteFailsTowardMatching is spec 127
-// bead-2 rework round 3's required fixture (RULING 3/S1-confirm2-new-1,
-// BLOCKING). S1 proved, end-to-end against the real classifier, that
-// `git -C "innocent\" reset --hard` — an opening quote whose only
-// apparent close is escaped (a backslash immediately before the SAME
-// quote character), leaving the quote genuinely unbalanced — returned
-// ZERO matches under round 2's swallow-to-end fallback, silently
-// hiding the real, unquoted `git reset --hard` sitting in plain text
-// right after the malformed quote. consumeGlobalOptionOperand's
-// unbalanced branch now falls back to the plain unquoted single-
-// next-token consumption instead, which happens to land exactly on
-// "reset" here (the displaced fragment "innocent\" is a single token,
-// so the one-token fallback recovers the true subcommand position) —
-// this MUST match.
-func TestFindFloorMatches_UnbalancedQuoteFailsTowardMatching(t *testing.T) {
-	text := `git -C "innocent\" reset --hard`
-	matches := FindFloorMatches(text)
-	found := false
-	for _, m := range matches {
-		if m.Family == FamilyGitReset {
-			found = true
-		}
+// TestFindFloorMatches_UnbalancedQuoteIsUnresolved is spec 127 bead-2
+// rework round 4's required fixture (RULING 2/G1-confirm3-1, BLOCKING;
+// this test replaces round 3's TestFindFloorMatches_UnbalancedQuoteFailsTowardMatching,
+// whose own name encoded a ruling that round 4 reversed).
+//
+// Round 3 (RULING 3/S1-confirm2-new-1) made the unbalanced-quote
+// fallback consume exactly one token as the operand and then read
+// WHATEVER TOKEN FOLLOWS as the subcommand — reasoning that failing
+// toward a match was the only forbidden-evasion-proof direction, since
+// round 2's swallow-to-end could hide a real destructive command
+// sitting in plain text right after a malformed quote
+// (`git -C "innocent\" reset --hard`, below). G1 proved that
+// reasoning was ALSO wrong, empirically: honest prose containing a
+// lone stray quote plus the word "reset" —
+// `Documentation calls git -C "configuration reset behavior benign.`
+// — tokenizes to the EXACT SAME shape (flag, one displaced bare word,
+// then "reset") and round 3's fallback classified it as a destructive
+// command. There is no signal, once a quote fails to close, that
+// distinguishes the honest-prose case from the genuinely-destructive
+// one; guessing either way is a coin flip dressed as a principle.
+//
+// The only honest answer is that the boundary is UNRESOLVED: NEITHER
+// case matches. The genuinely-destructive case below is now a
+// deliberate, ACKNOWLEDGED miss (documented in
+// consumeGlobalOptionOperand's own doc comment) — not a silent one —
+// traded for never manufacturing a false refusal on the honest-prose
+// case, which this scan's precision contract forbids outright.
+func TestFindFloorMatches_UnbalancedQuoteIsUnresolved(t *testing.T) {
+	cases := []string{
+		// The genuinely-destructive shape: a real, unquoted
+		// `git reset --hard` sits in plain text right after the
+		// malformed quote. This is the acknowledged miss — the
+		// classifier cannot tell this apart from the honest-prose case
+		// below, so it must not match either.
+		`git -C "innocent\" reset --hard`,
+		// G1-confirm3-1's exact probe: honest documentation with a lone
+		// stray quote and the noun "reset". Must never match — this is
+		// the direction the precision contract forbids.
+		`Documentation calls git -C "configuration reset behavior benign.`,
+		// The same false-match reproduced with a lone apostrophe global
+		// (G1-confirm3-1's second reproduction).
+		`Documentation calls git -c 'configuration reset behavior benign.`,
+		// The same false-match reproduced with a fused, quote-bearing
+		// `=`-operand global (G1-confirm3-1's third reproduction).
+		`Documentation calls git --git-dir="configuration reset behavior benign.`,
 	}
-	if !found {
-		t.Fatalf("%q: expected FamilyGitReset (an unbalanced quote must fail toward matching, not swallow the real command that follows it), got %+v", text, matches)
+	for _, text := range cases {
+		t.Run(text, func(t *testing.T) {
+			if matches := FindFloorMatches(text); len(matches) != 0 {
+				t.Fatalf("%q: expected NO match (an unbalanced quote's operand boundary is unresolved — neither swallowed nor promoted to a subcommand), got %+v", text, matches)
+			}
+		})
 	}
 }
 
