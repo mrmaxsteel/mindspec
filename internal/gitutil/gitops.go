@@ -108,12 +108,28 @@ func BranchExists(name string) bool {
 // EXPLICIT ROOT without relying on the process having already chdir'd
 // there (the same cwd-bound problem FetchRemoteBranch has, and the same
 // fix: an explicit `-C workdir`).
-func BranchExistsIn(workdir, name string) bool {
-	if rejectOptionLike(name) != nil {
-		return false
+//
+// Returns (bool, error) — G1-B3-04: an option-like name, a malformed/
+// unreadable repository, or any other structural git failure (exit 128,
+// git missing, lock contention) is a genuine EVIDENCE ERROR and must
+// never be folded into "branch absent". `--quiet` makes a truly absent
+// ref exit 1 with no output; any OTHER exit code is the error leg. A
+// caller in the adopt evidence lattice that treats (false, non-nil) as
+// plain absence would classify indeterminate existence as no-source —
+// exactly the collapse this signature exists to prevent.
+func BranchExistsIn(workdir, name string) (bool, error) {
+	if err := rejectOptionLike(name); err != nil {
+		return false, err
 	}
-	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "refs/heads/"+name)...)
-	return cmd.Run() == nil
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)...)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking branch %s existence in %s: %w", name, workdir, err)
 }
 
 // CreateBranch creates a new branch from the given base.
@@ -246,12 +262,27 @@ func HasRemote() bool {
 // leg; the former means source (i) simply does not exist as a source,
 // exactly like a bead with no surviving branch. Same SEC-5
 // RejectOptionLike hygiene as every other boundary helper in this file.
-func RemoteExistsIn(workdir, name string) bool {
-	if rejectOptionLike(name) != nil {
-		return false
+//
+// Returns (bool, error) — G1-B3-04: `git config --get` on a missing key
+// exits 1 with no output (the legitimate "not configured" case); any
+// OTHER exit (a malformed .git/config, a non-repo, a permissions
+// failure) is a structural evidence error, never silently folded into
+// "no remote configured" — a caller that read a plain bool here could
+// not tell a genuinely-absent remote from an unreadable git config, and
+// R1b(i)'s no-origin carve-out only applies to the former.
+func RemoteExistsIn(workdir, name string) (bool, error) {
+	if err := rejectOptionLike(name); err != nil {
+		return false, err
 	}
 	cmd := execCommand("git", gitArgs(workdir, "config", "--get", "remote."+name+".url")...)
-	return cmd.Run() == nil
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking remote %s existence in %s: %w", name, workdir, err)
 }
 
 // FetchRemote runs `git fetch <remote>` from the current working directory so
@@ -306,19 +337,42 @@ func FetchRemoteBranch(remote, branch string) error {
 // RejectOptionLike argv hygiene as FetchRemoteBranch; the only difference
 // is the explicit `-C workdir` (gitArgs), matching every other
 // workdir-taking helper in this file (IsAncestor, NetEffectLanded, ...).
-func FetchRemoteBranchIn(workdir, remote, branch string) error {
+//
+// Returns the FETCHED tip's SHA (S1-1), resolved via `rev-parse
+// FETCH_HEAD` IMMEDIATELY after a successful fetch, in this same
+// function, with NO intervening git call. This is deliberate: a caller
+// that re-derives "<remote>/<branch>" and re-resolves THAT ref name
+// through the ordinary ref store is at the mercy of
+// `remote.<remote>.fetch`'s refspec — under a narrow/single-branch clone
+// (or any repo whose fetch refspec does not map <branch> under
+// refs/remotes/<remote>/*), `git fetch <remote> <branch>` updates
+// FETCH_HEAD but does NOT create/update the tracking ref, so re-deriving
+// the ref name can silently evaluate an ABSENT or STALE pre-fetch cache
+// even though the fetch itself reported success — exactly the "poisoned
+// cache" class R1(b) forbids. Resolving FETCH_HEAD here instead ties the
+// returned evidence to what the fetch operation itself just guarantees.
+func FetchRemoteBranchIn(workdir, remote, branch string) (string, error) {
 	if err := rejectOptionLike(remote); err != nil {
-		return err
+		return "", err
 	}
 	if err := rejectOptionLike(branch); err != nil {
-		return err
+		return "", err
 	}
 	cmd := noPrompt(execCommand("git", gitArgs(workdir, "fetch", remote, branch)...))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("fetching %s %s in %s: %s", remote, branch, workdir, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("fetching %s %s in %s: %s", remote, branch, workdir, strings.TrimSpace(string(out)))
 	}
-	return nil
+	shaCmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}")...)
+	shaOut, shaErr := shaCmd.Output()
+	if shaErr != nil {
+		return "", fmt.Errorf("resolving FETCH_HEAD after fetching %s %s in %s: %v", remote, branch, workdir, shaErr)
+	}
+	sha := strings.TrimSpace(string(shaOut))
+	if sha == "" {
+		return "", fmt.Errorf("resolving FETCH_HEAD after fetching %s %s in %s: empty result", remote, branch, workdir)
+	}
+	return sha, nil
 }
 
 // DetectDefaultBranch returns the default branch name of remote (e.g. "main",
@@ -1169,11 +1223,30 @@ func CleanForcePaths(workdir string, paths []string) error {
 }
 
 // CommitPaths stages the given repo-relative paths (`git add -- <paths...>`)
-// and commits them with msg (`git commit -m <msg> --no-verify`) in workdir.
+// and commits ONLY them with msg (`git commit -m <msg> --no-verify --
+// <paths...>`) in workdir — a git "partial commit": staging other paths
+// FIRST (whether by an earlier step of the same caller, or by anything
+// else already resident in the index) does not pull them into this
+// commit; they remain staged, untouched, for a later commit to pick up.
+// This is deliberate (G1-B3-01, spec 127 bead 3 fix round): a caller
+// whose workdir may carry OTHER staged content it must never touch
+// (e.g. the adopt surface's finalize-export commit, which must be
+// confined to the export artifact even when an operator has unrelated
+// work already staged) needs the commit itself scoped, not merely the
+// `git add` step — staging is cumulative into a SHARED index, so an
+// unscoped `git commit` would still sweep in anything else staged
+// regardless of what THIS call added.
+//
 // When paths is empty it commits whatever is already staged (used for the
-// pure-rename commit, where `git mv` already staged the rename). `--no-verify`
-// bypasses the pre-commit hooks the deterministic migration must not trip.
-// Returns nil silently when there is nothing staged to commit.
+// pure-rename commit, where `git mv` already staged the rename); there is
+// no path to scope the commit to in that case. `--no-verify` bypasses the
+// pre-commit hooks the deterministic migration must not trip.
+//
+// Returns nil silently when there is nothing to commit: the "nothing
+// staged" check itself is scoped to paths (never the whole index) when
+// paths is non-empty, so this is a true no-op resume even when something
+// UNRELATED is staged — the identical idempotent-resume case
+// commitWithExport's non-empty-paths callers rely on.
 func CommitPaths(workdir, msg string, paths []string) error {
 	if len(paths) > 0 {
 		for _, p := range paths {
@@ -1186,6 +1259,19 @@ func CommitPaths(workdir, msg string, paths []string) error {
 		if out, err := addCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git add: %s", strings.TrimSpace(string(out)))
 		}
+		// Nothing staged AT THESE PATHS -> nothing to commit (idempotent
+		// resume reaches here) — scoped so unrelated staged content
+		// elsewhere in the index never masks this as "already committed".
+		diffCmd := execCommand("git", gitArgs(workdir, append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...)...)
+		if diffCmd.Run() == nil {
+			return nil
+		}
+		commitArgs := append([]string{"commit", "-m", msg, "--no-verify", "--"}, paths...)
+		cmd := execCommand("git", gitArgs(workdir, commitArgs...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git commit: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 	// Nothing staged → nothing to commit (idempotent resume reaches here).
 	if DiffCachedQuiet(workdir) == nil {

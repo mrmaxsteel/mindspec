@@ -98,6 +98,15 @@ const (
 	adoptClassSourcesConflict
 	adoptClassEvidenceError
 	adoptClassCoverageUnavailable
+	// adoptRefusalClassCount is O2-3's count sentinel (bead 1's
+	// DestructionOutcome precedent, cited by this file's own header
+	// comment but not previously applied to this enum): NOT a real
+	// class, always the last entry. TestEvaluateAdoptLattice_Table
+	// asserts the table's distinct exercised classes cover every value
+	// from adoptClassNone+1 through adoptRefusalClassCount-1, so a new
+	// class added here without a new fixture row REDs immediately
+	// instead of silently going untested.
+	adoptRefusalClassCount
 )
 
 // Refusal-class markers (F-r5-3, plan-pinned): distinct literal strings
@@ -211,7 +220,50 @@ func resolveAdoptStatusSet(root string) ([]string, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", cfgPath, err)
 	}
+	// O1-1: the file-level parse above only tells "did the read/YAML
+	// parse succeed" — it does NOT catch a well-formed YAML document
+	// whose status.custom value is a SHAPE bead.CustomStatuses'
+	// splitCustomList (internal/bead/config.go) silently cannot extract
+	// (a mapping, a scalar bool/number, or a list containing a
+	// non-string entry). splitCustomList degrades that case to a
+	// SILENTLY narrowed (possibly empty) custom set with no error
+	// anywhere in the call chain — indistinguishable, at the
+	// bead.AllStatuses(root) call below, from "no customs declared at
+	// all". Validate the field's shape ourselves, one level deeper than
+	// the whole-file read/parse step above, so a present-but-
+	// unparseable field is evidence-error here too, matching F-r5-2's
+	// "never a silently narrowed enumeration" discipline.
+	if raw, ok := cfg["status.custom"]; ok {
+		if shapeErr := validateCustomStatusShape(raw); shapeErr != nil {
+			return nil, fmt.Errorf("%s declares status.custom in a shape bd's own custom-status parser cannot extract: %w", cfgPath, shapeErr)
+		}
+	}
 	return bead.AllStatuses(root), nil
+}
+
+// validateCustomStatusShape re-implements — deliberately duplicating
+// only the SUCCESS/FAILURE signal, never the union bead.AllStatuses
+// already computes correctly — internal/bead/config.go's splitCustomList
+// classification: a bare string (comma-split) or a []interface{} whose
+// every element is a string are the only two shapes splitCustomList
+// extracts anything from. Anything else (a YAML mapping, a scalar
+// bool/number, or a list containing even one non-string entry) is a
+// shape splitCustomList silently drops to zero entries with no error;
+// this function reports that as an error instead (O1-1).
+func validateCustomStatusShape(raw interface{}) error {
+	switch v := raw.(type) {
+	case string:
+		return nil
+	case []interface{}:
+		for i, item := range v {
+			if _, ok := item.(string); !ok {
+				return fmt.Errorf("status.custom[%d] is not a string (got %T)", i, item)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("status.custom is not a string or a list of strings (got %T)", raw)
+	}
 }
 
 // listEpicBeads issues the single comma-joined `bd list --parent <epic>
@@ -275,13 +327,52 @@ func evaluateAdoptLattice(root, specID, epicID, specBranch string) (adoptLattice
 	// any-error would unconditionally dominate a from-scratch local
 	// workspace with no remote at all, even with every bead positively
 	// evidenced.
-	corroboratedRef := adoptRemote + "/" + specBranch
+	// corroboratedRef is set ONLY once source (i) is fetched successfully
+	// (S1-1) — to the FRESHLY-FETCHED SHA itself (FetchRemoteBranchIn's
+	// own FETCH_HEAD resolution), never to a re-derived "<remote>/<branch>"
+	// ref name re-resolved through the ambient tracking ref. Every probe
+	// below that consumes corroboratedRef (evaluateAgainstMain, git log
+	// scans inside FindLandedMerge) accepts a bare SHA exactly like a ref
+	// name — git treats them identically as commit-ish operands — so this
+	// substitution is transparent to every downstream consumer while
+	// closing the poisoned-cache class: a narrow/single-branch-refspec
+	// fetch that reports success without ever creating/updating
+	// refs/remotes/<remote>/<branch> can no longer be silently evaluated
+	// against an absent or stale tracking ref.
+	var corroboratedRef string
 	var srcIState evidenceState
 	var srcIDetail string
-	srcIAbsent := !adoptRemoteExistsFn(root, adoptRemote)
-	if srcIAbsent {
+	remoteExists, remoteExistsErr := adoptRemoteExistsFn(root, adoptRemote)
+	srcIAbsent := false
+	if remoteExistsErr != nil {
+		// G1-B3-04: a structural failure probing remote CONFIGURATION
+		// (malformed .git/config, unreadable repo) is a real evidence
+		// error — never silently folded into "no remote configured",
+		// which would let a misconfigured/unreadable remote silently lose
+		// source (i) instead of erroring.
+		srcIState = evidenceError
+		srcIDetail = fmt.Sprintf("checking whether remote %q is configured: %v", adoptRemote, remoteExistsErr)
+	} else if !remoteExists {
+		// srcIAbsent (a design decision resolving an underdetermined point
+		// in the spec text, flagged honestly): R1b(i) pins "absent remote
+		// branch or unreachable remote is error, never positive" — but
+		// says nothing about the ordinary case of a repository with NO
+		// "origin" remote configured AT ALL (the AC-1 "surviving bead
+		// branches covering the epic" fixture form has no reason to
+		// configure one). Reading "unreachable remote" and "absent remote
+		// branch" as both PRESUPPOSING a configured remote (one that
+		// fails to answer, or lacks the branch), an unconfigured remote is
+		// source (i) simply not EXISTING as a source — the same "no
+		// route" shape a bead with no surviving branch has — never an
+		// error. Without this distinction, AC-1's bead-branches-only
+		// evidence form would be unsatisfiable: any-error would
+		// unconditionally dominate a from-scratch local workspace with no
+		// remote at all, even with every bead positively evidenced. (This
+		// carve-out applies ONLY to the no-remote-configured case — see
+		// spec.md R1(b)(i)'s amendment sentence naming it explicitly.)
+		srcIAbsent = true
 		srcIDetail = fmt.Sprintf("no %q remote is configured", adoptRemote)
-	} else if fetchErr := adoptFetchRemoteBranchFn(root, adoptRemote, specBranch); fetchErr != nil {
+	} else if fetchedSHA, fetchErr := adoptFetchRemoteBranchFn(root, adoptRemote, specBranch); fetchErr != nil {
 		// A CONFIGURED remote that is unreachable, or lacks the wanted
 		// branch: error, never positive (R1b(i)) — and, per this
 		// function's own ordering, never silently treated as "no
@@ -291,13 +382,14 @@ func evaluateAdoptLattice(root, specID, epicID, specBranch string) (adoptLattice
 		srcIState = evidenceError
 		srcIDetail = fmt.Sprintf("fetching %s %s: %v", adoptRemote, specBranch, fetchErr)
 	} else {
+		corroboratedRef = fetchedSHA
 		st, outcome, evalErr := adoptEvaluateAgainstMainFn(root, corroboratedRef)
 		if evalErr != nil {
 			srcIState = evidenceError
-			srcIDetail = fmt.Sprintf("evaluating freshly-fetched %s against main: %v", corroboratedRef, evalErr)
+			srcIDetail = fmt.Sprintf("evaluating freshly-fetched %s (%s) against main: %v", specBranch, corroboratedRef, evalErr)
 		} else {
 			srcIState = st
-			srcIDetail = fmt.Sprintf("the freshly-fetched %s evaluates %s against main (%s)", corroboratedRef, st, outcome)
+			srcIDetail = fmt.Sprintf("the freshly-fetched %s (%s) evaluates %s against main (%s)", specBranch, corroboratedRef, st, outcome)
 		}
 	}
 
@@ -343,7 +435,21 @@ func evaluateAdoptLattice(root, specID, epicID, specBranch string) (adoptLattice
 			evals = append(evals, beadEval{id: b.ID, state: evidenceError, detail: d})
 			continue
 		}
-		if !adoptBranchExistsFn(root, beadBranch) {
+		branchExists, existsErr := adoptBranchExistsFn(root, beadBranch)
+		if existsErr != nil {
+			// G1-B3-04: a structural failure probing branch existence
+			// (never a genuinely-absent ref) is an evidence error, folded
+			// into adoptTriggerError exactly like any other probe failure
+			// — never silently read as "no surviving branch".
+			anyError = true
+			d := fmt.Sprintf("checking whether bead %s's branch %s exists: %v", idrender.Bead(b.ID), beadBranch, existsErr)
+			if firstErrorDetail == "" {
+				firstErrorDetail = d
+			}
+			evals = append(evals, beadEval{id: b.ID, state: evidenceError, detail: d})
+			continue
+		}
+		if !branchExists {
 			evals = append(evals, beadEval{id: b.ID, hasBranch: false})
 			continue
 		}

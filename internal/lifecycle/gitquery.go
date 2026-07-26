@@ -25,14 +25,20 @@ func BranchExists(name string) bool {
 // depending on a cmd-layer chdir having already happened — the same
 // posture FetchRemoteBranchIn's doc comment states). Thin wrapper, same
 // ADR-0030 boundary rationale as IsAncestor.
-func BranchExistsIn(workdir, name string) bool {
+//
+// (bool, error) — G1-B3-04: a structural git failure (malformed repo,
+// lock contention) is distinct from a genuinely absent branch; see
+// gitutil.BranchExistsIn's doc comment.
+func BranchExistsIn(workdir, name string) (bool, error) {
 	return gitutil.BranchExistsIn(workdir, name)
 }
 
 // RemoteExistsIn reports whether a remote named name is configured in
 // workdir, with no network I/O. Thin wrapper, same ADR-0030 boundary
 // rationale as IsAncestor.
-func RemoteExistsIn(workdir, name string) bool {
+//
+// (bool, error) — G1-B3-04: see gitutil.RemoteExistsIn's doc comment.
+func RemoteExistsIn(workdir, name string) (bool, error) {
 	return gitutil.RemoteExistsIn(workdir, name)
 }
 
@@ -89,6 +95,11 @@ var fetchRemoteBranchInFn = gitutil.FetchRemoteBranchIn
 // function declaration, not a package-level var — same rationale as
 // EvaluateWorkDestruction above: no consumer package can substitute a
 // divergent implementation behind this name.
-func FetchRemoteBranchIn(workdir, remote, branch string) error {
+//
+// Returns the fetched tip's SHA (S1-1) — see gitutil.FetchRemoteBranchIn's
+// doc comment: callers must evaluate THIS returned SHA directly, never
+// re-derive "<remote>/<branch>" and re-resolve it through the ambient
+// tracking ref.
+func FetchRemoteBranchIn(workdir, remote, branch string) (string, error) {
 	return fetchRemoteBranchInFn(workdir, remote, branch)
 }

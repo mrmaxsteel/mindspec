@@ -37,6 +37,20 @@ func adoptGitRunAllowFail(dir string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// adoptGitStatusPorcelain returns `git status --porcelain` for dir —
+// used by the G1-B3-01 dirty-workdir counterfixtures to prove an
+// operator's unrelated tracked/untracked/staged file survives an adopt
+// call byte- and index-identical (never swept into the finalize-export
+// commit).
+func adoptGitStatusPorcelain(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := adoptGitRunAllowFail(dir, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("git status --porcelain in %s: %v\n%s", dir, err, out)
+	}
+	return string(out)
+}
+
 // adoptWriteFile writes content to a path inside dir, creating parent
 // directories as needed.
 func adoptWriteFile(t *testing.T, dir, relPath, content string) {

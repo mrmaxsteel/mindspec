@@ -107,9 +107,11 @@ cmd/mindspec/release.go	runRelease	arg1:unprovable
 cmd/mindspec/repair.go	repairPhaseRunE	arg1:unprovable
 cmd/mindspec/repair.go	repairSpecTitleRunE	arg1:unprovable
 internal/approve/adopt.go	AdoptSpec	arg1:unprovable
+internal/approve/adopt.go	AdoptSpec	arg2:unprovable
 internal/approve/adopt.go	adoptCurrentBranchPresentRefusal	arg1:unprovable
 internal/approve/adopt.go	adoptEvidenceErrorRefusal	arg1:unprovable
 internal/approve/adopt.go	adoptEvidenceErrorRefusal	arg2:unprovable
+internal/approve/adopt.go	adoptFinalize	arg1:unprovable
 internal/approve/adopt.go	adoptOrphanPresentRefusal	arg1:unprovable
 internal/approve/adopt.go	adoptOrphanPresentRefusal	arg2:unprovable
 internal/approve/adopt.go	adoptRefusalFailure	arg1:unprovable

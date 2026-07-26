@@ -12,11 +12,17 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
 )
+
+// approveImportPath is the import path findAdoptSpecCallSites resolves
+// against, by IDENTITY, never by the literal source-level spelling of a
+// file's local qualifier for it (O2-1/G1-B3-05).
+const approveImportPath = "github.com/mrmaxsteel/mindspec/internal/approve"
 
 // TestImplAdoptCmd_ResolvesAtLeafIdentity pins AC-11(a): `impl adopt`
 // resolves against the real command tree at leaf identity
@@ -115,9 +121,23 @@ type adoptCallSite struct {
 }
 
 // findAdoptSpecCallSites parses absPath and returns one adoptCallSite
-// per call expression `approve.AdoptSpec(...)` found anywhere in the
-// file, tagged with the name of its nearest enclosing top-level
-// function/method (or "<package-level>" if none).
+// per call expression that resolves — by IMPORT IDENTITY, never by the
+// literal source-level spelling of a qualifier (O2-1/G1-B3-05: the prior
+// scan matched a CallExpr only when its qualifier's Ident.Name was
+// LITERALLY "approve", so an aliased import (`ap "…/internal/approve"`)
+// or a dot import made a real second call site invisible — proven by
+// mutation: an aliased-import probe call site still reported as a
+// single-call-site pass) — to internal/approve.AdoptSpec, tagged with
+// the name of its nearest enclosing top-level function/method (or
+// "<package-level>" if none).
+//
+// Resolution: first walk this FILE's own import specs to learn its local
+// name(s) for approveImportPath — an explicit alias, a dot import, or
+// (with no alias) the default "approve" — then match CallExprs against
+// those resolved facts rather than against the string "approve". A
+// same-spelled import from a DIFFERENT path (e.g. some other package
+// also named "approve") is correctly NOT matched, because its import
+// path differs.
 func findAdoptSpecCallSites(t *testing.T, absPath string) []adoptCallSite {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -129,6 +149,25 @@ func findAdoptSpecCallSites(t *testing.T, absPath string) []adoptCallSite {
 	rel, err := filepath.Rel(root, absPath)
 	if err != nil {
 		t.Fatalf("relativizing %s: %v", absPath, err)
+	}
+
+	qualifiedNames := map[string]bool{} // local identifier -> true, iff it names approveImportPath in THIS file
+	dotImported := false
+	for _, imp := range file.Imports {
+		path, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil || path != approveImportPath {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			qualifiedNames["approve"] = true
+		case imp.Name.Name == ".":
+			dotImported = true
+		case imp.Name.Name == "_":
+			// Blank import: no identifier can ever call through it.
+		default:
+			qualifiedNames[imp.Name.Name] = true
+		}
 	}
 
 	var sites []adoptCallSite
@@ -152,18 +191,122 @@ func findAdoptSpecCallSites(t *testing.T, absPath string) []adoptCallSite {
 			funcStack = funcStack[:len(funcStack)-1]
 			return false
 		case *ast.CallExpr:
-			if sel, ok := v.Fun.(*ast.SelectorExpr); ok {
-				if pkgIdent, ok := sel.X.(*ast.Ident); ok && pkgIdent.Name == "approve" && sel.Sel.Name == "AdoptSpec" {
-					name := "<package-level>"
-					if len(funcStack) > 0 {
-						name = funcStack[len(funcStack)-1]
-					}
-					sites = append(sites, adoptCallSite{file: rel, funcName: name})
+			matched := false
+			switch fn := v.Fun.(type) {
+			case *ast.SelectorExpr:
+				if pkgIdent, ok := fn.X.(*ast.Ident); ok && qualifiedNames[pkgIdent.Name] && fn.Sel.Name == "AdoptSpec" {
+					matched = true
 				}
+			case *ast.Ident:
+				if dotImported && fn.Name == "AdoptSpec" {
+					matched = true
+				}
+			}
+			if matched {
+				name := "<package-level>"
+				if len(funcStack) > 0 {
+					name = funcStack[len(funcStack)-1]
+				}
+				sites = append(sites, adoptCallSite{file: rel, funcName: name})
 			}
 		}
 		return true
 	}
 	ast.Inspect(file, visit)
 	return sites
+}
+
+// TestFindAdoptSpecCallSites_ResolvesByImportIdentityNotSpelling is the
+// O2-1/G1-B3-05 regression: the enumeration must resolve call sites by
+// this file's ACTUAL import path for internal/approve, never by the
+// literal source-level spelling of the qualifier "approve" — an aliased
+// or dot-imported call must be found exactly like the plain one, and a
+// SAME-SPELLED import from an UNRELATED path must never be matched.
+func TestFindAdoptSpecCallSites_ResolvesByImportIdentityNotSpelling(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "plain_import",
+			source: `package probe
+
+import "github.com/mrmaxsteel/mindspec/internal/approve"
+
+func caller() { approve.AdoptSpec("", "", nil, approve.AdoptOpts{}) }
+`,
+		},
+		{
+			// O2's exact mutation probe (verbatim shape): an aliased
+			// import must resolve identically to the plain case.
+			name: "aliased_import",
+			source: `package probe
+
+import adoptpkg "github.com/mrmaxsteel/mindspec/internal/approve"
+
+func caller() { adoptpkg.AdoptSpec("", "", nil, adoptpkg.AdoptOpts{}) }
+`,
+		},
+		{
+			name: "dot_import",
+			source: `package probe
+
+import . "github.com/mrmaxsteel/mindspec/internal/approve"
+
+func caller() { AdoptSpec("", "", nil, AdoptOpts{}) }
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "probe.go")
+			if err := os.WriteFile(path, []byte(tc.source), 0o644); err != nil {
+				t.Fatalf("writing probe source: %v", err)
+			}
+			sites := findAdoptSpecCallSites(t, path)
+			if len(sites) != 1 {
+				t.Fatalf("%s: expected exactly one resolved call site, got %d: %v", tc.name, len(sites), sites)
+			}
+			if sites[0].funcName != "caller" {
+				t.Errorf("expected the call site tagged with its enclosing func %q, got %q", "caller", sites[0].funcName)
+			}
+		})
+	}
+
+	t.Run("same_spelled_import_from_a_different_path_is_not_matched", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "probe.go")
+		source := `package probe
+
+import approve "github.com/example/other/approve"
+
+func caller() { approve.AdoptSpec() }
+`
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatalf("writing probe source: %v", err)
+		}
+		sites := findAdoptSpecCallSites(t, path)
+		if len(sites) != 0 {
+			t.Fatalf("a same-named import from a DIFFERENT path must never match; got %d sites: %v", len(sites), sites)
+		}
+	})
+
+	t.Run("blank_import_matches_nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "probe.go")
+		source := `package probe
+
+import _ "github.com/mrmaxsteel/mindspec/internal/approve"
+
+func caller() {}
+`
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatalf("writing probe source: %v", err)
+		}
+		sites := findAdoptSpecCallSites(t, path)
+		if len(sites) != 0 {
+			t.Fatalf("a blank import names no callable identifier; got %d sites: %v", len(sites), sites)
+		}
+	})
 }

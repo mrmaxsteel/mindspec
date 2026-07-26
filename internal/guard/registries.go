@@ -531,7 +531,14 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/adopt.go",
 		Func:       "AdoptSpec",
 		Detail:     "arg1:unprovable",
-		Rationale:  "idrender-rendered: the --reason-required refusal's message body substitutes idrender.Spec(specID), and specID is itself validate.SpecID-gated at this function's own entry before any Sprintf here runs.",
+		Rationale:  "idrender-rendered: the --reason-required refusal's message body substitutes idrender.Spec(specID), and specID is itself validate.SpecID-gated at this function's own entry before any Sprintf here runs. Also covers the fix-round open-lifecycle-bead refusal's recovery line (`fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(lcID))`) — same idrender-rendered shape, a second call site collapsing to this key.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "AdoptSpec",
+		Detail:     "arg2:unprovable",
+		Rationale:  "fix round G1-B3-02: the review-state precondition refusal's SECOND recovery line, `fmt.Sprintf(\"mindspec impl adopt %s --reason \\\"<why>\\\"   (retry once the spec is in review mode)\", idrender.Spec(specID))` — idrender-rendered, same guarantee as arg1 above; the FIRST recovery line of that same call (\"mindspec complete <bead-id>   (close remaining lifecycle beads, then re-run)\") is a pure literal with no substitution and folds cleanly on its own.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -585,6 +592,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	},
 	{
 		File:       "internal/approve/adopt.go",
+		Func:       "adoptFinalize",
+		Detail:     "arg1:unprovable",
+		Rationale:  "fix round G1-B3-03 (idempotent finalize protocol): covers both new refusal call sites' single recovery line — the already-done-via-normal-path refusal (`fmt.Sprintf(\"bd show %s --json   (inspect the epic's existing done-state metadata)\", idrender.Bead(epicID))`) and the already-adopted refusal (`fmt.Sprintf(\"bd show %s --json   (inspect the recorded adopt audit marker)\", idrender.Bead(epicID))`) — both idrender-rendered, epicID already idvalidate.BeadID-gated at this function's own entry before either Sprintf runs.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/adopt.go",
 		Func:       "adoptRefusalFailure",
 		Detail:     "arg1:unprovable",
 		Rationale:  "idrender-rendered: the lattice-refusal message body, `fmt.Sprintf(\"%s: %s\", r.Marker, r.Detail)` — r.Marker is one of four pinned literal constants (adoptMarker*) and r.Detail is built by evaluateAdoptLattice from idrender/termsafe-escaped fragments.",
@@ -594,7 +608,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/adopt.go",
 		Func:       "adoptRefusalFailure",
 		Detail:     "arg2:unprovable",
-		Rationale:  "idrender-rendered: covers the shared attestLine (`mindspec impl adopt %s --reason \"<why>\" --attest-unverified ...`, substituting idrender.Spec(specID) and the pinned adoptAttestTrigger string) and the per-class inspection lines (`git log --first-parent --merges main`, a literal with no substitution; `bd list --parent <epic-id> --status=%s`, substituting a fixed literal-joined status list) — three call sites in this function collapse to this one key.",
+		Rationale:  "idrender-rendered: covers the shared attestLine (`mindspec impl adopt %s --reason \"<why>\" --attest-unverified ...`, substituting idrender.Spec(specID) and the pinned adoptAttestTrigger string) and the per-class inspection lines (`git log --first-parent --merges main`, a literal with no substitution; `bd list --parent <epic-id> --status=%s`, substituting bead.AllStatuses(root)'s own computed status list — fix round O1-3, no longer a hardcoded 4-built-in literal — a project-controlled, non-adversarial set) — three call sites in this function collapse to this one key.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 }

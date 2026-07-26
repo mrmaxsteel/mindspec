@@ -114,7 +114,7 @@ func TestFetchRemoteBranchIn_WrapperPinFailsIfRepointed(t *testing.T) {
 	orig := fetchRemoteBranchInFn
 	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
 
-	fetchRemoteBranchInFn = func(workdir, remote, branch string) error {
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
 		return gitutil.FetchRemoteBranchIn(workdir, remote, branch)
 	}
 
@@ -133,12 +133,33 @@ func TestFetchRemoteBranchIn_ExportedFuncCallsThroughTheSeam(t *testing.T) {
 	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
 
 	sentinel := errors.New("sentinel-from-stubbed-fetch-seam")
-	fetchRemoteBranchInFn = func(workdir, remote, branch string) error {
-		return sentinel
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
+		return "", sentinel
 	}
 
-	if err := FetchRemoteBranchIn("workdir", "origin", "branch"); err != sentinel {
+	if _, err := FetchRemoteBranchIn("workdir", "origin", "branch"); err != sentinel {
 		t.Errorf("FetchRemoteBranchIn must call through the seam, not bypass it; got %v, want %v", err, sentinel)
+	}
+}
+
+// TestFetchRemoteBranchIn_ReturnsFetchedSHAThroughTheSeam is S1-1's
+// wrapper-level proof that the SHA FetchRemoteBranchIn returns is
+// genuinely propagated (not dropped) by the exported wrapper.
+func TestFetchRemoteBranchIn_ReturnsFetchedSHAThroughTheSeam(t *testing.T) {
+	orig := fetchRemoteBranchInFn
+	t.Cleanup(func() { fetchRemoteBranchInFn = orig })
+
+	const sentinelSHA = "deadbeefcafef00dfacade0123456789abcdef0"
+	fetchRemoteBranchInFn = func(workdir, remote, branch string) (string, error) {
+		return sentinelSHA, nil
+	}
+
+	sha, err := FetchRemoteBranchIn("workdir", "origin", "branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha != sentinelSHA {
+		t.Errorf("FetchRemoteBranchIn sha = %q, want %q (from the stubbed seam)", sha, sentinelSHA)
 	}
 }
 
