@@ -79,6 +79,42 @@ type Decision struct {
 // `git merge bead/<id>` on the spec branch is the obvious workaround; the
 // matcher only fires on `mindspec complete` and mindspec installs no
 // pre-merge-commit git hook, so the fence is prose by necessity.
+//
+// This function's own rendered template IS a real FamilyGitMerge match
+// (spec 127 R5(a)) — verified: guard.FindFloorMatches on its literal
+// template string returns [{Family:git merge}]. It reaches EIGHT real
+// `Decision{Message:}` diagnostics in this file — seven reached as a
+// %s ARGUMENT to an outer fmt.Sprintf, one via strings.Builder's
+// WriteString. Deliberately NOT cited by absolute line number: spec
+// 127 bead-2 rework round 1 (RULING 10) cited eight exact line numbers
+// here as "counted directly from this file, not carried over from a
+// prior estimate", and round 2's confirm found every one of those
+// eight numbers ALREADY stale (a later edit to this same comment block
+// shifted every site by +25 lines without the citation being
+// recomputed — independently caught by four reviewer slots, O2c-3/
+// S1-4/S1-CONFIRM-2/S2-r2-NEW1/S3-r2-NEW1). A line number drifts on
+// the next unrelated edit; the count and shape split do not, and
+// TestRawMergeFence_CallSiteShapeSentinel (internal/panel/
+// rawmergefence_test.go) re-parses this file fresh on every run and
+// REDs the moment either one changes — a `grep -n
+// 'RawMergeFence(f.BeadID)' internal/panel/gate.go` is also always
+// available to a reader who wants the CURRENT line numbers, which
+// this comment no longer tries to duplicate.
+//
+// internal/lint's product-diagnostic scan does NOT reach any of the
+// eight: the scan's Sprintf fold rule inspects only the template,
+// args[0], by design (R5c's own stated shape) — never a substituted
+// argument — and strings.Builder composition is not a fold shape the
+// scan recognizes at all. This is a genuine, disclosed reach gap, not
+// a mechanism failure: an exemption-list entry is the WRONG
+// disposition (R5(a)'s own text: the exemption list's domain is
+// exactly the swept GUIDANCE surfaces — "every emitted lifecycle
+// diagnostic is outside it... never exemption-listed" — and this is
+// product output), an allowlist entry collides with AC-9(ii)'s pinned
+// final count, and widening the fold rules to trace Sprintf arguments
+// or strings.Builder composition would revive the unbounded-fold-reach
+// shape the round-6 spec gate closed. Recorded here, reviewed, rather
+// than left for a reader to discover the scan does not see it.
 func RawMergeFence(beadID string) string {
 	return fmt.Sprintf(
 		"\nDo NOT bypass with raw `git merge bead/%s` — it skips bd closure, "+

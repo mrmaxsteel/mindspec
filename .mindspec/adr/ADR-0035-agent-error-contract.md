@@ -130,10 +130,6 @@ unparseable, inconsistent, and unenforceable.
 3. Spec 092 Bead 9 re-runs the five LLM-harness regression scenarios
    green, demonstrating agents recover via the emitted commands.
 
-<!-- PRE-DRAFT (Spec 127): pre-drafted at plan time per the 122/123/125
-amendment-lifecycle precedent; FINALIZED by spec-127 bead 2 (this marker
-removed there; wording adjusted only where the concrete implementation
-forces it). Reviewable at plan-approve. -->
 ## Amendment (Spec 127): Guidance non-destructiveness
 
 Every refusal keeps the copy-pastable final recovery line. This

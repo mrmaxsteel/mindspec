@@ -43,7 +43,9 @@ import (
 // conventionExempt lists exported error-returning functions in this
 // package that are NOT guard-failure constructors (e.g. plumbing that
 // returns I/O errors). Every entry needs a reason; keep it short.
-var conventionExempt = map[string]string{}
+var conventionExempt = map[string]string{
+	"NewDestructiveCommand": "an input-validation error for the CALLER of this constructor (spec 127 bead-2 rework, RULING 1) — not itself a lifecycle Decision/Failure message shown to an operator, so it carries no recovery: line of its own. The DestructiveCommand VALUE it produces on success is what later reaches NewFailure/FormatFailure as a recovery-line OPERAND.",
+}
 
 // failureFixture forces one guard-failure constructor to fail with
 // representative inputs and returns the message(s) it produced.
