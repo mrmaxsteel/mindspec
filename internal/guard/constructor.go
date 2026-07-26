@@ -33,31 +33,44 @@ import (
 // did not close (an arbitrary-depth alias/defined-type chain in round
 // 1; an elided-type slice/map/struct-field literal in round 2; a
 // function-local type declaration, a named container type over the
-// sealed type, and an elided pointer element, all in round 3 — eleven
-// escapes across five rounds counting the confirm passes). The root
-// cause is not a gap this scan can eventually close by finding one
-// more shape: Go permits same-package code to write unexported fields
-// BY DESIGN, and offers unboundedly many ways to name a type — aliases
-// at any depth, defined types, conversions, elided literals in slice/
-// map/struct-field/pointer context, function-local declarations, and
-// possibly more this bead has not yet been shown. A SYNTACTIC
-// (AST-level, no go/types) check cannot enumerate that set from the
-// outside, so no future round should claim this mechanism
-// "comprehensive" again.
+// sealed type, and an elided pointer element, all in round 3). The
+// scan's own fixture list — destructive_guidance_test.go's
+// samePackageEscapeShapes, held to that file by a manifest test so it
+// cannot silently drift from what scanSamePackageInvariant is actually
+// exercised against — is the single source of truth for which
+// concrete shapes this mechanism is proven to catch; this comment
+// does not restate that list as a count, because every count written
+// here or in spec 127's own text has gone stale at least once (bead-2
+// rework rounds 4 and 5). The root cause is not a gap this scan can
+// eventually close by finding one more shape: Go permits same-package
+// code to write unexported fields BY DESIGN, and offers unboundedly
+// many ways to name a type — aliases at any depth, defined types,
+// conversions, elided literals in slice/map/struct-field/pointer
+// context, function-local declarations, and more this bead has not
+// yet closed: round 3's confirm pass (O3) found a NAMED POINTER TYPE
+// (`type dcNamedPtr *DestructiveCommand` used as a slice element with
+// an elided literal) that compiles, forges a live value, and this
+// scan does NOT catch — filed as bd mindspec-erpg, deliberately NOT
+// fixed here (chasing one more spelling repeats the exact pattern
+// that produced this history). A SYNTACTIC (AST-level, no go/types)
+// check cannot enumerate that set from the outside, so no future
+// round should claim this mechanism "comprehensive" again, and no
+// future round should assume a shape named in prose is therefore
+// caught — only samePackageEscapeShapes's own fixtures are.
 //
 // What this scan actually does: flag every concrete escape shape
-// adversarial review has found and confirmed through this bead's
-// rework rounds (see scanSamePackageInvariant's own doc comment for
-// the current list) — a real, useful defense-in-depth catch for
-// convenient drift, layered UNDER human review of any same-package
-// change to this file, never a substitute for it. Not resolved, and
-// not claimed: a value that reaches this package only after passing
-// through an interface{}/generic-type indirection, or a same-named
-// type re-exported through another package's alias — either would need
-// actual type-checking (go/types) to resolve, which this scan
-// deliberately does not add (Go has indefinitely many spellings, and a
-// syntactic scan closes the SHAPES adversarial review has actually
-// found, not an unbounded claim it cannot back).
+// listed in destructive_guidance_test.go's samePackageEscapeShapes —
+// a real, useful defense-in-depth catch for convenient drift, layered
+// UNDER human review of any same-package change to this file, never a
+// substitute for it. Not resolved, and not claimed: the named-
+// pointer-type shape above, a value that reaches this package only
+// after passing through an interface{}/generic-type indirection, or a
+// same-named type re-exported through another package's alias —
+// either would need actual type-checking (go/types) to resolve, which
+// this scan deliberately does not add (Go has indefinitely many
+// spellings, and a syntactic scan closes the SHAPES adversarial
+// review has actually found AND FIXTURED, not an unbounded claim it
+// cannot back).
 // unsafe/reflect.NewAt bypasses of the struct are recorded OUTSIDE
 // this convention's threat model (R5(b)) — no Go-level guard survives
 // unsafe, and the convention targets convenient drift, not deliberate

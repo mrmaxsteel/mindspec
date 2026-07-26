@@ -2376,6 +2376,120 @@ func unsafeForge(cmd string) DestructiveCommand {
 	}
 }
 
+// samePackageEscapeShapes is the fixture-backed catalog of concrete
+// same-package construction shapes scanSamePackageInvariant is proven
+// to catch — each name is one of the TestSamePackageInvariant_<name>
+// fixtures above. This is the set the scan CATCHES, not the set that
+// EXISTS: it is not comprehensive (constructor.go's own doc comment
+// says so at length), and a NAMED POINTER TYPE
+// (`type dcNamedPtr *DestructiveCommand` used as a slice element with
+// an elided literal) is a known, unfixtured escape outside this set —
+// verified to compile and forge a live value, filed as bd
+// mindspec-erpg, and deliberately not closed here.
+//
+// Spec 127 bead-2's rework rounds each produced a written escape COUNT
+// (in this file, in spec.md, or both) that went stale at least once —
+// rounds 4 and 5 both had to fix a number that no longer matched the
+// fixtures. TestSamePackageInvariant_FixtureManifestMatches, below,
+// replaces that count with a name-for-name reconciliation against the
+// TestSamePackageInvariant_* functions actually declared in this
+// file, so this list and the fixtures cannot silently diverge again —
+// deriving beats writing down a cardinality by hand.
+var samePackageEscapeShapes = []string{
+	"SamePackageHelperForge",
+	"WrapperReturnedForgedValue",
+	"TypeAliasCompositeLiteral",
+	"TwoLevelAliasChain",
+	"ElidedSliceLiteral",
+	"ElidedMapLiteral",
+	"ElidedStructFieldLiteral",
+	"ElidedPointerElementLiteral",
+	"NamedSliceTypeElidedLiteral",
+	"NamedMapTypeElidedLiteral",
+	"FunctionLocalTypeAliasForge",
+	"FunctionLocalDefinedTypeForge",
+	"ShadowStructConvertedAcross",
+	"DefinedTypeCompositeThenConvert",
+}
+
+// samePackageEscapeControlFixtures lists the TestSamePackageInvariant_*
+// functions in this file that are NOT themselves a distinct escape
+// shape, so TestSamePackageInvariant_FixtureManifestMatches can
+// exclude them by name (not by count, for the same reason
+// samePackageEscapeShapes above is a name list): RealGuardPackageIsClean
+// is the negative control run against the real internal/guard package;
+// ElidedCompositeControl_EmbeddedNonElided pins that a pre-existing,
+// already-caught case still fires after the elision-resolution
+// addition, rather than introducing a new shape; UnsafeUsage exercises
+// the separate unsafe/reflect.NewAt defense R5(b)'s prose calls out on
+// its own, distinct from the enumerated same-package escape-shape
+// list.
+var samePackageEscapeControlFixtures = []string{
+	"RealGuardPackageIsClean",
+	"ElidedCompositeControl_EmbeddedNonElided",
+	"UnsafeUsage",
+}
+
+// TestSamePackageInvariant_FixtureManifestMatches asserts that
+// samePackageEscapeShapes plus samePackageEscapeControlFixtures is
+// EXACTLY the set of TestSamePackageInvariant_* functions declared in
+// this file — not more (a fixture landed without adding its name to
+// either list) and not fewer (a listed name with no fixture behind
+// it). This is the sentinel spec 127 bead-2 rework round 5's ruling
+// asked for in place of a hand-written cardinality: the reconciliation
+// runs against this file's OWN current source, so it cannot itself go
+// stale the way a written number did five times over this bead's
+// rework rounds.
+func TestSamePackageInvariant_FixtureManifestMatches(t *testing.T) {
+	path := filepath.Join(repoRootDir(t), "internal", "lint", "destructive_guidance_test.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading this test file to reconcile its own fixture manifest: %v", err)
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, data, 0)
+	if err != nil {
+		t.Fatalf("parsing this test file to reconcile its own fixture manifest: %v", err)
+	}
+
+	const prefix = "TestSamePackageInvariant_"
+	found := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil {
+			continue
+		}
+		name := fn.Name.Name
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		short := strings.TrimPrefix(name, prefix)
+		if short == "FixtureManifestMatches" {
+			continue
+		}
+		found[short] = true
+	}
+
+	expected := map[string]bool{}
+	for _, name := range samePackageEscapeShapes {
+		expected[name] = true
+	}
+	for _, name := range samePackageEscapeControlFixtures {
+		expected[name] = true
+	}
+
+	for name := range found {
+		if !expected[name] {
+			t.Errorf("TestSamePackageInvariant_%s exists in this file but is not listed in samePackageEscapeShapes or samePackageEscapeControlFixtures — add it to whichever set actually describes it", name)
+		}
+	}
+	for name := range expected {
+		if !found[name] {
+			t.Errorf("samePackageEscapeShapes or samePackageEscapeControlFixtures names %q but no TestSamePackageInvariant_%s function exists in this file", name, name)
+		}
+	}
+}
+
 // TestConstructorProvenance_CalleeNameSpoofRejected is AC-9(vi)'s
 // callee-name-spoof defense: a DIFFERENT package's function that
 // happens to share the name "NewDestructiveCommand" does not qualify
