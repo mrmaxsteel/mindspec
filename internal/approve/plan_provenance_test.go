@@ -2,6 +2,7 @@ package approve
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,11 +13,17 @@ import (
 // AC-6: a PURE, hermetic table test over the preflight-resolved
 // provenance VALUE (S3-r2-5) — no bd, no git, no identity. Every child
 // fixture is constructed directly with its childProvenanceEvidence
-// already set; checkExistingBeadsSafety is called with NOTHING else
-// stubbed (no seam override anywhere in this file), which is itself the
-// proof that the check performs no I/O of its own — a hidden git/bd
-// call would need a live seam to avoid panicking on a nil dependency,
-// and none exists here.
+// already set. THIS test installs no seam override of its own — a
+// SIBLING test in this same file (TestResolveChildProvenance_LegsThroughSeams)
+// does override planBranchExistsInFn/planFindLandedMergeFn, but for
+// evaluateChildProvenance/resolveChildProvenance, functions this test
+// never calls. checkExistingBeadsSafety itself declares no seam
+// parameter and calls no lifecycle/bd function in its body (checked by
+// reading it, not enforced here): a hidden I/O call smuggled into it
+// would run against whatever planBranchExistsInFn/planFindLandedMergeFn
+// are CURRENTLY bound to — their live production defaults throughout
+// this test, since nothing here touches them — not panic on a nil
+// dependency (the production seams are never nil).
 //
 // Legs map onto AC-6 exactly:
 //   - (i) completed-work evidence -> preserve, no `bd delete`.
@@ -177,14 +184,84 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 		}
 	})
 
-	t.Run("no branch, landed merge NOT found is partial/interrupted", func(t *testing.T) {
+	t.Run("no branch, genuinely zero candidate merges is partial/interrupted", func(t *testing.T) {
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
-			return nil, fmt.Errorf("wrapped: %w", lifecycle.ErrLandedMergeNotFound)
+			return nil, fmt.Errorf("wrapped: %w", lifecycle.ErrLandedMergeNoCandidate)
 		}
 		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
 		if got != provenancePartialInterrupted {
 			t.Errorf("got %v, want provenancePartialInterrupted", got)
+		}
+	})
+
+	// Bead-5 fix round 1, RULING 1 (G1/O1, both BLOCKING): before the
+	// fix, evaluateChildProvenance matched the BROAD
+	// errors.Is(landedErr, lifecycle.ErrLandedMergeNotFound) instead of
+	// the narrow ErrLandedMergeNoCandidate — which also matches every
+	// case below, collapsing them all into the same
+	// provenancePartialInterrupted (destructive-licensing) outcome.
+	// Restoring that bare errors.Is check reds every one of these.
+
+	t.Run("no branch, uncorroborated owned candidate (LandedMergeNoEvidence) is ambiguous, never partial/interrupted", func(t *testing.T) {
+		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			return nil, &lifecycle.LandedMergeNoEvidence{
+				BeadID: beadID, SpecBranch: specBranch,
+				MergeSHA: "aaaaaaa", SecondParent: "bbbbbbb",
+			}
+		}
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		if got != provenanceAmbiguous {
+			t.Errorf("got %v, want provenanceAmbiguous — an owned-but-uncorroborated candidate must never license deletion", got)
+		}
+	})
+
+	t.Run("no branch, owned candidates disagree on second parent (LandedMergeNoEvidence, conflicting) is ambiguous", func(t *testing.T) {
+		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			return nil, &lifecycle.LandedMergeNoEvidence{
+				BeadID: beadID, SpecBranch: specBranch,
+				MergeSHA: "aaaaaaa", SecondParent: "bbbbbbb",
+				ConflictingSecondParent: "ccccccc",
+			}
+		}
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		if got != provenanceAmbiguous {
+			t.Errorf("got %v, want provenanceAmbiguous — genuine ambiguity about which landing is this bead's tip must never license deletion", got)
+		}
+	})
+
+	t.Run("no branch, a corroboration-leg contradiction is ambiguous, not partial/interrupted", func(t *testing.T) {
+		// Mirrors the SHAPE of landed.go's reviewed_head_sha/branch-tip/
+		// landed-binding contradiction returns: a plain fmt.Errorf
+		// wrapping the BROAD ErrLandedMergeNotFound sentinel (not the
+		// narrow ErrLandedMergeNoCandidate) — a real owned candidate
+		// exists, but a corroboration datum disagrees with it.
+		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			return nil, fmt.Errorf("%w: %s on %s (surviving branch tip contradicts merge's second parent)",
+				lifecycle.ErrLandedMergeNotFound, beadID, specBranch)
+		}
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		if got != provenanceAmbiguous {
+			t.Errorf("got %v, want provenanceAmbiguous — a corroboration contradiction is not a definitive absence", got)
+		}
+	})
+
+	t.Run("no branch, a positively-identified-then-reverted landing is ambiguous, not partial/interrupted", func(t *testing.T) {
+		// Mirrors landed.go's revert-shape return: a positively
+		// corroborated candidate whose content is no longer present at
+		// the tip. Still a real, owned, once-landed merge — never the
+		// zero-candidate absence provenancePartialInterrupted requires.
+		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			return nil, fmt.Errorf("%w: %s on %s (merge's content is no longer present at the current tip — it was reverted or cleanly removed after landing)",
+				lifecycle.ErrLandedMergeNotFound, beadID, specBranch)
+		}
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		if got != provenanceAmbiguous {
+			t.Errorf("got %v, want provenanceAmbiguous — a reverted-after-landing signature is not a definitive never-landed absence", got)
 		}
 	})
 
@@ -235,5 +312,72 @@ func TestResolveChildProvenance_NonClosedLeftAtZeroValue(t *testing.T) {
 	out := resolveChildProvenance("/root", "spec/x", children)
 	if len(out) != 1 || out[0].Provenance != provenanceUnresolved {
 		t.Fatalf("expected the open child left at provenanceUnresolved, got %+v", out)
+	}
+}
+
+// TestAdversaryLandedMergeAmbiguityNeverLicensesDeletion is the G1
+// adversarial finding from the bead-5 panel (RULING 1, BLOCKING): with
+// the bead branch absent and owned candidate merges disagreeing on
+// their second parent — a real, ambiguous merge history, not a
+// never-landed bead — the end-to-end path from evaluateChildProvenance
+// through checkExistingBeadsSafety's rendered refusal must never reach
+// `bd delete`. Restoring the pre-fix bare
+// errors.Is(landedErr, lifecycle.ErrLandedMergeNotFound) check in
+// evaluateChildProvenance reds this test twice: provenance resolves to
+// provenancePartialInterrupted, and the rendered refusal ends in
+// `bd delete bead-1 --force`.
+func TestAdversaryLandedMergeAmbiguityNeverLicensesDeletion(t *testing.T) {
+	origExists := planBranchExistsInFn
+	origLanded := planFindLandedMergeFn
+	t.Cleanup(func() {
+		planBranchExistsInFn = origExists
+		planFindLandedMergeFn = origLanded
+	})
+
+	planBranchExistsInFn = func(string, string) (bool, error) {
+		return false, nil
+	}
+	planFindLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) {
+		return nil, &lifecycle.LandedMergeNoEvidence{
+			BeadID: "bead-1", SpecBranch: "spec/x",
+			MergeSHA: "aaaaaaaa", SecondParent: "bbbbbbbb",
+			ConflictingSecondParent: "cccccccc",
+		}
+	}
+
+	prov := evaluateChildProvenance("/repo", "spec/x", "bead-1")
+	if prov != provenanceAmbiguous {
+		t.Fatalf("ambiguous owned merge evidence classified as %v; want provenanceAmbiguous", prov)
+	}
+	err := checkExistingBeadsSafety([]existingChildBead{{
+		ID: "bead-1", Status: "closed", Provenance: prov,
+	}})
+	if err == nil {
+		t.Fatal("expected closed-child refusal")
+	}
+	if strings.Contains(err.Error(), "bd delete") {
+		t.Fatalf("ambiguous owned merge evidence emitted destructive deletion command:\n%s", err)
+	}
+}
+
+// TestPlanBranchExistsInFnDefaultsToLifecycleBranchExistsIn is O2-1's
+// fix: the seam-var doc comment above planBranchExistsInFn/
+// planFindLandedMergeFn claims both are "pointer-pinned in
+// plan_provenance_test.go" — every OTHER test in this file only
+// overrides the seam and restores it via t.Cleanup, which proves
+// nothing about the DEFAULT. This test (and its sibling below) is the
+// pin the comment was already claiming existed.
+func TestPlanBranchExistsInFnDefaultsToLifecycleBranchExistsIn(t *testing.T) {
+	if reflect.ValueOf(planBranchExistsInFn).Pointer() != reflect.ValueOf(lifecycle.BranchExistsIn).Pointer() {
+		t.Fatal("planBranchExistsInFn must default to lifecycle.BranchExistsIn (spec 127 R3c)")
+	}
+}
+
+// TestPlanFindLandedMergeFnDefaultsToLifecycleFindLandedMerge is
+// TestPlanBranchExistsInFnDefaultsToLifecycleBranchExistsIn's sibling
+// pin for the other R3c seam.
+func TestPlanFindLandedMergeFnDefaultsToLifecycleFindLandedMerge(t *testing.T) {
+	if reflect.ValueOf(planFindLandedMergeFn).Pointer() != reflect.ValueOf(lifecycle.FindLandedMerge).Pointer() {
+		t.Fatal("planFindLandedMergeFn must default to lifecycle.FindLandedMerge (spec 127 R3c)")
 	}
 }

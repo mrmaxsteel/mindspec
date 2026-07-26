@@ -793,9 +793,12 @@ exactly what they can support.
    fields, zero value renders invalid/fail-closed) + constructor whose
    destructive variants require a non-defaultable
    `guard.DestructionOutcome` (bead 1's type — the declared 1→2 edge);
-   consumed by the failure/message renderers. Same-package construction
-   sealed by the scan's AST invariant (step 4), not by opacity alone
-   (G-r5-3).
+   consumed by the failure/message renderers. Opacity seals cross-package
+   construction; same-package construction is REVIEW-CAUGHT, with the
+   scan's AST invariant (step 4) as defence-in-depth, not a seal (G-r5-3,
+   narrowed by bead-2 rework round 4's RULING 1 — matches spec.md's
+   amended R5(b) wording verbatim; this line was the one propagation
+   miss the amendment did not reach).
 3. `internal/guard/registries.go`: the destructive-guidance allowlist
    (seeded — every Background-inventory *emitter* site as-is; the three
    merge producers never seed), the opaque-operand registry (seeded from

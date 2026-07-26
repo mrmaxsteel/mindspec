@@ -697,15 +697,22 @@ func recvTypeNameForObligation(expr ast.Expr) string {
 func TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor(t *testing.T) {
 	root := repoRootFromGuardTestDir(t)
 	// knownAllowlistTemplates skips templates that legitimately DO
-	// match a floor family — plan.go's beadCreateFailure and
-	// checkExistingBeadsSafety each contain BOTH an opaque
-	// "mindspec ..." template (this obligation's actual concern) AND a
-	// SEPARATE, already-governed "bd delete %s --force" Sprintf
-	// (DestructiveGuidanceAllowlist's own first two entries, above,
-	// each with their own ContentRegeneration obligation) in the same
-	// function body. This obligation is scoped to the OPAQUE templates
-	// only; asserting no-match against a template the allowlist
-	// mechanism deliberately DOES match would contradict that entry.
+	// match a floor family — plan.go's beadCreateFailure contains BOTH
+	// an opaque "mindspec ..." template (this obligation's actual
+	// concern) AND a SEPARATE "bd delete %s --force" Sprintf in the
+	// same function body; the sibling template now lives in the
+	// separate closedChildDeletionRefusal helper, not in
+	// checkExistingBeadsSafety directly (bead 5, spec 127 R3c, moved
+	// it there — checkExistingBeadsSafety's own body now renders only
+	// the opaque "mindspec complete %s" template). Both sites'
+	// "bd delete %s --force" operand is constructor-derived
+	// (guard.NewDestructiveCommand) and provenance-exempt (R5(b)) —
+	// the two DestructiveGuidanceAllowlist entries this comment used
+	// to cite for them were REMOVED, not converted-with-continuing-
+	// obligation, in bead 5 (see that allowlist's own doc comment).
+	// This obligation is scoped to the OPAQUE templates only; asserting
+	// no-match against a template that legitimately matches the floor
+	// would contradict the constructor's own provenance exemption.
 	knownAllowlistTemplates := map[string]bool{
 		"bd delete %s --force": true,
 		// adopt.go's adoptStaleBranchPresentRefusal feeds this exact
@@ -739,6 +746,53 @@ func TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor(t *testing.T) {
 	}
 	if totalTemplates == 0 {
 		t.Fatal("collected zero fmt.Sprintf templates across every named site — this obligation's own probe is broken")
+	}
+}
+
+// TestBdDeleteForceTemplate_SingleSourceOfTruth is spec 127 AC-11(b)
+// (bead-5 fix round 1, RULING 3): plan.go's beadCreateFailure and
+// closedChildDeletionRefusal each independently call
+// guard.NewDestructiveCommand with a `fmt.Sprintf("bd delete %s
+// --force", ...)` literal — byte-identical TODAY by direct source
+// inspection, but nothing derived that identity mechanically before
+// this test; each site's own test only pinned its OWN rendered string
+// against a hardcoded literal, so either template could drift from
+// the other while every existing test stayed green. The AST tracer
+// cannot recognize an indirected shared-helper call at these two call
+// sites (verified empirically during this bead's authoring — a shared
+// wrapper function broke the internal/lint provenance scan's dataflow
+// recognition, the same class of AST-scan limitation R1(e)/R5(b)
+// already record elsewhere in this spec), so the anti-drift mechanism
+// AC-11(b) requires is this: re-parse BOTH production function bodies,
+// extract each one's "bd delete"-shaped Sprintf template, and assert
+// they are still identical. This derives the expected form from the
+// two production sites themselves — it does not pin either one against
+// a third hardcoded literal — so a future edit that changes BOTH
+// templates together in lockstep still passes; only a DRIFT between
+// them reds.
+func TestBdDeleteForceTemplate_SingleSourceOfTruth(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	sites := []struct{ file, fn string }{
+		{"internal/approve/plan.go", "beadCreateFailure"},
+		{"internal/approve/plan.go", "closedChildDeletionRefusal"},
+	}
+	var extracted []string
+	for _, site := range sites {
+		templates := sprintfTemplatesInFunc(t, root, site.file, site.fn)
+		found := ""
+		for _, tmpl := range templates {
+			if strings.Contains(tmpl, "bd delete") {
+				found = tmpl
+				break
+			}
+		}
+		if found == "" {
+			t.Fatalf("%s/%s: found no \"bd delete\"-shaped template among %v — this obligation's own extraction is broken, or AC-11(b)'s bd-delete site moved", site.file, site.fn, templates)
+		}
+		extracted = append(extracted, found)
+	}
+	if extracted[0] != extracted[1] {
+		t.Fatalf("AC-11(b) violated: %s's bd-delete template %q != %s's %q — the single source of truth has drifted", sites[0].fn, extracted[0], sites[1].fn, extracted[1])
 	}
 }
 

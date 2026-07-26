@@ -306,10 +306,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// (AC-4): a genuinely absent branch names the R1 adopt path in
 	// full; a probe FAILURE (existence INDETERMINATE) never collapses
 	// into "absent" and never names adopt (O2-r2-8) — it is its own
-	// fail-closed, retryable refusal. Bead 6 (R4) extends this SAME §1
-	// phase with the work-destruction preflight for the branch-present-
-	// but-stale leg (R3b) — sited here, as its own block, so that
-	// extension is a pure addition, never a reshuffle (C-r4-7).
+	// fail-closed, retryable refusal. Bead 6 (R4) is INTENDED to extend
+	// this SAME §1 phase with the work-destruction preflight for the
+	// branch-present-but-stale leg (R3b) — sited here, as its own
+	// block, as an insertion seam ahead of any mutation/git-consuming
+	// code below, so that the extension CAN land as an addition rather
+	// than a reshuffle (C-r4-7's obligation). Bead 5's own diff/tests
+	// cannot establish whether a bead that does not yet exist actually
+	// meets that obligation — bead 6's own diff and tests are what
+	// settle it.
 	switch exists, existsErr := implSpecBranchExistsFn(root, specBranch); {
 	case existsErr != nil:
 		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)

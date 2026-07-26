@@ -772,6 +772,21 @@ func beadCreateFailure(specID, heading string, created []string, createArgs []st
 	// byte-identical TEMPLATE, not a single Go function.
 	deleteCmd, ctorErr := guard.NewDestructiveCommand(
 		fmt.Sprintf("bd delete %s --force", strings.Join(created, " ")),
+		// No merge/branch work-destruction predicate ran at this call
+		// site (there is no branch or merge to evaluate — `created` is
+		// an in-run list of bd IDs this SAME invocation just made), so
+		// there is no matching guard.DestructionOutcome to give.
+		// DestructionAncestor — constructor.go's own documented design
+		// (bead 1's F1-3): a legitimate, real DestructionOutcome VALUE
+		// here, not a claim that a predicate ran to produce it — the
+		// mandatory PARAMETER is what the constructor enforces, never a
+		// non-zero check on its value. The parameter is therefore
+		// satisfied STRUCTURALLY (a value was named, per Go's
+		// no-default-arguments rule) rather than EVIDENTIALLY: the real
+		// evidentiary gating for this destructive action is the
+		// by-construction positive provenance named a few lines above
+		// (the partial set THIS failure just created), not
+		// DestructionAncestor itself.
 		guard.DestructionAncestor,
 	)
 	if ctorErr != nil {
@@ -858,6 +873,36 @@ type existingChildBead struct {
 // partial"), and it never proves a surviving branch's content is
 // unmergeable — both are left to inspection/reconciliation, on
 // purpose.
+//
+// "No landed-merge evidence" above means specifically
+// lifecycle.ErrLandedMergeNoCandidate (bead-5 fix round 1, RULING 1) —
+// the subject scan found ZERO candidate merges naming this bead at
+// all. Every OTHER lifecycle.FindLandedMerge outcome that also
+// satisfies the broader errors.Is(err, lifecycle.ErrLandedMergeNotFound)
+// — an uncorroborated or mutually-conflicting
+// *lifecycle.LandedMergeNoEvidence candidate, a reviewed_head_sha/
+// branch-tip/landed-binding CONTRADICTION, or a positively-identified-
+// then-reverted merge — is a real, owned candidate merge with
+// unresolved or contradicting evidence, NOT a positive absence, and
+// evaluateChildProvenance below routes every one of those to
+// provenanceAmbiguous instead (never a false deletion on an ambiguity).
+//
+// STATED LIMIT (O1-2, bead-5 fix round 1, RULING 2): the subject scan
+// this discriminator's "no candidate at all" leg depends on
+// (lifecycle.FirstParentMerges, `git log --first-parent --merges`) can
+// only ever see a TWO-PARENT merge commit. A landing performed via a
+// squash merge (one parent) or a fast-forward (no merge commit at all)
+// produces ZERO candidates — indistinguishable, at this discriminator,
+// from a bead that never landed — and is therefore residually
+// classified provenancePartialInterrupted despite genuinely-landed,
+// tree-present work. This is a real, unclosed gap (not merely
+// hypothetical — R3a's own sibling adopted-merge handling is ABOUT
+// out-of-band landings), demonstrated by
+// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit below;
+// detecting it would require a content-presence check this
+// discriminator does not perform. Tracked as a follow-up rather than
+// silently left for a future reader to rediscover (see this bead's
+// fix-round report).
 type childProvenanceEvidence int
 
 const (
@@ -874,12 +919,17 @@ const (
 	// computation itself failed — fail-closed, preserve rather than
 	// guess.
 	provenanceAmbiguous
-	// provenancePartialInterrupted: no bead branch survives AND no
-	// landed-merge evidence exists for it — the one positive signature
-	// a partial `bd create` failure or an interrupted supersede-close
-	// leaves behind (the plan.go beadCreateFailure by-construction
-	// model below, applied here as DURABLE evidence rather than
-	// in-run construction).
+	// provenancePartialInterrupted: no bead branch survives AND
+	// lifecycle.FindLandedMerge positively returns
+	// lifecycle.ErrLandedMergeNoCandidate (zero candidate merges found
+	// at all — NOT the broader ErrLandedMergeNotFound umbrella, which
+	// also covers an uncorroborated/conflicting candidate, a
+	// contradiction, or a reverted landing; see childProvenanceEvidence's
+	// own doc comment) — the one positive signature a partial
+	// `bd create` failure or an interrupted supersede-close leaves
+	// behind (the plan.go beadCreateFailure by-construction model
+	// below, applied here as DURABLE evidence rather than in-run
+	// construction).
 	provenancePartialInterrupted
 )
 
@@ -929,7 +979,25 @@ func evaluateChildProvenance(root, specBranch, beadID string) childProvenanceEvi
 	switch _, landedErr := planFindLandedMergeFn(root, specBranch, beadID); {
 	case landedErr == nil:
 		return provenanceCompletedWork
-	case errors.Is(landedErr, lifecycle.ErrLandedMergeNotFound):
+	case errors.Is(landedErr, lifecycle.ErrLandedMergeNoCandidate):
+		// The ONE definitive-absence shape (lifecycle.
+		// ErrLandedMergeNoCandidate's own doc comment): the subject scan
+		// found no candidate merge naming this bead AT ALL — not an
+		// uncorroborated candidate, not a contradiction, not a reverted
+		// landing. Bead-5 fix round 1 RULING 1: a bare
+		// errors.Is(landedErr, lifecycle.ErrLandedMergeNotFound) check
+		// here previously also matched *lifecycle.LandedMergeNoEvidence
+		// (that type deliberately wraps the broader sentinel — see its
+		// own doc comment) and every contradiction/reverted-landing
+		// return in FindLandedMerge, collapsing all of them into this
+		// same positive-deletion-licensing outcome. Checking the
+		// NARROWER sentinel specifically, rather than the broad
+		// ErrLandedMergeNotFound umbrella, is what fixes that: every
+		// other landedErr shape — including *LandedMergeNoEvidence in
+		// both its uncorroborated and mutually-conflicting forms, an
+		// invalid/empty bead id, a corroboration contradiction, and a
+		// positively-identified-then-reverted merge — falls through to
+		// the default ambiguous case below instead.
 		return provenancePartialInterrupted
 	default:
 		return provenanceAmbiguous
@@ -1032,13 +1100,18 @@ func closedChildDeletionRefusal(id string) error {
 		// No merge/branch work-destruction predicate ran at this call
 		// site — this is a bead-status/provenance check, not a
 		// gitutil.EvaluateWorkDestruction evaluation — so there is no
-		// semantically-matching guard.DestructionOutcome to give.
-		// DestructionAncestor is the constructor's own documented
-		// legitimate placeholder for exactly this case (its doc
-		// comment: "mere possession of a DestructionOutcome is not
-		// proof the predicate ran" — the real evidentiary gating here
-		// is childProvenanceEvidence, resolved above this call, per
-		// R2/R4/R3c's own job per the constructor's contract).
+		// matching guard.DestructionOutcome to give. DestructionAncestor
+		// — constructor.go's own documented design (bead 1's F1-3): a
+		// legitimate, real DestructionOutcome VALUE here, not a claim
+		// that a predicate ran to produce it — the mandatory PARAMETER
+		// is what the constructor enforces, never a non-zero check on
+		// its value ("mere possession of a DestructionOutcome is not
+		// proof the predicate ran"). The parameter is therefore
+		// satisfied STRUCTURALLY rather than EVIDENTIALLY: the real
+		// evidentiary gating for this destructive action is
+		// childProvenanceEvidence, resolved above this call by R3c's
+		// own discriminator (lifecycle.ErrLandedMergeNoCandidate,
+		// specifically — see that discriminator's doc comment).
 		guard.DestructionAncestor,
 	)
 	if ctorErr != nil {
@@ -1086,13 +1159,22 @@ func closedChildPreserveRefusal(id string, prov childProvenanceEvidence) error {
 // means the re-run's preflight sees those same closed beads and
 // checkExistingBeadsSafety's "closed" branch refuses again — spec 127 R3c
 // now gates the recovery's shape on resolveChildProvenance's durable
-// evidence rather than emitting `bd delete <id> --force` unconditionally,
-// but THIS exact interruption shape is precisely the positive
-// partial/interrupted signature the provenance model exists to catch (no
-// bead branch was ever created for these children, and no merge of their
-// non-existent work could ever have landed), so the recovery still
-// converges: delete the leftovers, re-run `mindspec plan approve`, and the
-// full new set is created exactly once.
+// evidence rather than emitting `bd delete <id> --force` unconditionally.
+// For a child that was never more than open/blocked/deferred BEFORE this
+// function closed it, that durable evidence is precisely the positive
+// partial/interrupted signature the provenance model exists to catch: no
+// bead/<id> branch is created merely by a bd status short of in_progress,
+// so none of those statuses could have left one surviving, and no merge of
+// non-existent work could ever have landed — so the recovery converges for
+// that case: delete the leftovers, re-run `mindspec plan approve`, and the
+// full new set is created exactly once. This reasoning does NOT extend to a
+// child that once reached in_progress (and so may hold a genuinely
+// surviving bead/<id> branch) before being superseded here while blocked
+// or deferred — checkExistingBeadsSafety's own switch never inspects branch
+// state for a non-in_progress/non-closed status, so whether such a child's
+// branch survives is not established by this function; Spec 074's own
+// longstanding design simply treats every one of those statuses as
+// safe-to-supersede regardless.
 func supersedeCloseExistingBeads(children []existingChildBead, planContent string) error {
 	if len(children) == 0 {
 		return nil

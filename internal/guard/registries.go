@@ -415,7 +415,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/plan.go",
 		Func:       "beadCreateFailure",
 		Detail:     "arg2:unprovable",
-		Rationale:  "idvalidate-guarded-raw: the OTHER call site's THIRD argument (arg2) is the SAME `fmt.Sprintf(\"mindspec plan approve %s\", specID)` template, following that call's arg1 — the genuine `bd delete %s --force` floor match already governed by DestructiveGuidanceAllowlist's first entry (above), not this registry.",
+		Rationale:  "idvalidate-guarded-raw: the OTHER call site's THIRD argument (arg2) is the SAME `fmt.Sprintf(\"mindspec plan approve %s\", specID)` template, following that call's arg1. This same function's genuine `bd delete %s --force` floor match is now constructor-derived (guard.NewDestructiveCommand, spec 127 R3c), not a raw allowlisted string; the two DestructiveGuidanceAllowlist entries this rationale used to cite were REMOVED (not converted-with-continuing-obligation) in bead 5 — see the allowlist's own doc comment above.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -429,7 +429,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/plan.go",
 		Func:       "checkExistingBeadsSafety",
 		Detail:     "arg1:unprovable",
-		Rationale:  "idrender-rendered: the OPAQUE command-position Sprintf here is `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(c.ID))` — a DIFFERENT operand from this same function's `bd delete %s --force` Sprintf, which is a genuine floor match already governed by DestructiveGuidanceAllowlist's second entry (above), not this registry.",
+		Rationale:  "idrender-rendered: the OPAQUE command-position Sprintf here is `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(c.ID))`. This function no longer renders a `bd delete %s --force` Sprintf directly (bead 5 moved it into the separate closedChildDeletionRefusal helper, called from this function's closed leg) — that template is now constructor-derived (guard.NewDestructiveCommand, spec 127 R3c); the DestructiveGuidanceAllowlist entry this rationale used to cite was REMOVED (not converted-with-continuing-obligation) in bead 5 — see the allowlist's own doc comment above.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

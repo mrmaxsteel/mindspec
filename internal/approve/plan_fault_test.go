@@ -119,12 +119,21 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 	// scenario (S3-r2-5's purity split: the resolution is I/O, so it
 	// needs a seam here exactly like every other bd/git-touching leg
 	// this harness already stubs).
+	//
+	// lifecycle.ErrLandedMergeNoCandidate, specifically — NOT the
+	// broader lifecycle.ErrLandedMergeNotFound sentinel (bead-5 fix
+	// round 1, RULING 1): evaluateChildProvenance now checks the
+	// narrower sentinel to avoid collapsing a real, ambiguous or
+	// contradicted owned candidate into this same positive signature.
+	// This harness's fixtures genuinely have zero candidates (no
+	// branch was ever created), so the narrow sentinel is the
+	// factually correct stub, not a workaround.
 	origBranchExists := planBranchExistsInFn
 	planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 	t.Cleanup(func() { planBranchExistsInFn = origBranchExists })
 	origFindLanded := planFindLandedMergeFn
 	planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
-		return nil, lifecycle.ErrLandedMergeNotFound
+		return nil, lifecycle.ErrLandedMergeNoCandidate
 	}
 	t.Cleanup(func() { planFindLandedMergeFn = origFindLanded })
 }
