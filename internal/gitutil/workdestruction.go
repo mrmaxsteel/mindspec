@@ -63,14 +63,36 @@
 // for the probed fixtures (single- and multi-commit recreation, the #218
 // shape routed to DestructionSuperseded instead, the AC-8(ii)/(iii)
 // boundary shapes, and the conservative corner where a cleanup's
-// deletions exactly equal a whole ancestor delta). A recreation whose OWN
-// novel contribution is a rename/copy of a target-present path, an
-// in-place edit (content or mode-only) of one, or a TYPE change to one
-// (spec 127 bead-1 fix round 2, G1-N1) is a stated, fixtured miss (see
-// novelPaths' and diffNameStatusBuckets' doc comments) — each would
-// require either relocating content back to its original path, or
-// re-admitting the over-match masking ruling 2 rolled back, and both are
-// deliberately out of scope for this bead.
+// deletions exactly equal a whole ancestor delta).
+//
+// The GENERAL rule for the stale-deletion leg's miss surface (stated once
+// here rather than left to be inferred from examples, spec 127 bead-1 fix
+// round 3->4, NEW-O1r-B/O3r-1): it detects a recreation ONLY when the
+// branch's ENTIRE novel diff against target is A-status (added paths,
+// and only those). ANY rename/copy, in-place edit (content or mode-only),
+// type change, or DELETION anywhere in that novel diff — alone or mixed
+// with genuine additions — makes the recreation invisible to this leg,
+// because none of those statuses is stripped before the ancestor-tree
+// comparison (see novelPaths' and diffNameStatusBuckets' doc comments for
+// why each is excluded). The five shapes fixtured by name below
+// (StatedLimit_RenameOfNovelWorkIsMissed,
+// StatedLimit_ModifiedNovelWorkIsMissed,
+// StatedLimit_ModeOnlyNovelWorkIsMissed,
+// StatedLimit_TypeChangeOfNovelWorkIsMissed, and
+// StatedLimit_ConflictOnRevertedPathScreensNothing above) — plus
+// StatedLimit_NovelDeletionIsMissed and
+// StatedLimit_MixedAddAndEditIsMissed in workdestruction_test.go — are
+// INSTANCES of that rule, illustrations for the fixture table, never its
+// extent: closing any one of them individually (e.g. by relocating
+// rename content back to its original path) would still leave the
+// general rule, and the other reachable members it predicts, open.
+// Closing it fully would require either a structural signal (a deletion
+// attributable to the branch's own commit, not merely to the diff
+// against target) or re-admitting the over-match masking ruling 2 rolled
+// back — both deliberately out of scope for this bead. See
+// guard.DestructionClean's doc comment for the consumer-facing
+// consequence: Clean means no destructive class was DETECTED, not that
+// the merge is certified non-destructive.
 //
 // A third stated limitation (spec 127 bead-1 fix round 2, O3-2): when the
 // candidate merge conflicts ON the very path the recreation reverts (a
@@ -103,23 +125,30 @@ package gitutil
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
 // errTruncatedHistory is findAncestorWithTree's sentinel for a target
-// history rev-list cannot fully see, via any of THREE independent git
+// history rev-list cannot fully see, via either of TWO independent
 // mechanisms (spec 127 bead-1 fix round, O1-3; fix round 2 added the
-// latter two): a depth-limited shallow clone, a refs/replace/* replace
-// ref, or a legacy .git/info/grafts file. In every case "no matching
-// ancestor found" is not a legitimate answer — it is an artifact of
-// history that was never fully available to scan. Wrapped, never
-// returned bare, so callers can still see the underlying probe's own
-// error text (and which of the three mechanisms triggered it).
+// second, then fix round 3->4 corrected how it is detected — see
+// historyTruncated's doc comment): a depth-limited shallow clone
+// (isShallowRepo), or an object-replacement mechanism — a refs/replace/*
+// ref or a legacy .git/info/grafts file — that measurably shortens what
+// `git rev-list target` reaches (historyTruncated). In every case "no
+// matching ancestor found" is not a legitimate answer — it is an
+// artifact of history that was never fully available to scan. Wrapped,
+// never returned bare, so callers can still see the underlying probe's
+// own error text — distinguishing shallow from replace/grafts, but (as
+// of fix round 3->4's single differential measurement replacing the two
+// separate presence probes) no longer distinguishing a replace ref from
+// a grafts file within that second category, since a single count
+// comparison cannot tell which of the two moved it.
 var errTruncatedHistory = errors.New("target's history is shallow/truncated: an ancestor scan cannot certify the absence of a match")
 
 // WorkDestructionEvidence carries the facts EvaluateWorkDestruction
@@ -189,8 +218,7 @@ var workDestructionNovelPathsFn = novelPaths
 var workDestructionStripPathsFn = stripNovelPaths
 var workDestructionFindAncestorTreeFn = findAncestorWithTree
 var workDestructionIsShallowFn = isShallowRepo
-var workDestructionHasReplaceRefsFn = hasReplaceRefs
-var workDestructionHasGraftsFileFn = hasGraftsFile
+var workDestructionHistoryTruncatedFn = historyTruncated
 
 // ancestryTargets returns the refs EvaluateWorkDestruction checks a
 // candidate branch against for ancestry and supersession, in order:
@@ -325,16 +353,25 @@ func EvaluateWorkDestruction(workdir, branch, target string) (guard.DestructionO
 }
 
 // snapshotRevertMatch is the snapshot-revert signature: it strips branch's
-// own novel contribution — both the paths it ADDS and the paths it EDITS
-// in place relative to target (never its renames/copies, which are moved
-// content, not new or edited content at either path — see novelPaths'
-// doc comment for why that stays a stated miss) — from branch's tip tree,
-// then scans target's own history for a commit whose tree, similarly
-// stripped of the SAME edited paths, exactly equals the stripped branch
-// tree. A match means branch, net of its own novel work, reconstructs a
-// prior state of target — the D-set the caller already found non-empty is
-// therefore a staleness artifact of that reconstruction, not authored
-// work.
+// own novel contribution (the paths it ADDS relative to target — never
+// its renames/copies, nor the paths it edits in place: see novelPaths'
+// doc comment for why both stay stated misses) from branch's tip tree,
+// then scans target's own history for a commit whose tree exactly equals
+// the stripped result, with no ancestor-side masking. A match means
+// branch, net of its own added work, reconstructs a prior state of
+// target — the D-set the caller already found non-empty is therefore a
+// staleness artifact of that reconstruction, not authored work.
+//
+// Corrected (spec 127 bead-1 fix round 3->4, O3r-1/NEW-O2R-b): this
+// paragraph previously said the strip ALSO covered paths branch edits in
+// place, and that the ancestor-side comparison was "similarly stripped of
+// the SAME edited paths" — true of round 1's brief A+M widening, and
+// left unrevised when ruling 2 (below) reverted that widening's CODE
+// without reverting this paragraph's PROSE, so it spent this bead's
+// second and third fix rounds describing behavior the shipped function
+// does not have, at the primary site the package doc above points
+// readers to twice. Restored to ab5aca11's original wording, which is
+// what the code below has always actually done since that revert.
 func snapshotRevertMatch(workdir, branch, target string) (matched bool, ancestorSHA string, err error) {
 	added, _, err := workDestructionNovelPathsFn(workdir, target, branch)
 	if err != nil {
@@ -392,7 +429,13 @@ func snapshotRevertMatch(workdir, branch, target string) (matched bool, ancestor
 // failure that caused the rollback). modified is still returned — every
 // caller that wants to name the stated miss precisely (or a future
 // caller that finds a mask-invariant-preserving use for it) can — but as
-// of this fix round its only actual caller discards it.
+// of this fix round its only actual caller discards it. diffNameStatusBucketsFn's
+// third return, deleted, is discarded here too (the `_` above) — a path
+// branch's own novel work DELETES relative to target is, like an edit or
+// a rename, not A-status, so it is likewise a reachable, undocumented-
+// until-now instance of the general miss rule stated in this file's
+// package doc comment and snapshotRevertMatch's (spec 127 bead-1 fix
+// round 3->4, NEW-O1r-B) rather than a sixth independent mechanism.
 //
 // Renamed/copied content (R/C) and type-changed content (T — spec 127
 // bead-1 fix round 2, G1-N1) are deliberately excluded from BOTH buckets
@@ -415,25 +458,30 @@ func novelPaths(workdir, target, branch string) (added, modified []string, err e
 	return added, modified, err
 }
 
-// tempIndexPath allocates a unique path suitable for a temporary
-// GIT_INDEX_FILE: the file itself is removed immediately (git creates the
-// index file fresh at `read-tree` time), so the returned path names no
-// existing file. This is what keeps stripNovelPaths from ever touching the
-// repo's REAL index: `git read-tree`/`update-index`/`write-tree` below run
-// with GIT_INDEX_FILE pointed here instead.
-func tempIndexPath() (string, error) {
-	f, err := os.CreateTemp("", "mindspec-workdestruction-idx-")
+// tempIndexPath allocates a fresh, private TEMPORARY DIRECTORY
+// (os.MkdirTemp, mode 0700) and returns a path for a GIT_INDEX_FILE
+// inside it that names no existing file — git creates the index file
+// fresh at `read-tree` time. This is what keeps stripNovelPaths from
+// ever touching the repo's REAL index: `git read-tree`/`update-index`/
+// `write-tree` below run with GIT_INDEX_FILE pointed here instead.
+//
+// Corrected (spec 127 bead-1 fix round 3->4, NEW-G1sub-5): a prior
+// version reserved the index path via os.CreateTemp + Close + Remove,
+// which frees that exact name inside TMPDIR — on a host where TMPDIR is
+// shared and world-writable (e.g. Linux CI's default /tmp; not macOS,
+// where TMPDIR is a per-user 0700 directory), another local process can
+// occupy the freed name before git opens it (a create-then-remove race,
+// CWE-377 shape). A private 0700 directory removes the class outright
+// rather than bounding it: nothing else can create a same-named entry
+// inside a directory only this process can write to. Callers must remove
+// the WHOLE returned directory when done, not merely the index path
+// within it — see stripNovelPaths' defer.
+func tempIndexPath() (dir, path string, err error) {
+	dir, err = os.MkdirTemp("", "mindspec-workdestruction-idx-")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	path := f.Name()
-	if cerr := f.Close(); cerr != nil {
-		return "", cerr
-	}
-	if rerr := os.Remove(path); rerr != nil {
-		return "", rerr
-	}
-	return path, nil
+	return dir, filepath.Join(dir, "index"), nil
 }
 
 // stripNovelPaths builds ref's tip tree with every path in strip removed,
@@ -484,11 +532,11 @@ func stripNovelPaths(workdir, ref string, strip []string) (treeOID string, err e
 		return "", err
 	}
 
-	idxPath, err := tempIndexPath()
+	idxDir, idxPath, err := tempIndexPath()
 	if err != nil {
 		return "", fmt.Errorf("allocating temporary index: %w", err)
 	}
-	defer os.Remove(idxPath)
+	defer os.RemoveAll(idxDir)
 
 	env := append(os.Environ(), "GIT_INDEX_FILE="+idxPath)
 
@@ -519,7 +567,7 @@ func stripNovelPaths(workdir, ref string, strip []string) (treeOID string, err e
 		if survivors, verr := lsTreeSurvivors(workdir, tree, strip); verr != nil {
 			return "", fmt.Errorf("verifying strip result: %w", verr)
 		} else if len(survivors) > 0 {
-			return "", fmt.Errorf("strip verification failed: %v still present in tree %s after --force-remove (path-identity mismatch between the strip list and the temp index)", survivors, tree)
+			return "", fmt.Errorf("strip verification failed: %v still present in tree %s after --force-remove (this function's own read-tree/update-index/write-tree sequence did not remove a path it was asked to remove; see this function's doc comment — a caller/index spelling mismatch is NOT detectable here)", survivors, tree)
 		}
 	}
 
@@ -568,60 +616,96 @@ func isShallowRepo(workdir string) (bool, error) {
 	return strings.TrimSpace(string(out)) == "true", nil
 }
 
-// hasReplaceRefs reports whether workdir has any refs/replace/* refs
-// (`git for-each-ref refs/replace/`) — spec 127 bead-1 fix round 2,
-// O1-3: a replace ref silently substitutes a DIFFERENT commit (and its
-// entire ancestry) wherever git would otherwise read the original,
-// truncating rev-list's view of target's real history exactly like a
-// shallow clone does — but WITHOUT --is-shallow-repository ever
-// reporting true. Verified: `git replace --graft <sha> <parent>` on an
-// otherwise-full clone makes `rev-list target` count drop while
-// is-shallow-repository stays false, and findAncestorWithTree's scan
-// (which relied on isShallowRepo alone) read the resulting "no match in
-// the (replaced) history I could see" as the definite DestructionClean
-// answer on a fixture that classifies DestructionStaleDeletion on the
-// same repo with the replace ref removed. `--no-replace-objects` would
-// make the scan see past this specific mechanism, but there is no
-// equivalent flag for the grafts file below, so detect-and-fail-closed
-// (this function, plus hasGraftsFile) is the single mechanic that covers
-// both truncation vectors the same way.
-func hasReplaceRefs(workdir string) (bool, error) {
-	cmd := execCommand("git", gitArgs(workdir, "for-each-ref", "refs/replace/")...)
-	out, err := cmd.Output()
-	if err != nil {
-		return false, fmt.Errorf("for-each-ref refs/replace/: %w", err)
+// historyTruncated reports whether target's history, as
+// findAncestorWithTree's own rev-list scan below will see it, is
+// truncated by git's object-replacement machinery — a refs/replace/*
+// ref, or a legacy .git/info/grafts file — RELATIVE to the full history
+// the same commits reach with every replacement mechanism disabled at
+// once.
+//
+// Spec 127 bead-1 fix round 3->4 (NEW-O1r-A/NEW-O2R-a/NEW-G1sub-1),
+// replacing this bead's fix round 2 probes (hasReplaceRefs, hasGraftsFile
+// — deleted, along with their doc comments' now-corrected claims):
+// those asked whether either mechanism EXISTS anywhere in the
+// repository, never whether it actually shortens what rev-list reaches.
+// That shape failed in BOTH directions at once, on the SAME
+// unconditional-presence design: over-fire, because a benign replace ref
+// or grafts file (git's own documented use case — a corrected author
+// line on a same-tree commit) truncates nothing yet still turned every
+// subsequent evaluation into a PERMANENT DestructionEvidenceError — the
+// one failure direction ("a false refusal of honest work") this
+// predicate's contract forbids, and a permanent condition where AC-8(iv)
+// requires a retryable one; and under-fire, because `for-each-ref
+// refs/replace/` is blind to a replace ref created under a relocated
+// GIT_REPLACE_REF_BASE (git honors that variable, concatenating it with
+// the target OID with NO normalization — verified empirically: a base of
+// "refs/myreplace" with no trailing slash still works as a real
+// replacement, at the ref name "refs/myreplacemyreplace<hex>", which
+// `for-each-ref refs/replace/` and `for-each-ref refs/myreplace/` both
+// miss), so a genuinely truncating relocated ref reported "not
+// truncated" — the exact fail-open this predicate exists to refuse,
+// reappearing inside the mechanism added to close it.
+//
+// This measures the EFFECT instead of the mechanism, which answers both
+// directions with one differential and needs no enumeration of where a
+// replace ref might live: it compares `git rev-list --count target` as
+// the real scan will run it against the SAME count with
+// `--no-replace-objects` (a top-level git option that disables replace-
+// object lookup UNIVERSALLY — verified: it bypasses a replace ref
+// regardless of which ref namespace stores it, including the relocated,
+// no-slash-normalized shape above) and `GIT_GRAFT_FILE=/dev/null` (grafts
+// have no equivalent top-level flag — `-c core.graftFile=` does NOT
+// work, verified; the environment variable is the only bypass) both
+// applied together. Truncated iff the bypassed count is STRICTLY
+// GREATER: a benign replacement (same reachable set either way) reports
+// false, never a refusal; a genuinely truncating one, at ANY ref
+// location or via grafts, reports true, because disabling it always
+// restores the full count regardless of where it was hiding.
+// isShallowRepo above is untouched by this and stays checked first: a
+// shallow clone's boundary (the $GIT_DIR/shallow file) is a distinct
+// mechanism neither flag here touches, so it truncates both sides of
+// this differential equally and the differential alone cannot see it.
+func historyTruncated(workdir, target string) (bool, error) {
+	// Redundant with findAncestorWithTree's own top-of-function guard (its
+	// only caller), kept directly here anyway — SEC-5 discipline elsewhere
+	// in this file guards every ref-bearing operand at the function that
+	// spends it, not only transitively at a caller several frames up.
+	if err := rejectOptionLike(target); err != nil {
+		return false, err
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	asSeen, err := revListCount(workdir, target, nil)
+	if err != nil {
+		return false, fmt.Errorf("rev-list --count %s: %w", target, err)
+	}
+	full, err := revListCount(workdir, target, []string{"GIT_GRAFT_FILE=/dev/null"}, "--no-replace-objects")
+	if err != nil {
+		return false, fmt.Errorf("rev-list --count %s (bypassing replace-objects/grafts): %w", target, err)
+	}
+	return full > asSeen, nil
 }
 
-// hasGraftsFile reports whether workdir's repository has a legacy
-// `.git/info/grafts` file — spec 127 bead-1 fix round 2, O1-3: like a
-// replace ref, a graft silently rewrites a commit's reported parents (and
-// therefore rev-list's reachability from target), without
-// --is-shallow-repository ever reporting true. Resolved via `git
-// rev-parse --git-path info/grafts` rather than a hardcoded
-// `<workdir>/.git/info/grafts` join, so this also works inside a linked
-// worktree (whose `.git` is a file, not a directory, and whose
-// `info/grafts` lives under the MAIN repository's common dir, not the
-// worktree's own).
-func hasGraftsFile(workdir string) (bool, error) {
-	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--git-path", "info/grafts")...)
+// revListCount runs `git rev-list --count target`, prefixed with any
+// topLevelOpts (top-level git options — e.g. --no-replace-objects — which
+// must precede the subcommand, hence the separate parameter rather than
+// folding into a generic args list) and with extraEnv appended to the
+// child's environment when non-empty (nil leaves Env unset, inheriting
+// the process environment exactly like every other read-only probe in
+// this file).
+func revListCount(workdir, target string, extraEnv []string, topLevelOpts ...string) (int, error) {
+	args := append(append([]string{}, topLevelOpts...), "rev-list", "--count", target)
+	cmd := execCommand("git", gitArgs(workdir, args...)...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("rev-parse --git-path info/grafts: %w", err)
+		return 0, err
 	}
-	path := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(workdir, path)
+	n, perr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if perr != nil {
+		return 0, fmt.Errorf("parsing rev-list --count output %q: %w", string(out), perr)
 	}
-	info, statErr := os.Stat(path)
-	if statErr != nil {
-		if errors.Is(statErr, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("stat %s: %w", path, statErr)
-	}
-	return !info.IsDir(), nil
+	return n, nil
 }
 
 // findAncestorWithTree scans target's own history (`git rev-list
@@ -630,13 +714,16 @@ func hasGraftsFile(workdir string) (bool, error) {
 // from it via stripNovelPaths — equals wantTree, returning its SHA; or
 // ("", nil) when no such commit exists (not an error: "no match" is a
 // legitimate, common answer). Before scanning, checks that target's
-// history is not truncated by any of THREE independent mechanisms — a
-// shallow clone (isShallowRepo), a replace ref (hasReplaceRefs), or a
-// legacy grafts file (hasGraftsFile), each wrapping errTruncatedHistory
-// (spec 127 bead-1 fix round 2, O1-3: the round-1 fix caught only the
+// history is not truncated by either of TWO independent mechanisms — a
+// shallow clone (isShallowRepo), or git's object-replacement machinery
+// (historyTruncated, covering both a replace ref and a legacy grafts
+// file with one measurement — see its doc comment for why they are
+// checked together rather than by separate presence probes as of spec
+// 127 bead-1 fix round 3->4) — each wrapping errTruncatedHistory (spec
+// 127 bead-1 fix round 2, O1-3: the round-1 fix caught only the
 // shallow-clone case; replace refs and grafts fail open the SAME way —
-// Clean, no error, D-set fully enumerated — via the other two mechanisms
-// git offers for the identical effect, "rev-list sees less history than
+// Clean, no error, D-set fully enumerated — via the other mechanism git
+// offers for the identical effect, "rev-list sees less history than
 // actually exists") — see errTruncatedHistory's doc comment. `git rev-list --format=` (unlike
 // `git log --format=`) precedes each formatted line with a "commit <sha>"
 // header line; those are skipped by rejecting any line whose first field
@@ -666,19 +753,12 @@ func findAncestorWithTree(workdir, target, wantTree string, maskPaths []string) 
 	if shallow {
 		return "", fmt.Errorf("%s: %w", target, errTruncatedHistory)
 	}
-	hasReplace, err := workDestructionHasReplaceRefsFn(workdir)
+	truncated, err := workDestructionHistoryTruncatedFn(workdir, target)
 	if err != nil {
-		return "", fmt.Errorf("checking %s's history for replace-ref truncation: %w", target, err)
+		return "", fmt.Errorf("checking %s's history for replace-object/grafts truncation: %w", target, err)
 	}
-	if hasReplace {
-		return "", fmt.Errorf("%s: refs/replace/* present: %w", target, errTruncatedHistory)
-	}
-	hasGrafts, err := workDestructionHasGraftsFileFn(workdir)
-	if err != nil {
-		return "", fmt.Errorf("checking %s's history for grafts truncation: %w", target, err)
-	}
-	if hasGrafts {
-		return "", fmt.Errorf("%s: info/grafts present: %w", target, errTruncatedHistory)
+	if truncated {
+		return "", fmt.Errorf("%s: a replace ref or info/grafts file measurably shortens rev-list's view: %w", target, errTruncatedHistory)
 	}
 
 	cmd := execCommand("git", gitArgs(workdir, "rev-list", "--format=%H %T", target)...)

@@ -42,11 +42,26 @@ package guard
 //     internal/gitutil's package doc comment for the tradeoff that widens.
 //   - DestructionClean: none of the above — an ordinary merge, including
 //     one whose own content genuinely conflicts (a real conflict is
-//     handled by the merge attempt itself, not by this predicate).
+//     handled by the merge attempt itself, not by this predicate). NOT a
+//     certification that the merge preserves work (spec 127 bead-1 fix
+//     round 3->4, NEW-O1r-B): DestructionClean means no destructive class
+//     was DETECTED, and the stale-deletion leg's detection is limited —
+//     it catches a recreation only when the branch's ENTIRE novel diff
+//     against target is A-status (added paths only); any rename, in-
+//     place edit, mode change, type change, or deletion anywhere in that
+//     novel diff — alone or mixed with genuine additions — is a stated,
+//     fixtured miss (see internal/gitutil's package doc comment and
+//     snapshotRevertMatch's doc comment for the general rule, and
+//     workdestruction_test.go's StatedLimit_* rows for the fixtured
+//     instances). A consumer must not skip its own conflict/review
+//     handling on the strength of a Clean answer alone.
 //   - DestructionEvidenceError: the predicate could not be evaluated (a
-//     git/infra failure at any of its probes) — absence of evidence is
-//     never treated as safety; every consumer fails closed on this
-//     outcome.
+//     git/infra failure at any of its probes, or a repo whose history is
+//     genuinely shallow/truncated so an ancestor scan cannot certify the
+//     absence of a match — see internal/gitutil's errTruncatedHistory)
+//     — absence of evidence is never treated as safety; every consumer
+//     fails closed on this outcome, which is retryable and carries a
+//     named override.
 type DestructionOutcome int
 
 const (
@@ -70,7 +85,9 @@ const (
 	// DestructionStaleDeletion: the merge preview deletes target content
 	// the branch never authored — a staleness artifact.
 	DestructionStaleDeletion
-	// DestructionClean: an ordinary merge; no destructive class applies.
+	// DestructionClean: an ordinary merge; no destructive class was
+	// DETECTED — not a certification that none applies (see the package
+	// doc comment above, spec 127 bead-1 fix round 3->4, NEW-O1r-B).
 	DestructionClean
 	// DestructionEvidenceError: the predicate could not be evaluated.
 	DestructionEvidenceError

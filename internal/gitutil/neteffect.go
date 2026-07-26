@@ -632,18 +632,21 @@ func diffNameStatusBuckets(workdir, from, to string) (added, deleted, modified [
 			// file <-> gitlink), not merely its content. Structurally a
 			// single-path record, exactly like A/D/M. Deliberately
 			// excluded from all three buckets, for the SAME reason R/C
-			// is: this file's only caller that consumes the added/
-			// modified buckets for anything beyond evidence
-			// (novelPaths, in workdestruction.go) uses them to strip/
-			// mask a branch's own novel work out of a tree-equality
-			// comparison, and spec 127 bead-1 fix round 2 (ruling 2,
-			// O1c-B/NEW-O2-b) found that masking a path out of BOTH
-			// sides of that comparison makes it a wildcard — the more
-			// paths get masked, the WEAKER the comparison, to the point
-			// of misclassifying honest branches as destructive. Folding
-			// T into the modified bucket would reopen that exact
-			// over-match risk one status letter later. So T stays a
-			// stated, fixtured miss (see
+			// is: this file's only caller that consumes the added
+			// bucket for anything beyond evidence (novelPaths, in
+			// workdestruction.go, via snapshotRevertMatch's strip)
+			// needs "paths the branch introduced at a location target
+			// never had" — T is by definition a path target ALREADY
+			// had, so it cannot belong in `added` regardless of which
+			// bucket a future caller might fold it into instead
+			// (corrected, spec 127 bead-1 fix round 3->4, O3r-1: the
+			// prior wording here said folding T into `modified` would
+			// reopen the A+M-masking over-match ruling 2 rolled back —
+			// no longer the live reason, since `modified` is discarded
+			// by snapshotRevertMatch's only caller as of that same
+			// ruling; that risk would need restating, not merely
+			// re-citing, if a future caller ever consumed `modified`
+			// again). So T stays a stated, fixtured miss (see
 			// StatedLimit_TypeChangeOfNovelWorkIsMissed in
 			// workdestruction_test.go) — named on purpose, unlike the
 			// silent `default` this case replaces.

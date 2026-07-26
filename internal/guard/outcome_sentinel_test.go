@@ -23,60 +23,93 @@ package guard
 // own — escapes both that check and every consumer's own
 // len(table)==DestructionOutcomeCount count: "the same silent-fail-open
 // shape this test was added to remove, one step further out." The second
-// half below walks every OTHER top-level const declaration in the file
-// and rejects any spec explicitly typed DestructionOutcome. This catches
-// the common authoring shape (an explicit type on the new spec); it does
-// NOT catch a spec with no explicit type whose value expression merely
-// happens to evaluate to a DestructionOutcome (e.g. one derived by
-// arithmetic from DestructionOutcomeCount) — go/ast's static Type field
-// is nil for those, and resolving the expression's type would need full
-// type-checking (go/types), which this lightweight parse-only walk
+// half below walks every OTHER top-level const declaration and rejects
+// any spec explicitly typed DestructionOutcome. This catches the common
+// authoring shape (an explicit type on the new spec); it does NOT catch
+// a spec with no explicit type whose value expression merely happens to
+// evaluate to a DestructionOutcome (e.g. one derived by arithmetic from
+// DestructionOutcomeCount) — go/ast's static Type field is nil for
+// those, and resolving the expression's type would need full type-
+// checking (go/types), which this lightweight parse-only walk
 // deliberately does not perform. Naming that boundary here rather than
 // letting the doc comment overclaim exhaustiveness it does not have.
+//
+// Widened twice more (spec 127 bead-1 fix round 3->4, NEW-O2R-c): the
+// walk above parsed ONLY the single file "outcome.go", and rejected ONLY
+// token.CONST declarations — two further escapes of the identical class,
+// verified by on-disk mutation: a `const DestructionSixthVariant
+// DestructionOutcome = 99` declared in any OTHER file of this package
+// (a walk scoped to one file's AST cannot see it), and a `var
+// DestructionSixthVariant DestructionOutcome = 99` rather than a const
+// (the rejection loop below skipped any GenDecl whose Tok was not
+// token.CONST). Both now parse the WHOLE package directory
+// (parser.ParseDir, filtering out _test.go — a test-local value of this
+// type is a fixture, not a production variant this sentinel need
+// police) and accept token.VAR alongside token.CONST in the rejection
+// loop. The one escape this still cannot see — an untyped spec whose
+// value merely evaluates to a DestructionOutcome by arithmetic — is
+// unchanged and still named honestly above.
 
 import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"strings"
 	"testing"
 )
 
 func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "outcome.go", nil, 0)
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
 	if err != nil {
-		t.Fatalf("parsing outcome.go: %v", err)
+		t.Fatalf("parsing package guard: %v", err)
+	}
+	pkg, ok := pkgs["guard"]
+	if !ok {
+		var found []string
+		for name := range pkgs {
+			found = append(found, name)
+		}
+		t.Fatalf("package %q not found in parsed directory (found: %v)", "guard", found)
 	}
 
 	var names []string
 	var primaryDecl *ast.GenDecl
-	for _, decl := range file.Decls {
-		gd, ok := decl.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST {
-			continue
-		}
-		var blockNames []string
-		containsAncestor := false
-		for _, spec := range gd.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok {
+	for _, file := range pkg.Files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
 				continue
 			}
-			for _, n := range vs.Names {
-				blockNames = append(blockNames, n.Name)
-				if n.Name == "DestructionAncestor" {
-					containsAncestor = true
+			var blockNames []string
+			containsAncestor := false
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, n := range vs.Names {
+					blockNames = append(blockNames, n.Name)
+					if n.Name == "DestructionAncestor" {
+						containsAncestor = true
+					}
 				}
 			}
+			if containsAncestor {
+				names = blockNames
+				primaryDecl = gd
+				break
+			}
 		}
-		if containsAncestor {
-			names = blockNames
-			primaryDecl = gd
+		if primaryDecl != nil {
 			break
 		}
 	}
 	if primaryDecl == nil {
-		t.Fatal("could not find the DestructionOutcome const block (DestructionAncestor) in outcome.go")
+		t.Fatal("could not find the DestructionOutcome const block (DestructionAncestor) anywhere in package guard")
 	}
 	if len(names) == 0 {
 		t.Fatal("the DestructionOutcome const block has no named specs")
@@ -87,29 +120,32 @@ func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 		t.Fatalf("DestructionOutcomeCount must be the FINAL spec in its const block (a variant appended after it escapes the len(table)==DestructionOutcomeCount discipline every consumer copies); got last spec %q, full block %v", last, names)
 	}
 
-	// NEW-O2-d: no OTHER const declaration in the file may explicitly
-	// type a spec DestructionOutcome — that would be a variant declared
-	// outside the pinned block, invisible to both the check above and to
-	// every consumer's len(table)==DestructionOutcomeCount count.
-	for _, decl := range file.Decls {
-		gd, ok := decl.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST || gd == primaryDecl {
-			continue
-		}
-		for _, spec := range gd.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok || vs.Type == nil {
+	// NEW-O2-d, widened by NEW-O2R-c: no OTHER const OR var declaration
+	// anywhere in the package's non-test files may explicitly type a spec
+	// DestructionOutcome — that would be a variant declared outside the
+	// pinned block, invisible to both the check above and to every
+	// consumer's len(table)==DestructionOutcomeCount count.
+	for _, file := range pkg.Files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd == primaryDecl || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
 				continue
 			}
-			ident, ok := vs.Type.(*ast.Ident)
-			if !ok || ident.Name != "DestructionOutcome" {
-				continue
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || vs.Type == nil {
+					continue
+				}
+				ident, ok := vs.Type.(*ast.Ident)
+				if !ok || ident.Name != "DestructionOutcome" {
+					continue
+				}
+				var declared []string
+				for _, n := range vs.Names {
+					declared = append(declared, n.Name)
+				}
+				t.Fatalf("DestructionOutcome variant(s) %v declared OUTSIDE the pinned const block containing DestructionAncestor/DestructionOutcomeCount — this escapes the len(table)==DestructionOutcomeCount discipline every consumer copies", declared)
 			}
-			var declared []string
-			for _, n := range vs.Names {
-				declared = append(declared, n.Name)
-			}
-			t.Fatalf("DestructionOutcome variant(s) %v declared OUTSIDE the pinned const block containing DestructionAncestor/DestructionOutcomeCount — this escapes the len(table)==DestructionOutcomeCount discipline every consumer copies", declared)
 		}
 	}
 }

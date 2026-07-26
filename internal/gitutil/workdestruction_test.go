@@ -519,6 +519,88 @@ func wdTypeChangeNovelWorkFixture(t *testing.T) (dir, branch, target string) {
 	return dir, "spec-recreated-typechange", "main"
 }
 
+// wdMixedAddAndEditFixture is NEW-O1r-B's first previously-undocumented,
+// previously-unfixtured member of the general miss rule (spec 127
+// bead-1 fix round 3->4): the branch's own novel contribution MIXES a
+// genuine addition (novel.txt, A-status, correctly stripped) WITH an
+// in-place edit of a target-present path (a.txt, M-status, never
+// stripped — see novelPaths' doc comment). All four pre-existing
+// StatedLimit_* fixtures above pin only the NARROW reading — each one's
+// branch has ZERO added paths (novelPaths returns added=[] on every one
+// of them) — so none of them exercises the everyday shape where a
+// branch's novel work both adds something new AND touches an existing
+// file. Stripping novel.txt alone cannot rescue the match here: a.txt's
+// edited content still blocks exact tree-equality against C1, for the
+// identical reason a bare edit does in wdModifiedNovelWorkFixture. See
+// this file's package doc comment and snapshotRevertMatch's for the
+// general rule this is an instance of.
+func wdMixedAddAndEditFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "a.txt", "original\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-mixed", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neWriteFile(t, dir, "novel.txt", "genuinely new work\n")
+	neWriteFile(t, dir, "a.txt", "edited in place by novel work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel ADD (novel.txt) mixed with novel EDIT (a.txt)")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-mixed", "main"
+}
+
+// wdNovelDeletionFixture is NEW-O1r-B's second previously-undocumented,
+// previously-unfixtured member (spec 127 bead-1 fix round 3->4): the
+// branch's own novel contribution is itself a DELETION of a path present
+// since target's own root (stale-doc.md, D-status) — not merely the
+// revert-induced deletion of landed.txt that makes this a recreation in
+// the first place. novelPaths' strip bucket is A-status only; D-status,
+// like R/C/M/T, is not in it (diffNameStatusBucketsFn's own third return
+// is discarded entirely by novelPaths — see its doc comment), so the
+// stripped tree is short one path (stale-doc.md) relative to EVERY
+// candidate ancestor's tree and matches none — even though this is a
+// genuine destructive recreation: the real merge would delete BOTH
+// landed.txt and stale-doc.md, two target-present paths, and branch
+// reconstructs no state target's history ever exactly held.
+func wdNovelDeletionFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "a.txt", "original\n")
+	neWriteFile(t, dir, "stale-doc.md", "an old doc\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1: a.txt + stale-doc.md")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-noveldeletion", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neRunGit(t, dir, "rm", "stale-doc.md")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel DELETION of stale-doc.md")
+	neRunGit(t, dir, "checkout", "main")
+
+	// Fixture invariant: no commit in target's history may have a tree
+	// exactly equal to branch's tip ({README.md, a.txt}) — otherwise this
+	// fixture would accidentally land on a real ancestor match and stop
+	// exercising the miss it is named for.
+	branchTree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "spec-recreated-noveldeletion^{tree}"))
+	for _, rev := range []string{"main", "main~1", "main~2"} {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", rev+"^{tree}").Output()
+		if err != nil {
+			continue // main~2 (the initial commit) has no further parent; ignore
+		}
+		if strings.TrimSpace(string(out)) == branchTree {
+			t.Fatalf("fixture invariant broken: %s's tree equals branch's stripped tip tree — this fixture would be CAUGHT, not missed", rev)
+		}
+	}
+	return dir, "spec-recreated-noveldeletion", "main"
+}
+
 // wdRenameNovelWorkFixture is O2-4's STATED, still-uncaught miss: the
 // branch's own novel contribution is a RENAME of a target-present path
 // (never a content edit or an add). novelPaths deliberately excludes R/C
@@ -751,12 +833,16 @@ func wdReplaceRefTruncatedHistoryFixture(t *testing.T) (dir, branch, target stri
 	if shallowNow {
 		t.Fatalf("fixture invariant broken: a replace ref must NOT make is-shallow-repository report true — otherwise this fixture does not exercise the DISTINCT mechanism O1-3's still-open finding named")
 	}
-	hasReplace, herr := hasReplaceRefs(dir)
-	if herr != nil {
-		t.Fatalf("fixture invariant: hasReplaceRefs: %v", herr)
-	}
-	if !hasReplace {
+	replaceRefs := neRunGit(t, dir, "for-each-ref", "refs/replace/")
+	if strings.TrimSpace(replaceRefs) == "" {
 		t.Fatalf("fixture invariant broken: the repo must actually have a refs/replace/* ref")
+	}
+	truncatedNow, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("fixture invariant: historyTruncated: %v", terr)
+	}
+	if !truncatedNow {
+		t.Fatalf("fixture invariant broken: historyTruncated must detect the truncation this replace ref just introduced (spec 127 bead-1 fix round 3->4: the differential replacing hasReplaceRefs)")
 	}
 	afterCmd := exec.Command("git", "-C", dir, "rev-list", target)
 	afterOut, aerr := afterCmd.Output()
@@ -809,19 +895,19 @@ func wdGraftsTruncatedHistoryFixture(t *testing.T) (dir, branch, target string) 
 	if shallowNow {
 		t.Fatalf("fixture invariant broken: a grafts file must NOT make is-shallow-repository report true")
 	}
-	hasReplace, herr := hasReplaceRefs(dir)
-	if herr != nil {
-		t.Fatalf("fixture invariant: hasReplaceRefs: %v", herr)
-	}
-	if hasReplace {
+	replaceRefs := neRunGit(t, dir, "for-each-ref", "refs/replace/")
+	if strings.TrimSpace(replaceRefs) != "" {
 		t.Fatalf("fixture invariant broken: this fixture must exercise the GRAFTS mechanism, not a replace ref")
 	}
-	hasGrafts, gerr := hasGraftsFile(dir)
-	if gerr != nil {
-		t.Fatalf("fixture invariant: hasGraftsFile: %v", gerr)
+	if _, gerr := os.Stat(graftsPath); gerr != nil {
+		t.Fatalf("fixture invariant broken: info/grafts must exist at %s: %v", graftsPath, gerr)
 	}
-	if !hasGrafts {
-		t.Fatalf("fixture invariant broken: hasGraftsFile must detect the info/grafts file this fixture just wrote")
+	truncatedNow, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("fixture invariant: historyTruncated: %v", terr)
+	}
+	if !truncatedNow {
+		t.Fatalf("fixture invariant broken: historyTruncated must detect the truncation this info/grafts file just introduced (spec 127 bead-1 fix round 3->4: the differential replacing hasGraftsFile)")
 	}
 	afterCmd := exec.Command("git", "-C", dir, "rev-list", target)
 	afterOut, aerr := afterCmd.Output()
@@ -943,6 +1029,8 @@ func TestEvaluateWorkDestruction_OutcomeTable(t *testing.T) {
 		{"StatedLimit_ModifiedNovelWorkIsMissed", wdModifiedNovelWorkFixture, guard.DestructionClean, nil},
 		{"StatedLimit_ModeOnlyNovelWorkIsMissed", wdModeOnlyNovelWorkFixture, guard.DestructionClean, nil},
 		{"StatedLimit_TypeChangeOfNovelWorkIsMissed", wdTypeChangeNovelWorkFixture, guard.DestructionClean, nil},
+		{"StatedLimit_MixedAddAndEditIsMissed", wdMixedAddAndEditFixture, guard.DestructionClean, nil},
+		{"StatedLimit_NovelDeletionIsMissed", wdNovelDeletionFixture, guard.DestructionClean, nil},
 		{"StatedLimit_ConflictOnRevertedPathScreensNothing", wdConflictOnRevertedPathFixture, guard.DestructionClean, func(t *testing.T, e WorkDestructionEvidence) {
 			if len(e.DeletedPaths) != 0 {
 				t.Errorf("evidence.DeletedPaths = %v, want empty (O3-2: a modify/delete conflict on the reverted path keeps the modified side, so the preview deletes nothing)", e.DeletedPaths)
@@ -1329,7 +1417,7 @@ func TestEvaluateWorkDestruction_AncestorMaskOvermatchRedOnRestoredMStatusMask(t
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if realOutcome != guard.DestructionClean {
-		t.Fatalf("fixture invariant broken: EvaluateWorkDestruction = %s, want DestructionClean — this is an honest branch, not a recreation", realOutcome)
+		t.Fatalf("EvaluateWorkDestruction = %s, want DestructionClean — this is an honest branch, not a recreation. Restoring the M-status strip/mask in snapshotRevertMatch (round 1's A+M widening) is FORBIDDEN by spec 127 bead-1 fix round 2 ruling 2 and bead 6's acceptance criteria: it misclassifies honest branches like this one as destructive (O1c-B/NEW-O2-b). Do not adjust this fixture or this expectation to make this test pass — fix the regression in snapshotRevertMatch instead", realOutcome)
 	}
 
 	// Reconstruct round 1's A+M mask directly: strip BOTH added and
@@ -1354,11 +1442,16 @@ func TestEvaluateWorkDestruction_AncestorMaskOvermatchRedOnRestoredMStatusMask(t
 	if restoredSHA == "" {
 		t.Fatal("test invariant broken: round 1's A+M mask was expected to OVER-MATCH (wrongly find an ancestor) on this honest-branch shape — that is the bug this test pins")
 	}
-	restoredAnswer := guard.DestructionStaleDeletion // what EvaluateWorkDestruction would have answered, had step 3 found this match
-
-	if realOutcome == restoredAnswer {
-		t.Fatalf("test invariant broken: the real and restored-mask answers must differ on this fixture; both landed on %s", realOutcome)
-	}
+	// restoredSHA != "" here means round 1's A+M mask WOULD have matched an
+	// ancestor — i.e. EvaluateWorkDestruction would have answered
+	// DestructionStaleDeletion, not the DestructionClean asserted above —
+	// on this honest branch, had that mask still been wired in. That
+	// non-empty match, together with the real predicate's Clean answer
+	// already asserted above, IS the discriminating pin (spec 127 bead-1
+	// fix round 3->4, NEW-G1sub-3: a prior version of this test also
+	// compared realOutcome against a hardcoded guard.DestructionStaleDeletion
+	// literal here, which could only ever fail if the Fatalf above had
+	// already fired — deleted as vacuous).
 }
 
 // --- evidence-error legs -----------------------------------------------------
@@ -1609,8 +1702,9 @@ func TestEvaluateWorkDestruction_ReplaceRefTruncatedHistoryFailsClosed(t *testin
 
 // TestEvaluateWorkDestruction_GraftsTruncatedHistoryFailsClosed is O1-3's
 // third truncation mechanism (spec 127 bead-1 fix round 2): a legacy
-// `.git/info/grafts` file, detected independently of both
-// isShallowRepo and hasReplaceRefs.
+// `.git/info/grafts` file — detected, alongside a replace ref, by the
+// single differential measurement historyTruncated performs (spec 127
+// bead-1 fix round 3->4), independently of isShallowRepo.
 func TestEvaluateWorkDestruction_GraftsTruncatedHistoryFailsClosed(t *testing.T) {
 	dir, branch, target := wdGraftsTruncatedHistoryFixture(t)
 
@@ -1626,6 +1720,180 @@ func TestEvaluateWorkDestruction_GraftsTruncatedHistoryFailsClosed(t *testing.T)
 	}
 	if evidence.FailedProbe != "snapshot-revert scan" {
 		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
+	}
+}
+
+// TestHistoryTruncated_BenignReplaceRefDoesNotOverRefuse is the
+// over-fire regression pin for spec 127 bead-1 fix round 3->4
+// (NEW-O1r-A/NEW-O2R-a/NEW-G1sub-1's own confirming repro, NEW-G1sub-2):
+// fix round 2's presence-only probes turned EVERY subsequent evaluation
+// on a repo carrying a BENIGN replace ref — git's own documented use
+// case, a corrected author line on a same-tree commit — into a
+// PERMANENT DestructionEvidenceError, even though rev-list's view of
+// the affected history is complete either way. RED on that prior
+// design: this fixture's replace ref, injected via `git replace <root>
+// <same-tree-corrected-message-commit>` after a positive
+// DestructionStaleDeletion control, changes `rev-list --count main` by
+// ZERO — verified below — so historyTruncated must report false and
+// EvaluateWorkDestruction must still reach and answer
+// DestructionStaleDeletion, not fall back to a refusal.
+func TestHistoryTruncated_BenignReplaceRefDoesNotOverRefuse(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	controlOutcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the pre-replace repo: %v", err)
+	}
+	if controlOutcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: pre-replace repo must classify DestructionStaleDeletion (the positive control), got %s", controlOutcome)
+	}
+
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	root := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--max-parents=0", target))
+	tree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", root+"^{tree}"))
+	corrected := strings.TrimSpace(neRunGit(t, dir, "commit-tree", tree, "-m", "root (author corrected)"))
+	neRunGit(t, dir, "replace", root, corrected)
+	after := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	if before != after {
+		t.Fatalf("fixture invariant broken: this replace ref must NOT truncate rev-list's view of %s (before=%s after=%s) — otherwise this is not the BENIGN case NEW-O1r-A/NEW-G1sub-2 named", target, before, after)
+	}
+
+	truncated, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("unexpected error from historyTruncated: %v", terr)
+	}
+	if truncated {
+		t.Fatalf("historyTruncated(%s) = true, want false — a benign replace ref that truncates nothing must not be reported as truncating (NEW-O1r-A's over-fire class)", target)
+	}
+
+	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("EvaluateWorkDestruction returned an unexpected error with a benign replace ref present: %v", err)
+	}
+	if outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("outcome = %s, want DestructionStaleDeletion — a benign replace ref must not turn this into a permanent refusal (NEW-O1r-A's over-fire class, the false-refusal direction this predicate's contract forbids)", outcome)
+	}
+}
+
+// TestHistoryTruncated_BenignGraftsFileDoesNotOverRefuse mirrors
+// TestHistoryTruncated_BenignReplaceRefDoesNotOverRefuse for the OTHER
+// truncation mechanism (spec 127 bead-1 fix round 3->4): a grafts file
+// naming a commit's TRUE parents (i.e. one that changes nothing about
+// what rev-list reaches) must not refuse either.
+func TestHistoryTruncated_BenignGraftsFileDoesNotOverRefuse(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	controlOutcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the pre-grafts repo: %v", err)
+	}
+	if controlOutcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: pre-grafts repo must classify DestructionStaleDeletion (the positive control), got %s", controlOutcome)
+	}
+
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	root := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--max-parents=0", target))
+	neRunGit(t, dir, "config", "advice.graftFileDeprecated", "false")
+	graftsPath := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "--git-path", "info/grafts"))
+	if !filepath.IsAbs(graftsPath) {
+		graftsPath = filepath.Join(dir, graftsPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(graftsPath), 0o755); err != nil {
+		t.Fatalf("mkdir info/: %v", err)
+	}
+	// A graft naming root's TRUE (i.e. its actual, unchanged) parents —
+	// root has none, so this line changes nothing rev-list can see.
+	if err := os.WriteFile(graftsPath, []byte(root+"\n"), 0o644); err != nil {
+		t.Fatalf("writing info/grafts: %v", err)
+	}
+	after := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	if before != after {
+		t.Fatalf("fixture invariant broken: this grafts entry must NOT truncate rev-list's view of %s (before=%s after=%s)", target, before, after)
+	}
+
+	truncated, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("unexpected error from historyTruncated: %v", terr)
+	}
+	if truncated {
+		t.Fatalf("historyTruncated(%s) = true, want false — a benign grafts entry that truncates nothing must not be reported as truncating (NEW-O1r-A's over-fire class)", target)
+	}
+
+	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("EvaluateWorkDestruction returned an unexpected error with a benign grafts file present: %v", err)
+	}
+	if outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("outcome = %s, want DestructionStaleDeletion — a benign grafts file must not turn this into a permanent refusal", outcome)
+	}
+}
+
+// TestHistoryTruncated_RelocatedReplaceRefStillDetected is the
+// under-fire regression pin (spec 127 bead-1 fix round 3->4,
+// NEW-G1sub-1): fix round 2's hasReplaceRefs hardcoded the
+// `refs/replace/` prefix, but git honors GIT_REPLACE_REF_BASE and
+// resolves a replacement's ref name by concatenating that variable with
+// the target OID with NO normalization (verified empirically: a base of
+// "refs/myreplace" — no trailing slash — still works as a REAL
+// replacement, at the literal ref path "refs/myreplacemyreplace<hex>",
+// which a for-each-ref scan of either "refs/replace/" or
+// "refs/myreplace/" misses). So a genuinely truncating relocated
+// replace ref reported "not truncated" under the old design — the exact
+// fail-open this predicate exists to refuse, reappearing inside the
+// mechanism fix round 2 added to close it. historyTruncated's
+// `--no-replace-objects` differential must catch this regardless of
+// relocation, because that flag disables replacement lookup
+// universally, not by ref-namespace enumeration.
+func TestHistoryTruncated_RelocatedReplaceRefStillDetected(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	controlOutcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the pre-replace repo: %v", err)
+	}
+	if controlOutcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: pre-replace repo must classify DestructionStaleDeletion (the positive control), got %s", controlOutcome)
+	}
+
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+
+	// Relocate the ref base BEFORE creating the replace ref, so the ref
+	// this `git replace --graft` creates lives outside refs/replace/ —
+	// deliberately with NO trailing slash, matching the shape verified
+	// to still work as a real replacement.
+	t.Setenv("GIT_REPLACE_REF_BASE", "refs/myreplace")
+	tip := strings.TrimSpace(neRunGit(t, dir, "rev-parse", target))
+	neRunGit(t, dir, "replace", "--graft", tip)
+
+	// Fixture invariant: the relocated ref must be INVISIBLE to a
+	// for-each-ref scan of the DEFAULT namespace — otherwise this does
+	// not exercise the relocation this test is named for.
+	defaultNamespace := neRunGit(t, dir, "for-each-ref", "refs/replace/")
+	if strings.TrimSpace(defaultNamespace) != "" {
+		t.Fatalf("fixture invariant broken: the relocated replace ref must not appear under refs/replace/, got %q", defaultNamespace)
+	}
+	after := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	if before == after {
+		t.Fatalf("fixture invariant broken: the relocated replace ref must actually TRUNCATE rev-list's view of %s (before=%s after=%s)", target, before, after)
+	}
+
+	truncated, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("unexpected error from historyTruncated: %v", terr)
+	}
+	if !truncated {
+		t.Fatalf("historyTruncated(%s) = false, want true — a relocated replace ref that genuinely truncates history must still be detected regardless of GIT_REPLACE_REF_BASE (NEW-G1sub-1's under-fire class)", target)
+	}
+
+	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected a non-nil error on a relocated-replace-ref-truncated history, got outcome=%s", outcome)
+	}
+	if !errors.Is(err, errTruncatedHistory) {
+		t.Errorf("expected the propagated error to wrap errTruncatedHistory, got: %v", err)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError — a relocated replace ref must fail closed exactly like one at the default namespace (NEW-G1sub-1)", outcome)
 	}
 }
 
@@ -1822,16 +2090,21 @@ func TestEvaluateWorkDestruction_MutatesNothing(t *testing.T) {
 // half of "Error-forcing for tests rides unexported in-package seam vars
 // with pointer-equality default pins (no exported knob)": every seam this
 // file forces above must default to the REAL production symbol. Extended
-// to ALL NINE seams (spec 127 bead-1 fix round, O2-6/O3-3: the prior
-// version pinned four of seven — workDestructionNovelPathsFn,
-// workDestructionStripPathsFn, and workDestructionFindAncestorTreeFn were
-// declared, and the first is even FORCED by a test above, without ever
-// being pinned; two of the three are the snapshot-revert discriminator
-// itself, the most safety-critical leg in this file) plus
-// diffNameStatusBucketsFn (neteffect.go) and workDestructionIsShallowFn;
-// fix round 2 (O1-3) added workDestructionHasReplaceRefsFn and
-// workDestructionHasGraftsFileFn, so the stated universal in this test's
-// own comment and the code agree.
+// to ALL EIGHT of this file's own seams (spec 127 bead-1 fix round,
+// O2-6/O3-3: the prior version pinned four of seven —
+// workDestructionNovelPathsFn, workDestructionStripPathsFn, and
+// workDestructionFindAncestorTreeFn were declared, and the first is even
+// FORCED by a test above, without ever being pinned; two of the three
+// are the snapshot-revert discriminator itself, the most safety-critical
+// leg in this file) plus diffNameStatusBucketsFn (neteffect.go) and
+// workDestructionIsShallowFn; fix round 2 (O1-3) added
+// workDestructionHasReplaceRefsFn and workDestructionHasGraftsFileFn
+// (bringing this file's own count to nine, ten with diffNameStatusBucketsFn);
+// fix round 3->4 (NEW-O1r-A/NEW-O2R-a/NEW-G1sub-1) collapsed both of
+// those into the single differential seam
+// workDestructionHistoryTruncatedFn, bringing this file's own count back
+// to eight (nine with diffNameStatusBucketsFn), and the stated universal
+// in this test's own comment and the code agree.
 func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionIsAncestorFn).Pointer() != reflect.ValueOf(IsAncestor).Pointer() {
 		t.Error("workDestructionIsAncestorFn must default to IsAncestor")
@@ -1854,11 +2127,8 @@ func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionIsShallowFn).Pointer() != reflect.ValueOf(isShallowRepo).Pointer() {
 		t.Error("workDestructionIsShallowFn must default to isShallowRepo")
 	}
-	if reflect.ValueOf(workDestructionHasReplaceRefsFn).Pointer() != reflect.ValueOf(hasReplaceRefs).Pointer() {
-		t.Error("workDestructionHasReplaceRefsFn must default to hasReplaceRefs")
-	}
-	if reflect.ValueOf(workDestructionHasGraftsFileFn).Pointer() != reflect.ValueOf(hasGraftsFile).Pointer() {
-		t.Error("workDestructionHasGraftsFileFn must default to hasGraftsFile")
+	if reflect.ValueOf(workDestructionHistoryTruncatedFn).Pointer() != reflect.ValueOf(historyTruncated).Pointer() {
+		t.Error("workDestructionHistoryTruncatedFn must default to historyTruncated")
 	}
 	if reflect.ValueOf(diffNameStatusBucketsFn).Pointer() != reflect.ValueOf(diffNameStatusBuckets).Pointer() {
 		t.Error("diffNameStatusBucketsFn must default to diffNameStatusBuckets")
