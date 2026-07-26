@@ -615,12 +615,37 @@ func wdNovelDeletionFixture(t *testing.T) (dir, branch, target string) {
 // not novel content at all: it is a byte-for-byte restoration of a path
 // target's own history held. snapshotRevertMatch's strip is
 // unconditional over the A bucket, so it removes stale.txt from branch's
-// side regardless of which of the two reasons put it there, and the
-// stripped tree then also disagrees with every candidate on keep.txt
-// (M-status, never stripped, and branch still carries the OLD value) —
-// so no candidate matches and this genuine, byte-identical recreation
-// reads DestructionClean. See guard.DestructionClean's doc comment for
-// the consumer-facing enumeration this class was added to.
+// side regardless of which of the two reasons put it there — and that
+// single removal IS the whole miss (CORRECTED fix round 7, NEW-O1f-A;
+// the prior version of this sentence claimed the stripped tree also
+// disagreed with every candidate on keep.txt, which is false). Against
+// C1 — the ancestor this branch recreates exactly — the stripped
+// stale.txt entry is the ONLY residue: branch carries keep.txt=v1, which
+// is exactly what C1 AND C2 carry, so keep.txt AGREES with both of them;
+// it disagrees only with C3, and the root commit has no keep.txt at all.
+// That is what makes this row a PURE instance of strip asymmetry — the
+// match is destroyed by the strip alone, not by a disagreement on a
+// modified path — and therefore a distinct class from the
+// StatedLimit_MixedAddAndEditIsMissed row, where an M-status novel edit
+// is what blocks against every candidate. C3's delete-AND-edit-in-ONE-
+// commit shape is what makes the fixture the everyday cleanup form
+// guard.DestructionClean's doc comment names; it is not what causes the
+// miss (measured fix round 7: with C3 deleting stale.txt alone and
+// keep.txt never bumped, the stripped tree still equals no ancestor's
+// tree and the row still reads Clean, because branch's own deletion of
+// landed.txt keeps it off every post-C2 candidate). No candidate
+// matches, so this genuine, byte-identical recreation reads
+// DestructionClean.
+//
+// FOR THE FILED CANDIDATE-RELATIVE-STRIP FOLLOW-UP: this row FLIPS when
+// that lands, so updating it is part of that change and not a regression
+// it caused. stale.txt is not novel RELATIVE TO C1, so a candidate-
+// relative strip would not remove it; branch's tip tree IS C1's tree
+// (asserted below), so the scan would match and the expected outcome
+// here becomes DestructionStaleDeletion.
+//
+// See guard.DestructionClean's doc comment for the consumer-facing
+// enumeration this class was added to.
 func wdRestoredDeletedPathFixture(t *testing.T) (dir, branch, target string) {
 	t.Helper()
 	dir = initGitRepo(t)
@@ -918,8 +943,9 @@ func wdReplaceRefTruncatedHistoryFixture(t *testing.T) (dir, branch, target stri
 // replace ref, by the single differential measurement historyTruncated
 // performs (spec 127 bead-1 fix round 3->4: the differential replacing
 // hasGraftsFile; corrected again fix round 5, NEW-G1sub-6/O1g-A/O2G-1/
-// O3g-1, to a full (commit,tree)-sequence comparison — see
-// historyTruncated's doc comment), independently of isShallowRepo. A
+// O3g-1, to a full (commit,tree) comparison, made order-insensitive — a
+// MULTISET — fix round 6, NEW-G1sub-11 — see historyTruncated's doc
+// comment), independently of isShallowRepo. A
 // prior version of this comment (spec 127 bead-1 fix round 2) described
 // this fixture against the two now-deleted presence probes
 // (--is-shallow-repository and refs/replace/*) that predated the
@@ -1981,8 +2007,9 @@ func TestHistoryTruncated_RelocatedReplaceRefStillDetected(t *testing.T) {
 // shape, and findAncestorWithTree's scan then ran against a history
 // whose trees were not target's real ones, silently answering
 // DestructionClean on a genuine deletion. This pins the fixed
-// (commit,tree)-sequence differential in historyTruncated instead:
-// reverting it to a bare count comparison must turn this test red.
+// (commit,tree) MULTISET differential in historyTruncated instead
+// (order-insensitive as of fix round 6, NEW-G1sub-11): reverting it to a
+// bare count comparison must turn this test red.
 func TestHistoryTruncated_CountPreservingSubstitutionCaught(t *testing.T) {
 	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
 

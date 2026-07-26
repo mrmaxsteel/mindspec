@@ -208,9 +208,12 @@ import (
 // mechanism — a refs/replace/* ref or a legacy .git/info/grafts file —
 // that measurably shortens OR SUBSTITUTES what `git rev-list target`
 // reaches (historyTruncated: fix round 5 widened this from a length-only
-// comparison to a (commit, tree)-sequence comparison, so a replacement
-// that swaps a real ancestor's tree for a different one without changing
-// the count is caught too — see that function's doc comment). In every
+// comparison to a (commit, tree) comparison, and fix round 6 made that
+// comparison order-insensitive — a MULTISET, never a sequence — so a
+// replacement that swaps a real ancestor's tree for a different one
+// without changing the count is caught, while a mere reordering of the
+// identical pairs is not; see historyTruncated's and
+// equalCommitTreeMultisets' doc comments). In every
 // case "no matching ancestor found" is not a legitimate answer — it is an
 // artifact of history that was never fully, faithfully available to scan.
 // Wrapped, never returned bare, so callers can still see the underlying
@@ -751,11 +754,23 @@ func isShallowRepo(workdir string) (bool, error) {
 // matched (or failed to match) against a history that was not target's
 // real one — reopening, inside this mechanism, the exact absence-of-
 // evidence-as-safety failure O1-3 was filed to close. Comparing the full
-// (commit, tree) multiset closes this for a COMMIT-object substitution or
-// a grafts entry: either changes the tree half of at least one pair (a
-// substituted commit keeps its %H but not its %T) or the count itself (a
-// grafts entry rewrites the parent list, changing which ancestors rev-list
-// reaches at all), so it differs from the as-seen multiset and is caught.
+// (commit, tree) multiset closes this for a COMMIT-object substitution,
+// and for every parent-list rewrite that changes WHICH COMMITS rev-list
+// reaches: the first changes the tree half of at least one pair (a
+// substituted commit keeps its %H but not its %T), the second changes the
+// count itself (the truncating and the lengthening graft shapes), so
+// either way the listing differs from the as-seen multiset and is caught.
+// A parent-list rewrite that PRESERVES the reachable set is NOT caught
+// (spec 127 bead-1 fix round 7, NEW-G1sub-15, correcting a universal this
+// sentence previously asserted — that a grafts entry ALWAYS changes what
+// rev-list reaches): dropping an edge to a commit still reachable by
+// another path in a merge-bearing history is honored by git — the
+// commit stops being an ancestor of the grafted child — yet leaves both
+// multisets byte-identical. It needs no catch, in both directions: the
+// scan enumerates the identical (commit, tree) candidates either way, so
+// its conclusion cannot change, and the topology the rewrite DOES move —
+// merge-base, and hence the merge preview — is honored identically by the
+// real `git merge` this predicate is predicting.
 // It does NOT close a TREE- or BLOB-object substitution reachable from
 // target (spec 127 bead-1 fix round 6, NEW-O1v-B, MINOR, not fixed): a
 // commit's %T is the OID recorded in the commit object, so replacing the
