@@ -38,7 +38,7 @@ This is the final human gate in the spec lifecycle.`,
 // implAdoptCmd is spec 127 R1's audited, evidence-gated, MERGE-FREE
 // terminal transition for a review-state spec whose content already
 // reached main by another route (GH #218's cluster). A sibling verb to
-// `approve` (not a flag on it — R1(e)'s only-caller-is-its-own-handler
+// `approve` (not a flag on it — R1(e)'s only-direct-call-site
 // discipline is cleanest with its own leaf; a merge-free terminal
 // transition must never share `approve`'s leaf with the merging one).
 var implAdoptCmd = &cobra.Command{

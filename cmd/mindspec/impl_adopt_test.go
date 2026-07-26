@@ -3,8 +3,12 @@ package main
 // Spec 127 bead 3 — the `mindspec impl adopt` cmd-layer surface:
 // leaf-identity registration, flag-set membership (AC-11's "resolves at
 // leaf identity" discipline, ceremony_guard_test.go's resolveCommand
-// pattern), and R1(e)'s call-site enumeration ("the only caller of the
-// adopt entrypoint is its own registered command handler").
+// pattern), and R1(e)'s call-site enumeration (the only *direct* call
+// site of the adopt entrypoint — a `CallExpr` resolving by import-path
+// identity to the imported selector — outside the test package is its
+// registered command handler; reachability through a function value,
+// method value, or wrapper-satisfied interface is not mechanically
+// detected and is review-caught).
 
 import (
 	"go/ast"
