@@ -3,8 +3,9 @@
 #
 # input_sha: 09f62bd97b28bae7b171054066117cb19a33874d (main, this spec's
 #   fork base — immutable, and prior to every bead)
-# scanner_revision: spec-127-bead-2-rework (internal/lint/destructive_guidance_test.go,
-#   internal/guard/classifier.go, as landed by bead 2's rework round)
+# scanner_revision: spec-127-bead-2-rework-round-2 (internal/lint/destructive_guidance_test.go,
+#   internal/guard/classifier.go, as landed by bead 2's SECOND rework
+#   round)
 # generation_command: no committed, runnable dump helper exists (O3-r2-7,
 #   spec 127 bead-2 rework) — this manifest was derived BY HAND at
 #   authoring/rework time, section-by-section, from
@@ -14,10 +15,34 @@
 #   here). The committed reconciliation is destructive_guidance_test.go's
 #   TestBootstrapManifest_* functions, which re-derive the SAME
 #   enumeration from the live scan every run — this file is the frozen
-#   record those tests compare against, not itself the mechanism. No
-#   fixture (α) — an independent, Background-derived expected
-#   enumeration compared against this manifest — exists; see O3-r2-3/
-#   O2-r2-4 in the bead-2 findings ledger for the recorded reason.
+#   record those tests compare against, not itself the mechanism.
+#   Fixture (α) — the known_sites_exemption_list's manifest-vs-
+#   Background-inventory reconciliation — is landed as of round 2
+#   (TestBootstrapManifest_BackgroundReconciliation, O3-3): it checks
+#   the eight Background-cited quoted entries are present (a bead
+#   introducing an UNREVIEWED site cannot enter this list unnoticed)
+#   plus the spec-orchestrator.md bypass block at family grain; it does
+#   NOT assert exact equality against this section's full live count
+#   (ten, not eight — see that test's own doc comment for why, and
+#   registries.go's KnownSitesExemptionList doc comment, RULING 7). No
+#   equivalent (α) exists for the OTHER two sections below (the
+#   allowlist and the opaque-operand registry): Background inventories
+#   shipped GUIDANCE TEXT, never enumerates every PRODUCT diagnostic
+#   call site — there is no independent Background enumeration to
+#   reconcile those two sections against.
+#
+# ROUND 2 addition (spec 127 bead-2 rework round 2, O2c-1 BLOCKING):
+#   fixing foldExpr's fullyLiteral to actually propagate through
+#   fmt.Sprintf/localBinds/pkgConstFolder.Get (round 1 discarded it in
+#   all three paths, laundering a partially-foldable operand to
+#   fullyLiteral=true) newly governs 38 real command-position Sprintf
+#   findings the round-1 tree had wrongly exempted — every one a
+#   "mindspec <verb> ..." template, never destructive. Sourced from
+#   THIS round's rework base (3f75ec7a), not the original 09f62bd9
+#   seed or bead-1's merge base (f3e344c1): added because round 2's own
+#   fix exposed them as real, previously-masked findings, not because
+#   those files changed. See registries.go's own comment on these 38
+#   entries for the full accounting.
 #
 # Verified reproducibly, not by recall (O3-r2-7): `git diff --stat
 # 09f62bd97b28bae7b171054066117cb19a33874d f3e344c1 -- internal/approve/plan.go
@@ -52,15 +77,53 @@ internal/executor/mindspec_executor.go	beadToSpecConflictFailure	git merge	git m
 internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git merge
 
 [opaque_operand_registry]
+cmd/mindspec/bead_clarify.go	beadClarifyCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:
+cmd/mindspec/panel.go	findPanelRegistration	arg1:unprovable
+cmd/mindspec/panel.go	panelCreateCmd	arg1:unprovable
+cmd/mindspec/panel.go	tallyExitAction	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable
+cmd/mindspec/reattest.go	reattestRefusalFailure	arg1:unprovable
+cmd/mindspec/reattest.go	reattestRefusalFailure	arg2:unprovable
+cmd/mindspec/reattest.go	runReattest	arg1:unprovable
+cmd/mindspec/release.go	runRelease	arg1:unprovable
+cmd/mindspec/repair.go	repairPhaseRunE	arg1:unprovable
+cmd/mindspec/repair.go	repairSpecTitleRunE	arg1:unprovable
+internal/approve/impl.go	ApproveImpl	arg1:unprovable
+internal/approve/impl.go	implObligationRefusal	arg1:unprovable
+internal/approve/impl.go	implObligationRefusal	arg2:unprovable
 internal/approve/impl.go	implOrphanRefusal	arg1:unprovable
+internal/approve/impl.go	runOrphanObligationGate	arg1:unprovable
+internal/approve/impl.go	runWorktreeEnumerationLeg	arg1:unprovable
+internal/approve/plan.go	ApprovePlan	arg1:unprovable
+internal/approve/plan.go	beadCreateFailure	arg1:unprovable
+internal/approve/plan.go	beadCreateFailure	arg2:unprovable
+internal/approve/plan.go	checkExistingBeadsSafety	arg1:unprovable
+internal/approve/plan.go	planValidationFailure	arg1:unprovable
+internal/approve/plan.go	queryExistingChildren	arg1:unprovable
+internal/approve/plan.go	resolvePlanApprovePreflight	arg1:unprovable
+internal/approve/plan.go	resolveTargetEpic	arg1:unprovable
+internal/complete/complete.go	Run	arg1:unprovable
+internal/complete/complete.go	adrDivergenceFailure	arg1:unprovable
+internal/complete/complete.go	adrDivergenceFailure	arg2:unprovable
+internal/complete/complete.go	adrDivergenceFailure	arg3:unprovable
+internal/complete/complete.go	attestedRestoreFailure	arg1:unprovable
+internal/complete/complete.go	attestedRestoreFailure	arg2:unprovable
+internal/complete/panel_advisory.go	panelGate	arg1:unprovable
+internal/complete/panel_advisory.go	reconcilePendingRefutations	arg1:unprovable
+internal/executor/layout_guard.go	mergeLayoutRegressionFailure	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.CompleteBead	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.FinalizeEpic	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg3:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
 internal/guard/guard.go	checkCWDWithCache	arg1:unprovable
+internal/lifecycle/finalize_orphans.go	FinalizeOrphan.RecoveryCommand	arg0:unprovable
 internal/lifecycle/orphans.go	Orphan.RecoveryCommand	arg0:unprovable
 internal/lifecycle/stale_open.go	StaleOpenBead.RecoveryCommand	arg0:unprovable
+internal/next/guard.go	ClaimFailure	arg1:unprovable
+internal/next/guard.go	DirtyTreeFailure	arg1:unprovable
+internal/next/guard.go	WorktreeSetupFailure	arg1:unprovable
 internal/next/ready_gate.go	GateReadiness	variadic-spread:recovery
 
 [known_sites_exemption_list]

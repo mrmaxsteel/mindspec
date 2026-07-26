@@ -215,7 +215,316 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1> --spec <id>` template plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor checks representative renderings of this exact template shape.",
 	},
+
+	// The 38 entries below are new in bead-2's SECOND rework round (spec
+	// 127, O2c-1, BLOCKING): fixing foldExpr's fullyLiteral to actually
+	// propagate through fmt.Sprintf, localBinds, and pkgConstFolder.Get
+	// (previously all three silently discarded it, laundering a
+	// partially-foldable operand to fullyLiteral=true) newly governs
+	// every command-position `fmt.Sprintf` call with a substituted
+	// argument that this rework-round-1 tree had wrongly exempted. Every
+	// one leads with the literal verb "mindspec" — never git/bd/rm, this
+	// floor's own closed program set — with an ID-typed, branch/ref-
+	// typed, or path-typed value substituted in. Three shapes recur
+	// (each entry below names which applies):
+	//   - idrender-rendered: the value is idrender.Bead(id)/
+	//     idrender.Spec(id), or a local (safeBeadID/safeBid) already
+	//     bound to one — a validated ID renders byte-identically
+	//     (idvalidate's grammar has no whitespace/tokenizer-separator
+	//     character, so it is always exactly one token) and a malformed
+	//     one is forced through strconv.Quote, which the classifier's
+	//     own quote-aware tokenizer (bead-2 rework round 2, G1-2/O1-9)
+	//     reads as a single, inert token regardless of its content;
+	//   - idvalidate-guarded-raw: the value is a raw specID/epicID/
+	//     parentID/beadID the enclosing function (or its own caller, at
+	//     this file's established entry-validation convention) rejects
+	//     via idvalidate.SpecID/BeadID before any of these Sprintf calls
+	//     run — same single-token guarantee, no render step;
+	//   - disclosed-residual: the value is NOT provably single-token
+	//     (an operator-typed panel slug, a git ref/branch name, or a
+	//     resolved filesystem path) — registered, not converted, with
+	//     the residual gap stated honestly rather than overclaimed.
+	// All 38 share one Obligation: TestOpaqueOperandRegistry_
+	// MindspecVerbTemplatesAgainstFloor (registries_test.go) re-parses
+	// each named site's REAL current source, extracts every fmt.Sprintf
+	// template in that function/method, and asserts none matches under
+	// a realistic-value battery — see that test's own doc comment for
+	// why the battery is realistic-value rather than maximally
+	// adversarial.
+	{
+		File:       "cmd/mindspec/bead_clarify.go",
+		Func:       "beadClarifyCmd",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `fmt.Sprintf(\"mindspec bead clarify %s --file <record.json>\", idrender.Bead(beadID))`.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "panelCreateCmd",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual: `fmt.Sprintf(\"use `+\"`panel create %s --spec <id> --target <ref>`\"+` for a gated panel, or `+\"`panel create %s --gate adhoc --target <ref>`\"+` for an ad-hoc panel\", slug, slug)` and a second Sprintf substituting `keys` (`strings.Join(config.PanelGateKeys, \", \")` — a fixed, code-defined 5-entry list, never user input). slug is validated by validatePanelSlug (rejects empty/\".\"/\"..\"/path separators/control bytes) but NOT whitespace or other printable content — an operator-chosen slug containing floor-shaped text (e.g. a slug literally spelled \"git reset --hard\") is a distinct, unexamined risk this obligation does not cover. Narrowing the claim rather than overclaiming it: this text is advisory guidance shown back to the SAME operator who named the slug, never executed by the product, and is reviewed at the moment it is read, same as any other diagnostic string.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "findPanelRegistration",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual: `fmt.Sprintf(\"mindspec panel create %s --spec <id> --target <ref>\", slug)` — same slug-typed residual as panelCreateCmd above (validatePanelSlug does not close whitespace/printable content).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "tallyExitAction",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual: `fmt.Sprintf(\"re-run the panel (mindspec panel create %s --round <N+1> ...), then mindspec complete <bead>\", slug)` — same slug-typed residual as panelCreateCmd above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/reattest.go",
+		Func:       "runReattest",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: every command-position Sprintf in this function substitutes `safeBeadID := idrender.Bead(beadID)` (line 189), bound once at function entry before any of these calls.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/reattest.go",
+		Func:       "reattestRefusalFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: safeBeadID is this function's own PARAMETER, and its sole caller (runReattest) always passes idrender.Bead(beadID) — never a raw ID.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/reattest.go",
+		Func:       "reattestRefusalFailure",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: the second command-position Sprintf (`\"bd show %s --json ... mindspec reattest %s\"`-shaped recovery lines) also substitutes only safeBeadID — same guarantee as arg1 above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/release.go",
+		Func:       "runRelease",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: every command-position Sprintf here substitutes `idrender.Bead(beadID)` inline (three call sites: the dirty-tree discard hint, the worktree-removal-failed hint, the return-to-open-failed hint).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/repair.go",
+		Func:       "repairSpecTitleRunE",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: epicID is this function's own args[0], rejected via `idvalidate.BeadID(epicID)` at the top of the function (its own-arg gate comment: \"validate epicID BEFORE any bd argv embed\") before any of the four command-position Sprintf calls that substitute it run.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/repair.go",
+		Func:       "repairPhaseRunE",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual: specID is this function's own args[0] and epicID is derived from it (`phase.FindEpicBySpecID(specID)`) — NEITHER is idvalidate'd inside this function before the command-position Sprintf calls that substitute them (`\"bd show %s\"`, `\"mindspec repair phase %s\"`). Unlike repairSpecTitleRunE's sibling command above, this function has no own-arg gate. Registered, not converted, pending that gate; the residual is stated honestly rather than assumed closed by analogy with the sibling command.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "ApproveImpl",
+		Detail:     "arg1:unprovable",
+		Rationale:  "mixed idvalidate-guarded-raw/idrender-rendered: most command-position Sprintf calls in this function substitute specID, validated at the top of ApproveImpl via validate.SpecID (== idvalidate.SpecID, per this file's own comment) before any of them run; the remainder substitute safeBid := idrender.Bead(bid) (idrender-rendered).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "runOrphanObligationGate",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, reached only via ApproveImpl's own preflight after its top-of-function idvalidate.SpecID gate (this file's single entry-validation convention, not re-checked per helper).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "runWorktreeEnumerationLeg",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, same ApproveImpl-preflight convention as runOrphanObligationGate above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "implObligationRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, same ApproveImpl-preflight convention as runOrphanObligationGate above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "implObligationRefusal",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idvalidate-guarded-raw: the second command-position Sprintf also substitutes specID — same guarantee as arg1 above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "resolvePlanApprovePreflight",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, validated at ApprovePlan's own top-of-function gate before this preflight helper runs (this file's single entry-validation convention).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "resolveTargetEpic",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID; this function itself imports and calls idvalidate for its own epic-resolution logic, and is reached only after ApprovePlan's own top-of-function specID gate.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "ApprovePlan",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, THIS function's own top-of-function idvalidate.SpecID gate (the source convention every other plan.go/impl.go helper above relies on).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "planValidationFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, reached only from ApprovePlan after its own gate (`fmt.Sprintf(\"mindspec plan approve %s\", specID)`).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "beadCreateFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: this function has TWO guard.NewFailure call sites. The len(created)==0 leg's OPAQUE command-position Sprintf (its own arg1) is `fmt.Sprintf(\"mindspec plan approve %s\", specID)`.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "beadCreateFailure",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idvalidate-guarded-raw: the OTHER call site's THIRD argument (arg2) is the SAME `fmt.Sprintf(\"mindspec plan approve %s\", specID)` template, following that call's arg1 — the genuine `bd delete %s --force` floor match already governed by DestructiveGuidanceAllowlist's first entry (above), not this registry.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "queryExistingChildren",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID; parentID (the OTHER substituted value, in the message-position arg0, not this command position) is likewise ApprovePlan-gated.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "checkExistingBeadsSafety",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the OPAQUE command-position Sprintf here is `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(c.ID))` — a DIFFERENT operand from this same function's `bd delete %s --force` Sprintf, which is a genuine floor match already governed by DestructiveGuidanceAllowlist's second entry (above), not this registry.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "Run",
+		Detail:     "arg1:unprovable",
+		Rationale:  "mixed idrender-rendered/disclosed-residual: the majority of Run's unprovable command-position operands substitute safeBeadID := idrender.Bead(beadID) (bound once near the top of Run); a minority substitute a resolved filesystem path (root, checkPath — the main-checkout path this process itself resolved, never free-form text) or the epic-linkage-derived branch name (derived). None of the latter is exhaustively adversarial-tested by this obligation; registered rather than converted, the residual stated honestly.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "adrDivergenceFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: all three command-position Sprintf calls in this function substitute safeBeadID := idrender.Bead(beadID), bound once at function entry.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "adrDivergenceFailure",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: same safeBeadID guarantee as arg1 above (the second of three near-identical recovery-line Sprintf calls).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "adrDivergenceFailure",
+		Detail:     "arg3:unprovable",
+		Rationale:  "idrender-rendered: same safeBeadID guarantee as arg1 above (the third of three near-identical recovery-line Sprintf calls).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "attestedRestoreFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual, off-floor by construction: `restoreCmd := fmt.Sprintf(\"git branch %s %s\", beadBranch, ne.SecondParent)` — a git-led command, but `git branch <name> <ref>` is ORDINARY branch creation; matchGit's \"branch\" case only matches with a `-D`/`--delete`+`--force` flag pair present, so no substitution of beadBranch/ne.SecondParent (a branch name and a git-produced hex commit SHA, never free-form text) can supply that pair without ITSELF being reviewed content — off this floor family's own matched shape, not merely unprovable by this scan's fold rules.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/complete.go",
+		Func:       "attestedRestoreFailure",
+		Detail:     "arg2:unprovable",
+		Rationale:  "idrender-rendered: the second command-position argument is `fmt.Sprintf(\"mindspec complete %s\", safeBeadID)`, safeBeadID := idrender.Bead(beadID).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/panel_advisory.go",
+		Func:       "panelGate",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: this function's command-position Sprintf calls substitute idrender.Bead(beadID)/idrender-rendered locals, mirroring cmd/mindspec/panel.go's tallyExitAction sibling.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/panel_advisory.go",
+		Func:       "reconcilePendingRefutations",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(beadID))`, the entirety of this function's refuse(msg) helper's second argument.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/executor/layout_guard.go",
+		Func:       "mergeLayoutRegressionFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "disclosed-residual, off-floor by construction: `fmt.Sprintf(\"git rebase %s %s\", targetRef, sourceRef)` — `git rebase` is not a family on this spec's closed floor (R5(a)'s AllFamilies has no rebase entry) at all, so no substitution of targetRef/sourceRef makes this TEMPLATE'S OWN leading command match; a theoretical residual (one of the two refs itself containing an embedded git/bd/rm floor token as free text) is not exhaustively tested here — both are this repo's own resolved git ref/layout-fingerprint labels, never operator-typed free text.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/executor/mindspec_executor.go",
+		Func:       "MindspecExecutor.CompleteBead",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: `fmt.Sprintf(\"mindspec complete %s\", beadID)` substitutes this function's own beadID parameter RAW (no idrender wrap) — but workspace.BeadBranch(beadID)/workspace.BeadWorktreeName(beadID), both called earlier in this same function and both erroring out on a malformed beadID (ADR-0042's composition-waist convention), gate every path that reaches this Sprintf.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/executor/mindspec_executor.go",
+		Func:       "MindspecExecutor.FinalizeEpic",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: `fmt.Sprintf(\"mindspec impl approve %s\", specID)` substitutes specID RAW, but THIS function's own composition-waist gate — `idvalidate.SpecID(specID)`, checked at the very top of FinalizeEpic with its own doc comment (\"a malformed specID must refuse before any composed worktree path is used\") — runs before any of the four command-position Sprintf calls that substitute it.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/lifecycle/finalize_orphans.go",
+		Func:       "FinalizeOrphan.RecoveryCommand",
+		Detail:     "arg0:unprovable",
+		Rationale:  "mixed disclosed-residual/idrender-rendered: the \"finalize_branch\" case substitutes o.Branch (a branch name this file's own orphan scan resolved from `git for-each-ref`, never operator-typed free text) into `\"open a PR for %s and merge it (or delete the branch if it is superseded)\"`; the default case substitutes idrender.Spec(o.SpecID) into `\"mindspec impl approve %s\"`.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/next/guard.go",
+		Func:       "DirtyTreeFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "already-established mechanism: `fmt.Sprintf(\"%s && mindspec next\", containment.EmitCd(activeWorktree))` — containment.EmitCd's own worktree-path safety is the SAME mechanism this registry already covers three times above (internal/executor/mindspec_executor.go's two EmitCd entries, internal/guard/guard.go's checkCWDWithCache entry) via TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor (same obligation as the three existing EmitCd entries above) plus TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor for the \"mindspec next\" literal suffix, which has no substitution at all.",
+	},
+	{
+		File:       "internal/next/guard.go",
+		Func:       "ClaimFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `fmt.Sprintf(\"mindspec next --spec %s   (re-run to auto-recover the worktree)\", idrender.Spec(specID))`.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/next/guard.go",
+		Func:       "WorktreeSetupFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: same shape as ClaimFailure above — `fmt.Sprintf(\"mindspec next --spec %s   (re-run detects the in-progress bead and auto-recovers the worktree)\", idrender.Spec(specID))`.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
 }
+
+// mindspecVerbTemplateObligation is the shared Obligation text for
+// every entry above added in bead-2's second rework round (O2c-1):
+// one real test, internal/guard/registries_test.go's
+// TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor, covers
+// all of them by re-parsing each named site's actual current source.
+const mindspecVerbTemplateObligation = "internal/guard's TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor re-parses this site's real, current source (never a hand-copied literal), extracts every fmt.Sprintf template found in the named function/method, and asserts none matches a destructive floor family under a realistic-value substitution battery — see that test's own doc comment for why the battery is realistic-value rather than a maximal adversarial fuzz."
 
 // KnownSiteExemptionEntry is one exact, reviewed floor match shipped
 // in guidance today (spec 127 R5a). It claims only that this exact

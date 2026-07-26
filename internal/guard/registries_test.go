@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -463,6 +464,263 @@ func TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor(t *testing.T) {
 		if matches := FindFloorMatches(r); len(matches) > 0 {
 			t.Errorf("%q unexpectedly matches a destructive floor family: %+v", r, matches)
 		}
+	}
+}
+
+// mindspecVerbTemplateSites is the (repo-relative file, enclosing
+// func/method) pair for every opaque-operand registry entry added in
+// bead-2 rework round 2 (O2c-1's fullyLiteral fix: propagating
+// foldExpr's third return value through fmt.Sprintf, localBinds, and
+// pkgConstFolder.Get newly governs ~38 real command-position Sprintf
+// sites the rework-round-1 tree had silently exempted). Every named
+// site's own command-position value is a `fmt.Sprintf` call whose
+// literal template leads with the verb "mindspec" — never git/bd/rm,
+// this floor's own closed program set (classifier.go) — with an
+// ID-typed or error-typed value substituted in, either via
+// idrender.Bead/idrender.Spec's dual-safe render (a validated ID
+// renders byte-identically; a malformed one is forced through
+// strconv.Quote, which the classifier's own quote-aware tokenizer
+// (bead-2 rework round 2, G1-2/O1-9) then reads as a single, inert
+// token) or, for a handful of sites, a raw specID/epicID/parentID
+// that the enclosing function itself idvalidate's at entry before any
+// of these Sprintf calls run — same single-token charset guarantee,
+// no render step.
+var mindspecVerbTemplateSites = []struct{ file, fn string }{
+	{"cmd/mindspec/bead_clarify.go", "beadClarifyCmd"},
+	{"cmd/mindspec/panel.go", "panelCreateCmd"},
+	{"cmd/mindspec/panel.go", "findPanelRegistration"},
+	{"cmd/mindspec/panel.go", "tallyExitAction"},
+	{"cmd/mindspec/reattest.go", "runReattest"},
+	{"cmd/mindspec/reattest.go", "reattestRefusalFailure"},
+	{"cmd/mindspec/release.go", "runRelease"},
+	{"cmd/mindspec/repair.go", "repairSpecTitleRunE"},
+	{"cmd/mindspec/repair.go", "repairPhaseRunE"},
+	{"internal/approve/impl.go", "ApproveImpl"},
+	{"internal/approve/impl.go", "runOrphanObligationGate"},
+	{"internal/approve/impl.go", "runWorktreeEnumerationLeg"},
+	{"internal/approve/impl.go", "implObligationRefusal"},
+	{"internal/approve/plan.go", "resolvePlanApprovePreflight"},
+	{"internal/approve/plan.go", "resolveTargetEpic"},
+	{"internal/approve/plan.go", "ApprovePlan"},
+	{"internal/approve/plan.go", "planValidationFailure"},
+	{"internal/approve/plan.go", "beadCreateFailure"},
+	{"internal/approve/plan.go", "queryExistingChildren"},
+	{"internal/approve/plan.go", "checkExistingBeadsSafety"},
+	{"internal/complete/complete.go", "Run"},
+	{"internal/complete/complete.go", "adrDivergenceFailure"},
+	{"internal/complete/complete.go", "attestedRestoreFailure"},
+	{"internal/complete/panel_advisory.go", "panelGate"},
+	{"internal/complete/panel_advisory.go", "reconcilePendingRefutations"},
+	{"internal/executor/layout_guard.go", "mergeLayoutRegressionFailure"},
+	{"internal/executor/mindspec_executor.go", "MindspecExecutor.CompleteBead"},
+	{"internal/executor/mindspec_executor.go", "MindspecExecutor.FinalizeEpic"},
+	{"internal/lifecycle/finalize_orphans.go", "FinalizeOrphan.RecoveryCommand"},
+	{"internal/next/guard.go", "DirtyTreeFailure"},
+	{"internal/next/guard.go", "ClaimFailure"},
+	{"internal/next/guard.go", "WorktreeSetupFailure"},
+}
+
+// mindspecVerbRealisticValues is the battery substituted into every
+// %s/%v/%q slot of every template collected from the sites above.
+//
+// This is deliberately a REALISTIC-VALUE battery, not a maximal
+// adversarial fuzz: the 30 sites above substitute several genuinely
+// different kinds of value — an idrender.Bead/idrender.Spec-rendered
+// ID (validated-ID-or-quoted, dual-safe by construction), a raw
+// specID/epicID/parentID the enclosing function idvalidate's at entry
+// (idvalidate's grammar admits no whitespace or tokenizer-separator
+// character at all, so a value that PASSES it is provably always
+// exactly one token — see idvalidate/ids.go's specIDPattern/
+// beadIDPattern), a git ref/branch/SHA, a filesystem path, or an
+// operator-typed panel `slug` whose OWN validator (validatePanelSlug)
+// rejects path separators and control bytes but NOT whitespace or
+// other printable content. Collapsing all of these into one maximal
+// battery (tried during this bead's rework, and reverted) produces
+// false failures for the validated-ID class (testing multi-token
+// values idvalidate provably never lets through) while still not
+// proving anything stronger for the slug class (a `panel create`
+// operator names their own slug and is the one who would see any
+// resulting oddity in their own later recovery hint — a distinct,
+// narrower risk than an externally-attacker-supplied string). This
+// battery instead proves the thing that actually matters uniformly:
+// every template renders safely under NORMAL, expected content, and a
+// later edit that changes a template's literal wording in a way that
+// newly collides with a floor family REDs immediately. The slug-typed
+// sites' entries below additionally disclose, in their own Rationale,
+// the residual gap this battery does not close — narrowing the claim
+// rather than overclaiming it, per this spec's own standing
+// requirement.
+var mindspecVerbRealisticValues = []string{
+	"mindspec-abcd.1", "mindspec-9cyu.2.3", "mindspec-mol-015",
+	"127-lifecycle-verb-trustworthiness", "092-req19-metadata-ban",
+	"review-round-2", "final-review-panel",
+	"origin/main", "bead/mindspec-abcd.1", "spec/127-lifecycle-verb-trustworthiness",
+}
+
+// sprintfVerbRe matches one printf verb ("%s", "%q", "%v", "%d", ...)
+// — used only to count how many adversarial values a given template
+// needs, never to distinguish verb TYPES: every value substituted
+// below is a plain string, which fmt accepts cleanly for %s/%v/%q and
+// renders as an inert `%!verb(string=...)` diagnostic wrapper for any
+// other verb — itself still opaque to the classifier (its own `(`/`)`
+// are tokenizer separators, so the wrapped value's words never fuse
+// with "string=" into a single "git"/"bd"/"rm" token).
+var sprintfVerbRe = regexp.MustCompile(`%[a-zA-Z]`)
+
+// fillTemplate substitutes value at every printf verb in tmpl.
+func fillTemplate(tmpl, value string) string {
+	n := len(sprintfVerbRe.FindAllString(tmpl, -1))
+	if n == 0 {
+		return tmpl
+	}
+	args := make([]interface{}, n)
+	for i := range args {
+		args[i] = value
+	}
+	return fmt.Sprintf(tmpl, args...)
+}
+
+// sprintfTemplatesInFunc parses relFile fresh (never trusting a
+// cached/prior AST — the whole point of this obligation is to catch
+// drift in the REAL, current source) and returns every fmt.Sprintf
+// literal-template string found anywhere inside the named top-level
+// function/method's body OR package-level var's initializer (the
+// cmd/mindspec cobra-command convention: `var xCmd = &cobra.Command{
+// RunE: func(...) {...} }` — a RunE closure, not a FuncDecl, so its
+// own enclosing name is the VAR's, matching internal/lint's
+// enclosingFunc's own two cases). funcName is "Name" for a plain
+// function or var, "Recv.Name" for a method.
+func sprintfTemplatesInFunc(t *testing.T, root, relFile, funcName string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join(root, relFile), nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", relFile, err)
+	}
+	var target ast.Node
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			name := d.Name.Name
+			if d.Recv != nil && len(d.Recv.List) > 0 {
+				name = recvTypeNameForObligation(d.Recv.List[0].Type) + "." + name
+			}
+			if name == funcName {
+				target = d
+			}
+		case *ast.GenDecl:
+			if d.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range d.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, nm := range vs.Names {
+					if nm.Name == funcName && i < len(vs.Values) {
+						target = vs.Values[i]
+					}
+				}
+			}
+		}
+	}
+	if target == nil {
+		t.Fatalf("function/method/var %q not found in %s — this obligation's own probe is broken (the site moved or was renamed; fix mindspecVerbTemplateSites)", funcName, relFile)
+	}
+	var templates []string
+	ast.Inspect(target, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		xid, ok := sel.X.(*ast.Ident)
+		if !ok || xid.Name != "fmt" || sel.Sel.Name != "Sprintf" || len(call.Args) == 0 {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		v, uerr := strconv.Unquote(lit.Value)
+		if uerr != nil {
+			return true
+		}
+		templates = append(templates, v)
+		return true
+	})
+	return templates
+}
+
+// recvTypeNameForObligation mirrors internal/lint's recvTypeName —
+// duplicated rather than imported (package guard cannot import
+// internal/lint's test-only helpers across the package boundary).
+func recvTypeNameForObligation(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.StarExpr:
+		return recvTypeNameForObligation(e.X)
+	}
+	return ""
+}
+
+// TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor is the
+// Obligation named by every "mindspec <verb>..."-templated entry added
+// in this bead's SECOND rework round (spec 127, O2c-1). Rather than
+// hand-copy each site's template as a literal — exactly the kind of
+// carried-over, driftable claim this spec exists to prevent, and the
+// defect class RawMergeFence's own doc comment (internal/panel/
+// gate.go) already lived through once — this test RE-PARSES the real
+// source at every named site, extracts every fmt.Sprintf template
+// found in that function/method's body, and asserts the classifier
+// finds NO floor match after substituting a realistic-value battery
+// (mindspecVerbRealisticValues, above — deliberately NOT a maximal
+// adversarial fuzz; see that variable's own doc comment for why) at
+// every printf verb. A template edited later is re-checked
+// automatically on every run; a named site that moves or is renamed
+// fails loudly (sprintfTemplatesInFunc's own "not found" fatal) rather
+// than silently passing zero templates.
+func TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	// knownAllowlistTemplates skips templates that legitimately DO
+	// match a floor family — plan.go's beadCreateFailure and
+	// checkExistingBeadsSafety each contain BOTH an opaque
+	// "mindspec ..." template (this obligation's actual concern) AND a
+	// SEPARATE, already-governed "bd delete %s --force" Sprintf
+	// (DestructiveGuidanceAllowlist's own first two entries, above,
+	// each with their own ContentRegeneration obligation) in the same
+	// function body. This obligation is scoped to the OPAQUE templates
+	// only; asserting no-match against a template the allowlist
+	// mechanism deliberately DOES match would contradict that entry.
+	knownAllowlistTemplates := map[string]bool{
+		"bd delete %s --force": true,
+	}
+	totalTemplates := 0
+	for _, site := range mindspecVerbTemplateSites {
+		templates := sprintfTemplatesInFunc(t, root, site.file, site.fn)
+		if len(templates) == 0 {
+			t.Errorf("%s/%s: found zero fmt.Sprintf templates — this obligation's own extraction is broken for this site's shape (fix sprintfTemplatesInFunc or mindspecVerbTemplateSites)", site.file, site.fn)
+		}
+		for _, tmpl := range templates {
+			if knownAllowlistTemplates[tmpl] {
+				continue
+			}
+			totalTemplates++
+			for _, v := range mindspecVerbRealisticValues {
+				rendered := fillTemplate(tmpl, v)
+				if matches := FindFloorMatches(rendered); len(matches) > 0 {
+					t.Errorf("%s/%s template %q with adversarial value %q renders %q, which matches the destructive floor: %+v", site.file, site.fn, tmpl, v, rendered, matches)
+				}
+			}
+		}
+	}
+	if totalTemplates == 0 {
+		t.Fatal("collected zero fmt.Sprintf templates across every named site — this obligation's own probe is broken")
 	}
 }
 

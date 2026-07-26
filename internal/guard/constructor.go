@@ -25,20 +25,39 @@ import (
 // internal/lint AST invariant instead (destructive_guidance_test.go's
 // scanSamePackageInvariant): the scan asserts every composite
 // literal, unexported-field write, or type CONVERSION producing this
-// type appears only inside NewDestructiveCommand's own body — resolved
-// through one level of type alias (`type X = DestructiveCommand`) and
-// one level of defined type (`type X DestructiveCommand`), not merely
-// by matching the literal identifier "DestructiveCommand" (spec 127
-// bead-2 rework, RULING 2/G1-r2-1/O2-r2-1: a round-6-panel-confirmed
-// escape class, the exact shape bead 1's own AST sentinel — the
-// DestructionOutcome const-block invariant, outcome_sentinel_test.go —
-// was independently widened to close for a DIFFERENT type in this
-// same package). unsafe/reflect.NewAt bypasses of the struct are
-// recorded OUTSIDE this convention's threat model (R5(b)) — no
-// Go-level guard survives unsafe, and the convention targets
-// convenient drift, not deliberate obfuscation. reflect alone,
-// WITHOUT unsafe, cannot write an unexported field (verified,
-// O2-r2-1) and is therefore not a separate escape to defend against.
+// type appears only inside NewDestructiveCommand's own body.
+//
+// This is a SYNTACTIC (AST-level, no go/types) resolver, comprehensive
+// against the concrete escape shapes two rounds of adversarial review
+// found and confirmed — never against "every possible Go spelling",
+// which no syntactic check can be (spec 127 bead-2 rework round 2's
+// own standing lesson): an arbitrary-depth chain of type aliases
+// and/or defined types (`type L1 = DestructiveCommand; type L2 = L1;
+// type L3 L2; ...`, resolved to a FIXED POINT, not merely one level —
+// round 1 shipped a single pass and G1-1/O2-1 confirmed a two-level
+// chain escaped it); a composite literal whose element TYPE IS
+// ELIDED — inferred from an enclosing array/slice/map literal's own
+// element type (`[]DestructiveCommand{{command: cmd, valid: true}}`,
+// `map[int]DestructiveCommand{0: {...}}`) or a KEYED struct field's
+// declared type (`someStruct{D: {command: cmd, valid: true}}`) —
+// resolved from that enclosing context, recursively, so nested
+// elisions keep resolving one level at a time (O2-1/O3-confirm-1: an
+// elided literal has node.Type == nil syntactically, so a check that
+// only inspects the literal's own Type field, never its parent, always
+// missed it). Not resolved, and not claimed: a value that reaches
+// this package only after passing through an interface{}/generic-type
+// indirection, or a same-named type re-exported through another
+// package's alias — either would need actual type-checking (go/types)
+// to resolve, which this scan deliberately does not add (spec 127
+// bead-2 rework round 2's own scoping call: Go has indefinitely many
+// spellings, and a syntactic scan closes the SHAPES adversarial review
+// has actually found, not an unbounded claim it cannot back).
+// unsafe/reflect.NewAt bypasses of the struct are recorded OUTSIDE
+// this convention's threat model (R5(b)) — no Go-level guard survives
+// unsafe, and the convention targets convenient drift, not deliberate
+// obfuscation. reflect alone, WITHOUT unsafe, cannot write an
+// unexported field (verified, O2-r2-1) and is therefore not a
+// separate escape to defend against.
 //
 // The zero value (valid == false) is INVALID and renders as a
 // fail-closed placeholder, never as a usable command — a caller that

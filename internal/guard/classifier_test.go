@@ -262,21 +262,53 @@ func TestFindFloorMatches_ClauseBoundary_NoCrossFold(t *testing.T) {
 }
 
 // TestFindFloorMatches_QuotedGlobalOptionOperand pins G1-r2-2/
-// O1-r2-9: a shell-quoted, whitespace-bearing `-C`/`-c` operand —
-// which tokenRe's own separator set (quote characters included)
-// splits into multiple plain tokens with no leading quote left to
-// notice — still normalizes correctly instead of leaking its second
-// word in as the subcommand.
+// O1-r2-9, then bead-2 rework round 2's confirm (G1-2/O1-confirm-1/
+// O1-9): a shell-quoted, whitespace-bearing `-C`/`-c` operand is one
+// shell argument and must normalize as exactly one token, whatever
+// its interior content — never leaking a later word in as the
+// subcommand (the original under-match this test pinned), and never
+// letting an embedded bare "reset"/"restore"/flag-shaped WORD inside
+// the quotes be misread as the subcommand either (the round-2-confirm
+// over-match: `git -c "user.name=Set to reset later" status` must
+// stay a NON-match for FamilyGitReset — "status" is the real
+// subcommand, never reached by round 1's greedy-token heuristic).
 func TestFindFloorMatches_QuotedGlobalOptionOperand(t *testing.T) {
-	cases := []struct {
+	positive := []struct {
 		name string
 		text string
 		fam  DestructiveFamily
 	}{
 		{"dash-C-quoted-space", `git -C "/tmp/work tree" reset --hard HEAD`, FamilyGitReset},
 		{"dash-c-quoted-space", `git -c "user.name=A B" reset --hard`, FamilyGitReset},
+		// The genuinely destructive command G1-2 found round 1 still
+		// missed: a quoted -C operand that happens to START WITH '-'.
+		// Round 1's greedy scan misread the operand itself as the
+		// stopping "flag-shaped" token; a single-token consume has no
+		// such heuristic to fool.
+		{"dash-C-quoted-leading-dash", `git -C "-tmp path" reset --hard HEAD`, FamilyGitReset},
+		// A quoted value containing an embedded git-subcommand-shaped
+		// or short-flag-shaped WORD must not fool the single-token
+		// consume either (it is swallowed whole, not re-scanned).
+		{"dash-c-quoted-embedded-flag-value", `git -c 'core.pager=less -R' reset --hard`, FamilyGitReset},
+		// Nested quotes (a single quote inside a double-quoted span,
+		// or vice versa) stay one token — the inner quote character is
+		// literal content, not a new span.
+		{"dash-c-nested-quotes", `git -c "alias.st='status --short'" reset --hard`, FamilyGitReset},
+		// An escaped quote of the SAME kind as the span's own
+		// delimiter does not close the span early.
+		{"dash-c-escaped-quote", `git -c "note=say \"hi\" then reset" reset --hard`, FamilyGitReset},
+		// A literal newline inside the quoted span is ordinary
+		// content, not a token/clause boundary.
+		{"dash-C-quoted-newline", "git -C \"/tmp/work\ntree\" reset --hard", FamilyGitReset},
+		// An unbalanced (unterminated) quote swallows the rest of the
+		// text into one token — the conservative direction: nothing
+		// past the stray quote can be mistaken for a fresh subcommand.
+		// This particular shape has no real subcommand left to find,
+		// so it is a non-match (see the negative table below); the
+		// positive analog is exercised by
+		// TestTokenize_UnbalancedQuoteSwallowsRemainder directly.
 	}
-	for _, c := range cases {
+	for _, c := range positive {
 		t.Run(c.name, func(t *testing.T) {
 			matches := FindFloorMatches(c.text)
 			found := false
@@ -289,6 +321,46 @@ func TestFindFloorMatches_QuotedGlobalOptionOperand(t *testing.T) {
 				t.Fatalf("%q: expected %s after normalization, got %+v", c.text, c.fam, matches)
 			}
 		})
+	}
+
+	negative := []string{
+		// O1-confirm-1/G1-2's over-match: a quoted -c VALUE containing
+		// the bare word "reset"/"restore" must never be read as the
+		// subcommand — the real subcommand (status/log) is what
+		// matters, and it is not on the floor.
+		`git -c "user.name=Set to reset later" status`,
+		`git -c "alias.info=explains reset semantics" log`,
+		// A quoted operand containing an entire destructive-looking
+		// command as inert TEXT must not match — it is one opaque
+		// token, never re-tokenized.
+		`git -C "reset --hard" status`,
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			if matches := FindFloorMatches(text); len(matches) != 0 {
+				t.Fatalf("%q: expected NO floor match (quoted operand content is inert), got %+v", text, matches)
+			}
+		})
+	}
+}
+
+// TestTokenize_UnbalancedQuoteSwallowsRemainder pins the unbalanced-
+// quote direction of G1-2/O1-9's confirm: with no closing quote, the
+// entire remainder of the text becomes ONE token — never split back
+// out into separate words that could recombine into an unrelated
+// match.
+// TestFindFloorMatches_UnbalancedQuotedGlobalOptionOperand pins the
+// unbalanced-quote direction of consumeGlobalOptionOperand
+// (classifier.go): a -C/-c operand's opening quote with no matching
+// close swallows the REMAINDER of the text as that operand — the safe
+// direction, since nothing past a stray quote can then be misread as
+// a fresh subcommand. This is a property of consumeGlobalOptionOperand
+// specifically (tokenize's own general pass is quote-oblivious, per
+// its own doc comment — a blanket quote-aware tokenizer was tried and
+// reverted for breaking prose scanning, bead-2 rework round 2).
+func TestFindFloorMatches_UnbalancedQuotedGlobalOptionOperand(t *testing.T) {
+	if matches := FindFloorMatches(`git -C "/tmp/work tree reset --hard`); len(matches) != 0 {
+		t.Fatalf("expected no match over an unbalanced quote, got %+v", matches)
 	}
 }
 

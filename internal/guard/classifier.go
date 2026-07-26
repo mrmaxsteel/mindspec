@@ -128,6 +128,24 @@ type Match struct {
 // so flag tokens carrying `-`, `:`, `/`, `=`, `<`, `>`, `.` survive
 // intact (`--force-with-lease`, `--git-dir=/x`, `:<ref>`,
 // `bead/<id>`).
+//
+// Quote characters stay in this SEPARATOR set — tokenize does NOT
+// treat them as span-opening delimiters — by design, not oversight
+// (bead-2 rework round 2's confirm, S1/S2/S3/O1/G1 jointly): this
+// tokenizer's dominant caller is prose/markdown scanning, where a
+// quote is ordinary punctuation (a quoted warning, a quoted rule, a
+// quoted error message) that must NEVER swallow the words inside it
+// into one opaque, unscannable token — "rendering form separates
+// nothing" (classifier.go's own header, H-r6-2) applies to quote
+// marks exactly like backticks and `**`. A blanket quote-aware
+// tokenizer was tried and reverted: it fixed the -C/-c shell-operand
+// defect (G1-2/O1-9) but broke exactly this — a `"...git merge..."`
+// quoted sentence inside shipped guidance stopped matching at all,
+// silently hiding real content from the SAME scan this floor exists
+// to feed. The -C/-c fix instead lives in consumeGlobalOptionOperand
+// (below), which is quote-aware ONLY for that one, genuinely-shell
+// position — scoped narrowly rather than applied to every quote mark
+// in every scanned text.
 var tokenRe = regexp.MustCompile("[^\\s`*(),;\"'|]+")
 
 // sentenceEnders is the trailing-punctuation set tokenize treats as a
@@ -165,6 +183,13 @@ func isTokenSeparatorByte(b byte) bool {
 	return false
 }
 
+// isQuoteByte reports whether b is a quote character — used only by
+// consumeGlobalOptionOperand's narrowly-scoped quote-awareness
+// (below), never by tokenize itself.
+func isQuoteByte(b byte) bool {
+	return b == '"' || b == '\''
+}
+
 // tokenize splits text into a flat token stream plus a same-length
 // boundary slice: boundary[i] is true when tokens[i] is followed by a
 // clause-ending mark — a trailing '.'/':'/'!'/'?' stripped from the
@@ -178,10 +203,16 @@ func isTokenSeparatorByte(b byte) bool {
 // folded into an earlier, unrelated invocation (O1-r2-3) — while an
 // invocation's own operand list is scanned to its true end regardless
 // of length (F1-r2-1: no arbitrary token-count cap).
-func tokenize(text string) ([]string, []bool) {
+//
+// A third return value, starts, records each token's byte offset in
+// the ORIGINAL text — needed only by consumeGlobalOptionOperand
+// (below) to re-examine the raw text right after a -C/-c flag for a
+// quote character tokenize itself does not treat specially.
+func tokenize(text string) ([]string, []bool, []int) {
 	idx := tokenRe.FindAllStringIndex(text, -1)
 	out := make([]string, 0, len(idx))
 	boundary := make([]bool, 0, len(idx))
+	starts := make([]int, 0, len(idx))
 	for _, span := range idx {
 		tok := text[span[0]:span[1]]
 		end := false
@@ -201,8 +232,9 @@ func tokenize(text string) ([]string, []bool) {
 		}
 		out = append(out, tok)
 		boundary = append(boundary, end)
+		starts = append(starts, span[0])
 	}
-	return out, boundary
+	return out, boundary, starts
 }
 
 // globalOptionPrefixes is the pinned, closed set of git global-option
@@ -238,73 +270,39 @@ var globalOptionWithOperand = map[string]bool{
 	"-c": true,
 }
 
-// gitSubcommandNames is the vocabulary matchGit's own switch below
-// recognizes. Duplicated here — not derived from the switch — purely
-// so skipGlobalOptions can decide where a -C/-c operand span ends
-// without a forward reference into matchGit; keeping the two lists in
-// sync is a review-time obligation of the same shape as AllFamilies
-// itself (spec 127 R5(a)): a subcommand added to the switch but not
-// here degrades this file's own MATCHING precision for that one
-// family when it is invoked behind `-C`/`-c`, never its SAFETY —
-// the floor already fails toward requiring review, never toward
-// proving a command safe.
-var gitSubcommandNames = map[string]bool{
-	"merge": true, "reset": true, "restore": true, "clean": true,
-	"branch": true, "push": true, "stash": true, "worktree": true,
-	"checkout": true, "switch": true, "update-ref": true, "tag": true,
-	"reflog": true, "gc": true,
-}
-
-// looksLikeGitSubcommandOrFlag reports whether tok is shaped like the
-// START of a new git argument — either a flag (leading '-') or a
-// known git subcommand name — the stopping condition
-// skipGlobalOptions uses to find the end of a -C/-c operand span
-// (below).
-func looksLikeGitSubcommandOrFlag(tok string) bool {
-	if strings.HasPrefix(tok, "-") {
-		return true
-	}
-	return gitSubcommandNames[tok]
-}
-
 // skipGlobalOptions returns the index of the git subcommand token,
 // having stripped every contiguous global option (and its operand)
 // from the pinned, closed normalization set starting right after
 // "git". Returns t.len() if the stream runs out first (no subcommand
 // present — not a match).
 //
-// A globalOptionWithOperand flag's (-C/-c) operand is consumed
-// GREEDILY — every token up to (not including) the next token that
-// itself looks like a git subcommand or a flag — rather than exactly
-// one token (spec 127 bead-2 rework, G1-r2-2/O1-r2-9): tokenRe's
-// separator set includes both quote characters, so a shell-quoted,
-// whitespace-bearing operand (`git -C "/tmp/work tree" reset --hard`,
-// `git -c "user.name=A B" reset --hard`) arrives here already split
-// into multiple plain tokens with no leading quote left to notice —
-// consuming exactly one token would leave the operand's SECOND word
-// to be misread as the subcommand (and, for `-c`, its value entirely
-// unrelated words could then masquerade as the subcommand too). The
-// greedy scan keeps the whole operand attached to its flag in both
-// the ordinary single-token case (the very next token IS a
-// subcommand, so the loop consumes zero extra tokens) and the
-// quoted-multi-token case.
-func skipGlobalOptions(t tokStream) int {
+// A globalOptionWithOperand flag's (-C/-c) operand is consumed via
+// consumeGlobalOptionOperand (below) — NOT a plain "next token"
+// advance — because tokenize (this file's general prose/markdown
+// scanner) deliberately leaves quote characters in its separator set
+// (rendering form separates nothing, H-r6-2), so a shell-quoted,
+// whitespace-bearing -C/-c operand
+// (`git -C "/tmp/work tree" reset --hard`) arrives at THIS function
+// already split into multiple plain tokens with no leading quote left
+// to notice. Bead-2 rework round 2 tried making tokenize itself
+// globally quote-aware (G1-r2-2/O1-r2-9's own fix) and that broke
+// prose scanning outright — a quoted SENTENCE in shipped guidance
+// (`"...the actual git merge..."`) silently stopped matching, because
+// the quotes swallowed the whole sentence into one opaque token. The
+// confirm round's OWN findings (G1-2/O1-confirm-1) were about that
+// same broken mechanism cutting the other way (a quoted value's
+// embedded words leaking in as a false subcommand, or a quoted
+// value's leading '-' defeating the greedy multi-token scan it
+// replaced). The fix that survives both directions scopes quote-
+// awareness to exactly this one, genuinely-shell position instead of
+// the whole tokenizer.
+func skipGlobalOptions(raw string, t tokStream) int {
 	i := 1 // t.tok(0) == "git"
 	for i < t.len() {
 		tok := t.tok(i)
 		switch {
 		case globalOptionWithOperand[tok]:
-			i++
-			// Consume every operand token up to (not including) the
-			// next token that itself looks like a subcommand or a
-			// flag — the loop already leaves i pointing AT that
-			// stopping token (or at t.len()), so no further
-			// adjustment is needed: the single-token case advances
-			// exactly once, the quoted-multi-token case advances
-			// through every word of the operand.
-			for i < t.len() && !looksLikeGitSubcommandOrFlag(t.tok(i)) {
-				i++
-			}
+			i = consumeGlobalOptionOperand(raw, t, i)
 		case globalOptionStandalone[tok]:
 			i++
 		default:
@@ -322,6 +320,60 @@ func skipGlobalOptions(t tokStream) int {
 		}
 	}
 	return i
+}
+
+// consumeGlobalOptionOperand returns the token index right past
+// globalOptionWithOperand flag t.tok(i)'s operand. It re-examines the
+// ORIGINAL text right after the flag's own span for a quote character
+// tokenize's general pass does not treat specially:
+//
+//   - no quote there (the ordinary case, `git -C ../wt reset --hard`,
+//     this repo's own house style): the operand is exactly the next
+//     token, so this returns i+2.
+//   - a quote there: the operand is everything between it and its
+//     matching close (a backslash immediately before the SAME quote
+//     character escapes it, staying inside the span; a DIFFERENT
+//     quote character nested inside is literal content, not a new
+//     span; an unbalanced quote — no close before end of text —
+//     swallows the remainder, the safe direction for malformed input,
+//     since nothing past a stray quote can then be misread as a fresh
+//     subcommand). This returns the index of the first EXISTING token
+//     (from tokenize's own separate, quote-oblivious pass) whose start
+//     offset is at or past the closing quote — i.e., every token
+//     tokenize already split OUT of the quoted span's interior is
+//     skipped over as a block, never individually re-examined as a
+//     candidate subcommand or flag.
+func consumeGlobalOptionOperand(raw string, t tokStream, i int) int {
+	flagEnd := t.starts[i] + len(t.tok(i))
+	pos := flagEnd
+	for pos < len(raw) && (raw[pos] == ' ' || raw[pos] == '\t') {
+		pos++
+	}
+	if pos >= len(raw) || !isQuoteByte(raw[pos]) {
+		return i + 2 // unquoted: exactly the next token
+	}
+	quote := raw[pos]
+	pos++ // skip opening quote
+	for pos < len(raw) {
+		c := raw[pos]
+		if c == '\\' && pos+1 < len(raw) && raw[pos+1] == quote {
+			pos += 2
+			continue
+		}
+		if c == quote {
+			pos++ // skip closing quote
+			break
+		}
+		pos++
+	}
+	// pos is now just past the consumed quoted span (or len(raw) if
+	// unbalanced). Find the first token whose own span starts at or
+	// after pos.
+	j := i + 1
+	for j < t.len() && t.starts[j] < pos {
+		j++
+	}
+	return j
 }
 
 // clusterHasFlag reports whether tok is either the exact long flag, or
@@ -349,16 +401,19 @@ func clusterHasFlag(tok, long string, letter byte) bool {
 // destructive trigger word is never read out of its own sentence
 // (spec 127 bead-2 rework, O1-r2-3), while an invocation's OWN operand
 // list is scanned to its true end with no arbitrary token-count cap
-// (F1-r2-1's `bd delete <n ids> --force` regression class).
+// (F1-r2-1's `bd delete <n ids> --force` regression class). starts
+// carries each token's byte offset in the original text — needed only
+// by consumeGlobalOptionOperand's narrowly-scoped quote-awareness.
 type tokStream struct {
 	text     []string
 	boundary []bool
+	starts   []int
 }
 
 func (t tokStream) len() int         { return len(t.text) }
 func (t tokStream) tok(i int) string { return t.text[i] }
 func (t tokStream) from(i int) tokStream {
-	return tokStream{text: t.text[i:], boundary: t.boundary[i:]}
+	return tokStream{text: t.text[i:], boundary: t.boundary[i:], starts: t.starts[i:]}
 }
 
 // findArg scans rest for a token satisfying pred, STOPPING at the
@@ -380,11 +435,13 @@ func findArg(rest tokStream, pred func(string) bool) int {
 }
 
 // matchGit attempts every git family against t (t.tok(0) == "git").
-// Returns the matched family and the total token count consumed
-// (including "git", any stripped globals, and the subcommand), or
-// ok=false.
-func matchGit(t tokStream) (DestructiveFamily, int, bool) {
-	subIdx := skipGlobalOptions(t)
+// raw is the full original text, needed only to re-examine a -C/-c
+// operand for a quote character (consumeGlobalOptionOperand, via
+// skipGlobalOptions). Returns the matched family and the total token
+// count consumed (including "git", any stripped globals, and the
+// subcommand), or ok=false.
+func matchGit(raw string, t tokStream) (DestructiveFamily, int, bool) {
+	subIdx := skipGlobalOptions(raw, t)
 	if subIdx >= t.len() {
 		return "", 0, false
 	}
@@ -570,14 +627,14 @@ func matchRm(t tokStream) (DestructiveFamily, int, bool) {
 // family and returns them in order of appearance, non-overlapping
 // (each match consumes its tokens; scanning resumes right after).
 func FindFloorMatches(text string) []Match {
-	toks, boundary := tokenize(text)
-	t := tokStream{text: toks, boundary: boundary}
+	toks, boundary, starts := tokenize(text)
+	t := tokStream{text: toks, boundary: boundary, starts: starts}
 	var out []Match
 	i := 0
 	for i < t.len() {
 		switch t.tok(i) {
 		case "git":
-			if fam, n, ok := matchGit(t.from(i)); ok && n > 0 {
+			if fam, n, ok := matchGit(text, t.from(i)); ok && n > 0 {
 				out = append(out, Match{Family: fam, Text: strings.Join(toks[i:i+n], " ")})
 				i += n
 				continue
