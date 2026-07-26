@@ -73,14 +73,35 @@ func TestImplAdoptCmd_ReasonRequiredArgs(t *testing.T) {
 	}
 }
 
-// TestAdoptSpec_OnlyProductionCallerIsItsCommandHandler is R1(e): "the
-// only caller of the adopt entrypoint is its own registered command
-// handler" (O2-8's rewrite of the untestable negative universal) —
-// pinned as a POSITIVE, testable claim: exactly one call site of
-// approve.AdoptSpec across every non-test .go file under cmd/ and
-// internal/, and it must be inside cmd/mindspec/impl.go's
+// TestAdoptSpec_OnlyDirectProductionCallSiteIsItsCommandHandler is
+// R1(e)'s call-site enumeration (O2-8's rewrite of the untestable
+// negative universal), pinned as a POSITIVE, testable claim scoped to
+// exactly what the AST scan can enforce: exactly one DIRECT call site
+// of approve.AdoptSpec — a CallExpr whose function is the imported
+// SelectorExpr or a dot-imported Ident, resolved by import-path
+// IDENTITY (O2-1/G1-B3-05) — across every non-test .go file under cmd/
+// and internal/, and it must be inside cmd/mindspec/impl.go's
 // adoptSpecRunE (the registered handler above).
-func TestAdoptSpec_OnlyProductionCallerIsItsCommandHandler(t *testing.T) {
+//
+// Renamed from TestAdoptSpec_OnlyProductionCallerIsItsCommandHandler
+// (G1-B3-05's confirm-round finding): the scan is syntax-shaped, not
+// object/call-graph based, and this is a structural property of an
+// AST walk, not a gap this test can close by adding more cases.
+// Confirmed by mutation: a package-level `var f = approve.AdoptSpec`
+// plus a second production function calling `f(...)` compiles and adds
+// a genuine second production reference to AdoptSpec, yet this test
+// still reports exactly one call site and PASSES — because there is no
+// CallExpr whose Fun is the imported selector at the indirect call
+// point. The same blind spot applies to a method value or an interface
+// satisfied by a wrapper around AdoptSpec.
+//
+// So: this test enforces that the only DIRECT call site — reached by a
+// literal `approve.AdoptSpec(...)` or dot-imported `AdoptSpec(...)`
+// expression — is the registered command handler. It does NOT, and
+// structurally cannot, prove that AdoptSpec is never reached through a
+// function value, method value, or interface; any such indirection is
+// undetected here and is a review-time, not a mechanical, guarantee.
+func TestAdoptSpec_OnlyDirectProductionCallSiteIsItsCommandHandler(t *testing.T) {
 	root := repoRootFromTestDir(t)
 	var sites []adoptCallSite
 	for _, top := range []string{"cmd", "internal"} {

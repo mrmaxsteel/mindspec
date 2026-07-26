@@ -222,14 +222,25 @@ func TestAdoptSpec_HappyPath(t *testing.T) {
 // independent fixture, captures BOTH calls' ACTUAL metadata writes, and
 // diffs them.
 //
-// The compared key set is DERIVED from ApproveImpl's own captured
-// output (never a hand-listed subset, the defect class bead 2's fixtures
-// were repeatedly reworked to stop committing): every key ApproveImpl's
-// done-state write touches must be present in AdoptSpec's terminal
-// metadata with an EQUAL value. AdoptSpec's own audit-only keys
-// (mindspec_adopt_*) are correctly ABSENT from ApproveImpl's write and
-// therefore never checked — R1(f) requires parity on the shared
-// terminal-state markers, not identity of the whole map.
+// The comparison is BIDIRECTIONAL and set-equal, not merely
+// approve-seeded (G1-B3-06's confirm-round finding: a one-directional
+// diff derived from ApproveImpl's key set can never catch a key AdoptSpec
+// writes that ApproveImpl does not — proven by a mutation that added
+// mindspec_unshared_terminal_marker to AdoptSpec's terminal map and left
+// the old one-directional test green). Equality is symmetric, so both
+// projections are computed and compared both ways:
+//
+//   - forward: every key ApproveImpl's done-state write touches must be
+//     present in AdoptSpec's terminal metadata with an EQUAL value.
+//   - reverse: every key in AdoptSpec's terminal metadata that is NOT
+//     one of its own audit-only mindspec_adopt_* keys must be present in
+//     ApproveImpl's captured write with an EQUAL value.
+//
+// The mindspec_adopt_* prefix is the one INTENTIONAL, NAMED asymmetry —
+// audit provenance (actor/reason/timestamp/evidence) that only adopt
+// produces, by design, and that ApproveImpl correctly never writes. Every
+// other key must appear on both sides or the test fails, in whichever
+// direction the drift occurred.
 func TestAdoptSpec_ParityWithNormalApproveImpl(t *testing.T) {
 	// --- side A: a real ApproveImpl run, capturing its ACTUAL write.
 	tmp := t.TempDir()
@@ -283,15 +294,42 @@ func TestAdoptSpec_ParityWithNormalApproveImpl(t *testing.T) {
 		t.Fatalf("AdoptSpec: unexpected error: %v", err)
 	}
 
-	// --- the actual comparison, derived from side A's real output.
+	// --- the actual comparison: project AdoptSpec's metadata down to its
+	// non-audit (shared) keys, then diff BOTH ways against ApproveImpl's
+	// captured write. The mindspec_adopt_* prefix is the sole named,
+	// intentional asymmetry.
+	adoptSharedMetadata := map[string]interface{}{}
+	for k, v := range adoptMetadata {
+		if strings.HasPrefix(k, "mindspec_adopt_") {
+			continue
+		}
+		adoptSharedMetadata[k] = v
+	}
+
+	// forward: approve -> adopt.
 	for k, wantV := range approveMetadata {
-		gotV, ok := adoptMetadata[k]
+		gotV, ok := adoptSharedMetadata[k]
 		if !ok {
 			t.Errorf("ApproveImpl's done-state write sets %q = %v, but AdoptSpec's terminal metadata never sets it — R1(f) parity broken", k, wantV)
 			continue
 		}
 		if gotV != wantV {
 			t.Errorf("done-state parity broken at key %q: ApproveImpl wrote %v, AdoptSpec wrote %v", k, wantV, gotV)
+		}
+	}
+
+	// reverse: adopt's non-audit projection -> approve. Catches a key
+	// AdoptSpec writes into the shared done-state that ApproveImpl never
+	// produces — the direction the prior one-directional test could not
+	// see (G1-B3-06).
+	for k, gotV := range adoptSharedMetadata {
+		wantV, ok := approveMetadata[k]
+		if !ok {
+			t.Errorf("AdoptSpec's terminal metadata sets non-audit key %q = %v, but ApproveImpl's done-state write never sets it — R1(f) parity broken in the adopt->approve direction (only the mindspec_adopt_* prefix is a permitted adopt-only key)", k, gotV)
+			continue
+		}
+		if gotV != wantV {
+			t.Errorf("done-state parity broken at key %q: AdoptSpec wrote %v, ApproveImpl wrote %v", k, gotV, wantV)
 		}
 	}
 }
@@ -877,10 +915,21 @@ func TestAdoptSpec_SecondCallRefusesAndPreservesFirstAuditPayload(t *testing.T) 
 
 // TestAdoptSpec_ResumesInterruptedFinalizeWithoutRerunningStage1 is
 // G1-B3-03's crash-recovery leg: a PRIOR run that completed stage 1
-// (close + audit metadata) but never reached stage 2 (export + commit,
-// e.g. a CommitPaths failure) must be RESUMABLE — a re-run performs
-// ONLY the missing stage 2, never re-closing the epic or re-merging
-// (and thereby overwriting) stage 1's audit metadata.
+// (audit metadata; close may or may not have completed — see below) but
+// never reached stage 2 (export + commit, e.g. a CommitPaths failure)
+// must be RESUMABLE — a re-run never re-merges (and thereby overwrites)
+// stage 1's audit metadata, and always completes the missing stage 2.
+//
+// Confirm round (G1-B3-03 residual): since the audit-metadata merge is
+// now written BEFORE `bd close` (adoptFinalize's doc comment), the
+// resume branch can no longer assume close already succeeded merely
+// because the audit marker is present — so it always (idempotently)
+// re-issues close. This is why the fixture below still expects exactly
+// ONE close call on resume (not zero): it is the idempotent, tolerated
+// re-issue, never a second DISTINCT close of an already-closed epic in
+// the sense of double-billing an operator action — the underlying bd
+// state is unchanged either way. What must never re-run is the AUDIT
+// METADATA merge, and that is what the assertions below pin.
 func TestAdoptSpec_ResumesInterruptedFinalizeWithoutRerunningStage1(t *testing.T) {
 	dir := adoptInitRepo(t)
 	makeLandedBeadBranch(t, dir, "test-b1")
@@ -907,10 +956,10 @@ func TestAdoptSpec_ResumesInterruptedFinalizeWithoutRerunningStage1(t *testing.T
 		t.Fatalf("AdoptSpec (resume): unexpected error: %v", err)
 	}
 
-	// Stage 1 must NOT have re-run: no close call, original audit payload
-	// untouched.
-	if *closedCalls != 0 {
-		t.Fatalf("a resumed run must not re-close the epic (stage 1 already completed on the interrupted prior run), got %d closes", *closedCalls)
+	// The audit-metadata merge must NOT have re-run (original payload
+	// untouched); the idempotent close re-issue is expected exactly once.
+	if *closedCalls != 1 {
+		t.Fatalf("a resumed run must idempotently re-issue close exactly once (tolerated whether or not the interrupted prior run's close already landed), got %d closes", *closedCalls)
 	}
 	if metadata["mindspec_adopt_reason"] != "the original, already-recorded reason" {
 		t.Errorf("mindspec_adopt_reason = %v, want the ORIGINAL reason preserved verbatim (resume must never re-run stage 1)", metadata["mindspec_adopt_reason"])
@@ -974,6 +1023,175 @@ func TestAdoptSpec_AlreadyDoneViaNormalPathRefuses(t *testing.T) {
 	newCount := adoptCommitCount(t, dir, preTip, "main")
 	if newCount != 0 {
 		t.Fatalf("a refusal must create no new commit, got %d", newCount)
+	}
+}
+
+// TestAdoptSpec_CloseFailureAfterAuditMetadataResumesWithoutLosingAuditTrail
+// is the confirm round's G1-B3-03 residual: the WINDOW between stage 1's
+// two calls — the audit-metadata merge, then `bd close` — must never
+// lose the first invocation's audit trail if `bd close` itself fails
+// (G1's TestAdversaryCrashAfterCloseLosesFirstInvocationAudit, replayed
+// against the NEW ordering where the audit write now lands FIRST). The
+// first call's audit-metadata merge succeeds; its `bd close` call is
+// fault-injected to fail once. A second call, supplying a DIFFERENT
+// reason, must resume using the FIRST invocation's already-recorded
+// reason/actor/timestamp — never re-derive or overwrite them from the
+// second call's opts — idempotently retry close, and complete stage 2.
+func TestAdoptSpec_CloseFailureAfterAuditMetadataResumesWithoutLosingAuditTrail(t *testing.T) {
+	dir := adoptInitRepo(t)
+	makeLandedBeadBranch(t, dir, "test-b1")
+	stubAdoptListEpicBeads(t, []adoptEpicBead{{ID: "test-b1", Status: "closed"}})
+	closedCalls, metadata := wireAdoptSeams(t, "epic-1")
+	adoptStubExport(t)
+	exec := &realAdoptCommitExecutor{MockExecutor: &executor.MockExecutor{}, t: t}
+
+	// Fault-inject: the FIRST `bd close` call fails (simulating a crash
+	// or transient bd failure right after the audit-metadata merge
+	// landed); every subsequent close call succeeds.
+	origClose := adoptRunBDCombinedFn
+	adoptRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "close" {
+			*closedCalls++
+			if *closedCalls == 1 {
+				return nil, fiFakeErr("fault-injection: simulated close failure after audit metadata landed")
+			}
+			return nil, nil
+		}
+		return origClose(args...)
+	}
+	t.Cleanup(func() { adoptRunBDCombinedFn = origClose })
+
+	_, err := AdoptSpec(dir, "042-test", exec, AdoptOpts{Reason: "the first invocation's genuine reason"})
+	if err == nil {
+		t.Fatal("expected the first call to fail: close was fault-injected to error")
+	}
+
+	// After the failed first call: the audit-metadata merge (stage 1's
+	// FIRST durable write, now ordered before close — see adoptFinalize's
+	// doc comment) must have landed, even though close itself failed.
+	if metadata["mindspec_adopt_reason"] != "the first invocation's genuine reason" {
+		t.Fatalf("expected the audit-metadata merge to have landed before the injected close failure, got mindspec_adopt_reason=%v", metadata["mindspec_adopt_reason"])
+	}
+	firstActor := metadata["mindspec_adopt_actor"]
+	firstAt := metadata["mindspec_adopt_at"]
+	if firstActor == nil || firstAt == nil {
+		t.Fatal("expected the audit-metadata merge to have recorded actor/timestamp before the injected close failure")
+	}
+	if metadata[adoptExportCommittedMetaKey] == true {
+		t.Fatal("stage 2 must not have run yet: close (stage 1's second call) never completed")
+	}
+
+	preTip := adoptRefHash(t, dir, "main")
+
+	// Second call, with a DIFFERENT reason: must resume, preserving the
+	// FIRST invocation's audit payload verbatim, never re-deriving it
+	// from this call's (different) reason/opts.
+	if _, err := AdoptSpec(dir, "042-test", exec, AdoptOpts{Reason: "a SECOND, different reason that must never land"}); err != nil {
+		t.Fatalf("resume call: unexpected error: %v", err)
+	}
+	if metadata["mindspec_adopt_reason"] != "the first invocation's genuine reason" {
+		t.Errorf("mindspec_adopt_reason = %v, want the FIRST invocation's reason preserved verbatim — the audit trail must never be lost or overwritten by a resume", metadata["mindspec_adopt_reason"])
+	}
+	if metadata["mindspec_adopt_actor"] != firstActor || metadata["mindspec_adopt_at"] != firstAt {
+		t.Error("mindspec_adopt_actor/at changed on resume — the first invocation's audit payload must be preserved verbatim")
+	}
+	if *closedCalls != 2 {
+		t.Fatalf("expected close to be attempted twice (the injected failure, then the idempotent resume retry), got %d", *closedCalls)
+	}
+	if metadata[adoptExportCommittedMetaKey] != true {
+		t.Error("expected stage 2 to complete on the resume call")
+	}
+	newCount := adoptCommitCount(t, dir, preTip, "main")
+	if newCount != 1 {
+		t.Fatalf("expected exactly 1 new commit on main from the resumed finalize, got %d", newCount)
+	}
+}
+
+// TestAdoptSpec_CommitSucceedsButCompletionMarkerWriteFailsSelfHeals is
+// the confirm round's G1-B3-03 residual, second leg: G1's
+// TestAdversaryCommittedExportOmitsCompletionMarker showed that a
+// committed .beads/issues.jsonl reflects the audit payload but NEVER
+// the completion marker (adoptExportCommittedMetaKey) itself, because
+// that marker is written to bd's metadata store AFTER exec.CommitPaths
+// and is never re-exported into the artifact it marks — so Git alone
+// cannot distinguish "stage 2 fully completed" from "the finalize
+// commit landed but the completion-marker write then failed".
+//
+// This proves that window is nonetheless SELF-HEALING, not merely
+// undocumented: gitutil.CommitPaths is a true no-op when nothing is
+// staged at its pathspec (internal/gitutil/gitops.go's `git diff
+// --cached --quiet -- <paths>` check), so a resume whose export
+// refresh produces BYTE-IDENTICAL content — as a real `bead.Export`
+// refresh does over an unchanged bd state — creates no second commit;
+// only the marker write is retried.
+func TestAdoptSpec_CommitSucceedsButCompletionMarkerWriteFailsSelfHeals(t *testing.T) {
+	dir := adoptInitRepo(t)
+	makeLandedBeadBranch(t, dir, "test-b1")
+	stubAdoptListEpicBeads(t, []adoptEpicBead{{ID: "test-b1", Status: "closed"}})
+	_, metadata := wireAdoptSeams(t, "epic-1")
+	exec := &realAdoptCommitExecutor{MockExecutor: &executor.MockExecutor{}, t: t}
+
+	// A DETERMINISTIC export double — unlike adoptStubExport, which
+	// embeds a per-call counter into the exported content and would
+	// therefore itself defeat CommitPaths' no-op path on this test's
+	// second stage-2 attempt. Standing in for a real `bead.Export`
+	// refresh over an UNCHANGED bd state, which is byte-identical run
+	// to run.
+	origExport := adoptExportBeadsFn
+	adoptExportBeadsFn = func(root string) error {
+		beadsDir := filepath.Join(root, ".beads")
+		if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(beadsDir, "issues.jsonl"), []byte(`{"id":"epic-1","status":"closed"}`+"\n"), 0o644)
+	}
+	t.Cleanup(func() { adoptExportBeadsFn = origExport })
+
+	// Fault-inject: the SECOND adoptMergeMetadataFn call — the
+	// export-committed marker write, stage 2's final step — fails once.
+	mergeAttempts := 0
+	origMerge := adoptMergeMetadataFn
+	adoptMergeMetadataFn = func(issueID string, updates map[string]interface{}) error {
+		mergeAttempts++
+		if mergeAttempts == 2 {
+			return fiFakeErr("fault-injection: simulated export-committed marker write failure")
+		}
+		return origMerge(issueID, updates)
+	}
+	t.Cleanup(func() { adoptMergeMetadataFn = origMerge })
+
+	preTip := adoptRefHash(t, dir, "main")
+
+	_, err := AdoptSpec(dir, "042-test", exec, AdoptOpts{Reason: "the first invocation's genuine reason"})
+	if err == nil {
+		t.Fatal("expected the first call to fail: the export-committed marker write was fault-injected to error")
+	}
+	if metadata[adoptExportCommittedMetaKey] == true {
+		t.Fatal("the completion marker must NOT be set — its write is what failed")
+	}
+	if metadata["mindspec_adopt_reason"] != "the first invocation's genuine reason" {
+		t.Fatal("expected stage 1's audit payload to have already landed")
+	}
+	firstCommitCount := adoptCommitCount(t, dir, preTip, "main")
+	if firstCommitCount != 1 {
+		t.Fatalf("expected the finalize-export commit to have landed despite the marker-write failure, got %d new commits", firstCommitCount)
+	}
+
+	// Resume: must NOT create a second commit (CommitPaths' true no-op
+	// path, since the export is byte-identical), and must complete the
+	// marker write this time.
+	if _, err := AdoptSpec(dir, "042-test", exec, AdoptOpts{Reason: "a resume-time reason, irrelevant — stage 1 already completed"}); err != nil {
+		t.Fatalf("resume call: unexpected error: %v", err)
+	}
+	if metadata[adoptExportCommittedMetaKey] != true {
+		t.Error("expected the completion marker to be set after the resume")
+	}
+	if metadata["mindspec_adopt_reason"] != "the first invocation's genuine reason" {
+		t.Error("the audit payload must remain the first invocation's, untouched by the resume")
+	}
+	finalCommitCount := adoptCommitCount(t, dir, preTip, "main")
+	if finalCommitCount != 1 {
+		t.Fatalf("expected STILL exactly 1 new commit on main after the resume (CommitPaths must no-op on byte-identical content), got %d", finalCommitCount)
 	}
 }
 

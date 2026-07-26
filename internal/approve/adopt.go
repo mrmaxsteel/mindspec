@@ -330,6 +330,24 @@ const adoptExportCommittedMetaKey = "mindspec_adopt_export_committed"
 //     complete): resume — run ONLY stage 2, preserving stage 1's
 //     original audit payload verbatim.
 //   - fresh: run both stages in order.
+//
+// Confirm round (G1-B3-03 residual): stage 1 writes the audit-metadata
+// merge BEFORE calling `bd close`, not after. A crash before that write
+// leaves nothing durable at all (genuinely fresh — safe to retry from
+// scratch, nothing to lose). A crash any time AFTER that write — whether
+// or not the close call itself has run yet — lands in the "interrupted"
+// branch below on the next attempt, because the audit marker is now the
+// FIRST durable fact stage 1 produces, never the close call. That branch
+// therefore always (idempotently) re-issues `bd close` before resuming
+// stage 2, tolerating an already-closed epic exactly like the fresh path
+// does. This closes the window the prior ordering left open: `bd close`
+// succeeding with the audit-metadata write then failing used to leave
+// the epic durably closed with NO record of who closed it or why, and a
+// retry would reclassify as fresh and record a SECOND, possibly
+// different, reason/trigger — permanently losing the first invocation's
+// audit trail. With the write ordered first, that state can no longer
+// occur: the audit payload is always durable before or at the same time
+// as the close, never after it.
 func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason string, verified bool, trigger adoptAttestTrigger) error {
 	// Gate-all-ids (ADR-0042 §1): epicID feeds a `bd close`/`bd show` argv
 	// build directly — validated before any bd spawn (defense-in-depth
@@ -359,16 +377,25 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 			fmt.Sprintf("bd show %s --json   (inspect the recorded adopt audit marker)", idrender.Bead(epicID)),
 		)
 	case alreadyAdopted:
-		// Interrupted: stage 1 already completed on a PRIOR run and its
-		// audit payload is preserved verbatim — resume stage 2 only.
+		// Interrupted: stage 1's audit payload already landed on a PRIOR
+		// run and is preserved verbatim — never re-derived from THIS
+		// invocation's reason/verified/trigger. Because the audit write
+		// now durably precedes `bd close` (see the doc comment above),
+		// reaching this branch does not guarantee close itself already
+		// ran, so it is always (idempotently) re-issued here;
+		// isAlreadyClosedErr tolerates the case where it already
+		// succeeded on the prior run.
+		if _, err := adoptRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
+			return fmt.Errorf("closing epic %s: %w", idrender.Bead(epicID), err)
+		}
 		return adoptFinalizeExportStage(root, exec, specID, epicID)
 	}
 
-	// Fresh run: stage 1 (close + audit metadata).
-	if _, err := adoptRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
-		return fmt.Errorf("closing epic %s: %w", idrender.Bead(epicID), err)
-	}
-
+	// Fresh run: stage 1. The audit-metadata merge is written FIRST,
+	// before `bd close` — see the doc comment above for why the ordering
+	// itself is the fix. A crash before this write leaves nothing durable
+	// (fresh, safe to retry). A crash after it is resumed by the
+	// "interrupted" branch above, which re-issues close idempotently.
 	meta := map[string]interface{}{
 		"mindspec_phase":        "done",
 		"mindspec_done":         true,
@@ -385,6 +412,10 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 	}
 	if err := adoptMergeMetadataFn(epicID, meta); err != nil {
 		return fmt.Errorf("recording adopt audit marker on epic %s: %w", idrender.Bead(epicID), err)
+	}
+
+	if _, err := adoptRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
+		return fmt.Errorf("closing epic %s: %w", idrender.Bead(epicID), err)
 	}
 
 	return adoptFinalizeExportStage(root, exec, specID, epicID)
