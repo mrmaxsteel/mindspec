@@ -81,49 +81,83 @@
 // the strip actually leaves behind. Correctly stated: detection requires
 // branch's tip tree, with ONLY the paths branch ADDS relative to target
 // (A-status, and only those) removed, to be byte-identical to some commit
-// tree in target's own history. A path blocks the match iff branch's
-// content there differs from EVERY candidate ancestor's tree at that
-// path — never merely because of the status label that path carries in
-// the diff against target. That is why a rename/copy, an in-place edit
-// (content or mode-only), or a type change in branch's OWN novel work is
-// a stated, fixtured miss: that content exists nowhere in target's
-// history, so it survives the strip and blocks every candidate (see
-// novelPaths' and diffNameStatusBuckets' doc comments for why none of
-// R/C, M, or T is stripped or masked). It is also why the class's own
+// tree in target's own history.
+//
+// CORRECTED AGAIN, in the over-claiming direction this time (spec 127
+// bead-1 fix round 6, NEW-O1v-A): the sentence that stood here through
+// fix round 5 — "a path blocks the match iff branch's content there
+// differs from EVERY candidate ancestor's tree at that path" — is FALSE.
+// It names only one of the two mechanisms that can block a match, and it
+// says "content" where the comparison is over the whole tree entry.
+// Stated correctly: for a given CANDIDATE, a path is a RESIDUE against
+// it when the STRIPPED branch tree's entry there (blob AND mode — a
+// mode-only difference blocks exactly like a content difference, see
+// StatedLimit_ModeOnlyNovelWorkIsMissed) does not equal that candidate's
+// tree entry at that path — INCLUDING the case where the strip has
+// removed the path from branch's side entirely (leaving no entry there
+// at all) while the candidate still has one. That second case is not a
+// corner: the strip is UNCONDITIONAL over the A-status bucket, so it
+// removes a path whether it is branch's OWN novel work (never existed in
+// target's history at all — the ordinary case below) or a RESTORATION of
+// content target has since deleted (exists in target's history, at that
+// very path, in the candidate being compared against — see
+// wdRestoredDeletedPathFixture in workdestruction_test.go): both are
+// A-status relative to target's tip, so both are stripped alike, and a
+// byte-identical recreation of a real ancestor can therefore still miss,
+// because the strip took the restored path's entry away from the side of
+// the comparison that needed it. A match requires ONE candidate to
+// agree, simultaneously, at EVERY path — paths that each agree with a
+// DIFFERENT candidate do not compose into a match.
+//
+// That is why a rename/copy, an in-place edit (content or mode-only), or
+// a type change in branch's OWN novel work is a stated, fixtured miss:
+// that tree entry exists nowhere in target's history at that path, so it
+// is a residue against every candidate and blocks all of them at once
+// (see novelPaths' and diffNameStatusBuckets' doc comments for why none
+// of R/C, M, or T is stripped or masked). It is also why the class's own
 // defining D-status paths never block detection on their own
 // (StaleDeletionWitnessSingleCommit et al.: the added path is
 // A-status-stripped, the deleted paths ARE the revert, and the row is
 // still caught) and why an M-status path against target does not block
-// it either, when branch's content there merely coincides with a
+// it either, when branch's tree entry there merely coincides with a
 // candidate ancestor's rather than being the branch's own edit
 // (ConflictMaskedRecreationNowCaught: conflicted.txt is M-status against
 // target because TARGET edited it after the ancestor branch
-// reconstructs, but branch still carries that ancestor's own content
-// there, so it is not a residue and does not block the match).
-// StatedLimit_NovelDeletionIsMissed shows the deletion-shaped miss
-// precisely: it is missed not because its novel diff contains a deletion
-// (every caught row's does) but because the branch's OWN novel deletion
-// removes a path that every candidate ancestor STILL HOLDS — a residue,
-// exactly like an edit's would be, not a status exemption. The five
-// shapes fixtured by name below
-// (StatedLimit_RenameOfNovelWorkIsMissed,
+// reconstructs, but branch still carries that ancestor's own tree entry
+// there, so it is not a residue against THAT candidate and does not
+// block the match). StatedLimit_NovelDeletionIsMissed shows the
+// deletion-shaped miss precisely: it is missed not because its novel
+// diff contains a deletion (every caught row's does) but because the
+// branch's OWN novel deletion is a residue against the candidates that
+// still hold the deleted path (C1, C2) — and, against the one candidate
+// that does not (the fixture's own root commit, which never carried
+// stale-doc.md at all), it blocks for the ordinary reason, an unrelated
+// path (a.txt) disagreeing instead — never a status exemption either
+// way. The following shapes are fixtured, by name, in
+// workdestruction_test.go's outcome table:
+// StatedLimit_RenameOfNovelWorkIsMissed,
 // StatedLimit_ModifiedNovelWorkIsMissed,
 // StatedLimit_ModeOnlyNovelWorkIsMissed,
-// StatedLimit_TypeChangeOfNovelWorkIsMissed, and
-// StatedLimit_ConflictOnRevertedPathScreensNothing above) — plus
-// StatedLimit_NovelDeletionIsMissed and
-// StatedLimit_MixedAddAndEditIsMissed in workdestruction_test.go — are
-// INSTANCES of that rule, illustrations for the fixture table, never its
-// extent: closing any one of them individually (e.g. by relocating
-// rename content back to its original path) would still leave the
-// general rule, and the other reachable members it predicts, open.
-// Closing it fully would require either a structural signal (a deletion
+// StatedLimit_TypeChangeOfNovelWorkIsMissed,
+// StatedLimit_ConflictOnRevertedPathScreensNothing,
+// StatedLimit_NovelDeletionIsMissed,
+// StatedLimit_MixedAddAndEditIsMissed, and (fix round 6)
+// StatedLimit_RestoredDeletedPathIsMissed. They are INSTANCES of that
+// rule, illustrations for the fixture table, never its extent: closing
+// any one of them individually (e.g. by relocating rename content back
+// to its original path) would still leave the general rule, and the
+// other reachable members it predicts, open. Closing the novel-work
+// misses fully would require either a structural signal (a deletion
 // attributable to the branch's own commit, not merely to the diff
 // against target) or re-admitting the over-match masking ruling 2 rolled
-// back — both deliberately out of scope for this bead. See
-// guard.DestructionClean's doc comment for the consumer-facing
-// consequence: Clean means no destructive class was DETECTED, not that
-// the merge is certified non-destructive.
+// back; closing the restored-path miss would require making the strip
+// candidate-relative instead of unconditional — a real design change with
+// its own over-refusal surface (a restoration that is genuinely novel
+// relative to every candidate must still strip) — both deliberately out
+// of scope for this bead, the latter filed as its own follow-up rather
+// than folded into this fix round. See guard.DestructionClean's doc
+// comment for the consumer-facing consequence: Clean means no destructive
+// class was DETECTED, not that the merge is certified non-destructive.
 //
 // A third stated limitation (spec 127 bead-1 fix round 2, O3-2): when the
 // candidate merge conflicts ON the very path the recreation reverts (a
@@ -159,6 +193,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -668,8 +703,7 @@ func isShallowRepo(workdir string) (bool, error) {
 // line on a same-tree commit) truncates nothing yet still turned every
 // subsequent evaluation into a PERMANENT DestructionEvidenceError — the
 // one failure direction ("a false refusal of honest work") this
-// predicate's contract forbids, and a permanent condition where AC-8(iv)
-// requires a retryable one; and under-fire, because `for-each-ref
+// predicate's contract forbids; and under-fire, because `for-each-ref
 // refs/replace/` is blind to a replace ref created under a relocated
 // GIT_REPLACE_REF_BASE (git honors that variable, concatenating it with
 // the target OID with NO normalization — verified empirically: a base of
@@ -695,8 +729,11 @@ func isShallowRepo(workdir string) (bool, error) {
 // no-slash-normalized shape above) and `GIT_GRAFT_FILE=/dev/null` (grafts
 // have no equivalent top-level flag — `-c core.graftFile=` does NOT
 // work, verified; the environment variable is the only bypass) both
-// applied together. Truncated iff the two (commit, tree) sequences DIFFER
-// AT ALL — not iff the bypassed count is merely larger.
+// applied together. Truncated iff the two (commit, tree) MULTISETS differ
+// AT ALL — not iff the bypassed count is merely larger, and (fix round 6,
+// see equalCommitTreeMultisets' doc comment) not merely because rev-list's
+// own commit-date-driven ordering places the identical pairs in a
+// different sequence.
 //
 // CORRECTED fix round 5 (NEW-G1sub-6/NEW-O1g-A/NEW-O2G-1/NEW-O3g-1): the
 // prior design compared only `rev-list --count`, i.e. the LENGTH of the
@@ -714,19 +751,40 @@ func isShallowRepo(workdir string) (bool, error) {
 // matched (or failed to match) against a history that was not target's
 // real one — reopening, inside this mechanism, the exact absence-of-
 // evidence-as-safety failure O1-3 was filed to close. Comparing the full
-// (commit, tree) sequence closes this: any substitution changes the tree
-// half of at least one pair even when the commit half and the count are
-// both unchanged, so it differs from the as-seen sequence and is caught.
-// Verified across six shapes: silent on a pristine repo, on a benign
-// same-tree author/message-only replace (rev-list's %H reports the
-// ORIGINAL commit's OID even through a replacement, and an author-only
-// correction changes neither the OID nor the tree, so the two sequences
-// stay byte-identical — the no-over-fire property NEW-O1r-A/NEW-G1sub-2
-// pin stays closed), and on a benign grafts entry naming a commit's TRUE
-// parents; fires on a same-parents/different-tree replace (the hole
-// above), a longer or shorter decoy chain via `replace --graft`, a
-// truncating info/grafts entry, and the relocated GIT_REPLACE_REF_BASE
-// shape TestHistoryTruncated_RelocatedReplaceRefStillDetected pins.
+// (commit, tree) multiset closes this for a COMMIT-object substitution or
+// a grafts entry: either changes the tree half of at least one pair (a
+// substituted commit keeps its %H but not its %T) or the count itself (a
+// grafts entry rewrites the parent list, changing which ancestors rev-list
+// reaches at all), so it differs from the as-seen multiset and is caught.
+// It does NOT close a TREE- or BLOB-object substitution reachable from
+// target (spec 127 bead-1 fix round 6, NEW-O1v-B, MINOR, not fixed): a
+// commit's %T is the OID recorded in the commit object, so replacing the
+// TREE or BLOB object that OID names leaves both %H and %T unchanged on
+// both legs of the differential while the content the scan's tree-OID
+// comparison stands on is doctored underneath it — an exotic class (no
+// everyday git workflow replaces a tree or a blob directly; git-replace's
+// real-world uses are commit-level, which this differential does catch)
+// left as a stated, undefended gap rather than a claimed-closed one.
+// Verified across seven shapes: silent on a pristine repo, on a benign
+// same-tree author/message-only replace on a LINEAR target history
+// (rev-list's %H reports the ORIGINAL commit's OID even through a
+// replacement, and an author-only correction changes neither the OID nor
+// the tree, so the two multisets stay identical — the no-over-fire
+// property NEW-O1r-A/NEW-G1sub-2 pin stays closed), on a benign grafts
+// entry naming a commit's TRUE parents, and (fix round 6,
+// TestHistoryTruncated_BenignAuthorOnlyReplaceAcrossMergePermutesButDoesNotOverRefuse)
+// on that same benign same-tree replace when target's history contains a
+// MERGE — the shape that lets the replacement's own committer date (left
+// unset in real use, so git defaults it to the current time; the pinning
+// test sets an explicit, later, deterministic date instead, to reproduce
+// the same later-than-its-sibling relationship without depending on real
+// time) permute its position relative to a sibling commit in rev-list's
+// date-ordered output, which an element-for-element comparison mistook
+// for truncation (NEW-G1sub-11);
+// fires on a same-parents/different-tree replace (the hole above), a
+// longer or shorter decoy chain via `replace --graft`, a truncating
+// info/grafts entry, and the relocated GIT_REPLACE_REF_BASE shape
+// TestHistoryTruncated_RelocatedReplaceRefStillDetected pins.
 //
 // TRADEOFF, stated rather than left inferred (G1sub's ruling): this is a
 // strictly NARROWER acceptance than the length-only design — a legitimate
@@ -756,34 +814,90 @@ func historyTruncated(workdir, target string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("rev-list --format='%%H %%T' %s: %w", target, err)
 	}
-	// -c advice.graftFileDeprecated=false suppresses git's own advice-line
-	// noise on this leg (spec 127 bead-1 fix round 5): setting
-	// GIT_GRAFT_FILE unconditionally makes git 2.x print "Support for
-	// `<GIT_DIR>/info/grafts` is deprecated and will be removed in a
-	// future Git version" on stderr, on EVERY call, whether or not a
-	// grafts file actually exists — noise on a load-bearing path, and
-	// also a removal notice for a mechanism this differential now
-	// actively depends on: if a future git drops grafts support outright,
-	// this leg's grafts coverage (though not its replace-ref coverage)
-	// goes with it, and whoever meets that removal should start here.
+	// -c advice.graftFileDeprecated=false is belt-and-braces, not noise
+	// suppression (spec 127 bead-1 fix round 6, NEW-O1v-C/NEW-G1sub-13
+	// corrected the claim that stood here through fix round 5, which said
+	// setting GIT_GRAFT_FILE makes git print its deprecation advice "on
+	// stderr, on EVERY call" and called that "noise on a load-bearing
+	// path" — false for THIS call: revListCommitTrees below runs via
+	// cmd.Output(), which captures the child's stderr into a buffer and
+	// discards it on a zero exit, so the advice never reached an operator
+	// through this leg either with or without the flag, verified directly
+	// by redirecting stderr to a file on both sides of the flag). What the
+	// flag actually protects is the FAILURE path: revListCommitTrees wraps
+	// a non-zero exit's stderr into its returned error (fix round 5,
+	// NEW-G1sub-10), and without this flag that wrapped text would carry
+	// the deprecation advice alongside git's real diagnostic whenever this
+	// bypass leg's own exit is non-zero for some OTHER reason. The as-seen
+	// leg two lines up carries no such flag and would surface the same
+	// advice unsuppressed on ITS failure path if a real info/grafts file
+	// is present — a live asymmetry, left as-is because as-seen's failure
+	// path is not this leg's job to polish. The removal-dependency note
+	// stands regardless of the noise correction: if a future git drops
+	// grafts support outright, this leg's grafts coverage (though not its
+	// replace-ref coverage) goes with it, and whoever meets that removal
+	// should start here.
 	full, err := revListCommitTrees(workdir, target, []string{"GIT_GRAFT_FILE=/dev/null"}, "-c", "advice.graftFileDeprecated=false", "--no-replace-objects")
 	if err != nil {
 		return false, fmt.Errorf("rev-list --format='%%H %%T' %s (bypassing replace-objects/grafts): %w", target, err)
 	}
-	return !equalCommitTreeSequences(asSeen, full), nil
+	return !equalCommitTreeMultisets(asSeen, full), nil
 }
 
-// equalCommitTreeSequences reports whether a and b — each an ordered
-// sequence of "sha tree" strings from revListCommitTrees — are identical
-// element-for-element. A length mismatch (a shortened or lengthened
-// traversal) or any single differing pair (a same-length substitution,
-// the shape fix round 5 closed) both count as a difference.
-func equalCommitTreeSequences(a, b []string) bool {
+// equalCommitTreeMultisets reports whether a and b — each an unordered
+// capture of "sha tree" strings from revListCommitTrees — carry the
+// IDENTICAL MULTISET of pairs, ignoring order (spec 127 bead-1 fix round
+// 6, NEW-G1sub-11; renamed from equalCommitTreeSequences, since a
+// sequence — order-sensitive by definition — is exactly what this no
+// longer compares; see below for why both the old name and the old
+// behavior were wrong). A length mismatch (a shortened or lengthened
+// traversal) or any pair present a different number of times in one
+// multiset than the other (a same-length substitution, the shape fix
+// round 5 closed) both count as a difference; a mere reordering of the
+// identical pairs does not.
+//
+// CORRECTED fix round 6 (NEW-G1sub-11): the element-for-element sequence
+// comparison fix round 5 shipped here was ITSELF a false refusal of
+// honest work — the one failure direction this predicate's contract
+// forbids, and the direction round 2's presence probes were rejected for
+// (see historyTruncated's doc comment). `git rev-list`'s default order is
+// commit-date driven, not purely topological: two commits with no
+// ancestor relationship to each other (e.g. two side branches merged
+// separately into target) are ordered by their own commit dates. A
+// same-tree, same-parents author/message-only replacement — git-replace's
+// own headline use case, and the exact shape the doc comment above names
+// as staying silent — gives the REPLACEMENT commit a new committer date
+// by default (`git replace --edit`, or any commit-tree recipe, both
+// produce this), which can swap that commit's position relative to a
+// SIBLING commit whenever target's history contains a merge. Neither
+// commit's OID nor its tree changes, so the two CAPTURES hold exactly the
+// same pairs — proved by TestHistoryTruncated_BenignAuthorOnlyReplaceAcrossMergePermutesButDoesNotOverRefuse,
+// which pins a merge-bearing target where the old comparison went red.
+// Order carries no information the predicate that consumes this result
+// uses: findAncestorWithTree iterates every candidate looking for a tree
+// match, so any permutation of the same (commit, tree) pairs yields the
+// identical conclusion. Comparing order-sensitively was therefore
+// STRICTLY STRONGER than the question actually being asked — the mirror
+// image of this bead's round-1/round-2 ancestor masking (see
+// snapshotRevertMatch's doc comment), which was strictly WEAKER than its
+// question and refused honest branches via over-broad wildcards. THE
+// COMPARISON MUST BE EXACTLY AS STRONG AS THE QUESTION IT ANSWERS, in
+// both directions — narrower and it fails open on a real substitution;
+// broader and it fails closed on honest work. Sorting cannot weaken the
+// fire cases fix round 5 added: a shortened or lengthened traversal still
+// changes the multiset's size, and a tree substitution still keeps the
+// commit's OID but changes its tree, so that pair itself differs from
+// anything in the other multiset regardless of position.
+func equalCommitTreeMultisets(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	sortedA := append([]string(nil), a...)
+	sortedB := append([]string(nil), b...)
+	sort.Strings(sortedA)
+	sort.Strings(sortedB)
+	for i := range sortedA {
+		if sortedA[i] != sortedB[i] {
 			return false
 		}
 	}
@@ -882,7 +996,16 @@ func findAncestorWithTree(workdir, target, wantTree string, maskPaths []string) 
 		return "", fmt.Errorf("checking %s's history for replace-object/grafts truncation: %w", target, err)
 	}
 	if truncated {
-		return "", fmt.Errorf("%s: a replace ref or info/grafts file measurably shortens rev-list's view: %w", target, errTruncatedHistory)
+		// "changes what rev-list reaches", not "shortens": spec 127 bead-1
+		// fix round 6 (NEW-O2V-1/NEW-O3v-1/NEW-G1sub-14) corrected this
+		// operator-facing string, which round 5 left saying "measurably
+		// shortens" — true of the original length-only design, false of
+		// the count-preserving tree substitution round 5 exists to catch
+		// (nothing is shortened there; a tree is swapped) — while
+		// correcting the same claim everywhere else in this file
+		// (errTruncatedHistory's own doc comment, historyTruncated's).
+		// This is the one instance of that claim a user actually sees.
+		return "", fmt.Errorf("%s: a replace ref or info/grafts file changes what rev-list reaches for this history (a shortened, lengthened, or substituted ancestry): %w", target, errTruncatedHistory)
 	}
 
 	cmd := execCommand("git", gitArgs(workdir, "rev-list", "--format=%H %T", target)...)

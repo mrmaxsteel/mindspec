@@ -70,6 +70,23 @@ package guard
 // walk's own on-disk mutation test targets; chasing arbitrarily deep
 // alias chains would be the same unbounded-generality trade the
 // untyped-arithmetic escape above already declines.
+//
+// Widened a sixth time (spec 127 bead-1 fix round 6, NEW-G1sub-12): both
+// Ident assertions — the alias collector's `ts.Type.(*ast.Ident)` and the
+// rejection loop's `vs.Type.(*ast.Ident)` — failed on a PARENTHESIZED
+// type: `const DestructionSixthVariantParen (DestructionOutcome) = 99`
+// compiles, is gofmt-clean (gofmt does not strip redundant parens around
+// a const spec's type), and is a real, assignable DestructionOutcome
+// variant, yet both assertions saw a *ast.ParenExpr rather than an
+// *ast.Ident and silently skipped it — the identical escape as the
+// untyped-arithmetic one this doc comment names above, but for a spec
+// that IS explicitly typed, which the walk otherwise claims to cover.
+// ast.Unparen (stdlib since Go 1.22; this module's go.mod floor is 1.23)
+// unwraps any parenthesization before both assertions, closing the
+// parenthesized form and its alias-of-parenthesized variant at the same
+// time. A parenthesized alias declaration (`type DOAliasParen =
+// (DestructionOutcome)`) is likewise covered, since the collector's
+// assertion is unwrapped too.
 
 import (
 	"go/ast"
@@ -157,7 +174,7 @@ func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 				if !ok || ts.Assign == token.NoPos {
 					continue
 				}
-				if ident, ok := ts.Type.(*ast.Ident); ok && ident.Name == "DestructionOutcome" {
+				if ident, ok := ast.Unparen(ts.Type).(*ast.Ident); ok && ident.Name == "DestructionOutcome" {
 					aliasNames[ts.Name.Name] = true
 				}
 			}
@@ -181,7 +198,7 @@ func TestDestructionOutcomeCountIsFinalConstSpec(t *testing.T) {
 				if !ok || vs.Type == nil {
 					continue
 				}
-				ident, ok := vs.Type.(*ast.Ident)
+				ident, ok := ast.Unparen(vs.Type).(*ast.Ident)
 				if !ok || (ident.Name != "DestructionOutcome" && !aliasNames[ident.Name]) {
 					continue
 				}

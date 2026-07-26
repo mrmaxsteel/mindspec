@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -601,6 +602,60 @@ func wdNovelDeletionFixture(t *testing.T) (dir, branch, target string) {
 	return dir, "spec-recreated-noveldeletion", "main"
 }
 
+// wdRestoredDeletedPathFixture is NEW-O1v-A's shape (spec 127 bead-1 fix
+// round 6): the everyday form of the "strip asymmetry" mechanism the
+// package doc comment's corrected rule now names, as opposed to the
+// novel-work misses above. Target's cleanup commit (C3) deletes
+// stale.txt AND bumps keep.txt in the SAME commit — a cleanup, a rename
+// split across paths, or a delete-plus-edit all take this shape. Branch
+// reverts to the tree BEFORE that cleanup — byte-identical to C1's tree,
+// asserted below, not a near-miss or a partial revert — restoring
+// stale.txt and keep.txt's old content. Relative to target's tip (C3),
+// stale.txt reads as A-status (C3 does not have it) even though it is
+// not novel content at all: it is a byte-for-byte restoration of a path
+// target's own history held. snapshotRevertMatch's strip is
+// unconditional over the A bucket, so it removes stale.txt from branch's
+// side regardless of which of the two reasons put it there, and the
+// stripped tree then also disagrees with every candidate on keep.txt
+// (M-status, never stripped, and branch still carries the OLD value) —
+// so no candidate matches and this genuine, byte-identical recreation
+// reads DestructionClean. See guard.DestructionClean's doc comment for
+// the consumer-facing enumeration this class was added to.
+func wdRestoredDeletedPathFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "keep.txt", "v1\n")
+	neWriteFile(t, dir, "stale.txt", "stale content\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1: keep.txt + stale.txt")
+	ancestorTree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD^{tree}"))
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "rm", "stale.txt")
+	neWriteFile(t, dir, "keep.txt", "v2\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C3 cleanup: remove stale.txt AND bump keep.txt (one commit)")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-restoreddeletion", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neWriteFile(t, dir, "stale.txt", "stale content\n")
+	neWriteFile(t, dir, "keep.txt", "v1\n")
+	neRunGit(t, dir, "add", "-A")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree (restores stale.txt, keep.txt)")
+	neRunGit(t, dir, "checkout", "main")
+
+	// Fixture invariant, the one NEW-O1v-A required: branch's tip tree
+	// must be BYTE-IDENTICAL to the recreated ancestor's (C1's) tree —
+	// this is not a near-miss or a partial revert, it is the modal,
+	// everyday recreation shape, and the miss it pins is real precisely
+	// because the match is exact before the strip runs.
+	branchTree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "spec-recreated-restoreddeletion^{tree}"))
+	if branchTree != ancestorTree {
+		t.Fatalf("fixture invariant broken: branch tip tree %s != recreated ancestor's (C1's) tree %s — this fixture must recreate C1 exactly, or it does not exercise NEW-O1v-A's shape", branchTree, ancestorTree)
+	}
+	return dir, "spec-recreated-restoreddeletion", "main"
+}
+
 // wdRenameNovelWorkFixture is O2-4's STATED, still-uncaught miss: the
 // branch's own novel contribution is a RENAME of a target-present path
 // (never a content edit or an add). novelPaths deliberately excludes R/C
@@ -1039,6 +1094,11 @@ func TestEvaluateWorkDestruction_OutcomeTable(t *testing.T) {
 		{"StatedLimit_TypeChangeOfNovelWorkIsMissed", wdTypeChangeNovelWorkFixture, guard.DestructionClean, nil},
 		{"StatedLimit_MixedAddAndEditIsMissed", wdMixedAddAndEditFixture, guard.DestructionClean, nil},
 		{"StatedLimit_NovelDeletionIsMissed", wdNovelDeletionFixture, guard.DestructionClean, nil},
+		{"StatedLimit_RestoredDeletedPathIsMissed", wdRestoredDeletedPathFixture, guard.DestructionClean, func(t *testing.T, e WorkDestructionEvidence) {
+			if len(e.DeletedPaths) == 0 {
+				t.Error("evidence.DeletedPaths must be populated — the merge preview genuinely deletes landed.txt, so this is a real miss on a genuine deletion, not a vacuous row (NEW-O1v-A)")
+			}
+		}},
 		{"StatedLimit_ConflictOnRevertedPathScreensNothing", wdConflictOnRevertedPathFixture, guard.DestructionClean, func(t *testing.T, e WorkDestructionEvidence) {
 			if len(e.DeletedPaths) != 0 {
 				t.Errorf("evidence.DeletedPaths = %v, want empty (O3-2: a modify/delete conflict on the reverted path keeps the modified side, so the preview deletes nothing)", e.DeletedPaths)
@@ -1995,6 +2055,141 @@ func TestHistoryTruncated_CountPreservingSubstitutionCaught(t *testing.T) {
 	}
 	if evidence.FailedProbe != "snapshot-revert scan" {
 		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
+	}
+}
+
+// TestHistoryTruncated_BenignAuthorOnlyReplaceAcrossMergePermutesButDoesNotOverRefuse
+// is the RED-on-round-5-bug pin for spec 127 bead-1 fix round 6
+// (NEW-G1sub-11): rev-list's default ordering is commit-date driven, not
+// purely topological, so two commits with no ancestor relationship to
+// each other — here, two SIDE branches merged separately into target —
+// are ordered by their own commit dates. git-replace's own headline use
+// case — a same-tree, same-parent author/message correction — gives the
+// REPLACEMENT commit a NEW committer date by default (`git replace
+// --edit`, or any commit-tree recipe, both produce this), which can swap
+// that commit's position relative to a SIBLING commit even though
+// neither commit's OID nor its tree changes. Fix round 5's
+// element-for-element sequence comparison treated that permutation as a
+// truncation and refused a benign, honest branch — a false refusal of
+// honest work, the one direction this predicate's contract forbids (see
+// errTruncatedHistory's doc comment) — exactly because a merge is
+// present in target's history; neither existing benign-replace pin above
+// (TestHistoryTruncated_BenignReplaceRefDoesNotOverRefuse,
+// TestHistoryTruncated_BenignGraftsFileDoesNotOverRefuse) exercises this,
+// since both of those fixtures are LINEAR — no merge, so no two commits
+// can swap. Reverting equalCommitTreeMultisets to an element-for-element
+// comparison must turn this test red.
+func TestHistoryTruncated_BenignAuthorOnlyReplaceAcrossMergePermutesButDoesNotOverRefuse(t *testing.T) {
+	dir := initGitRepo(t)
+	root := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "main"))
+
+	setDate := func(hhmmss string) {
+		t.Setenv("GIT_AUTHOR_DATE", "2024-01-01T"+hhmmss)
+		t.Setenv("GIT_COMMITTER_DATE", "2024-01-01T"+hhmmss)
+	}
+
+	neRunGit(t, dir, "checkout", "-b", "sideA")
+	neWriteFile(t, dir, "a1.txt", "a1\n")
+	neRunGit(t, dir, "add", ".")
+	setDate("01:00:00")
+	neRunGit(t, dir, "commit", "-m", "a1")
+	a1 := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+
+	neRunGit(t, dir, "checkout", "-b", "sideB", root)
+	neWriteFile(t, dir, "b1.txt", "b1\n")
+	neRunGit(t, dir, "add", ".")
+	setDate("02:00:00")
+	neRunGit(t, dir, "commit", "-m", "b1")
+
+	neRunGit(t, dir, "checkout", "main")
+	setDate("03:00:00")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "mergeA", "sideA")
+	setDate("04:00:00")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "mergeB", "sideB")
+	mergeBTree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "main^{tree}"))
+
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	setDate("05:00:00")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-order", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	setDate("06:00:00")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to mergeB's tree")
+	branch, target := "spec-recreated-order", "main"
+	neRunGit(t, dir, "checkout", "main")
+
+	// Fixture invariant: branch's tip tree must exactly equal mergeB's
+	// tree — the positive control this test's over-fire check depends on.
+	branchTree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", branch+"^{tree}"))
+	if branchTree != mergeBTree {
+		t.Fatalf("fixture invariant broken: branch tip tree %s != mergeB's tree %s", branchTree, mergeBTree)
+	}
+
+	controlOutcome, controlEvidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the pre-replace repo: %v", err)
+	}
+	if controlOutcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: pre-replace repo must classify DestructionStaleDeletion (the positive control), got %s", controlOutcome)
+	}
+	if controlEvidence.ReconstructedAncestor == "" {
+		t.Fatal("fixture invariant: ReconstructedAncestor must be populated by the positive control")
+	}
+
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	beforeHash := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--format=%H %T", target))
+
+	// A same-tree, same-parent author-only correction to a1 — git-replace's
+	// own headline use case. A real `git replace --edit` or commit-tree
+	// recipe would leave the date unset, so git defaults it to the current
+	// wall-clock time; this test instead sets an explicit, LATER,
+	// deterministic date below (rather than depending on real time),
+	// chosen to keep the permutation minimal (a1/b1 swap in place) rather
+	// than reshuffling the whole history the way an arbitrarily-distant
+	// "now" might.
+	a1Tree := strings.TrimSpace(neRunGit(t, dir, "rev-parse", a1+"^{tree}"))
+	a1Parent := strings.TrimSpace(neRunGit(t, dir, "rev-parse", a1+"^"))
+	setDate("10:00:00")
+	corrected := strings.TrimSpace(neRunGit(t, dir, "commit-tree", a1Tree, "-p", a1Parent, "-m", "a1 (author corrected)"))
+	neRunGit(t, dir, "replace", a1, corrected)
+
+	after := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
+	if before != after {
+		t.Fatalf("fixture invariant broken: this replacement must NOT change rev-list --count (before=%s after=%s) — otherwise it is not the benign, count-preserving shape this test pins", before, after)
+	}
+	afterHash := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--format=%H %T", target))
+	beforeSHAs := extractCommitSHAs(beforeHash)
+	afterSHAs := extractCommitSHAs(afterHash)
+	if len(beforeSHAs) != len(afterSHAs) {
+		t.Fatalf("fixture invariant broken: commit count changed (before=%v after=%v)", beforeSHAs, afterSHAs)
+	}
+	beforeSorted := append([]string(nil), beforeSHAs...)
+	afterSorted := append([]string(nil), afterSHAs...)
+	sort.Strings(beforeSorted)
+	sort.Strings(afterSorted)
+	if strings.Join(beforeSorted, ",") != strings.Join(afterSorted, ",") {
+		t.Fatalf("fixture invariant broken: the SET of commit OIDs rev-list reports must be unchanged (before=%v after=%v) — git-replace transparently substitutes content, never the OID used to reach it", beforeSHAs, afterSHAs)
+	}
+	if strings.Join(beforeSHAs, ",") == strings.Join(afterSHAs, ",") {
+		t.Fatalf("fixture invariant broken: this replacement must actually PERMUTE rev-list's ordering (before and after are identical sequences) — otherwise this does not exercise NEW-G1sub-11's shape at all; adjust the merge topology or commit dates")
+	}
+
+	truncated, terr := historyTruncated(dir, target)
+	if terr != nil {
+		t.Fatalf("unexpected error from historyTruncated: %v", terr)
+	}
+	if truncated {
+		t.Fatalf("historyTruncated(%s) = true, want false — a benign, same-tree author-only replacement must not be reported as truncating merely because it permutes rev-list's date-ordered listing (spec 127 bead-1 fix round 6, NEW-G1sub-11's false-refusal class)", target)
+	}
+
+	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("EvaluateWorkDestruction returned an unexpected error with a benign, order-permuting replace ref present: %v", err)
+	}
+	if outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("outcome = %s, want DestructionStaleDeletion — a benign replacement must not turn this into a permanent refusal merely because it reordered rev-list's listing", outcome)
 	}
 }
 

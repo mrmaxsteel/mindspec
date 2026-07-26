@@ -56,21 +56,34 @@ package guard
 //     since the revert that defines the class IS that D-status). A
 //     rename/copy, an in-place edit (content or mode-only), or a type
 //     change in the branch's OWN novel work is a stated, fixtured miss,
-//     because that content exists nowhere in target's history and so
-//     survives the strip and matches no candidate ancestor; an M- or
-//     D-status path against target is NOT disqualifying merely by its
-//     status label (see internal/gitutil's package doc comment and
-//     snapshotRevertMatch's doc comment for the general rule, and
-//     workdestruction_test.go's StatedLimit_* rows for the fixtured
-//     instances). A consumer must not skip its own conflict/review
-//     handling on the strength of a Clean answer alone.
+//     because that tree entry exists nowhere in target's history and so
+//     survives the strip and matches no candidate ancestor. A restoration
+//     of a path target has since deleted is ALSO a stated, fixtured miss
+//     (CORRECTED spec 127 bead-1 fix round 6, NEW-O1v-A: a prior version
+//     of this bullet named only the novel-work misses, which understates
+//     the surface): the strip removes every A-status path unconditionally,
+//     whether or not its content is genuinely novel, so a branch that
+//     restores a path target deleted in a commit that also touched
+//     something else can be a BYTE-IDENTICAL recreation of a real ancestor
+//     and still miss, because the strip took that path's entry away from
+//     the side of the comparison that needed it. An M- or D-status path
+//     against target is NOT disqualifying merely by its status label (see
+//     internal/gitutil's package doc comment and snapshotRevertMatch's doc
+//     comment for the general rule, and workdestruction_test.go's
+//     StatedLimit_* rows, including StatedLimit_RestoredDeletedPathIsMissed,
+//     for the fixtured instances). A consumer must not skip its own
+//     conflict/review handling on the strength of a Clean answer alone.
 //   - DestructionEvidenceError: the predicate could not be evaluated (a
 //     git/infra failure at any of its probes, or a repo whose history is
 //     genuinely shallow/truncated so an ancestor scan cannot certify the
 //     absence of a match — see internal/gitutil's errTruncatedHistory)
 //     — absence of evidence is never treated as safety; every consumer
-//     fails closed on this outcome, which is retryable and carries a
-//     named override.
+//     fails closed on this outcome, which carries a named override.
+//     "Retryable" (AC-8(iv)) means the override is available on a re-run,
+//     not that the underlying condition is transient (spec 127 bead-1 fix
+//     round 6, NEW-O3v-2): a shallow clone, a replace ref, or a grafts
+//     entry are all PERMANENT until an operator removes the mechanism or
+//     invokes the override, and none of that is a defect in this outcome.
 type DestructionOutcome int
 
 const (
