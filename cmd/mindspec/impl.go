@@ -70,9 +70,12 @@ func init() {
 	implCmd.AddCommand(implAdoptCmd)
 }
 
-// adoptSpecRunE is the ONLY production caller of approve.AdoptSpec
-// (R1(e) — pinned by cmd/mindspec/impl_adopt_test.go's call-site
-// enumeration).
+// adoptSpecRunE is the only DIRECT production call site of
+// approve.AdoptSpec (R1(e), amended at bead-3 fix round 2 — pinned by
+// cmd/mindspec/impl_adopt_test.go's call-site enumeration, a
+// CallExpr/import-path-identity AST scan). Reachability through a
+// function value, method value, or wrapper-satisfied interface is not
+// mechanically detected by that scan and is review-caught.
 func adoptSpecRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
 	// R3 explicit-ingress early gate (ADR-0042), same discipline as

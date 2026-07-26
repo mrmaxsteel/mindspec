@@ -77,10 +77,15 @@ var (
 	adoptExportBeadsFn       = bead.Export
 )
 
-// AdoptSpec is R1's entrypoint. It is NEVER IMPLICIT (R1(e)): the only
-// production caller is the `mindspec impl adopt <spec-id>` command
-// handler (cmd/mindspec/impl.go) — pinned by
-// cmd/mindspec/impl_adopt_test.go's call-site enumeration.
+// AdoptSpec is R1's entrypoint. Its only DIRECT production call site
+// (R1(e), amended at bead-3 fix round 2, G1-B3-05) is the
+// `mindspec impl adopt <spec-id>` command handler (cmd/mindspec/impl.go)
+// — pinned by cmd/mindspec/impl_adopt_test.go's call-site enumeration, a
+// CallExpr/import-path-identity AST scan. That scan is syntax-shaped,
+// not object/call-graph based: reachability through a function value, a
+// method value, or a wrapper-satisfied interface is NOT mechanically
+// detected here and is review-caught, the same residual class R5(b)
+// already records for same-package construction.
 func AdoptSpec(root, specID string, exec executor.Executor, opts AdoptOpts) (*AdoptResult, error) {
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
