@@ -219,7 +219,7 @@ records.
   <spec-id> --reason "<text>"`.** Registered beside `approve <id>` under
   the existing `impl` parent (`cmd/mindspec/impl.go:20-28`), following the
   125 `reattest` precedent: an explicit, audited, one-spec-per-invocation
-  surface, deliberately NOT a flag on `impl approve` — R1(e)'s
+  surface, deliberately NOT a flag on `impl approve` — R1's
   only-caller-is-its-own-handler enumeration is cleanest when the
   entrypoint has its own leaf, and a flag on `approve` would put a
   merge-free terminal transition behind the same leaf as the merging one.
@@ -229,12 +229,12 @@ records.
   records NOT-verified + which trigger (`no-source` | `negative` |
   `error`). Every AC that names the adopt invocation resolves
   `impl adopt` at leaf identity with `--reason`/`--attest-unverified`
-  flag-set membership (AC-11a).
+  flag-set membership (AC-11).
 - **Conflict-resolution re-entry naming (R5d): `--resolve-merge`** on both
   owning verbs — `mindspec complete <bead> --resolve-merge` (the `:1688`
   bead→spec leg) and `mindspec impl approve <spec-id> --resolve-merge`
   (the `:1721` spec→main leg). One flag name, two leaves, both resolving
-  per AC-11(a); the printed recovery lines name these invocations and
+  per AC-11; the printed recovery lines name these invocations and
   nothing merge-shaped.
 - **Predicate home and the boundaries (bead 1 / R4) — REVISED per
   P1-1/-2/-3/-4/-7: the clearance design is DELETED; the predicate lives
@@ -409,7 +409,7 @@ records.
   in-package seams; epic close + finalize export through the existing
   machinery (`bead.Export` / the executor's export-artifact shape),
   with AC-1's marker-for-marker comparison fixture against a normal
-  `impl approve` as the no-third-terminal-shape enforcement (R1f) —
+  `impl approve` as the no-third-terminal-shape enforcement (R1) —
   the comparison fixture, not this key list, is the authority.
 - **Refusal-class markers (F-r5-3):** the four adopt refusal classes
   carry distinct literal markers in their message text —
@@ -636,7 +636,7 @@ same as the existing preview).
 - **cmd-layer tests** are registration/flag/anti-drift only, using the
   leaf-identity `resolveCommand` pattern
   (`ceremony_guard_test.go:59-73`, `cmd.Name()` equality); bare
-  `rootCmd.Find` err==nil checks are forbidden (R6). AC-11(b)'s bd form
+  `rootCmd.Find` err==nil checks are forbidden (R6). AC-11's bd form
   never goes near `resolveCommand`.
 - **RED discipline, tagged honestly in-test.** RED-on-spec-init set
   (fail at `09f62bd9`, fail again on fix-revert): AC-1, AC-2 (all legs),
@@ -884,7 +884,7 @@ command); the R2-derived form arrives with bead 4 (R1g, declared).
 
 **Steps**
 1. `internal/approve/adopt.go` (new): the adopt entrypoint —
-   preconditions (review-state spec, `--reason` required), the R1d
+   preconditions (review-state spec, `--reason` required), the R1
    branch-present legs (current → names the normal path; stale per
    bead 1's predicate → inspection + stale-branch deletion + adopt
    rerun, constructor-derived from birth, never seeded), the R1g
@@ -919,13 +919,13 @@ command); the R2-derived form arrives with bead 4 (R1g, declared).
    aggregate (F-r5-4).
 4. `cmd/mindspec/impl.go`: register `adopt <spec-id>` beside
    `approve <id>` with `--reason`/`--attest-unverified`;
-   `help_golden_test.go` updated; R1(e)'s call-site enumeration test
+   `help_golden_test.go` updated; R1's call-site enumeration test
    (the adopt entrypoint's only caller is its registered handler);
    `impl_adopt_test.go` leaf-identity registration/flag checks.
 5. Tests: **AC-1** happy path (bare-local-origin remote at the landed
    tip, corroboration asserted; epic-coverage asserted; audit marker
    VERIFIED wording; no merge commit; durable post-state ≡ a normal
-   `impl approve` fixture marker-for-marker — R1f). **AC-2** legs
+   `impl approve` fixture marker-for-marker — R1). **AC-2** legs
    (i)-(vii) + the full **(ix) lattice table** — all seven rows, each
    asserting its own class marker, incl. the poisoned-cache row
    (evaluated at the fetched tip, never the stale cache), the
@@ -964,7 +964,7 @@ allowlist entries (the four consumer sites) with named records.
    takes a `guard.DestructionOutcome` + `gitutil.WorkDestructionEvidence`
    (cannot be called without one — O2-7's structural leg), returns the
    closed outcome plus rendered lines via bead 2's constructor. Pinned
-   outcomes per R2(b): ancestor-of-main-not-of-spec → deletion hint
+   outcomes per R2: ancestor-of-main-not-of-spec → deletion hint
    (the reachable case — an ancestor-of-spec branch never becomes an
    `Orphan`, `orphans.go:55-57`; no dead fixture); superseded → stale-
    branch deletion + the full `mindspec impl adopt <spec-id> --reason
@@ -1057,7 +1057,7 @@ preflight-phase structure bead 6 consumes (C-r4-7).
    ambiguous/unavailable evidence → preserve + inspection/
    reconciliation, no `bd delete`. Both plan.go emitters route through
    bead 2's constructor (never allowlisted — O1-r2-6), sharing ONE
-   constructor-produced `bd delete <id> --force` form — AC-11(b)'s
+   constructor-produced `bd delete <id> --force` form — AC-11's
    single source of truth, with bd-CLI drift covered by the existing
    `bead.IsUnsupportedFlagError` convention and no `bd` string ever
    passed to `resolveCommand`.
@@ -1082,7 +1082,7 @@ preflight-phase structure bead 6 consumes (C-r4-7).
 **Acceptance Criteria**
 - [ ] AC-4 — branch-missing + indeterminate preflight legs (leg i RED today)
 - [ ] AC-6 — closed-child deletion needs positive provenance, pure table (leg i RED today)
-- [ ] AC-11(b) — the single constructor-produced bd form (anti-drift)
+- [ ] AC-11 — the single constructor-produced bd form (anti-drift)
 
 **Depends on**
 Beads 2 and 3 (per the spec; the R3a refusal names adopt in full).
@@ -1215,7 +1215,7 @@ preamble). (bd edges wired from `work_chunks[].depends_on`.)
 
 Agent-template replacement, release.go recovery split, allowlist burned
 down to the single pinned final entry, seed-only exemption entries
-exited, and the AC-11(a) named-invocation anti-drift table over every
+exited, and the AC-11 named-invocation anti-drift table over every
 invocation this spec's messages and guidance name.
 
 **Steps**
@@ -1239,7 +1239,7 @@ invocation this spec's messages and guidance name.
    second-entry red fixtures land here. The four seed-only
    orchestrator-block exemption entries exit with named bead-7 records
    (fixture β final state).
-4. `cmd/mindspec/named_invocation_test.go` (AC-11a): every `mindspec`
+4. `cmd/mindspec/named_invocation_test.go` (AC-11): every `mindspec`
    invocation named by AC-1..AC-10 messages/guidance (`impl adopt` +
    both flags, `complete` + `--resolve-merge`, `impl approve` +
    `--resolve-merge` + `--allow-net-deletion`, `repair phase`,
@@ -1258,7 +1258,7 @@ invocation this spec's messages and guidance name.
 **Acceptance Criteria**
 - [ ] AC-10(i)/(ii) — template replacement + release split (RED today)
 - [ ] AC-9(ii) — burn-down to the exactly-one pinned entry (final state)
-- [ ] AC-11(a) — named-invocation anti-drift (anti-drift)
+- [ ] AC-11 — named-invocation anti-drift (anti-drift)
 - [ ] AC-10(iii)'s final membership (eight live entries, seed-only exits recorded)
 
 **Depends on**
