@@ -16,8 +16,17 @@ package guard
 // order the predicate evaluates them:
 //
 //   - DestructionAncestor: the candidate branch is already an ancestor of
-//     the target (or of main) — nothing to merge; the safe disposition is
-//     branch deletion / no-op.
+//     the target (or of main). The two sub-cases are NOT interchangeable
+//     for a merge producer (spec 127 bead-1 fix round, O1-5): ancestor-OF-
+//     TARGET is a true no-op (nothing to merge into target; the safe
+//     disposition is branch deletion). Ancestor-of-MAIN-but-NOT-of-target
+//     is NOT a no-op — merging branch into target is still a real,
+//     tree-changing merge; only branch's relationship to MAIN is
+//     already-settled. WorkDestructionEvidence.AncestorOf distinguishes
+//     the two (it names which ref the ancestry was found against); a
+//     consumer that skips the merge entirely on DestructionAncestor
+//     without checking AncestorOf == target risks silently dropping that
+//     branch's work.
 //   - DestructionSuperseded: the branch's content already landed via
 //     another route (a squash merge, a tracker-only carrier, or an
 //     equivalent content-level landing) — merging the stale snapshot
@@ -39,6 +48,17 @@ type DestructionOutcome int
 const (
 	// DestructionAncestor: the branch is already an ancestor of the target
 	// (or of main) — there is nothing to merge.
+	//
+	// DestructionAncestor is ALSO this type's zero value (spec 127 bead-1
+	// fix round, F1-3): `var o guard.DestructionOutcome` reads as this —
+	// the class that licenses a deletion/no-op — with no predicate having
+	// run at all. This inverts the house zero-value discipline elsewhere
+	// in gitutil (Subsumption deliberately zero-values to its FAIL-CLOSED
+	// answer), but the enum's ORDER here is plan-pinned (B-r4-3) and must
+	// not change. A consumer must never treat mere possession of a
+	// DestructionOutcome value as proof the predicate actually ran —
+	// only an explicit call site that assigns a non-default, validated
+	// variant is evidence of that.
 	DestructionAncestor DestructionOutcome = iota
 	// DestructionSuperseded: the branch's content already landed via
 	// another route.

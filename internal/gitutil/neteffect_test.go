@@ -646,12 +646,20 @@ func TestPreviewDeletedPaths_LargeRenameNeverReadsAsDeletion(t *testing.T) {
 	}
 }
 
-// TestPreviewDeletedPaths_ConflictYieldsNoDSetNotError is the pinned
-// conflict disposition: a preview that CONFLICTS carries no D-set — it is
-// not this leg's concern, and it is NOT an infra error (a merge-tree exit
-// 1 is a definitive classification, per the package's own exit-code
-// trichotomy discipline).
-func TestPreviewDeletedPaths_ConflictYieldsNoDSetNotError(t *testing.T) {
+// TestPreviewDeletedPaths_HonestModifyDeleteConflictYieldsEmptyDSet is the
+// pinned disposition for a GENUINE, isolated modify/delete conflict: `git
+// merge-tree --write-tree` retains TARGET's (ours') own version at the
+// conflicted path itself (verified on git 2.51.2: exit 1's stdout says
+// "Version main of f.txt left in tree"), so diffing target against the
+// conflicted preview's tree shows NO change there at all — an empty
+// D-set, correctly, but NOT because a conflict is special-cased away
+// (spec 127 bead-1 fix round, O1-1/O2-1/O3-2 deleted that short-circuit —
+// see the doc comment above, which used to claim "no D-set is derivable
+// from a preview that never resolved to a tree"). It is empty here
+// because target's own content at the ONLY path in play is genuinely
+// unchanged by the preview — contrast the next test, where a conflict
+// co-occurs with a genuine, unrelated deletion.
+func TestPreviewDeletedPaths_HonestModifyDeleteConflictYieldsEmptyDSet(t *testing.T) {
 	dir := initGitRepo(t)
 	neWriteFile(t, dir, "f.txt", "v1\n")
 	neRunGit(t, dir, "add", ".")
@@ -668,8 +676,39 @@ func TestPreviewDeletedPaths_ConflictYieldsNoDSetNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a conflicted preview must not be classified as an infra error, got: %v", err)
 	}
-	if deleted != nil {
-		t.Errorf("PreviewDeletedPaths on a conflicted preview = %v, want nil", deleted)
+	if len(deleted) != 0 {
+		t.Errorf("PreviewDeletedPaths on an isolated modify/delete conflict = %v, want none", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_ConflictOnOnePathDoesNotMaskDeletionOnAnother is
+// the RED-on-the-prior-bug fixture (spec 127 bead-1 fix round,
+// O1-1/O2-1/O3-2): a candidate merge that both CONFLICTS on one path and
+// DELETES a different, unrelated target-present path must still report
+// the unrelated deletion. Before this fix, PreviewDeletedPaths returned
+// (nil, nil) unconditionally on ANY conflict — masking the deletion of
+// landed.txt behind the unrelated conflict on f.txt, the exact
+// "certifying the destruction" failure this predicate exists to prevent.
+func TestPreviewDeletedPaths_ConflictOnOnePathDoesNotMaskDeletionOnAnother(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "f.txt", "v1\n")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add f.txt+landed.txt")
+	neRunGit(t, dir, "checkout", "-b", "del")
+	neRunGit(t, dir, "rm", "f.txt", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "delete f.txt and landed.txt")
+	neRunGit(t, dir, "checkout", "main")
+	neWriteFile(t, dir, "f.txt", "v2\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "modify f.txt")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "del")
+	if err != nil {
+		t.Fatalf("a conflicted preview must not be classified as an infra error, got: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "landed.txt" {
+		t.Errorf("PreviewDeletedPaths on a conflicted-but-not-fully-blind preview = %v, want [landed.txt] (the conflict on f.txt must not mask the unrelated deletion)", deleted)
 	}
 }
 
@@ -738,8 +777,8 @@ func TestPreviewDeletedPaths_DiffInfraErrorPropagates(t *testing.T) {
 	orig := diffNameStatusBucketsFn
 	t.Cleanup(func() { diffNameStatusBucketsFn = orig })
 	simulated := errors.New("simulated diff failure")
-	diffNameStatusBucketsFn = func(workdir, from, to string) ([]string, []string, error) {
-		return nil, nil, simulated
+	diffNameStatusBucketsFn = func(workdir, from, to string) ([]string, []string, []string, error) {
+		return nil, nil, nil, simulated
 	}
 
 	deleted, err := PreviewDeletedPaths(dir, "main", "feature")

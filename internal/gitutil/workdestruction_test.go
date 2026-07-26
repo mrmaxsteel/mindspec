@@ -16,7 +16,12 @@ package gitutil
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -248,7 +253,314 @@ func wdConservativeCornerFixture(t *testing.T) (dir, branch, target string) {
 	return dir, "cleanup", "main"
 }
 
+// --- spec 127 bead-1 fix round fixtures -------------------------------------
+
+// wdConflictMaskedRecreationFixture is O1-1/O2-1/O3-2's RED-on-the-prior-bug
+// shape: the exact same destructive recreation as
+// wdStaleDeletionSingleCommitFixture, but the target ALSO advances with an
+// ordinary, unrelated-in-intent edit that happens to overlap the branch's
+// OLD snapshot of f.txt — so the candidate merge conflicts. Before this
+// fix round, the conflict made the predicate return DestructionClean
+// unconditionally, discarding the stale-deletion the leg would otherwise
+// have proved; a stale-deletion is exactly as destructive whether or not
+// an unrelated conflict happens to accompany it.
+func wdConflictMaskedRecreationFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "f.txt", "v1\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-conflict", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neWriteFile(t, dir, "novel.txt", "novel\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel work")
+	neRunGit(t, dir, "checkout", "main")
+	neWriteFile(t, dir, "f.txt", "v2 (target advances, overlapping the branch's untouched OLD snapshot of f.txt)\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C3 target advances with an overlapping, unrelated edit")
+	return dir, "spec-recreated-conflict", "main"
+}
+
+// wdModifiedNovelWorkFixture is O1-4/O2-4's "modify-novel-work recreation":
+// the same destructive recreation shape, but the branch's own novel
+// contribution EDITS an existing target-present path (a.txt) in place,
+// rather than adding a new one. Before this fix round, novelPaths was the
+// A-status bucket only, so this shape was MISSED (a.txt's edited content
+// stayed in the stripped tree, blocking the tree-equality match) —
+// probably the most common real shape, since most bead branches touch
+// tracked files.
+func wdModifiedNovelWorkFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "a.txt", "original\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-modified", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neWriteFile(t, dir, "a.txt", "edited in place by novel work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel EDIT of a.txt")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-modified", "main"
+}
+
+// wdModeOnlyNovelWorkFixture is O1-4/O2-4's mode-only variant: the
+// branch's novel work changes a.txt's MODE only (chmod +x), no content
+// change — git's plumbing reports this as "M" too (same blob OID,
+// different mode), so it must land in the same modified bucket as a
+// genuine content edit.
+func wdModeOnlyNovelWorkFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "a.txt", "original\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-modeonly", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	if err := os.Chmod(filepath.Join(dir, "a.txt"), 0o755); err != nil {
+		t.Fatalf("chmod a.txt: %v", err)
+	}
+	neRunGit(t, dir, "add", "a.txt")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel MODE-ONLY change to a.txt")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-modeonly", "main"
+}
+
+// wdRenameNovelWorkFixture is O2-4's STATED, still-uncaught miss: the
+// branch's own novel contribution is a RENAME of a target-present path
+// (never a content edit or an add). novelPaths deliberately excludes R/C
+// from both buckets (see its doc comment), so this shape still reads
+// DestructionClean — named and fixtured so the boundary is machine-visible
+// rather than a silent, undocumented gap.
+func wdRenameNovelWorkFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "src/a.txt", "original\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-rename", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neRunGit(t, dir, "mv", "src/a.txt", "src/b.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: old tree + novel RENAME of a.txt->b.txt")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-rename", "main"
+}
+
+// wdTabAndNonASCIIAndNewlineNovelPathFixture is S1-1/O1-2/G1-1's RED-on-
+// the-prior-bug shape for the ADDED (novel) bucket: the same destructive
+// recreation, but the branch's own novel work is added at THREE paths that
+// each require special git handling under the pre-`-z` line-oriented
+// parser — a tab-containing name, a non-ASCII (accented) name, and a
+// literal-newline-containing name. Before this fix round, git's
+// `--name-status` (no `-z`) C-quoted the non-ASCII and tab names (a tab
+// ALSO breaks the '\t' field split itself) and split the newline-named
+// record across two garbage lines, so novelPaths returned garbled or
+// truncated tokens, stripNovelPaths silently no-opped on the real paths
+// (git update-index --force-remove exits 0 on an unmatched path), and the
+// tree-equality match failed — misclassifying a destructive recreation as
+// DestructionClean.
+func wdTabAndNonASCIIAndNewlineNovelPathFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "old.txt", "old1\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-quoting-novel", "main")
+	neRunGit(t, dir, "rm", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neWriteFile(t, dir, "novel\twork.txt", "novel-tab\n")
+	neWriteFile(t, dir, "résumé.txt", "novel-nonascii\n")
+	neWriteFile(t, dir, "novel\nline.txt", "novel-newline\n")
+	neRunGit(t, dir, "add", "-A")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel tab/non-ascii/newline paths")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-quoting-novel", "main"
+}
+
+// wdTabAndNonASCIIAndNewlineDeletedPathFixture is the same class on the
+// DELETED-path/evidence side (O1-2's "cosmetic" DeletedPaths corruption,
+// made behaviorally load-bearing here since it feeds novelPaths' sibling
+// diffNameStatusBuckets call too): the paths the recreation reverts away
+// (and that PreviewDeletedPaths reports in evidence.DeletedPaths) carry a
+// tab, a non-ASCII name, and a literal newline.
+func wdTabAndNonASCIIAndNewlineDeletedPathFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neWriteFile(t, dir, "old.txt", "old1\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neWriteFile(t, dir, "landed\ttab.txt", "landed-tab\n")
+	neWriteFile(t, dir, "résumé-landed.txt", "landed-nonascii\n")
+	neWriteFile(t, dir, "landed\nline.txt", "landed-newline\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C2 landed work (tab/non-ascii/newline names)")
+	neRunGit(t, dir, "checkout", "-b", "spec-recreated-quoting-deleted", "main")
+	neRunGit(t, dir, "rm", "landed\ttab.txt", "résumé-landed.txt", "landed\nline.txt")
+	neRunGit(t, dir, "commit", "-m", "recreated spec branch: reverts to C1's tree")
+	neWriteFile(t, dir, "novel.txt", "novel\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "--amend", "-m", "recreated spec branch: old tree + novel work")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "spec-recreated-quoting-deleted", "main"
+}
+
+// wdNoMainRefFixture is O1-7/O2-7's undocumented-but-fixtured disposition:
+// a repo whose trunk is named `trunk`, not `main` — ancestryTargets always
+// checks the literal "main" as its second ref, so its absence makes
+// EVERY evaluation fail closed with DestructionEvidenceError.
+func wdNoMainRefFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neRunGit(t, dir, "branch", "-m", "main", "trunk")
+	neRunGit(t, dir, "checkout", "-b", "feat")
+	neWriteFile(t, dir, "work.txt", "w\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feat work")
+	neRunGit(t, dir, "checkout", "trunk")
+	return dir, "feat", "trunk"
+}
+
+// wdUnrelatedHistoriesFixture is O1-7/O2-7's other undocumented-but-
+// fixtured disposition: branch and target share NO common ancestor at
+// all (an orphan root), so merge-base exits 1 and every probe that relies
+// on it — here, NetEffectLanded's internal merge-base call — fails
+// closed.
+func wdUnrelatedHistoriesFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir = initGitRepo(t)
+	neRunGit(t, dir, "checkout", "--orphan", "island")
+	neRunGit(t, dir, "rm", "-rf", "--cached", ".")
+	neWriteFile(t, dir, "island.txt", "unrelated history\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "unrelated orphan root")
+	neRunGit(t, dir, "checkout", "main")
+	return dir, "island", "main"
+}
+
+// wdShallowHistoryFixture is O1-3's RED-on-the-prior-bug shape: builds the
+// exact single-commit stale-deletion recreation (padded with extra
+// commits so a shallow clone can genuinely truncate BEFORE reaching the
+// reconstructable ancestor's commit), verifies the FULL-history origin
+// classifies DestructionStaleDeletion (the positive control — otherwise
+// this fixture would prove nothing about truncation specifically), then
+// returns a real `git clone --depth 1` of it. Before this fix round,
+// findAncestorWithTree's `git rev-list target` silently stopped at the
+// graft boundary, so "no match found in the (truncated) history I could
+// see" read as the definite answer "the deletions are authored" —
+// DestructionClean, evidence.DeletedPaths fully populated, no error.
+func wdShallowHistoryFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	origin := initGitRepo(t)
+	for i := 0; i < 3; i++ {
+		neWriteFile(t, origin, fmt.Sprintf("pad%d.txt", i), "pad\n")
+		neRunGit(t, origin, "add", ".")
+		neRunGit(t, origin, "commit", "-m", fmt.Sprintf("padding commit %d", i))
+	}
+	neWriteFile(t, origin, "old.txt", "old\n")
+	neRunGit(t, origin, "add", ".")
+	neRunGit(t, origin, "commit", "-m", "adds old.txt (the reconstructable ancestor)")
+	oldSHA := strings.TrimSpace(neRunGit(t, origin, "rev-parse", "HEAD"))
+	// Padding BETWEEN old.txt and the landed-work tip: a depth-2 shallow
+	// clone truncates from EACH ref's own tip independently, so main's
+	// tip needs to sit far enough from old.txt's commit that depth 2
+	// (just enough for merge-base(spec-recreated, main) to still resolve
+	// spec-recreated's parent — main's own tip — within its OWN depth-2
+	// slice) does not incidentally still reach it.
+	for i := 0; i < 3; i++ {
+		neWriteFile(t, origin, fmt.Sprintf("mid%d.txt", i), "mid\n")
+		neRunGit(t, origin, "add", ".")
+		neRunGit(t, origin, "commit", "-m", fmt.Sprintf("mid commit %d", i))
+	}
+	neWriteFile(t, origin, "landed.txt", "landed\n")
+	neRunGit(t, origin, "add", ".")
+	neRunGit(t, origin, "commit", "-m", "landed work")
+	neRunGit(t, origin, "checkout", "-b", "spec-recreated", "main")
+	neRunGit(t, origin, "rm", "landed.txt")
+	neRunGit(t, origin, "commit", "-m", "recreated: reverts to old.txt-adding commit's tree")
+	neWriteFile(t, origin, "novel.txt", "novel\n")
+	neRunGit(t, origin, "add", ".")
+	neRunGit(t, origin, "commit", "--amend", "-m", "recreated: old tree + novel work")
+	neRunGit(t, origin, "checkout", "main")
+
+	outcome, _, err := EvaluateWorkDestruction(origin, "spec-recreated", "main")
+	if err != nil {
+		t.Fatalf("fixture invariant: unexpected error evaluating the FULL-history origin: %v", err)
+	}
+	if outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("fixture invariant: full-history origin must classify DestructionStaleDeletion (the positive control), got %s", outcome)
+	}
+
+	shallow := t.TempDir()
+	cloneCmd := exec.Command("git", "clone", "--depth", "2", "--no-single-branch", "--branch", "spec-recreated", "file://"+origin, shallow)
+	cloneCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone --depth 2: %s: %v", out, err)
+	}
+	neRunGit(t, shallow, "branch", "main", "origin/main")
+
+	shallowNow, serr := isShallowRepo(shallow)
+	if serr != nil {
+		t.Fatalf("fixture invariant: isShallowRepo: %v", serr)
+	}
+	if !shallowNow {
+		t.Fatalf("fixture invariant: the clone must actually be shallow")
+	}
+	// The load-bearing invariant: main's OWN visible history in the
+	// shallow clone must NOT reach old.txt's commit — otherwise this
+	// fixture would not actually exercise truncation.
+	revList := neRunGit(t, shallow, "rev-list", "main")
+	if strings.Contains(revList, oldSHA) {
+		t.Fatalf("fixture invariant broken: old.txt's commit (%s) is still reachable in the shallow clone's rev-list main:\n%s", oldSHA, revList)
+	}
+
+	return shallow, "spec-recreated", "main"
+}
+
 // --- the outcome table ------------------------------------------------------
+
+// wdForcedEvidenceErrorFixture is the outcome table's own
+// DestructionEvidenceError row (spec 127 bead-1 fix round, O2-5(b)): the
+// prior version SEEDED the sentinel's `seen` map with
+// {DestructionEvidenceError: true} by fiat — a literal, not a fixture —
+// so deleting every real evidence-error test elsewhere would still leave
+// this sentinel green. Forcing a seam and registering its restoration via
+// t.Cleanup from INSIDE the fixture builder makes this row behave like
+// every other: the outcome table loop calls EvaluateWorkDestruction
+// exactly once, same as any other row, and gets a real
+// DestructionEvidenceError back from an actually-forced probe failure.
+func wdForcedEvidenceErrorFixture(t *testing.T) (dir, branch, target string) {
+	t.Helper()
+	dir, branch, target = wdHonestStaleBranchFixture(t)
+	orig := workDestructionIsAncestorFn
+	t.Cleanup(func() { workDestructionIsAncestorFn = orig })
+	workDestructionIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+		return false, errors.New("forced evidence-error fixture (spec 127 O2-5(b) sentinel-coverage row)")
+	}
+	return dir, branch, target
+}
 
 func TestEvaluateWorkDestruction_OutcomeTable(t *testing.T) {
 	type row struct {
@@ -303,13 +615,61 @@ func TestEvaluateWorkDestruction_OutcomeTable(t *testing.T) {
 				t.Error("evidence.ReconstructedAncestor must be populated for the conservative-corner stale-deletion outcome")
 			}
 		}},
+
+		// --- spec 127 bead-1 fix round: RED-on-the-prior-bug rows -----------
+
+		{"ConflictMaskedRecreationNowCaught", wdConflictMaskedRecreationFixture, guard.DestructionStaleDeletion, func(t *testing.T, e WorkDestructionEvidence) {
+			if len(e.DeletedPaths) == 0 {
+				t.Error("evidence.DeletedPaths must be populated (O1-1/O2-1/O3-2: a co-occurring conflict must not mask the deletion)")
+			}
+			if e.ReconstructedAncestor == "" {
+				t.Error("evidence.ReconstructedAncestor must be populated")
+			}
+		}},
+		{"ModifiedNovelWorkNowCaught", wdModifiedNovelWorkFixture, guard.DestructionStaleDeletion, func(t *testing.T, e WorkDestructionEvidence) {
+			if e.ReconstructedAncestor == "" {
+				t.Error("evidence.ReconstructedAncestor must be populated (O1-4/O2-4: an in-place edit of novel work must not block the match)")
+			}
+		}},
+		{"ModeOnlyNovelWorkNowCaught", wdModeOnlyNovelWorkFixture, guard.DestructionStaleDeletion, func(t *testing.T, e WorkDestructionEvidence) {
+			if e.ReconstructedAncestor == "" {
+				t.Error("evidence.ReconstructedAncestor must be populated (O1-4/O2-4: a mode-only novel change must not block the match)")
+			}
+		}},
+		{"TabNonASCIINewlineNovelPathNowCaught", wdTabAndNonASCIIAndNewlineNovelPathFixture, guard.DestructionStaleDeletion, func(t *testing.T, e WorkDestructionEvidence) {
+			if e.ReconstructedAncestor == "" {
+				t.Error("evidence.ReconstructedAncestor must be populated (S1-1/O1-2/G1-1: tab/non-ASCII/newline novel paths must not survive C-quoting corruption)")
+			}
+		}},
+		{"TabNonASCIINewlineDeletedPathNowCaught", wdTabAndNonASCIIAndNewlineDeletedPathFixture, guard.DestructionStaleDeletion, func(t *testing.T, e WorkDestructionEvidence) {
+			if len(e.DeletedPaths) != 3 {
+				t.Errorf("evidence.DeletedPaths = %v, want 3 raw (unescaped) tab/non-ASCII/newline paths", e.DeletedPaths)
+			}
+			if e.ReconstructedAncestor == "" {
+				t.Error("evidence.ReconstructedAncestor must be populated")
+			}
+		}},
+
+		// --- stated, fixtured misses (named so the boundary is machine-
+		// visible, not a silent gap) -----------------------------------------
+
+		{"StatedLimit_RenameOfNovelWorkIsMissed", wdRenameNovelWorkFixture, guard.DestructionClean, nil},
+
+		// --- the sentinel-coverage row (O2-5(b)) ----------------------------
+
+		{"ForcedEvidenceError", wdForcedEvidenceErrorFixture, guard.DestructionEvidenceError, func(t *testing.T, e WorkDestructionEvidence) {
+			if e.FailedProbe == "" {
+				t.Error("evidence.FailedProbe must be populated")
+			}
+		}},
 	}
 
-	// Every non-error outcome above must be represented; the fixture below
-	// (ProbeForcedEvidenceError) covers the fifth. This assertion is the
-	// B-r4-3 sentinel discipline every later consumer's table copies:
-	// DestructionOutcomeCount is 5 (four here + the forced-error fixture).
-	seen := map[guard.DestructionOutcome]bool{guard.DestructionEvidenceError: true}
+	// Every outcome, INCLUDING DestructionEvidenceError, must be
+	// represented by an actual row's `want` above — no literal seed (spec
+	// 127 bead-1 fix round, O2-5(b)). This is the B-r4-3 sentinel
+	// discipline every later consumer's table copies:
+	// len(seen) == guard.DestructionOutcomeCount.
+	seen := map[guard.DestructionOutcome]bool{}
 	for _, r := range table {
 		seen[r.want] = true
 	}
@@ -321,7 +681,11 @@ func TestEvaluateWorkDestruction_OutcomeTable(t *testing.T) {
 		t.Run(r.name, func(t *testing.T) {
 			dir, branch, target := r.build(t)
 			outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
-			if err != nil {
+			if r.want == guard.DestructionEvidenceError {
+				if err == nil {
+					t.Fatal("expected a non-nil error for the forced evidence-error row")
+				}
+			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if outcome != r.want {
@@ -435,7 +799,7 @@ func TestEvaluateWorkDestruction_StaleDeletionRedOnRevertedDiscriminator(t *test
 			if base != targetTip {
 				t.Fatalf("fixture invariant broken: merge-base(branch,target) must equal target's own tip on a recreated-from-tip branch (the forging effect), got base=%s target=%s", base, targetTip)
 			}
-			_, rangeDeleted, err := diffNameStatusBucketsFn(dir, base, branch)
+			_, rangeDeleted, _, err := diffNameStatusBucketsFn(dir, base, branch)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -524,19 +888,33 @@ func TestEvaluateWorkDestruction_SupersessionProbeErrorPropagates(t *testing.T) 
 	}
 }
 
-func TestEvaluateWorkDestruction_SubsumedOutcomeProbeErrorPropagates(t *testing.T) {
+// TestEvaluateWorkDestruction_MergeBaseProbeErrorPropagates is O2-2(a): the
+// step-2 merge-base resolution (evidence.MergeBase) must propagate a probe
+// failure from INSIDE EvaluateWorkDestruction itself, not merely at the
+// raw mergeBaseFn primitive's own unit tests elsewhere — and FailedProbe
+// must name the exact call, which no prior test read. NetEffectLanded is
+// stubbed to bypass its OWN internal mergeBaseFn use (the same package
+// seam) so the forced failure is unambiguously attributed to step 2's
+// explicit call, not to supersession's.
+func TestEvaluateWorkDestruction_MergeBaseProbeErrorPropagates(t *testing.T) {
 	dir, branch, target := wdHonestStaleBranchFixture(t)
 
-	orig := workDestructionSubsumedFn
-	t.Cleanup(func() { workDestructionSubsumedFn = orig })
-	simulated := errors.New("simulated ContentSubsumedOutcome probe failure")
-	workDestructionSubsumedFn = func(workdir, base, ref, target string) (Subsumption, error) {
-		return SubsumptionCleanDivergence, simulated
+	origNetEffect := workDestructionNetEffectFn
+	t.Cleanup(func() { workDestructionNetEffectFn = origNetEffect })
+	workDestructionNetEffectFn = func(workdir, ref, target string) (bool, error) {
+		return false, nil
+	}
+
+	orig := mergeBaseFn
+	t.Cleanup(func() { mergeBaseFn = orig })
+	simulated := errors.New("simulated merge-base probe failure")
+	mergeBaseFn = func(workdir, ref, target string) (string, error) {
+		return "", simulated
 	}
 
 	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
 	if err == nil {
-		t.Fatalf("expected the forced ContentSubsumedOutcome failure to propagate, got outcome=%s, nil error", outcome)
+		t.Fatalf("expected the forced merge-base failure to propagate, got outcome=%s, nil error", outcome)
 	}
 	if !errors.Is(err, simulated) {
 		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
@@ -544,8 +922,68 @@ func TestEvaluateWorkDestruction_SubsumedOutcomeProbeErrorPropagates(t *testing.
 	if outcome != guard.DestructionEvidenceError {
 		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
 	}
-	if evidence.FailedProbe == "" {
-		t.Error("evidence.FailedProbe must name the failed probe")
+	want := fmt.Sprintf("merge-base(%s, %s)", branch, target)
+	if evidence.FailedProbe != want {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, want)
+	}
+}
+
+// TestEvaluateWorkDestruction_StripNovelPathsProbeErrorPropagates is
+// O2-2(b): stripNovelPaths' own failure, forced from INSIDE
+// snapshotRevertMatch (the seam existed but no test forced it before this
+// fix round) — stripNovelPaths is the only step that writes outside the
+// repo (os.CreateTemp for GIT_INDEX_FILE), so a denied/full TMPDIR fails
+// on exactly the destructive shape this predicate exists to catch.
+func TestEvaluateWorkDestruction_StripNovelPathsProbeErrorPropagates(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	orig := workDestructionStripPathsFn
+	t.Cleanup(func() { workDestructionStripPathsFn = orig })
+	simulated := errors.New("simulated stripNovelPaths probe failure")
+	workDestructionStripPathsFn = func(workdir, ref string, strip []string) (string, error) {
+		return "", simulated
+	}
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected the forced stripNovelPaths failure to propagate, got outcome=%s, nil error", outcome)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+	}
+	if evidence.FailedProbe != "snapshot-revert scan" {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
+	}
+}
+
+// TestEvaluateWorkDestruction_FindAncestorTreeProbeErrorPropagates is
+// O2-2(c): findAncestorWithTree's own failure, forced from INSIDE
+// snapshotRevertMatch.
+func TestEvaluateWorkDestruction_FindAncestorTreeProbeErrorPropagates(t *testing.T) {
+	dir, branch, target := wdStaleDeletionSingleCommitFixture(t)
+
+	orig := workDestructionFindAncestorTreeFn
+	t.Cleanup(func() { workDestructionFindAncestorTreeFn = orig })
+	simulated := errors.New("simulated findAncestorWithTree probe failure")
+	workDestructionFindAncestorTreeFn = func(workdir, target, wantTree string, maskPaths []string) (string, error) {
+		return "", simulated
+	}
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected the forced findAncestorWithTree failure to propagate, got outcome=%s, nil error", outcome)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+	}
+	if evidence.FailedProbe != "snapshot-revert scan" {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
 	}
 }
 
@@ -580,8 +1018,8 @@ func TestEvaluateWorkDestruction_SnapshotRevertScanProbeErrorPropagates(t *testi
 	orig := workDestructionNovelPathsFn
 	t.Cleanup(func() { workDestructionNovelPathsFn = orig })
 	simulated := errors.New("simulated snapshot-revert scan failure")
-	workDestructionNovelPathsFn = func(workdir, target, branch string) ([]string, error) {
-		return nil, simulated
+	workDestructionNovelPathsFn = func(workdir, target, branch string) ([]string, []string, error) {
+		return nil, nil, simulated
 	}
 
 	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
@@ -599,34 +1037,158 @@ func TestEvaluateWorkDestruction_SnapshotRevertScanProbeErrorPropagates(t *testi
 	}
 }
 
+// TestEvaluateWorkDestruction_ShallowHistoryFailsClosed is O1-3's
+// RED-on-the-prior-bug regression: on a real, genuinely shallow clone,
+// the ancestor scan must fail closed with DestructionEvidenceError, never
+// silently read the truncated history's "no match" as DestructionClean.
+func TestEvaluateWorkDestruction_ShallowHistoryFailsClosed(t *testing.T) {
+	dir, branch, target := wdShallowHistoryFixture(t)
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected a non-nil error on a shallow/truncated history, got outcome=%s", outcome)
+	}
+	if !errors.Is(err, errTruncatedHistory) {
+		t.Errorf("expected the propagated error to wrap errTruncatedHistory, got: %v", err)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError (absence of evidence from a truncated history must never read as DestructionClean)", outcome)
+	}
+	if evidence.FailedProbe != "snapshot-revert scan" {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "snapshot-revert scan")
+	}
+}
+
+// TestEvaluateWorkDestruction_NoMainRefFailsClosedAndIsDocumented is
+// O1-7/O2-7's fixtured disposition: a repo with no local `main` ref fails
+// EVERY evaluation closed, naming the exact ancestry probe that could not
+// resolve it.
+func TestEvaluateWorkDestruction_NoMainRefFailsClosedAndIsDocumented(t *testing.T) {
+	dir, branch, target := wdNoMainRefFixture(t)
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected a non-nil error on a repo with no local main ref, got outcome=%s", outcome)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+	}
+	want := fmt.Sprintf("IsAncestor(%s, main)", branch)
+	if evidence.FailedProbe != want {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, want)
+	}
+}
+
+// TestEvaluateWorkDestruction_UnrelatedHistoriesFailsClosedAndIsDocumented
+// is O1-7/O2-7's other fixtured disposition: branch and target sharing no
+// common ancestor fails closed via NetEffectLanded's internal merge-base
+// call.
+func TestEvaluateWorkDestruction_UnrelatedHistoriesFailsClosedAndIsDocumented(t *testing.T) {
+	dir, branch, target := wdUnrelatedHistoriesFixture(t)
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
+	if err == nil {
+		t.Fatalf("expected a non-nil error on unrelated branch/target histories, got outcome=%s", outcome)
+	}
+	if outcome != guard.DestructionEvidenceError {
+		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+	}
+	want := fmt.Sprintf("NetEffectLanded(%s, %s)", branch, target)
+	if evidence.FailedProbe != want {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, want)
+	}
+}
+
 // TestEvaluateWorkDestruction_EvidenceErrorNeverFoldedIntoBoolean asserts
 // the mechanism the plan pins for AC-2(ix)/AC-3/AC-7 consumers: the
 // outcome on a probe failure is the NAMED evidence-error variant, never
 // silently coerced to DestructionClean/DestructionAncestor or any other
-// "safe-looking" value. Table-driven across every seam above.
+// "safe-looking" value. Genuinely table-driven across every forceable
+// seam this file exercises (spec 127 bead-1 fix round, O2-2: the prior
+// version forced exactly one seam — IsAncestor — while claiming in its own
+// comment to be "table-driven across every seam above").
 func TestEvaluateWorkDestruction_EvidenceErrorNeverFoldedIntoBoolean(t *testing.T) {
-	dir, branch, target := wdHonestStaleBranchFixture(t)
-
-	origIsAncestor := workDestructionIsAncestorFn
-	t.Cleanup(func() { workDestructionIsAncestorFn = origIsAncestor })
-	workDestructionIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
-		return false, errors.New("boom")
-	}
-
-	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
-	if err == nil {
-		t.Fatal("expected a non-nil error")
-	}
-	for _, unsafe := range []guard.DestructionOutcome{
+	unsafeOutcomes := []guard.DestructionOutcome{
 		guard.DestructionClean, guard.DestructionAncestor,
 		guard.DestructionSuperseded, guard.DestructionStaleDeletion,
-	} {
-		if outcome == unsafe {
-			t.Fatalf("an evidence-computation error must never be folded into %s", unsafe)
-		}
 	}
-	if outcome != guard.DestructionEvidenceError {
-		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+
+	cases := []struct {
+		name string
+		// snapshotRevert requests a fixture that actually reaches the
+		// stale-deletion leg (a non-empty D-set); the others fire on any
+		// fixture that reaches THEIR leg, so the generic honest-stale
+		// fixture suffices.
+		snapshotRevert bool
+		force          func(t *testing.T)
+	}{
+		{name: "Ancestry", force: func(t *testing.T) {
+			orig := workDestructionIsAncestorFn
+			t.Cleanup(func() { workDestructionIsAncestorFn = orig })
+			workDestructionIsAncestorFn = func(workdir, ancestor, descendant string) (bool, error) {
+				return false, errors.New("boom")
+			}
+		}},
+		{name: "Supersession", force: func(t *testing.T) {
+			orig := workDestructionNetEffectFn
+			t.Cleanup(func() { workDestructionNetEffectFn = orig })
+			workDestructionNetEffectFn = func(workdir, ref, target string) (bool, error) {
+				return false, errors.New("boom")
+			}
+		}},
+		{name: "MergeBase", force: func(t *testing.T) {
+			orig := mergeBaseFn
+			t.Cleanup(func() { mergeBaseFn = orig })
+			mergeBaseFn = func(workdir, ref, target string) (string, error) {
+				return "", errors.New("boom")
+			}
+		}},
+		{name: "PreviewDeletedPaths", force: func(t *testing.T) {
+			orig := workDestructionPreviewDeletedFn
+			t.Cleanup(func() { workDestructionPreviewDeletedFn = orig })
+			workDestructionPreviewDeletedFn = func(workdir, target, branch string) ([]string, error) {
+				return nil, errors.New("boom")
+			}
+		}},
+		{name: "StripNovelPaths", snapshotRevert: true, force: func(t *testing.T) {
+			orig := workDestructionStripPathsFn
+			t.Cleanup(func() { workDestructionStripPathsFn = orig })
+			workDestructionStripPathsFn = func(workdir, ref string, strip []string) (string, error) {
+				return "", errors.New("boom")
+			}
+		}},
+		{name: "FindAncestorTree", snapshotRevert: true, force: func(t *testing.T) {
+			orig := workDestructionFindAncestorTreeFn
+			t.Cleanup(func() { workDestructionFindAncestorTreeFn = orig })
+			workDestructionFindAncestorTreeFn = func(workdir, target, wantTree string, maskPaths []string) (string, error) {
+				return "", errors.New("boom")
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dir, branch, target string
+			if tc.snapshotRevert {
+				dir, branch, target = wdStaleDeletionSingleCommitFixture(t)
+			} else {
+				dir, branch, target = wdHonestStaleBranchFixture(t)
+			}
+			tc.force(t)
+
+			outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+			if err == nil {
+				t.Fatal("expected a non-nil error")
+			}
+			for _, unsafe := range unsafeOutcomes {
+				if outcome == unsafe {
+					t.Fatalf("an evidence-computation error must never be folded into %s", unsafe)
+				}
+			}
+			if outcome != guard.DestructionEvidenceError {
+				t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
+			}
+		})
 	}
 }
 
@@ -663,7 +1225,16 @@ func TestEvaluateWorkDestruction_MutatesNothing(t *testing.T) {
 // TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols is the default-pin
 // half of "Error-forcing for tests rides unexported in-package seam vars
 // with pointer-equality default pins (no exported knob)": every seam this
-// file forces above must default to the REAL production symbol.
+// file forces above must default to the REAL production symbol. Extended
+// to ALL seven seams (spec 127 bead-1 fix round, O2-6/O3-3: the prior
+// version pinned four of seven — workDestructionNovelPathsFn,
+// workDestructionStripPathsFn, and workDestructionFindAncestorTreeFn were
+// declared, and the first is even FORCED by a test above, without ever
+// being pinned; two of the three are the snapshot-revert discriminator
+// itself, the most safety-critical leg in this file) plus
+// diffNameStatusBucketsFn (neteffect.go) and the new
+// workDestructionIsShallowFn, so the stated universal in this test's own
+// comment and the code agree.
 func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionIsAncestorFn).Pointer() != reflect.ValueOf(IsAncestor).Pointer() {
 		t.Error("workDestructionIsAncestorFn must default to IsAncestor")
@@ -671,11 +1242,23 @@ func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionNetEffectFn).Pointer() != reflect.ValueOf(NetEffectLanded).Pointer() {
 		t.Error("workDestructionNetEffectFn must default to NetEffectLanded")
 	}
-	if reflect.ValueOf(workDestructionSubsumedFn).Pointer() != reflect.ValueOf(ContentSubsumedOutcome).Pointer() {
-		t.Error("workDestructionSubsumedFn must default to ContentSubsumedOutcome")
-	}
 	if reflect.ValueOf(workDestructionPreviewDeletedFn).Pointer() != reflect.ValueOf(PreviewDeletedPaths).Pointer() {
 		t.Error("workDestructionPreviewDeletedFn must default to PreviewDeletedPaths")
+	}
+	if reflect.ValueOf(workDestructionNovelPathsFn).Pointer() != reflect.ValueOf(novelPaths).Pointer() {
+		t.Error("workDestructionNovelPathsFn must default to novelPaths")
+	}
+	if reflect.ValueOf(workDestructionStripPathsFn).Pointer() != reflect.ValueOf(stripNovelPaths).Pointer() {
+		t.Error("workDestructionStripPathsFn must default to stripNovelPaths")
+	}
+	if reflect.ValueOf(workDestructionFindAncestorTreeFn).Pointer() != reflect.ValueOf(findAncestorWithTree).Pointer() {
+		t.Error("workDestructionFindAncestorTreeFn must default to findAncestorWithTree")
+	}
+	if reflect.ValueOf(workDestructionIsShallowFn).Pointer() != reflect.ValueOf(isShallowRepo).Pointer() {
+		t.Error("workDestructionIsShallowFn must default to isShallowRepo")
+	}
+	if reflect.ValueOf(diffNameStatusBucketsFn).Pointer() != reflect.ValueOf(diffNameStatusBuckets).Pointer() {
+		t.Error("diffNameStatusBucketsFn must default to diffNameStatusBuckets")
 	}
 }
 

@@ -92,11 +92,18 @@ func statusSubsumes(committed, changed string) bool {
 // mergeTreeResult is the exit-code-classified outcome of `git merge-tree
 // --write-tree`.
 type mergeTreeResult struct {
-	// treeOID is the resulting tree's OID, populated only on a clean merge
-	// (exit 0).
+	// treeOID is the resulting tree's OID. `git merge-tree --write-tree`
+	// prints the tree OID as its FIRST stdout line on BOTH exit 0 and exit
+	// 1 (spec 127 bead-1 fix round, O1-1/O2-1/O3-2): on a conflict the
+	// printed tree still contains every unconflicted path's merged content
+	// (conflicted paths carry conflict-marker blobs, plus the trailing
+	// numbered-stage/informational lines merge-tree also writes to
+	// stdout), so a D-set is derivable from it even when conflict is true.
+	// Verified on git 2.51.2: `git merge-tree --write-tree` exit 1 still
+	// emits the tree OID first, unconditionally.
 	treeOID string
 	// conflict is true on exit 1 — a leg-(a) NOT-landed answer, never an
-	// infra error.
+	// infra error. It no longer means "no tree is available": see treeOID.
 	conflict bool
 }
 
@@ -148,8 +155,12 @@ func runMergeTreeWriteTree(workdir, base, ours, theirs string, noRenames bool) (
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 		// CONFLICT (panel O1's trichotomy): a definitive leg-(a) NOT-landed
-		// answer, never infra — the caller must not treat this as a failure.
-		return mergeTreeResult{conflict: true}, nil
+		// answer, never infra — the caller must not treat this as a
+		// failure. The first stdout line is still the merged tree's OID
+		// (see mergeTreeResult.treeOID); capture it rather than discarding
+		// stdout, so a conflict-tolerant caller (PreviewDeletedPaths) can
+		// still derive a D-set.
+		return mergeTreeResult{conflict: true, treeOID: strings.TrimSpace(firstLine(string(out)))}, nil
 	}
 	// exit >= 2 (fatal git error, including "unknown option '--write-tree'"
 	// on git < 2.38) or a non-ExitError (git missing from PATH): infra,
@@ -516,46 +527,94 @@ func NetEffectLanded(workdir, ref, target string) (bool, error) {
 // (error-forcing for tests, default pointer-pinned).
 var diffNameStatusBucketsFn = diffNameStatusBuckets
 
-// diffNameStatusBuckets runs `git diff --name-status --find-renames from
+// diffNameStatusBuckets runs `git diff --name-status --find-renames -z from
 // to` and buckets the result into added (A-status: paths present at `to`
-// but absent at `from`) and deleted (D-status: paths present at `from` but
-// absent at `to`). Rename/copy status (R/C) counts as NEITHER added nor
-// deleted — the content moved, it was not introduced or removed — which is
-// exactly what --find-renames is pinned for (spec 127 bead 1): without it,
-// plumbing diffs default to no rename detection and a large move would
-// misread as a delete+add pair. `from`/`to` may be any commit-ish
-// (branch, SHA, or a bare tree OID, e.g. the result of a merge-tree
-// preview).
-func diffNameStatusBuckets(workdir, from, to string) (added, deleted []string, err error) {
+// but absent at `from`), deleted (D-status: paths present at `from` but
+// absent at `to`), and modified (M-status: present at both, but content
+// and/or mode changed — git's plumbing reports a pure mode-only change as
+// "M" too, with an unchanged blob OID, so this bucket also carries
+// mode-only novel work). Rename/copy status (R/C) counts as NEITHER added,
+// deleted, nor modified — the content moved, it was not introduced,
+// removed, or edited in place — which is exactly what --find-renames is
+// pinned for (spec 127 bead 1): without it, plumbing diffs default to no
+// rename detection and a large move would misread as a delete+add pair.
+// `from`/`to` may be any commit-ish (branch, SHA, or a bare tree OID, e.g.
+// the result of a merge-tree preview).
+//
+// `-z` (spec 127 bead-1 fix round, S1-1/O1-2/G1-1): WITHOUT it, git
+// C-quotes any path byte that needs escaping — which by default (
+// core.quotepath defaults to true) includes every non-ASCII UTF-8 byte,
+// and ALWAYS includes control characters such as a literal tab or
+// newline — into a double-quoted, backslash/octal-escaped literal token,
+// and a tab inside a path also breaks the '\t'-field-splitting itself,
+// not merely the quoting. `-z` sidesteps quoting entirely: git emits
+// each record NUL-separated with paths raw and unescaped — status, then
+// one path (A/D/M/…) or two paths (R/C: from-path, to-path), each
+// terminated by a NUL, with no trailing record after the final NUL.
+// Parsing therefore walks fixed-width NUL-delimited records rather than
+// splitting a line on '\t'/'\n', so a literal tab or newline BYTE inside
+// a path can never be misread as a field or record boundary.
+func diffNameStatusBuckets(workdir, from, to string) (added, deleted, modified []string, err error) {
 	if err := rejectOptionLike(from); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := rejectOptionLike(to); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-status", "--find-renames", from, to)...)
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-status", "--find-renames", "-z", from, to)...)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, nil, fmt.Errorf("diff --name-status --find-renames %s %s: %w", from, to, err)
+		return nil, nil, nil, fmt.Errorf("diff --name-status --find-renames -z %s %s: %w", from, to, err)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(fields[0], "A"):
-			added = append(added, fields[len(fields)-1])
-		case strings.HasPrefix(fields[0], "D"):
-			deleted = append(deleted, fields[len(fields)-1])
-		}
-		// R<score>/C<score> (rename/copy) and M (modify): neither bucket.
+	raw := string(out)
+	if raw == "" {
+		return nil, nil, nil, nil
 	}
-	return added, deleted, nil
+	fields := strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00")
+	for i := 0; i < len(fields); {
+		status := fields[i]
+		if status == "" {
+			// A trailing empty field from the final NUL (or a malformed
+			// record) — nothing left to consume either way.
+			break
+		}
+		switch status[0] {
+		case 'R', 'C':
+			// Two-path form: status, from-path, to-path. Renamed/copied
+			// content counts as none of the three buckets (see doc
+			// comment above).
+			if i+2 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated rename/copy record %q", from, to, status)
+			}
+			i += 3
+		case 'A':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated add record", from, to)
+			}
+			added = append(added, fields[i+1])
+			i += 2
+		case 'D':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated delete record", from, to)
+			}
+			deleted = append(deleted, fields[i+1])
+			i += 2
+		case 'M':
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated modify record", from, to)
+			}
+			modified = append(modified, fields[i+1])
+			i += 2
+		default:
+			// Any other single-path status (e.g. "T" typechange, "U"
+			// unmerged): none of the three buckets.
+			if i+1 >= len(fields) {
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated record %q", from, to, status)
+			}
+			i += 2
+		}
+	}
+	return added, deleted, modified, nil
 }
 
 // PreviewDeletedPaths is the read-only D-set primitive behind the spec 127
@@ -571,16 +630,22 @@ func diffNameStatusBuckets(workdir, from, to string) (added, deleted []string, e
 // bucket. A large rename/directory-move (AC-8(ii)) therefore reads as
 // R-paths, never D-paths.
 //
-// A CONFLICTED preview (merge-tree exit 1) yields (nil, nil): no D-set is
-// derivable from a preview that never resolved to a tree, and by design a
-// conflicted merge never reaches the stale-deletion leg — the real merge
-// attempt's own content conflict is handled separately (spec 127 R5(d)'s
-// conflict-recovery re-entry), not by this predicate. Any git infra
-// failure — resolving the merge-base, the merge-tree preview itself
-// (exit >= 2, including "unknown option" on git < 2.38), or the trailing
-// diff — is always propagated as a non-nil error, never classified into
-// an empty D-set (the spec 125 O2-1 discipline: absence of evidence is
-// never safety).
+// A CONFLICTED preview (merge-tree exit 1) does NOT short-circuit to an
+// empty D-set (spec 127 bead-1 fix round, O1-1/O2-1/O3-2 — reversing this
+// file's prior doc comment, which claimed "no D-set is derivable from a
+// preview that never resolved to a tree": FALSE on git >= 2.38, verified
+// end-to-end — `git merge-tree --write-tree` still prints the merged
+// tree's OID as its first line on exit 1, with every UNCONFLICTED path
+// merged normally; only the conflicted path(s) carry conflict-marker
+// content instead of a clean merge result). The D-set is derived from
+// that tree exactly as on a clean preview: a conflicting edit on ONE path
+// must never mask a genuine deletion on another, unrelated path — the
+// ordering-mask failure this predicate exists to prevent, at reduced
+// width, if it did. Any git infra failure — resolving the merge-base, the
+// merge-tree preview itself (exit >= 2, including "unknown option" on
+// git < 2.38), or the trailing diff — is always propagated as a non-nil
+// error, never classified into an empty D-set (the spec 125 O2-1
+// discipline: absence of evidence is never safety).
 //
 // Non-mutating throughout: `git merge-tree --write-tree` writes only
 // unreferenced loose tree objects (the same discipline as
@@ -603,13 +668,8 @@ func PreviewDeletedPaths(workdir, target, branch string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if res.conflict {
-		// See doc comment: a conflicted preview carries no D-set — this is
-		// not an infra failure, and it is not this leg's concern.
-		return nil, nil
-	}
 
-	_, deleted, err := diffNameStatusBucketsFn(workdir, target, res.treeOID)
+	_, deleted, _, err := diffNameStatusBucketsFn(workdir, target, res.treeOID)
 	if err != nil {
 		return nil, err
 	}
