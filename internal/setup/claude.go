@@ -947,6 +947,29 @@ Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This 
 See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestrator rules and subagent prompt fences (only the cycle runs ` + "`mindspec complete`" + `, after the panel gate passes; never raw ` + "`git merge bead/<id>`" + `; one ` + "`git push`" + ` at end-of-spec; subagents make exactly one commit, tests must PASS). Surviving skills reference that section rather than re-stating it.
 `
 
+// CanonicalGuidanceSurfaces returns every canonical, non-file-backed
+// guidance surface this product installs into consuming repos, keyed
+// by a stable surface name (spec 127 R5c's canonical-surface sweep
+// leg): the skill map (skillFiles(), including the 4 inlined
+// lifecycle-gate skills, which always win on key collision) plus the
+// two managed-block literals (`claudeMDManagedBlock`,
+// `agentsMDBlockTemplate` — the CLAUDE.md/AGENTS.md guidance this
+// product installs, previously outside every sweep leg because
+// AGENTS.md is tracked but matches no glob, and neither literal is a
+// file on disk before `mindspec setup` runs).
+//
+// Read-only: this is a copy on every call. The map key for the two
+// managed-block literals matches their Go identifier name exactly, so
+// a mutation fixture that plants a floor match under
+// "claudeMDManagedBlock" or "agentsMDBlockTemplate" is unambiguous
+// about which literal it targets.
+func CanonicalGuidanceSurfaces() map[string]string {
+	out := skillFiles()
+	out["claudeMDManagedBlock"] = claudeMDManagedBlock
+	out["agentsMDBlockTemplate"] = agentsMDBlockTemplate
+	return out
+}
+
 // claudeMDFull is written when CLAUDE.md doesn't exist.
 var claudeMDFull = "# CLAUDE.md — MindSpec\n" + mindspecMarkerBegin + "\n" + claudeMDManagedBlock + mindspecMarkerEnd + "\n"
 

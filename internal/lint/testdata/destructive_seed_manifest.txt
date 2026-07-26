@@ -1,0 +1,54 @@
+# spec 127 R5(c)/G-r5-4 bootstrap manifest — destructive-guidance
+# convention scan, seeded artifacts.
+#
+# input_sha: 09f62bd97b28bae7b171054066117cb19a33874d (main, this spec's
+#   fork base — immutable, and prior to every bead)
+# scanner_revision: spec-127-bead-2 (internal/lint/destructive_guidance_test.go,
+#   internal/guard/classifier.go, as landed by bead 2)
+# generation_command: go test -short ./internal/lint/... -run TestZZZDebugDump -v
+#   (the ad hoc dump used to derive this manifest by hand at authoring
+#   time; the committed reconciliation is destructive_guidance_test.go's
+#   TestBootstrapManifest_* functions, which re-derive the SAME
+#   enumeration from the live scan every run — this file is the frozen
+#   record fixture (α) compares against, not itself the mechanism)
+#
+# Verified: every diagnostic-emitting file this manifest cites
+# (internal/approve/plan.go, internal/executor/mindspec_executor.go,
+# cmd/mindspec/bead_ready.go, internal/next/ready_gate.go) and every
+# guidance surface it cites is BYTE-IDENTICAL between input_sha and
+# this bead's own HEAD (`git diff 09f62bd9 HEAD --stat` over those
+# paths is empty) — bead 1 touched only internal/guard/outcome.go,
+# internal/gitutil/**, internal/lifecycle/gitquery.go, and
+# internal/executor/merge_golden_test.go (a new test file, not a
+# diagnostic emitter). So this bead's own worktree IS input_sha for
+# every site below.
+#
+# Format: one entry per line, sorted within each section:
+#   <surface-or-file>\t<func-or-surface-key>\t<detail-or-text>\t<family-or-blank>
+
+[destructive_guidance_allowlist]
+internal/approve/plan.go	beadCreateFailure	bd delete %s --force	bd delete --force
+internal/approve/plan.go	checkExistingBeadsSafety	bd delete %s --force	bd delete --force
+internal/executor/mindspec_executor.go	beadToSpecConflictFailure	git merge	git merge
+internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git merge
+
+[opaque_operand_registry]
+cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:
+internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg3:unprovable
+internal/next/ready_gate.go	GateReadiness	variadic-spread:recovery
+
+[known_sites_exemption_list]
+.claude/agents/spec-orchestrator.md	git branch -D bead/<bead-id>	1	git branch -D
+.claude/agents/spec-orchestrator.md	git merge --no-ff bead/<bead-id> -m "Merge bead/<id>: <summary>"	1	git merge
+.claude/agents/spec-orchestrator.md	git stash drop	1	git stash drop/clear
+.claude/agents/spec-orchestrator.md	git worktree remove <bead-worktree> --force	1	git worktree remove --force
+.claude/skills/ms-bead-cycle/SKILL.md	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
+.claude/skills/ms-bead-cycle/SKILL.md	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).	1	git merge
+.claude/skills/ms-impl-approve/SKILL.md	Disclosed residual: a bead branch already raw-`git merge`d and then	1	git merge
+agentsMDBlockTemplate	- **Never merge a bead branch with raw `git merge bead/<id>`** — only `mindspec complete` merges. Raw merge bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on automatic merge commits, so raw merge is the obvious gate workaround).	1	git merge
+claudeMDManagedBlock	See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestrator rules and subagent prompt fences (only the cycle runs `mindspec complete`, after the panel gate passes; never raw `git merge bead/<id>`; one `git push` at end-of-spec; subagents make exactly one commit, tests must PASS). Surviving skills reference that section rather than re-stating it.	1	git merge
+ms-bead-cycle	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
+ms-bead-cycle	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).	1	git merge
+ms-impl-approve	bead branch already raw-`git merge`d and then `bd close`d,	1	git merge
+plugins/mindspec/skills/ms-bead-cycle/SKILL.md	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
+plugins/mindspec/skills/ms-bead-cycle/SKILL.md	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).	1	git merge
