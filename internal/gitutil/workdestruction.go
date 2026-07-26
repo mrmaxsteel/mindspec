@@ -13,14 +13,22 @@
 // ADR-0030 boundary separately bans internal/gitutil and os/exec from the
 // enforcement packages (internal/{validate,approve,complete,state,phase}),
 // so the verb layer cannot call this predicate directly either — it rides
-// the thin wrapper internal/lifecycle/gitquery.go declares as a
-// package-level `var`, not a `func`, precisely so a pointer-equality test
-// can pin wrapper ≡ implementation (see gitquery_test.go). gitutil already
-// hosts every decision primitive this predicate composes
-// (NetEffectLanded, ContentSubsumedOutcome, IsAncestor,
-// PreviewDeletedPaths) and imports only guard/termsafe/containment — no
-// cycle. The closed outcome enum itself stays in internal/guard (already a
-// direct import of both executor and lifecycle, and of gitutil).
+// the thin wrapper internal/lifecycle/gitquery.go declares as an
+// immutable `func` over an unexported package-level `var` seam, not an
+// exported mutable `var` itself (spec 127 bead-1 fix round, G1-2 — this
+// package doc comment previously said the opposite and was stale from
+// before that fix; see gitquery.go's own doc comment for why the
+// exported-var shape was withdrawn), so no consumer package can
+// substitute a divergent implementation, and a pointer-equality test
+// pins the in-package seam ≡ implementation (see gitquery_test.go).
+// gitutil already hosts every decision primitive this predicate composes
+// (NetEffectLanded, IsAncestor, PreviewDeletedPaths — ContentSubsumedOutcome
+// is no longer one of them: spec 127 bead-1 fix round deleted this
+// predicate's only call to it along with the targetConflict short-circuit;
+// see EvaluateWorkDestruction's own doc comment, step 2) and imports only
+// guard/termsafe/containment — no cycle. The closed outcome enum itself
+// stays in internal/guard (already a direct import of both executor and
+// lifecycle, and of gitutil).
 //
 // The stale-deletion discriminator, corrected (plan-approve ruling, spec
 // amended c43e3c93): a computed merge-base is itself forged by branch
@@ -28,27 +36,59 @@
 // old tree, `merge-base(branch, target)` trivially resolves to target's
 // tip, so the reverting commit reads as authoring its own deletions under
 // any definition grounded in that range. Authorship is grounded instead in
-// the branch's OWN novel contribution: strip the paths the branch adds OR
-// edits (in place, including a mode-only change — spec 127 bead-1 fix
-// round, O1-4/O2-4: an ADD-only novelPaths misses the common case of a
-// recreation whose novel work also touches an existing tracked path)
-// relative to the target from the branch's tip tree; if the stripped tree
-// exactly matches the tree of some commit in the target's own history —
-// itself similarly stripped of the SAME edited paths, so a candidate
-// ancestor's own (different) content there never blocks the match — the
-// branch, net of its own novel work, reconstructs a prior state of the
-// target, and its preview-deletions are staleness artifacts, not authored
-// changes. See snapshotRevertMatch below for the mechanics, and
-// workdestruction_test.go for the probed fixtures (single- and
-// multi-commit recreation, the #218 shape routed to DestructionSuperseded
-// instead, the AC-8(ii)/(iii) boundary shapes, the conservative corner
-// where a cleanup's deletions exactly equal a whole ancestor delta, and
-// the modified-novel-work recreation now caught by the same leg). A
-// recreation whose OWN novel contribution is a rename/copy of a
-// target-present path is still a stated, fixtured miss (see novelPaths'
-// doc comment) — the strip mechanic would need to relocate content back
-// to the path's ORIGINAL location, not merely mask it, and that is
+// the branch's OWN novel contribution: strip the paths the branch ADDS
+// (only — spec 127 bead-1 fix round 2, ruling 2: a round-1 fix briefly
+// also stripped/masked paths the branch EDITS in place, to cover the
+// common case of a recreation whose novel work also touches an existing
+// tracked path (O1-4/O2-4), but masking those paths out of candidate
+// ancestors too made the comparison strictly weaker than tree equality —
+// the more a branch touched, the more ancestors could match it — and it
+// newly misclassified honest branches as destructive (O1c-B/NEW-O2-b).
+// Reverted; see snapshotRevertMatch's doc comment for the mechanism and
+// the invariant that ruled it out) relative to the target from the
+// branch's tip tree; if the stripped tree exactly matches the tree of
+// some commit in target's own history — "target's own history" meaning
+// every commit `git rev-list target` reaches, including through a merged
+// side branch, not only target's first-parent lineage (spec 127 bead-1
+// fix round, O1-6): a match against such a commit is target having
+// carried that tree at SOME point, even if not on its direct mainline, so
+// the branch — net of its own authored additions — reconstructs a prior
+// state of the target, and its preview-deletions are staleness
+// artifacts, not authored changes. This widens the corner's false-refusal
+// surface slightly (a merged side branch's own tree, never target's
+// first-parent tip, can still trigger a match) but never its miss
+// surface, and stays fail-closed in the same direction as the
+// conservative corner below. See
+// snapshotRevertMatch below for the mechanics, and workdestruction_test.go
+// for the probed fixtures (single- and multi-commit recreation, the #218
+// shape routed to DestructionSuperseded instead, the AC-8(ii)/(iii)
+// boundary shapes, and the conservative corner where a cleanup's
+// deletions exactly equal a whole ancestor delta). A recreation whose OWN
+// novel contribution is a rename/copy of a target-present path, an
+// in-place edit (content or mode-only) of one, or a TYPE change to one
+// (spec 127 bead-1 fix round 2, G1-N1) is a stated, fixtured miss (see
+// novelPaths' and diffNameStatusBuckets' doc comments) — each would
+// require either relocating content back to its original path, or
+// re-admitting the over-match masking ruling 2 rolled back, and both are
 // deliberately out of scope for this bead.
+//
+// A third stated limitation (spec 127 bead-1 fix round 2, O3-2): when the
+// candidate merge conflicts ON the very path the recreation reverts (a
+// modify/delete conflict), git's merge resolution KEEPS the modified
+// side rather than deleting it, so PreviewDeletedPaths' D-set is EMPTY
+// and step 3 returns DestructionClean before the snapshot-revert scan
+// ever runs — even though the branch's snapshot-revert signature would
+// otherwise be positive. This is git-state-INDISTINGUISHABLE from an
+// honest stale branch whose merge happens to conflict (both shapes:
+// empty D-set, positive signature — removing the D-set gate to reach the
+// signature unconditionally was tried and REJECTED, having been shown to
+// flip two must-be-Clean rows, HonestStaleBranch and
+// ModifyDeleteConflictIsClean, to StaleDeletion), so this is a
+// documentation-completeness gap, not a closable fail-open: the real
+// merge attempt still stops the operator on the conflict; hand-resolving
+// toward the deletion afterward is unguarded. See
+// StatedLimit_ConflictOnRevertedPathScreensNothing in
+// workdestruction_test.go.
 //
 // Two whole-repository preconditions make EVERY evaluation return
 // DestructionEvidenceError, fail-closed rather than silently wrong (spec
@@ -63,19 +103,23 @@ package gitutil
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
-// errTruncatedHistory is findAncestorWithTree's sentinel for a shallow or
-// otherwise truncated target history (spec 127 bead-1 fix round, O1-3): on
-// a depth-limited clone, `git rev-list target` silently stops at the
-// graft boundary, so "no matching ancestor found" is not a legitimate
-// answer — it is an artifact of history that was never fully available to
-// scan. Wrapped, never returned bare, so callers can still see the
-// underlying probe's own error text.
+// errTruncatedHistory is findAncestorWithTree's sentinel for a target
+// history rev-list cannot fully see, via any of THREE independent git
+// mechanisms (spec 127 bead-1 fix round, O1-3; fix round 2 added the
+// latter two): a depth-limited shallow clone, a refs/replace/* replace
+// ref, or a legacy .git/info/grafts file. In every case "no matching
+// ancestor found" is not a legitimate answer — it is an artifact of
+// history that was never fully available to scan. Wrapped, never
+// returned bare, so callers can still see the underlying probe's own
+// error text (and which of the three mechanisms triggered it).
 var errTruncatedHistory = errors.New("target's history is shallow/truncated: an ancestor scan cannot certify the absence of a match")
 
 // WorkDestructionEvidence carries the facts EvaluateWorkDestruction
@@ -87,7 +131,15 @@ type WorkDestructionEvidence struct {
 	MergeBase string
 	// AncestorOf names the ref (target or "main") the branch was found to
 	// be an already-merged ancestor of. Populated only for
-	// DestructionAncestor.
+	// DestructionAncestor. LOAD-BEARING for a consumer's disposition, not
+	// merely diagnostic (spec 127 bead-1 fix round, O1-5): only
+	// AncestorOf == target is a true no-op (nothing to merge into target).
+	// AncestorOf == "main" (target itself not yet an ancestor) is NOT a
+	// no-op — merging branch into target is still a real, tree-changing
+	// merge — so a consumer that skips the merge on DestructionAncestor
+	// without checking this field against target risks silently dropping
+	// that branch's work. See guard.DestructionOutcome's doc comment for
+	// the full rationale.
 	AncestorOf string
 	// SupersededVia names the ref (target or "main") NetEffectLanded found
 	// the branch's content already landed against. Populated only for
@@ -137,6 +189,8 @@ var workDestructionNovelPathsFn = novelPaths
 var workDestructionStripPathsFn = stripNovelPaths
 var workDestructionFindAncestorTreeFn = findAncestorWithTree
 var workDestructionIsShallowFn = isShallowRepo
+var workDestructionHasReplaceRefsFn = hasReplaceRefs
+var workDestructionHasGraftsFileFn = hasGraftsFile
 
 // ancestryTargets returns the refs EvaluateWorkDestruction checks a
 // candidate branch against for ancestry and supersession, in order:
@@ -158,9 +212,15 @@ func ancestryTargets(target string) []string {
 // (internal/complete, internal/approve) refuses on
 // DestructionSuperseded/DestructionStaleDeletion and fails closed
 // (retryable, override available) on DestructionEvidenceError, while
-// DestructionAncestor proceeds as a no-op (the documented post-conflict
-// recovery flow's convergence depends on it); the direct spec→main
-// producer applies the identical table.
+// DestructionAncestor proceeds as a no-op ONLY when evidence.AncestorOf
+// == target (spec 127 bead-1 fix round, O1-5 — this comment previously
+// stated the no-op disposition flatly, with no caveat, contradicting
+// guard.DestructionOutcome's own doc comment; see WorkDestructionEvidence
+// .AncestorOf's doc comment for why the two sub-cases are not
+// interchangeable): the documented post-conflict recovery flow's
+// convergence depends on the target-ancestor case specifically, not on
+// DestructionAncestor as a whole. The direct spec→main producer applies
+// the identical table, with the identical caveat.
 //
 // Evaluation order, read-only throughout (mutates no refs, index, or
 // worktree — every underlying primitive shares that discipline):
@@ -276,24 +336,44 @@ func EvaluateWorkDestruction(workdir, branch, target string) (guard.DestructionO
 // therefore a staleness artifact of that reconstruction, not authored
 // work.
 func snapshotRevertMatch(workdir, branch, target string) (matched bool, ancestorSHA string, err error) {
-	added, modified, err := workDestructionNovelPathsFn(workdir, target, branch)
+	added, _, err := workDestructionNovelPathsFn(workdir, target, branch)
 	if err != nil {
 		return false, "", fmt.Errorf("finding %s's novel paths relative to %s: %w", branch, target, err)
 	}
-	strip := make([]string, 0, len(added)+len(modified))
-	strip = append(strip, added...)
-	strip = append(strip, modified...)
-	strippedTree, err := workDestructionStripPathsFn(workdir, branch, strip)
+	strippedTree, err := workDestructionStripPathsFn(workdir, branch, added)
 	if err != nil {
 		return false, "", fmt.Errorf("stripping %s's novel paths from its tip tree: %w", branch, err)
 	}
-	// modified is passed through as the ancestor-side mask: an ancestor's
-	// OWN (necessarily different, since it predates the edit) content at
-	// an edited-in-place path must never block the match — only added
-	// paths need no such mask, since they are by definition absent at
-	// target's tip and are not expected to reappear stripped-for-stripped
-	// at an OLDER ancestor either (spec 127 bead-1 fix round, O1-4/O2-4).
-	sha, err := workDestructionFindAncestorTreeFn(workdir, target, strippedTree, modified)
+	// No ancestor-side mask (spec 127 bead-1 fix round 2, ruling 2 —
+	// O1c-B/NEW-O2-b, a mirror-image failure AND a behavior regression
+	// from this bead's original delivery): the fix round briefly passed
+	// novelPaths' MODIFIED bucket through here as findAncestorWithTree's
+	// maskPaths, so an ancestor's own content at a branch-edited path
+	// would never block the match. That made the comparison strictly
+	// WEAKER than tree equality — the more paths a branch touched, the
+	// more ancestors could match it — and it newly misclassified HONEST
+	// branches (cut from target's own current tip, deleting a
+	// recently-added file, editing one unrelated tracked path — an
+	// everyday bead shape) as DestructionStaleDeletion. The invariant
+	// this leg must hold is that the comparison never gets WEAKER as a
+	// branch touches more paths; no discriminator was found that keeps
+	// that invariant while also matching a branch whose own novel
+	// contribution edits a path in place, so this reverts to
+	// added-paths-only masking (nil here), matching this bead's original
+	// delivery. A recreation whose OWN novel contribution edits an
+	// existing tracked path (content or mode-only), or changes an
+	// existing path's TYPE (spec 127 bead-1 fix round 2, G1-N1 — see
+	// diffNameStatusBuckets' doc comment), is therefore again a STATED,
+	// fixtured miss — see StatedLimit_ModifiedNovelWorkIsMissed,
+	// StatedLimit_ModeOnlyNovelWorkIsMissed, and
+	// StatedLimit_TypeChangeOfNovelWorkIsMissed in
+	// workdestruction_test.go — the same disposition, and for the same
+	// reason, as the pre-existing rename miss just below. Between a
+	// smaller number of destructive recreations going undetected (bounded
+	// by the D-set/evidence-error legs upstream and by the real merge
+	// attempt's own conflict surfacing) and a false refusal of honest
+	// work, this leg accepts the former.
+	sha, err := workDestructionFindAncestorTreeFn(workdir, target, strippedTree, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("scanning %s's history for a reconstructed ancestor tree: %w", target, err)
 	}
@@ -301,23 +381,35 @@ func snapshotRevertMatch(workdir, branch, target string) (matched bool, ancestor
 }
 
 // novelPaths returns the paths branch's own novel contribution touches
-// relative to target's tip: added (A-status) and modified-in-place
-// (M-status, which also carries a pure mode-only change — git's plumbing
-// does not distinguish the two) `git diff --name-status --find-renames
-// target branch` buckets.
+// relative to target's tip: added (A-status), from `git diff
+// --name-status --find-renames target branch`, and — informationally
+// only, see below — modified-in-place (M-status, which also carries a
+// pure mode-only change — git's plumbing does not distinguish the two).
 //
-// Renamed/copied content (R/C) is deliberately excluded from BOTH buckets
-// and stays a stated, fixtured miss (spec 127 bead-1 fix round, O2-4):
-// unlike an added or edited-in-place path, reconstructing "this path's
+// ONLY added is used by snapshotRevertMatch's strip/mask (spec 127
+// bead-1 fix round 2, ruling 2 rollback of O1-4/O2-4's brief M-status
+// masking — see snapshotRevertMatch's doc comment for the over-match
+// failure that caused the rollback). modified is still returned — every
+// caller that wants to name the stated miss precisely (or a future
+// caller that finds a mask-invariant-preserving use for it) can — but as
+// of this fix round its only actual caller discards it.
+//
+// Renamed/copied content (R/C) and type-changed content (T — spec 127
+// bead-1 fix round 2, G1-N1) are deliberately excluded from BOTH buckets
+// and stay stated, fixtured misses (spec 127 bead-1 fix round, O2-4; fix
+// round 2, G1-N1): unlike an added path, reconstructing "this path's
 // prior state" for a rename would require RELOCATING content back to its
 // original path in the strip mechanic (stripNovelPaths removes/masks a
-// path in place; it does not move content between paths), which is a
-// materially different — and materially riskier — mechanic than the
-// mask-in-place trick modified paths use. Given the choice between
-// shipping that additional mechanic unreviewed in this bead or naming the
-// miss precisely and fixturing it (see
-// StatedLimit_RenameOfNovelWorkIsMissed in workdestruction_test.go), this
-// bead takes the latter.
+// path in place; it does not move content between paths); a modified-
+// in-place or type-changed path COULD be masked the same way M-status
+// paths briefly were, but doing so reopens the exact over-match failure
+// ruling 2 rolled back. Given the choice between shipping either
+// mechanic unreviewed in this bead or naming the miss precisely and
+// fixturing it (see StatedLimit_RenameOfNovelWorkIsMissed,
+// StatedLimit_ModifiedNovelWorkIsMissed,
+// StatedLimit_ModeOnlyNovelWorkIsMissed, and
+// StatedLimit_TypeChangeOfNovelWorkIsMissed in workdestruction_test.go),
+// this bead takes the latter for all four.
 func novelPaths(workdir, target, branch string) (added, modified []string, err error) {
 	added, _, modified, err = diffNameStatusBucketsFn(workdir, target, branch)
 	return added, modified, err
@@ -355,22 +447,38 @@ func tempIndexPath() (string, error) {
 // tree OID unchanged when strip is empty (no-op). Despite the name (kept
 // for the snapshotRevertMatch/novelPaths call site, its primary caller),
 // ref need not be branch: findAncestorWithTree also calls this with a
-// candidate ANCESTOR commit-ish, to mask the same edited-in-place paths
-// out of a candidate's tree before comparing (spec 127 bead-1 fix round,
-// O1-4/O2-4).
+// candidate ANCESTOR commit-ish, to mask paths out of a candidate's tree
+// before comparing when its own maskPaths argument is non-empty — as of
+// spec 127 bead-1 fix round 2 (ruling 2), findAncestorWithTree's only
+// caller always passes an empty maskPaths, so this second call site is
+// presently exercised only with strip==nil (a no-op tree-OID lookup); see
+// findAncestorWithTree's doc comment for why.
 //
-// Hardened (spec 127 bead-1 fix round, S1-2): `git update-index
+// Defense-in-depth verification, corrected doc claim (spec 127 bead-1 fix
+// round, S1-2; corrected fix round 2, O1c-C): `git update-index
 // --force-remove -- <path>` exits 0 SILENTLY when path is not present in
 // the index at all — upstream git behavior, not a bug this function
-// introduces, but it means a future path-identity mismatch between the
-// caller's `strip` list and the temp index's real contents (S1-1's
-// concrete instance was one such mismatch; there could be others) would
-// silently no-op the strip with no test failing unless a specific
-// regression fixture happens to still be in place. After write-tree,
-// verify via `git ls-tree -z` (NUL-delimited, unquoted — the same
-// quoting-proof discipline as diffNameStatusBuckets) that none of the
-// intended-to-strip paths survive in the resulting tree, and fail loudly,
-// naming the mismatch, if any do.
+// introduces. After write-tree, this verifies via `git ls-tree -z`
+// (NUL-delimited, unquoted — the same quoting-proof discipline as
+// diffNameStatusBuckets) that none of the intended-to-strip paths survive
+// in the resulting tree, and fails loudly, naming the mismatch, if any
+// do. Fix round 2 found that this check CANNOT actually detect the class
+// its prior doc comment promised ("a future path-identity mismatch
+// between the caller's `strip` list and the temp index's real contents
+// ... would silently no-op the strip with no test failing"): a mismatch
+// (the caller's spelling not present in the index to begin with) and a
+// genuinely successful removal are OBSERVATIONALLY IDENTICAL by this
+// check — both leave the path absent from `survivors` — so no real
+// mismatch input can ever make it fire; O1c-C could construct none. It
+// DOES fire under a direct execCommand-seam injection that fabricates a
+// stripNovelPaths implementation which fails to remove a path it claims
+// to have removed (S1's confirmation) — forcible via a seam is not the
+// same as reachable by real input, and this is kept as exactly that:
+// defense-in-depth against a future regression in THIS function's own
+// read-tree/update-index/write-tree sequence, not a guard against a
+// caller/index spelling mismatch. A genuine mismatch must instead be
+// caught by verifying PRESENCE before removal, which this function does
+// not currently do.
 func stripNovelPaths(workdir, ref string, strip []string) (treeOID string, err error) {
 	if err := rejectOptionLike(ref); err != nil {
 		return "", err
@@ -460,20 +568,92 @@ func isShallowRepo(workdir string) (bool, error) {
 	return strings.TrimSpace(string(out)) == "true", nil
 }
 
+// hasReplaceRefs reports whether workdir has any refs/replace/* refs
+// (`git for-each-ref refs/replace/`) — spec 127 bead-1 fix round 2,
+// O1-3: a replace ref silently substitutes a DIFFERENT commit (and its
+// entire ancestry) wherever git would otherwise read the original,
+// truncating rev-list's view of target's real history exactly like a
+// shallow clone does — but WITHOUT --is-shallow-repository ever
+// reporting true. Verified: `git replace --graft <sha> <parent>` on an
+// otherwise-full clone makes `rev-list target` count drop while
+// is-shallow-repository stays false, and findAncestorWithTree's scan
+// (which relied on isShallowRepo alone) read the resulting "no match in
+// the (replaced) history I could see" as the definite DestructionClean
+// answer on a fixture that classifies DestructionStaleDeletion on the
+// same repo with the replace ref removed. `--no-replace-objects` would
+// make the scan see past this specific mechanism, but there is no
+// equivalent flag for the grafts file below, so detect-and-fail-closed
+// (this function, plus hasGraftsFile) is the single mechanic that covers
+// both truncation vectors the same way.
+func hasReplaceRefs(workdir string) (bool, error) {
+	cmd := execCommand("git", gitArgs(workdir, "for-each-ref", "refs/replace/")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("for-each-ref refs/replace/: %w", err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// hasGraftsFile reports whether workdir's repository has a legacy
+// `.git/info/grafts` file — spec 127 bead-1 fix round 2, O1-3: like a
+// replace ref, a graft silently rewrites a commit's reported parents (and
+// therefore rev-list's reachability from target), without
+// --is-shallow-repository ever reporting true. Resolved via `git
+// rev-parse --git-path info/grafts` rather than a hardcoded
+// `<workdir>/.git/info/grafts` join, so this also works inside a linked
+// worktree (whose `.git` is a file, not a directory, and whose
+// `info/grafts` lives under the MAIN repository's common dir, not the
+// worktree's own).
+func hasGraftsFile(workdir string) (bool, error) {
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--git-path", "info/grafts")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("rev-parse --git-path info/grafts: %w", err)
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workdir, path)
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat %s: %w", path, statErr)
+	}
+	return !info.IsDir(), nil
+}
+
 // findAncestorWithTree scans target's own history (`git rev-list
 // --format='%H %T' target`) for a commit whose tree OID — or, when
 // maskPaths is non-empty, whose tree OID once maskPaths is ALSO stripped
-// from it via stripNovelPaths (spec 127 bead-1 fix round, O1-4/O2-4: an
-// ancestor's own, necessarily different, content at a path branch edited
-// in place must never block the match) — equals wantTree, returning its
-// SHA; or ("", nil) when no such commit exists (not an error: "no match"
-// is a legitimate, common answer). Before scanning, checks that target's
-// history is not shallow/truncated (isShallowRepo) — see
-// errTruncatedHistory's doc comment. `git rev-list --format=` (unlike
+// from it via stripNovelPaths — equals wantTree, returning its SHA; or
+// ("", nil) when no such commit exists (not an error: "no match" is a
+// legitimate, common answer). Before scanning, checks that target's
+// history is not truncated by any of THREE independent mechanisms — a
+// shallow clone (isShallowRepo), a replace ref (hasReplaceRefs), or a
+// legacy grafts file (hasGraftsFile), each wrapping errTruncatedHistory
+// (spec 127 bead-1 fix round 2, O1-3: the round-1 fix caught only the
+// shallow-clone case; replace refs and grafts fail open the SAME way —
+// Clean, no error, D-set fully enumerated — via the other two mechanisms
+// git offers for the identical effect, "rev-list sees less history than
+// actually exists") — see errTruncatedHistory's doc comment. `git rev-list --format=` (unlike
 // `git log --format=`) precedes each formatted line with a "commit <sha>"
 // header line; those are skipped by rejecting any line whose first field
 // is the literal string "commit" (a real "%H %T" data line's first field
 // is always a 40-or-64-hex OID, never that literal).
+//
+// maskPaths is a general mechanic — mask ANY set of paths out of a
+// candidate's tree before comparing — kept generic and exported to this
+// file's tests rather than hardcoded to always-empty, but as of spec 127
+// bead-1 fix round 2 (ruling 2) its ONLY caller (snapshotRevertMatch)
+// always passes nil: masking a branch's edited-in-place paths out of
+// every candidate here is exactly the mechanism that made the
+// snapshot-revert comparison weaker than tree equality and misclassified
+// honest branches (O1c-B/NEW-O2-b). A future caller that finds a
+// different, narrower use for masking here — one that does not weaken as
+// more paths are masked — is not precluded by this function; the
+// invariant to preserve is snapshotRevertMatch's, not this function's own.
 func findAncestorWithTree(workdir, target, wantTree string, maskPaths []string) (sha string, err error) {
 	if err := rejectOptionLike(target); err != nil {
 		return "", err
@@ -485,6 +665,20 @@ func findAncestorWithTree(workdir, target, wantTree string, maskPaths []string) 
 	}
 	if shallow {
 		return "", fmt.Errorf("%s: %w", target, errTruncatedHistory)
+	}
+	hasReplace, err := workDestructionHasReplaceRefsFn(workdir)
+	if err != nil {
+		return "", fmt.Errorf("checking %s's history for replace-ref truncation: %w", target, err)
+	}
+	if hasReplace {
+		return "", fmt.Errorf("%s: refs/replace/* present: %w", target, errTruncatedHistory)
+	}
+	hasGrafts, err := workDestructionHasGraftsFileFn(workdir)
+	if err != nil {
+		return "", fmt.Errorf("checking %s's history for grafts truncation: %w", target, err)
+	}
+	if hasGrafts {
+		return "", fmt.Errorf("%s: info/grafts present: %w", target, errTruncatedHistory)
 	}
 
 	cmd := execCommand("git", gitArgs(workdir, "rev-list", "--format=%H %T", target)...)

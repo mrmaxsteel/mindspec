@@ -554,6 +554,26 @@ var diffNameStatusBucketsFn = diffNameStatusBuckets
 // Parsing therefore walks fixed-width NUL-delimited records rather than
 // splitting a line on '\t'/'\n', so a literal tab or newline BYTE inside
 // a path can never be misread as a field or record boundary.
+//
+// Every status letter git can emit here is classified below WITH A
+// WRITTEN REASON (spec 127 bead-1 fix round 2, G1-N1's ruling): the prior
+// shape of this switch had a bare `default` arm that silently treated any
+// status this file's authors had not enumerated — T (typechange) among
+// them — as "none of the three buckets", identically to the deliberate
+// R/C exclusion, with no record that a decision had even been made. That
+// is the fail-open shape this predicate exists to eliminate everywhere
+// else, reappearing here: a caller (novelPaths, in workdestruction.go)
+// that trusted "not added, not deleted, not modified" to mean "untouched"
+// was wrong for T, and would be wrong again for the next status letter a
+// future git version introduces. Known statuses are each named with a
+// reason (T joins R/C's exclusion, not A/D/M's buckets — see the case
+// below); anything this switch has NOT been taught — including U
+// (unmerged, which should never appear when diffing two commit-ish/
+// tree-ish arguments, since both `from` and `to` here are never the
+// index or working tree) and X (git's own admission that it could not
+// classify the change) — fails CLOSED with an error instead of falling
+// through. novelPaths' caller (EvaluateWorkDestruction) turns that error
+// into DestructionEvidenceError, never a guessed outcome.
 func diffNameStatusBuckets(workdir, from, to string) (added, deleted, modified []string, err error) {
 	if err := rejectOptionLike(from); err != nil {
 		return nil, nil, nil, err
@@ -605,13 +625,54 @@ func diffNameStatusBuckets(workdir, from, to string) (added, deleted, modified [
 			}
 			modified = append(modified, fields[i+1])
 			i += 2
-		default:
-			// Any other single-path status (e.g. "T" typechange, "U"
-			// unmerged): none of the three buckets.
+		case 'T':
+			// Type change (spec 127 bead-1 fix round 2, G1-N1): the path
+			// is present, under the SAME name, at both `from` and `to` —
+			// only its KIND changed (e.g. regular file <-> symlink, or
+			// file <-> gitlink), not merely its content. Structurally a
+			// single-path record, exactly like A/D/M. Deliberately
+			// excluded from all three buckets, for the SAME reason R/C
+			// is: this file's only caller that consumes the added/
+			// modified buckets for anything beyond evidence
+			// (novelPaths, in workdestruction.go) uses them to strip/
+			// mask a branch's own novel work out of a tree-equality
+			// comparison, and spec 127 bead-1 fix round 2 (ruling 2,
+			// O1c-B/NEW-O2-b) found that masking a path out of BOTH
+			// sides of that comparison makes it a wildcard — the more
+			// paths get masked, the WEAKER the comparison, to the point
+			// of misclassifying honest branches as destructive. Folding
+			// T into the modified bucket would reopen that exact
+			// over-match risk one status letter later. So T stays a
+			// stated, fixtured miss (see
+			// StatedLimit_TypeChangeOfNovelWorkIsMissed in
+			// workdestruction_test.go) — named on purpose, unlike the
+			// silent `default` this case replaces.
 			if i+1 >= len(fields) {
-				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated record %q", from, to, status)
+				return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: truncated type-change record", from, to)
 			}
 			i += 2
+		case 'U', 'X':
+			// Unmerged (U) and unknown (X) (spec 127 bead-1 fix round 2,
+			// G1-N1's ruling): neither has a bucket this predicate can
+			// place it in with a stated reason — U marks an index/
+			// working-tree conflict this predicate never diffs against,
+			// and X is git's own admission that it could not classify
+			// the change — so both fail CLOSED rather than silently
+			// landing in "none of the three buckets" the way the T-status
+			// hole did before this fix.
+			return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: unhandled diff status %q (git reported a change this predicate does not classify as added, deleted, or modified — failing closed rather than silently excluding it)", from, to, status)
+		default:
+			// Any status letter this switch has not been taught — a
+			// future git version, or a code this fix's authors did not
+			// anticipate — fails closed for the identical reason (spec
+			// 127 bead-1 fix round 2, G1-N1's ruling: "any diff status
+			// not explicitly classified with a written reason must fail
+			// CLOSED"). This inverts the prior default, which silently
+			// treated every unrecognized status — including T, the
+			// concrete hole G1-N1 found — as "none of the three
+			// buckets" with no record that a decision had even been
+			// made.
+			return nil, nil, nil, fmt.Errorf("diff --name-status -z %s %s: unrecognized diff status %q", from, to, status)
 		}
 	}
 	return added, deleted, modified, nil

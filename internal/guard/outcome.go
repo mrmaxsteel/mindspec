@@ -35,7 +35,11 @@ package guard
 //     in the target that the branch never carried as its own authored
 //     work — net of the branch's own novel contribution, its tree
 //     reconstructs a prior state of the target, so the deletions are
-//     staleness artifacts, not authored changes.
+//     staleness artifacts, not authored changes. "A prior state of the
+//     target" means any commit reachable in target's history (spec 127
+//     bead-1 fix round, O1-6), including one reachable only through a
+//     merged side branch, not only target's first-parent lineage — see
+//     internal/gitutil's package doc comment for the tradeoff that widens.
 //   - DestructionClean: none of the above — an ordinary merge, including
 //     one whose own content genuinely conflicts (a real conflict is
 //     handled by the merge attempt itself, not by this predicate).

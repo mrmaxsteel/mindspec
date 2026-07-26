@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -833,3 +834,93 @@ func TestPreviewDeletedPaths_MutatesNothing(t *testing.T) {
 		t.Errorf("worktree/index status changed:\nbefore: %q\nafter:  %q", statusBefore, statusAfter)
 	}
 }
+
+// --- spec 127 bead-1 fix round 2, G1-N1's ruling: diffNameStatusBuckets'
+// per-status classification -------------------------------------------------
+
+// TestDiffNameStatusBuckets_TypeChangeExcludedFromAllThreeBuckets is the
+// real-git behavioral half of G1-N1's fix: a T-status (typechange) path
+// — a target-present regular file turned into a symlink — must be
+// classified with a WRITTEN reason (excluded, same as R/C) rather than
+// silently falling through an unnamed default, and it must not appear in
+// added, deleted, or modified.
+func TestDiffNameStatusBuckets_TypeChangeExcludedFromAllThreeBuckets(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "kind.txt", "a regular file\n")
+	neWriteFile(t, dir, "untouched.txt", "untouched\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neRunGit(t, dir, "checkout", "-b", "typechange")
+	if err := os.Remove(filepath.Join(dir, "kind.txt")); err != nil {
+		t.Fatalf("remove kind.txt: %v", err)
+	}
+	if err := os.Symlink("untouched.txt", filepath.Join(dir, "kind.txt")); err != nil {
+		t.Fatalf("symlink kind.txt: %v", err)
+	}
+	neRunGit(t, dir, "add", "kind.txt")
+	neRunGit(t, dir, "commit", "-m", "kind.txt: regular file -> symlink")
+	neRunGit(t, dir, "checkout", "main")
+
+	statusOut := neRunGit(t, dir, "diff", "--name-status", "--find-renames", "main", "typechange", "--", "kind.txt")
+	if !strings.HasPrefix(strings.TrimSpace(statusOut), "T") {
+		t.Fatalf("fixture invariant broken: expected a T-status record for kind.txt, got %q", statusOut)
+	}
+
+	added, deleted, modified, err := diffNameStatusBuckets(dir, "main", "typechange")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, bucket := range [][]string{added, deleted, modified} {
+		for _, p := range bucket {
+			if p == "kind.txt" {
+				t.Fatalf("kind.txt (a T-status typechange) must not appear in added=%v deleted=%v modified=%v", added, deleted, modified)
+			}
+		}
+	}
+}
+
+// TestDiffNameStatusBuckets_UnhandledStatusFailsClosed is G1-N1's ruling
+// applied to statuses this predicate has never seen and never will
+// safely guess about: U (unmerged) and X (unknown), plus a hypothetical
+// future letter ("Z") no version of git emits today. Real git never
+// emits these for a commit-ish-to-commit-ish diff, so the seam is
+// exercised directly rather than via a real-git fixture — but the
+// SHAPE (a status this switch has not classified with a written reason)
+// is exactly what the round-1 fix's bare `default` arm let through
+// silently for T; this pins the INVERTED default (fail closed with an
+// error) for anything this switch does not explicitly recognize.
+func TestDiffNameStatusBuckets_UnhandledStatusFailsClosed(t *testing.T) {
+	for _, status := range []string{"U", "X", "Z"} {
+		t.Run(status, func(t *testing.T) {
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				// The format STRING itself (single-quoted, so the shell
+				// passes it to printf verbatim) contains the literal
+				// text `\000` — printf's OWN escape interpretation turns
+				// that into a real NUL byte in its output; a NUL byte
+				// cannot survive as a literal byte inside a Go string
+				// handed to exec.Command's argv (execve truncates C
+				// strings at NUL), so it must be produced this way
+				// rather than embedded directly.
+				script := "printf '" + status + "\\000somefile.txt\\000'"
+				return exec.Command("/bin/sh", "-c", script)
+			}
+
+			added, deleted, modified, err := diffNameStatusBuckets(unhandledStatusTestWorkdir, "from", "to")
+			if err == nil {
+				t.Fatalf("expected a non-nil error for unhandled status %q, got added=%v deleted=%v modified=%v", status, added, deleted, modified)
+			}
+			if !strings.Contains(err.Error(), status) {
+				t.Errorf("expected the error to name the unhandled status %q, got: %v", status, err)
+			}
+		})
+	}
+}
+
+// unhandledStatusTestWorkdir is a placeholder workdir for
+// TestDiffNameStatusBuckets_UnhandledStatusFailsClosed's seam-injected
+// git calls, which never actually touch a real repository (execCommand
+// itself is stubbed) — any string works, but rejectOptionLike still runs
+// first, so it must not look option-like.
+const unhandledStatusTestWorkdir = "/tmp/mindspec-unhandled-status-test-workdir"

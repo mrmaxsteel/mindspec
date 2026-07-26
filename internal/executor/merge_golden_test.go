@@ -14,15 +14,22 @@ package executor
 // left nil — runs under GIT_CONFIG_GLOBAL=/dev/null + GIT_CONFIG_NOSYSTEM=1
 // (so a developer's global commit.gpgsign=true, or any other commit-
 // object-altering config, can never leak into the captured bytes), a
-// SCRUBBED set of Git plumbing/config environment inputs that can
-// override those two in-process (spec 127 bead-1 fix round, G1-4 — see
-// ac8iScrubEnv's doc comment), and a FIXED GIT_AUTHOR_*/GIT_COMMITTER_*
-// identity and date. With tree content, parents, message, identity, and
-// date all pinned, the resulting merge commit's SHA is a pure function of
-// this file's fixture — reproducible byte-for-byte on any machine, not
-// merely structurally similar. The fixture root (a t.TempDir() path,
-// different every run) is templated out of the captured transcript
-// before comparison.
+// SCRUBBED set of Git plumbing/config/template environment inputs that
+// can override those two in-process (spec 127 bead-1 fix round, G1-4;
+// fix round 2, O3c-1/G1-4 added GIT_TEMPLATE_DIR and GIT_DEFAULT_HASH —
+// see buildAC8iDeterministicEnv's doc comment), an explicit
+// --object-format=sha1 on the fixture's own `git init` (so the OID width
+// itself cannot vary), and a FIXED GIT_AUTHOR_*/GIT_COMMITTER_* identity
+// and date. With tree content, parents, message, identity, date, and
+// object format all pinned, the resulting merge commit's SHA is a pure
+// function of this file's fixture — reproducible byte-for-byte across
+// every hostile-env vector this bead has found and fixtured (see
+// TestAC8i_OrdinaryMergeGolden_HermeticAgainstHostileEnv), though
+// buildAC8iDeterministicEnv's own doc comment states the one residual
+// class this scrub-list approach cannot rule out by construction: a
+// future git env var this file's authors have not yet named. The fixture
+// root (a t.TempDir() path, different every run) is templated out of the
+// captured transcript before comparison.
 //
 // The capture (ac8iCapture) records the merge commit's OWN SHA
 // (MergeCommitSHA, %H) and its parent tips (ParentTips, %P) — not merely
@@ -156,12 +163,39 @@ func ac8iScrubEnv(t *testing.T, key string) {
 // GIT_CONFIG_COUNT plus every GIT_CONFIG_KEY_N/GIT_CONFIG_VALUE_N pair
 // are CLI-equivalent config injection (git's own `-c` mechanism, exposed
 // via env for exactly this kind of ambient-inheritance hazard).
+// GIT_TEMPLATE_DIR (spec 127 bead-1 fix round 2, O3c-1) is a THIRD config
+// tier neither GIT_CONFIG_GLOBAL=/dev/null nor GIT_CONFIG_NOSYSTEM=1 can
+// isolate: `git init` copies the template directory's `config` file into
+// the NEW repository's LOCAL config, which beats both of those defences
+// (verified: a template config setting commit.gpgsign=true made the
+// fixture's very first `git commit --allow-empty` fail with a GPG-signing
+// error, before CompleteBead ever ran).
+//
+// Each scrubbed/pinned name here is a DENY-LIST entry, not drawn from an
+// explicit allowlist (spec 127 bead-1 fix round 2, ruling 4/ruling 1's
+// same inversion principle applied here too) — this function has now
+// missed a distinct git config-injection vector on TWO separate
+// occasions (GIT_TEMPLATE_DIR here; GIT_DEFAULT_HASH below), which is
+// exactly the pattern ruling 1 named for diffNameStatusBuckets' status
+// switch. An allowlist-based child environment (keep a small known-good
+// set, scrub everything else by default) would exclude the NEXT unknown
+// git env var without this function's authors having to anticipate it by
+// name first; it is not attempted here because CompleteBead's own git
+// calls inherit the FULL test-process environment by design (internal/
+// gitutil's exec.Cmd.Env is left nil), so building a true allowlist would
+// mean reconstructing the test binary's entire ambient environment
+// (PATH, HOME/USERPROFILE, TMPDIR, locale, proxy/cert vars a CI runner's
+// git may need) rather than scrubbing a handful of named git-specific
+// variables — a materially larger, riskier change than this fix round's
+// scope. Left as a known, stated limitation rather than a silently
+// narrower deny-list.
 func buildAC8iDeterministicEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE",
 		"GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
 		"GIT_COMMON_DIR", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+		"GIT_TEMPLATE_DIR",
 	} {
 		ac8iScrubEnv(t, key)
 	}
@@ -180,6 +214,17 @@ func buildAC8iDeterministicEnv(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "mindspec-golden")
 	t.Setenv("GIT_COMMITTER_EMAIL", "golden@mindspec.test")
 	t.Setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00+00:00")
+	// GIT_DEFAULT_HASH (spec 127 bead-1 fix round 2, G1-4): a sha256-
+	// defaulting machine or ambient env changes every OID this fixture
+	// captures (MergeCommitSHA, ParentTips, ResultTreeOID all become
+	// 64-hex instead of 40-hex). Pinned here as defense-in-depth for any
+	// OTHER `git init` this fixture's dependency chain might one day
+	// call without an explicit --object-format; the load-bearing
+	// guarantee is buildAC8iOrdinaryMergeFixtureWithContent's own `git
+	// init --object-format=sha1` below, which overrides this env var
+	// (and any ambient init.defaultObjectFormat config) for THIS
+	// fixture's actual repository regardless.
+	t.Setenv("GIT_DEFAULT_HASH", "sha1")
 }
 
 // ac8iDefaultBeadContent is the golden's own bead-work content — pulled
@@ -210,7 +255,15 @@ func buildAC8iOrdinaryMergeFixtureWithContent(t *testing.T, beadContent string) 
 	buildAC8iDeterministicEnv(t)
 
 	dir := t.TempDir()
-	ac8iRunGit(t, dir, "init", "-q", "-b", "main")
+	// --object-format=sha1 (spec 127 bead-1 fix round 2, G1-4) is the
+	// LOAD-BEARING guarantee against a sha256-defaulting machine or
+	// ambient GIT_DEFAULT_HASH/init.defaultObjectFormat: it fixes THIS
+	// repository's object format at creation time regardless of the
+	// caller's environment or config, and every subsequent git command in
+	// this fixture (including CompleteBead's own) operates on this
+	// already-initialized repository, so it inherits sha1 from the repo
+	// itself — never re-derived from ambient env per-command.
+	ac8iRunGit(t, dir, "init", "-q", "-b", "main", "--object-format=sha1")
 	ac8iRunGit(t, dir, "commit", "--allow-empty", "-m", "root")
 
 	const specID = "999-ac8i-golden"
@@ -444,11 +497,27 @@ func TestAC8i_OrdinaryMergeGolden_DetectsContentDrift(t *testing.T) {
 // buildAC8iDeterministicEnv now scrubs both classes before either the
 // fixture's own git commands or CompleteBead's inherited-env production
 // calls run.
+//
+// Extended (spec 127 bead-1 fix round 2, G1-4/O3c-1's own hostile-env
+// legs, added to the SAME test rather than duplicated so all four hostile
+// vectors are asserted against one shared replay): a hostile
+// GIT_DEFAULT_HASH=sha256 (would otherwise make every OID this fixture
+// captures 64-hex instead of 40-hex) and a hostile GIT_TEMPLATE_DIR
+// pointing at a template whose `config` sets commit.gpgsign=true (O3c-1's
+// verified vector — it defeats the fixture at its very FIRST commit,
+// before CompleteBead runs, if unscrubbed).
 func TestAC8i_OrdinaryMergeGolden_HermeticAgainstHostileEnv(t *testing.T) {
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "caller-owned-index"))
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
 	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+	t.Setenv("GIT_DEFAULT_HASH", "sha256")
+
+	templateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(templateDir, "config"), []byte("[commit]\n\tgpgsign = true\n"), 0o644); err != nil {
+		t.Fatalf("writing hostile GIT_TEMPLATE_DIR config: %v", err)
+	}
+	t.Setenv("GIT_TEMPLATE_DIR", templateDir)
 
 	startDir, err := os.Getwd()
 	if err != nil {

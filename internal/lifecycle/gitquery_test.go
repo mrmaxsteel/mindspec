@@ -18,7 +18,13 @@ package lifecycle
 // was never exported either).
 
 import (
+	"errors"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
@@ -85,5 +91,64 @@ func TestEvaluateWorkDestruction_ExportedFuncCallsThroughTheSeam(t *testing.T) {
 	}
 	if evidence.FailedProbe != sentinelEvidence.FailedProbe {
 		t.Errorf("evidence.FailedProbe = %q, want %q — the exported func must call through the seam, not bypass it", evidence.FailedProbe, sentinelEvidence.FailedProbe)
+	}
+}
+
+// repoRoot returns the absolute path to the mindspec repo root by walking
+// up from this test's runtime working directory (which `go test` sets to
+// the package directory) until go.mod is found — needed below as `go
+// build`'s cmd.Dir, so its module resolution finds the real module
+// rather than treating the probe as an ad-hoc, moduleless file.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("abs cwd: %v", err)
+	}
+	for i := 0; i < 8; i++ {
+		info, statErr := os.Stat(filepath.Join(dir, "go.mod"))
+		if statErr == nil && !info.IsDir() {
+			return dir
+		}
+		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+			t.Fatalf("stat %s: %v", filepath.Join(dir, "go.mod"), statErr)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatal("could not find repo root (go.mod) walking up from the test's working directory")
+	return ""
+}
+
+// TestEvaluateWorkDestruction_ExternalPackageCannotReassign is G1-2's
+// compile-time proof — the FOURTH of the four original BLOCKING classes
+// (spec 127 bead-1 fix round 2, ruling 3: "for each of the four original
+// BLOCKING classes ... re-inject the original defect and show the test
+// that goes RED"). testdata/g1rewireprobe/main.go attempts
+// `lifecycle.EvaluateWorkDestruction = someFunc` — the exact reassignment
+// G1 proved possible against the pre-fix exported `var`. Against the
+// CURRENT (immutable func) shape, that must fail to COMPILE, not merely
+// disagree with a runtime pointer-equality snapshot (which only proves
+// the two sides matched at the instant the test ran).
+//
+// Red-on-revert, performed manually and reported rather than repeated by
+// this test (which would otherwise have to ship the pre-fix source
+// permanently): reverting gitquery.go to ab5aca11's shape (`var
+// EvaluateWorkDestruction = gitutil.EvaluateWorkDestruction`) via `go
+// build -overlay` and re-running this exact probe makes `go build` exit
+// 0 — confirmed empirically before this test was written.
+func TestEvaluateWorkDestruction_ExternalPackageCannotReassign(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "build", "./internal/lifecycle/testdata/g1rewireprobe/")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected the external-package reassignment probe to FAIL to compile (lifecycle.EvaluateWorkDestruction must be an immutable func, not an assignable var); it built successfully")
+	}
+	if !strings.Contains(string(out), "cannot assign to lifecycle.EvaluateWorkDestruction") {
+		t.Errorf("expected a 'cannot assign to lifecycle.EvaluateWorkDestruction' compile error, got:\n%s", out)
 	}
 }
