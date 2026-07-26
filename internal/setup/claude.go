@@ -963,6 +963,17 @@ See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestra
 // a mutation fixture that plants a floor match under
 // "claudeMDManagedBlock" or "agentsMDBlockTemplate" is unambiguous
 // about which literal it targets.
+//
+// EXCLUDED, deliberately: historicalSkillsFS/previouslyShippedSkills
+// (skills.go:11-19)'s embedded historical_skills/*.md snapshots (spec
+// 127 bead-2 rework, O2-r2-15). These are byte-exact provenance
+// records of SKILL.md content this product previously shipped — used
+// only to distinguish a MindSpec-shipped file from a user-authored
+// one at refresh/cleanup time (HC-6) — never installed as guidance
+// themselves. Editing one to green this sweep would silently break
+// that provenance match. Verified: 3 of the 32 embedded snapshot files
+// carry a floor match today (two prior ms-bead-cycle snapshots plus
+// one other, all superseded by later revisions); none is swept.
 func CanonicalGuidanceSurfaces() map[string]string {
 	out := skillFiles()
 	out["claudeMDManagedBlock"] = claudeMDManagedBlock

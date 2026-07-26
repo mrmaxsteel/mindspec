@@ -10,11 +10,36 @@
 // Two legs:
 //   - the PRODUCT-DIAGNOSTIC leg: guard.NewFailure/FormatFailure call
 //     arguments, RecoveryCommand-shaped method returns, and
-//     `Message:`-keyed composite-literal fields, repo-wide, fail-closed
-//     on any operand the fold rules below cannot prove.
+//     `Message:`-keyed composite-literal fields, repo-wide. Literal
+//     matches are flagged in EVERY scanned position, including
+//     message bodies; the fail-closed-on-unprovable OBLIGATION,
+//     though, is scoped to COMMAND positions only (C-r4-6,
+//     diagFinding.commandPosition) — a guard.NewFailure/FormatFailure
+//     call's first argument and a `Message:` field are message-shaped
+//     free prose, and an unprovable one needs no registry entry
+//     (spec 127 bead-2 rework, RULING 10/O3-r2-6: the prior header
+//     claimed the broader, false "fail-closed on any operand"
+//     reading). Reach is further bounded to the fold's own PROVABLE
+//     shapes (a literal, an fmt.Sprintf literal TEMPLATE — never its
+//     substituted args — a package-level const, a function-local
+//     single-assignment bind): a helper function's OWN Sprintf
+//     argument or a strings.Builder-composed value is invisible to
+//     this leg entirely, not merely unprovable. internal/panel/gate.go's
+//     RawMergeFence (8 real call sites) is the concrete, disclosed
+//     instance of this reach limit — see its own doc comment.
 //   - the GUIDANCE leg: the three shipped-guidance globs plus the
 //     evaluated canonical setup-guidance builders, checked against the
-//     known-sites exemption list.
+//     known-sites exemption list. This leg classifies LINE BY LINE
+//     (scanGuidanceSurfaces): a destructive command spanning a line
+//     break — a backslash continuation, a markdown reflow, or a
+//     multi-row table — is invisible to it (spec 127 bead-2 rework,
+//     O2-r2-11), the same way the product-diagnostic leg's reach is
+//     bounded above. A reflow that splits a listed exemption entry's
+//     line both REDs it as stale-absent (correctly — the exact quoted
+//     line is gone) AND removes the sweep's ability to see the
+//     command at all, so a later "fix" of the stale entry could green
+//     the sweep over text that still instructs the same command. Not
+//     fixed in this bead; recorded as a known, disclosed limitation.
 //
 // Both legs share one fact: "is this text dangerous?" is not decidable
 // from the text (spec 127 Non-Goals) — this scan claims exactly what
@@ -25,6 +50,7 @@
 package lint
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -117,7 +143,7 @@ func (f *pkgConstFolder) Get(pkgDir, name string) (string, bool) {
 		return "", false // cycle guard
 	}
 	f.memo[pkgDir][name] = true
-	v, ok := foldExpr(site.expr, site.file, f, nil, 0)
+	v, ok, _ := foldExpr(site.expr, site.file, f, nil, 0)
 	if ok {
 		f.byPkg[pkgDir][name] = v
 	}
@@ -143,7 +169,7 @@ func localBinds(fn ast.Node, file *rFile, f *pkgConstFolder) map[string]string {
 			delete(binds, name)
 			return
 		}
-		if v, ok := foldExpr(val, file, f, nil, 0); ok {
+		if v, ok, _ := foldExpr(val, file, f, nil, 0); ok {
 			binds[name] = v
 		} else {
 			excluded[name] = true
@@ -181,67 +207,88 @@ func localBinds(fn ast.Node, file *rFile, f *pkgConstFolder) map[string]string {
 	return binds
 }
 
+// unfoldableMarker replaces a fragment foldExpr cannot resolve inside
+// a `+`-concatenation (spec 127 bead-2 rework, RULING 5/O3-r2-1): a
+// bare space (the prior substitution) DISAPPEARS as a token in its
+// own right once tokenRe splits on whitespace, so
+// `"git -C " + dir + " reset --hard"` folded to `git -C   reset
+// --hard` and skipGlobalOptions then consumed the literal word
+// "reset" as -C's OPERAND — defeating global-option normalization for
+// every family behind a dynamic-path `git -C`/`git -c`, this
+// codebase's own dominant command-building shape. The marker is
+// wrapped in explicit spaces so it still separates adjacent literal
+// fragments exactly as a bare space did (no fusion across the
+// dynamic gap), but its own non-whitespace content (�) survives
+// tokenization as one real, non-empty, non-flag-shaped token — so a
+// global option's operand slot stays OCCUPIED instead of vanishing.
+const unfoldableMarker = " � "
+
 // foldExpr computes the literal "skeleton" of expr: the concatenation
 // of every literal-provable fragment, with non-literal fragments
-// dropped (replaced by a single space, so adjacent literal tokens on
+// replaced by unfoldableMarker (above) so adjacent literal tokens on
 // either side of a dynamic gap never fuse into a token neither side
-// alone would form). hasLiteral is false ONLY when expr contributes NO
-// literal content at all — a bare call, a bare non-local identifier,
-// or an unresolvable selector — which is exactly the genuinely opaque
-// shape the opaque-operand registry exists for (spec 127 R5c, C-r4-6):
-// a partially-foldable expression (a literal flag prefix concatenated
-// with a dynamic ID/branch-name suffix, matching this codebase's own
-// convention of "flags are literal, values are dynamic") is
-// classified purely on its literal skeleton — the same principle the
-// spec itself applies to fmt.Sprintf's literal TEMPLATE, extended
-// uniformly to bare `+` concatenation.
+// alone would form, AND the gap itself still occupies a token slot.
+// Three return values: skel is the folded skeleton; hasLiteral is
+// false ONLY when expr contributes NO literal content at all — a bare
+// call, a bare non-local identifier, or an unresolvable selector;
+// fullyLiteral is false whenever ANY leaf of expr's tree did not fold
+// (spec 127 bead-2 rework, RULING 5/S1-r2-1) — a partially-foldable
+// expression (a literal flag prefix concatenated with a dynamic ID/
+// branch-name suffix, matching this codebase's own convention of
+// "flags are literal, values are dynamic") sets hasLiteral=true but
+// fullyLiteral=false: callers that gate the opaque-operand obligation
+// on "no literal content" alone (the old, wrong test) would wrongly
+// exempt a finding whose destructive content lives ENTIRELY in the
+// unfoldable remainder — this file's callers now gate on fullyLiteral
+// instead. hasLiteral and fullyLiteral agree everywhere EXCEPT inside
+// a BinaryExpr, the sole source of a genuine partial fold.
 //
 // depth guards against runaway recursion through mutually-referential
 // consts/calls; it is not expected to matter for any real site at this
 // base. file provides the enclosing file's import table, needed to
 // resolve a cross-package selector const (e.g.
 // `containment.RejectionLever`) to the OTHER package's pkgDir.
-func foldExpr(expr ast.Expr, file *rFile, f *pkgConstFolder, binds map[string]string, depth int) (string, bool) {
+func foldExpr(expr ast.Expr, file *rFile, f *pkgConstFolder, binds map[string]string, depth int) (skel string, hasLiteral bool, fullyLiteral bool) {
 	pkgDir := file.pkgDir
 	if depth > 6 {
-		return "", false
+		return "", false, false
 	}
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
 			if v, ok := unquote(e.Value); ok {
-				return v, true
+				return v, true, true
 			}
 		}
-		return "", false
+		return "", false, false
 	case *ast.ParenExpr:
 		return foldExpr(e.X, file, f, binds, depth+1)
 	case *ast.BinaryExpr:
 		if e.Op != token.ADD {
-			return "", false
+			return "", false, false
 		}
-		ls, lok := foldExpr(e.X, file, f, binds, depth+1)
-		rs, rok := foldExpr(e.Y, file, f, binds, depth+1)
-		if !lok && !rok {
-			return "", false
+		ls, lhas, lfull := foldExpr(e.X, file, f, binds, depth+1)
+		rs, rhas, rfull := foldExpr(e.Y, file, f, binds, depth+1)
+		if !lhas && !rhas {
+			return "", false, false
 		}
-		if !lok {
-			ls = " "
+		if !lhas {
+			ls = unfoldableMarker
 		}
-		if !rok {
-			rs = " "
+		if !rhas {
+			rs = unfoldableMarker
 		}
-		return ls + rs, true
+		return ls + rs, true, lfull && rfull
 	case *ast.Ident:
 		if binds != nil {
 			if v, ok := binds[e.Name]; ok {
-				return v, true
+				return v, true, true
 			}
 		}
 		if v, ok := f.Get(pkgDir, e.Name); ok {
-			return v, true
+			return v, true, true
 		}
-		return "", false
+		return "", false, false
 	case *ast.SelectorExpr:
 		// A cross-package selector const, e.g. containment.RejectionLever
 		// — resolve the package alias to its import path, then to that
@@ -250,21 +297,21 @@ func foldExpr(expr ast.Expr, file *rFile, f *pkgConstFolder, binds map[string]st
 		// correctly fails to fold).
 		xid, ok := e.X.(*ast.Ident)
 		if !ok {
-			return "", false
+			return "", false, false
 		}
 		importPath, ok := file.imports[xid.Name]
 		if !ok {
-			return "", false
+			return "", false, false
 		}
 		const modPrefix = "github.com/mrmaxsteel/mindspec/"
 		if !strings.HasPrefix(importPath, modPrefix) {
-			return "", false
+			return "", false, false
 		}
 		otherPkgDir := strings.TrimPrefix(importPath, modPrefix)
 		if v, ok := f.Get(otherPkgDir, e.Sel.Name); ok {
-			return v, true
+			return v, true, true
 		}
-		return "", false
+		return "", false, false
 	case *ast.CallExpr:
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
 			// fmt.Sprintf: provable via its literal TEMPLATE only
@@ -273,30 +320,32 @@ func foldExpr(expr ast.Expr, file *rFile, f *pkgConstFolder, binds map[string]st
 			if xid, ok2 := sel.X.(*ast.Ident); ok2 && xid.Name == "fmt" && sel.Sel.Name == "Sprintf" && len(e.Args) > 0 {
 				return foldExpr(e.Args[0], file, f, binds, depth+1)
 			}
-			// Trust boundary, stated: any *.RecoveryCommand() call is
-			// treated as contributing no literal content of its own —
-			// TRUSTED, not ignored — because every RecoveryCommand-
-			// shaped method's own return expressions are independently
-			// scanned by this file's leg (ii) against the SAME
-			// classifier. A caller passing one through is transitively
-			// covered by that independent check, not exempted from it.
-			if sel.Sel.Name == "RecoveryCommand" {
-				return "", true
-			}
-			// containment.EmitCd is a second trusted helper: its own
-			// body (internal/workspace/containment/containment.go)
-			// unconditionally renders `cd <shell-safe target>` — never
-			// a floor match, for any target — so treating its call
-			// sites as contributing no literal content (rather than
-			// as ~20 individually-registered opaque operands) is
-			// exact, not a widened exemption: verified once, here.
-			if xid, ok2 := sel.X.(*ast.Ident); ok2 && xid.Name == "containment" && sel.Sel.Name == "EmitCd" {
-				return "", true
-			}
+			// Spec 127 bead-2 rework, RULING 4/O2-r2-2: the former
+			// RecoveryCommand/containment.EmitCd "trusted helper"
+			// rules are DELETED. Both returned ("", true) — "proven
+			// to contain no destructive literal" — which is strictly
+			// STRONGER, and strictly WORSE when wrong, than the
+			// ("", false, false) an ordinary unresolvable call
+			// returns: a false operand in a command position carries
+			// an opaque-operand-registry obligation; a trusted one
+			// carried none. Three escapes needed neither: (a) a
+			// RecoveryCommand method with a named result and a bare
+			// `return` (leg (ii) below only folds
+			// ret.Results[0], skipping len(ret.Results)==0); (b) a
+			// func-TYPED FIELD named RecoveryCommand (leg (ii) only
+			// scans *ast.FuncDecl, never a closure value); (c) the
+			// EmitCd boundary matched the bare IDENTIFIER
+			// "containment", not a resolved import path, unlike
+			// isConstructorDerived's own strict resolution a few
+			// lines below. Falling through to the unresolved-call
+			// default now routes every real site through the SAME
+			// two governance tests every other opaque operand answers
+			// to — measured at exactly 4 real sites, now registered
+			// in guard.OpaqueOperandRegistry (registries.go).
 		}
-		return "", false
+		return "", false, false
 	}
-	return "", false
+	return "", false, false
 }
 
 // ---------------------------------------------------------------------
@@ -356,7 +405,15 @@ type diagFinding struct {
 	site       rSite
 	matches    []guard.Match // non-empty => a floor-family hit was found
 	hasLiteral bool          // only meaningful when matches is empty
-	provenance bool          // constructor-derived — exempt regardless
+	// fullyLiteral is false whenever ANY leaf of the scanned
+	// expression's tree did not fold — a partially-foldable
+	// expression (hasLiteral=true) whose destructive content lives
+	// entirely in the unfoldable remainder is NOT fullyLiteral (spec
+	// 127 bead-2 rework, RULING 5/S1-r2-1). The unprovable-command-
+	// operand governance test gates on THIS field, never on
+	// hasLiteral alone.
+	fullyLiteral bool
+	provenance   bool // constructor-derived — exempt regardless
 	// commandPosition is false for a guard.NewFailure/FormatFailure
 	// call's FIRST argument (the free-form message) and true for every
 	// other scanned position (recovery-command args, RecoveryCommand
@@ -434,23 +491,40 @@ func scanProductDiagnostics(t *testing.T, u *rUniverse, f *pkgConstFolder) []dia
 							out = append(out, diagFinding{
 								site:            rSite{Rel: file.rel, Func: enclosingFunc(file, node.Pos()), Detail: "variadic-spread:" + calleeText(arg), Line: fset(u, node.Pos())},
 								hasLiteral:      false,
+								fullyLiteral:    false,
 								provenance:      isConstructorDerived(arg, file),
 								commandPosition: true,
 							})
 							continue
 						}
-						skel, hasLit := foldExpr(arg, file, f, b, 0)
+						skel, hasLit, fullyLit := foldExpr(arg, file, f, b, 0)
 						matches := guard.FindFloorMatches(skel)
 						out = append(out, diagFinding{
 							site:            rSite{Rel: file.rel, Func: enclosingFunc(file, node.Pos()), Detail: detailFor(matches, skel, i), Line: fset(u, node.Pos())},
 							matches:         matches,
 							hasLiteral:      hasLit,
+							fullyLiteral:    fullyLit,
 							provenance:      isConstructorDerived(arg, file),
 							commandPosition: i >= 1,
 						})
 					}
 				}
 			case *ast.FuncDecl:
+				// KNOWN, DISCLOSED gap (spec 127 bead-2 rework,
+				// S1-r2-2): this only scans a bare `return <expr>`
+				// with at least one result — a RecoveryCommand method
+				// using a NAMED result plus a bare `return` (no result
+				// list on the return statement itself) is invisible
+				// here. Not exploitable TODAY (all three real
+				// implementers — Orphan, StaleOpenBead, and the third
+				// this spec's Background inventoried — use a single
+				// bare `return <expr>` with no named result), but this
+				// is a scoping decision recorded honestly rather than
+				// an unconditional guarantee: since the RecoveryCommand
+				// trust boundary itself is DELETED (RULING 4), a
+				// RecoveryCommand call this leg misses is still caught
+				// as an ordinary unresolved call requiring registry
+				// coverage — it does not silently pass either way.
 				if node.Name.Name == "RecoveryCommand" && node.Body != nil {
 					b := localBinds(node.Body, file, f)
 					ast.Inspect(node.Body, func(rn ast.Node) bool {
@@ -461,12 +535,13 @@ func scanProductDiagnostics(t *testing.T, u *rUniverse, f *pkgConstFolder) []dia
 						if !ok || len(ret.Results) == 0 {
 							return true
 						}
-						skel, hasLit := foldExpr(ret.Results[0], file, f, b, 0)
+						skel, hasLit, fullyLit := foldExpr(ret.Results[0], file, f, b, 0)
 						matches := guard.FindFloorMatches(skel)
 						out = append(out, diagFinding{
 							site:            rSite{Rel: file.rel, Func: enclosingFunc(file, node.Pos()), Detail: detailFor(matches, skel, 0), Line: fset(u, ret.Pos())},
 							matches:         matches,
 							hasLiteral:      hasLit,
+							fullyLiteral:    fullyLit,
 							provenance:      isConstructorDerived(ret.Results[0], file),
 							commandPosition: true,
 						})
@@ -484,13 +559,14 @@ func scanProductDiagnostics(t *testing.T, u *rUniverse, f *pkgConstFolder) []dia
 						continue
 					}
 					b := bindsFor(node.Pos())
-					skel, hasLit := foldExpr(kv.Value, file, f, b, 0)
+					skel, hasLit, fullyLit := foldExpr(kv.Value, file, f, b, 0)
 					matches := guard.FindFloorMatches(skel)
 					out = append(out, diagFinding{
-						site:       rSite{Rel: file.rel, Func: enclosingFunc(file, node.Pos()), Detail: detailFor(matches, skel, 0), Line: fset(u, kv.Pos())},
-						matches:    matches,
-						hasLiteral: hasLit,
-						provenance: isConstructorDerived(kv.Value, file),
+						site:         rSite{Rel: file.rel, Func: enclosingFunc(file, node.Pos()), Detail: detailFor(matches, skel, 0), Line: fset(u, kv.Pos())},
+						matches:      matches,
+						hasLiteral:   hasLit,
+						fullyLiteral: fullyLit,
+						provenance:   isConstructorDerived(kv.Value, file),
 						// A Message field is message-shaped, like a
 						// NewFailure/FormatFailure call's first
 						// argument — free-form finding prose, not a
@@ -702,7 +778,23 @@ func TestDestructiveGuidanceSweep_KnownSitesOnly(t *testing.T) {
 // catching a hollow entry (one that never matched anything) or
 // classifier drift.
 func TestDestructiveGuidanceSweep_ExemptionEntriesNotHollow(t *testing.T) {
-	for _, e := range guard.KnownSitesExemptionList {
+	if problems := hollowExemptionEntries(guard.KnownSitesExemptionList); len(problems) > 0 {
+		for _, p := range problems {
+			t.Error(p)
+		}
+	}
+}
+
+// hollowExemptionEntries is the shipped hollow-entry detector, factored
+// out so TestDestructiveGuidanceSweep_ExemptionEntriesNotHollow (over
+// the real list) and the hollow subtest below (over a mutated COPY)
+// call the identical mechanism — spec 127 bead-2 rework, O2-r2-14: the
+// prior hollow subtest inlined its own copy of this loop and asserted
+// only fixture setup, so deleting this detector would have left that
+// subtest green.
+func hollowExemptionEntries(list []guard.KnownSiteExemptionEntry) []string {
+	var problems []string
+	for _, e := range list {
 		matches := guard.FindFloorMatches(e.Text)
 		found := false
 		for _, m := range matches {
@@ -711,9 +803,10 @@ func TestDestructiveGuidanceSweep_ExemptionEntriesNotHollow(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("exemption entry %s/%q recorded family %s, but the classifier no longer matches it (hollow entry or classifier drift): got %+v", e.Surface, e.Text, e.Family, matches)
+			problems = append(problems, fmt.Sprintf("exemption entry %s/%q recorded family %s, but the classifier no longer matches it (hollow entry or classifier drift): got %+v", e.Surface, e.Text, e.Family, matches))
 		}
 	}
+	return problems
 }
 
 // TestDestructiveGuidanceSweep_UnlistedFixtures_AllRenderingForms pins
@@ -742,29 +835,56 @@ func TestDestructiveGuidanceSweep_UnlistedFixtures_AllRenderingForms(t *testing.
 // exercises the design principle's mechanical closure (spec 127
 // R5a): greening the sweep by removing, rewording, or duplicating a
 // KNOWN site's warning is itself a red diff — never a passing one.
+//
+// Rewritten in spec 127 bead-2's rework round (RULING 6/O2-r2-14/
+// O3-r2-8): the deletion/reword/duplication cases now mutate a COPY of
+// the REAL allGuidanceSurfaces() map (deleting/rewording/duplicating
+// the listed line IN the real file's content) and diff against the
+// REAL guard.KnownSitesExemptionList — pinning diffGuidanceHits's
+// behavior when a real, listed warning changes, not merely its
+// comparison logic over hand-built one-key maps (AC-10(iv)'s
+// canonical-surface plant fixtures already used this stronger shape;
+// this test now matches it). The "hollow" case calls the shipped
+// hollowExemptionEntries detector directly, and "duplication"
+// literally duplicates the line in content rather than incrementing a
+// count map.
 func TestDestructiveGuidanceSweep_WarningDeletionRewordDuplicationHollow(t *testing.T) {
 	if len(guard.KnownSitesExemptionList) == 0 {
 		t.Fatal("exemption list is empty — nothing to exercise")
 	}
 	entry := guard.KnownSitesExemptionList[0]
-	base := map[string]string{entry.Surface + ".synthetic": entry.Text + "\n"}
+	real := allGuidanceSurfaces(t)
+	content, ok := real[entry.Surface]
+	if !ok || !strings.Contains(content, entry.Text) {
+		t.Fatalf("fixture setup error: real surface %q does not contain entry.Text verbatim", entry.Surface)
+	}
+	exempt := exemptionMap(guard.KnownSitesExemptionList)
+
+	copyOf := func() map[string]string {
+		m := make(map[string]string, len(real))
+		for k, v := range real {
+			m[k] = v
+		}
+		return m
+	}
 
 	t.Run("deletion", func(t *testing.T) {
-		found := scanGuidanceSurfaces(map[string]string{entry.Surface + ".synthetic": "the warning is gone now\n"})
-		exempt := map[guidanceHitKey]int{{Surface: entry.Surface + ".synthetic", Text: entry.Text}: 1}
+		mutated := copyOf()
+		mutated[entry.Surface] = strings.Replace(content, entry.Text, "the warning is gone now", 1)
+		found := scanGuidanceSurfaces(mutated)
 		_, _, staleAbsent := diffGuidanceHits(found, exempt)
 		if len(staleAbsent) == 0 {
-			t.Fatal("expected the deletion to register as a stale-absent entry")
+			t.Fatal("expected deleting the real listed line to register as a stale-absent entry")
 		}
 	})
 
 	t.Run("reword", func(t *testing.T) {
-		reworded := entry.Text + " (reworded)"
-		found := scanGuidanceSurfaces(map[string]string{entry.Surface + ".synthetic": reworded + "\n"})
-		exempt := map[guidanceHitKey]int{{Surface: entry.Surface + ".synthetic", Text: entry.Text}: 1}
+		mutated := copyOf()
+		mutated[entry.Surface] = strings.Replace(content, entry.Text, entry.Text+" (reworded)", 1)
+		found := scanGuidanceSurfaces(mutated)
 		unlisted, _, staleAbsent := diffGuidanceHits(found, exempt)
 		if len(staleAbsent) == 0 {
-			t.Fatal("expected the reworded line to register as stale-absent under the original quoted string")
+			t.Fatal("expected the reworded real line to register as stale-absent under the original quoted string")
 		}
 		if len(unlisted) == 0 {
 			t.Fatal("expected the reworded line itself to be an unlisted floor match")
@@ -772,26 +892,25 @@ func TestDestructiveGuidanceSweep_WarningDeletionRewordDuplicationHollow(t *test
 	})
 
 	t.Run("duplication", func(t *testing.T) {
-		found := scanGuidanceSurfaces(base)
-		found[guidanceHitKey{Surface: entry.Surface + ".synthetic", Text: entry.Text}]++ // simulate a second occurrence
-		exempt := map[guidanceHitKey]int{{Surface: entry.Surface + ".synthetic", Text: entry.Text}: 1}
+		mutated := copyOf()
+		// Duplicate the line IN CONTENT (not by incrementing a count
+		// map) — scanGuidanceSurfaces' own occurrence counting must be
+		// what registers the drift.
+		mutated[entry.Surface] = content + "\n" + entry.Text
+		found := scanGuidanceSurfaces(mutated)
 		_, staleCount, _ := diffGuidanceHits(found, exempt)
 		if len(staleCount) == 0 {
-			t.Fatal("expected a duplicated occurrence to register as a count-drift stale entry")
+			t.Fatal("expected a real duplicated line to register as a count-drift stale entry")
 		}
 	})
 
 	t.Run("hollow", func(t *testing.T) {
-		hollow := guard.KnownSiteExemptionEntry{Surface: "synthetic", Text: "mindspec complete <bead>", Count: 1, Family: guard.FamilyGitMerge}
-		matches := guard.FindFloorMatches(hollow.Text)
-		found := false
-		for _, m := range matches {
-			if m.Family == hollow.Family {
-				found = true
-			}
-		}
-		if found {
-			t.Fatal("fixture setup error: expected the hollow entry's text to NOT match its claimed family")
+		mutated := make([]guard.KnownSiteExemptionEntry, len(guard.KnownSitesExemptionList))
+		copy(mutated, guard.KnownSitesExemptionList)
+		mutated = append(mutated, guard.KnownSiteExemptionEntry{Surface: "synthetic", Text: "mindspec complete <bead>", Count: 1, Family: guard.FamilyGitMerge})
+		problems := hollowExemptionEntries(mutated)
+		if len(problems) == 0 {
+			t.Fatal("expected the shipped hollow-entry detector to flag the synthetic hollow entry")
 		}
 	})
 }
@@ -888,8 +1007,14 @@ func TestProductDiagnosticScan_DestructiveMatchesAreGoverned(t *testing.T) {
 // TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned is
 // the opaque-operand half: every command-position operand (never the
 // free-form message position — see diagFinding.commandPosition) the
-// fold rules cannot prove is EITHER constructor-derived OR present on
-// the opaque-operand registry.
+// fold rules cannot prove FULLY LITERAL is EITHER constructor-derived
+// OR present on the opaque-operand registry. Gates on fullyLiteral,
+// not hasLiteral (spec 127 bead-2 rework, RULING 5/S1-r2-1): the old
+// hasLiteral-only gate let a PARTIALLY-folded operand — matches=[],
+// hasLiteral=true — through unregistered whenever the destructive
+// content actually lived entirely in the unfoldable remainder (a
+// helper-function call, a method call, a closure call, or a
+// Sprintf-substituted argument all fold to the SAME shape).
 func TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned(t *testing.T) {
 	u := loadRatchetUniverse(t)
 	f := newPkgConstFolder(u)
@@ -897,7 +1022,7 @@ func TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned(t *testing.T
 	registry := registryMap()
 	var ungoverned []string
 	for _, fd := range findings {
-		if len(fd.matches) > 0 || fd.hasLiteral || !fd.commandPosition {
+		if len(fd.matches) > 0 || fd.fullyLiteral || !fd.commandPosition {
 			continue
 		}
 		if fd.provenance || registry[fd.site.Key()] {
@@ -944,7 +1069,7 @@ func TestProductDiagnosticScan_OpaqueRegistryMembershipExact(t *testing.T) {
 	findings := scanProductDiagnostics(t, u, f)
 	live := map[string]bool{}
 	for _, fd := range findings {
-		if len(fd.matches) == 0 && !fd.hasLiteral && fd.commandPosition && !fd.provenance {
+		if len(fd.matches) == 0 && !fd.fullyLiteral && fd.commandPosition && !fd.provenance {
 			live[fd.site.Key()] = true
 		}
 	}
@@ -995,6 +1120,199 @@ func injectedRefusal(beadBranch string) error {
 	}
 }
 
+// injectionTableCase is one row of TestProductDiagnosticScan_InjectionTable
+// below. exprSrc is a Go expression (referencing `dynamic string`,
+// the enclosing function's parameter) rendered as the SECOND argument
+// to guard.NewFailure — the operand shape a real internal/approve-style
+// refusal builds. family is the expected match ("" for the four
+// recorded non-match exclusions).
+type injectionTableCase struct {
+	name    string
+	family  guard.DestructiveFamily
+	exprSrc string
+}
+
+// TestProductDiagnosticScan_InjectionTable is AC-9(i)'s full mechanism
+// proof, delivered at the boundary the AC actually specifies (spec
+// 127 bead-2 rework, RULING 9/F1-r2-3/O2-r2-7/O3-r2-2): ONE probe per
+// floor family — all 17 — driven through the REAL SCAN over a
+// synthetic internal/approve-shaped fixture, plus option-cluster
+// re-spellings, BOTH global-option normalization forms (`+`-
+// concatenation AND fmt.Sprintf) for BOTH `-C` and `-c`, and all four
+// recorded non-match exclusions — asserting the scan REDs each
+// positive (naming file:line) and stays green on every exclusion.
+// TestFindFloorMatches_OnePerFamily (classifier_test.go, package
+// guard) proves the CLASSIFIER's own contract; that proof does NOT by
+// itself show the SCAN's fold layer reaches every family in every
+// operand shape — the scan feeds the classifier a FOLDED skeleton,
+// never the author's original string, and TestProductDiagnosticScan_
+// DynamicGapGitCNormalization above is the proof that gap is not
+// theoretical (a normalization clause that passed at the unit level
+// failed through the scan before RULING 5's fix).
+func TestProductDiagnosticScan_InjectionTable(t *testing.T) {
+	cases := []injectionTableCase{
+		{"merge", guard.FamilyGitMerge, `"git merge --no-ff "+dynamic`},
+		{"reset", guard.FamilyGitReset, `"git reset --hard "+dynamic`},
+		{"restore", guard.FamilyGitRestore, `"git restore "+dynamic`},
+		{"clean", guard.FamilyGitCleanForce, `"git clean -fd "+dynamic`},
+		{"branch-delete", guard.FamilyGitBranchDeleteForce, `"git branch -D "+dynamic`},
+		{"push-force", guard.FamilyGitPushForce, `"git push --force "+dynamic`},
+		{"stash-drop", guard.FamilyGitStashDropClear, `"git stash drop "+dynamic`},
+		{"worktree-remove-force", guard.FamilyGitWorktreeRemoveForce, `"git worktree remove --force "+dynamic`},
+		{"checkout-pathspec", guard.FamilyGitCheckoutPathspecDiscard, `"git checkout -- "+dynamic`},
+		{"switch-discard", guard.FamilyGitSwitchDiscardChanges, `"git switch --discard-changes "+dynamic`},
+		{"checkout-force", guard.FamilyGitCheckoutForce, `"git checkout -f "+dynamic`},
+		{"update-ref-delete", guard.FamilyGitUpdateRefDelete, `"git update-ref -d "+dynamic`},
+		{"tag-delete", guard.FamilyGitTagDelete, `"git tag -d "+dynamic`},
+		{"push-delete", guard.FamilyGitPushDelete, `"git push origin --delete "+dynamic`},
+		{"reflog-expire", guard.FamilyGitReflogExpireOrGCPrune, `"git reflog expire --expire=now "+dynamic`},
+		{"rm-rf", guard.FamilyRmRf, `"rm -rf "+dynamic`},
+		{"bd-delete-force", guard.FamilyBdDeleteForce, `"bd delete "+dynamic+" --force"`},
+
+		// Option-cluster re-spellings (R5(a)'s equivalence).
+		{"clean-cluster", guard.FamilyGitCleanForce, `"git clean -fdx "+dynamic`},
+		{"rm-cluster", guard.FamilyRmRf, `"rm -fr "+dynamic`},
+		{"push-force-short", guard.FamilyGitPushForce, `"git push -f "+dynamic`},
+
+		// Global-option normalization: BOTH forms, BOTH -C and -c
+		// (RULING 5/O3-r2-1's own regression class).
+		{"dash-C-concat", guard.FamilyGitReset, `"git -C "+dynamic+" reset --hard"`},
+		{"dash-c-concat", guard.FamilyGitReset, `"git -c "+dynamic+" reset --hard"`},
+		{"dash-C-sprintf", guard.FamilyGitReset, `fmt.Sprintf("git -C %s reset --hard", dynamic)`},
+		{"dash-c-sprintf", guard.FamilyGitReset, `fmt.Sprintf("git -c %s reset --hard", dynamic)`},
+
+		// The four recorded non-match exclusions.
+		{"exclusion-merge-abort", "", `"git merge --abort "+dynamic`},
+		{"exclusion-worktree-prune", "", `"git worktree prune "+dynamic`},
+		{"exclusion-rm-cached", "", `"git rm --cached "+dynamic`},
+		{"exclusion-push-force-with-lease", "", `"git push --force-with-lease "+dynamic`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel := "internal/approve/injection_table_" + strings.ReplaceAll(c.name, "-", "_") + "_fixture.go"
+			src := "package approve\n\n" +
+				`import (` + "\n" +
+				`	"fmt"` + "\n\n" +
+				`	"github.com/mrmaxsteel/mindspec/internal/guard"` + "\n" +
+				")\n\n" +
+				"func injectedRefusal(dynamic string) error {\n" +
+				"	return guard.NewFailure(\"a synthetic refusal\", " + c.exprSrc + ")\n" +
+				"}\n"
+			u := singleFileUniverse(t, rel, src)
+			f := newPkgConstFolder(u)
+			findings := scanProductDiagnostics(t, u, f)
+
+			var matchedHere []guard.Match
+			var line int
+			for _, fd := range findings {
+				if fd.site.Rel != rel || fd.site.Func != "injectedRefusal" {
+					continue
+				}
+				matchedHere = append(matchedHere, fd.matches...)
+				if fd.site.Line != 0 {
+					line = fd.site.Line
+				}
+			}
+
+			if c.family == "" {
+				if len(matchedHere) > 0 {
+					t.Fatalf("expected NO floor match (recorded exclusion), got %+v", matchedHere)
+				}
+				return
+			}
+			found := false
+			for _, m := range matchedHere {
+				if m.Family == c.family {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("expected the scan to find %s in %s, got %+v", c.family, rel, matchedHere)
+			}
+			if line == 0 {
+				t.Error("expected the finding to carry a real line number")
+			}
+		})
+	}
+}
+
+// TestProductDiagnosticScan_DynamicGapGitCNormalization pins RULING 5/
+// O3-r2-1 through the SCAN, not just the classifier: a dynamic `git
+// -C <path>` operand — `"git -C " + wtPath + " reset --hard"`, this
+// codebase's own dominant command-building shape — must still be
+// found as a real FamilyGitReset match. Before this fix, foldExpr's
+// bare-space substitution for the unfoldable `wtPath` fragment folded
+// to `git -C   reset --hard`, and skipGlobalOptions then consumed the
+// literal word "reset" as -C's own operand, making the match
+// disappear entirely.
+func TestProductDiagnosticScan_DynamicGapGitCNormalization(t *testing.T) {
+	src := `package approve
+
+import "github.com/mrmaxsteel/mindspec/internal/guard"
+
+func dynamicGapRefusal(wtPath string) error {
+	return guard.NewFailure("a synthetic refusal", "git -C "+wtPath+" reset --hard")
+}
+`
+	u := singleFileUniverse(t, "internal/approve/dynamic_gap_fixture.go", src)
+	f := newPkgConstFolder(u)
+	findings := scanProductDiagnostics(t, u, f)
+	found := false
+	for _, fd := range findings {
+		for _, m := range fd.matches {
+			if m.Family == guard.FamilyGitReset && fd.site.Func == "dynamicGapRefusal" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected the scan to find a FamilyGitReset match through the dynamic -C gap")
+	}
+}
+
+// TestProductDiagnosticScan_PartialFoldDestructiveInUnfoldableHalf
+// pins RULING 5/S1-r2-1: a `+`-concatenation whose destructive content
+// lives ENTIRELY in an unfoldable fragment (a helper-function call) —
+// `"note: " + buildRecovery(beadBranch)` where buildRecovery itself
+// returns `"git branch -D " + beadBranch` — must not be silently
+// exempted from the opaque-operand governance gate just because its
+// OTHER half ("note: ") is literal. Before this fix, any partial fold
+// set hasLiteral=true unconditionally, and the unprovable-operand gate
+// skipped every hasLiteral=true finding regardless of whether the
+// fold was actually complete.
+func TestProductDiagnosticScan_PartialFoldDestructiveInUnfoldableHalf(t *testing.T) {
+	src := `package approve
+
+import "github.com/mrmaxsteel/mindspec/internal/guard"
+
+func buildRecovery(beadBranch string) string {
+	return "git branch -D " + beadBranch
+}
+
+func partialFoldRefusal(beadBranch string) error {
+	return guard.NewFailure("a refusal", "note: "+buildRecovery(beadBranch))
+}
+`
+	u := singleFileUniverse(t, "internal/approve/partial_fold_fixture.go", src)
+	f := newPkgConstFolder(u)
+	findings := scanProductDiagnostics(t, u, f)
+	var target *diagFinding
+	for i := range findings {
+		if findings[i].site.Func == "partialFoldRefusal" && findings[i].commandPosition {
+			target = &findings[i]
+		}
+	}
+	if target == nil {
+		t.Fatal("expected a command-position finding for partialFoldRefusal's second argument")
+	}
+	if len(target.matches) != 0 {
+		t.Fatalf("fixture setup error: expected the STATIC fold to see no match (the destructive content lives in the unresolved call), got %+v", target.matches)
+	}
+	if target.fullyLiteral {
+		t.Fatal("expected fullyLiteral=false — the buildRecovery(...) fragment is unresolved, so this finding must require registry/provenance governance")
+	}
+}
+
 // singleFileUniverse parses src as a single file at the given repo-
 // relative path and registers it into a fresh, throwaway rUniverse —
 // used for injection/provenance fixtures that must never touch the
@@ -1021,17 +1339,75 @@ func singleFileUniverse(t *testing.T, rel, src string) *rUniverse {
 // any file inside package guard can populate its unexported fields
 // directly (Go does not scope unexported-field access below the
 // package). This invariant closes that gap: a populated composite
-// literal or an unexported-field write of the opaque type is red
-// anywhere in a "package guard" file OUTSIDE NewDestructiveCommand's
-// own implementation. Package identity is by PACKAGE CLAUSE name
-// ("package guard"), not by repo path, so a fixture universe need not
-// live at a real "internal/guard" path to be recognized.
+// literal, an unexported-field write, or a type CONVERSION producing
+// the opaque type is red anywhere in a "package guard" file OUTSIDE
+// NewDestructiveCommand's own implementation. Package identity is by
+// PACKAGE CLAUSE name ("package guard"), not by repo path, so a
+// fixture universe need not live at a real "internal/guard" path to
+// be recognized.
+//
+// Widened (spec 127 bead-2 rework, RULING 2/G1-r2-1/O2-r2-1): the
+// original check matched a composite literal's Type ONLY against the
+// literal identifier "DestructiveCommand", missing three same-package
+// forges that need neither unsafe nor reflect, all verified to
+// compile and produce a Valid()==true value with the real invariant
+// test staying green while present: (a) a TYPE ALIAS composite
+// literal (`type dcAlias = DestructiveCommand; dcAlias{...}` — this
+// IS a composite literal of that exact type; node.Type is the Ident
+// "dcAlias", which the old identifier-equality test missed); (b) a
+// shadow struct with an identical underlying field set, CONVERTED
+// across (`DestructiveCommand(dcShadow{...})` — nothing flagged the
+// conversion expression at all); (c) a DEFINED type
+// (`type dcDefined DestructiveCommand`) composite-literalled then
+// converted. Two passes now: first, collect every package-level type
+// name that IS DestructiveCommand, an alias of it, or a defined type
+// over it (resolving `type X = DestructiveCommand` and
+// `type X DestructiveCommand` across every "package guard" file in
+// the universe, not just the current one — an alias may be declared
+// in one file and forged in another); second, flag a composite
+// literal OR a conversion CallExpr naming any of those resolved type
+// names, outside the constructor. This closes (a) and (c) via the
+// composite-literal leg (dcAlias/dcDefined are now in the resolved
+// name set) and (b) via the new conversion-CallExpr leg (a bare
+// `DestructiveCommand(...)` call outside the constructor is always
+// red, regardless of what its argument's own type is).
 func scanSamePackageInvariant(u *rUniverse) []string {
 	var problems []string
+	var guardFiles []*rFile
 	for _, file := range u.files {
-		if file.file.Name == nil || file.file.Name.Name != "guard" {
-			continue
+		if file.file.Name != nil && file.file.Name.Name == "guard" {
+			guardFiles = append(guardFiles, file)
 		}
+	}
+
+	// Pass 1: resolve type identity — DestructiveCommand itself, plus
+	// every alias (`type X = DestructiveCommand`) and defined type
+	// (`type X DestructiveCommand`) declared anywhere in the universe's
+	// "package guard" files.
+	dcTypeNames := map[string]bool{"DestructiveCommand": true}
+	for _, file := range guardFiles {
+		for _, decl := range file.file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if id, ok := ast.Unparen(ts.Type).(*ast.Ident); ok && id.Name == "DestructiveCommand" {
+					dcTypeNames[ts.Name.Name] = true
+				}
+			}
+		}
+	}
+
+	// Pass 2: flag every composite literal or conversion naming a
+	// resolved type-identity member, and every unexported-field write
+	// or unsafe/reflect.NewAt usage, outside NewDestructiveCommand's
+	// own implementation.
+	for _, file := range guardFiles {
 		for _, imp := range file.file.Imports {
 			if p, ok := unquote(imp.Path.Value); ok && p == "unsafe" {
 				problems = append(problems, file.rel+": imports \"unsafe\" — recorded outside this convention's threat model (spec 127 R5b), still red wherever the AST scan can see it")
@@ -1043,8 +1419,18 @@ func scanSamePackageInvariant(u *rUniverse) []string {
 			ast.Inspect(decl, func(n ast.Node) bool {
 				switch node := n.(type) {
 				case *ast.CompositeLit:
-					if id, ok := node.Type.(*ast.Ident); ok && id.Name == "DestructiveCommand" && !isConstructorImpl {
-						problems = append(problems, file.rel+":"+itoa(u.fset.Position(node.Pos()).Line)+": DestructiveCommand composite literal outside NewDestructiveCommand's implementation (same-package forge)")
+					if isConstructorImpl {
+						return true
+					}
+					if id, ok := ast.Unparen(node.Type).(*ast.Ident); ok && dcTypeNames[id.Name] {
+						problems = append(problems, file.rel+":"+itoa(u.fset.Position(node.Pos()).Line)+": "+id.Name+" composite literal outside NewDestructiveCommand's implementation (same-package forge)")
+					}
+				case *ast.CallExpr:
+					if isConstructorImpl {
+						return true
+					}
+					if id, ok := ast.Unparen(node.Fun).(*ast.Ident); ok && dcTypeNames[id.Name] {
+						problems = append(problems, file.rel+":"+itoa(u.fset.Position(node.Pos()).Line)+": conversion to "+id.Name+" outside NewDestructiveCommand's implementation (same-package forge)")
 					}
 				case *ast.AssignStmt:
 					if isConstructorImpl {
@@ -1116,6 +1502,74 @@ func wrapperForge(cmd string) DestructiveCommand {
 	problems := scanSamePackageInvariant(u)
 	if len(problems) == 0 {
 		t.Fatal("expected the wrapper's field-write forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_TypeAliasCompositeLiteral is RULING 2/
+// G1-r2-1/O2-r2-1(a): a composite literal of a TYPE ALIAS of
+// DestructiveCommand is a composite literal of that exact type
+// (`type dcAlias = DestructiveCommand`), even though node.Type is the
+// Ident "dcAlias" rather than "DestructiveCommand" — the old
+// identifier-equality check missed it entirely.
+func TestSamePackageInvariant_TypeAliasCompositeLiteral(t *testing.T) {
+	src := `package guard
+
+type dcAlias = DestructiveCommand
+
+func aliasForge(cmd string) DestructiveCommand {
+	return dcAlias{command: cmd, valid: true}
+}
+`
+	u := singleFileUniverse(t, "internal/guard/alias_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the type-alias composite literal forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_ShadowStructConvertedAcross is RULING 2/
+// G1-r2-1/O2-r2-1(b): a distinct struct with an identical underlying
+// field set, CONVERTED to DestructiveCommand, needs no unsafe and no
+// reflect — Go allows a conversion between two struct types whose
+// underlying field sequences match. Nothing in the old invariant
+// inspected conversion expressions at all.
+func TestSamePackageInvariant_ShadowStructConvertedAcross(t *testing.T) {
+	src := `package guard
+
+type dcShadow struct {
+	command string
+	valid   bool
+}
+
+func shadowForge(cmd string) DestructiveCommand {
+	return DestructiveCommand(dcShadow{command: cmd, valid: true})
+}
+`
+	u := singleFileUniverse(t, "internal/guard/shadow_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the shadow-struct conversion forge to be flagged")
+	}
+}
+
+// TestSamePackageInvariant_DefinedTypeCompositeThenConvert is
+// RULING 2/G1-r2-1/O2-r2-1(c): a DEFINED type over DestructiveCommand
+// (`type dcDefined DestructiveCommand`), composite-literalled then
+// converted back.
+func TestSamePackageInvariant_DefinedTypeCompositeThenConvert(t *testing.T) {
+	src := `package guard
+
+type dcDefined DestructiveCommand
+
+func definedForge(cmd string) DestructiveCommand {
+	d := dcDefined{command: cmd, valid: true}
+	return DestructiveCommand(d)
+}
+`
+	u := singleFileUniverse(t, "internal/guard/defined_fixture.go", src)
+	problems := scanSamePackageInvariant(u)
+	if len(problems) == 0 {
+		t.Fatal("expected the defined-type composite-then-convert forge to be flagged")
 	}
 }
 
@@ -1224,9 +1678,19 @@ func realRefusal(branch string, outcome guard.DestructionOutcome) string {
 
 // ---------------------------------------------------------------------
 // Bootstrap discipline (spec 127 G-r5-4/H-r6-5): the committed seed
-// manifest and its three hermetic fixtures — reconciliation (α),
-// registry identity (β), content regeneration (γ) — applied uniformly
-// to all three seeded artifacts.
+// manifest and its TWO landed hermetic fixtures — registry identity
+// (β) and content regeneration (γ) — applied uniformly to all three
+// seeded artifacts. Fixture (α) — manifest-vs-independent-Background-
+// derived-enumeration reconciliation — is NOT landed (spec 127 bead-2
+// rework, O2-r2-4/O3-r2-3): it was cited as existing in two places
+// (this manifest's own header and registries.go's doc comments)
+// before either implemented it; both citations are now corrected to
+// state plainly that (α) does not exist, rather than leaving a named
+// fixture cited and absent. (β)+(γ) together still catch a hollow or
+// drifted entry; what only (α) would additionally catch — a
+// bead-introduced site entering the seed at the WRONG base — is
+// covered today by the manifest header's own reproducible
+// `git diff --stat` verification instead of a standing fixture.
 // ---------------------------------------------------------------------
 
 // manifestEntry is one parsed line of destructive_seed_manifest.txt.

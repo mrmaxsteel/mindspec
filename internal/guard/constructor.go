@@ -22,35 +22,55 @@ import (
 // literal — Go does not scope unexported-field access below the
 // package boundary, and a compiled probe during this bead's authoring
 // confirmed it (G-r5-3). SAME-package construction is sealed by the
-// internal/lint AST invariant instead (destructive_guidance_test.go):
-// the scan asserts every composite literal or unexported-field write
-// of this type appears only inside NewDestructiveCommand's own body.
-// unsafe/reflect.NewAt bypasses of the struct are recorded OUTSIDE
-// this convention's threat model (R5(b)) — no Go-level guard survives
-// unsafe, and the convention targets convenient drift, not deliberate
-// obfuscation.
+// internal/lint AST invariant instead (destructive_guidance_test.go's
+// scanSamePackageInvariant): the scan asserts every composite
+// literal, unexported-field write, or type CONVERSION producing this
+// type appears only inside NewDestructiveCommand's own body — resolved
+// through one level of type alias (`type X = DestructiveCommand`) and
+// one level of defined type (`type X DestructiveCommand`), not merely
+// by matching the literal identifier "DestructiveCommand" (spec 127
+// bead-2 rework, RULING 2/G1-r2-1/O2-r2-1: a round-6-panel-confirmed
+// escape class, the exact shape bead 1's own AST sentinel — the
+// DestructionOutcome const-block invariant, outcome_sentinel_test.go —
+// was independently widened to close for a DIFFERENT type in this
+// same package). unsafe/reflect.NewAt bypasses of the struct are
+// recorded OUTSIDE this convention's threat model (R5(b)) — no
+// Go-level guard survives unsafe, and the convention targets
+// convenient drift, not deliberate obfuscation. reflect alone,
+// WITHOUT unsafe, cannot write an unexported field (verified,
+// O2-r2-1) and is therefore not a separate escape to defend against.
 //
 // The zero value (valid == false) is INVALID and renders as a
 // fail-closed placeholder, never as a usable command — a caller that
 // writes `var d guard.DestructiveCommand` and skips the constructor
-// gets an inert value, not a silently blank recovery line.
+// gets an inert value, not a silently blank recovery line. This is a
+// deliberately RENDER-time fail-closed leg, not a development-time
+// red: nothing in the same-package invariant above flags a bare
+// zero-value construction reaching a scanned diagnostic operand
+// (O3-r2-9) — the recorded, reviewed decision is that this one bypass
+// ships as a fail-closed render, not as an AST-caught compile-time
+// error, because the value it produces is inert (never a floor-
+// matching command) rather than silently wrong.
 type DestructiveCommand struct {
 	command string
 	valid   bool
 }
 
 // NewDestructiveCommand is the ONLY sanctioned way to produce a
-// DestructiveCommand. Two requirements, both enforced here:
+// (valid) DestructiveCommand. Two requirements:
 //
 //   - command must be text the classifier (classifier.go) recognizes
-//     as a reviewed floor-family match. This constructor exists for
-//     DESTRUCTIVE commands only; a non-destructive recovery line
-//     (including `mindspec complete`, made safe upstream by R4) never
-//     needs it — pass it to guard.FormatFailure/NewFailure as a plain
-//     string, exactly as before this spec. A command that doesn't
-//     match any floor family is a programmer error here, not a
-//     runtime condition: it means this constructor was reached for
-//     the wrong kind of command.
+//     as a match on the reviewed floor. This constructor's error path
+//     is for a command genuinely OFF that closed, reviewed floor —
+//     NOT a claim that such a command is safe (spec 127 bead-2
+//     rework, RULING 3/O1-r2-2): the floor is deliberately
+//     incomplete, so an off-floor command is caught by review under
+//     the ADR-0035 in-diff extension obligation, never proven
+//     non-destructive by this constructor's refusal. A genuinely
+//     non-destructive recovery line (including `mindspec complete`,
+//     made safe upstream by R4) never needs this constructor at all —
+//     pass it to guard.FormatFailure/NewFailure as a plain string,
+//     exactly as before this spec.
 //   - outcome is a mandatory guard.DestructionOutcome parameter — Go
 //     has no default arguments, so no call site can construct a
 //     DestructiveCommand without at least naming an evaluated
@@ -65,24 +85,36 @@ type DestructiveCommand struct {
 //     predicate ran (bead 1's own outcome.go doc comment), and this
 //     constructor does not claim otherwise.
 //
-// Panics on an empty command or a non-floor-match command — both
-// programmer errors caught at development time, the same posture
-// FormatFailure already takes on a banned `bd update --metadata`
-// (Req 19).
-func NewDestructiveCommand(command string, outcome DestructionOutcome) DestructiveCommand {
+// Returns a non-nil error — NEVER panics — on an empty command or a
+// command that matches no reviewed floor family (spec 127 bead-2
+// rework, RULING 1: a panic inside a guard is itself a denial of
+// service, and the floor is deliberately incomplete, so unmatched-but-
+// destructive input is an EXPECTED input shape, not a programmer
+// error; two independent real triggers were verified — a joined
+// multi-ID `bd delete <ids...> --force` line at 8+ IDs, and a
+// legitimately quoted, whitespace-bearing `git -C <path>` operand,
+// both now FIXED at the classifier level, classifier.go, but the
+// constructor itself must not re-introduce the same failure mode for
+// whatever off-floor destructive input review has not yet caught).
+// On error, the returned DestructiveCommand is the type's own INVALID
+// zero value — Valid() is false and String() renders the fail-closed
+// placeholder below — so a caller that erroneously ignores the error
+// still gets an inert value, never a silently wrong command.
+func NewDestructiveCommand(command string, outcome DestructionOutcome) (DestructiveCommand, error) {
 	_ = outcome // mandatory by signature; evidentiary gating is the caller's (R2/R4's) job
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
-		panic("guard: NewDestructiveCommand requires a non-empty command")
+		return DestructiveCommand{}, fmt.Errorf("guard: NewDestructiveCommand requires a non-empty command")
 	}
 	if !IsFloorMatch(trimmed) {
-		panic(fmt.Sprintf(
-			"guard: NewDestructiveCommand: %q matches no reviewed destructive floor family (spec 127 R5a) — "+
-				"this constructor is for destructive commands only; pass a plain string to FormatFailure/NewFailure "+
-				"for a non-destructive recovery line",
-			trimmed))
+		return DestructiveCommand{}, fmt.Errorf(
+			"guard: NewDestructiveCommand: %q matches no family on the reviewed destructive floor (spec 127 R5a). "+
+				"This is NOT a claim that it is safe: the floor is a reviewed finite set. If the command IS "+
+				"destructive, extend AllFamilies in this same change (the ADR-0035 in-diff extension obligation); "+
+				"if it is genuinely non-destructive, pass it to FormatFailure/NewFailure as a plain string",
+			trimmed)
 	}
-	return DestructiveCommand{command: trimmed, valid: true}
+	return DestructiveCommand{command: trimmed, valid: true}, nil
 }
 
 // String renders the wrapped command. The zero value (never produced

@@ -3,25 +3,44 @@
 #
 # input_sha: 09f62bd97b28bae7b171054066117cb19a33874d (main, this spec's
 #   fork base — immutable, and prior to every bead)
-# scanner_revision: spec-127-bead-2 (internal/lint/destructive_guidance_test.go,
-#   internal/guard/classifier.go, as landed by bead 2)
-# generation_command: go test -short ./internal/lint/... -run TestZZZDebugDump -v
-#   (the ad hoc dump used to derive this manifest by hand at authoring
-#   time; the committed reconciliation is destructive_guidance_test.go's
+# scanner_revision: spec-127-bead-2-rework (internal/lint/destructive_guidance_test.go,
+#   internal/guard/classifier.go, as landed by bead 2's rework round)
+# generation_command: no committed, runnable dump helper exists (O3-r2-7,
+#   spec 127 bead-2 rework) — this manifest was derived BY HAND at
+#   authoring/rework time, section-by-section, from
+#   scanProductDiagnostics/scanGuidanceSurfaces's own live output
+#   (`go test -short -run TestProductDiagnosticScan -v ./internal/lint/`
+#   and the equivalent guidance-leg run, read directly, transcribed
+#   here). The committed reconciliation is destructive_guidance_test.go's
 #   TestBootstrapManifest_* functions, which re-derive the SAME
 #   enumeration from the live scan every run — this file is the frozen
-#   record fixture (α) compares against, not itself the mechanism)
+#   record those tests compare against, not itself the mechanism. No
+#   fixture (α) — an independent, Background-derived expected
+#   enumeration compared against this manifest — exists; see O3-r2-3/
+#   O2-r2-4 in the bead-2 findings ledger for the recorded reason.
 #
-# Verified: every diagnostic-emitting file this manifest cites
-# (internal/approve/plan.go, internal/executor/mindspec_executor.go,
-# cmd/mindspec/bead_ready.go, internal/next/ready_gate.go) and every
-# guidance surface it cites is BYTE-IDENTICAL between input_sha and
-# this bead's own HEAD (`git diff 09f62bd9 HEAD --stat` over those
-# paths is empty) — bead 1 touched only internal/guard/outcome.go,
-# internal/gitutil/**, internal/lifecycle/gitquery.go, and
-# internal/executor/merge_golden_test.go (a new test file, not a
-# diagnostic emitter). So this bead's own worktree IS input_sha for
-# every site below.
+# Verified reproducibly, not by recall (O3-r2-7): `git diff --stat
+# 09f62bd97b28bae7b171054066117cb19a33874d f3e344c1 -- internal/approve/plan.go
+# internal/executor/mindspec_executor.go cmd/mindspec/bead_ready.go
+# cmd/mindspec/panel.go internal/next/ready_gate.go internal/guard/guard.go
+# internal/lifecycle/orphans.go internal/lifecycle/stale_open.go .claude/
+# plugins/ internal/setup/` is EMPTY — every diagnostic-emitting file and
+# every guidance surface this manifest cites is byte-identical between
+# input_sha and bead 1's merge commit (f3e344c1). The full set of files
+# bead 1 actually touched (`git diff --name-only 09f62bd9 f3e344c1`,
+# re-run for this rework rather than carried over from the prior,
+# incomplete list): .beads/issues.jsonl, .mindspec/adr/ADR-0035-agent-error-contract.md,
+# .mindspec/domains/workflow/OWNERSHIP.yaml,
+# .mindspec/specs/127-lifecycle-verb-trustworthiness/{plan,spec}.md,
+# internal/executor/merge_golden_test.go,
+# internal/executor/testdata/ac8i_ordinary_merge_golden.json,
+# internal/gitutil/{neteffect,workdestruction}.go and their _test.go,
+# internal/guard/outcome.go, internal/guard/outcome_sentinel_test.go,
+# internal/lifecycle/gitquery.go, internal/lifecycle/gitquery_test.go,
+# internal/lifecycle/testdata/g1rewireprobe/main.go, and
+# internal/lint/ratchet_argv_table_test.go — none is a diagnostic
+# emitter or a guidance surface this manifest cites, so this bead's own
+# worktree IS input_sha for every site below.
 #
 # Format: one entry per line, sorted within each section:
 #   <surface-or-file>\t<func-or-surface-key>\t<detail-or-text>\t<family-or-blank>
@@ -34,7 +53,14 @@ internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git 
 
 [opaque_operand_registry]
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:
+cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable
+internal/approve/impl.go	implOrphanRefusal	arg1:unprovable
+internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg3:unprovable
+internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
+internal/guard/guard.go	checkCWDWithCache	arg1:unprovable
+internal/lifecycle/orphans.go	Orphan.RecoveryCommand	arg0:unprovable
+internal/lifecycle/stale_open.go	StaleOpenBead.RecoveryCommand	arg0:unprovable
 internal/next/ready_gate.go	GateReadiness	variadic-spread:recovery
 
 [known_sites_exemption_list]

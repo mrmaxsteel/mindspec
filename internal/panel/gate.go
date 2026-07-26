@@ -79,6 +79,31 @@ type Decision struct {
 // `git merge bead/<id>` on the spec branch is the obvious workaround; the
 // matcher only fires on `mindspec complete` and mindspec installs no
 // pre-merge-commit git hook, so the fence is prose by necessity.
+//
+// This function's own rendered template IS a real FamilyGitMerge match
+// (spec 127 R5(a)) — verified: guard.FindFloorMatches on its literal
+// template string returns [{Family:git merge}]. It reaches EIGHT real
+// `Decision{Message:}` diagnostics, at this file's own :183, :210,
+// :250, :266, :279, :296, :322, :336 (counted directly from this
+// file, not carried over from a prior estimate — spec 127 bead-2
+// rework RULING 10, which found three DIFFERENT counts across its own
+// panel round and required whoever fixes this to count and state the
+// number rather than repeat one). internal/lint's product-diagnostic
+// scan does NOT reach any of them: seven arrive as a %s ARGUMENT to
+// an outer fmt.Sprintf whose OWN template is destructive-text-free
+// (the scan's Sprintf fold rule inspects only the template, args[0],
+// by design — R5c's own stated shape), and the eighth (:266) is built
+// via strings.Builder, which the scan cannot fold at all. This is a
+// genuine, disclosed reach gap, not a mechanism failure: an exemption-
+// list entry is the WRONG disposition (R5(a)'s own text: the
+// exemption list's domain is exactly the swept GUIDANCE surfaces —
+// "every emitted lifecycle diagnostic is outside it... never
+// exemption-listed" — and this is product output), an allowlist entry
+// collides with AC-9(ii)'s pinned final count, and widening the fold
+// rules to trace Sprintf arguments or strings.Builder composition
+// would revive the unbounded-fold-reach shape the round-6 spec gate
+// closed. Recorded here, reviewed, rather than left for a reader to
+// discover the scan does not see it.
 func RawMergeFence(beadID string) string {
 	return fmt.Sprintf(
 		"\nDo NOT bypass with raw `git merge bead/%s` — it skips bd closure, "+

@@ -12,8 +12,34 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// TestBeadCreateFailure_EmitsBdDeleteForceLine is the obligation
+// registries.go's beadCreateFailure allowlist entry actually names
+// (spec 127 bead-2 rework, RULING 6/O3-r2-4/O1-r2-4): the prior
+// citation, "plan_test.go's existing TestBeadCreateFailure-shaped
+// coverage", named a test that did not exist — the nearest real test,
+// TestCreateImplementationBeads_BDCreateFails, forces the FIRST bead
+// create to fail (created is empty), so it never exercises the
+// partial-set `bd delete <ids> --force` line at all. This test calls
+// beadCreateFailure directly with a non-empty created slice and pins
+// the exact rendered recovery line.
+func TestBeadCreateFailure_EmitsBdDeleteForceLine(t *testing.T) {
+	created := []string{"mindspec-abcd.1", "mindspec-abcd.2"}
+	err := beadCreateFailure("042-test", "Bead 3", created, nil, fmt.Errorf("bd not available"))
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	want := "bd delete mindspec-abcd.1 mindspec-abcd.2 --force"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected the recovery to contain %q, got:\n%s", want, err.Error())
+	}
+	if !guard.IsFloorMatch(want) {
+		t.Fatalf("fixture setup error: %q is expected to be a reviewed floor match (FamilyBdDeleteForce)", want)
+	}
+}
 
 func TestUpdatePlanApproval_UpdatesFrontmatter(t *testing.T) {
 	tmp := t.TempDir()

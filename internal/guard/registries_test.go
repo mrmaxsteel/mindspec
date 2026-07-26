@@ -6,8 +6,13 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // registries_test.go pins the three registries' internal disciplines
@@ -39,7 +44,15 @@ func TestOpaqueOperandRegistry_EveryEntryHasRationaleAndObligation(t *testing.T)
 	}
 }
 
+// TestKnownSitesExemptionList_EveryEntryHasFamilyAndCount pins EVERY
+// field the test's own NAME promises (spec 127 bead-2 rework,
+// O1-r2-10: the prior body never once referenced e.Family, so an
+// entry with an empty Family passed despite the test's name).
 func TestKnownSitesExemptionList_EveryEntryHasFamilyAndCount(t *testing.T) {
+	registered := map[DestructiveFamily]bool{}
+	for _, fam := range AllFamilies {
+		registered[fam] = true
+	}
 	for _, e := range KnownSitesExemptionList {
 		if e.Surface == "" || e.Text == "" {
 			t.Errorf("exemption entry %+v has an empty surface/text", e)
@@ -47,7 +60,134 @@ func TestKnownSitesExemptionList_EveryEntryHasFamilyAndCount(t *testing.T) {
 		if e.Count < 1 {
 			t.Errorf("exemption entry %s/%q has a non-positive count", e.Surface, e.Text)
 		}
+		if e.Family == "" {
+			t.Errorf("exemption entry %s/%q has an empty Family", e.Surface, e.Text)
+		} else if !registered[e.Family] {
+			t.Errorf("exemption entry %s/%q names Family %s, which is not in AllFamilies", e.Surface, e.Text, e.Family)
+		}
 	}
+}
+
+// TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation
+// mirrors the allowlist/opaque-registry discipline checks above,
+// extended to the exemption list now that it carries the same two
+// fields (spec 127 bead-2 rework, RULING 6/G1-r2-3).
+func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.T) {
+	for _, e := range KnownSitesExemptionList {
+		if e.Rationale == "" {
+			t.Errorf("exemption entry %s/%q has no rationale", e.Surface, e.Text)
+		}
+		if e.Obligation == "" {
+			t.Errorf("exemption entry %s/%q has no obligation", e.Surface, e.Text)
+		}
+	}
+}
+
+// TestKnownSitesExemptionList_CountSentinel pins the live/total split
+// derived, not hand-typed (spec 127 bead-2 rework, RULING 7): fails
+// if len(KnownSitesExemptionList) or the live/seed-only split ever
+// drifts from what the exported count vars themselves compute — which
+// can only happen if this test is stale against a code change that
+// also updated the vars, since both are derived from the same slice.
+// Its real value is pinning the CURRENT correct numbers (ten live,
+// fourteen total) so a reviewer sees them fail loudly if a future
+// edit to the slice's structure (e.g. renaming the seed-only surface)
+// silently changes what "live" means.
+func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
+	if got, want := len(KnownSitesExemptionList), 14; got != want {
+		t.Errorf("len(KnownSitesExemptionList) = %d, want %d", got, want)
+	}
+	if got, want := KnownSitesExemptionListTotalCount, 14; got != want {
+		t.Errorf("KnownSitesExemptionListTotalCount = %d, want %d", got, want)
+	}
+	if got, want := KnownSitesExemptionListLiveCount, 10; got != want {
+		t.Errorf("KnownSitesExemptionListLiveCount = %d, want %d", got, want)
+	}
+}
+
+// TestRegistryObligations_NamedTestsExist is spec 127 bead-2 rework's
+// RULING 6 systemic fix (G1-r2-3/O1-r2-4/O2-r2-6/O3-r2-4): parses
+// every Rationale and Obligation string in all three registries for a
+// Test[A-Za-z0-9_]+-shaped identifier and asserts each one names a
+// real test function declared SOMEWHERE in the repo's *_test.go
+// files — not merely that the field is non-empty (the mechanism this
+// spec's own dominant defect class keeps exploiting: an obligation
+// naming a test that does not exist is, by ADR-0035's own rule, on
+// the same footing as an unregistered site). This is what would have
+// caught the two prior citations of a nonexistent
+// TestDestructiveGuidanceAllowlist_ObligationsHold and the nonexistent
+// "TestBeadCreateFailure"-shaped plan_test.go coverage.
+func TestRegistryObligations_NamedTestsExist(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	declared := collectDeclaredTestNames(t, root)
+	testNameRe := regexp.MustCompile(`Test[A-Za-z0-9_]+`)
+
+	check := func(label, text string) {
+		for _, name := range testNameRe.FindAllString(text, -1) {
+			if !declared[name] {
+				t.Errorf("%s names %s, which is not a test function declared anywhere in the repo's *_test.go files", label, name)
+			}
+		}
+	}
+	for _, e := range DestructiveGuidanceAllowlist {
+		check("allowlist "+e.File+"/"+e.Func+" Rationale", e.Rationale)
+		check("allowlist "+e.File+"/"+e.Func+" Obligation", e.Obligation)
+	}
+	for _, e := range OpaqueOperandRegistry {
+		check("opaque-operand "+e.File+"/"+e.Func+" Rationale", e.Rationale)
+		check("opaque-operand "+e.File+"/"+e.Func+" Obligation", e.Obligation)
+	}
+	for _, e := range KnownSitesExemptionList {
+		check("exemption "+e.Surface+"/"+e.Text+" Rationale", e.Rationale)
+		check("exemption "+e.Surface+"/"+e.Text+" Obligation", e.Obligation)
+	}
+}
+
+// collectDeclaredTestNames walks every *_test.go file under cmd/ and
+// internal/ (skipping testdata dirs, same as ratchet_universe_test.go's
+// own walk in package lint) and returns the set of every top-level,
+// receiver-less Test*-named function declared anywhere in the repo —
+// obligations legitimately cite tests in OTHER packages (e.g.
+// internal/approve/plan_test.go), so this walk is repo-wide, not
+// package-local.
+func collectDeclaredTestNames(t *testing.T, root string) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, top := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if d.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(d.Name(), "_test.go") {
+				return nil
+			}
+			file, perr := parser.ParseFile(fset, path, nil, 0)
+			if perr != nil {
+				return nil // a broken test file is not this test's concern
+			}
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
+					names[fn.Name.Name] = true
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", top, err)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("collected zero test names — this probe's own walk is broken")
+	}
+	return names
 }
 
 // TestDestructiveGuidanceAllowlist_ContentRegeneration is fixture (γ)
@@ -133,13 +273,21 @@ func TestOpaqueOperandRegistry_RuntimeInventoryAgainstFloor(t *testing.T) {
 // scan folds a command operand: a plain string literal, or
 // fmt.Sprintf's literal template (substituted args are irrelevant to
 // classification, spec 127 R5c).
+//
+// Uses strconv.Unquote — not raw byte-slicing — so an escape sequence
+// (readiness.go:219/:228 already carry `\"` inside their templates)
+// decodes to the value the string ACTUALLY renders at runtime, not
+// its undecoded source spelling (spec 127 bead-2 rework, O1-r2-5).
+// strconv.Unquote failing is NOT treated as "no floor match" — it
+// returns ok=false, which the caller (TestOpaqueOperandRegistry_
+// RuntimeInventoryAgainstFloor) already turns into an explicit
+// t.Errorf, never a silent pass.
 func recoveryTemplate(expr ast.Expr) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
-			s := e.Value
-			if len(s) >= 2 {
-				return s[1 : len(s)-1], true
+			if v, err := strconv.Unquote(e.Value); err == nil {
+				return v, true
 			}
 		}
 	case *ast.CallExpr:
@@ -156,17 +304,164 @@ func recoveryTemplate(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
-// TestOpaqueOperandRegistry_RerunCallers is the second half of
-// beadToSpecConflictFailure's `rerun` obligation: both real callers'
-// actual rerun argument, checked directly against the classifier.
-func TestOpaqueOperandRegistry_RerunCallers(t *testing.T) {
-	realReruns := []string{
-		"mindspec complete bead/mindspec-abcd.1",
-		"mindspec impl approve 127-lifecycle-verb-trustworthiness",
+// TestRecoveryTemplate_DecodesEscapesLikeTheRealString pins O1-r2-5's
+// fold: a Recovery: field whose literal carries an escape sequence
+// must decode to the value that literal ACTUALLY renders at runtime
+// — a destructive command hidden behind an escape must still be
+// caught, not silently folded to its undecoded source spelling.
+func TestRecoveryTemplate_DecodesEscapesLikeTheRealString(t *testing.T) {
+	src := `package readiness
+
+var x = Signal{Recovery: "git push --force\n"}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "synthetic.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture: %v", err)
 	}
-	for _, r := range realReruns {
+	var value ast.Expr
+	ast.Inspect(file, func(n ast.Node) bool {
+		kv, ok := n.(*ast.KeyValueExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := kv.Key.(*ast.Ident); ok && id.Name == "Recovery" {
+			value = kv.Value
+		}
+		return true
+	})
+	if value == nil {
+		t.Fatal("fixture setup error: no Recovery: field found")
+	}
+	tmpl, ok := recoveryTemplate(value)
+	if !ok {
+		t.Fatal("expected recoveryTemplate to fold the literal")
+	}
+	if matches := FindFloorMatches(tmpl); len(matches) == 0 {
+		t.Fatalf("expected the decoded template %q to match FamilyGitPushForce, got no matches", tmpl)
+	}
+}
+
+// TestOpaqueOperandRegistry_RerunCallers is the second half of
+// beadToSpecConflictFailure's `rerun` obligation. Spec 127 bead-2
+// rework, O3-r2-5: the prior version hardcoded two hand-written
+// strings and asserted against those — a stub fabricating the value
+// the AC then asserts, never reading mindspec_executor.go's real call
+// sites at all, so a caller later rewritten to pass a destructive
+// rerun string would leave this test green. This version parses
+// internal/executor/mindspec_executor.go's real AST, finds EVERY call
+// to beadToSpecConflictFailure, folds argument index 3 (`rerun`) the
+// same way the scan folds a command operand (recoveryTemplate, above
+// — a literal or an fmt.Sprintf literal template), and asserts no
+// floor match — the same shape TestOpaqueOperandRegistry_
+// RuntimeInventoryAgainstFloor already uses in this file for the
+// readiness-signal catalog.
+func TestOpaqueOperandRegistry_RerunCallers(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	path := filepath.Join(root, "internal", "executor", "mindspec_executor.go")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	found := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		id, ok := call.Fun.(*ast.Ident)
+		if !ok || id.Name != "beadToSpecConflictFailure" {
+			return true
+		}
+		if len(call.Args) <= 3 {
+			t.Errorf("a call to beadToSpecConflictFailure has %d args, expected at least 4 (rerun is index 3) — this test's own probe is broken", len(call.Args))
+			return true
+		}
+		tmpl, ok := recoveryTemplate(call.Args[3])
+		if !ok {
+			t.Errorf("beadToSpecConflictFailure call at %s: the rerun argument (index 3) is not a literal or fmt.Sprintf-with-literal-template — this test cannot prove it, which itself is the obligation failing", fset.Position(call.Pos()))
+			return true
+		}
+		found++
+		if matches := FindFloorMatches(tmpl); len(matches) > 0 {
+			t.Errorf("beadToSpecConflictFailure call at %s: rerun template %q matches a destructive floor family: %+v", fset.Position(call.Pos()), tmpl, matches)
+		}
+		return true
+	})
+	if found == 0 {
+		t.Fatal("found zero calls to beadToSpecConflictFailure — this test's own probe is broken (the call sites must have changed shape)")
+	}
+}
+
+// TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor is the
+// named obligation for the three containment.EmitCd-bare-call entries
+// added in the bead-2 rework (beadToSpecConflictFailure,
+// directMergeConflictFailure, checkCWDWithCache): runs the REAL
+// containment.EmitCd over representative worktree/root PATH shapes
+// (never free-form/adversarial text — that broader, false "for any
+// target" claim was corrected in destructive_guidance_test.go's
+// former EmitCd trust boundary, spec 127 bead-2 rework O2-r2-9) and
+// asserts the classifier finds no floor match.
+func TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor(t *testing.T) {
+	paths := []string{
+		"/repo",
+		"/repo/.worktrees/worktree-spec-127-lifecycle-verb-trustworthiness",
+		"/repo/.worktrees/worktree-mindspec-2vtk.2",
+		"../other-worktree",
+		"/tmp/mindspec-work",
+	}
+	for _, p := range paths {
+		rendered := containment.EmitCd(p)
+		if matches := FindFloorMatches(rendered); len(matches) > 0 {
+			t.Errorf("containment.EmitCd(%q) = %q unexpectedly matches a destructive floor family: %+v", p, rendered, matches)
+		}
+	}
+}
+
+// TestOpaqueOperandRegistry_RecoveryCommandTemplatesAgainstFloor is
+// the named obligation for Orphan.RecoveryCommand/
+// StaleOpenBead.RecoveryCommand's own `"mindspec complete " +
+// idrender.Bead(id)` return shape (bead-2 rework): checks the
+// rendered form over representative PATTERN-VALID bead-ID strings
+// (idvalidate.BeadID's charset — lowercase alnum, hyphens, dots only,
+// no whitespace) — the literal prefix alone is already off-floor
+// (mindspec, not git/bd/rm), and a pattern-valid id can never itself
+// spell a multi-token destructive command (no whitespace to separate
+// tokens). Package guard cannot import internal/lifecycle (a real
+// import cycle — internal/lifecycle/gitquery.go imports internal/
+// guard), so this checks the rendered TEXT SHAPE directly rather than
+// calling Orphan.RecoveryCommand()/StaleOpenBead.RecoveryCommand()
+// themselves.
+func TestOpaqueOperandRegistry_RecoveryCommandTemplatesAgainstFloor(t *testing.T) {
+	ids := []string{
+		"mindspec-abcd.1",
+		"mindspec-ab01.2.3",
+		"proj-slug-123",
+	}
+	for _, id := range ids {
+		rendered := "mindspec complete " + id
+		if matches := FindFloorMatches(rendered); len(matches) > 0 {
+			t.Errorf("%q unexpectedly matches a destructive floor family: %+v", rendered, matches)
+		}
+	}
+}
+
+// TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor is the
+// named obligation for cmd/mindspec/panel.go's tallyExitActionNonBead
+// (bead-2 rework): representative renderings of its own `"re-run the
+// panel: " + "mindspec panel create %s --round <N+1> --spec <id>"`
+// template, with and without the optional `--target`/`--gate`
+// fragments, checked against the classifier.
+func TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor(t *testing.T) {
+	renderings := []string{
+		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id>`,
+		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main`,
+		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main --gate impl`,
+	}
+	for _, r := range renderings {
 		if matches := FindFloorMatches(r); len(matches) > 0 {
-			t.Errorf("rerun invocation %q unexpectedly matches a destructive floor family: %+v", r, matches)
+			t.Errorf("%q unexpectedly matches a destructive floor family: %+v", r, matches)
 		}
 	}
 }
