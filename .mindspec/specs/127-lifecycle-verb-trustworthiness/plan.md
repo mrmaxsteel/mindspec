@@ -1478,7 +1478,7 @@ producer-wise (AC-7(iv) is a whole-set universal).
 - [ ] `go test -short ./internal/executor/... ./internal/complete/... ./internal/approve/... ./cmd/mindspec/... ./internal/redact/...` passes
 - [ ] AC-7(i)-(v) RED at `09f62bd9`; AC-5 RED; AC-9(v) legs each mapped to a named test; AC-8(i) golden byte-identical (guard); AC-8(v) convergence with zero override
 - [ ] No raw `git merge` string in either emitter's output (string-asserted + the internal/lint scan stays green); friction admission + epic metadata both present on the override fixture; redact token registered
-- [ ] Preserved-merge enumeration test covers the full call-site set; `abortMergeState` precondition fixture (never aborts a foreign merge)
+- [ ] Preserved-merge enumeration test covers the full call-site set; `classifyPreservedMergeBinding` foreign-merge refusal fixture (never completes or adopts a foreign merge)
 - [ ] Target-drift backstop fixture green (producer-site refusal on mid-run target drift; partial state + re-run convergence asserted); `workDestructionFn` pointer pin green
 - [ ] Full gates clean; zero `--override-adr` (this bead's own completion is the preflight's first live run — orchestrator note)
 
