@@ -409,3 +409,74 @@ func TestRun_SelfOrphanDeterminationErrorRetainsRefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestRun_MultiLineHintThreadsAllLinesInOrder is bead-4 fix round 2's
+// ITEM 1 (G1-5 held open across fix round 1): round 1 added the
+// analogous multi-line fidelity test to internal/approve
+// (implOrphanRefusal) and internal/doctor (checkOrphanedBeads), but this
+// package — the THIRD consumer of the same lifecycle.OrphanHint
+// derivation — had no equivalent. Every existing orphan test in this
+// file stubs evaluateOrphanHintFn with the single-line Clean shape
+// (Lines: []string{"mindspec complete " + beadID}); TestRun_MultiOrphanConvergence
+// and TestRun_AllOrphansRefusalNamesEverySibling both cover BREADTH over
+// multiple orphaned SIBLINGS, never fidelity over a single hint's
+// MULTIPLE LINES. This stubs the Superseded shape (preserve-tag,
+// delete, adopt-invocation — three lines) for a single non-self-orphaned
+// sibling and asserts every line appears, in order and unmodified,
+// inside Run's returned error — the fidelity check the round-1
+// amendment's "internal/complete's pre-existing coverage compensates"
+// claim asserted and did not have.
+//
+// complete.go's renderOrphanRecoverySegment folds hint.Lines with
+// `strings.Join(hint.Lines, "; ")` (byte-identical fold to
+// internal/doctor's orphaned_beads.go), so order and content survive
+// that fold exactly — unlike internal/approve's separate-recovery-line
+// (guard.NewFailure) rendering.
+func TestRun_MultiLineHintThreadsAllLinesInOrder(t *testing.T) {
+	saveAndRestore(t)
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	runBDFn = func(args ...string) ([]byte, error) { return nil, fmt.Errorf("no results") }
+
+	wantLines := []string{
+		`git tag preserve/bead-x bead/bead-x   (preserve bead-x's commits before deleting — its content is not guaranteed reachable from spec/008-test)`,
+		"git branch -D bead/bead-x",
+		`mindspec impl adopt 008-test --reason "<why bead-x's content already reached main outside the lifecycle>"`,
+	}
+	findOrphanedClosedBeadsFn = func(sid, workdir, excludeBeadID string) []lifecycle.Orphan {
+		return []lifecycle.Orphan{{BeadID: "bead-x", BeadBranch: "bead/bead-x", SpecBranch: "spec/008-test"}}
+	}
+	evaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{
+			Outcome:      guard.DestructionSuperseded,
+			EvidenceNote: "bead bead-x's branch bead/bead-x is superseded — its content already landed in spec/008-test via another route per the shared work-destruction predicate",
+			Lines:        append([]string{}, wantLines...),
+		}
+	}
+	// bead-c is NOT itself orphaned — this drives the all-orphans refusal
+	// path (the else branch below the self-orphan WARN-demotion), the
+	// same path TestRun_AllOrphansRefusalNamesEverySibling exercises.
+	isBeadSelfOrphanedFn = func(sid, workdir, id string) (bool, error) { return false, nil }
+	closeBeadFn = func(ids ...string) error { t.Fatal("must not mutate — this is a preflight refusal"); return nil }
+
+	_, err := Run(root, "bead-c", "", "", newMockExec(), CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected a refusal naming the orphaned sibling")
+	}
+	msg := err.Error()
+
+	lastIdx := -1
+	for i, want := range wantLines {
+		idx := strings.Index(msg, want)
+		if idx < 0 {
+			t.Fatalf("line %d (%q) missing verbatim from Run's error:\n%s", i, want, msg)
+		}
+		if idx <= lastIdx {
+			t.Fatalf("line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", i, want, msg)
+		}
+		lastIdx = idx
+	}
+}

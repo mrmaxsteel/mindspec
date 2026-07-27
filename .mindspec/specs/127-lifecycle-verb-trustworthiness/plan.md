@@ -1064,14 +1064,43 @@ in two distinct ways corrected here rather than re-asserted:
    added `TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder` in
    `internal/approve/impl_display_forgery_test.go` and
    `TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder` in
-   `internal/doctor/orphaned_beads_test.go`, joining
-   `internal/complete`'s pre-existing multi-orphan coverage via
-   `renderOrphanRecoverySegment` and adopt's own stale-deletion/Clean
-   fixtures): the DERIVATION is shared and its lines are threaded
-   faithfully, in order and unmodified, by each consumer — whose
-   wrapping (separate recovery lines, an inline `"; "`-joined string, or
-   prose) is its own, by design, and is exactly what each consumer's
-   own fixture now proves rather than assumes.
+   `internal/doctor/orphaned_beads_test.go`).
+   **CORRECTED in fix round 2 (G1-5 held open across round 1)**: round 1
+   claimed those two new tests, "joining `internal/complete`'s
+   pre-existing multi-orphan coverage via `renderOrphanRecoverySegment`
+   and adopt's own stale-deletion/Clean fixtures," already proved this
+   for all four consumers. That claim was false for BOTH cited
+   fixtures, not just the one G1 flagged: `internal/complete`'s
+   pre-existing `TestRun_MultiOrphanConvergence` and
+   `TestRun_AllOrphansRefusalNamesEverySibling` stub only the
+   single-line `guard.DestructionClean` shape and prove BREADTH over
+   multiple orphaned SIBLINGS, never fidelity over one hint's MULTIPLE
+   LINES — the exact gap this bullet exists to close, surviving
+   unnoticed in the third consumer. Re-auditing found the identical gap
+   in the fourth: adopt's own stale-deletion/Clean fixtures
+   (`TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint`,
+   `TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete`) drive
+   `lifecycle.DeriveOrphanHint` outcomes whose `hint.Lines` is always
+   exactly one entry (`guard.DestructionStaleDeletion` /
+   `guard.DestructionClean` — see `orphan_hints.go`); neither ever
+   exercised `adoptOrphanPresentRefusal`'s
+   `hint.Outcome == guard.DestructionSuperseded` pass-through
+   (adopt.go:586), a genuine three-line unmodified thread with no
+   fixture anywhere driving it. Fix round 2 added
+   `TestRun_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/complete/closed_unmerged_test.go` and
+   `TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder`
+   in `internal/approve/adopt_test.go`, each stubbing a fabricated
+   `guard.DestructionSuperseded` (three-line) hint and asserting every
+   line appears, in order and unmodified, in the consumer's rendered
+   output — reverting each production render to G1's exact mutation
+   (drop the final line whenever `hint.Lines` has more than one entry)
+   reds both. With all four now covered: the DERIVATION is shared and
+   its lines are threaded faithfully, in order and unmodified, by each
+   consumer — whose wrapping (separate recovery lines, an inline
+   `"; "`-joined string, or prose) is its own, by design — and this is
+   now exactly what each consumer's own fixture proves rather than
+   assumes.
 
 Match this corrected reading against spec.md's AC-3 text (unaffected —
 it already scopes the parity leg to "all four production surfaces" and

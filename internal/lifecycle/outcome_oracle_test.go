@@ -517,8 +517,15 @@ func buildPackageTables(files []*ast.File) (packageFuncTable, packageVarTable) {
 // itself another followable name, so a short var-to-var indirection
 // chain IS covered). It does NOT resolve a function value threaded
 // through a LOCAL variable, a struct field, an interface method set, or
-// a runtime-constructed closure — that class is REVIEW-CAUGHT, not
-// mechanically closed here.
+// a runtime-constructed closure; NOR a package-level `var name`
+// declared WITHOUT its own initializer whose value is instead assigned
+// by a sibling file's `init()` and read only by value at the call site
+// (bead-4 fix round 2, O2 new MINOR — buildPackageTables above only
+// populates `vars[name] = vs.Values[i]` when the declaration itself
+// carries an initializer expression, so an init()-populated var has no
+// entry for walk to descend into, and init() is never itself reached
+// since nothing textually calls it by name) — that class is
+// REVIEW-CAUGHT, not mechanically closed here.
 func scanForForbiddenRefsWithClosure(t *testing.T, dir, rootPath string, exemptFuncs ...string) []string {
 	t.Helper()
 	fset, files := parsePackageGoFiles(t, dir)

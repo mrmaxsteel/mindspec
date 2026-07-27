@@ -15,6 +15,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
@@ -920,6 +922,69 @@ func TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete(t *testing.T) {
 	}
 	if *closedCalls != 0 {
 		t.Fatal("a refusal must perform no mutation")
+	}
+}
+
+// TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder
+// is bead-4 fix round 2's ITEM 1 follow-through: fix round 1's plan.md
+// amendment cited "adopt's own stale-deletion/Clean fixtures" as part of
+// this package's per-consumer fidelity evidence, but BOTH of those real-
+// git fixtures (TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint,
+// TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete above) drive
+// lifecycle.DeriveOrphanHint outcomes whose hint.Lines is always exactly
+// ONE entry (guard.DestructionStaleDeletion / guard.DestructionClean —
+// see orphan_hints.go) — neither can exercise adoptOrphanPresentRefusal's
+// hint.Outcome == guard.DestructionSuperseded leg (adopt.go:586), whose
+// `lines = hint.Lines` is a genuine multi-line (three-entry: preserve-
+// tag, delete, adopt-invocation) UNMODIFIED pass-through with no adopt.go
+// fixture anywhere ever exercising it. This calls adoptOrphanPresentRefusal
+// directly (the seam is adoptEvaluateOrphanHintFn, stubbed — no real repo
+// needed) with a fabricated Superseded hint and asserts every line
+// appears, in order and unmodified, as its own "recovery: " line —
+// closing the same claim-exceeds-mechanism gap G1-5/O3-1 found in
+// internal/complete, before it was asserted as already-covered here too.
+func TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder(t *testing.T) {
+	orig := adoptEvaluateOrphanHintFn
+	t.Cleanup(func() { adoptEvaluateOrphanHintFn = orig })
+	wantLines := []string{
+		`git tag preserve/bead-x bead/bead-x   (preserve bead-x's commits before deleting — its content is not guaranteed reachable from main)`,
+		"git branch -D bead/bead-x",
+		`mindspec impl adopt 042-test --reason "<why bead-x's content already reached main outside the lifecycle>"`,
+	}
+	adoptEvaluateOrphanHintFn = func(root, beadID, beadBranch, specID string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{
+			Outcome:      guard.DestructionSuperseded,
+			EvidenceNote: "bead bead-x's branch bead/bead-x is superseded — its content already landed in main via another route per the shared work-destruction predicate",
+			Lines:        append([]string{}, wantLines...),
+		}
+	}
+
+	err := adoptOrphanPresentRefusal(t.TempDir(), "042-test", "bead-x", "bead/bead-x")
+	if err == nil {
+		t.Fatal("adoptOrphanPresentRefusal returned nil")
+	}
+	msg := err.Error()
+
+	lastIdx := -1
+	for i, want := range wantLines {
+		idx := strings.Index(msg, want)
+		if idx < 0 {
+			t.Fatalf("line %d (%q) missing verbatim from the rendered message:\n%s", i, want, msg)
+		}
+		if idx <= lastIdx {
+			t.Fatalf("line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", i, want, msg)
+		}
+		lastIdx = idx
+		if !strings.Contains(msg, "recovery: "+want) {
+			t.Errorf("expected line %q to render as its own recovery line, got:\n%s", want, msg)
+		}
+	}
+	// A Superseded outcome never appends the adopt-rerun line a SECOND
+	// time (adopt.go:586's `if hint.Outcome != guard.DestructionSuperseded`
+	// guard) — the third wantLines entry above IS the adopt-rerun,
+	// already folded into the derivation's own hint.Lines.
+	if got := strings.Count(msg, "mindspec impl adopt"); got != 1 {
+		t.Errorf("expected exactly 1 adopt-rerun invocation (no duplicate append), got %d in:\n%s", got, msg)
 	}
 }
 
