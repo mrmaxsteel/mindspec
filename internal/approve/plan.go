@@ -2,7 +2,6 @@ package approve
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -833,13 +832,27 @@ type existingChildBead struct {
 	// `bd list --parent ... --all -n 0 --json`'s output for a closed
 	// bead (verified empirically: no additional bd/git I/O needed to
 	// read it — queryExistingChildren's existing query already returns
-	// it). Bead-5 fix round 2, RULING 1 (G1): evaluateChildProvenance
-	// reads this as the ONE durable, positive-evidence marker for an
-	// interrupted supersede-close — see supersedeCloseReasonPrefix's own
-	// doc comment for why it is the single production writer of this
-	// shape. Empty for an open child, and empty for a genuinely
-	// completed one too (bead.Close, the `mindspec complete` call site,
-	// passes bd close no --reason at all).
+	// it).
+	//
+	// Bead-5 fix round 3, RULING 1 (G1): NO LONGER READ by
+	// evaluateChildProvenance to license a deletion hint. Fix round 2
+	// treated this as the one durable, positive-evidence marker for an
+	// interrupted supersede-close; G1 disproved that: `bd close --help`
+	// (installed bd 1.1.0) confirms any human or automation may pass an
+	// arbitrary `--reason`/`--reason-file`, so `bd close <child> --reason
+	// "superseded by plan v2"` writes this identical field without
+	// supersedeCloseExistingBeads ever running, and `bd import --help`
+	// states import upserts every field `bd export` emits — including
+	// close_reason — into an existing row. A bd-resident string can
+	// therefore never be non-forgeable by construction; see
+	// supersedeCloseReasonPrefix's own doc comment for the corrected
+	// production-writer picture. This field is kept only because it is
+	// free (already fetched, zero extra I/O), useful for a human's own
+	// `bd show <id> --json` inspection (closedChildPreserveRefusal's
+	// recovery line points there), and a candidate input for a FUTURE
+	// evidence source that corroborates it against something a tracker
+	// write cannot reproduce (mindspec-nixq). It must NEVER, by itself,
+	// move Provenance off provenanceAmbiguous.
 	CloseReason string `json:"close_reason"`
 	// Provenance is spec 127 R3c's durable evidence classification —
 	// set ONLY for CLOSED children, by resolveChildProvenance during
@@ -858,18 +871,33 @@ type existingChildBead struct {
 
 // supersedeCloseReasonPrefix is the exact literal prefix
 // supersedeCloseExistingBeads writes via `bd close ... --reason
-// "superseded by plan v<version>"` below — the ONE durable, positive
-// marker evaluateChildProvenance treats as proof of an interrupted
-// supersede-close (bead-5 fix round 2, RULING 1). It is the single
-// production writer of a `bd close --reason` for a child bead under an
-// epic: `mindspec complete`'s own close call site (bead.Close, wired
-// from internal/complete/complete.go's closeBeadFn) passes bd close NO
-// --reason at all, so a genuinely completed bead's close_reason is
-// always empty. A prefix match (not full equality) is deliberate — the
-// version suffix varies per plan and extractPlanVersion falls back to
-// the literal string "unknown" when the frontmatter has no version
-// field, so the prefix alone is what both the writer and the reader
-// must agree on.
+// "superseded by plan v<version>"` below.
+//
+// Bead-5 fix round 3, RULING 1 (G1): this const's own doc comment used
+// to claim supersedeCloseExistingBeads was "the single production
+// writer" of a `bd close --reason` for a child bead under an epic, on
+// the strength of two enumerated close call sites (`mindspec
+// complete`'s bead.Close, which passes no --reason, and this one,
+// which always does). That enumeration was both incomplete AND beside
+// the point: `internal/bead/hygiene.go:170`'s FixHygiene calls `bd
+// update <id> --status=closed` — a third production path this
+// comment's own "exactly two close call sites" framing missed, though
+// it writes no reason and so was never part of this shape either way.
+// More importantly, `bd close --help`/`bd import --help` (installed bd
+// 1.1.0) establish that NO enumeration of MindSpec's own production
+// call sites can make this string durable, unforgeable evidence: `bd
+// close --reason`/`--reason-file` accepts arbitrary text from any
+// human or automation outside MindSpec entirely, and `bd import`
+// upserts every field `bd export` emits (including close_reason) into
+// an existing row. So evaluateChildProvenance no longer reads
+// CloseReason at all (the parameter was removed, not merely ignored —
+// see its own doc comment). This const's only remaining production
+// consumer is the writer below, which keeps writing it purely as a
+// human-readable `bd show <id> --json` breadcrumb; the prefix-not-
+// equality match is kept for whatever diagnostic value that retains —
+// the version suffix varies per plan and extractPlanVersion falls back
+// to the literal string "unknown" when the frontmatter has no version
+// field.
 const supersedeCloseReasonPrefix = "superseded by plan v"
 
 // childProvenanceEvidence is R3c's positively-established evidence
@@ -912,26 +940,45 @@ const supersedeCloseReasonPrefix = "superseded by plan v"
 // reversal — collapsed genuinely-landed, tree-present work into the
 // same deletion-licensing outcome the original R3c bug produced.
 //
-// The DURABLE POSITIVE signature this discriminator now requires
-// instead is CloseReason carrying supersedeCloseReasonPrefix (see that
-// const's own doc comment): supersedeCloseExistingBeads is the ONLY
-// production path that ever closes a child bead under an epic WITHOUT
-// completed work landing, and it is the ONLY production path that ever
-// passes bd close a --reason at all — so that literal prefix is
-// positive, durable, by-construction proof the bead was superseded/
-// left over, independent of what the merge-commit scan could or could
-// not see. Landed evidence found (landedErr == nil) still wins
-// unconditionally over the marker — a positively-identified landing is
-// stronger evidence than a close reason. Absent BOTH a landed merge and
-// the marker, the state is AMBIGUOUS, not partial/interrupted: a plain
-// `bd close <id>` (no --reason) on a genuinely never-landed leftover —
-// a real leftover, just closed outside supersedeCloseExistingBeads —
-// now also resolves ambiguous rather than licensing deletion. That is
-// the deliberate trade this reversal makes: precision (never
-// misclassifying squash/fast-forward-landed work as deletable) over
-// recall (a same-shape leftover closed by some other, non-mindspec
-// path no longer gets an automatic deletion hint — it falls to
-// inspection/reconciliation like any other ambiguous case instead).
+// Bead-5 fix round 3, RULING 1 (G1, reversing fix round 2's own RULING
+// 1 for the SAME reason round 2 reversed round 1 — an accepted signal
+// turned out to be weaker evidence than the model needs): fix round 2's
+// paragraph above claimed the DURABLE POSITIVE signature was CloseReason
+// carrying supersedeCloseReasonPrefix, reasoning that
+// supersedeCloseExistingBeads was the ONE production path that ever
+// passes `bd close` a --reason at all. That "single production writer"
+// claim was about who INTENDS to write this shape from INSIDE MindSpec
+// — it never accounted for who CAN write the identical bytes from
+// outside it. `bd close --help`/`bd import --help` (installed bd 1.1.0)
+// establish that any human or automation may `bd close <id> --reason
+// "superseded by plan v2"` directly, and `bd import` upserts every
+// field `bd export` emits (including close_reason) into an existing
+// row — so a manually-closed or migrated/imported bead can carry the
+// identical prefix without supersedeCloseExistingBeads ever having run.
+// Corroborating one tracker-resident field with another does not fix
+// this: bd import's own contract (every exported field, upserted) means
+// no bd-resident marker can be made non-forgeable by construction —
+// real corroboration, if built, has to come from outside bd's tracker
+// data (e.g. git content itself, the way landed-merge evidence already
+// does).
+//
+// So the zero-candidate case (lifecycle.ErrLandedMergeNoCandidate) now
+// resolves provenanceAmbiguous UNCONDITIONALLY — CloseReason is no
+// longer read by evaluateChildProvenance at all (the parameter was
+// removed outright, not merely ignored; see existingChildBead.CloseReason's
+// own doc comment for what the field is still kept for). Landed
+// evidence found (landedErr == nil) still wins unconditionally, as
+// before. provenancePartialInterrupted is consequently UNREACHABLE from
+// evaluateChildProvenance today — every production caller sees the
+// closed+zero-candidate case preserve as ambiguous, which is exactly the
+// spec's own stated fallback (spec.md's R3c: "when evidence indicates
+// completed work, or is ambiguous or unavailable, the refusal preserves
+// the record"). This is a deliberate trade, not an oversight: what AC-6
+// still delivers with the producer this conservative is recorded on
+// closedChildDeletionRefusal's own doc comment, and mindspec-nixq
+// (already tracking positive squash/fast-forward landing DETECTION via
+// real git content, which would be strong enough to license this case
+// again) is the natural home for restoring a real positive leg here.
 type childProvenanceEvidence int
 
 const (
@@ -948,14 +995,20 @@ const (
 	// computation itself failed — fail-closed, preserve rather than
 	// guess.
 	provenanceAmbiguous
-	// provenancePartialInterrupted: no bead branch survives, no landed
-	// merge of this bead's work was positively identified, AND
-	// CloseReason carries supersedeCloseReasonPrefix — the ONE positive,
-	// durable signature an interrupted supersede-close leaves behind
-	// (bead-5 fix round 2, RULING 1: zero merge candidates ALONE no
-	// longer suffices — see childProvenanceEvidence's own doc comment
-	// for why, and supersedeCloseReasonPrefix's doc comment for why this
-	// marker is the single production writer of this shape).
+	// provenancePartialInterrupted: no bead branch survives and no
+	// landed merge of this bead's work was positively identified.
+	//
+	// NOT CURRENTLY PRODUCIBLE by evaluateChildProvenance (bead-5 fix
+	// round 3, RULING 1): fix round 2 reached this value off a
+	// CloseReason marker for the zero-candidate case; G1 found that
+	// marker forgeable (see childProvenanceEvidence's own doc comment)
+	// and the marker leg was removed outright. Retained as a real,
+	// tested enum value on purpose: checkExistingBeadsSafety's AC-6(iii)
+	// table pins the correct CONSUMER behavior for this value (the
+	// deletion hint, gated and constructor-routed) so a future,
+	// non-tracker-resident evidence source can produce it again without
+	// checkExistingBeadsSafety needing to change — see
+	// closedChildDeletionRefusal's own doc comment.
 	provenancePartialInterrupted
 )
 
@@ -973,19 +1026,27 @@ func resolveChildProvenance(root, specBranch string, children []existingChildBea
 		if strings.ToLower(out[i].Status) != "closed" {
 			continue
 		}
-		out[i].Provenance = evaluateChildProvenance(root, specBranch, out[i].ID, out[i].CloseReason)
+		out[i].Provenance = evaluateChildProvenance(root, specBranch, out[i].ID)
 	}
 	return out
 }
 
 // evaluateChildProvenance resolves ONE closed child's provenance — see
 // childProvenanceEvidence's doc comment for the discriminator and why
-// it is neither too weak nor too strong. closeReason is the bead's own
-// bd close_reason (existingChildBead.CloseReason) — bead-5 fix round 2,
-// RULING 1: the durable positive marker this function now REQUIRES,
-// alongside the zero-candidate merge-scan result, before it will ever
-// return provenancePartialInterrupted.
-func evaluateChildProvenance(root, specBranch, beadID, closeReason string) childProvenanceEvidence {
+// it is neither too weak nor too strong.
+//
+// Bead-5 fix round 3, RULING 1 (G1): this function no longer takes a
+// closeReason parameter. Fix round 2 added one specifically to license
+// provenancePartialInterrupted off a bd close_reason marker; G1 found
+// that marker forgeable — `bd close --reason`/`bd import` can both
+// write the identical prefix without supersedeCloseExistingBeads ever
+// running (existingChildBead.CloseReason's own doc comment) — so there
+// is no remaining input this function could read to distinguish a
+// genuine interrupted-supersede leftover from tracker data an ordinary
+// manual close or import produced. The parameter is REMOVED, not
+// merely ignored, so a future change cannot silently reintroduce the
+// dependency without a reviewable signature change.
+func evaluateChildProvenance(root, specBranch, beadID string) childProvenanceEvidence {
 	if idvalidate.BeadID(beadID) != nil {
 		// A malformed id from bd: never derive a branch name from it,
 		// never license a deletion off evidence this function could
@@ -1008,34 +1069,24 @@ func evaluateChildProvenance(root, specBranch, beadID, closeReason string) child
 	}
 	switch _, landedErr := planFindLandedMergeFn(root, specBranch, beadID); {
 	case landedErr == nil:
-		// A positively-identified landing always wins, unconditionally
-		// — it is stronger evidence than any close_reason marker could
-		// ever contradict.
+		// A positively-identified landing always wins, unconditionally.
 		return provenanceCompletedWork
-	case errors.Is(landedErr, lifecycle.ErrLandedMergeNoCandidate) && strings.HasPrefix(closeReason, supersedeCloseReasonPrefix):
-		// Bead-5 fix round 2, RULING 1 (G1, reversing fix round 1's own
-		// RULING 1): lifecycle.ErrLandedMergeNoCandidate alone — the
-		// subject scan found no candidate merge naming this bead AT
-		// ALL — used to be treated as the one definitive absence
-		// signature. It is not: a squash merge or fast-forward landing
-		// produces the exact same zero-candidate shape despite real,
-		// tree-present work (childProvenanceEvidence's own doc comment;
-		// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit
-		// and its fast-forward sibling below). ZERO CANDIDATES IS
-		// ABSENCE OF EVIDENCE, NOT EVIDENCE OF ABSENCE. The additional,
-		// now-mandatory condition is closeReason carrying
-		// supersedeCloseReasonPrefix — the durable, positive,
-		// by-construction proof that THIS bead was closed via an
-		// interrupted supersedeCloseExistingBeads run, not completion
-		// (see that const's own doc comment for why it is the single
-		// production writer of this shape). Every other landedErr shape
-		// — *LandedMergeNoEvidence in both its uncorroborated and
-		// mutually-conflicting forms, a corroboration contradiction, a
-		// positively-identified-then-reverted merge, an infra error —
-		// and every zero-candidate result WITHOUT the marker, falls
-		// through to the default ambiguous case below instead.
-		return provenancePartialInterrupted
 	default:
+		// Bead-5 fix round 3, RULING 1 (G1, reversing fix round 2's own
+		// RULING 1): EVERY other landedErr shape — including
+		// lifecycle.ErrLandedMergeNoCandidate, the zero-candidate shape
+		// a squash or fast-forward landing is indistinguishable from
+		// (childProvenanceEvidence's own doc comment;
+		// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit
+		// and its fast-forward sibling below) — now resolves ambiguous
+		// unconditionally. Fix round 2 carved out an exception here when
+		// CloseReason carried supersedeCloseReasonPrefix; that carve-out
+		// is REMOVED because the marker was forgeable (this function's
+		// own doc comment, and childProvenanceEvidence's). ZERO
+		// CANDIDATES IS ABSENCE OF EVIDENCE, NOT EVIDENCE OF ABSENCE, and
+		// there is no remaining input that turns absence into positive
+		// proof. provenancePartialInterrupted is therefore never
+		// returned by this function today.
 		return provenanceAmbiguous
 	}
 }
@@ -1130,6 +1181,21 @@ func checkExistingBeadsSafety(children []existingChildBead) error {
 // own site above (AC-11(b)'s single source of truth for this
 // external-CLI command; see that site's comment for why this is a
 // direct constructor call rather than a shared helper function).
+//
+// Bead-5 fix round 3, RULING 1: as of this round, no production caller
+// ever passes provenancePartialInterrupted into checkExistingBeadsSafety
+// (evaluateChildProvenance's zero-candidate case now always resolves
+// ambiguous instead — see that function's own doc comment for why the
+// prior CloseReason-marker leg was removed as forgeable). This function
+// therefore currently fires only from the AC-6(iii) table test, which
+// constructs the Provenance value directly. What that still delivers,
+// so the AC is not narrowed to nothing: the CONSUMER contract stays
+// real and pinned — IF any future evidence source (e.g. mindspec-nixq's
+// tracked squash/fast-forward content-presence detection) legitimately
+// produces provenancePartialInterrupted, this function is proven to
+// render the correct, constructor-routed, single-source-of-truth
+// deletion hint for it — without checkExistingBeadsSafety or this
+// function needing to change when that producer arrives.
 func closedChildDeletionRefusal(id string) error {
 	deleteCmd, ctorErr := guard.NewDestructiveCommand(
 		fmt.Sprintf("bd delete %s --force", idrender.Bead(id)),
@@ -1146,10 +1212,12 @@ func closedChildDeletionRefusal(id string) error {
 		// satisfied STRUCTURALLY rather than EVIDENTIALLY: the real
 		// evidentiary gating for this destructive action is
 		// childProvenanceEvidence, resolved above this call by R3c's own
-		// discriminator — the zero-candidate merge scan AND the
-		// supersedeCloseReasonPrefix marker on CloseReason, both required
-		// (bead-5 fix round 2, RULING 1 — see that discriminator's doc
-		// comment).
+		// discriminator (evaluateChildProvenance) — which, as of bead-5
+		// fix round 3, never produces provenancePartialInterrupted in
+		// production at all (the CloseReason marker fix round 2 relied
+		// on here was found forgeable and removed; see that
+		// discriminator's own doc comment). This call site is exercised
+		// today only by the AC-6(iii) table test.
 		guard.DestructionAncestor,
 	)
 	if ctorErr != nil {
@@ -1198,21 +1266,30 @@ func closedChildPreserveRefusal(id string, prov childProvenanceEvidence) error {
 // checkExistingBeadsSafety's "closed" branch refuses again — spec 127 R3c
 // now gates the recovery's shape on resolveChildProvenance's durable
 // evidence rather than emitting `bd delete <id> --force` unconditionally.
+//
 // For a child that was never more than open/blocked/deferred BEFORE this
-// function closed it, that durable evidence is precisely the positive
-// partial/interrupted signature the provenance model exists to catch: no
-// bead/<id> branch is created merely by a bd status short of in_progress,
-// so none of those statuses could have left one surviving, and no merge of
-// non-existent work could ever have landed — so the recovery converges for
-// that case: delete the leftovers, re-run `mindspec plan approve`, and the
-// full new set is created exactly once. This reasoning does NOT extend to a
-// child that once reached in_progress (and so may hold a genuinely
-// surviving bead/<id> branch) before being superseded here while blocked
-// or deferred — checkExistingBeadsSafety's own switch never inspects branch
-// state for a non-in_progress/non-closed status, so whether such a child's
-// branch survives is not established by this function; Spec 074's own
-// longstanding design simply treats every one of those statuses as
-// safe-to-supersede regardless.
+// function closed it, no bead/<id> branch is created merely by a bd status
+// short of in_progress, so none of those statuses could have left one
+// surviving, and no merge of non-existent work could ever have landed —
+// that is genuinely, structurally safe-to-delete leftover data. BUT (bead-5
+// fix round 3, RULING 1): resolveChildProvenance currently has no way to
+// tell this case apart, from tracker data alone, from an ordinary manual
+// `bd close`/`bd import` that happens to leave the same zero-candidate
+// shape — see evaluateChildProvenance's own doc comment for why the
+// CloseReason marker this comment used to cite as the distinguishing
+// signature was found forgeable and removed. So the recovery does NOT
+// automatically converge today: the re-run's preflight refuses with a
+// preserve-and-inspect message (provenanceAmbiguous), and an operator who
+// has confirmed by inspection that a given closed child really is one of
+// THIS function's own leftovers still runs `bd delete <id> --force`
+// manually before retrying `mindspec plan approve`. This reasoning does NOT
+// extend to a child that once reached in_progress (and so may hold a
+// genuinely surviving bead/<id> branch) before being superseded here while
+// blocked or deferred — checkExistingBeadsSafety's own switch never
+// inspects branch state for a non-in_progress/non-closed status, so
+// whether such a child's branch survives is not established by this
+// function; Spec 074's own longstanding design simply treats every one of
+// those statuses as safe-to-supersede regardless.
 func supersedeCloseExistingBeads(children []existingChildBead, planContent string) error {
 	if len(children) == 0 {
 		return nil

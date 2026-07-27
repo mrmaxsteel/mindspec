@@ -812,11 +812,33 @@ func TestBdDeleteForceTemplate_SingleSourceOfTruth(t *testing.T) {
 // Sprintf call found anywhere in the function body. Fails the test
 // loudly (never silently falls back to a decoy or an approximate match)
 // when: the named function/var is not found, it contains no
-// guard.NewDestructiveCommand call, that call's first argument is not a
-// fmt.Sprintf(...) call, or that Sprintf's own first argument is not a
-// plain string literal (a non-literal — e.g. concatenated — template is
-// exactly the drift shape this obligation exists to catch, and it
-// cannot be compared as a string).
+// guard.NewDestructiveCommand call, it contains MORE THAN ONE such call
+// (bead-5 fix round 3, RULING 2, G1 — see below), that call's first
+// argument is not a fmt.Sprintf(...) call, or that Sprintf's own first
+// argument is not a plain string literal (a non-literal — e.g.
+// concatenated — template is exactly the drift shape this obligation
+// exists to catch, and it cannot be compared as a string).
+//
+// UNIQUENESS, NOT FIRST-MATCH (bead-5 fix round 3, RULING 2): the prior
+// shape walked the AST with an "if found != "" { return false }" guard
+// at the top of the visitor — which, once the FIRST
+// guard.NewDestructiveCommand call was seen, short-circuited every
+// later node in the SAME traversal (ast.Inspect calls the visitor for
+// every remaining node regardless of what an earlier call returned; the
+// bool return only controls descent into that one node's children). So
+// a constructor-shaped decoy placed BEFORE the real call absorbed the
+// walk, and the real call — even a drifted, non-literal one — was never
+// inspected. G1's adversary probe proved this empirically: a decoy
+// `guard.NewDestructiveCommand(fmt.Sprintf("bd delete %s --force",
+// ...), ...)` placed ahead of a real constructor whose template had
+// been rewritten as `fmt.Sprintf(strings.Join([]string{"bd delete %s",
+// "--force"}, " "), ...)` (same runtime rendering, non-literal
+// template) left TestBdDeleteForceTemplate_SingleSourceOfTruth GREEN.
+// The fix below collects EVERY guard.NewDestructiveCommand call in the
+// target body first, then requires there be EXACTLY ONE before
+// extracting anything — a second qualifying call (decoy or otherwise)
+// fails loudly instead of silently picking whichever one the walk
+// reached first.
 func bdDeleteTemplateAtDestructiveCommandCall(t *testing.T, root, relFile, funcName string) string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -824,6 +846,24 @@ func bdDeleteTemplateAtDestructiveCommandCall(t *testing.T, root, relFile, funcN
 	if err != nil {
 		t.Fatalf("parsing %s: %v", relFile, err)
 	}
+	target := funcOrVarDeclByName(file, funcName)
+	if target == nil {
+		t.Fatalf("function/method/var %q not found in %s — this obligation's own probe is broken (the site moved or was renamed)", funcName, relFile)
+	}
+	v, extractErr := extractBdDeleteTemplate(fset, target)
+	if extractErr != nil {
+		t.Fatalf("%s/%s: %v", relFile, funcName, extractErr)
+	}
+	return v
+}
+
+// funcOrVarDeclByName returns the *ast.FuncDecl (function or method, the
+// latter qualified as "Recv.Name") or the *ast.ValueSpec value of the
+// top-level var declaration named funcName, or nil if none matches.
+// Extracted unchanged from bdDeleteTemplateAtDestructiveCommandCall's
+// prior body so the lookup and the extraction (below) can be tested
+// independently.
+func funcOrVarDeclByName(file *ast.File, funcName string) ast.Node {
 	var target ast.Node
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
@@ -852,14 +892,29 @@ func bdDeleteTemplateAtDestructiveCommandCall(t *testing.T, root, relFile, funcN
 			}
 		}
 	}
-	if target == nil {
-		t.Fatalf("function/method/var %q not found in %s — this obligation's own probe is broken (the site moved or was renamed)", funcName, relFile)
-	}
-	found := ""
+	return target
+}
+
+// extractBdDeleteTemplate is the pure core of
+// bdDeleteTemplateAtDestructiveCommandCall (bead-5 fix round 3): given
+// the already-located target node, it returns the fmt.Sprintf literal
+// template passed as the FIRST ARGUMENT to target's own
+// guard.NewDestructiveCommand(...) call, or a descriptive error — never
+// a *testing.T, so a regression fixture can call it directly and assert
+// on the error instead of needing a subprocess or a t.Run indirection.
+// See bdDeleteTemplateAtDestructiveCommandCall's own doc comment for
+// why this must anchor to the constructor's actual operand, and why it
+// requires UNIQUENESS rather than first-match — G1's bead-5 fix round 3
+// adversary probe planted a constructor-shaped decoy ahead of a real,
+// non-literal-template call and the prior first-match walk never
+// reached the real one; TestBdDeleteTemplate_TwoConstructorDecoyReds
+// below reproduces that exact probe against this function.
+func extractBdDeleteTemplate(fset *token.FileSet, target ast.Node) (string, error) {
+	// Pass 1: collect EVERY guard.NewDestructiveCommand call in target —
+	// never stop at the first — so a decoy cannot absorb the walk before
+	// the real (possibly drifted) call is ever reached.
+	var calls []*ast.CallExpr
 	ast.Inspect(target, func(n ast.Node) bool {
-		if found != "" {
-			return false
-		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -869,41 +924,115 @@ func bdDeleteTemplateAtDestructiveCommandCall(t *testing.T, root, relFile, funcN
 			return true
 		}
 		xid, ok := sel.X.(*ast.Ident)
-		if !ok || xid.Name != "guard" || sel.Sel.Name != "NewDestructiveCommand" || len(call.Args) == 0 {
+		if !ok || xid.Name != "guard" || sel.Sel.Name != "NewDestructiveCommand" {
 			return true
 		}
-		sprintfCall, ok := call.Args[0].(*ast.CallExpr)
-		if !ok {
-			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not a fmt.Sprintf(...) call — this obligation's own extraction assumption is broken, or the site's shape changed", relFile, funcName)
-			return false
-		}
-		fsel, ok := sprintfCall.Fun.(*ast.SelectorExpr)
-		if !ok {
-			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not a package-qualified call — extraction assumption broken", relFile, funcName)
-			return false
-		}
-		fxid, ok := fsel.X.(*ast.Ident)
-		if !ok || fxid.Name != "fmt" || fsel.Sel.Name != "Sprintf" || len(sprintfCall.Args) == 0 {
-			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not fmt.Sprintf(...) — extraction assumption broken", relFile, funcName)
-			return false
-		}
-		lit, ok := sprintfCall.Args[0].(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
-			t.Fatalf("%s/%s: guard.NewDestructiveCommand's fmt.Sprintf template is not a plain string literal (a non-literal — e.g. concatenated — expression was found instead) — this IS the drift this obligation exists to catch; it cannot be compared as a string", relFile, funcName)
-			return false
-		}
-		v, uerr := strconv.Unquote(lit.Value)
-		if uerr != nil {
-			t.Fatalf("%s/%s: unquoting template literal: %v", relFile, funcName, uerr)
-			return false
-		}
-		found = v
-		return false
+		calls = append(calls, call)
+		return true
 	})
-	if found == "" {
-		t.Fatalf("%s/%s: found no guard.NewDestructiveCommand(fmt.Sprintf(...)) call — this obligation's own extraction is broken, or AC-11(b)'s bd-delete site moved", relFile, funcName)
+
+	// Pass 2: require UNIQUENESS before extracting anything. Zero calls
+	// is the pre-existing "site moved" failure; two or more is the
+	// round-3 defect this rewrite closes — a second qualifying call
+	// (real or decoy) can never be silently resolved by picking one.
+	switch len(calls) {
+	case 0:
+		return "", fmt.Errorf("found no guard.NewDestructiveCommand(...) call — this obligation's own extraction is broken, or AC-11(b)'s bd-delete site moved")
+	case 1:
+		// unique — proceed to extraction below.
+	default:
+		var locs []string
+		for _, c := range calls {
+			locs = append(locs, fset.Position(c.Pos()).String())
+		}
+		return "", fmt.Errorf("found %d guard.NewDestructiveCommand(...) calls (%s) — the emitter must be UNIQUELY identified; a second constructor-shaped call (real or decoy) defeats the single-source-of-truth identity this test exists to prove", len(calls), strings.Join(locs, ", "))
 	}
-	return found
+	call := calls[0]
+
+	if len(call.Args) == 0 {
+		return "", fmt.Errorf("guard.NewDestructiveCommand called with no arguments — extraction assumption broken")
+	}
+	sprintfCall, ok := call.Args[0].(*ast.CallExpr)
+	if !ok {
+		return "", fmt.Errorf("guard.NewDestructiveCommand's first argument is not a fmt.Sprintf(...) call — this obligation's own extraction assumption is broken, or the site's shape changed")
+	}
+	fsel, ok := sprintfCall.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return "", fmt.Errorf("guard.NewDestructiveCommand's first argument is not a package-qualified call — extraction assumption broken")
+	}
+	fxid, ok := fsel.X.(*ast.Ident)
+	if !ok || fxid.Name != "fmt" || fsel.Sel.Name != "Sprintf" || len(sprintfCall.Args) == 0 {
+		return "", fmt.Errorf("guard.NewDestructiveCommand's first argument is not fmt.Sprintf(...) — extraction assumption broken")
+	}
+	lit, ok := sprintfCall.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", fmt.Errorf("guard.NewDestructiveCommand's fmt.Sprintf template is not a plain string literal (a non-literal — e.g. concatenated — expression was found instead) — this IS the drift this obligation exists to catch; it cannot be compared as a string")
+	}
+	v, uerr := strconv.Unquote(lit.Value)
+	if uerr != nil {
+		return "", fmt.Errorf("unquoting template literal: %w", uerr)
+	}
+	return v, nil
+}
+
+// TestBdDeleteTemplate_TwoConstructorDecoyReds is the mutation-regression
+// fixture G1 required (bead-5 fix round 3, RULING 2): it reproduces G1's
+// exact adversary probe — a constructor-shaped decoy
+// (guard.NewDestructiveCommand(fmt.Sprintf("bd delete %s --force", ...)))
+// placed BEFORE a real call whose own template has been rewritten
+// non-literally (fmt.Sprintf(strings.Join([]string{"bd delete %s",
+// "--force"}, " "), ...) — identical runtime rendering, non-literal AST)
+// — and asserts extractBdDeleteTemplate now REDs on it. Before this
+// round's fix, the first-match walk selected the decoy's literal
+// template and returned successfully, leaving the drifted real operand
+// unexamined; TestBdDeleteForceTemplate_SingleSourceOfTruth stayed
+// green throughout.
+func TestBdDeleteTemplate_TwoConstructorDecoyReds(t *testing.T) {
+	const src = `package approve
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+)
+
+func closedChildDeletionRefusal(id string) error {
+	// Decoy: syntactically identical to a real call site, planted ahead
+	// of the real one — this is exactly G1's probe shape.
+	_, _ = guard.NewDestructiveCommand(fmt.Sprintf("bd delete %s --force", ""), guard.DestructionAncestor)
+
+	// Real call: same rendering, but the template is no longer a plain
+	// string literal (concatenated via strings.Join) — the drift this
+	// obligation exists to catch.
+	deleteCmd, ctorErr := guard.NewDestructiveCommand(
+		fmt.Sprintf(strings.Join([]string{"bd delete %s", "--force"}, " "), id),
+		guard.DestructionAncestor,
+	)
+	if ctorErr != nil {
+		return ctorErr
+	}
+	_ = deleteCmd
+	return nil
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "plan.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+	target := funcOrVarDeclByName(file, "closedChildDeletionRefusal")
+	if target == nil {
+		t.Fatal("fixture setup broken: closedChildDeletionRefusal not found in the synthetic source")
+	}
+
+	got, extractErr := extractBdDeleteTemplate(fset, target)
+	if extractErr == nil {
+		t.Fatalf("extractBdDeleteTemplate returned %q with no error — the two-constructor decoy bypass is NOT caught; it must fail loudly on multiple guard.NewDestructiveCommand calls instead of silently picking the first (the decoy)", got)
+	}
+	if !strings.Contains(extractErr.Error(), "guard.NewDestructiveCommand(...) calls") {
+		t.Fatalf("extractBdDeleteTemplate failed, but not with the expected multiple-calls diagnostic: %v", extractErr)
+	}
 }
 
 func repoRootFromGuardTestDir(t *testing.T) string {

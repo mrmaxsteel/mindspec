@@ -108,32 +108,34 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 
 	// Spec 127 R3c: this fault-injection harness models a fake bd
 	// tracker with NO real git branches for its fixture bead IDs — root
-	// (setupPreflightPlan) is a plain temp dir, never `git init`'d. A
-	// closed child in these fixtures is, by every one of these tests'
-	// own construction, the interrupted-supersede/partial-create shape:
-	// no bead branch was ever created for it and no work of its could
-	// ever have landed. Default the provenance seams to that positive
-	// signature rather than leaving them at the real (git-requiring)
-	// functions, which would read "ambiguous" over a non-git root and
-	// silently change these tests' own intended, already-reviewed
-	// scenario (S3-r2-5's purity split: the resolution is I/O, so it
-	// needs a seam here exactly like every other bd/git-touching leg
-	// this harness already stubs).
+	// (setupPreflightPlan) is a plain temp dir, never `git init`'d. Stub
+	// both provenance seams to the "no branch, zero merge candidates"
+	// shape rather than leaving them at the real (git-requiring)
+	// functions, which would panic/error over a non-git root
+	// (S3-r2-5's purity split: the resolution is I/O, so it needs a
+	// seam here exactly like every other bd/git-touching leg this
+	// harness already stubs).
 	//
 	// lifecycle.ErrLandedMergeNoCandidate, specifically — NOT the
 	// broader lifecycle.ErrLandedMergeNotFound sentinel (bead-5 fix
 	// round 1, RULING 1): evaluateChildProvenance now checks the
 	// narrower sentinel to avoid collapsing a real, ambiguous or
-	// contradicted owned candidate into this same positive signature.
-	// This harness's fixtures genuinely have zero candidates (no
-	// branch was ever created), so the narrow sentinel is the
-	// factually correct stub, not a workaround. Bead-5 fix round 2,
-	// RULING 1: the zero-candidate stub alone is no longer sufficient —
-	// existingChildrenJSON below also renders close_reason carrying
+	// contradicted owned candidate into a different outcome. This
+	// harness's fixtures genuinely have zero candidates (no branch was
+	// ever created), so the narrow sentinel is the factually correct
+	// stub, not a workaround.
+	//
+	// Bead-5 fix round 3, RULING 1 (G1): this zero-candidate shape now
+	// resolves provenanceAmbiguous UNCONDITIONALLY — fix round 2's
+	// close_reason-marker exception (which used to promote it to
+	// provenancePartialInterrupted) was removed as forgeable tracker
+	// data; see evaluateChildProvenance's own doc comment.
+	// existingChildrenJSON below still renders close_reason carrying
 	// supersedeCloseReasonPrefix for every closed id, matching what a
-	// REAL supersedeCloseExistingBeads run actually wrote for exactly
-	// this fixture shape (a child that never reached in_progress before
-	// being superseded).
+	// REAL supersedeCloseExistingBeads run actually writes — but that
+	// value is no longer read by evaluateChildProvenance at all; it is
+	// kept purely because it is what the real call site would produce,
+	// not because it changes any test's outcome.
 	origBranchExists := planBranchExistsInFn
 	planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 	t.Cleanup(func() { planBranchExistsInFn = origBranchExists })
@@ -146,14 +148,17 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 
 // existingChildrenJSON renders ids (all status "open" unless closed) as the
 // `bd list --parent` JSON array queryExistingChildren expects. A closed id
-// also carries close_reason = supersedeCloseReasonPrefix + a fixed suffix
-// (bead-5 fix round 2, RULING 1) — every closed fixture across this
-// harness is, by wirePlanEpicSeams' own doc comment above, the
-// interrupted-supersede-close shape, so its close_reason is exactly what
-// a REAL supersedeCloseExistingBeads run would have written; without it,
-// evaluateChildProvenance would now (correctly) resolve these fixtures
-// provenanceAmbiguous instead of provenancePartialInterrupted, changing
-// these tests' own intended, already-reviewed scenario.
+// also carries close_reason = supersedeCloseReasonPrefix + a fixed suffix,
+// matching what a REAL supersedeCloseExistingBeads run would have written
+// for exactly this fixture shape (a child that never reached in_progress
+// before being superseded).
+//
+// Bead-5 fix round 3, RULING 1 (G1): this close_reason value is now purely
+// cosmetic realism, not a functional input — evaluateChildProvenance no
+// longer reads CloseReason at all (the marker was found forgeable via
+// ordinary `bd close --reason`/`bd import`; see that function's own doc
+// comment), so every closed fixture in this harness resolves
+// provenanceAmbiguous regardless of what this field carries.
 func existingChildrenJSON(ids []string, closed map[string]bool) []byte {
 	var parts []string
 	for _, id := range ids {
@@ -174,10 +179,23 @@ func existingChildrenJSON(ids []string, closed map[string]bool) []byte {
 // sanctioned mutation post-Bead-4, plan.go) TERMINATES the approve when it
 // fails (a close error propagates from ApprovePlan). Mechanism B: the
 // wrapper closes the fake-tracker bead for real, then fails. Re-invocation
-// converges to the clean NAMED supersede-safety refusal: the preflight now
-// sees old-bead-1 CLOSED and refuses with the `bd delete <id> --force`
-// recovery line — the accepted outcome (c2 precedent).
-func TestFaultInjection_ApprovePlan_P0A_SupersedeClose_KillThenConverge(t *testing.T) {
+// hits the clean NAMED supersede-safety refusal: the preflight now sees
+// old-bead-1 CLOSED.
+//
+// Bead-5 fix round 3, RULING 1 (G1): this used to converge to a `bd
+// delete <id> --force` recovery line (the accepted outcome, c2
+// precedent) on the strength of the close_reason marker
+// existingChildrenJSON attaches. That marker is no longer trusted (it
+// is indistinguishable, from tracker data alone, from an ordinary
+// manual `bd close --reason`/`bd import` write — see
+// evaluateChildProvenance's own doc comment), so this scenario now
+// resolves provenanceAmbiguous instead: the refusal PRESERVES the
+// record and names `bd show <id> --json` for manual inspection. An
+// operator who has actually confirmed old-bead-1 is a genuine
+// leftover still runs `bd delete old-bead-1 --force` themselves before
+// re-running `mindspec plan approve` — the recovery no longer happens
+// automatically.
+func TestFaultInjection_ApprovePlan_P0A_SupersedeClose_KillThenPreservesForManualRecovery(t *testing.T) {
 	const specID, epicID = "042-test", "epic-42"
 	root, planPath, original := setupPreflightPlan(t, specID, validSingleBeadPlan)
 
@@ -214,7 +232,10 @@ func TestFaultInjection_ApprovePlan_P0A_SupersedeClose_KillThenConverge(t *testi
 	assertPlanUnchangedAndNoMutation(t, planPath, original, mockExec)
 
 	// Run 2: preflight now sees old-bead-1 CLOSED — the clean NAMED
-	// supersede-safety refusal, not a repeated close attempt.
+	// supersede-safety refusal, not a repeated close attempt. Bead-5
+	// fix round 3, RULING 1: this preserves (provenanceAmbiguous) rather
+	// than offering an automatic `bd delete --force` hint — see this
+	// test's own doc comment.
 	_, err = ApprovePlan(root, specID, "tester", mockExec)
 	if err == nil {
 		t.Fatal("expected p0a re-invocation to hit the closed-child supersede-safety refusal")
@@ -222,8 +243,11 @@ func TestFaultInjection_ApprovePlan_P0A_SupersedeClose_KillThenConverge(t *testi
 	if !strings.Contains(err.Error(), "old-bead-1") || !strings.Contains(err.Error(), "closed") {
 		t.Errorf("expected the closed-child refusal naming old-bead-1, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "bd delete old-bead-1 --force") {
-		t.Errorf("expected the bd-delete recovery line, got: %v", err)
+	if strings.Contains(err.Error(), "bd delete") {
+		t.Errorf("expected NO bd-delete recovery line (the close_reason marker no longer licenses one), got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "bd show old-bead-1 --json") {
+		t.Errorf("expected the preserve-and-inspect recovery line, got: %v", err)
 	}
 	assertPlanUnchangedAndNoMutation(t, planPath, original, mockExec)
 }
