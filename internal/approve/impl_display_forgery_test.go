@@ -9,6 +9,7 @@ package approve
 // orphan_gate_test.go.
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -157,5 +158,78 @@ func TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder(t *testing.T) {
 		if !strings.Contains(msg, "recovery: "+want) {
 			t.Errorf("expected line %q to render as its own recovery line, got:\n%s", want, msg)
 		}
+	}
+}
+
+// TestImplOrphanRefusal_FidelityAcrossAllOutcomes is bead-4 fix round 5's
+// answer to G1-5A: spec.md AC-3 and plan.md claimed the multi-line
+// fixture above proves implOrphanRefusal's line-threading fidelity "for
+// every outcome" — it does not, because it stubs only
+// guard.DestructionSuperseded. G1 reproduced the gap: an outcome-
+// conditional truncation written to drop the final hint line ONLY when
+// hint.Outcome == guard.DestructionAncestor (or, separately,
+// guard.DestructionEvidenceError) left that Superseded-only fixture
+// green. This table drives implOrphanRefusal over the FULL closed
+// outcome set — asserted against guard.DestructionOutcomeCount, never a
+// literal count (bead 2 shipped five stale written counts; a sixth
+// outcome variant must red this table's length assertion before it
+// reds anything else) — with a FABRICATED three-line hint per outcome.
+// The fabrication is deliberate, not an oversight: real DeriveOrphanHint
+// output is a single line for several outcomes (StaleDeletion,
+// EvidenceError, Clean), and this table's job is implOrphanRefusal's OWN
+// threading of hint.Lines into guard.NewFailure, never the derivation's
+// own content (orphan_hints_test.go already fixtures that separately,
+// per outcome, hermetically).
+func TestImplOrphanRefusal_FidelityAcrossAllOutcomes(t *testing.T) {
+	outcomes := make([]guard.DestructionOutcome, 0, int(guard.DestructionOutcomeCount))
+	for o := guard.DestructionOutcome(0); o < guard.DestructionOutcomeCount; o++ {
+		outcomes = append(outcomes, o)
+	}
+	if len(outcomes) != int(guard.DestructionOutcomeCount) {
+		t.Fatalf("this table covers %d outcomes, want %d (guard.DestructionOutcomeCount) — a new outcome variant needs its own row", len(outcomes), int(guard.DestructionOutcomeCount))
+	}
+
+	for _, outcome := range outcomes {
+		t.Run(outcome.String(), func(t *testing.T) {
+			tmp := t.TempDir()
+			writeSpecDir(t, tmp, "010-test")
+
+			orig := implEvaluateOrphanHintFn
+			t.Cleanup(func() { implEvaluateOrphanHintFn = orig })
+			wantLines := []string{
+				fmt.Sprintf("synthetic recovery line 1 for %s", outcome),
+				fmt.Sprintf("synthetic recovery line 2 for %s", outcome),
+				fmt.Sprintf("synthetic recovery line 3 for %s", outcome),
+			}
+			implEvaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+				return lifecycle.OrphanHint{
+					Outcome:      outcome,
+					EvidenceNote: fmt.Sprintf("synthetic evidence note for %s", outcome),
+					Lines:        append([]string{}, wantLines...),
+				}
+			}
+
+			o := lifecycle.Orphan{BeadID: "bead-x", BeadBranch: "bead/bead-x", SpecBranch: "spec/010-test"}
+			err := implOrphanRefusal(tmp, "010-test", o)
+			if err == nil {
+				t.Fatal("implOrphanRefusal returned nil")
+			}
+			msg := err.Error()
+
+			lastIdx := -1
+			for i, want := range wantLines {
+				idx := strings.Index(msg, want)
+				if idx < 0 {
+					t.Fatalf("outcome %s: line %d (%q) missing verbatim from the rendered message:\n%s", outcome, i, want, msg)
+				}
+				if idx <= lastIdx {
+					t.Fatalf("outcome %s: line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", outcome, i, want, msg)
+				}
+				lastIdx = idx
+				if !strings.Contains(msg, "recovery: "+want) {
+					t.Errorf("outcome %s: expected line %q to render as its own recovery line, got:\n%s", outcome, want, msg)
+				}
+			}
+		})
 	}
 }

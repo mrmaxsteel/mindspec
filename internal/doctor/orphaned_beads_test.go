@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -254,6 +255,80 @@ func TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder(t *testing.T) {
 	}
 	if c.FixFunc != nil {
 		t.Error("a Superseded outcome must carry NO FixFunc")
+	}
+}
+
+// TestCheckOrphanedBeads_FidelityAcrossAllOutcomes is bead-4 fix round 5's
+// answer to G1-5A: TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder
+// above proves checkOrphanedBeads's line-threading fidelity only for
+// guard.DestructionSuperseded. G1 reproduced the gap directly: an
+// outcome-conditional truncation dropping the final hint line ONLY when
+// hint.Outcome == guard.DestructionAncestor (or, separately,
+// guard.DestructionEvidenceError) left the Superseded-only fixture
+// green. This table drives checkOrphanedBeads over the FULL closed
+// outcome set — asserted against guard.DestructionOutcomeCount, never a
+// literal count (bead 2 shipped five stale written counts; a sixth
+// outcome variant must red this table's length assertion before it reds
+// anything else) — with a FABRICATED three-line hint per outcome: real
+// DeriveOrphanHint output is single-line for several outcomes, and this
+// table's job is checkOrphanedBeads's OWN `strings.Join(hint.Lines,
+// "; ")` fold into Check.Message, never the derivation's own content.
+func TestCheckOrphanedBeads_FidelityAcrossAllOutcomes(t *testing.T) {
+	outcomes := make([]guard.DestructionOutcome, 0, int(guard.DestructionOutcomeCount))
+	for o := guard.DestructionOutcome(0); o < guard.DestructionOutcomeCount; o++ {
+		outcomes = append(outcomes, o)
+	}
+	if len(outcomes) != int(guard.DestructionOutcomeCount) {
+		t.Fatalf("this table covers %d outcomes, want %d (guard.DestructionOutcomeCount) — a new outcome variant needs its own row", len(outcomes), int(guard.DestructionOutcomeCount))
+	}
+
+	for _, outcome := range outcomes {
+		t.Run(outcome.String(), func(t *testing.T) {
+			root := t.TempDir()
+			makeSpecDir(t, root, "008-test")
+
+			wantLines := []string{
+				fmt.Sprintf("synthetic recovery line 1 for %s", outcome),
+				fmt.Sprintf("synthetic recovery line 2 for %s", outcome),
+				fmt.Sprintf("synthetic recovery line 3 for %s", outcome),
+			}
+			orig := evaluateOrphanHintFn
+			t.Cleanup(func() { evaluateOrphanHintFn = orig })
+			evaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+				return lifecycle.OrphanHint{
+					Outcome:      outcome,
+					EvidenceNote: fmt.Sprintf("synthetic evidence note for %s", outcome),
+					Lines:        append([]string{}, wantLines...),
+				}
+			}
+			stubFindOrphans(t, func(specID, workdir, excludeBeadID string) []lifecycle.Orphan {
+				return []lifecycle.Orphan{{BeadID: "bead-9", BeadBranch: "bead/bead-9", SpecBranch: "spec/008-test"}}
+			})
+
+			r := &Report{}
+			checkOrphanedBeads(r, root)
+			var c *Check
+			for i := range r.Checks {
+				if strings.Contains(r.Checks[i].Name, "orphaned closed bead") {
+					c = &r.Checks[i]
+				}
+			}
+			if c == nil {
+				t.Fatal("expected an orphaned-bead check")
+			}
+
+			lastIdx := -1
+			for i, want := range wantLines {
+				idx := strings.Index(c.Message, want)
+				if idx < 0 {
+					t.Fatalf("outcome %s: line %d (%q) missing verbatim from Check.Message:\n%s", outcome, i, want, c.Message)
+				}
+				if idx <= lastIdx {
+					t.Fatalf("outcome %s: line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", outcome, i, want, c.Message)
+				}
+				lastIdx = idx
+			}
+		})
 	}
 }
 

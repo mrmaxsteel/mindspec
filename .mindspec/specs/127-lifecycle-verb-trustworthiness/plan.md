@@ -1100,8 +1100,43 @@ in two distinct ways corrected here rather than re-asserted:
    repeating it**: `impl`, `doctor`, and `complete` do thread the
    derivation's lines faithfully, in order and unmodified, through their
    own wrapping — separate recovery lines, an inline `"; "`-joined
-   string, or prose, respectively — for every outcome, and their three
-   fixtures now prove exactly that. `adopt` does NOT: for
+   string, or prose, respectively — for every outcome. **CORRECTED
+   AGAIN (round 5, G1-5A)**: the sentence immediately above previously
+   claimed the three named Superseded-only fixtures already proved this
+   every-outcome claim — they do not, and the "for every outcome, and
+   their three fixtures now prove exactly that" wording is the overclaim
+   G1 reproduced directly: an outcome-conditional line drop written only
+   for `guard.DestructionAncestor` (or, separately, only for
+   `guard.DestructionEvidenceError`) left all three named fixtures
+   green, because each stubs only `guard.DestructionSuperseded`. The
+   every-outcome claim is proven instead by three companion tables added
+   in this round — `TestImplOrphanRefusal_FidelityAcrossAllOutcomes`
+   (`internal/approve/impl_display_forgery_test.go`),
+   `TestCheckOrphanedBeads_FidelityAcrossAllOutcomes`
+   (`internal/doctor/orphaned_beads_test.go`), and
+   `TestRun_FidelityAcrossAllOutcomes`
+   (`internal/complete/closed_unmerged_test.go`) — one per consumer,
+   each iterating `guard.DestructionOutcome`'s full closed set (built by
+   counting up to `guard.DestructionOutcomeCount` and asserting the
+   built slice's length against it, never a literal count — bead 2
+   shipped five stale written counts) with a FABRICATED three-line hint
+   per outcome: never real `DeriveOrphanHint` output, which is
+   single-line for several outcomes (StaleDeletion, EvidenceError,
+   Clean) — the point is each consumer's OWN threading of `hint.Lines`,
+   never the derivation's content, which `orphan_hints_test.go` already
+   fixtures separately and hermetically per outcome. Each table asserts
+   every fabricated line survives, in order and unmodified, through that
+   consumer's own wrapping. Verified red, via `go test -overlay` against
+   scratch-mutated copies of `impl.go`/`orphaned_beads.go`/`complete.go`
+   (the tracked files themselves untouched): an outcome-conditional drop
+   isolated to `guard.DestructionAncestor` reds only that outcome's row
+   in all three tables; the same isolated to
+   `guard.DestructionEvidenceError` reds only that row; an unconditional
+   drop reds every row in all three. The three original Superseded-only
+   fixtures remain valid and are not superseded by the new tables — they
+   additionally pin the byte-identical REAL-derivation Superseded shape
+   (preserve-tag/delete/adopt-invocation text), which the new tables'
+   fabricated content deliberately does not exercise. `adopt` does NOT: for
    `DestructionClean`, `adoptOrphanPresentRefusal` (`adopt.go:562-585`)
    intentionally SUBSTITUTES the derivation's `mindspec complete <bead>`
    line with its own inspection guidance — AC-2(viii)'s own "never
