@@ -61,7 +61,7 @@ func TestConflictFailureBodiesEscapedPerLine(t *testing.T) {
 			t.Errorf("specBranch (waist-validated) must render RAW; got:\n%s", msg)
 		}
 
-		err2 := directMergeConflictFailure(dir, "spec/077-test", hostileErr)
+		err2 := directMergeConflictFailure(dir, "spec/077-test", "mindspec impl approve 077-test", hostileErr)
 		msg2 := err2.Error()
 		assertCleanRender(t, msg2)
 		if !strings.Contains(msg2, "spec/077-test") {

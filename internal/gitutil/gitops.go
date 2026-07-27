@@ -740,6 +740,24 @@ func CommitAll(workdir, message string) error {
 	return nil
 }
 
+// CommitNoEdit completes an in-progress merge in workdir via
+// `git commit --no-edit` (spec 127 R5(d)(iv)/E-r5-5): unlike
+// `git merge --continue`, which always invokes an editor and fails
+// outright in a non-interactive shell, `--no-edit` accepts MERGE_MSG
+// (the message the original `git merge -m "..."` call seeded, including
+// its `# Conflicts:` comment lines) as-is — no comment stripping, no
+// subject rewrite. The subject a caller seeded via MergeInto/MergeBranch
+// survives unchanged, which is the identity mechanism the R5(d) re-entry
+// surface depends on (spec 125's parseMergeSubjectBeadBranch), not a
+// courtesy.
+func CommitNoEdit(workdir string) error {
+	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("committing (--no-edit) in %s: %s", workdir, escapeLines(strings.TrimSpace(string(out))))
+	}
+	return nil
+}
+
 // escapeLines applies termsafe.Escape to each line of a (possibly
 // multi-line) block of agent-influenced text — git porcelain/error output —
 // while preserving the real newlines that separate genuine lines (R4:

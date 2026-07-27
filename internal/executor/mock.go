@@ -124,13 +124,13 @@ func (m *MockExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, error
 	return m.DispatchBeadResult, m.DispatchBeadErr
 }
 
-func (m *MockExecutor) CompleteBead(beadID, specBranch, msg string) error {
-	m.record("CompleteBead", beadID, specBranch, msg)
+func (m *MockExecutor) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
+	m.record("CompleteBead", beadID, specBranch, msg, overrideReason, resolveMerge)
 	return m.CompleteBeadErr
 }
 
-func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error) {
-	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet)
+func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error) {
+	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
 }
 

@@ -128,14 +128,22 @@ func TestCeremonyNonInflation_HelpFlags(t *testing.T) {
 		want map[string]bool
 	}{
 		{
+			// Spec 127 R4(b) intentionally adds `--allow-net-deletion` to
+			// this surface — a NEW, spec-mandated audited escape hatch for
+			// the work-destruction preflight (an admission this baseline
+			// exists to make VISIBLE, not to forbid: spec 122's own
+			// no-new-flag claim was scoped to spec 122 alone). Baseline
+			// updated deliberately, in this same change, rather than
+			// silently widened.
 			name: "mindspec complete",
 			path: []string{"complete"},
-			want: setOf("--allow-doc-skew", "--help", "--override-adr", "--spec", "--supersede-adr", "--trace"),
+			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--help", "--override-adr", "--resolve-merge", "--spec", "--supersede-adr", "--trace"),
 		},
 		{
+			// Same spec 127 R4(b)/R5(d) additions as "mindspec complete" above.
 			name: "mindspec impl approve",
 			path: []string{"impl", "approve"},
-			want: setOf("--allow-doc-skew", "--help", "--override-adr", "--supersede-adr", "--trace"),
+			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--help", "--override-adr", "--resolve-merge", "--supersede-adr", "--trace"),
 		},
 		{
 			name: "mindspec validate",

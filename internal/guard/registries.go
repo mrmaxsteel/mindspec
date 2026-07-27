@@ -89,24 +89,18 @@ type DestructiveGuidanceAllowlistEntry struct {
 // TestRegistryObligations_NamedTestsExist (registries_test.go) verifies
 // mechanically, for every entry in all three registries, that every
 // obligation names only tests that exist.
-var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{
-	{
-		File:       "internal/executor/mindspec_executor.go",
-		Func:       "beadToSpecConflictFailure",
-		Detail:     "git merge",
-		Family:     FamilyGitMerge,
-		Rationale:  "the post-conflict raw-merge recovery line at :1688 (`fmt.Sprintf(`git merge --no-ff -m \"Merge %s\" %s`, beadBranch, beadBranch)`) — its allowlisting rationale is OVERTURNED per this spec's own revision-2 ruling (C2-r2-1): reachability of the emitter and safety of the emitted command are different questions. Seeded here so the tree stays green; CONVERTED (not merely allowlisted) by bead 6, which replaces it with the R5(d) preflighted re-entry surface — no conflict emitter prints a raw `git merge` line at all once bead 6 lands.",
-		Obligation: "registries_test.go's TestDestructiveGuidanceAllowlist_ContentRegeneration re-derives the classifier match and confirms it still matches FamilyGitMerge, so this entry cannot silently drift to describe a different command while bead 6 is pending.",
-	},
-	{
-		File:       "internal/executor/mindspec_executor.go",
-		Func:       "directMergeConflictFailure",
-		Detail:     "git merge",
-		Family:     FamilyGitMerge,
-		Rationale:  "the post-conflict raw-merge recovery line at :1721 (spec→main leg, `\"git merge --no-ff \"+specBranch`) — same overturned rationale as beadToSpecConflictFailure above. The literal prefix alone (\"git merge --no-ff \", concatenated with the dynamic spec-branch operand) already matches the floor family regardless of the operand's value — flags are always literal, values are always dynamic, in this codebase's own convention. Seeded here; converted by bead 6 (the same re-entry surface covers both legs).",
-		Obligation: "registries_test.go's TestDestructiveGuidanceAllowlist_ContentRegeneration re-derives the classifier match and confirms it still matches FamilyGitMerge.",
-	},
-}
+// Bead 6 (spec 127 R5(d)): BOTH seeded entries above this comment (their
+// original text preserved in git history) EXIT the allowlist. Neither
+// beadToSpecConflictFailure nor directMergeConflictFailure prints a
+// `git merge` line — or any destructive-floor-matching text — any
+// longer: the R5(d) conversion replaces both raw-merge recovery lines
+// with a `--resolve-merge` re-entry invocation of the owning lifecycle
+// verb (a `mindspec complete`/`mindspec impl approve` command, never
+// git/bd/rm-led). The reachable state after this bead is therefore ZERO
+// entries (the doc comment above already anticipated this as the
+// eventual state, before bead 7's release.go disposition adds the one
+// remaining pinned entry).
+var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{}
 
 // OpaqueOperandEntry is one call-site operand the scan cannot fold to
 // a literal at all — no literal skeleton whatsoever, e.g. a runtime-
@@ -140,11 +134,29 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RuntimeInventoryAgainstFloor enumerates every readiness signal's registered Recovery template (internal/validate/readiness's own signal catalog) and asserts NONE matches a reviewed floor family — the runtime string inventory this operand can ever actually produce, checked against the classifier.",
 	},
 	{
+		// Bead 6 (spec 127 R5(d)): RENAMED from "arg3:unprovable" — the
+		// R5(d) conversion dropped this function's EmitCd/git-merge
+		// arguments, so the recovery-line operand (still `rerun`, still
+		// unprovable) shifted from guard.NewFailure's 4th argument to its
+		// 2nd (index 1): `guard.NewFailure(b.String(), rerun+" "+
+		// ResolveMergeFlag)`.
 		File:       "internal/executor/mindspec_executor.go",
 		Func:       "beadToSpecConflictFailure",
-		Detail:     "arg3:unprovable",
-		Rationale:  "the fourth NewFailure argument is `rerun`, a plain string parameter (the caller-supplied `mindspec complete <bead-id>` / `mindspec impl approve <spec-id>` re-invocation); its value originates at this function's TWO real callers, not at a literal in this file, so no fold can prove it here.",
+		Detail:     "arg1:unprovable",
+		Rationale:  "the recovery-line argument is `rerun+\" \"+ResolveMergeFlag` — rerun is a plain string parameter (the caller-supplied `mindspec complete <bead-id>` / `mindspec impl approve <spec-id>` re-invocation); its value originates at this function's TWO real callers, not at a literal in this file, so no fold can prove it here. ResolveMergeFlag is a package const (`--resolve-merge`, never git/bd/rm-led).",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RerunCallers asserts the classifier finds no floor match in either real caller's actual rerun argument (`mindspec complete <bead>`, `mindspec impl approve <spec>`).",
+	},
+	{
+		// Bead 6 (spec 127 R5(d)): NEW — directMergeConflictFailure
+		// gained a `rerun` parameter as part of the same conversion
+		// (it previously had no rerun invocation at all, only a bare
+		// `git branch -d` instruction). Identical shape to
+		// beadToSpecConflictFailure's entry above.
+		File:       "internal/executor/mindspec_executor.go",
+		Func:       "directMergeConflictFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "the recovery-line argument is `rerun+\" \"+ResolveMergeFlag` — rerun is a plain string parameter (the caller-supplied `mindspec impl approve <spec-id>` re-invocation), same shape as beadToSpecConflictFailure's entry above.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RerunCallers asserts the classifier finds no floor match in this function's real caller's actual rerun argument.",
 	},
 	{
 		File:       "internal/next/ready_gate.go",
@@ -188,20 +200,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "`guard.NewFailure(msg, lines...)` — the SAME shape and SAME rationale as implOrphanRefusal's entry above: adoptOrphanPresentRefusal (R1(g)'s composite-incident refusal, spec 127 bead 4) spreads a []string built from lifecycle.EvaluateOrphanHintAgainstMain's OrphanHint.Lines (occasionally appending its own adopt-rerun invocation, a pure literal Sprintf template already provable elsewhere), which can legitimately carry a `git branch -D` line for the ancestor/superseded outcomes; this entry's own OLD arg1/arg2 shape (the bead-3 interim's hardcoded, always-non-destructive inspection lines) EXITED with this bead — see this registry's own bootstrap history for that shape's removal.",
 		Obligation: "internal/lifecycle's TestDeriveOrphanHint_DestructiveLinesMatchOnlyReviewedShape (same obligation as implOrphanRefusal's entry above — both call sites spread the identical OrphanHint.Lines shape).",
 	},
-	{
-		File:       "internal/executor/mindspec_executor.go",
-		Func:       "beadToSpecConflictFailure",
-		Detail:     "arg1:unprovable",
-		Rationale:  "a bare `containment.EmitCd(specWtPath)` call — specWtPath is a resolved spec-worktree filesystem path, never free-form text.",
-		Obligation: "registries_test.go's TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor runs the REAL containment.EmitCd over representative worktree/root path shapes and asserts no floor match.",
-	},
-	{
-		File:       "internal/executor/mindspec_executor.go",
-		Func:       "directMergeConflictFailure",
-		Detail:     "arg1:unprovable",
-		Rationale:  "a bare `containment.EmitCd(root)` call — root is the repo root path, never free-form text.",
-		Obligation: "registries_test.go's TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor (same obligation as beadToSpecConflictFailure above).",
-	},
+	// Bead 6 (spec 127 R5(d)): the two containment.EmitCd(...) entries
+	// this comment used to describe (beadToSpecConflictFailure's
+	// `EmitCd(specWtPath)`, directMergeConflictFailure's `EmitCd(root)`)
+	// EXIT here — the R5(d) conversion dropped the `cd` recovery line
+	// entirely: the --resolve-merge re-entry surface resolves its own
+	// target worktree/branch (R5(d)(ii)), so the operator no longer
+	// needs to `cd` anywhere first.
 	{
 		File:       "internal/guard/guard.go",
 		Func:       "checkCWDWithCache",
@@ -640,6 +645,67 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Detail:     "arg2:unprovable",
 		Rationale:  "idrender-rendered: covers the shared attestLine (`mindspec impl adopt %s --reason \"<why>\" --attest-unverified ...`, substituting idrender.Spec(specID) and the pinned adoptAttestTrigger string) and the per-class inspection lines (`git log --first-parent --merges main`, a literal with no substitution; `bd list --parent <epic-id> --status=%s`, substituting bead.AllStatuses(root)'s own computed status list — fix round O1-3, no longer a hardcoded 4-built-in literal — a project-controlled, non-adversarial set) — three call sites in this function collapse to this one key.",
 		Obligation: mindspecVerbTemplateObligation,
+	},
+
+	// Spec 127 bead 6 (R4): the merge-destruction preflight's own refusal
+	// builders, one pair per boundary layer (internal/executor's own
+	// backstop and internal/lifecycle's ADR-0030 wrapper the §1-phase
+	// verb-layer preflights consume — see each file's doc comment for why
+	// the logic is independently duplicated rather than shared across
+	// that boundary). All four share the identical shape: the recovery
+	// line is `fmt.Sprintf("... %s \"<reason>\" ... — then %s",
+	// AllowNetDeletionFlag, rerun)` — AllowNetDeletionFlag is a package
+	// const (provable), but rerun is a plain string PARAMETER (the
+	// caller-supplied `mindspec complete <bead-id>` / `mindspec impl
+	// approve <spec-id>` re-invocation), the same opacity shape
+	// beadToSpecConflictFailure's own "arg1:unprovable" entry above
+	// already registers for an identical rerun parameter.
+	{
+		File:       "internal/executor/merge_preflight.go",
+		Func:       "evidenceErrorRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "the recovery line's `rerun` operand is a plain string parameter supplied by this function's two callers (preflightMergeDestruction's own two callers, CompleteBead and FinalizeEpic) — no fold can prove it here.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument, the same shape beadToSpecConflictFailure's entry above already registers via TestOpaqueOperandRegistry_RerunCallers.",
+	},
+	{
+		File:       "internal/executor/merge_preflight.go",
+		Func:       "destructionRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "same shape as evidenceErrorRefusal above — the recovery line's `rerun` operand is a plain string parameter, not a literal.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers (same obligation as evidenceErrorRefusal's entry above).",
+	},
+	{
+		File:       "internal/lifecycle/merge_preflight.go",
+		Func:       "workDestructionEvidenceErrorRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "the §1-phase (verb-layer) counterpart of internal/executor's evidenceErrorRefusal above — same shape, a plain string `rerun` parameter supplied by this function's two callers (internal/complete and internal/approve's own §1 preflights).",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument.",
+	},
+	{
+		File:       "internal/lifecycle/merge_preflight.go",
+		Func:       "workDestructionRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "same shape as workDestructionEvidenceErrorRefusal above.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers (same obligation as workDestructionEvidenceErrorRefusal's entry above).",
+	},
+	{
+		// Spec 127 bead 6 (R5(d)): the --resolve-merge resumption
+		// surface's "still conflicted, re-print steps" leg.
+		File:       "internal/executor/merge_resumption.go",
+		Func:       "stillConflictedRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "`guard.NewFailure(resolutionSteps(...), reentryHint)` — reentryHint is a plain string parameter (the caller-supplied `mindspec complete <bead-id> --resolve-merge` / `mindspec impl approve <spec-id> --resolve-merge` re-invocation), the same opacity shape as the merge-preflight rerun entries above.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers asserts the classifier finds no floor match in every real caller's actual reentryHint argument.",
+	},
+	{
+		// Spec 127 bead 6 (R5(d)): resumeAwareMerge's own "resolved but
+		// not completed" refusal leg (the operator has not passed
+		// --resolve-merge yet).
+		File:       "internal/executor/merge_resumption.go",
+		Func:       "resumeAwareMerge",
+		Detail:     "arg1:unprovable",
+		Rationale:  "`guard.NewFailure(..., fmt.Sprintf(\"re-run with %s to finish it: %s\", ResolveMergeFlag, reentryHint))` — ResolveMergeFlag is a package const (provable), but reentryHint is the same plain string parameter as stillConflictedRefusal's entry above.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers (same obligation as stillConflictedRefusal's entry above — both receive reentryHint from the identical three real callers).",
 	},
 }
 

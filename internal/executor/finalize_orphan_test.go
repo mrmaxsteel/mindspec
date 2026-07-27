@@ -124,7 +124,7 @@ func TestFinalizeEpic_OrphanedSpecBranch(t *testing.T) {
 			// still-pushed assertion below.
 			specTipBefore := refHash(t, dir, "spec/077-test")
 
-			result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+			result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -211,7 +211,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	// spec-worktree removal in FinalizeEpic's cleanup block errors.
 	fake.removeErr = errors.New("simulated crash: spec worktree removal failed")
 
-	if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil); err == nil {
+	if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false); err == nil {
 		t.Fatal("run 1 must fail (injected worktree-removal error), got nil")
 	}
 	if !branchExistsIn(t, origin, "chore/finalize-077-test") {
@@ -225,7 +225,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	fake.removeErr = nil
 	*exportContent = []byte(`{"id":"epic-1","status":"closed","retry":2}` + "\n")
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("retry must succeed, got: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals(t *testin
 	}
 	runGitIn(t, dir, "worktree", "add", wtPath, "chore/finalize-077-test")
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("a leftover temp finalize worktree must be self-healed, got: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestFinalizeEpic_OrphanFetchFailureFallsBackToBaseline(t *testing.T) {
 	var result FinalizeResult
 	var err error
 	stderr := captureStderrAround(t, func() {
-		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	})
 	if err != nil {
 		t.Fatalf("a fetch failure must fall back to baseline behavior, got: %v", err)
@@ -359,7 +359,7 @@ func TestFinalizeEpic_OrphanChoreFailureStillPushesSpecBranch(t *testing.T) {
 
 	var err error
 	_ = captureStderrAround(t, func() {
-		_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+		_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	})
 	if err == nil {
 		t.Fatal("a chore-flow failure must surface as an error, got nil")

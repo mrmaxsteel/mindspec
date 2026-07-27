@@ -113,9 +113,9 @@ func (e *killAfterExecutor) CommitPaths(dir, msg string, paths []string) error {
 	return nil
 }
 
-func (e *killAfterExecutor) CompleteBead(beadID, specBranch, msg string) error {
+func (e *killAfterExecutor) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
 	e.completeBeadCalls++
-	if err := e.Executor.CompleteBead(beadID, specBranch, msg); err != nil {
+	if err := e.Executor.CompleteBead(beadID, specBranch, msg, overrideReason, resolveMerge); err != nil {
 		return err
 	}
 	if e.killCompleteBead {

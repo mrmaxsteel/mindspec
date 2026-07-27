@@ -56,6 +56,8 @@ func init() {
 	approveImplCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
 	approveImplCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on spec epic metadata)")
 	approveImplCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on spec epic metadata)")
+	approveImplCmd.Flags().String("allow-net-deletion", "", "Override the work-destruction preflight with a recorded reason (records mindspec_net_deletion_override_* on spec epic metadata)")
+	approveImplCmd.Flags().Bool("resolve-merge", false, "Resume a preserved bead→spec or spec→main merge conflict: re-print resolution steps if unresolved, or complete it once the index is resolved and staged")
 	approveCmd.AddCommand(approveSpecCmd)
 	approveCmd.AddCommand(approvePlanCmd)
 	approveCmd.AddCommand(approveImplCmd)
