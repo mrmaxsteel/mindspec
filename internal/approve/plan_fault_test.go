@@ -127,7 +127,13 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 	// contradicted owned candidate into this same positive signature.
 	// This harness's fixtures genuinely have zero candidates (no
 	// branch was ever created), so the narrow sentinel is the
-	// factually correct stub, not a workaround.
+	// factually correct stub, not a workaround. Bead-5 fix round 2,
+	// RULING 1: the zero-candidate stub alone is no longer sufficient —
+	// existingChildrenJSON below also renders close_reason carrying
+	// supersedeCloseReasonPrefix for every closed id, matching what a
+	// REAL supersedeCloseExistingBeads run actually wrote for exactly
+	// this fixture shape (a child that never reached in_progress before
+	// being superseded).
 	origBranchExists := planBranchExistsInFn
 	planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 	t.Cleanup(func() { planBranchExistsInFn = origBranchExists })
@@ -139,15 +145,25 @@ func wirePlanEpicSeams(t *testing.T, specID, epicID string, queryFn func(args ..
 }
 
 // existingChildrenJSON renders ids (all status "open" unless closed) as the
-// `bd list --parent` JSON array queryExistingChildren expects.
+// `bd list --parent` JSON array queryExistingChildren expects. A closed id
+// also carries close_reason = supersedeCloseReasonPrefix + a fixed suffix
+// (bead-5 fix round 2, RULING 1) — every closed fixture across this
+// harness is, by wirePlanEpicSeams' own doc comment above, the
+// interrupted-supersede-close shape, so its close_reason is exactly what
+// a REAL supersedeCloseExistingBeads run would have written; without it,
+// evaluateChildProvenance would now (correctly) resolve these fixtures
+// provenanceAmbiguous instead of provenancePartialInterrupted, changing
+// these tests' own intended, already-reviewed scenario.
 func existingChildrenJSON(ids []string, closed map[string]bool) []byte {
 	var parts []string
 	for _, id := range ids {
 		status := "open"
+		extra := ""
 		if closed[id] {
 			status = "closed"
+			extra = fmt.Sprintf(`,"close_reason":%q`, supersedeCloseReasonPrefix+"1")
 		}
-		parts = append(parts, fmt.Sprintf(`{"id":%q,"status":%q}`, id, status))
+		parts = append(parts, fmt.Sprintf(`{"id":%q,"status":%q%s}`, id, status, extra))
 	}
 	return []byte("[" + strings.Join(parts, ",") + "]")
 }

@@ -155,7 +155,7 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 			t.Fatal("FindLandedMerge must not be consulted when the branch survives")
 			return nil, nil
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", "")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous", got)
 		}
@@ -167,29 +167,55 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 			t.Fatal("FindLandedMerge must not be consulted when the existence probe errors")
 			return nil, nil
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", "")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous", got)
 		}
 	})
 
-	t.Run("no branch, landed merge found is completed work", func(t *testing.T) {
+	t.Run("no branch, landed merge found is completed work, even with the supersede marker set", func(t *testing.T) {
+		// A positively-identified landing wins unconditionally — see
+		// evaluateChildProvenance's own doc comment: it is stronger
+		// evidence than any close_reason marker could contradict.
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
 			return &lifecycle.LandedMerge{}, nil
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceCompletedWork {
 			t.Errorf("got %v, want provenanceCompletedWork", got)
 		}
 	})
 
-	t.Run("no branch, genuinely zero candidate merges is partial/interrupted", func(t *testing.T) {
+	t.Run("no branch, zero candidate merges WITHOUT the supersede marker is ambiguous, not partial/interrupted", func(t *testing.T) {
+		// Bead-5 fix round 2, RULING 1 (G1, reversing fix round 1's own
+		// RULING 1): zero merge candidates alone is ABSENCE of evidence,
+		// not evidence of absence (a squash/fast-forward landing
+		// produces the identical shape) — it no longer, by itself,
+		// licenses provenancePartialInterrupted. closeReason is empty
+		// here exactly as it would be for a genuinely completed bead
+		// (mindspec complete's own bd close call passes no --reason at
+		// all).
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
 			return nil, fmt.Errorf("wrapped: %w", lifecycle.ErrLandedMergeNoCandidate)
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", "")
+		if got != provenanceAmbiguous {
+			t.Errorf("got %v, want provenanceAmbiguous", got)
+		}
+	})
+
+	t.Run("no branch, zero candidate merges WITH the supersede marker is partial/interrupted", func(t *testing.T) {
+		// The positive companion to the case above: closeReason carries
+		// supersedeCloseReasonPrefix — the durable, by-construction
+		// proof this bead was closed by an interrupted
+		// supersedeCloseExistingBeads run, not completion.
+		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
+		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
+			return nil, fmt.Errorf("wrapped: %w", lifecycle.ErrLandedMergeNoCandidate)
+		}
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"3")
 		if got != provenancePartialInterrupted {
 			t.Errorf("got %v, want provenancePartialInterrupted", got)
 		}
@@ -201,9 +227,12 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 	// the narrow ErrLandedMergeNoCandidate — which also matches every
 	// case below, collapsing them all into the same
 	// provenancePartialInterrupted (destructive-licensing) outcome.
-	// Restoring that bare errors.Is check reds every one of these.
+	// Restoring that bare errors.Is check reds every one of these — even
+	// with the supersede marker present, which every fixture below now
+	// also supplies, to prove the marker alone is not sufficient either:
+	// the zero-candidate leg must ALSO hold.
 
-	t.Run("no branch, uncorroborated owned candidate (LandedMergeNoEvidence) is ambiguous, never partial/interrupted", func(t *testing.T) {
+	t.Run("no branch, uncorroborated owned candidate (LandedMergeNoEvidence) is ambiguous, never partial/interrupted, even with the marker set", func(t *testing.T) {
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
 			return nil, &lifecycle.LandedMergeNoEvidence{
@@ -211,13 +240,13 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 				MergeSHA: "aaaaaaa", SecondParent: "bbbbbbb",
 			}
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous — an owned-but-uncorroborated candidate must never license deletion", got)
 		}
 	})
 
-	t.Run("no branch, owned candidates disagree on second parent (LandedMergeNoEvidence, conflicting) is ambiguous", func(t *testing.T) {
+	t.Run("no branch, owned candidates disagree on second parent (LandedMergeNoEvidence, conflicting) is ambiguous, even with the marker set", func(t *testing.T) {
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
 			return nil, &lifecycle.LandedMergeNoEvidence{
@@ -226,13 +255,13 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 				ConflictingSecondParent: "ccccccc",
 			}
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous — genuine ambiguity about which landing is this bead's tip must never license deletion", got)
 		}
 	})
 
-	t.Run("no branch, a corroboration-leg contradiction is ambiguous, not partial/interrupted", func(t *testing.T) {
+	t.Run("no branch, a corroboration-leg contradiction is ambiguous, not partial/interrupted, even with the marker set", func(t *testing.T) {
 		// Mirrors the SHAPE of landed.go's reviewed_head_sha/branch-tip/
 		// landed-binding contradiction returns: a plain fmt.Errorf
 		// wrapping the BROAD ErrLandedMergeNotFound sentinel (not the
@@ -243,13 +272,13 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 			return nil, fmt.Errorf("%w: %s on %s (surviving branch tip contradicts merge's second parent)",
 				lifecycle.ErrLandedMergeNotFound, beadID, specBranch)
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous — a corroboration contradiction is not a definitive absence", got)
 		}
 	})
 
-	t.Run("no branch, a positively-identified-then-reverted landing is ambiguous, not partial/interrupted", func(t *testing.T) {
+	t.Run("no branch, a positively-identified-then-reverted landing is ambiguous, not partial/interrupted, even with the marker set", func(t *testing.T) {
 		// Mirrors landed.go's revert-shape return: a positively
 		// corroborated candidate whose content is no longer present at
 		// the tip. Still a real, owned, once-landed merge — never the
@@ -259,18 +288,18 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 			return nil, fmt.Errorf("%w: %s on %s (merge's content is no longer present at the current tip — it was reverted or cleanly removed after landing)",
 				lifecycle.ErrLandedMergeNotFound, beadID, specBranch)
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous — a reverted-after-landing signature is not a definitive never-landed absence", got)
 		}
 	})
 
-	t.Run("no branch, landed-merge lookup errors (not the not-found sentinel) is ambiguous", func(t *testing.T) {
+	t.Run("no branch, landed-merge lookup errors (not the not-found sentinel) is ambiguous, even with the marker set", func(t *testing.T) {
 		planBranchExistsInFn = func(workdir, branch string) (bool, error) { return false, nil }
 		planFindLandedMergeFn = func(workdir, specBranch, beadID string) (*lifecycle.LandedMerge, error) {
 			return nil, errBoom
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "bead-1")
+		got := evaluateChildProvenance("/root", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous", got)
 		}
@@ -281,7 +310,7 @@ func TestResolveChildProvenance_LegsThroughSeams(t *testing.T) {
 			t.Fatal("must never derive/probe a branch for a malformed id")
 			return false, nil
 		}
-		got := evaluateChildProvenance("/root", "spec/x", "--not-a-valid-id")
+		got := evaluateChildProvenance("/root", "spec/x", "--not-a-valid-id", supersedeCloseReasonPrefix+"1")
 		if got != provenanceAmbiguous {
 			t.Errorf("got %v, want provenanceAmbiguous", got)
 		}
@@ -345,7 +374,10 @@ func TestAdversaryLandedMergeAmbiguityNeverLicensesDeletion(t *testing.T) {
 		}
 	}
 
-	prov := evaluateChildProvenance("/repo", "spec/x", "bead-1")
+	// Even with the supersede marker present, an uncorroborated owned
+	// candidate must still never license deletion — the zero-candidate
+	// leg is required too (bead-5 fix round 2, RULING 1).
+	prov := evaluateChildProvenance("/repo", "spec/x", "bead-1", supersedeCloseReasonPrefix+"1")
 	if prov != provenanceAmbiguous {
 		t.Fatalf("ambiguous owned merge evidence classified as %v; want provenanceAmbiguous", prov)
 	}

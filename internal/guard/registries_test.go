@@ -750,26 +750,43 @@ func TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor(t *testing.T) {
 }
 
 // TestBdDeleteForceTemplate_SingleSourceOfTruth is spec 127 AC-11(b)
-// (bead-5 fix round 1, RULING 3): plan.go's beadCreateFailure and
-// closedChildDeletionRefusal each independently call
-// guard.NewDestructiveCommand with a `fmt.Sprintf("bd delete %s
-// --force", ...)` literal — byte-identical TODAY by direct source
-// inspection, but nothing derived that identity mechanically before
-// this test; each site's own test only pinned its OWN rendered string
-// against a hardcoded literal, so either template could drift from
-// the other while every existing test stayed green. The AST tracer
-// cannot recognize an indirected shared-helper call at these two call
-// sites (verified empirically during this bead's authoring — a shared
-// wrapper function broke the internal/lint provenance scan's dataflow
-// recognition, the same class of AST-scan limitation R1(e)/R5(b)
-// already record elsewhere in this spec), so the anti-drift mechanism
-// AC-11(b) requires is this: re-parse BOTH production function bodies,
-// extract each one's "bd delete"-shaped Sprintf template, and assert
-// they are still identical. This derives the expected form from the
-// two production sites themselves — it does not pin either one against
-// a third hardcoded literal — so a future edit that changes BOTH
-// templates together in lockstep still passes; only a DRIFT between
-// them reds.
+// (bead-5 fix round 1, RULING 3; NARROWED bead-5 fix round 2, RULING 2,
+// G1): plan.go's beadCreateFailure and closedChildDeletionRefusal each
+// independently call guard.NewDestructiveCommand with a
+// `fmt.Sprintf("bd delete %s --force", ...)` literal — byte-identical
+// TODAY by direct source inspection, but nothing derived that identity
+// mechanically before this test; each site's own test only pinned its
+// OWN rendered string against a hardcoded literal, so either template
+// could drift from the other while every existing test stayed green.
+// The AST tracer cannot recognize an indirected shared-helper call at
+// these two call sites (verified empirically during this bead's
+// authoring — a shared wrapper function broke the internal/lint
+// provenance scan's dataflow recognition, the same class of AST-scan
+// limitation R1(e)/R5(b) already record elsewhere in this spec).
+//
+// Fix round 1's extraction (sprintfTemplatesInFunc, shared with
+// TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor above —
+// which legitimately needs EVERY Sprintf template in a function body)
+// collected every fmt.Sprintf call anywhere in the function and picked
+// whichever one merely CONTAINED "bd delete". G1's adversary probe
+// (fix round 2) broke that: an unrelated decoy
+// `fmt.Sprintf("bd delete %s --force", "")` planted anywhere else in
+// the SAME function body gets selected instead of the REAL
+// guard.NewDestructiveCommand operand, even after that real operand
+// drifts to a differently-shaped (or non-literal, e.g. concatenated)
+// template — one emitter plus its own local rendering assertion could
+// drift while this test kept reporting cross-emitter identity, which is
+// exactly the AC-11(b) "(anti-drift)" guarantee it claims to hold.
+//
+// bdDeleteTemplateAtDestructiveCommandCall below closes that: instead
+// of scanning the whole function body for ANY Sprintf call, it locates
+// the actual `guard.NewDestructiveCommand(...)` call and extracts ONLY
+// the fmt.Sprintf template passed as ITS first argument — the literal
+// operand the constructor actually receives. A decoy elsewhere in the
+// body can no longer be selected (it is never the constructor's
+// argument), and a drifted real operand can no longer hide behind one
+// (a non-literal drifted operand now fails loudly instead of falling
+// back to a decoy match).
 func TestBdDeleteForceTemplate_SingleSourceOfTruth(t *testing.T) {
 	root := repoRootFromGuardTestDir(t)
 	sites := []struct{ file, fn string }{
@@ -778,22 +795,115 @@ func TestBdDeleteForceTemplate_SingleSourceOfTruth(t *testing.T) {
 	}
 	var extracted []string
 	for _, site := range sites {
-		templates := sprintfTemplatesInFunc(t, root, site.file, site.fn)
-		found := ""
-		for _, tmpl := range templates {
-			if strings.Contains(tmpl, "bd delete") {
-				found = tmpl
-				break
-			}
-		}
-		if found == "" {
-			t.Fatalf("%s/%s: found no \"bd delete\"-shaped template among %v — this obligation's own extraction is broken, or AC-11(b)'s bd-delete site moved", site.file, site.fn, templates)
-		}
-		extracted = append(extracted, found)
+		extracted = append(extracted, bdDeleteTemplateAtDestructiveCommandCall(t, root, site.file, site.fn))
 	}
 	if extracted[0] != extracted[1] {
 		t.Fatalf("AC-11(b) violated: %s's bd-delete template %q != %s's %q — the single source of truth has drifted", sites[0].fn, extracted[0], sites[1].fn, extracted[1])
 	}
+}
+
+// bdDeleteTemplateAtDestructiveCommandCall parses relFile fresh (same
+// discipline as sprintfTemplatesInFunc's own doc comment — never
+// trusting a cached/prior AST) and returns the fmt.Sprintf literal
+// template passed as the FIRST ARGUMENT to the named function's own
+// guard.NewDestructiveCommand(...) call — see
+// TestBdDeleteForceTemplate_SingleSourceOfTruth's doc comment for why
+// this is anchored to the constructor's actual operand rather than any
+// Sprintf call found anywhere in the function body. Fails the test
+// loudly (never silently falls back to a decoy or an approximate match)
+// when: the named function/var is not found, it contains no
+// guard.NewDestructiveCommand call, that call's first argument is not a
+// fmt.Sprintf(...) call, or that Sprintf's own first argument is not a
+// plain string literal (a non-literal — e.g. concatenated — template is
+// exactly the drift shape this obligation exists to catch, and it
+// cannot be compared as a string).
+func bdDeleteTemplateAtDestructiveCommandCall(t *testing.T, root, relFile, funcName string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join(root, relFile), nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", relFile, err)
+	}
+	var target ast.Node
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			name := d.Name.Name
+			if d.Recv != nil && len(d.Recv.List) > 0 {
+				name = recvTypeNameForObligation(d.Recv.List[0].Type) + "." + name
+			}
+			if name == funcName {
+				target = d
+			}
+		case *ast.GenDecl:
+			if d.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range d.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, nm := range vs.Names {
+					if nm.Name == funcName && i < len(vs.Values) {
+						target = vs.Values[i]
+					}
+				}
+			}
+		}
+	}
+	if target == nil {
+		t.Fatalf("function/method/var %q not found in %s — this obligation's own probe is broken (the site moved or was renamed)", funcName, relFile)
+	}
+	found := ""
+	ast.Inspect(target, func(n ast.Node) bool {
+		if found != "" {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		xid, ok := sel.X.(*ast.Ident)
+		if !ok || xid.Name != "guard" || sel.Sel.Name != "NewDestructiveCommand" || len(call.Args) == 0 {
+			return true
+		}
+		sprintfCall, ok := call.Args[0].(*ast.CallExpr)
+		if !ok {
+			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not a fmt.Sprintf(...) call — this obligation's own extraction assumption is broken, or the site's shape changed", relFile, funcName)
+			return false
+		}
+		fsel, ok := sprintfCall.Fun.(*ast.SelectorExpr)
+		if !ok {
+			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not a package-qualified call — extraction assumption broken", relFile, funcName)
+			return false
+		}
+		fxid, ok := fsel.X.(*ast.Ident)
+		if !ok || fxid.Name != "fmt" || fsel.Sel.Name != "Sprintf" || len(sprintfCall.Args) == 0 {
+			t.Fatalf("%s/%s: guard.NewDestructiveCommand's first argument is not fmt.Sprintf(...) — extraction assumption broken", relFile, funcName)
+			return false
+		}
+		lit, ok := sprintfCall.Args[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			t.Fatalf("%s/%s: guard.NewDestructiveCommand's fmt.Sprintf template is not a plain string literal (a non-literal — e.g. concatenated — expression was found instead) — this IS the drift this obligation exists to catch; it cannot be compared as a string", relFile, funcName)
+			return false
+		}
+		v, uerr := strconv.Unquote(lit.Value)
+		if uerr != nil {
+			t.Fatalf("%s/%s: unquoting template literal: %v", relFile, funcName, uerr)
+			return false
+		}
+		found = v
+		return false
+	})
+	if found == "" {
+		t.Fatalf("%s/%s: found no guard.NewDestructiveCommand(fmt.Sprintf(...)) call — this obligation's own extraction is broken, or AC-11(b)'s bd-delete site moved", relFile, funcName)
+	}
+	return found
 }
 
 func repoRootFromGuardTestDir(t *testing.T) string {

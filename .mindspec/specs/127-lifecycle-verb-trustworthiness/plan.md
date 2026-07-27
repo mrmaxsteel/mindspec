@@ -1059,10 +1059,14 @@ preflight-phase structure bead 6 consumes (C-r4-7).
    passed INTO `checkExistingBeadsSafety` as a value (purity preserved —
    S3-r2-5). Closed child: deletion hint ONLY on positive
    partial/interrupted provenance (mechanics: no bead branch exists AND
-   no landed-merge evidence AND, when present, supersede-run markers —
-   the `plan.go:715-728` by-construction model); completed-work OR
-   ambiguous/unavailable evidence → preserve + inspection/
-   reconciliation, no `bd delete`. Both plan.go emitters route through
+   no landed-merge evidence AND — CORRECTED bead-5 fix round 2, RULING 1
+   — a supersede-run marker (CloseReason carrying
+   `supersedeCloseReasonPrefix`) REQUIRED, not merely consulted when
+   present: zero merge candidates alone cannot distinguish a genuine
+   leftover from a squash/fast-forward landing, so the marker from the
+   `plan.go:749-758` by-construction model is now the mandatory positive
+   signal); completed-work OR ambiguous/unavailable evidence → preserve
+   + inspection/reconciliation, no `bd delete`. Both plan.go emitters route through
    bead 2's constructor (never allowlisted — O1-r2-6), sharing ONE
    constructor-produced `bd delete <id> --force` form — AC-11's
    single source of truth, with bd-CLI drift covered by the existing

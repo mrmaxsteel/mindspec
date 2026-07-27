@@ -74,25 +74,49 @@ func TestEvaluateChildProvenance_RealRepo_ManualMergeNoBindingIsAmbiguous(t *tes
 	run("merge", "--no-ff", "-m", "Merge bead/test-1", "bead/test-1")
 	run("branch", "-D", "bead/test-1")
 
-	got := evaluateChildProvenance(dir, "spec/test", "test-1")
+	got := evaluateChildProvenance(dir, "spec/test", "test-1", "")
 	if got != provenanceAmbiguous {
 		t.Fatalf("got %v, want provenanceAmbiguous — an out-of-band landing with no corroboration must never license deletion", got)
 	}
 }
 
-// TestEvaluateChildProvenance_RealRepo_NeverBranchedIsPartialInterrupted
-// is the genuine positive-absence leg this real-repo suite pins
-// alongside the ambiguous case above: a bead that was never even
-// branched produces zero candidate merges (lifecycle.
-// ErrLandedMergeNoCandidate) and IS correctly classified
-// provenancePartialInterrupted — the one true positive signature the
-// discriminator exists to catch.
-func TestEvaluateChildProvenance_RealRepo_NeverBranchedIsPartialInterrupted(t *testing.T) {
+// TestEvaluateChildProvenance_RealRepo_NeverBranchedWithSupersedeMarkerIsPartialInterrupted
+// is the genuine positive leg this real-repo suite pins alongside the
+// ambiguous case above: a bead that was never even branched produces
+// zero candidate merges (lifecycle.ErrLandedMergeNoCandidate) — this is
+// EXACTLY the shape supersedeCloseExistingBeads leaves behind for a
+// child that never reached in_progress before being superseded (that
+// function's own doc comment). Bead-5 fix round 2, RULING 1: zero
+// candidates alone no longer suffices (see
+// TestEvaluateChildProvenance_RealRepo_NeverBranchedWithoutMarkerIsAmbiguous
+// below); the supersede-close marker on closeReason is what makes this
+// case correctly resolve provenancePartialInterrupted.
+func TestEvaluateChildProvenance_RealRepo_NeverBranchedWithSupersedeMarkerIsPartialInterrupted(t *testing.T) {
 	dir, _ := realGitRepo(t)
 
-	got := evaluateChildProvenance(dir, "spec/test", "never-existed")
+	got := evaluateChildProvenance(dir, "spec/test", "never-existed", supersedeCloseReasonPrefix+"1")
 	if got != provenancePartialInterrupted {
 		t.Fatalf("got %v, want provenancePartialInterrupted", got)
+	}
+}
+
+// TestEvaluateChildProvenance_RealRepo_NeverBranchedWithoutMarkerIsAmbiguous
+// is this test's negative sibling (bead-5 fix round 2, RULING 1, G1):
+// the IDENTICAL zero-candidate shape as the test above, but with no
+// close_reason marker — indistinguishable, from the merge-commit scan
+// alone, from a squash/fast-forward landing of real work (see the two
+// STATED-LIMIT tests below). Without the marker this now resolves
+// provenanceAmbiguous, never provenancePartialInterrupted: the trade
+// this reversal makes is that a leftover closed by some path OTHER
+// than supersedeCloseExistingBeads (e.g. a bare `bd close <id>` with no
+// --reason) no longer draws an automatic deletion hint here — it falls
+// to inspection/reconciliation like any other ambiguous case.
+func TestEvaluateChildProvenance_RealRepo_NeverBranchedWithoutMarkerIsAmbiguous(t *testing.T) {
+	dir, _ := realGitRepo(t)
+
+	got := evaluateChildProvenance(dir, "spec/test", "never-existed", "")
+	if got != provenanceAmbiguous {
+		t.Fatalf("got %v, want provenanceAmbiguous", got)
 	}
 }
 
@@ -101,11 +125,21 @@ func TestEvaluateChildProvenance_RealRepo_NeverBranchedIsPartialInterrupted(t *t
 // left) in childProvenanceEvidence's own doc comment: a squash merge
 // (one parent, no merge commit lifecycle.FirstParentMerges' `--merges`
 // filter can ever see) lands real content but produces the SAME zero
-// candidates as a bead that never existed. This test PINS the
-// currently-accepted residual risk — it asserts today's actual
-// (imperfect) behavior, provenancePartialInterrupted, rather than
-// silently leaving the gap for a future reader to rediscover. A fix
-// that closes this gap should update this test, not delete it.
+// candidates as a bead that never existed. Bead-5 fix round 2, RULING 1
+// (G1): fix round 1 pinned this AS provenancePartialInterrupted — an
+// executable false-deletion path, since a real landing rendered the
+// same positive signature as a genuine leftover. This test now asserts
+// the CORRECTED behavior instead: with no supersede-close marker on
+// close_reason (a squash-merged bead was closed via `mindspec
+// complete`, which passes bd close no --reason at all — see
+// supersedeCloseReasonPrefix's own doc comment), the discriminator
+// resolves provenanceAmbiguous, never licensing a `bd delete` hint on
+// this genuinely-landed, tree-present work. A fix that closes the
+// underlying blind spot (positively DETECTING a squash/fast-forward
+// landing as provenanceCompletedWork, rather than merely refusing to
+// misclassify it) should update this test's assertion and
+// childProvenanceEvidence's doc comment together, don't just flip the
+// want.
 func TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit(t *testing.T) {
 	dir, run := realGitRepo(t)
 	run("checkout", "-b", "bead/test-2")
@@ -119,8 +153,34 @@ func TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit(t *testing.T)
 	run("commit", "-m", "Merge bead/test-2 (squash)")
 	run("branch", "-D", "bead/test-2")
 
-	got := evaluateChildProvenance(dir, "spec/test", "test-2")
-	if got != provenancePartialInterrupted {
-		t.Fatalf("got %v, want provenancePartialInterrupted (the STATED LIMIT: a squash landing is indistinguishable from never-landed here) — if this now returns something else, a detection fix landed; update this test's assertion and childProvenanceEvidence's doc comment together, don't just flip the want", got)
+	// No supersede marker: a squash-merged bead is closed via `mindspec
+	// complete` (bead.Close), which never passes bd close a --reason.
+	got := evaluateChildProvenance(dir, "spec/test", "test-2", "")
+	if got != provenanceAmbiguous {
+		t.Fatalf("got %v, want provenanceAmbiguous (the squash landing must never license a false deletion, even though the merge-commit scan alone cannot positively identify it as completed work either)", got)
+	}
+}
+
+// TestEvaluateChildProvenance_RealRepo_FastForwardIsStatedLimit is the
+// squash test's fast-forward sibling (bead-5 fix round 2, RULING 1,
+// G1's own required addition): a fast-forward landing leaves NO merge
+// commit at all — an even more extreme case of the same
+// FirstParentMerges blind spot — and must be equally protected against
+// a false deletion.
+func TestEvaluateChildProvenance_RealRepo_FastForwardIsStatedLimit(t *testing.T) {
+	dir, run := realGitRepo(t)
+	run("checkout", "-b", "bead/test-3")
+	if err := os.WriteFile(filepath.Join(dir, "test-3.txt"), []byte("work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "work test-3")
+	run("checkout", "spec/test")
+	run("merge", "--ff-only", "bead/test-3")
+	run("branch", "-D", "bead/test-3")
+
+	got := evaluateChildProvenance(dir, "spec/test", "test-3", "")
+	if got != provenanceAmbiguous {
+		t.Fatalf("got %v, want provenanceAmbiguous (the fast-forward landing must never license a false deletion)", got)
 	}
 }

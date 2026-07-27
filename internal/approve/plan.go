@@ -829,6 +829,18 @@ func largestPayloadField(createArgs []string) (string, int) {
 type existingChildBead struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+	// CloseReason is bd's own `close_reason` field, already present in
+	// `bd list --parent ... --all -n 0 --json`'s output for a closed
+	// bead (verified empirically: no additional bd/git I/O needed to
+	// read it — queryExistingChildren's existing query already returns
+	// it). Bead-5 fix round 2, RULING 1 (G1): evaluateChildProvenance
+	// reads this as the ONE durable, positive-evidence marker for an
+	// interrupted supersede-close — see supersedeCloseReasonPrefix's own
+	// doc comment for why it is the single production writer of this
+	// shape. Empty for an open child, and empty for a genuinely
+	// completed one too (bead.Close, the `mindspec complete` call site,
+	// passes bd close no --reason at all).
+	CloseReason string `json:"close_reason"`
 	// Provenance is spec 127 R3c's durable evidence classification —
 	// set ONLY for CLOSED children, by resolveChildProvenance during
 	// preflight (I/O). There is no such field in `bd list --parent`
@@ -844,6 +856,22 @@ type existingChildBead struct {
 	Provenance childProvenanceEvidence `json:"-"`
 }
 
+// supersedeCloseReasonPrefix is the exact literal prefix
+// supersedeCloseExistingBeads writes via `bd close ... --reason
+// "superseded by plan v<version>"` below — the ONE durable, positive
+// marker evaluateChildProvenance treats as proof of an interrupted
+// supersede-close (bead-5 fix round 2, RULING 1). It is the single
+// production writer of a `bd close --reason` for a child bead under an
+// epic: `mindspec complete`'s own close call site (bead.Close, wired
+// from internal/complete/complete.go's closeBeadFn) passes bd close NO
+// --reason at all, so a genuinely completed bead's close_reason is
+// always empty. A prefix match (not full equality) is deliberate — the
+// version suffix varies per plan and extractPlanVersion falls back to
+// the literal string "unknown" when the frontmatter has no version
+// field, so the prefix alone is what both the writer and the reader
+// must agree on.
+const supersedeCloseReasonPrefix = "superseded by plan v"
+
 // childProvenanceEvidence is R3c's positively-established evidence
 // classification for a CLOSED child bead: resolved with I/O (git reads)
 // in resolveChildProvenance, called once from the ApprovePlan preflight
@@ -856,53 +884,54 @@ type existingChildBead struct {
 // child's bead/<id> branch no longer existing is NOT, by itself,
 // evidence of a partial/interrupted leftover — a genuinely COMPLETED
 // bead's branch is ALSO gone after a normal `mindspec complete`
-// merge-and-clean. The discriminator R3c pins is therefore the
-// CONJUNCTION: no surviving branch AND no landed-merge evidence for it
-// on the target spec branch. Landed evidence found -> completed work
-// (a weaker claim here would delete a done record — too weak). Neither
-// branch nor landed evidence found -> the one positive partial/
-// interrupted signature (a stronger claim here would refuse to ever
-// clean up a genuine partial-create/interrupted-supersede leftover —
-// too strong, and the exact R3c defect this bead exists to fix). A
-// SURVIVING branch, or any evidence-computation failure, is
-// deliberately AMBIGUOUS: this model never guesses in either
-// direction, and does NOT establish that a surviving-branch child is
-// unsafe to delete — only that this mechanism does not positively
-// clear it either way. What this model does NOT establish: it never
-// proves a closed child's work is SAFE to lose (only "not positively
-// partial"), and it never proves a surviving branch's content is
-// unmergeable — both are left to inspection/reconciliation, on
-// purpose.
+// merge-and-clean. Landed evidence found -> completed work (a weaker
+// claim here would delete a done record — too weak). A SURVIVING
+// branch, or any evidence-computation failure, is deliberately
+// AMBIGUOUS: this model never guesses in either direction, and does
+// NOT establish that a surviving-branch child is unsafe to delete —
+// only that this mechanism does not positively clear it either way.
+// What this model does NOT establish: it never proves a closed child's
+// work is SAFE to lose (only "not positively partial"), and it never
+// proves a surviving branch's content is unmergeable — both are left
+// to inspection/reconciliation, on purpose.
 //
-// "No landed-merge evidence" above means specifically
-// lifecycle.ErrLandedMergeNoCandidate (bead-5 fix round 1, RULING 1) —
-// the subject scan found ZERO candidate merges naming this bead at
-// all. Every OTHER lifecycle.FindLandedMerge outcome that also
-// satisfies the broader errors.Is(err, lifecycle.ErrLandedMergeNotFound)
-// — an uncorroborated or mutually-conflicting
-// *lifecycle.LandedMergeNoEvidence candidate, a reviewed_head_sha/
-// branch-tip/landed-binding CONTRADICTION, or a positively-identified-
-// then-reverted merge — is a real, owned candidate merge with
-// unresolved or contradicting evidence, NOT a positive absence, and
-// evaluateChildProvenance below routes every one of those to
-// provenanceAmbiguous instead (never a false deletion on an ambiguity).
+// Bead-5 fix round 2, RULING 1 (G1, reversing fix round 1's own
+// RULING 1): no surviving branch AND no landed-merge evidence is
+// ABSENCE of evidence, not evidence of ABSENCE — it does NOT, by
+// itself, license provenancePartialInterrupted. The subject scan the
+// landed-merge check depends on (lifecycle.FirstParentMerges, `git log
+// --first-parent --merges`) can only ever see a TWO-PARENT merge
+// commit; a landing performed via a squash merge (one parent) or a
+// fast-forward (no merge commit at all) produces the exact same
+// ZERO-candidate shape (lifecycle.ErrLandedMergeNoCandidate) as a bead
+// that never landed at all — the two are INDISTINGUISHABLE from that
+// scan alone (pinned by
+// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit and
+// its fast-forward sibling below). Treating that absence as positive
+// partial/interrupted proof — fix round 1's own defect, before this
+// reversal — collapsed genuinely-landed, tree-present work into the
+// same deletion-licensing outcome the original R3c bug produced.
 //
-// STATED LIMIT (O1-2, bead-5 fix round 1, RULING 2): the subject scan
-// this discriminator's "no candidate at all" leg depends on
-// (lifecycle.FirstParentMerges, `git log --first-parent --merges`) can
-// only ever see a TWO-PARENT merge commit. A landing performed via a
-// squash merge (one parent) or a fast-forward (no merge commit at all)
-// produces ZERO candidates — indistinguishable, at this discriminator,
-// from a bead that never landed — and is therefore residually
-// classified provenancePartialInterrupted despite genuinely-landed,
-// tree-present work. This is a real, unclosed gap (not merely
-// hypothetical — R3a's own sibling adopted-merge handling is ABOUT
-// out-of-band landings), demonstrated by
-// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit below;
-// detecting it would require a content-presence check this
-// discriminator does not perform. Tracked as a follow-up rather than
-// silently left for a future reader to rediscover (see this bead's
-// fix-round report).
+// The DURABLE POSITIVE signature this discriminator now requires
+// instead is CloseReason carrying supersedeCloseReasonPrefix (see that
+// const's own doc comment): supersedeCloseExistingBeads is the ONLY
+// production path that ever closes a child bead under an epic WITHOUT
+// completed work landing, and it is the ONLY production path that ever
+// passes bd close a --reason at all — so that literal prefix is
+// positive, durable, by-construction proof the bead was superseded/
+// left over, independent of what the merge-commit scan could or could
+// not see. Landed evidence found (landedErr == nil) still wins
+// unconditionally over the marker — a positively-identified landing is
+// stronger evidence than a close reason. Absent BOTH a landed merge and
+// the marker, the state is AMBIGUOUS, not partial/interrupted: a plain
+// `bd close <id>` (no --reason) on a genuinely never-landed leftover —
+// a real leftover, just closed outside supersedeCloseExistingBeads —
+// now also resolves ambiguous rather than licensing deletion. That is
+// the deliberate trade this reversal makes: precision (never
+// misclassifying squash/fast-forward-landed work as deletable) over
+// recall (a same-shape leftover closed by some other, non-mindspec
+// path no longer gets an automatic deletion hint — it falls to
+// inspection/reconciliation like any other ambiguous case instead).
 type childProvenanceEvidence int
 
 const (
@@ -919,17 +948,14 @@ const (
 	// computation itself failed — fail-closed, preserve rather than
 	// guess.
 	provenanceAmbiguous
-	// provenancePartialInterrupted: no bead branch survives AND
-	// lifecycle.FindLandedMerge positively returns
-	// lifecycle.ErrLandedMergeNoCandidate (zero candidate merges found
-	// at all — NOT the broader ErrLandedMergeNotFound umbrella, which
-	// also covers an uncorroborated/conflicting candidate, a
-	// contradiction, or a reverted landing; see childProvenanceEvidence's
-	// own doc comment) — the one positive signature a partial
-	// `bd create` failure or an interrupted supersede-close leaves
-	// behind (the plan.go beadCreateFailure by-construction model
-	// below, applied here as DURABLE evidence rather than in-run
-	// construction).
+	// provenancePartialInterrupted: no bead branch survives, no landed
+	// merge of this bead's work was positively identified, AND
+	// CloseReason carries supersedeCloseReasonPrefix — the ONE positive,
+	// durable signature an interrupted supersede-close leaves behind
+	// (bead-5 fix round 2, RULING 1: zero merge candidates ALONE no
+	// longer suffices — see childProvenanceEvidence's own doc comment
+	// for why, and supersedeCloseReasonPrefix's doc comment for why this
+	// marker is the single production writer of this shape).
 	provenancePartialInterrupted
 )
 
@@ -947,15 +973,19 @@ func resolveChildProvenance(root, specBranch string, children []existingChildBea
 		if strings.ToLower(out[i].Status) != "closed" {
 			continue
 		}
-		out[i].Provenance = evaluateChildProvenance(root, specBranch, out[i].ID)
+		out[i].Provenance = evaluateChildProvenance(root, specBranch, out[i].ID, out[i].CloseReason)
 	}
 	return out
 }
 
 // evaluateChildProvenance resolves ONE closed child's provenance — see
 // childProvenanceEvidence's doc comment for the discriminator and why
-// it is neither too weak nor too strong.
-func evaluateChildProvenance(root, specBranch, beadID string) childProvenanceEvidence {
+// it is neither too weak nor too strong. closeReason is the bead's own
+// bd close_reason (existingChildBead.CloseReason) — bead-5 fix round 2,
+// RULING 1: the durable positive marker this function now REQUIRES,
+// alongside the zero-candidate merge-scan result, before it will ever
+// return provenancePartialInterrupted.
+func evaluateChildProvenance(root, specBranch, beadID, closeReason string) childProvenanceEvidence {
 	if idvalidate.BeadID(beadID) != nil {
 		// A malformed id from bd: never derive a branch name from it,
 		// never license a deletion off evidence this function could
@@ -978,26 +1008,32 @@ func evaluateChildProvenance(root, specBranch, beadID string) childProvenanceEvi
 	}
 	switch _, landedErr := planFindLandedMergeFn(root, specBranch, beadID); {
 	case landedErr == nil:
+		// A positively-identified landing always wins, unconditionally
+		// — it is stronger evidence than any close_reason marker could
+		// ever contradict.
 		return provenanceCompletedWork
-	case errors.Is(landedErr, lifecycle.ErrLandedMergeNoCandidate):
-		// The ONE definitive-absence shape (lifecycle.
-		// ErrLandedMergeNoCandidate's own doc comment): the subject scan
-		// found no candidate merge naming this bead AT ALL — not an
-		// uncorroborated candidate, not a contradiction, not a reverted
-		// landing. Bead-5 fix round 1 RULING 1: a bare
-		// errors.Is(landedErr, lifecycle.ErrLandedMergeNotFound) check
-		// here previously also matched *lifecycle.LandedMergeNoEvidence
-		// (that type deliberately wraps the broader sentinel — see its
-		// own doc comment) and every contradiction/reverted-landing
-		// return in FindLandedMerge, collapsing all of them into this
-		// same positive-deletion-licensing outcome. Checking the
-		// NARROWER sentinel specifically, rather than the broad
-		// ErrLandedMergeNotFound umbrella, is what fixes that: every
-		// other landedErr shape — including *LandedMergeNoEvidence in
-		// both its uncorroborated and mutually-conflicting forms, an
-		// invalid/empty bead id, a corroboration contradiction, and a
-		// positively-identified-then-reverted merge — falls through to
-		// the default ambiguous case below instead.
+	case errors.Is(landedErr, lifecycle.ErrLandedMergeNoCandidate) && strings.HasPrefix(closeReason, supersedeCloseReasonPrefix):
+		// Bead-5 fix round 2, RULING 1 (G1, reversing fix round 1's own
+		// RULING 1): lifecycle.ErrLandedMergeNoCandidate alone — the
+		// subject scan found no candidate merge naming this bead AT
+		// ALL — used to be treated as the one definitive absence
+		// signature. It is not: a squash merge or fast-forward landing
+		// produces the exact same zero-candidate shape despite real,
+		// tree-present work (childProvenanceEvidence's own doc comment;
+		// TestEvaluateChildProvenance_RealRepo_SquashMergeIsStatedLimit
+		// and its fast-forward sibling below). ZERO CANDIDATES IS
+		// ABSENCE OF EVIDENCE, NOT EVIDENCE OF ABSENCE. The additional,
+		// now-mandatory condition is closeReason carrying
+		// supersedeCloseReasonPrefix — the durable, positive,
+		// by-construction proof that THIS bead was closed via an
+		// interrupted supersedeCloseExistingBeads run, not completion
+		// (see that const's own doc comment for why it is the single
+		// production writer of this shape). Every other landedErr shape
+		// — *LandedMergeNoEvidence in both its uncorroborated and
+		// mutually-conflicting forms, a corroboration contradiction, a
+		// positively-identified-then-reverted merge, an infra error —
+		// and every zero-candidate result WITHOUT the marker, falls
+		// through to the default ambiguous case below instead.
 		return provenancePartialInterrupted
 	default:
 		return provenanceAmbiguous
@@ -1109,9 +1145,11 @@ func closedChildDeletionRefusal(id string) error {
 		// proof the predicate ran"). The parameter is therefore
 		// satisfied STRUCTURALLY rather than EVIDENTIALLY: the real
 		// evidentiary gating for this destructive action is
-		// childProvenanceEvidence, resolved above this call by R3c's
-		// own discriminator (lifecycle.ErrLandedMergeNoCandidate,
-		// specifically — see that discriminator's doc comment).
+		// childProvenanceEvidence, resolved above this call by R3c's own
+		// discriminator — the zero-candidate merge scan AND the
+		// supersedeCloseReasonPrefix marker on CloseReason, both required
+		// (bead-5 fix round 2, RULING 1 — see that discriminator's doc
+		// comment).
 		guard.DestructionAncestor,
 	)
 	if ctorErr != nil {
@@ -1180,7 +1218,12 @@ func supersedeCloseExistingBeads(children []existingChildBead, planContent strin
 		return nil
 	}
 	version := extractPlanVersion(planContent)
-	reason := fmt.Sprintf("superseded by plan v%s", version)
+	// Bead-5 fix round 2, RULING 1: this literal (supersedeCloseReasonPrefix
+	// + version) is the single production write of a `bd close --reason`
+	// for a child bead under an epic — evaluateChildProvenance reads it
+	// back as the durable positive marker for an interrupted
+	// supersede-close. Keep the two in the SAME const, never re-typed.
+	reason := supersedeCloseReasonPrefix + version
 	var ids []string
 	for _, c := range children {
 		// Gate-all-ids (ADR-0042 §1, round 9): c.ID is bd-sourced
