@@ -1102,10 +1102,20 @@ in two distinct ways corrected here rather than re-asserted:
    now exactly what each consumer's own fixture proves rather than
    assumes.
 
-Match this corrected reading against spec.md's AC-3 text (unaffected —
-it already scopes the parity leg to "all four production surfaces" and
-separately assigns adopt's own coverage to the emitter test; no spec.md
-change needed, per O3-2's confirmation).
+**CORRECTED**: this section previously claimed the reading above was
+already matched by spec.md's AC-3 text, unaffected, "per O3-2's
+confirmation." That claim was false. O3-2 confirmed only that AC-3
+anticipates adopt's extra rerun line — a different question from
+whether identical *rendering* is required — and the confirmation was
+applied here without re-reading AC-3's own text. AC-3's parity sentence
+read two ways: rendering the output of the same derivation (satisfied)
+or rendering output that is itself the same across four structurally
+different consumers (violated by design — a requirement this section's
+own bullet 2 says would be the wrong fix). spec.md's AC-3 IS amended in
+this round (G1's audit of fix round 2's amendment) to state the
+achievable requirement: fidelity to the derivation's lines, threaded in
+order and unmodified, with each consumer's own wrapping legitimately
+its own.
 
 **Verification**
 - [ ] `go test -short ./internal/lifecycle/... ./internal/complete/... ./internal/approve/... ./internal/doctor/...` passes
