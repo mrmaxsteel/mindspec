@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -217,6 +218,34 @@ func ConflictedFiles(workdir string) []string {
 func MergeInProgress(workdir string) bool {
 	cmd := execCommand("git", "-C", workdir, "rev-parse", "-q", "--verify", "MERGE_HEAD")
 	return cmd.Run() == nil
+}
+
+// MergeMsgSubject reads the first line of workdir's MERGE_MSG — the
+// message git seeded for an in-progress merge (MergeInto/MergeBranch's
+// own `-m "Merge <source>"`/`-m "Merge <source> into <target>"` call,
+// above) before any commit finalizes it. Spec 127 bead-6 fix round 1
+// (G1-1): the resumption surface's own preserved-merge binding check
+// uses this to NAME which branch a preserved (possibly foreign) merge
+// actually belongs to, independent of MERGE_HEAD's bare SHA. Only
+// meaningful while MergeInProgress(workdir) is true; returns an error if
+// MERGE_MSG is absent or unreadable (best-effort diagnostic — a caller
+// must not treat a read failure as "no merge in progress").
+func MergeMsgSubject(workdir string) (string, error) {
+	cmd := execCommand("git", "-C", workdir, "rev-parse", "--git-path", "MERGE_MSG")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolving MERGE_MSG path in %s: %w", workdir, err)
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workdir, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading MERGE_MSG in %s: %w", workdir, err)
+	}
+	line := strings.SplitN(string(data), "\n", 2)[0]
+	return strings.TrimSpace(line), nil
 }
 
 // AbortMerge aborts an in-progress merge in workdir, restoring the

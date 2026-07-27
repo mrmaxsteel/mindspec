@@ -19,6 +19,23 @@ func BranchExists(name string) bool {
 	return gitutil.BranchExists(name)
 }
 
+// HasRemote reports whether at least one git remote is configured in the
+// CALLING PROCESS's cwd. Thin wrapper (same ADR-0030 boundary rationale as
+// IsAncestor). Spec 127 bead-6 fix round 1 (O1-1/O3-1/G1's ac5-pr-path-
+// widening ruling): internal/approve.ApproveImpl consults this BEFORE
+// deciding whether its own §1 AC-5 preflight applies at all — the
+// executor's OWN equivalent producer-level preflight
+// (mindspec_executor.go's preflightMergeDestruction call for the direct
+// spec→main leg) only ever runs when this same probe (there, called
+// directly as gitutil.HasRemote()) says false, i.e. FinalizeEpic's
+// MergeStrategy will be "direct". The two calls must agree on
+// APPLICABILITY, not just outcome, or a PR-routed run (no local merge
+// ever attempted) can be refused by a check whose entire purpose is
+// guarding a local merge that will never run.
+func HasRemote() bool {
+	return gitutil.HasRemote()
+}
+
 // BranchExistsIn is the workdir-taking variant of BranchExists (spec 127
 // R1b): BranchExists checks the CALLING PROCESS's cwd, which the adopt
 // surface cannot rely on (it operates at an explicit root, never

@@ -127,6 +127,363 @@ func TestCompleteBead_ResolveMerge_FullLifecycle(t *testing.T) {
 	}
 }
 
+// TestCompleteBead_ResolveMerge_SourceDriftIsIncorporated is AC-9(v) leg
+// alpha (bead-6 fix round 1, G1-1's "PinsOldSourceTipAfterDrift" finding):
+// the bead branch gains a NEW commit AFTER the conflict begins but BEFORE
+// --resolve-merge completes it. Before this fix, the completed commit's
+// second parent stayed the OLD (preserved) MERGE_HEAD and the new
+// commit's content was silently omitted — this test proves the current
+// tip is incorporated (a catch-up merge runs immediately after
+// completing the stale resumed merge) before CompleteBead reports
+// success.
+func TestCompleteBead_ResolveMerge_SourceDriftIsIncorporated(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
+
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   "worktree-mindspec-x.1",
+		Path:   beadWtDir,
+		Branch: "bead/mindspec-x.1",
+	}}
+	fake.onRemove = func(name string) {
+		if name == "worktree-mindspec-x.1" {
+			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", beadWtDir).Run()
+		}
+	}
+
+	// 1. Plain invocation: conflicts, preserved.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err == nil {
+		t.Fatal("expected a merge-conflict error, got nil")
+	}
+
+	// 2. DRIFT: a new commit lands on the bead branch AFTER the conflict
+	// began, touching a path the resolved conflict never touches (so the
+	// catch-up merge below is a clean fast-forward-shaped merge, not a
+	// second conflict).
+	if err := os.WriteFile(beadWtDir+"/drift.txt", []byte("drifted work\n"), 0o644); err != nil {
+		t.Fatalf("write drift file: %v", err)
+	}
+	runGitIn(t, beadWtDir, "add", "drift.txt")
+	runGitIn(t, beadWtDir, "commit", "-m", "drift: bead branch advances after the conflict began")
+	driftedBeadTip := refHash(t, dir, "bead/mindspec-x.1")
+
+	// 3. Resolve + stage the ORIGINAL conflict (never touches drift.txt).
+	if err := os.WriteFile(specWtPath+"/c.txt", []byte("resolved\n"), 0o644); err != nil {
+		t.Fatalf("write resolution: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "c.txt")
+
+	// 4. --resolve-merge completes the PRESERVED (now-stale) merge, then
+	// must incorporate the drift before reporting success.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("--resolve-merge with drift must still converge, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("no merge should remain in progress after drift is incorporated")
+	}
+	if got, readErr := os.ReadFile(specWtPath + "/c.txt"); readErr != nil || string(got) != "resolved\n" {
+		t.Errorf("the resolved content must survive, got %q, err=%v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(specWtPath + "/drift.txt"); readErr != nil || string(got) != "drifted work\n" {
+		t.Errorf("AC-9(v)(alpha): the DRIFTED commit's content must be incorporated, not silently omitted; got %q, err=%v", got, readErr)
+	}
+	isAnc, ancErr := gitutil.IsAncestor(dir, driftedBeadTip, "spec/077-test")
+	if ancErr != nil || !isAnc {
+		t.Errorf("AC-9(v)(alpha): the drifted bead tip %s must be an ancestor of spec/077-test after convergence (ancErr=%v, isAnc=%v)", driftedBeadTip, ancErr, isAnc)
+	}
+	if branchExistsIn(t, dir, "bead/mindspec-x.1") {
+		t.Error("the bead branch must be deleted once the drift is incorporated and the merge fully converges")
+	}
+}
+
+// TestCompleteBead_ResolveMerge_ForeignPreservedMergeRefuses is bead-6 fix
+// round 1's G1-1 fix, both resumption legs: a preserved MERGE_HEAD that
+// does NOT correspond to the requested bead branch (a foreign merge —
+// e.g. another bead's conflict left in the SAME shared spec worktree, or
+// an unrelated operator merge) must never be silently re-diagnosed as
+// this request's own conflict, and must never be completed by
+// --resolve-merge.
+func TestCompleteBead_ResolveMerge_ForeignPreservedMergeRefuses(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
+	_ = beadWtDir
+
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   "worktree-mindspec-x.1",
+		Path:   beadWtDir,
+		Branch: "bead/mindspec-x.1",
+	}}
+
+	// Plant a FOREIGN merge directly in the spec worktree: an unrelated
+	// branch, never named by this invocation at all.
+	runGitIn(t, dir, "branch", "foreign-branch")
+	foreignWt := dir + "/.wt-foreign"
+	runGitIn(t, dir, "worktree", "add", foreignWt, "foreign-branch")
+	if err := os.WriteFile(foreignWt+"/f.txt", []byte("foreign side\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, foreignWt, "add", ".")
+	runGitIn(t, foreignWt, "commit", "-m", "foreign change")
+	if err := os.WriteFile(specWtPath+"/f.txt", []byte("spec side (unrelated path)\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", ".")
+	runGitIn(t, specWtPath, "commit", "-m", "spec-side change to the same path foreign-branch touches")
+	_, _ = exec.Command("git", "-C", specWtPath, "merge", "--no-ff", "-m", "Merge foreign-branch", "foreign-branch").CombinedOutput()
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("fixture invariant broken: the foreign merge must be mid-conflict in the spec worktree")
+	}
+
+	// STILL-CONFLICTED leg: refuses, names the mismatch, touches nothing.
+	preservedBefore := mergeHeadSHA(t, specWtPath)
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false)
+	if err == nil {
+		t.Fatal("a foreign preserved merge must refuse, not be silently re-diagnosed as this bead's own conflict")
+	}
+	if !strings.Contains(err.Error(), "does not correspond to the requested source") {
+		t.Errorf("refusal must name the binding mismatch; got:\n%s", err.Error())
+	}
+	if got := mergeHeadSHA(t, specWtPath); got != preservedBefore {
+		t.Fatalf("the foreign merge must be untouched; MERGE_HEAD was %s, now %s", preservedBefore, got)
+	}
+
+	// READY-TO-COMPLETE leg: resolve + stage the FOREIGN conflict, then
+	// invoke THIS bead's --resolve-merge — must still refuse rather than
+	// silently completing someone else's merge.
+	if err := os.WriteFile(specWtPath+"/f.txt", []byte("resolved foreign content\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "f.txt")
+	err = g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil {
+		t.Fatal("a resolved-and-staged FOREIGN merge must still refuse --resolve-merge for an unrelated bead")
+	}
+	if !strings.Contains(err.Error(), "does not correspond to the requested source") {
+		t.Errorf("refusal must name the binding mismatch; got:\n%s", err.Error())
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("the foreign merge must remain preserved (uncommitted) — this bead's invocation must never complete it")
+	}
+}
+
+// TestCompleteBead_ResolveMerge_InvokedFromWrongCheckout is AC-9(v) leg
+// gamma (spec text (ii): "resolves its own target worktree and branch,
+// so neither operand is scrollback-pinned"): the calling process's cwd is
+// a DECOY worktree entirely unrelated to this bead's spec worktree at
+// invocation time. CompleteBead must still resolve and complete the
+// correct spec worktree — never operate on whatever the process happens
+// to be sitting in.
+func TestCompleteBead_ResolveMerge_InvokedFromWrongCheckout(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
+
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   "worktree-mindspec-x.1",
+		Path:   beadWtDir,
+		Branch: "bead/mindspec-x.1",
+	}}
+	fake.onRemove = func(name string) {
+		if name == "worktree-mindspec-x.1" {
+			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", beadWtDir).Run()
+		}
+	}
+
+	// A DECOY worktree, checked out to an unrelated branch, with its own
+	// unrelated content — never named by this invocation.
+	runGitIn(t, dir, "branch", "decoy-branch")
+	decoyWt := dir + "/.wt-decoy"
+	runGitIn(t, dir, "worktree", "add", decoyWt, "decoy-branch")
+	if err := os.WriteFile(decoyWt+"/decoy.txt", []byte("decoy content\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, decoyWt, "add", ".")
+	runGitIn(t, decoyWt, "commit", "-m", "decoy change")
+	decoyTipBefore := refHash(t, dir, "decoy-branch")
+
+	// 1. Plain invocation from the decoy checkout: conflicts, preserved
+	// (proves the FIRST attempt already resolves specWtPath correctly,
+	// not the decoy).
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(decoyWt); err != nil {
+		t.Fatalf("chdir into decoy worktree: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err == nil {
+		t.Fatal("expected a merge-conflict error, got nil")
+	}
+	if gitutil.MergeInProgress(decoyWt) {
+		t.Fatal("the decoy checkout must never enter a merge state — the conflict belongs to specWtPath")
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("the conflict must be preserved in the RESOLVED spec worktree, not wherever the process cwd happened to be")
+	}
+
+	// 2. Resolve + stage, still invoked from the decoy checkout.
+	if err := os.WriteFile(specWtPath+"/c.txt", []byte("resolved\n"), 0o644); err != nil {
+		t.Fatalf("write resolution: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "c.txt")
+
+	// 3. --resolve-merge, still invoked from the decoy checkout: must
+	// complete the merge in specWtPath.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("--resolve-merge invoked from an unrelated checkout must still complete the correct spec worktree, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must be complete in specWtPath")
+	}
+	if got, readErr := os.ReadFile(specWtPath + "/c.txt"); readErr != nil || string(got) != "resolved\n" {
+		t.Errorf("the resolved content must land on the spec branch; got %q, err=%v", got, readErr)
+	}
+
+	// The decoy checkout must be entirely untouched throughout.
+	if got := refHash(t, dir, "decoy-branch"); got != decoyTipBefore {
+		t.Errorf("the decoy branch must never move; was %s, now %s", decoyTipBefore, got)
+	}
+	if got, readErr := os.ReadFile(decoyWt + "/decoy.txt"); readErr != nil || string(got) != "decoy content\n" {
+		t.Errorf("the decoy worktree's content must be untouched; got %q, err=%v", got, readErr)
+	}
+}
+
+// TestCompleteBead_ResolveMerge_AddStepOperandsExactlyMatchConflictedSet
+// is AC-9(v) leg eta: the printed resolution steps' `git add` line
+// operands must equal EXACTLY the conflicted-file set (parsed, not
+// merely "contains one path") — never a wider -A/./-u form. This needs
+// MULTIPLE conflicted files to be a meaningful parity check (a
+// single-file case cannot distinguish "the exact set" from "at least one
+// path is named").
+func TestCompleteBead_ResolveMerge_AddStepOperandsExactlyMatchConflictedSet(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+
+	runGitIn(t, dir, "branch", "spec/077-multi")
+	runGitIn(t, dir, "branch", "bead/mindspec-multi.1")
+
+	specWtPath := dir + "/.worktrees/worktree-spec-077-multi"
+	if err := os.MkdirAll(dir+"/.worktrees", 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/077-multi")
+	for _, name := range []string{"c1.txt", "c2.txt"} {
+		if err := os.WriteFile(specWtPath+"/"+name, []byte("spec side "+name+"\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	runGitIn(t, specWtPath, "add", ".")
+	runGitIn(t, specWtPath, "commit", "-m", "spec change (two files)")
+
+	beadWtDir := dir + "/.wt-bead-multi1"
+	runGitIn(t, dir, "worktree", "add", beadWtDir, "bead/mindspec-multi.1")
+	for _, name := range []string{"c1.txt", "c2.txt"} {
+		if err := os.WriteFile(beadWtDir+"/"+name, []byte("bead side "+name+"\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	runGitIn(t, beadWtDir, "add", ".")
+	runGitIn(t, beadWtDir, "commit", "-m", "bead change (two files)")
+
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   "worktree-mindspec-multi.1",
+		Path:   beadWtDir,
+		Branch: "bead/mindspec-multi.1",
+	}}
+
+	if err := g.CompleteBead("mindspec-multi.1", "spec/077-multi", "", "", false); err == nil {
+		t.Fatal("expected a merge-conflict error, got nil")
+	}
+	conflicted := gitutil.ConflictedFiles(specWtPath)
+	if len(conflicted) != 2 {
+		t.Fatalf("fixture invariant broken: expected 2 conflicted files, got %v", conflicted)
+	}
+
+	// A SECOND (still-conflicted) invocation is the one that renders the
+	// pinned resolution-step template (resolutionSteps) — the first,
+	// fresh-conflict invocation renders the caller's own rich conflict
+	// message instead, which carries no "git add" line at all.
+	err := g.CompleteBead("mindspec-multi.1", "spec/077-multi", "", "", true)
+	if err == nil {
+		t.Fatal("expected the still-conflicted refusal, got nil")
+	}
+
+	msg := err.Error()
+	var addLine string
+	for _, line := range strings.Split(msg, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "2. git add ") {
+			addLine = strings.TrimPrefix(trimmed, "2. git add ")
+			break
+		}
+	}
+	if addLine == "" {
+		t.Fatalf("expected a '2. git add <paths>' line in the resolution steps; got:\n%s", msg)
+	}
+	gotOperands := strings.Fields(addLine)
+	if len(gotOperands) != len(conflicted) {
+		t.Fatalf("AC-9(v)(eta): add-step operand count = %d, want exactly %d (the conflicted set %v); got operands %v", len(gotOperands), len(conflicted), conflicted, gotOperands)
+	}
+	wantSet := map[string]bool{}
+	for _, f := range conflicted {
+		wantSet[f] = true
+	}
+	for _, op := range gotOperands {
+		if !wantSet[op] {
+			t.Errorf("AC-9(v)(eta): add-step operand %q is not in the conflicted set %v — the emitted add-step must equal the conflicted set exactly, never a wider form", op, conflicted)
+		}
+	}
+	for _, forbidden := range []string{"-A", ".", "-u"} {
+		for _, op := range gotOperands {
+			if op == forbidden {
+				t.Errorf("AC-9(v)(eta): the emitted add-step must never contain the forbidden whole-index form %q", forbidden)
+			}
+		}
+	}
+}
+
+// TestCommitAll_RefusesOverAPreservedMerge is bead-6 fix round 1's F1-1
+// fixture: internal/approve's spec.go/plan.go reach the R5(d)(v)
+// preserved-merge precondition EXCLUSIVELY through the
+// executor.Executor interface's CommitAll method (grep-confirmed: this
+// is the one production call site of gitutil.CommitAll, inside
+// commitWithExport). Rather than standing up the full ApproveSpec/
+// ApprovePlan gate chain (bd epic, spec.md validation, etc.) just to
+// reach this call, this drives the EXACT EXPORTED METHOD those two call
+// sites invoke directly — proving the reach with a real red-on-revert
+// test rather than an architectural (grep-only) argument alone.
+func TestCommitAll_RefusesOverAPreservedMerge(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
+	_ = beadWtDir
+
+	orig := execBeadExportFn
+	t.Cleanup(func() { execBeadExportFn = orig })
+	execBeadExportFn = func(workdir string) error { return nil }
+
+	// Plant a real, mid-conflict merge in the spec worktree (never a
+	// merge this CommitAll call started).
+	_, _ = exec.Command("git", "-C", specWtPath, "merge", "--no-ff", "bead/mindspec-x.1").CombinedOutput()
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("fixture invariant broken: the spec worktree must be mid-conflict")
+	}
+	headBefore := refHash(t, specWtPath, "HEAD")
+
+	err := g.CommitAll(specWtPath, "chore: approve spec 999-test")
+	if err == nil {
+		t.Fatal("CommitAll must refuse rather than commit over a preserved merge (the exact two-parent chore: resurrection spec 125 shipped to fix)")
+	}
+	if !strings.Contains(err.Error(), "already in progress there that this run did not start") {
+		t.Errorf("refusal must name the preserved-merge precondition; got: %v", err)
+	}
+	if got := refHash(t, specWtPath, "HEAD"); got != headBefore {
+		t.Errorf("HEAD must not advance — CommitAll must touch nothing on this refusal; was %s, now %s", headBefore, got)
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the preserved merge must remain untouched (never committed, never aborted)")
+	}
+}
+
 // mergeHeadSHA reads MERGE_HEAD's resolved SHA in workdir (empty if
 // absent), used to prove a plain re-run or a still-conflicted
 // --resolve-merge invocation never touches the preserved merge state.

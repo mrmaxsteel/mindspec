@@ -131,6 +131,112 @@ func TestApproveImpl_AC7_AllowNetDeletionOverrideCompletes(t *testing.T) {
 	}
 }
 
+// TestApproveImpl_AC5_SkippedWhenRemoteConfigured is bead-6 fix round 1's
+// O1-1/O3-1 regression test: R3b/AC-5's own text scopes the §1 preflight
+// to "the finalize merge" — the no-remote DIRECT spec→main merge. When a
+// remote IS configured, exec.FinalizeEpic instead pushes specBranch for a
+// PR and never local-merges into main, so the §1 check must not even be
+// CONSULTED — proven here by stubbing implWorkDestructionPreflightFn to
+// ALWAYS refuse (simulating a real DestructionSuperseded evaluation, as
+// O3-1's real-git fixture reproduced for the routine "PR already merged,
+// local main now reflects it" state) and asserting ApproveImpl still
+// reaches FinalizeEpic and succeeds — the destructive stub answer is
+// never given the chance to fire.
+func TestApproveImpl_AC5_SkippedWhenRemoteConfigured(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+
+	origHasRemote := implHasRemoteFn
+	t.Cleanup(func() { implHasRemoteFn = origHasRemote })
+	implHasRemoteFn = func() bool { return true }
+
+	origPreflight := implWorkDestructionPreflightFn
+	t.Cleanup(func() { implWorkDestructionPreflightFn = origPreflight })
+	preflightCalled := false
+	implWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
+		preflightCalled = true
+		return guard.NewFailure("this must never fire on the PR-routed leg", "unreachable")
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "pr", CommitCount: 5},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err != nil {
+		t.Fatalf("a PR-routed run (remote configured) must not be refused by the §1 preflight, got: %v", err)
+	}
+	if preflightCalled {
+		t.Error("AC-5/O1-1: the §1 preflight must not be consulted at all when a remote is configured (the PR-routed leg never local-merges)")
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 1 {
+		t.Errorf("expected FinalizeEpic to be reached on the PR-routed leg, got %d call(s)", len(calls))
+	}
+}
+
+// TestApproveImpl_AC5_StillAppliesWithNoRemoteConfigured is the paired
+// regression guard for TestApproveImpl_AC5_SkippedWhenRemoteConfigured:
+// narrowing the §1 preflight's applicability to the no-remote leg must
+// not also disable it there — the ORIGINAL AC-5 refusal (a stale
+// recreated spec branch on the direct-merge path) still fires.
+func TestApproveImpl_AC5_StillAppliesWithNoRemoteConfigured(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
+	os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0755)
+
+	saveAndRestore(t)
+
+	closeCalled := false
+	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+		closeCalled = true
+		return []byte("ok"), nil
+	}
+
+	origHasRemote := implHasRemoteFn
+	t.Cleanup(func() { implHasRemoteFn = origHasRemote })
+	implHasRemoteFn = func() bool { return false }
+
+	origPreflight := implWorkDestructionPreflightFn
+	t.Cleanup(func() { implWorkDestructionPreflightFn = origPreflight })
+	preflightCalled := false
+	implWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
+		preflightCalled = true
+		if overrideReason != "" {
+			return nil
+		}
+		return guard.NewFailure(
+			fmt.Sprintf("refusing to merge %s into %s: staleness detected.", branch, target),
+			fmt.Sprintf("inspect the branch, then re-run with %s \"<reason>\" to proceed anyway — then %s", executor.AllowNetDeletionFlag, rerun),
+		)
+	}
+
+	mock := &executor.MockExecutor{
+		CommitCountResult:  5,
+		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+	}
+
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil {
+		t.Fatal("a stale recreated spec branch must still refuse the finalize merge when no remote is configured")
+	}
+	if !preflightCalled {
+		t.Error("the §1 preflight must still be consulted on the no-remote direct-merge leg")
+	}
+	if closeCalled {
+		t.Error("the §1 preflight refusal must fire BEFORE the epic close mutation")
+	}
+	if calls := mock.CallsTo("FinalizeEpic"); len(calls) != 0 {
+		t.Errorf("FinalizeEpic must never be called on a §1 preflight refusal, got %d call(s)", len(calls))
+	}
+}
+
 // TestImplWorkDestructionPreflightFn_DeclaredDefaultIsRealImplementation
 // pins the PRODUCTION default declared in impl.go's var block: this
 // package's TestMain (main_test.go) installs a permissive stub for

@@ -110,6 +110,102 @@ func worktreeStateRefusal(workdir string, blockingPaths []string, mergeErr error
 	return &noMergeStateError{msg: b.String()}
 }
 
+// bindingClass classifies a preserved MERGE_HEAD against the source
+// branch THIS invocation was asked to merge (spec 127 bead-6 fix round 1,
+// G1-1): the resumption dispatch previously treated ANY preserved
+// MERGE_HEAD as "the product-initiated merge for this request", binding
+// nothing. See classifyPreservedMergeBinding's doc comment.
+type bindingClass int
+
+const (
+	// bindingExact: the preserved MERGE_HEAD is exactly the expected
+	// source's current tip — the ordinary case, no drift, no foreign
+	// merge.
+	bindingExact bindingClass = iota
+	// bindingDrifted: the expected source has advanced PAST the
+	// preserved MERGE_HEAD since the merge began (MERGE_HEAD is an
+	// ancestor of the source's current tip) — the same branch, an older
+	// snapshot of it.
+	bindingDrifted
+	// bindingForeign: the preserved MERGE_HEAD is neither the expected
+	// source's tip nor an ancestor of it — a merge this invocation did
+	// not start and does not recognize (an operator merge, or another
+	// bead's preserved conflict in a shared spec worktree).
+	bindingForeign
+)
+
+// classifyPreservedMergeBinding resolves the preserved MERGE_HEAD in
+// workdir and the CURRENT tip of expectedSource, and classifies their
+// relationship. Spec 127 bead-6 fix round 1 (G1-1): resumeAwareMerge
+// consults this before EVER completing (committing) or re-diagnosing a
+// preserved merge, so a merge that does not correspond to the branch this
+// invocation was asked to merge is never silently completed or mistaken
+// for this request's own conflict.
+func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindingClass, preservedTip, sourceTip string, err error) {
+	preservedTip, err = gitutil.RevParseRef(workdir, "MERGE_HEAD")
+	if err != nil {
+		return 0, "", "", fmt.Errorf("resolving the preserved MERGE_HEAD in %s: %w", workdir, err)
+	}
+	sourceTip, err = gitutil.RevParseRef(workdir, expectedSource)
+	if err != nil {
+		return 0, preservedTip, "", fmt.Errorf("resolving the current tip of %s: %w", expectedSource, err)
+	}
+	if preservedTip == sourceTip {
+		return bindingExact, preservedTip, sourceTip, nil
+	}
+	isAnc, ancErr := gitutil.IsAncestor(workdir, preservedTip, sourceTip)
+	if ancErr != nil {
+		return 0, preservedTip, sourceTip, fmt.Errorf("could not determine whether the preserved merge in %s corresponds to %s (ancestry check failed: %w)", workdir, expectedSource, ancErr)
+	}
+	if isAnc {
+		return bindingDrifted, preservedTip, sourceTip, nil
+	}
+	return bindingForeign, preservedTip, sourceTip, nil
+}
+
+// bindingIndeterminateError is the fail-closed leg when
+// classifyPreservedMergeBinding itself cannot resolve a ref or evaluate
+// ancestry — an infra failure, not a classification, so this must never
+// be read as "safe to complete".
+type bindingIndeterminateError struct{ msg string }
+
+func (e *bindingIndeterminateError) Error() string { return e.msg }
+
+// bindingIndeterminateRefusal renders the fail-closed refusal for a
+// classification failure: nothing is committed, nothing is touched.
+func bindingIndeterminateRefusal(workdir, expectedSource string, cause error, reentryHint string) error {
+	return &bindingIndeterminateError{msg: fmt.Sprintf(
+		"could not verify that the merge preserved in %s belongs to %s (%s) — refusing to touch it until this is resolved.\nre-run %s once resolved.",
+		workdir, termsafe.Escape(expectedSource), termsafe.Escape(cause.Error()), reentryHint,
+	)}
+}
+
+// foreignMergeError is G1-1's central fix: a preserved MERGE_HEAD that is
+// neither this request's expected source tip nor an ancestor of it — a
+// merge this invocation did not start and must never commit over or
+// treat as its own conflict.
+type foreignMergeError struct{ msg string }
+
+func (e *foreignMergeError) Error() string { return e.msg }
+
+// foreignMergeRefusal names the mismatch: the expected source, and (best-
+// effort, via gitutil.MergeMsgSubject) what the preserved merge's own
+// seeded message says it actually is — so an operator whose invocation
+// collides with another bead's preserved conflict in a shared spec
+// worktree gets a diagnostic naming the FOREIGN merge, not a silent
+// completion or an unexplained ancestry-mismatch failure downstream.
+func foreignMergeRefusal(workdir, expectedSource, preservedTip, expectedSourceTip, reentryHint string) *foreignMergeError {
+	var b strings.Builder
+	fmt.Fprintf(&b, "refusing to touch the merge preserved in %s: it does not correspond to the requested source %s.", workdir, termsafe.Escape(expectedSource))
+	if subject, err := gitutil.MergeMsgSubject(workdir); err == nil && subject != "" {
+		fmt.Fprintf(&b, "\nthe preserved merge's own message: %s", termsafe.Escape(subject))
+	}
+	fmt.Fprintf(&b, "\npreserved merge head: %s", termsafe.Escape(preservedTip))
+	fmt.Fprintf(&b, "\nrequested source (%s) current tip: %s", termsafe.Escape(expectedSource), termsafe.Escape(expectedSourceTip))
+	fmt.Fprintf(&b, "\nnothing here was touched: resolve or complete the preserved (foreign) merge directly if it is expected, or re-run %s once it no longer occupies this worktree.", reentryHint)
+	return &foreignMergeError{msg: b.String()}
+}
+
 // resumeOutcome is what mergeResumptionStep found on this invocation.
 type resumeOutcome int
 
@@ -197,9 +293,44 @@ func completeResumedMerge(workdir string) error {
 //     — conflictFailure renders the caller's own rich failure message
 //     naming what is preserved; this function never calls
 //     gitutil.AbortMerge.
-func resumeAwareMerge(workdir string, resolveMerge bool, reentryHint string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
+//
+// expectedSource is the branch this invocation was asked to merge (the
+// caller's own operand — beadBranch, e.Branch, or specBranch at the
+// three call sites). Spec 127 bead-6 fix round 1 (G1-1): BEFORE either
+// resumption leg above acts on a preserved MERGE_HEAD, this function
+// classifies it against expectedSource's CURRENT tip
+// (classifyPreservedMergeBinding) — a preserved merge is no longer
+// assumed to be "the product-initiated merge for this request" merely by
+// existing.
+//
+//   - bindingExact: unchanged behavior (the cases above).
+//   - bindingForeign: refuse in BOTH resumption legs, naming the
+//     mismatch and (best-effort) the foreign merge's own seeded subject
+//     — never re-printed as this request's own resolution steps, never
+//     completed.
+//   - bindingDrifted (still-conflicted leg): not yet actionable — no
+//     commit has happened, so there is nothing to catch up on yet; the
+//     operator finishes resolving what is already staged, and drift is
+//     caught at completion, below.
+//   - bindingDrifted (ready-to-complete leg): completeResumedMerge
+//     finalizes the PRESERVED (now-stale) resolution first — the
+//     operator's staged work is never discarded — then this function
+//     immediately re-invokes mergeFn() against expectedSource's CURRENT
+//     tip (attemptFreshMerge) so the drift is incorporated before this
+//     call reports success, closing the same gap a resumed merge would
+//     otherwise silently leave open (the completed commit's second
+//     parent would stay the OLD MERGE_HEAD, omitting every commit
+//     authored on the source after the conflict began).
+func resumeAwareMerge(workdir string, resolveMerge bool, expectedSource, reentryHint string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
 	switch mergeResumptionStep(workdir) {
 	case resumeStillConflicted:
+		class, preservedTip, sourceTip, err := classifyPreservedMergeBinding(workdir, expectedSource)
+		if err != nil {
+			return bindingIndeterminateRefusal(workdir, expectedSource, err, reentryHint)
+		}
+		if class == bindingForeign {
+			return foreignMergeRefusal(workdir, expectedSource, preservedTip, sourceTip, reentryHint)
+		}
 		return stillConflictedRefusal(workdir, reentryHint)
 	case resumeReadyToComplete:
 		if !resolveMerge {
@@ -208,9 +339,37 @@ func resumeAwareMerge(workdir string, resolveMerge bool, reentryHint string, mer
 				fmt.Sprintf("re-run with %s to finish it: %s", ResolveMergeFlag, reentryHint),
 			)
 		}
-		return completeResumedMerge(workdir)
+		class, preservedTip, sourceTip, err := classifyPreservedMergeBinding(workdir, expectedSource)
+		if err != nil {
+			return bindingIndeterminateRefusal(workdir, expectedSource, err, reentryHint)
+		}
+		if class == bindingForeign {
+			return foreignMergeRefusal(workdir, expectedSource, preservedTip, sourceTip, reentryHint)
+		}
+		if err := completeResumedMerge(workdir); err != nil {
+			return err
+		}
+		if class == bindingDrifted {
+			// The just-completed commit's second parent is the OLD
+			// (preserved) MERGE_HEAD — expectedSource has moved since.
+			// Incorporate the current tip before reporting success.
+			return attemptFreshMerge(workdir, mergeFn, conflictFailure)
+		}
+		return nil
 	}
 	// resumeNoMergeInProgress: attempt a fresh merge.
+	return attemptFreshMerge(workdir, mergeFn, conflictFailure)
+}
+
+// attemptFreshMerge runs mergeFn() (the caller's real
+// MergeInto/MergeBranch attempt) once, over whatever operand tips it
+// closes over at call time. On conflict, the conflict is left IN PLACE
+// (never aborted) — conflictFailure renders the caller's own rich
+// failure message. Factored out of resumeAwareMerge's bottom leg so the
+// bindingDrifted catch-up (above) can invoke the identical fresh-merge-
+// plus-conflict-handling logic after completing a stale resumed merge,
+// not a copy of it.
+func attemptFreshMerge(workdir string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
 	if mergeErr := mergeFn(); mergeErr != nil {
 		// R5(d)(vi)/E-r5-4: a merge failure that produced NO merge state
 		// (no MERGE_HEAD — e.g. a dirty index/worktree blocking the

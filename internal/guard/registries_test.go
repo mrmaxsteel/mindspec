@@ -517,7 +517,10 @@ func TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing %s: %v", path, err)
 	}
-	const reentryHintArgIdx = 2 // resumeAwareMerge(workdir, resolveMerge, reentryHint, ...)
+	// Bead-6 fix round 1 (G1-1): resumeAwareMerge gained an expectedSource
+	// parameter (the preserved-merge binding fix) between resolveMerge and
+	// reentryHint, shifting reentryHint from index 2 to index 3.
+	const reentryHintArgIdx = 3 // resumeAwareMerge(workdir, resolveMerge, expectedSource, reentryHint, ...)
 	found := 0
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)

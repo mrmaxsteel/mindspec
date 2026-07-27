@@ -43,5 +43,13 @@ func TestMain(m *testing.M) {
 	implWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
 		return nil
 	}
+	// Bead-6 fix round 1 (O1-1/O3-1): implHasRemoteFn now gates whether
+	// the §1 preflight above is even consulted (it applies only to the
+	// no-remote DIRECT spec→main leg). Defaulting it to false here
+	// preserves every pre-existing test's behavior exactly as it was
+	// before this gate existed — the preflight above still runs
+	// (permissively) for every test unless a test explicitly overrides
+	// this seam to exercise the PR-routed skip itself.
+	implHasRemoteFn = func() bool { return false }
 	os.Exit(m.Run())
 }

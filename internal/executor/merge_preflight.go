@@ -9,13 +9,32 @@ import (
 )
 
 // workDestructionFn is the R4 preflight's seam over the shared predicate
-// (gitutil.EvaluateWorkDestruction), pointer-pinned to the AC-17 anti-drift
-// consumer set alongside netEffectLandedFn above (spec 127 R4(a), S3-r2-6):
-// "the preflight consumes gitutil.NetEffectLanded/lifecycle.FindLandedMerge
-// through the same symbols the existing netEffectLandedFn seam pins" — no
-// private reimplementation, no second independently-rewirable seam. Tests
-// override this to force DestructionEvidenceError/specific outcomes without
-// a real git repo.
+// (gitutil.EvaluateWorkDestruction). Tests override this to force
+// DestructionEvidenceError/specific outcomes without a real git repo.
+//
+// Bead-6 fix round 1 (O2-2 correction): this is NOT a member of spec
+// 121's AC-17 anti-drift consumer set — that set has exactly two pinned
+// members (this package's netEffectLandedFn, pinned to
+// gitutil.NetEffectLanded by TestNetEffectLandedFn_IsGitutilNetEffect
+// Landed; internal/lifecycle's finalizeOrphanNetEffectFn, pinned the same
+// way). workDestructionFn points at a DIFFERENT, higher-level function
+// (gitutil.EvaluateWorkDestruction) that only reaches NetEffectLanded
+// transitively, through yet another, independently-rewirable seam one
+// level further out (gitutil's own workDestructionNetEffectFn, bead 1,
+// pinned by internal/gitutil/workdestruction_test.go). This var follows
+// the SAME pointer-pin PATTERN as the AC-17 pair (a package-level seam
+// pointer-pinned to its real implementation by its own test,
+// TestWorkDestructionFn_DefaultsToRealImplementation) — that pattern is
+// the actual governing mechanism (there is no single enumerated AC-17
+// registry/table to "join"; S3's ruling on this bead's own panel
+// confirms it) — but it is honestly a fourth, additional,
+// independently-rewirable seam layered above the two AC-17 members, not
+// a fifth member of their set. No live divergence exists today (every
+// link in the chain is independently pinned to the real
+// gitutil.NetEffectLanded), but a reviewer who updates only the two
+// AC-17 tests when auditing anti-drift coverage would incorrectly
+// believe this seam is covered by that audit too — it is not; its own
+// pin test is the only thing guarding it.
 var workDestructionFn = gitutil.EvaluateWorkDestruction
 
 // AllowNetDeletionFlag is the exact flag spelling every layer (cmd-layer
@@ -85,6 +104,42 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 //     the permissive path requires an explicit, named case; everything
 //     else — known destructive outcomes, evidence-error, and any future
 //     outcome nobody has written a case for yet — refuses.
+//
+// # CROSS-LAYER DIVERGENCE — WHAT IS MECHANICALLY PINNED AND WHAT IS NOT
+//
+// Bead-6 fix round 1 (O1/G1's cross-layer-authority finding): this
+// function and internal/lifecycle.EvaluateWorkDestructionPreflight are
+// two INDEPENDENTLY-CODED copies of the same "only
+// Ancestor/Clean proceed" decision (ADR-0030's boundary forces the
+// duplication — internal/executor may not import internal/lifecycle in
+// production). Stated honestly, not overclaimed:
+//
+//   - The PREDICATE cannot diverge: this file's workDestructionFn and
+//     internal/lifecycle's evaluateWorkDestructionFn are BOTH
+//     pointer-pinned (by their own package's test) to the identical
+//     gitutil.EvaluateWorkDestruction — a genuinely different predicate
+//     answer between the two layers is therefore not a code-drift risk,
+//     only an operand/timing-drift risk (the target-drift and
+//     branch-drift backstop fixtures, merge_resumption_test.go/
+//     internal/complete's own tests, cover that class).
+//   - The DISPOSITION SWITCH is NOT mechanically cross-checked: this
+//     function's switch (Ancestor/Clean permissive, no default) and
+//     lifecycle.EvaluateWorkDestructionPreflight's switch are two
+//     separately-written, separately-maintained pieces of Go source. A
+//     future edit to ONE that adds, removes, or reclassifies a case
+//     without making the identical edit to the OTHER would silently
+//     diverge — nothing in this codebase asserts the two switches agree,
+//     beyond each one's own guard.DestructionOutcomeCount-length
+//     disposition-table test (this package's
+//     TestPreflightMergeDestruction_FullDispositionTable;
+//     internal/lifecycle's TestEvaluateWorkDestructionPreflight_
+//     FullDispositionTable) independently proving each one's OWN
+//     internal completeness, not their mutual agreement. This is the
+//     honest, currently-unclosed residual G1 named; a future spec that
+//     wants it mechanically closed would need a single shared,
+//     cross-imported disposition table (which the current ADR-0030
+//     boundary forbids) or a generated/reflection-based cross-package
+//     conformance test.
 func (g *MindspecExecutor) preflightMergeDestruction(branch, target, overrideReason, rerun string) error {
 	outcome, evidence, err := workDestructionFn(g.Root, branch, target)
 	if err != nil {

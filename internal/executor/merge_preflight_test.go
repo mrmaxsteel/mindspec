@@ -142,6 +142,54 @@ func TestPreflightMergeDestruction_OverrideCompletesDestructiveOutcomes(t *testi
 	}
 }
 
+// TestPreflightMergeDestruction_FullDispositionTable is bead-6 fix round
+// 1's join of the spec's enum-exhaustiveness mechanism (G1-4): the tests
+// above pin each outcome's disposition individually via hand-written
+// slices, but none of them asserts the table is COMPLETE against
+// guard.DestructionOutcomeCount — the same "len(table) ==
+// DestructionOutcomeCount" discipline internal/gitutil's own consumer
+// tests already carry (spec 127 B-r4-3, outcome.go's package doc). A
+// future DestructionOutcome variant inserted before the
+// DestructionOutcomeCount sentinel will fail this test's length
+// assertion — not the fail-closed switch, which stays fail-closed by
+// construction regardless (preflightMergeDestruction's own doc comment)
+// — forcing a conscious row here, closing the "fails closed at runtime
+// but never goes red at development time" gap G1-4 named.
+func TestPreflightMergeDestruction_FullDispositionTable(t *testing.T) {
+	type row struct {
+		outcome  guard.DestructionOutcome
+		proceeds bool
+	}
+	table := []row{
+		{guard.DestructionAncestor, true},
+		{guard.DestructionSuperseded, false},
+		{guard.DestructionStaleDeletion, false},
+		{guard.DestructionClean, true},
+		{guard.DestructionEvidenceError, false},
+	}
+	if len(table) != int(guard.DestructionOutcomeCount) {
+		t.Fatalf("disposition table has %d row(s), want %d (guard.DestructionOutcomeCount) — a new DestructionOutcome variant needs a row here", len(table), int(guard.DestructionOutcomeCount))
+	}
+	for _, r := range table {
+		t.Run(r.outcome.String(), func(t *testing.T) {
+			stubWorkDestructionFn(t, func(workdir, branch, target string) (guard.DestructionOutcome, gitutil.WorkDestructionEvidence, error) {
+				if r.outcome == guard.DestructionEvidenceError {
+					return r.outcome, gitutil.WorkDestructionEvidence{}, errors.New("simulated evidence-error")
+				}
+				return r.outcome, gitutil.WorkDestructionEvidence{}, nil
+			})
+			g := &MindspecExecutor{Root: "/nonexistent"}
+			err := g.preflightMergeDestruction("bead/x", "spec/y", "", "mindspec complete x")
+			if r.proceeds && err != nil {
+				t.Errorf("outcome %s must proceed (no override needed), got: %v", r.outcome, err)
+			}
+			if !r.proceeds && err == nil {
+				t.Errorf("outcome %s must refuse without an override, got nil", r.outcome)
+			}
+		})
+	}
+}
+
 // TestPreflightMergeDestruction_EvidenceErrorRefusesRetryableWithOverrideNamed
 // is AC-8(iv): a git/infra failure fails closed, retryable, naming the
 // override as still available.

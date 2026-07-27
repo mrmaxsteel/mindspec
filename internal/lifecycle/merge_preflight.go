@@ -42,6 +42,18 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 // which applies identically here: outcome is never a parameter a caller
 // supplies, it is always this function's own fresh call into
 // EvaluateWorkDestruction below.
+//
+// Cross-layer divergence, stated honestly (bead-6 fix round 1, O1/G1):
+// see internal/executor's preflightMergeDestruction doc comment's
+// "CROSS-LAYER DIVERGENCE" section for the full accounting. In short —
+// the PREDICATE cannot diverge (both layers' seams are independently
+// pointer-pinned to the same gitutil.EvaluateWorkDestruction); the two
+// DISPOSITION SWITCHES (this one, and the executor's) are separately
+// coded and NOT mechanically cross-checked against each other — each
+// side's own disposition-table test proves only its OWN internal
+// completeness against guard.DestructionOutcomeCount, never mutual
+// agreement. This is a stated, review-caught residual, not a claim that
+// something here prevents it.
 func EvaluateWorkDestructionPreflight(workdir, branch, target, overrideReason, rerun string) error {
 	outcome, evidence, err := EvaluateWorkDestruction(workdir, branch, target)
 	if err != nil {

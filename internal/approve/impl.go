@@ -119,6 +119,19 @@ var (
 	// stub this too, or the real evaluation fails closed
 	// (DestructionEvidenceError) against non-existent refs.
 	implWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
+	// implHasRemoteFn is bead-6 fix round 1's applicability gate for the
+	// preflight immediately above (O1-1/O3-1, G1's ac5-pr-path-widening
+	// ruling): the §1 AC-5 preflight guards ONLY "the finalize merge"
+	// (R3b/AC-5's own text) — the no-remote DIRECT spec→main merge —
+	// never the PR-routed leg, which never attempts a local merge at
+	// all. exec.FinalizeEpic decides push-vs-direct via this identical
+	// probe (gitutil.HasRemote(), unconditionally, inside FinalizeEpic
+	// itself); consulting the SAME probe here, before the §1 call,
+	// keeps the two layers agreeing on APPLICABILITY rather than only on
+	// outcome (O1-1's required change). Routed through lifecycle.HasRemote
+	// (thin wrapper), the same ADR-0030 boundary reason as every other
+	// seam in this block.
+	implHasRemoteFn = lifecycle.HasRemote
 )
 
 // implContextLine renders the Req 8 worktree-context line for impl
@@ -364,14 +377,33 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// check above cannot distinguish from a healthy branch. Evaluated
 	// HERE, before any epic close / phase write / other mutation below,
 	// so a refusal leaves state byte-identical to the pre-call state
-	// (O1-r2-2's siting). This is a convenience early-refusal; the
-	// executor's OWN live consultation immediately before its
-	// gitutil.MergeBranch call (mindspec_executor.go, hoisted above its
-	// cleanup block) is the backstop that actually gates the mutation
-	// regardless of whether this check ran or observed stale state — the
-	// same relationship AC-5's own bead-6 siting note describes.
-	if err := implWorkDestructionPreflightFn(root, specBranch, "main", o.AllowNetDeletion, fmt.Sprintf("mindspec impl approve %s", specID)); err != nil {
-		return nil, err
+	// (O1-r2-2's siting).
+	//
+	// GATED on implHasRemoteFn (bead-6 fix round 1, O1-1/O3-1): R3b/AC-5's
+	// own text scopes this preflight to "the finalize merge" — the
+	// no-remote DIRECT spec→main merge exec.FinalizeEpic performs when
+	// gitutil.HasRemote() is false. When a remote IS configured,
+	// FinalizeEpic instead pushes specBranch for a PR and never local-
+	// merges it into main at all (the PR-routed leg relies on the Bead-3
+	// precondition + PR review instead). Evaluating this predicate
+	// unconditionally used to refuse the routine, non-adversarial "PR
+	// already merged, local main now reflects it" state — the exact state
+	// spec 121's own orphan/net-effect detection exists to handle
+	// gracefully — BEFORE FinalizeEpic's graceful handling ever ran (O3-1,
+	// reproduced with a real-git fixture: EvaluateWorkDestruction
+	// classifies that state DestructionSuperseded). Skipping the §1 call
+	// on the PR-routed leg does not weaken safety: the executor's OWN
+	// live consultation immediately before its gitutil.MergeBranch call
+	// (mindspec_executor.go, hoisted above its cleanup block) is the
+	// actual backstop that gates the mutation, and it is ITSELF gated on
+	// the identical `result.MergeStrategy == "direct"` condition — this
+	// is a convenience early-refusal for exactly the leg the executor's
+	// own preflight guards, not a claim that a second, unconditional
+	// backstop exists for the PR leg (there is none; see O1-1).
+	if !implHasRemoteFn() {
+		if err := implWorkDestructionPreflightFn(root, specBranch, "main", o.AllowNetDeletion, fmt.Sprintf("mindspec impl approve %s", specID)); err != nil {
+			return nil, err
+		}
 	}
 
 	// Enforcement gate (1/3): verify all plan beads are closed.

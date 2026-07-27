@@ -427,7 +427,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// aborted) and, on a genuinely fresh conflict, leaves it IN PLACE
 		// (Spec 092 Req 14(a)'s original abort-and-refuse behavior is
 		// retired by this spec — see resumeAwareMerge's doc comment).
-		if err := resumeAwareMerge(specWtPath, resolveMerge, fmt.Sprintf("mindspec complete %s %s", beadID, ResolveMergeFlag),
+		if err := resumeAwareMerge(specWtPath, resolveMerge, beadBranch, fmt.Sprintf("mindspec complete %s %s", beadID, ResolveMergeFlag),
 			func() error { return gitutil.MergeInto(specWtPath, beadBranch) },
 			func(mergeErr error) error {
 				return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, fmt.Sprintf("mindspec complete %s", beadID), mergeErr)
@@ -742,7 +742,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			// conflict is left in place, never aborted — Spec 092
 			// Req 14(a)'s original abort-and-refuse behavior is retired
 			// by this spec).
-			if err := resumeAwareMerge(specWtPath, resolveMerge, fmt.Sprintf("mindspec impl approve %s %s", specID, ResolveMergeFlag),
+			if err := resumeAwareMerge(specWtPath, resolveMerge, e.Branch, fmt.Sprintf("mindspec impl approve %s %s", specID, ResolveMergeFlag),
 				func() error { return gitutil.MergeInto(specWtPath, e.Branch) },
 				func(mergeErr error) error {
 					return beadToSpecConflictFailure(e.Branch, specBranch, specWtPath, fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
@@ -911,7 +911,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// worktree removal) — safe because gitutil.MergeBranch checks out
 		// main and merges specBranch at g.Root, touching neither the bead
 		// worktrees nor the spec worktree the cleanup below removes.
-		if err := resumeAwareMerge(g.Root, resolveMerge, fmt.Sprintf("mindspec impl approve %s %s", specID, ResolveMergeFlag),
+		if err := resumeAwareMerge(g.Root, resolveMerge, specBranch, fmt.Sprintf("mindspec impl approve %s %s", specID, ResolveMergeFlag),
 			func() error { return gitutil.MergeBranch(g.Root, specBranch, "main") },
 			func(mergeErr error) error {
 				return directMergeConflictFailure(g.Root, specBranch, fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
