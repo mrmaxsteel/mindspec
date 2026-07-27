@@ -32,7 +32,42 @@ import (
 // bead->spec merge. It is a typed sentinel (test with errors.Is) so callers
 // can distinguish "positively evaluated, no match" from a genuine git/read
 // failure that must NOT be silently treated the same way.
+//
+// errors.Is(err, ErrLandedMergeNotFound) is a deliberately BROAD umbrella:
+// every non-identification outcome in this file satisfies it — an invalid/
+// empty bead id, a genuine zero-candidate scan, an uncorroborated or
+// mutually-conflicting *LandedMergeNoEvidence candidate, a corroboration-
+// leg CONTRADICTION (reviewed_head_sha / surviving branch / landed-binding
+// disagreeing with the candidate), and a positively-corroborated candidate
+// later found reverted/removed. A caller that only needs "not positively
+// identified" (e.g. MergedUnclosed's own errors.Is check, after first
+// peeling off *LandedMergeNoEvidence via errors.As) may match this sentinel
+// alone. A caller that needs to license a DESTRUCTIVE action specifically
+// on "no landing was ever even a candidate" must NOT use this broad sentinel
+// for that — it must check ErrLandedMergeNoCandidate below, the ONE shape
+// among all of these that is a definitive positive absence rather than an
+// ambiguity, contradiction, or reverted-after-landing signature (spec 127
+// bead-5 fix round 1, RULING 1: the pre-fix defect collapsed
+// *LandedMergeNoEvidence into this broad umbrella at exactly that
+// destructive-licensing boundary).
 var ErrLandedMergeNotFound = errors.New("no landed merge commit positively identified for bead")
+
+// ErrLandedMergeNoCandidate wraps ErrLandedMergeNotFound (test via
+// errors.Is, same as every other error in this file) and is returned ONLY
+// when the subject scan found ZERO first-parent merge commits on specBranch
+// naming this bead at all (len(candidates) == 0 below) — the one shape
+// among every ErrLandedMergeNotFound-wrapping return in this file where "no
+// landing exists" is a definitive, positively-established fact, not an
+// unresolved ambiguity, a corroboration contradiction, or a
+// reverted-after-landing signature. A caller deciding whether it is safe to
+// treat a closed bead as never-landed (e.g. licensing a `bd delete --force`
+// hint) must check specifically for THIS sentinel via errors.Is — not the
+// broader ErrLandedMergeNotFound umbrella, which also covers
+// *LandedMergeNoEvidence (an OWNED candidate merge exists; see that type's
+// doc comment), a reviewed_head_sha/branch-tip/landed-binding contradiction,
+// and a positively-identified-then-reverted merge — none of which is a
+// definitive "never landed".
+var ErrLandedMergeNoCandidate = fmt.Errorf("%w: no candidate merge found", ErrLandedMergeNotFound)
 
 // LandedMergeNoEvidence is returned by FindLandedMerge, wrapping
 // ErrLandedMergeNotFound (test via errors.Is), when a subject-scan candidate
@@ -491,7 +526,14 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("%w: %s on %s", ErrLandedMergeNotFound, beadID, specBranch)
+		// The ONE definitive-absence shape (see ErrLandedMergeNoCandidate's
+		// doc comment): the subject scan found no two-parent first-parent
+		// merge on specBranch naming this bead at all. Every other
+		// ErrLandedMergeNotFound-wrapping return below this point (an
+		// uncorroborated/conflicting *LandedMergeNoEvidence, a
+		// corroboration contradiction, a reverted-after-landing signature)
+		// deliberately wraps the broader sentinel instead — never this one.
+		return nil, fmt.Errorf("%w: %s on %s", ErrLandedMergeNoCandidate, beadID, specBranch)
 	}
 
 	// All owned candidates must agree on ONE second parent (FIX-2b, the

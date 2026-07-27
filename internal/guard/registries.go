@@ -61,36 +61,35 @@ type DestructiveGuidanceAllowlistEntry struct {
 // The three merge producers (`CompleteBead`'s/`FinalizeEpic`'s
 // MergeInto, `MergeBranch`) emit no strings and never seed (they are
 // governed by R4, not R5).
-// Both plan.go entries' Obligation fields were corrected in spec 127
-// bead-2's rework round (RULING 6/O1-r2-4/O2-r2-6/O3-r2-4): they
-// previously cited "registries_test.go's
+// Both plan.go entries THIS COMMENT ORIGINALLY DESCRIBED (beadCreateFailure,
+// checkExistingBeadsSafety) EXITED this allowlist in bead 5 (R3c): both
+// call sites now route their `bd delete ... --force` line through
+// guard.NewDestructiveCommand (see internal/approve/plan.go's
+// closedChildDeletionRefusal and beadCreateFailure), so the operand is
+// constructor-derived — provenance-exempt per R5(b) — and no longer a
+// live allowlist finding. Their obligations lived on:
+// internal/approve/plan_test.go's TestBeadCreateFailure_EmitsBdDeleteForceLine
+// still pins beadCreateFailure's rendered line directly, and bead 5's own
+// AC-6 table (internal/approve/plan_provenance_test.go) is
+// checkExistingBeadsSafety's obligation. The seed manifest
+// (internal/lint/testdata/destructive_seed_manifest.txt) drops both
+// lines in the SAME commit per fixture (β)'s own documented discipline
+// (TestBootstrapManifest_AllowlistRegistryIdentity's doc comment).
+//
+// Prior to bead 5, this comment cited a since-corrected Obligation-field
+// defect (spec 127 bead-2's rework round, RULING 6/O1-r2-4/O2-r2-6/O3-r2-4):
+// both entries previously cited "registries_test.go's
 // TestDestructiveGuidanceAllowlist_ObligationsHold" (no such test was
 // ever declared) and, for beadCreateFailure, an additional
-// "plan_test.go's existing TestBeadCreateFailure-shaped coverage"
-// (the nearest real test, TestCreateImplementationBeads_BDCreateFails,
-// forces the FIRST bead-create call to fail, so `created` is empty
-// and the partial-set `bd delete` line this entry is ABOUT is never
-// even rendered). The corrected Obligation fields below name only
-// tests that exist; TestRegistryObligations_NamedTestsExist
-// (registries_test.go) now verifies that mechanically for every
-// entry in all three registries, not just these two.
+// "plan_test.go's existing TestBeadCreateFailure-shaped coverage" (the
+// nearest real test, TestCreateImplementationBeads_BDCreateFails, forces
+// the FIRST bead-create call to fail, so `created` is empty and the
+// partial-set `bd delete` line this entry was ABOUT was never even
+// rendered) — fixed before either entry existed to see this exit.
+// TestRegistryObligations_NamedTestsExist (registries_test.go) verifies
+// mechanically, for every entry in all three registries, that every
+// obligation names only tests that exist.
 var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{
-	{
-		File:       "internal/approve/plan.go",
-		Func:       "beadCreateFailure",
-		Detail:     "bd delete %s --force",
-		Family:     FamilyBdDeleteForce,
-		Rationale:  "the partial-bead-create recovery — created is BY CONSTRUCTION the partial set this very run created (a provenance-carrying deletion, F1-2), but this spec's constructor requires a DestructionOutcome value, and this site has none to give it yet. Seeded here; converted by bead 5 (R3c: both plan.go sites route through the constructor, neither stays on the allowlist).",
-		Obligation: "internal/approve/plan_test.go's TestBeadCreateFailure_EmitsBdDeleteForceLine pins the emitted `bd delete <ids> --force` line directly; registries_test.go's TestDestructiveGuidanceAllowlist_ContentRegeneration re-derives the same template and confirms it still matches FamilyBdDeleteForce, so drift in either direction is caught.",
-	},
-	{
-		File:       "internal/approve/plan.go",
-		Func:       "checkExistingBeadsSafety",
-		Detail:     "bd delete %s --force",
-		Family:     FamilyBdDeleteForce,
-		Rationale:  "the closed-child case — the exact live defect this spec exists to fix (R3c, Background 'the live class, inventoried'): emitted UNCONDITIONALLY today, gated by no verified fact. Seeded here (the tree must stay green while bead 5 does the actual gating work); converted — not merely allowlisted — by bead 5, which routes this site through the constructor and gates it on positive provenance.",
-		Obligation: "registries_test.go's TestDestructiveGuidanceAllowlist_ContentRegeneration re-derives the template and confirms it still matches FamilyBdDeleteForce; bead 5's own AC-6 table test is the obligation that actually gates the behavior change.",
-	},
 	{
 		File:       "internal/executor/mindspec_executor.go",
 		Func:       "beadToSpecConflictFailure",
@@ -344,6 +343,20 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	},
 	{
 		File:       "internal/approve/impl.go",
+		Func:       "implBranchIndeterminateRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, same ApproveImpl-preflight convention as runOrphanObligationGate above (spec 127 R3a's AC-4(ii) probe-error leg).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
+		Func:       "implBranchMissingRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idvalidate-guarded-raw: substitutes specID, same ApproveImpl-preflight convention as runOrphanObligationGate above (spec 127 R3a's AC-4(i) missing-branch leg, naming the R1 adopt invocation in full).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/impl.go",
 		Func:       "implObligationRefusal",
 		Detail:     "arg1:unprovable",
 		Rationale:  "idvalidate-guarded-raw: substitutes specID, same ApproveImpl-preflight convention as runOrphanObligationGate above.",
@@ -354,6 +367,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Func:       "implObligationRefusal",
 		Detail:     "arg2:unprovable",
 		Rationale:  "idvalidate-guarded-raw: the second command-position Sprintf also substitutes specID — same guarantee as arg1 above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/approve/plan.go",
+		Func:       "closedChildPreserveRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the command-position Sprintf here is `fmt.Sprintf(\"bd show %s --json   (inspect its recorded history before deciding)\", idrender.Bead(id))` — the same idrender-rendered discipline as this file's checkExistingBeadsSafety entry below (in_progress leg): id is bd-sourced (`bd list --parent`), never idvalidate'd at this rendering site. Spec 127 R3c: fires for a closed child whose durable evidence is completed-work OR ambiguous/unavailable — a `bd show --json` inspection command, never `bd delete`.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -395,7 +415,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/plan.go",
 		Func:       "beadCreateFailure",
 		Detail:     "arg2:unprovable",
-		Rationale:  "idvalidate-guarded-raw: the OTHER call site's THIRD argument (arg2) is the SAME `fmt.Sprintf(\"mindspec plan approve %s\", specID)` template, following that call's arg1 — the genuine `bd delete %s --force` floor match already governed by DestructiveGuidanceAllowlist's first entry (above), not this registry.",
+		Rationale:  "idvalidate-guarded-raw: the OTHER call site's THIRD argument (arg2) is the SAME `fmt.Sprintf(\"mindspec plan approve %s\", specID)` template, following that call's arg1. This same function's genuine `bd delete %s --force` floor match is now constructor-derived (guard.NewDestructiveCommand, spec 127 R3c), not a raw allowlisted string; the two DestructiveGuidanceAllowlist entries this rationale used to cite were REMOVED (not converted-with-continuing-obligation) in bead 5 — see the allowlist's own doc comment above.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -409,7 +429,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/approve/plan.go",
 		Func:       "checkExistingBeadsSafety",
 		Detail:     "arg1:unprovable",
-		Rationale:  "idrender-rendered: the OPAQUE command-position Sprintf here is `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(c.ID))` — a DIFFERENT operand from this same function's `bd delete %s --force` Sprintf, which is a genuine floor match already governed by DestructiveGuidanceAllowlist's second entry (above), not this registry.",
+		Rationale:  "idrender-rendered: the OPAQUE command-position Sprintf here is `fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(c.ID))`. This function no longer renders a `bd delete %s --force` Sprintf directly (bead 5 moved it into the separate closedChildDeletionRefusal helper, called from this function's closed leg) — that template is now constructor-derived (guard.NewDestructiveCommand, spec 127 R3c); the DestructiveGuidanceAllowlist entry this rationale used to cite was REMOVED (not converted-with-continuing-obligation) in bead 5 — see the allowlist's own doc comment above.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

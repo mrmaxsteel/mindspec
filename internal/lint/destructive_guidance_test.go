@@ -2770,13 +2770,18 @@ func parseSeedManifest(t *testing.T) map[string][]manifestEntry {
 }
 
 // TestBootstrapManifest_AllowlistRegistryIdentity is fixture (β) for
-// the destructive-guidance allowlist: at this base, NOTHING has been
-// converted yet (bead 2 is the seeding bead), so registry membership
-// equals the manifest exactly — no bead-exit records exist to
-// subtract. A later bead that converts a site removes BOTH the
-// registries.go entry and this manifest's corresponding line in the
-// SAME commit, so the two-way comparison never has to reason about a
-// partially-updated pair.
+// the destructive-guidance allowlist: registry membership equals the
+// manifest exactly. At bead 2's own base NOTHING had been converted yet
+// (bead 2 is the seeding bead), so the comparison held with zero
+// bead-exit records. Bead 5 (spec 127 R3c) is the first to convert
+// seeded sites — internal/approve/plan.go's beadCreateFailure and
+// checkExistingBeadsSafety, both now constructor-routed — and removed
+// BOTH the registries.go entries and this manifest's two corresponding
+// [destructive_guidance_allowlist] lines in that SAME commit (the exit
+// note at the top of destructive_seed_manifest.txt), so the two-way
+// comparison below never has to reason about a partially-updated pair:
+// a later bead converting a further seeded site follows the identical
+// discipline.
 func TestBootstrapManifest_AllowlistRegistryIdentity(t *testing.T) {
 	sections := parseSeedManifest(t)
 	manifestKeys := map[string]bool{}

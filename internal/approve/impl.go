@@ -84,6 +84,19 @@ var (
 	// gitutil.BranchExists) for the same ADR-0030 boundary reason as
 	// implIsAncestorFn above.
 	implBranchExistsFn = lifecycle.BranchExists
+	// implSpecBranchExistsFn is spec 127 R3a's §1 preflight probe: it
+	// resolves whether the SPEC branch exists at the explicit root
+	// (never CWD-relative — unlike implBranchExistsFn above, which is
+	// scoped to the R3 obligation backstop's own bool-only, CWD-relative
+	// probe and must stay that way). (bool, error) distinguishes a
+	// genuinely absent branch from a structural git failure that leaves
+	// existence INDETERMINATE (AC-4(ii); lifecycle.BranchExistsIn's own
+	// doc comment) — the two legs render textually distinct refusals
+	// below, and the probe error leg must NEVER collapse into the
+	// absent leg. Routed through lifecycle.BranchExistsIn (the
+	// workdir-taking variant of the same branchExistsFn seam family),
+	// pointer-pinned in impl_test.go.
+	implSpecBranchExistsFn = lifecycle.BranchExistsIn
 	// implGetMetadataFn and implCheckObligationsFn back R3's durable-
 	// obligation backstop: the SAME check-only coverage predicate
 	// (Spec 114 R2 discipline) `mindspec complete` itself settles,
@@ -284,6 +297,30 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// waist call cannot fail.
 	specBranch, _ := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
+
+	// Spec 127 R3a — §1 PREFLIGHT: branch-existence FACT, resolved
+	// before any merge-base or other git plumbing ever touches
+	// specBranch (the #218 step-1 wedge: exec.MergeBase below used to
+	// surface a raw `exit status 128` — a wrapped *exec.ExitError — when
+	// the branch was simply gone). Two legs, textually distinct
+	// (AC-4): a genuinely absent branch names the R1 adopt path in
+	// full; a probe FAILURE (existence INDETERMINATE) never collapses
+	// into "absent" and never names adopt (O2-r2-8) — it is its own
+	// fail-closed, retryable refusal. Bead 6 (R4) is INTENDED to extend
+	// this SAME §1 phase with the work-destruction preflight for the
+	// branch-present-but-stale leg (R3b) — sited here, as its own
+	// block, as an insertion seam ahead of any mutation/git-consuming
+	// code below, so that the extension CAN land as an addition rather
+	// than a reshuffle (C-r4-7's obligation). Bead 5's own diff/tests
+	// cannot establish whether a bead that does not yet exist actually
+	// meets that obligation — bead 6's own diff and tests are what
+	// settle it.
+	switch exists, existsErr := implSpecBranchExistsFn(root, specBranch); {
+	case existsErr != nil:
+		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)
+	case !exists:
+		return nil, implBranchMissingRefusal(specID, specBranch)
+	}
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
 	specDir, sdErr := workspace.SpecDir(root, specID)
@@ -830,6 +867,36 @@ func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
 		})
 	}
 	return nil
+}
+
+// implBranchMissingRefusal is AC-4(i) (spec 127 R3a, the #218 step-1
+// wedge): the spec branch is genuinely absent. Names the absent branch,
+// the external-merge likelihood, and the R1 adopt path IN FULL — its
+// exact invocation, flags included (AC-11) — so an operator whose
+// spec's content already reached main by another route has a named
+// forward path. Never a raw `exit status 128`, never a wrapped
+// *exec.ExitError: this refusal fires BEFORE exec.MergeBase (or any
+// other git plumbing) ever touches specBranch.
+func implBranchMissingRefusal(specID, specBranch string) error {
+	return guard.NewFailure(
+		fmt.Sprintf("spec %s's branch %s does not exist — its content may have already reached main by another route (e.g. an external merge outside this lifecycle)", idrender.Spec(specID), termsafe.Escape(specBranch)),
+		fmt.Sprintf(`mindspec impl adopt %s --reason "<why this spec's content already reached main outside the lifecycle>"`, idrender.Spec(specID)),
+	)
+}
+
+// implBranchIndeterminateRefusal is AC-4(ii) (O2-r2-8): the existence
+// PROBE itself failed — a structural git error, not a clean "no such
+// ref" — so existence is INDETERMINATE, never collapsed into
+// "absent". Fail-closed and retryable, wording distinct from
+// implBranchMissingRefusal, and never names adopt as the disposition:
+// "could not determine" must never become "absent" — a two-valued
+// collapse here is exactly the bead-3 defect class this leg exists to
+// prevent.
+func implBranchIndeterminateRefusal(specID, specBranch string, cause error) error {
+	return guard.NewFailure(
+		fmt.Sprintf("could not determine whether spec %s's branch %s exists: %s", idrender.Spec(specID), termsafe.Escape(specBranch), termsafe.Escape(cause.Error())),
+		fmt.Sprintf("mindspec impl approve %s   (retry once the underlying failure is resolved)", idrender.Spec(specID)),
+	)
 }
 
 // implOrphanRefusal renders the (a)/(b)/(c)-shaped refusal shared by
