@@ -1019,6 +1019,65 @@ allowlist entries (the four consumer sites) with named records.
 6. Registry exits: the four converted consumer sites exit the seeded
    allowlist with named bead-4 exit records (fixture β stays green).
 
+**AMENDED (bead-4 fix round 1, MAJOR G1-5/O3-1)** — step 2's "Emitter-
+enumeration anti-drift test covers all five" and step 5's
+"consumer-parity leg (all four production surfaces render identical
+derivation output)" both overstate what the shipped mechanisms prove,
+in two distinct ways corrected here rather than re-asserted:
+
+1. **"all five" is wrong; it is four, and they are not identical
+   calls.** `wantOrphanHintRefs()` (orphan_hint_emitters_test.go) pins
+   exactly four references — one per consumer (adopt, impl, complete,
+   doctor) — never five: complete.go's two render sites (`:520`/`:552`
+   in the pre-bead-4 numbering this step's own text cites) collapse to
+   ONE reference because the shipped implementation computes each
+   orphan's hint ONCE before branching on self-orphan status, not
+   twice. And the four references do not all call the identical
+   function: adopt calls `EvaluateOrphanHintAgainstMain` (no surviving
+   spec branch to enrich from — R1(g) is reached only once one is
+   already confirmed absent); the other three call `EvaluateOrphanHint`
+   (spec-branch-enriched). Both are thin wrappers around the same pure
+   `DeriveOrphanHint`, so the DERIVATION is still exactly one function
+   — the wrapper choice differs by design, not by drift.
+2. **"render identical derivation output" is not what the consumer-
+   parity leg (AC-3's `TestOutcomeOracle_AC3Table`) tests, and no other
+   mechanism tested it either until this fix round.** That leg proves
+   the PURE derivation's own `hint.Lines`/`EvidenceNote` are correct and
+   well-formed for a given outcome — it never calls
+   `implOrphanRefusal`/`checkOrphanedBeads`/`adoptOrphanPresentRefusal`/
+   `complete.go`'s renderer at all, so it cannot and does not prove
+   what any of THEM render. Each consumer's own wrapping is
+   legitimately its own: `internal/approve/impl.go`'s
+   `implOrphanRefusal` and `internal/approve/adopt.go`'s
+   `adoptOrphanPresentRefusal` thread `hint.Lines` as SEPARATE
+   `guard.NewFailure` recovery lines; `internal/doctor/orphaned_beads.go`
+   collapses them with `strings.Join(hint.Lines, "; ")` into one inline
+   `Check.Message`/`Run` string; `internal/complete/complete.go`'s
+   `renderOrphanRecoverySegment` folds them the same way, prefixed with
+   `EvidenceNote`, into its own multi-orphan recovery sequence. A
+   doctor `Run` field, a `guard` refusal message, and CLI prose are
+   different surfaces with different structural conventions
+   (ADR-0035's one-command-per-line discipline applies within each, not
+   across all four as one shared byte string) — forcing byte-identical
+   output across them would be the wrong fix, not the missing one.
+   **What is true, and now tested per-consumer** (bead-4 fix round 1
+   added `TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/approve/impl_display_forgery_test.go` and
+   `TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/doctor/orphaned_beads_test.go`, joining
+   `internal/complete`'s pre-existing multi-orphan coverage via
+   `renderOrphanRecoverySegment` and adopt's own stale-deletion/Clean
+   fixtures): the DERIVATION is shared and its lines are threaded
+   faithfully, in order and unmodified, by each consumer — whose
+   wrapping (separate recovery lines, an inline `"; "`-joined string, or
+   prose) is its own, by design, and is exactly what each consumer's
+   own fixture now proves rather than assumes.
+
+Match this corrected reading against spec.md's AC-3 text (unaffected —
+it already scopes the parity leg to "all four production surfaces" and
+separately assigns adopt's own coverage to the emitter test; no spec.md
+change needed, per O3-2's confirmation).
+
 **Verification**
 - [ ] `go test -short ./internal/lifecycle/... ./internal/complete/... ./internal/approve/... ./internal/doctor/...` passes
 - [ ] AC-3 legs (i)/(ii)/(iv)/(v) RED at `09f62bd9` (static string today), leg (iii) guard green, leg (vi) RED (FixFunc unconditional today); every leg oracle-judged; parity + emitter-enumeration green

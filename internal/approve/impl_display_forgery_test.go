@@ -106,3 +106,56 @@ func TestImplOrphanRefusal_CleanOrphanByteIdentical(t *testing.T) {
 		t.Errorf("clean-fixture message changed:\ngot:  %s\nwant prefix: %s", msg, wantPrefix)
 	}
 }
+
+// TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder is bead-4
+// fix round 1's MAJOR fix (G1-5/O3-1): the accepted consumer-parity
+// narrowing claimed each consumer's own per-package tests compensate for
+// the missing cross-package literal-parity test — but no existing
+// fixture in this package stubbed a MULTI-LINE (non-Clean) hint at all;
+// every implOrphanRefusal test above uses the single-line Clean shape.
+// This stubs the Superseded shape (preserve-tag, delete, adopt-
+// invocation — three lines) and asserts every line appears, in order
+// and unmodified, as its OWN "recovery: " line in the final rendered
+// message — the fidelity check the narrowing's "each package
+// independently tests its own plumbing" claim needed and did not have.
+func TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder(t *testing.T) {
+	tmp := t.TempDir()
+	writeSpecDir(t, tmp, "010-test")
+
+	orig := implEvaluateOrphanHintFn
+	t.Cleanup(func() { implEvaluateOrphanHintFn = orig })
+	wantLines := []string{
+		`git tag preserve/bead-x bead/bead-x   (preserve bead-x's commits before deleting — its content is not guaranteed reachable from spec/010-test)`,
+		"git branch -D bead/bead-x",
+		`mindspec impl adopt 010-test --reason "<why bead-x's content already reached main outside the lifecycle>"`,
+	}
+	implEvaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{
+			Outcome:      guard.DestructionSuperseded,
+			EvidenceNote: "bead bead-x's branch bead/bead-x is superseded — its content already landed in spec/010-test via another route per the shared work-destruction predicate",
+			Lines:        append([]string{}, wantLines...),
+		}
+	}
+
+	o := lifecycle.Orphan{BeadID: "bead-x", BeadBranch: "bead/bead-x", SpecBranch: "spec/010-test"}
+	err := implOrphanRefusal(tmp, "010-test", o)
+	if err == nil {
+		t.Fatal("implOrphanRefusal returned nil")
+	}
+	msg := err.Error()
+
+	lastIdx := -1
+	for i, want := range wantLines {
+		idx := strings.Index(msg, want)
+		if idx < 0 {
+			t.Fatalf("line %d (%q) missing verbatim from the rendered message:\n%s", i, want, msg)
+		}
+		if idx <= lastIdx {
+			t.Fatalf("line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", i, want, msg)
+		}
+		lastIdx = idx
+		if !strings.Contains(msg, "recovery: "+want) {
+			t.Errorf("expected line %q to render as its own recovery line, got:\n%s", want, msg)
+		}
+	}
+}

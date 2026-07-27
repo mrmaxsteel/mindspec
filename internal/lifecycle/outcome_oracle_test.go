@@ -307,19 +307,27 @@ func thisOracleFileSource(t *testing.T) string {
 }
 
 // TestOutcomeOracle_IndependenceCallScan is independence leg (1): parses
-// outcome_oracle_test.go's OWN source and fails on any CallExpr,
-// SelectorExpr, or bare Ident reference to outcomeOracleForbiddenSymbols
-// — a file-scoped, self-referential AST scan. This test itself is
-// necessarily EXEMPT from its own ban (it must name the forbidden
-// strings to check for them) — enforced by skipping this function's own
-// FuncDecl body during the walk, verified never to hide a real
-// violation by TestOutcomeOracle_IndependenceCallScan_DefeatPlantedViolation
-// below, which plants one in a SEPARATE (non-exempt) function and
-// confirms the scan still finds it.
+// EVERY .go file in this package directory (bead-4 fix round 1,
+// BLOCKING-2 — see scanForForbiddenRefsWithClosure's own doc comment)
+// and fails the moment any same-package call reachable from
+// outcome_oracle_test.go's own non-exempt declarations resolves to
+// outcomeOracleForbiddenSymbols, wherever in the package that reference
+// actually lives. This test itself is necessarily EXEMPT from its own
+// ban (it must name the forbidden strings to check for them) — enforced
+// by skipping this function's own FuncDecl body during the walk,
+// verified never to hide a real violation by TWO defeat tests below: one
+// planting a violation directly inside the scanned file (sensitivity),
+// one planting it behind an innocuously-named call into a SIBLING file
+// (scope — the class this fix round closes).
 func TestOutcomeOracle_IndependenceCallScan(t *testing.T) {
-	violations := scanForForbiddenRefs(t, thisOracleFileSource(t), "TestOutcomeOracle_IndependenceCallScan", "TestOutcomeOracle_IndependenceCallScan_DefeatPlantedViolation")
+	rootPath := thisOracleFileSource(t)
+	violations := scanForForbiddenRefsWithClosure(t, filepath.Dir(rootPath), rootPath,
+		"TestOutcomeOracle_IndependenceCallScan",
+		"TestOutcomeOracle_IndependenceCallScan_DefeatPlantedViolation",
+		"TestOutcomeOracle_IndependenceCallScan_DefeatSiblingIndirection",
+	)
 	for _, v := range violations {
-		t.Errorf("outcome_oracle_test.go independence violation: %s", v)
+		t.Errorf("outcome_oracle_test.go independence violation (package-wide helper-closure scan): %s", v)
 	}
 }
 
@@ -410,6 +418,227 @@ func plantedViolation(workdir, branch, target string) {
 	violations := scanForForbiddenRefs(t, path, "TestOutcomeOracle_IndependenceCallScan", "TestOutcomeOracle_IndependenceCallScan_DefeatPlantedViolation")
 	if len(violations) == 0 {
 		t.Fatal("planted violation was not detected — the independence scan is hollow")
+	}
+}
+
+// --- helper-closure confinement (bead-4 fix round 1, BLOCKING-2) -------
+
+// packageFuncTable maps every top-level, receiver-less function
+// declaration's name to its own *ast.FuncDecl; packageVarTable maps
+// every top-level `var name = <expr>` declaration's name to its RHS
+// expression — both built across EVERY .go file (production and test)
+// in one flat package directory, with one shared *token.FileSet so a
+// violation found through a cross-file call still reports its true
+// file:line.
+type packageFuncTable map[string]*ast.FuncDecl
+type packageVarTable map[string]ast.Expr
+
+// parsePackageGoFiles parses every *.go file directly inside dir (no
+// recursion — this is one flat package directory) with a single shared
+// token.FileSet, so positions resolved from ANY of the returned files
+// report the correct filename.
+func parsePackageGoFiles(t *testing.T, dir string) (*token.FileSet, []*ast.File) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading package dir %s: %v", dir, err)
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		f, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s: %v", path, perr)
+		}
+		files = append(files, f)
+	}
+	return fset, files
+}
+
+// buildPackageTables walks every top-level declaration in files and
+// records every receiver-less function and every single-value `var`
+// assignment, keyed by name — the same-package call/value-indirection
+// surface scanForForbiddenRefsWithClosure's walk below can follow.
+func buildPackageTables(files []*ast.File) (packageFuncTable, packageVarTable) {
+	funcs := packageFuncTable{}
+	vars := packageVarTable{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil {
+					funcs[d.Name.Name] = d
+				}
+			case *ast.GenDecl:
+				if d.Tok != token.VAR {
+					continue
+				}
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, name := range vs.Names {
+						if i < len(vs.Values) {
+							vars[name.Name] = vs.Values[i]
+						}
+					}
+				}
+			}
+		}
+	}
+	return funcs, vars
+}
+
+// scanForForbiddenRefsWithClosure is scanForForbiddenRefs's package-wide
+// upgrade (bead-4 fix round 1, BLOCKING-2 / G1-2). The plain scan above
+// only ever sees a reference textually inside the ONE file it is
+// handed — provably insufficient: a helper function (or a
+// function-valued package var) defined in ANY sibling file in the same
+// directory, called from rootPath under an innocuous name, can reach a
+// forbidden production symbol with NO direct reference ever appearing
+// inside rootPath's own source at all (see
+// TestOutcomeOracle_IndependenceCallScan_DefeatSiblingIndirection below,
+// which plants exactly this shape). This walks every same-package,
+// same-directory `name(...)` call reachable from rootPath's own
+// declarations — following it into whichever FILE actually declares
+// that name, wherever in the package that is — and reports a violation
+// the moment the walk reaches a forbidden symbol, from any file.
+//
+// STATED LIMIT (the same disclosure discipline bead 2's
+// samePackageEscapeShapes settled on for its own unfixturable
+// same-package escape shapes, internal/lint/destructive_guidance_test.go):
+// this follows a bare `name(...)` call to a package-level function or a
+// package-level `var name = <expr>` (recursing again if that RHS is
+// itself another followable name, so a short var-to-var indirection
+// chain IS covered). It does NOT resolve a function value threaded
+// through a LOCAL variable, a struct field, an interface method set, or
+// a runtime-constructed closure — that class is REVIEW-CAUGHT, not
+// mechanically closed here.
+func scanForForbiddenRefsWithClosure(t *testing.T, dir, rootPath string, exemptFuncs ...string) []string {
+	t.Helper()
+	fset, files := parsePackageGoFiles(t, dir)
+	funcs, vars := buildPackageTables(files)
+
+	exempt := map[string]bool{}
+	for _, f := range exemptFuncs {
+		exempt[f] = true
+	}
+
+	var rootFile *ast.File
+	for _, f := range files {
+		if fset.Position(f.Pos()).Filename == rootPath {
+			rootFile = f
+			break
+		}
+	}
+	if rootFile == nil {
+		t.Fatalf("root file %s was not found while parsing package dir %s", rootPath, dir)
+	}
+
+	var violations []string
+	visitedFuncs := map[string]bool{}
+	visitedVars := map[string]bool{}
+
+	var walk func(n ast.Node)
+	walk = func(n ast.Node) {
+		ast.Inspect(n, func(node ast.Node) bool {
+			switch expr := node.(type) {
+			case *ast.SelectorExpr:
+				if outcomeOracleForbiddenSymbols[expr.Sel.Name] {
+					violations = append(violations, fset.Position(expr.Pos()).String()+": reference to forbidden symbol "+expr.Sel.Name)
+					return false
+				}
+			case *ast.Ident:
+				if outcomeOracleForbiddenSymbols[expr.Name] {
+					violations = append(violations, fset.Position(expr.Pos()).String()+": reference to forbidden symbol "+expr.Name)
+				}
+				if fd, ok := funcs[expr.Name]; ok && !visitedFuncs[expr.Name] {
+					visitedFuncs[expr.Name] = true
+					walk(fd.Body)
+				} else if ve, ok := vars[expr.Name]; ok && !visitedVars[expr.Name] {
+					visitedVars[expr.Name] = true
+					walk(ve)
+				}
+			}
+			return true
+		})
+	}
+
+	for _, decl := range rootFile.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if exempt[d.Name.Name] {
+				continue
+			}
+			visitedFuncs[d.Name.Name] = true
+			walk(d.Body)
+		case *ast.GenDecl:
+			if d.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range d.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, name := range vs.Names {
+					visitedVars[name.Name] = true
+				}
+				for _, val := range vs.Values {
+					walk(val)
+				}
+			}
+		}
+	}
+
+	return violations
+}
+
+// TestOutcomeOracle_IndependenceCallScan_DefeatSiblingIndirection is the
+// helper-closure scan's own defeat test for BLOCKING-2 (bead-4 fix round
+// 1, G1-2): the plain, file-scoped scanForForbiddenRefs only ever sees a
+// reference textually inside the ONE file it is handed — a helper
+// function defined in a SIBLING file in the same package, called from
+// the "root" file under an innocuous name, reaches a forbidden
+// production symbol with NO direct reference ever appearing in the root
+// file's own source. This plants exactly that shape (never inside the
+// real outcome_oracle_test.go/outcome_oracle_ac3_test.go — a fresh
+// synthetic two-file package fixture) and confirms
+// scanForForbiddenRefsWithClosure still finds it — proving the scan's
+// SCOPE, not merely its sensitivity (the pre-existing
+// TestOutcomeOracle_IndependenceCallScan_DefeatPlantedViolation above
+// already proved sensitivity within one file; this is the class G1
+// reported the plain scan could not see at all).
+func TestOutcomeOracle_IndependenceCallScan_DefeatSiblingIndirection(t *testing.T) {
+	dir := t.TempDir()
+	siblingSrc := `package lifecycle
+
+func siblingPredicateBackdoor(workdir, branch, target string) {
+	_, _, _ = EvaluateWorkDestruction(workdir, branch, target)
+}
+`
+	rootSrc := `package lifecycle
+
+func innocuousHelper(workdir, branch, target string) {
+	siblingPredicateBackdoor(workdir, branch, target)
+}
+`
+	siblingPath := filepath.Join(dir, "sibling_helper.go")
+	rootPath := filepath.Join(dir, "root_probe.go")
+	if err := os.WriteFile(siblingPath, []byte(siblingSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootPath, []byte(rootSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations := scanForForbiddenRefsWithClosure(t, dir, rootPath)
+	if len(violations) == 0 {
+		t.Fatal("a sibling-file helper reached through an innocuously-named same-directory call was not detected — the helper-closure scan is scoped too narrowly (bead-4 fix round 1, G1-2)")
 	}
 }
 

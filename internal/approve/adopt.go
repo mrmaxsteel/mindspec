@@ -534,15 +534,19 @@ func adoptStaleBranchPresentRefusal(specID, specBranch string, outcome guard.Des
 // gitutil.WorkDestructionEvidence from ever needing to be named in this
 // ADR-0030 enforcement package).
 //
-// Unlike the OTHER four R2 consumers (complete/impl-approve/doctor),
+// Unlike the OTHER three R2 consumers (complete/impl-approve/doctor),
 // this refusal's own natural next step is always "resolve the branch's
 // state, then re-run adopt" — R1(g) is reached only because the local
 // spec branch is ALREADY gone, so "mindspec complete <bead>" (the
-// derivation's normal-unmerged hint) has no spec branch to merge into
-// here, and every OTHER outcome's hint is silent on what to do next
-// once resolved. So this appends the adopt re-run invocation after the
-// derivation's own lines — UNLESS the outcome is DestructionSuperseded,
-// whose hint already ends with that exact invocation (deletionHint in
+// derivation's normal-unmerged/DestructionClean hint) has no spec
+// branch to merge into here. adoptScanOrphanFn's own trigger
+// (evidenceNegative) only ever reaches DestructionClean or
+// DestructionStaleDeletion (bead-3/bead-4's adoptScanOrphanPresent doc
+// comment), so DestructionClean is handled specially below — see the
+// switch's own comment (bead-4 fix round 1, BLOCKING-1) — before this
+// function appends the adopt re-run invocation after whatever lines
+// remain, UNLESS the outcome is DestructionSuperseded, whose hint
+// already ends with that exact invocation (deletionHint in
 // orphan_hints.go); appending a second copy would be a duplicate, not a
 // correction.
 func adoptOrphanPresentRefusal(root, specID, beadID, beadBranch string) error {
@@ -555,6 +559,30 @@ func adoptOrphanPresentRefusal(root, specID, beadID, beadBranch string) error {
 		msg += "\n" + hint.EvidenceNote
 	}
 	lines := hint.Lines
+	if hint.Outcome == guard.DestructionClean {
+		// Bead-4 fix round 1 (BLOCKING-1: G1-1/S3-1/F1-1). DestructionClean's
+		// derivation-owned hint (DeriveOrphanHint's normal-unmerged case) is
+		// EXACTLY `mindspec complete <bead>` — the ordinary next step once a
+		// spec branch survives to merge into. This function is reached only
+		// once AdoptSpec's own !specBranchExists leg (above, in AdoptSpec)
+		// has ALREADY established that the local spec branch does NOT
+		// survive — so that command names an action with no spec branch to
+		// act on: uninvokable guidance, and a direct violation of
+		// AC-2(viii)/R2's "never mindspec complete" falsifier in this
+		// refusal. Substitute an inspection-first line naming the real
+		// state instead — identical in SHAPE to the stale-deletion/
+		// evidence-error outcomes' own inspection-first hints (git diff,
+		// never a completion or deletion command): this consumer's
+		// disposition for an ordinary unlanded orphan with no home spec
+		// branch is "inspect the branch, then decide" (recreate/locate the
+		// spec branch, or adopt once the branch's fate is resolved) — the
+		// adopt re-run this function appends unconditionally below already
+		// names the forward path once that inspection is done.
+		lines = []string{fmt.Sprintf(
+			"git diff main %s   (bead %s's branch is an ordinary unlanded orphan — inspect it; no spec branch survives here for %s to complete into)",
+			termsafe.Escape(beadBranch), idrender.Bead(beadID), idrender.Bead(beadID),
+		)}
+	}
 	if hint.Outcome != guard.DestructionSuperseded {
 		lines = append(append([]string{}, lines...), fmt.Sprintf(
 			`mindspec impl adopt %s --reason "<why>"   (re-run once %s's branch state is resolved)`,

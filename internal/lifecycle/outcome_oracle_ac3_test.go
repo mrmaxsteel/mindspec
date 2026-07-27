@@ -79,18 +79,27 @@ func ac3SupersededFixture(t *testing.T) (dir, beadBranch, specTargetRef string) 
 // target added since, PLUS a genuinely novel addition of its own
 // (bead-work.txt).
 //
-// The novel addition is load-bearing, not decoration: without it,
-// stale-bead's WHOLE diff relative to merge-base(stale-bead, "main") —
-// main is ALWAYS a second ancestryTarget the predicate checks, even
-// when this fixture's own caller only cares about spec-target — is a
+// The novel addition WAS load-bearing at the time this fixture was
+// authored, for the reason this comment used to state at length: without
+// it, stale-bead's WHOLE diff relative to merge-base(stale-bead, "main")
+// — main is ALWAYS a second ancestryTarget the predicate checks, even
+// when this fixture's own caller only cares about spec-target — was a
 // PURE deletion (nothing added at all), which NetEffectLanded's own
-// "re-apply the diff to target" check accepts VACUOUSLY (an empty/
-// deletion-only diff re-applies cleanly with nothing to compare),
-// misclassifying the fixture as DestructionSuperseded before the
-// stale-deletion leg ever runs (verified empirically while authoring
-// this fixture — the exact trap gitutil's own
-// wdStaleDeletionSingleCommitFixture avoids the same way, by amending a
-// novel path onto the revert commit).
+// "re-apply the diff to target" check accepted VACUOUSLY (an empty
+// diff re-applies cleanly with nothing to compare), misclassifying the
+// fixture as DestructionSuperseded before the stale-deletion leg ever
+// ran.
+//
+// Bead-4 fix round 1 (BLOCKING-4, G1-4/O1-1/O2-1/S1-1) closed that trap
+// at the predicate itself (NetEffectLanded's refTree/baseTree vacuous-
+// match guard, internal/gitutil/neteffect.go) rather than leaving every
+// caller to keep discovering and working around it independently — see
+// ac3PureStaleDeletionNoNovelWorkFixture below, which builds the EXACT
+// degenerate shape this fixture used to dodge and pins that it now
+// classifies correctly with NO novel-work workaround at all. This
+// fixture's own novel addition is therefore no longer load-bearing for
+// correctness; it is kept as its own realistic multi-change shape
+// (a stale recreation is not always a pure revert in practice).
 func ac3StaleDeletionFixture(t *testing.T) (dir, beadBranch, specTargetRef string) {
 	dir = ac3InitRepo(t)
 	ac3GitRun(t, dir, "checkout", "-q", "-b", "spec-target")
@@ -268,5 +277,77 @@ func TestOutcomeOracle_AC3Table(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ac3PureStaleDeletionNoNovelWorkFixture is bead-4 fix round 1's own
+// control for BLOCKING-4 (G1-4/O1-1/O2-1/S1-1): the EXACT degenerate
+// shape ac3StaleDeletionFixture's own doc comment above used to name and
+// dodge — a bead branch recreated from the spec target's OWN
+// (now-superseded) tip, reverting content the target added since, with
+// NO novel work of its own at all. Before NetEffectLanded's vacuous-
+// match fix (internal/gitutil/neteffect.go), this branch's cumulative
+// diff against merge-base(branch, "main") netted to empty, so leg 2's
+// second iteration (against "main") reported landed=true vacuously,
+// misclassifying this shape as DestructionSuperseded before this file's
+// own stale-deletion leg ever ran. The fix closes this at the predicate,
+// so this fixture needs no bead-work.txt-style workaround at all — it is
+// the CONTROL proving the fix, not an escape hatch around the trap.
+func ac3PureStaleDeletionNoNovelWorkFixture(t *testing.T) (dir, beadBranch, specTargetRef string) {
+	dir = ac3InitRepo(t)
+	ac3GitRun(t, dir, "checkout", "-q", "-b", "spec-target")
+	ac3WriteFile(t, dir, "landed.txt", "landed after the branch's snapshot\n")
+	ac3Commit(t, dir, "advance spec-target past the branch's old snapshot")
+	ac3GitRun(t, dir, "checkout", "-q", "-b", "stale-bead-no-novel-work", "spec-target")
+	ac3GitRun(t, dir, "rm", "-q", "landed.txt")
+	ac3Commit(t, dir, "revert to the old snapshot (stale recreation, NO novel work)")
+	ac3GitRun(t, dir, "checkout", "-q", "main")
+	return dir, "stale-bead-no-novel-work", "spec-target"
+}
+
+// TestOutcomeOracle_PureStaleDeletionNoNovelWorkIsNotSuperseded is
+// BLOCKING-4's permanent regression, evaluated end-to-end through the
+// REAL predicate and derivation (never fabricated evidence) — never
+// reached by ac3Table() above, since it is not a sixth outcome, only a
+// second, previously-mismatched fixture for an outcome the table already
+// covers.
+//
+// Scope-defeating mutation: reverting NetEffectLanded's vacuous-match
+// guard turns this RED, with EvaluateWorkDestruction reporting
+// DestructionSuperseded (SupersededVia: "main") and DeriveOrphanHint
+// rendering the preserve/delete/adopt lines instead — exactly the
+// misclassification the panel reproduced against real production code.
+func TestOutcomeOracle_PureStaleDeletionNoNovelWorkIsNotSuperseded(t *testing.T) {
+	dir, beadBranch, specTargetRef := ac3PureStaleDeletionNoNovelWorkFixture(t)
+
+	// Independent oracle proof (never the predicate under test): merging
+	// this branch previews at least one deletion of spec-target-present
+	// content — the stale-deletion claim's own licensing property — and
+	// the branch is not itself a literal ancestor of either ref.
+	if oracleIsAncestor(t, dir, beadBranch, specTargetRef) || oracleIsAncestor(t, dir, beadBranch, "main") {
+		t.Fatal("oracle: this branch must not itself be a literal ancestor of either ref")
+	}
+	if deleted := oraclePreviewDeletedPaths(t, dir, specTargetRef, beadBranch); len(deleted) == 0 {
+		t.Fatal("oracle: merging this branch must preview at least one deletion — that is the whole point of this fixture")
+	}
+
+	outcome, evidence, err := EvaluateWorkDestruction(dir, beadBranch, specTargetRef)
+	if err != nil {
+		t.Fatalf("EvaluateWorkDestruction: unexpected error: %v", err)
+	}
+	if outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("EvaluateWorkDestruction = %v, want DestructionStaleDeletion — a branch with NO novel work of its own that merely reverts target-added content must never be reported superseded (nothing of its own ever landed anywhere); evidence: %+v", outcome, evidence)
+	}
+
+	hint := EvaluateOrphanHint(dir, "test-bead", beadBranch, "042-test", specTargetRef)
+	if hint.Outcome != guard.DestructionStaleDeletion {
+		t.Fatalf("DeriveOrphanHint's own Outcome = %v, want DestructionStaleDeletion", hint.Outcome)
+	}
+	joined := strings.Join(hint.Lines, "\n")
+	if strings.Contains(joined, "mindspec complete") {
+		t.Errorf("a stale-deletion hint must never render mindspec complete, got: %v", hint.Lines)
+	}
+	if strings.Contains(joined, "git branch -D") {
+		t.Errorf("a stale-deletion hint must never render a destructive deletion command, got: %v", hint.Lines)
 	}
 }

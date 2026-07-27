@@ -26,6 +26,23 @@ package lifecycle
 // wrapper-satisfied interface is NOT mechanically detected here either,
 // and is review-caught under the same residual class R5(b)/R1(e)
 // already record.
+//
+// NARROWED SCOPE, stated precisely (bead-4 fix round 1, BLOCKING-3 —
+// G1-3): this cross-package leg matches ONLY a reference reached through
+// an IMPORT of internal/lifecycle — structurally blind to a call from
+// WITHIN internal/lifecycle itself, because no file ever imports its own
+// package. TestOrphanHintEmitters_SamePackageCallersArePinned below
+// closes exactly that gap for DIRECT calls to DeriveOrphanHint (the one
+// production entrypoint a same-package emitter could call with a
+// fabricated, non-evaluated outcome). What NEITHER leg catches — named
+// here rather than silently overclaimed, the same disclosure bead 2's
+// samePackageEscapeShapes settled on — is SEAM REUSE: a new production
+// consumer that renders a second recovery surface by calling an
+// ALREADY-ENUMERATED seam var directly (e.g. a second call site added to
+// implEvaluateOrphanHintFn from a NEW function in impl.go) adds no new
+// lifecycle-package-qualified reference for this scan to find at all.
+// TestOrphanHintEmitters_SeamReuseIsReviewCaught documents that residual
+// explicitly; it is REVIEW-CAUGHT, not mechanically closed.
 import (
 	"go/ast"
 	"go/parser"
@@ -326,5 +343,184 @@ var seam = lc.EvaluateOrphanHintAgainstMain
 	refs := findOrphanHintRefs(t, path, "decoy.go")
 	if len(refs) != 1 || refs[0].symbol != "EvaluateOrphanHintAgainstMain" || refs[0].context != "seam" {
 		t.Fatalf("aliased import must still be matched by import-path identity, got %+v", refs)
+	}
+}
+
+// --- same-package leg (bead-4 fix round 1, BLOCKING-3) -----------------
+
+// approvedSamePackageDeriveOrphanHintCallers is the CLOSED, pinned set
+// of the only two production functions in this package allowed to call
+// DeriveOrphanHint directly: the two wrapper entrypoints every EXTERNAL
+// consumer actually reaches through (EvaluateOrphanHint,
+// EvaluateOrphanHintAgainstMain). Both always run a REAL
+// EvaluateWorkDestruction evaluation before calling DeriveOrphanHint —
+// that is the entire evidentiary guarantee DeriveOrphanHint's own doc
+// comment describes ("enforced by review + the emitter-enumeration
+// anti-drift test"). A THIRD same-package caller would call
+// DeriveOrphanHint with an outcome value that need not have come from a
+// real evaluation at all (the type's own zero-value legitimacy,
+// documented there) — review-caught before this fix, mechanically
+// caught after it.
+var approvedSamePackageDeriveOrphanHintCallers = map[string]bool{
+	"EvaluateOrphanHint":            true,
+	"EvaluateOrphanHintAgainstMain": true,
+}
+
+// samePackageDeriveOrphanHintRef is one bare (unqualified) reference to
+// DeriveOrphanHint found inside a package's own production source (never
+// _test.go — this file's/bead-4's own AC-3 table calling the pure
+// derivation directly, over real-git fixtures, is that table's whole
+// design, not an emitter).
+type samePackageDeriveOrphanHintRef struct {
+	file, context string
+}
+
+// scanPackageForBareDeriveCalls walks EVERY production (non-_test.go)
+// .go file directly inside dir and returns one ref per bare, unqualified
+// CallExpr callee named "DeriveOrphanHint" — the same-package half of
+// R2(a)'s anti-drift leg that findOrphanHintRefs/scanRepoForOrphanHintRefs
+// above structurally cannot cover (they only ever match an IMPORTED,
+// qualified or dot-imported, reference — a file inside the package being
+// scanned never imports itself).
+func scanPackageForBareDeriveCalls(t *testing.T, dir string) []samePackageDeriveOrphanHintRef {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading package dir %s: %v", dir, err)
+	}
+	var refs []samePackageDeriveOrphanHintRef
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		fset := token.NewFileSet()
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s: %v", path, perr)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			id, ok := call.Fun.(*ast.Ident)
+			if !ok || id.Name != "DeriveOrphanHint" {
+				return true
+			}
+			refs = append(refs, samePackageDeriveOrphanHintRef{file: e.Name(), context: enclosingContext(file, call.Pos())})
+			return true
+		})
+	}
+	return refs
+}
+
+// TestOrphanHintEmitters_SamePackageCallersArePinned is R2(a)'s
+// same-package leg (bead-4 fix round 1, BLOCKING-3/G1-3): every bare
+// call to DeriveOrphanHint anywhere in this package's production source
+// must resolve to one of the two approved wrapper functions — a new
+// same-package emitter (calling DeriveOrphanHint directly, with a
+// fabricated or otherwise non-evaluated outcome) reds this test the
+// moment it is added, never silently passing the way
+// TestOrphanHintEmitters_ExactEnumeration alone would (it cannot see
+// this file at all — no import to match).
+func TestOrphanHintEmitters_SamePackageCallersArePinned(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := scanPackageForBareDeriveCalls(t, wd)
+	if len(refs) == 0 {
+		t.Fatal("found zero same-package DeriveOrphanHint callers — expected exactly the two approved wrappers; this scan's own confinement broke, or the wrappers were renamed without updating this test")
+	}
+	for _, r := range refs {
+		if !approvedSamePackageDeriveOrphanHintCallers[r.context] {
+			t.Errorf("unapproved same-package DeriveOrphanHint call in %s, context %q — only %v may call this derivation directly; every other caller must go through EvaluateOrphanHint/EvaluateOrphanHintAgainstMain so the outcome it renders is guaranteed to come from a real evaluation", r.file, r.context, approvedSamePackageDeriveOrphanHintCallers)
+		}
+	}
+	seen := map[string]bool{}
+	for _, r := range refs {
+		seen[r.context] = true
+	}
+	for approved := range approvedSamePackageDeriveOrphanHintCallers {
+		if !seen[approved] {
+			t.Errorf("expected an approved caller %q to call DeriveOrphanHint directly, found none — a wrapper was refactored to no longer call the derivation, or renamed without updating this pin", approved)
+		}
+	}
+}
+
+// TestOrphanHintEmitters_DefeatSamePackageDirectDerivation is this new
+// leg's own defeat test (the same non-vacuity discipline every anti-
+// drift scan in this spec carries): plants a THIRD same-package caller —
+// an "adversarialSixthEmitter"-shaped function calling DeriveOrphanHint
+// with a fabricated outcome, exactly the shape G1's panel finding
+// reproduced against the real production file — in a fixture written to
+// a fresh temp dir (never the real orphan_hints.go itself) and confirms
+// the scan flags it.
+func TestOrphanHintEmitters_DefeatSamePackageDirectDerivation(t *testing.T) {
+	dir := t.TempDir()
+	src := `package lifecycle
+
+import (
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+)
+
+func adversarialSixthEmitter() string {
+	hint := DeriveOrphanHint(guard.DestructionOutcome(0), gitutil.WorkDestructionEvidence{}, "x", "y", "z", "w")
+	return hint.Lines[0]
+}
+`
+	path := filepath.Join(dir, "adversarial.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := scanPackageForBareDeriveCalls(t, dir)
+	found := false
+	for _, r := range refs {
+		if r.context == "adversarialSixthEmitter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("planted same-package direct-derivation caller was not detected — the same-package scan is hollow")
+	}
+}
+
+// TestOrphanHintEmitters_SeamReuseIsReviewCaught is this leg's own
+// disclosed residual (bead-4 fix round 1, G1-3's second half — the same
+// "state exactly what it catches and what it does not" discipline bead
+// 2's samePackageEscapeShapes settled on for its own unfixturable
+// escape). A NEW production function that renders a SECOND recovery
+// surface by calling an ALREADY-ENUMERATED seam var directly (e.g. a
+// second call to implEvaluateOrphanHintFn from a new function in
+// impl.go, rather than adding a fresh `lifecycle.EvaluateOrphanHint`
+// reference of its own) adds NO new lifecycle-package-qualified
+// reference for scanRepoForOrphanHintRefs to find — that scan is keyed
+// entirely on syntactic references to THIS package's symbols, and a
+// seam-var call site one package away is, by construction, invisible to
+// it. This test plants exactly that shape (a synthetic second-consumer
+// file calling an already-declared seam var from a NEW function) and
+// confirms — deliberately asserting the CURRENT, undetected behavior,
+// not fixing it — that findOrphanHintRefs produces no reference for it.
+// Review is the only enforcement for this residual class; if it is ever
+// mechanically closed, this test should be rewritten to assert detection
+// instead of its absence.
+func TestOrphanHintEmitters_SeamReuseIsReviewCaught(t *testing.T) {
+	src := `package approve
+
+func implSecondaryOrphanRefusal(root, beadID, beadBranch, specID, specBranch string) string {
+	hint := implEvaluateOrphanHintFn(root, beadID, beadBranch, specID, specBranch)
+	return hint.Lines[0]
+}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "second_consumer.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := findOrphanHintRefs(t, path, "second_consumer.go")
+	if len(refs) != 0 {
+		t.Fatalf("a seam-var-reuse second consumer unexpectedly produced %d reference(s) — if the scan now detects this shape, rewrite this test to assert detection and update this file's doc comment (the residual this test names would then be closed)", len(refs))
 	}
 }

@@ -193,6 +193,70 @@ func TestCheckOrphanedBeads_FixFuncGatedByOutcome(t *testing.T) {
 	}
 }
 
+// TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder is bead-4
+// fix round 1's MAJOR fix (G1-5/O3-1): the accepted consumer-parity
+// narrowing claimed each consumer's own per-package tests compensate for
+// the missing cross-package literal-parity test, but
+// TestCheckOrphanedBeads_FixFuncGatedByOutcome above (the only test in
+// this file that stubs a non-Clean outcome) asserts ONLY that FixFunc is
+// nil — it never inspects Check.Message's content at all. This stubs
+// the Superseded shape (preserve-tag, delete, adopt-invocation — three
+// lines) and asserts every line appears, in order and unmodified, in
+// Check.Message — the fidelity check the narrowing's "each package
+// independently tests its own plumbing" claim needed and did not have.
+// checkOrphanedBeads folds hint.Lines with `strings.Join(hint.Lines,
+// "; ")` (orphaned_beads.go), so order and content survive that fold
+// exactly, unlike impl.go/adopt.go's separate-recovery-line rendering.
+func TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder(t *testing.T) {
+	root := t.TempDir()
+	makeSpecDir(t, root, "008-test")
+
+	wantLines := []string{
+		`git tag preserve/bead-9 bead/bead-9   (preserve bead-9's commits before deleting — its content is not guaranteed reachable from spec/008-test)`,
+		"git branch -D bead/bead-9",
+		`mindspec impl adopt 008-test --reason "<why bead-9's content already reached main outside the lifecycle>"`,
+	}
+	orig := evaluateOrphanHintFn
+	t.Cleanup(func() { evaluateOrphanHintFn = orig })
+	evaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{
+			Outcome:      guard.DestructionSuperseded,
+			EvidenceNote: "bead bead-9's branch bead/bead-9 is superseded — its content already landed in spec/008-test via another route per the shared work-destruction predicate",
+			Lines:        append([]string{}, wantLines...),
+		}
+	}
+	stubFindOrphans(t, func(specID, workdir, excludeBeadID string) []lifecycle.Orphan {
+		return []lifecycle.Orphan{{BeadID: "bead-9", BeadBranch: "bead/bead-9", SpecBranch: "spec/008-test"}}
+	})
+
+	r := &Report{}
+	checkOrphanedBeads(r, root)
+	var c *Check
+	for i := range r.Checks {
+		if strings.Contains(r.Checks[i].Name, "orphaned closed bead") {
+			c = &r.Checks[i]
+		}
+	}
+	if c == nil {
+		t.Fatal("expected an orphaned-bead check")
+	}
+
+	lastIdx := -1
+	for i, want := range wantLines {
+		idx := strings.Index(c.Message, want)
+		if idx < 0 {
+			t.Fatalf("line %d (%q) missing verbatim from Check.Message:\n%s", i, want, c.Message)
+		}
+		if idx <= lastIdx {
+			t.Fatalf("line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", i, want, c.Message)
+		}
+		lastIdx = idx
+	}
+	if c.FixFunc != nil {
+		t.Error("a Superseded outcome must carry NO FixFunc")
+	}
+}
+
 // No specs dir → no-op, no panic.
 func TestCheckOrphanedBeads_NoSpecsDir(t *testing.T) {
 	root := t.TempDir()
