@@ -59,10 +59,10 @@ type Executor interface {
 	// merge-state disposition is IDENTICAL regardless of resolveMerge: no
 	// merge in progress → attempt a fresh merge, and on conflict stop in
 	// place (never abort, never checkout) rather than replaying today's
-	// abort-and-refuse behavior — see mindspec_executor.go's
-	// abortMergeState doc comment for the reasoning; unmerged index
-	// entries present → refuse naming the resolution steps (never a new
-	// merge, never a checkout, never an abort).
+	// abort-and-refuse behavior — see resumeAwareMerge's doc comment
+	// (internal/executor/merge_resumption.go) for the reasoning;
+	// unmerged index entries present → refuse naming the resolution
+	// steps (never a new merge, never a checkout, never an abort).
 	CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
 
 	// FinalizeEpic merges the spec branch to main (or pushes for PR),
