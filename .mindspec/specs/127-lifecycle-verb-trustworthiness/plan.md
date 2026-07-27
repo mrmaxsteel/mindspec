@@ -1058,16 +1058,81 @@ preflight-phase structure bead 6 consumes (C-r4-7).
    `ApprovePlan` preflight (where children are already resolved) and
    passed INTO `checkExistingBeadsSafety` as a value (purity preserved —
    S3-r2-5). Closed child: deletion hint ONLY on positive
-   partial/interrupted provenance (mechanics: no bead branch exists AND
-   no landed-merge evidence AND — CORRECTED bead-5 fix round 2, RULING 1
-   — a supersede-run marker (CloseReason carrying
-   `supersedeCloseReasonPrefix`) REQUIRED, not merely consulted when
-   present: zero merge candidates alone cannot distinguish a genuine
-   leftover from a squash/fast-forward landing, so the marker from the
-   `plan.go:749-758` by-construction model is now the mandatory positive
-   signal); completed-work OR ambiguous/unavailable evidence → preserve
-   + inspection/reconciliation, no `bd delete`. Both plan.go emitters route through
-   bead 2's constructor (never allowlisted — O1-r2-6), sharing ONE
+   partial/interrupted provenance. **AMENDED — both named positive-leg
+   mechanics this step originally pinned are REFUTED, replaced rather
+   than re-patched a third time** (bead-5 fix rounds 2-4, findings G1
+   made against the running code, not against the spec; spec.md's R3c
+   was re-checked against this amendment and needs none — it names its
+   mechanics "e.g." and plan-level, and already specifies the
+   ambiguous-or-unavailable case as preserve, which is exactly what
+   ships):
+   1. `no bead branch exists AND no landed-merge evidence` (this step's
+      original wording) is the zero-candidate inference fix round 2's
+      own RULING 1 disproved: `lifecycle.FindLandedMerge` scans via
+      `gitutil.FirstParentMerges`, i.e. `git log --first-parent
+      --merges`, which selects only TWO-OR-MORE-PARENT commits — a
+      squash merge (one parent) or a fast-forward (no merge commit at
+      all) produces the identical zero-candidate shape
+      (`lifecycle.ErrLandedMergeNoCandidate`) as a bead that never
+      landed. Absence of a merge candidate is ABSENCE of evidence, not
+      evidence of absence; licensing a deletion off it emitted `bd
+      delete <id> --force` for work that had landed.
+   2. fix round 2's own patch for (1) — a supersede-run marker,
+      `CloseReason` carrying `supersedeCloseReasonPrefix`, required as
+      the corroborating positive signal — is ITSELF removed outright,
+      not narrowed: fix round 3 (G1) proved it forgeable against the
+      installed bd 1.1.0 — `bd close --reason` lets any human or
+      automation write the identical prefix without
+      `supersedeCloseExistingBeads` ever running, and `bd import`
+      upserts every field `bd export` emits (including
+      `close_reason`) into an existing row, so an imported record can
+      carry it too. Corroborating one tracker-resident field with
+      another does not fix this: no bd-resident marker can be made
+      non-forgeable by construction. G1 also found a third production
+      `bd close` writer the original enumeration missed
+      (`internal/bead/hygiene.go:170`'s `FixHygiene`), which would have
+      been a further forgery surface even had the marker held.
+
+   **The positive leg is UNOBTAINABLE from this mechanism today, not
+   merely unbuilt** — this is the part the amendment records, so the
+   narrowing reads as honest rather than as dodged work:
+   `evaluateChildProvenance` has exactly two positive-evidence inputs —
+   branch survival and the first-parent merge scan — and
+   `gitutil.NetEffectLanded`'s content-presence route opens with
+   `RevParseRef(workdir, ref)`, i.e. it requires a ref that resolves,
+   which is exactly what a branchless closed child does not have. For a
+   child with no surviving branch and zero merge candidates, no git
+   artifact reachable from this function or its callees distinguishes
+   "squash/fast-forward landed" from "never had work" — the evidence
+   does not exist, so no mechanism built on this scan can supply it.
+   **Direction unchanged — R3c's own wording, unaffected**: deletion
+   requires positive provenance; "when evidence indicates completed
+   work, or is ambiguous or unavailable, the refusal preserves the
+   record and names inspection/reconciliation instead" (spec.md R3c,
+   verbatim). Bead 5 ships the zero-candidate case resolving
+   `provenanceAmbiguous` UNCONDITIONALLY, so the closed+zero-candidate
+   leg is, today, always the preserve path. **The consumer side stays
+   ready, not narrowed**: `provenancePartialInterrupted` remains a
+   real, tested, constructor-routed enum value, and AC-6(iii)'s pure
+   hermetic table test proves that whenever any future source supplies
+   it, the deletion hint is correctly gated, worded, and constructor-
+   routed — so the eventual positive producer needs NO consumer-side
+   change. **The positive producer is deferred to `mindspec-nixq`** (P2,
+   filed off this bead's own panel finding, slot O1): its route (a),
+   git content-presence detection at the child's last-known tree via a
+   `NetEffectLanded`-style probe, is the only path back to a positive
+   leg, and is out of reach for the merge-commit-scan shape this bead
+   is built on.
+
+   **Operational consequence, since an operator meets it**: the
+   incident this step exists to gate — a crash mid-
+   `supersedeCloseExistingBeads` retry leaving a genuinely superseded
+   leftover closed child behind — now ALWAYS preserves-and-inspects
+   rather than auto-deleting; an operator who has confirmed by hand
+   that a closed child is a superseded leftover runs the deletion
+   themselves (`bd delete <id> --force`) before retrying `plan
+   approve`. Both plan.go emitters still route through bead 2's
+   constructor (never allowlisted — O1-r2-6), sharing ONE
    constructor-produced `bd delete <id> --force` form — AC-11's
    single source of truth, with bd-CLI drift covered by the existing
    `bead.IsUnsupportedFlagError` convention and no `bd` string ever
