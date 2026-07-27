@@ -813,9 +813,24 @@ func TestAdoptSpec_EvidenceErrorNamesRetryFirstThenAttestation(t *testing.T) {
 // (a closed bead's stale bead branch still present), with the INTERIM
 // inspection-first wording and NO destructive command (bead 4 upgrades
 // this to the full R2-derived hint).
-func TestAdoptSpec_CompositeIncidentInterimRefusal(t *testing.T) {
+// TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint is
+// AC-2(viii) (spec 127 bead 4): the composite incident state — a closed
+// bead's surviving branch previews a stale-deletion against main (the
+// same recreation-from-current-tip shape makeStaleRecreatedBranch builds
+// for R1(d)'s own stale-spec-branch leg, here evaluated against "main"
+// directly since R1(g) is reached only once the local spec branch is
+// confirmed ABSENT — there is no spec branch to evaluate against).
+// Replaces bead 3's INTERIM inspection-only fixture (which used a
+// genuinely-unlanded branch, guard.DestructionClean — that outcome's
+// hint is `mindspec complete <bead>`, per R2(b)'s pinned table, so it
+// could never demonstrate AC-2(viii)'s "never mindspec complete"
+// requirement in the first place): adoptScanOrphanPresent's own trigger
+// (evidenceNegative) only ever reaches DestructionClean or
+// DestructionStaleDeletion, and only the latter satisfies AC-2(viii)'s
+// falsifier.
+func TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint(t *testing.T) {
 	dir := adoptInitRepo(t)
-	makeUnlandedBeadBranch(t, dir, "test-b1")
+	makeStaleRecreatedBranch(t, dir, "bead/test-b1")
 	stubAdoptListEpicBeads(t, []adoptEpicBead{{ID: "test-b1", Status: "closed"}})
 	closedCalls, _ := wireAdoptSeams(t, "epic-1")
 	exec := &realAdoptCommitExecutor{MockExecutor: &executor.MockExecutor{}, t: t}
@@ -826,15 +841,21 @@ func TestAdoptSpec_CompositeIncidentInterimRefusal(t *testing.T) {
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "mindspec complete") {
-		t.Error("the orphan-present refusal must never suggest mindspec complete")
+		t.Error("a stale-deletion composite-incident refusal must never suggest mindspec complete (AC-2(viii))")
 	}
 	for _, floorCmd := range []string{"git branch -D", "rm -rf", "git reset"} {
 		if strings.Contains(msg, floorCmd) {
-			t.Errorf("bead 3's INTERIM orphan-present refusal must carry no destructive command, found %q in: %v", floorCmd, msg)
+			t.Errorf("a stale-deletion outcome names inspection only, never a destructive command; found %q in: %v", floorCmd, msg)
 		}
 	}
-	if !strings.Contains(msg, "git diff") {
-		t.Errorf("expected an inspection-first git diff command, got: %v", msg)
+	if !strings.Contains(msg, "git diff main bead/test-b1") {
+		t.Errorf("expected an inspection-first git diff command over the evaluated branch, got: %v", msg)
+	}
+	if !strings.Contains(msg, "delete") {
+		t.Errorf("expected the evidence class to state plainly that merging would delete landed work, got: %v", msg)
+	}
+	if !strings.Contains(msg, `mindspec impl adopt 042-test --reason "<why>"`) {
+		t.Errorf("expected the full adopt re-run invocation once the branch state is resolved, got: %v", msg)
 	}
 	if *closedCalls != 0 {
 		t.Fatal("a refusal must perform no mutation")

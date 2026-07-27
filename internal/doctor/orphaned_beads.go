@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -34,6 +35,15 @@ func escapeLines(s string) string {
 // (also used by `mindspec next` and `mindspec complete`). Injectable so the
 // doctor check is unit-testable without a live repo or `bd`.
 var findOrphanedClosedBeadsFn = lifecycle.FindOrphanedClosedBeads
+
+// evaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+// checkOrphanedBeads consumes (pointer-pinned default): it performs
+// REAL git I/O (gitutil.EvaluateWorkDestruction underneath), so a test
+// that stubs findOrphanedClosedBeadsFn with a fabricated lifecycle.Orphan
+// value and no real underlying repo must also stub this, or the real
+// evaluation fails closed (DestructionEvidenceError) against the
+// fixture's non-existent refs.
+var evaluateOrphanHintFn = lifecycle.EvaluateOrphanHint
 
 // runMindspecCompleteFn re-invokes `mindspec complete <beadID>` to recover one
 // orphaned bead during `mindspec doctor --fix`. Injectable for tests; the
@@ -63,10 +73,16 @@ func defaultRunMindspecComplete(root, beadID string) error {
 // It walks the tier-aware specs enumeration root (flat .mindspec/specs →
 // canonical .mindspec/docs/specs → legacy docs/specs, spec 106 Req 3) and runs
 // the shared lifecycle.FindOrphanedClosedBeads predicate per spec (the same
-// trigger `mindspec next` and `mindspec complete` block on). Each orphan is
-// reported as Status=Error with the `mindspec complete <id>` recovery line and
-// a FixFunc that re-invokes completion under `--fix`. Read-only by default; the
-// binary is run only when Fix() calls the FixFunc.
+// trigger `mindspec next` and `mindspec complete` block on). Each orphan's
+// Message renders the spec 127 R2 lifecycle.EvaluateOrphanHint derivation —
+// never a bare "mindspec complete <id>" string. R2(c): the FixFunc that
+// re-invokes completion under `--fix` is attached ONLY when the derivation's
+// outcome is guard.DestructionClean (the normal-unmerged case, where
+// `mindspec complete` is the R4-preflighted, correct action) — every other
+// outcome (ancestor/superseded/stale-deletion/evidence-error) carries no
+// FixFunc at all, so `doctor --fix` mutates nothing there: output and action
+// derive from the SAME outcome value and cannot disagree. Read-only by
+// default; the binary is run only when Fix() calls a present FixFunc.
 func checkOrphanedBeads(r *Report, root string) {
 	specsRoot := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsRoot)
@@ -89,17 +105,25 @@ func checkOrphanedBeads(r *Report, root string) {
 		// neutral observer, not itself completing any bead.
 		for _, o := range findOrphanedClosedBeadsFn(specID, root, "") {
 			beadID := o.BeadID
+			hint := evaluateOrphanHintFn(root, o.BeadID, o.BeadBranch, specID, o.SpecBranch)
+			note := ""
+			if hint.EvidenceNote != "" {
+				note = " " + hint.EvidenceNote + "."
+			}
 			// R4: beadID is an ID-typed position (idrender.Bead);
 			// BeadBranch/SpecBranch carry a "bead/"/"spec/" prefix so
 			// they don't validate against the bare idvalidate grammar —
 			// escape as free text instead.
-			r.Checks = append(r.Checks, Check{
+			check := Check{
 				Name:   fmt.Sprintf("orphaned closed bead: %s", idrender.Bead(beadID)),
 				Status: Error,
-				Message: fmt.Sprintf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s. Run `%s` to recover.",
-					idrender.Bead(beadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch), o.RecoveryCommand()),
-				FixFunc: func() error { return runMindspecCompleteFn(root, beadID) },
-			})
+				Message: fmt.Sprintf("bead %s was closed without `mindspec complete` — its branch %s is unmerged into %s.%s Run `%s` to recover.",
+					idrender.Bead(beadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch), note, strings.Join(hint.Lines, "; ")),
+			}
+			if hint.Outcome == guard.DestructionClean {
+				check.FixFunc = func() error { return runMindspecCompleteFn(root, beadID) }
+			}
+			r.Checks = append(r.Checks, check)
 		}
 	}
 }

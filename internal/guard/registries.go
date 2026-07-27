@@ -165,12 +165,28 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	// half is literal). None of the seven is destructive: each is
 	// checked below against the classifier over representative real
 	// values, not against a stub that fabricates them.
+	// internal/approve/impl.go's implOrphanRefusal EXITED this entry's
+	// original shape in bead 4 (spec 127 R2): the bare `o.RecoveryCommand()`
+	// call this entry described is GONE — implOrphanRefusal now renders
+	// the derivation's output instead (lifecycle.EvaluateOrphanHint /
+	// orphan_hints.go). It re-enters this registry immediately below
+	// under a NEW detail key (a variadic spread of the derivation's
+	// OrphanHint.Lines, not a bare method call), because that spread is
+	// itself unprovable by this scan for a different reason — see that
+	// entry's own rationale.
 	{
 		File:       "internal/approve/impl.go",
 		Func:       "implOrphanRefusal",
-		Detail:     "arg1:unprovable",
-		Rationale:  "a bare `o.RecoveryCommand()` call — the deleted trust boundary asserted this call contributes no literal content, PROVEN, when in fact it is simply unresolved by this file's fold rules; Orphan.RecoveryCommand's own body is independently scanned by leg (ii) (see the orphans.go entry below) and is not destructive today.",
-		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RecoveryCommandTemplatesAgainstFloor covers Orphan.RecoveryCommand's actual rendered shape.",
+		Detail:     "variadic-spread:hint.Lines",
+		Rationale:  "`guard.NewFailure(msg, hint.Lines...)` — hint is a lifecycle.OrphanHint returned by implEvaluateOrphanHintFn (spec 127 R2's single hint derivation), a runtime-computed []string this file's fold rules cannot resolve at all (the same variadic-spread shape as bead_ready.go's report.RecoveryCommands()... above), and — unlike that entry — DeriveOrphanHint's own Lines CAN legitimately contain a destructive `git branch -D` line for two of its five outcomes (ancestor-of-main, superseded), so this entry cannot claim 'never matches a floor family' the way the other variadic-spread entries do. What it claims instead: every line this call site can ever receive that DOES match a floor family is EXACTLY the one reviewed, guard.NewDestructiveCommand-derived shape — never a raw or differently-shaped destructive string. internal/lint's provenance-tracing (isConstructorDerived) only walks the SAME enclosing function as the guard.NewFailure call for a checked-and-returned NewDestructiveCommand bind (R5(b)'s own stated limitation) — since the constructor call lives inside orphan_hints.go's deletionHint, several functions removed from this call site, the scan cannot trace across that boundary, so this operand is registered rather than proven provenance-exempt.",
+		Obligation: "internal/lifecycle's TestDeriveOrphanHint_DestructiveLinesMatchOnlyReviewedShape (orphan_hints_test.go) enumerates every guard.DestructionOutcome over a representative beadBranch/specID battery and asserts any line matching a destructive floor family is byte-identical to `git branch -D <branch>` (FamilyGitBranchDeleteForce) and nothing else.",
+	},
+	{
+		File:       "internal/approve/adopt.go",
+		Func:       "adoptOrphanPresentRefusal",
+		Detail:     "variadic-spread:lines",
+		Rationale:  "`guard.NewFailure(msg, lines...)` — the SAME shape and SAME rationale as implOrphanRefusal's entry above: adoptOrphanPresentRefusal (R1(g)'s composite-incident refusal, spec 127 bead 4) spreads a []string built from lifecycle.EvaluateOrphanHintAgainstMain's OrphanHint.Lines (occasionally appending its own adopt-rerun invocation, a pure literal Sprintf template already provable elsewhere), which can legitimately carry a `git branch -D` line for the ancestor/superseded outcomes; this entry's own OLD arg1/arg2 shape (the bead-3 interim's hardcoded, always-non-destructive inspection lines) EXITED with this bead — see this registry's own bootstrap history for that shape's removal.",
+		Obligation: "internal/lifecycle's TestDeriveOrphanHint_DestructiveLinesMatchOnlyReviewedShape (same obligation as implOrphanRefusal's entry above — both call sites spread the identical OrphanHint.Lines shape).",
 	},
 	{
 		File:       "internal/executor/mindspec_executor.go",
@@ -582,20 +598,14 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "the constructor-derived deletion line's error-refusal FALLBACK path — `fmt.Sprintf(\"could not construct the stale-branch deletion recovery for %s: %v\", termsafe.Escape(specBranch), ctorErr)` — reached only when NewDestructiveCommand itself refuses (git branch -D is on the reviewed floor, so unreachable in practice); the SUCCESS path's deletion line is separately provenance-exempt, never registered.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
-	{
-		File:       "internal/approve/adopt.go",
-		Func:       "adoptOrphanPresentRefusal",
-		Detail:     "arg1:unprovable",
-		Rationale:  "idrender-rendered: the composite-incident interim refusal's message body substitutes idrender.Spec(specID), idrender.Bead(beadID), and termsafe.Escape(beadBranch) — beadBranch is a waist-composed `bead/<id>` branch name (scan (a) covers its composition).",
-		Obligation: mindspecVerbTemplateObligation,
-	},
-	{
-		File:       "internal/approve/adopt.go",
-		Func:       "adoptOrphanPresentRefusal",
-		Detail:     "arg2:unprovable",
-		Rationale:  "idrender-rendered: the inspection recovery line, `fmt.Sprintf(\"git diff main %s   (inspect %s's unlanded work...)\", beadBranch, idrender.Bead(beadID))` — same beadBranch/idrender.Bead shapes as arg1 above; `git diff` matches no floor family regardless.",
-		Obligation: mindspecVerbTemplateObligation,
-	},
+	// adoptOrphanPresentRefusal's bead-3 interim arg1/arg2 entries
+	// (the hardcoded, always-non-destructive "git diff main %s" +
+	// "mindspec impl adopt ... --reason" lines) EXITED in bead 4: that
+	// function no longer builds those two literals inline — it renders
+	// lifecycle.EvaluateOrphanHintAgainstMain's derived OrphanHint.Lines
+	// instead, a shape re-registered above (in the opaque-operand block
+	// this same function's implOrphanRefusal-mirroring entry lives in)
+	// under "variadic-spread:lines".
 	{
 		File:       "internal/approve/adopt.go",
 		Func:       "adoptEvidenceErrorRefusal",

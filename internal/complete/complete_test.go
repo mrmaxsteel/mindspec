@@ -100,6 +100,7 @@ func saveAndRestore(t *testing.T) {
 	origDoltCommit := doltCommitFn
 	origVerifyCommitted := verifyCommittedFn
 	origFindOrphans := findOrphanedClosedBeadsFn
+	origEvaluateOrphanHint := evaluateOrphanHintFn
 	origIsBeadSelfOrphaned := isBeadSelfOrphanedFn
 	origFindEpicForBead := findEpicForBeadFn
 	origResolveSpecPrefix := resolveSpecPrefixFn
@@ -109,6 +110,7 @@ func saveAndRestore(t *testing.T) {
 
 	t.Cleanup(func() {
 		findOrphanedClosedBeadsFn = origFindOrphans
+		evaluateOrphanHintFn = origEvaluateOrphanHint
 		isBeadSelfOrphanedFn = origIsBeadSelfOrphaned
 		closeBeadFn = origClose
 		worktreeListFn = origWtList

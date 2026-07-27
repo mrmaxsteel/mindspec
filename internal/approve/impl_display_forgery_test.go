@@ -13,12 +13,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
+
+// stubImplNormalUnmergedHint pins the spec 127 R2 hint-derivation seam to
+// the deterministic "normal unmerged" outcome, byte-identical to the
+// pre-bead-4 Orphan.RecoveryCommand() text: neither test in this file
+// has a real underlying git repo (tmp is a bare t.TempDir(), no `git
+// init`), and this file's whole point is pinning implOrphanRefusal's OWN
+// message-wrapper escaping — independent of the shared work-destruction
+// predicate's git evaluation, which orphan_gate_test.go already covers.
+func stubImplNormalUnmergedHint(t *testing.T) {
+	t.Helper()
+	orig := implEvaluateOrphanHintFn
+	t.Cleanup(func() { implEvaluateOrphanHintFn = orig })
+	implEvaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{Outcome: guard.DestructionClean, Lines: []string{"mindspec complete " + idrender.Bead(beadID)}}
+	}
+}
 
 func TestImplOrphanRefusal_HostileOrphanFieldsForcedSafe(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	stubImplNormalUnmergedHint(t)
 
 	hostileBeadID := "bead-x\n--force"
 	hostileBranch := "bead/bead-x\x1b[31mFAKE\x1b[0m;evil"
@@ -68,6 +87,7 @@ func TestImplOrphanRefusal_HostileOrphanFieldsForcedSafe(t *testing.T) {
 func TestImplOrphanRefusal_CleanOrphanByteIdentical(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
+	stubImplNormalUnmergedHint(t)
 
 	const cleanBeadID = "mindspec-9cyu.1"
 	o := lifecycle.Orphan{

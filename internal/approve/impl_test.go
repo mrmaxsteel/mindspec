@@ -518,6 +518,7 @@ func saveAndRestore(t *testing.T) {
 	origGetwd := implGetwdFn
 	// Spec 115 Bead 2: the pre-terminal orphan/obligation gate's seams.
 	origScanOrphans := implScanOrphansFn
+	origEvaluateOrphanHint := implEvaluateOrphanHintFn
 	origClosedEpicBeadIDs := implClosedEpicBeadIDsFn
 	origWorktreeList := implWorktreeListFn
 	origIsAncestor := implIsAncestorFn
@@ -533,6 +534,7 @@ func saveAndRestore(t *testing.T) {
 		implPhaseMetadataFn = origPhaseMeta
 		implGetwdFn = origGetwd
 		implScanOrphansFn = origScanOrphans
+		implEvaluateOrphanHintFn = origEvaluateOrphanHint
 		implClosedEpicBeadIDsFn = origClosedEpicBeadIDs
 		implWorktreeListFn = origWorktreeList
 		implIsAncestorFn = origIsAncestor
@@ -577,6 +579,15 @@ func saveAndRestore(t *testing.T) {
 	// before. Tests exercising the gate itself override these.
 	implScanOrphansFn = func(specID, workdir, excludeBeadID string) ([]lifecycle.Orphan, error) {
 		return nil, nil
+	}
+	// Spec 127 R2: the hint-derivation seam implOrphanRefusal consumes.
+	// No test fixture here has a real underlying git repo, so this
+	// default reproduces the pre-bead-4 "normal unmerged" byte-identical
+	// hint (Orphan.RecoveryCommand()'s text) — the shape every existing
+	// orphan-gate test already asserts. Tests exercising a non-normal
+	// outcome (evidence-error, superseded, etc.) override this.
+	implEvaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{Outcome: guard.DestructionClean, Lines: []string{"mindspec complete " + beadID}}
 	}
 	implClosedEpicBeadIDsFn = func(specID string) ([]string, error) { return nil, nil }
 	implWorktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }

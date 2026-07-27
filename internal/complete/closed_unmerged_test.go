@@ -40,6 +40,11 @@ func TestRun_BlocksOnOrphanedSibling(t *testing.T) {
 		gotExclude = excludeBeadID
 		return []lifecycle.Orphan{{BeadID: "sib-1", BeadBranch: "bead/sib-1", SpecBranch: "spec/008-test"}}
 	}
+	// Spec 127 R2: no real underlying repo — stub the "normal unmerged"
+	// outcome, matching this test's own byte-identical assertion below.
+	evaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{Outcome: guard.DestructionClean, Lines: []string{"mindspec complete " + beadID}}
+	}
 
 	// A close stub that, if reached, would record a mutation — it must NOT be.
 	closed := false
@@ -223,6 +228,15 @@ func runOrphanFixture(t *testing.T, specID, beadID string, otherOrphans []lifecy
 	findOrphanedClosedBeadsFn = func(sid, workdir, excludeBeadID string) []lifecycle.Orphan {
 		gotExclude = excludeBeadID
 		return otherOrphans
+	}
+	// Spec 127 R2: these fixtures fabricate lifecycle.Orphan values with
+	// no real underlying repo — evaluateOrphanHintFn's real
+	// implementation would do real git I/O and fail closed
+	// (DestructionEvidenceError) against non-existent refs. Stub the
+	// "normal unmerged" outcome, matching every assertion in this file
+	// (byte-identical to Orphan.RecoveryCommand()'s pre-existing text).
+	evaluateOrphanHintFn = func(workdir, beadID, beadBranch, specID, specBranch string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{Outcome: guard.DestructionClean, Lines: []string{"mindspec complete " + beadID}}
 	}
 	isBeadSelfOrphanedFn = func(sid, workdir, id string) (bool, error) {
 		return selfOrphaned(id)

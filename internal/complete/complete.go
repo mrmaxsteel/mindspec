@@ -294,6 +294,33 @@ func termsafeEscapeEach(vals []string) []string {
 	return out
 }
 
+// evaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+// (pointer-pinned default, mirroring findOrphanedClosedBeadsFn's own
+// in-package-seam pattern in this file): it performs REAL git I/O
+// (lifecycle.EvaluateOrphanHint -> gitutil.EvaluateWorkDestruction), so
+// tests that stub findOrphanedClosedBeadsFn with a fabricated
+// lifecycle.Orphan value and no real underlying repo must also stub
+// this seam, or the real git evaluation fails closed
+// (DestructionEvidenceError) against the fixture's non-existent refs.
+var evaluateOrphanHintFn = lifecycle.EvaluateOrphanHint
+
+// renderOrphanRecoverySegment folds a spec 127 R2 lifecycle.OrphanHint
+// down into ONE string suitable for slotting into this file's existing
+// sibling-orphan recovery-sequence joins (`strings.Join(recoveries,
+// "; ")` / `", then "`). hint.EvidenceNote is empty only for the
+// normal-unmerged outcome (guard.DestructionClean), whose single line —
+// "mindspec complete <bead>" — is byte-identical to the pre-existing
+// Orphan.RecoveryCommand() text; every other outcome prefixes its
+// recovery line(s) with the evidence class that licenses them (R2(b)'s
+// "destructive hints carry their proof").
+func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
+	lines := strings.Join(hint.Lines, "; ")
+	if hint.EvidenceNote == "" {
+		return lines
+	}
+	return hint.EvidenceNote + ": " + lines
+}
+
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
 // beadID is required — it must always be provided by the caller.
@@ -499,6 +526,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// orphaned-yet-being-recovered branch — that is exactly what this run
 	// converges).
 	if orphans := findOrphanedClosedBeadsFn(specID, root, beadID); len(orphans) > 0 {
+		// Spec 127 R2: one evidence-carrying hint per orphaned sibling,
+		// computed ONCE (the sole call site of the derivation in this
+		// function) rather than re-deriving `mindspec complete <bead>`
+		// inline as a bare string — see orphan_hints.go's own doc
+		// comment for the outcome-to-hint mapping.
+		hints := make([]lifecycle.OrphanHint, len(orphans))
+		for i, o := range orphans {
+			hints[i] = evaluateOrphanHintFn(root, o.BeadID, o.BeadBranch, specID, specBranch)
+		}
+
 		// §2(i) deadlock-free recovery graph (mindspec-tpjn): two (or
 		// more) simultaneously orphaned closed siblings, each refusing on
 		// the OTHER, previously had no non-manual exit. Determine whether
@@ -516,8 +553,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				names = append(names, idrender.Bead(o.BeadID))
 			}
 			recoveries := make([]string, 0, len(orphans))
-			for _, o := range orphans {
-				recoveries = append(recoveries, o.RecoveryCommand())
+			for _, h := range hints {
+				recoveries = append(recoveries, renderOrphanRecoverySegment(h))
 			}
 			// R4: safeBeadID/names are ID-typed positions (idrender).
 			fmt.Printf("Warning: bead %s was closed without `mindspec complete` and is unmerged (closed-but-unmerged) — recovering it now.\nSibling(s) %s are ALSO closed-but-unmerged; recover each next: %s.\n",
@@ -549,7 +586,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 					detail.WriteString(", ")
 				}
 				fmt.Fprintf(&detail, "%s (branch %s)", idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch))
-				recoveries = append(recoveries, o.RecoveryCommand())
+				recoveries = append(recoveries, renderOrphanRecoverySegment(hints[i]))
 			}
 			recoveries = append(recoveries, "mindspec complete "+safeBeadID)
 			return nil, fmt.Errorf("sibling bead(s) %s were closed without `mindspec complete` — unmerged into %s (closed-but-unmerged).\nRecover each in turn, then re-run: %s.",

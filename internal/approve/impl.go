@@ -77,6 +77,14 @@ var (
 	// imports the git-plumbing package directly (internal/lint
 	// boundary; internal/lifecycle already consumes it the same way).
 	implIsAncestorFn = lifecycle.IsAncestor
+	// implEvaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+	// implOrphanRefusal consumes (pointer-pinned default): it performs
+	// REAL git I/O (gitutil.EvaluateWorkDestruction underneath), so a
+	// test that fabricates a lifecycle.Orphan value with no real
+	// underlying repo must stub this too, or the real evaluation fails
+	// closed (DestructionEvidenceError) against the fixture's
+	// non-existent refs.
+	implEvaluateOrphanHintFn = lifecycle.EvaluateOrphanHint
 	// implBranchExistsFn feeds ONLY the R3 obligation backstop's
 	// branch-state-truthful recovery line (round-2 G3) — never the
 	// orphan-detection trigger, which stays inside implScanOrphansFn.
@@ -902,19 +910,27 @@ func implBranchIndeterminateRefusal(specID, specBranch string, cause error) erro
 // implOrphanRefusal renders the (a)/(b)/(c)-shaped refusal shared by
 // Leg 1 and Leg 2: (a) names the bead ID, its unmerged bead/<id>
 // branch, and the spec branch; (b) states it was closed without
-// `mindspec complete`; (c) ends with o.RecoveryCommand() as the FINAL
-// line (ADR-0035; internal/guard/recovery_convention_test.go enforces
-// the final-line shape). The advisory slot line (R2) is best-effort
-// decoration ONLY — never load-bearing, never printed if unreadable.
+// `mindspec complete`; (c) ends with the spec 127 R2
+// lifecycle.EvaluateOrphanHint's recovery line(s) as the FINAL lines
+// (ADR-0035; internal/guard/recovery_convention_test.go enforces the
+// final-line shape) — a destructive outcome's evidence class is folded
+// into the message body (never into the recovery lines themselves,
+// which stay one command each per the ADR-0035 convention). The
+// advisory slot line (R2, spec 115) is best-effort decoration ONLY —
+// never load-bearing, never printed if unreadable.
 func implOrphanRefusal(root, specID string, o lifecycle.Orphan) error {
+	hint := implEvaluateOrphanHintFn(root, o.BeadID, o.BeadBranch, specID, o.SpecBranch)
 	msg := fmt.Sprintf(
 		"bead %s (branch %s) was closed without running mindspec complete and is not merged into %s",
 		idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch),
 	)
+	if hint.EvidenceNote != "" {
+		msg += "\n" + hint.EvidenceNote
+	}
 	if slot := implAdvisorySlotLine(root, specID, o.BeadID); slot != "" {
 		msg += "\n" + slot
 	}
-	return guard.NewFailure(msg, o.RecoveryCommand())
+	return guard.NewFailure(msg, hint.Lines...)
 }
 
 // formatOpenChildHint renders the Spec 095 (mindspec-ry73) advisory hint
