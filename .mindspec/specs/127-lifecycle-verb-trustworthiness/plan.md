@@ -1095,12 +1095,26 @@ in two distinct ways corrected here rather than re-asserted:
    line appears, in order and unmodified, in the consumer's rendered
    output — reverting each production render to G1's exact mutation
    (drop the final line whenever `hint.Lines` has more than one entry)
-   reds both. With all four now covered: the DERIVATION is shared and
-   its lines are threaded faithfully, in order and unmodified, by each
-   consumer — whose wrapping (separate recovery lines, an inline
-   `"; "`-joined string, or prose) is its own, by design — and this is
-   now exactly what each consumer's own fixture proves rather than
-   assumes.
+   reds both. **This paragraph's own conclusion overstated what the four
+   fixtures prove, and round 3 corrects it (G1-5A/B/C) rather than
+   repeating it**: `impl`, `doctor`, and `complete` do thread the
+   derivation's lines faithfully, in order and unmodified, through their
+   own wrapping — separate recovery lines, an inline `"; "`-joined
+   string, or prose, respectively — for every outcome, and their three
+   fixtures now prove exactly that. `adopt` does NOT: for
+   `DestructionClean`, `adoptOrphanPresentRefusal` (`adopt.go:562-585`)
+   intentionally SUBSTITUTES the derivation's `mindspec complete <bead>`
+   line with its own inspection guidance — AC-2(viii)'s own "never
+   `mindspec complete`" leg requires this — and for every outcome except
+   `DestructionSuperseded` it APPENDS its own rerun line after whatever
+   lines remain (`adopt.go:586-590`). The named adopt fixture,
+   `TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder`,
+   fabricates `DestructionSuperseded` — the one outcome adopt neither
+   substitutes nor appends to — so it proves that narrow pass-through
+   only, never the universal adopt fidelity claim this bullet
+   previously drew from it (adopt's `DestructionClean` substitution is
+   instead proven by `TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete`,
+   bead-4 fix round 1's own fixture for that outcome).
 
 **CORRECTED**: this section previously claimed the reading above was
 already matched by spec.md's AC-3 text, unaffected, "per O3-2's
@@ -1111,11 +1125,31 @@ applied here without re-reading AC-3's own text. AC-3's parity sentence
 read two ways: rendering the output of the same derivation (satisfied)
 or rendering output that is itself the same across four structurally
 different consumers (violated by design — a requirement this section's
-own bullet 2 says would be the wrong fix). spec.md's AC-3 IS amended in
-this round (G1's audit of fix round 2's amendment) to state the
-achievable requirement: fidelity to the derivation's lines, threaded in
-order and unmodified, with each consumer's own wrapping legitimately
-its own.
+own bullet 2 says would be the wrong fix). spec.md's AC-3 was amended in
+that round (G1's audit of fix round 2's amendment) to state a
+requirement it called achievable — fidelity to the derivation's lines,
+threaded in order and unmodified, with each consumer's own wrapping
+legitimately its own — but that wording was still a universal.
+
+**CORRECTED AGAIN (round 3, G1-5A/B/C)**: the round-2 wording above is
+itself false for `adopt`'s `DestructionClean` outcome (the substitution
+detailed above, required by AC-2(viii)), double-counts `adopt` in the
+emitter-enumeration's closing sentence ("them plus R1(g)'s adopt
+refusal" against an enumeration that already names adopt as one of the
+four), and — read as consumers sharing one result instance rather than
+one derivation function — reintroduces the exact two-reading ambiguity
+the amendment exists to remove. **spec.md's AC-3 is amended again in
+this round** to name the shared derivation as a FUNCTION rather than a
+shared result, and to state each consumer's real transformation —
+including adopt's `DestructionClean` substitution and its
+non-`DestructionSuperseded` rerun-append — instead of one sentence that
+was true of three consumers and false of the fourth's own outcome. This
+is the second AC-3 correction; the false universal originated in an
+orchestrator dispatch that produced the round-2 wording, not in the
+shipped code (which has substituted `DestructionClean` and appended for
+every outcome but `DestructionSuperseded` since bead-4 fix round 1's
+BLOCKING-1) and not in the bead-4 fix-round-2 test work, which remains
+accurate and still verified red under the line-dropping mutation.
 
 **Verification**
 - [ ] `go test -short ./internal/lifecycle/... ./internal/complete/... ./internal/approve/... ./internal/doctor/...` passes
