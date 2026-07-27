@@ -1019,6 +1019,173 @@ allowlist entries (the four consumer sites) with named records.
 6. Registry exits: the four converted consumer sites exit the seeded
    allowlist with named bead-4 exit records (fixture β stays green).
 
+**AMENDED (bead-4 fix round 1, MAJOR G1-5/O3-1)** — step 2's "Emitter-
+enumeration anti-drift test covers all five" and step 5's
+"consumer-parity leg (all four production surfaces render identical
+derivation output)" both overstate what the shipped mechanisms prove,
+in two distinct ways corrected here rather than re-asserted:
+
+1. **"all five" is wrong; it is four, and they are not identical
+   calls.** `wantOrphanHintRefs()` (orphan_hint_emitters_test.go) pins
+   exactly four references — one per consumer (adopt, impl, complete,
+   doctor) — never five: complete.go's two render sites (`:520`/`:552`
+   in the pre-bead-4 numbering this step's own text cites) collapse to
+   ONE reference because the shipped implementation computes each
+   orphan's hint ONCE before branching on self-orphan status, not
+   twice. And the four references do not all call the identical
+   function: adopt calls `EvaluateOrphanHintAgainstMain` (no surviving
+   spec branch to enrich from — R1(g) is reached only once one is
+   already confirmed absent); the other three call `EvaluateOrphanHint`
+   (spec-branch-enriched). Both are thin wrappers around the same pure
+   `DeriveOrphanHint`, so the DERIVATION is still exactly one function
+   — the wrapper choice differs by design, not by drift.
+2. **"render identical derivation output" is not what the consumer-
+   parity leg (AC-3's `TestOutcomeOracle_AC3Table`) tests, and no other
+   mechanism tested it either until this fix round.** That leg proves
+   the PURE derivation's own `hint.Lines`/`EvidenceNote` are correct and
+   well-formed for a given outcome — it never calls
+   `implOrphanRefusal`/`checkOrphanedBeads`/`adoptOrphanPresentRefusal`/
+   `complete.go`'s renderer at all, so it cannot and does not prove
+   what any of THEM render. Each consumer's own wrapping is
+   legitimately its own: `internal/approve/impl.go`'s
+   `implOrphanRefusal` and `internal/approve/adopt.go`'s
+   `adoptOrphanPresentRefusal` thread `hint.Lines` as SEPARATE
+   `guard.NewFailure` recovery lines; `internal/doctor/orphaned_beads.go`
+   collapses them with `strings.Join(hint.Lines, "; ")` into one inline
+   `Check.Message`/`Run` string; `internal/complete/complete.go`'s
+   `renderOrphanRecoverySegment` folds them the same way, prefixed with
+   `EvidenceNote`, into its own multi-orphan recovery sequence. A
+   doctor `Run` field, a `guard` refusal message, and CLI prose are
+   different surfaces with different structural conventions
+   (ADR-0035's one-command-per-line discipline applies within each, not
+   across all four as one shared byte string) — forcing byte-identical
+   output across them would be the wrong fix, not the missing one.
+   **What is true, and now tested per-consumer** (bead-4 fix round 1
+   added `TestImplOrphanRefusal_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/approve/impl_display_forgery_test.go` and
+   `TestCheckOrphanedBeads_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/doctor/orphaned_beads_test.go`).
+   **CORRECTED in fix round 2 (G1-5 held open across round 1)**: round 1
+   claimed those two new tests, "joining `internal/complete`'s
+   pre-existing multi-orphan coverage via `renderOrphanRecoverySegment`
+   and adopt's own stale-deletion/Clean fixtures," already proved this
+   for all four consumers. That claim was false for BOTH cited
+   fixtures, not just the one G1 flagged: `internal/complete`'s
+   pre-existing `TestRun_MultiOrphanConvergence` and
+   `TestRun_AllOrphansRefusalNamesEverySibling` stub only the
+   single-line `guard.DestructionClean` shape and prove BREADTH over
+   multiple orphaned SIBLINGS, never fidelity over one hint's MULTIPLE
+   LINES — the exact gap this bullet exists to close, surviving
+   unnoticed in the third consumer. Re-auditing found the identical gap
+   in the fourth: adopt's own stale-deletion/Clean fixtures
+   (`TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint`,
+   `TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete`) drive
+   `lifecycle.DeriveOrphanHint` outcomes whose `hint.Lines` is always
+   exactly one entry (`guard.DestructionStaleDeletion` /
+   `guard.DestructionClean` — see `orphan_hints.go`); neither ever
+   exercised `adoptOrphanPresentRefusal`'s
+   `hint.Outcome == guard.DestructionSuperseded` pass-through
+   (adopt.go:586), a genuine three-line unmodified thread with no
+   fixture anywhere driving it. Fix round 2 added
+   `TestRun_MultiLineHintThreadsAllLinesInOrder` in
+   `internal/complete/closed_unmerged_test.go` and
+   `TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder`
+   in `internal/approve/adopt_test.go`, each stubbing a fabricated
+   `guard.DestructionSuperseded` (three-line) hint and asserting every
+   line appears, in order and unmodified, in the consumer's rendered
+   output — reverting each production render to G1's exact mutation
+   (drop the final line whenever `hint.Lines` has more than one entry)
+   reds both. **This paragraph's own conclusion overstated what the four
+   fixtures prove, and round 3 corrects it (G1-5A/B/C) rather than
+   repeating it**: `impl`, `doctor`, and `complete` do thread the
+   derivation's lines faithfully, in order and unmodified, through their
+   own wrapping — separate recovery lines, an inline `"; "`-joined
+   string, or prose, respectively — for every outcome. **CORRECTED
+   AGAIN (round 5, G1-5A)**: the sentence immediately above previously
+   claimed the three named Superseded-only fixtures already proved this
+   every-outcome claim — they do not, and the "for every outcome, and
+   their three fixtures now prove exactly that" wording is the overclaim
+   G1 reproduced directly: an outcome-conditional line drop written only
+   for `guard.DestructionAncestor` (or, separately, only for
+   `guard.DestructionEvidenceError`) left all three named fixtures
+   green, because each stubs only `guard.DestructionSuperseded`. The
+   every-outcome claim is proven instead by three companion tables added
+   in this round — `TestImplOrphanRefusal_FidelityAcrossAllOutcomes`
+   (`internal/approve/impl_display_forgery_test.go`),
+   `TestCheckOrphanedBeads_FidelityAcrossAllOutcomes`
+   (`internal/doctor/orphaned_beads_test.go`), and
+   `TestRun_FidelityAcrossAllOutcomes`
+   (`internal/complete/closed_unmerged_test.go`) — one per consumer,
+   each iterating `guard.DestructionOutcome`'s full closed set (built by
+   counting up to `guard.DestructionOutcomeCount` and asserting the
+   built slice's length against it, never a literal count — bead 2
+   shipped five stale written counts) with a FABRICATED three-line hint
+   per outcome: never real `DeriveOrphanHint` output, which is
+   single-line for several outcomes (StaleDeletion, EvidenceError,
+   Clean) — the point is each consumer's OWN threading of `hint.Lines`,
+   never the derivation's content, which `orphan_hints_test.go` already
+   fixtures separately and hermetically per outcome. Each table asserts
+   every fabricated line survives, in order and unmodified, through that
+   consumer's own wrapping. Verified red, via `go test -overlay` against
+   scratch-mutated copies of `impl.go`/`orphaned_beads.go`/`complete.go`
+   (the tracked files themselves untouched): an outcome-conditional drop
+   isolated to `guard.DestructionAncestor` reds only that outcome's row
+   in all three tables; the same isolated to
+   `guard.DestructionEvidenceError` reds only that row; an unconditional
+   drop reds every row in all three. The three original Superseded-only
+   fixtures remain valid and are not superseded by the new tables — they
+   additionally pin the byte-identical REAL-derivation Superseded shape
+   (preserve-tag/delete/adopt-invocation text), which the new tables'
+   fabricated content deliberately does not exercise. `adopt` does NOT: for
+   `DestructionClean`, `adoptOrphanPresentRefusal` (`adopt.go:562-585`)
+   intentionally SUBSTITUTES the derivation's `mindspec complete <bead>`
+   line with its own inspection guidance — AC-2(viii)'s own "never
+   `mindspec complete`" leg requires this — and for every outcome except
+   `DestructionSuperseded` it APPENDS its own rerun line after whatever
+   lines remain (`adopt.go:586-590`). The named adopt fixture,
+   `TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder`,
+   fabricates `DestructionSuperseded` — the one outcome adopt neither
+   substitutes nor appends to — so it proves that narrow pass-through
+   only, never the universal adopt fidelity claim this bullet
+   previously drew from it (adopt's `DestructionClean` substitution is
+   instead proven by `TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete`,
+   bead-4 fix round 1's own fixture for that outcome).
+
+**CORRECTED**: this section previously claimed the reading above was
+already matched by spec.md's AC-3 text, unaffected, "per O3-2's
+confirmation." That claim was false. O3-2 confirmed only that AC-3
+anticipates adopt's extra rerun line — a different question from
+whether identical *rendering* is required — and the confirmation was
+applied here without re-reading AC-3's own text. AC-3's parity sentence
+read two ways: rendering the output of the same derivation (satisfied)
+or rendering output that is itself the same across four structurally
+different consumers (violated by design — a requirement this section's
+own bullet 2 says would be the wrong fix). spec.md's AC-3 was amended in
+that round (G1's audit of fix round 2's amendment) to state a
+requirement it called achievable — fidelity to the derivation's lines,
+threaded in order and unmodified, with each consumer's own wrapping
+legitimately its own — but that wording was still a universal.
+
+**CORRECTED AGAIN (round 3, G1-5A/B/C)**: the round-2 wording above is
+itself false for `adopt`'s `DestructionClean` outcome (the substitution
+detailed above, required by AC-2(viii)), double-counts `adopt` in the
+emitter-enumeration's closing sentence ("them plus R1(g)'s adopt
+refusal" against an enumeration that already names adopt as one of the
+four), and — read as consumers sharing one result instance rather than
+one derivation function — reintroduces the exact two-reading ambiguity
+the amendment exists to remove. **spec.md's AC-3 is amended again in
+this round** to name the shared derivation as a FUNCTION rather than a
+shared result, and to state each consumer's real transformation —
+including adopt's `DestructionClean` substitution and its
+non-`DestructionSuperseded` rerun-append — instead of one sentence that
+was true of three consumers and false of the fourth's own outcome. This
+is the second AC-3 correction; the false universal originated in an
+orchestrator dispatch that produced the round-2 wording, not in the
+shipped code (which has substituted `DestructionClean` and appended for
+every outcome but `DestructionSuperseded` since bead-4 fix round 1's
+BLOCKING-1) and not in the bead-4 fix-round-2 test work, which remains
+accurate and still verified red under the line-dropping mutation.
+
 **Verification**
 - [ ] `go test -short ./internal/lifecycle/... ./internal/complete/... ./internal/approve/... ./internal/doctor/...` passes
 - [ ] AC-3 legs (i)/(ii)/(iv)/(v) RED at `09f62bd9` (static string today), leg (iii) guard green, leg (vi) RED (FixFunc unconditional today); every leg oracle-judged; parity + emitter-enumeration green

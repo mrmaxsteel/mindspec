@@ -298,6 +298,66 @@ func TestNetEffectLanded_NonTrackerDiffNeverReachesLegB(t *testing.T) {
 	}
 }
 
+// TestNetEffectLanded_PureRevertNoAdditionNotVacuouslyLanded is bead-4 fix
+// round 1's BLOCKING-4 regression (G1-4/O1-1/O2-1/S1-1): a branch whose
+// cumulative diff against merge-base(branch, target) nets to EMPTY (it
+// reintroduces content target once carried, then reverts its OWN
+// reintroduction, with no other change) must never be reported landed —
+// applying an empty diff changes nothing, so a "landed" answer here would
+// prove nothing was ever introduced, not that anything landed. Two
+// targets, per the panel's own reproduction: an UNTOUCHED target (the
+// simplest vacuous shape) and a DIVERGED one carrying unrelated content
+// the branch never saw — proving the (pre-fix) vacuous match was
+// target-independent, not a same-content coincidence.
+//
+// Scope-defeating mutation (not merely a sensitivity one): reverting
+// NetEffectLanded's refTree/baseTree guard above (restoring the version
+// that calls ContentSubsumed unconditionally) turns both subtests RED,
+// with `landed=true` logged in both — the exact misclassification the
+// panel reproduced against real production code before this fix.
+func TestNetEffectLanded_PureRevertNoAdditionNotVacuouslyLanded(t *testing.T) {
+	buildStaleBead := func(t *testing.T) string {
+		t.Helper()
+		dir := initGitRepo(t)
+		neRunGit(t, dir, "checkout", "-b", "spec-target")
+		neWriteFile(t, dir, "landed.txt", "landed after the branch's snapshot\n")
+		neRunGit(t, dir, "add", ".")
+		neRunGit(t, dir, "commit", "-m", "spec-target adds landed.txt")
+		neRunGit(t, dir, "checkout", "-b", "stale-bead", "spec-target")
+		neRunGit(t, dir, "rm", "landed.txt")
+		neRunGit(t, dir, "commit", "-m", "revert to the pre-landed.txt snapshot (no other change)")
+		neRunGit(t, dir, "checkout", "main")
+		return dir
+	}
+
+	t.Run("against_untouched_target", func(t *testing.T) {
+		dir := buildStaleBead(t)
+
+		landed, err := NetEffectLanded(dir, "stale-bead", "main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if landed {
+			t.Error("a branch whose net diff against merge-base(branch, main) is empty must NOT be reported landed against main — nothing was ever introduced for main to have landed")
+		}
+	})
+
+	t.Run("against_diverged_target_with_unrelated_content", func(t *testing.T) {
+		dir := buildStaleBead(t)
+		neWriteFile(t, dir, "unrelated.txt", "unrelated content the branch never saw\n")
+		neRunGit(t, dir, "add", ".")
+		neRunGit(t, dir, "commit", "-m", "main diverges with unrelated content")
+
+		landed, err := NetEffectLanded(dir, "stale-bead", "main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if landed {
+			t.Error("the vacuous match must not fire even when target has diverged with unrelated content the branch never touched — proving the prior bug was target-independent, not a same-content coincidence")
+		}
+	})
+}
+
 // TestContentSubsumedOutcome_Trichotomy pins the spec 121 final-review r2
 // F2-2r discriminator on real-git fixtures: the three-way outcome of a
 // merge M's own change (base=M^1, ours=tip, theirs=M) is LANDED while the

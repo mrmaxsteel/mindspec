@@ -15,6 +15,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
@@ -813,9 +815,31 @@ func TestAdoptSpec_EvidenceErrorNamesRetryFirstThenAttestation(t *testing.T) {
 // (a closed bead's stale bead branch still present), with the INTERIM
 // inspection-first wording and NO destructive command (bead 4 upgrades
 // this to the full R2-derived hint).
-func TestAdoptSpec_CompositeIncidentInterimRefusal(t *testing.T) {
+// TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint is
+// AC-2(viii) (spec 127 bead 4): the composite incident state — a closed
+// bead's surviving branch previews a stale-deletion against main (the
+// same recreation-from-current-tip shape makeStaleRecreatedBranch builds
+// for R1(d)'s own stale-spec-branch leg, here evaluated against "main"
+// directly since R1(g) is reached only once the local spec branch is
+// confirmed ABSENT — there is no spec branch to evaluate against).
+// Replaces bead 3's INTERIM inspection-only fixture (which used a
+// genuinely-unlanded branch, guard.DestructionClean — before bead-4 fix
+// round 1, that outcome's hint was rendered verbatim as
+// `mindspec complete <bead>`, per R2(b)'s pinned table, so it could not
+// demonstrate AC-2(viii)'s "never mindspec complete" requirement, and
+// swapping the fixture to this stale-deletion shape was bead 4's own
+// way of reaching a falsifiable case): adoptScanOrphanPresent's own
+// trigger (evidenceNegative) only ever reaches DestructionClean or
+// DestructionStaleDeletion. Bead-4 fix round 1 (BLOCKING-1: G1-1/S3-1/
+// F1-1) found that swap had silently REMOVED the only test that could
+// ever exercise the Clean leg, over a production refusal that was
+// itself still emitting `mindspec complete` there — see
+// TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete below, which
+// restores that coverage now that adoptOrphanPresentRefusal's
+// DestructionClean case is fixed rather than merely untested.
+func TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint(t *testing.T) {
 	dir := adoptInitRepo(t)
-	makeUnlandedBeadBranch(t, dir, "test-b1")
+	makeStaleRecreatedBranch(t, dir, "bead/test-b1")
 	stubAdoptListEpicBeads(t, []adoptEpicBead{{ID: "test-b1", Status: "closed"}})
 	closedCalls, _ := wireAdoptSeams(t, "epic-1")
 	exec := &realAdoptCommitExecutor{MockExecutor: &executor.MockExecutor{}, t: t}
@@ -826,18 +850,141 @@ func TestAdoptSpec_CompositeIncidentInterimRefusal(t *testing.T) {
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "mindspec complete") {
-		t.Error("the orphan-present refusal must never suggest mindspec complete")
+		t.Error("a stale-deletion composite-incident refusal must never suggest mindspec complete (AC-2(viii))")
 	}
 	for _, floorCmd := range []string{"git branch -D", "rm -rf", "git reset"} {
 		if strings.Contains(msg, floorCmd) {
-			t.Errorf("bead 3's INTERIM orphan-present refusal must carry no destructive command, found %q in: %v", floorCmd, msg)
+			t.Errorf("a stale-deletion outcome names inspection only, never a destructive command; found %q in: %v", floorCmd, msg)
 		}
 	}
-	if !strings.Contains(msg, "git diff") {
-		t.Errorf("expected an inspection-first git diff command, got: %v", msg)
+	if !strings.Contains(msg, "git diff main bead/test-b1") {
+		t.Errorf("expected an inspection-first git diff command over the evaluated branch, got: %v", msg)
+	}
+	if !strings.Contains(msg, "delete") {
+		t.Errorf("expected the evidence class to state plainly that merging would delete landed work, got: %v", msg)
+	}
+	if !strings.Contains(msg, `mindspec impl adopt 042-test --reason "<why>"`) {
+		t.Errorf("expected the full adopt re-run invocation once the branch state is resolved, got: %v", msg)
 	}
 	if *closedCalls != 0 {
 		t.Fatal("a refusal must perform no mutation")
+	}
+}
+
+// TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete is bead-4 fix
+// round 1's own regression for BLOCKING-1 (G1-1/S3-1/F1-1/S2-1): the
+// OTHER shape adoptScanOrphanPresent's evidenceNegative trigger can
+// reach — an ordinary, genuinely-unlanded closed bead branch
+// (guard.DestructionClean, makeUnlandedBeadBranch's own documented
+// shape) — reproduced end-to-end against the real AdoptSpec entrypoint,
+// using only pre-existing helpers, never a fabricated evidence value.
+// R1(g) is reached only once AdoptSpec has already established the
+// local spec branch does NOT survive (the !specBranchExists leg above
+// AdoptSpec's orphan scan), so DestructionClean's derivation-owned hint
+// (`mindspec complete <bead>`) names an uninvokable action here: no
+// spec branch survives for it to merge into. This is the exact gap
+// TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint's own
+// fixture swap (bead 4) left completely untested in either direction —
+// S2-1's own finding.
+//
+// Scope-defeating mutation: reverting adoptOrphanPresentRefusal's
+// DestructionClean special-case above (falling through to render
+// hint.Lines unmodified) turns this RED, with
+// `recovery: mindspec complete test-b1` appearing in the refusal
+// alongside the adopt re-run — both the forbidden action and the
+// correct one, with no signal which is broken — exactly the shape G1/
+// S3/F1 reproduced against the real production file.
+func TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete(t *testing.T) {
+	dir := adoptInitRepo(t)
+	makeUnlandedBeadBranch(t, dir, "test-b1")
+	stubAdoptListEpicBeads(t, []adoptEpicBead{{ID: "test-b1", Status: "closed"}})
+	closedCalls, _ := wireAdoptSeams(t, "epic-1")
+	exec := &realAdoptCommitExecutor{MockExecutor: &executor.MockExecutor{}, t: t}
+
+	_, err := AdoptSpec(dir, "042-test", exec, AdoptOpts{Reason: "composite incident, ordinary unlanded orphan"})
+	if err == nil {
+		t.Fatal("expected a refusal over the composite incident state")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "mindspec complete") {
+		t.Error("a Clean composite-incident refusal must never suggest mindspec complete (AC-2(viii)) — no spec branch survives here for it to act on")
+	}
+	for _, floorCmd := range []string{"git branch -D", "rm -rf", "git reset"} {
+		if strings.Contains(msg, floorCmd) {
+			t.Errorf("a Clean outcome names inspection only, never a destructive command; found %q in: %v", floorCmd, msg)
+		}
+	}
+	if !strings.Contains(msg, "git diff main bead/test-b1") {
+		t.Errorf("expected an inspection-first git diff command over the evaluated branch, got: %v", msg)
+	}
+	if !strings.Contains(msg, `mindspec impl adopt 042-test --reason "<why>"`) {
+		t.Errorf("expected the full adopt re-run invocation once the branch state is resolved, got: %v", msg)
+	}
+	if *closedCalls != 0 {
+		t.Fatal("a refusal must perform no mutation")
+	}
+}
+
+// TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder
+// is bead-4 fix round 2's ITEM 1 follow-through: fix round 1's plan.md
+// amendment cited "adopt's own stale-deletion/Clean fixtures" as part of
+// this package's per-consumer fidelity evidence, but BOTH of those real-
+// git fixtures (TestAdoptSpec_CompositeIncidentStaleDeletionRendersDerivedHint,
+// TestAdoptSpec_CompositeIncidentCleanNeverNamesComplete above) drive
+// lifecycle.DeriveOrphanHint outcomes whose hint.Lines is always exactly
+// ONE entry (guard.DestructionStaleDeletion / guard.DestructionClean —
+// see orphan_hints.go) — neither can exercise adoptOrphanPresentRefusal's
+// hint.Outcome == guard.DestructionSuperseded leg (adopt.go:586), whose
+// `lines = hint.Lines` is a genuine multi-line (three-entry: preserve-
+// tag, delete, adopt-invocation) UNMODIFIED pass-through with no adopt.go
+// fixture anywhere ever exercising it. This calls adoptOrphanPresentRefusal
+// directly (the seam is adoptEvaluateOrphanHintFn, stubbed — no real repo
+// needed) with a fabricated Superseded hint and asserts every line
+// appears, in order and unmodified, as its own "recovery: " line —
+// closing the same claim-exceeds-mechanism gap G1-5/O3-1 found in
+// internal/complete, before it was asserted as already-covered here too.
+func TestAdoptOrphanPresentRefusal_SupersededMultiLineHintThreadsAllLinesInOrder(t *testing.T) {
+	orig := adoptEvaluateOrphanHintFn
+	t.Cleanup(func() { adoptEvaluateOrphanHintFn = orig })
+	wantLines := []string{
+		`git tag preserve/bead-x bead/bead-x   (preserve bead-x's commits before deleting — its content is not guaranteed reachable from main)`,
+		"git branch -D bead/bead-x",
+		`mindspec impl adopt 042-test --reason "<why bead-x's content already reached main outside the lifecycle>"`,
+	}
+	adoptEvaluateOrphanHintFn = func(root, beadID, beadBranch, specID string) lifecycle.OrphanHint {
+		return lifecycle.OrphanHint{
+			Outcome:      guard.DestructionSuperseded,
+			EvidenceNote: "bead bead-x's branch bead/bead-x is superseded — its content already landed in main via another route per the shared work-destruction predicate",
+			Lines:        append([]string{}, wantLines...),
+		}
+	}
+
+	err := adoptOrphanPresentRefusal(t.TempDir(), "042-test", "bead-x", "bead/bead-x")
+	if err == nil {
+		t.Fatal("adoptOrphanPresentRefusal returned nil")
+	}
+	msg := err.Error()
+
+	lastIdx := -1
+	for i, want := range wantLines {
+		idx := strings.Index(msg, want)
+		if idx < 0 {
+			t.Fatalf("line %d (%q) missing verbatim from the rendered message:\n%s", i, want, msg)
+		}
+		if idx <= lastIdx {
+			t.Fatalf("line %d (%q) did not appear AFTER the previous line — order not preserved:\n%s", i, want, msg)
+		}
+		lastIdx = idx
+		if !strings.Contains(msg, "recovery: "+want) {
+			t.Errorf("expected line %q to render as its own recovery line, got:\n%s", want, msg)
+		}
+	}
+	// A Superseded outcome never appends the adopt-rerun line a SECOND
+	// time (adopt.go:586's `if hint.Outcome != guard.DestructionSuperseded`
+	// guard) — the third wantLines entry above IS the adopt-rerun,
+	// already folded into the derivation's own hint.Lines.
+	if got := strings.Count(msg, "mindspec impl adopt"); got != 1 {
+		t.Errorf("expected exactly 1 adopt-rerun invocation (no duplicate append), got %d in:\n%s", got, msg)
 	}
 }
 

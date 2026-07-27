@@ -32,6 +32,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -69,12 +70,20 @@ var (
 	adoptLifecycleChildIDsFn = phase.LifecycleChildIDsForEpic
 	adoptReadBeadStatusFn    = adoptReadBeadStatus
 	adoptScanOrphanFn        = adoptScanOrphanPresent
-	adoptEvaluateLatticeFn   = evaluateAdoptLattice
-	adoptRunBDCombinedFn     = bead.RunBDCombined
-	adoptGetMetadataFn       = bead.GetMetadata
-	adoptMergeMetadataFn     = bead.MergeMetadata
-	adoptGitUserEmailFn      = bead.GitUserEmail
-	adoptExportBeadsFn       = bead.Export
+	// adoptEvaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+	// adoptOrphanPresentRefusal consumes (pointer-pinned default): it
+	// performs REAL git I/O (gitutil.EvaluateWorkDestruction underneath),
+	// so a test that fabricates a closed-bead fixture with no real
+	// underlying repo must stub this too, or the real evaluation fails
+	// closed (DestructionEvidenceError) against the fixture's
+	// non-existent refs.
+	adoptEvaluateOrphanHintFn = lifecycle.EvaluateOrphanHintAgainstMain
+	adoptEvaluateLatticeFn    = evaluateAdoptLattice
+	adoptRunBDCombinedFn      = bead.RunBDCombined
+	adoptGetMetadataFn        = bead.GetMetadata
+	adoptMergeMetadataFn      = bead.MergeMetadata
+	adoptGitUserEmailFn       = bead.GitUserEmail
+	adoptExportBeadsFn        = bead.Export
 )
 
 // AdoptSpec is R1's entrypoint. Its only DIRECT production call site
@@ -190,12 +199,12 @@ func AdoptSpec(root, specID string, exec executor.Executor, opts AdoptOpts) (*Ad
 	// mutation, with an inspection-first message carrying NO destructive
 	// command (declared in the plan's Decomposition so this interim
 	// state is priced, not discovered).
-	orphanBeadID, orphanBranch, orphanOutcome, orphanErr := adoptScanOrphanFn(root, epicID)
+	orphanBeadID, orphanBranch, _, orphanErr := adoptScanOrphanFn(root, epicID)
 	if orphanErr != nil {
 		return nil, adoptEvidenceErrorRefusal(specID, fmt.Sprintf("could not scan epic %s's closed beads for a stale surviving branch: %v", idrender.Bead(epicID), orphanErr))
 	}
 	if orphanBeadID != "" {
-		return nil, adoptOrphanPresentRefusal(specID, orphanBeadID, orphanBranch, orphanOutcome)
+		return nil, adoptOrphanPresentRefusal(root, specID, orphanBeadID, orphanBranch)
 	}
 
 	// R1(b): the aggregation lattice.
@@ -269,10 +278,20 @@ func adoptReadBeadStatus(id string) (string, error) {
 //
 // Returns the guard.DestructionOutcome the shared predicate produced
 // when an orphan IS found (F1-1): bead 3 discards no evidence its own
-// call already computed, so bead 4's upgrade to the full R2-derived hint
-// is a pure call-site swap at adoptOrphanPresentRefusal, with no
-// signature churn on this function. The returned outcome is meaningless
-// when beadID == "" (no orphan found).
+// call already computed. Bead 4's upgrade to the full R2-derived hint
+// is a pure call-site swap at adoptOrphanPresentRefusal (below), with
+// no signature churn on THIS function — the F1-1 comment's original
+// claim, confirmed: adoptOrphanPresentRefusal needs the predicate's
+// WorkDestructionEvidence too (R2(b)'s "destructive hints carry their
+// proof"), but that type lives in internal/gitutil, which internal/
+// approve (an ADR-0030 enforcement package) may not import — so
+// adoptOrphanPresentRefusal re-derives it itself, through
+// lifecycle.EvaluateOrphanHintAgainstMain (a second, redundant,
+// read-only evaluation of the identical (root, branch, "main") input
+// this function's own adoptEvaluateAgainstMainFn call already made),
+// rather than this function threading a gitutil-typed value back
+// through its own signature. The returned outcome is meaningless when
+// beadID == "" (no orphan found).
 func adoptScanOrphanPresent(root, epicID string) (beadID, beadBranch string, outcome guard.DestructionOutcome, err error) {
 	beads, listErr := adoptListEpicBeadsFn(root, epicID)
 	if listErr != nil {
@@ -503,27 +522,74 @@ func adoptStaleBranchPresentRefusal(specID, specBranch string, outcome guard.Des
 	)
 }
 
-// adoptOrphanPresentRefusal is R1(g)'s INTERIM composite-incident
-// refusal (AC-2(viii)'s bead-3 slice): inspection-first, no destructive
-// command. Bead 4 upgrades this to the full R2-derived hint (evidence-
-// proven stale-branch deletion with the preserve-first clause).
+// adoptOrphanPresentRefusal is R1(g)'s composite-incident refusal
+// (AC-2(viii)): the derived hint (bead 4), never the bead-3 interim
+// inspection-first form. It re-derives the shared predicate's outcome
+// and evidence itself, against "main" (R1(g) is reached only once
+// AdoptSpec has already established the local spec branch does not
+// survive — there is no spec branch to name or enrich from), via
+// adoptEvaluateOrphanHintFn (default-pinned to
+// lifecycle.EvaluateOrphanHintAgainstMain — see that function's own doc
+// comment for why this is the mechanism that keeps
+// gitutil.WorkDestructionEvidence from ever needing to be named in this
+// ADR-0030 enforcement package).
 //
-// outcome is UNUSED for now (F1-1): adoptScanOrphanPresent already
-// computes and returns it (the shared predicate's own
-// guard.DestructionOutcome for the orphaned branch), so bead 4's
-// upgrade — swapping this interim message for the full R2-derived hint —
-// is a pure call-site change with no signature churn on
-// adoptScanOrphanPresent, whose caller (AdoptSpec) already has the value
-// to hand.
-func adoptOrphanPresentRefusal(specID, beadID, beadBranch string, outcome guard.DestructionOutcome) error { //nolint:unparam // F1-1: threaded now so bead 4's upgrade to the full R2-derived hint is a pure call-site swap; consumed once that lands
-	return guard.NewFailure(
-		fmt.Sprintf(
-			"spec %s's epic has a closed bead %s whose branch %s still exists and is not landed in main — this is the composite incident state (a stale bead branch alongside externally-landed spec content); adopting now, before that branch's state is resolved, is refused",
-			idrender.Spec(specID), idrender.Bead(beadID), termsafe.Escape(beadBranch),
-		),
-		fmt.Sprintf("git diff main %s   (inspect %s's unlanded work before doing anything else)", beadBranch, idrender.Bead(beadID)),
-		fmt.Sprintf(`mindspec impl adopt %s --reason "<why>"   (re-run once %s's branch state is resolved)`, idrender.Spec(specID), idrender.Bead(beadID)),
+// Unlike the OTHER three R2 consumers (complete/impl-approve/doctor),
+// this refusal's own natural next step is always "resolve the branch's
+// state, then re-run adopt" — R1(g) is reached only because the local
+// spec branch is ALREADY gone, so "mindspec complete <bead>" (the
+// derivation's normal-unmerged/DestructionClean hint) has no spec
+// branch to merge into here. adoptScanOrphanFn's own trigger
+// (evidenceNegative) only ever reaches DestructionClean or
+// DestructionStaleDeletion (bead-3/bead-4's adoptScanOrphanPresent doc
+// comment), so DestructionClean is handled specially below — see the
+// switch's own comment (bead-4 fix round 1, BLOCKING-1) — before this
+// function appends the adopt re-run invocation after whatever lines
+// remain, UNLESS the outcome is DestructionSuperseded, whose hint
+// already ends with that exact invocation (deletionHint in
+// orphan_hints.go); appending a second copy would be a duplicate, not a
+// correction.
+func adoptOrphanPresentRefusal(root, specID, beadID, beadBranch string) error {
+	hint := adoptEvaluateOrphanHintFn(root, beadID, beadBranch, specID)
+	msg := fmt.Sprintf(
+		"spec %s's epic has a closed bead %s whose branch %s still exists and is not landed in main — this is the composite incident state (a stale bead branch alongside externally-landed spec content); adopting now, before that branch's state is resolved, is refused",
+		idrender.Spec(specID), idrender.Bead(beadID), termsafe.Escape(beadBranch),
 	)
+	if hint.EvidenceNote != "" {
+		msg += "\n" + hint.EvidenceNote
+	}
+	lines := hint.Lines
+	if hint.Outcome == guard.DestructionClean {
+		// Bead-4 fix round 1 (BLOCKING-1: G1-1/S3-1/F1-1). DestructionClean's
+		// derivation-owned hint (DeriveOrphanHint's normal-unmerged case) is
+		// EXACTLY `mindspec complete <bead>` — the ordinary next step once a
+		// spec branch survives to merge into. This function is reached only
+		// once AdoptSpec's own !specBranchExists leg (above, in AdoptSpec)
+		// has ALREADY established that the local spec branch does NOT
+		// survive — so that command names an action with no spec branch to
+		// act on: uninvokable guidance, and a direct violation of
+		// AC-2(viii)/R2's "never mindspec complete" falsifier in this
+		// refusal. Substitute an inspection-first line naming the real
+		// state instead — identical in SHAPE to the stale-deletion/
+		// evidence-error outcomes' own inspection-first hints (git diff,
+		// never a completion or deletion command): this consumer's
+		// disposition for an ordinary unlanded orphan with no home spec
+		// branch is "inspect the branch, then decide" (recreate/locate the
+		// spec branch, or adopt once the branch's fate is resolved) — the
+		// adopt re-run this function appends unconditionally below already
+		// names the forward path once that inspection is done.
+		lines = []string{fmt.Sprintf(
+			"git diff main %s   (bead %s's branch is an ordinary unlanded orphan — inspect it; no spec branch survives here for %s to complete into)",
+			termsafe.Escape(beadBranch), idrender.Bead(beadID), idrender.Bead(beadID),
+		)}
+	}
+	if hint.Outcome != guard.DestructionSuperseded {
+		lines = append(append([]string{}, lines...), fmt.Sprintf(
+			`mindspec impl adopt %s --reason "<why>"   (re-run once %s's branch state is resolved)`,
+			idrender.Spec(specID), idrender.Bead(beadID),
+		))
+	}
+	return guard.NewFailure(msg, lines...)
 }
 
 // adoptEvidenceErrorRefusal is AC-2(vi): a fail-closed, retryable

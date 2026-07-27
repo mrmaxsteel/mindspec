@@ -450,6 +450,27 @@ func jsonlStatusesAt(workdir, ref, path string) map[string]string {
 // is always propagated as an error, never guessed into a boolean (the
 // git < 2.38 case: leg (a)'s merge-tree --write-tree is unsupported, so the
 // caller must not silently fall through to a leg-(b) "success").
+//
+// Second vacuous-match guard (bead-4 fix round 1, BLOCKING-4 — G1-4/O1-1/
+// O2-1/S1-1): the ancestor-collapse fallback above corrects ONE vacuous
+// shape (ref itself already an ancestor of target). There is a SECOND,
+// distinct one it does not touch: leg (a)'s three-way merge (base, ours =
+// target, theirs = ref) necessarily reproduces target's OWN tree,
+// unconditionally, whenever ref's tree at its tip equals its tree at
+// base — i.e. ref's cumulative diff against that base is EMPTY (the
+// add-then-revert shape: a branch that reintroduces content target once
+// carried and then reverts its own reintroduction, ending up with no net
+// change of its own at all). Applying an empty diff to any tree returns
+// that tree unchanged, so leg (a) would report SubsumptionLanded — and
+// therefore "landed" — for EVERY possible target, including one that
+// never carried ref's content at all (verified end-to-end against both an
+// untouched and a diverged target; see
+// TestNetEffectLanded_PureRevertNoAdditionNotVacuouslyLanded). Nothing was
+// ever introduced by ref relative to this base, so nothing can be
+// reported landed: leg (a) is skipped entirely in that case, falling
+// through to leg (b) exactly as a genuine NOT-landed leg (a) result would
+// (leg (b)'s own diff-confined-to-tracker check also finds nothing here,
+// since the diff it inspects is the same empty one).
 func NetEffectLanded(workdir, ref, target string) (bool, error) {
 	if err := rejectOptionLike(ref); err != nil {
 		return false, err
@@ -475,15 +496,26 @@ func NetEffectLanded(workdir, ref, target string) (bool, error) {
 		base = parentBase
 	}
 
-	landed, err := ContentSubsumed(workdir, base, ref, target)
+	refTree, err := treeOIDFn(workdir, refSHA)
 	if err != nil {
-		// Infra failure (e.g. git < 2.38's unsupported --write-tree):
-		// propagate. Never fall through to leg (b) on an undetermined leg
-		// (a) — that would silently guess past the failure.
-		return false, err
+		return false, fmt.Errorf("resolving tree of %s: %w", ref, err)
 	}
-	if landed {
-		return true, nil
+	baseTree, err := treeOIDFn(workdir, base)
+	if err != nil {
+		return false, fmt.Errorf("resolving tree of merge-base %s: %w", base, err)
+	}
+
+	if refTree != baseTree {
+		landed, err := ContentSubsumed(workdir, base, ref, target)
+		if err != nil {
+			// Infra failure (e.g. git < 2.38's unsupported --write-tree):
+			// propagate. Never fall through to leg (b) on an undetermined leg
+			// (a) — that would silently guess past the failure.
+			return false, err
+		}
+		if landed {
+			return true, nil
+		}
 	}
 
 	// Leg (b): the tracker-only-carrier fallback, entered only on leg (a)'s
