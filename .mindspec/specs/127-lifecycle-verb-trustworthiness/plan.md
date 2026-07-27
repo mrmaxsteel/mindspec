@@ -1089,9 +1089,11 @@ preflight-phase structure bead 6 consumes (C-r4-7).
       carry it too. Corroborating one tracker-resident field with
       another does not fix this: no bd-resident marker can be made
       non-forgeable by construction. G1 also found a third production
-      `bd close` writer the original enumeration missed
-      (`internal/bead/hygiene.go:170`'s `FixHygiene`), which would have
-      been a further forgery surface even had the marker held.
+      closure path the original enumeration missed
+      (`internal/bead/hygiene.go:170`'s `FixHygiene`, which runs `bd
+      update <id> --status=closed`) — it disproves the original
+      closure-path enumeration, but because it writes no reason at all
+      it was never a `close_reason`-marker forgery surface.
 
    **The positive leg is UNOBTAINABLE from this mechanism today, not
    merely unbuilt** — this is the part the amendment records, so the
