@@ -1295,11 +1295,18 @@ func supersedeCloseExistingBeads(children []existingChildBead, planContent strin
 		return nil
 	}
 	version := extractPlanVersion(planContent)
-	// Bead-5 fix round 2, RULING 1: this literal (supersedeCloseReasonPrefix
-	// + version) is the single production write of a `bd close --reason`
-	// for a child bead under an epic — evaluateChildProvenance reads it
-	// back as the durable positive marker for an interrupted
-	// supersede-close. Keep the two in the SAME const, never re-typed.
+	// Bead-5 fix round 2, RULING 1 (superseded by fix round 3, RULING 1,
+	// G1): this literal (supersedeCloseReasonPrefix + version) is the
+	// single production WRITE of a `bd close --reason` for a child bead
+	// under an epic. It is READ BY NOTHING as evidence — and deliberately
+	// so: G1 proved a bd-resident close_reason string can never be
+	// non-forgeable by construction (`bd close --reason`/`bd import` can
+	// both write this identical prefix without this function ever
+	// running; see supersedeCloseReasonPrefix's and
+	// evaluateChildProvenance's own doc comments). Keep the two in the
+	// SAME const, never re-typed — purely so this write and a human's own
+	// later `bd show <id> --json` inspection agree on the literal text,
+	// not because any production reader parses it back.
 	reason := supersedeCloseReasonPrefix + version
 	var ids []string
 	for _, c := range children {
