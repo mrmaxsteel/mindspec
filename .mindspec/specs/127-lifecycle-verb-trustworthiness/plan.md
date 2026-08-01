@@ -123,6 +123,8 @@ work_chunks:
 ---
 # Plan: 127-lifecycle-verb-trustworthiness
 
+*Citation scope (added at final review, F3-2): all `file:line` citations in this document are pinned to the spec base `09f62bd9` unless explicitly marked as refreshed against the shipped tree (e.g. the bead-6 R5(d)(v) enumeration's bead-7 refresh note). Resolving an unmarked citation against a later tree may land on moved code; the counts and membership claims, not the line numbers, are what the plan steps pin.*
+
 **Revision 2, after the two-slot plan gate (P1/P2: 2/2
 REQUEST_CHANGES).** Two mechanisms are REPLACED, not repaired: the
 `guard.MergeClearance` producer-backstop design is deleted (it rested on

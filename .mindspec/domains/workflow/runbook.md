@@ -164,6 +164,47 @@ landed-merge commit could not be located by identity", that is the spec
 survives; re-run the lifecycle command after addressing the named
 cause rather than deleting the branch.
 
+### Lifecycle-verb behaviour changes an operator will notice (spec 127)
+
+Four operator-visible changes shipped with spec 127 (bd `mindspec-jax8`'s
+enumeration):
+
+1. **`mindspec plan approve` now has THREE outcomes where docs used to
+   describe one** (R3a/AC-4): it proceeds when the spec branch exists;
+   it REFUSES — naming the `mindspec impl adopt` path — when the branch
+   is positively missing (previously a raw merge-base error); and it
+   refuses DISTINCTLY when branch existence is INDETERMINATE (a git
+   evidence error is never folded into "absent"). See the merge-safety
+   operator guide (`project-docs/user/guides/merge-safety.md`) for the
+   adopt flow itself.
+2. **The closed-child `bd delete <id> --force` hint is gone in
+   practice** (R3c/AC-6): the deletion hint is now gated on POSITIVE
+   merge provenance and, as shipped, is UNREACHABLE in production —
+   every closed child with zero merge candidates gets an inspect-first
+   recovery (inspect, verify, then delete BY HAND if warranted), never a
+   pasteable force-delete. If you previously saw a delete hint on a
+   supersede-crash retry, this is why you now see inspection steps.
+   bd `mindspec-nixq` tracks restoring a positive producer for the hint.
+3. **Every lifecycle merge is preflighted for work destruction**
+   (R4): `complete` and `impl approve` refuse — before any mutation —
+   when the merge would net-delete target content the branch never
+   authored (superseded / stale-deletion outcomes) or when evidence
+   cannot be computed. The audited override is
+   `--allow-net-deletion "<reason>"`, recorded on durable metadata AND
+   in the escape-hatch friction registry, so repeated use is visible to
+   friction reporting (like `--allow-doc-skew`). A conflicted merge is
+   now PRESERVED in place, never aborted; the refusal names the
+   `--resolve-merge` re-entry (execution domain architecture doc,
+   § Merge safety layer).
+4. **Destructive-command guidance is mechanically policed** (R5/AC-11):
+   a 17-family destructive-command classifier floor (`internal/guard`)
+   plus a repo-wide `internal/lint` scan ensure no lifecycle diagnostic,
+   recovery line, or shipped guidance file emits a destructive command
+   outside the evidence-carrying constructor or a rationale-carrying
+   registry entry. The one legitimate `bd delete <id> --force` emission
+   is constructor-routed from a single source of truth shared by both
+   `internal/approve/plan.go` emitters.
+
 ## Maintenance Notes
 
 - **2026-07-02 (spec 107 wave 1):** The hidden `spec init` alias

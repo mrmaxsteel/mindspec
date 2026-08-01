@@ -106,6 +106,17 @@ an existing command group must add its name there or the drift guard
 fails the same way (spec 124 registered `ready-check` and `clarify` for
 the new `bead ready-check`/`bead clarify` verbs).
 
+Spec 127 made both registrations: `adopt` joined `SubcommandTokens` for
+the new `mindspec impl adopt` verb (R1's audited, merge-free terminal
+transition), and `allow-net-deletion` joined the third closed set,
+`internal/redact.EscapeHatchTokens` — the enum of escape-hatch tokens a
+friction/success journal event may carry (R4(b)'s audited
+work-destruction override, registered so repeated use is visible to
+friction reporting). The same drop-don't-guess rule applies: an
+unregistered escape-hatch token TAINTS and silently DROPS the event, so
+any new audited override flag must register its token here in the same
+diff.
+
 ### Config
 
 ```go
