@@ -1471,12 +1471,14 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    `--resolve-merge` flags, with leaf-identity + flag-membership tests.
 5. Preserved-merge precondition (R5(d)(v) — universal): every
    `CommitAll`/`commitWithExport` call site (`mindspec_executor.go:370`
-   /`:576`/`:623`/`:1041`/`:1126`; `approve/spec.go:122`/`:131`;
-   `approve/plan.go:399`/`:409` — the verified full set at this base)
+   /`:589`/`:645`/`:1092`/`:1176`; `approve/spec.go:122`/`:131`;
+   `approve/plan.go:430`/`:440` — nine sites, the verified full set at
+   this base; line numbers advisory, refreshed at bead-7 fix round 5
+   against the shipped tree)
    and the three producers check the target worktree for an in-progress
    merge their run did not create → refuse fail-closed naming the
    preserved conflict, its paths, and the re-entry invocation;
-   FinalizeEpic's warn-and-continue on the `:576` commit failure
+   FinalizeEpic's warn-and-continue on the `:589` commit failure
    becomes a refusal for exactly this class (E-r5-2). Shared helper +
    call-site enumeration test so a new committing path cannot bypass.
 6. Tests: **AC-7** all five legs (producer parity via the same evidence
