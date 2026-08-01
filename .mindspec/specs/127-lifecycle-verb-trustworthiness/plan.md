@@ -206,8 +206,11 @@ in this plan required resurrecting any of the four.
 bead 3 and bead 4, adopt's orphan-present refusal is inspection-first with
 no destructive command (R1g's declared interim); between bead 2 and bead
 7, the destructive-guidance allowlist holds its full seeded membership and
-the exemption list holds 8+4 entries — the tree is green throughout
-because AC-9(ii)'s zero-entry final-state assertion (AMENDED at bead-7
+the exemption list holds 10+4 entries — ten live (the eight Background-cited
+sites plus the two `ms-bead-cycle` canonical skill-map entries the
+exhaustive scan found, spec.md's Background note) plus the four seed-only
+orchestrator-block entries — the tree is green throughout because
+AC-9(ii)'s zero-entry final-state assertion (AMENDED at bead-7
 fix round 1 — not "exactly-one-entry," see the final-state amendment
 above) is **bead 7's** deliverable
 (bead 2 lands membership pinning, rationale + obligation discipline, and
