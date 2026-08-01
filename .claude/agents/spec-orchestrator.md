@@ -157,22 +157,47 @@ c. Six-reviewer bead panel reading the diff.
 
 d. Apply panel-mandated revisions in a fixup commit on the bead branch.
 
-e. Manual merge into the spec branch (because `mindspec complete`
-   sometimes trips on uncommitted `.beads/issues.jsonl` churn):
+e. Merge into the spec branch by running the verb, not by hand (spec
+   127 R5(e)): `mindspec complete` owns the bead→spec merge AND the
+   `.beads/issues.jsonl`-churn commit (`complete.go:733-742`) — it does
+   not need, and must never be preceded by, a manual stash/merge/
+   cleanup dance.
 
    ```
-   cd <spec-worktree>
-   git stash push -u -m "jsonl"
-   git merge --no-ff bead/<bead-id> -m "Merge bead/<id>: <summary>"
-   git stash drop
-   git worktree remove <bead-worktree> --force
-   git branch -D bead/<bead-id>
    mindspec complete <bead-id> "<one-line description>"
    ```
 
-   If `mindspec complete` reports phase drift ("plan vs implement"), fix
-   the epic's metadata with `bd update <epic-id>
-   --metadata='{"mindspec_phase":"implement",...}'` then retry.
+   Three known non-destructive recoveries, by the condition
+   `mindspec complete` reports — never a raw `git`/`bd` workaround:
+
+   - **Phase drift** ("plan vs implement" / the epic's stored phase
+     disagrees with its child beads): re-derive and merge-write the
+     phase — `mindspec repair phase <spec-id>`. This preserves every
+     other metadata key (`mindspec_migrated_at`, doc-skew/ADR-override
+     audit keys); a raw metadata REPLACE on the epic silently wipes
+     them and is runtime-banned — never hand-edit epic metadata.
+   - **Stale-SHA panel block** (GH #186 — a tracker-only commit, such
+     as `complete`'s own `.beads/issues.jsonl` sync, can advance the
+     bead tip past the round's `reviewed_head_sha`; #186 itself is
+     tracked for spec 128 and is not fixed here): re-panel so the
+     recorded SHA catches up — `mindspec panel create <slug> --spec
+     <spec-id> --target bead/<bead-id> --bead <bead-id> --round
+     <N+1>` (this co-bumps `round` and `reviewed_head_sha` in one
+     write; see `ms-panel-tally`'s stale-verdict rule) — then re-run
+     `mindspec complete <bead-id>`. **`--bead <bead-id>` is required,
+     not optional decoration**: omitting it registers a NON-bead
+     panel (`bead_id: null`); `mindspec complete`'s gate selects its
+     registered panel via `panel.ForBead`, which only ever matches a
+     bead-bound registration, and fails OPEN (permits completion with
+     no gate at all) when it finds none. A re-panel run without
+     `--bead` therefore looks like a recovery but silently disables
+     the very gate this bead exists to make trustworthy — worse than
+     the raw `git`/`bd` workaround it replaces, which at least fails
+     loudly.
+   - Any other refusal names its own recovery in the printed
+     `recovery:` line — run that line verbatim; it is always a
+     `mindspec`/`bd`-safe invocation, never a raw destructive command
+     (ADR-0035's guidance non-destructiveness clause).
 
 ### 7. Push spec branch + tags
 
@@ -624,14 +649,16 @@ Prevention: when drafting plans, use purely numeric bead labels
 
 ### 4. `mindspec complete` trips on `.beads/issues.jsonl` churn
 
-Symptom: `mindspec complete <bead-id>` reports "workspace has
-uncommitted changes: M issues.jsonl".
+Symptom: `mindspec complete <bead-id>` (no commit message) reports
+"workspace has uncommitted changes: M issues.jsonl".
 
 Cause: bd auto-regenerates the JSONL on every command; uncommitted
-churn from a sibling operation blocks completion.
+churn from a sibling operation blocks the bare, no-commit-message form.
 
-Recovery: do the merge manually as shown in step 6 (e) of the
-lifecycle, then call `mindspec complete` to record state.
+Recovery: pass a commit message — `mindspec complete <bead-id>
+"<one-line description>"` — so `complete`'s own pre-gate `CommitAll`
+step commits the churn itself (`complete.go:733-742`), exactly as step
+6 (e) of the lifecycle does; no manual merge is needed.
 
 ### 5. Session freshness gate
 
@@ -653,13 +680,14 @@ phase. mindspec complete is for implementation beads only."
 Cause: the bead is `in_progress` but the parent epic's
 `mindspec_phase` metadata still says `plan` (or the reverse).
 
-Recovery:
+Recovery: re-derive the phase from the child beads' own statuses and
+merge-write it to the epic — never a raw metadata replace, which wipes
+every unrelated key (`mindspec_migrated_at`, doc-skew/ADR-override
+audit keys):
 
 ```
-bd update <epic-id> --metadata='{"mindspec_phase":"implement", ...rest...}'
+mindspec repair phase <spec-id>
 ```
-
-(Preserve other metadata fields like `spec_num` and `spec_title`.)
 
 ---
 

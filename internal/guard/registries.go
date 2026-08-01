@@ -44,22 +44,49 @@ type DestructiveGuidanceAllowlistEntry struct {
 // DestructiveGuidanceAllowlist is seeded from the scan's own first run
 // over the pre-change tree — the Background inventory's live emitter
 // sites (spec 127 R5d) — and burned down by later beads as each
-// converts its own site. The reachable final state is ZERO entries,
-// not one: spec.md's Allowlist paragraph (R5(d), ruled O1-r2-6/C2-r2-2,
-// seed rule corrected per C-r4-9) pins bead 7's final allowlist to
-// "exactly one entry — release.go's labeled operator discard" (obligation
-// O2-r2-5), but bead-2 rework round 1 found this unreachable as written:
-// cmd/mindspec/release.go:257-258's own recovery line — `mindspec release
-// <id> --force` — leads with the mindspec verb, not git/bd/rm, so
-// FindFloorMatches on it returns [] (verified) and it can never be seeded
-// by this scan-derived mechanism; seeding it anyway would be the exact
-// unfalsifiable-leftover-at-burn-down shape the seed rule exists to
-// prevent. This is a recorded spec/plan-level adjudication bead 7
-// inherits, not a bead-2 code change: either AC-9(ii)'s final count
-// becomes zero with release.go's discard recorded as a
-// labeled-operator-choice OUTSIDE the allowlist mechanism, or the floor
-// is deliberately extended with a `mindspec <verb> --force`-shaped family
-// before bead 7 dispatches.
+// converts its own site.
+//
+// BEAD 7 FINAL DISPOSITION (resolving the tension bead-2 rework round 1
+// left recorded above, now corrected in place rather than left as an
+// open either/or): spec.md's Allowlist paragraph (R5(d), ruled
+// O1-r2-6/C2-r2-2, seed rule corrected per C-r4-9) reads as pinning
+// bead 7's final allowlist to "exactly one entry — release.go's labeled
+// operator discard" (obligation O2-r2-5). That literal count is
+// UNREACHABLE, and not by omission: cmd/mindspec/release.go's own
+// recovery text — `mindspec release <id> --force` — leads with the
+// mindspec verb, not git/bd/rm, so FindFloorMatches on it returns []
+// (verified empirically, both before and after bead 7's release.go
+// split) and it can never be admitted to a scan-seeded allowlist
+// without fabricating a finding the scan itself does not produce — the
+// exact unfalsifiable-leftover-at-burn-down shape the seed rule exists
+// to forbid. The other branch bead-2 left open — deliberately
+// extending R5(a)'s floor with a `mindspec <verb> --force`-shaped
+// family — is FORECLOSED, not merely undesirable: classifier.go's own
+// header (O2-r2-13) already records, as a shipped, reviewed decision,
+// that this floor's program set is closed to exactly {git, bd, rm} and
+// that mindspec's own destructive verbs — naming
+// `mindspec release <id> --force` specifically — "match no family here
+// and never will while the program set stays closed to these three."
+// Reopening that ruling to manufacture a seedable match would repeat
+// the very defect R5(a)'s Non-Goals section names (a mechanism
+// claiming more than a test can support) for a family this spec's own
+// prior bead already declined to add. So: the reachable, DERIVED final
+// state is ZERO entries — not a written literal, but the value
+// `len(destructive_seed_manifest.txt)`'s `[destructive_guidance_
+// allowlist]` section reconciles to once every seeded site converts
+// (registries_test.go's fixture (β), TestBootstrapManifest_
+// AllowlistRegistryIdentity) — and release.go's discard is instead
+// covered by its OWN obligation, entirely outside this registry:
+// cmd/mindspec/release_test.go's TestRunRelease_DiscardNeverInRecoveryLine
+// asserts the rendered failure's machine-greppable `recovery: ` line
+// never contains `--force`, and that the discard invocation appears
+// only in the message body's separately-labeled operator-choice text —
+// literally what O2-r2-5's obligation names, just proven by a
+// dedicated test rather than by allowlist membership a real scan can
+// never produce. AC-9(ii)'s literal "one entry" text is, on this
+// evidence, itself the defect the registries.go comment it amends was
+// already flagging for bead 7 to resolve; this comment records the
+// resolution rather than silently diverging from it.
 // The three merge producers (`CompleteBead`'s/`FinalizeEpic`'s
 // MergeInto, `MergeBranch`) emit no strings and never seed (they are
 // governed by R4, not R5).
@@ -99,9 +126,9 @@ type DestructiveGuidanceAllowlistEntry struct {
 // with a `--resolve-merge` re-entry invocation of the owning lifecycle
 // verb (a `mindspec complete`/`mindspec impl approve` command, never
 // git/bd/rm-led). The reachable state after this bead is therefore ZERO
-// entries (the doc comment above already anticipated this as the
-// eventual state, before bead 7's release.go disposition adds the one
-// remaining pinned entry).
+// entries — and stays zero after bead 7 (see the FINAL DISPOSITION note
+// above): release.go's discard is off this floor's program set by
+// design and is never seeded here.
 var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{}
 
 // OpaqueOperandEntry is one call-site operand the scan cannot fold to
@@ -326,7 +353,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/release.go",
 		Func:       "runRelease",
 		Detail:     "arg1:unprovable",
-		Rationale:  "idrender-rendered: every command-position Sprintf here substitutes `idrender.Bead(beadID)` inline (three call sites: the dirty-tree discard hint, the worktree-removal-failed hint, the return-to-open-failed hint).",
+		Rationale:  "idrender-rendered: every command-position Sprintf here substitutes `idrender.Bead(beadID)` inline (three call sites: the dirty-tree commit-and-rerun hint, the worktree-removal-failed hint, the return-to-open-failed hint). Bead 7 (spec 127 R5(d)/(e)): the dirty-tree site's recovery-line Sprintf no longer carries the `--force` discard tail — the discard moved into the MESSAGE body (arg0), a separately-labeled operator choice (registries.go's DestructiveGuidanceAllowlist doc comment explains why that operand needs no registry entry of its own: `mindspec release ... --force` matches no reviewed floor family at all, classifier.go's own {git,bd,rm}-program-set exclusion, O2-r2-13, so the scan's fold rules never flag arg0's static template here regardless of its dynamic porcelain-line content).",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -767,13 +794,17 @@ const exemptionHollowObligation = "internal/lint's TestDestructiveGuidanceSweep_
 // enumeration (spec 127 R5a/H-r6-4 named eight; running the scan
 // itself — not recall — found two MORE under the canonical
 // "ms-bead-cycle" skill-map surface key, the third recurrence of this
-// spec's own undercount lesson, spec 127 bead-2 rework RULING 7)
-// plus bead 7's four seed-only orchestrator-block entries (exited
-// when that bead deletes the bypass block, per named bead-exit
-// records — R5c's bootstrap discipline fixture (β)). Fourteen total —
-// KnownSitesExemptionListLiveCount/KnownSitesExemptionListTotalCount
-// below pin both halves so this count can never drift silently a
-// fourth time; TestKnownSitesExemptionList_CountSentinel asserts
+// spec's own undercount lesson, spec 127 bead-2 rework RULING 7). Prior
+// to bead 7 this list ALSO carried four seed-only orchestrator-block
+// entries (fourteen total) that existed only because
+// .claude/agents/spec-orchestrator.md's raw bypass block was still
+// live; bead 7 deletes that block outright (R5(e)) and exits all four
+// entries in the same commit (see the exit note at the end of this
+// slice literal) — ten live entries, ten total, is the state from bead
+// 7 onward. KnownSitesExemptionListLiveCount/
+// KnownSitesExemptionListTotalCount below pin both halves so this
+// count can never drift silently a fourth time;
+// TestKnownSitesExemptionList_CountSentinel asserts
 // len(KnownSitesExemptionList) against the derived total, never a
 // hand-typed number.
 var KnownSitesExemptionList = []KnownSiteExemptionEntry{
@@ -862,43 +893,30 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 		Obligation: exemptionHollowObligation,
 	},
 
-	// The four seed-only orchestrator-block entries — bead 7 deletes
-	// `.claude/agents/spec-orchestrator.md`'s bypass block outright, so
-	// these reconcile against Background's bypass-block bullet at
-	// command-family grain (per J-r7-1's honest scope), not at exact
-	// quoted-string grain like the ten above.
-	{
-		Surface:    ".claude/agents/spec-orchestrator.md",
-		Text:       "git stash drop",
-		Count:      1,
-		Family:     FamilyGitStashDropClear,
-		Rationale:  "part of the orchestrator's historical bypass-block recipe (a raw command sequence the orchestrator once ran directly, pre-dating this spec's constructor discipline) — seeded so the tree stays green while the block still exists; bead 7 deletes the whole block outright, exiting this entry.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    ".claude/agents/spec-orchestrator.md",
-		Text:       "git merge --no-ff bead/<bead-id> -m \"Merge bead/<id>: <summary>\"",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "same historical bypass-block recipe as git-stash-drop above.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    ".claude/agents/spec-orchestrator.md",
-		Text:       "git worktree remove <bead-worktree> --force",
-		Count:      1,
-		Family:     FamilyGitWorktreeRemoveForce,
-		Rationale:  "same historical bypass-block recipe as git-stash-drop above.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    ".claude/agents/spec-orchestrator.md",
-		Text:       "git branch -D bead/<bead-id>",
-		Count:      1,
-		Family:     FamilyGitBranchDeleteForce,
-		Rationale:  "same historical bypass-block recipe as git-stash-drop above.",
-		Obligation: exemptionHollowObligation,
-	},
+	// BEAD 7 EXIT (spec 127 R5(c)'s bootstrap discipline, fixture (β)):
+	// the four seed-only orchestrator-block entries this section used to
+	// carry — .claude/agents/spec-orchestrator.md's "git stash drop",
+	// "git merge --no-ff bead/<bead-id> ...", "git worktree remove
+	// <bead-worktree> --force", and "git branch -D bead/<bead-id>" — EXIT
+	// here. Bead 7 deletes that file's raw bypass block outright (R5(e)):
+	// the file no longer contains any of those four floor-matching
+	// strings (grep-verified — see cmd/mindspec's AC-10(i) absence test
+	// covering the same four command shapes at the same surface), so
+	// there is nothing left on this surface for these entries to exempt.
+	// destructive_seed_manifest.txt's [known_sites_exemption_list] drops
+	// these same four lines in this SAME commit, per the manifest's own
+	// documented discipline (TestBootstrapManifest_ExemptionListIdentity's
+	// two-way comparison — a registry entry with no manifest line is red,
+	// exactly like an addition). These four entries reconciled against the
+	// Background's bypass-block bullet at command-family grain only
+	// (J-r7-1) — never at the ten-live-entries' exact quoted-string grain
+	// — so their exit is covered by fixture (β)'s registry-identity check
+	// alone, not by fixture (α)'s Background reconciliation.
+	//
+	// KnownSitesExemptionList is therefore the TEN live entries above and
+	// nothing else: TestKnownSitesExemptionList_CountSentinel pins
+	// len(KnownSitesExemptionList) == 10 (derived from the slice, not a
+	// hand-typed literal re-typed here) — never 14 again.
 }
 
 // KnownSitesExemptionListLiveCount/KnownSitesExemptionListTotalCount

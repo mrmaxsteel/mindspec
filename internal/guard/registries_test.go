@@ -90,19 +90,49 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // drifts from what the exported count vars themselves compute — which
 // can only happen if this test is stale against a code change that
 // also updated the vars, since both are derived from the same slice.
-// Its real value is pinning the CURRENT correct numbers (ten live,
-// fourteen total) so a reviewer sees them fail loudly if a future
-// edit to the slice's structure (e.g. renaming the seed-only surface)
-// silently changes what "live" means.
+// Its real value is pinning the CURRENT correct numbers (ten live, ten
+// total, as of bead 7's exit of the four seed-only orchestrator-block
+// entries — fourteen total was the pre-bead-7 state) so a reviewer
+// sees them fail loudly if a future edit to the slice's structure
+// (e.g. renaming the seed-only surface, or a leftover orchestrator
+// entry surviving the exit) silently changes what "live" means.
+// wantKnownSitesLiveCount is the ONE hand-typed number this sentinel
+// pins (bead-7 fix round 1, G1's brief-error correction): eight
+// Background-cited entries plus two background-justified widening
+// entries (spec.md R5(c)), with the four seed-only orchestrator-block
+// entries already exited by bead 7 — so live and total coincide.
+// Declared once and read three times below, rather than re-typed at
+// each assertion, so the three checks cannot silently drift apart from
+// one another even though the underlying "10" is still, unavoidably,
+// a hand-pinned sentinel value (that's what a sentinel is).
+const wantKnownSitesLiveCount = 10
+
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
-	if got, want := len(KnownSitesExemptionList), 14; got != want {
+	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {
 		t.Errorf("len(KnownSitesExemptionList) = %d, want %d", got, want)
 	}
-	if got, want := KnownSitesExemptionListTotalCount, 14; got != want {
+	if got, want := KnownSitesExemptionListTotalCount, wantKnownSitesLiveCount; got != want {
 		t.Errorf("KnownSitesExemptionListTotalCount = %d, want %d", got, want)
 	}
-	if got, want := KnownSitesExemptionListLiveCount, 10; got != want {
+	if got, want := KnownSitesExemptionListLiveCount, wantKnownSitesLiveCount; got != want {
 		t.Errorf("KnownSitesExemptionListLiveCount = %d, want %d", got, want)
+	}
+}
+
+// TestKnownSitesExemptionList_NoOrchestratorSeedSurvives is a red
+// fixture for bead 7's own exit obligation (fixture (β)'s registry-
+// identity discipline, applied directly rather than only via the
+// derived count): if a leftover seed-only
+// orchestrator-block entry (or a reintroduced one) ever exists in
+// KnownSitesExemptionList, this REDs — independent of the derived
+// count sentinel above, so a future edit that removes one seed-only
+// entry AND adds one unrelated live one (keeping len() at 10 by
+// coincidence) is still caught.
+func TestKnownSitesExemptionList_NoOrchestratorSeedSurvives(t *testing.T) {
+	for _, e := range KnownSitesExemptionList {
+		if e.Surface == ".claude/agents/spec-orchestrator.md" {
+			t.Errorf("KnownSitesExemptionList still carries a seed-only orchestrator-block entry %q — bead 7 deletes that block outright and exits all four such entries", e.Text)
+		}
 	}
 }
 
