@@ -70,6 +70,18 @@ package executor
 //     call-graph/dataflow analysis — it FAILS CLOSED instead
 //     (failClosedOnMergeSignatureParams): finding one REDS the test,
 //     naming the location, rather than silently leaving it uncounted.
+//   - (CLOSED, bead-6 fix round 4, item 2) A package-level `var` declared
+//     WITHOUT an initializer whose OWN declared type matches
+//     gitutil.MergeInto/MergeBranch's signature exactly (`var mysteryFn
+//     func(string, string) error`, assigned a concrete value only
+//     elsewhere — a separate statement, an init() func, another file) was
+//     a THIRD unresolvable shape, invisible to both
+//     collectMergeFnAliases (no initializer expression to trace) and
+//     failClosedOnMergeSignatureParams (not a function parameter). This is
+//     exactly as unresolvable as the parameter case, for the same reason,
+//     and now FAILS CLOSED the same way
+//     (collectUnresolvedMergeSignatureVars +
+//     failClosedOnUnresolvedMergeSignatureVars).
 //   - This is lexically-scoped, not a full call-graph trace: a merge call
 //     reached through a call to a SEPARATE, independently-declared
 //     function (not a closure, not an alias) must carry its OWN preflight
@@ -471,6 +483,81 @@ func paramCalledAsFunc(body ast.Node, paramName string) bool {
 	return found
 }
 
+// collectUnresolvedMergeSignatureVars scans every top-level `var`
+// declaration (across every file) for one declared WITHOUT an
+// initializer whose OWN declared type matches gitutil.MergeInto/
+// MergeBranch's exact signature (mergeFuncSignatureShape) — e.g. `var
+// mysteryFn func(string, string) error`, left nil at declaration and
+// assigned a concrete value only somewhere else (a separate assignment
+// statement, an init() func, another file). Spec 127 bead-6 fix round 4
+// (item 2, the confirm-round's own ruling): collectMergeFnAliases can only
+// ever trace a var's own INITIALIZER expression — a var with NO
+// initializer carries nothing for it to trace, so it was previously
+// invisible to BOTH collectMergeFnAliases (not an alias assignment) and
+// failClosedOnMergeSignatureParams (not a function parameter) — a third,
+// silently uncounted shape. This is exactly as unresolvable, by the same
+// reasoning failClosedOnMergeSignatureParams already applies to a
+// function-typed parameter: the standing instruction is fail CLOSED on a
+// shape this scan cannot resolve, not silently pass it over. Returns the
+// set of such var names, collected once and shared across every span (a
+// package-level var is visible package-wide, unlike a function parameter
+// scoped to its own function).
+func collectUnresolvedMergeSignatureVars(files []*ast.File) map[string]bool {
+	unresolved := map[string]bool{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Values) != 0 || vs.Type == nil {
+					// A var WITH an initializer is collectMergeFnAliases'
+					// own concern (a chain rooted at gitutil.MergeInto/
+					// MergeBranch resolves there; a chain rooted at
+					// something else is correctly left unresolved, not a
+					// merge producer at all — re-flagging it here on
+					// signature shape alone would be pure false-positive
+					// noise for the common case of an unrelated
+					// same-shaped function value).
+					continue
+				}
+				ft, ok := vs.Type.(*ast.FuncType)
+				if !ok {
+					continue
+				}
+				if _, ok := mergeFuncSignatureShape(ft); !ok {
+					continue
+				}
+				for _, name := range vs.Names {
+					unresolved[name.Name] = true
+				}
+			}
+		}
+	}
+	return unresolved
+}
+
+// failClosedOnUnresolvedMergeSignatureVars is
+// collectUnresolvedMergeSignatureVars' enforcement leg, mirroring
+// failClosedOnMergeSignatureParams below: any span that calls one of these
+// package-level, uninitialized-at-declaration vars directly (by name) REDS
+// — this scan cannot trace what value the var holds at that call site
+// (the assignment could be anywhere: a different file, an init() func, a
+// runtime-conditional branch), so it cannot confirm a preflight covers
+// whatever it resolves to. Shares paramCalledAsFunc's direct-call
+// detection — the check is identical once the vocabulary of "an
+// unresolvable name that might be a merge producer" is the same, whether
+// that name arrived as a function parameter or a package-level var.
+func failClosedOnUnresolvedMergeSignatureVars(t *testing.T, unresolvedVars map[string]bool, body ast.Node, fileName, label string, pos token.Position) {
+	for name := range unresolvedVars {
+		if paramCalledAsFunc(body, name) {
+			t.Errorf("%s (%s, at %s): package-level var %q is declared with a signature matching gitutil.MergeInto/MergeBranch exactly but NO initializer, and is called directly here — this AST-level scan cannot trace what value it is assigned elsewhere (a separate statement, an init() func, another file), so it cannot confirm a preflight covers whatever it resolves to at runtime. Give it a traceable shape (an initializer this scan can resolve, e.g. `= gitutil.MergeInto` or a chain rooted at one) or extend this scan; a merge producer must never reach gitutil.MergeInto/MergeBranch through an indirection this ratchet cannot see.", label, fileName, pos, name)
+		}
+	}
+}
+
 // failClosedOnMergeSignatureParams is bead-6 fix round 3's fail-closed
 // leg for the OTHER unresolvable indirection G1-2's confirm-round
 // finding demonstrated (alongside the chained-alias shape
@@ -538,6 +625,7 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 	}
 
 	aliases := collectMergeFnAliases(files)
+	unresolvedVars := collectUnresolvedMergeSignatureVars(files)
 
 	var spans []*funcSpan
 	for i, file := range files {
@@ -550,6 +638,7 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 					return true
 				}
 				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
+				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{file: fileName, label: v.Name.Name, mergeCalls: merges, preflight: preflights})
 			case *ast.FuncLit:
@@ -561,6 +650,7 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 				}
 				label := fmt.Sprintf("func literal at %s", fset.Position(v.Pos()))
 				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, label, fset.Position(v.Pos()))
+				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, label, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{
 					file:       fileName,
@@ -807,5 +897,107 @@ func ordinaryResumeAwareMergeShape(mergeFn func() error, conflictFailure func(er
 
 	if got := funcParamsMatchingMergeSignature(ordinary.Type.Params); len(got) != 0 {
 		t.Errorf("resumeAwareMerge's own mergeFn()/conflictFailure() shapes must NEVER match gitutil.MergeInto/MergeBranch's signature (0/1 string params, not 2/3); got %v", got)
+	}
+}
+
+// TestCollectUnresolvedMergeSignatureVars_CatchesUninitializedVarIndirection
+// is bead-6 fix round 4's acceptance test for item 2: a package-level var
+// declared WITHOUT an initializer, whose OWN declared type matches
+// gitutil.MergeInto/MergeBranch's signature exactly, and called directly —
+// the THIRD unresolvable shape (alongside the alias-chain and
+// parameter-indirection shapes rounds 3/1 already closed) that was
+// previously invisible to this scan entirely: not an alias assignment
+// (collectMergeFnAliases has no initializer expression to trace) and not a
+// function parameter (failClosedOnMergeSignatureParams only looks at
+// Params). A var WITH an initializer — even one this scan cannot resolve
+// to gitutil.MergeInto/MergeBranch — must NOT be caught here: that is
+// collectMergeFnAliases' own concern, and conflating the two would flag
+// every ordinary same-shaped function value as if it were unresolvable.
+func TestCollectUnresolvedMergeSignatureVars_CatchesUninitializedVarIndirection(t *testing.T) {
+	src := `package p
+
+var mergeIntoLikeUninitialized func(string, string) error
+var mergeBranchLikeUninitialized func(string, string, string) error
+
+// An ordinary initialized var of a DIFFERENT (unrelated) shape must never
+// be caught here — it is a real, resolvable value, just not one this
+// scan traces (that is collectMergeFnAliases' own residual, not this
+// check's concern).
+var initializedUnrelated func(string, string) error = someOtherPackage.SomeFunc
+
+func g2UnpreflightedProducer() error {
+	return mergeIntoLikeUninitialized("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "unresolvedvar.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	unresolved := collectUnresolvedMergeSignatureVars([]*ast.File{file})
+
+	for _, name := range []string{"mergeIntoLikeUninitialized", "mergeBranchLikeUninitialized"} {
+		if !unresolved[name] {
+			t.Errorf("collectUnresolvedMergeSignatureVars must catch %q: declared with a matching signature and no initializer", name)
+		}
+	}
+	if unresolved["initializedUnrelated"] {
+		t.Error("collectUnresolvedMergeSignatureVars must NOT catch a var that DOES carry an initializer — that is collectMergeFnAliases' own concern, not this check's")
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g2UnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	if !paramCalledAsFunc(producer.Body, "mergeIntoLikeUninitialized") {
+		t.Fatal("paramCalledAsFunc must detect the uninitialized var being called directly — this is the same direct-call detection failClosedOnUnresolvedMergeSignatureVars relies on")
+	}
+}
+
+// TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree
+// confirms (real-git-repo-adjacent, but here a real-source-tree check) that
+// the new fail-closed leg does not fire against internal/executor's own
+// production code: TestMergeChokepoint_EveryProducerConsultsThePreflight
+// already runs failClosedOnUnresolvedMergeSignatureVars over every real
+// span in this package as part of its normal pass — this test exists
+// separately so a false positive here is diagnosable on its own, without
+// wading through the chokepoint test's other assertions, and so the ONE
+// package-level func-typed var without an initializer this package
+// actually has (finalizeStepHookFn, `func(stage string) error` — one
+// string param, not two or three) is pinned as a known-safe non-match by
+// name, not merely by the absence of a failure.
+func TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree(t *testing.T) {
+	root := mergeChokepointRepoRoot(t)
+	pkgDir := filepath.Join(root, "internal", "executor")
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", pkgDir, err)
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".go" || len(e.Name()) > 8 && e.Name()[len(e.Name())-8:] == "_test.go" {
+			continue
+		}
+		path := filepath.Join(pkgDir, e.Name())
+		file, ferr := parser.ParseFile(fset, path, nil, 0)
+		if ferr != nil {
+			t.Fatalf("parsing %s: %v", path, ferr)
+		}
+		files = append(files, file)
+	}
+
+	unresolved := collectUnresolvedMergeSignatureVars(files)
+	if unresolved["finalizeStepHookFn"] {
+		t.Error("finalizeStepHookFn (func(stage string) error, one string param) must NOT match gitutil.MergeInto/MergeBranch's signature (two or three) — a real, pre-existing package-level var without an initializer must never be a false positive")
+	}
+	if len(unresolved) != 0 {
+		t.Errorf("expected zero unresolved-var false positives against the real internal/executor tree, got %v", unresolved)
 	}
 }

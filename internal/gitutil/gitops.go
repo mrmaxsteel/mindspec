@@ -906,6 +906,94 @@ func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, e
 	return strings.TrimSpace(string(out)), nil
 }
 
+// DanglingCollapsedMergeExists reports whether workdir's object store
+// already holds an UNREACHABLE (dangling) commit object with EXACTLY the
+// given tree and ordered two-parent list — spec 127 bead-6 fix round 4's
+// discriminator (S1's confirm-round question): a genuinely STRANDED
+// drift-collapse (completeDriftedResumedMerge's CommitTreeMerge succeeded
+// but the immediately-following ResetSoft failed) leaves the commit-tree
+// call's own OUTPUT OBJECT sitting in the object store, unreferenced by any
+// ref — because ResetSoft never ran the update that would have made it
+// reachable. Nothing else in this codebase ever calls CommitTreeMerge with
+// these exact operands, so this object's presence is proof-positive of a
+// genuinely interrupted collapse, not merely a topology that happens to
+// look the same.
+//
+// A topology that MERELY LOOKS stranded — two adjacent, same-subject merge
+// commits produced by two entirely separate, successful `git commit
+// --no-edit` invocations (spec 127 bead-6 fix round 3's STATED RESIDUAL 1:
+// a drift catch-up that itself re-conflicts, completed by a later, separate
+// invocation) — never runs CommitTreeMerge at all, so no such object can
+// exist for it. detectStrandedDriftTopology (merge_resumption.go) calls
+// this BEFORE ever collapsing: only a topology BOTH matching the structural
+// shape (adjacency + shared subject) AND corroborated by this dangling
+// object is treated as stranded. The structural shape alone is
+// NECESSARY but not SUFFICIENT — collapsing a legitimately-produced
+// multi-invocation chain on shape alone would rewrite history the operator
+// never asked to be rewritten, and (worse) could orphan an
+// already-durably-recorded landed-merge binding that named the
+// now-discarded commit by SHA.
+//
+// Uses `git fsck --unreachable --no-reflog` (dangling objects still present
+// but reachable from no ref and no reflog entry — exactly what a
+// resumeSoft failure leaves behind) rather than any ref-based scan, since
+// the object this proves the existence of is BY DEFINITION not on any ref.
+func DanglingCollapsedMergeExists(workdir, tree, parent1, parent2 string) (bool, error) {
+	for _, s := range []string{tree, parent1, parent2} {
+		if err := rejectOptionLike(s); err != nil {
+			return false, err
+		}
+	}
+	cmd := execCommand("git", gitArgs(workdir, "fsck", "--unreachable", "--no-reflog")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("fsck --unreachable in %s: %w", workdir, err)
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		fields := strings.Fields(line)
+		// `git fsck --unreachable` labels its own lines "unreachable <type>
+		// <sha>" (never "dangling" — that label is plain `git fsck`'s own,
+		// narrower vocabulary for an unreachable object with no incoming
+		// reference from another object git visited). Accept either label
+		// so this does not silently miss its target if the flag's own
+		// wording is ever mixed with a plain fsck call.
+		if len(fields) != 3 || (fields[0] != "unreachable" && fields[0] != "dangling") || fields[1] != "commit" {
+			continue
+		}
+		sha := fields[2]
+		gotTree, terr := TreeSHA(workdir, sha)
+		if terr != nil || gotTree != tree {
+			continue
+		}
+		gotParents, perr := CommitParents(workdir, sha)
+		if perr != nil {
+			continue
+		}
+		if len(gotParents) == 2 && gotParents[0] == parent1 && gotParents[1] == parent2 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CommitParents returns ref's own parent-SHA list, in git's own order
+// (`git log -1 --format=%P ref`) — works on any resolvable commit object,
+// including one reachable from no ref at all (a dangling object located via
+// `git fsck --unreachable`), since `git log` accepts a bare object SHA
+// directly. Spec 127 bead-6 fix round 4: the parent half of
+// DanglingCollapsedMergeExists's tree+parents identity check.
+func CommitParents(workdir, ref string) ([]string, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "log", "-1", "--format=%P", ref, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading parents of %s: %w", ref, err)
+	}
+	return strings.Fields(string(out)), nil
+}
+
 // escapeLines applies termsafe.Escape to each line of a (possibly
 // multi-line) block of agent-influenced text — git porcelain/error output —
 // while preserving the real newlines that separate genuine lines (R4:
