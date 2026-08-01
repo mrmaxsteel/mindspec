@@ -155,6 +155,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"testing"
 )
 
@@ -261,6 +262,41 @@ func collectInlineArgFuncLits(file *ast.File) map[*ast.FuncLit]bool {
 	return inline
 }
 
+// gitutilImportPath is this repository's own import path for internal/
+// gitutil — the ONE package whose MergeInto/MergeBranch this whole ratchet
+// exists to gate.
+const gitutilImportPath = "github.com/mrmaxsteel/mindspec/internal/gitutil"
+
+// gitutilLocalName resolves the identifier file's OWN import line binds
+// gitutilImportPath to — "gitutil" for a plain, unaliased import (every
+// production call site in this package today), or whatever alias an
+// import line gives it (`import gu ".../internal/gitutil"`). Bead-6 fix
+// round 6 (G1-2's confirm-round finding, shape 3): every direct-call/
+// alias/conversion check below previously hard-coded the literal
+// identifier "gitutil", so a merge producer reached through
+// `gu.MergeInto(...)` with gitutil imported under an alias — ordinary Go,
+// not an adversarial contrivance — was invisible to every one of them at
+// once. Falls back to the literal "gitutil" when file carries no matching
+// import at all: this ratchet's OWN ad hoc, single-file unit-test fixture
+// sources (below) are minimal syntax snippets that reference
+// `gitutil.MergeInto` directly without ever declaring an import block
+// (parser.ParseFile only parses syntax, never resolves imports) — every
+// REAL production file in this package does import gitutil under some
+// name, so this fallback never masks a real alias there.
+func gitutilLocalName(file *ast.File) string {
+	for _, imp := range file.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || path != gitutilImportPath {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		return "gitutil"
+	}
+	return "gitutil"
+}
+
 // collectSpanCalls walks root (a *ast.FuncDecl's or *ast.FuncLit's Body)
 // collecting merge/preflight calls that belong DIRECTLY to it — descent
 // stops at any NESTED, NON-INLINE *ast.FuncLit boundary, so a closure
@@ -268,8 +304,10 @@ func collectInlineArgFuncLits(file *ast.File) map[*ast.FuncLit]bool {
 // its calls attributed to its enclosing span (it gets its own span from
 // the whole-file walk that dispatches this function). A nested FuncLit
 // that IS a direct call argument (inlineArgs[fl]) is transparent: descent
-// continues into it as if it were part of the current span.
-func collectSpanCalls(root ast.Node, aliases map[string]string, inlineArgs map[*ast.FuncLit]bool) (merges []mergeCallInfo, preflights []preflightCallInfo) {
+// continues into it as if it were part of the current span. gitutilName
+// is the enclosing file's OWN resolved gitutil identifier
+// (gitutilLocalName) — never the literal "gitutil" (bead-6 fix round 6).
+func collectSpanCalls(root ast.Node, aliases map[string]string, inlineArgs map[*ast.FuncLit]bool, gitutilName string) (merges []mergeCallInfo, preflights []preflightCallInfo) {
 	ast.Inspect(root, func(n ast.Node) bool {
 		if n == nil {
 			return false
@@ -285,7 +323,7 @@ func collectSpanCalls(root ast.Node, aliases map[string]string, inlineArgs map[*
 		}
 		switch fn := call.Fun.(type) {
 		case *ast.SelectorExpr:
-			if xid, ok := fn.X.(*ast.Ident); ok && xid.Name == "gitutil" &&
+			if xid, ok := fn.X.(*ast.Ident); ok && xid.Name == gitutilName &&
 				(fn.Sel.Name == "MergeInto" || fn.Sel.Name == "MergeBranch") {
 				merges = append(merges, buildMergeCall(call, fn.Sel.Name))
 			}
@@ -352,6 +390,9 @@ func collectMergeFnAliases(files []*ast.File) map[string]string {
 	aliases := map[string]string{}
 	pending := map[string]string{} // varName -> the identifier it was assigned, for var-to-var hops not yet resolved
 	for _, file := range files {
+		// Bead-6 fix round 6: resolve THIS file's own gitutil identifier —
+		// never the literal "gitutil" (see gitutilLocalName's doc comment).
+		gitutilName := gitutilLocalName(file)
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.VAR {
@@ -370,7 +411,7 @@ func collectMergeFnAliases(files []*ast.File) map[string]string {
 					switch v := val.(type) {
 					case *ast.SelectorExpr:
 						xid, ok := v.X.(*ast.Ident)
-						if !ok || xid.Name != "gitutil" {
+						if !ok || xid.Name != gitutilName {
 							continue
 						}
 						if v.Sel.Name != "MergeInto" && v.Sel.Name != "MergeBranch" {
@@ -540,11 +581,11 @@ func funcParamsMatchingMergeSignature(params *ast.FieldList, typeAliases map[str
 // package's own mock/fixture types declare (e.g. MockExecutor's
 // GitMvFn/ResetHardFn, which share gitutil.MergeInto/MergeBranch's bare
 // string-arity shape by coincidence, never assigned a merge producer).
-func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string) bool {
+func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string, gitutilName string) bool {
 	switch v := e.(type) {
 	case *ast.SelectorExpr:
 		xid, ok := v.X.(*ast.Ident)
-		return ok && xid.Name == "gitutil" && (v.Sel.Name == "MergeInto" || v.Sel.Name == "MergeBranch")
+		return ok && xid.Name == gitutilName && (v.Sel.Name == "MergeInto" || v.Sel.Name == "MergeBranch")
 	case *ast.Ident:
 		_, ok := mergeAliases[v.Name]
 		return ok
@@ -552,22 +593,100 @@ func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string) bool {
 		if len(v.Args) != 1 {
 			return false
 		}
-		return isMergeProducerExpr(v.Args[0], mergeAliases)
+		return isMergeProducerExpr(v.Args[0], mergeAliases, gitutilName)
 	case *ast.ParenExpr:
-		return isMergeProducerExpr(v.X, mergeAliases)
+		return isMergeProducerExpr(v.X, mergeAliases, gitutilName)
 	default:
 		return false
+	}
+}
+
+// collectNamedStructTypes scans every top-level `type X struct {...}`
+// declaration across every file, mirroring collectFuncTypeAliases for
+// struct types — needed to resolve a POSITIONAL composite literal's
+// (`handler{gitutil.MergeInto}`) field name by index, since a positional
+// element carries no field name of its own (bead-6 fix round 6, G1-2's
+// confirm-round finding, shape 2).
+func collectNamedStructTypes(files []*ast.File) map[string]*ast.StructType {
+	structs := map[string]*ast.StructType{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if st, ok := ts.Type.(*ast.StructType); ok {
+					structs[ts.Name.Name] = st
+				}
+			}
+		}
+	}
+	return structs
+}
+
+// structFieldNamesInOrder flattens st's own field list into the ordered
+// name sequence a POSITIONAL composite literal's elements line up
+// against — one entry per name a field declares (`a, b int` contributes
+// two slots), or "" for an embedded field (no Names), so position
+// counting stays correct even though an embedded field can never match a
+// risky member name added elsewhere by field NAME.
+func structFieldNamesInOrder(st *ast.StructType) []string {
+	if st == nil || st.Fields == nil {
+		return nil
+	}
+	var names []string
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			names = append(names, "")
+			continue
+		}
+		for _, n := range f.Names {
+			names = append(names, n.Name)
+		}
+	}
+	return names
+}
+
+// resolveStructType resolves e to its own *ast.StructType: directly, if e
+// IS one (an anonymous struct type literal, right there in the
+// composite-literal expression), or through exactly ONE namedStructs
+// lookup if e is a bare *ast.Ident naming a declared struct type —
+// mirroring resolveFuncType's bounded, one-hop philosophy. Anything else
+// (nil Type, elided in a nested literal; a pointer; an unresolvable name)
+// returns ok=false.
+func resolveStructType(e ast.Expr, namedStructs map[string]*ast.StructType) (*ast.StructType, bool) {
+	switch v := e.(type) {
+	case *ast.StructType:
+		return v, true
+	case *ast.Ident:
+		st, ok := namedStructs[v.Name]
+		return st, ok
+	default:
+		return nil, false
 	}
 }
 
 // collectRiskyMemberNames scans every file for a struct field or a named
 // function type GENUINELY assigned/converted from gitutil.MergeInto/
 // MergeBranch (isMergeProducerExpr) — bead-6 fix round 5 (G1's
-// confirm-round finding, shapes (b) and (c)):
+// confirm-round finding, shapes (b) and (c)), extended by bead-6 fix
+// round 6 (G1-2's confirm-round finding) to two further ways a field can
+// be GENUINELY assigned:
 //
-//   - a STRUCT FIELD actually assigned a merge producer via a
-//     composite-literal keyed element (`handler{run: gitutil.MergeInto}`),
-//     reached elsewhere via a selector call (`h.run(...)`);
+//   - a STRUCT FIELD assigned a merge producer via a composite-literal
+//     KEYED element (`handler{run: gitutil.MergeInto}`, round 5) or a
+//     POSITIONAL element (`handler{gitutil.MergeInto}`, round 6 — the
+//     element carries no field name of its own, so its slot's name is
+//     resolved by index against the literal's own struct type), reached
+//     elsewhere via a selector call (`h.run(...)`);
+//   - a STRUCT FIELD assigned a merge producer via a POST-CONSTRUCTION
+//     assignment statement (`h.run = gitutil.MergeInto`, round 6 —
+//     ordinary Go, not merely a contrived construction-time shape);
 //   - a METHOD whose OWN receiver's named function type was itself
 //     converted from a merge producer somewhere (`type mergeFunc
 //     func(string, string) error; ...; m := mergeFunc(gitutil.MergeInto)`,
@@ -593,14 +712,31 @@ func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string) bool {
 // cannot trace without full call-graph/dataflow analysis. Field names and
 // matching method names share ONE vocabulary here, so
 // failClosedOnRiskyMemberCalls treats them identically.
+//
+// STATED RESIDUAL (bead-6 fix round 6, G1-2's confirm-round finding, the
+// false-positive half — judged NONBLOCKING and left as a disclosed
+// trade-off, not fixed): this vocabulary is keyed by BARE member name
+// alone, package-wide, never by the receiver's own type identity —
+// resolving that would require go/types, full type-checking this
+// deliberately AST-level, textual ratchet does not otherwise attempt (see
+// this file's own package doc comment). So a field or method GENUINELY
+// assigned a merge producer on one type can make an UNRELATED type's
+// same-named, different-signature member call red purely on the name
+// collision. This is a real, demonstrated false-positive (a maintenance
+// cost — rename or extend this scan) but never a false NEGATIVE: it can
+// only make this ratchet fail CI on safe code, never let an unpreflighted
+// merge call through silently, so it does not compromise the guarantee
+// this bead exists to provide.
 func collectRiskyMemberNames(files []*ast.File, typeAliases map[string]*ast.FuncType, mergeAliases map[string]string) map[string]bool {
 	risky := map[string]bool{}
+	namedStructs := collectNamedStructTypes(files)
 
 	// Named types genuinely converted FROM a merge producer somewhere —
 	// the narrower bar shape (c) needs, before any method on that type is
 	// treated as risky.
 	convertedTypes := map[string]bool{}
 	for _, file := range files {
+		gitutilName := gitutilLocalName(file)
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -613,7 +749,7 @@ func collectRiskyMemberNames(files []*ast.File, typeAliases map[string]*ast.Func
 			if _, ok := typeAliases[id.Name]; !ok {
 				return true
 			}
-			if isMergeProducerExpr(call.Args[0], mergeAliases) {
+			if isMergeProducerExpr(call.Args[0], mergeAliases, gitutilName) {
 				convertedTypes[id.Name] = true
 			}
 			return true
@@ -621,24 +757,69 @@ func collectRiskyMemberNames(files []*ast.File, typeAliases map[string]*ast.Func
 	}
 
 	for _, file := range files {
+		gitutilName := gitutilLocalName(file)
+
 		// Struct fields genuinely assigned a merge producer via a
-		// composite-literal keyed element.
+		// composite-literal element — KEYED or POSITIONAL. A struct
+		// literal's elements are, per Go's own grammar, either ALL keyed
+		// or ALL positional — never mixed — so finding one non-KeyValueExpr
+		// element means every element in this literal is positional, and
+		// each slot's field name is resolved by index against the
+		// literal's own struct type (round 6).
 		ast.Inspect(file, func(n ast.Node) bool {
 			cl, ok := n.(*ast.CompositeLit)
 			if !ok {
 				return true
 			}
+			var positionalNames []string
 			for _, elt := range cl.Elts {
-				kv, ok := elt.(*ast.KeyValueExpr)
+				if _, keyed := elt.(*ast.KeyValueExpr); !keyed {
+					if st, ok := resolveStructType(cl.Type, namedStructs); ok {
+						positionalNames = structFieldNamesInOrder(st)
+					}
+					break
+				}
+			}
+			for i, elt := range cl.Elts {
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					keyID, ok := kv.Key.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					if isMergeProducerExpr(kv.Value, mergeAliases, gitutilName) {
+						risky[keyID.Name] = true
+					}
+					continue
+				}
+				if i >= len(positionalNames) || positionalNames[i] == "" {
+					continue
+				}
+				if isMergeProducerExpr(elt, mergeAliases, gitutilName) {
+					risky[positionalNames[i]] = true
+				}
+			}
+			return true
+		})
+
+		// Struct fields genuinely assigned a merge producer via a
+		// POST-CONSTRUCTION assignment (`h.run = gitutil.MergeInto`, round
+		// 6) — the same "genuinely assigned" bar as the composite-literal
+		// leg above, just via *ast.AssignStmt rather than at construction.
+		ast.Inspect(file, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok || as.Tok != token.ASSIGN {
+				return true
+			}
+			for i, lhs := range as.Lhs {
+				if i >= len(as.Rhs) {
+					continue
+				}
+				sel, ok := lhs.(*ast.SelectorExpr)
 				if !ok {
 					continue
 				}
-				keyID, ok := kv.Key.(*ast.Ident)
-				if !ok {
-					continue
-				}
-				if isMergeProducerExpr(kv.Value, mergeAliases) {
-					risky[keyID.Name] = true
+				if isMergeProducerExpr(as.Rhs[i], mergeAliases, gitutilName) {
+					risky[sel.Sel.Name] = true
 				}
 			}
 			return true
@@ -824,7 +1005,7 @@ func failClosedOnMergeSignatureParams(t *testing.T, params *ast.FieldList, body 
 // concern (a real gitutil.MergeInto/MergeBranch call, or an unrelated
 // gitutil function — never a risky member by construction, since nothing
 // in gitutil's own source is part of the files this scan parses).
-func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.Node, fileName, label string, pos token.Position) {
+func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.Node, fileName, label string, pos token.Position, gitutilName string) {
 	if body == nil || len(risky) == 0 {
 		return
 	}
@@ -837,7 +1018,7 @@ func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.
 		if !ok {
 			return true
 		}
-		if xid, ok := sel.X.(*ast.Ident); ok && xid.Name == "gitutil" {
+		if xid, ok := sel.X.(*ast.Ident); ok && xid.Name == gitutilName {
 			return true
 		}
 		if risky[sel.Sel.Name] {
@@ -894,6 +1075,9 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 	for i, file := range files {
 		fileName := fileNames[i]
 		inlineArgs := collectInlineArgFuncLits(file)
+		// Bead-6 fix round 6: resolve THIS file's own gitutil identifier —
+		// never the literal "gitutil" (see gitutilLocalName's doc comment).
+		gitutilName := gitutilLocalName(file)
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch v := n.(type) {
 			case *ast.FuncDecl:
@@ -902,8 +1086,8 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 				}
 				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()), typeAliases)
 				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
-				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
-				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
+				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()), gitutilName)
+				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs, gitutilName)
 				spans = append(spans, &funcSpan{file: fileName, label: v.Name.Name, mergeCalls: merges, preflight: preflights})
 			case *ast.FuncLit:
 				if inlineArgs[v] {
@@ -915,8 +1099,8 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 				label := fmt.Sprintf("func literal at %s", fset.Position(v.Pos()))
 				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, label, fset.Position(v.Pos()), typeAliases)
 				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, label, fset.Position(v.Pos()))
-				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, label, fset.Position(v.Pos()))
-				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
+				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, label, fset.Position(v.Pos()), gitutilName)
+				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs, gitutilName)
 				spans = append(spans, &funcSpan{
 					file:       fileName,
 					label:      label,
@@ -1044,11 +1228,11 @@ func producer() error {
 	// FuncLit boundary) — the merge call belongs to the closure's OWN
 	// span, which the real repo-wide scan visits separately and which
 	// carries no preflight call of its own in this fixture.
-	outerMerges, _ := collectSpanCalls(producerDecl.Body, nil, inline)
+	outerMerges, _ := collectSpanCalls(producerDecl.Body, nil, inline, "gitutil")
 	if len(outerMerges) != 0 {
 		t.Fatalf("producer's own span must not see the closure's merge call once the closure is correctly non-transparent; got %d", len(outerMerges))
 	}
-	closureMerges, closurePreflights := collectSpanCalls(closureLit.Body, nil, inline)
+	closureMerges, closurePreflights := collectSpanCalls(closureLit.Body, nil, inline, "gitutil")
 	if len(closureMerges) != 1 {
 		t.Fatalf("the closure's own span must see its own merge call; got %d", len(closureMerges))
 	}
@@ -1421,6 +1605,255 @@ func g5UnpreflightedProducer(m g1ScratchNamedFunc) error {
 	if !found {
 		t.Fatal("fixture invariant broken: expected an `m.Invoke(...)` selector call in the producer body")
 	}
+}
+
+// TestCollectRiskyMemberNames_CatchesPositionalCompositeLiteral is bead-6
+// fix round 6's acceptance test for G1-2's confirm-round finding, shape 2:
+// a struct field genuinely assigned a merge producer via a POSITIONAL
+// composite-literal element (`handler{gitutil.MergeInto}`, no field key)
+// — round 5's collectRiskyMemberNames only ever walked KeyValueExpr
+// elements, so this shape was invisible even though the field is just as
+// genuinely assigned as the keyed form.
+func TestCollectRiskyMemberNames_CatchesPositionalCompositeLiteral(t *testing.T) {
+	src := `package p
+
+type g6ScratchPositionalHandler struct {
+	run func(string, string) error
+}
+
+func newG6ScratchPositionalHandler() g6ScratchPositionalHandler {
+	return g6ScratchPositionalHandler{gitutil.MergeInto}
+}
+
+func g6PositionalUnpreflightedProducer(h g6ScratchPositionalHandler) error {
+	return h.run("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "positionalliteral.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	risky := collectRiskyMemberNames([]*ast.File{file}, nil, collectMergeFnAliases([]*ast.File{file}))
+	if !risky["run"] {
+		t.Error(`collectRiskyMemberNames must catch a struct field named "run" GENUINELY assigned gitutil.MergeInto via a POSITIONAL composite-literal element`)
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g6PositionalUnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	found := false
+	ast.Inspect(producer.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "run" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("fixture invariant broken: expected an `h.run(...)` selector call in the producer body")
+	}
+}
+
+// TestCollectRiskyMemberNames_CatchesPostConstructionAssignment is bead-6
+// fix round 6's acceptance test for G1-2's confirm-round finding, shape 1:
+// a struct field genuinely assigned a merge producer via a
+// POST-CONSTRUCTION assignment statement (`h.run = gitutil.MergeInto`) —
+// round 5's collectRiskyMemberNames only ever walked composite-literal
+// elements, never *ast.AssignStmt, so this ordinary Go spelling (not an
+// adversarial contrivance) was invisible.
+func TestCollectRiskyMemberNames_CatchesPostConstructionAssignment(t *testing.T) {
+	src := `package p
+
+type g6ScratchAssignedHandler struct {
+	run func(string, string) error
+}
+
+func g6AssignedUnpreflightedProducer() error {
+	var h g6ScratchAssignedHandler
+	h.run = gitutil.MergeInto
+	return h.run("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "postassign.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	risky := collectRiskyMemberNames([]*ast.File{file}, nil, collectMergeFnAliases([]*ast.File{file}))
+	if !risky["run"] {
+		t.Error(`collectRiskyMemberNames must catch a struct field named "run" GENUINELY assigned gitutil.MergeInto via a POST-CONSTRUCTION assignment statement`)
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g6AssignedUnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	found := false
+	ast.Inspect(producer.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "run" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("fixture invariant broken: expected an `h.run(...)` selector call in the producer body")
+	}
+}
+
+// TestGitutilLocalName_ResolvesImportAlias is bead-6 fix round 6's
+// acceptance test for G1-2's confirm-round finding, shape 3: a direct
+// gitutil.MergeInto/MergeBranch call reached through an ALIASED import
+// (`import gu ".../internal/gitutil"; gu.MergeInto(...)`) — ordinary Go,
+// not an adversarial contrivance — was invisible to every hard-coded
+// literal "gitutil" check in this ratchet at once (collectSpanCalls,
+// collectMergeFnAliases, isMergeProducerExpr, failClosedOnRiskyMemberCalls
+// all shared the same defect). Proves gitutilLocalName resolves the
+// alias, and that collectSpanCalls driven by the stale, hard-coded
+// literal "gitutil" — round 5's actual behavior — would have missed the
+// call entirely.
+func TestGitutilLocalName_ResolvesImportAlias(t *testing.T) {
+	src := `package p
+
+import gu "github.com/mrmaxsteel/mindspec/internal/gitutil"
+
+func g6AliasUnpreflightedProducer() error {
+	return gu.MergeInto("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "importalias.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	gitutilName := gitutilLocalName(file)
+	if gitutilName != "gu" {
+		t.Fatalf(`gitutilLocalName must resolve the aliased import to "gu", got %q`, gitutilName)
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g6AliasUnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+
+	inline := collectInlineArgFuncLits(file)
+	merges, _ := collectSpanCalls(producer.Body, nil, inline, gitutilName)
+	if len(merges) != 1 {
+		t.Fatalf("collectSpanCalls, driven by the resolved alias %q, must see the gu.MergeInto call; got %d", gitutilName, len(merges))
+	}
+
+	// The defect this round fixes: driven by the stale, hard-coded literal
+	// "gitutil" (round 5's own behavior), the identical call is invisible.
+	staleMerges, _ := collectSpanCalls(producer.Body, nil, inline, "gitutil")
+	if len(staleMerges) != 0 {
+		t.Fatalf(`fixture invariant broken: the literal "gitutil" name must NOT match a gu.-aliased call — got %d`, len(staleMerges))
+	}
+}
+
+// TestCollectRiskyMemberNames_BareNameCollisionAcrossUnrelatedTypesIsAcceptedResidual
+// documents bead-6 fix round 6's disclosed, NONBLOCKING trade-off (G1-2's
+// confirm-round finding, the false-positive half — see
+// collectRiskyMemberNames' own doc comment): the risky vocabulary is keyed
+// by BARE member name alone, never by receiver type identity, so a field
+// genuinely assigned a merge producer on one type makes an UNRELATED
+// type's same-named, different-signature member call red purely on the
+// name collision. Pinned here, attacking the OPPOSITE direction from
+// TestCollectRiskyMemberNames_CatchesStructFieldIndirection's own
+// "unrelatedSame" false-positive check (same bare shape, never assigned —
+// correctly NOT risky) — this fixture's unrelated field IS caught, a
+// real, demonstrated false positive, never a false negative, so a future
+// change to this scan's precision is a deliberate choice, not an
+// accidental regression.
+func TestCollectRiskyMemberNames_BareNameCollisionAcrossUnrelatedTypesIsAcceptedResidual(t *testing.T) {
+	src := `package p
+
+type g6ScratchAssignedHandler struct {
+	run func(string, string) error
+}
+
+func newG6ScratchAssignedHandler() g6ScratchAssignedHandler {
+	return g6ScratchAssignedHandler{run: gitutil.MergeInto}
+}
+
+// An UNRELATED type sharing the bare field name "run", never itself
+// assigned a merge producer, and a DIFFERENT signature — this scan
+// cannot rule out that v.run() below resolves to something other than
+// g6ScratchAssignedHandler's own genuinely-assigned field, so it fires
+// anyway (the accepted residual this test documents).
+type g6UnrelatedType struct {
+	run func() error
+}
+
+func g6UnrelatedProducer(v g6UnrelatedType) error {
+	return v.run()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "collision.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	risky := collectRiskyMemberNames([]*ast.File{file}, nil, collectMergeFnAliases([]*ast.File{file}))
+	if !risky["run"] {
+		t.Fatal(`fixture invariant broken: expected "run" to be risky via g6ScratchAssignedHandler's genuine assignment`)
+	}
+
+	var unrelatedProducer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g6UnrelatedProducer" {
+			unrelatedProducer = fd
+		}
+	}
+	if unrelatedProducer == nil {
+		t.Fatal("fixture invariant broken: expected the unrelated producer FuncDecl")
+	}
+	found := false
+	ast.Inspect(unrelatedProducer.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "run" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("fixture invariant broken: expected a `v.run()` selector call in the unrelated producer body")
+	}
+	// risky["run"] is already true above (verified against
+	// g6ScratchAssignedHandler's genuine assignment); a repo-wide
+	// failClosedOnRiskyMemberCalls pass over this same file would
+	// therefore RED g6UnrelatedProducer's v.run() call too, even though it
+	// has nothing to do with gitutil.MergeInto/MergeBranch — the accepted,
+	// disclosed false-positive this test exists to pin.
 }
 
 // TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree

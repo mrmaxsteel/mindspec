@@ -281,6 +281,114 @@ func TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterCommit(t *tes
 	}
 }
 
+// TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterMerge is
+// bead-6 fix round 6's acceptance test for O1-4/S1-4/S3-4/F1-2/G1-1's
+// shared confirm-round finding: round 5's own STATED RESIDUAL 2(b) claimed
+// closure for "another bead's own merge... landing on the branch between
+// the interruption and a retry", but detectStrandedDriftTopology only ever
+// inspected gitutil.FirstParentMerges' two nearest-HEAD entries — a
+// genuinely intervening MERGE commit (as opposed to the sibling test's
+// ORDINARY commit, which FirstParentMerges never returns at all) became
+// the new nearest entry, its subject differed from the stranded pair's own
+// subject, and the fixed merges[0]/merges[1] destructuring rejected the
+// whole topology on that mismatch before ever reaching the genuinely
+// stranded C1/C2 pair one slot further down — a bare retry silently
+// reported success ("already up to date") over the still-uncollapsed,
+// ambiguous topology. This test proves the retry now refuses loudly
+// instead, exactly as the ordinary-commit sibling test does, and that the
+// intervening merge's own content survives untouched.
+func TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterMerge(t *testing.T) {
+	g, dir, specWtPath, _, driftedBeadTip := driftedResolveMergeFixture(t)
+	_ = driftedBeadTip
+
+	origResetSoft := resetSoftFn
+	t.Cleanup(func() { resetSoftFn = origResetSoft })
+	failNext := true
+	resetSoftFn = func(workdir, target string) error {
+		if failNext {
+			failNext = false
+			return errors.New("simulated ref-lock contention")
+		}
+		return origResetSoft(workdir, target)
+	}
+
+	// 4. --resolve-merge: strands C1+C2 exactly as the sibling tests above.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err == nil {
+		t.Fatal("expected the injected ResetSoft failure to surface")
+	}
+	strandedTip := refHash(t, dir, "spec/077-test")
+
+	// 5. BURY it under a GENUINE MERGE, not an ordinary commit — standing
+	// in for another bead's own merge landing on the same spec branch
+	// before anyone retries this bead's own completion (a routine event
+	// in mindspec's own multi-bead-per-spec-branch workflow).
+	runGitIn(t, specWtPath, "checkout", "-b", "other-topic")
+	if err := os.WriteFile(specWtPath+"/other.txt", []byte("another bead's own work\n"), 0o644); err != nil {
+		t.Fatalf("write other-topic file: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "other.txt")
+	runGitIn(t, specWtPath, "commit", "-m", "other-topic: unrelated work")
+	runGitIn(t, specWtPath, "checkout", "spec/077-test")
+	runGitIn(t, specWtPath, "merge", "--no-ff", "-m", "Merge bead/mindspec-other.1 into spec/077-test", "other-topic")
+	buriedHead := refHash(t, dir, "spec/077-test")
+	if buriedHead == strandedTip {
+		t.Fatal("fixture invariant broken: the intervening merge must move the tip past the stranded pair")
+	}
+
+	// 6. Bare retry: must refuse loudly — never silently collapse (which
+	// would discard the intervening merge) and never silently report
+	// success (which would launder the still-uncollapsed topology, the
+	// exact overclaim round 5's own STATED RESIDUAL 2(b) made for this
+	// shape).
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil {
+		t.Fatal("a retry over a stranded pair buried under a later merge must never report success")
+	}
+	var indeterminate *strandedTopologyIndeterminateError
+	if !errors.As(err, &indeterminate) {
+		t.Errorf("expected a *strandedTopologyIndeterminateError, got %T: %v", err, err)
+	}
+
+	// Nothing was touched: the intervening merge survives, the stranded
+	// pair beneath it is untouched, and the bead branch (not yet cleaned
+	// up) still exists.
+	if got := refHash(t, dir, "spec/077-test"); got != buriedHead {
+		t.Errorf("a refused, indeterminate retry must not move the branch; was %s, now %s", buriedHead, got)
+	}
+	if got, readErr := os.ReadFile(specWtPath + "/other.txt"); readErr != nil || string(got) != "another bead's own work\n" {
+		t.Errorf("the intervening merge's content must survive untouched; got %q, err=%v", got, readErr)
+	}
+	merges, ferr := gitutil.FirstParentMerges(dir, "spec/077-test")
+	if ferr != nil {
+		t.Fatalf("FirstParentMerges: %v", ferr)
+	}
+	if len(merges) < 3 {
+		t.Fatalf("expected the intervening merge PLUS the stranded C1/C2 pair (3 entries); got %+v", merges)
+	}
+	if merges[0].SHA != buriedHead {
+		t.Fatalf("expected the intervening merge to be the newest entry; got %+v", merges[0])
+	}
+	if merges[1].SHA != strandedTip || len(merges[1].Parents) != 2 {
+		t.Fatalf("the stranded pair's own top (C2) must remain exactly as it was, one slot below the intervening merge; got %+v", merges[1])
+	}
+	if merges[2].SHA != merges[1].Parents[0] || len(merges[2].Parents) != 2 {
+		t.Fatalf("C1 must remain C2's immediate first parent, unrewritten; got %+v", merges[2])
+	}
+	if merges[1].Subject != merges[2].Subject {
+		t.Fatalf("the stranded pair must still share its own identical subject, distinct from the intervening merge's; got %q vs %q (intervening: %q)", merges[1].Subject, merges[2].Subject, merges[0].Subject)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-x.1") {
+		t.Error("the bead branch must survive a refused, indeterminate retry — no cleanup runs on a refusal")
+	}
+
+	// The downstream backstop: spec 125's own FindLandedMerge must still
+	// fail closed against this exact ambiguous shape, independent of
+	// whatever detectStrandedDriftTopology itself concludes.
+	if _, err := lifecycle.FindLandedMerge(dir, "spec/077-test", "mindspec-x.1"); err == nil {
+		t.Fatal("FindLandedMerge must still refuse the ambiguous two-merge topology buried under an intervening merge")
+	}
+}
+
 // TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned
 // is bead-6 fix round 5's acceptance test for STATED RESIDUAL 2(c) —
 // completeDriftedResumedMerge's own doc comment — the ONE sub-case this

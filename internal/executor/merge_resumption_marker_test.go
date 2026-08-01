@@ -70,8 +70,9 @@ func rewriteMergeMsgSubject(t *testing.T, workdir, newSubject string) {
 // is BLOCKING 2's acceptance test: hand-editing MERGE_MSG's subject to
 // falsely claim the bead branch's own identity over a preserved,
 // genuinely-foreign (but ancestor) merge must NOT flip the classification
-// to bindingDrifted — the unforgeable merge-start marker must still
-// refuse to corroborate it.
+// to bindingDrifted — the merge-start marker (producer-written evidence,
+// not unforgeable; see gitutil.MergeSourceMarkerRef's doc comment) must
+// still refuse to corroborate it.
 func TestCompleteBead_ResolveMerge_HandEditedMergeMessageCannotForgeBinding(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 
@@ -163,7 +164,8 @@ func TestCompleteBead_ResolveMerge_HandEditedMergeMessageCannotForgeBinding(t *t
 	// round 3, the hand-edited subject alone would have classified this
 	// bindingDrifted and completeResumedMerge would have COMMITTED
 	// decoy-src-forge's content under the forged subject, reporting
-	// success. The unforgeable marker must refuse to corroborate it.
+	// success. The marker — producer-written evidence, not unforgeable —
+	// must refuse to corroborate it.
 	if err := os.WriteFile(specWtPath+"/shared.txt", []byte("resolved\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

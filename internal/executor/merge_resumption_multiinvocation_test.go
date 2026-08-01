@@ -69,7 +69,8 @@ func twoInvocationDriftReconflictFixtureWithFake(t *testing.T) (g *MindspecExecu
 	}
 
 	// 1. Plain invocation: conflicts on c.txt, preserved (also writes the
-	// unforgeable merge-source marker at merge start).
+	// merge-source marker — producer-written evidence, not unforgeable;
+	// see gitutil.MergeSourceMarkerRef's doc comment — at merge start).
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
