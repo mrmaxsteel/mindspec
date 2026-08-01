@@ -73,8 +73,14 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 // value argument for a caller to forget to populate. Every producer's
 // obligation reduces to "call preflightMergeDestruction before your merge,
 // with the real branch/target operands" — which
-// internal/executor/merge_chokepoint_test.go verifies by dataflow (a real
-// evaluation feeding the merge call), not by call-site proximity.
+// internal/executor/merge_chokepoint_test.go verifies via a preceding,
+// operand-corresponding call to preflightMergeDestruction found BY NAME in
+// the same span (an AST match against this function's own name, never a
+// dataflow trace of workDestructionFn's evaluation — bead-6 fix round 8:
+// a fifth surviving copy of the same mechanism misdescription plan.md:1378
+// carried, caught by this round's own sweep; this file never built the
+// dataflow-tracing mechanism the prior wording here claimed), not by mere
+// call-site proximity.
 //
 // Walking every route an unevaluated outcome could take to reach a merge:
 //   - A producer that never calls this function at all: the merge runs
