@@ -805,9 +805,15 @@ exactly what they can support.
    (seeded — every Background-inventory *emitter* site as-is; the three
    merge producers never seed), the opaque-operand registry (seeded from
    the scan's pinned first run, e.g. `bead_ready.go:57`'s spread), and
-   the known-sites exemption list (**eight content-pinned live entries +
-   four seed-only orchestrator-block entries**, per R5(a)'s scan-derived
-   enumeration; entries pin surface key + quoted string + count, lines
+   the known-sites exemption list (**ten content-pinned live entries**
+   — R5(c)'s eight Background-cited plus two background-justified
+   widening entries, AMENDED at bead-7 fix round 3, was "eight
+   content-pinned live entries," stale against bead-2's own rework
+   (round 3/4) discovering the widening, step 6 below (this bead's own
+   bootstrap-fixture step, which already reads "ten live total"), and
+   AC-10(iii)'s ten-entry state — **plus four seed-only
+   orchestrator-block entries**, per R5(a)'s scan-derived enumeration;
+   entries pin surface key + quoted string + count, lines
    advisory). Every entry: rationale + named obligation test; additions
    red; entry disciplines per R5(a)'s three machine assertions.
 4. `internal/lint/destructive_guidance_test.go`: the repo-wide AST scan
@@ -1570,7 +1576,11 @@ messages and guidance name.
    silently never selects) resolves at leaf identity with flag-set
    membership; bare `Find` forbidden.
 5. Final whole-tree sweep re-run as review evidence: zero floor matches
-   outside the eight-entry exemption list across globs + canonical
+   outside the **ten-entry** exemption list (AMENDED at bead-7 fix
+   round 3 — was "the eight-entry exemption list," stale against the
+   Verification section below, AC-10(iii)'s ten-entry state, and the
+   shipped sentinel: R5(c)'s eight Background-cited entries plus two
+   background-justified widening entries) across globs + canonical
    surfaces.
 
 **Verification**
