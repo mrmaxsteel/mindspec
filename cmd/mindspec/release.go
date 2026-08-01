@@ -248,13 +248,32 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 			for i, line := range userDirt {
 				escapedUserDirt[i] = termsafe.Escape(line)
 			}
+			// Spec 127 R5(d)/(e), AC-9(ii)/AC-10(ii) (O2-r2-5, O3-r2-7): the
+			// recovery: line carries ONLY the safe action (commit + re-run) —
+			// never the --force discard. The discard is a distinct, separately-
+			// labeled OPERATOR CHOICE folded into the message body instead: it
+			// destroys only the operator's OWN uncommitted worktree changes, a
+			// policy call no evidence can make for them (this is why it is not
+			// constructor-derived and not merge-evidence-gated the way R1-R4's
+			// hints are), so it belongs in the labeled-choice block, not the
+			// machine-greppable recovery line an agent pastes reflexively. The
+			// scan still covers this whole diagnostic body (O3-r2-7's "scope is
+			// the whole emitted diagnostic" — relocating a destructive command
+			// out of the recovery: position does not hide it from the sweep),
+			// even though `mindspec release ... --force` itself matches no
+			// reviewed floor family (classifier.go's own recorded {git,bd,rm}
+			// program-set exclusion, O2-r2-13) — "the classifier still sees it"
+			// names the scan's SCOPE, not a claim that this line is classified.
 			msg := fmt.Sprintf(
 				"cannot release bead %s: its worktree has uncommitted user changes:\n  %s\n"+
 					"these may be your work in progress — release did NOT remove the worktree.\n"+
-					"(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
-				idrender.Bead(beadID), strings.Join(escapedUserDirt, "\n  "))
+					"(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)\n\n"+
+					"Operator choice — discard instead: this is YOUR call, not one evidence can "+
+					"make for you. To permanently DISCARD the uncommitted changes above rather "+
+					"than keep them, re-run with `mindspec release %s --force`.",
+				idrender.Bead(beadID), strings.Join(escapedUserDirt, "\n  "), idrender.Bead(beadID))
 			return guard.NewFailure(msg,
-				fmt.Sprintf("commit them (git add -A && git commit) then re-run `mindspec release %s`, or discard them by re-running with `mindspec release %s --force`", idrender.Bead(beadID), idrender.Bead(beadID)))
+				fmt.Sprintf("commit them (git add -A && git commit) then re-run `mindspec release %s`", idrender.Bead(beadID)))
 		}
 	}
 

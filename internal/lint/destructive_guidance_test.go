@@ -1036,6 +1036,64 @@ func TestDestructiveGuidanceSweep_KnownSitesOnly(t *testing.T) {
 	}
 }
 
+// bypassBlockBannedStrings is AC-10(i)'s own literal enumeration for
+// .claude/agents/spec-orchestrator.md's deleted bypass block: none of
+// these six strings may appear anywhere in the file, whether or not
+// any of them would ALSO be caught by the general floor-match sweep
+// above (`bd update ... --metadata` in particular matches no R5(a)
+// family at all — Req-19's ban is a distinct, older mechanism — so
+// TestDestructiveGuidanceSweep_KnownSitesOnly's classifier-driven check
+// cannot stand in for this one).
+var bypassBlockBannedStrings = []string{
+	"git stash push",
+	"git stash drop",
+	"git merge --no-ff bead/",
+	"git worktree remove",
+	"git branch -D",
+	"bd update",
+}
+
+// bypassBlockPinnedInvocations is AC-10(i)'s replacement-guidance leg:
+// the three named, invocable recoveries R5(e) requires in place of the
+// deleted bypass block. Each is asserted present verbatim (not merely
+// "some mindspec command appears") — AC-11(a)'s own leaf-identity
+// resolution is a SEPARATE obligation (cmd/mindspec/named_invocation_test.go),
+// this test only pins that the TEXT survives in the guidance artifact.
+var bypassBlockPinnedInvocations = []string{
+	`mindspec complete <bead-id> "<one-line description>"`,
+	"mindspec repair phase <spec-id>",
+	"mindspec panel create <slug> --spec",
+}
+
+// TestSpecOrchestratorTemplate_BypassBlockReplaced is AC-10(i): the raw
+// bypass block (stash / raw merge / forced worktree removal / branch
+// -D / raw `bd update --metadata`) is gone from the shipped agent
+// template, and its replacement names the three pinned, non-destructive
+// invocations R5(e) mandates. Red-on-revert: restoring any one of the
+// six banned strings, or deleting any one of the three pinned
+// invocations, REDs this test (verified manually at authoring time by
+// reintroducing each banned string in turn and re-running this test).
+func TestSpecOrchestratorTemplate_BypassBlockReplaced(t *testing.T) {
+	root := repoRootDir(t)
+	path := filepath.Join(root, ".claude", "agents", "spec-orchestrator.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	content := string(data)
+
+	for _, banned := range bypassBlockBannedStrings {
+		if strings.Contains(content, banned) {
+			t.Errorf("%s still contains banned bypass-block string %q — spec 127 R5(e) removes the raw bypass block outright", path, banned)
+		}
+	}
+	for _, want := range bypassBlockPinnedInvocations {
+		if !strings.Contains(content, want) {
+			t.Errorf("%s is missing pinned replacement invocation %q — R5(e)'s replacement guidance names this invocation verbatim", path, want)
+		}
+	}
+}
+
 // TestDestructiveGuidanceSweep_ExemptionEntriesNotHollow is the
 // exemption list's assertion (ii): every entry's quoted string still
 // matches its recorded floor family, independent of the live scan —
@@ -2950,10 +3008,17 @@ func TestBackgroundJustifiedWideningExemptions_CountSentinel(t *testing.T) {
 // matching one two lines later, is what actually lands in the
 // exemption list; stash push itself matches no family). Named at
 // COMMAND-FAMILY grain per spec.md's own scoping (J-r7-1): this bullet
-// reconciles at that coarser grain, not exact quoted-string grain like
-// the eight above — the four seed-only orchestrator-block entries
-// reconcile against it, and are covered at EXACT grain by fixture
-// (β)'s bead-7 exit records instead.
+// reconciled at that coarser grain, not exact quoted-string grain like
+// the eight above, ONLY while the four seed-only orchestrator-block
+// entries were still live in the manifest. BEAD 7 EXITS all four
+// (R5(e) deletes the whole bypass block outright), so this var is now
+// HISTORICAL — retained so a reader can see what the pre-bead-7 seed
+// stood for — and TestBootstrapManifest_BackgroundReconciliation below
+// asserts the orchestrator surface's manifest entries are exactly
+// EMPTY post-exit, not a family-set match against this var. The four
+// seed-only entries are covered at EXACT grain by fixture (β)'s
+// bead-7 exit records (TestBootstrapManifest_AllowlistRegistryIdentity's
+// sibling for the exemption list, TestBootstrapManifest_ExemptionListIdentity).
 var backgroundExpectedBypassBlockFamilies = []guard.DestructiveFamily{
 	guard.FamilyGitBranchDeleteForce,
 	guard.FamilyGitMerge,
@@ -3081,20 +3146,16 @@ func TestBootstrapManifest_BackgroundReconciliation(t *testing.T) {
 		}
 	}
 
-	got := familiesBySurface[orchestratorSurface]
-	want := map[guard.DestructiveFamily]bool{}
-	for _, fam := range backgroundExpectedBypassBlockFamilies {
-		want[fam] = true
-	}
-	for fam := range want {
-		if !got[fam] {
-			t.Errorf("fixture (α), family grain: spec.md Background's spec-orchestrator.md bypass-block bullet names family %s — not present in the manifest at surface %q", fam, orchestratorSurface)
-		}
-	}
-	for fam := range got {
-		if !want[fam] {
-			t.Errorf("fixture (α), family grain: manifest surface %q has family %s not named in spec.md Background's bypass-block bullet", orchestratorSurface, fam)
-		}
+	// Bead 7 exits all four seed-only orchestrator-block entries in the
+	// SAME commit that deletes spec-orchestrator.md's raw bypass block
+	// (R5(e)) — so the manifest's orchestrator-surface family set is
+	// now EMPTY, not a match against backgroundExpectedBypassBlockFamilies
+	// (that var is retained as a historical record of what the pre-bead-7
+	// seed stood for; see its own doc comment). A leftover entry here —
+	// the exact leftover/second-entry shape AC-9's burn-down fixtures
+	// probe one layer up in registries_test.go — REDs this assertion.
+	if got := familiesBySurface[orchestratorSurface]; len(got) != 0 {
+		t.Errorf("fixture (α), family grain: manifest surface %q still carries families %v after bead 7's exit — the seed-only orchestrator-block entries must be fully removed, not merely reduced", orchestratorSurface, got)
 	}
 }
 
