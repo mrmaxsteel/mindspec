@@ -1378,14 +1378,17 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    bead N. Chokepoint anti-drift test asserts every
    `gitutil.MergeInto`/`MergeBranch` call site its AST vocabulary can
    resolve (direct calls, package-level alias chains at any depth,
-   import aliases, package-level struct fields, and the fail-closed
+   import aliases, struct fields — keyed-literal and assignment legs
+   resolved by name alone with no scope check, positional-literal leg
+   restricted to a package-level struct type — and the fail-closed
    parameter/var/member shapes, including through an ordinary
    parenthesized callee) is preceded by its own call to
    `preflightMergeDestruction` — consultation via a preceding-call AST
    match, not dataflow tracing from `workDestructionFn` and not
-   call-site adjacency; everything else this bare-name, package-level
-   scan does not resolve — function-local declarations among them — is
-   review-caught, never enumerated as exhaustive, per AC-7(iv).
+   call-site adjacency; everything else this bare-name scan does not
+   resolve — a function-local struct's field via the
+   positional-composite-literal leg among them — is review-caught,
+   never enumerated as exhaustive, per AC-7(iv).
    AC-7(iv), whole and unstaged.
 3. Override + friction: `--allow-net-deletion "<reason>"` recorded on
    epic metadata (the `--allow-doc-skew` pattern) AND registered in

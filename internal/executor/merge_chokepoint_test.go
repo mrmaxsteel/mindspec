@@ -21,17 +21,21 @@ package executor
 //
 // THIS IS NOT A UNIVERSAL CLAIM: a dot-import, an embedded named-function
 // struct field, a map or slice element holding a producer, a multi-hop
-// named struct type, interface dispatch, and reflection all need type
-// resolution to trace to gitutil.MergeInto/MergeBranch — go/types is out
-// of scope for this same ratchet (R5(b)'s precedent, upheld against the
-// bare-name-collision residual below on exactly that basis) — and a
-// single compiling production file combining the first four of those
-// shapes passed this scan unchanged (G1's round-6 confirm-round finding,
-// the third such widening of the enumeration in as many rounds, per
-// AC-7(iv)'s own amendment). These shapes are REVIEW-CAUGHT, under the
-// same in-diff extension obligation R5(a)/R5(b) already rely on for their
-// own residual classes, never machine-verified by this test — extending
-// this scan again to cover them is not the fix (AC-7(iv)'s amendment).
+// named struct type, interface dispatch, and reflection are none of them
+// attempted by this scan. Some are syntactically tractable without
+// go/types — a dot-import's package path and the bare MergeInto name,
+// fixed-point named-type traversal, and container-element recognition
+// all resolve without it — but go/types itself is out of scope for this
+// same ratchet regardless (R5(b)'s precedent, upheld against the
+// bare-name-collision residual below on exactly that basis): these are
+// out on SCOPE, not on impossibility. A single compiling production file
+// combining the first four of those shapes passed this scan unchanged
+// (G1's round-6 confirm-round finding, the third such widening of the
+// enumeration in as many rounds, per AC-7(iv)'s own amendment). These
+// shapes are REVIEW-CAUGHT, under the same in-diff extension obligation
+// R5(a)/R5(b) already rely on for their own residual classes, never
+// machine-verified by this test — extending this scan again to cover
+// them is not the fix (AC-7(iv)'s amendment).
 //
 // Bead-6 fix round 8 attempted to close two of those residual classes —
 // function-local var/type/struct declarations, and an ordinary
