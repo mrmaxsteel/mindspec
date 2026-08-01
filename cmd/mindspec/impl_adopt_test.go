@@ -16,11 +16,10 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/spf13/pflag"
 )
 
 // approveImportPath is the import path findAdoptSpecCallSites resolves
@@ -38,28 +37,54 @@ func TestImplAdoptCmd_ResolvesAtLeafIdentity(t *testing.T) {
 	}
 }
 
-// TestImplAdoptCmd_FlagSetIsExactlyReasonAndAttest pins AC-11(a)'s
-// named-flag assertion via flag-set membership on the resolved leaf:
-// exactly {--reason, --attest-unverified}, no bypass-shaped extra flag.
-func TestImplAdoptCmd_FlagSetIsExactlyReasonAndAttest(t *testing.T) {
-	cmd := resolveCommand(t, "impl", "adopt")
-	var names []string
-	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) { names = append(names, f.Name) })
-	want := setOf("reason", "attest-unverified")
-	got := setOf(names...)
+// TestImplAdoptCmd_FlagSetIsExactlyTheAdoptSurface pins AC-11(a)'s
+// named-flag assertion via flag-set membership on the resolved leaf: the
+// spec-mandated {--reason, --attest-unverified} plus the two flags every
+// mindspec leaf carries (cobra's auto-injected --help and the root's
+// persistent --trace), and no bypass-shaped extra flag.
+//
+// Spec 127 final review, S2-1 (MAJOR): this assertion used to read
+// cmd.LocalFlags() directly and claim the set was EXACTLY {reason,
+// attest-unverified}. That is false about the shipped binary — `mindspec
+// impl adopt --help` works — and it only passed because cobra injects
+// --help lazily and Go's default file-execution order happened to run this
+// file before named_invocation_test.go, whose commandFlagSet call
+// permanently mutates the shared implAdoptCmd singleton via
+// InitDefaultHelpFlag. `go test -shuffle` turned it into a real failure.
+// An anti-drift pin that is wrong about the surface it pins cannot detect
+// drift in it: it REDs on a test reorder and stays silent on a genuine
+// flag addition made while the singleton is already initialized.
+//
+// It now routes through commandFlagSet — the same helper every other
+// verb's guard uses (TestCeremonyNonInflation_HelpFlags), which
+// InitDefaultHelpFlag's first — so the assertion states the steady-state
+// surface and is order-independent by construction.
+func TestImplAdoptCmd_FlagSetIsExactlyTheAdoptSurface(t *testing.T) {
+	got := commandFlagSet(resolveCommand(t, "impl", "adopt"))
+	want := setOf("--reason", "--attest-unverified", "--help", "--trace")
 	if len(got) != len(want) {
-		t.Fatalf("impl adopt local flag set = %v, want exactly {reason, attest-unverified}", names)
+		t.Fatalf("impl adopt flag set = %v, want exactly %v", sortedFlagNames(got), sortedFlagNames(want))
 	}
 	for n := range want {
 		if !got[n] {
-			t.Errorf("impl adopt is missing expected flag --%s", n)
+			t.Errorf("impl adopt is missing expected flag %s", n)
 		}
 	}
 	for n := range got {
 		if !want[n] {
-			t.Errorf("impl adopt has unexpected extra flag --%s", n)
+			t.Errorf("impl adopt has unexpected extra flag %s", n)
 		}
 	}
+}
+
+// sortedFlagNames renders a flag set deterministically for failure output.
+func sortedFlagNames(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // TestImplAdoptCmd_ReasonRequiredArgs pins the ExactArgs(1) contract:

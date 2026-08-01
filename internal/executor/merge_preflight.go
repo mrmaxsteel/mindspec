@@ -56,6 +56,19 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 // review-caught, not scanned — see AC-7(iv), amended, and this file's own
 // merge_chokepoint_test.go package doc comment).
 //
+// That chokepoint scan is PACKAGE-SCOPED: it reads internal/executor and
+// nothing else, so on its own it says nothing about a producer added in
+// another package through the plainest shape of all (spec 127 final
+// review, O1-1/O2-2 — package scope appeared in none of the shape-lists
+// above). merge_containment_test.go is the repo-wide half that closes it:
+// no production file OUTSIDE internal/executor may call
+// gitutil.MergeInto/MergeBranch at all. The two compose into the property
+// this function's contract depends on — every producer is in this
+// package, and every producer in this package consults this function over
+// its own operands — and the containment scan carries the same
+// non-go/types residual (function values, struct fields, interfaces,
+// reflection) as the chokepoint scan does.
+//
 // # THE ZERO-VALUE TRAP
 //
 // guard.DestructionAncestor is guard.DestructionOutcome's zero value

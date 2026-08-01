@@ -159,7 +159,10 @@ d. Apply panel-mandated revisions in a fixup commit on the bead branch.
 
 e. Merge into the spec branch by running the verb, not by hand (spec
    127 R5(e)): `mindspec complete` owns the bead→spec merge AND the
-   `.beads/issues.jsonl`-churn commit (`complete.go:733-742`) — it does
+   `.beads/issues.jsonl`-churn commit (`internal/complete.Run`'s
+   artifact-aware clean-tree step, the `chore: sync beads artifact`
+   `CommitPaths` call — cited by symbol, not by line, because line numbers
+   in live agent guidance rot silently against the tree it is read on) — it does
    not need, and must never be preceded by, a manual stash/merge/
    cleanup dance.
 
@@ -657,7 +660,8 @@ churn from a sibling operation blocks the bare, no-commit-message form.
 
 Recovery: pass a commit message — `mindspec complete <bead-id>
 "<one-line description>"` — so `complete`'s own pre-gate `CommitAll`
-step commits the churn itself (`complete.go:733-742`), exactly as step
+step commits the churn itself (`internal/complete.Run`'s artifact-aware
+clean-tree step — cited by symbol, not by line), exactly as step
 6 (e) of the lifecycle does; no manual merge is needed.
 
 ### 5. Session freshness gate

@@ -325,7 +325,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/panel.go",
 		Func:       "tallyExitAction",
 		Detail:     "arg1:unprovable",
-		Rationale:  "disclosed-residual: `fmt.Sprintf(\"re-run the panel (mindspec panel create %s --round <N+1> ...), then mindspec complete <bead>\", slug)` — same slug-typed residual as panelCreateCmd above.",
+		Rationale:  "disclosed-residual: `fmt.Sprintf(\"re-run the panel (%s), then mindspec complete %s\", recreate, safeBeadID)`, where recreate is this function's own `mindspec panel create %s --bead %s --round %d` template plus optional `--spec %s`/`--target %s`/`--gate %s` fragments (spec 127 final review, mindspec-tyi3: the recovery now carries the matched registration's binding instead of a static placeholder argv) — a mindspec verb, never git/bd/rm-led. The ID-typed operands are idrender-rendered (idrender.Bead/idrender.Spec: a validated ID renders byte-identically, a malformed one is forced through strconv.Quote, which this floor's quote-aware tokenizer reads as one inert token) and target/gate go through escapeConfigValue + shellQuoteTarget, so the sole residual is the slug-typed one: same as panelCreateCmd above (validatePanelSlug does not close whitespace/printable content).",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

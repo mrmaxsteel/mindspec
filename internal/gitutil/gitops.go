@@ -922,6 +922,29 @@ func CommitMessageBody(workdir, ref string) (string, error) {
 	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
+// CommitSigningEnabled reports whether workdir's EFFECTIVE git
+// configuration asks for signed commits (`commit.gpgsign`), spec 127 final
+// review S1-1.
+//
+// `git config --bool --get` folds the whole config cascade (system/global/
+// local/worktree/`-c`/GIT_CONFIG_*) exactly as the commit machinery reads
+// it, so this answers the same question `git commit` itself asks. Key
+// ABSENT is exit 1 and means "not requested"; any other non-zero exit is a
+// genuine evidence error and is returned as one — never folded into "not
+// signing", which would silently reproduce the unsigned-collapse defect
+// this function exists to prevent.
+func CommitSigningEnabled(workdir string) (bool, error) {
+	cmd := execCommand("git", gitArgs(workdir, "config", "--bool", "--get", "commit.gpgsign")...)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading commit.gpgsign in %s: %w", workdir, err)
+	}
+	return strings.TrimSpace(string(out)) == "true", nil
+}
+
 // CommitTreeMerge creates a new, UNREFERENCED merge commit object
 // (`git commit-tree <tree> -p <parent1> -p <parent2> -m <message>`) — a
 // plumbing primitive that moves no ref and touches neither the index nor
@@ -930,13 +953,52 @@ func CommitMessageBody(workdir, ref string) (string, error) {
 // a two-commit sequence that shares one FINAL tree into a single merge
 // commit carrying the INTENDED two parents (merge_resumption.go's
 // completeDriftedResumedMerge).
+//
+// SIGNING (spec 127 final review, S1-1). `git commit-tree` does NOT honor
+// `commit.gpgsign` on its own — unlike `git commit --no-edit` and `git
+// merge --no-ff`, which produced every commit this collapse REPLACES. In a
+// signing-configured repository the collapse therefore used to swap two
+// SIGNED merges for one UNSIGNED commit at the branch tip, report success,
+// and leave the operator's push to be rejected by a "require signed
+// commits" branch protection with no mindspec diagnostic — and it stripped
+// the operator's own signature from the one commit whose provenance the
+// R5(d) re-entry surface most needs to preserve. So the effective
+// configuration is consulted and `-S` passed when it asks for signing,
+// making the produced object carry the same `gpgsig` header the commits it
+// replaces carried (`gpg.format`, `user.signingkey`, and the signing
+// program all resolve through git's own cascade — nothing about the
+// signing method is re-implemented here).
+//
+// This fails CLOSED by construction in the one remaining bad case: when
+// signing is configured but unavailable (missing key, a signing program
+// that errors), `commit-tree -S` exits non-zero and the collapse returns
+// that error instead of producing a silently-unsigned tip — exactly what
+// `git commit` would do in the same repository.
+//
+// No test in the suite could observe this before: the plan's own test-
+// environment rule mandates neutralized signing config
+// (GIT_CONFIG_GLOBAL=/dev/null + GIT_CONFIG_NOSYSTEM=1, plus a per-repo
+// `commit.gpgsign false`) in every fixture — see
+// internal/executor/merge_golden_test.go's buildAC8iDeterministicEnv for
+// the shape. commit_signing_test.go deliberately opts OUT of that
+// isolation, configuring signing ON in its own repositories where local
+// config wins over the tiers those env vars suppress.
 func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, error) {
 	for _, s := range []string{tree, parent1, parent2} {
 		if err := rejectOptionLike(s); err != nil {
 			return "", err
 		}
 	}
-	cmd := execCommand("git", gitArgs(workdir, "commit-tree", tree, "-p", parent1, "-p", parent2, "-m", message)...)
+	signing, err := CommitSigningEnabled(workdir)
+	if err != nil {
+		return "", err
+	}
+	argv := []string{"commit-tree"}
+	if signing {
+		argv = append(argv, "-S")
+	}
+	argv = append(argv, tree, "-p", parent1, "-p", parent2, "-m", message)
+	cmd := execCommand("git", gitArgs(workdir, argv...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("commit-tree in %s: %w", workdir, err)

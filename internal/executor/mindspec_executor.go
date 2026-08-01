@@ -439,7 +439,28 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 
 	// Safety check: verify bead branch is merged into spec branch before cleanup.
 	// This prevents data loss if the merge above failed silently.
-	if gitutil.BranchExists(beadBranch) {
+	//
+	// Spec 127 final review (mindspec-6f5p): this presence probe — which
+	// gates BOTH the anti-data-loss ancestry check and the fail-closed
+	// landed-binding write below — used to be the cwd-scoped
+	// gitutil.BranchExists, which resolves refs/heads/<branch> against the
+	// CALLING PROCESS's working directory. CompleteBead's production
+	// caller (internal/complete.Run) does not os.Chdir(g.Root) until AFTER
+	// this method returns, so an invocation whose cwd is not inside this
+	// repository silently answered "branch absent" and skipped both
+	// guarded legs. BranchExistsIn (R1b) is the workdir-taking variant and
+	// g.Root is this executor's explicit root, so the answer no longer
+	// depends on where the process happens to be standing.
+	//
+	// An EVIDENCE ERROR is never folded into absence: indeterminate
+	// existence refuses rather than skipping the guards it gates —
+	// skipping is precisely the data-loss outcome this check exists to
+	// prevent (BranchExistsIn's own doc comment states the same rule).
+	beadBranchPresent, beadBranchErr := gitutil.BranchExistsIn(g.Root, beadBranch)
+	if beadBranchErr != nil {
+		return fmt.Errorf("could not determine whether bead branch %s still exists in %s (%w) — aborting cleanup rather than skipping the is-it-merged-into-%s safety check without evidence", beadBranch, g.Root, beadBranchErr, specBranch)
+	}
+	if beadBranchPresent {
 		isAnc, ancErr := gitutil.IsAncestor(g.Root, beadBranch, specBranch)
 		if ancErr != nil || !isAnc {
 			return fmt.Errorf("bead branch %s is NOT merged into %s — aborting cleanup to prevent data loss", beadBranch, specBranch)
