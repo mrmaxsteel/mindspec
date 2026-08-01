@@ -181,10 +181,19 @@ e. Merge into the spec branch by running the verb, not by hand (spec
      bead tip past the round's `reviewed_head_sha`; #186 itself is
      tracked for spec 128 and is not fixed here): re-panel so the
      recorded SHA catches up — `mindspec panel create <slug> --spec
-     <spec-id> --target bead/<bead-id> --round <N+1>` (this co-bumps
-     `round` and `reviewed_head_sha` in one write; see
-     `ms-panel-tally`'s stale-verdict rule) — then re-run `mindspec
-     complete <bead-id>`.
+     <spec-id> --target bead/<bead-id> --bead <bead-id> --round
+     <N+1>` (this co-bumps `round` and `reviewed_head_sha` in one
+     write; see `ms-panel-tally`'s stale-verdict rule) — then re-run
+     `mindspec complete <bead-id>`. **`--bead <bead-id>` is required,
+     not optional decoration**: omitting it registers a NON-bead
+     panel (`bead_id: null`); `mindspec complete`'s gate selects its
+     registered panel via `panel.ForBead`, which only ever matches a
+     bead-bound registration, and fails OPEN (permits completion with
+     no gate at all) when it finds none. A re-panel run without
+     `--bead` therefore looks like a recovery but silently disables
+     the very gate this bead exists to make trustworthy — worse than
+     the raw `git`/`bd` workaround it replaces, which at least fails
+     loudly.
    - Any other refusal names its own recovery in the printed
      `recovery:` line — run that line verbatim; it is always a
      `mindspec`/`bd`-safe invocation, never a raw destructive command

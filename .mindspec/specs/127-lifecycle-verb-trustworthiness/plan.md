@@ -207,7 +207,9 @@ bead 3 and bead 4, adopt's orphan-present refusal is inspection-first with
 no destructive command (R1g's declared interim); between bead 2 and bead
 7, the destructive-guidance allowlist holds its full seeded membership and
 the exemption list holds 8+4 entries — the tree is green throughout
-because AC-9(ii)'s exactly-one-entry assertion is **bead 7's** deliverable
+because AC-9(ii)'s zero-entry final-state assertion (AMENDED at bead-7
+fix round 1 — not "exactly-one-entry," see the final-state amendment
+above) is **bead 7's** deliverable
 (bead 2 lands membership pinning, rationale + obligation discipline, and
 the bootstrap fixtures over the seeded set); the four seed-only
 orchestrator-block exemption entries exit in bead 7 with named exit
@@ -1512,9 +1514,13 @@ preamble). (bd edges wired from `work_chunks[].depends_on`.)
 ## Bead 7: R5d/e sweep and burn-down — last by construction
 
 Agent-template replacement, release.go recovery split, allowlist burned
-down to the single pinned final entry, seed-only exemption entries
-exited, and the AC-11 named-invocation anti-drift table over every
-invocation this spec's messages and guidance name.
+down to its zero-entry final state (AMENDED at bead-7 fix round 1 —
+see spec.md's R5(d) amendment: the "single pinned final entry" this
+paragraph originally named is unreachable — release.go's discard leads
+with the `mindspec` verb and never matches the classifier's {git,bd,rm}
+floor, O2-r2-13), seed-only exemption entries exited, and the AC-11
+named-invocation anti-drift table over every invocation this spec's
+messages and guidance name.
 
 **Steps**
 1. `.claude/agents/spec-orchestrator.md:163-175`: the raw bypass block
@@ -1528,21 +1534,41 @@ invocation this spec's messages and guidance name.
    absence greps + pinned-invocation assertions.
 2. `cmd/mindspec/release.go:257`: recovery line = the safe action
    (commit and re-run); the `--force` discard becomes a separately-
-   labeled operator choice the classifier still sees (O3-r2-7) —
-   the allowlist's ONE final entry, rationale + the tested obligation
-   (discard never in the `recovery:` line — O2-r2-5).
+   labeled operator choice the classifier still sees (O3-r2-7).
+   **AMENDED at bead-7 fix round 1**: this step originally described
+   the discard as "the allowlist's ONE final entry"; the discard
+   never matches the classifier's floor (it leads with the `mindspec`
+   verb, not `git`/`bd`/`rm`), so it cannot become an allowlist entry
+   at all — its obligation (discard never in the `recovery:` line —
+   O2-r2-5) is delivered instead by `TestRunRelease_
+   DiscardNeverInRecoveryLine`, entirely outside the allowlist.
 3. Burn-down: every remaining seeded allowlist entry removed —
-   `internal/guard/registries.go` ends at exactly ONE entry; AC-9(ii)'s
-   exactly-one assertion + leftover/rationale-free/obligation-untested/
-   second-entry red fixtures land here. The four seed-only
-   orchestrator-block exemption entries exit with named bead-7 records
-   (fixture β final state).
+   `internal/guard/registries.go` ends at **zero** entries (AMENDED at
+   bead-7 fix round 1 — not "exactly ONE," per step 2's correction
+   above); AC-9(ii)'s zero-entry final assertion is delivered by
+   `TestProductDiagnosticScan_AllowlistMembershipExact` (leftover/
+   second-entry, via bidirectional set equality against the seed
+   manifest), `TestDestructiveGuidanceAllowlist_
+   EveryEntryHasRationaleAndObligation` (rationale/obligation
+   presence — vacuously true at zero, and still exercised by the
+   OTHER two registries' non-empty entries), and
+   `TestRegistryObligations_NamedTestsExist` (obligation cites a real
+   test) — not four separately-named dedicated fixtures, a
+   distributed rather than four-fixture guarantee (AMENDED at bead-7
+   fix round 1, O2-1's correction of this step's own prior "four red
+   fixtures" phrasing). The four seed-only orchestrator-block
+   exemption entries exit with named bead-7 records (fixture β final
+   state).
 4. `cmd/mindspec/named_invocation_test.go` (AC-11): every `mindspec`
    invocation named by AC-1..AC-10 messages/guidance (`impl adopt` +
    both flags, `complete` + `--resolve-merge`, `impl approve` +
    `--resolve-merge` + `--allow-net-deletion`, `repair phase`,
-   `release` with/without `--force`) resolves at leaf identity with
-   flag-set membership; bare `Find` forbidden.
+   `release` with/without `--force`, `panel create` +
+   `--spec`/`--target`/`--bead`/`--round` — the R5(e) #186 stale-SHA
+   interim recovery, `--bead` added at bead-7 fix round 1, G1-1-ruled:
+   omitting it registers a non-bead panel `mindspec complete`'s gate
+   silently never selects) resolves at leaf identity with flag-set
+   membership; bare `Find` forbidden.
 5. Final whole-tree sweep re-run as review evidence: zero floor matches
    outside the eight-entry exemption list across globs + canonical
    surfaces.
@@ -1550,12 +1576,12 @@ invocation this spec's messages and guidance name.
 **Verification**
 - [ ] `go test -short ./cmd/mindspec/... ./internal/guard/... ./internal/lint/...` passes
 - [ ] AC-10(i)/(ii) RED at `09f62bd9`, green after; every replacement invocation resolves per AC-11
-- [ ] AC-9(ii): exactly one allowlist entry; all four red fixtures fire on revert-shaped mutations; exemption list at eight live entries, four named exits
+- [ ] AC-9(ii): zero allowlist entries (AMENDED at bead-7 fix round 1 — not "exactly one," see step 3); the leftover/second-entry/rationale-free/obligation-untested guarantees fire on revert-shaped mutations, delivered across `TestProductDiagnosticScan_AllowlistMembershipExact`, `TestDestructiveGuidanceAllowlist_EveryEntryHasRationaleAndObligation`, `TestRegistryObligations_NamedTestsExist`, and `TestBootstrapManifest_AllowlistRegistryIdentity` (not four separately-named fixtures); exemption list at ten live entries (not eight — R5(c)'s Background-cited eight plus two background-justified widening entries), four named exits
 - [ ] internal/lint sweep green over the final tree; full gates clean; zero `--override-adr`
 
 **Acceptance Criteria**
 - [ ] AC-10(i)/(ii) — template replacement + release split (RED today)
-- [ ] AC-9(ii) — burn-down to the exactly-one pinned entry (final state)
+- [ ] AC-9(ii) — burn-down to the zero-entry final state (AMENDED at bead-7 fix round 1 — not "exactly-one pinned entry")
 - [ ] AC-11 — named-invocation anti-drift (anti-drift)
 - [ ] AC-10(iii)'s final membership (eight live entries, seed-only exits recorded)
 

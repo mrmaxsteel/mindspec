@@ -118,10 +118,24 @@ var namedInvocations = []namedInvocation{
 	{
 		// R5(e)'s #186 stale-SHA interim recovery, named in the
 		// spec-orchestrator.md replacement guidance this bead ships:
-		// re-panel to co-bump round + reviewed_head_sha.
-		label:     "mindspec panel create --spec/--target/--round",
+		// re-panel to co-bump round + reviewed_head_sha. `--bead` is
+		// named alongside the other three (fix round 1, G1-1-ruled):
+		// omitting it from the guidance registers a NON-bead panel
+		// (`bead_id: null`), which `mindspec complete`'s
+		// `panel.ForBead`-scoped gate never matches — a silent
+		// fail-open, not a recovery. Flag-set membership alone cannot
+		// prove `--bead` was actually SUPPLIED at the call site this
+		// guidance names (that's a semantic composition property, not
+		// a leaf-identity one); the guidance text itself pins the
+		// literal invocation, and
+		// TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds
+		// (panel_test.go) proves the composed registration is
+		// bead-bound and that `panel.ForBead` selects it — the
+		// mechanical half of this row's claim that `--help` alone
+		// cannot establish.
+		label:     "mindspec panel create --spec/--target/--bead/--round",
 		path:      []string{"panel", "create"},
-		wantFlags: []string{"--spec", "--target", "--round"},
+		wantFlags: []string{"--spec", "--target", "--bead", "--round"},
 	},
 }
 

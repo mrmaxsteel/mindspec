@@ -96,14 +96,25 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // sees them fail loudly if a future edit to the slice's structure
 // (e.g. renaming the seed-only surface, or a leftover orchestrator
 // entry surviving the exit) silently changes what "live" means.
+// wantKnownSitesLiveCount is the ONE hand-typed number this sentinel
+// pins (bead-7 fix round 1, G1's brief-error correction): eight
+// Background-cited entries plus two background-justified widening
+// entries (spec.md R5(c)), with the four seed-only orchestrator-block
+// entries already exited by bead 7 — so live and total coincide.
+// Declared once and read three times below, rather than re-typed at
+// each assertion, so the three checks cannot silently drift apart from
+// one another even though the underlying "10" is still, unavoidably,
+// a hand-pinned sentinel value (that's what a sentinel is).
+const wantKnownSitesLiveCount = 10
+
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
-	if got, want := len(KnownSitesExemptionList), 10; got != want {
+	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {
 		t.Errorf("len(KnownSitesExemptionList) = %d, want %d", got, want)
 	}
-	if got, want := KnownSitesExemptionListTotalCount, 10; got != want {
+	if got, want := KnownSitesExemptionListTotalCount, wantKnownSitesLiveCount; got != want {
 		t.Errorf("KnownSitesExemptionListTotalCount = %d, want %d", got, want)
 	}
-	if got, want := KnownSitesExemptionListLiveCount, 10; got != want {
+	if got, want := KnownSitesExemptionListLiveCount, wantKnownSitesLiveCount; got != want {
 		t.Errorf("KnownSitesExemptionListLiveCount = %d, want %d", got, want)
 	}
 }
