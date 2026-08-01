@@ -1057,15 +1057,15 @@ func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.
 	})
 }
 
-// TestMergeChokepoint_EveryProducerConsultsThePreflight is AC-7(iv),
+// TestMergeChokepoint_ResolvableProducersConsultThePreflight is AC-7(iv),
 // amended: every gitutil.MergeInto/gitutil.MergeBranch call site this
 // scan's AST vocabulary can resolve (direct, alias-chain-at-any-depth, or
 // import-aliased) in this package, in every function-like construct
 // (FuncDecl or FuncLit, at any nesting depth), is preceded by its OWN,
 // distinct, operand-corresponding call to preflightMergeDestruction — see
-// this file's package doc comment for the resolved/fail-closed/
-// review-caught scope this name does not spell out.
-func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
+// this file's package doc comment for the exact resolved/fail-closed/
+// review-caught scope "resolvable" stands in for here.
+func TestMergeChokepoint_ResolvableProducersConsultThePreflight(t *testing.T) {
 	root := mergeChokepointRepoRoot(t)
 	pkgDir := filepath.Join(root, "internal", "executor")
 	entries, err := os.ReadDir(pkgDir)
@@ -1891,7 +1891,7 @@ func g6UnrelatedProducer(v g6UnrelatedType) error {
 // TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree
 // confirms (real-git-repo-adjacent, but here a real-source-tree check) that
 // the new fail-closed leg does not fire against internal/executor's own
-// production code: TestMergeChokepoint_EveryProducerConsultsThePreflight
+// production code: TestMergeChokepoint_ResolvableProducersConsultThePreflight
 // already runs failClosedOnUnresolvedMergeSignatureVars over every real
 // span in this package as part of its normal pass — this test exists
 // separately so a false positive here is diagnosable on its own, without
