@@ -738,8 +738,12 @@ func strandedTopologyIndeterminateRefusal(workdir, expectedSource, strandedTip, 
 // failure can leave behind: two commits that are BOTH plain (exactly
 // two-parent) merge commits, immediately adjacent on the first-parent
 // chain reachable from HEAD (the newer one's first parent IS the older
-// one, not merely an ancestor of it — no unrelated history sits between
-// them), sharing the IDENTICAL subject, and that subject names
+// one, not merely an ancestor of it — no ORDINARY git operation lands
+// unrelated history between them; a `git replace` ref or `.git/info/
+// grafts` entry rewiring what this commit's first parent REPORTS as can,
+// and is out of scope for the same reason deliberate ref/object
+// manipulation is throughout this bead — see MergeSourceMarkerRef's own
+// doc comment), sharing the IDENTICAL subject, and that subject names
 // expectedSource (mergeSubjectNamesSource's own MergeInto/MergeBranch form
 // check, applied here to a commit's own preserved subject rather than a
 // live MERGE_MSG). When true, it returns exactly what the original
@@ -811,8 +815,10 @@ func strandedTopologyIndeterminateRefusal(workdir, expectedSource, strandedTip, 
 // in fact still needed the indeterminate refusal below. This function
 // now scans every consecutive pair in the merges list, nearest-HEAD
 // first, for the first one that is adjacent (candidate's own first
-// parent SHA-equals the older entry's SHA — no other commit, merge or
-// not, sits directly between them) and shares a subject naming
+// parent SHA-equals the older entry's SHA — under ordinary git
+// operation, no other commit, merge or not, sits directly between them;
+// see detectStrandedDriftTopology's own doc comment for the replace-ref/
+// graft scoping) and shares a subject naming
 // expectedSource, rather than assuming that pair is always at indices
 // 0/1. Everything above it in the list — any number of unrelated merges,
 // with or without ordinary commits interposed — is simply skipped, the

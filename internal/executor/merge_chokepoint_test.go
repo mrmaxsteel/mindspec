@@ -1,13 +1,42 @@
 package executor
 
-// Spec 127 AC-7(iv): the chokepoint anti-drift test. Every
-// gitutil.MergeInto/gitutil.MergeBranch call site in this package must be
-// preceded — in the same enclosing function-like construct (a *ast.FuncDecl
-// or a *ast.FuncLit, whichever DIRECTLY contains it — never inherited from
-// an enclosing scope), by its OWN, dedicated, operand-corresponding call to
-// preflightMergeDestruction. A new raw producer that skips the preflight
-// call entirely is caught here, at build-and-test time, regardless of
-// whether any behavioral test happens to exercise it.
+// Spec 127 AC-7(iv), amended at bead-6 fix round 7 (G1's round-6
+// confirm-round finding): the chokepoint anti-drift test. Every
+// gitutil.MergeInto/gitutil.MergeBranch call site THIS SCAN'S AST
+// VOCABULARY CAN RESOLVE — direct calls, alias chains at any depth,
+// import-aliased calls, struct fields populated by assignment or
+// composite literal, and the signature-matched parameter/var/member
+// shapes it fails closed on, all documented below — must be preceded, in
+// the same enclosing function-like construct (a *ast.FuncDecl or a
+// *ast.FuncLit, whichever DIRECTLY contains it — never inherited from an
+// enclosing scope), by its OWN, dedicated, operand-corresponding call to
+// preflightMergeDestruction. A new raw producer reached through one of
+// those RESOLVABLE shapes that skips the preflight call entirely is
+// caught here, at build-and-test time, regardless of whether any
+// behavioral test happens to exercise it; a producer reached through one
+// of the FAIL-CLOSED shapes (a function-typed parameter, an uninitialized
+// package-level var, or a struct field/named-function-type method of a
+// producer's exact signature, called directly) REDS the build instead of
+// passing silently, because this scan cannot trace what value it holds.
+//
+// THIS IS NOT A UNIVERSAL CLAIM: a dot-import, an embedded named-function
+// struct field, a map or slice element holding a producer, a multi-hop
+// named struct type, interface dispatch, and reflection all need type
+// resolution to trace to gitutil.MergeInto/MergeBranch — go/types is out
+// of scope for this same ratchet (R5(b)'s precedent, upheld against the
+// bare-name-collision residual below on exactly that basis) — and a
+// single compiling production file combining the first four of those
+// shapes passed this scan unchanged (G1's round-6 confirm-round finding,
+// the third such widening of the enumeration in as many rounds, per
+// AC-7(iv)'s own amendment). These shapes are REVIEW-CAUGHT, under the
+// same in-diff extension obligation R5(a)/R5(b) already rely on for their
+// own residual classes, never machine-verified by this test — extending
+// this scan again to cover them is not the fix (AC-7(iv)'s amendment).
+// The threat model this test defends is a developer adding a new merge
+// producer and forgetting its preflight call — the realistic failure
+// every resolved and fail-closed shape above covers — never deliberate
+// evasion: assembling a map of function values indexed at the call site
+// is not how a producer is added by accident.
 //
 // Bead-6 fix round 1 rewrite (O2-1, S3-1, S3-2/G1-2 — three independently
 // demonstrated ways the original scan was defeated):
@@ -1028,11 +1057,14 @@ func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.
 	})
 }
 
-// TestMergeChokepoint_EveryProducerConsultsThePreflight is AC-7(iv):
-// every gitutil.MergeInto/gitutil.MergeBranch call site (direct or
-// single-hop-aliased) in this package, in every function-like construct
+// TestMergeChokepoint_EveryProducerConsultsThePreflight is AC-7(iv),
+// amended: every gitutil.MergeInto/gitutil.MergeBranch call site this
+// scan's AST vocabulary can resolve (direct, alias-chain-at-any-depth, or
+// import-aliased) in this package, in every function-like construct
 // (FuncDecl or FuncLit, at any nesting depth), is preceded by its OWN,
-// distinct, operand-corresponding call to preflightMergeDestruction.
+// distinct, operand-corresponding call to preflightMergeDestruction — see
+// this file's package doc comment for the resolved/fail-closed/
+// review-caught scope this name does not spell out.
 func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 	root := mergeChokepointRepoRoot(t)
 	pkgDir := filepath.Join(root, "internal", "executor")

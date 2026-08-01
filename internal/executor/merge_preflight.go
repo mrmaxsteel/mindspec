@@ -49,7 +49,12 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 // consulted at CompleteBead's bead→spec merge, FinalizeEpic's bead→spec
 // auto-merge, and the direct spec→main merge (the three enumerated call
 // sites; internal/executor/merge_chokepoint_test.go asserts there are no
-// others).
+// others AMONG THE SHAPES ITS AST VOCABULARY RESOLVES — direct calls,
+// alias chains, import aliases, struct fields, and the signature-matched
+// parameter/var shapes it fails closed on; a dot-import, an embedded
+// field, a map/slice element, or a multi-hop named struct type is
+// review-caught, not scanned — see AC-7(iv), amended, and this file's own
+// merge_chokepoint_test.go package doc comment).
 //
 // # THE ZERO-VALUE TRAP
 //
@@ -73,11 +78,16 @@ const AllowNetDeletionFlag = "--allow-net-deletion"
 //
 // Walking every route an unevaluated outcome could take to reach a merge:
 //   - A producer that never calls this function at all: the merge runs
-//     unguarded. This is NOT prevented by any runtime mechanism — it is
-//     caught by merge_chokepoint_test.go's enumeration of every
-//     gitutil.MergeInto/MergeBranch call site in this package, which
-//     fails the build's test suite (not a runtime guard) if a call site
-//     is added with no preceding call into this function.
+//     unguarded. This is NOT prevented by any runtime mechanism — for a
+//     call site merge_chokepoint_test.go's AST vocabulary can resolve
+//     (a direct call, an alias chain, an import alias, or one of the
+//     fail-closed parameter/var/field shapes), it fails the build's test
+//     suite (not a runtime guard) if the call site is added with no
+//     preceding call into this function; for a shape that vocabulary does
+//     not attempt (a dot-import, an embedded field, a map/slice element,
+//     a multi-hop named struct type — AC-7(iv), amended), this is instead
+//     review-caught, under the same in-diff extension obligation R5(a)/
+//     R5(b) already rely on, never machine-verified.
 //   - A struct literal or "var outcome guard.DestructionOutcome" defaulting
 //     silently: impossible for a CALLER to construct, because outcome is
 //     never a parameter here — it is always the fresh return value of

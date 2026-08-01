@@ -454,7 +454,7 @@ primary — the `internal/lint` convention scan out of bead 2 as its own
 bead (declared, not expected to fire after the round-6 cut); secondary —
 the AC-3 outcome-oracle harness out of bead 4 (it would land directly
 after bead 1); tertiary — the R5(d) re-entry recovery-surface work out of
-bead 6 (the AC-7(iv) chokepoint universal is NOT staged — it stays whole
+bead 6 (the AC-7(iv) chokepoint requirement is NOT staged — it stays whole
 in bead 6 under every valve outcome). Bead 6 must NOT be split
 producer-wise. Bead 5 is light and carries no valve.
 
@@ -1340,7 +1340,7 @@ design, plan preamble) on all three producers; `--allow-net-deletion` with frict
 registration; the chokepoint enumeration; the `:1688`/`:1721` conversion
 to the `--resolve-merge` resumption surface with the preserved-merge
 precondition across every committing path; AC-5. NOT split
-producer-wise (AC-7(iv) is a whole-set universal).
+producer-wise (AC-7(iv) is a single, whole requirement).
 
 **Steps**
 1. Verb-layer §1 preflights EVALUATE the predicate through the
