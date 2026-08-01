@@ -1583,7 +1583,7 @@ messages and guidance name.
 - [ ] AC-10(i)/(ii) — template replacement + release split (RED today)
 - [ ] AC-9(ii) — burn-down to the zero-entry final state (AMENDED at bead-7 fix round 1 — not "exactly-one pinned entry")
 - [ ] AC-11 — named-invocation anti-drift (anti-drift)
-- [ ] AC-10(iii)'s final membership (eight live entries, seed-only exits recorded)
+- [ ] AC-10(iii)'s final membership (ten live entries — R5(c)'s eight Background-cited entries plus two background-justified widening entries, AMENDED at bead-7 fix round 2, was "eight," stale against the Verification section above and the shipped sentinel; seed-only exits recorded)
 
 **Depends on**
 Beads 2, 4, 5, and 6 — last by construction (C-r4-4): the burn-down
