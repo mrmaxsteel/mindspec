@@ -97,7 +97,7 @@ func TestOrphanConvergence_NormalUnmergedBeadMergesCleanly(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWD) })
 
 	g := executor.NewMindspecExecutor(dir)
-	if err := g.CompleteBead(beadID, specBranch, ""); err != nil {
+	if err := g.CompleteBead(beadID, specBranch, "", "", false); err != nil {
 		t.Fatalf("an ordinary, non-conflicting bead merge must converge with no refusal, got: %v", err)
 	}
 

@@ -100,8 +100,11 @@
 # full accounting.
 
 [destructive_guidance_allowlist]
-internal/executor/mindspec_executor.go	beadToSpecConflictFailure	git merge	git merge
-internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git merge
+# Bead 6 (spec 127 R5(d)): the two entries this section used to carry
+# (beadToSpecConflictFailure/directMergeConflictFailure, both "git
+# merge") EXIT here — neither function prints a `git merge` line (or
+# any floor-matching text) any longer; both are converted to the
+# --resolve-merge re-entry surface. The section is intentionally EMPTY.
 
 # Bead 4 (spec 127 R2): internal/approve/impl.go's implOrphanRefusal and
 # internal/approve/adopt.go's adoptOrphanPresentRefusal EXIT their
@@ -112,6 +115,36 @@ internal/executor/mindspec_executor.go	directMergeConflictFailure	git merge	git 
 # destructive `git branch -D` line for two of its five outcomes — see
 # registries.go's own entries for the obligation this shape carries
 # instead of "never matches a floor family".
+
+# Bead 6 (spec 127 R4/R5(d)): four NEW entries for the merge-destruction
+# preflight's refusal builders — internal/executor/merge_preflight.go's
+# evidenceErrorRefusal/destructionRefusal (the producer-level backstop,
+# consulted live at every gitutil.MergeInto/MergeBranch call site) and
+# internal/lifecycle/merge_preflight.go's workDestructionEvidenceError
+# Refusal/workDestructionRefusal (the §1-phase verb-layer counterpart
+# internal/complete and internal/approve consult). All four share the
+# same shape beadToSpecConflictFailure's own `rerun`-parameter entry
+# (below, in this same bead RENAMED from arg3:unprovable to
+# arg1:unprovable — see registries.go's own comment): a `rerun`
+# parameter — the caller-supplied `mindspec complete <bead-id>` /
+# `mindspec impl approve <spec-id>` re-invocation — substituted into the
+# recovery-line Sprintf, never a literal at this function's own scope.
+# None of the four is destructive (this bead introduces no new floor-
+# matching command); each is registered because its recovery-line
+# operand is genuinely unprovable by this scan's fold rules, exactly the
+# pre-existing precedent's own rationale.
+#
+# Same bead, same R5(d) conversion: beadToSpecConflictFailure's
+# containment.EmitCd(specWtPath) and directMergeConflictFailure's
+# containment.EmitCd(root) opaque-operand entries EXIT (neither function
+# prints a `cd` recovery line any longer — the --resolve-merge surface
+# resolves its own target); beadToSpecConflictFailure's rerun entry
+# RENAMES from arg3:unprovable to arg1:unprovable (the EmitCd/git-merge
+# arguments that used to precede it in the guard.NewFailure call are
+# gone); directMergeConflictFailure gains a NEW rerun parameter (it
+# previously had none) under the identical arg1:unprovable key its own
+# now-exited EmitCd entry already occupied — a coincidental same-key
+# reuse, not a special case.
 
 [opaque_operand_registry]
 cmd/mindspec/bead_clarify.go	beadClarifyCmd	arg1:unprovable
@@ -163,13 +196,18 @@ internal/complete/complete.go	attestedRestoreFailure	arg2:unprovable
 internal/complete/panel_advisory.go	panelGate	arg1:unprovable
 internal/complete/panel_advisory.go	reconcilePendingRefutations	arg1:unprovable
 internal/executor/layout_guard.go	mergeLayoutRegressionFailure	arg1:unprovable
+internal/executor/merge_preflight.go	destructionRefusal	arg1:unprovable
+internal/executor/merge_preflight.go	evidenceErrorRefusal	arg1:unprovable
+internal/executor/merge_resumption.go	resumeAwareMerge	arg1:unprovable
+internal/executor/merge_resumption.go	stillConflictedRefusal	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.CompleteBead	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.FinalizeEpic	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
-internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg3:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
 internal/guard/guard.go	checkCWDWithCache	arg1:unprovable
 internal/lifecycle/finalize_orphans.go	FinalizeOrphan.RecoveryCommand	arg0:unprovable
+internal/lifecycle/merge_preflight.go	workDestructionEvidenceErrorRefusal	arg1:unprovable
+internal/lifecycle/merge_preflight.go	workDestructionRefusal	arg1:unprovable
 internal/lifecycle/orphans.go	Orphan.RecoveryCommand	arg0:unprovable
 internal/lifecycle/stale_open.go	StaleOpenBead.RecoveryCommand	arg0:unprovable
 internal/next/guard.go	ClaimFailure	arg1:unprovable

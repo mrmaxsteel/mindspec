@@ -216,26 +216,37 @@ func TestLandedE2E_ConflictRecoveryBindsAndFindLandedMergeIdentifies(t *testing.
 	g := executor.NewMindspecExecutor(dir)
 
 	// 1. First run: CompleteBead's own MergeInto hits the real add/add
-	// conflict and refuses; the printed recovery line must carry -m so a
-	// verbatim-following operator produces an identifiable subject
-	// (AC-1b's message half, Bead 1's beadToSpecConflictFailure fix).
-	err = g.CompleteBead(beadID, specBranch, "")
+	// conflict and refuses. Spec 127 R5(d): the conflict is left IN
+	// PLACE (never aborted) and the recovery names the --resolve-merge
+	// re-entry invocation, never a raw `git merge` line — replacing the
+	// AC-1b `-m`-carrying recovery line this test used to assert on.
+	err = g.CompleteBead(beadID, specBranch, "", "", false)
 	if err == nil {
 		t.Fatal("expected the bead→spec add/add conflict to refuse")
 	}
-	wantRecovery := `git merge --no-ff -m "Merge ` + beadBranch + `" ` + beadBranch
-	if !strings.Contains(err.Error(), wantRecovery) {
-		t.Errorf("conflict recovery must print %q (AC-1b), got:\n%v", wantRecovery, err)
+	if strings.Contains(err.Error(), "git merge") {
+		t.Errorf("conflict recovery must never print a raw `git merge` line; got:\n%v", err)
+	}
+	if !strings.Contains(err.Error(), executor.ResolveMergeFlag) {
+		t.Errorf("conflict recovery must name %s; got:\n%v", executor.ResolveMergeFlag, err)
 	}
 	if _, refErr := gitE2ERaw(dir, "rev-parse", "--verify", "refs/heads/"+beadBranch); refErr != nil {
 		t.Fatal("fixture: the conflicted bead branch must survive the refusal")
 	}
 
-	// 2. Operator recovery following the PRE-fix line verbatim (no -m):
-	// the merge conflicts, the operator resolves and commits, and git
-	// writes its DEFAULT subject — the exact miss shape 755/757 fleet
-	// beads are stranded in.
-	_, _ = gitE2ERaw(specWt, "merge", "--no-ff", beadBranch) // conflicts by construction
+	// 2. Operator recovery: the merge CompleteBead started above is
+	// PRESERVED (spec 127 R5(d) — no abort), so the operator resolves
+	// the ALREADY-in-progress merge directly (no fresh `git merge`,
+	// which would fail with "merge in progress") and commits with
+	// `--no-edit`, retaining whatever subject the original attempt
+	// seeded — git's OWN default form here (`Merge branch '<beadBranch>'
+	// into '<specBranch>'`), since MergeInto's own `-m "Merge <bead>"`
+	// form is what actually started this merge... this fixture
+	// specifically wants the DEFAULT-subject miss shape, so it discards
+	// the preserved MERGE_MSG and re-seeds git's own default before
+	// completing, reproducing the exact 755/757 fleet miss shape.
+	gitE2E(t, specWt, "merge", "--abort")
+	_, _ = gitE2ERaw(specWt, "merge", "--no-ff", beadBranch) // conflicts again, git's OWN default subject this time
 	if err := os.WriteFile(filepath.Join(specWt, ".beads", "issues.jsonl"), []byte("resolved\n"), 0o644); err != nil {
 		t.Fatalf("write resolution: %v", err)
 	}
@@ -253,7 +264,7 @@ func TestLandedE2E_ConflictRecoveryBindsAndFindLandedMergeIdentifies(t *testing.
 	// no-op merge; the binding is persisted via the REAL
 	// bead.MergeMetadata (bd update through the shim), then cleanup
 	// deletes the branch.
-	if err := g.CompleteBead(beadID, specBranch, ""); err != nil {
+	if err := g.CompleteBead(beadID, specBranch, "", "", false); err != nil {
 		t.Fatalf("the recovery re-run must converge, got: %v", err)
 	}
 

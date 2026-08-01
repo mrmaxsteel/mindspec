@@ -313,7 +313,7 @@ func buildAC8iOrdinaryMergeFixtureWithContent(t *testing.T, beadContent string) 
 	g := &MindspecExecutor{Root: dir, WorktreeOps: fake}
 
 	stdout, stderr, callErr := ac8iCaptureOutput(func() error {
-		return g.CompleteBead(beadID, specBranch, "")
+		return g.CompleteBead(beadID, specBranch, "", "", false)
 	})
 
 	exitCode := 0

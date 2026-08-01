@@ -97,11 +97,13 @@ func assertConflictedFilesListing(t *testing.T, msg, path string) {
 	}
 }
 
-// TestCompleteBead_MergeConflictAbortsAndPreserves pins the incident
-// amendment: a bead→spec merge failure in CompleteBead must abort the
-// in-progress merge in the spec worktree, preserve the bead branch +
-// bead worktree (no cleanup), and return a non-zero guard failure
-// naming the conflicted files with resolve-in-spec-worktree recovery —
+// TestCompleteBead_MergeConflictAbortsAndPreserves pins the spec 127
+// R5(d) behavior (replacing the Spec 092 incident amendment's abort-and-
+// refuse this test's name still records for history): a bead→spec merge
+// failure in CompleteBead leaves the conflict IN PLACE (never aborted),
+// preserves the bead branch + bead worktree (no cleanup), and returns a
+// non-zero guard failure naming the conflicted files with a
+// --resolve-merge re-entry recovery — never a raw `git merge` line,
 // never the old warn-and-continue.
 func TestCompleteBead_MergeConflictAbortsAndPreserves(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
@@ -115,7 +117,7 @@ func TestCompleteBead_MergeConflictAbortsAndPreserves(t *testing.T) {
 
 	specHashBefore := refHash(t, dir, "spec/077-test")
 
-	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "")
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -136,16 +138,14 @@ func TestCompleteBead_MergeConflictAbortsAndPreserves(t *testing.T) {
 	if !strings.Contains(msg, specWtPath) {
 		t.Errorf("recovery should reference the spec worktree %s; got:\n%s", specWtPath, msg)
 	}
-	if !strings.Contains(msg, "recovery: mindspec complete mindspec-x.1") {
-		t.Errorf("recovery should include the converging re-run `mindspec complete mindspec-x.1`; got:\n%s", msg)
+	if !strings.Contains(msg, "recovery: mindspec complete mindspec-x.1 "+ResolveMergeFlag) {
+		t.Errorf("recovery should name the --resolve-merge re-entry invocation; got:\n%s", msg)
 	}
-	// Spec 125 R5/AC-1b: the printed recovery merge line now supplies
-	// `-m "Merge <beadBranch>"` so an operator following it verbatim
-	// produces an IDENTIFIABLE exact subject too — belt (second-parent
-	// identity, subject-independent) and suspenders (an identifiable
-	// recovery subject).
-	if !strings.Contains(msg, `recovery: git merge --no-ff -m "Merge bead/mindspec-x.1" bead/mindspec-x.1`) {
-		t.Errorf("recovery should print an identifiable exact-subject merge; got:\n%s", msg)
+	// Spec 127 R5(d)/C2-r2-1: no raw `git merge` line anywhere — the
+	// preflight evaluated THIS merge attempt; a printed raw merge
+	// command would start a NEW, unevaluated one.
+	if strings.Contains(msg, "git merge") {
+		t.Errorf("recovery must never print a raw `git merge` line; got:\n%s", msg)
 	}
 
 	// No warn-and-continue cleanup: bead worktree + branch preserved.
@@ -159,18 +159,21 @@ func TestCompleteBead_MergeConflictAbortsAndPreserves(t *testing.T) {
 		t.Errorf("bead worktree must be preserved on conflict: %v", statErr)
 	}
 
-	// The in-progress merge was aborted: spec worktree clean, spec
-	// branch unchanged.
-	if gitutil.MergeInProgress(specWtPath) {
-		t.Error("the in-progress merge in the spec worktree must be aborted")
+	// Spec 127 R5(d): the conflict is left IN PLACE — never aborted —
+	// so --resolve-merge has something to resume. Spec branch unchanged
+	// (no commit has landed; only the index/MERGE_HEAD reflect the
+	// in-progress merge).
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the in-progress merge in the spec worktree must be PRESERVED, not aborted (spec 127 R5(d))")
 	}
 	if got := refHash(t, dir, "spec/077-test"); got != specHashBefore {
-		t.Errorf("spec branch must be unchanged after abort; was %s, now %s", specHashBefore, got)
+		t.Errorf("spec branch must be unchanged (no commit landed); was %s, now %s", specHashBefore, got)
 	}
-	// B15: the abort site is byte-clean — no residual staged/unstaged
-	// changes survive the `git merge --abort`.
-	if got := porcelainStatus(t, specWtPath); got != "" {
-		t.Errorf("spec worktree must be byte-clean after abort; git status --porcelain:\n%s", got)
+	// The preserved conflict leaves c.txt carrying conflict markers —
+	// the spec worktree is NOT clean (this is the state --resolve-merge
+	// expects to find and resume).
+	if got := porcelainStatus(t, specWtPath); got == "" {
+		t.Error("spec worktree must carry the preserved conflict (non-empty git status --porcelain)")
 	}
 }
 
@@ -193,7 +196,7 @@ func TestFinalizeEpic_BeadMergeConflictAbortsFinalize(t *testing.T) {
 	mainHashBefore := refHash(t, dir, "main")
 	specHashBefore := refHash(t, dir, "spec/077-test")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-x.1"})
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-x.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -212,12 +215,16 @@ func TestFinalizeEpic_BeadMergeConflictAbortsFinalize(t *testing.T) {
 	if !strings.Contains(msg, specWtPath) {
 		t.Errorf("recovery should reference the spec worktree %s; got:\n%s", specWtPath, msg)
 	}
-	if !strings.Contains(msg, "recovery: mindspec impl approve 077-test") {
-		t.Errorf("recovery should include re-running `mindspec impl approve 077-test`; got:\n%s", msg)
+	if !strings.Contains(msg, "recovery: mindspec impl approve 077-test "+ResolveMergeFlag) {
+		t.Errorf("recovery should name the --resolve-merge re-entry invocation; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "git merge") {
+		t.Errorf("recovery must never print a raw `git merge` line; got:\n%s", msg)
 	}
 
-	// Post-abort state: spec worktree exists, both branches exist, main
-	// untouched (no direct merge, no in-progress merge), no removals.
+	// Post-failure state (spec 127 R5(d): the conflict is PRESERVED, not
+	// aborted): spec worktree exists, both branches exist, main
+	// untouched (no direct merge), no removals.
 	if _, statErr := os.Stat(specWtPath); statErr != nil {
 		t.Errorf("spec worktree must still exist: %v", statErr)
 	}
@@ -233,15 +240,14 @@ func TestFinalizeEpic_BeadMergeConflictAbortsFinalize(t *testing.T) {
 	if gitutil.MergeInProgress(dir) {
 		t.Error("main must have no in-progress merge state")
 	}
-	if gitutil.MergeInProgress(specWtPath) {
-		t.Error("the in-progress merge in the spec worktree must be aborted")
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the in-progress merge in the spec worktree must be PRESERVED, not aborted (spec 127 R5(d))")
 	}
 	if got := refHash(t, dir, "spec/077-test"); got != specHashBefore {
-		t.Errorf("spec branch must be unchanged after abort; was %s, now %s", specHashBefore, got)
+		t.Errorf("spec branch must be unchanged (no commit landed); was %s, now %s", specHashBefore, got)
 	}
-	// B15: the abort site is byte-clean after the abort.
-	if got := porcelainStatus(t, specWtPath); got != "" {
-		t.Errorf("spec worktree must be byte-clean after abort; git status --porcelain:\n%s", got)
+	if got := porcelainStatus(t, specWtPath); got == "" {
+		t.Error("spec worktree must carry the preserved conflict (non-empty git status --porcelain)")
 	}
 	if len(fake.removeCalls) != 0 {
 		t.Errorf("no worktree removal may happen on conflict; got removeCalls=%v", fake.removeCalls)
@@ -275,7 +281,7 @@ func TestFinalizeEpic_DirectMergeConflictPreservesSpecBranch(t *testing.T) {
 	fake.listEntries = nil // no bead worktrees
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -289,12 +295,14 @@ func TestFinalizeEpic_DirectMergeConflictPreservesSpecBranch(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(msg) {
 		t.Errorf("error must end with a `recovery:` line; got:\n%s", msg)
 	}
-	// Root-anchored recovery, no worktree references.
-	if !strings.Contains(msg, "recovery: cd "+dir) {
-		t.Errorf("recovery should operate at the repo root %s; got:\n%s", dir, msg)
+	// Spec 127 R5(d): the recovery names the --resolve-merge re-entry
+	// invocation — no `cd`, no raw `git merge` line (the re-entry
+	// surface resolves its own target).
+	if !strings.Contains(msg, "recovery: mindspec impl approve 077-test "+ResolveMergeFlag) {
+		t.Errorf("recovery should name the --resolve-merge re-entry invocation; got:\n%s", msg)
 	}
-	if !strings.Contains(msg, "recovery: git merge --no-ff spec/077-test") {
-		t.Errorf("recovery should re-run the merge at the root; got:\n%s", msg)
+	if strings.Contains(msg, "git merge") {
+		t.Errorf("recovery must never print a raw `git merge` line; got:\n%s", msg)
 	}
 	for _, banned := range []string{".worktrees", "worktree-spec-"} {
 		if strings.Contains(msg, banned) {
@@ -302,21 +310,23 @@ func TestFinalizeEpic_DirectMergeConflictPreservesSpecBranch(t *testing.T) {
 		}
 	}
 
-	// Req 18 post-abort state: spec branch survives, main clean,
-	// non-zero exit (err != nil above).
+	// Req 18 post-failure state (spec 127 R5(d): the conflict is
+	// PRESERVED, not aborted): spec branch survives, main's ref
+	// unchanged (no commit landed), non-zero exit (err != nil above).
 	if !branchExistsIn(t, dir, "spec/077-test") {
 		t.Error("spec branch must survive a direct-merge conflict")
 	}
-	if gitutil.MergeInProgress(dir) {
-		t.Error("main must have no in-progress merge state after the abort")
+	if !gitutil.MergeInProgress(dir) {
+		t.Error("main must have a PRESERVED in-progress merge state, not aborted (spec 127 R5(d))")
 	}
 	if got := refHash(t, dir, "main"); got != mainHashBefore {
-		t.Errorf("main must be unchanged after abort; was %s, now %s", mainHashBefore, got)
+		t.Errorf("main's ref must be unchanged (no commit landed); was %s, now %s", mainHashBefore, got)
 	}
-	// B15: "main is clean" as a byte-state — the abort site (the root
-	// checkout on main) has an empty porcelain status.
-	if got := porcelainStatus(t, dir); got != "" {
-		t.Errorf("main must be byte-clean after abort; git status --porcelain:\n%s", got)
+	// The preserved conflict leaves c.txt carrying conflict markers at
+	// the repo root — main is NOT clean (the state --resolve-merge
+	// expects to find and resume).
+	if got := porcelainStatus(t, dir); got == "" {
+		t.Error("main must carry the preserved conflict (non-empty git status --porcelain)")
 	}
 }
 
@@ -365,7 +375,7 @@ func TestFinalizeEpic_PartialBeadMergeMatrix(t *testing.T) {
 
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"})
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error (bead B), got nil")
 	}
@@ -386,30 +396,33 @@ func TestFinalizeEpic_PartialBeadMergeMatrix(t *testing.T) {
 	if _, statErr := os.Stat(beadWtDir); statErr != nil {
 		t.Errorf("bead B's worktree must be preserved on conflict: %v", statErr)
 	}
-	// Main untouched, abort site clean, no removals ran.
+	// Main untouched, no removals ran. Spec 127 R5(d): the conflict is
+	// left IN PLACE (never aborted) — that preserved state is exactly
+	// what the operator's --resolve-merge recovery below resumes.
 	if got := refHash(t, dir, "main"); got != mainHashBefore {
 		t.Errorf("main must be untouched; was %s, now %s", mainHashBefore, got)
 	}
-	if gitutil.MergeInProgress(specWtPath) {
-		t.Error("the in-progress merge in the spec worktree must be aborted")
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the in-progress merge in the spec worktree must be PRESERVED, not aborted (spec 127 R5(d))")
 	}
 	if len(fake.removeCalls) != 0 {
 		t.Errorf("no worktree removal may happen on conflict; got removeCalls=%v", fake.removeCalls)
 	}
 
-	// Operator recovery (the failure's own recovery commands): re-run
-	// the merge in the spec worktree, resolve, commit the merge.
-	mergeCmd := exec.Command("git", "-C", specWtPath, "merge", "--no-ff", "bead/mindspec-x.1")
-	_ = mergeCmd.Run() // conflicts again, leaves the merge in progress
+	// Operator recovery: the merge FinalizeEpic left in progress above
+	// is resolved directly (no fresh `git merge` — one is already in
+	// progress) and committed, exactly the manual steps a
+	// --resolve-merge invocation's own "still conflicted" leg would
+	// print.
 	if err := os.WriteFile(filepath.Join(specWtPath, "c.txt"), []byte("resolved\n"), 0o644); err != nil {
 		t.Fatalf("write resolution: %v", err)
 	}
-	runGitIn(t, specWtPath, "add", ".")
-	runGitIn(t, specWtPath, "commit", "-m", "merge bead/mindspec-x.1 (resolved)")
+	runGitIn(t, specWtPath, "add", "c.txt")
+	runGitIn(t, specWtPath, "commit", "--no-edit")
 
 	// The re-run converges: both bead branches are ancestors now, so the
 	// loop skips them and finalize completes (direct merge to main).
-	result, rerunErr := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"})
+	result, rerunErr := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"mindspec-a.1", "mindspec-x.1"}, "", false)
 	if rerunErr != nil {
 		t.Fatalf("re-run after conflict resolution must converge, got: %v", rerunErr)
 	}
@@ -429,17 +442,16 @@ func TestFinalizeEpic_PartialBeadMergeMatrix(t *testing.T) {
 	}
 }
 
-// TestAbortMergeState_NoMergeInProgress covers the defensive no-
-// MERGE_HEAD early return (Bead 9 punch-list B16): with no in-progress
-// merge there is nothing to abort — no conflicted files, empty note.
-func TestAbortMergeState_NoMergeInProgress(t *testing.T) {
+// TestMergeResumptionStep_NoMergeInProgress covers the defensive
+// no-MERGE_HEAD case (spec 127 R5(d), replacing the deleted
+// abortMergeState's own no-op leg this test used to cover — Bead 9
+// punch-list B16): with no in-progress merge, mergeResumptionStep
+// reports resumeNoMergeInProgress so the caller proceeds to a fresh
+// merge attempt.
+func TestMergeResumptionStep_NoMergeInProgress(t *testing.T) {
 	dir := newTempRepo(t)
 
-	conflicted, note := abortMergeState(dir)
-	if len(conflicted) != 0 {
-		t.Errorf("conflicted = %v, want empty (no merge in progress)", conflicted)
-	}
-	if note != "" {
-		t.Errorf("note = %q, want empty (nothing was aborted)", note)
+	if got := mergeResumptionStep(dir); got != resumeNoMergeInProgress {
+		t.Errorf("mergeResumptionStep = %v, want resumeNoMergeInProgress (no merge in progress)", got)
 	}
 }

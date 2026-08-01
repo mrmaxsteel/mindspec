@@ -107,6 +107,7 @@ func saveAndRestore(t *testing.T) {
 	origMergedUnclosed := mergedUnclosedFn
 	origBeadScopeGetMeta := beadScopeGetMetadataFn
 	origBeadScopeChangedFiles := beadScopeChangedFilesFn
+	origWorkDestructionPreflight := completeWorkDestructionPreflightFn
 
 	t.Cleanup(func() {
 		findOrphanedClosedBeadsFn = origFindOrphans
@@ -133,6 +134,7 @@ func saveAndRestore(t *testing.T) {
 		mergedUnclosedFn = origMergedUnclosed
 		beadScopeGetMetadataFn = origBeadScopeGetMeta
 		beadScopeChangedFilesFn = origBeadScopeChangedFiles
+		completeWorkDestructionPreflightFn = origWorkDestructionPreflight
 	})
 
 	// Spec 089: phase.EnsureMigrated (wired into complete) shells to
@@ -157,6 +159,18 @@ func saveAndRestore(t *testing.T) {
 	t.Cleanup(restorePhaseList)
 
 	// Default stubs
+	// Spec 127 R4(a): completeWorkDestructionPreflightFn performs REAL git
+	// I/O (lifecycle.EvaluateWorkDestructionPreflight ->
+	// gitutil.EvaluateWorkDestruction) UNCONDITIONALLY on every non-
+	// reconcile Run call — unlike evaluateOrphanHintFn above, which only
+	// fires when an orphan is actually found, this new §1 check always
+	// runs, so most existing tests (which never set up a real git repo
+	// behind beadHead/specBranch) would otherwise fail closed against a
+	// nonexistent ref. Default to permissive; the AC-5/override-specific
+	// tests override this to drive the refusal/override paths.
+	completeWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
+		return nil
+	}
 	resolveTargetFn = func(root, flag string) (string, error) { return "", fmt.Errorf("no active specs") }
 	findLocalRootFn = func() (string, error) { return "", fmt.Errorf("test: no local root") }
 	// Spec 096 final-review (mindspec-2u0u): the default post-close re-read
@@ -3319,11 +3333,11 @@ type doomedExec struct {
 	onCompleteBead func()
 }
 
-func (d *doomedExec) CompleteBead(beadID, specBranch, msg string) error {
+func (d *doomedExec) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
 	if d.onCompleteBead != nil {
 		d.onCompleteBead()
 	}
-	return d.MockExecutor.CompleteBead(beadID, specBranch, msg)
+	return d.MockExecutor.CompleteBead(beadID, specBranch, msg, overrideReason, resolveMerge)
 }
 
 // cwdSensitive wraps a bd stub so it fails exactly the way a real bd

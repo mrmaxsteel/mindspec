@@ -72,7 +72,7 @@ func TestCompleteBead_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 		return errSimulatedBindingWrite
 	}
 
-	err := g.CompleteBead("mindspec-bind.1", "spec/121-bind", "")
+	err := g.CompleteBead("mindspec-bind.1", "spec/121-bind", "", "", false)
 	if err == nil {
 		t.Fatal("expected the binding-write failure to refuse")
 	}
@@ -111,7 +111,7 @@ func TestCompleteBead_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	if err := g.CompleteBead("mindspec-bind.1", "spec/121-bind", ""); err != nil {
+	if err := g.CompleteBead("mindspec-bind.1", "spec/121-bind", "", "", false); err != nil {
 		t.Fatalf("re-run must converge, got: %v", err)
 	}
 	if branchExistsIn(t, dir, "bead/mindspec-bind.1") {
@@ -159,7 +159,7 @@ func TestFinalizeEpic_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 	mainHashBefore := refHash(t, dir, "main")
 	mergeBindingFn = func(string, map[string]interface{}) error { return errSimulatedBindingWrite }
 
-	_, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"})
+	_, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected the binding-write failure to abort finalize")
 	}
@@ -199,7 +199,7 @@ func TestFinalizeEpic_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"})
+	result, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false)
 	if err != nil {
 		t.Fatalf("re-run must converge, got: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestFinalizeEpic_AlreadyMergedUnboundReRunBinds(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil } // absent
 
-	result, err := g.FinalizeEpic("epic-1", "121-g2", "spec/121-g2", []string{"mindspec-g2.1"})
+	result, err := g.FinalizeEpic("epic-1", "121-g2", "spec/121-g2", []string{"mindspec-g2.1"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "121-g2b", "spec/121-g2b", []string{"mindspec-g2b.1"}); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "121-g2b", "spec/121-g2b", []string{"mindspec-g2b.1"}, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 0 {
@@ -398,7 +398,7 @@ func TestFinalizeEpic_StaleBindingMismatchRewritesCorrectBinding(t *testing.T) {
 		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "121-g31", "spec/121-g31", []string{"mindspec-g31.1"}); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "121-g31", "spec/121-g31", []string{"mindspec-g31.1"}, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {
@@ -441,7 +441,7 @@ func TestFinalizeEpic_StaleBindingOverwriteFailurePreservesBranch(t *testing.T) 
 		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-g31f", "spec/121-g31f", []string{"mindspec-g31f.1"})
+	_, err := g.FinalizeEpic("epic-1", "121-g31f", "spec/121-g31f", []string{"mindspec-g31f.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected the failed correcting overwrite to refuse")
 	}
@@ -511,7 +511,7 @@ func TestFinalizeEpic_SpecWorktreeMissing_MergedUnboundBindsBeforeCleanup(t *tes
 		return nil
 	}
 
-	result, err := g.FinalizeEpic("epic-1", "121-g11", "spec/121-g11", []string{"mindspec-g11.1"})
+	result, err := g.FinalizeEpic("epic-1", "121-g11", "spec/121-g11", []string{"mindspec-g11.1"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestFinalizeEpic_SpecWorktreeMissing_UnmergedRefusesNotDestroyed(t *testing
 		return nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-g11u", "spec/121-g11u", []string{"mindspec-g11u.1"})
+	_, err := g.FinalizeEpic("epic-1", "121-g11u", "spec/121-g11u", []string{"mindspec-g11u.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected the unmerged-bead-with-missing-worktree state to refuse")
 	}
@@ -616,7 +616,7 @@ func TestFinalizeEpic_IsAncestorFailure_AbortsBeforeBindOrCleanup(t *testing.T) 
 		return nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-ancerr", "spec/121-ancerr", []string{"mindspec-ancerr.1"})
+	_, err := g.FinalizeEpic("epic-1", "121-ancerr", "spec/121-ancerr", []string{"mindspec-ancerr.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected the IsAncestor infra failure to abort finalize")
 	}
@@ -719,7 +719,7 @@ func TestCompleteBead_ConflictRecoveryMissStillBinds(t *testing.T) {
 	}
 
 	// First run: CompleteBead's own MergeInto hits the real conflict.
-	err := g.CompleteBead("mindspec-ac1.2", "spec/125-ac1", "")
+	err := g.CompleteBead("mindspec-ac1.2", "spec/125-ac1", "", "", false)
 	if err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
@@ -727,9 +727,12 @@ func TestCompleteBead_ConflictRecoveryMissStillBinds(t *testing.T) {
 		t.Fatal("test setup: the conflicted bead branch must survive")
 	}
 
-	// Recovery: an operator following the PRE-FIX recovery line verbatim
-	// (no `-m`) resolves the conflict and commits — landing git's DEFAULT
-	// subject, never the exact "Merge bead/mindspec-ac1.2".
+	// Recovery: spec 127 R5(d) preserves (never aborts) the conflict
+	// CompleteBead's own attempt above just hit — abort it here (test-
+	// side only) to set up THIS fixture's specific shape: an operator
+	// resolving a FRESH merge that lands git's DEFAULT subject, never
+	// the exact "Merge bead/mindspec-ac1.2".
+	_ = exec.Command("git", "-C", specWtPath, "merge", "--abort").Run()
 	_ = exec.Command("git", "-C", specWtPath, "merge", "--no-ff", "bead/mindspec-ac1.2").Run()
 	if err := os.WriteFile(filepath.Join(specWtPath, ".beads", "issues.jsonl"), []byte("resolved\n"), 0o644); err != nil {
 		t.Fatalf("write resolution: %v", err)
@@ -756,7 +759,7 @@ func TestCompleteBead_ConflictRecoveryMissStillBinds(t *testing.T) {
 	// Recovery re-run of production CompleteBead: the bead branch is now
 	// already an ancestor (no-op MergeInto), and the binding must still
 	// be recorded, corroborated by second parent — not subject text.
-	if err := g.CompleteBead("mindspec-ac1.2", "spec/125-ac1", ""); err != nil {
+	if err := g.CompleteBead("mindspec-ac1.2", "spec/125-ac1", "", "", false); err != nil {
 		t.Fatalf("the recovery re-run must succeed, got: %v", err)
 	}
 	if writeCalls != 1 {
@@ -832,7 +835,7 @@ func TestFinalizeEpic_AlreadyAncestorDefaultSubjectBinds(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "125-ac1c", "spec/125-ac1c", []string{"mindspec-ac1c.1"})
+	result, err := g.FinalizeEpic("epic-1", "125-ac1c", "spec/125-ac1c", []string{"mindspec-ac1c.1"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -894,7 +897,7 @@ func TestFinalizeEpic_AutoMergeLegPersistsBindingOnSuccess(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "125-ac1c-auto", "spec/125-ac1c-auto", []string{"mindspec-ac1c-auto.1"})
+	result, err := g.FinalizeEpic("epic-1", "125-ac1c-auto", "spec/125-ac1c-auto", []string{"mindspec-ac1c-auto.1"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -961,7 +964,7 @@ func TestCompleteBead_ForcedLocateMissRefusesLoudAndConverges(t *testing.T) {
 		return nil
 	}
 
-	err := g.CompleteBead("mindspec-ac3.1", "spec/125-ac3", "")
+	err := g.CompleteBead("mindspec-ac3.1", "spec/125-ac3", "", "", false)
 	if err == nil {
 		t.Fatal("expected the forced locate miss on a MERGED bead to refuse LOUD")
 	}
@@ -987,7 +990,7 @@ func TestCompleteBead_ForcedLocateMissRefusesLoudAndConverges(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	if err := g.CompleteBead("mindspec-ac3.1", "spec/125-ac3", ""); err != nil {
+	if err := g.CompleteBead("mindspec-ac3.1", "spec/125-ac3", "", "", false); err != nil {
 		t.Fatalf("the re-run must converge once the locate is no longer forced to miss, got: %v", err)
 	}
 	if boundSHA == "" {
@@ -1035,7 +1038,7 @@ func TestCompleteBead_TrueOrphanQuietNoBinding(t *testing.T) {
 	}
 
 	stderr := captureStderrAround(t, func() {
-		if err := g.CompleteBead("mindspec-ac4.1", "spec/125-ac4", ""); err != nil {
+		if err := g.CompleteBead("mindspec-ac4.1", "spec/125-ac4", "", "", false); err != nil {
 			t.Fatalf("a true orphan bead must complete quietly, got: %v", err)
 		}
 	})
@@ -1121,7 +1124,7 @@ func TestCompleteBead_MergedThenAncestorForcedMissIsLoud(t *testing.T) {
 		return nil
 	}
 
-	err := g.CompleteBead("mindspec-ac4b.1", "spec/125-ac4b", "")
+	err := g.CompleteBead("mindspec-ac4b.1", "spec/125-ac4b", "", "", false)
 	if err == nil {
 		t.Fatal("expected the forced miss on a MERGED-then-ancestor bead to refuse LOUD — a count/merge-base classifier would silently pass this fixture (both metrics are byte-identical to a true orphan)")
 	}
@@ -1194,7 +1197,7 @@ func TestFinalizeEpic_ExistingBindingEmptySecondParentRewrites(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "125-g21e", "spec/125-g21e", []string{"mindspec-g21e.1"}); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "125-g21e", "spec/125-g21e", []string{"mindspec-g21e.1"}, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {
@@ -1256,7 +1259,7 @@ func TestFinalizeEpic_ExistingBindingWrongSecondParentRewrites(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "125-g21w", "spec/125-g21w", []string{"mindspec-g21w.1"}); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "125-g21w", "spec/125-g21w", []string{"mindspec-g21w.1"}, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {

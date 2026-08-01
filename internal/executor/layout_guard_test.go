@@ -427,7 +427,7 @@ func TestCompleteBead_LayoutRegressionBlocked(t *testing.T) {
 
 	specHashBefore := refHash(t, dir, "spec/106-x")
 
-	err := g.CompleteBead("mindspec-106x.4", "spec/106-x", "")
+	err := g.CompleteBead("mindspec-106x.4", "spec/106-x", "", "", false)
 	if err == nil {
 		t.Fatal("a canonical bead → flat spec merge must be blocked (layout regression)")
 	}
@@ -476,7 +476,7 @@ func TestFinalizeEpic_DirectMergeLayoutRegressionBlocked(t *testing.T) {
 	fake.listEntries = nil // no bead worktrees
 	mainHashBefore := refHash(t, dir, "main")
 
-	_, err := g.FinalizeEpic("epic-1", "106-x", "spec/106-x", nil)
+	_, err := g.FinalizeEpic("epic-1", "106-x", "spec/106-x", nil, "", false)
 	if err == nil {
 		t.Fatal("a canonical spec → flat main direct merge must be blocked (layout regression)")
 	}

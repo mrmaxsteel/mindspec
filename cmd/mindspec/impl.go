@@ -63,6 +63,8 @@ func init() {
 	implApproveCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on spec epic metadata)")
 	implApproveCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on spec epic metadata)")
 	implApproveCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on spec epic metadata)")
+	implApproveCmd.Flags().String("allow-net-deletion", "", "Override the work-destruction preflight with a recorded reason (records mindspec_net_deletion_override_* on spec epic metadata)")
+	implApproveCmd.Flags().Bool("resolve-merge", false, "Resume a preserved bead→spec or spec→main merge conflict: re-print resolution steps if unresolved, or complete it once the index is resolved and staged")
 	implCmd.AddCommand(implApproveCmd)
 
 	implAdoptCmd.Flags().String("reason", "", "Required justification for adopting this spec (recorded in the audit marker)")
@@ -188,11 +190,25 @@ func approveImplRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--override-adr and --supersede-adr are mutually exclusive")
 	}
 
+	// Spec 127 R4(b): --allow-net-deletion override flag (shared with
+	// `mindspec approve impl`). Same empty-reason discipline as the
+	// other overrides above.
+	allowNetDeletion, _ := cmd.Flags().GetString("allow-net-deletion")
+	if cmd.Flags().Changed("allow-net-deletion") && strings.TrimSpace(allowNetDeletion) == "" {
+		return fmt.Errorf("--allow-net-deletion requires a non-empty reason")
+	}
+
+	// Spec 127 R5(d): --resolve-merge re-entry flag (shared with
+	// `mindspec approve impl`).
+	resolveMerge, _ := cmd.Flags().GetBool("resolve-merge")
+
 	exec := newExecutor(root)
 	result, approveErr := approve.ApproveImpl(root, specID, exec, approve.ImplOpts{
-		AllowDocSkew: allowDocSkew,
-		OverrideADR:  overrideADR,
-		SupersedeADR: supersedeADR,
+		AllowDocSkew:     allowDocSkew,
+		OverrideADR:      overrideADR,
+		SupersedeADR:     supersedeADR,
+		AllowNetDeletion: allowNetDeletion,
+		ResolveMerge:     resolveMerge,
 	})
 
 	if tailErr := implApproveTail(os.Stdout, os.Stderr, root, invocationCwd, specID, cfg, result, approveErr, emitInstruct); tailErr != nil {

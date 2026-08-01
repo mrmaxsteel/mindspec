@@ -22,7 +22,7 @@ type readStubMergeExecutor struct {
 	completeCalled bool
 }
 
-func (e *readStubMergeExecutor) CompleteBead(beadID, specBranch, msg string) error {
+func (e *readStubMergeExecutor) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
 	e.completeCalled = true
 	return nil
 }

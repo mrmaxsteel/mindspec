@@ -454,7 +454,7 @@ primary — the `internal/lint` convention scan out of bead 2 as its own
 bead (declared, not expected to fire after the round-6 cut); secondary —
 the AC-3 outcome-oracle harness out of bead 4 (it would land directly
 after bead 1); tertiary — the R5(d) re-entry recovery-surface work out of
-bead 6 (the AC-7(iv) chokepoint universal is NOT staged — it stays whole
+bead 6 (the AC-7(iv) chokepoint requirement is NOT staged — it stays whole
 in bead 6 under every valve outcome). Bead 6 must NOT be split
 producer-wise. Bead 5 is light and carries no valve.
 
@@ -1340,7 +1340,7 @@ design, plan preamble) on all three producers; `--allow-net-deletion` with frict
 registration; the chokepoint enumeration; the `:1688`/`:1721` conversion
 to the `--resolve-merge` resumption surface with the preserved-merge
 precondition across every committing path; AC-5. NOT split
-producer-wise (AC-7(iv) is a whole-set universal).
+producer-wise (AC-7(iv) is a single, whole requirement).
 
 **Steps**
 1. Verb-layer §1 preflights EVALUATE the predicate through the
@@ -1375,11 +1375,26 @@ producer-wise (AC-7(iv) is a whole-set universal).
    1..N−1 are already merged with their landed bindings written — a
    durable, legitimate partial state — and the re-run converges over
    them via the `ancestor` no-op leg while §1 surfaces the refusal for
-   bead N. Chokepoint anti-drift test enumerates every
-   `MergeInto`/`MergeBranch` call site in lifecycle/executor packages
-   and asserts each CONSULTS the preflight — dataflow from a
-   `workDestructionFn` evaluation of that call's operand pair to the
-   merge call, not call-site adjacency — AC-7(iv), whole and unstaged.
+   bead N. Chokepoint anti-drift test asserts every
+   `gitutil.MergeInto`/`MergeBranch` call site its AST vocabulary can
+   resolve (direct calls, package-level alias chains at any depth,
+   import aliases, struct fields — keyed-literal and assignment legs
+   resolved by name alone with no scope check, positional-literal leg
+   resolved for an inline anonymous struct type at any scope or a
+   NAMED struct type declared at package level (fix round 11: only
+   the named-identifier lookup is package-level-only; the anonymous
+   `*ast.StructType` branch has no scope check at all) — and the
+   fail-closed parameter/var/member shapes, including through an
+   ordinary parenthesized callee) is preceded by its own call to
+   `preflightMergeDestruction` — consultation via a preceding-call AST
+   match, not dataflow tracing from `workDestructionFn` and not
+   call-site adjacency; everything else this bare-name scan does not
+   resolve — a NAMED function-local struct's field via the
+   positional-composite-literal leg among them (an anonymous
+   function-local struct literal's positional field is machine-caught,
+   not part of this residual) — is review-caught,
+   never enumerated as exhaustive, per AC-7(iv).
+   AC-7(iv), whole and unstaged.
 3. Override + friction: `--allow-net-deletion "<reason>"` recorded on
    epic metadata (the `--allow-doc-skew` pattern) AND registered in
    `cmd/mindspec/selfemit.go`'s `escapeHatchFlags` + `detectFriction`
@@ -1393,10 +1408,48 @@ producer-wise (AC-7(iv) is a whole-set universal).
    scrollback operand); resumption-not-start-only (unmerged index →
    re-print steps and exit; resolved index + MERGE_HEAD → complete the
    product-initiated merge with the seeded subject, never
-   checkout/abort); `abortMergeState` (`:1634-1643`) gains the
-   own-run-only precondition; seeded subjects (bead leg names the bead
-   branch — identity-load-bearing per `landed.go:255-276`; spec→main
-   subject human-facing, recorded per leg); completion via
+   checkout/abort). **AMENDED (bead-6 fix round 1) — the line above
+   ("`abortMergeState` gains the own-run-only precondition") is
+   REPLACED, not narrowed: the implementer's actual diff deletes
+   `abortMergeState` outright rather than gating it, a deliberate
+   never-abort simplification, not a slip. The fix-round-1 panel (S1,
+   S3: SOUND, approve as a plan amendment; O3: sound-but-incomplete;
+   G1: "defensible in principle, but this implementation cannot be
+   accepted" pending the binding fix below) adjudicated this
+   explicitly and the orchestrator ADOPTS it as the plan's own design
+   from here forward — never-abort (preserve-by-default) is strictly
+   safer than the abort-and-refuse design this step originally named:
+   the old dual design's real failure modes (an OID/branch paste
+   pinning the wrong operand; spec-125 subject-identity loss on
+   replay) are worse than what never-abort creates, and every conflict
+   emitter's resumption leg (`resumeAwareMerge`,
+   `internal/executor/merge_resumption.go`) now NEVER calls
+   `gitutil.AbortMerge` on any path, product-initiated or not. This
+   was NOT safe as first shipped, though: G1-1 (BLOCKING) proved the
+   resumption dispatch treated ANY preserved `MERGE_HEAD` as this
+   invocation's own product-initiated merge, binding it to neither the
+   requested source branch nor its current tip — a foreign (another
+   bead's, or an operator's) preserved merge could be silently
+   completed, and a source that advanced after the conflict began
+   could have its later commits silently omitted from the completed
+   merge. Bead-6 fix round 1 closes this: `resumeAwareMerge` now takes
+   the caller's expected source branch and classifies the preserved
+   `MERGE_HEAD` before acting
+   (`classifyPreservedMergeBinding` — exact match / drifted-but-same-
+   branch / foreign), refusing (naming the mismatch, via the preserved
+   merge's own seeded `MERGE_MSG` subject where available) rather than
+   completing a foreign merge, and catching up the drifted tip via a
+   fresh `mergeFn()` re-invocation immediately after completing a
+   stale-but-legitimate resumed merge, before reporting success — so
+   the current tip is always incorporated, never silently dropped.
+   Fixtured directly (`internal/executor/merge_resumption_test.go`):
+   `TestCompleteBead_ResolveMerge_ForeignPreservedMergeRefuses`,
+   `TestCompleteBead_ResolveMerge_SourceDriftIsIncorporated`. The
+   direction (preserve, never abort) is UNCHANGED from what fix round
+   1 shipped; what changed is that a preserved merge is no longer
+   trusted by mere existence.** Seeded subjects (bead leg names the
+   bead branch — identity-load-bearing per `landed.go:255-276`;
+   spec→main subject human-facing, recorded per leg); completion via
    `git commit --no-edit` (E-r5-5's recorded mechanics); worktree-state
    refusal for no-merge-state failures (names blocking paths, never
    "conflict", never an unchanged re-entry loop — E-r5-4); resolution
@@ -1440,7 +1493,7 @@ producer-wise (AC-7(iv) is a whole-set universal).
 - [ ] `go test -short ./internal/executor/... ./internal/complete/... ./internal/approve/... ./cmd/mindspec/... ./internal/redact/...` passes
 - [ ] AC-7(i)-(v) RED at `09f62bd9`; AC-5 RED; AC-9(v) legs each mapped to a named test; AC-8(i) golden byte-identical (guard); AC-8(v) convergence with zero override
 - [ ] No raw `git merge` string in either emitter's output (string-asserted + the internal/lint scan stays green); friction admission + epic metadata both present on the override fixture; redact token registered
-- [ ] Preserved-merge enumeration test covers the full call-site set; `abortMergeState` precondition fixture (never aborts a foreign merge)
+- [ ] Preserved-merge enumeration test covers the full call-site set; `classifyPreservedMergeBinding` foreign-merge refusal fixture (never completes or adopts a foreign merge)
 - [ ] Target-drift backstop fixture green (producer-site refusal on mid-run target drift; partial state + re-run convergence asserted); `workDestructionFn` pointer pin green
 - [ ] Full gates clean; zero `--override-adr` (this bead's own completion is the preflight's first live run — orchestrator note)
 

@@ -1465,15 +1465,20 @@ func TestSEC5_SingleRefSites_InsertSeparator(t *testing.T) {
 	if err := MergeBranch("/wt", "feature", "main"); err != nil {
 		t.Fatal(err)
 	}
-	// Two calls: checkout target (trailing `--`), then merge with `-m ... -- source`.
+	// Three calls: checkout target (trailing `--`), the bead-6 fix round
+	// 3 merge-source marker's rev-parse of the source tip (best-effort —
+	// the stubbed empty output makes it resolve to ErrRefNotFound here,
+	// so no update-ref call follows), then merge with `-m ... -- source`.
 	assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "main", "--")
-	assertArgs(t, (*calls)[1].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature into main", "--", "feature")
+	assertArgs(t, (*calls)[1].args, "-C", "/wt", "rev-parse", "--verify", "--quiet", "feature^{commit}")
+	assertArgs(t, (*calls)[2].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature into main", "--", "feature")
 
 	calls = swapExec(t, "", 0)
 	if err := MergeInto("/wt", "feature"); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature", "--", "feature")
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "rev-parse", "--verify", "--quiet", "feature^{commit}")
+	assertArgs(t, (*calls)[1].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature", "--", "feature")
 
 	calls = swapExec(t, "", 0)
 	if _, err := LogOneline("/wt", "main"); err != nil {

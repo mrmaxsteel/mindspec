@@ -93,7 +93,7 @@ func TestFinalizeEpic_ScopesBothLegsToLifecycleAllowSet(t *testing.T) {
 		}
 	}
 
-	result, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", []string{"mindspec-scope.1"})
+	result, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", []string{"mindspec-scope.1"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestFinalizeEpic_NilAllowSetAbortsOnBeadCandidate(t *testing.T) {
 
 	specHashBefore := refHash(t, dir, "spec/119-scope")
 
-	_, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", nil)
+	_, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", nil, "", false)
 	if err == nil {
 		t.Fatal("expected an error when lifecycleAllowSet is nil with a bead candidate present, got nil")
 	}
@@ -207,7 +207,7 @@ func TestFinalizeEpic_WorktreeListErrorAbortsBeforeAnyMutation(t *testing.T) {
 
 	specHashBefore := refHash(t, dir, "spec/119-scope")
 
-	_, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", []string{"mindspec-scope.1"})
+	_, err := g.FinalizeEpic("epic-1", "119-scope", "spec/119-scope", []string{"mindspec-scope.1"}, "", false)
 	if err == nil {
 		t.Fatal("expected an error when WorktreeOps.List fails, got nil")
 	}
@@ -261,7 +261,7 @@ func TestFinalizeEpic_SkipsMalformedBeadBranchEntry(t *testing.T) {
 	// same-named allow-set entry must not admit the hostile branch,
 	// because the reverse-derivation gate discards it BEFORE the
 	// allow-set membership check ever runs.
-	result, err := g.FinalizeEpic("epic-1", "119-scope2", "spec/119-scope2", []string{"mindspec-scope.1", "x;evil"})
+	result, err := g.FinalizeEpic("epic-1", "119-scope2", "spec/119-scope2", []string{"mindspec-scope.1", "x;evil"}, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

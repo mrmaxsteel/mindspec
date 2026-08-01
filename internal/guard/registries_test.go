@@ -395,6 +395,162 @@ func TestOpaqueOperandRegistry_RerunCallers(t *testing.T) {
 	}
 }
 
+// TestOpaqueOperandRegistry_MergePreflightRerunCallers is the named
+// obligation for the four spec 127 bead-6 R4 merge-preflight refusal-
+// builder registry entries (internal/executor/merge_preflight.go's
+// evidenceErrorRefusal/destructionRefusal and internal/lifecycle/
+// merge_preflight.go's workDestructionEvidenceErrorRefusal/
+// workDestructionRefusal — the enclosing functions the scan actually
+// flags, because that is where the guard.NewFailure call lives): all
+// four receive `rerun` as a bound PARAMETER from their own single
+// caller (preflightMergeDestruction / EvaluateWorkDestructionPreflight
+// respectively), which passes it straight through unchanged — so a
+// direct-call probe on the four registered functions themselves can
+// never fold rerun to a literal (it is always a parameter reference at
+// that point, never a literal expression), and would wrongly report
+// zero provable calls. This test instead proves provenance one level
+// up, at the REAL entry points production code calls
+// (preflightMergeDestruction's three real callers in
+// mindspec_executor.go; EvaluateWorkDestructionPreflight's two real
+// callers in internal/complete/complete.go and internal/approve/
+// impl.go) — the same recoveryTemplate fold this file's
+// TestOpaqueOperandRegistry_RerunCallers already applies to
+// beadToSpecConflictFailure — and asserts no floor match, proving the
+// runtime string inventory that ultimately reaches the four registered
+// operands via the unchanged pass-through.
+func TestOpaqueOperandRegistry_MergePreflightRerunCallers(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	cases := []struct {
+		relPath  string
+		funcName string
+		argIdx   int
+	}{
+		{
+			relPath:  filepath.Join("internal", "executor", "mindspec_executor.go"),
+			funcName: "preflightMergeDestruction",
+			argIdx:   3,
+		},
+		{
+			// complete.go calls the seam VAR (completeWorkDestructionPreflightFn),
+			// pointer-pinned to lifecycle.EvaluateWorkDestructionPreflight
+			// — not the qualified function name directly.
+			relPath:  filepath.Join("internal", "complete", "complete.go"),
+			funcName: "completeWorkDestructionPreflightFn",
+			argIdx:   4,
+		},
+		{
+			// impl.go calls its own seam var (implWorkDestructionPreflightFn),
+			// same pointer-pinned default, same reasoning.
+			relPath:  filepath.Join("internal", "approve", "impl.go"),
+			funcName: "implWorkDestructionPreflightFn",
+			argIdx:   4,
+		},
+	}
+	for _, c := range cases {
+		path := filepath.Join(root, c.relPath)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		found := 0
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			// preflightMergeDestruction is called as a method
+			// (g.preflightMergeDestruction(...)); EvaluateWorkDestruction
+			// Preflight is called as a package-qualified function
+			// (lifecycle.EvaluateWorkDestructionPreflight(...) /
+			// implWorkDestructionPreflightFn(...) — the SEAM VAR's
+			// production default IS this function, so this probe targets
+			// the function name directly via its qualified-selector form).
+			var name string
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				name = fn.Sel.Name
+			case *ast.Ident:
+				name = fn.Name
+			default:
+				return true
+			}
+			if name != c.funcName {
+				return true
+			}
+			if len(call.Args) <= c.argIdx {
+				return true // a different call of the same short name (e.g. the seam assignment itself) — not this shape
+			}
+			tmpl, ok := recoveryTemplate(call.Args[c.argIdx])
+			if !ok {
+				t.Errorf("%s call at %s: the rerun argument (index %d) is not a literal or fmt.Sprintf-with-literal-template — this test cannot prove it, which itself is the obligation failing", c.funcName, fset.Position(call.Pos()), c.argIdx)
+				return true
+			}
+			found++
+			if matches := FindFloorMatches(tmpl); len(matches) > 0 {
+				t.Errorf("%s call at %s: rerun template %q matches a destructive floor family: %+v", c.funcName, fset.Position(call.Pos()), tmpl, matches)
+			}
+			return true
+		})
+		if found == 0 {
+			t.Errorf("found zero provable calls to %s in %s — this test's own probe is broken (the call site must have changed shape)", c.funcName, c.relPath)
+		}
+	}
+}
+
+// TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers is the
+// named obligation for the spec 127 bead-6 R5(d) stillConflictedRefusal
+// entry (internal/executor/merge_resumption.go): it receives
+// `reentryHint` as a bound PARAMETER from its ONE caller,
+// resumeAwareMerge — itself called from mindspec_executor.go's three
+// producer sites with a literal fmt.Sprintf template — so a direct-call
+// probe on stillConflictedRefusal can never fold reentryHint to a
+// literal (same double-indirection reasoning as
+// TestOpaqueOperandRegistry_MergePreflightRerunCallers above). This
+// proves provenance one level up, at resumeAwareMerge's three real
+// callers.
+func TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers(t *testing.T) {
+	root := repoRootFromGuardTestDir(t)
+	path := filepath.Join(root, "internal", "executor", "mindspec_executor.go")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	// Bead-6 fix round 1 (G1-1): resumeAwareMerge gained an expectedSource
+	// parameter (the preserved-merge binding fix) between resolveMerge and
+	// reentryHint, shifting reentryHint from index 2 to index 3.
+	const reentryHintArgIdx = 3 // resumeAwareMerge(workdir, resolveMerge, expectedSource, reentryHint, ...)
+	found := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		id, ok := call.Fun.(*ast.Ident)
+		if !ok || id.Name != "resumeAwareMerge" {
+			return true
+		}
+		if len(call.Args) <= reentryHintArgIdx {
+			t.Errorf("a call to resumeAwareMerge has %d args, expected at least %d (reentryHint is index %d) — this test's own probe is broken", len(call.Args), reentryHintArgIdx+1, reentryHintArgIdx)
+			return true
+		}
+		tmpl, ok := recoveryTemplate(call.Args[reentryHintArgIdx])
+		if !ok {
+			t.Errorf("resumeAwareMerge call at %s: the reentryHint argument (index %d) is not a literal or fmt.Sprintf-with-literal-template — this test cannot prove it, which itself is the obligation failing", fset.Position(call.Pos()), reentryHintArgIdx)
+			return true
+		}
+		found++
+		if matches := FindFloorMatches(tmpl); len(matches) > 0 {
+			t.Errorf("resumeAwareMerge call at %s: reentryHint template %q matches a destructive floor family: %+v", fset.Position(call.Pos()), tmpl, matches)
+		}
+		return true
+	})
+	if found == 0 {
+		t.Fatal("found zero calls to resumeAwareMerge — this test's own probe is broken (the call sites must have changed shape)")
+	}
+}
+
 // TestOpaqueOperandRegistry_EmitCdWorktreePathsAgainstFloor is the
 // named obligation for the three containment.EmitCd-bare-call entries
 // added in the bead-2 rework (beadToSpecConflictFailure,

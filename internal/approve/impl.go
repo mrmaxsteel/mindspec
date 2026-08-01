@@ -111,6 +111,27 @@ var (
 	// exported by Bead 1 so this gate never re-implements it.
 	implGetMetadataFn      = bead.GetMetadata
 	implCheckObligationsFn = complete.CheckPendingObligations
+	// implWorkDestructionPreflightFn is the spec 127 R4(a) §1-phase seam
+	// (pointer-pinned default): performs REAL git I/O
+	// (lifecycle.EvaluateWorkDestructionPreflight ->
+	// gitutil.EvaluateWorkDestruction) over the spec branch and main.
+	// Tests that drive ApproveImpl without a real underlying repo must
+	// stub this too, or the real evaluation fails closed
+	// (DestructionEvidenceError) against non-existent refs.
+	implWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
+	// implHasRemoteFn is bead-6 fix round 1's applicability gate for the
+	// preflight immediately above (O1-1/O3-1, G1's ac5-pr-path-widening
+	// ruling): the §1 AC-5 preflight guards ONLY "the finalize merge"
+	// (R3b/AC-5's own text) — the no-remote DIRECT spec→main merge —
+	// never the PR-routed leg, which never attempts a local merge at
+	// all. exec.FinalizeEpic decides push-vs-direct via this identical
+	// probe (gitutil.HasRemote(), unconditionally, inside FinalizeEpic
+	// itself); consulting the SAME probe here, before the §1 call,
+	// keeps the two layers agreeing on APPLICABILITY rather than only on
+	// outcome (O1-1's required change). Routed through lifecycle.HasRemote
+	// (thin wrapper), the same ADR-0030 boundary reason as every other
+	// seam in this block.
+	implHasRemoteFn = lifecycle.HasRemote
 )
 
 // implContextLine renders the Req 8 worktree-context line for impl
@@ -156,6 +177,25 @@ type ImplOpts struct {
 	// Mutually exclusive with OverrideADR at the CLI layer.
 	// Spec 087 Bead 3.
 	SupersedeADR string
+
+	// AllowNetDeletion is the spec 127 R4(b) audited-override reason:
+	// "" means no override, so the finalize merge preflight (both the
+	// §1 evaluation below — the direct spec→main leg, AC-5 — and
+	// FinalizeEpic's own live backstop at every producer call site)
+	// refuses on a DestructionSuperseded/DestructionStaleDeletion/
+	// DestructionEvidenceError outcome exactly as with no override
+	// configured. After `exec.FinalizeEpic` returns nil the reason is
+	// recorded on the spec EPIC's metadata under the
+	// `mindspec_net_deletion_override_*` namespace, mirroring
+	// AllowDocSkew/OverrideADR above, and admitted to the escape-hatch
+	// friction registry (cmd/mindspec/selfemit.go).
+	AllowNetDeletion string
+
+	// ResolveMerge is the spec 127 R5(d) `--resolve-merge` flag: passed
+	// straight through to exec.FinalizeEpic's own resumption-aware merge
+	// dispatch (internal/executor's resumeAwareMerge), consulted
+	// independently at both of FinalizeEpic's merge sites.
+	ResolveMerge bool
 }
 
 // ImplResult holds the result of implementation approval.
@@ -328,6 +368,42 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)
 	case !exists:
 		return nil, implBranchMissingRefusal(specID, specBranch)
+	}
+
+	// Spec 127 R3b/AC-5 — R4's §1-phase work-destruction preflight for
+	// this verb's OWN direct spec→main leg: the branch is confirmed to
+	// exist (above) but may be PRESENT-AND-STALE — a recreated branch at
+	// an old snapshot (the #218 step-2 shape) — which the bare existence
+	// check above cannot distinguish from a healthy branch. Evaluated
+	// HERE, before any epic close / phase write / other mutation below,
+	// so a refusal leaves state byte-identical to the pre-call state
+	// (O1-r2-2's siting).
+	//
+	// GATED on implHasRemoteFn (bead-6 fix round 1, O1-1/O3-1): R3b/AC-5's
+	// own text scopes this preflight to "the finalize merge" — the
+	// no-remote DIRECT spec→main merge exec.FinalizeEpic performs when
+	// gitutil.HasRemote() is false. When a remote IS configured,
+	// FinalizeEpic instead pushes specBranch for a PR and never local-
+	// merges it into main at all (the PR-routed leg relies on the Bead-3
+	// precondition + PR review instead). Evaluating this predicate
+	// unconditionally used to refuse the routine, non-adversarial "PR
+	// already merged, local main now reflects it" state — the exact state
+	// spec 121's own orphan/net-effect detection exists to handle
+	// gracefully — BEFORE FinalizeEpic's graceful handling ever ran (O3-1,
+	// reproduced with a real-git fixture: EvaluateWorkDestruction
+	// classifies that state DestructionSuperseded). Skipping the §1 call
+	// on the PR-routed leg does not weaken safety: the executor's OWN
+	// live consultation immediately before its gitutil.MergeBranch call
+	// (mindspec_executor.go, hoisted above its cleanup block) is the
+	// actual backstop that gates the mutation, and it is ITSELF gated on
+	// the identical `result.MergeStrategy == "direct"` condition — this
+	// is a convenience early-refusal for exactly the leg the executor's
+	// own preflight guards, not a claim that a second, unconditional
+	// backstop exists for the PR leg (there is none; see O1-1).
+	if !implHasRemoteFn() {
+		if err := implWorkDestructionPreflightFn(root, specBranch, "main", o.AllowNetDeletion, fmt.Sprintf("mindspec impl approve %s", specID)); err != nil {
+			return nil, err
+		}
 	}
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
@@ -564,7 +640,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// MUTATION (3/3, terminal): delegate to executor for merge/push,
 	// scoped to lifecycleAllowSet (Spec 119 Bead 3, R6/P6) resolved
 	// above.
-	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet)
+	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge)
 	if err != nil {
 		return nil, fmt.Errorf("finalizing epic: %w", err)
 	}
@@ -606,6 +682,20 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		}
 		if err := implMergeMetadataFn(epicID, meta); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record adr-supersede metadata on %s: %v", epicID, err))
+		}
+	}
+
+	// Spec 127 R4(b): record the audited net-deletion override AFTER the
+	// terminal mutation (exec.FinalizeEpic) returns nil, mirroring the
+	// doc-skew/adr-override discipline above.
+	if o.AllowNetDeletion != "" && epicID != "" {
+		meta := map[string]interface{}{
+			"mindspec_net_deletion_override_reason": o.AllowNetDeletion,
+			"mindspec_net_deletion_override_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_net_deletion_override_by":     implGitUserEmailFn(),
+		}
+		if err := implMergeMetadataFn(epicID, meta); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record net-deletion override metadata on %s: %v", epicID, err))
 		}
 	}
 

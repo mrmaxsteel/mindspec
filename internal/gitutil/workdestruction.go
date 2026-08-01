@@ -177,14 +177,39 @@
 // StatedLimit_ConflictOnRevertedPathScreensNothing in
 // workdestruction_test.go.
 //
-// Two whole-repository preconditions make EVERY evaluation return
-// DestructionEvidenceError, fail-closed rather than silently wrong (spec
-// 127 bead-1 fix round, O1-7/O2-7): a repo with no local `main` ref (the
-// hardcoded second ancestry/supersession target in ancestryTargets), and
+// ONE whole-repository precondition makes EVERY evaluation return
+// DestructionEvidenceError, fail-closed rather than silently wrong:
 // branch/target histories with no common ancestor ("unrelated
-// histories" — merge-base exits 1). Both surface as
+// histories" — merge-base exits 1). It surfaces as
 // DestructionEvidenceError with a FailedProbe naming the git primitive
 // that failed, never as a silent skip or a guessed outcome.
+//
+// CORRECTED (spec 127 bead-6 fix round 11, S2-2/F1-0): a repo with no
+// local `main` ref (the hardcoded second ancestry/supersession target in
+// ancestryTargets) was ALSO originally on this list (spec 127 bead-1 fix
+// round, O1-7/O2-7) — main's absence and a genuine git-primitive failure
+// both surfaced as the identical hard DestructionEvidenceError. That was
+// defensible back when EVERY consumer of this predicate
+// (EvaluateOrphanHint) discarded the error into a soft hint before this
+// bead existed — the practical effect of the hard error was invisible.
+// It stopped being defensible the moment a consumer stopped discarding
+// it: this bead's own preflightMergeDestruction is wired directly into
+// CompleteBead's/FinalizeEpic's bead→spec merges and the direct spec→main
+// merge, and treats ANY DestructionEvidenceError as an unconditional
+// merge refusal — so "fail closed on a missing main ref" came to mean
+// "refuse every bead→spec and spec→main merge in any repository whose
+// trunk is not literally named main", strictly worse than this
+// predicate's pre-bead-6 behavior, and not what the fail-closed contract
+// is protecting: that contract guards against absence of EVIDENCE, not
+// absence of a ref this predicate has no independent reason to require
+// exist at all (nothing about a bead→spec merge is actually about main).
+// ancestryTargets now checks whether a local main ref exists at all
+// before adding it to the probe set — main's absence simply narrows
+// evaluation to target alone, the same way target already being "main"
+// narrows it to one distinct ref. A STRUCTURAL failure checking for
+// main's existence (a corrupt repository, git itself missing — not mere
+// absence) still surfaces as DestructionEvidenceError, exactly like any
+// other probe failure; see ancestryTargets' own doc comment.
 package gitutil
 
 import (
@@ -291,17 +316,36 @@ var workDestructionStripPathsFn = stripNovelPaths
 var workDestructionFindAncestorTreeFn = findAncestorWithTree
 var workDestructionIsShallowFn = isShallowRepo
 var workDestructionHistoryTruncatedFn = historyTruncated
+var workDestructionBranchExistsFn = BranchExistsIn
 
 // ancestryTargets returns the refs EvaluateWorkDestruction checks a
 // candidate branch against for ancestry and supersession, in order:
-// target first, then "main" — except when target IS "main", in which case
-// there is only one distinct ref to check (checking it twice would be a
-// wasted duplicate git call, not a behavior change).
-func ancestryTargets(target string) []string {
+// target first, then "main" — except when target IS "main" (only one
+// distinct ref to check; checking it twice would be a wasted duplicate
+// git call, not a behavior change) or when no local "main" ref exists at
+// all (spec 127 bead-6 fix round 11, S2-2/F1-0). The latter case used to
+// be absent from this function entirely — it unconditionally returned
+// "main" as a second target, and IsAncestor's "any exit code other than
+// 1 is a hard error" rule turned probing a nonexistent ref into a
+// DestructionEvidenceError that unconditionally refused every merge in a
+// repo whose trunk is not literally named main (see the package doc
+// comment above for the full history). Checking existence FIRST, and
+// simply narrowing the probe set when it is absent, keeps that same
+// hard-error behavior for every OTHER kind of git/infra failure (a
+// corrupt repository, git itself missing) while no longer treating
+// main's mere absence as one.
+func ancestryTargets(workdir, target string) ([]string, error) {
 	if target == "main" {
-		return []string{"main"}
+		return []string{"main"}, nil
 	}
-	return []string{target, "main"}
+	exists, err := workDestructionBranchExistsFn(workdir, "main")
+	if err != nil {
+		return nil, fmt.Errorf("checking whether a local main ref exists: %w", err)
+	}
+	if !exists {
+		return []string{target}, nil
+	}
+	return []string{target, "main"}, nil
 }
 
 // EvaluateWorkDestruction is the shared work-destruction predicate (spec
@@ -351,15 +395,29 @@ func ancestryTargets(target string) []string {
 //
 // ANY git/infra failure at any probe returns
 // (DestructionEvidenceError, evidence naming the failed probe, non-nil
-// err) — absence of evidence is never treated as safety. Two
-// whole-repository preconditions make every probe fail this way: no
-// local `main` ref, and unrelated branch/target histories (see the
-// package doc comment above).
+// err) — absence of evidence is never treated as safety. One
+// whole-repository precondition makes every probe fail this way:
+// unrelated branch/target histories (see the package doc comment above).
+// A repo with no local `main` ref is deliberately NOT such a
+// precondition (spec 127 bead-6 fix round 11, S2-2/F1-0 — this comment
+// previously listed it as one): ancestryTargets narrows the probe set to
+// target alone rather than hard-erroring on main's mere absence; see its
+// own doc comment.
 func EvaluateWorkDestruction(workdir, branch, target string) (guard.DestructionOutcome, WorkDestructionEvidence, error) {
 	var evidence WorkDestructionEvidence
 
+	// Computed once and reused by both legs below (ancestryTargets is no
+	// longer a pure function as of fix round 11 — it may check main's
+	// existence via a real git call — so calling it twice would be the
+	// exact wasted-duplicate-git-call this file already avoids elsewhere).
+	targets, err := ancestryTargets(workdir, target)
+	if err != nil {
+		evidence.FailedProbe = "ancestryTargets(main existence)"
+		return guard.DestructionEvidenceError, evidence, err
+	}
+
 	// 1. Ancestry.
-	for _, anc := range ancestryTargets(target) {
+	for _, anc := range targets {
 		isAnc, err := workDestructionIsAncestorFn(workdir, branch, anc)
 		if err != nil {
 			evidence.FailedProbe = fmt.Sprintf("IsAncestor(%s, %s)", branch, anc)
@@ -372,7 +430,7 @@ func EvaluateWorkDestruction(workdir, branch, target string) (guard.DestructionO
 	}
 
 	// 2. Supersession, against target then main.
-	for i, against := range ancestryTargets(target) {
+	for i, against := range targets {
 		landed, err := workDestructionNetEffectFn(workdir, branch, against)
 		if err != nil {
 			evidence.FailedProbe = fmt.Sprintf("NetEffectLanded(%s, %s)", branch, against)
