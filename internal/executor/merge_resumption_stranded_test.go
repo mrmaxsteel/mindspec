@@ -23,6 +23,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 // driftedResolveMergeFixture drives CompleteBead through a conflict,
@@ -194,5 +195,222 @@ func TestRepairStrandedDriftCollapse_RepairFailureIsLoudNotSilent(t *testing.T) 
 	}
 	if !branchExistsIn(t, dir, "bead/mindspec-x.1") {
 		t.Error("the bead branch must survive a repair failure — no cleanup runs on a refusal")
+	}
+}
+
+// TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterCommit is
+// bead-6 fix round 5's acceptance test for S1-3/O1-3/G1-3/F1-1's shared
+// confirm-round finding: a single, ordinary commit landing on the branch
+// between an interrupted ResetSoft and a later retry buries the stranded
+// C1/C2 pair one commit below the new tip. Before this fix, that silently
+// defeated detection (the pre-round-5 code read literally "HEAD"'s tree,
+// which had moved past the stranded pair, so the dangling-object proof
+// never matched) and a bare retry reported apparent success
+// ("already up to date") over the still-uncollapsed, ambiguous topology —
+// exactly the class of bug S1-1's original BLOCKING finding was about.
+// This test proves the retry now refuses loudly instead, and — just as
+// importantly — that it does NOT blindly `git reset --soft` over the
+// intervening commit (which would silently discard it).
+func TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterCommit(t *testing.T) {
+	g, dir, specWtPath, _, driftedBeadTip := driftedResolveMergeFixture(t)
+	_ = driftedBeadTip
+
+	origResetSoft := resetSoftFn
+	t.Cleanup(func() { resetSoftFn = origResetSoft })
+	failNext := true
+	resetSoftFn = func(workdir, target string) error {
+		if failNext {
+			failNext = false
+			return errors.New("simulated ref-lock contention")
+		}
+		return origResetSoft(workdir, target)
+	}
+
+	// 4. --resolve-merge: strands C1+C2 exactly as
+	// TestCompleteDriftedResumedMerge_ResetSoftFailureStrandsThenRepairs
+	// does — the dangling proof object for this exact tree/parents/message
+	// now sits in the object store, unreferenced.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err == nil {
+		t.Fatal("expected the injected ResetSoft failure to surface")
+	}
+	strandedTip := refHash(t, dir, "spec/077-test")
+
+	// 5. BURY it: an ordinary, unrelated commit lands on the spec branch —
+	// standing in for another bead's own merge, or any routine auto-commit
+	// — before anyone retries this bead's own completion.
+	if err := os.WriteFile(specWtPath+"/unrelated.txt", []byte("unrelated later work\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated file: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "unrelated.txt")
+	runGitIn(t, specWtPath, "commit", "-m", "an unrelated commit lands on top of the stranded pair")
+	buriedHead := refHash(t, dir, "spec/077-test")
+	if buriedHead == strandedTip {
+		t.Fatal("fixture invariant broken: the unrelated commit must move the tip past the stranded pair")
+	}
+
+	// 6. Bare retry: must refuse loudly — never silently collapse (which
+	// would discard the unrelated commit) and never silently report
+	// success (which would launder the still-uncollapsed topology).
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil {
+		t.Fatal("a retry over a stranded pair buried under a later commit must never report success")
+	}
+	var indeterminate *strandedTopologyIndeterminateError
+	if !errors.As(err, &indeterminate) {
+		t.Errorf("expected a *strandedTopologyIndeterminateError, got %T: %v", err, err)
+	}
+
+	// Nothing was touched: the unrelated commit survives, the stranded
+	// pair beneath it is untouched, and the bead branch (not yet
+	// cleaned up) still exists.
+	if got := refHash(t, dir, "spec/077-test"); got != buriedHead {
+		t.Errorf("a refused, indeterminate retry must not move the branch; was %s, now %s", buriedHead, got)
+	}
+	if got, readErr := os.ReadFile(specWtPath + "/unrelated.txt"); readErr != nil || string(got) != "unrelated later work\n" {
+		t.Errorf("the unrelated commit's content must survive untouched; got %q, err=%v", got, readErr)
+	}
+	merges, ferr := gitutil.FirstParentMerges(dir, "spec/077-test")
+	if ferr != nil {
+		t.Fatalf("FirstParentMerges: %v", ferr)
+	}
+	if len(merges) < 2 || merges[0].SHA != strandedTip || len(merges[0].Parents) != 2 {
+		t.Fatalf("the stranded C1/C2 pair beneath the unrelated commit must remain exactly as it was, unrewritten; got %+v", merges)
+	}
+	if !branchExistsIn(t, dir, "bead/mindspec-x.1") {
+		t.Error("the bead branch must survive a refused, indeterminate retry — no cleanup runs on a refusal")
+	}
+}
+
+// TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned
+// is bead-6 fix round 5's acceptance test for STATED RESIDUAL 2(c) —
+// completeDriftedResumedMerge's own doc comment — the ONE sub-case this
+// round disclosed rather than closed: an external `git gc --prune=now`
+// removing the dangling proof object between the interruption and a
+// retry, with NOTHING else having landed on top of the stranded pair.
+// This is deliberately NOT distinguishable from STATED RESIDUAL 1's own
+// legitimately-produced multi-invocation chain by any signal available
+// here (see MergeSourceMarkerRef's doc comment for why bead 6 stopped
+// chasing an "unforgeable" replacement for the identical reason) — so
+// this test pins the ACCEPTED behavior (a no-op fresh merge reports
+// success, exactly as it does for the legitimate chain), proves the
+// topology is left genuinely uncollapsed (never silently rewritten on
+// shape alone), and proves the downstream backstop actually holds:
+// lifecycle.FindLandedMerge, asked to identify this bead's own landed
+// merge afterward, still fails closed and refuses to pick a side — no
+// caller anywhere is ever told a false landed-merge identity.
+func TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	g, dir, specWtPath, _, driftedBeadTip := driftedResolveMergeFixture(t)
+
+	origResetSoft := resetSoftFn
+	t.Cleanup(func() { resetSoftFn = origResetSoft })
+	failNext := true
+	resetSoftFn = func(workdir, target string) error {
+		if failNext {
+			failNext = false
+			return errors.New("simulated ref-lock contention")
+		}
+		return origResetSoft(workdir, target)
+	}
+
+	// 4. --resolve-merge: strand C1+C2, exactly as the sibling tests above.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err == nil {
+		t.Fatal("expected the injected ResetSoft failure to surface")
+	}
+	strandedTip := refHash(t, dir, "spec/077-test")
+
+	// 5. PRUNE: an external `git gc --prune=now` (nothing mindspec itself
+	// ever invokes) genuinely deletes the now-unreachable dangling proof
+	// object, in the window before anyone retries.
+	runGitIn(t, specWtPath, "reflog", "expire", "--expire=now", "--all")
+	runGitIn(t, specWtPath, "gc", "--prune=now", "-q")
+
+	// 6. Bare retry: ACCEPTED to report success here (indistinguishable
+	// from the legitimate multi-invocation chain), but must NOT silently
+	// rewrite the topology — the two-merge C1/C2 shape must survive
+	// exactly as it was.
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("the accepted residual reports success (a no-op fresh merge), got: %v", err)
+	}
+	finalTip := refHash(t, dir, "spec/077-test")
+	if finalTip != strandedTip {
+		t.Fatalf("the topology must NOT be rewritten on shape alone once the proof is gone: tip moved from %s to %s", strandedTip, finalTip)
+	}
+	merges, ferr := gitutil.FirstParentMerges(dir, "spec/077-test")
+	if ferr != nil {
+		t.Fatalf("FirstParentMerges: %v", ferr)
+	}
+	if len(merges) < 2 || merges[0].SHA != strandedTip || len(merges[0].Parents) != 2 || merges[0].Parents[1] != driftedBeadTip {
+		t.Fatalf("the un-collapsed C1/C2 pair must survive exactly as it was; got %+v", merges)
+	}
+
+	// The downstream backstop: spec 125's own FindLandedMerge must still
+	// fail closed against this exact ambiguous shape — never attest a
+	// false landed-merge identity just because this residual reported
+	// "success".
+	if _, err := lifecycle.FindLandedMerge(dir, "spec/077-test", "mindspec-x.1"); err == nil {
+		t.Fatal("FindLandedMerge must still refuse the ambiguous two-merge topology — the accepted residual's own safety depends on this backstop holding")
+	}
+}
+
+// TestDanglingCollapsedMergeExists_MessageMismatchIsNotProof is bead-6 fix
+// round 5's acceptance test for G1-3's confirm-round finding (the
+// false-positive half): a SEPARATE CommitTreeMerge call sharing the exact
+// tree and ordered parents of a would-be-collapsed pair, but carrying an
+// UNRELATED message, must never be accepted as proof of that pair's own
+// genuine interruption.
+func TestDanglingCollapsedMergeExists_MessageMismatchIsNotProof(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn(t, dir, "init", "-q")
+	runGitIn(t, dir, "commit", "--allow-empty", "-m", "root")
+	parent1 := refHash(t, dir, "HEAD")
+	runGitIn(t, dir, "checkout", "-b", "side")
+	if err := os.WriteFile(dir+"/side.txt", []byte("side\n"), 0o644); err != nil {
+		t.Fatalf("write side file: %v", err)
+	}
+	runGitIn(t, dir, "add", "side.txt")
+	runGitIn(t, dir, "commit", "-m", "side work")
+	parent2 := refHash(t, dir, "HEAD")
+	tree, err := gitutil.TreeSHA(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("TreeSHA: %v", err)
+	}
+
+	// An UNRELATED CommitTreeMerge call: exact tree and ordered parents,
+	// deliberately DIFFERENT message.
+	sha, err := gitutil.CommitTreeMerge(dir, tree, parent1, parent2, "an unrelated operator-created object")
+	if err != nil {
+		t.Fatalf("CommitTreeMerge: %v", err)
+	}
+	// Read back the object's OWN stored message (rather than assuming the
+	// literal -m argument survives byte-for-byte — git's own commit-message
+	// normalization is CommitMessageBody's own concern, not this test's;
+	// see its doc comment) so the two assertions below differ ONLY in
+	// whether the message argument matches, isolating exactly what this
+	// fix checks.
+	ownMessage, err := gitutil.CommitMessageBody(dir, sha)
+	if err != nil {
+		t.Fatalf("CommitMessageBody: %v", err)
+	}
+
+	proven, err := gitutil.DanglingCollapsedMergeExists(dir, tree, parent1, parent2, "Merge bead/mindspec-x.1")
+	if err != nil {
+		t.Fatalf("DanglingCollapsedMergeExists: %v", err)
+	}
+	if proven {
+		t.Fatal("an object with the exact tree/parents but an UNRELATED message must never be accepted as proof")
+	}
+
+	// The SAME object, looked up with its OWN actual (stored) message, IS
+	// proof — confirms this is a message check, not a false negative on
+	// tree/parents.
+	proven, err = gitutil.DanglingCollapsedMergeExists(dir, tree, parent1, parent2, ownMessage)
+	if err != nil {
+		t.Fatalf("DanglingCollapsedMergeExists: %v", err)
+	}
+	if !proven {
+		t.Fatal("the same object, queried with its own actual message, must be found")
 	}
 }

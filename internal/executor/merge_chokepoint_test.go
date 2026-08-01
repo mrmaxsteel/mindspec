@@ -89,6 +89,32 @@ package executor
 //     scan (every *ast.FuncDecl is independently required to hold its own
 //     preflight call) and remains true here; this rewrite does not
 //     introduce or remove that property.
+//   - (CLOSED, bead-6 fix round 5, G1's confirm-round finding) THREE more
+//     unresolvable shapes, all bounded extensions of the var/parameter
+//     fail-closed machinery above rather than new mechanisms:
+//     (i) a package-level var declared with a TYPE ALIAS or a distinct
+//     NAMED TYPE (`type MergeSignature = func(string, string) error` or
+//     `type MergeSignature func(string, string) error`) whose OWN
+//     underlying type matches the signature exactly — the var's declared
+//     Type is an *ast.Ident naming the alias/named type, never literally
+//     an *ast.FuncType, so it was invisible to
+//     collectUnresolvedMergeSignatureVars's literal type-assertion;
+//     resolveFuncType now follows that one indirection
+//     (collectFuncTypeAliases resolves every top-level `type` declaration
+//     whose Type is itself a *ast.FuncType, alias or not, once, and every
+//     var/parameter/struct-field/method-receiver check below resolves
+//     through it); (ii) a STRUCT FIELD of this exact signature, invoked
+//     via a selector (`h.run(...)`); (iii) a NAMED FUNCTION TYPE
+//     converted from gitutil.MergeInto/MergeBranch and invoked through a
+//     METHOD whose OWN receiver carries that exact underlying signature
+//     (`m.Invoke(...)`, where m's type's underlying type matches). (ii)
+//     and (iii) are the SAME unresolvable shape from this scan's own
+//     vantage point — a selector call whose receiver's identity this scan
+//     cannot trace — so collectRiskyMemberNames collects both field names
+//     and such method names into one vocabulary, and
+//     failClosedOnRiskyMemberCalls REDS on either, by the same
+//     "cannot resolve, fail closed" standing instruction as the
+//     parameter/uninitialized-var legs above.
 //
 // A NARROW SET OF INLINE CALL-ARGUMENT CLOSURES ARE TRANSPARENT, ON
 // PURPOSE — NAMED TO ONE CALL SHAPE, NOT ANY DIRECT CALL ARGUMENT (bead-6
@@ -421,18 +447,74 @@ func mergeFuncSignatureShape(ft *ast.FuncType) (kind string, ok bool) {
 	}
 }
 
+// collectFuncTypeAliases scans every top-level `type` declaration across
+// every file for one whose OWN Type is directly an *ast.FuncType — this
+// captures BOTH a type alias (`type MergeSignature = func(string, string)
+// error`, TypeSpec.Assign set) and a distinct NAMED type (`type
+// MergeSignature func(string, string) error`, TypeSpec.Assign unset):
+// bead-6 fix round 5 (G1's confirm-round finding, shape (a)) needs both,
+// since a var/parameter/struct-field/method-receiver can be declared with
+// either spelling and neither is literally an *ast.FuncType at the
+// declaration site that names it — only resolveFuncType's one-hop lookup
+// through this map makes it visible to mergeFuncSignatureShape at all.
+func collectFuncTypeAliases(files []*ast.File) map[string]*ast.FuncType {
+	aliases := map[string]*ast.FuncType{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if ft, ok := ts.Type.(*ast.FuncType); ok {
+					aliases[ts.Name.Name] = ft
+				}
+			}
+		}
+	}
+	return aliases
+}
+
+// resolveFuncType resolves e to its own *ast.FuncType: directly, if e IS
+// one, or through exactly ONE typeAliases lookup if e is a bare
+// *ast.Ident naming a type alias or named type collectFuncTypeAliases
+// found (bead-6 fix round 5). Nil typeAliases is valid (an *ast.Ident
+// then never resolves) — every caller below still fails closed on
+// whatever it cannot trace, precisely as it did before this indirection
+// existed. Anything else (a selector, a pointer, an unresolvable name)
+// returns ok=false: this is a bounded, ONE-HOP extension of the existing
+// var/parameter fail-closed machinery, never an attempt at general type
+// resolution.
+func resolveFuncType(e ast.Expr, typeAliases map[string]*ast.FuncType) (*ast.FuncType, bool) {
+	switch v := e.(type) {
+	case *ast.FuncType:
+		return v, true
+	case *ast.Ident:
+		ft, ok := typeAliases[v.Name]
+		return ft, ok
+	default:
+		return nil, false
+	}
+}
+
 // funcParamsMatchingMergeSignature returns the names of every parameter
 // in params whose type EXACTLY matches gitutil.MergeInto's or
-// gitutil.MergeBranch's own signature (mergeFuncSignatureShape) — the
-// shape a caller could pass either of those two functions through
-// DIRECTLY, unwrapped, as a value.
-func funcParamsMatchingMergeSignature(params *ast.FieldList) []string {
+// gitutil.MergeBranch's own signature (mergeFuncSignatureShape,
+// resolveFuncType) — the shape a caller could pass either of those two
+// functions through DIRECTLY, unwrapped, as a value, spelled as a literal
+// func type OR (bead-6 fix round 5) a type alias/named type resolving to
+// one.
+func funcParamsMatchingMergeSignature(params *ast.FieldList, typeAliases map[string]*ast.FuncType) []string {
 	if params == nil {
 		return nil
 	}
 	var names []string
 	for _, f := range params.List {
-		ft, ok := f.Type.(*ast.FuncType)
+		ft, ok := resolveFuncType(f.Type, typeAliases)
 		if !ok {
 			continue
 		}
@@ -442,6 +524,145 @@ func funcParamsMatchingMergeSignature(params *ast.FieldList) []string {
 		names = append(names, namesOrBlank(f.Names)...)
 	}
 	return names
+}
+
+// isMergeProducerExpr reports whether e is (or, through any number of
+// type-conversion/paren layers, ultimately reduces to) a direct reference
+// to gitutil.MergeInto/MergeBranch: the literal selector itself, a
+// package-level var mergeAliases (collectMergeFnAliases' own output)
+// already resolved to one, or a type-conversion call (`SomeType(X)`,
+// syntactically a *ast.CallExpr with exactly one argument) whose
+// argument itself satisfies this predicate. Used to find where a merge
+// producer is ACTUALLY assigned into a struct field or converted to a
+// named type — see collectRiskyMemberNames' own doc comment for why this
+// narrower "genuinely assigned" bar, not shape alone, is what keeps that
+// scan from false-positiving on every unrelated same-shaped field this
+// package's own mock/fixture types declare (e.g. MockExecutor's
+// GitMvFn/ResetHardFn, which share gitutil.MergeInto/MergeBranch's bare
+// string-arity shape by coincidence, never assigned a merge producer).
+func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string) bool {
+	switch v := e.(type) {
+	case *ast.SelectorExpr:
+		xid, ok := v.X.(*ast.Ident)
+		return ok && xid.Name == "gitutil" && (v.Sel.Name == "MergeInto" || v.Sel.Name == "MergeBranch")
+	case *ast.Ident:
+		_, ok := mergeAliases[v.Name]
+		return ok
+	case *ast.CallExpr:
+		if len(v.Args) != 1 {
+			return false
+		}
+		return isMergeProducerExpr(v.Args[0], mergeAliases)
+	case *ast.ParenExpr:
+		return isMergeProducerExpr(v.X, mergeAliases)
+	default:
+		return false
+	}
+}
+
+// collectRiskyMemberNames scans every file for a struct field or a named
+// function type GENUINELY assigned/converted from gitutil.MergeInto/
+// MergeBranch (isMergeProducerExpr) — bead-6 fix round 5 (G1's
+// confirm-round finding, shapes (b) and (c)):
+//
+//   - a STRUCT FIELD actually assigned a merge producer via a
+//     composite-literal keyed element (`handler{run: gitutil.MergeInto}`),
+//     reached elsewhere via a selector call (`h.run(...)`);
+//   - a METHOD whose OWN receiver's named function type was itself
+//     converted from a merge producer somewhere (`type mergeFunc
+//     func(string, string) error; ...; m := mergeFunc(gitutil.MergeInto)`,
+//     `func (f mergeFunc) Invoke(a, b string) error { return f(a, b) }`),
+//     reached via a selector call (`m.Invoke(...)`).
+//
+// This is deliberately NARROWER than "any field/receiver whose declared
+// type happens to match the bare signature shape" — (string, string)
+// error and (string, string, string) error are common, unremarkable
+// shapes (this very package's own MockExecutor fixture fields,
+// GitMvFn/ResetHardFn, share them purely by coincidence, assigned real
+// test closures that have nothing to do with gitutil.MergeInto/
+// MergeBranch) — flagging every same-shaped field/method would be pure
+// false-positive noise, not a finding. Requiring a genuine assignment/
+// conversion FROM a merge producer, found ANYWHERE in the scanned files
+// (the same textual, not-full-dataflow philosophy collectMergeFnAliases
+// already uses for package vars), is what makes this a real signal: it
+// fires only when a merge producer's own identity has genuinely been
+// funneled through this member, which is exactly G1's own adversarial
+// shape. From there this is the SAME unresolvable indirection a function-
+// typed parameter or an uninitialized package-level var already fails
+// closed on: a selector call whose receiver's concrete value this scan
+// cannot trace without full call-graph/dataflow analysis. Field names and
+// matching method names share ONE vocabulary here, so
+// failClosedOnRiskyMemberCalls treats them identically.
+func collectRiskyMemberNames(files []*ast.File, typeAliases map[string]*ast.FuncType, mergeAliases map[string]string) map[string]bool {
+	risky := map[string]bool{}
+
+	// Named types genuinely converted FROM a merge producer somewhere —
+	// the narrower bar shape (c) needs, before any method on that type is
+	// treated as risky.
+	convertedTypes := map[string]bool{}
+	for _, file := range files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			id, ok := call.Fun.(*ast.Ident)
+			if !ok || len(call.Args) != 1 {
+				return true
+			}
+			if _, ok := typeAliases[id.Name]; !ok {
+				return true
+			}
+			if isMergeProducerExpr(call.Args[0], mergeAliases) {
+				convertedTypes[id.Name] = true
+			}
+			return true
+		})
+	}
+
+	for _, file := range files {
+		// Struct fields genuinely assigned a merge producer via a
+		// composite-literal keyed element.
+		ast.Inspect(file, func(n ast.Node) bool {
+			cl, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			for _, elt := range cl.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				keyID, ok := kv.Key.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if isMergeProducerExpr(kv.Value, mergeAliases) {
+					risky[keyID.Name] = true
+				}
+			}
+			return true
+		})
+
+		// Methods whose receiver's named type was itself converted from a
+		// merge producer above.
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) != 1 {
+				continue
+			}
+			recvType := fd.Recv.List[0].Type
+			if star, ok := recvType.(*ast.StarExpr); ok {
+				recvType = star.X
+			}
+			id, ok := recvType.(*ast.Ident)
+			if !ok || !convertedTypes[id.Name] {
+				continue
+			}
+			risky[fd.Name.Name] = true
+		}
+	}
+	return risky
 }
 
 // namesOrBlank returns each *ast.Ident's Name — a parameter field can
@@ -486,23 +707,29 @@ func paramCalledAsFunc(body ast.Node, paramName string) bool {
 // collectUnresolvedMergeSignatureVars scans every top-level `var`
 // declaration (across every file) for one declared WITHOUT an
 // initializer whose OWN declared type matches gitutil.MergeInto/
-// MergeBranch's exact signature (mergeFuncSignatureShape) — e.g. `var
-// mysteryFn func(string, string) error`, left nil at declaration and
-// assigned a concrete value only somewhere else (a separate assignment
-// statement, an init() func, another file). Spec 127 bead-6 fix round 4
-// (item 2, the confirm-round's own ruling): collectMergeFnAliases can only
-// ever trace a var's own INITIALIZER expression — a var with NO
-// initializer carries nothing for it to trace, so it was previously
-// invisible to BOTH collectMergeFnAliases (not an alias assignment) and
-// failClosedOnMergeSignatureParams (not a function parameter) — a third,
-// silently uncounted shape. This is exactly as unresolvable, by the same
-// reasoning failClosedOnMergeSignatureParams already applies to a
-// function-typed parameter: the standing instruction is fail CLOSED on a
-// shape this scan cannot resolve, not silently pass it over. Returns the
-// set of such var names, collected once and shared across every span (a
-// package-level var is visible package-wide, unlike a function parameter
-// scoped to its own function).
-func collectUnresolvedMergeSignatureVars(files []*ast.File) map[string]bool {
+// MergeBranch's exact signature (mergeFuncSignatureShape, resolveFuncType)
+// — e.g. `var mysteryFn func(string, string) error`, left nil at
+// declaration and assigned a concrete value only somewhere else (a
+// separate assignment statement, an init() func, another file). Spec 127
+// bead-6 fix round 4 (item 2, the confirm-round's own ruling):
+// collectMergeFnAliases can only ever trace a var's own INITIALIZER
+// expression — a var with NO initializer carries nothing for it to trace,
+// so it was previously invisible to BOTH collectMergeFnAliases (not an
+// alias assignment) and failClosedOnMergeSignatureParams (not a function
+// parameter) — a third, silently uncounted shape. This is exactly as
+// unresolvable, by the same reasoning failClosedOnMergeSignatureParams
+// already applies to a function-typed parameter: the standing instruction
+// is fail CLOSED on a shape this scan cannot resolve, not silently pass it
+// over. Bead-6 fix round 5 (G1's confirm-round finding, shape (a)): the
+// var's declared type is now resolved through typeAliases too, so `var
+// mysteryFn MergeSignature` (a type alias or named type resolving to the
+// exact signature) is caught identically to the literal `func(string,
+// string) error` spelling — resolveFuncType's one-hop lookup is the ONLY
+// difference from round 4's own check. Returns the set of such var names,
+// collected once and shared across every span (a package-level var is
+// visible package-wide, unlike a function parameter scoped to its own
+// function).
+func collectUnresolvedMergeSignatureVars(files []*ast.File, typeAliases map[string]*ast.FuncType) map[string]bool {
 	unresolved := map[string]bool{}
 	for _, file := range files {
 		for _, decl := range file.Decls {
@@ -523,7 +750,7 @@ func collectUnresolvedMergeSignatureVars(files []*ast.File) map[string]bool {
 					// same-shaped function value).
 					continue
 				}
-				ft, ok := vs.Type.(*ast.FuncType)
+				ft, ok := resolveFuncType(vs.Type, typeAliases)
 				if !ok {
 					continue
 				}
@@ -578,12 +805,46 @@ func failClosedOnUnresolvedMergeSignatureVars(t *testing.T, unresolvedVars map[s
 // params respectively, not 2 or 3), so this never fires against
 // resumeAwareMerge/attemptFreshMerge/completeDriftedResumedMerge's own,
 // already-audited plumbing.
-func failClosedOnMergeSignatureParams(t *testing.T, params *ast.FieldList, body ast.Node, fileName, label string, pos token.Position) {
-	for _, name := range funcParamsMatchingMergeSignature(params) {
+func failClosedOnMergeSignatureParams(t *testing.T, params *ast.FieldList, body ast.Node, fileName, label string, pos token.Position, typeAliases map[string]*ast.FuncType) {
+	for _, name := range funcParamsMatchingMergeSignature(params, typeAliases) {
 		if paramCalledAsFunc(body, name) {
 			t.Errorf("%s (%s, at %s): parameter %q has a signature matching gitutil.MergeInto/MergeBranch exactly and is called directly — this AST-level scan cannot trace what value it is bound to at any call site (not full call-graph analysis, per design), so it cannot confirm a preflight covers whatever it resolves to at runtime. Give it a traceable shape (a direct gitutil.MergeInto/MergeBranch call, or a package-level var alias) or extend this scan; a merge producer must never reach gitutil.MergeInto/MergeBranch through an indirection this ratchet cannot see.", label, fileName, pos, name)
 		}
 	}
+}
+
+// failClosedOnRiskyMemberCalls is collectRiskyMemberNames' enforcement
+// leg (bead-6 fix round 5, G1's confirm-round finding, shapes (b) and
+// (c)): any selector call `X.Name(...)` inside body, at ANY nesting depth
+// (deliberately not stopping at a nested FuncLit boundary — same reason
+// paramCalledAsFunc does not), where Name is a struct field or method
+// name collectRiskyMemberNames matched, REDS — this scan cannot trace
+// what concrete value X.Name resolves to. `gitutil.<anything>` selectors
+// are excluded here: those are collectSpanCalls' own, already-precise
+// concern (a real gitutil.MergeInto/MergeBranch call, or an unrelated
+// gitutil function — never a risky member by construction, since nothing
+// in gitutil's own source is part of the files this scan parses).
+func failClosedOnRiskyMemberCalls(t *testing.T, risky map[string]bool, body ast.Node, fileName, label string, pos token.Position) {
+	if body == nil || len(risky) == 0 {
+		return
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if xid, ok := sel.X.(*ast.Ident); ok && xid.Name == "gitutil" {
+			return true
+		}
+		if risky[sel.Sel.Name] {
+			t.Errorf("%s (%s, at %s): %q is a struct field or a named-function-type method whose declared/receiver type has a signature matching gitutil.MergeInto/MergeBranch exactly, and is called here via a selector — this AST-level scan cannot trace what concrete function value it holds at this call site (not full call-graph/dataflow analysis, per design), so it cannot confirm a preflight covers whatever it resolves to at runtime. Give it a traceable shape or extend this scan; a merge producer must never reach gitutil.MergeInto/MergeBranch through an indirection this ratchet cannot see.", label, fileName, pos, sel.Sel.Name)
+		}
+		return true
+	})
 }
 
 // TestMergeChokepoint_EveryProducerConsultsThePreflight is AC-7(iv):
@@ -625,7 +886,9 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 	}
 
 	aliases := collectMergeFnAliases(files)
-	unresolvedVars := collectUnresolvedMergeSignatureVars(files)
+	typeAliases := collectFuncTypeAliases(files)
+	unresolvedVars := collectUnresolvedMergeSignatureVars(files, typeAliases)
+	riskyMembers := collectRiskyMemberNames(files, typeAliases, aliases)
 
 	var spans []*funcSpan
 	for i, file := range files {
@@ -637,8 +900,9 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 				if v.Body == nil {
 					return true
 				}
-				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
+				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()), typeAliases)
 				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
+				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{file: fileName, label: v.Name.Name, mergeCalls: merges, preflight: preflights})
 			case *ast.FuncLit:
@@ -649,8 +913,9 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 					return true
 				}
 				label := fmt.Sprintf("func literal at %s", fset.Position(v.Pos()))
-				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, label, fset.Position(v.Pos()))
+				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, label, fset.Position(v.Pos()), typeAliases)
 				failClosedOnUnresolvedMergeSignatureVars(t, unresolvedVars, v.Body, fileName, label, fset.Position(v.Pos()))
+				failClosedOnRiskyMemberCalls(t, riskyMembers, v.Body, fileName, label, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{
 					file:       fileName,
@@ -881,7 +1146,7 @@ func ordinaryResumeAwareMergeShape(mergeFn func() error, conflictFailure func(er
 		t.Fatal("fixture invariant broken: expected both FuncDecls")
 	}
 
-	adversaryParams := funcParamsMatchingMergeSignature(adversary.Type.Params)
+	adversaryParams := funcParamsMatchingMergeSignature(adversary.Type.Params, nil)
 	wantParams := map[string]bool{"mergeIntoLike": true, "mergeBranchLike": true}
 	if len(adversaryParams) != len(wantParams) {
 		t.Fatalf("funcParamsMatchingMergeSignature(adversary) = %v, want exactly %v", adversaryParams, wantParams)
@@ -895,7 +1160,7 @@ func ordinaryResumeAwareMergeShape(mergeFn func() error, conflictFailure func(er
 		}
 	}
 
-	if got := funcParamsMatchingMergeSignature(ordinary.Type.Params); len(got) != 0 {
+	if got := funcParamsMatchingMergeSignature(ordinary.Type.Params, nil); len(got) != 0 {
 		t.Errorf("resumeAwareMerge's own mergeFn()/conflictFailure() shapes must NEVER match gitutil.MergeInto/MergeBranch's signature (0/1 string params, not 2/3); got %v", got)
 	}
 }
@@ -935,7 +1200,7 @@ func g2UnpreflightedProducer() error {
 		t.Fatalf("parsing fixture source: %v", err)
 	}
 
-	unresolved := collectUnresolvedMergeSignatureVars([]*ast.File{file})
+	unresolved := collectUnresolvedMergeSignatureVars([]*ast.File{file}, nil)
 
 	for _, name := range []string{"mergeIntoLikeUninitialized", "mergeBranchLikeUninitialized"} {
 		if !unresolved[name] {
@@ -957,6 +1222,204 @@ func g2UnpreflightedProducer() error {
 	}
 	if !paramCalledAsFunc(producer.Body, "mergeIntoLikeUninitialized") {
 		t.Fatal("paramCalledAsFunc must detect the uninitialized var being called directly — this is the same direct-call detection failClosedOnUnresolvedMergeSignatureVars relies on")
+	}
+}
+
+// TestCollectUnresolvedMergeSignatureVars_ResolvesTypeAliasIndirection is
+// bead-6 fix round 5's acceptance test for G1's confirm-round finding,
+// shape (a): a package-level var declared with a TYPE ALIAS (or a
+// distinct NAMED TYPE) whose OWN underlying type matches
+// gitutil.MergeInto/MergeBranch's signature exactly — `type
+// MergeSignature = func(string, string) error; var f MergeSignature`,
+// assigned only inside an init() func — is exactly the same unresolvable
+// shape as the literal `func(string, string) error` spelling round 4
+// caught, but round 4's own `vs.Type.(*ast.FuncType)` type assertion
+// missed it entirely (an *ast.Ident naming the alias, never literally a
+// FuncType). This reproduces G1's own real repro (the type-alias +
+// init() attack) at the collector level.
+func TestCollectUnresolvedMergeSignatureVars_ResolvesTypeAliasIndirection(t *testing.T) {
+	src := `package p
+
+type MergeSignature = func(string, string) error
+
+var mergeIntoLikeAliased MergeSignature
+
+func init() {
+	mergeIntoLikeAliased = gitutil.MergeInto
+}
+
+func g3UnpreflightedProducer() error {
+	return mergeIntoLikeAliased("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "typealiasvar.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	typeAliases := collectFuncTypeAliases([]*ast.File{file})
+	if _, ok := typeAliases["MergeSignature"]; !ok {
+		t.Fatal("collectFuncTypeAliases must resolve the `type MergeSignature = func(string, string) error` alias declaration")
+	}
+
+	unresolved := collectUnresolvedMergeSignatureVars([]*ast.File{file}, typeAliases)
+	if !unresolved["mergeIntoLikeAliased"] {
+		t.Error("collectUnresolvedMergeSignatureVars must catch a var declared with a TYPE ALIAS matching the signature, not only the literal func-type spelling")
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g3UnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	if !paramCalledAsFunc(producer.Body, "mergeIntoLikeAliased") {
+		t.Fatal("paramCalledAsFunc must detect the aliased var being called directly")
+	}
+}
+
+// TestCollectRiskyMemberNames_CatchesStructFieldIndirection is bead-6 fix
+// round 5's acceptance test for G1's confirm-round finding, shape (b): a
+// struct field GENUINELY assigned gitutil.MergeInto via a composite
+// literal, invoked elsewhere via a selector (`h.run(...)`), is invisible
+// to every prior leg (not a package var, not a function parameter) —
+// reproduces G1's own real repro at the collector level. Deliberately
+// includes an UNRELATED field of the identical bare shape
+// (mirroring this package's own real MockExecutor.ResetHardFn) to prove
+// this is a "genuinely assigned" check, not shape alone.
+func TestCollectRiskyMemberNames_CatchesStructFieldIndirection(t *testing.T) {
+	src := `package p
+
+type g1ScratchHandler struct {
+	run           func(string, string) error
+	unrelatedSame func(string, string) error
+}
+
+func newG1ScratchHandler() g1ScratchHandler {
+	return g1ScratchHandler{run: gitutil.MergeInto}
+}
+
+func g4UnpreflightedProducer(h g1ScratchHandler) error {
+	return h.run("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "structfield.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	risky := collectRiskyMemberNames([]*ast.File{file}, nil, collectMergeFnAliases([]*ast.File{file}))
+	if !risky["run"] {
+		t.Error(`collectRiskyMemberNames must catch a struct field named "run" GENUINELY assigned gitutil.MergeInto`)
+	}
+	if risky["unrelatedSame"] {
+		t.Error(`collectRiskyMemberNames must NOT catch "unrelatedSame" — same bare shape, never assigned a merge producer (the false-positive this narrower check exists to avoid)`)
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g4UnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	found := false
+	ast.Inspect(producer.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && sel.Sel.Name == "run" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("fixture invariant broken: expected an `h.run(...)` selector call in the producer body")
+	}
+}
+
+// TestCollectRiskyMemberNames_CatchesNamedFuncTypeMethodIndirection is
+// bead-6 fix round 5's acceptance test for G1's confirm-round finding,
+// shape (c): a NAMED FUNCTION TYPE whose underlying type matches
+// gitutil.MergeInto/MergeBranch's signature exactly, converted from
+// gitutil.MergeInto and invoked through a METHOD on that named type
+// (`m.Invoke(...)`) — reproduces G1's own real repro at the collector
+// level.
+func TestCollectRiskyMemberNames_CatchesNamedFuncTypeMethodIndirection(t *testing.T) {
+	src := `package p
+
+type g1ScratchNamedFunc func(string, string) error
+
+func (f g1ScratchNamedFunc) Invoke(a, b string) error { return f(a, b) }
+
+// An UNRELATED named type of the identical bare shape, never converted
+// from a merge producer — proves this is a "genuinely converted" check,
+// not shape alone. A DIFFERENT method name so its absence from the risky
+// set is actually observable (the risky vocabulary is by name, so an
+// identically-named method on the converted type would be flagged
+// regardless of which type this one belongs to).
+type g1ScratchUnrelatedNamedFunc func(string, string) error
+
+func (f g1ScratchUnrelatedNamedFunc) InvokeUnrelated(a, b string) error { return f(a, b) }
+
+func newG1ScratchNamedFunc() g1ScratchNamedFunc {
+	return g1ScratchNamedFunc(gitutil.MergeInto)
+}
+
+func g5UnpreflightedProducer(m g1ScratchNamedFunc) error {
+	return m.Invoke("wt", "branch1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "namedfunctypemethod.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	typeAliases := collectFuncTypeAliases([]*ast.File{file})
+	if _, ok := typeAliases["g1ScratchNamedFunc"]; !ok {
+		t.Fatal("collectFuncTypeAliases must resolve the named function type declaration")
+	}
+	risky := collectRiskyMemberNames([]*ast.File{file}, typeAliases, collectMergeFnAliases([]*ast.File{file}))
+	if !risky["Invoke"] {
+		t.Error(`collectRiskyMemberNames must catch a method named "Invoke" whose receiver's named type was GENUINELY converted from gitutil.MergeInto`)
+	}
+	if risky["InvokeUnrelated"] {
+		t.Error(`collectRiskyMemberNames must NOT catch "InvokeUnrelated" — its receiver's named type was never converted from a merge producer (the false-positive this narrower check exists to avoid)`)
+	}
+
+	var producer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g5UnpreflightedProducer" {
+			producer = fd
+		}
+	}
+	if producer == nil {
+		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
+	}
+	found := false
+	ast.Inspect(producer.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && sel.Sel.Name == "Invoke" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("fixture invariant broken: expected an `m.Invoke(...)` selector call in the producer body")
 	}
 }
 
@@ -993,11 +1456,51 @@ func TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree(t
 		files = append(files, file)
 	}
 
-	unresolved := collectUnresolvedMergeSignatureVars(files)
+	typeAliases := collectFuncTypeAliases(files)
+	unresolved := collectUnresolvedMergeSignatureVars(files, typeAliases)
 	if unresolved["finalizeStepHookFn"] {
 		t.Error("finalizeStepHookFn (func(stage string) error, one string param) must NOT match gitutil.MergeInto/MergeBranch's signature (two or three) — a real, pre-existing package-level var without an initializer must never be a false positive")
 	}
 	if len(unresolved) != 0 {
 		t.Errorf("expected zero unresolved-var false positives against the real internal/executor tree, got %v", unresolved)
+	}
+}
+
+// TestCollectRiskyMemberNames_ZeroFalsePositivesOnRealTree mirrors
+// TestFailClosedOnUnresolvedMergeSignatureVars_ZeroFalsePositivesOnRealTree
+// for bead-6 fix round 5's struct-field/named-function-type-method leg
+// (collectRiskyMemberNames): internal/executor's own production code
+// declares no struct field or method whose type carries
+// gitutil.MergeInto/MergeBranch's exact signature, so this must find
+// nothing — a separate, dedicated test so a real false positive here
+// (a genuine, unrelated same-shaped field or method added later) is
+// diagnosable on its own, without wading through the chokepoint test's
+// other assertions.
+func TestCollectRiskyMemberNames_ZeroFalsePositivesOnRealTree(t *testing.T) {
+	root := mergeChokepointRepoRoot(t)
+	pkgDir := filepath.Join(root, "internal", "executor")
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", pkgDir, err)
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".go" || len(e.Name()) > 8 && e.Name()[len(e.Name())-8:] == "_test.go" {
+			continue
+		}
+		path := filepath.Join(pkgDir, e.Name())
+		file, ferr := parser.ParseFile(fset, path, nil, 0)
+		if ferr != nil {
+			t.Fatalf("parsing %s: %v", path, ferr)
+		}
+		files = append(files, file)
+	}
+
+	typeAliases := collectFuncTypeAliases(files)
+	mergeAliases := collectMergeFnAliases(files)
+	risky := collectRiskyMemberNames(files, typeAliases, mergeAliases)
+	if len(risky) != 0 {
+		t.Errorf("expected zero risky-member false positives against the real internal/executor tree, got %v", risky)
 	}
 }

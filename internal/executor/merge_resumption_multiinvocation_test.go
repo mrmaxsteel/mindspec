@@ -131,7 +131,7 @@ func assertLegitimateTwoMergeChain(t *testing.T, dir, specWtPath, c1, c2, drifte
 	if merges[0].Subject != merges[1].Subject {
 		t.Fatalf("C1/C2 must share the identical seeded subject: %q vs %q", merges[1].Subject, merges[0].Subject)
 	}
-	proven, derr := gitutil.DanglingCollapsedMergeExists(specWtPath, mustTree(t, specWtPath), merges[1].Parents[0], driftedBeadTip)
+	proven, derr := gitutil.DanglingCollapsedMergeExists(specWtPath, mustTree(t, specWtPath), merges[1].Parents[0], driftedBeadTip, merges[0].Subject)
 	if derr != nil {
 		t.Fatalf("DanglingCollapsedMergeExists: %v", derr)
 	}

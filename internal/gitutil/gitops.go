@@ -152,15 +152,37 @@ func CreateBranch(name, from string) error {
 // MergeSourceMarkerRef returns the ref name under which
 // MergeInto/MergeBranch record the merge-start marker for source (spec
 // 127 bead-6 fix round 3, G1-1's confirm-round finding): a plain ref
-// under refs/mindspec/, pointing at source's own tip AT THE MOMENT a
-// merge attempt of it began. Unlike MERGE_MSG — a file git itself invites
-// an operator to hand-edit before finishing a merge — nothing in the
-// ordinary conflict-resolution workflow invites touching a ref under
-// refs/mindspec/, so it survives as durable, tool-written evidence of
-// which source THIS invocation's own MergeInto/MergeBranch call actually
-// started merging. Exported so internal/executor's resumption-binding
-// check (classifyPreservedMergeBinding/mergeSourceMarkerMatches) can look
-// it up under the exact key these two functions write it under.
+// under refs/mindspec/, pointing at source's own tip AT (or very near —
+// see recordMergeSourceMarker's own doc comment) THE MOMENT a merge
+// attempt of it began. Unlike MERGE_MSG — a file git itself invites an
+// operator to hand-edit before finishing a merge — nothing in the
+// ORDINARY conflict-resolution workflow invites touching a ref under
+// refs/mindspec/, so a mismatched or absent marker is meaningful,
+// producer-written evidence that a preserved merge does not correspond to
+// this invocation's own attempt.
+//
+// Bead-6 fix round 5 (G1's confirm-round finding): this is NOT
+// unforgeable. It is an ordinary local ref, and `git update-ref` (or
+// deleting then recreating the ref) is exactly as available to a
+// deliberate operator as any other git plumbing — a human willing to
+// hand-edit MERGE_MSG can equally move this ref to make a foreign merge
+// classify as this tool's own. That threat (deliberate ref manipulation)
+// is explicitly OUT OF SCOPE: an operator who can run arbitrary git
+// commands against the repository can already do far worse (delete the
+// repository, rewrite any history), and no marker that lives inside the
+// repository itself can defend against that actor. What this marker
+// DOES catch, and is scoped to, is the REALISTIC accidental case: a
+// hand-edited MERGE_MSG subject left over from ordinary conflict
+// resolution, a stale marker from an earlier run, or another bead's
+// preserved conflict in a shared worktree — none of which touch
+// refs/mindspec/ in the course of ordinary use. See
+// mergeSourceMarkerMatches' doc comment (internal/executor) for how an
+// absent/mismatched marker is handled: always fail-closed or confidently
+// foreign, never silently trusted.
+//
+// Exported so internal/executor's resumption-binding check
+// (classifyPreservedMergeBinding/mergeSourceMarkerMatches) can look it up
+// under the exact key these two functions write it under.
 func MergeSourceMarkerRef(source string) string {
 	return "refs/mindspec/merge-source/" + source
 }
@@ -172,6 +194,20 @@ func MergeSourceMarkerRef(source string) string {
 // resumption over this exact conflict cannot corroborate itself as
 // bindingDrifted and fails closed (bindingIndeterminateRefusal) instead —
 // safe, if more conservative, never a silent trust of unverified state.
+//
+// Bead-6 fix round 5 (G1's confirm-round finding): the tip this records
+// is resolved by a SEPARATE RevParseRef call, moments before the `git
+// merge` call each caller (MergeBranch/MergeInto) makes right after —
+// these are two distinct git invocations, not one atomic operation. In
+// the narrow window between them, source could in principle move (a
+// concurrent push, another process) or the UpdateRef write could itself
+// fail for a reason RevParseRef's read did not hit. Both are best-effort,
+// disclosed gaps, not silently assumed away: a write failure here is
+// swallowed exactly as documented above (the marker is simply absent,
+// which fails closed downstream), and a moved source between the two
+// calls would record a marker that no longer equals source's tip by the
+// time MergeInto/MergeBranch's own `git merge` resolves it a second time
+// — again surfacing as a mismatch, never as false trust.
 func recordMergeSourceMarker(workdir, source string) {
 	tip, err := RevParseRef(workdir, source)
 	if err != nil {
@@ -216,9 +252,10 @@ func MergeBranch(workdir, source, target string) error {
 		return fmt.Errorf("checkout %s: %s", target, strings.TrimSpace(string(out)))
 	}
 
-	// Bead-6 fix round 3: record the unforgeable merge-start marker
-	// BEFORE the merge itself runs — see MergeSourceMarkerRef's doc
-	// comment.
+	// Bead-6 fix round 3 (reworded round 5 — see MergeSourceMarkerRef's
+	// doc comment: this marker is producer-written evidence, not
+	// unforgeable): record the merge-start marker BEFORE the merge
+	// itself runs.
 	recordMergeSourceMarker(workdir, source)
 
 	// Merge source. `-m <msg>` precedes the `--` separator so the message
@@ -240,9 +277,10 @@ func MergeInto(targetWorkdir, sourceBranch string) error {
 	if err := rejectOptionLike(sourceBranch); err != nil {
 		return err
 	}
-	// Bead-6 fix round 3: record the unforgeable merge-start marker
-	// BEFORE the merge itself runs — see MergeSourceMarkerRef's doc
-	// comment.
+	// Bead-6 fix round 3 (reworded round 5 — see MergeSourceMarkerRef's
+	// doc comment: this marker is producer-written evidence, not
+	// unforgeable): record the merge-start marker BEFORE the merge
+	// itself runs.
 	recordMergeSourceMarker(targetWorkdir, sourceBranch)
 	mergeCmd := execCommand("git", "-C", targetWorkdir, "merge", "--no-ff", "-m",
 		fmt.Sprintf("Merge %s", sourceBranch), "--", sourceBranch)
@@ -908,16 +946,17 @@ func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, e
 
 // DanglingCollapsedMergeExists reports whether workdir's object store
 // already holds an UNREACHABLE (dangling) commit object with EXACTLY the
-// given tree and ordered two-parent list — spec 127 bead-6 fix round 4's
-// discriminator (S1's confirm-round question): a genuinely STRANDED
+// given tree, ordered two-parent list, AND message — spec 127 bead-6 fix
+// round 4's discriminator (S1's confirm-round question), tightened at
+// round 5 (G1-3's confirm-round finding): a genuinely STRANDED
 // drift-collapse (completeDriftedResumedMerge's CommitTreeMerge succeeded
 // but the immediately-following ResetSoft failed) leaves the commit-tree
 // call's own OUTPUT OBJECT sitting in the object store, unreferenced by any
 // ref — because ResetSoft never ran the update that would have made it
 // reachable. Nothing else in this codebase ever calls CommitTreeMerge with
-// these exact operands, so this object's presence is proof-positive of a
-// genuinely interrupted collapse, not merely a topology that happens to
-// look the same.
+// these exact operands INCLUDING this exact message, so a match is strong
+// evidence of a genuinely interrupted collapse and not a coincidence of
+// topology.
 //
 // A topology that MERELY LOOKS stranded — two adjacent, same-subject merge
 // commits produced by two entirely separate, successful `git commit
@@ -938,7 +977,39 @@ func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, e
 // but reachable from no ref and no reflog entry — exactly what a
 // resumeSoft failure leaves behind) rather than any ref-based scan, since
 // the object this proves the existence of is BY DEFINITION not on any ref.
-func DanglingCollapsedMergeExists(workdir, tree, parent1, parent2 string) (bool, error) {
+//
+// STATED LIMITS (bead-6 fix round 5, G1-3's confirm-round finding — fixed
+// what is cheap here, disclosed the rest at this function's two call
+// sites, merge_resumption.go's detectStrandedDriftTopology and
+// completeDriftedResumedMerge's own doc comment):
+//
+//   - FALSE POSITIVE (fixed this round): round 4 matched on tree+parents
+//     alone, so a SEPARATE CommitTreeMerge call that happened to share the
+//     exact tree and ordered parents but carried an UNRELATED message was
+//     wrongly accepted as proof. Requiring the message too closes this —
+//     tree+parents+message together are the FULL identity of the one
+//     object completeDriftedResumedMerge's own CommitTreeMerge call can
+//     ever produce for a given collapse attempt.
+//   - FALSE NEGATIVE (NOT fixed here — this function cannot fix it, only
+//     disclose it): this object is, BY DEFINITION, unreachable — exactly
+//     what `git gc --prune=now` (or a repo configured with an aggressive
+//     gc.pruneExpire) targets for deletion. If an external prune runs
+//     between the interrupted ResetSoft and a later retry, this function
+//     correctly (by its own design) reports false, because the proof
+//     object is genuinely gone — there is no durable, non-prunable
+//     signal this function (or any in-repository marker) can fall back
+//     on that a deliberate or automated `git gc` cannot also defeat; see
+//     MergeSourceMarkerRef's own doc comment for why bead 6 stopped
+//     chasing an "unforgeable" replacement for this same reason. The
+//     caller's own doc comment states exactly what this means for that
+//     one case (proof lost, nothing landed on top: indistinguishable
+//     from the legitimate multi-invocation chain, an accepted residual
+//     backstopped by spec 125's own fail-closed FindLandedMerge refusal
+//     downstream) versus the DIFFERENT, fixable case this round closes
+//     (proof still exists, but something has landed on top of the
+//     candidate pair since — the caller now refuses loudly rather than
+//     silently reporting success).
+func DanglingCollapsedMergeExists(workdir, tree, parent1, parent2, message string) (bool, error) {
 	for _, s := range []string{tree, parent1, parent2} {
 		if err := rejectOptionLike(s); err != nil {
 			return false, err
@@ -969,9 +1040,18 @@ func DanglingCollapsedMergeExists(workdir, tree, parent1, parent2 string) (bool,
 		if perr != nil {
 			continue
 		}
-		if len(gotParents) == 2 && gotParents[0] == parent1 && gotParents[1] == parent2 {
-			return true, nil
+		if len(gotParents) != 2 || gotParents[0] != parent1 || gotParents[1] != parent2 {
+			continue
 		}
+		gotMessage, merr := CommitMessageBody(workdir, sha)
+		if merr != nil || gotMessage != message {
+			// Round 5 (G1-3): tree+parents identity alone is not enough — a
+			// separate CommitTreeMerge call with the same tree and parents
+			// but an unrelated message must never be accepted as proof of
+			// THIS collapse's own interruption.
+			continue
+		}
+		return true, nil
 	}
 	return false, nil
 }
