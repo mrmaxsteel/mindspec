@@ -16,6 +16,18 @@ package complete
 // outcome class the predicate assigns to (beadHead, specBranch) is
 // UNCHANGED (still permissive) once the materialization commit exists,
 // confirmed by an independent, direct call to the same predicate.
+//
+// SCOPE NOTE (bead-6 fix round 3, O3-1/F1-2's panel finding): this
+// fixture makes no claim about the merge-time landed-BINDING write
+// (mindspec_executor.go's ensureLandedBinding) — like every
+// setupRealGitFaultFixture-based test in this package, it runs from the
+// package checkout's own cwd, not root, so gitutil.BranchExists(beadBranch)
+// (the guard around both the ancestor-safety check and ensureLandedBinding)
+// resolves against the wrong repository and that whole guard never fires
+// here. See target_drift_backstop_test.go's SCOPE CAVEAT for the full
+// explanation; this is the same pre-existing (specs 121/125) gap,
+// already filed as a P1 follow-up, not something this test exercises or
+// claims to.
 
 import (
 	"os"

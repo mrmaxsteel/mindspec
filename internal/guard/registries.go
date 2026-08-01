@@ -45,19 +45,21 @@ type DestructiveGuidanceAllowlistEntry struct {
 // over the pre-change tree — the Background inventory's live emitter
 // sites (spec 127 R5d) — and burned down by later beads as each
 // converts its own site. The reachable final state is ZERO entries,
-// not one (spec 127 bead-2 rework, O2-r2-8/F1-r2-2: the spec/plan text
-// pins bead 7's final allowlist to "exactly one entry — release.go's
-// labeled operator discard", but cmd/mindspec/release.go:257-258's own
-// recovery line — `mindspec release <id> --force` — leads with the
-// mindspec verb, not git/bd/rm, so FindFloorMatches on it returns []
-// (verified) and it can never be seeded by this scan-derived
-// mechanism; seeding it anyway would be the exact unfalsifiable-
-// leftover-at-burn-down shape the seed rule exists to prevent). This
-// is a recorded spec/plan-level adjudication bead 7 inherits, not a
-// bead-2 code change: either AC-9(ii)'s final count becomes zero with
-// release.go's discard recorded as a labeled-operator-choice OUTSIDE
-// the allowlist mechanism, or the floor is deliberately extended with
-// a `mindspec <verb> --force`-shaped family before bead 7 dispatches.
+// not one: spec.md's Allowlist paragraph (R5(d), ruled O1-r2-6/C2-r2-2,
+// seed rule corrected per C-r4-9) pins bead 7's final allowlist to
+// "exactly one entry — release.go's labeled operator discard" (obligation
+// O2-r2-5), but bead-2 rework round 1 found this unreachable as written:
+// cmd/mindspec/release.go:257-258's own recovery line — `mindspec release
+// <id> --force` — leads with the mindspec verb, not git/bd/rm, so
+// FindFloorMatches on it returns [] (verified) and it can never be seeded
+// by this scan-derived mechanism; seeding it anyway would be the exact
+// unfalsifiable-leftover-at-burn-down shape the seed rule exists to
+// prevent. This is a recorded spec/plan-level adjudication bead 7
+// inherits, not a bead-2 code change: either AC-9(ii)'s final count
+// becomes zero with release.go's discard recorded as a
+// labeled-operator-choice OUTSIDE the allowlist mechanism, or the floor
+// is deliberately extended with a `mindspec <verb> --force`-shaped family
+// before bead 7 dispatches.
 // The three merge producers (`CompleteBead`'s/`FinalizeEpic`'s
 // MergeInto, `MergeBranch`) emit no strings and never seed (they are
 // governed by R4, not R5).

@@ -60,13 +60,16 @@ package executor
 //     corresponding; conversely this cannot be fooled by mere accidental
 //     name reuse of UNRELATED values, since a real producer's own operand
 //     naming is what this test's fixtures below assert against.
-//   - Only a SINGLE-HOP alias (`var X = gitutil.MergeInto`) is resolved.
-//     A second-level alias (`var Y = X`) or passing gitutil.MergeInto as a
-//     function PARAMETER and calling it via the parameter name is not
-//     traced — the identical "one level closes the shape a real author
-//     would plausibly reach for" trade-off internal/guard's own
-//     alias-resolution walk (outcome_sentinel_test.go) already makes and
-//     names honestly for the identical class of escape.
+//   - (CLOSED, bead-6 fix round 3, G1-2's confirm-round finding) A
+//     var-to-var alias CHAIN of any depth (`var A = gitutil.MergeInto; var
+//     B = A; var C = B`) is now fully resolved by collectMergeFnAliases'
+//     fixed-point closure — not merely the first hop. A function-typed
+//     PARAMETER whose signature matches gitutil.MergeInto/MergeBranch
+//     exactly, called by its parameter name, is a structurally DIFFERENT
+//     shape this scan cannot trace to a concrete value without full
+//     call-graph/dataflow analysis — it FAILS CLOSED instead
+//     (failClosedOnMergeSignatureParams): finding one REDS the test,
+//     naming the location, rather than silently leaving it uncounted.
 //   - This is lexically-scoped, not a full call-graph trace: a merge call
 //     reached through a call to a SEPARATE, independently-declared
 //     function (not a closure, not an alias) must carry its OWN preflight
@@ -293,14 +296,23 @@ func buildPreflightCall(call *ast.CallExpr) preflightCallInfo {
 }
 
 // collectMergeFnAliases scans every top-level `var` declaration across
-// every parsed file for a direct, single-hop alias of
-// gitutil.MergeInto/gitutil.MergeBranch (spec 127 bead-6 fix round 1,
-// S3-1): `var adversarialMergeFn = gitutil.MergeInto`. Only this one-hop
-// form is resolved — see the stated residual in this file's package doc
-// comment for why a second-level alias or a function-parameter
-// indirection is not traced.
+// every parsed file for an alias of gitutil.MergeInto/gitutil.MergeBranch
+// (spec 127 bead-6 fix round 1, S3-1): `var adversarialMergeFn =
+// gitutil.MergeInto`. Bead-6 fix round 3 (G1-2's confirm-round finding):
+// this now resolves a CHAIN of var-to-var aliases of ANY depth — `var A =
+// gitutil.MergeInto; var B = A; var C = B` — not merely the first hop,
+// via the fixed-point closure below. A `var Y = X` whose chain bottoms
+// out at something OTHER than gitutil.MergeInto/MergeBranch (an alias of
+// an unrelated function, or a chain this scan cannot resolve at all — a
+// call expression, a struct-field selector, etc.) is correctly left
+// unresolved: it is not a merge producer, and flagging it would be pure
+// false-positive noise. A function-PARAMETER indirection (as opposed to
+// a package-level var) is a structurally different shape — see
+// funcParamsMatchingMergeSignature below, which fails closed on it
+// instead of attempting to resolve it.
 func collectMergeFnAliases(files []*ast.File) map[string]string {
 	aliases := map[string]string{}
+	pending := map[string]string{} // varName -> the identifier it was assigned, for var-to-var hops not yet resolved
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -313,25 +325,178 @@ func collectMergeFnAliases(files []*ast.File) map[string]string {
 					continue
 				}
 				for i, val := range vs.Values {
-					sel, ok := val.(*ast.SelectorExpr)
-					if !ok {
+					if i >= len(vs.Names) {
 						continue
 					}
-					xid, ok := sel.X.(*ast.Ident)
-					if !ok || xid.Name != "gitutil" {
-						continue
-					}
-					if sel.Sel.Name != "MergeInto" && sel.Sel.Name != "MergeBranch" {
-						continue
-					}
-					if i < len(vs.Names) {
-						aliases[vs.Names[i].Name] = sel.Sel.Name
+					name := vs.Names[i].Name
+					switch v := val.(type) {
+					case *ast.SelectorExpr:
+						xid, ok := v.X.(*ast.Ident)
+						if !ok || xid.Name != "gitutil" {
+							continue
+						}
+						if v.Sel.Name != "MergeInto" && v.Sel.Name != "MergeBranch" {
+							continue
+						}
+						aliases[name] = v.Sel.Name
+					case *ast.Ident:
+						// A var-to-var hop (`var Y = X`) — may chain to
+						// gitutil.MergeInto/MergeBranch through any number
+						// of further hops; resolved below.
+						pending[name] = v.Name
 					}
 				}
 			}
 		}
 	}
+	// Fixed-point closure over pending var-to-var aliases: repeat until a
+	// pass resolves nothing new, so a chain of ANY length is fully
+	// traced, not just the first hop (bead-6 fix round 3, G1-2).
+	for changed := true; changed; {
+		changed = false
+		for name, target := range pending {
+			if _, already := aliases[name]; already {
+				continue
+			}
+			if kind, ok := aliases[target]; ok {
+				aliases[name] = kind
+				changed = true
+			}
+		}
+	}
 	return aliases
+}
+
+// mergeFuncSignatureShape reports whether ft matches gitutil.MergeInto's
+// or gitutil.MergeBranch's OWN signature exactly — respectively (string,
+// string) error and (string, string, string) error, every param
+// unnamed/string-typed, one error result. This is the ONE shape a
+// function-typed PARAMETER could hold either of those two functions
+// DIRECTLY (passed through, not wrapped) — resumeAwareMerge's own
+// mergeFn (`func() error`) and conflictFailure (`func(error) error`)
+// parameters never match this shape, by construction, since they WRAP a
+// merge attempt rather than being called AS one.
+func mergeFuncSignatureShape(ft *ast.FuncType) (kind string, ok bool) {
+	if ft.Results == nil || len(ft.Results.List) != 1 {
+		return "", false
+	}
+	resIdent, ok2 := ft.Results.List[0].Type.(*ast.Ident)
+	if !ok2 || resIdent.Name != "error" {
+		return "", false
+	}
+	if ft.Params == nil {
+		return "", false
+	}
+	nParams := 0
+	for _, f := range ft.Params.List {
+		id, ok3 := f.Type.(*ast.Ident)
+		if !ok3 || id.Name != "string" {
+			return "", false
+		}
+		n := len(f.Names)
+		if n == 0 {
+			n = 1
+		}
+		nParams += n
+	}
+	switch nParams {
+	case 2:
+		return "MergeInto", true
+	case 3:
+		return "MergeBranch", true
+	default:
+		return "", false
+	}
+}
+
+// funcParamsMatchingMergeSignature returns the names of every parameter
+// in params whose type EXACTLY matches gitutil.MergeInto's or
+// gitutil.MergeBranch's own signature (mergeFuncSignatureShape) — the
+// shape a caller could pass either of those two functions through
+// DIRECTLY, unwrapped, as a value.
+func funcParamsMatchingMergeSignature(params *ast.FieldList) []string {
+	if params == nil {
+		return nil
+	}
+	var names []string
+	for _, f := range params.List {
+		ft, ok := f.Type.(*ast.FuncType)
+		if !ok {
+			continue
+		}
+		if _, ok := mergeFuncSignatureShape(ft); !ok {
+			continue
+		}
+		names = append(names, namesOrBlank(f.Names)...)
+	}
+	return names
+}
+
+// namesOrBlank returns each *ast.Ident's Name — a parameter field can
+// carry zero names (an unnamed/anonymous parameter, which can never be
+// called by identifier, so it is correctly excluded by returning
+// nothing for it).
+func namesOrBlank(idents []*ast.Ident) []string {
+	names := make([]string, 0, len(idents))
+	for _, id := range idents {
+		names = append(names, id.Name)
+	}
+	return names
+}
+
+// paramCalledAsFunc reports whether body calls paramName as a bare
+// function call (`paramName(...)`) anywhere within it, at any nesting
+// depth (deliberately not stopping at a nested FuncLit boundary — a
+// parameter closed over by an inner closure and invoked there is still
+// the same unresolvable indirection this check exists to catch).
+func paramCalledAsFunc(body ast.Node, paramName string) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == paramName {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// failClosedOnMergeSignatureParams is bead-6 fix round 3's fail-closed
+// leg for the OTHER unresolvable indirection G1-2's confirm-round
+// finding demonstrated (alongside the chained-alias shape
+// collectMergeFnAliases now fully resolves): a function-typed PARAMETER
+// whose signature matches gitutil.MergeInto/MergeBranch exactly, called
+// directly by its parameter name inside the span. This scan cannot trace
+// WHAT VALUE such a parameter is bound to at any given call site — that
+// would require full call-graph/dataflow analysis, which this ratchet
+// deliberately does not attempt (G1's own ruling: "fail closed on shapes
+// it cannot resolve, not full call-graph"). So rather than silently
+// passing over it (the pre-round-3 defect: a param of this exact shape,
+// called, was invisible to totalCalls and to the preflight-correspondence
+// check alike), it REDS — a human must either give the scan a traceable
+// shape (a direct call or a var alias) or extend it, never leave an
+// unresolvable indirection matching a merge producer's own signature
+// silently uncounted. mergeFn (`func() error`) and conflictFailure
+// (`func(error) error`) never match this signature (0 and 1 string-typed
+// params respectively, not 2 or 3), so this never fires against
+// resumeAwareMerge/attemptFreshMerge/completeDriftedResumedMerge's own,
+// already-audited plumbing.
+func failClosedOnMergeSignatureParams(t *testing.T, params *ast.FieldList, body ast.Node, fileName, label string, pos token.Position) {
+	for _, name := range funcParamsMatchingMergeSignature(params) {
+		if paramCalledAsFunc(body, name) {
+			t.Errorf("%s (%s, at %s): parameter %q has a signature matching gitutil.MergeInto/MergeBranch exactly and is called directly — this AST-level scan cannot trace what value it is bound to at any call site (not full call-graph analysis, per design), so it cannot confirm a preflight covers whatever it resolves to at runtime. Give it a traceable shape (a direct gitutil.MergeInto/MergeBranch call, or a package-level var alias) or extend this scan; a merge producer must never reach gitutil.MergeInto/MergeBranch through an indirection this ratchet cannot see.", label, fileName, pos, name)
+		}
+	}
 }
 
 // TestMergeChokepoint_EveryProducerConsultsThePreflight is AC-7(iv):
@@ -384,6 +549,7 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 				if v.Body == nil {
 					return true
 				}
+				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, v.Name.Name, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{file: fileName, label: v.Name.Name, mergeCalls: merges, preflight: preflights})
 			case *ast.FuncLit:
@@ -393,10 +559,12 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 					// no span of its own.
 					return true
 				}
+				label := fmt.Sprintf("func literal at %s", fset.Position(v.Pos()))
+				failClosedOnMergeSignatureParams(t, v.Type.Params, v.Body, fileName, label, fset.Position(v.Pos()))
 				merges, preflights := collectSpanCalls(v.Body, aliases, inlineArgs)
 				spans = append(spans, &funcSpan{
 					file:       fileName,
-					label:      fmt.Sprintf("func literal at %s", fset.Position(v.Pos())),
+					label:      label,
 					mergeCalls: merges,
 					preflight:  preflights,
 				})
@@ -531,5 +699,113 @@ func producer() error {
 	}
 	if len(closurePreflights) != 0 {
 		t.Fatal("fixture invariant broken: the closure must carry no preflight call of its own")
+	}
+}
+
+// TestCollectMergeFnAliases_ResolvesChainOfAnyDepth is bead-6 fix round
+// 3's acceptance test for G1-2's confirm-round finding: O2's own
+// adversarial repro (`var A = gitutil.MergeInto; var B = A`) escaped the
+// pre-round-3 single-hop alias resolution entirely — B's call sites were
+// invisible to totalCalls. collectMergeFnAliases must now resolve a
+// chain of ANY depth, and must NOT resolve a chain that bottoms out at
+// something unrelated to gitutil.MergeInto/MergeBranch.
+func TestCollectMergeFnAliases_ResolvesChainOfAnyDepth(t *testing.T) {
+	src := `package p
+
+var directMergeInto = gitutil.MergeInto
+var oneHop = directMergeInto
+var twoHop = oneHop
+var threeHop = twoHop
+
+var directMergeBranch = gitutil.MergeBranch
+var branchOneHop = directMergeBranch
+
+var unrelated = someOtherPackage.SomeFunc
+var unrelatedHop = unrelated
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "aliaschain.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	aliases := collectMergeFnAliases([]*ast.File{file})
+
+	for _, name := range []string{"directMergeInto", "oneHop", "twoHop", "threeHop"} {
+		if got := aliases[name]; got != "MergeInto" {
+			t.Errorf("aliases[%q] = %q, want %q (a chain of any depth must resolve to MergeInto, matching O2's exact adversarial repro)", name, got, "MergeInto")
+		}
+	}
+	for _, name := range []string{"directMergeBranch", "branchOneHop"} {
+		if got := aliases[name]; got != "MergeBranch" {
+			t.Errorf("aliases[%q] = %q, want %q", name, got, "MergeBranch")
+		}
+	}
+	for _, name := range []string{"unrelated", "unrelatedHop"} {
+		if _, ok := aliases[name]; ok {
+			t.Errorf("aliases[%q] must NOT be resolved — its chain bottoms out at an unrelated function, never gitutil.MergeInto/MergeBranch", name)
+		}
+	}
+}
+
+// TestFuncParamsMatchingMergeSignature_CatchesParameterIndirection is
+// bead-6 fix round 3's acceptance test for the OTHER half of G1-2's
+// confirm-round finding: a function-typed PARAMETER matching
+// gitutil.MergeInto/MergeBranch's own signature, called directly, must be
+// flagged — this AST scan cannot trace what value such a parameter is
+// bound to at any call site. resumeAwareMerge's own mergeFn/
+// conflictFailure parameters (`func() error`/`func(error) error`) must
+// NEVER match, since flagging those would make this ratchet unusable
+// against its own file.
+func TestFuncParamsMatchingMergeSignature_CatchesParameterIndirection(t *testing.T) {
+	src := `package p
+
+func g1UnpreflightedProducer(mergeIntoLike func(string, string) error, mergeBranchLike func(string, string, string) error) error {
+	return mergeIntoLike("wt", "branch1")
+}
+
+func ordinaryResumeAwareMergeShape(mergeFn func() error, conflictFailure func(error) error) error {
+	return mergeFn()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "paramindirection.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	var adversary, ordinary *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fd.Name.Name {
+		case "g1UnpreflightedProducer":
+			adversary = fd
+		case "ordinaryResumeAwareMergeShape":
+			ordinary = fd
+		}
+	}
+	if adversary == nil || ordinary == nil {
+		t.Fatal("fixture invariant broken: expected both FuncDecls")
+	}
+
+	adversaryParams := funcParamsMatchingMergeSignature(adversary.Type.Params)
+	wantParams := map[string]bool{"mergeIntoLike": true, "mergeBranchLike": true}
+	if len(adversaryParams) != len(wantParams) {
+		t.Fatalf("funcParamsMatchingMergeSignature(adversary) = %v, want exactly %v", adversaryParams, wantParams)
+	}
+	for _, name := range adversaryParams {
+		if !wantParams[name] {
+			t.Errorf("unexpected matched param %q", name)
+		}
+		if !paramCalledAsFunc(adversary.Body, name) && name == "mergeIntoLike" {
+			t.Errorf("paramCalledAsFunc must detect %q being called directly", name)
+		}
+	}
+
+	if got := funcParamsMatchingMergeSignature(ordinary.Type.Params); len(got) != 0 {
+		t.Errorf("resumeAwareMerge's own mergeFn()/conflictFailure() shapes must NEVER match gitutil.MergeInto/MergeBranch's signature (0/1 string params, not 2/3); got %v", got)
 	}
 }

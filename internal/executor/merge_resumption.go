@@ -26,6 +26,22 @@ import (
 // site) must render byte-identically.
 const ResolveMergeFlag = "--resolve-merge"
 
+// treeSHAFn/commitMessageBodyFn/commitTreeMergeFn/resetSoftFn are
+// package-level indirections over their gitutil counterparts (spec 127
+// bead-6 fix round 3): the drift-collapse mechanics
+// (completeDriftedResumedMerge/repairStrandedDriftCollapse) call these,
+// not gitutil directly, so a fault-injection test can force any ONE step
+// to fail — e.g. a successful commit-tree followed by a ResetSoft
+// failure (S1-1/G1-3/O1-1/F1-1's real-git reproduction) — without
+// needing to break real git itself (ref-lock contention, disk errors,
+// etc. are not portably reproducible in a test).
+var (
+	treeSHAFn           = gitutil.TreeSHA
+	commitMessageBodyFn = gitutil.CommitMessageBody
+	commitTreeMergeFn   = gitutil.CommitTreeMerge
+	resetSoftFn         = gitutil.ResetSoft
+)
+
 // preservedMergeError is the R5(d)(v) preserved-merge precondition's own
 // error type: a merge is already in progress in a worktree that THIS
 // call did not create. Callers that need to distinguish this class from
@@ -154,14 +170,25 @@ const (
 // (preservedTip is necessarily frozen at whatever it was when the
 // conflict began, while expectedSource's OWN branch may have since
 // moved — that is exactly the legitimate drifted case this function must
-// still recognize). What durably identifies WHICH branch a preserved
-// merge actually started against is the subject git itself seeded at
-// merge start (mergeInto's `-m "Merge <source>"` / MergeBranch's
-// `-m "Merge <source> into <target>"`, gitutil.MergeMsgSubject) — so an
-// ancestor-but-not-identical preserved tip is only bindingDrifted when
-// the seeded subject ALSO names expectedSource; otherwise it is
-// bindingForeign, exactly like the non-ancestor case, never silently
-// trusted on ancestry alone.
+// still recognize). Round 2 anchored this on the subject git itself
+// seeded at merge start (gitutil.MergeMsgSubject).
+//
+// Bead-6 fix round 3 (G1's confirm-round finding on round 2): MERGE_MSG
+// is a plain file git itself invites an operator to hand-edit before
+// finishing a merge — matching its subject is a FRESH forgeable proxy for
+// identity, not durable evidence. An operator who rewrites MERGE_MSG's
+// first line to "Merge <expectedSource>" over a preserved FOREIGN merge
+// gets it classified bindingDrifted and completed. The subject check
+// stays as a cheap, necessary first filter (a subject that doesn't even
+// CLAIM expectedSource is confidently bindingForeign, unchanged from
+// round 2), but a subject that DOES claim expectedSource must now also be
+// corroborated by mergeSourceMarkerMatches — an unforgeable ref
+// MergeInto/MergeBranch themselves wrote, atomically, at the moment THIS
+// TOOL'S OWN merge attempt of expectedSource began (gitutil.
+// MergeSourceMarkerRef), never something an ordinary operator action
+// touches. A marker that cannot be read at all (absent, or a genuine git
+// failure) is NOT evidence either way — it fails closed as indeterminate,
+// never as a confident classification in either direction.
 func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindingClass, preservedTip, sourceTip string, err error) {
 	preservedTip, err = gitutil.RevParseRef(workdir, "MERGE_HEAD")
 	if err != nil {
@@ -188,6 +215,17 @@ func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindin
 	if !named {
 		return bindingForeign, preservedTip, sourceTip, nil
 	}
+	// Round 3: the subject CLAIMS expectedSource — but the subject is
+	// operator-editable, so it is corroborated (never simply trusted)
+	// against the unforgeable merge-start marker before this preserved
+	// merge is completed as expectedSource's own drifted history.
+	matched, markErr := mergeSourceMarkerMatches(workdir, expectedSource, preservedTip)
+	if markErr != nil {
+		return 0, preservedTip, sourceTip, fmt.Errorf("could not confirm the preserved merge in %s is %s's own recorded merge attempt (%w)", workdir, expectedSource, markErr)
+	}
+	if !matched {
+		return bindingForeign, preservedTip, sourceTip, nil
+	}
 	return bindingDrifted, preservedTip, sourceTip, nil
 }
 
@@ -195,16 +233,20 @@ func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindin
 // subject names expectedSource as the branch being merged — the
 // MergeInto ("Merge <source>") or MergeBranch ("Merge <source> into
 // <target>") shape gitutil seeds at merge start (gitops.go's own `-m`
-// calls). Bead-6 fix round 2: this is the ONE piece of evidence that
-// survives expectedSource's OWN tip moving after the merge began —
-// ancestry alone cannot distinguish "this IS expectedSource, just an
-// older snapshot of it" from "this is some OTHER branch that happens to
-// be an ancestor of expectedSource's current tip". Matching is anchored
-// on "Merge <expectedSource>" as either the WHOLE subject (MergeInto's
-// form) or a prefix immediately followed by " into " (MergeBranch's
-// form) — never a bare substring — so a branch name that is a textual
-// prefix of another branch's name (e.g. "bead/x" vs "bead/x-extra")
-// cannot be confused for a match.
+// calls). Matching is anchored on "Merge <expectedSource>" as either the
+// WHOLE subject (MergeInto's form) or a prefix immediately followed by
+// " into " (MergeBranch's form) — never a bare substring — so a branch
+// name that is a textual prefix of another branch's name (e.g. "bead/x"
+// vs "bead/x-extra") cannot be confused for a match.
+//
+// Bead-6 fix round 3: this is now a NECESSARY but no longer SUFFICIENT
+// signal — MERGE_MSG is hand-editable, so a subject naming expectedSource
+// no longer alone justifies bindingDrifted (see
+// classifyPreservedMergeBinding's doc comment and mergeSourceMarkerMatches
+// below). A subject that does NOT name expectedSource remains a
+// confident, unchanged bindingForeign signal — hand-editing MERGE_MSG to
+// falsely DISCLAIM identity would only ever make this function MORE
+// conservative, never less.
 func mergeSubjectNamesSource(workdir, expectedSource string) (bool, error) {
 	subject, err := gitutil.MergeMsgSubject(workdir)
 	if err != nil {
@@ -215,6 +257,26 @@ func mergeSubjectNamesSource(workdir, expectedSource string) (bool, error) {
 		return true, nil
 	}
 	return strings.HasPrefix(subject, want+" into "), nil
+}
+
+// mergeSourceMarkerMatches reports whether workdir holds the unforgeable
+// merge-start marker MergeInto/MergeBranch record for expectedSource
+// (gitutil.MergeSourceMarkerRef, spec 127 bead-6 fix round 3), and
+// whether its recorded value equals preservedTip — the corroboration
+// classifyPreservedMergeBinding requires before trusting an
+// ancestor-but-not-equal preserved merge as expectedSource's own drifted
+// history. A missing marker (gitutil.ErrRefNotFound — e.g. a merge
+// started by a build predating this fix, or a hand-run `git merge`
+// outside this tool) is NOT evidence of anything either way: it is
+// returned as an error so the caller fails closed
+// (bindingIndeterminateRefusal), never silently trusted (permission) and
+// never silently rejected (a confident, possibly wrong, foreign verdict).
+func mergeSourceMarkerMatches(workdir, expectedSource, preservedTip string) (bool, error) {
+	recorded, err := gitutil.RevParseRef(workdir, gitutil.MergeSourceMarkerRef(expectedSource))
+	if err != nil {
+		return false, err
+	}
+	return recorded == preservedTip, nil
 }
 
 // bindingIndeterminateError is the fail-closed leg when
@@ -358,16 +420,47 @@ func completeResumedMerge(workdir string) error {
 // tree is BY CONSTRUCTION identical to what is already checked out, so
 // this touches neither the index nor the working tree.
 //
-// STATED RESIDUAL: when the catch-up merge (mergeFn against the current
-// source tip) itself RE-CONFLICTS, this returns that failure as-is — C1
-// stays committed, no collapse is attempted over an uncommitted state.
-// The next --resolve-merge resumption then resolves the re-conflict as
-// an ordinary bindingExact completion against C1 (expectedSource's tip
-// has not moved again in the meantime), producing a second, separate
-// merge commit — the two-merge topology this fix removes from the
-// single-invocation clean-catch-up path can still arise across two
-// SEPARATE invocations when the catch-up itself conflicts. Collapsing
-// that multi-invocation chain too is out of this fix's scope.
+// STATED RESIDUALS (bead-6 fix round 3: the FIRST of these two was the
+// only one this comment disclosed before round 3 — S1-1/G1-3/O1-1/F1-1's
+// panel review found a SECOND, undisclosed way the same bad shape could
+// land, and this fix round closes it rather than merely disclosing it;
+// see below):
+//
+//  1. When the catch-up merge (mergeFn against the current source tip)
+//     itself RE-CONFLICTS, this returns that failure as-is — C1 stays
+//     committed, no collapse is attempted over an uncommitted state. The
+//     next --resolve-merge resumption then resolves the re-conflict as an
+//     ordinary bindingExact completion against C1 (expectedSource's tip
+//     has not moved again in the meantime), producing a second, separate
+//     merge commit — the two-merge topology this fix removes from the
+//     single-invocation clean-catch-up path can still arise across two
+//     SEPARATE invocations when the catch-up itself conflicts. Collapsing
+//     that multi-invocation chain too remains out of this fix's scope
+//     (mergeResumptionStep sees a merge IN PROGRESS on that next
+//     invocation — resumeStillConflicted/resumeReadyToComplete — never
+//     resumeNoMergeInProgress, so resumeAwareMerge's stranded-topology
+//     repair below cannot even run against it).
+//
+//  2. (CLOSED, round 3) After the catch-up lands CLEANLY (C2 exists,
+//     MERGE_HEAD is gone), four more calls run before the branch moves
+//     onto the collapsed commit: TreeSHA, the second-parent read,
+//     CommitTreeMerge, and ResetSoft. If ResetSoft fails after
+//     CommitTreeMerge already succeeded (a ref-lock or other transient
+//     failure), the branch is left sitting at the un-collapsed C1+C2
+//     topology with MERGE_HEAD already cleared — and a BARE
+//     re-invocation would previously see resumeNoMergeInProgress, dispatch
+//     straight to attemptFreshMerge, whose mergeFn() is now a clean no-op
+//     ("already up to date") against the already-merged tip: silent
+//     apparent success over the exact ambiguous two-merge shape spec 125's
+//     FindLandedMerge refuses. resumeAwareMerge's dispatch now calls
+//     repairStrandedDriftCollapse BEFORE ever reaching attemptFreshMerge on
+//     that leg: it detects this EXACT stranded shape (two adjacent,
+//     exactly-two-parent merge commits at HEAD/HEAD^1 sharing one subject
+//     naming expectedSource) and re-attempts the identical collapse — nothing
+//     about producing that stranded shape ever reports success at any
+//     invocation. If the repair's own ResetSoft fails again, THAT is
+//     returned as a loud, distinct error (strandedCollapseError) — never
+//     silently retried as a fresh merge.
 func completeDriftedResumedMerge(workdir string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
 	preTip, err := gitutil.RevParseRef(workdir, "HEAD")
 	if err != nil {
@@ -376,16 +469,16 @@ func completeDriftedResumedMerge(workdir string, mergeFn func() error, conflictF
 	if err := completeResumedMerge(workdir); err != nil {
 		return err
 	}
-	subject, err := gitutil.CommitMessageBody(workdir, "HEAD")
+	subject, err := commitMessageBodyFn(workdir, "HEAD")
 	if err != nil {
 		return fmt.Errorf("reading the completed merge's own message in %s: %w", workdir, err)
 	}
 	if err := attemptFreshMerge(workdir, mergeFn, conflictFailure); err != nil {
 		// The catch-up merge did not land cleanly (a genuine re-conflict,
-		// or a worktree-state failure) — see the STATED RESIDUAL above.
+		// or a worktree-state failure) — STATED RESIDUAL 1 above.
 		return err
 	}
-	tree, err := gitutil.TreeSHA(workdir, "HEAD")
+	tree, err := treeSHAFn(workdir, "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolving %s's post-catch-up tree: %w", workdir, err)
 	}
@@ -393,12 +486,100 @@ func completeDriftedResumedMerge(workdir string, mergeFn func() error, conflictF
 	if err != nil {
 		return fmt.Errorf("resolving the catch-up merge's second parent in %s: %w", workdir, err)
 	}
-	collapsed, err := gitutil.CommitTreeMerge(workdir, tree, preTip, driftedTip, subject)
+	collapsed, err := commitTreeMergeFn(workdir, tree, preTip, driftedTip, subject)
 	if err != nil {
 		return fmt.Errorf("collapsing the drift catch-up into a single merge commit in %s: %w", workdir, err)
 	}
-	if err := gitutil.ResetSoft(workdir, collapsed); err != nil {
+	if err := resetSoftFn(workdir, collapsed); err != nil {
+		// Leaves the un-collapsed C1+C2 topology at HEAD, MERGE_HEAD
+		// already cleared — STATED RESIDUAL 2 above. A LATER invocation's
+		// repairStrandedDriftCollapse detects and re-attempts this exact
+		// collapse before it can be silently laundered as a no-op success.
 		return fmt.Errorf("moving %s onto the collapsed merge commit: %w", workdir, err)
+	}
+	return nil
+}
+
+// strandedCollapseError is bead-6 fix round 3's loud, distinct failure
+// when repairStrandedDriftCollapse finds a stranded two-merge drift
+// topology (an earlier, interrupted completeDriftedResumedMerge's
+// ResetSoft failed after its CommitTreeMerge already succeeded) but its
+// OWN repair attempt also fails — never silently retried as a fresh
+// merge, and never reported as success.
+type strandedCollapseError struct{ msg string }
+
+func (e *strandedCollapseError) Error() string { return e.msg }
+
+// detectStrandedDriftTopology reports whether workdir's current branch
+// (HEAD) is sitting at the exact stranded shape completeDriftedResumedMerge's
+// ResetSoft failure can leave behind: HEAD and HEAD's own first parent are
+// BOTH plain (exactly two-parent) merge commits, immediately adjacent (HEAD's
+// first parent IS the older commit, not merely an ancestor of it — no
+// unrelated history sits between them), sharing the IDENTICAL subject, and
+// that subject names expectedSource (mergeSubjectNamesSource's own
+// MergeInto/MergeBranch form check, applied here to a commit's own preserved
+// subject rather than a live MERGE_MSG). When true, it returns exactly what
+// the original collapse needed: preTip (the OLDER commit's own first
+// parent — the pre-resumption tip, never itself a parent of the eventual
+// collapsed result), driftedTip (the NEWER commit's second parent — the
+// drift that was caught up), and the shared subject to preserve.
+func detectStrandedDriftTopology(workdir, expectedSource string) (stranded bool, preTip, driftedTip, subject string, err error) {
+	merges, ferr := gitutil.FirstParentMerges(workdir, "HEAD")
+	if ferr != nil {
+		return false, "", "", "", fmt.Errorf("scanning %s for a stranded drift-collapse topology: %w", workdir, ferr)
+	}
+	if len(merges) < 2 {
+		return false, "", "", "", nil
+	}
+	top, prior := merges[0], merges[1]
+	if len(top.Parents) != 2 || len(prior.Parents) != 2 {
+		return false, "", "", "", nil
+	}
+	if top.Parents[0] != prior.SHA {
+		// Not adjacent — some other, unrelated history sits between them;
+		// not the shape this collapse's own interruption produces.
+		return false, "", "", "", nil
+	}
+	if top.Subject != prior.Subject {
+		return false, "", "", "", nil
+	}
+	want := "Merge " + expectedSource
+	if top.Subject != want && !strings.HasPrefix(top.Subject, want+" into ") {
+		return false, "", "", "", nil
+	}
+	return true, prior.Parents[0], top.Parents[1], top.Subject, nil
+}
+
+// repairStrandedDriftCollapse is bead-6 fix round 3's convergence fix for
+// completeDriftedResumedMerge's STATED RESIDUAL 2 (see its doc comment):
+// called at the top of resumeAwareMerge's resumeNoMergeInProgress leg,
+// BEFORE attemptFreshMerge ever runs, so a bare re-invocation over a
+// stranded two-merge topology repairs it (making the sequence convergent)
+// rather than letting attemptFreshMerge's mergeFn() silently no-op over it
+// (making the interruption look like success). Returns nil, untouched,
+// when workdir is not in the stranded shape at all — the ordinary case on
+// every normal invocation.
+func repairStrandedDriftCollapse(workdir, expectedSource string) error {
+	stranded, preTip, driftedTip, subject, err := detectStrandedDriftTopology(workdir, expectedSource)
+	if err != nil {
+		return err
+	}
+	if !stranded {
+		return nil
+	}
+	tree, err := treeSHAFn(workdir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving the stranded topology's tree in %s: %w", workdir, err)
+	}
+	collapsed, err := commitTreeMergeFn(workdir, tree, preTip, driftedTip, subject)
+	if err != nil {
+		return fmt.Errorf("repairing the stranded two-merge drift topology in %s: %w", workdir, err)
+	}
+	if err := resetSoftFn(workdir, collapsed); err != nil {
+		return &strandedCollapseError{msg: fmt.Sprintf(
+			"%s still holds an uncollapsed two-merge drift topology for %s from an earlier, interrupted %s run (the collapse's final step did not complete) — the repair attempt failed: %s\nnothing beyond the repair attempt itself was touched; re-run once the underlying failure clears (e.g. ref-lock contention) to retry.",
+			workdir, termsafe.Escape(expectedSource), ResolveMergeFlag, termsafe.Escape(err.Error()),
+		)}
 	}
 	return nil
 }
@@ -495,7 +676,16 @@ func resumeAwareMerge(workdir string, resolveMerge bool, expectedSource, reentry
 		}
 		return completeResumedMerge(workdir)
 	}
-	// resumeNoMergeInProgress: attempt a fresh merge.
+	// resumeNoMergeInProgress: repair any stranded drift-collapse an
+	// earlier, interrupted invocation left behind (bead-6 fix round 3 —
+	// see completeDriftedResumedMerge's STATED RESIDUAL 2 and
+	// repairStrandedDriftCollapse's doc comment) BEFORE attempting a
+	// fresh merge — otherwise a bare re-invocation's mergeFn() would
+	// silently no-op ("already up to date") over the un-collapsed
+	// topology and report apparent success.
+	if err := repairStrandedDriftCollapse(workdir, expectedSource); err != nil {
+		return err
+	}
 	return attemptFreshMerge(workdir, mergeFn, conflictFailure)
 }
 

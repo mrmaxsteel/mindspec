@@ -55,6 +55,24 @@ import (
 // producer-level refusal and re-run: nothing about refusing/re-running
 // bead N's drifted merge may touch a DIFFERENT bead's already-landed
 // history or evidence trail.
+//
+// SCOPE CAVEAT (bead-6 fix round 3, O3-1/G1-4's panel finding — read
+// before trusting the "PRIOR MERGES AND BINDINGS ARE INTACT" label
+// below): this fixture proves the git-SHA/content leg of that phrase
+// (bead M's landed merge commit stays an ancestor of specBranch, its
+// content survives, and lifecycle.FindLandedMerge's own — possibly
+// uncorroborated — outcome for it is unchanged). It does NOT exercise the
+// merge-time landed-BINDING write/read path (mindspec_executor.go's
+// ensureLandedBinding): this test's process cwd is the package checkout,
+// not root, and gitutil.BranchExists(beadBranch) at mindspec_executor.go
+// (the guard around BOTH the ancestor-safety check and ensureLandedBinding)
+// resolves against the CALLING PROCESS's cwd — so that entire guard is
+// silently skipped for every bead this fixture completes, prior bead M
+// included. That is a pre-existing gap (specs 121/125, not introduced
+// here), already filed as a P1 follow-up; this test's own "bindings"
+// claim is scoped to what it actually exercises (SHA identity and
+// FindLandedMerge's outcome stability), not a literal binding-metadata
+// comparison.
 func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T) {
 	saveAndRestore(t)
 	const specID, beadID = "927-tdrift", "mindspec-119tdrift.1"
@@ -168,11 +186,14 @@ func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T
 		t.Errorf("the re-run must not create any new commit on specBranch; tip was %s, now %s", specTipAfterFirstRun, got)
 	}
 
-	// PRIOR MERGES AND BINDINGS ARE INTACT (plan.md Steps §6, the leg fix
-	// round 1 left undemonstrated): bead N's producer-level refusal and
-	// re-run — including the drift/squash commit that landed alongside
-	// it — must never disturb bead M's own, already-landed merge or its
-	// identifiability.
+	// PRIOR MERGE'S GIT-SHA IDENTITY AND FindLandedMerge's OUTCOME ARE
+	// INTACT (plan.md Steps §6's "PRIOR MERGES AND BINDINGS ARE INTACT"
+	// clause, scoped per this file's SCOPE CAVEAT above — the literal
+	// landed-BINDING metadata is never written in this fixture, see
+	// there): bead N's producer-level refusal and re-run — including the
+	// drift/squash commit that landed alongside it — must never disturb
+	// bead M's own, already-landed merge commit or FindLandedMerge's
+	// identification outcome for it.
 	if !isAncestorRealGit2(t, root, priorMergeSHA, specBranch) {
 		t.Errorf("the prior bead's landed merge commit %s must still be an ancestor of specBranch after bead N's refusal/re-run sequence", priorMergeSHA)
 	}

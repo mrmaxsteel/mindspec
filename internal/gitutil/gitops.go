@@ -149,6 +149,54 @@ func CreateBranch(name, from string) error {
 	return nil
 }
 
+// MergeSourceMarkerRef returns the ref name under which
+// MergeInto/MergeBranch record the merge-start marker for source (spec
+// 127 bead-6 fix round 3, G1-1's confirm-round finding): a plain ref
+// under refs/mindspec/, pointing at source's own tip AT THE MOMENT a
+// merge attempt of it began. Unlike MERGE_MSG — a file git itself invites
+// an operator to hand-edit before finishing a merge — nothing in the
+// ordinary conflict-resolution workflow invites touching a ref under
+// refs/mindspec/, so it survives as durable, tool-written evidence of
+// which source THIS invocation's own MergeInto/MergeBranch call actually
+// started merging. Exported so internal/executor's resumption-binding
+// check (classifyPreservedMergeBinding/mergeSourceMarkerMatches) can look
+// it up under the exact key these two functions write it under.
+func MergeSourceMarkerRef(source string) string {
+	return "refs/mindspec/merge-source/" + source
+}
+
+// recordMergeSourceMarker best-effort records source's CURRENT tip in
+// workdir under MergeSourceMarkerRef(source), before a merge attempt of
+// it begins. Never fatal to the merge attempt itself: a write failure
+// here (ref-lock contention, etc.) only means a LATER preserved-merge
+// resumption over this exact conflict cannot corroborate itself as
+// bindingDrifted and fails closed (bindingIndeterminateRefusal) instead —
+// safe, if more conservative, never a silent trust of unverified state.
+func recordMergeSourceMarker(workdir, source string) {
+	tip, err := RevParseRef(workdir, source)
+	if err != nil {
+		return
+	}
+	_ = UpdateRef(workdir, MergeSourceMarkerRef(source), tip)
+}
+
+// UpdateRef runs `git update-ref <ref> <sha>` in workdir, creating or
+// moving ref to point directly at sha — the plumbing primitive behind
+// recordMergeSourceMarker above (spec 127 bead-6 fix round 3).
+func UpdateRef(workdir, ref, sha string) error {
+	if err := rejectOptionLike(ref); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(sha); err != nil {
+		return err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "update-ref", ref, sha)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("update-ref %s %s: %s", ref, sha, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // MergeBranch merges source into target using --no-ff (from the given workdir).
 // If workdir is empty, uses the current directory.
 func MergeBranch(workdir, source, target string) error {
@@ -167,6 +215,11 @@ func MergeBranch(workdir, source, target string) error {
 	if out, err := checkoutCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout %s: %s", target, strings.TrimSpace(string(out)))
 	}
+
+	// Bead-6 fix round 3: record the unforgeable merge-start marker
+	// BEFORE the merge itself runs — see MergeSourceMarkerRef's doc
+	// comment.
+	recordMergeSourceMarker(workdir, source)
 
 	// Merge source. `-m <msg>` precedes the `--` separator so the message
 	// is not reparsed as a commit operand (everything after `--` is a
@@ -187,6 +240,10 @@ func MergeInto(targetWorkdir, sourceBranch string) error {
 	if err := rejectOptionLike(sourceBranch); err != nil {
 		return err
 	}
+	// Bead-6 fix round 3: record the unforgeable merge-start marker
+	// BEFORE the merge itself runs — see MergeSourceMarkerRef's doc
+	// comment.
+	recordMergeSourceMarker(targetWorkdir, sourceBranch)
 	mergeCmd := execCommand("git", "-C", targetWorkdir, "merge", "--no-ff", "-m",
 		fmt.Sprintf("Merge %s", sourceBranch), "--", sourceBranch)
 	if out, err := mergeCmd.CombinedOutput(); err != nil {
