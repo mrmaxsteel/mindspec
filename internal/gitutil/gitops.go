@@ -787,6 +787,68 @@ func CommitNoEdit(workdir string) error {
 	return nil
 }
 
+// TreeSHA resolves ref's tree object SHA in workdir (`git rev-parse
+// <ref>^{tree}`). Spec 127 bead-6 fix round 2: the drift-catchup
+// single-merge collapse (merge_resumption.go's
+// completeDriftedResumedMerge) reads the CURRENTLY checked-out commit's
+// tree so a reconstructed commit object can carry the identical content
+// under different parents.
+func TreeSHA(workdir, ref string) (string, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return "", err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", ref+"^{tree}")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse %s^{tree}: %w", ref, err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("rev-parse %s^{tree}: %w", ref, ErrRefNotFound)
+	}
+	return sha, nil
+}
+
+// CommitMessageBody returns ref's full raw commit message in workdir
+// (`git log -1 --format=%B`), with exactly the one trailing newline git
+// itself appends stripped — otherwise byte-verbatim. Spec 127 bead-6 fix
+// round 2: used to carry a just-completed merge's own preserved subject
+// (E-r5-5/A-r4-5) into a reconstructed commit object without
+// re-deriving or re-typing it.
+func CommitMessageBody(workdir, ref string) (string, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return "", err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "log", "-1", "--format=%B", ref, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("reading commit message of %s: %w", ref, err)
+	}
+	return strings.TrimSuffix(string(out), "\n"), nil
+}
+
+// CommitTreeMerge creates a new, UNREFERENCED merge commit object
+// (`git commit-tree <tree> -p <parent1> -p <parent2> -m <message>`) — a
+// plumbing primitive that moves no ref and touches neither the index nor
+// the working tree. The caller moves a branch onto the returned SHA
+// itself (see ResetSoft). Spec 127 bead-6 fix round 2: used to collapse
+// a two-commit sequence that shares one FINAL tree into a single merge
+// commit carrying the INTENDED two parents (merge_resumption.go's
+// completeDriftedResumedMerge).
+func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, error) {
+	for _, s := range []string{tree, parent1, parent2} {
+		if err := rejectOptionLike(s); err != nil {
+			return "", err
+		}
+	}
+	cmd := execCommand("git", gitArgs(workdir, "commit-tree", tree, "-p", parent1, "-p", parent2, "-m", message)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("commit-tree in %s: %w", workdir, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // escapeLines applies termsafe.Escape to each line of a (possibly
 // multi-line) block of agent-influenced text — git porcelain/error output —
 // while preserving the real newlines that separate genuine lines (R4:
@@ -1227,6 +1289,27 @@ func ResetHard(workdir, ref string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git reset --hard %s: %s", ref, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ResetSoft runs `git reset --soft <target>` in workdir — moves the
+// current branch ref (and HEAD) to target WITHOUT touching the index or
+// working tree. Spec 127 bead-6 fix round 2 (the drift-catchup single-
+// merge collapse, merge_resumption.go's completeDriftedResumedMerge):
+// safe ONLY when target's tree is already known to equal the working
+// tree's current content — the one invariant that call site establishes
+// (target is built by CommitTreeMerge from the CURRENTLY checked-out
+// commit's own tree) — never called generically to move a branch onto
+// an arbitrary commit whose tree might differ from what is on disk.
+func ResetSoft(workdir, target string) error {
+	if err := rejectOptionLike(target); err != nil {
+		return err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "reset", "--soft", target)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git reset --soft %s: %s", target, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

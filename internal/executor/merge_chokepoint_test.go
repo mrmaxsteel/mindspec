@@ -75,21 +75,36 @@ package executor
 //     preflight call) and remains true here; this rewrite does not
 //     introduce or remove that property.
 //
-// INLINE CALL-ARGUMENT CLOSURES ARE TRANSPARENT, ON PURPOSE: this
-// package's own real producers pass their merge attempt as an INLINE
-// func literal directly into resumeAwareMerge's mergeFn parameter —
+// A NARROW SET OF INLINE CALL-ARGUMENT CLOSURES ARE TRANSPARENT, ON
+// PURPOSE — NAMED TO ONE CALL SHAPE, NOT ANY DIRECT CALL ARGUMENT (bead-6
+// fix round 2, G1's confirm-round finding: an EARLIER version of this
+// scan treated ANY *ast.FuncLit that is a direct element of ANY
+// *ast.CallExpr's Args list as transparent — a claim that is FALSE for a
+// closure passed to some OTHER function with no synchronous-execution
+// guarantee at all; see
+// TestAdversaryArbitraryInlineCallbackIsNotTransparent below, which
+// fails red against that broader rule). This package's own real
+// producers pass their merge attempt as an INLINE func literal directly
+// into resumeAwareMerge's mergeFn parameter —
 // `resumeAwareMerge(..., func() error { return gitutil.MergeInto(...) },
 // ...)` — evaluated SYNCHRONOUSLY as part of that very call, not stored,
 // not deferred, not handed to a goroutine. G1-2's own finding is about a
 // closure that "can execute independently" of the outer preflight's
-// timing; an inline call argument cannot — it runs inside the same
-// invocation, immediately after the preflight call the enclosing
-// function made moments before. So a *ast.FuncLit that is a DIRECT
-// element of some *ast.CallExpr's Args list is treated as TRANSPARENT:
-// its calls are attributed to its ENCLOSING span, not a new one — this
-// is what lets the real producers pass, while a *ast.FuncLit bound to a
-// `var` (O2-1's shape — never a direct call argument) still gets its own,
-// independent span and its own obligation.
+// timing; an inline argument to resumeAwareMerge specifically cannot —
+// it runs inside the same invocation, immediately after the preflight
+// call the enclosing function made moments before. That guarantee comes
+// from resumeAwareMerge's OWN audited implementation, not from the mere
+// syntactic shape "argument of a call" — an inline closure passed to
+// some ARBITRARY other function carries no such guarantee: the callee
+// could store it, hand it to a goroutine, or invoke it conditionally,
+// and nothing in the AST can tell those cases apart from resumeAwareMerge's
+// synchronous contract. So ONLY a *ast.FuncLit that is a DIRECT argument
+// of a call to resumeAwareMerge (identifier name match — this package's
+// own free function, never a method) is treated as TRANSPARENT: its
+// calls are attributed to its ENCLOSING span, not a new one. A
+// *ast.FuncLit bound to a `var` (O2-1's shape) OR passed as a direct
+// argument to any OTHER call still gets its own, independent span and
+// its own obligation.
 
 import (
 	"fmt"
@@ -164,18 +179,35 @@ func operandKey(e ast.Expr) string {
 	}
 }
 
+// resumeAwareMergeFuncName is the ONE call shape whose direct
+// call-argument func literals are synchronous-by-construction (see this
+// file's package doc comment). Bead-6 fix round 2 narrows
+// collectInlineArgFuncLits to exactly this identifier — a closure passed
+// as a direct argument to any OTHER call gets its own span, same as one
+// bound to a var.
+const resumeAwareMergeFuncName = "resumeAwareMerge"
+
 // collectInlineArgFuncLits finds every *ast.FuncLit that is a DIRECT
-// element of some *ast.CallExpr's Args list anywhere in file — a closure
-// passed inline to a call, evaluated synchronously as part of that call,
-// never stored or deferred. These are TRANSPARENT to the span-collection
-// walk below (see this file's package doc comment, "INLINE CALL-ARGUMENT
-// CLOSURES ARE TRANSPARENT"): their calls belong to their ENCLOSING span,
-// not a new one of their own.
+// element of a call to resumeAwareMergeFuncName's Args list anywhere in
+// file — a closure passed inline to THAT specific, audited-synchronous
+// call, never stored or deferred. These are TRANSPARENT to the
+// span-collection walk below (see this file's package doc comment, "A
+// NARROW SET OF INLINE CALL-ARGUMENT CLOSURES ARE TRANSPARENT"): their
+// calls belong to their ENCLOSING span, not a new one of their own. A
+// *ast.FuncLit passed as a direct argument to any OTHER call is NOT
+// collected here (bead-6 fix round 2, G1's confirm-round finding: the
+// prior version collected one for ANY call, which is unsound — nothing
+// in the AST can attest that an arbitrary callee invokes its argument
+// synchronously the way resumeAwareMerge is itself audited to).
 func collectInlineArgFuncLits(file *ast.File) map[*ast.FuncLit]bool {
 	inline := map[*ast.FuncLit]bool{}
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
+			return true
+		}
+		id, ok := call.Fun.(*ast.Ident)
+		if !ok || id.Name != resumeAwareMergeFuncName {
 			return true
 		}
 		for _, arg := range call.Args {
@@ -427,5 +459,77 @@ func TestMergeChokepoint_EveryProducerConsultsThePreflight(t *testing.T) {
 	const wantMergeCallSites = 3
 	if totalCalls != wantMergeCallSites {
 		t.Errorf("found %d total MergeInto/MergeBranch call site(s) in internal/executor production code, want exactly %d (spec 127's three enumerated producers) — re-audit this count if a producer was legitimately added or removed", totalCalls, wantMergeCallSites)
+	}
+}
+
+// TestAdversaryArbitraryInlineCallbackIsNotTransparent is bead-6 fix
+// round 2 (G1's confirm-round finding): an inline func literal passed as
+// a direct argument to some OTHER function — never resumeAwareMerge — is
+// syntactically identical to the ONE shape this file's own transparency
+// rule is scoped to (a *ast.FuncLit that is a direct *ast.CallExpr
+// argument), but carries none of the synchronous-execution guarantee
+// that shape's carve-out depends on. Restoring the prior, unqualified
+// collectInlineArgFuncLits (any call, not just resumeAwareMerge) makes
+// this test fail red: it marks the closure below transparent, which
+// would let an UNRELATED preflightMergeDestruction call in the enclosing
+// function wrongly "cover" a merge call that established no preflight
+// obligation of its own.
+func TestAdversaryArbitraryInlineCallbackIsNotTransparent(t *testing.T) {
+	src := `package p
+
+func someOtherHelper(cb func() error) error { return cb() }
+
+func producer() error {
+	preflightMergeDestruction("branch1", "target1", "", "rerun")
+	return someOtherHelper(func() error {
+		return gitutil.MergeInto("wt", "branch1")
+	})
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "adversary.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	inline := collectInlineArgFuncLits(file)
+
+	var closureLit *ast.FuncLit
+	var producerDecl *ast.FuncDecl
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FuncLit:
+			closureLit = v
+		case *ast.FuncDecl:
+			if v.Name.Name == "producer" {
+				producerDecl = v
+			}
+		}
+		return true
+	})
+	if closureLit == nil || producerDecl == nil {
+		t.Fatal("fixture invariant broken: expected exactly one func literal and a producer FuncDecl")
+	}
+
+	if inline[closureLit] {
+		t.Fatal("a func literal passed to an ARBITRARY function (not resumeAwareMerge) must NOT be treated as transparent — nothing guarantees it runs synchronously the way resumeAwareMerge's own mergeFn argument does")
+	}
+
+	// Consequence check: with the closure correctly NOT transparent,
+	// collectSpanCalls over producer's OWN span must not see the merge
+	// call inside it at all (descent stops at the nested, non-inline
+	// FuncLit boundary) — the merge call belongs to the closure's OWN
+	// span, which the real repo-wide scan visits separately and which
+	// carries no preflight call of its own in this fixture.
+	outerMerges, _ := collectSpanCalls(producerDecl.Body, nil, inline)
+	if len(outerMerges) != 0 {
+		t.Fatalf("producer's own span must not see the closure's merge call once the closure is correctly non-transparent; got %d", len(outerMerges))
+	}
+	closureMerges, closurePreflights := collectSpanCalls(closureLit.Body, nil, inline)
+	if len(closureMerges) != 1 {
+		t.Fatalf("the closure's own span must see its own merge call; got %d", len(closureMerges))
+	}
+	if len(closurePreflights) != 0 {
+		t.Fatal("fixture invariant broken: the closure must carry no preflight call of its own")
 	}
 }

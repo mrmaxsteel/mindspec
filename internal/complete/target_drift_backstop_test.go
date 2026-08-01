@@ -26,6 +26,7 @@ package complete
 // fiat.
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 // TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes is the
@@ -40,6 +42,19 @@ import (
 // preflight refuses a merge that the §1-phase preflight evaluated
 // permissively moments earlier, because the TARGET drifted in between —
 // proving the two-layer siting argument empirically, not by inspection.
+//
+// Bead-6 fix round 2 (G1's confirm-round finding): the plan's own Steps
+// §6 wording for this fixture is "the producer refuses, bead N is
+// unmerged, PRIOR MERGES AND BINDINGS ARE INTACT, and the re-run
+// converges" — fix round 1 demonstrated only the first, third, and
+// fourth clauses. This adds a PRIOR bead (M), landed for real via
+// ordinary Run() completion BEFORE bead N's drift/refusal sequence
+// begins, and asserts M's own landed merge commit — and
+// lifecycle.FindLandedMerge's identification outcome for it, whatever
+// that outcome is — is BYTE-IDENTICAL before and after bead N's
+// producer-level refusal and re-run: nothing about refusing/re-running
+// bead N's drifted merge may touch a DIFFERENT bead's already-landed
+// history or evidence trail.
 func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T) {
 	saveAndRestore(t)
 	const specID, beadID = "927-tdrift", "mindspec-119tdrift.1"
@@ -53,6 +68,40 @@ func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
 
 	specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+	ex := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
+
+	// PRIOR BEAD M: lands for real, via an ordinary (undrifted, un-hooked)
+	// Run() completion, BEFORE the drift hook below is even installed —
+	// so its own landing is genuinely unaffected by anything that
+	// follows.
+	const priorBeadID = "mindspec-119tdriftprior.1"
+	priorBeadBranch := "bead/" + priorBeadID
+	gitRun(t, root, "branch", priorBeadBranch, "main")
+	priorWt := filepath.Join(root, ".wt-tdriftprior")
+	gitRun(t, root, "worktree", "add", priorWt, priorBeadBranch)
+	writeFile(t, priorWt, "internal/widget/prior.go", "package widget\n\nfunc Prior() {}\n")
+	// This branch forks from "main", which carries NEITHER widget.go NOR
+	// OWNERSHIP.yaml at all (setupRealGitFaultFixture seeds both ONLY on
+	// beadBranch, in its own commit) — so this bead's own commit must
+	// claim its file the identical way: an OWNERSHIP.yaml alongside the
+	// source change, BYTE-IDENTICAL to setupRealGitFaultFixture's own
+	// content, so the LATER squash-merge of bead N's branch below (which
+	// introduces the SAME path with the SAME content from a DIFFERENT,
+	// unrelated history) resolves as a clean add/add rather than a
+	// conflict.
+	writeFile(t, priorWt, ".mindspec/docs/domains/widget/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
+	gitRun(t, priorWt, "add", "-A")
+	gitRun(t, priorWt, "commit", "-q", "-m", "impl: prior bead's own unrelated work")
+	gitRun(t, root, "worktree", "remove", "--force", priorWt)
+
+	if _, err := Run(root, priorBeadID, specID, "", ex, CompleteOpts{}); err != nil {
+		t.Fatalf("fixture invariant broken: the PRIOR bead must land cleanly before bead N's drift sequence begins, got: %v", err)
+	}
+	priorMergeSHA := gateRevParse(t, root, specBranch)
+	if !fileExistsAtRefRealGit(t, root, specBranch, "internal/widget/prior.go") {
+		t.Fatal("fixture invariant broken: the prior bead's content must have landed on specBranch")
+	}
+	priorLandedBefore, priorErrBefore := lifecycle.FindLandedMerge(root, specBranch, priorBeadID)
 
 	origPreflight := completeWorkDestructionPreflightFn
 	t.Cleanup(func() { completeWorkDestructionPreflightFn = origPreflight })
@@ -76,8 +125,6 @@ func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T
 		}
 		return err
 	}
-
-	ex := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
 
 	specTipBeforeFirstRun := gateRevParse(t, root, specBranch)
 	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
@@ -120,6 +167,67 @@ func TestRun_TargetDriftBackstop_ProducerRefusesAfterSection1Passes(t *testing.T
 	if got := gateRevParse(t, root, specBranch); got != specTipAfterFirstRun {
 		t.Errorf("the re-run must not create any new commit on specBranch; tip was %s, now %s", specTipAfterFirstRun, got)
 	}
+
+	// PRIOR MERGES AND BINDINGS ARE INTACT (plan.md Steps §6, the leg fix
+	// round 1 left undemonstrated): bead N's producer-level refusal and
+	// re-run — including the drift/squash commit that landed alongside
+	// it — must never disturb bead M's own, already-landed merge or its
+	// identifiability.
+	if !isAncestorRealGit2(t, root, priorMergeSHA, specBranch) {
+		t.Errorf("the prior bead's landed merge commit %s must still be an ancestor of specBranch after bead N's refusal/re-run sequence", priorMergeSHA)
+	}
+	if !fileExistsAtRefRealGit(t, root, specBranch, "internal/widget/prior.go") {
+		t.Error("the prior bead's content must still be present on specBranch")
+	}
+	priorLandedAfter, priorErrAfter := lifecycle.FindLandedMerge(root, specBranch, priorBeadID)
+	if diff := landedMergeOutcomeDiff(priorLandedBefore, priorErrBefore, priorLandedAfter, priorErrAfter); diff != "" {
+		t.Errorf("bead N's refusal/re-run sequence must not change FindLandedMerge's identification outcome for the PRIOR bead M: %s", diff)
+	}
+}
+
+// landedMergeOutcomeDiff compares two FindLandedMerge outcomes (each a
+// *lifecycle.LandedMerge plus its error) and returns a non-empty
+// description of any difference, or "" if they are equivalent. Used to
+// prove a DIFFERENT bead's refusal/re-run sequence left an unrelated
+// bead's own landed-merge identification byte-for-byte unchanged,
+// whatever that identification outcome is (positively identified,
+// uncorroborated, or otherwise) — this test does not need FindLandedMerge
+// to succeed for bead M, only to answer IDENTICALLY before and after.
+func landedMergeOutcomeDiff(beforeLanded *lifecycle.LandedMerge, beforeErr error, afterLanded *lifecycle.LandedMerge, afterErr error) string {
+	beforeOK := beforeErr == nil
+	afterOK := afterErr == nil
+	if beforeOK != afterOK {
+		return fmt.Sprintf("success changed: before err=%v, after err=%v", beforeErr, afterErr)
+	}
+	if beforeOK {
+		if beforeLanded.SHA != afterLanded.SHA || beforeLanded.SecondParent != afterLanded.SecondParent {
+			return fmt.Sprintf("identified merge changed: before %+v, after %+v", beforeLanded, afterLanded)
+		}
+		return ""
+	}
+	if beforeErr.Error() != afterErr.Error() {
+		return fmt.Sprintf("error text changed: before %q, after %q", beforeErr.Error(), afterErr.Error())
+	}
+	return ""
+}
+
+// isAncestorRealGit2 is isAncestorRealGit without the (bool, error)
+// double-return noise at call sites that only need a plain bool and
+// treat any probe error as "not confirmed ancestor" (t.Errorf already
+// names the SHA on failure, so a probe error and a genuine non-ancestor
+// answer are both worth failing the same assertion on).
+func isAncestorRealGit2(t *testing.T, dir, ancestor, descendant string) bool {
+	t.Helper()
+	isAnc, err := isAncestorRealGit(t, dir, ancestor, descendant)
+	return err == nil && isAnc
+}
+
+// fileExistsAtRefRealGit reports whether path exists in ref's tree in the
+// real git repo at dir (`git cat-file -e <ref>:<path>`).
+func fileExistsAtRefRealGit(t *testing.T, dir, ref, path string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "cat-file", "-e", ref+":"+path)
+	return cmd.Run() == nil
 }
 
 // isAncestorRealGit reports whether ancestor is an ancestor of descendant

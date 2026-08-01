@@ -266,6 +266,126 @@ func TestCompleteBead_ResolveMerge_ForeignPreservedMergeRefuses(t *testing.T) {
 	}
 }
 
+// TestCompleteBead_ResolveMerge_AncestorForeignMergeRefuses is bead-6 fix
+// round 2's G1 confirm-round finding: classifyPreservedMergeBinding was
+// refuted for a preserved MERGE_HEAD belonging to a DIFFERENT branch that
+// merely happens to be an ANCESTOR of the requested source's current tip
+// — ancestry alone cannot establish that a preserved merge is this
+// bead's own history, merely drifted. Unlike
+// TestCompleteBead_ResolveMerge_ForeignPreservedMergeRefuses (whose
+// decoy branch is NOT an ancestor of the bead branch — the easy case
+// bindingForeign already caught), this fixture makes decoy-src's tip a
+// REAL ancestor of the bead branch's current tip (via a genuine,
+// unrelated merge on the bead branch itself) — the exact shape that
+// used to fall through to bindingDrifted and be silently adopted as
+// "this bead's own conflict, just drifted", up to and including being
+// COMPLETED by --resolve-merge.
+func TestCompleteBead_ResolveMerge_AncestorForeignMergeRefuses(t *testing.T) {
+	g, fake, dir := newRepoExecutor(t)
+
+	runGitIn(t, dir, "branch", "spec/077-ancfor")
+	runGitIn(t, dir, "branch", "bead/mindspec-ancfor.1")
+	runGitIn(t, dir, "branch", "decoy-src")
+
+	specWtPath := dir + "/.worktrees/worktree-spec-077-ancfor"
+	if err := os.MkdirAll(dir+"/.worktrees", 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGitIn(t, dir, "worktree", "add", specWtPath, "spec/077-ancfor")
+
+	// decoy-src: an UNRELATED branch that will become the FOREIGN
+	// preserved merge's source.
+	decoyWt := dir + "/.wt-decoy-src"
+	runGitIn(t, dir, "worktree", "add", decoyWt, "decoy-src")
+	if err := os.WriteFile(decoyWt+"/shared.txt", []byte("decoy version\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, decoyWt, "add", ".")
+	runGitIn(t, decoyWt, "commit", "-m", "decoy work")
+	runGitIn(t, dir, "worktree", "remove", "--force", decoyWt)
+	decoyTip := refHash(t, dir, "decoy-src")
+
+	// bead/mindspec-ancfor.1: its OWN work, PLUS a REAL (clean, no
+	// conflict) merge of decoy-src for unrelated reasons — so decoyTip
+	// becomes an ANCESTOR of the bead branch's CURRENT tip, without the
+	// bead branch itself BEING decoy-src.
+	beadWtDir := dir + "/.wt-bead-ancfor1"
+	runGitIn(t, dir, "worktree", "add", beadWtDir, "bead/mindspec-ancfor.1")
+	if err := os.WriteFile(beadWtDir+"/own.txt", []byte("bead's own work\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, beadWtDir, "add", ".")
+	runGitIn(t, beadWtDir, "commit", "-m", "bead's own work")
+	runGitIn(t, beadWtDir, "merge", "--no-ff", "-m", "bead incorporates decoy-src for unrelated reasons", "decoy-src")
+	beadTip := refHash(t, dir, "bead/mindspec-ancfor.1")
+	if isAnc, ancErr := gitutil.IsAncestor(dir, decoyTip, beadTip); ancErr != nil || !isAnc {
+		t.Fatalf("fixture invariant broken: decoyTip must be an ancestor of the bead branch's current tip, isAnc=%v err=%v", isAnc, ancErr)
+	}
+
+	fake.listEntries = []bead.WorktreeListEntry{{
+		Name:   "worktree-mindspec-ancfor.1",
+		Path:   beadWtDir,
+		Branch: "bead/mindspec-ancfor.1",
+	}}
+
+	// Plant the FOREIGN preserved merge directly in the SPEC worktree:
+	// decoy-src conflicts with the spec's own edit to the SAME path —
+	// never a merge of the bead branch at all.
+	if err := os.WriteFile(specWtPath+"/shared.txt", []byte("spec version\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", ".")
+	runGitIn(t, specWtPath, "commit", "-m", "spec-side edit to the same path decoy-src touches")
+	_, _ = exec.Command("git", "-C", specWtPath, "merge", "--no-ff", "-m", "Merge decoy-src", "decoy-src").CombinedOutput()
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("fixture invariant broken: the decoy merge must be mid-conflict in the spec worktree")
+	}
+	if got := mergeHeadSHA(t, specWtPath); got != decoyTip {
+		t.Fatalf("fixture invariant broken: MERGE_HEAD must be decoyTip; got %s want %s", got, decoyTip)
+	}
+
+	specTipBefore := refHash(t, dir, "spec/077-ancfor")
+
+	// STILL-CONFLICTED leg: ancestry alone must not let this be
+	// silently re-diagnosed as the bead's own (merely drifted) conflict.
+	err := g.CompleteBead("mindspec-ancfor.1", "spec/077-ancfor", "", "", false)
+	if err == nil {
+		t.Fatal("an ancestor-but-foreign preserved merge must refuse, not be silently trusted as this bead's own drifted conflict")
+	}
+	if !strings.Contains(err.Error(), "does not correspond to the requested source") {
+		t.Errorf("refusal must name the binding mismatch (bindingForeign), not the still-conflicted resolution steps; got:\n%s", err.Error())
+	}
+	if got := mergeHeadSHA(t, specWtPath); got != decoyTip {
+		t.Fatalf("the foreign merge must be untouched; MERGE_HEAD was %s, now %s", decoyTip, got)
+	}
+
+	// READY-TO-COMPLETE leg: resolve + stage the FOREIGN conflict (as an
+	// operator innocently would, believing the still-conflicted message
+	// above described their own bead's conflict), then invoke
+	// --resolve-merge — must STILL refuse. Before this fix, ancestry
+	// alone classified this bindingDrifted, so completeResumedMerge
+	// would COMMIT decoy-src's content under its "Merge decoy-src"
+	// subject and report success — silently adopting a foreign merge as
+	// this bead's own landing.
+	if err := os.WriteFile(specWtPath+"/shared.txt", []byte("resolved\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitIn(t, specWtPath, "add", "shared.txt")
+	err = g.CompleteBead("mindspec-ancfor.1", "spec/077-ancfor", "", "", true)
+	if err == nil {
+		t.Fatal("an ancestor-but-foreign preserved merge must refuse --resolve-merge too — completing it would silently adopt decoy-src's content as this bead's own landed merge")
+	}
+	if !strings.Contains(err.Error(), "does not correspond to the requested source") {
+		t.Errorf("refusal must name the binding mismatch; got:\n%s", err.Error())
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("the foreign merge must remain preserved (uncommitted) — this bead's invocation must never complete it")
+	}
+	if got := refHash(t, dir, "spec/077-ancfor"); got != specTipBefore {
+		t.Errorf("spec branch tip must not advance — nothing may be committed over an ancestor-but-foreign preserved merge; was %s, now %s", specTipBefore, got)
+	}
+}
+
 // TestCompleteBead_ResolveMerge_InvokedFromWrongCheckout is AC-9(v) leg
 // gamma (spec text (ii): "resolves its own target worktree and branch,
 // so neither operand is scrollback-pinned"): the calling process's cwd is

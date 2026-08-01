@@ -141,6 +141,27 @@ const (
 // preserved merge, so a merge that does not correspond to the branch this
 // invocation was asked to merge is never silently completed or mistaken
 // for this request's own conflict.
+//
+// Bead-6 fix round 2 (G1's confirm-round finding): ancestry ALONE cannot
+// establish that a preserved merge is expectedSource, merely drifted.
+// preservedTip being an ancestor of expectedSource's current tip is
+// necessary but not sufficient for "this is expectedSource's own history,
+// just an older snapshot" — a FOREIGN branch's tip can, by pure git
+// topology, ALSO be an ancestor of expectedSource's current tip (e.g.
+// expectedSource later merged, or was rebased across, that foreign
+// branch's history) without the preserved merge being expectedSource's
+// own stale attempt at all. Tip equality cannot be required either
+// (preservedTip is necessarily frozen at whatever it was when the
+// conflict began, while expectedSource's OWN branch may have since
+// moved — that is exactly the legitimate drifted case this function must
+// still recognize). What durably identifies WHICH branch a preserved
+// merge actually started against is the subject git itself seeded at
+// merge start (mergeInto's `-m "Merge <source>"` / MergeBranch's
+// `-m "Merge <source> into <target>"`, gitutil.MergeMsgSubject) — so an
+// ancestor-but-not-identical preserved tip is only bindingDrifted when
+// the seeded subject ALSO names expectedSource; otherwise it is
+// bindingForeign, exactly like the non-ancestor case, never silently
+// trusted on ancestry alone.
 func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindingClass, preservedTip, sourceTip string, err error) {
 	preservedTip, err = gitutil.RevParseRef(workdir, "MERGE_HEAD")
 	if err != nil {
@@ -157,10 +178,43 @@ func classifyPreservedMergeBinding(workdir, expectedSource string) (class bindin
 	if ancErr != nil {
 		return 0, preservedTip, sourceTip, fmt.Errorf("could not determine whether the preserved merge in %s corresponds to %s (ancestry check failed: %w)", workdir, expectedSource, ancErr)
 	}
-	if isAnc {
-		return bindingDrifted, preservedTip, sourceTip, nil
+	if !isAnc {
+		return bindingForeign, preservedTip, sourceTip, nil
 	}
-	return bindingForeign, preservedTip, sourceTip, nil
+	named, subjErr := mergeSubjectNamesSource(workdir, expectedSource)
+	if subjErr != nil {
+		return 0, preservedTip, sourceTip, fmt.Errorf("could not verify which branch the preserved merge in %s belongs to (%w)", workdir, subjErr)
+	}
+	if !named {
+		return bindingForeign, preservedTip, sourceTip, nil
+	}
+	return bindingDrifted, preservedTip, sourceTip, nil
+}
+
+// mergeSubjectNamesSource reports whether workdir's seeded MERGE_MSG
+// subject names expectedSource as the branch being merged — the
+// MergeInto ("Merge <source>") or MergeBranch ("Merge <source> into
+// <target>") shape gitutil seeds at merge start (gitops.go's own `-m`
+// calls). Bead-6 fix round 2: this is the ONE piece of evidence that
+// survives expectedSource's OWN tip moving after the merge began —
+// ancestry alone cannot distinguish "this IS expectedSource, just an
+// older snapshot of it" from "this is some OTHER branch that happens to
+// be an ancestor of expectedSource's current tip". Matching is anchored
+// on "Merge <expectedSource>" as either the WHOLE subject (MergeInto's
+// form) or a prefix immediately followed by " into " (MergeBranch's
+// form) — never a bare substring — so a branch name that is a textual
+// prefix of another branch's name (e.g. "bead/x" vs "bead/x-extra")
+// cannot be confused for a match.
+func mergeSubjectNamesSource(workdir, expectedSource string) (bool, error) {
+	subject, err := gitutil.MergeMsgSubject(workdir)
+	if err != nil {
+		return false, err
+	}
+	want := "Merge " + expectedSource
+	if subject == want {
+		return true, nil
+	}
+	return strings.HasPrefix(subject, want+" into "), nil
 }
 
 // bindingIndeterminateError is the fail-closed leg when
@@ -272,6 +326,83 @@ func completeResumedMerge(workdir string) error {
 	return gitutil.CommitNoEdit(workdir)
 }
 
+// completeDriftedResumedMerge is bead-6 fix round 2's single-merge
+// collapse for the bindingDrifted ready-to-complete leg (G1's confirm-
+// round finding on this bead's own fix round 1: the prior two-commit
+// sequence — complete the STALE preserved merge, then re-merge the
+// CURRENT source tip — was NOT downstream-neutral.
+// internal/lifecycle.FindLandedMerge's subject scan sees TWO owned
+// candidates naming the SAME bead with DIFFERENT second parents and
+// fails closed as genuine ownership ambiguity (spec 125 FIX-2b) — and
+// that check cannot safely be loosened to tell "one invocation's own
+// drift catch-up" apart from "an operator's independent re-merge of an
+// advancing branch" (proven by restoring the two-merge topology against
+// TestFindLandedMerge_AmbiguousOwnedSecondParentsRefuses: the identical
+// adjacency+ancestor shape is exactly what that test deliberately
+// refuses). The fix is at the SOURCE instead: never produce the second,
+// independently-identifiable commit.
+//
+// Mechanics: the preserved (stale) merge is completed for real first —
+// completeResumedMerge, `git commit --no-edit` — so the operator's own
+// hand-resolution is never discarded or re-asked for, producing an
+// intermediate commit C1 (this call's own HEAD immediately after).
+// mergeFn then runs the CURRENT source tip against C1 via
+// attemptFreshMerge; when that catch-up is itself conflict-free, it
+// produces C2. C2's TREE already carries everything the final commit
+// needs (the original resolution AND the drift) — commit-tree builds a
+// NEW, unreferenced commit object with that EXACT tree but the INTENDED
+// two parents (the target's pre-resumption tip, and the source's
+// current — post-drift — tip; C1 is never a parent of the final
+// result), carrying C1's own preserved subject (E-r5-5/A-r4-5) verbatim.
+// reset --soft then moves the branch onto it: safe because the target
+// tree is BY CONSTRUCTION identical to what is already checked out, so
+// this touches neither the index nor the working tree.
+//
+// STATED RESIDUAL: when the catch-up merge (mergeFn against the current
+// source tip) itself RE-CONFLICTS, this returns that failure as-is — C1
+// stays committed, no collapse is attempted over an uncommitted state.
+// The next --resolve-merge resumption then resolves the re-conflict as
+// an ordinary bindingExact completion against C1 (expectedSource's tip
+// has not moved again in the meantime), producing a second, separate
+// merge commit — the two-merge topology this fix removes from the
+// single-invocation clean-catch-up path can still arise across two
+// SEPARATE invocations when the catch-up itself conflicts. Collapsing
+// that multi-invocation chain too is out of this fix's scope.
+func completeDriftedResumedMerge(workdir string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
+	preTip, err := gitutil.RevParseRef(workdir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving %s's pre-resumption tip: %w", workdir, err)
+	}
+	if err := completeResumedMerge(workdir); err != nil {
+		return err
+	}
+	subject, err := gitutil.CommitMessageBody(workdir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("reading the completed merge's own message in %s: %w", workdir, err)
+	}
+	if err := attemptFreshMerge(workdir, mergeFn, conflictFailure); err != nil {
+		// The catch-up merge did not land cleanly (a genuine re-conflict,
+		// or a worktree-state failure) — see the STATED RESIDUAL above.
+		return err
+	}
+	tree, err := gitutil.TreeSHA(workdir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving %s's post-catch-up tree: %w", workdir, err)
+	}
+	driftedTip, err := gitutil.RevParseRef(workdir, "HEAD^2")
+	if err != nil {
+		return fmt.Errorf("resolving the catch-up merge's second parent in %s: %w", workdir, err)
+	}
+	collapsed, err := gitutil.CommitTreeMerge(workdir, tree, preTip, driftedTip, subject)
+	if err != nil {
+		return fmt.Errorf("collapsing the drift catch-up into a single merge commit in %s: %w", workdir, err)
+	}
+	if err := gitutil.ResetSoft(workdir, collapsed); err != nil {
+		return fmt.Errorf("moving %s onto the collapsed merge commit: %w", workdir, err)
+	}
+	return nil
+}
+
 // resumeAwareMerge is the R5(d) merge dispatch every producer's own
 // merge site calls INSTEAD of calling gitutil.MergeInto/MergeBranch
 // directly. It subsumes the preserved-merge precondition (checking
@@ -312,15 +443,24 @@ func completeResumedMerge(workdir string) error {
 //     commit has happened, so there is nothing to catch up on yet; the
 //     operator finishes resolving what is already staged, and drift is
 //     caught at completion, below.
-//   - bindingDrifted (ready-to-complete leg): completeResumedMerge
+//   - bindingDrifted (ready-to-complete leg): completeDriftedResumedMerge
 //     finalizes the PRESERVED (now-stale) resolution first — the
-//     operator's staged work is never discarded — then this function
-//     immediately re-invokes mergeFn() against expectedSource's CURRENT
-//     tip (attemptFreshMerge) so the drift is incorporated before this
-//     call reports success, closing the same gap a resumed merge would
-//     otherwise silently leave open (the completed commit's second
-//     parent would stay the OLD MERGE_HEAD, omitting every commit
-//     authored on the source after the conflict began).
+//     operator's staged work is never discarded — then re-invokes
+//     mergeFn() against expectedSource's CURRENT tip so the drift is
+//     incorporated before this call reports success, closing the same
+//     gap a resumed merge would otherwise silently leave open (the
+//     completed commit's second parent would stay the OLD MERGE_HEAD,
+//     omitting every commit authored on the source after the conflict
+//     began) — and then COLLAPSES the two commits this produces into a
+//     single merge commit (bead-6 fix round 2: two first-parent-adjacent
+//     merge commits under the SAME seeded subject with different second
+//     parents is indistinguishable, from internal/lifecycle.FindLandedMerge's
+//     vantage point, from a genuine ownership ambiguity between two
+//     independent re-merges — spec 125 FIX-2b deliberately refuses that
+//     shape, so it cannot be told apart downstream; the fix is to never
+//     produce it). See completeDriftedResumedMerge's doc comment for the
+//     collapse mechanics and its one stated residual (a catch-up that
+//     itself re-conflicts is not collapsed in this same call).
 func resumeAwareMerge(workdir string, resolveMerge bool, expectedSource, reentryHint string, mergeFn func() error, conflictFailure func(mergeErr error) error) error {
 	switch mergeResumptionStep(workdir) {
 	case resumeStillConflicted:
@@ -346,16 +486,14 @@ func resumeAwareMerge(workdir string, resolveMerge bool, expectedSource, reentry
 		if class == bindingForeign {
 			return foreignMergeRefusal(workdir, expectedSource, preservedTip, sourceTip, reentryHint)
 		}
-		if err := completeResumedMerge(workdir); err != nil {
-			return err
-		}
 		if class == bindingDrifted {
-			// The just-completed commit's second parent is the OLD
-			// (preserved) MERGE_HEAD — expectedSource has moved since.
-			// Incorporate the current tip before reporting success.
-			return attemptFreshMerge(workdir, mergeFn, conflictFailure)
+			// expectedSource has moved since the conflict began — complete
+			// the stale resolution, incorporate the current tip, and
+			// collapse both into ONE merge commit (see
+			// completeDriftedResumedMerge's doc comment).
+			return completeDriftedResumedMerge(workdir, mergeFn, conflictFailure)
 		}
-		return nil
+		return completeResumedMerge(workdir)
 	}
 	// resumeNoMergeInProgress: attempt a fresh merge.
 	return attemptFreshMerge(workdir, mergeFn, conflictFailure)
