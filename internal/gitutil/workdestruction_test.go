@@ -766,10 +766,15 @@ func wdTabAndNonASCIIAndNewlineDeletedPathFixture(t *testing.T) (dir, branch, ta
 	return dir, "spec-recreated-quoting-deleted", "main"
 }
 
-// wdNoMainRefFixture is O1-7/O2-7's undocumented-but-fixtured disposition:
-// a repo whose trunk is named `trunk`, not `main` — ancestryTargets always
-// checks the literal "main" as its second ref, so its absence makes
-// EVERY evaluation fail closed with DestructionEvidenceError.
+// wdNoMainRefFixture is a repo whose trunk is named `trunk`, not `main`.
+// ancestryTargets checks for a local "main" ref before adding it as a
+// second ancestry/supersession target; here it is absent, so evaluation
+// narrows to target ("trunk") alone rather than hard-failing (spec 127
+// bead-6 fix round 11, S2-2/F1-0 — this fixture previously backed a test
+// asserting the opposite, that main's absence made EVERY evaluation fail
+// closed with DestructionEvidenceError; see
+// TestEvaluateWorkDestruction_NoMainRefNarrowsToTargetAlone below for why
+// that was corrected).
 func wdNoMainRefFixture(t *testing.T) (dir, branch, target string) {
 	t.Helper()
 	dir = initGitRepo(t)
@@ -2237,23 +2242,55 @@ func extractCommitSHAs(revListFormatOutput string) []string {
 	return shas
 }
 
-// TestEvaluateWorkDestruction_NoMainRefFailsClosedAndIsDocumented is
-// O1-7/O2-7's fixtured disposition: a repo with no local `main` ref fails
-// EVERY evaluation closed, naming the exact ancestry probe that could not
-// resolve it.
-func TestEvaluateWorkDestruction_NoMainRefFailsClosedAndIsDocumented(t *testing.T) {
+// TestEvaluateWorkDestruction_NoMainRefNarrowsToTargetAlone is spec 127
+// bead-6 fix round 11's regression fix (S2-2/F1-0, git-bisected against
+// 2b02be5c): a repo with no local `main` ref must NOT fail every
+// evaluation closed — that turned preflightMergeDestruction (this bead's
+// new, non-error-discarding consumer, wired directly into CompleteBead/
+// FinalizeEpic/the spec→main merge) into an unconditional refusal of
+// every bead→spec and spec→main merge in any repository whose trunk is
+// not literally named main. Evaluation must instead narrow to target
+// ("trunk" here) alone and reach its ordinary conclusion: branch adds a
+// file target does not have and deletes nothing target has, so the D-set
+// is empty and the outcome is DestructionClean, with no error at all.
+func TestEvaluateWorkDestruction_NoMainRefNarrowsToTargetAlone(t *testing.T) {
 	dir, branch, target := wdNoMainRefFixture(t)
+
+	outcome, _, err := EvaluateWorkDestruction(dir, branch, target)
+	if err != nil {
+		t.Fatalf("no local main ref must not be treated as an evidence error: %v", err)
+	}
+	if outcome != guard.DestructionClean {
+		t.Errorf("outcome = %s, want DestructionClean", outcome)
+	}
+}
+
+// TestEvaluateWorkDestruction_MainRefExistenceCheckFailureIsEvidenceError
+// pins the OTHER half of fix round 11's fix: only main's mere ABSENCE is
+// exempted from hard-erroring — a genuine structural failure checking
+// for its existence (a corrupt repository, git itself missing) must still
+// surface as DestructionEvidenceError, exactly like every other probe
+// failure. Uses a fixture whose target is NOT "main" (wdAncestorOfTargetFixture)
+// so ancestryTargets actually calls workDestructionBranchExistsFn rather
+// than short-circuiting on target == "main".
+func TestEvaluateWorkDestruction_MainRefExistenceCheckFailureIsEvidenceError(t *testing.T) {
+	dir, branch, target := wdAncestorOfTargetFixture(t)
+
+	orig := workDestructionBranchExistsFn
+	t.Cleanup(func() { workDestructionBranchExistsFn = orig })
+	workDestructionBranchExistsFn = func(workdir, name string) (bool, error) {
+		return false, errors.New("boom")
+	}
 
 	outcome, evidence, err := EvaluateWorkDestruction(dir, branch, target)
 	if err == nil {
-		t.Fatalf("expected a non-nil error on a repo with no local main ref, got outcome=%s", outcome)
+		t.Fatalf("expected a non-nil error, got outcome=%s", outcome)
 	}
 	if outcome != guard.DestructionEvidenceError {
 		t.Errorf("outcome = %s, want DestructionEvidenceError", outcome)
 	}
-	want := fmt.Sprintf("IsAncestor(%s, main)", branch)
-	if evidence.FailedProbe != want {
-		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, want)
+	if evidence.FailedProbe != "ancestryTargets(main existence)" {
+		t.Errorf("evidence.FailedProbe = %q, want %q", evidence.FailedProbe, "ancestryTargets(main existence)")
 	}
 }
 
@@ -2298,6 +2335,19 @@ func TestEvaluateWorkDestruction_UnrelatedHistoriesFailsClosedAndIsDocumented(t 
 // TestEvaluateWorkDestruction_MergeBaseProbeErrorPropagates already
 // uses) and asserting the exact FailedProbe string per row makes a row
 // that passes on the wrong leg fail loudly instead of silently.
+//
+// Fix round 11 adds a "MainRefExistenceCheck" row (S2-2/F1-0): the new
+// workDestructionBranchExistsFn seam, forced to fail here, must surface
+// as DestructionEvidenceError exactly like every other probe — only
+// main's mere ABSENCE (a false, nil return) is exempted from hard-
+// erroring, never a genuine failure checking for its existence. Uses
+// wdAncestorOfTargetFixture (target != "main", so ancestryTargets
+// actually calls this seam rather than short-circuiting on target ==
+// "main") — kept as its own dedicated test,
+// TestEvaluateWorkDestruction_MainRefExistenceCheckFailureIsEvidenceError
+// below, rather than folded into this table, since every other row here
+// forces a seam that fires unconditionally regardless of fixture shape,
+// while this one only fires for a target that is not literally "main".
 func TestEvaluateWorkDestruction_EvidenceErrorNeverFoldedIntoBoolean(t *testing.T) {
 	unsafeOutcomes := []guard.DestructionOutcome{
 		guard.DestructionClean, guard.DestructionAncestor,
@@ -2454,10 +2504,16 @@ func TestEvaluateWorkDestruction_MutatesNothing(t *testing.T) {
 // the table-driven evidence-error test above) without ever pinning it —
 // present since fix round 1 introduced this test, missed when rounds 2
 // and 4 both edited this comment's seam count without checking the pin
-// list against the force list. Pinned below; the count is now eight
+// list against the force list. Pinned below; the count was eight
 // workDestruction*Fn seams plus diffNameStatusBucketsFn and mergeBaseFn
-// (ten total), and the universal now holds against every seam this file
+// (ten total), and the universal held against every seam this file
 // forces, not merely against the ones already named here.
+//
+// Fix round 11 (S2-2/F1-0) added workDestructionBranchExistsFn
+// (ancestryTargets' check for a local main ref, defaulting to
+// BranchExistsIn) — pinned below too, bringing the count to nine
+// workDestruction*Fn seams plus diffNameStatusBucketsFn and mergeBaseFn
+// (eleven total).
 func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	if reflect.ValueOf(workDestructionIsAncestorFn).Pointer() != reflect.ValueOf(IsAncestor).Pointer() {
 		t.Error("workDestructionIsAncestorFn must default to IsAncestor")
@@ -2488,6 +2544,9 @@ func TestEvaluateWorkDestruction_SeamsPinnedToRealSymbols(t *testing.T) {
 	}
 	if reflect.ValueOf(mergeBaseFn).Pointer() != reflect.ValueOf(gitMergeBase).Pointer() {
 		t.Error("mergeBaseFn must default to gitMergeBase")
+	}
+	if reflect.ValueOf(workDestructionBranchExistsFn).Pointer() != reflect.ValueOf(BranchExistsIn).Pointer() {
+		t.Error("workDestructionBranchExistsFn must default to BranchExistsIn")
 	}
 }
 
