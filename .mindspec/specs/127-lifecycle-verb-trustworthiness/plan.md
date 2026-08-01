@@ -1377,15 +1377,16 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    them via the `ancestor` no-op leg while §1 surfaces the refusal for
    bead N. Chokepoint anti-drift test asserts every
    `gitutil.MergeInto`/`MergeBranch` call site its AST vocabulary can
-   resolve (direct calls, alias chains at any depth and lexical scope,
-   import aliases, struct fields, and the fail-closed parameter/var/
-   member shapes, including through an ordinary parenthesized callee)
-   is preceded by its own call to `preflightMergeDestruction` —
-   consultation via a preceding-call AST match, not dataflow tracing
-   from `workDestructionFn` and not call-site adjacency; the residual
-   (dot-imports, embedded fields, map/slice elements, multi-hop named
-   types, interface dispatch, reflection) is review-caught, per
-   AC-7(iv). AC-7(iv), whole and unstaged.
+   resolve (direct calls, package-level alias chains at any depth,
+   import aliases, package-level struct fields, and the fail-closed
+   parameter/var/member shapes, including through an ordinary
+   parenthesized callee) is preceded by its own call to
+   `preflightMergeDestruction` — consultation via a preceding-call AST
+   match, not dataflow tracing from `workDestructionFn` and not
+   call-site adjacency; everything else this bare-name, package-level
+   scan does not resolve — function-local declarations among them — is
+   review-caught, never enumerated as exhaustive, per AC-7(iv).
+   AC-7(iv), whole and unstaged.
 3. Override + friction: `--allow-net-deletion "<reason>"` recorded on
    epic metadata (the `--allow-doc-skew` pattern) AND registered in
    `cmd/mindspec/selfemit.go`'s `escapeHatchFlags` + `detectFriction`

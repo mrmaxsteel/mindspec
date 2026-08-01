@@ -32,11 +32,28 @@ package executor
 // same in-diff extension obligation R5(a)/R5(b) already rely on for their
 // own residual classes, never machine-verified by this test — extending
 // this scan again to cover them is not the fix (AC-7(iv)'s amendment).
-// The threat model this test defends is a developer adding a new merge
-// producer and forgetting its preflight call — the realistic failure
-// every resolved and fail-closed shape above covers — never deliberate
-// evasion: assembling a map of function values indexed at the call site
-// is not how a producer is added by accident.
+//
+// Bead-6 fix round 8 attempted to close two of those residual classes —
+// function-local var/type/struct declarations, and an ordinary
+// parenthesized callee — entirely within textual AST. The parenthesized-
+// callee fix (unwrapParens, below) is sound and stays. The function-local
+// declaration extension did not: collectMergeFnAliases/
+// collectNamedStructTypes/collectFuncTypeAliases recorded results in a
+// map keyed by bare identifier name, package-wide, and that map cannot
+// represent a function's own scope. Bead-6 fix round 9 (G1's confirm-
+// round finding, reversing part of round 8 the team lead had endorsed)
+// REVERTS it: an unrelated, unused local alias in one function was proven
+// to wrongly flag calls in an unrelated function (a false positive,
+// demonstrated against this package's own real source — see
+// collectMergeFnAliases' own doc comment below), and two functions
+// declaring same-named local struct types were proven to let the later
+// declaration silently defeat detection of the earlier one's real,
+// unpreflighted producer (a false negative — see collectNamedStructTypes'
+// own doc comment below). Both directions are unacceptable for a safety
+// ratchet, so all three collectors resolve package-level declarations
+// only, exactly as they did before round 8. A function-local var/type/
+// struct declaration is REVIEW-CAUGHT, the same as the shapes named two
+// paragraphs above.
 //
 // Bead-6 fix round 1 rewrite (O2-1, S3-1, S3-2/G1-2 — three independently
 // demonstrated ways the original scan was defeated):
@@ -419,116 +436,86 @@ func buildPreflightCall(call *ast.CallExpr) preflightCallInfo {
 	return pc
 }
 
-// collectMergeFnAliases scans every `var` declaration in every parsed
-// file — package-level AND function-body-local, and both the long
-// (`var X = ...`) and short (`X := ...`) forms — for an alias of
-// gitutil.MergeInto/gitutil.MergeBranch (spec 127 bead-6 fix round 1,
-// S3-1): `var adversarialMergeFn = gitutil.MergeInto`. Bead-6 fix round 3
-// (G1-2's confirm-round finding): this now resolves a CHAIN of var-to-var
-// aliases of ANY depth — `var A = gitutil.MergeInto; var B = A; var C = B`
-// — not merely the first hop, via the fixed-point closure below. A `var Y
-// = X` whose chain bottoms out at something OTHER than gitutil.MergeInto/
-// MergeBranch (an alias of an unrelated function, or a chain this scan
-// cannot resolve at all — a call expression, a struct-field selector,
-// etc.) is correctly left unresolved: it is not a merge producer, and
-// flagging it would be pure false-positive noise. A function-PARAMETER
-// indirection (as opposed to a var) is a structurally different shape —
-// see funcParamsMatchingMergeSignature below, which fails closed on it
+// collectMergeFnAliases scans every top-level `var` declaration across
+// every parsed file for an alias of gitutil.MergeInto/gitutil.MergeBranch
+// (spec 127 bead-6 fix round 1, S3-1): `var adversarialMergeFn =
+// gitutil.MergeInto`. Bead-6 fix round 3 (G1-2's confirm-round finding):
+// this now resolves a CHAIN of var-to-var aliases of ANY depth — `var A =
+// gitutil.MergeInto; var B = A; var C = B` — not merely the first hop,
+// via the fixed-point closure below. A `var Y = X` whose chain bottoms
+// out at something OTHER than gitutil.MergeInto/MergeBranch (an alias of
+// an unrelated function, or a chain this scan cannot resolve at all — a
+// call expression, a struct-field selector, etc.) is correctly left
+// unresolved: it is not a merge producer, and flagging it would be pure
+// false-positive noise. A function-PARAMETER indirection (as opposed to
+// a package-level var) is a structurally different shape — see
+// funcParamsMatchingMergeSignature below, which fails closed on it
 // instead of attempting to resolve it.
 //
-// Bead-6 fix round 8 (G1/O3's confirm-round finding): the pre-round-8
-// version walked only file.Decls, which by Go's ast package contract
-// never includes a function-body-local declaration — a var declared
-// (long or short form) inside a *ast.FuncDecl/*ast.FuncLit body was
-// invisible to this collector entirely, so `func f() error { var first =
-// gitutil.MergeInto; second := first; return second("a", "b") }`'s
-// two-link chain was neither traced as a producer nor flagged unresolved
-// — it passed silently. Walking the whole file with ast.Inspect, rather
-// than only its top-level Decls, finds a matching *ast.GenDecl or
-// *ast.AssignStmt at ANY depth — package-level or local — with no change
-// in behaviour for the package-level case this collector already handled.
-//
-// STATED RESIDUAL (bead-6 fix round 8): like collectRiskyMemberNames'
-// bare-member-name vocabulary, this map is keyed by bare var NAME alone,
-// package-wide, never scoped to the function a local var was declared in
-// — so two UNRELATED local vars sharing a name in two different
-// functions, one genuinely a merge-producer alias and one not, can make
-// the unrelated one wrongly flagged as an alias too. This is the same
-// false-positive-only, never-false-negative trade-off already accepted
-// for collectRiskyMemberNames (this file's own package doc comment) —
-// resolving it would require scope-aware (effectively go/types) analysis
-// this deliberately AST-level, textual ratchet does not attempt.
+// Bead-6 fix round 8 extended this to walk every file with ast.Inspect
+// (package-level AND function-body-local `var`/`:=`/`=`), so a
+// function-local alias would resolve exactly like a package-level one.
+// Bead-6 fix round 9 REVERTS that extension (G1's confirm-round finding):
+// the alias map is keyed by bare var NAME alone, package-wide — that is
+// a single flat namespace, not a scope, and storing a function-local
+// alias in the SAME map a package-level one uses is unsound. G1 proved it
+// empirically against this package's own real source: an unrelated,
+// unused local `fn := gitutil.MergeInto` in one function made every
+// unrelated bare `fn(...)` call in every OTHER function in the package —
+// including withWorkingDir's own two safe calls to its `fn func() error`
+// parameter (mindspec_executor.go:1787) — count as a MergeInto call, RED-
+// ing the chokepoint test's pinned total against unmodified, correct
+// code. A mechanism that misfires on honest code is worse than one that
+// declines to resolve a shape it never claimed to, so this collector goes
+// back to package-level declarations only (file.Decls) — the pre-round-8
+// behaviour, restored. A function-local alias, of either the long `var`
+// or short `:=` form, is REVIEW-CAUGHT, exactly as it was before round 8
+// and exactly as a function-local named struct or type declaration
+// remains for collectNamedStructTypes/collectFuncTypeAliases below. Scope
+// -correct local resolution — a per-function symbol table, rather than a
+// package-wide map — does not inherently require go/types, but building
+// one is separate, deliberate work this round does not attempt.
 func collectMergeFnAliases(files []*ast.File) map[string]string {
 	aliases := map[string]string{}
 	pending := map[string]string{} // varName -> the identifier it was assigned, for var-to-var hops not yet resolved
-	record := func(name string, val ast.Expr, gitutilName string) {
-		switch v := val.(type) {
-		case *ast.SelectorExpr:
-			xid, ok := v.X.(*ast.Ident)
-			if !ok || xid.Name != gitutilName {
-				return
-			}
-			if v.Sel.Name != "MergeInto" && v.Sel.Name != "MergeBranch" {
-				return
-			}
-			aliases[name] = v.Sel.Name
-		case *ast.Ident:
-			// A var-to-var hop (`var Y = X` or `Y := X`) — may chain to
-			// gitutil.MergeInto/MergeBranch through any number of further
-			// hops; resolved below.
-			pending[name] = v.Name
-		}
-	}
 	for _, file := range files {
 		// Bead-6 fix round 6: resolve THIS file's own gitutil identifier —
 		// never the literal "gitutil" (see gitutilLocalName's doc comment).
 		gitutilName := gitutilLocalName(file)
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch decl := n.(type) {
-			case *ast.GenDecl:
-				if decl.Tok != token.VAR {
-					return true
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
 				}
-				for _, spec := range decl.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok {
+				for i, val := range vs.Values {
+					if i >= len(vs.Names) {
 						continue
 					}
-					for i, val := range vs.Values {
-						if i >= len(vs.Names) {
+					name := vs.Names[i].Name
+					switch v := val.(type) {
+					case *ast.SelectorExpr:
+						xid, ok := v.X.(*ast.Ident)
+						if !ok || xid.Name != gitutilName {
 							continue
 						}
-						record(vs.Names[i].Name, val, gitutilName)
+						if v.Sel.Name != "MergeInto" && v.Sel.Name != "MergeBranch" {
+							continue
+						}
+						aliases[name] = v.Sel.Name
+					case *ast.Ident:
+						// A var-to-var hop (`var Y = X`) — may chain to
+						// gitutil.MergeInto/MergeBranch through any number
+						// of further hops; resolved below.
+						pending[name] = v.Name
 					}
-				}
-			case *ast.AssignStmt:
-				// The short form (`second := first`) and a plain
-				// reassignment of an already-declared var (`x =
-				// gitutil.MergeInto`) are both a *ast.AssignStmt — Tok ==
-				// token.DEFINE or token.ASSIGN respectively — never a
-				// *ast.GenDecl, so the long `var` form's own case above
-				// cannot see either. Only a one-to-one Lhs/Rhs pairing is a
-				// var-to-var hop candidate (mirroring the ValueSpec loop
-				// above); a single multi-value RHS call (`a, b := f()`)
-				// leaves len(Lhs) != len(Rhs) and is correctly skipped —
-				// record only ever matches a SelectorExpr/Ident shape
-				// anyway, never a CallExpr.
-				if decl.Tok != token.DEFINE && decl.Tok != token.ASSIGN {
-					return true
-				}
-				if len(decl.Lhs) != len(decl.Rhs) {
-					return true
-				}
-				for i, rhs := range decl.Rhs {
-					id, ok := decl.Lhs[i].(*ast.Ident)
-					if !ok || id.Name == "_" {
-						continue
-					}
-					record(id.Name, rhs, gitutilName)
 				}
 			}
-			return true
-		})
+		}
 	}
 	// Fixed-point closure over pending var-to-var aliases: repeat until a
 	// pass resolves nothing new, so a chain of ANY length is fully
@@ -590,27 +577,32 @@ func mergeFuncSignatureShape(ft *ast.FuncType) (kind string, ok bool) {
 	}
 }
 
-// collectFuncTypeAliases scans every `type` declaration in every file —
-// package-level AND function-body-local (bead-6 fix round 8, same defect
-// class as collectMergeFnAliases/collectNamedStructTypes below: a
-// function-local `type` declaration lives inside its enclosing FuncDecl's
-// Body, which file.Decls never reaches) — for one whose OWN Type is
-// directly an *ast.FuncType — this captures BOTH a type alias (`type
-// MergeSignature = func(string, string) error`, TypeSpec.Assign set) and
-// a distinct NAMED type (`type MergeSignature func(string, string)
-// error`, TypeSpec.Assign unset): bead-6 fix round 5 (G1's confirm-round
-// finding, shape (a)) needs both, since a var/parameter/struct-field/
-// method-receiver can be declared with either spelling and neither is
-// literally an *ast.FuncType at the declaration site that names it —
-// only resolveFuncType's one-hop lookup through this map makes it
-// visible to mergeFuncSignatureShape at all.
+// collectFuncTypeAliases scans every top-level `type` declaration across
+// every file for one whose OWN Type is directly an *ast.FuncType — this
+// captures BOTH a type alias (`type MergeSignature = func(string, string)
+// error`, TypeSpec.Assign set) and a distinct NAMED type (`type
+// MergeSignature func(string, string) error`, TypeSpec.Assign unset):
+// bead-6 fix round 5 (G1's confirm-round finding, shape (a)) needs both,
+// since a var/parameter/struct-field/method-receiver can be declared with
+// either spelling and neither is literally an *ast.FuncType at the
+// declaration site that names it — only resolveFuncType's one-hop lookup
+// through this map makes it visible to mergeFuncSignatureShape at all.
+//
+// Bead-6 fix round 8 extended this to function-body-local `type`
+// declarations via ast.Inspect, for symmetry with
+// collectMergeFnAliases/collectNamedStructTypes above and below. Bead-6
+// fix round 9 REVERTS that extension for the same reason it reverts the
+// other two (see collectMergeFnAliases' and collectNamedStructTypes' own
+// doc comments): a package-wide bare-name map cannot represent a
+// function's own scope, so this goes back to package-level declarations
+// only (file.Decls) — a function-local type declaration is REVIEW-CAUGHT.
 func collectFuncTypeAliases(files []*ast.File) map[string]*ast.FuncType {
 	aliases := map[string]*ast.FuncType{}
 	for _, file := range files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			gd, ok := n.(*ast.GenDecl)
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.TYPE {
-				return true
+				continue
 			}
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
@@ -621,8 +613,7 @@ func collectFuncTypeAliases(files []*ast.File) map[string]*ast.FuncType {
 					aliases[ts.Name.Name] = ft
 				}
 			}
-			return true
-		})
+		}
 	}
 	return aliases
 }
@@ -708,31 +699,36 @@ func isMergeProducerExpr(e ast.Expr, mergeAliases map[string]string, gitutilName
 	}
 }
 
-// collectNamedStructTypes scans every `type X struct {...}` declaration
-// in every file — package-level AND function-body-local (bead-6 fix
-// round 8, G1/O3's confirm-round finding: the pre-round-8 version walked
-// only file.Decls, so a struct type declared inside a function body —
-// `func f() error { type localHandler struct{ run func(string, string)
-// error }; h := localHandler{gitutil.MergeInto}; return h.run("a", "b") }`
-// — was invisible to resolveStructType entirely, so its positional
-// literal's field name never resolved and `run` was never added to the
-// risky vocabulary) — mirroring collectFuncTypeAliases for struct types —
-// needed to resolve a POSITIONAL composite literal's
+// collectNamedStructTypes scans every top-level `type X struct {...}`
+// declaration across every file, mirroring collectFuncTypeAliases for
+// struct types — needed to resolve a POSITIONAL composite literal's
 // (`handler{gitutil.MergeInto}`) field name by index, since a positional
 // element carries no field name of its own (bead-6 fix round 6, G1-2's
-// confirm-round finding, shape 2). A local named struct type can hold
-// fields and be constructed via a composite literal like any package-
-// level one — Go only forbids attaching a METHOD to a function-local
-// type, not declaring or literal-constructing one, so this collector's
-// job (resolving the struct's OWN field list, never a method) is
-// unaffected by that restriction.
+// confirm-round finding, shape 2).
+//
+// Bead-6 fix round 8 extended this to walk every file with ast.Inspect so
+// a function-body-local `type X struct{...}` declaration would resolve
+// exactly like a package-level one. Bead-6 fix round 9 REVERTS that
+// extension (G1's confirm-round finding): the struct map is keyed by bare
+// type NAME alone, package-wide, and two functions may legally declare
+// DIFFERENT local struct types under the SAME name — the round-8 map
+// cannot represent that distinction, so the later declaration silently
+// overwrote the earlier one in the map, and an earlier function's real,
+// unpreflighted local positional-struct producer passed this scan
+// unnoticed (a false negative — proven against a two-function, same-
+// name-different-type fixture; the direction that matters most for a
+// safety ratchet, since it is strictly worse than declining to resolve a
+// shape at all). This collector goes back to package-level declarations
+// only (file.Decls) — the pre-round-8 behaviour, restored; a
+// function-local named struct type is REVIEW-CAUGHT, exactly as it
+// always was before round 8.
 func collectNamedStructTypes(files []*ast.File) map[string]*ast.StructType {
 	structs := map[string]*ast.StructType{}
 	for _, file := range files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			gd, ok := n.(*ast.GenDecl)
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.TYPE {
-				return true
+				continue
 			}
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
@@ -743,8 +739,7 @@ func collectNamedStructTypes(files []*ast.File) map[string]*ast.StructType {
 					structs[ts.Name.Name] = st
 				}
 			}
-			return true
-		})
+		}
 	}
 	return structs
 }
@@ -2000,19 +1995,19 @@ func g6UnrelatedProducer(v g6UnrelatedType) error {
 	// disclosed false-positive this test exists to pin.
 }
 
-// TestCollectMergeFnAliases_ResolvesFunctionLocalAliasChain is bead-6 fix
-// round 8's acceptance test for G1/O3's confirm-round finding: the
-// pre-round-8 collectMergeFnAliases walked only file.Decls, which by Go's
-// ast package contract never includes a function-body-local declaration —
-// so this exact two-link chain (the long `var` form hopping to the short
-// `:=` form, G1's own reproduction) was invisible in its entirety: neither
-// "first" nor "second" was ever recorded as an alias, so a call to either
-// passed this scan with no preflight obligation at all, silently — not
-// merely unresolved-and-fail-closed, genuinely uncounted.
-func TestCollectMergeFnAliases_ResolvesFunctionLocalAliasChain(t *testing.T) {
+// TestCollectMergeFnAliases_FunctionLocalAliasesAreNotResolved is bead-6
+// fix round 9's acceptance test for G1's confirm-round finding, replacing
+// round 8's retracted TestCollectMergeFnAliases_ResolvesFunctionLocalAlias
+// Chain: this exact two-link chain (the long `var` form hopping to the
+// short `:=` form) must now resolve NEITHER "first" NOR "second" — a
+// function-body-local declaration is invisible to this package-level-only
+// collector, the pre-round-8 behaviour restored. This is a stated,
+// REVIEW-CAUGHT residual (AC-7(iv), amended at round 9), not a silent gap
+// this scan claims to close.
+func TestCollectMergeFnAliases_FunctionLocalAliasesAreNotResolved(t *testing.T) {
 	src := `package p
 
-func g8UnpreflightedProducer() error {
+func g9LocalAliasChainProducer() error {
 	var first = gitutil.MergeInto
 	second := first
 	return second("wt", "branch1")
@@ -2025,111 +2020,123 @@ func g8UnpreflightedProducer() error {
 	}
 
 	aliases := collectMergeFnAliases([]*ast.File{file})
-	if got := aliases["first"]; got != "MergeInto" {
-		t.Errorf(`aliases["first"] = %q, want "MergeInto" — a function-local "var" initializer must resolve exactly like a package-level one`, got)
+	if _, ok := aliases["first"]; ok {
+		t.Error(`aliases["first"] must be absent — a function-body-local "var" initializer is invisible to this package-level-only collector, post-round-9 revert`)
 	}
-	if got := aliases["second"]; got != "MergeInto" {
-		t.Errorf(`aliases["second"] = %q, want "MergeInto" — a function-local short ":=" hop off an already-resolved local alias must chain through, exactly like a package-level "var Y = X" hop`, got)
-	}
-
-	// Consequence check: with "second" now resolved, collectSpanCalls over
-	// the producer's own span must see its call as a real merge call — the
-	// property TestMergeChokepoint_ResolvableProducersConsultThePreflight
-	// relies on to RED this producer for lacking a preflight call.
-	var producer *ast.FuncDecl
-	for _, decl := range file.Decls {
-		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g8UnpreflightedProducer" {
-			producer = fd
-		}
-	}
-	if producer == nil {
-		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
-	}
-	merges, preflights := collectSpanCalls(producer.Body, aliases, nil, "gitutil")
-	if len(merges) != 1 {
-		t.Fatalf("collectSpanCalls must see the aliased merge call now that the local chain resolves; got %d merge call(s)", len(merges))
-	}
-	if len(preflights) != 0 {
-		t.Fatal("fixture invariant broken: expected no preflight call in this producer's body")
+	if _, ok := aliases["second"]; ok {
+		t.Error(`aliases["second"] must be absent — a function-body-local short ":=" hop is invisible to this package-level-only collector, post-round-9 revert`)
 	}
 }
 
-// TestCollectRiskyMemberNames_CatchesFunctionLocalNamedStruct is bead-6
-// fix round 8's acceptance test for G1/O3's confirm-round finding: the
-// pre-round-8 collectNamedStructTypes walked only file.Decls, so a named
-// struct type declared INSIDE a function body was invisible to
-// resolveStructType — a positional composite literal of that local type
-// holding gitutil.MergeInto never resolved a field name, so "run" was
-// never added to the risky vocabulary and h.run(...) passed this scan
-// with no preflight obligation at all, silently. Go forbids attaching a
-// METHOD to a function-local type, but this shape needs no method — a
-// plain field, populated positionally and called via selector — so the
-// local declaration alone is enough to reproduce the gap.
-func TestCollectRiskyMemberNames_CatchesFunctionLocalNamedStruct(t *testing.T) {
+// TestCollectMergeFnAliases_UnrelatedLocalAliasDoesNotContaminateOtherSpans
+// is bead-6 fix round 9's acceptance test for the false positive G1
+// demonstrated against this package's own real source: round 8's
+// function-local extension recorded a local alias into the SAME
+// package-wide map a package-level alias uses, keyed by bare name alone —
+// so an unrelated, unused local `fn := gitutil.MergeInto` declared in ONE
+// function made every bare `fn(...)` call in every OTHER function count
+// as a MergeInto call, with no relationship between them at all (the
+// exact shape of this package's own withWorkingDir (mindspec_executor.go:
+// 1787), which calls its `fn func() error` parameter bare, twice).
+// Reverting to package-level-only resolution removes the map entry
+// entirely, so the two unrelated calls below stay uncounted.
+func TestCollectMergeFnAliases_UnrelatedLocalAliasDoesNotContaminateOtherSpans(t *testing.T) {
 	src := `package p
 
-func g8LocalStructUnpreflightedProducer() error {
-	type g8LocalHandler struct {
-		run func(string, string) error
+func g9UnrelatedLocalAliasProducer() error {
+	fn := gitutil.MergeInto
+	_ = fn
+	return nil
+}
+
+func g9SafeWorkingDirLikeCaller(fn func() error) error {
+	if err := fn(); err != nil {
+		return err
 	}
-	h := g8LocalHandler{gitutil.MergeInto}
-	return h.run("wt", "branch1")
+	return fn()
 }
 `
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "localstruct.go", src, 0)
+	file, err := parser.ParseFile(fset, "unrelatedlocalalias.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing fixture source: %v", err)
+	}
+
+	aliases := collectMergeFnAliases([]*ast.File{file})
+	if _, ok := aliases["fn"]; ok {
+		t.Fatal(`aliases["fn"] must be absent — the round-8 defect resolved a function-local alias into the SAME package-wide map a package-level one uses, wrongly contaminating every unrelated "fn(...)" call elsewhere in the package`)
+	}
+
+	var safeCaller *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g9SafeWorkingDirLikeCaller" {
+			safeCaller = fd
+		}
+	}
+	if safeCaller == nil {
+		t.Fatal("fixture invariant broken: expected g9SafeWorkingDirLikeCaller FuncDecl")
+	}
+	merges, _ := collectSpanCalls(safeCaller.Body, aliases, nil, "gitutil")
+	if len(merges) != 0 {
+		t.Fatalf("collectSpanCalls must not count g9SafeWorkingDirLikeCaller's two bare fn() calls as merge calls; got %d — this is exactly the false positive round 9 reverts", len(merges))
+	}
+}
+
+// TestCollectNamedStructTypes_DoesNotResolveFunctionLocalStructs is
+// bead-6 fix round 9's acceptance test, mirroring the alias case above for
+// the false NEGATIVE half of G1's finding: round 8's function-local
+// extension stored every named struct type — package-level AND local — in
+// ONE package-wide map keyed by bare name, so two functions legally
+// declaring DIFFERENT local types under the SAME name silently collided —
+// the later declaration overwrote the earlier one, and the earlier
+// function's real, unpreflighted local positional-struct producer passed
+// this scan unnoticed. Reverting to package-level-only resolution removes
+// BOTH local declarations from the map entirely — neither collides with
+// the other, and neither is silently miscounted as safe; a local named
+// struct producer is REVIEW-CAUGHT, exactly as it always was before round
+// 8 introduced the collision.
+func TestCollectNamedStructTypes_DoesNotResolveFunctionLocalStructs(t *testing.T) {
+	src := `package p
+
+func g9FirstLocalStructProducer() error {
+	type g9LocalHandler struct {
+		run func(string, string) error
+	}
+	h := g9LocalHandler{gitutil.MergeInto}
+	return h.run("wt", "branch1")
+}
+
+func g9SecondLocalStructUnrelated() error {
+	type g9LocalHandler struct {
+		value int
+	}
+	h := g9LocalHandler{value: 1}
+	_ = h
+	return nil
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "localstructcollision.go", src, 0)
 	if err != nil {
 		t.Fatalf("parsing fixture source: %v", err)
 	}
 
 	namedStructs := collectNamedStructTypes([]*ast.File{file})
-	if _, ok := namedStructs["g8LocalHandler"]; !ok {
-		t.Fatal("collectNamedStructTypes must resolve a function-local named struct type declaration, not only a package-level one")
-	}
-
-	risky := collectRiskyMemberNames([]*ast.File{file}, nil, collectMergeFnAliases([]*ast.File{file}))
-	if !risky["run"] {
-		t.Error(`collectRiskyMemberNames must catch a struct field named "run" GENUINELY assigned gitutil.MergeInto through a positional literal of a FUNCTION-LOCAL named struct type, exactly as it already does for a package-level one`)
-	}
-
-	var producer *ast.FuncDecl
-	for _, decl := range file.Decls {
-		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "g8LocalStructUnpreflightedProducer" {
-			producer = fd
-		}
-	}
-	if producer == nil {
-		t.Fatal("fixture invariant broken: expected the producer FuncDecl")
-	}
-	found := false
-	ast.Inspect(producer.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "run" {
-			found = true
-		}
-		return true
-	})
-	if !found {
-		t.Fatal("fixture invariant broken: expected an `h.run(...)` selector call in the producer body")
+	if _, ok := namedStructs["g9LocalHandler"]; ok {
+		t.Fatal(`collectNamedStructTypes must not resolve either function-local "g9LocalHandler" declaration — the round-8 defect stored both in ONE package-wide map, so the second (unrelated) declaration silently overwrote the first (the real producer)`)
 	}
 }
 
-// TestCollectFuncTypeAliases_ResolvesFunctionLocalTypeDeclaration is
-// bead-6 fix round 8's symmetry fix for the third file.Decls-only loop the
-// team lead's brief named alongside collectMergeFnAliases/
-// collectNamedStructTypes: it now sees a function-local `type` declaration
-// exactly as it already saw a package-level one, so it does not silently
-// carry the same defect a fourth time for whatever future caller relies
-// on it.
-func TestCollectFuncTypeAliases_ResolvesFunctionLocalTypeDeclaration(t *testing.T) {
+// TestCollectFuncTypeAliases_DoesNotResolveFunctionLocalTypeDeclaration is
+// bead-6 fix round 9's acceptance test symmetric with the two above: a
+// function-body-local `type` declaration is invisible to this
+// package-level-only collector, post-revert.
+func TestCollectFuncTypeAliases_DoesNotResolveFunctionLocalTypeDeclaration(t *testing.T) {
 	src := `package p
 
-func g8LocalTypeHolder() error {
-	type g8LocalSignature = func(string, string) error
-	var mysteryFn g8LocalSignature
+func g9LocalTypeHolder() error {
+	type g9LocalSignature = func(string, string) error
+	var mysteryFn g9LocalSignature
 	return mysteryFn("wt", "branch1")
 }
 `
@@ -2138,13 +2145,8 @@ func g8LocalTypeHolder() error {
 	if err != nil {
 		t.Fatalf("parsing fixture source: %v", err)
 	}
-	typeAliases := collectFuncTypeAliases([]*ast.File{file})
-	ft, ok := typeAliases["g8LocalSignature"]
-	if !ok {
-		t.Fatal("collectFuncTypeAliases must resolve a function-local type declaration, not only a package-level one")
-	}
-	if kind, ok := mergeFuncSignatureShape(ft); !ok || kind != "MergeInto" {
-		t.Errorf("resolved local type's signature shape = (%q, %v), want (\"MergeInto\", true)", kind, ok)
+	if _, ok := collectFuncTypeAliases([]*ast.File{file})["g9LocalSignature"]; ok {
+		t.Fatal(`collectFuncTypeAliases must not resolve a function-local type declaration — package-level-only, post-round-9 revert`)
 	}
 }
 
