@@ -1472,17 +1472,21 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    comment (A-r4-5). `cmd/mindspec/complete.go`/`impl.go` register the
    `--resolve-merge` flags, with leaf-identity + flag-membership tests.
 5. Preserved-merge precondition (R5(d)(v) — universal): every
-   `CommitAll`/`commitWithExport` call site (`mindspec_executor.go:370`
-   /`:589`/`:645`/`:1092`/`:1176`; `approve/spec.go:122`/`:131`;
-   `approve/plan.go:430`/`:440` — nine sites, the verified full set at
-   this base; line numbers advisory, refreshed at bead-7 fix round 5
-   against the shipped tree)
+   `CommitAll`/`commitWithExport` call site (**AMENDED at final
+   review, O3-2** — this step previously enumerated the sites and
+   pinned "nine sites, the verified full set at this base"; the
+   enumeration drifted, and the obligation is now pinned as a
+   **funnel guarantee** derived by AST scan rather than a written
+   count. See spec.md R5(d)(v) for the full amendment; the delivering
+   assertion is
+   `TestCommitFunnel_CommitAllIsReachedOnlyThroughCommitWithExport`
+   in `internal/executor/commit_funnel_test.go`.)
    and the three producers check the target worktree for an in-progress
    merge their run did not create → refuse fail-closed naming the
    preserved conflict, its paths, and the re-entry invocation;
    FinalizeEpic's warn-and-continue on the `:589` commit failure
    becomes a refusal for exactly this class (E-r5-2). Shared helper +
-   call-site enumeration test so a new committing path cannot bypass.
+   funnel-reach scan so a new committing path cannot bypass.
 6. Tests: **AC-7** all five legs (producer parity via the same evidence
    shape on all three; override fixture binds ONLY `--allow-net-
    deletion` — S3-r2-7; tracker-path refusal leaves the bead tip at the
@@ -1498,7 +1502,7 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    evidence error → retryable refusal naming the override; **AC-8(v)**
    post-conflict convergence (re-entry driven in-process, resolve,
    complete, re-run converges via ancestor-no-op — no refusal, no
-   override). **AC-9(v)** all eight sub-legs (α-η) per the spec,
+   override). **AC-9(v)** all seven sub-legs (α-η) per the spec,
    red-on-revert on both E-r5-1 destruction mechanisms (δ) and the
    E-r5-2 two-parent-`chore:` resurrection (ε).
 7. Registry exits: the `:1688`/`:1721` seeded emitter entries exit with
