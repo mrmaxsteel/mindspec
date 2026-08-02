@@ -853,8 +853,10 @@ exactly what they can support.
    invariant: populated composite literals / unexported-field writes of
    the opaque type only inside the approved constructor; helper forges,
    wrapper-forges, callee-name spoofs, visible `unsafe`/`reflect.NewAt`
-   → red. Guidance legs: the three globs (`.claude/agents/**`,
-   `.claude/skills/**`, `plugins/*/skills/**`) with new-file anti-drift,
+   → red. Guidance legs: the globs (`.claude/agents/**`,
+   `.claude/skills/**`, `plugins/*/skills/**`, and `project-docs/**`, added
+   at the final confirm round — G3-N4 found this step still listing three)
+   with new-file anti-drift,
    PLUS `setup.CanonicalGuidanceSurfaces()` (step 5). `historical_skills`
    excluded with the recorded refresh-snapshot rationale (verify the
    rationale against `internal/setup/skills.go:18-19` — if false, it

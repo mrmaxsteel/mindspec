@@ -25,11 +25,26 @@ package executor
 //	    lexically inside `commitWithExport` — the funnel is the only
 //	    production caller of the commit primitive.
 //	(2) `commitWithExport` is declared exactly once, and inside it the
-//	    precondition `checkNoPreservedMerge` is called BEFORE
+//	    precondition `checkNoPreservedMerge` RUNS BEFORE
 //	    `gitutil.CommitAll`, both DIRECTLY IN ITS OWN SPAN — a call to
 //	    either that sits inside a nested closure is not counted at all,
 //	    because a closure's body may never run at the point the funnel
-//	    commits.
+//	    commits. "Before" here is EXECUTION order, established by
+//	    construction and not by source position: the precondition must be
+//	    evaluated unconditionally, and WITHOUT ITS RESULT BEING DISCARDED,
+//	    by a top-level statement of the funnel body that precedes the
+//	    statement the commit is reached from. A `defer` runs at return, a
+//	    `go` runs concurrently, and an `if`/`switch` branch or a loop body
+//	    may not run at all — each puts the check textually above a commit
+//	    it does not precede, and the position comparison this replaced
+//	    called every one of them correctly ordered. A bare call statement
+//	    or a blank-assigned result runs the check and throws its refusal
+//	    away, which is ordering without guarding (see
+//	    commitFunnelDeriveOrder). (2)'s OWN RESIDUAL, on the same footing
+//	    as (3)'s below: it does not prove the precondition's error is
+//	    PROPAGATED — an error bound to a real variable that nothing tests
+//	    is dataflow, which this scan does not do. Pinned by
+//	    `StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen`.
 //	(3) NO production function or method named `CommitAll` can reach git —
 //	    the `gitutil` package, or a process start named in this scan's
 //	    finite vocabulary (`commitFunnelSpawnRoutes`) — except through
@@ -56,28 +71,41 @@ package executor
 // implementation either funnels or cannot reach git.
 //
 // WHAT "BY NAME" MEANS, AND WHAT EVADES IT. The graph's edges are exactly
-// the callees this scan can name without types: a bare `foo(...)` and a
-// receiver call `x.foo(...)` both resolve to every production declaration
-// named `foo` in the CALLING package (unioned over receivers, which
-// over-approximates in the fail-closed direction), and `pkg.Foo(...)`
-// resolves through the file's own import block whenever `pkg` names a
-// package inside this module. Depth is unbounded: reachability is a
-// monotone fixed point, so recursion and mutual recursion converge rather
-// than truncating at a hop limit. What that leaves outside — the honest
-// residual, on the same footing as the merge chokepoint scan's:
+// the callees this scan can name without types: a bare `foo(...)` resolves
+// to every production declaration named `foo` in the CALLING package, and
+// so does ANY selector call whose receiver is not a package qualifier —
+// `x.foo(...)`, the pointer method expression `(*T).foo(...)`, the nested
+// receiver `x.y.foo(...)`, `xs[0].foo(...)`, `v.(*T).foo(...)` (unioned
+// over receivers, which over-approximates in the fail-closed direction).
+// A package qualifier is always a bare identifier, so a selector on an
+// EXPRESSION is never a cross-package call; treating one as unresolvable,
+// which this scan did until its fourth adversarial round, dropped direct
+// statically-named calls silently. `pkg.Foo(...)` resolves through the
+// file's own import block whenever `pkg` names a package inside this
+// module. Depth is unbounded: reachability is a monotone fixed point, so
+// recursion and mutual recursion converge rather than truncating at a hop
+// limit. What that leaves outside — the honest residual, on the same
+// footing as the merge chokepoint scan's:
 //
 //   - FUNCTION VALUES: a call through a var, a struct field, a parameter,
-//     or through reflection, where no callee name is written;
+//     or through reflection, where no callee name is written — pinned by
+//     `StatedLimit_AFunctionValueCallIsNotSeen`;
 //   - CROSS-PACKAGE RECEIVERS: a method call whose receiver's type is
 //     declared in ANOTHER package, since a method name is only matched
-//     inside the calling package;
-//   - DOT-IMPORTS of `gitutil`, which bind names this scan never sees;
+//     inside the calling package — pinned by
+//     `StatedLimit_CrossPackageReceiverHopIsNotTraced`;
+//   - DOT-IMPORTS of `gitutil`, which bind names this scan never sees —
+//     pinned by `StatedLimit_ADotImportedGitutilIsNotSeen`;
 //   - FOREIGN CALLBACKS: a func handed to a stdlib or third-party package
-//     and invoked from there, since only this module's source is parsed;
+//     and invoked from there, since only this module's source is parsed —
+//     pinned by `StatedLimit_AForeignCallbackIsNotSeen`;
 //   - PROCESS STARTS OUTSIDE THE VOCABULARY: "reaches git" is the finite,
 //     named set in `commitFunnelSpawnRoutes`, not a general effect
 //     analysis, so a third-party exec wrapper — or a stdlib route nobody
-//     has added to that table — is not a reach this scan can see.
+//     has added to that table — is not a reach this scan can see — pinned
+//     by `StatedLimit_AThirdPartyProcessRunnerIsNotSeen`;
+//   - THE SUBJECT BOUNDARY, described at the end of this header — pinned
+//     by `StatedLimit_ARawArgvCommitterOutsideCommitAllIsNotSeen`.
 //
 // (Named, not numbered, deliberately: an ordinal list cross-referenced by
 // position rots the first time an entry is inserted, which is the same
@@ -85,13 +113,26 @@ package executor
 // FUNCTION VALUES, DOT-IMPORTS and FOREIGN CALLBACKS are the shapes
 // merge_chokepoint_test.go documents as out of scope for a go/types-free
 // ratchet, and the same precedent (R5(b)) governs. CROSS-PACKAGE
-// RECEIVERS and PROCESS STARTS OUTSIDE THE VOCABULARY are this scan's own
-// boundaries, stated here rather than left to be discovered, and each is
-// pinned by a `StatedLimit` fixture below so that widening the scan
-// without widening this list REDS. What IS traced — and was not before
-// this property was rebuilt — is the ordinary refactor shape `CommitAll`
-// → same-package helper → process start, at any depth, whether or not the
-// helper call carries explicit generic type arguments.
+// RECEIVERS, PROCESS STARTS OUTSIDE THE VOCABULARY and the subject
+// boundary are this scan's own, stated here rather than left to be
+// discovered. Each of the six carries the `StatedLimit` fixture named
+// beside it — a claim this header made one round before the fixtures
+// existed, when three of the six were pinned and the disclosure said all
+// were — so that widening the scan without widening this list REDS. What
+// IS traced — and was not before this property was rebuilt — is the
+// ordinary refactor shape `CommitAll` → same-package helper → process
+// start, at any depth, whether or not the helper call carries explicit
+// generic type arguments, and whether the helper is reached by a bare
+// name or through a receiver EXPRESSION.
+//
+// AND THE VOCABULARY ITSELF. `commitFunnelSpawnRoutes` is the finite table
+// property (3) means by "reaches git", and its coverage fixture is DERIVED
+// from it, so a route added without a fixture cannot go unexercised. That
+// derivation is one-directional and the asymmetry is worth naming: a
+// derived assertion cannot detect the DELETION of the thing it derives
+// from — delete `os.StartProcess` and its subtest disappears with it,
+// silently. `TestCommitFunnel_SpawnRouteVocabularyDoesNotShrink` is the
+// independent floor that closes the other direction.
 //
 // AND THE RESIDUAL THAT IS NOT ABOUT EDGES AT ALL — the biggest one, and
 // the one an earlier version of this header covered up. This scan has
@@ -214,10 +255,21 @@ type commitFunnelDecl struct {
 	// that excludes). Deduplicated, in first-written order.
 	callees []commitFunnelFuncKey
 	// preconditionPos / primitivePos are the positions of the funnel's
-	// own precondition and commit calls, for the ordering check — derived
-	// from the funnel's DIRECT span only. Zero when absent.
+	// own precondition and commit calls — derived from the funnel's DIRECT
+	// span only. Zero when absent. They answer PRESENCE ("the funnel still
+	// checks", "the funnel still commits"), never ordering: see
+	// preconditionGuards.
 	preconditionPos token.Pos
 	primitivePos    token.Pos
+	// preconditionGuards is true when the precondition is EVALUATED
+	// UNCONDITIONALLY by a top-level statement of the funnel body that runs
+	// strictly before the statement the commit is reached from — execution
+	// order, established by construction, not source order. guardGap names
+	// the construct standing in the way when it is false. See
+	// commitFunnelDeriveOrder for why the source positions above cannot
+	// answer this.
+	preconditionGuards bool
+	guardGap           string
 }
 
 // commitFunnelFileScan is everything the scan derives from one file.
@@ -374,6 +426,329 @@ func commitFunnelWalkSpans(root ast.Node, fset *token.FileSet, label, name strin
 	})
 }
 
+// commitFunnelDirectCalls visits every call in node that belongs to node's
+// OWN span: descent stops at a nested *ast.FuncLit, whose body may run
+// later, elsewhere, or never at all.
+func commitFunnelDirectCalls(node ast.Node, visit func(*ast.CallExpr)) {
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			visit(v)
+		}
+		return true
+	})
+}
+
+// commitFunnelUnconditionalExprCalls visits the calls inside e that are
+// evaluated whenever e itself is evaluated. It stops at a func literal (a
+// body that runs later, if ever) and at the RIGHT operand of `&&` / `||`,
+// which Go short-circuits — `cond && check()` writes the check above the
+// commit and, whenever cond is false, never runs it.
+func commitFunnelUnconditionalExprCalls(e ast.Expr, visit func(*ast.CallExpr)) {
+	if e == nil {
+		return
+	}
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.BinaryExpr:
+			if v.Op == token.LAND || v.Op == token.LOR {
+				commitFunnelUnconditionalExprCalls(v.X, visit)
+				return false
+			}
+		case *ast.CallExpr:
+			visit(v)
+		}
+		return true
+	})
+}
+
+// commitFunnelUnconditionalStmtCalls visits the calls stmt evaluates
+// UNCONDITIONALLY — every time control reaches stmt, on every path out of
+// it. What it leaves out is the whole point:
+//
+//   - `defer` and `go`: the call runs at return, or concurrently — after
+//     the commit, or with no ordering against it at all;
+//   - an `if` / `switch` / `select` BODY: the branch that skips it still
+//     commits (only an `if`'s init statement and condition, and a switch's
+//     init statement and tag, run unconditionally);
+//   - a `for` / `range` BODY: it may run zero times (only the loop's init
+//     statement and the range operand run unconditionally);
+//   - a func literal's body: it may never be invoked.
+//
+// A bare block and a labelled statement are transparent — reaching them
+// runs their contents — so this recurses through both.
+func commitFunnelUnconditionalStmtCalls(stmt ast.Stmt, visit func(*ast.CallExpr)) {
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		commitFunnelUnconditionalExprCalls(s.X, visit)
+	case *ast.AssignStmt:
+		for _, e := range s.Lhs {
+			commitFunnelUnconditionalExprCalls(e, visit)
+		}
+		for _, e := range s.Rhs {
+			commitFunnelUnconditionalExprCalls(e, visit)
+		}
+	case *ast.ReturnStmt:
+		for _, e := range s.Results {
+			commitFunnelUnconditionalExprCalls(e, visit)
+		}
+	case *ast.IncDecStmt:
+		commitFunnelUnconditionalExprCalls(s.X, visit)
+	case *ast.SendStmt:
+		commitFunnelUnconditionalExprCalls(s.Chan, visit)
+		commitFunnelUnconditionalExprCalls(s.Value, visit)
+	case *ast.DeclStmt:
+		gd, ok := s.Decl.(*ast.GenDecl)
+		if !ok {
+			return
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, e := range vs.Values {
+				commitFunnelUnconditionalExprCalls(e, visit)
+			}
+		}
+	case *ast.IfStmt:
+		commitFunnelUnconditionalStmtCalls(s.Init, visit)
+		commitFunnelUnconditionalExprCalls(s.Cond, visit)
+	case *ast.SwitchStmt:
+		commitFunnelUnconditionalStmtCalls(s.Init, visit)
+		commitFunnelUnconditionalExprCalls(s.Tag, visit)
+	case *ast.TypeSwitchStmt:
+		commitFunnelUnconditionalStmtCalls(s.Init, visit)
+		commitFunnelUnconditionalStmtCalls(s.Assign, visit)
+	case *ast.ForStmt:
+		commitFunnelUnconditionalStmtCalls(s.Init, visit)
+	case *ast.RangeStmt:
+		commitFunnelUnconditionalExprCalls(s.X, visit)
+	case *ast.LabeledStmt:
+		commitFunnelUnconditionalStmtCalls(s.Stmt, visit)
+	case *ast.BlockStmt:
+		for _, inner := range s.List {
+			commitFunnelUnconditionalStmtCalls(inner, visit)
+		}
+	}
+}
+
+// commitFunnelDiscardedResults collects the calls in stmt whose RESULT is
+// thrown away: a bare call statement, or an assignment landing entirely in
+// blank identifiers. Such a call RUNS — so it satisfies any ordering rule,
+// including the dominance rule below — and REFUSES NOTHING, because the
+// error it returns is never seen and the commit proceeds regardless.
+//
+// This is the fifth shape of the same defect and it was found by auditing
+// this file's own new ordering rule rather than by a reviewer: an ordering
+// guarantee is not a guarding guarantee. `_ = checkNoPreservedMerge(…)`
+// evades `errcheck` too (its check-blank option is off by default), so
+// without this the whole static gate set would go green over it.
+func commitFunnelDiscardedResults(stmt ast.Stmt, into map[*ast.CallExpr]bool) {
+	ast.Inspect(stmt, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ExprStmt:
+			if call, ok := s.X.(*ast.CallExpr); ok {
+				into[call] = true
+			}
+		case *ast.AssignStmt:
+			if len(s.Rhs) != 1 {
+				return true
+			}
+			call, ok := s.Rhs[0].(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			for _, lhs := range s.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || id.Name != "_" {
+					return true
+				}
+			}
+			into[call] = true
+		}
+		return true
+	})
+}
+
+// commitFunnelObstruction names the construct holding a precondition call
+// that IS written in the funnel but is not evaluated on the way to the
+// commit, so the failure tells the author what to change rather than only
+// that something is wrong. A `defer` or `go` anywhere inside the statement
+// is named ahead of the statement's own shape, because it is the specific
+// thing that inverts text order and execution order.
+func commitFunnelObstruction(stmt ast.Stmt, isPrecondition func(*ast.CallExpr) bool) string {
+	holds := func(n ast.Node) bool {
+		found := false
+		commitFunnelDirectCalls(n, func(c *ast.CallExpr) {
+			if isPrecondition(c) {
+				found = true
+			}
+		})
+		return found
+	}
+	async := ""
+	ast.Inspect(stmt, func(n ast.Node) bool {
+		if async != "" {
+			return false
+		}
+		switch n.(type) {
+		case *ast.DeferStmt:
+			if holds(n) {
+				async = "a `defer` statement, which runs when the funnel RETURNS — after the commit"
+			}
+		case *ast.GoStmt:
+			if holds(n) {
+				async = "a `go` statement, which runs concurrently, with no ordering against the commit"
+			}
+		}
+		return true
+	})
+	if async != "" {
+		return async
+	}
+	switch stmt.(type) {
+	case *ast.IfStmt:
+		return "a conditional branch, so the path that skips it still commits"
+	case *ast.ForStmt, *ast.RangeStmt:
+		return "a loop body, which may run zero times"
+	case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+		return "a case body, so the cases that skip it still commit"
+	}
+	return "a construct that is not evaluated on every path to the commit"
+}
+
+// commitFunnelDeriveOrder decides property (2) over the funnel's own body:
+// not merely WHERE the precondition and the commit are written, but whether
+// the precondition RUNS on every path that reaches the commit, before the
+// commit.
+//
+// Source position cannot answer that, and the gap is not theoretical. The
+// fourth adversarial round on this file defeated the position-only check
+// this replaces with `defer checkNoPreservedMerge(...)` written ABOVE the
+// commit — textually first, temporally last — and again with the check
+// wrapped in `if msg != ""`, textually first and, for an empty message,
+// never. Both compiled, both left the scan green, and both broke the real
+// behaviour: the property claimed temporal ordering and measured textual
+// position, which is this artifact's own signature defect, a claim
+// outrunning its mechanism.
+//
+// The rule enforced instead is DOMINANCE BY CONSTRUCTION: the precondition
+// must be evaluated unconditionally, WITHOUT ITS RESULT BEING DISCARDED, by
+// a top-level statement of the funnel body that comes strictly before the
+// top-level statement the commit is reached from. That is STRICTER than
+// execution order — a check and a commit in the same `if` branch is
+// genuinely ordered and reds here anyway — and strict in the fail-closed
+// direction: it accepts only the shapes where "before" is guaranteed by the
+// language rather than by the reader's reasoning about which branch runs.
+//
+// WHAT THIS STILL DOES NOT PROVE, stated rather than left to be found: that
+// the precondition's error is PROPAGATED. `err := checkNoPreservedMerge(…)`
+// followed by an `err` that is never tested runs the check, keeps its
+// result, and commits anyway — a dataflow question this scan does not
+// answer. It is a residual of property (2), on the same footing as property
+// (3)'s, and it is pinned by
+// TestCommitFunnel_StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen.
+func commitFunnelDeriveOrder(d *commitFunnelDecl, body *ast.BlockStmt, gitutilName string) {
+	isPrecondition := func(c *ast.CallExpr) bool {
+		pkg, sel := commitFunnelCalleeName(c)
+		return pkg == "" && sel == commitPreconditionName
+	}
+	isPrimitive := func(c *ast.CallExpr) bool {
+		pkg, sel := commitFunnelCalleeName(c)
+		return pkg == gitutilName && sel == commitPrimitiveName
+	}
+
+	// PRESENCE first, over the funnel's whole DIRECT span — a nested
+	// closure is excluded, since its body may never run. This is what
+	// separates "the funnel no longer checks" and "the funnel no longer
+	// commits", each reported on its own terms, from "the check no longer
+	// guards the commit".
+	commitFunnelDirectCalls(body, func(c *ast.CallExpr) {
+		if d.preconditionPos == token.NoPos && isPrecondition(c) {
+			d.preconditionPos = c.Pos()
+		}
+		if d.primitivePos == token.NoPos && isPrimitive(c) {
+			d.primitivePos = c.Pos()
+		}
+	})
+	if d.preconditionPos == token.NoPos || d.primitivePos == token.NoPos {
+		return
+	}
+
+	guard, commitAt, obstruction := -1, -1, ""
+	for i, stmt := range body.List {
+		if guard < 0 {
+			discarded := map[*ast.CallExpr]bool{}
+			commitFunnelDiscardedResults(stmt, discarded)
+			sawDiscarded := false
+			commitFunnelUnconditionalStmtCalls(stmt, func(c *ast.CallExpr) {
+				switch {
+				case !isPrecondition(c):
+				case discarded[c]:
+					sawDiscarded = true
+				default:
+					guard = i
+				}
+			})
+			if guard < 0 && obstruction == "" {
+				if sawDiscarded {
+					obstruction = fmt.Sprintf("a statement that DISCARDS its result, so the refusal %s "+
+						"returns never reaches the caller and the commit runs anyway",
+						commitPreconditionName)
+				} else {
+					commitFunnelDirectCalls(stmt, func(c *ast.CallExpr) {
+						if isPrecondition(c) {
+							obstruction = commitFunnelObstruction(stmt, isPrecondition)
+						}
+					})
+				}
+			}
+		}
+		if commitAt < 0 {
+			commitFunnelDirectCalls(stmt, func(c *ast.CallExpr) {
+				if isPrimitive(c) {
+					commitAt = i
+				}
+			})
+		}
+	}
+
+	switch {
+	case commitAt < 0:
+		d.guardGap = "the commit resolves in the funnel's span but not in any top-level statement of its body"
+	case guard < 0:
+		if obstruction == "" {
+			obstruction = "a construct that is not evaluated on every path to the commit"
+		}
+		d.guardGap = fmt.Sprintf("its only call to %s sits in %s, so the commit reached from statement %d runs unguarded",
+			commitPreconditionName, obstruction, commitAt+1)
+	case guard >= commitAt:
+		d.guardGap = fmt.Sprintf("the commit is reached from statement %d of the funnel body, while %s is not evaluated until statement %d",
+			commitAt+1, commitPreconditionName, guard+1)
+	default:
+		d.preconditionGuards = true
+	}
+}
+
+// commitFunnelReceiverExpr is the pseudo-qualifier commitFunnelCalleeName
+// returns for a selector whose receiver is an EXPRESSION rather than a bare
+// identifier. A Go package qualifier is always a single identifier, so such
+// a call is certainly a method call or method expression, and its NAME is
+// resolvable inside the calling package exactly like `x.m(...)`. The
+// sentinel routes it there while keeping it out of the two buckets that key
+// on a real package name — the qualified-`gitutil` bucket and the bare
+// same-package bucket — so `a.b.CommitAll(...)` is never mistaken for
+// either. It cannot collide with a real import identifier: it is not a
+// valid Go identifier at all.
+const commitFunnelReceiverExpr = "<receiver-expression>"
+
 // commitFunnelCalleeName renders a call's callee as either a bare
 // identifier name (ident, "") or a qualified pair (pkg, sel). Parenthesized
 // callees are unwrapped so `(gitutil.CommitAll)(...)` resolves identically
@@ -408,7 +783,18 @@ func commitFunnelCalleeName(call *ast.CallExpr) (pkg, sel string) {
 		if x, ok := v.X.(*ast.Ident); ok {
 			return x.Name, v.Sel.Name
 		}
-		return "", ""
+		// The receiver is an expression: a pointer method expression
+		// `(*altExecutor).doCommit(a, path, msg)`, a nested receiver
+		// `g.helper.doCommit(path, msg)`, an element `xs[0].doCommit(...)`,
+		// a type assertion `v.(*T).doCommit(...)`. Every one of these is a
+		// DIRECT, statically-named call whose method name resolves in the
+		// calling package — none of them is the function-value or
+		// reflection form the header's residual list discloses. Returning
+		// ("", "") here, as this function did until the fourth adversarial
+		// round found it three ways over, dropped the edge silently, so a
+		// `CommitAll` reaching git through such a call read as unable to
+		// reach git at all.
+		return commitFunnelReceiverExpr, v.Sel.Name
 	}
 	return "", ""
 }
@@ -459,11 +845,14 @@ func scanCommitFunnelFile(fset *token.FileSet, file *ast.File, name string, pkgN
 			// parses, so there is nothing to follow.
 			return commitFunnelFuncKey{}, false
 		}
-		// Not a package qualifier at all — a method call on a receiver.
-		// Without go/types the receiver's type is unknown, so this
-		// resolves by method NAME within the calling package, unioned
-		// over every receiver that declares it (see the header's
-		// residuals for the cross-package receiver this misses).
+		// Not a package qualifier at all — a method call or method
+		// expression, whether the receiver was written as an identifier
+		// (`g.doCommit(...)`) or as an expression
+		// (`commitFunnelReceiverExpr`: `(*T).doCommit(...)`,
+		// `g.helper.doCommit(...)`). Without go/types the receiver's type
+		// is unknown, so this resolves by method NAME within the calling
+		// package, unioned over every receiver that declares it (see the
+		// header's residuals for the cross-package receiver this misses).
 		return commitFunnelFuncKey{dir: dir, name: sel}, true
 	}
 
@@ -537,25 +926,15 @@ func scanCommitFunnelFile(fset *token.FileSet, file *ast.File, name string, pkgN
 		switch fd.Name.Name {
 		case commitFunnelFuncName:
 			// The funnel's own ordering facts come from its DIRECT span
-			// only: commitFunnelWalkSpans hands a nested closure an
-			// EMPTY declared name, and a precondition that runs only
-			// inside a closure — which may never run — must not read as
-			// a precondition the commit is guarded by. Failing to find
-			// either call is failing closed: property (2) then reports
-			// the funnel as no longer checking, or no longer committing.
-			commitFunnelWalkSpans(fd.Body, fset, d.label, fd.Name.Name,
-				func(call *ast.CallExpr, _, declName string, _ token.Position) {
-					if declName == "" {
-						return
-					}
-					pkg, sel := commitFunnelCalleeName(call)
-					switch {
-					case pkg == "" && sel == commitPreconditionName && d.preconditionPos == token.NoPos:
-						d.preconditionPos = call.Pos()
-					case pkg == gitutilName && sel == commitPrimitiveName && d.primitivePos == token.NoPos:
-						d.primitivePos = call.Pos()
-					}
-				})
+			// only: a precondition that runs only inside a closure —
+			// which may never run — must not read as a precondition the
+			// commit is guarded by. Failing to find either call is
+			// failing closed: property (2) then reports the funnel as no
+			// longer checking, or no longer committing. And where BOTH
+			// resolve, the ordering answer is derived from statement
+			// dominance rather than from source position — see
+			// commitFunnelDeriveOrder.
+			commitFunnelDeriveOrder(d, fd.Body, gitutilName)
 			out.funnelDecls = append(out.funnelDecls, d)
 		case commitPrimitiveName:
 			out.primitiveDecls = append(out.primitiveDecls, d)
@@ -860,11 +1239,15 @@ func TestCommitFunnel_CommitAllIsReachedOnlyThroughCommitWithExport(t *testing.T
 			commitFunnelFuncName, funnel.file, funnel.pos.Line, commitPrimitiveName)
 	}
 	if funnel.preconditionPos != token.NoPos && funnel.primitivePos != token.NoPos &&
-		funnel.preconditionPos > funnel.primitivePos {
-		t.Errorf("%s (%s:%d) calls %s at offset %d, AFTER gitutil.%s at offset %d — "+
-			"a precondition checked after the commit has already happened refuses nothing",
+		!funnel.preconditionGuards {
+		t.Errorf("%s (%s:%d) writes %s at offset %d and gitutil.%s at offset %d, but the precondition does "+
+			"not GUARD the commit: %s.\n"+
+			"Source order is not execution order. A `defer` runs at return, a `go` runs concurrently, and an "+
+			"`if`/`switch` branch or a loop body may not run at all — every one of them puts the check "+
+			"textually above a commit it does not precede. A precondition that does not run before the commit "+
+			"refuses nothing, producing the two-parent chore: commit spec 125 shipped to fix.",
 			commitFunnelFuncName, funnel.file, funnel.pos.Line, commitPreconditionName,
-			funnel.preconditionPos, commitPrimitiveName, funnel.primitivePos)
+			funnel.preconditionPos, commitPrimitiveName, funnel.primitivePos, funnel.guardGap)
 	}
 
 	// Property (3): no CommitAll implementation reaches git except through
@@ -1117,6 +1500,84 @@ func commitG[T any](path, msg string) error {
 	}
 }
 
+// TestCommitFunnel_ScanResolvesACalleeWhoseReceiverIsAnExpression pins the
+// third evasion of the rebuilt property (3), found three independent ways
+// in the fourth adversarial round. `commitFunnelCalleeName` accepted a
+// selector only when its receiver was a bare `*ast.Ident`, so two ORDINARY,
+// statically-named calls were dropped from the graph without a trace:
+//
+//   - a pointer method expression, `(*altExecutor).doCommit(a, path, msg)`,
+//     whose receiver is a parenthesized pointer TYPE;
+//   - a nested receiver, `g.helper.doCommit(path, msg)`, whose receiver is
+//     itself a selector.
+//
+// Neither is the function-value or reflection form the header's residual
+// list discloses, and in both the callee name resolves in the calling
+// package — so a `CommitAll` reaching git through one of them read as
+// unable to reach git at all, while still nominally delegating. The
+// control in each case is the same fixture with the helper's git call
+// removed: the red must come from the helper's REACH, not from the shape
+// of the call.
+func TestCommitFunnel_ScanResolvesACalleeWhoseReceiverIsAnExpression(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call string
+	}{
+		{name: "pointer-method-expression", call: `(*altExecutor).doCommit(a, path, msg)`},
+		{name: "nested-receiver", call: `a.helper.doCommit(path, msg)`},
+		{name: "element-receiver", call: `a.helpers[0].doCommit(path, msg)`},
+		{name: "type-asserted-receiver", call: `a.any.(*altExecutor).doCommit(path, msg)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := func(helper string) string {
+				return fmt.Sprintf(`package complete
+
+import "os/exec"
+
+type altExecutor struct {
+	helper  *altExecutor
+	helpers []*altExecutor
+	any     interface{}
+}
+
+func (a *altExecutor) CommitAll(path, msg string) error {
+	return %s
+}
+
+func (a *altExecutor) doCommit(path, msg string) error {
+%s
+}
+`, tc.call, helper)
+			}
+			committing := body("\treturn exec.Command(\"git\", \"-C\", path, \"commit\", \"-am\", msg).Run()")
+			inert := body("\t_ = path\n\t_ = msg\n\treturn nil")
+
+			class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+				"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+				"internal/complete/alt.go":    committing,
+			}))
+			witness, flagged := class.bypasses["(*altExecutor).CommitAll"]
+			if !flagged {
+				t.Fatalf("a direct, statically-named call whose receiver is an expression must resolve like "+
+					"any other named call; flagged: %v", class.bypasses)
+			}
+			if joined := strings.Join(witness, " → "); !strings.Contains(joined, "doCommit") ||
+				!strings.HasSuffix(joined, osExecImportPath+".Command") {
+				t.Errorf("the witness must carry the chain that reaches git, got %q", joined)
+			}
+
+			control := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+				"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+				"internal/complete/alt.go":    inert,
+			}))
+			if len(control.bypasses) != 0 {
+				t.Errorf("the control — the same call shape to a helper that cannot reach git — must NOT be "+
+					"flagged, or the red above proves only that a selector was written: %v", control.bypasses)
+			}
+		})
+	}
+}
+
 // The second: property (3)'s reach vocabulary was exactly `os/exec`, so a
 // body that starts `git` through `syscall.Exec` or `os.StartProcess` —
 // stdlib, no third-party anything — read as unable to reach git at all.
@@ -1124,8 +1585,18 @@ func commitG[T any](path, msg string) error {
 // this test pins every route in it by DERIVING the fixture from that
 // table, so a route added there without a fixture cannot go unexercised.
 func TestCommitFunnel_ScanCatchesANonExecProcessStart(t *testing.T) {
+	// Non-vacuity for the DERIVATION itself. This test's fixtures come
+	// from the route table, so an emptied table produces zero subtests and
+	// a silent green — a derived assertion cannot notice the deletion of
+	// the thing it derives from. That is the boundary of the "derive
+	// counts, never write them" rule this file otherwise follows, and
+	// TestCommitFunnel_SpawnRouteVocabularyDoesNotShrink is the
+	// independent sentinel that covers it. This guard is the local half:
+	// zero subtests is a failure, not a pass.
+	exercised := 0
 	for _, route := range commitFunnelSpawnRoutes {
 		for _, fn := range route.funcs {
+			exercised++
 			t.Run(route.importPath+"."+fn, func(t *testing.T) {
 				src := fmt.Sprintf(`package complete
 
@@ -1157,6 +1628,59 @@ func spawnGit(path, msg string) error {
 				}
 			})
 		}
+	}
+	if exercised == 0 {
+		t.Fatal("commitFunnelSpawnRoutes is empty, so this test ran zero subtests and proved nothing — " +
+			"the scan's entire process-start vocabulary would be gone with every assertion here still green")
+	}
+}
+
+// TestCommitFunnel_SpawnRouteVocabularyDoesNotShrink is the sentinel the
+// derived fixture above cannot be. DERIVING the coverage table protects
+// against a route ADDED without a fixture; it cannot protect against a
+// route DELETED — remove `os.StartProcess` and its subtest disappears with
+// it, silently, leaving the disclosed vocabulary unpinned while every
+// assertion above stays green.
+//
+// So this list is WRITTEN, deliberately, and it is the one written list in
+// this file. That is not a relapse into the enumeration this whole artifact
+// replaced, and the difference is what makes it safe: it does not claim to
+// be complete, and nothing derives from it. It is a FLOOR — these routes
+// are disclosed in this file's header and in R5(d)(v), so they must stay in
+// the table. A route added above the floor is still covered, by the derived
+// fixture; a route removed from under it REDS here, by name. The failure
+// mode of a written enumeration is silent drift as the truth grows past it,
+// and a floor has no such failure mode, because growth is exactly what it
+// does not assert.
+func TestCommitFunnel_SpawnRouteVocabularyDoesNotShrink(t *testing.T) {
+	sentinel := []string{
+		osExecImportPath + ".Command",
+		osExecImportPath + ".CommandContext",
+		"os.StartProcess",
+		"syscall.Exec",
+		"syscall.ForkExec",
+		"syscall.StartProcess",
+	}
+	have := map[string]bool{}
+	for _, route := range commitFunnelSpawnRoutes {
+		for _, fn := range route.funcs {
+			have[route.importPath+"."+fn] = true
+		}
+	}
+	live := make([]string, 0, len(have))
+	for r := range have {
+		live = append(live, r)
+	}
+	sort.Strings(live)
+	for _, want := range sentinel {
+		if have[want] {
+			continue
+		}
+		t.Errorf("%s is disclosed as part of this scan's process-start vocabulary — in this file's header "+
+			"and in spec 127 R5(d)(v) — but is no longer in commitFunnelSpawnRoutes. Deleting a route "+
+			"silently deletes its coverage fixture too, because that fixture is DERIVED from this table. "+
+			"If the route is genuinely being dropped, drop it from the disclosure in the same commit; "+
+			"otherwise restore it. Live vocabulary: %v", want, live)
 	}
 }
 
@@ -1203,10 +1727,18 @@ func (v *vendoredExecutor) CommitAll(path, msg string) error {
 //
 // The shape: `CommitAll` delegates to a method on a receiver whose type is
 // declared in ANOTHER package, and that method shells out. Resolution is
-// by name within the CALLING package, so the hop resolves to nothing and
-// the edge is dropped. Contrast the same delegation with the helper in the
-// same package, which IS caught — see
+// by name within the CALLING package, so the hop names a key no local
+// declaration answers to and the edge is dropped. Contrast the same
+// delegation with the helper in the same package, which IS caught — see
 // TestCommitFunnel_ScanCatchesCommitAllDelegatingToACommittingHelper.
+//
+// The reason matters, and narrowed at the fourth adversarial round. This
+// fixture writes `c.h.doCommit(…)`, a nested-receiver selector, which the
+// scan used to drop for its SHAPE — before it ever reached the question of
+// which package declares the callee. That shape now resolves
+// (commitFunnelReceiverExpr; TestCommitFunnel_ScanResolvesACalleeWhoseRe-
+// ceiverIsAnExpression), so this test pins what it always claimed to: the
+// CROSS-PACKAGE boundary, and nothing else.
 func TestCommitFunnel_StatedLimit_CrossPackageReceiverHopIsNotTraced(t *testing.T) {
 	caller := `package complete
 
@@ -1297,6 +1829,258 @@ func syncNow(path, msg string) error {
 				t.Errorf("the raw-argv fixture must declare no %s: %+v", commitPrimitiveName, d.label)
 			}
 		}
+	}
+}
+
+// TestCommitFunnel_StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen
+// pins property (2)'s OWN residual — the one left standing after the
+// ordering rule was rebuilt as dominance, and disclosed at the same time
+// rather than a round later.
+//
+// The scan proves the precondition is evaluated unconditionally, before the
+// commit, with its result not syntactically discarded. It does NOT prove
+// the error is propagated: binding it to a real variable that nothing ever
+// tests keeps the result, satisfies every syntactic rule above, and commits
+// anyway. Answering that is dataflow, which a go/types-free AST scan does
+// not do — the same boundary R5(b)'s precedent draws for the sibling merge
+// chokepoint scan.
+//
+// This test REDS the day the scan starts answering it, which is exactly
+// when the disclosure must change.
+func TestCommitFunnel_StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen(t *testing.T) {
+	const src = `package scratch
+
+func commitWithExport(path, msg string) error {
+	err := checkNoPreservedMerge(path, "")
+	if err != nil && false {
+		return err
+	}
+	return gitutil.CommitAll(path, msg)
+}
+`
+	fset, file := commitFunnelParse(t, "ignored_error.go", src)
+	scan := scanCommitFunnelFile(fset, file, "ignored_error.go", nil)
+
+	if len(scan.funnelDecls) != 1 {
+		t.Fatalf("expected one funnel declaration, got %d", len(scan.funnelDecls))
+	}
+	d := scan.funnelDecls[0]
+	// Non-vacuity: this shape is genuinely CLASSIFIED — both calls
+	// resolve, and the ordering rule reaches a verdict on it — rather than
+	// falling out of the scan for some unrelated reason.
+	if d.preconditionPos == token.NoPos || d.primitivePos == token.NoPos {
+		t.Fatalf("both calls must resolve for this to pin a DATAFLOW limit; precondition=%v primitive=%v",
+			d.preconditionPos, d.primitivePos)
+	}
+	if !d.preconditionGuards {
+		t.Fatalf("the scan now rejects a precondition whose error is never acted on — that is an "+
+			"IMPROVEMENT, but commitFunnelDeriveOrder's disclosure and this file's header still say it "+
+			"does not answer dataflow. Rewrite the disclosure (and this test) in the same commit that "+
+			"widened the scan. Gap: %q", d.guardGap)
+	}
+}
+
+// TestCommitFunnel_StatedLimit_AFunctionValueCallIsNotSeen pins the
+// FUNCTION VALUES residual — the one the header has disclosed since the
+// rebuild and nothing held in place until the fourth adversarial round
+// counted the fixtures against the disclosure.
+//
+// Two shapes, one residual: a call through a struct field holding the
+// committing function (`v.commit(path, msg)`, where `commit` is a field,
+// not a method), and a call through `reflect`. In both, NO CALLEE NAME is
+// written at the call site, so there is nothing for a go/types-free scan to
+// resolve — `commitFunnelReceiverExpr`'s widening of receiver resolution
+// does not and cannot reach either, which is exactly why this stays a
+// residual after that widening.
+func TestCommitFunnel_StatedLimit_AFunctionValueCallIsNotSeen(t *testing.T) {
+	const indirect = `package complete
+
+import (
+	"os/exec"
+	"reflect"
+)
+
+type valueExecutor struct{ commit func(string, string) error }
+
+func newValueExecutor() *valueExecutor {
+	return &valueExecutor{commit: doCommitIndirectly}
+}
+
+func (v *valueExecutor) CommitAll(path, msg string) error {
+	return v.commit(path, msg)
+}
+
+type reflectExecutor struct{}
+
+func (r *reflectExecutor) CommitAll(path, msg string) error {
+	reflect.ValueOf(doCommitIndirectly).Call(nil)
+	return nil
+}
+
+func doCommitIndirectly(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go":   commitFunnelFixtureFunnel,
+		"internal/complete/indirect.go": indirect,
+	}))
+	for _, label := range []string{"(*valueExecutor).CommitAll", "(*reflectExecutor).CommitAll"} {
+		if _, flagged := class.bypasses[label]; flagged {
+			t.Fatalf("the scan now follows a call through a function value — that is an IMPROVEMENT, but the "+
+				"header's residual list still says it does not. Rewrite the residual (and this test) in the "+
+				"same commit that widened the scan. Flagged: %v", class.bypasses)
+		}
+		if _, seen := class.byLabel[label]; !seen {
+			t.Fatalf("%s was never examined, so this test pins nothing", label)
+		}
+	}
+	// Non-vacuity in the other direction: the committing helper the values
+	// point at IS one the scan can see when it is NAMED at a call site —
+	// so the residual is about the indirection, not about the helper.
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	named := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/named.go": `package complete
+
+import "os/exec"
+
+type namedExecutor struct{}
+
+func (n *namedExecutor) CommitAll(path, msg string) error {
+	return doCommitIndirectly(path, msg)
+}
+
+func doCommitIndirectly(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+`,
+	}))
+	if _, flagged := named.bypasses["(*namedExecutor).CommitAll"]; !flagged {
+		t.Fatalf("the SAME helper reached by its written name must be caught, or this test pins the helper "+
+			"rather than the indirection: %v", named.bypasses)
+	}
+}
+
+// TestCommitFunnel_StatedLimit_ADotImportedGitutilIsNotSeen pins the
+// DOT-IMPORTS residual. A dot import binds `gitutil`'s exported names into
+// the file's own scope, so the primitive is called as a bare `CommitAll(…)`
+// with no qualifier anywhere — and this scan resolves the primitive through
+// the file's import ALIAS for gitutil, which a dot import does not provide.
+// commitFunnelImportDirs drops dot imports explicitly for the same reason.
+func TestCommitFunnel_StatedLimit_ADotImportedGitutilIsNotSeen(t *testing.T) {
+	dotImported := fmt.Sprintf(`package complete
+
+import . "%s"
+
+type dotExecutor struct{}
+
+func (d *dotExecutor) CommitAll(path, msg string) error {
+	return commitDotted(path, msg)
+}
+
+func commitDotted(path, msg string) error {
+	return CommitAll(path, msg)
+}
+`, gitutilImportPath)
+	scans := commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/dot.go":    dotImported,
+	})
+	class := commitFunnelClassify(scans)
+	if _, flagged := class.bypasses["(*dotExecutor).CommitAll"]; flagged {
+		t.Fatalf("the scan now resolves a dot-imported gitutil — that is an IMPROVEMENT, but the header's "+
+			"residual list still says it does not. Rewrite the residual (and this test) in the same commit "+
+			"that widened the scan. Flagged: %v", class.bypasses)
+	}
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	if _, seen := class.byLabel["(*dotExecutor).CommitAll"]; !seen {
+		t.Fatal("the dot-importing implementation was never examined, so this test pins nothing")
+	}
+	// And precisely WHY it is unseen: property (1) resolves no qualified
+	// primitive call in that file at all, because none is written.
+	for _, sc := range scans {
+		for _, c := range sc.qualifiedPrimitiveCalls {
+			if strings.HasPrefix(c.file, "internal/complete/") {
+				t.Errorf("a dot-imported primitive call must not resolve as a QUALIFIED call: %+v", c)
+			}
+		}
+	}
+}
+
+// TestCommitFunnel_StatedLimit_AForeignCallbackIsNotSeen pins the FOREIGN
+// CALLBACKS residual: a committing method handed to a package this walk
+// does not parse, and invoked from inside it. `filepath.WalkDir(path,
+// w.commitEach)` writes `w.commitEach` as an ARGUMENT, never as a callee,
+// so there is no call site for the graph to follow — and the invocation
+// that does reach it lives in stdlib source this scan never reads.
+func TestCommitFunnel_StatedLimit_AForeignCallbackIsNotSeen(t *testing.T) {
+	const callback = `package complete
+
+import (
+	"io/fs"
+	"os/exec"
+	"path/filepath"
+)
+
+type walkExecutor struct{ msg string }
+
+func (w *walkExecutor) CommitAll(path, msg string) error {
+	w.msg = msg
+	return filepath.WalkDir(path, w.commitEach)
+}
+
+func (w *walkExecutor) commitEach(p string, d fs.DirEntry, err error) error {
+	return exec.Command("git", "-C", p, "commit", "-am", w.msg).Run()
+}
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go":   commitFunnelFixtureFunnel,
+		"internal/complete/callback.go": callback,
+	}))
+	if _, flagged := class.bypasses["(*walkExecutor).CommitAll"]; flagged {
+		t.Fatalf("the scan now follows a func handed to a foreign package — that is an IMPROVEMENT, but the "+
+			"header's residual list still says it does not. Rewrite the residual (and this test) in the same "+
+			"commit that widened the scan. Flagged: %v", class.bypasses)
+	}
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	if _, seen := class.byLabel["(*walkExecutor).CommitAll"]; !seen {
+		t.Fatal("the callback-passing implementation was never examined, so this test pins nothing")
+	}
+	// Non-vacuity: the SAME method, CALLED rather than passed, is caught —
+	// so the residual is the handing-off, not the method.
+	direct := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/direct.go": `package complete
+
+import (
+	"io/fs"
+	"os/exec"
+)
+
+type walkExecutor struct{ msg string }
+
+func (w *walkExecutor) CommitAll(path, msg string) error {
+	return w.commitEach(path, nil, nil)
+}
+
+func (w *walkExecutor) commitEach(p string, d fs.DirEntry, err error) error {
+	return exec.Command("git", "-C", p, "commit", "-am", w.msg).Run()
+}
+`,
+	}))
+	if _, flagged := direct.bypasses["(*walkExecutor).CommitAll"]; !flagged {
+		t.Fatalf("the same method reached by a written call must be caught, or this test pins the method "+
+			"rather than the hand-off: %v", direct.bypasses)
 	}
 }
 
@@ -1482,8 +2266,155 @@ func commitWithExport(path, msg string) error {
 	if d.preconditionPos == token.NoPos || d.primitivePos == token.NoPos {
 		t.Fatalf("both calls must resolve; precondition=%v primitive=%v", d.preconditionPos, d.primitivePos)
 	}
-	if d.preconditionPos <= d.primitivePos {
+	if d.preconditionGuards {
 		t.Fatal("the reordered funnel must be detected: the precondition follows the commit")
+	}
+	if !strings.Contains(d.guardGap, "statement 1") {
+		t.Errorf("the failure must name the statement the commit is reached from, got %q", d.guardGap)
+	}
+}
+
+// TestCommitFunnel_ScanRejectsAPreconditionThatDoesNotDominateTheCommit is
+// the mutation proof for property (2)'s ORDERING guarantee, and the shape
+// the fourth adversarial round planted against its predecessor. That
+// predecessor compared `token.Pos` values — source-text offsets — and so
+// answered a question about text while claiming an answer about execution.
+//
+// Every case below writes the precondition ABOVE the commit and is
+// nevertheless unguarded at run time, and the `textuallyFirst` assertion in
+// each is the regression pin: it asserts the offsets are still in the order
+// the old check called correct, so this test reds again the moment anyone
+// re-derives ordering from position. The `defer` case is the one that shipped
+// past a full gate set — funnel scan and `golangci-lint` both green — and
+// broke `TestCommitAll_RefusesOverAPreservedMerge` at run time.
+func TestCommitFunnel_ScanRejectsAPreconditionThatDoesNotDominateTheCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		// want is a substring the derived explanation must carry, so the
+		// failure names the construct rather than only the verdict.
+		want string
+		// guards is the control: the honest shape must still pass, or
+		// every red above would prove only that the check is strict.
+		guards bool
+	}{
+		{
+			name: "deferred-precondition",
+			body: `	defer checkNoPreservedMerge(path, "")
+	return gitutil.CommitAll(path, msg)`,
+			want: "`defer` statement",
+		},
+		{
+			name: "asynchronous-precondition",
+			body: `	go checkNoPreservedMerge(path, "")
+	return gitutil.CommitAll(path, msg)`,
+			want: "`go` statement",
+		},
+		{
+			name: "conditional-precondition",
+			body: `	if msg != "" {
+		if err := checkNoPreservedMerge(path, ""); err != nil {
+			return err
+		}
+	}
+	return gitutil.CommitAll(path, msg)`,
+			want: "conditional branch",
+		},
+		{
+			name: "short-circuited-precondition",
+			body: `	if msg != "" && checkNoPreservedMerge(path, "") != nil {
+		return errRefused
+	}
+	return gitutil.CommitAll(path, msg)`,
+			want: "conditional branch",
+		},
+		{
+			name: "loop-body-precondition",
+			body: `	for _, p := range paths {
+		if err := checkNoPreservedMerge(p, ""); err != nil {
+			return err
+		}
+	}
+	return gitutil.CommitAll(path, msg)`,
+			want: "loop body",
+		},
+		{
+			name: "case-body-precondition",
+			body: `	switch msg {
+	case "":
+		if err := checkNoPreservedMerge(path, ""); err != nil {
+			return err
+		}
+	}
+	return gitutil.CommitAll(path, msg)`,
+			want: "case body",
+		},
+		{
+			// Found by this file's own hostile-reader pass over the
+			// dominance rule above, not by a reviewer: an ORDERING
+			// guarantee is not a GUARDING guarantee. Both shapes run the
+			// precondition, unconditionally, strictly before the commit —
+			// and both throw its refusal on the floor.
+			name: "bare-call-precondition",
+			body: `	checkNoPreservedMerge(path, "")
+	return gitutil.CommitAll(path, msg)`,
+			want: "DISCARDS its result",
+		},
+		{
+			name: "blank-assigned-precondition",
+			body: `	_ = checkNoPreservedMerge(path, "")
+	return gitutil.CommitAll(path, msg)`,
+			want: "DISCARDS its result",
+		},
+		{
+			name: "honest-funnel",
+			body: `	if err := checkNoPreservedMerge(path, ""); err != nil {
+		return err
+	}
+	if err := exportBeads(path); err != nil {
+		return err
+	}
+	return gitutil.CommitAll(path, msg)`,
+			guards: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "package scratch\n\nfunc commitWithExport(path, msg string) error {\n" + tc.body + "\n}\n"
+			fset, file := commitFunnelParse(t, tc.name+".go", src)
+			scan := scanCommitFunnelFile(fset, file, tc.name+".go", nil)
+
+			if len(scan.funnelDecls) != 1 {
+				t.Fatalf("expected one funnel declaration, got %d", len(scan.funnelDecls))
+			}
+			d := scan.funnelDecls[0]
+			// Non-vacuity: both calls must still RESOLVE. A shape that
+			// reds because the scan stopped seeing the precondition at all
+			// would be reported as "the funnel no longer checks" and would
+			// prove nothing about ordering.
+			if d.preconditionPos == token.NoPos || d.primitivePos == token.NoPos {
+				t.Fatalf("both calls must resolve for this to be an ORDERING case; precondition=%v primitive=%v",
+					d.preconditionPos, d.primitivePos)
+			}
+			if d.preconditionPos >= d.primitivePos {
+				t.Fatalf("this fixture must write the precondition ABOVE the commit — otherwise it does not "+
+					"pin the position-vs-execution gap; precondition=%v primitive=%v",
+					d.preconditionPos, d.primitivePos)
+			}
+			if tc.guards {
+				if !d.preconditionGuards {
+					t.Fatalf("the honest funnel shape must satisfy the ordering guarantee, got gap %q", d.guardGap)
+				}
+				return
+			}
+			if d.preconditionGuards {
+				t.Fatalf("a precondition that does not run before the commit must NOT satisfy the ordering " +
+					"guarantee — source position said it did")
+			}
+			if !strings.Contains(d.guardGap, tc.want) {
+				t.Errorf("the failure must name the construct that broke the ordering; got %q, want it to "+
+					"mention %q", d.guardGap, tc.want)
+			}
+		})
 	}
 }
 

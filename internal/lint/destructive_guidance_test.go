@@ -27,7 +27,8 @@
 //     this leg entirely, not merely unprovable. internal/panel/gate.go's
 //     RawMergeFence (8 real call sites) is the concrete, disclosed
 //     instance of this reach limit — see its own doc comment.
-//   - the GUIDANCE leg: the three shipped-guidance globs plus the
+//   - the GUIDANCE leg: the shipped-guidance globs (walked live by
+//     guidanceGlobDirs, four roots today) plus the
 //     evaluated canonical setup-guidance builders, checked against the
 //     known-sites exemption list. This leg classifies LINE BY LINE
 //     (scanGuidanceSurfaces): a destructive command spanning a line
@@ -864,13 +865,13 @@ func fset(u *rUniverse, pos token.Pos) int {
 }
 
 // ---------------------------------------------------------------------
-// Guidance leg: the three shipped-guidance globs plus the canonical
+// Guidance leg: the shipped-guidance globs plus the canonical
 // setup-guidance builders (spec 127 R5c/H-r6-6).
 // ---------------------------------------------------------------------
 
 // guidanceGlobDirs is the closed set of tracked-file guidance roots
 // (spec 127 R5c: `.claude/agents/**`, `.claude/skills/**`,
-// `plugins/*/skills/**`). Walked live at test time — a newly added
+// `plugins/*/skills/**`, and `project-docs/**`). Walked live at test time — a newly added
 // file under any of these is automatically included (the anti-drift
 // leg is the live filesystem walk itself, not a hardcoded list).
 //
