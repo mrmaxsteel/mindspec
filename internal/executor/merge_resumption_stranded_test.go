@@ -406,6 +406,34 @@ func TestDetectStrandedDriftTopology_IndeterminateWhenBuriedByLaterMerge(t *test
 // lifecycle.FindLandedMerge, asked to identify this bead's own landed
 // merge afterward, still fails closed and refuses to pick a side — no
 // caller anywhere is ever told a false landed-merge identity.
+//
+// SPEC 127 FINAL CONFIRM ROUND (G1-2). The finding held against this test
+// was that the product "reports completion without the uniquely
+// attestable landed identity". The two legs below are what that reading
+// was missing, and they are now DERIVED here rather than left to be
+// re-argued from the prose:
+//
+//	(a) completion is NOT identity-less. The retry's ensureLandedBinding
+//	    records a durable landed-merge binding, and the identity it
+//	    records is UNIQUE by construction rather than chosen: the bead's
+//	    own tip is the exact second parent of exactly ONE merge on the
+//	    spec branch (C2), so the write side has no candidate set to pick
+//	    from. C1, the stranded pair's lower half, merged the PRE-drift
+//	    tip and is therefore not a candidate at all.
+//	(b) the read side's refusal is a DIFFERENT question, and this test
+//	    now pins which one. FindLandedMerge nominates candidates by merge
+//	    SUBJECT, so it sees both C1 and C2 under this bead's name, finds
+//	    they disagree on the second parent, and returns spec 125 FIX-2b's
+//	    ambiguity refusal — BEFORE it ever consults the binding written
+//	    at (a). The refusal is "two same-subject merges disagree", never
+//	    "nothing identified this bead's landing".
+//
+// So no caller is told a false identity (the original claim, unchanged),
+// AND a true one is durably recorded. What remains — the READ side
+// short-circuiting on subject-nominated ambiguity ahead of a write-time
+// binding that would resolve it — is a read-path design question for
+// internal/lifecycle, not a completion-path defect, and is left to a
+// tracked follow-up rather than changed inside a confirm round.
 func TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -438,7 +466,14 @@ func TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned(t
 	// 6. Bare retry: ACCEPTED to report success here (indistinguishable
 	// from the legitimate multi-invocation chain), but must NOT silently
 	// rewrite the topology — the two-merge C1/C2 shape must survive
-	// exactly as it was.
+	// exactly as it was. The binding writes are captured (leg (a) of the
+	// G1-2 note above): reporting success is only acceptable if the
+	// landed identity is durably recorded on the way past.
+	var bindings []map[string]interface{}
+	mergeBindingFn = func(_ string, meta map[string]interface{}) error {
+		bindings = append(bindings, meta)
+		return nil
+	}
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
 		t.Fatalf("the accepted residual reports success (a no-op fresh merge), got: %v", err)
 	}
@@ -454,12 +489,52 @@ func TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned(t
 		t.Fatalf("the un-collapsed C1/C2 pair must survive exactly as it was; got %+v", merges)
 	}
 
-	// The downstream backstop: spec 125's own FindLandedMerge must still
-	// fail closed against this exact ambiguous shape — never attest a
-	// false landed-merge identity just because this residual reported
-	// "success".
-	if _, err := lifecycle.FindLandedMerge(dir, "spec/077-test", "mindspec-x.1"); err == nil {
+	// (a) The landed identity IS recorded, and it is UNIQUE rather than
+	// chosen: exactly one merge on the spec branch carries the bead's own
+	// tip as its exact second parent, and that is the merge the binding
+	// names. Derived from the repo, never from the SHAs this test already
+	// happens to hold.
+	owned, oerr := gitutil.ExactSecondParentMerges(dir, "spec/077-test", driftedBeadTip)
+	if oerr != nil {
+		t.Fatalf("ExactSecondParentMerges: %v", oerr)
+	}
+	if len(owned) != 1 {
+		t.Fatalf("the write side must have exactly ONE candidate — the bead tip is the exact second "+
+			"parent of one merge, so there is nothing to pick between; got %d: %+v", len(owned), owned)
+	}
+	if len(bindings) != 1 {
+		t.Fatalf("completion must record the landed-merge binding before cleanup, got %d writes: %+v", len(bindings), bindings)
+	}
+	gotSHA, _ := bindings[0]["mindspec_landed_merge_sha"].(string)
+	gotParent, _ := bindings[0]["mindspec_landed_second_parent"].(string)
+	if gotSHA != owned[0].SHA || gotParent != driftedBeadTip {
+		t.Errorf("the recorded binding must name the one merge the bead's tip identifies; got sha=%s "+
+			"secondParent=%s, want sha=%s secondParent=%s", gotSHA, gotParent, owned[0].SHA, driftedBeadTip)
+	}
+
+	// (b) The downstream backstop: spec 125's own FindLandedMerge must
+	// still fail closed against this exact ambiguous shape — never attest
+	// a false landed-merge identity just because this residual reported
+	// "success". And it must refuse for the REASON the residual's safety
+	// argument depends on: two same-subject owned merges disagreeing on
+	// the landed tip (FIX-2b), which the read side reaches BEFORE it
+	// consults the binding recorded at (a) — not "nothing identified this
+	// bead at all", which would be a different, weaker statement.
+	_, findErr := lifecycle.FindLandedMerge(dir, "spec/077-test", "mindspec-x.1")
+	if findErr == nil {
 		t.Fatal("FindLandedMerge must still refuse the ambiguous two-merge topology — the accepted residual's own safety depends on this backstop holding")
+	}
+	var noEvidence *lifecycle.LandedMergeNoEvidence
+	if !errors.As(findErr, &noEvidence) || noEvidence.ConflictingSecondParent == "" {
+		t.Fatalf("the refusal must be the conflicting-second-parent ambiguity, got %T: %v", findErr, findErr)
+	}
+	if errors.Is(findErr, lifecycle.ErrLandedMergeNoCandidate) {
+		t.Error("the refusal must never be the zero-candidate sentinel: a merge naming this bead " +
+			"plainly exists, and that sentinel is the one a caller may read as a licence to delete")
+	}
+	if noEvidence.SecondParent != driftedBeadTip {
+		t.Errorf("the refusal must name the drift-side landing as its candidate; got %s, want %s",
+			noEvidence.SecondParent, driftedBeadTip)
 	}
 }
 

@@ -538,6 +538,24 @@ of Scope), `PreviewDeletedPaths`, and the workdir-taking fetch variant
 (bead 3) — non-mutating throughout (unreferenced loose objects only,
 same as the existing preview).
 
+**AMENDED at final review (O3-1, corrected in the confirm round): the
+paragraph above was violated, and it is left standing rather than
+rewritten so the plan records what it declared.** `internal/gitutil` also
+gained FIVE mutating primitives — `UpdateRef`, `ResetSoft`,
+`CommitTreeMerge`, `CommitNoEdit` and `recordMergeSourceMarker` — the
+first of them (`CommitNoEdit`) arriving in bead 6's own implementation
+commit `c9adc141`, which is where "non-mutating throughout" went stale.
+The cause is recorded in full in `spec.md`'s Impacted Domains execution
+bullet, under the same finding: bead-6 fix round 1's never-abort
+amendment (R5(d)) ruled that no product path may abort or checkout over
+a preserved merge, so resumption and drift-collapse needed write
+primitives at the git layer, and they were placed in the package every
+executor git mutation already routes through. The declaration above is
+therefore accurate as of PLAN time and false as of the shipped tree;
+`spec.md` is the artifact of record for what `internal/gitutil` actually
+received, and the preceding sentence — "no divergence requiring a human
+stop" — did not survive contact with bead 6 either.
+
 ## Testing Strategy
 
 - **Real-git temp-repo fixtures, existing house patterns**, with git
