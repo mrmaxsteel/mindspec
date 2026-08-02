@@ -7,10 +7,10 @@ package executor
 // commits inside a worktree". The shipped design discharges that
 // obligation NOT by repeating the check at each call site but at a single
 // funnel: `commitWithExport` calls `checkNoPreservedMerge` once, then
-// delegates to `gitutil.CommitAll`. Every committing path — this
+// delegates to `gitutil.CommitAll`. The committing paths — this
 // package's own internal `commitWithExport` calls and the external
 // `Executor.CommitAll` callers in `internal/approve`, `internal/complete`
-// and `internal/spec` — reaches it through that one function. (No count
+// and `internal/spec` — reach it through that one function. (No count
 // is written here on purpose: a count is the thing this scan replaces.
 // The membership is whatever the scan finds, and the assertions hold
 // over all of it.)
@@ -21,9 +21,10 @@ package executor
 // guarantee, asserting four properties over the repo's real production
 // source:
 //
-//	(1) EVERY resolved `gitutil.CommitAll` call in production code is
-//	    lexically inside `commitWithExport` — the funnel is the only
-//	    production caller of the commit primitive.
+//	(1) Each `gitutil.CommitAll` call THIS SCAN RESOLVES in production code
+//	    is lexically inside `commitWithExport` — among the calls it
+//	    resolves, the funnel is the only production caller of the commit
+//	    primitive.
 //	(2) `commitWithExport` is declared exactly once, and inside it the
 //	    precondition `checkNoPreservedMerge` RUNS BEFORE
 //	    `gitutil.CommitAll`, both DIRECTLY IN ITS OWN SPAN — a call to
@@ -40,15 +41,21 @@ package executor
 //	    called every one of them correctly ordered. A bare call statement
 //	    or a blank-assigned result runs the check and throws its refusal
 //	    away, which is ordering without guarding (see
-//	    commitFunnelDeriveOrder). (2)'s OWN RESIDUAL, on the same footing
-//	    as (3)'s below: it does not prove the precondition's error is
+//	    commitFunnelDeriveOrder). A `goto` written in the funnel body
+//	    breaks the statement-list reading the rule depends on — it can
+//	    enter that list past the check — and is REFUSED outright rather
+//	    than analysed (commitFunnelJump). (2)'s OWN RESIDUAL, on the same
+//	    footing as (3)'s below: it does not prove the precondition's error is
 //	    PROPAGATED — an error bound to a real variable that nothing tests
 //	    is dataflow, which this scan does not do. Pinned by
 //	    `StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen`.
-//	(3) NO production function or method named `CommitAll` can reach git —
+//	(3) No production function or method named `CommitAll` REACHES git —
 //	    the `gitutil` package, or a process start named in this scan's
 //	    finite vocabulary (`commitFunnelSpawnRoutes`) — except through
-//	    `commitWithExport`. This is decided against a call graph derived
+//	    `commitWithExport`, ALONG A CHAIN OF EDGES THIS SCAN RESOLVES.
+//	    That qualifier is the whole content of the residual list below:
+//	    the property is decided over the graph the scan can build, not
+//	    over the program. This is decided against a call graph derived
 //	    from the WHOLE production tree, not from the one method body:
 //	    every call chain this scan can resolve BY NAME is followed, to
 //	    unbounded depth, with edges INTO the funnel cut (reaching git
@@ -56,33 +63,70 @@ package executor
 //	    what guards it). An implementation that reaches git off the funnel
 //	    REDS whether or not it also calls the funnel; one that reaches git
 //	    nowhere passes. Both answers are DERIVED — the MockExecutor is
-//	    exempt because the graph says it cannot reach git, never because a
-//	    written allowlist says so.
+//	    exempt because the graph shows no path from it to git, not because
+//	    a written allowlist says so.
 //	(4) No production caller inside package `gitutil` itself reaches
-//	    `CommitAll` by its bare, same-package name, which would bypass the
-//	    funnel without ever writing the `gitutil.` qualifier this scan
-//	    keys on.
+//	    `CommitAll` by its bare, same-package name — among the calls this
+//	    scan resolves — which would bypass the funnel without ever writing
+//	    the `gitutil.` qualifier this scan keys on.
 //
 // Property (3) is what carries the EXTERNAL callers. This scan has no
 // go/types, so it cannot prove that `exec.CommitAll(...)` in
 // `internal/complete` dispatches to `*MindspecExecutor`. It does not need
-// to: (3) quantifies over EVERY production `CommitAll` implementation in
-// the tree, so whichever one an interface call lands on, that
-// implementation either funnels or cannot reach git.
+// to: (3) ranges over the production `CommitAll` DECLARATIONS this walk
+// parses, so whichever one an interface call lands on, that
+// implementation either funnels or has no path to git along an edge this
+// scan resolves.
+//
+// WHAT THIS SCAN IS, AND WHAT IT IS NOT — the claim, narrowed at the
+// fifth confirm round to what the mechanism delivers. This is a RATCHET
+// AGAINST ACCIDENTAL REGRESSION: it catches the shapes an ordinary
+// refactor produces — a new caller, a renamed helper, a delegation grown
+// one hop longer, a precondition moved or wrapped or deferred — and it
+// holds those shapes in place for the next change. It is NOT a proof
+// against deliberate evasion. It resolves callees by a FINITE, SYNTACTIC
+// enumeration of the ways a call can be WRITTEN: a bare identifier; a
+// selector whose receiver is an identifier the file's import block does
+// not bind; a selector whose receiver is an expression; each of those with
+// or without explicit generic type arguments; and a qualified call through
+// a name that import block does bind to a package inside this module.
+// Go's grammar and scope rules admit ways to name a call that this
+// enumeration does not cover. Five consecutive adversarial rounds on this
+// file each found another one — helper indirection, generic instantiation,
+// a spawn route outside the vocabulary, pointer method expressions,
+// non-identifier receivers, `defer`, `goto`, a receiver shadowing an
+// import name — and the list below is where the ones found so far are
+// written down, in the expectation that it is not finished.
+//
+// The stakes of a residual are bounded in the direction that matters: it
+// means A FUTURE BYPASS MIGHT NOT BE CAUGHT, not that the shipped product
+// is unguarded. The runtime path this file watches over is
+// `commitWithExport`, whose refusal is pinned by
+// `TestCommitAll_RefusesOverAPreservedMerge` and exercised throughout the
+// executor suite. R5(d)(v)'s obligation over what this scan does not
+// resolve rests on review, exactly as R5(b)'s precedent governs the
+// sibling merge-chokepoint scan — this file narrows the enforced claim to
+// what a syntactic scan can carry, and leaves the rest where it has always
+// been rather than pretending the scan is holding it.
 //
 // WHAT "BY NAME" MEANS, AND WHAT EVADES IT. The graph's edges are exactly
 // the callees this scan can name without types: a bare `foo(...)` resolves
-// to every production declaration named `foo` in the CALLING package, and
-// so does ANY selector call whose receiver is not a package qualifier —
-// `x.foo(...)`, the pointer method expression `(*T).foo(...)`, the nested
-// receiver `x.y.foo(...)`, `xs[0].foo(...)`, `v.(*T).foo(...)` (unioned
-// over receivers, which over-approximates in the fail-closed direction).
-// A package qualifier is always a bare identifier, so a selector on an
-// EXPRESSION is never a cross-package call; treating one as unresolvable,
-// which this scan did until its fourth adversarial round, dropped direct
-// statically-named calls silently. `pkg.Foo(...)` resolves through the
-// file's own import block whenever `pkg` names a package inside this
-// module. Depth is unbounded: reachability is a monotone fixed point, so
+// to the production declarations named `foo` in the CALLING package, and
+// so does a selector call whose receiver is not an identifier the file's
+// import block binds — `x.foo(...)`, the pointer method expression
+// `(*T).foo(...)`, the nested receiver `x.y.foo(...)`, `xs[0].foo(...)`,
+// `v.(*T).foo(...)` (unioned over receivers, which over-approximates in
+// the fail-closed direction). A package qualifier is a bare identifier by
+// Go's grammar, so a selector on an EXPRESSION is a method call rather
+// than a cross-package one; treating one as unresolvable, which this scan
+// did until its fourth adversarial round, dropped direct
+// statically-named calls silently. The converse does NOT hold — a bare
+// identifier receiver is not necessarily a package, because a local
+// declaration may shadow an import name, which is the residual named
+// below. `pkg.Foo(...)` resolves through the file's own import block
+// whenever `pkg` names a package inside this module — file-scoped, which
+// is exactly what that residual is about. Depth is unbounded:
+// reachability is a monotone fixed point, so
 // recursion and mutual recursion converge rather than truncating at a hop
 // limit. What that leaves outside — the honest residual, on the same
 // footing as the merge chokepoint scan's:
@@ -94,6 +138,14 @@ package executor
 //     declared in ANOTHER package, since a method name is only matched
 //     inside the calling package — pinned by
 //     `StatedLimit_CrossPackageReceiverHopIsNotTraced`;
+//   - RECEIVERS THAT SHADOW AN IMPORT NAME: the import block is FILE
+//     scoped and the question is not — a function-local declaration may
+//     legally shadow an import, and then `fmt.doCommit(path, msg)` is an
+//     ordinary same-package method call on a local variable that this scan
+//     classifies as a call into package `fmt` and drops. Resolving it
+//     needs lexical scope, which is the go/types-shaped work this ratchet
+//     does not do — pinned by
+//     `StatedLimit_AReceiverShadowingAnImportNameIsNotResolved`;
 //   - DOT-IMPORTS of `gitutil`, which bind names this scan never sees —
 //     pinned by `StatedLimit_ADotImportedGitutilIsNotSeen`;
 //   - FOREIGN CALLBACKS: a func handed to a stdlib or third-party package
@@ -113,17 +165,29 @@ package executor
 // FUNCTION VALUES, DOT-IMPORTS and FOREIGN CALLBACKS are the shapes
 // merge_chokepoint_test.go documents as out of scope for a go/types-free
 // ratchet, and the same precedent (R5(b)) governs. CROSS-PACKAGE
-// RECEIVERS, PROCESS STARTS OUTSIDE THE VOCABULARY and the subject
-// boundary are this scan's own, stated here rather than left to be
-// discovered. Each of the six carries the `StatedLimit` fixture named
-// beside it — a claim this header made one round before the fixtures
-// existed, when three of the six were pinned and the disclosure said all
-// were — so that widening the scan without widening this list REDS. What
-// IS traced — and was not before this property was rebuilt — is the
+// RECEIVERS, IMPORT-SHADOWED RECEIVERS, PROCESS STARTS OUTSIDE THE
+// VOCABULARY and the subject boundary are this scan's own, stated here
+// rather than left to be discovered. Each bullet above carries the
+// `StatedLimit` fixture named beside it — no count is written, because
+// this header once wrote one a round before the fixtures existed, when
+// three of the then-six were pinned and the disclosure said all were — so
+// that widening the scan without widening this list REDS. Property (2)'s
+// dataflow residual, stated with (2) above, is likewise pinned
+// (`StatedLimit_APreconditionWhoseErrorIsNeverTestedIsNotSeen`).
+//
+// AND ONE RESIDUAL THAT IS UNPINNED, NECESSARILY: the enumeration itself.
+// A fixture can pin a shape somebody has thought of; nothing pins the
+// shape nobody has written down yet, and the section above says plainly
+// that more of them exist. Every named limit here has a fixture holding it
+// in place; the FINITENESS of the naming has none, and saying so is the
+// only honest way to close a list that five rounds have each extended.
+//
+// What IS traced — and was not before this property was rebuilt — is the
 // ordinary refactor shape `CommitAll` → same-package helper → process
 // start, at any depth, whether or not the helper call carries explicit
 // generic type arguments, and whether the helper is reached by a bare
-// name or through a receiver EXPRESSION.
+// name or through a receiver EXPRESSION. That shape is the one refactors
+// actually produce, and holding it is what this file is for.
 //
 // AND THE VOCABULARY ITSELF. `commitFunnelSpawnRoutes` is the finite table
 // property (3) means by "reaches git", and its coverage fixture is DERIVED
@@ -139,8 +203,9 @@ package executor
 // exactly two subjects: `gitutil.CommitAll` CALL SITES, and DECLARATIONS
 // NAMED `CommitAll`. A function that commits by assembling `git commit`
 // argv by hand, is not named `CommitAll`, and is not reachable from any
-// declaration that is, is invisible to all four properties — it is not a bypass this scan fails to prove safe, it is a
-// path this scan never looks at. The previous wording claimed that shape
+// declaration that is, is invisible to all four properties — it is not a
+// bypass this scan fails to prove safe, it is a path this scan never looks
+// at. The previous wording claimed that shape
 // was "bounded by property (3)'s fail-closed treatment of any `CommitAll`
 // body that can reach `os/exec` at all"; that was false then and would be
 // false now, because property (3)'s reach analysis STARTS at `CommitAll`
@@ -331,7 +396,12 @@ var commitFunnelModulePath = strings.TrimSuffix(gitutilImportPath, "/internal/gi
 // repo-relative directory that declares them (the call graph's key
 // space), and the set of every identifier the block binds, in-module or
 // not. The second result is what keeps a third-party `x.Foo()` from being
-// mistaken for a same-package method named Foo.
+// mistaken for a same-package method named Foo. It is FILE scoped, and
+// lexical scope is not: a function-local declaration may legally shadow
+// one of these names, and a same-package method call on it is then read as
+// package-qualified and dropped. That is a DISCLOSED residual of this scan
+// rather than an oversight of this function — see the header, and
+// TestCommitFunnel_StatedLimit_AReceiverShadowingAnImportNameIsNotResolved.
 //
 // pkgNames maps a repo-relative directory to the package name its files
 // declare, so an unaliased in-module import resolves to the identifier Go
@@ -624,6 +694,54 @@ func commitFunnelObstruction(stmt ast.Stmt, isPrecondition func(*ast.CallExpr) b
 	return "a construct that is not evaluated on every path to the commit"
 }
 
+// commitFunnelJump names a NON-STRUCTURED JUMP written directly in the
+// funnel's own span. The dominance rule below reads the funnel body as a
+// list of top-level statements entered in order; a `goto` breaks exactly
+// that reading, because it can enter the list PAST the statement holding
+// the precondition and land on a label the commit is reached from. The
+// check is then written above the commit, evaluated unconditionally by the
+// rule's reckoning, and skipped at run time — the same position-versus-
+// execution gap `defer` and `if` opened, arriving through a different
+// construct.
+//
+// The response is refusal, not analysis: a funnel body containing a `goto`
+// anywhere in its direct span cannot have dominance established BY
+// CONSTRUCTION, whatever the jump's target, so this reds rather than
+// attempting to decide which labels are reachable from where. That is
+// fail-closed and it costs nothing real — the production funnel has no
+// `goto`, and a funnel that grows one should be read by a person.
+//
+// `break` and `continue` need no such treatment, and the reason is worth
+// writing down rather than leaving to be re-derived: their targets are the
+// enclosing `for`, `switch` or `select` statement (a label on `break` must
+// name one of those three, never a plain block), and this scan already
+// declines to count anything inside those bodies as unconditionally
+// evaluated. There is no statement they can skip that the dominance rule
+// was counting on. A jump inside a nested closure is likewise not this
+// funnel's control flow — Go has no cross-function `goto` — so the walk
+// stops at a func literal.
+func commitFunnelJump(body *ast.BlockStmt) string {
+	found := ""
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found != "" {
+			return false
+		}
+		switch v := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.BranchStmt:
+			if v.Tok == token.GOTO {
+				found = fmt.Sprintf("a `goto` written in the funnel body, which can jump PAST the statement "+
+					"holding %s to a label the commit is reached from — so no ordering of top-level "+
+					"statements establishes dominance and this scan refuses to guess which labels are "+
+					"reachable", commitPreconditionName)
+			}
+		}
+		return true
+	})
+	return found
+}
+
 // commitFunnelDeriveOrder decides property (2) over the funnel's own body:
 // not merely WHERE the precondition and the commit are written, but whether
 // the precondition RUNS on every path that reaches the commit, before the
@@ -679,6 +797,14 @@ func commitFunnelDeriveOrder(d *commitFunnelDecl, body *ast.BlockStmt, gitutilNa
 		}
 	})
 	if d.preconditionPos == token.NoPos || d.primitivePos == token.NoPos {
+		return
+	}
+
+	// A non-structured jump defeats the statement-list reading the rule
+	// below depends on, so it is answered before that reading is attempted
+	// rather than inside it.
+	if jump := commitFunnelJump(body); jump != "" {
+		d.guardGap = jump
 		return
 	}
 
@@ -853,6 +979,13 @@ func scanCommitFunnelFile(fset *token.FileSet, file *ast.File, name string, pkgN
 		// is unknown, so this resolves by method NAME within the calling
 		// package, unioned over every receiver that declares it (see the
 		// header's residuals for the cross-package receiver this misses).
+		//
+		// Reaching here means the qualifier matched NO import binding. The
+		// two branches above decide the other way on the file's import
+		// table alone, which is FILE scoped: a function-local declaration
+		// shadowing an import name is routed there instead of here and its
+		// edge is dropped. Disclosed in the header and pinned by
+		// TestCommitFunnel_StatedLimit_AReceiverShadowingAnImportNameIsNotResolved.
 		return commitFunnelFuncKey{dir: dir, name: sel}, true
 	}
 
@@ -1781,6 +1914,107 @@ func (c Committer) doCommit(path, msg string) error {
 	}
 }
 
+// TestCommitFunnel_StatedLimit_AReceiverShadowingAnImportNameIsNotResolved
+// pins the OTHER half of the name-resolution boundary its sibling above
+// pins — and it is a NARROWING, found at the fifth confirm round by two
+// independent adversary slots (G1-N5/G3-N5) after the fourth had closed
+// the receiver-EXPRESSION shape.
+//
+// The shape: a selector's receiver IS a bare identifier, so this scan asks
+// the file's import block whether that identifier names a package. The
+// import block is file-scoped and this question is not: Go lets a
+// function-local declaration shadow an import name, and then
+// `fmt.doCommit(path, msg)` is an ordinary same-package method call on a
+// local variable while the import table still answers "that is package
+// fmt". The edge is classified as a call into a package this walk either
+// does not parse (a third-party or stdlib name) or parses under the wrong
+// directory (an in-module one), and either way it is dropped.
+//
+// Resolving it needs lexical scope, which is the go/types-shaped work this
+// ratchet does not do — so the boundary is DISCLOSED and pinned here
+// instead, like the six beside it. The control in the same test is what
+// makes that specific: the identical delegation through a local named `h`
+// IS traced and IS flagged, so the miss is the shadowing, not the shape.
+func TestCommitFunnel_StatedLimit_AReceiverShadowingAnImportNameIsNotResolved(t *testing.T) {
+	// The local `fmt` shadows the file's own `fmt` import, which is used by
+	// note() below, so the import is real rather than a parse-only prop.
+	// Compiles and vets clean.
+	const shadowed = `package complete
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+type shadowExecutor struct{}
+
+type shadowHelper struct{}
+
+func (h shadowHelper) doCommit(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+
+func (s *shadowExecutor) CommitAll(path, msg string) error {
+	fmt := shadowHelper{}
+	return fmt.doCommit(path, msg)
+}
+
+func note(p string) string { return fmt.Sprintf("note %s", p) }
+`
+	const unshadowed = `package complete
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+type shadowExecutor struct{}
+
+type shadowHelper struct{}
+
+func (h shadowHelper) doCommit(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+
+func (s *shadowExecutor) CommitAll(path, msg string) error {
+	h := shadowHelper{}
+	return h.doCommit(path, msg)
+}
+
+func note(p string) string { return fmt.Sprintf("note %s", p) }
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/shadow.go": shadowed,
+	}))
+	if _, flagged := class.bypasses["(*shadowExecutor).CommitAll"]; flagged {
+		t.Fatalf("the scan now resolves a receiver that shadows an import name — that is an IMPROVEMENT, "+
+			"but the header's residual list and spec 127 R5(d)(v) still say it does not. Rewrite the "+
+			"residual (and this test) in the same commit that widened the scan. Flagged: %v", class.bypasses)
+	}
+	// Non-vacuity: the set WAS classified, and the implementation this test
+	// claims is missed is one the classifier actually SAW.
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	if _, seen := class.byLabel["(*shadowExecutor).CommitAll"]; !seen {
+		t.Fatal("the shadowing implementation was never examined, so this test pins nothing")
+	}
+
+	// The control: same delegation, same helper, same reach — only the
+	// local's NAME differs, and this one is caught. Without it the red
+	// above would be consistent with the scan missing the whole fixture.
+	control := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/shadow.go": unshadowed,
+	}))
+	if _, flagged := control.bypasses["(*shadowExecutor).CommitAll"]; !flagged {
+		t.Fatalf("the control must be flagged — an unshadowed local receiver delegating to a committing "+
+			"same-package helper is exactly what property (3) catches. Bypasses: %v", control.bypasses)
+	}
+}
+
 // TestCommitFunnel_StatedLimit_ARawArgvCommitterOutsideCommitAllIsNotSeen
 // pins the WIDEST disclosed boundary — the one the header now names
 // explicitly and an earlier version papered over. This scan's subjects are
@@ -2365,6 +2599,26 @@ func TestCommitFunnel_ScanRejectsAPreconditionThatDoesNotDominateTheCommit(t *te
 			body: `	_ = checkNoPreservedMerge(path, "")
 	return gitutil.CommitAll(path, msg)`,
 			want: "DISCARDS its result",
+		},
+		{
+			// The fifth confirm round's shape (G2). Every construct above
+			// keeps the funnel body a list of statements entered in order
+			// and hides the check inside one of them; this one leaves the
+			// check at the top level, unconditional and undiscarded — where
+			// the dominance rule counts it — and jumps over it. Legal Go:
+			// the skipped `if` scopes its `err` to itself, so the jump
+			// brings no variable into scope, and the label is in the same
+			// block. Compiles and vets clean.
+			name: "goto-past-the-precondition",
+			body: `	if msg == "skip" {
+		goto commit
+	}
+	if err := checkNoPreservedMerge(path, ""); err != nil {
+		return err
+	}
+commit:
+	return gitutil.CommitAll(path, msg)`,
+			want: "`goto` written in the funnel body",
 		},
 		{
 			name: "honest-funnel",

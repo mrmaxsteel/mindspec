@@ -1506,7 +1506,11 @@ producer-wise (AC-7(iv) is a single, whole requirement).
    preserved conflict, its paths, and the re-entry invocation;
    FinalizeEpic's warn-and-continue on the `:589` commit failure
    becomes a refusal for exactly this class (E-r5-2). Shared helper +
-   funnel-reach scan so a new committing path cannot bypass.
+   funnel-reach scan, which REDs on a new committing path it resolves
+   (a ratchet against the shapes a refactor produces, not a proof
+   against deliberate evasion — narrowed at the fifth confirm round;
+   see spec.md R5(d)(v) and the scan file's header for the enumeration
+   it covers and the residuals it discloses).
 6. Tests: **AC-7** all five legs (producer parity via the same evidence
    shape on all three; override fixture binds ONLY `--allow-net-
    deletion` — S3-r2-7; tracker-path refusal leaves the bead tip at the
