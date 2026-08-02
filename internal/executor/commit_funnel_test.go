@@ -81,6 +81,24 @@ package executor
 // where that helper shells out to git, is not traced. What IS traced —
 // and was not before this property was rebuilt — is the ordinary refactor
 // shape `CommitAll` → same-package helper → `os/exec`, at any depth.
+//
+// AND THE RESIDUAL THAT IS NOT ABOUT EDGES AT ALL — the biggest one, and
+// the one an earlier version of this header covered up. This scan has
+// exactly two subjects: `gitutil.CommitAll` CALL SITES, and DECLARATIONS
+// NAMED `CommitAll`. A function that commits by assembling `git commit`
+// argv through `os/exec` by hand, is not named `CommitAll`, and is not
+// reachable from any declaration that is, is invisible to all four
+// properties — it is not a bypass this scan fails to prove safe, it is a
+// path this scan never looks at. The previous wording claimed that shape
+// was "bounded by property (3)'s fail-closed treatment of any `CommitAll`
+// body that can reach `os/exec` at all"; that was false then and would be
+// false now, because property (3)'s reach analysis STARTS at `CommitAll`
+// declarations and can only ever describe what they can get to. R5(d)(v)'s
+// obligation over that shape rests on review and on the merge-producer
+// scan's own coverage, not on this file. Naming it is the point: the
+// defect this artifact exists to end is a claim outrunning its mechanism,
+// and a residual list that quietly drops the widest gap is that same
+// defect wearing a disclosure's clothes.
 
 import (
 	"fmt"
@@ -992,6 +1010,113 @@ func stage(path, msg string) error {
 	for _, hop := range []string{"Persist", "stage", "gitutil.CommitAll"} {
 		if !strings.Contains(joined, hop) {
 			t.Errorf("the witness must name every hop it followed; %q is missing %q", joined, hop)
+		}
+	}
+}
+
+// TestCommitFunnel_StatedLimit_CrossPackageReceiverHopIsNotTraced PINS A
+// DISCLOSED BOUNDARY rather than proving coverage: it asserts what this
+// scan does NOT catch, so the header's residual list cannot quietly go
+// stale in either direction. If someone later widens the claim without
+// widening the scan, nothing here changes and the header lies; if someone
+// widens the SCAN, this test REDS and forces the residual to be rewritten
+// in the same commit.
+//
+// The shape: `CommitAll` delegates to a method on a receiver whose type is
+// declared in ANOTHER package, and that method shells out. Resolution is
+// by name within the CALLING package, so the hop resolves to nothing and
+// the edge is dropped. Contrast the same delegation with the helper in the
+// same package, which IS caught — see
+// TestCommitFunnel_ScanCatchesCommitAllDelegatingToACommittingHelper.
+func TestCommitFunnel_StatedLimit_CrossPackageReceiverHopIsNotTraced(t *testing.T) {
+	caller := `package complete
+
+type crossExecutor struct{ h helpers.Committer }
+
+func (c *crossExecutor) CommitAll(path, msg string) error {
+	return c.h.doCommit(path, msg)
+}
+`
+	helper := `package helpers
+
+import "os/exec"
+
+type Committer struct{}
+
+func (c Committer) doCommit(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go":   commitFunnelFixtureFunnel,
+		"internal/complete/cross.go":    caller,
+		"internal/helpers/committer.go": helper,
+	}))
+	if _, flagged := class.bypasses["(*crossExecutor).CommitAll"]; flagged {
+		t.Fatalf("the scan now traces a cross-package receiver hop — that is an IMPROVEMENT, but the "+
+			"header's residual list still says it does not. Rewrite the residual (and this test) in the "+
+			"same commit that widened the scan. Flagged: %v", class.bypasses)
+	}
+	// Non-vacuity: a fixture that silently stopped being classified at all
+	// would also produce no flag. The honest funnel in the same set must
+	// still read as delegating, and the bypassing implementation must be
+	// one the classifier actually SAW.
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	if _, seen := class.byLabel["(*crossExecutor).CommitAll"]; !seen {
+		t.Fatal("the cross-package implementation was never examined, so this test pins nothing")
+	}
+}
+
+// TestCommitFunnel_StatedLimit_ARawArgvCommitterOutsideCommitAllIsNotSeen
+// pins the WIDEST disclosed boundary — the one the header now names
+// explicitly and an earlier version papered over. This scan's subjects are
+// gitutil.CommitAll call sites and declarations named CommitAll; a
+// function that assembles `git commit` argv by hand, is named something
+// else, and is reachable from no CommitAll implementation is not a bypass
+// the scan fails to prove safe, it is a path the scan never looks at.
+//
+// This test exists so that claim stays true by mechanism. It REDS the day
+// the scan's subject set widens, which is exactly when the header must
+// change.
+func TestCommitFunnel_StatedLimit_ARawArgvCommitterOutsideCommitAllIsNotSeen(t *testing.T) {
+	const raw = `package complete
+
+import "os/exec"
+
+func syncNow(path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+`
+	scans := commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/sync.go":   raw,
+	})
+	class := commitFunnelClassify(scans)
+	if len(class.bypasses) != 0 {
+		t.Fatalf("the scan now reaches a committing path that is not a %s implementation — widen the "+
+			"header's residual in the same commit: %v", commitPrimitiveName, class.bypasses)
+	}
+	// Non-vacuity: the set WAS classified (the honest funnel reads as
+	// delegating), and the raw-argv committer is genuinely unseen rather
+	// than merely unflagged — no property has a subject in that file at
+	// all: it declares no CommitAll and calls no gitutil primitive.
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	for _, sc := range scans {
+		for _, c := range sc.qualifiedPrimitiveCalls {
+			if strings.HasPrefix(c.file, "internal/complete/") {
+				t.Errorf("unexpected primitive call site resolved in the raw-argv fixture: %+v", c)
+			}
+		}
+		for _, d := range sc.primitiveDecls {
+			if strings.HasPrefix(d.file, "internal/complete/") {
+				t.Errorf("the raw-argv fixture must declare no %s: %+v", commitPrimitiveName, d.label)
+			}
 		}
 	}
 }

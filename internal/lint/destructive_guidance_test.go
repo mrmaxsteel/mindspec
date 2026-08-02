@@ -873,9 +873,24 @@ func fset(u *rUniverse, pos token.Pos) int {
 // `plugins/*/skills/**`). Walked live at test time — a newly added
 // file under any of these is automatically included (the anti-drift
 // leg is the live filesystem walk itself, not a hardcoded list).
+//
+// `project-docs/**` was ADDED at spec 127's final confirm round (F3):
+// this spec's own fix rounds shipped `project-docs/user/guides/
+// merge-safety.md`, an OPERATOR-FACING guidance file telling a human
+// which git commands to run around a preserved merge — the exact class
+// this sweep exists for — into a tree no glob reached. A sweep that
+// misses the guidance its own spec shipped is the enumeration defect
+// this spec is about, one directory over. The whole `project-docs`
+// tree is taken rather than the one `user/guides` subdirectory, for
+// the same reason these roots are walked live rather than listed: the
+// next guidance file will not be added where the last one was.
 func guidanceGlobDirs(root string) []string {
 	var dirs []string
-	for _, d := range []string{filepath.Join(root, ".claude", "agents"), filepath.Join(root, ".claude", "skills")} {
+	for _, d := range []string{
+		filepath.Join(root, ".claude", "agents"),
+		filepath.Join(root, ".claude", "skills"),
+		filepath.Join(root, "project-docs"),
+	} {
 		if _, err := os.Stat(d); err == nil {
 			dirs = append(dirs, d)
 		}
