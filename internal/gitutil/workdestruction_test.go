@@ -1932,14 +1932,22 @@ func TestHistoryTruncated_BenignGraftsFileDoesNotOverRefuse(t *testing.T) {
 // NEW-G1sub-1): fix round 2's hasReplaceRefs hardcoded the
 // `refs/replace/` prefix, but git honors GIT_REPLACE_REF_BASE and
 // resolves a replacement's ref name by concatenating that variable with
-// the target OID with NO normalization (verified empirically: a base of
-// "refs/myreplace" — no trailing slash — still works as a REAL
-// replacement, at the literal ref path "refs/myreplace<hex>" (base plus
-// OID, one concatenation — spec 127 bead-1 fix round 5, NEW-G1sub-7: a
-// prior version of this comment doubled the base to
-// "refs/myreplacemyreplace<hex>", caught by direct verification against
-// `git for-each-ref`), which a for-each-ref scan of either
-// "refs/replace/" or "refs/myreplace/" misses). So a genuinely truncating
+// the target OID, so a replacement can live at a ref path a scan of
+// "refs/replace/" never visits. This fixture relocates the base to
+// "refs/myreplace/", putting the replacement at
+// "refs/myreplace/<hex>" — outside the hardcoded namespace, which the
+// fixture invariants below assert directly rather than assume.
+//
+// GIT-VERSION NOTE (spec 127 CI-identity fix round): this fixture used to
+// relocate to "refs/myreplace" with NO trailing slash, on the strength of
+// an empirical check that git concatenated it unnormalized into the
+// literal ref "refs/myreplace<hex>". That check was run against git
+// 2.51 and no longer holds: git 2.54+ aborts outright on a slashless
+// replace-ref base — `BUG: refs.c: ref pattern must end in a trailing
+// slash when trimming` — killing even a bare `git for-each-ref`, which
+// turned this test red on CI (git 2.54) while it stayed green locally
+// (git 2.51). The trailing-slash base exercises the same relocation
+// property this test is named for, on every git version. So a genuinely truncating
 // relocated replace ref reported "not truncated" under the old design —
 // the exact fail-open this predicate exists to refuse, reappearing
 // inside the mechanism fix round 2 added to close it. historyTruncated's
@@ -1960,10 +1968,11 @@ func TestHistoryTruncated_RelocatedReplaceRefStillDetected(t *testing.T) {
 	before := strings.TrimSpace(neRunGit(t, dir, "rev-list", "--count", target))
 
 	// Relocate the ref base BEFORE creating the replace ref, so the ref
-	// this `git replace --graft` creates lives outside refs/replace/ —
-	// deliberately with NO trailing slash, matching the shape verified
-	// to still work as a real replacement.
-	t.Setenv("GIT_REPLACE_REF_BASE", "refs/myreplace")
+	// this `git replace --graft` creates lives outside refs/replace/.
+	// The trailing slash is REQUIRED by git 2.54+ (see the doc comment's
+	// git-version note); the relocation itself is what this test needs,
+	// and the fixture invariants below prove it actually took effect.
+	t.Setenv("GIT_REPLACE_REF_BASE", "refs/myreplace/")
 	tip := strings.TrimSpace(neRunGit(t, dir, "rev-parse", target))
 	neRunGit(t, dir, "replace", "--graft", tip)
 

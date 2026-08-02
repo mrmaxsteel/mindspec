@@ -547,6 +547,13 @@ func TestRepairStrandedDriftCollapse_AcceptedResidualWhenProofExternallyPruned(t
 func TestDanglingCollapsedMergeExists_MessageMismatchIsNotProof(t *testing.T) {
 	dir := t.TempDir()
 	runGitIn(t, dir, "init", "-q")
+	// REPO-LOCAL identity, not merely runGitIn's GIT_AUTHOR_*/
+	// GIT_COMMITTER_* env: that env reaches only the git commands runGitIn
+	// spawns, never the one gitutil.CommitTreeMerge spawns below. Repo-local
+	// config is the one tier both read — see newTempRepo (executor_test.go).
+	runGitIn(t, dir, "config", "user.email", "test@example.com")
+	runGitIn(t, dir, "config", "user.name", "test")
+	runGitIn(t, dir, "config", "commit.gpgsign", "false")
 	runGitIn(t, dir, "commit", "--allow-empty", "-m", "root")
 	parent1 := refHash(t, dir, "HEAD")
 	runGitIn(t, dir, "checkout", "-b", "side")

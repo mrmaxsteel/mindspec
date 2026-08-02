@@ -102,6 +102,15 @@ func initGitRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-b", "main")
+	// REPO-LOCAL identity, not merely run()'s GIT_AUTHOR_*/GIT_COMMITTER_*
+	// env: that env reaches only the git commands run() itself spawns.
+	// Primitives under test here spawn their OWN git (CommitTreeMerge,
+	// MergeInto, MergeBranch all create commits), and those subprocesses
+	// see the ambient config tier only — present on a developer's machine,
+	// absent on a CI runner. Repo-local config is the one tier both read.
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	run("config", "commit.gpgsign", "false")
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644)
 	run("add", ".")
 	run("commit", "-m", "initial")

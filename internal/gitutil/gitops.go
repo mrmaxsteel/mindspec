@@ -1001,6 +1001,19 @@ func CommitTreeMerge(workdir, tree, parent1, parent2, message string) (string, e
 	cmd := execCommand("git", gitArgs(workdir, argv...)...)
 	out, err := cmd.Output()
 	if err != nil {
+		// Surface git's OWN stderr (workdestruction.go's convention).
+		// `cmd.Output()` discards it, so every failure here used to
+		// reach the operator as a bare "exit status 128" naming neither
+		// the cause nor a remedy — the shape that made the identity-less
+		// failure of this call unreadable in CI logs. `commit-tree`
+		// fails for reasons the operator alone can fix (no configured
+		// git identity, a signing key that is missing or locked), and
+		// git's own message names each of them with the exact command
+		// to run; dropping it is dropping the whole diagnostic.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("commit-tree in %s: %w: %s", workdir, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
 		return "", fmt.Errorf("commit-tree in %s: %w", workdir, err)
 	}
 	return strings.TrimSpace(string(out)), nil

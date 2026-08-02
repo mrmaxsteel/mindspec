@@ -70,6 +70,20 @@ func adoptInitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	adoptGitRun(t, dir, "init", "-q", "-b", "main")
+	// REPO-LOCAL identity, not merely the GIT_AUTHOR_*/GIT_COMMITTER_* env
+	// adoptGitRunAllowFail sets: that env reaches only the git commands
+	// THIS helper spawns, never the ones the PRODUCT spawns. AdoptSpec's
+	// finalize-export commit (gitutil.CommitPaths) is a subprocess of the
+	// test binary, so it sees the ambient config tier only — present on a
+	// developer's machine, absent on a CI runner, which is how an
+	// identity-less commit failure stayed invisible locally and turned the
+	// whole TestAdoptSpec_* family red on CI. Repo-local config is the one
+	// tier both the helper's git and the product's git read.
+	// Mirrors internal/complete/fault_injection_realgit_test.go's
+	// setupRealGitFaultFixture.
+	adoptGitRun(t, dir, "config", "user.email", "test@example.invalid")
+	adoptGitRun(t, dir, "config", "user.name", "test")
+	adoptGitRun(t, dir, "config", "commit.gpgsign", "false")
 	adoptWriteFile(t, dir, "README.md", "root\n")
 	adoptGitRun(t, dir, "add", ".")
 	adoptGitRun(t, dir, "commit", "-q", "-m", "root commit")
