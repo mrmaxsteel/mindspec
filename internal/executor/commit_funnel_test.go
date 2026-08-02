@@ -31,7 +31,8 @@ package executor
 //	    because a closure's body may never run at the point the funnel
 //	    commits.
 //	(3) NO production function or method named `CommitAll` can reach git —
-//	    the `gitutil` package or `os/exec` — except through
+//	    the `gitutil` package, or a process start named in this scan's
+//	    finite vocabulary (`commitFunnelSpawnRoutes`) — except through
 //	    `commitWithExport`. This is decided against a call graph derived
 //	    from the WHOLE production tree, not from the one method body:
 //	    every call chain this scan can resolve BY NAME is followed, to
@@ -65,30 +66,39 @@ package executor
 // than truncating at a hop limit. What that leaves outside — the honest
 // residual, on the same footing as the merge chokepoint scan's:
 //
-//   - a call through a function VALUE (a var, a struct field, a
-//     parameter) or through reflection, where no callee name is written;
-//   - a method call whose receiver's type is declared in ANOTHER package,
-//     since the method name is only matched inside the calling package;
-//   - a dot-imported `gitutil`, which binds names this scan never sees;
-//   - a callback handed to a stdlib or third-party package and invoked
-//     from there, since only this module's source is parsed.
+//   - FUNCTION VALUES: a call through a var, a struct field, a parameter,
+//     or through reflection, where no callee name is written;
+//   - CROSS-PACKAGE RECEIVERS: a method call whose receiver's type is
+//     declared in ANOTHER package, since a method name is only matched
+//     inside the calling package;
+//   - DOT-IMPORTS of `gitutil`, which bind names this scan never sees;
+//   - FOREIGN CALLBACKS: a func handed to a stdlib or third-party package
+//     and invoked from there, since only this module's source is parsed;
+//   - PROCESS STARTS OUTSIDE THE VOCABULARY: "reaches git" is the finite,
+//     named set in `commitFunnelSpawnRoutes`, not a general effect
+//     analysis, so a third-party exec wrapper — or a stdlib route nobody
+//     has added to that table — is not a reach this scan can see.
 //
-// The first, third and fourth are the shapes merge_chokepoint_test.go
-// documents as out of scope for a go/types-free ratchet, and the same
-// precedent (R5(b)) governs. The second is this graph's own boundary and
-// is stated here rather than left to be discovered: a `CommitAll` that
-// delegates to a helper method on a type declared in a different package,
-// where that helper shells out to git, is not traced. What IS traced —
-// and was not before this property was rebuilt — is the ordinary refactor
-// shape `CommitAll` → same-package helper → `os/exec`, at any depth.
+// (Named, not numbered, deliberately: an ordinal list cross-referenced by
+// position rots the first time an entry is inserted, which is the same
+// failure mode as the call-site enumeration this whole file replaced.)
+// FUNCTION VALUES, DOT-IMPORTS and FOREIGN CALLBACKS are the shapes
+// merge_chokepoint_test.go documents as out of scope for a go/types-free
+// ratchet, and the same precedent (R5(b)) governs. CROSS-PACKAGE
+// RECEIVERS and PROCESS STARTS OUTSIDE THE VOCABULARY are this scan's own
+// boundaries, stated here rather than left to be discovered, and each is
+// pinned by a `StatedLimit` fixture below so that widening the scan
+// without widening this list REDS. What IS traced — and was not before
+// this property was rebuilt — is the ordinary refactor shape `CommitAll`
+// → same-package helper → process start, at any depth, whether or not the
+// helper call carries explicit generic type arguments.
 //
 // AND THE RESIDUAL THAT IS NOT ABOUT EDGES AT ALL — the biggest one, and
 // the one an earlier version of this header covered up. This scan has
 // exactly two subjects: `gitutil.CommitAll` CALL SITES, and DECLARATIONS
 // NAMED `CommitAll`. A function that commits by assembling `git commit`
-// argv through `os/exec` by hand, is not named `CommitAll`, and is not
-// reachable from any declaration that is, is invisible to all four
-// properties — it is not a bypass this scan fails to prove safe, it is a
+// argv by hand, is not named `CommitAll`, and is not reachable from any
+// declaration that is, is invisible to all four properties — it is not a bypass this scan fails to prove safe, it is a
 // path this scan never looks at. The previous wording claimed that shape
 // was "bounded by property (3)'s fail-closed treatment of any `CommitAll`
 // body that can reach `os/exec` at all"; that was false then and would be
@@ -128,6 +138,31 @@ const (
 
 	osExecImportPath = "os/exec"
 )
+
+// commitFunnelSpawnRoute is one stdlib way a body can start a process —
+// and therefore reach `git` — without ever naming the gitutil package.
+type commitFunnelSpawnRoute struct {
+	importPath string
+	// fallback is the identifier an unaliased import binds, used when the
+	// file carries no matching import line (this file's own fixture
+	// snippets are syntax-only).
+	fallback string
+	funcs    []string
+}
+
+// commitFunnelSpawnRoutes is this scan's ENTIRE vocabulary for "reaches
+// git without going through gitutil". It is finite and stdlib-only on
+// purpose, and that is a limit, not an oversight: a body that starts a
+// process through a THIRD-PARTY runner, or through a helper in a package
+// this walk does not parse, names none of these and is not seen. Stated
+// in the header's residuals rather than left implicit — the previous
+// version of this scan hedged the same fact as "at this scan's
+// vocabulary" and never said what the vocabulary was.
+var commitFunnelSpawnRoutes = []commitFunnelSpawnRoute{
+	{importPath: osExecImportPath, fallback: "exec", funcs: []string{"Command", "CommandContext"}},
+	{importPath: "os", fallback: "os", funcs: []string{"StartProcess"}},
+	{importPath: "syscall", fallback: "syscall", funcs: []string{"Exec", "ForkExec", "StartProcess"}},
+}
 
 // commitFunnelCall is one call site the scan resolved, labelled with the
 // function-like construct that DIRECTLY contains it (never inherited from
@@ -169,9 +204,11 @@ type commitFunnelDecl struct {
 	// gitutilCalls names every `<gitutil>.X` function the body calls, in
 	// source order — the evidence that a body can reach git directly.
 	gitutilCalls []string
-	// callsOSExec is true when the body invokes os/exec, the other way a
-	// body can reach git without naming the gitutil package.
-	callsOSExec bool
+	// spawnEvidence names the process-start route the body invokes
+	// (`os/exec.Command`, `os.StartProcess`, …) — the other way a body can
+	// reach git without naming the gitutil package. Empty when the body
+	// starts no process this scan's vocabulary recognises.
+	spawnEvidence string
 	// callees are the production declarations this body calls that the
 	// scan can resolve BY NAME (see the header's residual list for what
 	// that excludes). Deduplicated, in first-written order.
@@ -344,11 +381,25 @@ func commitFunnelWalkSpans(root ast.Node, fset *token.FileSet, label, name strin
 func commitFunnelCalleeName(call *ast.CallExpr) (pkg, sel string) {
 	fun := call.Fun
 	for {
-		p, ok := fun.(*ast.ParenExpr)
-		if !ok {
-			break
+		switch v := fun.(type) {
+		case *ast.ParenExpr:
+			fun = v.X
+			continue
+		// An EXPLICITLY INSTANTIATED generic callee — `commitG[string](…)`
+		// or `commitG[K, V](…)` — is an ordinary named call wearing type
+		// arguments. Unwrapping to the underlying name resolves it exactly
+		// as the inferred form `commitG(…)` already resolved, so whether a
+		// bypass writes its type arguments cannot decide whether it is
+		// seen. (Found by auditing this scan against shapes a hostile
+		// reader would reach for, after the rebuild.)
+		case *ast.IndexExpr:
+			fun = v.X
+			continue
+		case *ast.IndexListExpr:
+			fun = v.X
+			continue
 		}
-		fun = p.X
+		break
 	}
 	switch v := fun.(type) {
 	case *ast.Ident:
@@ -369,7 +420,18 @@ func commitFunnelCalleeName(call *ast.CallExpr) (pkg, sel string) {
 // for the single-file fixtures below).
 func scanCommitFunnelFile(fset *token.FileSet, file *ast.File, name string, pkgNames map[string]string) commitFunnelFileScan {
 	gitutilName := gitutilLocalName(file)
-	osExecName := commitFunnelImportLocalName(file, osExecImportPath, "exec")
+	// Each spawn route resolved through the file's OWN name for it, so an
+	// aliased `import osexec "os/exec"` is not a way past this.
+	spawnFuncs := map[string]map[string]string{}
+	for _, r := range commitFunnelSpawnRoutes {
+		local := commitFunnelImportLocalName(file, r.importPath, r.fallback)
+		if spawnFuncs[local] == nil {
+			spawnFuncs[local] = map[string]string{}
+		}
+		for _, fn := range r.funcs {
+			spawnFuncs[local][fn] = fmt.Sprintf("%s.%s", r.importPath, fn)
+		}
+	}
 	dir := filepath.ToSlash(filepath.Dir(name))
 	importDirs, importBound := commitFunnelImportDirs(file, pkgNames)
 
@@ -452,8 +514,10 @@ func scanCommitFunnelFile(fset *token.FileSet, file *ast.File, name string, pkgN
 			switch {
 			case pkg == gitutilName:
 				d.gitutilCalls = append(d.gitutilCalls, sel)
-			case pkg == osExecName && (sel == "Command" || sel == "CommandContext"):
-				d.callsOSExec = true
+			default:
+				if ev := spawnFuncs[pkg][sel]; ev != "" && d.spawnEvidence == "" {
+					d.spawnEvidence = ev
+				}
 			}
 			// A method call on a receiver (`g.commitWithExport(...)`)
 			// reads as a qualified pair whose package half is the
@@ -575,8 +639,8 @@ func commitFunnelReachesGit(d *commitFunnelDecl) string {
 	if len(d.gitutilCalls) > 0 {
 		return fmt.Sprintf("gitutil.%s", d.gitutilCalls[0])
 	}
-	if d.callsOSExec {
-		return osExecImportPath
+	if d.spawnEvidence != "" {
+		return d.spawnEvidence
 	}
 	return ""
 }
@@ -948,7 +1012,7 @@ func (a *altExecutor) doCommit(path, msg string) error {
 		t.Fatalf("a CommitAll that commits through a same-package helper must be caught; flagged: %v", class.bypasses)
 	}
 	joined := strings.Join(witness, " → ")
-	if !strings.Contains(joined, "doCommit") || !strings.HasSuffix(joined, osExecImportPath) {
+	if !strings.Contains(joined, "doCommit") || !strings.HasSuffix(joined, osExecImportPath+".Command") {
 		t.Errorf("the failure must carry the chain that reaches git, got %q", joined)
 	}
 	if _, ok := class.bypasses["(*MindspecExecutor).CommitAll"]; ok {
@@ -1011,6 +1075,121 @@ func stage(path, msg string) error {
 		if !strings.Contains(joined, hop) {
 			t.Errorf("the witness must name every hop it followed; %q is missing %q", joined, hop)
 		}
+	}
+}
+
+// TestCommitFunnel_ScanResolvesAnExplicitlyInstantiatedGenericCallee and
+// TestCommitFunnel_ScanCatchesANonExecProcessStart are the two shapes a
+// post-rebuild audit of this file against a hostile reader turned up —
+// both were live evasions of the rebuilt property (3), both are now
+// closed, and both are pinned here so they stay closed.
+//
+// The first: whether a bypass writes its type arguments cannot be allowed
+// to decide whether the scan sees it. `commitG(path, msg)` resolved; the
+// identical `commitG[string](path, msg)` did not, because the callee is
+// an IndexExpr rather than an Ident.
+func TestCommitFunnel_ScanResolvesAnExplicitlyInstantiatedGenericCallee(t *testing.T) {
+	const generic = `package complete
+
+import "os/exec"
+
+type genExecutor struct{}
+
+func (g *genExecutor) CommitAll(path, msg string) error {
+	return commitG[string](path, msg)
+}
+
+func commitG[T any](path, msg string) error {
+	return exec.Command("git", "-C", path, "commit", "-am", msg).Run()
+}
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+		"internal/complete/gen.go":    generic,
+	}))
+	witness, flagged := class.bypasses["(*genExecutor).CommitAll"]
+	if !flagged {
+		t.Fatalf("an explicitly instantiated generic callee must resolve like any other named call; "+
+			"flagged: %v", class.bypasses)
+	}
+	if joined := strings.Join(witness, " → "); !strings.Contains(joined, "commitG") {
+		t.Errorf("the witness must name the generic helper it followed, got %q", joined)
+	}
+}
+
+// The second: property (3)'s reach vocabulary was exactly `os/exec`, so a
+// body that starts `git` through `syscall.Exec` or `os.StartProcess` —
+// stdlib, no third-party anything — read as unable to reach git at all.
+// The vocabulary is now the finite set in commitFunnelSpawnRoutes, and
+// this test pins every route in it by DERIVING the fixture from that
+// table, so a route added there without a fixture cannot go unexercised.
+func TestCommitFunnel_ScanCatchesANonExecProcessStart(t *testing.T) {
+	for _, route := range commitFunnelSpawnRoutes {
+		for _, fn := range route.funcs {
+			t.Run(route.importPath+"."+fn, func(t *testing.T) {
+				src := fmt.Sprintf(`package complete
+
+import %q
+
+type spawnExecutor struct{}
+
+func (s *spawnExecutor) CommitAll(path, msg string) error {
+	return spawnGit(path, msg)
+}
+
+func spawnGit(path, msg string) error {
+	_, _ = %s.%s()
+	return nil
+}
+`, route.importPath, route.fallback, fn)
+				class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+					"internal/executor/funnel.go": commitFunnelFixtureFunnel,
+					"internal/complete/spawn.go":  src,
+				}))
+				witness, flagged := class.bypasses["(*spawnExecutor).CommitAll"]
+				if !flagged {
+					t.Fatalf("a CommitAll reaching a process start through %s.%s must be caught; flagged: %v",
+						route.importPath, fn, class.bypasses)
+				}
+				want := route.importPath + "." + fn
+				if joined := strings.Join(witness, " → "); !strings.HasSuffix(joined, want) {
+					t.Errorf("the witness must name the route it found; got %q, want it to end in %q", joined, want)
+				}
+			})
+		}
+	}
+}
+
+// TestCommitFunnel_StatedLimit_AThirdPartyProcessRunnerIsNotSeen pins the
+// residual the route table above leaves standing: the vocabulary is
+// stdlib-only, so a body that starts git through a third-party runner
+// names none of it. Disclosed in the header; pinned here so widening the
+// table without widening the disclosure REDS.
+func TestCommitFunnel_StatedLimit_AThirdPartyProcessRunnerIsNotSeen(t *testing.T) {
+	const thirdParty = `package complete
+
+import "github.com/example/runner"
+
+type vendoredExecutor struct{}
+
+func (v *vendoredExecutor) CommitAll(path, msg string) error {
+	return runner.Run("git", "-C", path, "commit", "-am", msg)
+}
+`
+	class := commitFunnelClassify(commitFunnelScanFixtures(t, map[string]string{
+		"internal/executor/funnel.go":   commitFunnelFixtureFunnel,
+		"internal/complete/vendored.go": thirdParty,
+	}))
+	if _, flagged := class.bypasses["(*vendoredExecutor).CommitAll"]; flagged {
+		t.Fatalf("the scan now sees a third-party process runner — widen the header's residual in the "+
+			"same commit: %v", class.bypasses)
+	}
+	if class.delegating != 1 {
+		t.Fatalf("the fixture set was not classified — expected the honest funnel to count as "+
+			"delegating, got %d", class.delegating)
+	}
+	if _, seen := class.byLabel["(*vendoredExecutor).CommitAll"]; !seen {
+		t.Fatal("the vendored implementation was never examined, so this test pins nothing")
 	}
 }
 
@@ -1354,7 +1533,7 @@ func (r *recordingExecutor) CommitAll(path, msg string) error {
 	if !ok {
 		t.Fatalf("missing the recording implementation; got %v", byLabel)
 	}
-	if len(rec.gitutilCalls) != 0 || rec.callsOSExec {
+	if len(rec.gitutilCalls) != 0 || rec.spawnEvidence != "" {
 		t.Error("a recording double must be derived as provably non-committing, not exempted by name")
 	}
 }
@@ -1383,8 +1562,8 @@ func (s *shellExecutor) CommitAll(path, msg string) error {
 	if d.callsFunnel {
 		t.Error("the shelling implementation must NOT read as delegating")
 	}
-	if !d.callsOSExec {
-		t.Error("a CommitAll that shells out through os/exec must be derived as able to reach git")
+	if d.spawnEvidence != osExecImportPath+".Command" {
+		t.Errorf("a CommitAll that shells out through os/exec must be derived as able to reach git; got %q", d.spawnEvidence)
 	}
 }
 
