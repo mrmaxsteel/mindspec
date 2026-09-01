@@ -233,15 +233,39 @@ fallback at `:1210`), not the bead worktree. The protocol:
    moves; a preserved conflict resumes INTO the 127 `--resolve-merge`
    machinery. (T): terminal marker clear on BOTH the
    ordinary and landed-merge-reconcile completion paths. **Re-entry
-   discriminator (round-5 G3.2), total over the legitimate states**: with
-   marker `M*` present, tip == `M*` → the published stage COMPLETED — its
-   kind is identified structurally (diff `M*` vs `M*^` confined to the named
-   artifact → it is `D`, continue at the merge; otherwise it is `C`,
-   continue at R then S), with preserved-merge/landed states identifying
+   discriminator (round-5 G3.2; made TOTAL under empty diffs at round-6
+   G1)**: stage kind is encoded DURABLY IN THE COMMIT OBJECT itself — every
+   `C` and `D` carries a pinned commit-message trailer (`Mindspec-Stage:
+   materialization` / `Mindspec-Stage: artifact-sync`; exact key pinned in
+   bead 6, read via the existing `CommitMessageBody` primitive) — never
+   inferred from the tree diff, which is ambiguous when `C` is a clean-tree
+   completion or `D` is a no-op sync. Empty stages are ELIDED (pinned
+   decision, matching HEAD's no-op-commit behavior): a `T` equal to the
+   tip's tree builds no `C`, an unchanged artifact builds no `D` — the
+   discriminator stays total because a marker only ever points at a
+   trailer-carrying commit, and whichever stages exist appear in the parent
+   chain with their kinds legible; R and S run exactly once each, neither
+   skipped nor looped, whether or not their commits exist. With marker `M*`
+   present: tip == `M*` → the published stage COMPLETED — its kind is read
+   from the trailer (`C` → continue at R then S; `D` → continue at the ONE
+   authoritative S-resume route: index refresh to `D` + the genuine-dirt
+   classifier, THEN merge — round-6 G3: no continue-at-the-merge shortcut
+   exists on any re-entry), with preserved-merge/landed states identifying
    G/T; tip == `M*^` → the write-ahead is UNFINISHED — finish the bead-ref
    advance (expected-old = tip) and continue; tip ∉ {`M*`, `M*^`} → FOREIGN:
    delete the marker, proceed as a normal run, the stale-SHA gate evaluating
-   exactly as today — the cannot-launder boundary is retained. Every run's
+   exactly as today — the cannot-launder boundary is retained. **Marker
+   publication is itself race-safe (round-6 G2)**: absent→`C` publishes via
+   `update-ref` CREATE semantics (atomically fails if the ref exists),
+   `C→D` via expected-old — per-ref CAS, deliberately NOT bead 1's phase
+   lock (the named instrument choice: the materialization machinery stays
+   uncoupled from the phase-metadata lock, so no lock-ordering edge exists
+   between the two subsystems). A failed marker publication (unexpected
+   existing value: another invocation in flight, or a leftover) REFUSES
+   with an ADR-0035 line naming the marker — one invocation can never
+   overwrite another's recovery evidence; a failed bead-ref advance leaves
+   the already-published marker in place as write-ahead evidence for the
+   next run's discriminator. Every run's
    early sequence, before the panel gate: (1) landed-merge reconciliation
    detection FIRST (spec-119 detection; if landed → reconcile path, clearing
    any orphaned marker — round-4 G1.3); (2) the discriminator above; resume
@@ -851,15 +875,19 @@ Beads 2 and 3 (the post-states the tails must agree with).
    unchanged-at-tip, never absent-from-`T`) and the staged materialization
    machinery (round-4 G1, write-ahead form round-5 G1): `commit-tree`
    builders for `C` (from `T`) and `D` (C's tree + refreshed artifact blob),
-   the write-ahead marker publish + expected-old single-ref advance helpers
-   (plain `update-ref` — following the spec-127
-   `CommitTreeMerge`/`UpdateRef`/`recordMergeSourceMarker` precedents; no
-   multi-ref transaction dependency, no git-version floor beyond plain
-   plumbing), the re-entry discriminator over {tip == marker, tip ==
-   marker-parent, foreign}, the index-only `reset --quiet --mixed`, and the
-   failure legs of protocol step 3 (expected-old race → refusal +
-   re-measure; reset failure → forward-only refusal, the resume machinery
-   converging the re-run).
+   the write-ahead marker publish helpers with per-ref CAS (CREATE
+   semantics for absent→`C`, expected-old for `C→D` — round-6 G2) and the
+   expected-old single-ref advance (plain `update-ref` — following the
+   spec-127 `CommitTreeMerge`/`UpdateRef`/`recordMergeSourceMarker`
+   precedents; no multi-ref transaction dependency, no git-version floor
+   beyond plain plumbing), the `Mindspec-Stage` trailer builders + reader
+   (round-6 G1; exact trailer key pinned in this bead, read via
+   `CommitMessageBody`), the re-entry discriminator over {tip == marker
+   (kind from trailer), tip == marker-parent, foreign}, the index-only
+   `reset --quiet --mixed`, and the failure legs of protocol step 3
+   (expected-old race → refusal + re-measure; failed marker publication →
+   refusal naming the marker, no overwrite; reset failure → forward-only
+   refusal, the resume machinery converging the re-run).
 2. `internal/executor`: interface + `MindspecExecutor` + mock gain
    `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
    the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
@@ -897,13 +925,17 @@ Beads 2 and 3 (the post-states the tails must agree with).
    materialization op's index-refresh + expected-old-tip semantics, PLUS
    (round-3 G1.2, extended round-4 G1.5) the §3 mutation-point
    classification gains the FULL M→R→S→G→T staged boundary with the
-   WRITE-AHEAD marker invariant (marker published before every tool-authored
-   bead-ref advance, its OID encoding intended tip + expected predecessor as
-   the commit's first parent; the total re-entry discriminator over
-   {tip == marker: stage complete, kind identified by the artifact-confined
-   diff test; tip == marker-parent: finish the advance; foreign: delete +
-   stale-SHA as at HEAD}; reconcile-detection before any stale-marker
-   decision; the S-stage exit contract; terminal clear on both completion
+   WRITE-AHEAD marker invariant (marker published race-safely — CREATE /
+   expected-old CAS — before every tool-authored bead-ref advance, its OID
+   encoding intended tip + expected predecessor as the commit's first
+   parent, stage kind encoded in the pinned `Mindspec-Stage` commit trailer
+   — round-6 G1: read from the encoding, never the diff, total under empty
+   stages, which are elided; the total re-entry discriminator over
+   {tip == marker: stage complete, kind from the trailer; tip ==
+   marker-parent: finish the advance; foreign: delete + stale-SHA as at
+   HEAD}; every `D`-resume passing through the single authoritative S-exit
+   route — index to `D`, dirt classifier, then merge; reconcile-detection
+   before any stale-marker decision; terminal clear on both completion
    paths), and
    (round-3 G6, confirmed correct at round 4) the refusal
    guarantee is stated precisely rather than as repository-byte-identical: a
@@ -920,8 +952,8 @@ Beads 2 and 3 (the post-states the tails must agree with).
    red-on-revert, a post-review non-tracker commit still trips stale-SHA
    (gate untouched).
 7. Failure-injection + red-on-revert fixture legs (round-1 G1.5, extended
-   rounds 2–5; all legs run on the DEFAULT FILES REF BACKEND explicitly —
-   round-5 G1), all thirteen: (i) an UNTRACKED source/doc/ADR file in the
+   rounds 2–6; all legs run on the DEFAULT FILES REF BACKEND explicitly —
+   round-5 G1), all seventeen: (i) an UNTRACKED source/doc/ADR file in the
    worktree — the gate measures it and refuses before any commit; (ii) a
    pre-commit hook that adds/changes a source file — the committed tree is
    still ≡ `T` (plumbing runs no hooks); (iii) the tracker export changing
@@ -934,16 +966,16 @@ Beads 2 and 3 (the post-states the tails must agree with).
    deletion; (vi) an unchanged-after-snapshot worktree is status-CLEAN after
    materialization — red against the phantom-staged-deletion state; (vii)
    the excluded artifact is byte-identical at tip, in `T`, and in the user
-   commit, changing only in the sync commit; (viii) the resume KILL fixture
-   (round-3 G1.2): advance the ref to `C` with the marker written, interrupt
-   before the reset, add an interval edit, then invoke the documented
-   recovery (plain re-run) — it converges to a landed merge with NO
-   rollback, NO re-panel, no phantom staged deletions, and the interval edit
-   preserved on disk with the executable outcome pinned (round-5 G2): the
-   re-run's S-stage exit contract REFUSES pre-merge naming the edited
-   path — the file's content survives and no terminal cleanup removes the
-   worktree while it is uncommitted; a stale-marker variant (foreign tip) is
-   cleaned and falls through to a normal run; (ix) kill AFTER the
+   commit, changing only in the sync commit; (viii) the resume KILL fixture, split per round-6 G3
+   into two runs: (viii-a) advance the ref to `C` with the marker written,
+   interrupt before the reset, add an interval edit, invoke the documented
+   recovery (plain re-run) — it REFUSES pre-merge at the S-exit contract
+   naming the edited path, with NO rollback, NO re-panel, no phantom staged
+   deletions; the file's content survives and no terminal cleanup removes
+   the worktree while it is uncommitted; (viii-b) after the operator clears
+   the named dirt, a clean follow-up run CONVERGES to the landed merge; a
+   stale-marker variant (foreign tip) is cleaned and falls through to a
+   normal run; (ix) kill AFTER the
    S-stage ref advance (tip `D`, marker `D` — round-4 G1.4): plain re-run
    resumes at the S-exit contract then the merge and converges, no
    re-panel, and an interval edit present at that point triggers the same
@@ -956,7 +988,20 @@ Beads 2 and 3 (the post-states the tails must agree with).
    `C`, tip `A` == marker-parent — round-5 G1's one-ref-installed
    ordering): plain re-run finishes the advance and converges, no re-panel;
    (xiii) the same window at the S stage (marker `D`, tip `C` ==
-   marker-parent): plain re-run finishes `C→D` and converges.
+   marker-parent): plain re-run finishes `C→D` and converges; (xiv)
+   concurrent-publisher leg (round-6 G2): a second invocation's marker
+   publication fails on the CAS (create-exists / expected-old mismatch) with
+   the refusal naming the marker, and the first invocation's marker OID is
+   byte-identical before and after — recovery evidence never overwritten;
+   (xv) empty-`C` elision (clean-tree completion — round-6 G1): no `C` is
+   built, `D` (if any) parents directly on `A`, and re-entry after an
+   interruption classifies every present commit correctly from its trailer,
+   R and S each running exactly once; (xvi) no-op-`D` elision (unchanged
+   artifact): no `D` is built, and a kill after the `A→C` advance resumes
+   through R, S (which elides), the S-exit contract, and the merge; (xvii)
+   ordinary artifact-changing `D`: trailer classification identifies `D`
+   after interruption and the resume passes through the S-exit contract,
+   never straight to the merge.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
