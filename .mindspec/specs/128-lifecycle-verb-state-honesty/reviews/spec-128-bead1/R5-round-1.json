@@ -1,0 +1,57 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The known-phase comparator, force-reason persistence/output, Windows handle/share/lock-range mechanics, and the mechanical deviations A-D are substantially correct. However, the lock's claimed fresh stored-phase read is fail-open: WithPhaseWriteLock calls readStoredPhaseWithCache, which collapses a bd read error, a nil epic, invalid metadata type, and an invalid-but-present phase to the same empty string used for true absence. EnsureMigrated then treats that empty string as an absent legacy phase and writes under the lock. A transient fresh-read failure after another serialized writer has advanced the phase can therefore still overwrite that fresher value, contradicting AC-5(vii) and the implementation's stated conservative-unknown/absent-only contract. The Windows acquisition loop also retries every LockFileEx failure and eventually labels permanent Win32 errors as lock timeouts; only the documented contention error should be polled.",
+  "concrete_changes_required": [
+    "Make the under-lock epic read error-aware and presence-aware: propagate lookup/decode errors before invoking the callback or writing, preserve invalid-but-present phase values as unknown rather than converting them to absence, and let EnsureMigrated backfill only a genuinely missing/empty field. Add tests showing a fresh-read error and invalid-but-present metadata cannot trigger migration or any merge write, including the fresher-writer contention shape.",
+    "In phaselock_windows.go, retry only the Win32 error that means the requested byte range is presently locked (ERROR_LOCK_VIOLATION for this synchronous FAIL_IMMEDIATELY path); close the retained handle and return other LockFileEx errors immediately instead of wrapping them as ErrPhaseLockTimeout. Cover the classification through a Windows-call seam or Windows-specific test."
+  ],
+  "findings": [
+    {
+      "id": "R5-1",
+      "severity": "high",
+      "assessment": "internal/phase/phaselock.go:106 uses readStoredPhaseWithCache, whose derive.go:264-275 implementation returns empty string both for genuine absence and for FindEpic failure, nil/invalid metadata, or an unrecognized phase. internal/phase/migrate.go:68-78 interprets that value as absence and merge-writes a derived phase. Thus the absent-check is lexically inside the critical section, but it is not a truthful fresh absence check and can clobber a fresher locked write when the fresh read fails. This also defeats order.go's conservative treatment of bogus values by erasing the distinction before the comparator/caller sees it."
+    },
+    {
+      "id": "R5-2",
+      "severity": "medium",
+      "assessment": "The Windows ABI/layout and ownership shape are otherwise sound: os.OpenFile retains the same handle in the returned closure; Go's Windows Open uses FILE_SHARE_READ|FILE_SHARE_WRITE without FILE_SHARE_DELETE; the exclusive LockFileEx and UnlockFileEx calls use the same zero offset and 64-bit range; CloseHandle occurs via f.Close; amd64 and 386 cross-compilation and Windows vet pass. But lines 79-104 poll every LockFileEx failure, so invalid-handle, unsupported-filesystem, or other permanent errors are delayed and misreported as contention timeout rather than surfaced accurately."
+    },
+    {
+      "id": "R5-order",
+      "severity": "none",
+      "assessment": "order.go correctly defines the total order spec < plan < implement < review < done. The exhaustive 5x5 test establishes forward, equal, and backward behavior, and either unknown operand conservatively returns true."
+    },
+    {
+      "id": "deviation-A",
+      "severity": "none",
+      "assessment": "ACCEPTABLE. Adding epicID and the caller's MergeMetadata seam, with a callback returning an update map, preserves the existing fault-injection seams and supports multi-key done/adopt writes that the plan shorthand could not express. The current writer inventory test recognizes this call shape and covers the present literal mindspec_phase writers. This deviation is not the cause of R5-1; its internal fresh-read implementation must be corrected while retaining the useful seam shape."
+    },
+    {
+      "id": "deviation-B",
+      "severity": "none",
+      "assessment": "ACCEPTABLE. The root parameter is necessary to locate the repo-scoped lock. All production and test call sites compile, and EnsureMigrated's callback is entered under the real lock; the remaining defect is the collapsed read result, not the root plumbing."
+    },
+    {
+      "id": "deviation-C",
+      "severity": "none",
+      "assessment": "ACCEPTABLE. The paired registry/manifest addition is narrowly caused by the second recovery operand. Its disclosed-residual rationale is honest: idrender makes presentation safe but does not prove specID/epicID validation, and the new entry explicitly carries forward that existing provenance gap rather than claiming it closed."
+    },
+    {
+      "id": "deviation-D",
+      "severity": "none",
+      "assessment": "ACCEPTABLE. TestApproveImplCallOrder still anchors the reconcile write between the orphan gate and epic close, and the done write between close and CommitCount. The rewritten helpers identify the WithPhaseWriteLock seam and distinguish the returned reconcile map from the done-marker map, preserving the original ordering assertions under the new call shape."
+    },
+    {
+      "id": "R5-force-reason",
+      "severity": "none",
+      "assessment": "Forced backward repair merge-writes mindspec_phase_force_reason with the supplied non-empty reason and prints that same reason in the force-repaired success line. The direct test verifies both metadata and output."
+    },
+    {
+      "id": "R5-verification",
+      "severity": "none",
+      "assessment": "Verified commit 5101a07a. go build ./..., go test ./internal/phase/... ./cmd/mindspec/... -short, go test -race ./internal/phase/..., go test ./... -short, Windows amd64/386 phase-test cross-compilation, and Windows phase vet all passed. The bead worktree remained clean and .mindspec/phase.lock was absent at the final check."
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.97,
+  "rationale": "The kernel-held lock itself resisted empirical attack: go build ./... and the mandated go test ./internal/phase/... ./cmd/mindspec/... -short passed; the phase-lock tests and AC-5(vii) migration contention passed under -race; AC-5(v)'s repair/concurrent-writer test passed 10 race-enabled repetitions; and a hand-rolled /tmp overlay probe passed 20 race-enabled repetitions of 32 synchronized WithPhaseWriteLock writers with max occupancy 1 and no lost updates. A direct probe against the bead worktree proved a pre-existing empty .mindspec/phase.lock does not block, is ignored, creates no porcelain dirt, and is removed afterward. The repair timeout path names the lock and advises only a re-run, never deletion. Approval is nevertheless blocked by an operator-facing timeout-contract gap: release and complete discard WithPhaseWriteLock errors, and several other writer paths reduce them to raw warnings/errors rather than the plan-pinned ADR-0035 refusal with a recovery line. Targeted repair tests also leak their lock root to the enclosing primary checkout instead of a fixture repo, making isolated race runs fail under this sandbox even though the aggregate mandated suite passed. Deviations A-D are acceptable as assessed below.",
+  "concrete_changes_required": [
+    "Propagate phase-lock acquisition/timeout failures at every user-facing writer. In particular, stop discarding WithPhaseWriteLock errors in cmd/mindspec/release.go and internal/complete/complete.go, and ensure each surfaced timeout names .mindspec/phase.lock and ends with an ADR-0035 re-run recovery line that never advises deleting/removing the file. Add per-path tests, including the currently best-effort writers.",
+    "Make the repair-phase unit fixtures hermetic: chdir or inject a fixture root for every test that reaches WithPhaseWriteLock, so targeted and race-enabled TestRepairPhase_BackwardMoveRefused / ForceBackwardWritesAndRecordsReason runs never resolve or write the enclosing primary checkout. Pin that the fixture lockfile is ignored/non-blockable and cleaned or confined to t.TempDir()."
+  ],
+  "findings": [
+    {
+      "id": "R4-1",
+      "severity": "major",
+      "title": "Bounded lock timeout is silently discarded or lacks the pinned ADR-0035 refusal on multiple writers",
+      "evidence": "plan.md Bead 1 step 2 pins a bounded timeout followed by an ADR-0035 refusal naming the lock path and a re-run recovery line. cmd/mindspec/release.go:154 and internal/complete/complete.go:1369 assign the WithPhaseWriteLock result to _, so contention lasting 10 seconds silently skips the phase write and the command can continue without any refusal. plan/spec existing-epic paths append ordinary warnings, impl's done write appends a warning, and migration/adopt can return raw wrapped errors; none inherently supplies a final recovery line. Only cmd/mindspec/repair.go wraps lockErr with guard.NewFailure and the safe recovery `mindspec repair phase <spec>`. The low-level timeout test proves bounded timing/path/no-delete wording but cannot prove the missing user-facing refusal behavior."
+    },
+    {
+      "id": "R4-2",
+      "severity": "medium",
+      "title": "Targeted repair tests are not fixture-root isolated after locking was introduced",
+      "evidence": "A targeted race run of TestRepairPhase_BackwardMoveRefused and TestRepairPhase_ForceBackwardWritesAndRecordsReason resolved /Users/Max/replit/mindspec/.mindspec/phase.lock and failed with operation not permitted. Their stubRepairPhaseEnvWithChildren helper stubs bd/merge seams but does not chdir to a temp repo; by contrast TestRepairPhase_ConcurrentWriterNeverRegressed explicitly creates .mindspec under t.TempDir and chdirs there, and passed 10/10 under -race. The aggregate mandated scoped suite passed, which makes this an isolation/order sensitivity defect rather than evidence that the production lock failed."
+    },
+    {
+      "id": "R4-3",
+      "severity": "none",
+      "title": "Empirical lock, leftover-file, timeout-text, and dirt probes passed",
+      "evidence": "go build ./... exited 0; go test ./internal/phase/... ./cmd/mindspec/... -short passed (phase and cmd/mindspec); selected phase-lock/migration tests passed five repetitions under -race; AC-5(v) passed ten repetitions under -race. The custom /tmp overlay probe synchronized 32 writers against one real WithPhaseWriteLock, deliberately used an unprotected counter inside the critical section, and passed 20 repetitions under -race with maxInside=1 and counter=32. A second scratch overlay seeded an empty lock at the actual bead-worktree path, acquired successfully, confirmed git check-ignore selects .gitignore:10, confirmed empty porcelain status, then removed the file. Final bead-worktree status is clean and .mindspec/phase.lock is absent. The timeout error body contains no delete/remove/rm instruction, and repair's wrapping recovery is a plain re-run."
+    },
+    {
+      "id": "R4-A",
+      "severity": "info",
+      "title": "Deviation A assessment: acceptable",
+      "assessment": "The root/epicID/mergeMetadata/callback signature is a justified improvement over the plan's shorthand. Map returns are required for the multi-key done, adopt-audit, migration-marker, and forced-reason writes, and passing each caller's merge seam preserves existing fault injection. WithPhaseWriteLock performs the single fresh stored-phase read after acquisition and invokes the supplied seam before unlock. The AC-5(vi) test remains structurally connected to this shape because each literal mindspec_phase update must be lexically nested in WithPhaseWriteLock, and the inventory test passed. This assessment does not excuse separate concerns about the inventory walker's totality reported by other lenses."
+    },
+    {
+      "id": "R4-B",
+      "severity": "info",
+      "title": "Deviation B assessment: acceptable",
+      "assessment": "Adding root to EnsureMigrated and EnsureMigratedWithCache is necessary and mechanical: all three production callers pass their existing root, the code builds, and the absent check now occurs on the fresh stored value inside WithPhaseWriteLock. TestEnsureMigrated_NeverOverwritesFresherLockedWrite passed five race-enabled repetitions and retained the fresher locked value."
+    },
+    {
+      "id": "R4-C",
+      "severity": "info",
+      "title": "Deviation C assessment: acceptable and honestly disclosed",
+      "assessment": "The registries.go arg2:unprovable entry accurately states that repairPhaseRunE has no own idvalidate gate for its specID/derived epicID command operands, identifies the two new recovery templates, and does not pretend idrender proves validation. Its manifest entry is paired and ordered beside the existing arg1 residual."
+    },
+    {
+      "id": "R4-D",
+      "severity": "info",
+      "title": "Deviation D assessment: acceptable",
+      "assessment": "TestApproveImplCallOrder passed. The replacement anchors still select WithPhaseWriteLock calls whose third argument is implPhaseMetadataFn, distinguish reconcile from done by mindspec_done presence, and retain the same strict reconcile-before-close-before-done-before-commit/finalize ordering."
+    }
+  ]
+}

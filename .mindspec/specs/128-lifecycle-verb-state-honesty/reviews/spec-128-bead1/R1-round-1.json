@@ -1,0 +1,66 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.85,
+  "rationale": "Author-of-record lens, commit 5101a07a re-derived hunk by hunk against plan.md § Bead 1. The delivered machinery is faithful and well-built: the comparator's total order + conservative-unknown rule match step 1's pin; phaselock.go delivers the kernel-held flock/LockFileEx design with the bounded 10s wait, no-delete-instruction timeout, and the gitignore trio (repo .gitignore, gitutil.RuntimeIgnoreEntries, bootstrap.starterGitignore); all nine writer sites (plan.go, spec.go, complete.go, release.go, impl.go x2, adopt.go, migrate.go, repair.go) are wrapped with values GENUINELY unchanged — I read each hunk; every payload map, guard condition, and error-handling posture (release/complete's swallowed error, plan/spec's warning append) is byte-for-byte the prior semantics, moved inside the closure. The SanctionedDerivedSync fence has exactly zero production callers (grep-verified) and the fence test implements the plan's found-subset-of-allowlist bead-1 form with the bead-2 tightening instruction documented. The AC-5(v)/(vii) contention tests are honest: real lock, stale pre-lock target vs fresh under-lock read, final stored value is the fresher writer's. Build green; internal/phase green under -race; cmd/mindspec, internal/approve, complete, guard, lint, gitutil, bootstrap all green -short. Worktree left clean. ONE plan-conformance gap blocks approval: plan step 2's test list explicitly includes 'crashed-holder recovery (kill the holder; next acquire succeeds — both platforms' semantics, the Windows leg seam-driven on non-Windows CI)' and no such test exists anywhere in the commit (grep for kill/crash/subprocess confirms). The kernel-release-on-process-death property is the central justification for choosing flock/LockFileEx over the journal O_EXCL idiom, and right now it is asserted in doc comments but never exercised. Worse for this spec's own honesty standard: the omission is NOT in the implementer's A-D deviation disclosures — it is an undisclosed dropped step, not an argued deviation. The leftover-file leg is not a substitute (it seeds a file with no live holder; it never kills a holder). Everything else is APPROVE-quality.",
+  "hard_block": false,
+  "concrete_changes_required": [
+    "Add the plan step-2 crashed-holder recovery test to internal/phase/phaselock_test.go: a unix leg that spawns a real subprocess (helper-process or go run pattern) which acquires the lock at a fixture path and is SIGKILLed while holding it, then asserts the parent's next acquirePhaseFileLock succeeds promptly (well under phaseLockWait); plus the plan's Windows-leg disposition — seam-driven on non-Windows CI per plan.md § Bead 1 step 2 — or, if the implementer believes the leg is untestable/redundant, a disclosed deviation with the argument stated, reviewable next round. Undisclosed omission is the defect; silent absence cannot stand."
+  ],
+  "findings": [
+    {
+      "id": "R1-DEV-A",
+      "severity": "info",
+      "assessment": "Deviation A: ACCEPTABLE — divergence from plan shorthand verified necessary.",
+      "detail": "The plan's sketch fn func(stored string) (write string, ok bool, err error) cannot express four of the nine writers: impl.go's done write (mindspec_phase + mindspec_done), adopt.go's seven-key audit map, migrate.go's phase + mindspec_migrated_at, and repair.go's forced phase + mindspec_phase_force_reason. A single-string return is unworkable exactly as the implementer argues. The mergeMetadata parameter preserves every pre-existing per-package fault-injection seam — verified at each site: planMergeMetadataFn, bead.MergeMetadata (spec/release), completeMergeMetadataFn, implPhaseMetadataFn (x2), adoptMergeMetadataFn, migrate's mergeMetadataFn, repairMergeMetadataFn — so no seam is orphaned and existing tests kept their injection points. The map-returning-closure shape also keeps the AC-5(vi) test honest: the mindspec_phase composite literal lives lexically inside the WithPhaseWriteLock CallExpr, which is precisely what the AST walk anchors on, and the write itself is performed by WithPhaseWriteLock's own body inside the critical section. The epicID addition is required for the fresh under-lock stored read. Right call; bead 3+ consumers get a workable long-term shape."
+    },
+    {
+      "id": "R1-DEV-B",
+      "severity": "info",
+      "assessment": "Deviation B: ACCEPTABLE — mechanical and forced by the plan itself.",
+      "detail": "EnsureMigrated/EnsureMigratedWithCache gaining a root first parameter is the unavoidable consequence of plan step 3's own instruction that migrate.go's absent-check moves inside the critical section — the lock lives at <root>/.mindspec/phase.lock, so the backfill must be told where root is. All 3 production call sites (plan.go:300, impl.go:277, complete.go:522) and the 5 pre-existing migrate_test.go sites updated consistently. The refactor also genuinely improves the absent-check: it now runs against the fresh under-lock stored value (WithPhaseWriteLock's per-call NewCache read) rather than the caller's possibly-stale shared cache — which is what makes the AC-5(vii) test pass for the right reason."
+    },
+    {
+      "id": "R1-DEV-C",
+      "severity": "info",
+      "assessment": "Deviation C: ACCEPTABLE — the ratchet entry's disclosed-residual rationale is honest.",
+      "detail": "Cross-checked the new registries.go entry against the actual repair.go code: the refusal's two recovery command strings really are idrender-rendered (idrender.Bead(epicID) in the bd-show line, idrender.Spec(specID) in the force-backward line), the specID/epicID provenance really is the same as the sibling arg1 entry (args[0] + FindEpicBySpecID, no idvalidate gate in this function), and the rationale claims the residual is DISCLOSED, not closed — mirroring the arg1 entry's wording rather than assuming closure by analogy. One paired registry + manifest line, minimal scope, house pattern followed. The alternative (adding an idvalidate gate to repairPhaseRunE) would have been genuinely out of bead scope."
+    },
+    {
+      "id": "R1-DEV-D",
+      "severity": "info",
+      "assessment": "Deviation D: ACCEPTABLE — anchors rewritten minimally, same assertions pinned.",
+      "detail": "TestApproveImplCallOrder's two rewritten anchors sit at the same positions in the ordering sequence (after runOrphanObligationGate, before implRunBDCombinedFn(close), before exec.CommitCount), still pin the same seam identity (Args[2] ident must be implPhaseMetadataFn), and still discriminate the two writes by the same payload shape (mindspec_phase-without-mindspec_done for the reconcile vs mindspec_done for the done write) via withPhaseWriteLockReturnsMapWithKey's exclude-key parameter. The claimed 'same ordering assertions' is true. The old anchors could not survive the wrap (the direct CallExpr no longer exists), so the rewrite was forced, and it was disclosed."
+    },
+    {
+      "id": "R1-01",
+      "severity": "major",
+      "assessment": "Plan step 2's crashed-holder recovery test is missing AND undisclosed.",
+      "detail": "plan.md § Bead 1 step 2 lists among the required tests: 'crashed-holder recovery (kill the holder; next acquire succeeds — both platforms' semantics, the Windows leg seam-driven on non-Windows CI)'. No test in the commit kills a holder or seam-drives the Windows crash leg (verified by reading phaselock_test.go in full and grepping the whole diff). The delivered tests (exclusivity, timeout, leftover-file, no-git-dirt) do not cover it: leftover-file seeds a dead file with no live holder, which exercises 'the file is not the lock', not 'the kernel releases a dead holder's lock'. Since kernel-release is the design's core claim (it is why flock/LockFileEx replaced the journal O_EXCL idiom and why the timeout message may safely never advise deletion), leaving it comment-asserted-only is a real gap. The implementer disclosed four deviations conscientiously; this one is absent from the list, so it reads as an oversight, not a judgment call. See concrete_changes_required."
+    },
+    {
+      "id": "R1-02",
+      "severity": "minor",
+      "assessment": "writer_inventory_test.go doc-comment inaccuracy.",
+      "detail": "The header claims the walk runs 'excluding this package's own lock/order/migrate/sanctioned-sync plumbing and test files', but the code only excludes _test.go files and testdata dirs — internal/phase's production files ARE walked, and their literals pass because they sit inside WithPhaseWriteLock calls (the samePackage bare-identifier branch). The actual behavior is STRONGER than the comment says; the comment should be corrected so a future reader doesn't add an exclusion believing one exists. Fold into the fix round; not independently blocking."
+    },
+    {
+      "id": "R1-03",
+      "severity": "info",
+      "assessment": "AC-5(vi) anchor shape has a known evasion class — acceptable, worth recording.",
+      "detail": "The AST walk keys on a string-literal 'mindspec_phase' KeyValueExpr inside a composite literal; a future writer building the map by index assignment (m[\"mindspec_phase\"] = v) or via a key-holding const would be invisible to it. Every current writer uses the composite-literal idiom, unwrapping any one site turns the test red, and the spec itself scoped the obligation as grep/seam-anchored ('exact test shape is a plan decision'), so this is the inherent residual of the chosen mechanism, disclosed here for the record rather than demanded fixed. The qualifier resolution (import-path identity, alias/dot-import handling) is done properly."
+    },
+    {
+      "id": "R1-04",
+      "severity": "minor",
+      "assessment": "SanctionedDerivedSync silently swallows the children-read error.",
+      "detail": "sanctioned_sync.go: children, _ := c.GetChildren(epicID) — a failed children read yields an empty derivation and a silent no-op (derived == \"\" returns nil, nil). The failure direction is safe (no write ever lands on bad evidence), but the caller gets nil error and cannot distinguish 'synced' from 'could not read children'. Zero callers exist at this bead, so nothing is broken today; bead 2 should decide whether release's sync wants that error surfaced before wiring the caller. Flagging now so the contract question reaches bead 2 deliberately."
+    },
+    {
+      "id": "R1-05",
+      "severity": "info",
+      "assessment": "Nine wrap sites tallied; values genuinely unchanged; fence at zero.",
+      "detail": "Site-by-site: plan.go:455 'implement' (warning-append posture kept); spec.go:76 'plan' (warning kept); complete.go step-6.5 nextMode (same nextMode!=\"\" && epicID!=\"\" guard, error still discarded); release.go syncPhase mode (error still discarded); impl.go reconcile phaseDetail.Derived (guard.NewFailure posture kept) and done+mindspec_done (warning kept); adopt.go's full audit map (built inside the closure so the phase write executes under the lock; time.Now() now evaluated under the lock — immaterial); migrate.go derived+migrated_at (absent-check moved inside, planned); repair.go detail.Derived with the NEW planned guard. That is nine writer call sites across eight files. repair's two behavior changes (unforced-backward refusal; empty/unknown stored treated as backward) are both plan-pinned, not drift. SanctionedDerivedSync production callers: zero, grep-verified, matching the fence test's bead-1 form with the tightening instruction for bead 2 documented in place. Empirical: go build green; internal/phase -race green; cmd/mindspec, approve, complete, guard, lint, gitutil, bootstrap -short green; worktree left byte-identical (git status clean, no phase.lock residue)."
+    }
+  ]
+}

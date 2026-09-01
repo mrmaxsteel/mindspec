@@ -1,0 +1,37 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "The locking implementation and fixture isolation now withstand the empirical checks: go build ./..., the mandated scoped -short suite, the full go test ./... -short suite, the phase/cmd/complete race sets, crashed-holder and leftover-file cases, and a hand-rolled 64-writer attack all passed. The bead worktree remained clean, .mindspec/phase.lock was absent afterward, and git check-ignore resolves it to the managed .gitignore entry. My round-1 fixture-isolation ask is addressed. My lock-timeout surfacing ask is only partial: release and complete no longer discard errors and their tests force real held-lock timeouts, but phase.DescribeLockFailure ends with prose rather than ADR-0035's copy-pastable `recovery: <command>`, while plan/spec approval, impl's best-effort done write, impl adopt, and EnsureMigrated still surface raw lock errors or warnings without any final recovery line. The changed callback signature and the disclosed test/lint ripple are otherwise honest and acceptable.",
+  "concrete_changes_required": [
+    "Finish round-1 R4-1/G3 for every user-facing phase writer: render ErrPhaseLockTimeout with a final ADR-0035-compliant, safe, copy-pastable `recovery: <command>` line naming .mindspec/phase.lock. This includes release and complete (their current `recovery: re-run once ...` prose is not a command) plus plan/spec approval, impl's done-marker write, impl adopt, and EnsureMigrated/callers; retain each path's intended fatal-vs-best-effort exit behavior. Add real held-lock per-path tests that assert guard.HasFinalRecoveryLine or the equivalent exact copy-pastable-command contract and never suggest deleting/removing the lock file."
+  ],
+  "findings": [
+    {
+      "id": "R4-1",
+      "classification": "PARTIAL",
+      "severity": "major",
+      "title": "Timeout errors are no longer discarded in two paths, but the all-writer ADR-0035 contract remains incomplete",
+      "evidence": "cmd/mindspec/release.go:127 and internal/complete/complete.go:1389 now call phase.DescribeLockFailure, and their real-contention tests passed under -race. However DescribeLockFailure returns `recovery: re-run once the lock ... clears`, which is prose, not ADR-0035's required copy-pastable `recovery: <command>` (ADR-0035 Decision 1; spec.md's ADR touchpoint likewise requires copy-pastable final recovery lines). Other production writers still bypass the helper: internal/approve/plan.go and spec.go append raw `could not write phase metadata` warnings; internal/approve/impl.go's done write appends a raw warning; internal/approve/adopt.go wraps and returns the raw lock error; internal/phase/migrate.go returns raw `ensure-migrated ...` wrapping to its callers. The reviewed tests cover DescribeLockFailure, release, and complete only, which matches this incomplete routing. The impl reconcile path is already a distinct compliant case because it uses guard.NewFailure with a repair command."
+    },
+    {
+      "id": "R4-2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "Repair-phase fixtures are now hermetic and leave no checkout lock dirt",
+      "evidence": "repairFindRootFn is fixture-scoped through stubRepairFindRoot(t, t.TempDir()) in both shared repair helpers and explicitly in the concurrency fixture. Targeted TestRepairPhase* race runs passed five repetitions, the mandated go test ./internal/phase/... ./cmd/mindspec/... -short passed, and the stronger go test ./... -short passed from the bead worktree. Final git status/diff were clean, .mindspec/phase.lock was absent, and git check-ignore -v mapped that path to .gitignore:10."
+    },
+    {
+      "id": "R4-EMPIRICAL",
+      "severity": "none",
+      "title": "Kernel lock, crash recovery, leftover-file behavior, and concurrency probes passed",
+      "evidence": "go build ./... exited 0 (the Go tool emitted only a sandbox-denied module stat-cache write outside the workspace); both scoped and full -short suites exited 0. Race-enabled phase lock/migration/sanctioned-sync tests, repair/release tests, and complete-sync tests passed five repetitions. The plan-named Unix subprocess SIGKILL recovery test and empty/partial leftover lockfile tests ran within those sets. A scratch /tmp copy at reviewed commit 99d75484 passed 20 race-enabled repetitions of a hand-rolled attack launching 64 simultaneous WithPhaseWriteLock writers with deliberately unprotected in-critical-section occupancy counters: max occupancy stayed 1 and all 64 writers completed."
+    },
+    {
+      "id": "R4-FIX-RESOLUTIONS",
+      "severity": "info",
+      "title": "Changed signature, fresh reads, and disclosed ripple/ratchet updates are honest",
+      "evidence": "The new callback shape func(stored string, present bool) (map[string]interface{}, error) distinguishes lookup failure, genuine absence, and present-but-invalid metadata while retaining caller-specific MergeMetadata seams; read failures abort before fn/write, SanctionedDerivedSync now propagates child-read failures, and repair derives with a fresh Cache inside the critical section. The adopt and impl test stubs are legitimate consequences of the newly propagated fresh epic read, not weakened assertions. The raw-ID-render ratchet reductions from 5/3 to 1/1 match the moved, idrender-wrapped call sites; internal/lint passed in the full suite. The writer-inventory comment candidly discloses its remaining helper-built-map/data-flow residual."
+    }
+  ]
+}

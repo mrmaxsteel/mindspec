@@ -1,0 +1,29 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": "high",
+  "rationale": "Codebase-pin regression check at 293ef0ee (round-2 I had zero asks; duty is regression-only, block only on spec-branch-corrupting defects — none found). Helper-built-map fixtures: genuine and honest. TestFindUnguardedPhaseWrites_CatchesHelperBuiltUpdateMapEvasion pins exactly the dataflow shape I probed empirically in round 2 (map built in a separate helper, passed opaquely to a MergeMetadata-shaped call), asserts exactly one violation AND that attribution lands on the builder function; its companion proves the closure-nested-inside-the-lock case stays unflagged. The doc comment is truthful about mechanism — it is a positive proof of existing per-file walker semantics, not a new dataflow analysis — and the narrowed residual ('a key or map... that never appears as a visible composite literal or index-assignment ANYWHERE in the scanned tree') is precisely accurate, since a cross-file helper's literal is scanned in its own file and flagged there. I re-derived at this commit: the same helper shape planted in a REAL production file (internal/complete) turns TestMindspecPhaseWritesAllLockGuarded red, attributed to the builder (probe_helper.go:4 func probeBuildUpdate). Warning-text assertion updates are honest adaptations, not weakenings: 'could not sync phase metadata' is the real production wording of the new phase.DescribeLockFailure (phaselock.go:141-143), both updated tests (impl i3 done-write, plan p4) inject at the UNCHANGED seams (implPhaseMetadataFn/planMergeMetadataFn) and still require the distinctive substring; the five best-effort sites all supply copy-pastable idrender-wrapped re-run commands, and only a genuine ErrPhaseLockTimeout earns the recovery line — other errors render as-is with no manufactured recovery. Ratchet 8->7 for ApproveImpl Sprintf(...epicID...) matches an actual site removal visible in the diff (the done-marker warning's raw-epicID Sprintf replaced by DescribeLockFailure with idrender.Spec(specID)) — a decrease backed by code, not gate-weakening; internal/lint green enforces the exact count. Suites at 293ef0ee: go build OK; internal/phase + internal/approve + internal/lint + full cmd/mindspec all green with -count=1 (uncached); the 8 walker/lock tests (including the crashed-holder subprocess test) green under -race. Bead worktree left byte-identical, no phase.lock residue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-r3-1",
+      "severity": "INFO",
+      "summary": "Helper-built-map fixture tests verified genuine: the evasion fixture exercises the real dataflow shape (helper builds the literal, caller passes it opaquely), requires exactly one violation with attribution to the builder, and the guarded companion covers the nested-closure case. Re-derived independently at 293ef0ee by planting the same shape in internal/complete in a /tmp copy — TestMindspecPhaseWritesAllLockGuarded went red at the builder's exact line. The doc comment's claim that this is walker-semantics proof (not new analysis) and its narrowed anywhere-in-the-scanned-tree residual are both accurate."
+    },
+    {
+      "id": "R2-r3-2",
+      "severity": "INFO",
+      "summary": "Warning-text assertion updates are honest: the new 'could not sync phase metadata' strings in impl_fault_test.go (i3) and plan_fault_test.go (p4) match phase.DescribeLockFailure's real output; the fault-injection seams are unchanged, so the tests still exercise the same failure paths; DescribeLockFailure's contract (timeout -> copy-pastable recovery command; other errors as-is; nil -> empty) is implemented exactly as documented, and all five best-effort call sites (complete, release, plan approve, spec approve, impl done-write) supply verb-accurate idrender-wrapped re-run commands. The fatal writer paths (repair, migrate, impl reconcile, adopt) correctly remain on guard.NewFailure instead."
+    },
+    {
+      "id": "R2-r3-3",
+      "severity": "INFO",
+      "summary": "Ratchet recount 8->7 (ApproveImpl fmt.Sprintf(...epicID...)) verified against the diff: the done-marker warning's raw-epicID Sprintf was deleted outright, replaced by DescribeLockFailure(err, Sprintf with idrender.Spec(specID)) — no epicID interpolation remains at that site; the Gate text describes this accurately. Tightening in the safe direction; internal/lint green with -count=1."
+    },
+    {
+      "id": "R2-r3-4",
+      "severity": "MINOR",
+      "summary": "Carried-forward doc nit (non-blocking, third sighting): writer_inventory_test.go:17 still says the walk excludes 'this package's own lock/order/migrate/sanctioned-sync plumbing' when the walker only excludes _test.go files and testdata — the plumbing is walked and passes because its writes are lock-nested (stronger than claimed). Purely cosmetic; fold into any later doc sweep, no bead-blocking weight at the max-rounds boundary."
+    }
+  ]
+}

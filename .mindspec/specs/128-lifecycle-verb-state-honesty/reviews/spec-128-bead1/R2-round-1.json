@@ -1,0 +1,52 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R2 claude",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens, empirically probed in a /tmp copy (bead worktree left byte-identical, git status clean verified). The core machinery is real and green: `go build ./...` OK; `go test ./internal/phase/... ./cmd/mindspec/... -short` green (phase 0.9s, cmd 52.7s); phaselock/order/sanctioned/inventory/migrate tests green under -race. The AC-5(vi) AST test is genuinely red-on-revert: unwrapping the complete.go:1369 site back to a direct seam call turned it red naming `internal/complete/complete.go:1369 (func Run)`, and a NEW unwrapped composite-literal writer in a fresh file (internal/complete/probe_new_writer.go) was caught at its exact line. The SanctionedDerivedSync zero-caller fence also went red on an out-of-allowlist caller probe. Deviations A-D all assess as justified (details in findings). Two gaps block approval: (1) the AC-5(vi) walker passes GREEN on two unlocked-writer evasion shapes I built and ran — an index-assignment map build (`m := map[string]interface{}{}; m[\"mindspec_phase\"] = \"done\"; seam(id, m)`) and a const-key composite literal (`map[string]interface{}{probePhaseKey: \"done\"}` where probePhaseKey = \"mindspec_phase\") — because the walker only matches BasicLit string keys inside KeyValueExprs; the test's own doc comment overclaims (\"or any *MergeMetadataFn seam ... is red\"). (2) The plan's Bead 1 step-2 test list explicitly names a crashed-holder recovery test (\"kill the holder; next acquire succeeds — both platforms' semantics, the Windows leg seam-driven on non-Windows CI\") and no such test exists — phaselock_test.go has exactly four tests, and its header comment reproduces the plan's test list with the crashed-holder item silently dropped. That omission is not among deviations A-D, so it is an undisclosed plan deviation, squarely a named-test-missing finding under this lens.",
+  "concrete_changes_required": [
+    "Harden internal/phase/writer_inventory_test.go's walker against the two probed evasion shapes: (a) flag an AssignStmt whose LHS is an IndexExpr with a BasicLit string key \"mindspec_phase\" when it lies outside a WithPhaseWriteLock CallExpr's extent (a map-index WRITE, not a read — reads are rvalue IndexExprs and stay unflagged); (b) resolve composite-literal keys that are Idents bound to a string constant equal to \"mindspec_phase\" (file-local consts at minimum). Alternatively, if the panel accepts the composite-literal anchor as sufficient for the accidental-drift threat model, correct the test's doc comment so it no longer claims ANY seam call outside the lock is red — the claim must match the mechanism.",
+    "Deliver the plan-named crashed-holder recovery test (plan.md Bead 1 step 2: kill the holder process, next acquire succeeds — unix subprocess leg; Windows leg seam-driven on non-Windows CI), or record its omission as an explicit, argued deviation for the panel to accept (e.g. \"tests kernel flock semantics, not our code\") — it is currently silently dropped from both the deviation list and phaselock_test.go's own header enumeration of the plan's test list."
+  ],
+  "findings": [
+    {
+      "id": "R2-1",
+      "severity": "MAJOR",
+      "summary": "AC-5(vi) red-on-revert PROVEN for the canonical shape: unwrapping one existing site (complete.go:1369) turns TestMindspecPhaseWritesAllLockGuarded red with the exact file:line+func, and a brand-new unwrapped `\"mindspec_phase\"` composite-literal writer in a fresh file in a different package is caught at its exact line. BUT two unlocked evasion shapes pass green (index-assign map build; const-key composite literal), both empirically run in a /tmp copy. The realistic copy-paste drift path IS caught; the walker's claim in its doc comment is broader than its mechanism. Fix walker or fix claim (concrete change 1)."
+    },
+    {
+      "id": "R2-2",
+      "severity": "MAJOR",
+      "summary": "Undisclosed plan deviation: the crashed-holder recovery test named in plan.md Bead 1 step 2 does not exist. phaselock_test.go contains exactly TestWithPhaseWriteLock_ExclusiveAcrossGoroutines, TestAcquirePhaseFileLock_TimesOutWithoutDeleteInstruction, TestAcquirePhaseFileLock_LeftoverEmptyFileDoesNotBlock, TestWithPhaseWriteLock_NoBlockableGitDirt — its header comment restates the plan's test list minus the crashed-holder item. The leftover-file leg covers the adjacent stale-file class but not process-death lock release. Not listed in deviations A-D (concrete change 2)."
+    },
+    {
+      "id": "R2-A",
+      "severity": "INFO",
+      "summary": "Deviation A: JUSTIFIED, and the chosen shape keeps AC-5(vi) honest. The plan's literal sketch (fn(stored) (write string, ok bool, err error), no epicID/mergeMetadata) is verifiably unworkable: five of the nine sites write multi-key maps (impl done-write's mindspec_done, adopt's six-key audit map, migrate's mindspec_migrated_at, repair's mindspec_phase_force_reason) that a single write-string return cannot express, and hardcoding bead.MergeMetadata would orphan every per-package fault-injection seam (planMergeMetadataFn, completeMergeMetadataFn, implPhaseMetadataFn, adoptMergeMetadataFn, repairMergeMetadataFn, migrate's mergeMetadataFn) — all preserved and green. Honesty of the AST test under this shape: the actual merge invocation happens ONLY inside phaselock.go's body, the composite literal lives lexically inside the WithPhaseWriteLock CallExpr, and WithPhaseWriteLock's fresh read uses a per-call NewCache() so fn's stored value can never be a pre-lock snapshot. Probed red-on-revert (R2-1's positive legs)."
+    },
+    {
+      "id": "R2-B",
+      "severity": "INFO",
+      "summary": "Deviation B: JUSTIFIED and mechanical. EnsureMigrated/EnsureMigratedWithCache need root to locate <root>/.mindspec/phase.lock; all 3 production call sites (plan.go:300, impl.go:277, complete.go:522) and 5 migrate_test.go sites updated; the absent-check genuinely moved inside the critical section (stored re-read fresh under the lock via WithPhaseWriteLock's own NewCache, the pre-lock readStoredPhaseWithCache check deleted). AC-5(vii)'s TestEnsureMigrated_NeverOverwritesFresherLockedWrite exercises the REAL lock: backfill blocks behind a holder writing \"plan\", then no-ops (migrated=false) and final stored is the locked writer's value."
+    },
+    {
+      "id": "R2-C",
+      "severity": "INFO",
+      "summary": "Deviation C: matches the house pattern and the rationale is honest. The new OpaqueOperandRegistry entry mirrors its arg1 sibling directly above (same File/Func/Detail/Rationale/Obligation shape, same mindspecVerbTemplateObligation), the disclosed-residual text accurately describes the two new command-position Sprintf lines I verified in repair.go's refusal (`bd show %s ...` and `mindspec repair phase %s --force-backward ...`, both idrender-rendered), and the manifest line sits in correct sort position (repairPhaseRunE arg1 < arg2 < repairSpecTitleRunE). internal/guard and internal/lint suites green."
+    },
+    {
+      "id": "R2-D",
+      "severity": "INFO",
+      "summary": "Deviation D: the rewritten anchors pin the SAME relative ordering and are live, not vacuous. TestApproveImplCallOrder's driver requires every anchor found and strictly increasing source positions; the new matchers disambiguate identically to the old ones (reconcile = FuncLit returning a map with mindspec_phase and WITHOUT mindspec_done; done = with mindspec_done), via withPhaseWriteLockMergeFnName pinning the seam ident (implPhaseMetadataFn) as the third argument. Probed: removing mindspec_done from the done-write map in a /tmp copy turns the test red with 'anchor ... mindspec_phase=done not found'. The reconcile < close < done < CommitCount < FinalizeEpic chain is unchanged."
+    },
+    {
+      "id": "R2-3",
+      "severity": "INFO",
+      "summary": "AC-5(ii)/(iii)/(v) fixtures verified faithful to the AC text: refusal leaves the merge seam uncalled with a final recovery line naming --force-backward; forced write records AND prints the reason; the AC-5(v) concurrency test contends on the REAL lock and asserts final stored \"review\" with repair refusing on the fresh under-lock read. The concurrency fixture even pre-sets mindspec_phase_semantics=v2, matching bead 2's planned marker-present pinning (plan round-3 G2). Gitignore coverage is triple (repo .gitignore, gitutil.RuntimeIgnoreEntries, bootstrap.starterGitignore) and TestWithPhaseWriteLock_NoBlockableGitDirt asserts clean porcelain in a real git fixture; the bead worktree stayed byte-identical after full -short and -race runs (no phase.lock residue)."
+    },
+    {
+      "id": "R2-4",
+      "severity": "MINOR",
+      "summary": "writer_inventory_test.go's header comment says the walk runs \"excluding this package's own lock/order/migrate/sanctioned-sync plumbing and test files\" — but the walker only excludes _test.go files and testdata dirs; the phase package's own plumbing IS walked and passes because its literals sit inside WithPhaseWriteLock calls (which is stronger than the comment claims, so this is a doc-accuracy nit, not a coverage gap)."
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Commit 293ef0ee is safe to land under the round-3 max-round calibration. Re-derivation found all nine mindspec_phase writer paths command-shaped on ErrPhaseLockTimeout, with the intended fatal-versus-best-effort behavior preserved. The mandated build/scoped tests, the approve/complete short suites, repeated race-enabled lock/migration/repair/release/complete tests, crash/timeout/leftover-file checks, and a corrected scratch 96-writer attack all passed; the attack ran 10 repetitions with maximum critical-section occupancy exactly 1. The lock path is ignored, no phase.lock remained, and the bead worktree stayed byte-clean. My round-2 G3 ask is PARTIAL only because its required per-path regression-test leg is incomplete: release and complete have real held-lock path tests with exact command assertions, while seven other production paths have correct recovery text but no equivalent per-path timeout test. That residual cannot corrupt the spec branch or downstream beads and therefore is a finding, not a max-round block.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-G3",
+      "classification": "PARTIAL",
+      "severity": "minor",
+      "title": "All nine recovery commands are implemented correctly, but seven lack the required per-path timeout tests",
+      "evidence": "Static and empirical re-derivation at 293ef0ee found these nine writer-site recovery commands: cmd/mindspec/release.go -> `mindspec release <bead-id>`; internal/complete/complete.go -> `mindspec complete <bead-id>`; internal/approve/spec.go -> `mindspec spec approve <spec-id>`; internal/approve/plan.go -> `mindspec plan approve <spec-id>`; internal/approve/impl.go reconcile -> `mindspec repair phase <spec-id>`; internal/approve/impl.go done-write -> `mindspec impl approve <spec-id>`; internal/approve/adopt.go -> `mindspec impl adopt <spec-id> --reason \"<why>\"`; internal/phase/migrate.go -> `mindspec repair phase <spec-id>`; cmd/mindspec/repair.go -> `mindspec repair phase <spec-id>`. All unique command forms passed `zsh -n` with representative valid IDs; ID-bearing DescribeLockFailure callers use idrender, ApproveImpl validates specID before its raw rendering, and repair cannot reach the lock for an unresolved malformed spec ID. Timeout messages retain the underlying lock error, which names `.mindspec/phase.lock`, and none advises deletion/removal. However, repository search found real held-lock exact-command path tests only in TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded and TestCompleteSyncPhase_LockTimeoutSurfacedNotDiscarded, plus the generic TestDescribeLockFailure. There is no equivalent timeout-path test for spec approve, plan approve, either impl path, impl adopt, EnsureMigrated, or repair phase. Thus the production half of G3 is addressed, but the consolidated round-2 requirement `Per-path tests` and BRIEF claim that every path has such a test are not fully met. This is regression-coverage debt, not a demonstrated state-corruption defect."
+    },
+    {
+      "id": "R4-EMPIRICAL",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "Lock behavior, refusal behavior, and checkout hygiene withstand the empirical lens",
+      "evidence": "`go build ./...` and `go test ./internal/phase/... ./cmd/mindspec/... -short` passed; the Go tool emitted only a sandbox-denied external module stat-cache update. `go test ./internal/approve ./internal/complete -short` passed. Race-enabled focused phase lock/migration/sanctioned-sync tests, repair/release tests, and complete-sync tests passed three repetitions. These runs include the real timeout, crashed-holder release, leftover empty lockfile, and no-blockable-git-dirt fixtures. An isolated /tmp copy of 293ef0ee with a hand-rolled 96-concurrent-writer probe passed under -race for 10 repetitions with maximum simultaneous callback occupancy 1 and zero writer errors. Final checks showed `.gitignore:10:.mindspec/phase.lock`, no phase.lock file, empty `git status --short`, and an empty tracked diff in the bead worktree."
+    }
+  ]
+}

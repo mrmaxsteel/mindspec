@@ -1,0 +1,62 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "All four round-2 R6 asks are addressed at reviewed commit 293ef0ee, and the renewed hard block clears on independent re-derivation. Two fresh /tmp scratch tests reproduced the exact prior EnsureMigratedWithCache shapes: an injected children-read failure is wrapped and returned with migrated=false and zero merge writes, while a caller Cache pre-warmed with all-open children and then backed by all-closed children produces a fresh review write rather than stale plan. The promised SanctionedDerivedSync failure/no-write and real-lock success tests now exist and exercise the production entry point. The acquisition hook is invoked from inside both platform poll loops immediately before the kernel acquisition call, and all three contention fixtures use it after the holder has entered. The helper-built-map regression fixture is real and red for the requested shape. Full build, full short tests, and focused race repetitions passed in the bead worktree, which remained byte-clean with no phase.lock residue. The disclosed advanceState error swallowing is explicitly AC-4b/bead-5 work, and the status-aware shared helper's pre-existing swallowed child-read error is an honest residual whose broader redesign is outside bead 1; at this max-round boundary these are findings, not defects requiring bead-1 rework or threatening bead-2 consumption of the lock/sanction surfaces.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "classification": "ADDRESSED",
+      "round_2_ask": 1,
+      "severity": "info",
+      "title": "EnsureMigratedWithCache now fails closed and derives from fresh in-lock children",
+      "evidence": "Independent tests added only to an absolute /tmp archive of commit 293ef0ee passed both prior reproductions. In the error shape, the epic lookup and under-lock stored read succeeded, the children query returned a sentinel error, EnsureMigratedWithCache returned an error wrapping that sentinel with migrated=false, and the merge seam recorded zero writes. In the staleness shape, a caller Cache was pre-warmed with an open child, the backing fixture changed to closed before invocation, and the merge seam received mindspec_phase=review; reuse of the stale caller Cache would have produced plan. Production migrate.go constructs NewCache inside the WithPhaseWriteLock callback and propagates GetChildren errors before forming updates."
+    },
+    {
+      "classification": "ADDRESSED",
+      "round_2_ask": 2,
+      "severity": "info",
+      "title": "SanctionedDerivedSync behavioral tests exist and exercise the real surface",
+      "evidence": "internal/phase/sanctioned_sync_test.go now includes TestSanctionedDerivedSync_ChildReadFailurePropagatesNoWrite and TestSanctionedDerivedSync_SuccessWritesDerivedPhaseViaRealLockAndMergeSeam. The former asserts errors.Is on the injected child-read failure and zero merge calls. The latter calls SanctionedDerivedSync on a real t.TempDir lock root and asserts one seam write of review from all-closed children, including the intended backward-permitted implement-to-review behavior. These tests passed in the full suite and in the focused race run."
+    },
+    {
+      "classification": "ADDRESSED",
+      "round_2_ask": 3,
+      "severity": "info",
+      "title": "Contention barriers now originate inside the acquisition poll loop",
+      "evidence": "SetAcquireAttemptHookForTest installs the hook read by acquirePhaseFileLock. Both phaselock_unix.go and phaselock_windows.go invoke it inside each for-loop iteration immediately before Flock or LockFileEx. The phaselock, migration-contention, and repair-contention tests install the hook only after the holder has entered, wait for its signal before releasing the holder, assert the contender cannot complete during the held interval, and then assert completion. Focused -race execution of these fixtures passed three repetitions."
+    },
+    {
+      "classification": "ADDRESSED",
+      "round_2_ask": 4,
+      "severity": "info",
+      "title": "The requested helper-built update-map drift shape is red",
+      "evidence": "TestFindUnguardedPhaseWrites_CatchesHelperBuiltUpdateMapEvasion creates a separate buildUpdate helper returning a map containing mindspec_phase, passes its result to an unlocked merge function, and requires exactly one violation attributed to buildUpdate. Its guarded companion places the helper closure within WithPhaseWriteLock and requires zero violations. The full short suite passed."
+    },
+    {
+      "classification": "FINDING",
+      "severity": "low",
+      "title": "The inventory remains a syntax guard rather than whole-program data-flow analysis",
+      "assessment": "The exact round-2 helper-built-map ask is covered, but dynamically constructed keys, package-level aliases, reflection, and other shapes with no visible literal or index assignment remain outside the walker. The file discloses this limitation. Its top-level example saying a helper-built map is invisible is now broader than the implemented behavior: a normal helper containing a visible literal is detected even across a separate function body. This documentation imprecision does not permit the ordinary requested writer shape to pass and does not justify blocking at the max-round boundary."
+    },
+    {
+      "classification": "FINDING",
+      "severity": "moderate",
+      "title": "Status-aware repair inherits the shared helper's pre-existing child-read error swallowing",
+      "assessment": "repairPhaseRunE correctly moved from bare DerivePhaseFromChildren to DerivePhaseDetailWithCache, uses detail.Derived, prefers the lock's independently fresh stored value, and now preserves terminal done rows. DerivePhaseDetailWithCache still cannot return its own children-read failure because deriveFromChildrenOrStatusWithCache swallows it. That can turn failed child discovery into a fallback derived value on some nonterminal states, but this is an explicitly disclosed, pre-existing contract shared beyond bead 1; redesigning it is broader than the terminal-row correction requested in round 2. It should be tracked in a scoped follow-up, but under the supplied max-round calibration it is not a bead-1 hard block."
+    },
+    {
+      "classification": "FINDING",
+      "severity": "info",
+      "title": "advanceState's swallowed FetchChildren error is correctly fenced to bead 5",
+      "assessment": "internal/complete.advanceState still discards FetchChildren's error and can fabricate plan from nil children. This is not an undisclosed bead-1 omission: spec AC-4b and plan bead 5 explicitly require the completeFetchChildrenFn seam, an advanceState error return, indeterminate result/tail rendering, and suppression of the step-6.5 phase write. Bead 2 can consume WithPhaseWriteLock and wire SanctionedDerivedSync without changing that boundary, so moving this fix into bead 1 would cut across the approved decomposition."
+    },
+    {
+      "classification": "VERIFICATION",
+      "severity": "info",
+      "title": "Build, tests, race probes, and cleanliness passed",
+      "evidence": "In the bead worktree: go build ./... succeeded; go test ./... -short succeeded; go test -race ./internal/phase/... ./cmd/mindspec/... -short with the phaselock exclusivity, migration contention, repair contention, and SanctionedDerivedSync tests at -count=3 succeeded. Final git status --porcelain was empty and no .mindspec/phase.lock existed under the bead worktree."
+    }
+  ]
+}
