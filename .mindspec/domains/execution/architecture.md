@@ -213,3 +213,82 @@ first-parent guess — and ANY infra failure propagates as
 `(false, non-nil error)`: undetermined is never mapped to identify or
 refuse; callers fail closed. `ContentSubsumedOutcome` itself is
 byte-identical before/after 125.
+
+## Merge safety layer (spec 127)
+
+Spec 127 put two properties in front of every lifecycle merge: **no
+merge executes without work-destruction evidence being consulted**, and
+**no conflicted merge is ever aborted by the product**.
+
+### The R4 work-destruction preflight — one chokepoint, three producers
+
+`preflightMergeDestruction` (`internal/executor/merge_preflight.go`) is
+the ONE function every lifecycle merge producer calls immediately before
+its `gitutil.MergeInto`/`MergeBranch`: `CompleteBead`'s bead→spec merge,
+`FinalizeEpic`'s bead→spec auto-merge loop, and `FinalizeEpic`'s direct
+no-remote spec→main merge. It consults the shared predicate
+`gitutil.EvaluateWorkDestruction` (bead 1; seamed via
+`workDestructionFn`) and switches exhaustively over the closed
+`guard.DestructionOutcome` enum: `ancestor` proceeds as a no-op (the
+documented post-conflict recovery converges via ancestry); `clean`
+proceeds; `superseded`, `stale-deletion`, and `evidence-error` refuse
+fail-closed — absence of evidence is never treated as safety — with the
+audited `--allow-net-deletion "<reason>"` override
+(`AllowNetDeletionFlag`, byte-identical at every layer) as the only way
+through, recorded by the CALLER (`internal/complete` /
+`internal/approve`) on durable metadata and the friction registry.
+
+Two ratchet tests compose to keep the producer set closed:
+`merge_chokepoint_test.go` (package-scoped AST scan — exactly these
+producers inside `internal/executor`, within its documented shape
+vocabulary) and `merge_containment_test.go` (repo-wide, final-review
+O1-1/O2-2 — no production file OUTSIDE `internal/executor` may call
+`MergeInto`/`MergeBranch` at all).
+
+**The zero-value trap** (`outcome.go`, `merge_preflight.go`):
+`guard.DestructionAncestor` is the enum's zero value AND the permissive
+disposition — the inversion of the house fail-closed-zero discipline
+(the enum order is plan-pinned). A defaulted or stale
+`DestructionOutcome` reads as "safe to merge"; the preflight closes this
+structurally, and no consumer may treat mere possession of an outcome
+value as proof the predicate ran.
+
+### Never-abort conflict preservation + `--resolve-merge` resumption (R5(d))
+
+`abortMergeState` and every product-side merge abort are DELETED (the
+old spec-092 unwind design — see this domain's interfaces doc for the
+inversion record). A conflicted lifecycle merge stops in place; the
+refusal names the conflicted files, pinned resolution steps, and the
+`--resolve-merge` re-entry invocation of the owning verb. Re-entry
+(`resumeAwareMerge`, `merge_resumption.go`) re-runs the R4 preflight at
+the CURRENT source tip, then:
+
+- **No merge in progress** → fresh merge; on conflict, stop in place
+  (never abort, never checkout — no product path checks out a target
+  while `MERGE_HEAD` exists).
+- **Preserved merge, conflicts still unresolved** → refuse again with
+  the same resolution steps (`stillConflictedRefusal`).
+- **Preserved merge, index fully resolved and staged** →
+  `classifyPreservedMergeBinding` corroborates WHOSE merge it is
+  (merge-subject naming + the `MergeSourceMarkerRef` marker ref):
+  **exact** (preserved tip == expected source tip) completes the SAME
+  merge via `gitutil.CommitNoEdit`; **drifted** (source advanced since
+  the preserve) completes then incorporates the drift via the
+  drift-collapse mechanics (`CommitTreeMerge` — signing-aware, S1-1 —
+  plus `ResetSoft`/`UpdateRef`, each behind a fault-injectable seam,
+  with `DanglingCollapsedMergeExists` distinguishing a genuinely
+  stranded collapse on re-entry); **foreign** or **indeterminate**
+  refuses fail-closed and preserves.
+- **Unmerged/blocked worktree state that is NOT a preserved merge** →
+  the distinct worktree-state refusal (blocking paths named, wording
+  disjoint from the conflict diagnostic).
+
+Without `--resolve-merge`, a plain re-run REFUSES over a resolved index
+rather than silently completing someone else's staged resolution, and
+the staged resolution survives byte-for-byte (AC-9(v)(δ)). The
+committing surfaces that are not merge producers (`impl approve`'s
+artifact commit, sibling-bead `complete`) check the preserved-merge
+precondition BEFORE mutating, so a preserved merge can never be
+swallowed into a two-parent `chore:` commit (AC-9(v)(ε); enforced at the
+`commitWithExport` funnel, the only production caller of
+`gitutil.CommitAll`).

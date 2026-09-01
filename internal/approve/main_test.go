@@ -29,5 +29,27 @@ func TestMain(m *testing.M) {
 	planListJSONFn = func(args ...string) ([]byte, error) {
 		return []byte(`[]`), nil
 	}
+	// Spec 127 R4(a): implWorkDestructionPreflightFn performs REAL git I/O
+	// (lifecycle.EvaluateWorkDestructionPreflight ->
+	// gitutil.EvaluateWorkDestruction) unconditionally on every ApproveImpl
+	// call — unlike implEvaluateOrphanHintFn, which only fires when an
+	// orphan is actually found, this new §1 check runs for EVERY spec, so
+	// defaulting it here (rather than patching every existing test) keeps
+	// the package's pre-127 tests running against a fabricated root/
+	// specBranch that was never a real git repo. Any test asserting AC-5
+	// (the stale-recreated-spec-branch refusal) or the override escape
+	// overrides this default per-test and restores it via t.Cleanup — same
+	// convention as planListJSONFn above.
+	implWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
+		return nil
+	}
+	// Bead-6 fix round 1 (O1-1/O3-1): implHasRemoteFn now gates whether
+	// the §1 preflight above is even consulted (it applies only to the
+	// no-remote DIRECT spec→main leg). Defaulting it to false here
+	// preserves every pre-existing test's behavior exactly as it was
+	// before this gate existed — the preflight above still runs
+	// (permissively) for every test unless a test explicitly overrides
+	// this seam to exercise the PR-routed skip itself.
+	implHasRemoteFn = func() bool { return false }
 	os.Exit(m.Run())
 }

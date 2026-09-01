@@ -136,6 +136,14 @@ var (
 	// applying every gate against the landed content. Tests swap this to
 	// drive the reconcile matrix without a real repo.
 	mergedUnclosedFn = lifecycle.MergedUnclosed
+	// completeWorkDestructionPreflightFn is the spec 127 R4(a) §1-phase
+	// seam (pointer-pinned default): performs REAL git I/O
+	// (lifecycle.EvaluateWorkDestructionPreflight ->
+	// gitutil.EvaluateWorkDestruction) over the bead branch and spec
+	// branch. Tests that drive Run without a real underlying repo must
+	// stub this too, or the real evaluation fails closed
+	// (DestructionEvidenceError) against non-existent refs.
+	completeWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
 )
 
 // defaultVerifyCommitted is the production committed-state verifier for the
@@ -253,6 +261,27 @@ type CompleteOpts struct {
 	// layer; the override metadata namespaces are distinct.
 	// Spec 087 Bead 3.
 	SupersedeADR string
+
+	// AllowNetDeletion is the human-readable reason for the spec 127
+	// R4(b) audited override: "" means no override, so the bead→spec
+	// merge preflight refuses on a DestructionSuperseded/
+	// DestructionStaleDeletion/DestructionEvidenceError outcome exactly
+	// as it would with no override configured at all. A non-empty value
+	// lets that SAME preflight (both the §1 evaluation below and the
+	// executor's own live backstop immediately before its MergeInto)
+	// proceed anyway. After `exec.CompleteBead` returns nil the reason is
+	// recorded on the BEAD's metadata under the
+	// `mindspec_net_deletion_override_*` namespace (reason / by / at) —
+	// mirroring AllowDocSkew/OverrideADR's own post-mutation write above
+	// — and admitted to the escape-hatch friction registry
+	// (cmd/mindspec/selfemit.go).
+	AllowNetDeletion string
+
+	// ResolveMerge is the spec 127 R5(d) `--resolve-merge` flag: passed
+	// straight through to exec.CompleteBead's own resumption-aware merge
+	// dispatch (internal/executor's resumeAwareMerge). See CompleteBead's
+	// doc comment (executor.go) for the exact resumption semantics.
+	ResolveMerge bool
 }
 
 // reconcileState carries the Spec 119 R4 merged-unclosed / branch-less
@@ -292,6 +321,33 @@ func termsafeEscapeEach(vals []string) []string {
 		out[i] = termsafe.Escape(v)
 	}
 	return out
+}
+
+// evaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+// (pointer-pinned default, mirroring findOrphanedClosedBeadsFn's own
+// in-package-seam pattern in this file): it performs REAL git I/O
+// (lifecycle.EvaluateOrphanHint -> gitutil.EvaluateWorkDestruction), so
+// tests that stub findOrphanedClosedBeadsFn with a fabricated
+// lifecycle.Orphan value and no real underlying repo must also stub
+// this seam, or the real git evaluation fails closed
+// (DestructionEvidenceError) against the fixture's non-existent refs.
+var evaluateOrphanHintFn = lifecycle.EvaluateOrphanHint
+
+// renderOrphanRecoverySegment folds a spec 127 R2 lifecycle.OrphanHint
+// down into ONE string suitable for slotting into this file's existing
+// sibling-orphan recovery-sequence joins (`strings.Join(recoveries,
+// "; ")` / `", then "`). hint.EvidenceNote is empty only for the
+// normal-unmerged outcome (guard.DestructionClean), whose single line —
+// "mindspec complete <bead>" — is byte-identical to the pre-existing
+// Orphan.RecoveryCommand() text; every other outcome prefixes its
+// recovery line(s) with the evidence class that licenses them (R2(b)'s
+// "destructive hints carry their proof").
+func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
+	lines := strings.Join(hint.Lines, "; ")
+	if hint.EvidenceNote == "" {
+		return lines
+	}
+	return hint.EvidenceNote + ": " + lines
 }
 
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
@@ -499,6 +555,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// orphaned-yet-being-recovered branch — that is exactly what this run
 	// converges).
 	if orphans := findOrphanedClosedBeadsFn(specID, root, beadID); len(orphans) > 0 {
+		// Spec 127 R2: one evidence-carrying hint per orphaned sibling,
+		// computed ONCE (the sole call site of the derivation in this
+		// function) rather than re-deriving `mindspec complete <bead>`
+		// inline as a bare string — see orphan_hints.go's own doc
+		// comment for the outcome-to-hint mapping.
+		hints := make([]lifecycle.OrphanHint, len(orphans))
+		for i, o := range orphans {
+			hints[i] = evaluateOrphanHintFn(root, o.BeadID, o.BeadBranch, specID, specBranch)
+		}
+
 		// §2(i) deadlock-free recovery graph (mindspec-tpjn): two (or
 		// more) simultaneously orphaned closed siblings, each refusing on
 		// the OTHER, previously had no non-manual exit. Determine whether
@@ -516,8 +582,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				names = append(names, idrender.Bead(o.BeadID))
 			}
 			recoveries := make([]string, 0, len(orphans))
-			for _, o := range orphans {
-				recoveries = append(recoveries, o.RecoveryCommand())
+			for _, h := range hints {
+				recoveries = append(recoveries, renderOrphanRecoverySegment(h))
 			}
 			// R4: safeBeadID/names are ID-typed positions (idrender).
 			fmt.Printf("Warning: bead %s was closed without `mindspec complete` and is unmerged (closed-but-unmerged) — recovering it now.\nSibling(s) %s are ALSO closed-but-unmerged; recover each next: %s.\n",
@@ -549,7 +615,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 					detail.WriteString(", ")
 				}
 				fmt.Fprintf(&detail, "%s (branch %s)", idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch))
-				recoveries = append(recoveries, o.RecoveryCommand())
+				recoveries = append(recoveries, renderOrphanRecoverySegment(hints[i]))
 			}
 			recoveries = append(recoveries, "mindspec complete "+safeBeadID)
 			return nil, fmt.Errorf("sibling bead(s) %s were closed without `mindspec complete` — unmerged into %s (closed-but-unmerged).\nRecover each in turn, then re-run: %s.",
@@ -698,6 +764,26 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if gateCfgErr == nil && panelReg != nil {
 		if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 			reviewerCountAdvisory(panelReg, def, advisoryOut)
+		}
+	}
+
+	// 2.26. Spec 127 R4(a) — the §1-phase work-destruction preflight for
+	// this verb's OWN bead→spec merge (CompleteBead's MergeInto), sited
+	// immediately after the panel gate and BEFORE step 2.5's artifact-
+	// materialization subphase (the CommitAll below) — so a refusal here
+	// leaves tracker and git state byte-identical to the pre-call state,
+	// same as every other step-1-through-2.25 preflight fact. Skipped
+	// entirely in reconcile mode: there the bead's work already landed
+	// via a merge OUTSIDE this invocation (2.1 above), so there is no
+	// bead→spec MergeInto for this verb to preflight — the merge already
+	// happened and this run performs no merge at all. This is a
+	// convenience early-refusal; the executor's OWN live consultation
+	// immediately before its MergeInto call (mindspec_executor.go) is the
+	// backstop that actually gates the mutation regardless of whether
+	// this check ran or observed stale state.
+	if reconcile == nil {
+		if err := completeWorkDestructionPreflightFn(root, beadHead, specBranch, opts.AllowNetDeletion, fmt.Sprintf("mindspec complete %s", beadID)); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1122,7 +1208,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
-		completeErr = exec.CompleteBead(beadID, specBranch, "")
+		completeErr = exec.CompleteBead(beadID, specBranch, "", opts.AllowNetDeletion, opts.ResolveMerge)
 		if completeErr == nil {
 			result.WorktreeRemoved = true
 		}
@@ -1235,6 +1321,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if err := completeMergeMetadataFn(beadID, meta); err != nil {
 			// R4: beadID is an ID-typed position — idrender.Bead.
 			fmt.Printf("Warning: could not record adr-supersede metadata on %s: %v\n", safeBeadID, err)
+		}
+	}
+
+	// Spec 127 R4(b): record the audited net-deletion override AFTER the
+	// terminal bead→spec merge (`exec.CompleteBead`) returns nil —
+	// mirroring the doc-skew/adr-override discipline above. If
+	// CompleteBead failed we skip the write; the failure itself is the
+	// audit trail. Best-effort: a metadata write failure surfaces as a
+	// warning print but does not fail the lifecycle.
+	if opts.AllowNetDeletion != "" && completeErr == nil {
+		meta := buildSkewMetadata(opts.AllowNetDeletion,
+			"mindspec_net_deletion_override_reason",
+			"mindspec_net_deletion_override_at",
+			"mindspec_net_deletion_override_by",
+		)
+		if err := completeMergeMetadataFn(beadID, meta); err != nil {
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			fmt.Printf("Warning: could not record net-deletion override metadata on %s: %v\n", safeBeadID, err)
 		}
 	}
 

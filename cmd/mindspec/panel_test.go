@@ -92,14 +92,27 @@ func snapshotTree(t *testing.T, root string) []string {
 // value set by one t.Run — e.g. a --bead containing a control byte —
 // otherwise persists into the next subtest's Execute() and can produce a
 // false-positive rejection attributed to the wrong flag.
+//
+// Spec 127 final review (found while discharging S2-1's `-shuffle`
+// obligation): it also RESTORES the defaults when the calling test ends.
+// Resetting only on the way IN leaves the shared singleton dirty on the
+// way OUT, so a test that runs `panel create ... --round 2` silently
+// changes the flag state every LATER test in the package executes under —
+// TestPanelCreate_StampsResolversAndCoBumpsRoundSHA reads `round` at its
+// default and FAILS under `-shuffle` when it happens to run after one.
+// Same shared-mutable-singleton class as S2-1 itself, one flag set over.
 func resetPanelCreateFlags(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"spec", "target", "bead", "round", "gate"} {
-		if f := panelCreateCmd.Flags().Lookup(name); f != nil {
-			_ = f.Value.Set(f.DefValue)
-			f.Changed = false
+	restore := func() {
+		for _, name := range []string{"spec", "target", "bead", "round", "gate"} {
+			if f := panelCreateCmd.Flags().Lookup(name); f != nil {
+				_ = f.Value.Set(f.DefValue)
+				f.Changed = false
+			}
 		}
 	}
+	restore()
+	t.Cleanup(restore)
 }
 
 // stubWorktreeListEmpty points panelWorktreeListFn at a stub returning no
@@ -155,6 +168,11 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 	withTestChdir(t, root)
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
+	// panelCreateCmd's flags are a package-level singleton shared by every
+	// test in this package; reset on entry (and, via resetPanelCreateFlags'
+	// own cleanup, on exit) so this test reads `round` at its default
+	// regardless of execution order.
+	resetPanelCreateFlags(t)
 
 	origRevParse := revParseForPanelFn
 	t.Cleanup(func() { revParseForPanelFn = origRevParse })
@@ -255,6 +273,102 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 	}
 	if string(verdictAfter) != verdictBody {
 		t.Fatalf("re-panel touched the prior-round verdict file: got %q, want %q", verdictAfter, verdictBody)
+	}
+}
+
+// --- TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds --------------
+
+// TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds is spec 127
+// bead 7 fix round 1's proof for G1-1 (BLOCKING): the #186 stale-SHA
+// interim recovery `.claude/agents/spec-orchestrator.md` names —
+// `mindspec panel create <slug> --spec <spec-id> --target
+// bead/<bead-id> --bead <bead-id> --round <N+1>` — is exercised through
+// the REAL command tree (rootCmd.Execute, the same entrypoint the
+// guidance's invocation resolves through) and its composed effect is
+// asserted at the level `mindspec complete`'s own gate consumes:
+// panel.Scan + panel.ForBead, not merely that `--bead` exists on the
+// resolved leaf's flag set (named_invocation_test.go's job, and not
+// enough on its own — a flag existing on a leaf does not prove a
+// caller who supplies it gets a bead-bound registration back).
+//
+// This test does NOT drive `mindspec complete` itself end-to-end
+// (that requires a real bd-backed bead and git worktree — the
+// documented 127->128 interim seam, O1-1's note) — it proves the
+// composition one layer down, at the exact seam panelGate reads
+// (internal/complete/panel_advisory.go's `panel.ForBead(panelScanFn(...),
+// beadID)`): that the guidance's own invocation, run for real, produces
+// a registration `ForBead` selects. What remains unproven here (named
+// explicitly, not silently assumed): that `mindspec complete` itself,
+// given a live stale-SHA refusal, actually reaches this same registered
+// panel via the same root set `panelScanFn` resolves at runtime — that
+// full end-to-end wiring is the acknowledged 127->128 interim gap.
+func TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds(t *testing.T) {
+	root := mkPanelTestRoot(t, "")
+	withTestChdir(t, root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+	resetPanelCreateFlags(t)
+
+	origRevParse := revParseForPanelFn
+	t.Cleanup(func() { revParseForPanelFn = origRevParse })
+	sha := "cccc3333cccc3333cccc3333cccc3333cccc3333"
+	revParseForPanelFn = func(string, string) (string, error) { return sha, nil }
+
+	beadID := "mindspec-2vtk.7"
+	runPanel := func(args ...string) (string, error) {
+		var stdout, stderr bytes.Buffer
+		rootCmd.SetOut(&stdout)
+		rootCmd.SetErr(&stderr)
+		rootCmd.SetArgs(append([]string{"panel"}, args...))
+		err := rootCmd.Execute()
+		return stdout.String() + stderr.String(), err
+	}
+
+	// The exact documented recovery shape, `--round 2` standing in for
+	// `--round <N+1>`.
+	if out, err := runPanel("create", "stale-repanel", "--spec", "127-test",
+		"--target", "bead/"+beadID, "--bead", beadID, "--round", "2"); err != nil {
+		t.Fatalf("documented recovery invocation failed: %v\noutput=%s", err, out)
+	}
+
+	regs := panel.Scan(root)
+	bound := panel.ForBead(regs, beadID)
+	if len(bound) != 1 {
+		t.Fatalf("panel.ForBead(panel.Scan(root), %q) = %d registrations, want exactly 1 (the recovery's own re-panel) — this is the exact selection mindspec complete's gate (internal/complete.panelGate) performs before deciding whether a bead has a registered panel at all", beadID, len(bound))
+	}
+	if bound[0].Panel.BeadID == nil || *bound[0].Panel.BeadID != beadID {
+		t.Fatalf("selected registration's BeadID = %v, want %q", bound[0].Panel.BeadID, beadID)
+	}
+	if bound[0].Panel.Round != 2 || bound[0].Panel.ReviewedHeadSHA != sha {
+		t.Fatalf("selected registration round/SHA = %d/%q, want 2/%q — the co-bump this recovery exists to perform", bound[0].Panel.Round, bound[0].Panel.ReviewedHeadSHA, sha)
+	}
+
+	// Adversarial control, mirroring the exact defect this fixes: the
+	// SAME invocation with --bead omitted (the pre-fix guidance text)
+	// must NOT be selectable by ForBead — reproducing, at this
+	// mechanically-testable layer, the fail-open panelGate would hit.
+	resetPanelCreateFlags(t)
+	if out, err := runPanel("create", "stale-repanel-nobead", "--spec", "127-test",
+		"--target", "bead/"+beadID, "--round", "2"); err != nil {
+		t.Fatalf("no-bead control invocation failed: %v\noutput=%s", err, out)
+	}
+	regsAfter := panel.Scan(root)
+	boundAfter := panel.ForBead(regsAfter, beadID)
+	if len(boundAfter) != 1 {
+		t.Fatalf("panel.ForBead still finds %d registration(s) after adding a non-bead panel for the SAME beadID string — want the pre-existing bound registration only, unchanged; a second match here would mean the no-bead invocation was ALSO bead-bound, which disproves the control", len(boundAfter))
+	}
+	nonBead := panel.Scan(root)
+	found := false
+	for _, r := range nonBead {
+		if r.Slug() == "stale-repanel-nobead" {
+			found = true
+			if r.Panel.BeadID != nil {
+				t.Fatalf("stale-repanel-nobead (created without --bead) has non-nil BeadID %q — want nil (bead_id: null), reproducing the exact registration a pre-fix guidance-follower would end up with", *r.Panel.BeadID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("stale-repanel-nobead registration not found in panel.Scan(root) at all")
 	}
 }
 
@@ -440,7 +554,10 @@ func TestPanelTally_ExitCodeTracksDecision(t *testing.T) {
 			tallyWarnOut = &stderr
 			t.Cleanup(func() { tallyWarnOut = origOut })
 
-			err := tallyExitAction(d, "demo")
+			err := tallyExitAction(d, tallyRecoveryFacts{
+				Slug: "demo", SpecID: "110", Target: "bead/" + beadID,
+				BeadID: beadID, NextRound: 2,
+			})
 			switch {
 			case tc.wantErr:
 				if err == nil {
@@ -448,6 +565,17 @@ func TestPanelTally_ExitCodeTracksDecision(t *testing.T) {
 				}
 				if !guard.HasFinalRecoveryLine(err.Error()) {
 					t.Errorf("expected a final recovery line, got: %v", err)
+				}
+				// Spec 127 final review (mindspec-tyi3): a recovery line
+				// EXISTING is not the property that matters — a Block
+				// recovery that omits `--bead` re-registers a panel
+				// `panel.ForBead` cannot select, silently fail-opening the
+				// gate it claims to restore. The composed proof lives in
+				// TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds;
+				// this row-level check keeps every Block row honest about
+				// the binding being present at all.
+				if !strings.Contains(err.Error(), "--bead") {
+					t.Errorf("Block recovery does not name --bead, so following it registers a bead_id:null panel the complete-gate cannot see: %v", err)
 				}
 			default:
 				if err != nil {
@@ -458,6 +586,211 @@ func TestPanelTally_ExitCodeTracksDecision(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds -----------------
+
+// splitPosixSingleQuoted tokenizes a rendered recovery command the way a
+// POSIX shell would for the one quoting form tallyExitAction emits
+// (shellQuoteTarget's single-quoted literals, including the
+// close/backslash-quote/reopen escape for an embedded quote). This test
+// asserts the emitted line is COPYABLE, so it must consume the line as
+// written rather than re-deriving the operands it is trying to verify.
+func splitPosixSingleQuoted(t *testing.T, s string) []string {
+	t.Helper()
+	var (
+		out     []string
+		cur     strings.Builder
+		inQuote bool
+		started bool
+	)
+	flush := func() {
+		if started {
+			out = append(out, cur.String())
+			cur.Reset()
+			started = false
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inQuote && c == '\'':
+			inQuote = false
+		case inQuote:
+			cur.WriteByte(c)
+			started = true
+		case c == '\'':
+			inQuote = true
+			started = true
+		case c == '\\' && i+1 < len(s):
+			i++
+			cur.WriteByte(s[i])
+			started = true
+		case c == ' ' || c == '\t':
+			flush()
+		default:
+			cur.WriteByte(c)
+			started = true
+		}
+	}
+	if inQuote {
+		t.Fatalf("recovery command has an unterminated single quote — it is not copyable into a shell: %q", s)
+	}
+	flush()
+	return out
+}
+
+// TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds is spec 127 final
+// review's proof for mindspec-tyi3's `panel tally` surface, and it
+// deliberately replaces the property the old coverage asserted.
+//
+// TestPanelTally_ExitCodeTracksDecision checked
+// guard.HasFinalRecoveryLine(err) — that A recovery line exists. That is
+// the WRONG property: the shipped line was `mindspec panel create <slug>
+// --round <N+1> ...`, which carries no `--bead`, so following it registers
+// a panel with `bead_id: null`. internal/complete's gate selects with
+// panel.ForBead, which matches only registrations whose BeadID equals the
+// bead being completed; an empty selection is the documented fail-open, so
+// the "recovery" silently DISARMED the gate. A line-exists assertion can
+// never see that.
+//
+// This test therefore takes the emitted line as written, runs it back
+// through the REAL command tree (rootCmd.Execute — the same entrypoint a
+// follower's shell reaches), and asserts the composed effect at the seam
+// the gate actually consumes: panel.Scan + panel.ForBead. It reuses bead
+// 7's proven pattern from
+// TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds, including its
+// omission control (the same argv with `--bead` stripped must NOT become
+// selectable), so the assertion cannot pass vacuously.
+func TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds(t *testing.T) {
+	root := mkPanelTestRoot(t, "")
+	withTestChdir(t, root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	beadID := "mindspec-2vtk.7"
+	const slug = "block-repanel"
+
+	// A REAL git repo with a real bead/<id> branch: the BEAD path of
+	// resolvePanelGateFacts hard-wires the executor's own RevParseRef (no
+	// stub seam), so an absent branch would divert the decision into the
+	// transient-git-error Warn leg and this test would never reach the
+	// Block recovery it exists to exercise.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	runGitInDir(t, root, "init", "-q", "-b", "main")
+	runGitInDir(t, root, "commit", "--allow-empty", "-q", "-m", "root")
+	runGitInDir(t, root, "branch", "bead/"+beadID)
+	stubWorktreeListEmpty(t)
+
+	resetPanelCreateFlags(t)
+	if out, err := runPanelVerbCmd("create", slug, "--spec", "127-test",
+		"--target", "bead/"+beadID, "--bead", beadID, "--round", "1"); err != nil {
+		t.Fatalf("seeding the round-1 bead panel failed: %v\noutput=%s", err, out)
+	}
+
+	// A REJECT verdict at an UN-advanced target: the decision Blocks for a
+	// substantive reason, so the recovery under test is the one an agent
+	// facing real dissent would follow.
+	regs := panel.Scan(root)
+	var dir string
+	for _, r := range regs {
+		if r.Slug() == slug {
+			dir = r.Dir
+		}
+	}
+	if dir == "" {
+		t.Fatalf("the round-1 panel %q is not in panel.Scan(root) at all", slug)
+	}
+	body := fmt.Sprintf(`{"verdict":%q}`, panel.VerdictReject)
+	if err := os.WriteFile(filepath.Join(dir, "R1-round-1.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("seed verdict file: %v", err)
+	}
+
+	out, err := runPanelVerbCmd("tally", slug)
+	if err == nil {
+		t.Fatalf("expected a Block (non-zero exit) for a REJECT verdict:\noutput=%s", out)
+	}
+	recovery := err.Error()
+
+	// The Block recovery must also name the bead to complete concretely —
+	// the pre-fix text emitted a literal `<bead>` placeholder.
+	if !strings.Contains(recovery, "mindspec complete") || !strings.Contains(recovery, beadID) {
+		t.Errorf("recovery does not name `mindspec complete <the real bead>`: %v", err)
+	}
+	if strings.Contains(recovery, "<bead>") || strings.Contains(recovery, "<N+1>") {
+		t.Errorf("recovery still carries an uninstantiated placeholder (it cannot be copied as-is): %v", err)
+	}
+
+	// Extract the create invocation exactly as printed.
+	start := strings.Index(recovery, "mindspec panel create")
+	if start < 0 {
+		t.Fatalf("recovery does not contain a `mindspec panel create` invocation: %v", err)
+	}
+	rest := recovery[start:]
+	end := strings.Index(rest, "), then")
+	if end < 0 {
+		t.Fatalf("could not delimit the create invocation in the recovery: %q", rest)
+	}
+	createCmd := rest[:end]
+
+	tokens := splitPosixSingleQuoted(t, createCmd)
+	if len(tokens) < 3 || tokens[0] != "mindspec" || tokens[1] != "panel" || tokens[2] != "create" {
+		t.Fatalf("recovery invocation does not lead with `mindspec panel create`: %q -> %q", createCmd, tokens)
+	}
+	args := tokens[2:] // runPanelVerbCmd supplies the "panel" leaf itself
+
+	resetPanelCreateFlags(t)
+	if out, err := runPanelVerbCmd(args...); err != nil {
+		t.Fatalf("the emitted recovery invocation failed when run for real: %v\nargv=%q\noutput=%s", err, args, out)
+	}
+
+	bound := panel.ForBead(panel.Scan(root), beadID)
+	if len(bound) != 1 {
+		t.Fatalf("panel.ForBead(panel.Scan(root), %q) = %d registrations, want exactly 1 — this is the exact selection mindspec complete's gate performs, and a recovery whose re-panel it cannot see leaves the bead ungated", beadID, len(bound))
+	}
+	if bound[0].Panel.BeadID == nil || *bound[0].Panel.BeadID != beadID {
+		t.Fatalf("re-panel BeadID = %v, want %q", bound[0].Panel.BeadID, beadID)
+	}
+	if bound[0].Panel.Round != 2 {
+		t.Errorf("re-panel round = %d, want 2 (the recovery must bump past the round it just adjudicated)", bound[0].Panel.Round)
+	}
+
+	// Omission control, mirroring the exact defect this fixes: the SAME
+	// invocation with `--bead` stripped — the pre-fix recovery's shape —
+	// must NOT be selectable by ForBead.
+	var noBead []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--bead" {
+			i++ // also drop its value
+			continue
+		}
+		if args[i] == args[1] { // the slug positional
+			noBead = append(noBead, args[1]+"-nobead")
+			continue
+		}
+		noBead = append(noBead, args[i])
+	}
+	resetPanelCreateFlags(t)
+	if out, err := runPanelVerbCmd(noBead...); err != nil {
+		t.Fatalf("no-bead control invocation failed: %v\nargv=%q\noutput=%s", err, noBead, out)
+	}
+	if got := len(panel.ForBead(panel.Scan(root), beadID)); got != 1 {
+		t.Fatalf("panel.ForBead finds %d registration(s) after adding a --bead-less panel for the SAME bead; want the bound re-panel only — a second match would disprove the control", got)
+	}
+	controlFound := false
+	for _, r := range panel.Scan(root) {
+		if r.Slug() == args[1]+"-nobead" {
+			controlFound = true
+			if r.Panel.BeadID != nil {
+				t.Fatalf("the --bead-less control registered BeadID %q, want nil (bead_id: null) — the control does not reproduce the pre-fix registration", *r.Panel.BeadID)
+			}
+		}
+	}
+	if !controlFound {
+		t.Fatal("the --bead-less control registration is not in panel.Scan(root) at all")
 	}
 }
 
@@ -1382,7 +1715,10 @@ func TestPanelVerbs_BeadHostileBeadIDEscaped(t *testing.T) {
 		origWarnOut := tallyWarnOut
 		tallyWarnOut = &warnBuf
 		t.Cleanup(func() { tallyWarnOut = origWarnOut })
-		if err := tallyExitAction(tallyDecision, "hostile-c"); err != nil {
+		if err := tallyExitAction(tallyDecision, tallyRecoveryFacts{
+			Slug: "hostile-c", SpecID: "116-test", Target: "bead/" + hostileBeadID,
+			BeadID: hostileBeadID, NextRound: 2,
+		}); err != nil {
 			t.Fatalf("expected a nil error for a Warn decision, got: %v", err)
 		}
 		assertClean(t, warnBuf.String())

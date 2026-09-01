@@ -432,7 +432,7 @@ func TestCompleteBead_MergesAndCleans(t *testing.T) {
 	beadHashBefore := refHash(t, dir, "bead/mindspec-x.1")
 	mainHash := refHash(t, dir, "main")
 
-	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", ""); err != nil {
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -467,7 +467,7 @@ func TestCompleteBeadRejectsMalformedSpecBranch(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 	runGitIn(t, dir, "branch", "bead/mindspec-x.1")
 
-	err := g.CompleteBead("mindspec-x.1", "spec/x;evil", "")
+	err := g.CompleteBead("mindspec-x.1", "spec/x;evil", "", "", false)
 	if err == nil {
 		t.Fatal("expected a refusal for a spec branch whose suffix fails idvalidate.SpecID")
 	}
@@ -513,7 +513,7 @@ func TestCompleteBead_WorktreeRemoveRunsFromRepoRoot(t *testing.T) {
 
 	// No msg → no auto-commit/IsTreeClean path; merge path will warn (spec wt
 	// missing) but the cleanup path still runs.
-	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", ""); err != nil {
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -541,7 +541,7 @@ func TestFinalizeEpic_DirectMerge(t *testing.T) {
 
 	fake.listEntries = nil // no bead worktrees
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestFinalizeEpic_DirectMerge(t *testing.T) {
 func TestFinalizeEpic_BranchNotFound(t *testing.T) {
 	g, _, _ := newRepoExecutor(t)
 
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -759,8 +759,8 @@ func TestMockExecutor_RecordsCalls(t *testing.T) {
 		t.Errorf("branch = %q", bInfo.Branch)
 	}
 
-	_ = m.CompleteBead("x.1", "spec/001-test", "done")
-	fr, _ := m.FinalizeEpic("e1", "001-test", "spec/001-test", nil)
+	_ = m.CompleteBead("x.1", "spec/001-test", "done", "", false)
+	fr, _ := m.FinalizeEpic("e1", "001-test", "spec/001-test", nil, "", false)
 	if fr.CommitCount != 3 {
 		t.Errorf("commits = %d", fr.CommitCount)
 	}
@@ -1313,7 +1313,7 @@ func TestCompleteBead_EscapesHostileWorktreeNameInRemoveWarning(t *testing.T) {
 		// bead/mindspec-x.1 does not exist as a branch, so the
 		// merged-ancestor safety check and merge legs are skipped; the
 		// cleanup leg runs Remove(wtName) which fails, forcing the warning.
-		if err := g.CompleteBead("mindspec-x.1", "spec/077-test", ""); err != nil {
+		if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})

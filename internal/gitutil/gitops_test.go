@@ -102,6 +102,15 @@ func initGitRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-b", "main")
+	// REPO-LOCAL identity, not merely run()'s GIT_AUTHOR_*/GIT_COMMITTER_*
+	// env: that env reaches only the git commands run() itself spawns.
+	// Primitives under test here spawn their OWN git (CommitTreeMerge,
+	// MergeInto, MergeBranch all create commits), and those subprocesses
+	// see the ambient config tier only — present on a developer's machine,
+	// absent on a CI runner. Repo-local config is the one tier both read.
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	run("config", "commit.gpgsign", "false")
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644)
 	run("add", ".")
 	run("commit", "-m", "initial")
@@ -1465,15 +1474,20 @@ func TestSEC5_SingleRefSites_InsertSeparator(t *testing.T) {
 	if err := MergeBranch("/wt", "feature", "main"); err != nil {
 		t.Fatal(err)
 	}
-	// Two calls: checkout target (trailing `--`), then merge with `-m ... -- source`.
+	// Three calls: checkout target (trailing `--`), the bead-6 fix round
+	// 3 merge-source marker's rev-parse of the source tip (best-effort —
+	// the stubbed empty output makes it resolve to ErrRefNotFound here,
+	// so no update-ref call follows), then merge with `-m ... -- source`.
 	assertArgs(t, (*calls)[0].args, "-C", "/wt", "checkout", "main", "--")
-	assertArgs(t, (*calls)[1].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature into main", "--", "feature")
+	assertArgs(t, (*calls)[1].args, "-C", "/wt", "rev-parse", "--verify", "--quiet", "feature^{commit}")
+	assertArgs(t, (*calls)[2].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature into main", "--", "feature")
 
 	calls = swapExec(t, "", 0)
 	if err := MergeInto("/wt", "feature"); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature", "--", "feature")
+	assertArgs(t, (*calls)[0].args, "-C", "/wt", "rev-parse", "--verify", "--quiet", "feature^{commit}")
+	assertArgs(t, (*calls)[1].args, "-C", "/wt", "merge", "--no-ff", "-m", "Merge feature", "--", "feature")
 
 	calls = swapExec(t, "", 0)
 	if _, err := LogOneline("/wt", "main"); err != nil {
@@ -1576,6 +1590,73 @@ func TestFetchRemoteBranch_RunsNarrowFetch(t *testing.T) {
 	swapExec(t, "fatal: couldn't find remote ref main", 1)
 	if err := FetchRemoteBranch("origin", "main"); err == nil {
 		t.Fatal("FetchRemoteBranch: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestFetchRemoteBranchIn_RunsNarrowFetchAtWorkdir pins spec 127 R1b(i)'s
+// workdir-taking fetch variant: same narrow `fetch <remote> <branch>` as
+// FetchRemoteBranch, but with an explicit `-C workdir` prefix (gitArgs) so
+// the caller never depends on the process's current working directory —
+// the adopt surface's own requirement, since internal/approve must never
+// chdir the whole process to corroborate one spec's evidence.
+func TestFetchRemoteBranchIn_RunsNarrowFetchAtWorkdir(t *testing.T) {
+	calls := swapExecFunc(t, func(name string, args []string) (string, int) {
+		if hasArg(args, "fetch") {
+			return "", 0
+		}
+		// FETCH_HEAD resolution (S1-1).
+		return "deadbeefcafef00dfacade0123456789abcdef0\n", 0
+	})
+	sha, err := FetchRemoteBranchIn("/tmp/some-root", "origin", "spec/127-test")
+	if err != nil {
+		t.Fatalf("FetchRemoteBranchIn: unexpected error: %v", err)
+	}
+	if sha != "deadbeefcafef00dfacade0123456789abcdef0" {
+		t.Errorf("sha = %q, want the resolved FETCH_HEAD sha", sha)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("expected 2 calls (fetch, then FETCH_HEAD resolution), got %d: %v", len(*calls), *calls)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/some-root", "fetch", "origin", "spec/127-test")
+	assertArgs(t, (*calls)[1].args, "-C", "/tmp/some-root", "rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}")
+
+	swapExec(t, "fatal: couldn't find remote ref spec/127-test", 1)
+	if _, err := FetchRemoteBranchIn("/tmp/some-root", "origin", "spec/127-test"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected error on non-zero git exit, got nil")
+	}
+}
+
+// TestFetchRemoteBranchIn_FetchSucceedsButFetchHeadUnresolvable is S1-1:
+// a fetch that reports success but whose FETCH_HEAD cannot be resolved
+// (e.g. a narrow/single-branch refspec that never even updates
+// FETCH_HEAD for an unrelated ref shape) must surface as an ERROR, never
+// silently degrade to some other ref name.
+func TestFetchRemoteBranchIn_FetchSucceedsButFetchHeadUnresolvable(t *testing.T) {
+	swapExecFunc(t, func(name string, args []string) (string, int) {
+		if hasArg(args, "fetch") {
+			return "", 0
+		}
+		return "", 1 // FETCH_HEAD unresolvable
+	})
+	if _, err := FetchRemoteBranchIn("/tmp/some-root", "origin", "spec/127-test"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected an error when FETCH_HEAD cannot be resolved after a successful fetch")
+	}
+}
+
+// TestFetchRemoteBranchIn_RejectsOptionLikeOperands mirrors the SEC-5
+// argv-hygiene fixture every other gitutil boundary helper carries: a
+// remote or branch operand beginning with "-" must never reach git argv
+// unrejected (it would be reinterpreted as an option).
+func TestFetchRemoteBranchIn_RejectsOptionLikeOperands(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	if _, err := FetchRemoteBranchIn("/tmp/some-root", "--upload-pack=x", "main"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected rejection of an option-like remote operand")
+	}
+	if _, err := FetchRemoteBranchIn("/tmp/some-root", "origin", "-x"); err == nil {
+		t.Fatal("FetchRemoteBranchIn: expected rejection of an option-like branch operand")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("expected no git invocation on a rejected operand, got %d", len(*calls))
 	}
 }
 
@@ -1815,4 +1896,272 @@ func TestDefaultBranch_SetsNoPromptEnv(t *testing.T) {
 	assertNoPromptEnv(t, (*calls)[0])
 	assertArgs(t, (*calls)[1].args, "remote", "show", "origin")
 	assertNoPromptEnv(t, (*calls)[1])
+}
+
+// TestBranchExistsIn_RunsAtExplicitWorkdir pins spec 127 R1b's
+// workdir-taking existence check: same `rev-parse --verify refs/heads/`
+// probe as BranchExists, but with an explicit `-C workdir` prefix so a
+// caller never depends on the process's current working directory.
+func TestBranchExistsIn_RunsAtExplicitWorkdir(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	exists, err := BranchExistsIn("/tmp/some-root", "bead/x.1")
+	if err != nil {
+		t.Fatalf("BranchExistsIn: unexpected error: %v", err)
+	}
+	if !exists {
+		t.Fatal("BranchExistsIn: expected true on a zero-exit rev-parse")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/some-root", "rev-parse", "--verify", "--quiet", "refs/heads/bead/x.1")
+
+	// G1-B3-04: exit 1 (with --quiet) is the genuinely-absent case — false,
+	// nil error.
+	swapExec(t, "", 1)
+	exists, err = BranchExistsIn("/tmp/some-root", "bead/x.1")
+	if err != nil {
+		t.Fatalf("BranchExistsIn: unexpected error on a genuinely absent branch: %v", err)
+	}
+	if exists {
+		t.Fatal("BranchExistsIn: expected false on exit 1")
+	}
+}
+
+// TestBranchExistsIn_StructuralFailureIsErrorNeverAbsence is G1-B3-04:
+// a git failure OTHER than the genuine "ref absent" exit (1) — a
+// malformed repo, lock contention, git itself missing — must be
+// returned as an ERROR, never silently folded into "branch does not
+// exist". A caller that read a plain bool here could not distinguish
+// indeterminate existence from genuine absence.
+func TestBranchExistsIn_StructuralFailureIsErrorNeverAbsence(t *testing.T) {
+	swapExec(t, "fatal: not a git repository", 128)
+	exists, err := BranchExistsIn("/tmp/some-root", "bead/x.1")
+	if err == nil {
+		t.Fatal("BranchExistsIn: expected an error on a structural git failure (exit 128), got nil")
+	}
+	if exists {
+		t.Fatal("BranchExistsIn: a structural failure must never report true")
+	}
+}
+
+// TestBranchExistsIn_RejectsOptionLikeName mirrors BranchExists' own
+// SEC-5 hygiene: a `-`-prefixed name reads as false (with an error, per
+// G1-B3-04) without ever reaching git argv.
+func TestBranchExistsIn_RejectsOptionLikeName(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	exists, err := BranchExistsIn("/tmp/some-root", "--upload-pack=x")
+	if err == nil {
+		t.Fatal("BranchExistsIn: expected an error on an option-like name")
+	}
+	if exists {
+		t.Fatal("BranchExistsIn: expected false on an option-like name")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("expected no git invocation on a rejected name, got %d", len(*calls))
+	}
+}
+
+// TestBranchExistsIn_RealGitIsWorkdirScoped is the real-git regression
+// this helper exists to fix: BranchExists (no -C) answers for the
+// CALLING PROCESS's cwd, which is always this test binary's package
+// directory — never a temp fixture repo. BranchExistsIn must answer
+// correctly for an explicit OTHER directory without any chdir.
+func TestBranchExistsIn_RealGitIsWorkdirScoped(t *testing.T) {
+	dir := initGitRepo(t)
+	restore := swapRealExecCommand(t)
+	defer restore()
+
+	if out, err := exec.Command("git", "-C", dir, "branch", "bead/x.1").CombinedOutput(); err != nil {
+		t.Fatalf("git branch bead/x.1: %v\n%s", err, out)
+	}
+
+	if exists, err := BranchExistsIn(dir, "bead/x.1"); err != nil || !exists {
+		t.Errorf("BranchExistsIn(dir, ...) must find a branch that genuinely exists in dir: exists=%v err=%v", exists, err)
+	}
+	if exists, err := BranchExistsIn(dir, "bead/does-not-exist"); err != nil || exists {
+		t.Errorf("BranchExistsIn(dir, ...) must not find a branch that does not exist in dir: exists=%v err=%v", exists, err)
+	}
+	// The CALLING PROCESS's cwd (this test binary's package dir, part of
+	// the mindspec repo itself) certainly does not have a "bead/x.1"
+	// branch — proving BranchExistsIn is genuinely workdir-scoped, not
+	// silently answering for cwd like BranchExists does.
+	if BranchExists("bead/x.1") {
+		t.Skip("this repo unexpectedly has a bead/x.1 branch; the workdir-scoping contrast this test wants is not demonstrable here")
+	}
+}
+
+// --- RemoteExistsIn (G1-B3-04: no fixture previously existed for this
+// helper at all) ---
+
+// TestRemoteExistsIn_RunsAtExplicitWorkdir pins the `git config --get
+// remote.<name>.url` probe shape and the genuine absent/present
+// distinction (exit 1 vs exit 0).
+func TestRemoteExistsIn_RunsAtExplicitWorkdir(t *testing.T) {
+	calls := swapExec(t, "https://example.invalid/repo.git\n", 0)
+	exists, err := RemoteExistsIn("/tmp/some-root", "origin")
+	if err != nil {
+		t.Fatalf("RemoteExistsIn: unexpected error: %v", err)
+	}
+	if !exists {
+		t.Fatal("RemoteExistsIn: expected true when the remote is configured")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(*calls))
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/some-root", "config", "--get", "remote.origin.url")
+
+	swapExec(t, "", 1)
+	exists, err = RemoteExistsIn("/tmp/some-root", "origin")
+	if err != nil {
+		t.Fatalf("RemoteExistsIn: unexpected error on a genuinely unconfigured remote: %v", err)
+	}
+	if exists {
+		t.Fatal("RemoteExistsIn: expected false when git config --get exits 1 (not configured)")
+	}
+}
+
+// TestRemoteExistsIn_StructuralFailureIsErrorNeverAbsence is G1-B3-04's
+// core claim: a malformed/unreadable .git/config makes `git config --get`
+// exit 128 (not 1) — that MUST be an error, never silently read as "no
+// remote configured", which would let a misconfigured or unreadable
+// remote silently lose R1b(i)'s source (i) instead of erroring.
+func TestRemoteExistsIn_StructuralFailureIsErrorNeverAbsence(t *testing.T) {
+	swapExec(t, "fatal: bad config line 11 in file .git/config", 128)
+	exists, err := RemoteExistsIn("/tmp/some-root", "origin")
+	if err == nil {
+		t.Fatal("RemoteExistsIn: expected an error on a structural git-config failure (exit 128), got nil")
+	}
+	if exists {
+		t.Fatal("RemoteExistsIn: a structural failure must never report true")
+	}
+}
+
+// TestRemoteExistsIn_RejectsOptionLikeName mirrors every other boundary
+// helper's SEC-5 hygiene.
+func TestRemoteExistsIn_RejectsOptionLikeName(t *testing.T) {
+	calls := swapExec(t, "", 0)
+	exists, err := RemoteExistsIn("/tmp/some-root", "--upload-pack=x")
+	if err == nil {
+		t.Fatal("RemoteExistsIn: expected an error on an option-like name")
+	}
+	if exists {
+		t.Fatal("RemoteExistsIn: expected false on an option-like name")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("expected no git invocation on a rejected name, got %d", len(*calls))
+	}
+}
+
+// TestRemoteExistsIn_RealGitNoNetworkIO is a real-git regression proving
+// RemoteExistsIn performs NO network I/O (a config-only read) and
+// correctly distinguishes a configured remote from an absent one at an
+// explicit workdir, never the calling process's cwd.
+func TestRemoteExistsIn_RealGitNoNetworkIO(t *testing.T) {
+	dir := initGitRepo(t)
+	restore := swapRealExecCommand(t)
+	defer restore()
+
+	if exists, err := RemoteExistsIn(dir, "origin"); err != nil || exists {
+		t.Errorf("RemoteExistsIn(dir, origin) on a repo with no remotes: exists=%v err=%v, want false/nil", exists, err)
+	}
+
+	if out, err := exec.Command("git", "-C", dir, "remote", "add", "origin", "/nonexistent/does-not-need-to-exist-for-config-get").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	if exists, err := RemoteExistsIn(dir, "origin"); err != nil || !exists {
+		t.Errorf("RemoteExistsIn(dir, origin) after `git remote add`: exists=%v err=%v, want true/nil (config-only, no network I/O needed to answer)", exists, err)
+	}
+}
+
+// swapRealExecCommand restores execCommand to the real exec.Command for
+// the duration of a test that needs genuine subprocess behavior (real
+// git), overriding whatever swapExec/swapExecFunc left in place from an
+// earlier test in the same process (execCommand is a package-level var).
+func swapRealExecCommand(t *testing.T) func() {
+	t.Helper()
+	orig := execCommand
+	execCommand = exec.Command
+	return func() { execCommand = orig }
+}
+
+// TestFetchRemoteBranchIn_RealGitNarrowRefspecPoisonedTrackingRef is
+// S1-1's real-git regression fixture (mirroring
+// TestBranchExistsIn_RealGitIsWorkdirScoped's real-git-not-mock
+// discipline): a clone whose `remote.origin.fetch` refspec is NARROWED
+// to a single branch (the realistic `--single-branch` shape) leaves
+// `refs/remotes/origin/<other-branch>` STALE even after a successful
+// `git fetch origin <other-branch>` — exit 0, FETCH_HEAD correctly
+// updated, but the ambient tracking ref untouched. FetchRemoteBranchIn
+// must return the FRESH FETCH_HEAD sha directly, never re-derive and
+// re-resolve "<remote>/<branch>" through that poisoned tracking ref.
+func TestFetchRemoteBranchIn_RealGitNarrowRefspecPoisonedTrackingRef(t *testing.T) {
+	restore := swapRealExecCommand(t)
+	defer restore()
+
+	runIn := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	origin := initGitRepo(t)
+	// A "feature" branch on origin, at an OLD tip.
+	runIn(origin, "checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(origin, "feature.txt"), []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runIn(origin, "add", ".")
+	runIn(origin, "commit", "-q", "-m", "feature old tip")
+	oldTip := runIn(origin, "rev-parse", "HEAD")
+	runIn(origin, "checkout", "-q", "main")
+
+	// A NARROW-refspec clone (the realistic --single-branch shape):
+	// remote.origin.fetch only maps refs/heads/main.
+	clone := t.TempDir()
+	cloneCmd := exec.Command("git", "clone", "-q", "--single-branch", "--branch", "main", origin, clone)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone --single-branch: %v\n%s", err, out)
+	}
+
+	// Plant a STALE refs/remotes/origin/feature at the OLD tip (the shape
+	// a prior wide-refspec fetch, or a manually-created ref, would leave
+	// behind) — simulating the poisoned pre-fetch cache this fixture
+	// proves FetchRemoteBranchIn must not be fooled by.
+	runIn(clone, "update-ref", "refs/remotes/origin/feature", oldTip)
+
+	// Advance origin's feature branch to a NEW tip.
+	runIn(origin, "checkout", "-q", "feature")
+	if err := os.WriteFile(filepath.Join(origin, "feature.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runIn(origin, "add", ".")
+	runIn(origin, "commit", "-q", "-m", "feature new tip")
+	newTip := runIn(origin, "rev-parse", "HEAD")
+	runIn(origin, "checkout", "-q", "main")
+
+	sha, err := FetchRemoteBranchIn(clone, "origin", "feature")
+	if err != nil {
+		t.Fatalf("FetchRemoteBranchIn: unexpected error: %v", err)
+	}
+	if sha != newTip {
+		t.Fatalf("FetchRemoteBranchIn sha = %q, want the FRESH tip %q (not the stale tracking ref)", sha, newTip)
+	}
+
+	// Prove the poisoning is real: the ambient tracking ref itself is
+	// STILL the stale old tip, confirming this fixture would have been
+	// silently fooled by a re-derive-and-re-resolve implementation.
+	staleRef := runIn(clone, "rev-parse", "refs/remotes/origin/feature")
+	if staleRef != oldTip {
+		t.Fatalf("fixture sanity: expected the ambient tracking ref to remain poisoned at the OLD tip %q, got %q (narrow-refspec clone setup did not reproduce the poisoned-cache shape)", oldTip, staleRef)
+	}
 }

@@ -43,9 +43,10 @@ import (
 // from being dropped). Flag NAME → enum token (the token differs only in
 // that the journal/storage contract uses the flag name verbatim here).
 var escapeHatchFlags = map[string]string{
-	"override-adr":   "override-adr",
-	"allow-doc-skew": "allow-doc-skew",
-	"supersede-adr":  "supersede-adr",
+	"override-adr":       "override-adr",
+	"allow-doc-skew":     "allow-doc-skew",
+	"supersede-adr":      "supersede-adr",
+	"allow-net-deletion": "allow-net-deletion",
 }
 
 // detectFriction inspects a SUCCEEDING leaf command and returns the bound
@@ -56,7 +57,13 @@ var escapeHatchFlags = map[string]string{
 // Only the FIRST bound escape-hatch flag (in a deterministic order) is
 // reported — the fingerprint is keyed on a single which-escape-hatch
 // token, and an entry records one admission. Order: override-adr,
-// allow-doc-skew, supersede-adr (stable, deterministic).
+// allow-doc-skew, supersede-adr, allow-net-deletion (stable,
+// deterministic — spec 127 S3-r2-7 requires this position be STATED IN
+// CODE, not merely documented in prose elsewhere: allow-net-deletion is
+// appended LAST, after the three pre-existing hatches, so an invocation
+// that somehow binds it alongside an older hatch still records the
+// older hatch's token — this file is the single place that order is
+// decided, and this comment is that statement).
 func detectFriction(cmd *cobra.Command) (escapeHatch string, ok bool) {
 	// A completed `repair phase` (`mindspec repair phase <spec-id>`) is a
 	// friction admission in its own right (the lifecycle needed manual
@@ -67,7 +74,7 @@ func detectFriction(cmd *cobra.Command) (escapeHatch string, ok bool) {
 
 	// Leaf-local override flags. Deterministic order so a multi-flag
 	// invocation (unusual) records a stable single token.
-	for _, name := range []string{"override-adr", "allow-doc-skew", "supersede-adr"} {
+	for _, name := range []string{"override-adr", "allow-doc-skew", "supersede-adr", "allow-net-deletion"} {
 		if f := cmd.Flags().Lookup(name); f != nil && cmd.Flags().Changed(name) {
 			return escapeHatchFlags[name], true
 		}

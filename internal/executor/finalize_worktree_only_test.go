@@ -47,7 +47,7 @@ func TestFinalizeEpic_MergesOnlyWorktreeRealBranches(t *testing.T) {
 		runGitIn(t, dir, "worktree", "remove", "--force", beadWt)
 		fake.listEntries = nil
 
-		if _, err := g.FinalizeEpic("epic-1", "115-ac12a", "spec/115-ac12a", nil); err != nil {
+		if _, err := g.FinalizeEpic("epic-1", "115-ac12a", "spec/115-ac12a", nil, "", false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -111,7 +111,7 @@ func TestFinalizeEpic_MergesOnlyWorktreeRealBranches(t *testing.T) {
 			{Name: "worktree-tagshadow-ac12b-1", Path: wt, Branch: ""},
 		}
 
-		if _, err := g.FinalizeEpic("epic-1", "115-ac12b", "spec/115-ac12b", nil); err != nil {
+		if _, err := g.FinalizeEpic("epic-1", "115-ac12b", "spec/115-ac12b", nil, "", false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 

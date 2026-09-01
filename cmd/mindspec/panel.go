@@ -21,6 +21,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -286,19 +287,36 @@ recovery line (ADR-0035).`,
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)
 
-		// Spec 113 R1: a non-bead panel is not complete-gated, so its exit
-		// path must never route through tallyExitAction's bead-templated
-		// recovery (whose `<bead>` literal would re-introduce a forbidden
-		// `mindspec complete <bead>` instruction on a panel with no bead to
-		// complete). tallyExitAction itself stays 2-arg and byte-identical
-		// (its sole test caller, TestPanelTally_ExitCodeTracksDecision, is
-		// unmodified) — the non-bead recovery is rendered HERE instead.
-		if reg.Err == nil && reg.Panel.IsBead() {
-			return tallyExitAction(d, slug)
-		}
 		target := ""
 		if facts.Res != nil && facts.Res.Panel != nil {
 			target = facts.Res.Panel.Target
+		}
+
+		// Spec 113 R1: a non-bead panel is not complete-gated, so its exit
+		// path must never route through tallyExitAction's bead recovery
+		// (which names `mindspec complete <bead>` — a forbidden
+		// instruction on a panel with no bead to complete). The non-bead
+		// recovery is rendered by tallyExitActionNonBead instead.
+		//
+		// Spec 127 final review (mindspec-tyi3): tallyExitAction used to
+		// be a static 2-arg helper rendering `mindspec panel create <slug>
+		// --round <N+1> ...` — an argv that CANNOT carry the bead binding
+		// even in principle, so an agent following it re-registered a
+		// panel with `bead_id: null`, which internal/complete's
+		// panel.ForBead selection never sees and which therefore
+		// fails-open the very gate the recovery exists to restore. The
+		// binding is derivable right here: reg carries the matched
+		// registration's spec/target/bead/gate, exactly as the non-bead
+		// leg below already derives its own operands.
+		if reg.Err == nil && reg.Panel.IsBead() {
+			return tallyExitAction(d, tallyRecoveryFacts{
+				Slug:      slug,
+				SpecID:    reg.Panel.Spec,
+				Target:    target,
+				BeadID:    *reg.Panel.BeadID,
+				Gate:      reg.Panel.Gate,
+				NextRound: nextPanelRound(reg, facts.Res),
+			})
 		}
 		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate)
 	},
@@ -771,6 +789,50 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	return strings.TrimRight(b.String(), "\n"), d
 }
 
+// tallyRecoveryFacts carries the MATCHED REGISTRATION's own operands into
+// tallyExitAction's Block recovery (spec 127 final review, mindspec-tyi3).
+// Every field is derived at the `panel tally` call site from the same
+// panel.Registration the decision was computed over — never re-read, never
+// guessed — so the recovery command it renders reproduces THIS panel's
+// binding rather than a placeholder argv the follower must reconstruct.
+//
+// SpecID/Target/BeadID/Gate are read RAW from a repo-write-attacker-
+// poisonable panel.json, so none of them is rendered raw: the ID-typed
+// pair goes through idrender (forced-safe ID rendering) and the free-form
+// pair through escapeConfigValue + shellQuoteTarget, exactly as
+// tallyExitActionNonBead already renders target/gate. Slug is the
+// already-validated positional (validatePanelSlug), carried here so the
+// re-panel names the SAME panel this tally adjudicated.
+type tallyRecoveryFacts struct {
+	Slug      string
+	SpecID    string
+	Target    string
+	BeadID    string
+	Gate      string
+	NextRound int
+}
+
+// nextPanelRound is the round a re-panel recovery must be created at: one
+// past whichever round this tally actually adjudicated. Res.LatestRound is
+// the FILENAME-derived latest round (the verdicts the decision was
+// computed over) and is preferred; the registration's own recorded Round
+// is the fallback when no result was resolvable. Rendering the concrete
+// number rather than a `<N+1>` placeholder is what makes the recovery
+// copyable — a placeholder is precisely how the binding got dropped.
+func nextPanelRound(reg panel.Registration, res *panel.Result) int {
+	round := 0
+	if reg.Err == nil {
+		round = reg.Panel.Round
+	}
+	if res != nil && res.LatestRound > round {
+		round = res.LatestRound
+	}
+	if round < 1 {
+		round = 1
+	}
+	return round + 1
+}
+
 // tallyExitAction derives `panel tally`'s exit purely from d.Action — the
 // SAME panel.Decision renderPanelTally already returns — never from raw
 // verdict counts (res.Approves etc.): panel.Allow -> nil (exit 0);
@@ -782,14 +844,55 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 // d.Action (passing every planned gate yet exiting 0 on a stale-SHA or
 // hard_block Block, the lola-f4a8 class) is caught by
 // TestPanelTally_ExitCodeTracksDecision.
-func tallyExitAction(d panel.Decision, slug string) error {
+//
+// Spec 127 final review (mindspec-tyi3): the Block recovery used to render
+// the static `mindspec panel create %s --round <N+1> ...` from a 2-arg
+// helper that received only (Decision, slug). That argv carries no
+// `--bead`, so a follower's re-panel registers with `bead_id: null`;
+// internal/complete's gate selects via panel.ForBead, which matches ONLY
+// registrations whose BeadID equals the bead being completed, and an empty
+// selection is the documented fail-open (panel_advisory.go's "Fail-open
+// (§6)" leg) — the bead then completes UNGATED against stale verdicts.
+// A recovery that silently disarms the gate it claims to restore is worse
+// than no recovery, so the operands now come from the matched
+// registration (tallyRecoveryFacts) and `--bead` is always emitted.
+// TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds asserts the
+// COMPOSED effect — the emitted line, run for real through the command
+// tree, produces a registration panel.ForBead selects — rather than the
+// mere presence of a recovery line, which is what let this ship.
+func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
 	switch d.Action {
 	case panel.Warn:
 		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
 		return nil
 	case panel.Block:
+		// Two different render disciplines, matching what each operand
+		// IS. The ID-typed operands go through idrender (the house
+		// forced-safe renderer, scan (h)): a validated ID renders
+		// byte-identically, a malformed one is forced through
+		// strconv.Quote — one inert, shell-safe token either way. The
+		// free-form registration fields (target, gate) get
+		// tallyExitActionNonBead's exact treatment: escapeConfigValue
+		// then shellQuoteTarget, so a control byte cannot reach the
+		// terminal and a shell metacharacter cannot execute if the
+		// printed line is copied into a shell.
+		safeBeadID := idrender.Bead(f.BeadID)
+		recreate := fmt.Sprintf("mindspec panel create %s --bead %s --round %d",
+			f.Slug, safeBeadID, f.NextRound)
+		// Same omission discipline as tallyExitActionNonBead (F3-2): an
+		// unrecorded operand renders no dangling flag with nothing after
+		// it — which would otherwise swallow the NEXT flag as its value.
+		if f.SpecID != "" {
+			recreate += fmt.Sprintf(" --spec %s", idrender.Spec(f.SpecID))
+		}
+		if f.Target != "" {
+			recreate += fmt.Sprintf(" --target %s", shellQuoteTarget(escapeConfigValue(f.Target)))
+		}
+		if f.Gate != "" {
+			recreate += fmt.Sprintf(" --gate %s", shellQuoteTarget(escapeConfigValue(f.Gate)))
+		}
 		return guard.NewFailure(d.Message, fmt.Sprintf(
-			"re-run the panel (mindspec panel create %s --round <N+1> ...), then mindspec complete <bead>", slug))
+			"re-run the panel (%s), then mindspec complete %s", recreate, safeBeadID))
 	default:
 		return nil
 	}

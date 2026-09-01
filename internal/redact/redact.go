@@ -71,11 +71,12 @@ const maxCleanLen = 512
 // allowlist recognizes (plan §Storage Contract). Anything else in an
 // Event's EscapeHatch field is TAINTED and drops the entry (M4).
 var EscapeHatchTokens = map[string]struct{}{
-	"":               {}, // no escape hatch (the common, non-friction case)
-	"override-adr":   {},
-	"allow-doc-skew": {},
-	"supersede-adr":  {},
-	"repair-phase":   {},
+	"":                   {}, // no escape hatch (the common, non-friction case)
+	"override-adr":       {},
+	"allow-doc-skew":     {},
+	"supersede-adr":      {},
+	"repair-phase":       {},
+	"allow-net-deletion": {}, // spec 127 R4(b): the work-destruction preflight's audited override
 }
 
 // CommandTokens is the closed-set enum of mindspec's TOP-LEVEL command
@@ -148,6 +149,7 @@ var CommandTokens = map[string]struct{}{
 var SubcommandTokens = map[string]struct{}{
 	"":                 {},
 	"add":              {},
+	"adopt":            {}, // impl adopt (spec 127 R1: audited, merge-free terminal transition)
 	"adr":              {},
 	"append":           {}, // panel disposition append (spec 117 Bead 2 R6(b) transactional write op)
 	"approve":          {},

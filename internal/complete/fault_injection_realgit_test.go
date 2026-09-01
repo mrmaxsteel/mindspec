@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -113,9 +114,9 @@ func (e *killAfterExecutor) CommitPaths(dir, msg string, paths []string) error {
 	return nil
 }
 
-func (e *killAfterExecutor) CompleteBead(beadID, specBranch, msg string) error {
+func (e *killAfterExecutor) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
 	e.completeBeadCalls++
-	if err := e.Executor.CompleteBead(beadID, specBranch, msg); err != nil {
+	if err := e.Executor.CompleteBead(beadID, specBranch, msg, overrideReason, resolveMerge); err != nil {
 		return err
 	}
 	if e.killCompleteBead {
@@ -189,13 +190,65 @@ func setupRealGitFaultFixture(t *testing.T, specID, beadID string) (root, specBr
 
 // wireRealGitFaultSeams stubs the complete-package lifecycle seams (NOT the
 // executor) for the real-git fault-injection tests: an implement-mode epic,
-// a `bd close` that always succeeds, and no live bd on PATH.
+// a `bd close` that always succeeds, and a fixture-local fake bd (below)
+// standing in for a live one.
 func wireRealGitFaultSeams(t *testing.T, specID string) {
 	t.Helper()
 	stubPhaseEpic(t, specID, "epic-"+specID)
 	resolveTargetFn = func(r, flag string) (string, error) { return specID, nil }
 	findLocalRootFn = func() (string, error) { return "", fakeErr("test: no local root") }
 	closeBeadFn = func(...string) error { return nil }
+	fakeBdOnPath(t)
+}
+
+// fakeBdOnPath puts a fixture-local `bd` at the front of PATH for the
+// duration of the test.
+//
+// These fixtures build a REAL git repository in a temp dir but have no bd
+// tracker at all: every OTHER bd dependency is stubbed at a
+// complete-package seam (closeBeadFn, worktreeListFn, stubPhaseEpic), so
+// until spec 127's final review nothing here ever spawned bd for real.
+// That changed when CompleteBead's bead-branch presence probe was corrected
+// from the cwd-scoped gitutil.BranchExists to the root-scoped
+// BranchExistsIn (mindspec-6f5p): the probe answers TRUTHFULLY now, so the
+// merge-time landed-binding write it gates (spec 121 R5(b),
+// internal/executor's ensureLandedBinding -> bead.MergeMetadata) actually
+// RUNS — and it would resolve `bd` from the TEST PROCESS's cwd, i.e. this
+// repository's own tracker, where the fixture's invented bead ids do not
+// exist. `bd show <fixture-bead>` exits 1, the binding write fails, and
+// CompleteBead correctly refuses to clean up before a durable binding
+// exists. That refusal is right about the FIXTURE and wrong about
+// PRODUCTION, where `mindspec complete` only ever runs against a bead bd
+// already knows (closeBeadFn just closed it).
+//
+// So the fixture now models production: a bd that EXISTS and knows this
+// bead. The fake answers exactly the two calls the binding path makes —
+// `bd show <id> --json` with an empty metadata map, and `bd update <id>
+// --metadata <json>` with success — plus `bd export`, which it accepts
+// WITHOUT writing anything (the real one would write .beads/issues.jsonl
+// relative to a caller-set workdir; a fixture must never risk a write into
+// this repository). Every other subcommand exits 1, preserving these
+// fixtures' deliberate "no usable bd" posture for everything the tests do
+// not exercise on purpose.
+func fakeBdOnPath(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture-local fake bd is a POSIX shell script")
+	}
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+case "$1" in
+  show)   echo '[{"metadata":{}}]' ;;
+  update) ;;
+  export) ;;
+  *)      echo "fake bd: unsupported subcommand $1" >&2; exit 1 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // --- c2: `--commit-msg` tracker auto-commit --------------------------------

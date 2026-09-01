@@ -129,3 +129,44 @@ unparseable, inconsistent, and unenforceable.
    `guard.HasFinalRecoveryLine` on its failure message.
 3. Spec 092 Bead 9 re-runs the five LLM-harness regression scenarios
    green, demonstrating agents recover via the emitted commands.
+
+## Amendment (Spec 127): Guidance non-destructiveness
+
+Every refusal keeps the copy-pastable final recovery line. This
+amendment adds the guidance non-destructiveness clause over the whole
+emitted lifecycle diagnostic — recovery line, message body, and labeled
+choice block alike:
+
+1. A destructive-class command — a match of the reviewed
+   destructive-family floor in `internal/guard`'s classifier
+   (global-option-normalized, exact unsafe forms, recorded safe-form
+   exclusions) — may be produced only (a) through the evidence-carrying
+   constructor in `internal/guard`, whose destructive variants cannot
+   be invoked without a non-defaultable work-destruction-predicate
+   outcome, or (b) from a registered destructive-guidance allowlist
+   entry carrying an in-code rationale AND a testable obligation; an
+   entry whose obligation has no test is on the same footing as an
+   unregistered site.
+2. Where evidence says the action would destroy work, the recovery
+   line names the safe disposition instead. Where evidence is
+   unavailable or uncomputable, hints degrade to inspection-first —
+   never to the destructive action.
+3. **Enforcement, named** (a clause with no red mechanism is a
+   slogan): the classifier and constructor (`internal/guard`), the
+   repo-wide destructive-guidance convention scan (`internal/lint`,
+   covering emitted diagnostics, the shipped-guidance globs, and the
+   canonical setup guidance builders), and the exactly-pinned
+   allowlist/registries are this clause's red mechanisms; the
+   `cmd/mindspec` amendment pinning test asserts this section names
+   all four.
+4. **In-diff extension obligation and the finite-floor limitation,
+   stated plainly**: the floor is a reviewed finite set, not closure —
+   whether a piece of text is dangerous is not decidable from the
+   text. A change that introduces a use or emission of a destructive
+   command family not on the floor MUST extend the floor in the same
+   change. This is a review-time convention with NO red mechanism
+   while the new family is off the floor: a novel destructive family
+   or program is caught by review under this obligation, not by the
+   guard. The known-sites exemption list claims only that its exact
+   quoted strings, at their exact surfaces, are known and were
+   reviewed — never that they are safe because non-prescriptive.

@@ -35,7 +35,35 @@ type Executor interface {
 	// CompleteBead commits outstanding changes, merges the bead branch back
 	// into the spec branch, removes the bead workspace, and deletes the
 	// bead branch. If msg is non-empty, it is used as the commit message.
-	CompleteBead(beadID, specBranch, msg string) error
+	//
+	// overrideReason (spec 127 R4(b)) is the operator-supplied
+	// `--allow-net-deletion "<reason>"` text, or "" when no override was
+	// requested. It is passed straight through to this producer's R4
+	// preflight (immediately before the bead→spec MergeInto): a non-empty
+	// value lets the merge proceed even when the shared work-destruction
+	// predicate found DestructionSuperseded/DestructionStaleDeletion/
+	// DestructionEvidenceError. The CALLER (internal/complete) is
+	// responsible for recording the override on durable metadata and the
+	// friction journal AFTER this call returns nil — this method only
+	// decides proceed-vs-refuse.
+	//
+	// resolveMerge (spec 127 R5(d)) is the operator-supplied
+	// `--resolve-merge` flag, consulted at exactly ONE decision point:
+	// when a merge is ALREADY in progress in the target worktree with its
+	// index RESOLVED and staged (no conflicted files remain),
+	// resolveMerge==true completes it via `git commit --no-edit` and
+	// proceeds to the same cleanup a fresh merge success would reach;
+	// resolveMerge==false still refuses in that same state, naming
+	// --resolve-merge as the way to finish it (a plain re-run never
+	// silently completes someone else's staged resolution). Every OTHER
+	// merge-state disposition is IDENTICAL regardless of resolveMerge: no
+	// merge in progress → attempt a fresh merge, and on conflict stop in
+	// place (never abort, never checkout) rather than replaying today's
+	// abort-and-refuse behavior — see resumeAwareMerge's doc comment
+	// (internal/executor/merge_resumption.go) for the reasoning;
+	// unmerged index entries present → refuse naming the resolution
+	// steps (never a new merge, never a checkout, never an abort).
+	CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
 
 	// FinalizeEpic merges the spec branch to main (or pushes for PR),
 	// cleans up all workspaces and branches for the spec lifecycle.
@@ -53,7 +81,18 @@ type Executor interface {
 	// rather than silently skip or admit any bead/<id> candidate (AC-14)
 	// — a caller with a genuinely empty scope must pass a non-nil,
 	// zero-length slice.
-	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string) (FinalizeResult, error)
+	//
+	// overrideReason (spec 127 R4(b)) is the same audited
+	// `--allow-net-deletion "<reason>"` text CompleteBead documents above,
+	// consulted at BOTH of this method's own R4 preflight sites (the
+	// per-bead auto-merge loop and the direct spec→main merge).
+	//
+	// resolveMerge (spec 127 R5(d)) is the same `--resolve-merge` flag
+	// CompleteBead documents above, consulted independently at BOTH of
+	// this method's own merge sites (the per-bead auto-merge loop's spec
+	// worktree, and the direct spec→main leg's main checkout) — only
+	// whichever site actually has a preserved merge acts on it.
+	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error)
 
 	// Cleanup removes stale workspaces and branches for a spec.
 	// If force is true, skips lifecycle state checks.

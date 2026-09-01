@@ -9,8 +9,8 @@ type Executor interface {
     // Workspace lifecycle
     InitSpecWorkspace(specID string) (WorkspaceInfo, error)
     DispatchBead(beadID, specID string) (WorkspaceInfo, error)
-    CompleteBead(beadID, specBranch, msg string) error
-    FinalizeEpic(epicID, specID, specBranch string) (FinalizeResult, error)
+    CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
+    FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error)
     Cleanup(specID string, force bool) error
 
     // Epic handoff (notification hook — no-op for MindspecExecutor)
@@ -23,6 +23,16 @@ type Executor interface {
     CommitAll(path, msg string) error
 }
 ```
+
+The two merge-producing methods gained paired parameters in spec 127
+(R4(b)/R5(d)): `overrideReason` is the operator's audited
+`--allow-net-deletion "<reason>"` text ("" = no override), consulted by
+the R4 work-destruction preflight immediately before each
+`MergeInto`/`MergeBranch`; `resolveMerge` is the `--resolve-merge`
+re-entry flag, consulted only when a merge is ALREADY in progress with a
+fully resolved, staged index — see § Merge safety layer below.
+(`lifecycleAllowSet` is spec 119's finalize scoping — see the
+architecture doc.)
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
@@ -64,6 +74,35 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | `RuntimeIgnoreEntries` | The single canonical list of MindSpec local runtime files that must never be tracked (`.mindspec/session.json`, `.mindspec/focus` — ADR-0015). Bootstrap, setup, and doctor all consume THIS var, so the writer sides and the doctor detection side cannot drift. |
 | `EnsureGitignoreEntries(root, entries...)` | Entry-granular, negation-aware `.gitignore` ensure (final review G1): guarantees each entry is ACTUALLY ignored by git, not merely present as a line. Existing bytes are never reordered or rewritten; entries needing a fresh line are appended under a shared header comment; creates the file if absent. An entry needs a fresh line when its exact line is absent (delimiter-stripped comparison only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence), OR when the line IS present but `git check-ignore` reports the path un-ignored anyway — a LATER negation rule (`!entry`) defeats it under git's last-match-wins ordering, so the plain entry is RE-APPENDED (a harmless duplicate line) to make the last match the ignore rule again. So the same entry can legitimately appear more than once, and a converged call still shells out to `git check-ignore` per line-present entry before concluding nothing needs writing (no write happens in that case). On an indeterminate git verdict (no repository / exit status outside {0,1}, e.g. 128) it falls back to line-presence alone rather than force a spurious re-append. Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
 
+### Merge-safety primitives (spec 127, `internal/gitutil`)
+
+Added by spec 127's work-destruction preflight (R4) and never-abort
+merge resumption (R5(d)). NOTE: the spec's Impacted Domains originally
+declared `internal/gitutil` read-only; that declaration was violated and
+amended at final review (O3-1) — the five mutating primitives below are
+the record of why.
+
+**Read-only evidence/preview helpers:**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `EvaluateWorkDestruction(workdir, branch, target)` (`workdestruction.go`) | The shared work-destruction predicate: returns the closed `guard.DestructionOutcome` enum (ancestor / superseded / stale-deletion / clean / evidence-error, count-sentinel `DestructionOutcomeCount`) plus `WorkDestructionEvidence`. Evidence-unavailable is its own outcome, never folded into safety. CAUTION: `DestructionAncestor` is the zero value — possession of a value is not proof the predicate ran (see `outcome.go`'s doc comment and `merge_preflight.go`'s zero-value trap note). |
+| `PreviewDeletedPaths(workdir, target, branch)` (`neteffect.go`) | Read-only merge preview of target paths the merge would net-delete — the R4(b) refusal's named-paths evidence. |
+| `BranchExistsIn(workdir, name)` / `RemoteExistsIn(workdir, name)` | Explicit-root variants of the cwd-scoped probes; `BranchExistsIn` is the CompleteBead guard probe as of the final-review code round (mindspec-6f5p — the cwd-scoped `BranchExists` silently skipped both guarded legs when the process cwd was outside the repo). Both return `(bool, error)`: indeterminate refuses, never folds into "absent". |
+| `FetchRemoteBranchIn(workdir, remote, branch)` | Explicit-root fetch; returns the fetched tip's SHA resolved from `FETCH_HEAD` immediately after the fetch (poisoned-tracking-ref hygiene). |
+| `MergeMsgSubject(workdir)` / `TreeSHA` / `CommitParents` / `CommitMessageBody` / `CommitSigningEnabled` | Small read probes the resumption classifier and signing-aware drift-collapse consult. |
+| `DanglingCollapsedMergeExists(workdir, tree, p1, p2, msg)` | `git fsck --unreachable` probe distinguishing a genuinely stranded drift-collapse from a topology that merely looks like one (necessary-but-not-sufficient; stated limits in its doc comment). |
+
+**Mutating primitives (all consumed only by `internal/executor`'s
+resumption/drift-collapse mechanics behind fault-injectable seams):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `CommitNoEdit(workdir)` | Completes an in-progress, fully staged merge (`git commit --no-edit`) — the `--resolve-merge` exact-binding completion. |
+| `CommitTreeMerge(workdir, tree, p1, p2, msg)` | Creates an unreferenced merge commit object for drift-collapse. Signing-aware (final-review S1-1): `git commit-tree` does not honor `commit.gpgsign`, so this consults the effective signing config, passes `-S`, and fails CLOSED when signing is configured but unavailable. |
+| `UpdateRef(workdir, ref, sha)` / `ResetSoft(workdir, target)` | Move a ref / branch tip onto the collapse result. |
+| `recordMergeSourceMarker` (unexported; `MergeSourceMarkerRef(source)` names the ref) | Writes the merge-start marker ref `MergeInto`/`MergeBranch` record so resumption can corroborate WHICH source a preserved merge belongs to. |
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()` for locating the repository root
@@ -97,17 +136,47 @@ auditor) never needs the long-gone subagent transcript. `internal/bead`
 itself never interprets the values under either key; it only names them
 so every writer/reader shares one literal definition.
 
-## Merge-conflict hardening (spec 092 Reqs 13–15, 18)
+## Merge-conflict handling — never-abort (spec 127 R5(d); supersedes spec 092 Reqs 13–15, 18 here)
 
-- `internal/gitutil` merge-state helpers: `MergeInProgress(workdir)`,
-  `ConflictedFiles(workdir)`, `AbortMerge(workdir)` — detect and
-  unwind an in-progress merge before reporting a guard failure.
-- `MindspecExecutor` conflict paths (`CompleteBead` bead→spec merge and
-  the direct spec-merge site) abort the conflicted merge
-  (`abortMergeState`) and emit structured failures
-  (`beadToSpecConflictFailure`, `directMergeConflictFailure`) that name
-  the conflicted files and end with a copy-pastable recovery command.
-- `internal/bead.MergeMetadata` error text no longer quotes a raw
-  `bd update --metadata` command line (Req 19 / HC-5: `--metadata`
-  REPLACES the whole metadata map; agents must never be handed one to
-  paste).
+**Spec 127 inverted this section's design.** Spec 092 had the executor
+detect and unwind an in-progress merge (`abortMergeState` →
+`gitutil.AbortMerge`) before reporting a guard failure. That unconditional
+abort is exactly the destruction mechanism spec 127's E-r5-1 lab evidence
+convicted — it discards an operator's staged hand-resolution — and the
+shipped design is the opposite:
+
+- **`abortMergeState` no longer exists.** No product path aborts a fresh
+  conflict, and no product path performs a target checkout while
+  `MERGE_HEAD` exists in that worktree. `gitutil.AbortMerge`
+  (`gitops.go`) remains exported with ZERO production callers — the
+  never-abort property is currently enforced only by that absence, not
+  by an assertion that it persists (recorded final-review residual). Do
+  not reintroduce a caller; the executor is NOT supposed to use it.
+- **Conflicts stop in place.** A conflicted lifecycle merge is preserved
+  exactly as git left it. The structured failures
+  (`beadToSpecConflictFailure`, `directMergeConflictFailure`) name the
+  conflicted files and end with the `--resolve-merge` re-entry
+  invocation of the owning verb (`mindspec complete --resolve-merge` /
+  `mindspec impl approve --resolve-merge`) plus pinned per-outcome
+  resolution steps whose `git add` operands equal the emitter-computed
+  conflicted set — never a raw `git merge` line (the R5(d) constructor
+  conversion; the `internal/lint` scan REDs a raw merge line here).
+- **Re-entry resumes the SAME merge** via `resumeAwareMerge`
+  (`internal/executor/merge_resumption.go`):
+  `classifyPreservedMergeBinding` gates resumption as exact / drifted /
+  foreign against the expected source (merge-subject naming plus the
+  `MergeSourceMarkerRef` merge-start marker); exact completes the
+  preserved merge (`gitutil.CommitNoEdit` — no checkout, no abort, no
+  new merge); drifted incorporates source drift via the drift-collapse
+  mechanics (`CommitTreeMerge` + `ResetSoft`/`UpdateRef`, signing-aware);
+  foreign or indeterminate refuses fail-closed. A plain no-flag re-run
+  over a resolved index refuses WITHOUT aborting and the staged
+  resolution survives byte-for-byte; `--resolve-merge` is required to
+  complete someone's staged resolution deliberately.
+- `internal/bead.MergeMetadata` error text still never quotes a raw
+  `bd update --metadata` line (spec 092 Req 19 / HC-5 — unchanged, and
+  guarded by AC-9(iii)).
+
+The R4 work-destruction preflight in front of every merge producer, and
+the full resumption state machine, are described in this domain's
+architecture doc, § Merge safety layer (spec 127).

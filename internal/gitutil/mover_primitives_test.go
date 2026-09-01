@@ -146,6 +146,66 @@ func TestCommitPaths_NoopWhenNothingStaged(t *testing.T) {
 	}
 }
 
+// TestCommitPaths_ScopedCommitLeavesUnrelatedStagedContentAlone is
+// G1-B3-01 (spec 127 bead 3 fix round): when OTHER content is already
+// staged before CommitPaths runs, the commit it makes must include ONLY
+// the given paths — the pre-existing staged content must remain staged
+// (untouched, uncommitted) afterward, not silently swept into this
+// commit just because it shares the same index. This is the property
+// the adopt surface's finalize-export commit depends on to never sweep
+// an operator's unrelated dirty/staged work into a terminal transition.
+func TestCommitPaths_ScopedCommitLeavesUnrelatedStagedContentAlone(t *testing.T) {
+	repo := initGitRepoCfg(t)
+
+	// Something else already staged BEFORE CommitPaths ever runs.
+	if err := os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("unrelated work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addCmd := exec.Command("git", "-C", repo, "add", "unrelated.txt")
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add unrelated.txt: %v\n%s", err, out)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "export.txt"), []byte("export content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitPaths(repo, "export only", []string{"export.txt"}); err != nil {
+		t.Fatalf("CommitPaths: %v", err)
+	}
+
+	// The commit must touch ONLY export.txt.
+	showCmd := exec.Command("git", "-C", repo, "show", "--name-only", "--format=", "HEAD")
+	out, err := showCmd.Output()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	changed := strings.Fields(strings.TrimSpace(string(out)))
+	if len(changed) != 1 || changed[0] != "export.txt" {
+		t.Fatalf("commit must touch only export.txt, got %v", changed)
+	}
+
+	// unrelated.txt must remain STAGED but uncommitted.
+	statusCmd := exec.Command("git", "-C", repo, "status", "--porcelain")
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if !strings.Contains(string(statusOut), "A  unrelated.txt") {
+		t.Fatalf("expected unrelated.txt to remain staged (git status --porcelain):\n%s", statusOut)
+	}
+
+	// A second call with nothing NEW at export.txt (but unrelated.txt
+	// still staged) must be a true no-op — scoped to paths, not the
+	// whole index.
+	beforeSHA, _ := RevParseHEAD(repo)
+	if err := CommitPaths(repo, "export only again", []string{"export.txt"}); err != nil {
+		t.Fatalf("CommitPaths (idempotent resume): %v", err)
+	}
+	if afterSHA, _ := RevParseHEAD(repo); afterSHA != beforeSHA {
+		t.Errorf("CommitPaths must be a no-op when the given paths have nothing new staged, even with unrelated content staged elsewhere: %s -> %s", beforeSHA, afterSHA)
+	}
+}
+
 func TestLocalAndRemoteTrackingRefs(t *testing.T) {
 	repo := initGitRepoCfg(t)
 	run := func(args ...string) {

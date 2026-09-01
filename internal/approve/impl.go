@@ -77,6 +77,14 @@ var (
 	// imports the git-plumbing package directly (internal/lint
 	// boundary; internal/lifecycle already consumes it the same way).
 	implIsAncestorFn = lifecycle.IsAncestor
+	// implEvaluateOrphanHintFn is the spec 127 R2 hint-derivation seam
+	// implOrphanRefusal consumes (pointer-pinned default): it performs
+	// REAL git I/O (gitutil.EvaluateWorkDestruction underneath), so a
+	// test that fabricates a lifecycle.Orphan value with no real
+	// underlying repo must stub this too, or the real evaluation fails
+	// closed (DestructionEvidenceError) against the fixture's
+	// non-existent refs.
+	implEvaluateOrphanHintFn = lifecycle.EvaluateOrphanHint
 	// implBranchExistsFn feeds ONLY the R3 obligation backstop's
 	// branch-state-truthful recovery line (round-2 G3) — never the
 	// orphan-detection trigger, which stays inside implScanOrphansFn.
@@ -84,12 +92,46 @@ var (
 	// gitutil.BranchExists) for the same ADR-0030 boundary reason as
 	// implIsAncestorFn above.
 	implBranchExistsFn = lifecycle.BranchExists
+	// implSpecBranchExistsFn is spec 127 R3a's §1 preflight probe: it
+	// resolves whether the SPEC branch exists at the explicit root
+	// (never CWD-relative — unlike implBranchExistsFn above, which is
+	// scoped to the R3 obligation backstop's own bool-only, CWD-relative
+	// probe and must stay that way). (bool, error) distinguishes a
+	// genuinely absent branch from a structural git failure that leaves
+	// existence INDETERMINATE (AC-4(ii); lifecycle.BranchExistsIn's own
+	// doc comment) — the two legs render textually distinct refusals
+	// below, and the probe error leg must NEVER collapse into the
+	// absent leg. Routed through lifecycle.BranchExistsIn (the
+	// workdir-taking variant of the same branchExistsFn seam family),
+	// pointer-pinned in impl_test.go.
+	implSpecBranchExistsFn = lifecycle.BranchExistsIn
 	// implGetMetadataFn and implCheckObligationsFn back R3's durable-
 	// obligation backstop: the SAME check-only coverage predicate
 	// (Spec 114 R2 discipline) `mindspec complete` itself settles,
 	// exported by Bead 1 so this gate never re-implements it.
 	implGetMetadataFn      = bead.GetMetadata
 	implCheckObligationsFn = complete.CheckPendingObligations
+	// implWorkDestructionPreflightFn is the spec 127 R4(a) §1-phase seam
+	// (pointer-pinned default): performs REAL git I/O
+	// (lifecycle.EvaluateWorkDestructionPreflight ->
+	// gitutil.EvaluateWorkDestruction) over the spec branch and main.
+	// Tests that drive ApproveImpl without a real underlying repo must
+	// stub this too, or the real evaluation fails closed
+	// (DestructionEvidenceError) against non-existent refs.
+	implWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
+	// implHasRemoteFn is bead-6 fix round 1's applicability gate for the
+	// preflight immediately above (O1-1/O3-1, G1's ac5-pr-path-widening
+	// ruling): the §1 AC-5 preflight guards ONLY "the finalize merge"
+	// (R3b/AC-5's own text) — the no-remote DIRECT spec→main merge —
+	// never the PR-routed leg, which never attempts a local merge at
+	// all. exec.FinalizeEpic decides push-vs-direct via this identical
+	// probe (gitutil.HasRemote(), unconditionally, inside FinalizeEpic
+	// itself); consulting the SAME probe here, before the §1 call,
+	// keeps the two layers agreeing on APPLICABILITY rather than only on
+	// outcome (O1-1's required change). Routed through lifecycle.HasRemote
+	// (thin wrapper), the same ADR-0030 boundary reason as every other
+	// seam in this block.
+	implHasRemoteFn = lifecycle.HasRemote
 )
 
 // implContextLine renders the Req 8 worktree-context line for impl
@@ -135,6 +177,25 @@ type ImplOpts struct {
 	// Mutually exclusive with OverrideADR at the CLI layer.
 	// Spec 087 Bead 3.
 	SupersedeADR string
+
+	// AllowNetDeletion is the spec 127 R4(b) audited-override reason:
+	// "" means no override, so the finalize merge preflight (both the
+	// §1 evaluation below — the direct spec→main leg, AC-5 — and
+	// FinalizeEpic's own live backstop at every producer call site)
+	// refuses on a DestructionSuperseded/DestructionStaleDeletion/
+	// DestructionEvidenceError outcome exactly as with no override
+	// configured. After `exec.FinalizeEpic` returns nil the reason is
+	// recorded on the spec EPIC's metadata under the
+	// `mindspec_net_deletion_override_*` namespace, mirroring
+	// AllowDocSkew/OverrideADR above, and admitted to the escape-hatch
+	// friction registry (cmd/mindspec/selfemit.go).
+	AllowNetDeletion string
+
+	// ResolveMerge is the spec 127 R5(d) `--resolve-merge` flag: passed
+	// straight through to exec.FinalizeEpic's own resumption-aware merge
+	// dispatch (internal/executor's resumeAwareMerge), consulted
+	// independently at both of FinalizeEpic's merge sites.
+	ResolveMerge bool
 }
 
 // ImplResult holds the result of implementation approval.
@@ -284,6 +345,66 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// waist call cannot fail.
 	specBranch, _ := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
+
+	// Spec 127 R3a — §1 PREFLIGHT: branch-existence FACT, resolved
+	// before any merge-base or other git plumbing ever touches
+	// specBranch (the #218 step-1 wedge: exec.MergeBase below used to
+	// surface a raw `exit status 128` — a wrapped *exec.ExitError — when
+	// the branch was simply gone). Two legs, textually distinct
+	// (AC-4): a genuinely absent branch names the R1 adopt path in
+	// full; a probe FAILURE (existence INDETERMINATE) never collapses
+	// into "absent" and never names adopt (O2-r2-8) — it is its own
+	// fail-closed, retryable refusal. Bead 6 (R4) is INTENDED to extend
+	// this SAME §1 phase with the work-destruction preflight for the
+	// branch-present-but-stale leg (R3b) — sited here, as its own
+	// block, as an insertion seam ahead of any mutation/git-consuming
+	// code below, so that the extension CAN land as an addition rather
+	// than a reshuffle (C-r4-7's obligation). Bead 5's own diff/tests
+	// cannot establish whether a bead that does not yet exist actually
+	// meets that obligation — bead 6's own diff and tests are what
+	// settle it.
+	switch exists, existsErr := implSpecBranchExistsFn(root, specBranch); {
+	case existsErr != nil:
+		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)
+	case !exists:
+		return nil, implBranchMissingRefusal(specID, specBranch)
+	}
+
+	// Spec 127 R3b/AC-5 — R4's §1-phase work-destruction preflight for
+	// this verb's OWN direct spec→main leg: the branch is confirmed to
+	// exist (above) but may be PRESENT-AND-STALE — a recreated branch at
+	// an old snapshot (the #218 step-2 shape) — which the bare existence
+	// check above cannot distinguish from a healthy branch. Evaluated
+	// HERE, before any epic close / phase write / other mutation below,
+	// so a refusal leaves state byte-identical to the pre-call state
+	// (O1-r2-2's siting).
+	//
+	// GATED on implHasRemoteFn (bead-6 fix round 1, O1-1/O3-1): R3b/AC-5's
+	// own text scopes this preflight to "the finalize merge" — the
+	// no-remote DIRECT spec→main merge exec.FinalizeEpic performs when
+	// gitutil.HasRemote() is false. When a remote IS configured,
+	// FinalizeEpic instead pushes specBranch for a PR and never local-
+	// merges it into main at all (the PR-routed leg relies on the Bead-3
+	// precondition + PR review instead). Evaluating this predicate
+	// unconditionally used to refuse the routine, non-adversarial "PR
+	// already merged, local main now reflects it" state — the exact state
+	// spec 121's own orphan/net-effect detection exists to handle
+	// gracefully — BEFORE FinalizeEpic's graceful handling ever ran (O3-1,
+	// reproduced with a real-git fixture: EvaluateWorkDestruction
+	// classifies that state DestructionSuperseded). Skipping the §1 call
+	// on the PR-routed leg does not weaken safety: the executor's OWN
+	// live consultation immediately before its gitutil.MergeBranch call
+	// (mindspec_executor.go, hoisted above its cleanup block) is the
+	// actual backstop that gates the mutation, and it is ITSELF gated on
+	// the identical `result.MergeStrategy == "direct"` condition — this
+	// is a convenience early-refusal for exactly the leg the executor's
+	// own preflight guards, not a claim that a second, unconditional
+	// backstop exists for the PR leg (there is none; see O1-1).
+	if !implHasRemoteFn() {
+		if err := implWorkDestructionPreflightFn(root, specBranch, "main", o.AllowNetDeletion, fmt.Sprintf("mindspec impl approve %s", specID)); err != nil {
+			return nil, err
+		}
+	}
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
 	specDir, sdErr := workspace.SpecDir(root, specID)
@@ -519,7 +640,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// MUTATION (3/3, terminal): delegate to executor for merge/push,
 	// scoped to lifecycleAllowSet (Spec 119 Bead 3, R6/P6) resolved
 	// above.
-	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet)
+	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge)
 	if err != nil {
 		return nil, fmt.Errorf("finalizing epic: %w", err)
 	}
@@ -561,6 +682,20 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		}
 		if err := implMergeMetadataFn(epicID, meta); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record adr-supersede metadata on %s: %v", epicID, err))
+		}
+	}
+
+	// Spec 127 R4(b): record the audited net-deletion override AFTER the
+	// terminal mutation (exec.FinalizeEpic) returns nil, mirroring the
+	// doc-skew/adr-override discipline above.
+	if o.AllowNetDeletion != "" && epicID != "" {
+		meta := map[string]interface{}{
+			"mindspec_net_deletion_override_reason": o.AllowNetDeletion,
+			"mindspec_net_deletion_override_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_net_deletion_override_by":     implGitUserEmailFn(),
+		}
+		if err := implMergeMetadataFn(epicID, meta); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record net-deletion override metadata on %s: %v", epicID, err))
 		}
 	}
 
@@ -832,22 +967,60 @@ func runWorktreeEnumerationLeg(root, specID, specBranch string) error {
 	return nil
 }
 
+// implBranchMissingRefusal is AC-4(i) (spec 127 R3a, the #218 step-1
+// wedge): the spec branch is genuinely absent. Names the absent branch,
+// the external-merge likelihood, and the R1 adopt path IN FULL — its
+// exact invocation, flags included (AC-11) — so an operator whose
+// spec's content already reached main by another route has a named
+// forward path. Never a raw `exit status 128`, never a wrapped
+// *exec.ExitError: this refusal fires BEFORE exec.MergeBase (or any
+// other git plumbing) ever touches specBranch.
+func implBranchMissingRefusal(specID, specBranch string) error {
+	return guard.NewFailure(
+		fmt.Sprintf("spec %s's branch %s does not exist — its content may have already reached main by another route (e.g. an external merge outside this lifecycle)", idrender.Spec(specID), termsafe.Escape(specBranch)),
+		fmt.Sprintf(`mindspec impl adopt %s --reason "<why this spec's content already reached main outside the lifecycle>"`, idrender.Spec(specID)),
+	)
+}
+
+// implBranchIndeterminateRefusal is AC-4(ii) (O2-r2-8): the existence
+// PROBE itself failed — a structural git error, not a clean "no such
+// ref" — so existence is INDETERMINATE, never collapsed into
+// "absent". Fail-closed and retryable, wording distinct from
+// implBranchMissingRefusal, and never names adopt as the disposition:
+// "could not determine" must never become "absent" — a two-valued
+// collapse here is exactly the bead-3 defect class this leg exists to
+// prevent.
+func implBranchIndeterminateRefusal(specID, specBranch string, cause error) error {
+	return guard.NewFailure(
+		fmt.Sprintf("could not determine whether spec %s's branch %s exists: %s", idrender.Spec(specID), termsafe.Escape(specBranch), termsafe.Escape(cause.Error())),
+		fmt.Sprintf("mindspec impl approve %s   (retry once the underlying failure is resolved)", idrender.Spec(specID)),
+	)
+}
+
 // implOrphanRefusal renders the (a)/(b)/(c)-shaped refusal shared by
 // Leg 1 and Leg 2: (a) names the bead ID, its unmerged bead/<id>
 // branch, and the spec branch; (b) states it was closed without
-// `mindspec complete`; (c) ends with o.RecoveryCommand() as the FINAL
-// line (ADR-0035; internal/guard/recovery_convention_test.go enforces
-// the final-line shape). The advisory slot line (R2) is best-effort
-// decoration ONLY — never load-bearing, never printed if unreadable.
+// `mindspec complete`; (c) ends with the spec 127 R2
+// lifecycle.EvaluateOrphanHint's recovery line(s) as the FINAL lines
+// (ADR-0035; internal/guard/recovery_convention_test.go enforces the
+// final-line shape) — a destructive outcome's evidence class is folded
+// into the message body (never into the recovery lines themselves,
+// which stay one command each per the ADR-0035 convention). The
+// advisory slot line (R2, spec 115) is best-effort decoration ONLY —
+// never load-bearing, never printed if unreadable.
 func implOrphanRefusal(root, specID string, o lifecycle.Orphan) error {
+	hint := implEvaluateOrphanHintFn(root, o.BeadID, o.BeadBranch, specID, o.SpecBranch)
 	msg := fmt.Sprintf(
 		"bead %s (branch %s) was closed without running mindspec complete and is not merged into %s",
 		idrender.Bead(o.BeadID), termsafe.Escape(o.BeadBranch), termsafe.Escape(o.SpecBranch),
 	)
+	if hint.EvidenceNote != "" {
+		msg += "\n" + hint.EvidenceNote
+	}
 	if slot := implAdvisorySlotLine(root, specID, o.BeadID); slot != "" {
 		msg += "\n" + slot
 	}
-	return guard.NewFailure(msg, o.RecoveryCommand())
+	return guard.NewFailure(msg, hint.Lines...)
 }
 
 // formatOpenChildHint renders the Spec 095 (mindspec-ry73) advisory hint

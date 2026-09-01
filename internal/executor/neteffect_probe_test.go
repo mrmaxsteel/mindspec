@@ -53,7 +53,7 @@ func TestFinalizeEpic_Probe_SquashMergedRoutesToCarrier(t *testing.T) {
 	origin := setupSquashMergedOrigin(t, dir)
 	fake.listEntries = nil
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestFinalizeEpic_Probe_SquashThenRevertNotRouted(t *testing.T) {
 	runGitIn(t, dir, "push", "origin", "main")
 	fake.listEntries = nil
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestFinalizeEpic_Probe_SquashThenUnrelatedLaterChangesStillRoutes(t *testin
 	runGitIn(t, dir, "push", "origin", "main")
 	fake.listEntries = nil
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestFinalizeEpic_Probe_TrueMergeThenRevertStaysAncestryRouted(t *testing.T)
 	runGitIn(t, dir, "push", "origin", "main")
 	fake.listEntries = nil
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestFinalizeEpic_Probe_NetEffectInfraFailureWarnsAndFailsOpen(t *testing.T)
 	var result FinalizeResult
 	var err error
 	stderr := captureStderrAround(t, func() {
-		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	})
 	if err != nil {
 		t.Fatalf("a net-effect infra failure must fail OPEN (never a hard `impl approve` failure), got: %v", err)

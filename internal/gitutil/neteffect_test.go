@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -295,6 +296,66 @@ func TestNetEffectLanded_NonTrackerDiffNeverReachesLegB(t *testing.T) {
 	if landed {
 		t.Error("a diff not confined to the tracker path must never be reported landed via leg (b)")
 	}
+}
+
+// TestNetEffectLanded_PureRevertNoAdditionNotVacuouslyLanded is bead-4 fix
+// round 1's BLOCKING-4 regression (G1-4/O1-1/O2-1/S1-1): a branch whose
+// cumulative diff against merge-base(branch, target) nets to EMPTY (it
+// reintroduces content target once carried, then reverts its OWN
+// reintroduction, with no other change) must never be reported landed —
+// applying an empty diff changes nothing, so a "landed" answer here would
+// prove nothing was ever introduced, not that anything landed. Two
+// targets, per the panel's own reproduction: an UNTOUCHED target (the
+// simplest vacuous shape) and a DIVERGED one carrying unrelated content
+// the branch never saw — proving the (pre-fix) vacuous match was
+// target-independent, not a same-content coincidence.
+//
+// Scope-defeating mutation (not merely a sensitivity one): reverting
+// NetEffectLanded's refTree/baseTree guard above (restoring the version
+// that calls ContentSubsumed unconditionally) turns both subtests RED,
+// with `landed=true` logged in both — the exact misclassification the
+// panel reproduced against real production code before this fix.
+func TestNetEffectLanded_PureRevertNoAdditionNotVacuouslyLanded(t *testing.T) {
+	buildStaleBead := func(t *testing.T) string {
+		t.Helper()
+		dir := initGitRepo(t)
+		neRunGit(t, dir, "checkout", "-b", "spec-target")
+		neWriteFile(t, dir, "landed.txt", "landed after the branch's snapshot\n")
+		neRunGit(t, dir, "add", ".")
+		neRunGit(t, dir, "commit", "-m", "spec-target adds landed.txt")
+		neRunGit(t, dir, "checkout", "-b", "stale-bead", "spec-target")
+		neRunGit(t, dir, "rm", "landed.txt")
+		neRunGit(t, dir, "commit", "-m", "revert to the pre-landed.txt snapshot (no other change)")
+		neRunGit(t, dir, "checkout", "main")
+		return dir
+	}
+
+	t.Run("against_untouched_target", func(t *testing.T) {
+		dir := buildStaleBead(t)
+
+		landed, err := NetEffectLanded(dir, "stale-bead", "main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if landed {
+			t.Error("a branch whose net diff against merge-base(branch, main) is empty must NOT be reported landed against main — nothing was ever introduced for main to have landed")
+		}
+	})
+
+	t.Run("against_diverged_target_with_unrelated_content", func(t *testing.T) {
+		dir := buildStaleBead(t)
+		neWriteFile(t, dir, "unrelated.txt", "unrelated content the branch never saw\n")
+		neRunGit(t, dir, "add", ".")
+		neRunGit(t, dir, "commit", "-m", "main diverges with unrelated content")
+
+		landed, err := NetEffectLanded(dir, "stale-bead", "main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if landed {
+			t.Error("the vacuous match must not fire even when target has diverged with unrelated content the branch never touched — proving the prior bug was target-independent, not a same-content coincidence")
+		}
+	})
 }
 
 // TestContentSubsumedOutcome_Trichotomy pins the spec 121 final-review r2
@@ -593,3 +654,333 @@ func TestRevertShape_RejectsOptionLikeOperands(t *testing.T) {
 		t.Error("expected a rejection for an option-like target operand")
 	}
 }
+
+// --- PreviewDeletedPaths (spec 127 bead 1) ---------------------------------
+
+// TestPreviewDeletedPaths_GenuineDeletion is the baseline positive: a
+// branch that actually removes a file target still carries reports that
+// file as a D-path.
+func TestPreviewDeletedPaths_GenuineDeletion(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "keep.txt", "keep\n")
+	neWriteFile(t, dir, "gone.txt", "gone\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add keep+gone")
+	neRunGit(t, dir, "checkout", "-b", "cleanup")
+	neRunGit(t, dir, "rm", "gone.txt")
+	neRunGit(t, dir, "commit", "-m", "remove gone.txt")
+	neRunGit(t, dir, "checkout", "main")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "cleanup")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "gone.txt" {
+		t.Errorf("PreviewDeletedPaths = %v, want [gone.txt]", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_LargeRenameNeverReadsAsDeletion is AC-8(ii)'s
+// primitive-level pin: a directory move/rename must surface as an R-path
+// via --find-renames, never as a D-path — the exact miss the pinned
+// rename detection exists to prevent (without it, plumbing diffs default
+// to no rename detection and a move misreads as delete+add).
+func TestPreviewDeletedPaths_LargeRenameNeverReadsAsDeletion(t *testing.T) {
+	dir := initGitRepo(t)
+	body := "content line one\nmore lines here to make similarity high\nline three\nline four\n"
+	for _, n := range []string{"1", "2", "3", "4", "5"} {
+		neWriteFile(t, dir, "dir/f"+n+".txt", body+n+"\n")
+	}
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add dir/")
+	neRunGit(t, dir, "checkout", "-b", "mover")
+	neRunGit(t, dir, "mv", "dir", "newdir")
+	neRunGit(t, dir, "commit", "-m", "move dir -> newdir")
+	neRunGit(t, dir, "checkout", "main")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "mover")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Errorf("PreviewDeletedPaths = %v, want none — a directory move must read as renames, never deletions", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_HonestModifyDeleteConflictYieldsEmptyDSet is the
+// pinned disposition for a GENUINE, isolated modify/delete conflict: `git
+// merge-tree --write-tree` retains TARGET's (ours') own version at the
+// conflicted path itself (verified on git 2.51.2: exit 1's stdout says
+// "Version main of f.txt left in tree"), so diffing target against the
+// conflicted preview's tree shows NO change there at all — an empty
+// D-set, correctly, but NOT because a conflict is special-cased away
+// (spec 127 bead-1 fix round, O1-1/O2-1/O3-2 deleted that short-circuit —
+// see the doc comment above, which used to claim "no D-set is derivable
+// from a preview that never resolved to a tree"). It is empty here
+// because target's own content at the ONLY path in play is genuinely
+// unchanged by the preview — contrast the next test, where a conflict
+// co-occurs with a genuine, unrelated deletion.
+func TestPreviewDeletedPaths_HonestModifyDeleteConflictYieldsEmptyDSet(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "f.txt", "v1\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add f.txt")
+	neRunGit(t, dir, "checkout", "-b", "del")
+	neRunGit(t, dir, "rm", "f.txt")
+	neRunGit(t, dir, "commit", "-m", "delete f.txt")
+	neRunGit(t, dir, "checkout", "main")
+	neWriteFile(t, dir, "f.txt", "v2\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "modify f.txt")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "del")
+	if err != nil {
+		t.Fatalf("a conflicted preview must not be classified as an infra error, got: %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Errorf("PreviewDeletedPaths on an isolated modify/delete conflict = %v, want none", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_ConflictOnOnePathDoesNotMaskDeletionOnAnother is
+// the RED-on-the-prior-bug fixture (spec 127 bead-1 fix round,
+// O1-1/O2-1/O3-2): a candidate merge that both CONFLICTS on one path and
+// DELETES a different, unrelated target-present path must still report
+// the unrelated deletion. Before this fix, PreviewDeletedPaths returned
+// (nil, nil) unconditionally on ANY conflict — masking the deletion of
+// landed.txt behind the unrelated conflict on f.txt, the exact
+// "certifying the destruction" failure this predicate exists to prevent.
+func TestPreviewDeletedPaths_ConflictOnOnePathDoesNotMaskDeletionOnAnother(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "f.txt", "v1\n")
+	neWriteFile(t, dir, "landed.txt", "landed\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add f.txt+landed.txt")
+	neRunGit(t, dir, "checkout", "-b", "del")
+	neRunGit(t, dir, "rm", "f.txt", "landed.txt")
+	neRunGit(t, dir, "commit", "-m", "delete f.txt and landed.txt")
+	neRunGit(t, dir, "checkout", "main")
+	neWriteFile(t, dir, "f.txt", "v2\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "modify f.txt")
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "del")
+	if err != nil {
+		t.Fatalf("a conflicted preview must not be classified as an infra error, got: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "landed.txt" {
+		t.Errorf("PreviewDeletedPaths on a conflicted-but-not-fully-blind preview = %v, want [landed.txt] (the conflict on f.txt must not mask the unrelated deletion)", deleted)
+	}
+}
+
+// TestPreviewDeletedPaths_MergeBaseInfraErrorPropagates and
+// TestPreviewDeletedPaths_MergeTreeInfraErrorPropagates prove PreviewDeletedPaths
+// never classifies a git infra failure into an empty (safe-looking) D-set
+// (the spec 125 O2-1 discipline, applied to this new primitive): both the
+// merge-base resolution and the merge-tree preview propagate.
+func TestPreviewDeletedPaths_MergeBaseInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := mergeBaseFn
+	t.Cleanup(func() { mergeBaseFn = orig })
+	simulated := errors.New("simulated merge-base failure")
+	mergeBaseFn = func(workdir, ref, target string) (string, error) { return "", simulated }
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the merge-base failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+func TestPreviewDeletedPaths_MergeTreeInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := mergeTreeWriteTreeFn
+	t.Cleanup(func() { mergeTreeWriteTreeFn = orig })
+	simulated := errors.New(`fatal: unknown option '--write-tree'`)
+	mergeTreeWriteTreeFn = func(workdir, base, ours, theirs string) (mergeTreeResult, error) {
+		return mergeTreeResult{}, simulated
+	}
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the merge-tree failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+// TestPreviewDeletedPaths_DiffInfraErrorPropagates: the trailing
+// name-status diff's own failure must propagate too, not just the
+// merge-tree leg's.
+func TestPreviewDeletedPaths_DiffInfraErrorPropagates(t *testing.T) {
+	dir := initGitRepo(t)
+	neRunGit(t, dir, "checkout", "-b", "feature")
+	neWriteFile(t, dir, "f.txt", "x\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "feature work")
+	neRunGit(t, dir, "checkout", "main")
+
+	orig := diffNameStatusBucketsFn
+	t.Cleanup(func() { diffNameStatusBucketsFn = orig })
+	simulated := errors.New("simulated diff failure")
+	diffNameStatusBucketsFn = func(workdir, from, to string) ([]string, []string, []string, error) {
+		return nil, nil, nil, simulated
+	}
+
+	deleted, err := PreviewDeletedPaths(dir, "main", "feature")
+	if err == nil {
+		t.Fatalf("expected the diff failure to propagate, got deleted=%v, nil error", deleted)
+	}
+	if !errors.Is(err, simulated) {
+		t.Errorf("expected the propagated error to wrap the simulated failure, got: %v", err)
+	}
+}
+
+// TestPreviewDeletedPaths_RejectsOptionLikeOperands: the SEC-5 argv-hygiene
+// pin, same as every other gitutil ref-bearing entry point.
+func TestPreviewDeletedPaths_RejectsOptionLikeOperands(t *testing.T) {
+	dir := initGitRepo(t)
+	if _, err := PreviewDeletedPaths(dir, "-x", "main"); err == nil {
+		t.Error("expected a rejection for an option-like target operand")
+	}
+	if _, err := PreviewDeletedPaths(dir, "main", "-x"); err == nil {
+		t.Error("expected a rejection for an option-like branch operand")
+	}
+}
+
+// TestPreviewDeletedPaths_MutatesNothing asserts the non-mutating
+// discipline: refs and worktree status are byte-identical before and
+// after a PreviewDeletedPaths call (the same house check as
+// ContentSubsumedOutcome's own preview).
+func TestPreviewDeletedPaths_MutatesNothing(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "keep.txt", "keep\n")
+	neWriteFile(t, dir, "gone.txt", "gone\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "add keep+gone")
+	neRunGit(t, dir, "checkout", "-b", "cleanup")
+	neRunGit(t, dir, "rm", "gone.txt")
+	neRunGit(t, dir, "commit", "-m", "remove gone.txt")
+	neRunGit(t, dir, "checkout", "main")
+
+	refsBefore := neRunGit(t, dir, "for-each-ref")
+	statusBefore := neRunGit(t, dir, "status", "--porcelain")
+
+	if _, err := PreviewDeletedPaths(dir, "main", "cleanup"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	refsAfter := neRunGit(t, dir, "for-each-ref")
+	statusAfter := neRunGit(t, dir, "status", "--porcelain")
+	if refsBefore != refsAfter {
+		t.Errorf("refs changed:\nbefore: %q\nafter:  %q", refsBefore, refsAfter)
+	}
+	if statusBefore != statusAfter {
+		t.Errorf("worktree/index status changed:\nbefore: %q\nafter:  %q", statusBefore, statusAfter)
+	}
+}
+
+// --- spec 127 bead-1 fix round 2, G1-N1's ruling: diffNameStatusBuckets'
+// per-status classification -------------------------------------------------
+
+// TestDiffNameStatusBuckets_TypeChangeExcludedFromAllThreeBuckets is the
+// real-git behavioral half of G1-N1's fix: a T-status (typechange) path
+// — a target-present regular file turned into a symlink — must be
+// classified with a WRITTEN reason (excluded, same as R/C) rather than
+// silently falling through an unnamed default, and it must not appear in
+// added, deleted, or modified.
+func TestDiffNameStatusBuckets_TypeChangeExcludedFromAllThreeBuckets(t *testing.T) {
+	dir := initGitRepo(t)
+	neWriteFile(t, dir, "kind.txt", "a regular file\n")
+	neWriteFile(t, dir, "untouched.txt", "untouched\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "C1")
+	neRunGit(t, dir, "checkout", "-b", "typechange")
+	if err := os.Remove(filepath.Join(dir, "kind.txt")); err != nil {
+		t.Fatalf("remove kind.txt: %v", err)
+	}
+	if err := os.Symlink("untouched.txt", filepath.Join(dir, "kind.txt")); err != nil {
+		t.Fatalf("symlink kind.txt: %v", err)
+	}
+	neRunGit(t, dir, "add", "kind.txt")
+	neRunGit(t, dir, "commit", "-m", "kind.txt: regular file -> symlink")
+	neRunGit(t, dir, "checkout", "main")
+
+	statusOut := neRunGit(t, dir, "diff", "--name-status", "--find-renames", "main", "typechange", "--", "kind.txt")
+	if !strings.HasPrefix(strings.TrimSpace(statusOut), "T") {
+		t.Fatalf("fixture invariant broken: expected a T-status record for kind.txt, got %q", statusOut)
+	}
+
+	added, deleted, modified, err := diffNameStatusBuckets(dir, "main", "typechange")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, bucket := range [][]string{added, deleted, modified} {
+		for _, p := range bucket {
+			if p == "kind.txt" {
+				t.Fatalf("kind.txt (a T-status typechange) must not appear in added=%v deleted=%v modified=%v", added, deleted, modified)
+			}
+		}
+	}
+}
+
+// TestDiffNameStatusBuckets_UnhandledStatusFailsClosed is G1-N1's ruling
+// applied to statuses this predicate has never seen and never will
+// safely guess about: U (unmerged) and X (unknown), plus a hypothetical
+// future letter ("Z") no version of git emits today. Real git never
+// emits these for a commit-ish-to-commit-ish diff, so the seam is
+// exercised directly rather than via a real-git fixture — but the
+// SHAPE (a status this switch has not classified with a written reason)
+// is exactly what the round-1 fix's bare `default` arm let through
+// silently for T; this pins the INVERTED default (fail closed with an
+// error) for anything this switch does not explicitly recognize.
+func TestDiffNameStatusBuckets_UnhandledStatusFailsClosed(t *testing.T) {
+	for _, status := range []string{"U", "X", "Z"} {
+		t.Run(status, func(t *testing.T) {
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				// The format STRING itself (single-quoted, so the shell
+				// passes it to printf verbatim) contains the literal
+				// text `\000` — printf's OWN escape interpretation turns
+				// that into a real NUL byte in its output; a NUL byte
+				// cannot survive as a literal byte inside a Go string
+				// handed to exec.Command's argv (execve truncates C
+				// strings at NUL), so it must be produced this way
+				// rather than embedded directly.
+				script := "printf '" + status + "\\000somefile.txt\\000'"
+				return exec.Command("/bin/sh", "-c", script)
+			}
+
+			added, deleted, modified, err := diffNameStatusBuckets(unhandledStatusTestWorkdir, "from", "to")
+			if err == nil {
+				t.Fatalf("expected a non-nil error for unhandled status %q, got added=%v deleted=%v modified=%v", status, added, deleted, modified)
+			}
+			if !strings.Contains(err.Error(), status) {
+				t.Errorf("expected the error to name the unhandled status %q, got: %v", status, err)
+			}
+		})
+	}
+}
+
+// unhandledStatusTestWorkdir is a placeholder workdir for
+// TestDiffNameStatusBuckets_UnhandledStatusFailsClosed's seam-injected
+// git calls, which never actually touch a real repository (execCommand
+// itself is stubbed) — any string works, but rejectOptionLike still runs
+// first, so it must not look option-like.
+const unhandledStatusTestWorkdir = "/tmp/mindspec-unhandled-status-test-workdir"

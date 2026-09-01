@@ -1,0 +1,144 @@
+package guard
+
+// DestructionOutcome is the closed, named outcome set of the shared
+// work-destruction predicate (internal/gitutil.EvaluateWorkDestruction,
+// spec 127 R4, wrapped for the ADR-0030 enforcement packages by
+// internal/lifecycle.EvaluateWorkDestruction). Every consumer of the
+// predicate switches over this type EXHAUSTIVELY — a new variant with no
+// fixture in a consumer's table is meant to go red at development time
+// (spec 127 O2-r2-4). Go has no enum-exhaustiveness check and
+// .golangci.yml carries no `exhaustive` linter, so the mechanism is this
+// file's DestructionOutcomeCount sentinel: every consumer's fixture table
+// asserts `len(table) == DestructionOutcomeCount`, and consumer switches
+// carry no `default` arm over this type (spec 127 B-r4-3).
+//
+// The five outcomes correspond to the spec's evidence classes, in the
+// order the predicate evaluates them:
+//
+//   - DestructionAncestor: the candidate branch is already an ancestor of
+//     the target (or of main). The two sub-cases are NOT interchangeable
+//     for a merge producer (spec 127 bead-1 fix round, O1-5): ancestor-OF-
+//     TARGET is a true no-op (nothing to merge into target; the safe
+//     disposition is branch deletion). Ancestor-of-MAIN-but-NOT-of-target
+//     is NOT a no-op — merging branch into target is still a real,
+//     tree-changing merge; only branch's relationship to MAIN is
+//     already-settled. WorkDestructionEvidence.AncestorOf distinguishes
+//     the two (it names which ref the ancestry was found against); a
+//     consumer that skips the merge entirely on DestructionAncestor
+//     without checking AncestorOf == target risks silently dropping that
+//     branch's work.
+//   - DestructionSuperseded: the branch's content already landed via
+//     another route (a squash merge, a tracker-only carrier, or an
+//     equivalent content-level landing) — merging the stale snapshot
+//     would regress landed work.
+//   - DestructionStaleDeletion: the merge preview deletes content present
+//     in the target that the branch never carried as its own authored
+//     work — net of the branch's own novel contribution, its tree
+//     reconstructs a prior state of the target, so the deletions are
+//     staleness artifacts, not authored changes. "A prior state of the
+//     target" means any commit reachable in target's history (spec 127
+//     bead-1 fix round, O1-6), including one reachable only through a
+//     merged side branch, not only target's first-parent lineage — see
+//     internal/gitutil's package doc comment for the tradeoff that widens.
+//   - DestructionClean: none of the above — an ordinary merge, including
+//     one whose own content genuinely conflicts (a real conflict is
+//     handled by the merge attempt itself, not by this predicate). NOT a
+//     certification that the merge preserves work (spec 127 bead-1 fix
+//     round 3->4, NEW-O1r-B): DestructionClean means no destructive class
+//     was DETECTED, and the stale-deletion leg's detection is limited —
+//     it requires branch's tip tree, with ONLY the paths branch ADDS
+//     relative to target removed, to exactly equal some commit tree in
+//     target's own history (CORRECTED spec 127 bead-1 fix round 5,
+//     NEW-O2G-2/NEW-O3g-2: a prior version of this bullet stated the miss
+//     surface as a rule over EVERY status in the whole novel diff against
+//     target, which this package's own fixture table falsifies — every
+//     detected recreation's novel diff necessarily has a D-status path,
+//     since the revert that defines the class IS that D-status). A
+//     rename/copy, an in-place edit (content or mode-only), or a type
+//     change in the branch's OWN novel work is a stated, fixtured miss,
+//     because that tree entry exists nowhere in target's history and so
+//     survives the strip and matches no candidate ancestor. A restoration
+//     of a path target has since deleted is ALSO a stated, fixtured miss
+//     (CORRECTED spec 127 bead-1 fix round 6, NEW-O1v-A: a prior version
+//     of this bullet named only the novel-work misses, which understates
+//     the surface): the strip removes every A-status path unconditionally,
+//     whether or not its content is genuinely novel, so a branch that
+//     restores a path target deleted in a commit that also touched
+//     something else can be a BYTE-IDENTICAL recreation of a real ancestor
+//     and still miss, because the strip took that path's entry away from
+//     the side of the comparison that needed it. An M- or D-status path
+//     against target is NOT disqualifying merely by its status label (see
+//     internal/gitutil's package doc comment and snapshotRevertMatch's doc
+//     comment for the general rule, and workdestruction_test.go's
+//     StatedLimit_* rows, including StatedLimit_RestoredDeletedPathIsMissed,
+//     for the fixtured instances). A consumer must not skip its own
+//     conflict/review handling on the strength of a Clean answer alone.
+//   - DestructionEvidenceError: the predicate could not be evaluated (a
+//     git/infra failure at any of its probes, or a repo whose history is
+//     genuinely shallow/truncated so an ancestor scan cannot certify the
+//     absence of a match — see internal/gitutil's errTruncatedHistory)
+//     — absence of evidence is never treated as safety; every consumer
+//     fails closed on this outcome, which carries a named override.
+//     "Retryable" (AC-8(iv)) means the override is available on a re-run,
+//     not that the underlying condition is transient (spec 127 bead-1 fix
+//     round 6, NEW-O3v-2): a shallow clone, a replace ref, or a grafts
+//     entry are all PERMANENT until an operator removes the mechanism or
+//     invokes the override, and none of that is a defect in this outcome.
+type DestructionOutcome int
+
+const (
+	// DestructionAncestor: the branch is already an ancestor of the target
+	// (or of main) — there is nothing to merge.
+	//
+	// DestructionAncestor is ALSO this type's zero value (spec 127 bead-1
+	// fix round, F1-3): `var o guard.DestructionOutcome` reads as this —
+	// the class that licenses a deletion/no-op — with no predicate having
+	// run at all. This inverts the house zero-value discipline elsewhere
+	// in gitutil (Subsumption deliberately zero-values to its FAIL-CLOSED
+	// answer), but the enum's ORDER here is plan-pinned (B-r4-3) and must
+	// not change. A consumer must never treat mere possession of a
+	// DestructionOutcome value as proof the predicate actually ran —
+	// only an explicit call site that assigns a non-default, validated
+	// variant is evidence of that.
+	DestructionAncestor DestructionOutcome = iota
+	// DestructionSuperseded: the branch's content already landed via
+	// another route.
+	DestructionSuperseded
+	// DestructionStaleDeletion: the merge preview deletes target content
+	// the branch never authored — a staleness artifact.
+	DestructionStaleDeletion
+	// DestructionClean: an ordinary merge; no destructive class was
+	// DETECTED — not a certification that none applies (see the
+	// DestructionOutcome doc comment above, spec 127 bead-1 fix round
+	// 3->4, NEW-O1r-B; corrected fix round 5, NEW-O3g-3 — package guard
+	// has no package doc comment in any file, so the prior wording
+	// pointed nowhere).
+	DestructionClean
+	// DestructionEvidenceError: the predicate could not be evaluated.
+	DestructionEvidenceError
+	// DestructionOutcomeCount is the exported count sentinel every
+	// consumer's fixture table is pinned against (spec 127 B-r4-3) — it is
+	// itself not a valid outcome value.
+	DestructionOutcomeCount
+)
+
+// String renders o for diagnostics and test failure messages. Not itself a
+// "consumer switch" in the exhaustiveness sense above (see the doc comment
+// on DestructionOutcome) — it carries a fallback arm so an out-of-range
+// value never panics a caller that merely wants to print it.
+func (o DestructionOutcome) String() string {
+	switch o {
+	case DestructionAncestor:
+		return "ancestor"
+	case DestructionSuperseded:
+		return "superseded"
+	case DestructionStaleDeletion:
+		return "stale-deletion"
+	case DestructionClean:
+		return "clean"
+	case DestructionEvidenceError:
+		return "evidence-error"
+	default:
+		return "unknown-destruction-outcome"
+	}
+}

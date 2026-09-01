@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
 // releaseRecorder captures the order of the two destructive steps (Remove the
@@ -103,6 +105,47 @@ func TestReleaseDirtyRefusesWithoutForce(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "uncommitted") {
 		t.Errorf("refusal should name the uncommitted changes; got: %v", err)
+	}
+}
+
+// TestRunRelease_DiscardNeverInRecoveryLine is spec 127 AC-9(ii)/AC-10(ii)
+// (O2-r2-5, O3-r2-7): the dirty-tree refusal's machine-greppable
+// `recovery: ` line names ONLY the safe action (commit + re-run) — the
+// `--force` discard is a separately-labeled OPERATOR CHOICE that
+// appears in the message body instead, never on a `recovery: ` line an
+// agent might paste reflexively. Verified red-on-revert manually at
+// authoring time: restoring the pre-bead-7 combined line (both actions
+// on one `recovery: ` line) makes the second assertion below fail.
+func TestRunRelease_DiscardNeverInRecoveryLine(t *testing.T) {
+	r := &releaseRecorder{dirty: []string{"src/foo.go"}}
+	err := runRelease(r.deps(), "mindspec-abc", false)
+	if err == nil {
+		t.Fatal("runRelease must refuse a dirty worktree without --force")
+	}
+	full := err.Error()
+
+	var recoveryLines, bodyLines []string
+	for _, line := range strings.Split(full, "\n") {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			recoveryLines = append(recoveryLines, line)
+		} else {
+			bodyLines = append(bodyLines, line)
+		}
+	}
+	if len(recoveryLines) == 0 {
+		t.Fatal("dirty refusal has no recovery: line at all")
+	}
+	for _, rl := range recoveryLines {
+		if strings.Contains(rl, "--force") {
+			t.Errorf("recovery: line contains the --force discard — it must name only the safe commit-and-rerun action: %q", rl)
+		}
+	}
+	body := strings.Join(bodyLines, "\n")
+	if !strings.Contains(body, "--force") {
+		t.Errorf("message body is missing the labeled --force discard choice entirely: %q", full)
+	}
+	if !strings.Contains(strings.ToLower(body), "operator choice") {
+		t.Errorf("the discard must be a SEPARATELY-LABELED operator choice in the message body, not just a bare mention: %q", body)
 	}
 }
 

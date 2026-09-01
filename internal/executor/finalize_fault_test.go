@@ -93,7 +93,7 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = failAtStage("auto_merge")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the auto_merge kill, got: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge to completion, got: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestFinalizeFault_Push_KillThenConverge(t *testing.T) {
 	fake.listEntries = nil
 
 	finalizeStepHookFn = failAtStage("push")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the push kill, got: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestFinalizeFault_Push_KillThenConverge(t *testing.T) {
 	preKillTip := refHash(t, origin, "spec/077-test")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge (the push is idempotent), got: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestFinalizeFault_OrphanFinalize_KillThenConverge(t *testing.T) {
 	fake.listEntries = nil
 
 	finalizeStepHookFn = failAtStage("orphan_finalize")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the orphan_finalize kill, got: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestFinalizeFault_OrphanFinalize_KillThenConverge(t *testing.T) {
 	*exportContent = []byte(`{"id":"epic-1","status":"closed","retry":2}` + "\n")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge (retry-idempotent chore flow), got: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = failAtStage("pre_cleanup")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the pre_cleanup kill, got: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	beadTip := refHash(t, dir, "bead/bead-1")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge to completion, got: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestFinalizeFault_PostCleanup_KillThenCleanRefusal(t *testing.T) {
 	fake.listEntries = nil
 
 	finalizeStepHookFn = failAtStage("post_cleanup")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the post_cleanup kill, got: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestFinalizeFault_PostCleanup_KillThenCleanRefusal(t *testing.T) {
 	}
 
 	finalizeStepHookFn = nil
-	_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil)
+	_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
 	if err == nil {
 		t.Fatal("expected the re-invocation to hit FinalizeEpic's own clean 'spec branch does not exist' refusal")
 	}
