@@ -1,0 +1,56 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Two of my three round-2 asks are ADDRESSED: the temporary index is now tip-seeded and pinned by artifact-preservation fixtures, and legacy-v2 state is now treated honestly on lock-free reads with a self-healing repair path. The Windows ask is only PARTIAL. PID liveness plus age prevents deleting a live old holder, but the stated re-read/delete/create/verify sequence is not an atomic compare-and-delete: two contenders can both re-read stale identity S, winner A can delete S, create A, verify A, and return, after which contender B can execute its already-authorized delete, remove A, create B, verify B, and also return. Post-create verification cannot protect against a later delete. The current journal O_EXCL idiom closes the created handle before returning, so inheriting that idiom does not implicitly supply delete exclusion. This violates the same-machine serialization invariant AC-5 depends on. Separately, the new materialization reset-failure recovery promises an idempotent re-run after update-ref has already advanced the bead tip to C; without a pre-panel resume path, that re-run is stopped by stale-SHA. These are focused plan corrections, not grounds for rejection or hard block, but both are correctness claims that implementation beads cannot safely invent around after plan approval.",
+  "concrete_changes_required": [
+    "Replace or complete the Windows stale-takeover protocol with a mechanically atomic ownership guarantee. Pin a concrete primitive such as retaining a Windows handle opened without FILE_SHARE_DELETE for the entire critical section, or an OS-native named mutex/LockFileEx design; specify owner-only release. Add a barrier-controlled test for the exact late-delete interleaving where both contenders finish their stale-identity re-read before the winner creates and verifies its lock, then the loser attempts deletion after the winner has entered. Assert that only one contender can enter. Also disposition a crash between O_EXCL creation and complete PID/timestamp publication so an empty or partial stale file does not block forever.",
+    "Make the post-update-ref reset-failure recovery true. Specify resume detection before the panel stale-SHA gate (or an equivalent forward-reconcile route) that recognizes the already-materialized commit/tree and safely continues index refresh plus artifact sync, so the emitted plain re-run actually converges; otherwise replace the recovery and reconcile the result with R4.3's plain-re-run contract.",
+    "Pin the v2 marker in phase fixtures: marker-absent stored=implement/all-open is the legacy-notice/self-heal case, while AC-5(ii), AC-5(iv), and AC-5(viii)'s constructed backward guard cases are marker-present so EnsurePhaseSemanticsV2 does not consume the condition before the guard or retained-warning assertion runs. State that the legacy notice replaces, and is not a retained form of, the mismatch warning.",
+    "Add cmd/mindspec/repair.go to work_chunks id 2 because bead 2 step 7 adds the EnsurePhaseSemanticsV2 call there. In bead 2 step 3, explicitly carry the already-promised tightening of the sanctioned-caller inventory from zero callers outside the allowlist to exactly one production caller."
+  ],
+  "findings": [
+    {
+      "id": "R6-R3-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Tip-seeded snapshot preserves the excluded tracked artifact",
+      "detail": "Plan lines 161-173 now seed the temporary index with read-tree <tip> before exclusion-bearing add -A. Consequently the excluded .beads/issues.jsonl entry retains the tip blob and mode in T instead of becoming a synthetic deletion. Bead 6 mirrors the mechanism and adds the requested red-on-revert user-commit-never-touches-artifact leg plus byte identity across tip, T, and the user commit. The three-part materialization also refreshes the real index and uses update-ref's expected-old-tip operand."
+    },
+    {
+      "id": "R6-R3-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Legacy-v2 read paths now expose an honest, convergent treatment",
+      "detail": "Bead 2 exports LegacyPhaseSignature and consumes it lock-free in the stored-vs-derived consistency path reached by state show. Marker-absent legacy state emits a distinct legacy notice rather than the obsolete mismatch warning. Adding repair phase to EnsurePhaseSemanticsV2's invocation sites makes the notice's command reconcile implement-to-plan plus marker before the backward guard and then no-op as consistent. This satisfies the original read-before-mutation concern without making read commands take a write lock. The fixture marker ambiguity is a new plan-writing issue, recorded separately, rather than a failure of this mechanism."
+    },
+    {
+      "id": "R6-R3-ASK-3",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Windows takeover protects live holders but its compare-and-delete remains non-atomic",
+      "detail": "PID-not-alive AND age closes the live-old-holder failure from round 2. O_EXCL also selects one creator at an instant. But re-read followed by delete is two operations, and verify-once protects only against deletes that happen before verification. Allowed trace: A and B both re-read stale S; A deletes S, creates identity A, verifies, and enters; B then performs the delete authorized by its earlier S read, creates B, verifies, and enters. The plan's claim that post-create verify closes this interleave is false unless it additionally pins a primitive that prevents deletion after creation, such as keeping the Go/Windows file handle open without FILE_SHARE_DELETE for the entire lock lifetime. The current internal/journal Windows idiom closes its O_EXCL handle before returning, so merely citing that idiom does not provide the missing property."
+    },
+    {
+      "id": "R6-R3-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Reset-failure recovery re-runs into the stale-SHA gate",
+      "detail": "Protocol step 3 and bead 6 say update-ref advances refs/heads/bead/<id> to C before the real-index mixed reset. If reset then fails, the plan promises a refusal whose recovery names an idempotent re-run. On that re-run, however, the bead tip is C rather than the reviewed SHA A, and no materialization-partial resume state is specified before the panel gate. The ordinary stale-SHA check therefore blocks the promised recovery. Reconcile mode as described covers an already-landed merge, not this pre-merge materialization commit. This is a self-defeating recovery hint in the very defect family spec 128 is meant to remove."
+    },
+    {
+      "id": "R6-R3-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "title": "Legacy self-healing consumes marker-absent backward-guard fixtures",
+      "detail": "The constructed backward state stored=implement with all lifecycle children open is also LegacyPhaseSignature. Because repair now invokes EnsurePhaseSemanticsV2 before its guard, a marker-absent instance is translated to plan plus v2 marker and then no-ops; it cannot exercise AC-5(ii)'s backward refusal, AC-5(iv)'s retained direction-conditional warning, or AC-5(viii)'s operator-refusal side. The plan is buildable if those guard fixtures are explicitly marker-present and the marker-absent state is reserved for the legacy notice/self-heal fixture, but that test-determining distinction is currently unstated."
+    },
+    {
+      "id": "R6-R3-NEW-3",
+      "classification": "NEW_ISSUE",
+      "severity": "minor",
+      "title": "Bead 2's scope omits its new repair entry point and hides its fence-tightening duty",
+      "detail": "Bead 2 step 7 adds EnsurePhaseSemanticsV2 to repair phase before the guard, which requires editing cmd/mindspec/repair.go, but work_chunks id 2 does not list that file. The same section says the sanctioned release caller is call-site-fenced in bead 1, while the obligation to tighten that fence to exactly one caller appears only back in bead 1's section. Adding the missing path and restating the tightening in the bead that performs it keeps the generated work packet honest."
+    }
+  ]
+}

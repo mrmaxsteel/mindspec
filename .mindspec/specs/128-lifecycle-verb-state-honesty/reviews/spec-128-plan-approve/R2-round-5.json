@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.92,
+  "rationale": "Round-5 zero-ask regression check of 27294e84 under the grounding lens, with INDEPENDENT empirical verification of every fresh git-mechanics claim in a scratch repo (not trusting the author's re-run lab). LAB RESULTS, all three claims TRUE: (1) `git update-ref --stdin` with start/prepare/commit over two refs (bead ref with expected-old + marker ref) moves BOTH refs atomically on success — verified: main and refs/mindspec/materialized/test both advanced A→C in one transaction. (2) A wrong expected-old on the bead ref aborts WHOLESALE at prepare — verified verbatim: `fatal: prepare: cannot lock ref 'refs/heads/main': is at <C> but expected <A>`, exit non-zero, and NEITHER ref moved (the marker update in the same transaction did not apply) — exactly the plan's 'fatal at prepare, neither ref moves' fail-closed semantics, and my test used OLD≠NEW so it does not repeat the author's invalidated first attempt. (3) The S-stage plumbing construction is buildable precisely as described: temp-index `read-tree C` → `hash-object -w` the refreshed artifact → `update-index --cacheinfo` → `write-tree` → `commit-tree <tree> -p C` yields D whose parent is C and whose diff vs C is EXACTLY the artifact path, and the follow-up transaction {bead-ref C→D, marker→D} commits atomically. CONSISTENCY SWEEP: the staged protocol is now stated identically in all three surfaces — the protocol paragraph (M: commit-tree C first, then txn {A→C expected-old, marker→C}; R: idempotent reset; S: D by plumbing + txn {C→D, marker→D}; G: resume routes INTO --resolve-merge; T: terminal clear on both completion paths, with reconcile-detection FIRST in the early sequence), bead 6 step 1 (the transaction helper with wholesale-abort semantics beside the 127 precedents), bead 6 step 4 (the corrected staged order), and the ADR-0041 §1/§3 draft description (full M→R→S→G→T + transactional marker invariant, loose-object qualification preserved). My round-4 minor finding R2-4-2 (marker-before-commit-tree ordering slip) is FIXED — the corrected order 'commit-tree BEFORE any marker can exist' is now explicit in both the protocol paragraph and step 4 (round-4 G1.2). The G2 sweep also verifies: the stale O_EXCL journal-idiom framings are gone from both the lock-home paragraph and bead 1 step 2, replaced consistently by flock/LockFileEx-retained-handle with the journal contributing only the read-modify-write shape. The marker==tip-by-construction invariant now genuinely holds across every tool-authored transition (both transitions are transactional), making marker≠tip a proof of foreignness — the state machine is sound and the three new kill fixtures (ix)/(x)/(xi) pin its edges. ONE minor residual, non-blocking: after the S transaction the real index still sits at C while HEAD is D (delta = the refreshed artifact blob), and the stage list repeats no index refresh after S — so between S and worktree removal, status consumers see the artifact as a staged+unstaged pair. Consequence-free on every current path (the merge runs outside the bead worktree; the worktree is removed on success; resume-from-first-incomplete-stage never consults the bead index; fixture (vi)'s unchanged-artifact scenario never builds D so the fixture is unaffected), but a one-line repetition of the idempotent R refresh after the S transaction would preserve the status-clean invariant the plan otherwise establishes. Recording for fold-in; it does not warrant a round.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-5-1",
+      "severity": "info",
+      "claim": "All three fresh git-mechanics claims verified TRUE by independent lab (scratch repo, git 2.x, OLD≠NEW throughout).",
+      "evidence": "TEST1: two-ref start/prepare/commit transaction advanced bead ref A→C and marker →C atomically. TEST2: wrong expected-old → 'fatal: prepare: cannot lock ref … is at C but expected A', neither ref moved. TEST3: D built via read-tree C + hash-object + update-index --cacheinfo + write-tree + commit-tree -p C; diff C→D exactly the artifact path; txn {C→D, marker→D} atomic.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-5-2",
+      "severity": "info",
+      "claim": "Protocol stated consistently across the protocol paragraph, bead 6 steps 1/4, and the ADR-0041 draft; round-4 R2-4-2 ordering slip FIXED; G2's stale O_EXCL framings swept from both named locations.",
+      "evidence": "All three surfaces carry the same M→R→S→G→T order with commit-tree-before-marker, transactional two-ref advances, reconcile-detection-first early sequence, and terminal clear on both completion paths; lock-home paragraph and bead 1 step 2 now say flock/LockFileEx with journal contributing only the withReportsLock shape.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-5-3",
+      "severity": "minor",
+      "claim": "No index refresh is repeated after the S transaction: post-S, the real index is at C while HEAD is D (delta = the refreshed artifact blob), so status consumers in the S→worktree-removal window see the artifact as a staged+unstaged pair.",
+      "evidence": "Stage list: R's reset precedes S; nothing follows the {C→D, marker→D} transaction before G. Consequence-free on current paths (merge runs outside the bead worktree; worktree removed on success; resume never consults the bead index; fixture (vi) never builds D in its unchanged scenario), but the status-clean invariant the plan establishes for the pre-S window is silently narrower after S.",
+      "disposition": "Non-blocking: fold in a one-line repetition of the idempotent R refresh after the S transaction (or an explicit scope sentence) on the next touch of plan.md."
+    }
+  ]
+}

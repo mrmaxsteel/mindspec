@@ -1,0 +1,45 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.98,
+  "rationale": "The round-2 plan remains buildable, honestly scoped, and spec-faithful under R4's empirical lens. The reviewed checkout is exactly 747bf9b3f841ea1c9a9d2f48516d2dcba8129cbd. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the three documented advisory decomposition warnings. The YAML frontmatter parses into ten contiguous work_chunks whose positional IDs and dependency lists match Bead sections 1 through 10. Mechanical re-derivation against current derive.go confirms OQ-3 option 1 dissolves the warning window: all-open lifecycle children derive plan, an in-progress lifecycle child derives implement, and non-lifecycle children are excluded; the proposed plan-approve and first-lifecycle-claim writers therefore keep stored and derived values equal, so derive.go:179 is false. Release correctly requires a fresh child-derived sanctioned sync because today's stored-trusting DerivePhase route would otherwise warn and preserve implement. The reshaping at 747bf9b3 introduces no regression in this lens, and the whole plan assigns the resulting implementation and regression fixtures to concrete beads.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R2-F1",
+      "severity": "none",
+      "class": "prior-round-asks",
+      "summary": "Round 1 R4 verdict was APPROVE with an empty concrete_changes_required array, so there are no R4 asks to classify as ADDRESSED, PARTIAL, MISSED, or NEW_ISSUE. The required regression check was performed against the reviewed tree and found no new issue."
+    },
+    {
+      "id": "R4-R2-F2",
+      "severity": "none",
+      "class": "validation",
+      "summary": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited 0. It reported exactly three WARNs: decomposition-bead-count (10 beads), decomposition-scope-redundancy (R=0.09), and decomposition-chain-depth (depth 4). These remain advisory and are explicitly answered by the plan's Decomposition Note; none indicates a parse, schema, mapping, or buildability failure."
+    },
+    {
+      "id": "R4-R2-F3",
+      "severity": "none",
+      "class": "frontmatter-mapping",
+      "summary": "A fresh YAML parse succeeded. work_chunks count=10 with IDs [1,2,3,4,5,6,7,8,9,10]; Bead-section count=10 with the same IDs in the same positions. Structured dependencies match each section's Depends on prose: 1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]. The round-2 additions remain homed in their intended chunks, including the six writer files in chunk 1, semantics_v2 in chunk 2, snapshot/executor files in chunk 6, and beads.go in chunk 8."
+    },
+    {
+      "id": "R4-R2-F4",
+      "severity": "none",
+      "class": "oq3-mechanical-derivation",
+      "summary": "For an open epic, deriveFromChildrenOrStatusWithCache reaches DerivePhaseFromChildren. Zero lifecycle children returns plan at derive.go:362-366; all lifecycle children open returns plan at :386-387; any in_progress lifecycle child returns implement at :369-371; explicit non-lifecycle and epic children are skipped at :347-351. Under option 1, plan approve writes stored plan, so the all-open plan-approve window has stored==derived and the warning predicate at :179 is false. The first successful lifecycle claim makes the child in_progress and the new next writer advances stored to implement, again leaving :179 false. A non-lifecycle claim changes neither derivation nor stored phase. Thus the inherited complete trigger-2 advisory is genuinely dissolved rather than suppressed or sanctioned."
+    },
+    {
+      "id": "R4-R2-F5",
+      "severity": "none",
+      "class": "release-route",
+      "summary": "The release redesign is correctly load-bearing and explicitly assigned. Today release.go:316 calls phase.DerivePhase after reopening the bead. With stored implement and child-derived plan, DerivePhaseWithStatusWithCache executes the mismatch warning at derive.go:179-191, returns trusted implement, and release writes implement back. Bead 2 instead routes release through the bead-1 SanctionedDerivedSync entry, which re-derives inside the phase-write lock and writes plan. The plan requires zero-warning assertions and a single-production-caller fence, making reversion observable."
+    },
+    {
+      "id": "R4-R2-F6",
+      "severity": "none",
+      "class": "test-probe",
+      "summary": "Targeted current-tree tests passed: `go test ./internal/phase -run 'TestDerivePhaseFromChildren($|_)|TestDerivePhaseWithStatus_MetadataPresent|TestDerivePhaseDetail_StoredAndDerived' -count=1 -v`. This covered all-open to plan, in-progress to implement, zero-task plus bug to plan, all-task-open plus bug to plan, the cache-aware path, stored-phase warning behavior, and independent stored/derived detail exposure."
+    }
+  ]
+}

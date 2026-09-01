@@ -1,0 +1,55 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.97,
+  "rationale": "Round 6 fixes two of R5's three round-5 precision asks cleanly: ADR Fitness now says ADR-0041 section 2 is unchanged and section 3 is amended, matching bead 6; and the failure-fixture label now correctly says thirteen for legs (i)-(xiii). The write-ahead discriminator is also restated in both the main protocol and the bead 6 ADR-0041 section 3 draft with the same three branches. Re-derivation, however, shows that its C-versus-D kind test is not total over supported complete flows. `mindspec complete <bead>` explicitly supports a clean worktree with no commit message, and the current commit primitives treat unchanged materialization or artifact stages as no-ops. If the proposed plumbing nevertheless builds the plan's stated C or D commit with a tree identical to its parent, both stages have the same empty parent diff: treating an empty diff as artifact-confined misclassifies C as D, while requiring a non-empty named-artifact diff misclassifies D as C. The plan does not instead pin no-op-stage elision or another durable stage identity. This is a localized, buildable correction, and the remaining ADR lens is sound: OQ-1(a) honestly reverses both load-bearing section-1 directions while retaining the panel-before-materialization trust boundary; ADR-0023's filesystem authority is confined to pre-epic drafts; ADR-0025's amendment is fenced to the worktree-creating next claim path; and leaving ADR-0037 untouched remains correct. But the ambiguous discriminator is the load-bearing recovery contract being added to ADR-0041 section 3, so it must be resolved at the plan gate rather than left to bead implementation interpretation.",
+  "concrete_changes_required": [
+    "Make the write-ahead C/D stage discriminator total for supported no-op states, and carry the same rule into the bead 6 ADR-0041 section 3 draft. Either pin when empty C/D stages are elided and how recovery advances across them, or encode an unambiguous durable stage identity independent of whether the parent tree diff is empty. Add recovery fixtures for clean-tree/no-commit-message completion and unchanged-artifact sync so both C and D are classified correctly after interruption."
+  ],
+  "findings": [
+    {
+      "id": "R5-R5-PRECISION-1",
+      "prior_ask": "ADR Fitness consistency",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "adr-0041-amendment-scope",
+      "summary": "ADR Fitness now matches bead 6: section 2 remains unchanged and section 3 is amended with the staged recovery boundary.",
+      "evidence": "At b98d06c2, plan.md:514-528 states that ADR-0041 section 2 is unchanged and section 3 gains M→R→S→G→T write-ahead forward-resume semantics. Bead 6 at plan.md:888-916 assigns exactly that section-3 amendment while retaining the deliberate section-1 reversal."
+    },
+    {
+      "id": "R5-R5-PRECISION-2",
+      "prior_ask": "Stage discriminator pinned and carried into the ADR-0041 section 3 draft",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "class": "write-ahead-stage-identity",
+      "summary": "The requested three-way wording is present in both locations, but its C-versus-D structural sub-test is ambiguous when a stage has no tree delta.",
+      "evidence": "The main protocol at plan.md:235-249 and the bead 6 ADR draft at plan.md:898-907 both say tip==marker is complete, tip==marker-parent is unfinished, and other tips are foreign; both identify D by a marker-to-parent diff confined to the named artifact and otherwise identify C. Yet cmd/mindspec/complete.go:20 and :790-818 support completion without a commit message on a clean tree, while internal/gitutil/gitops.go:837-848 and :1675-1707 establish no-op-on-nothing-to-commit semantics. For an empty-tree C and an empty-tree D, the proposed parent-diff observation is identical, so no definition of 'confined' distinguishes both. The plan does not pin stage elision or another durable discriminator, despite calling the discriminator total over legitimate states."
+    },
+    {
+      "id": "R5-R5-PRECISION-3",
+      "prior_ask": "Failure-fixture count label",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "fixture-count-label",
+      "summary": "The label now matches the enumerated fixture legs.",
+      "evidence": "At b98d06c2, plan.md:922-959 says 'all thirteen' and enumerates exactly (i) through (xiii), including the two write-ahead one-ref-installed windows."
+    },
+    {
+      "id": "R5-ADR-REGRESSION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "adr-conformance",
+      "summary": "No regression was found in the other R5 ADR lenses.",
+      "evidence": "plan.md:289-298 retains panel-before-materialization and leaves ADR-0037 section 4/internal-panel untouched; plan.md:300-332 and :529-535 confine ADR-0023 filesystem discovery to the pre-epic draft interval; plan.md:536-543 and bead 7 confine ADR-0025's dirt-entanglement amendment to the worktree-creating next claim path."
+    },
+    {
+      "id": "R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "The reviewed plan validates with only its three acknowledged decomposition advisories.",
+      "evidence": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exits successfully at b98d06c2 and reports only bead-count 10, scope-redundancy 0.09, and dependency-depth 4 warnings; plan.md:486-503 explicitly accounts for all three. `git diff b98d06c2^ b98d06c2 --check` is clean."
+    }
+  ]
+}

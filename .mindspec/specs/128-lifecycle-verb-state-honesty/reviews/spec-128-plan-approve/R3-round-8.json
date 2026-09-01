@@ -1,0 +1,21 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.85,
+  "rationale": "Zero-ask approver regression check on 2e73a0f3 in the decomposition lens: clean, and the round-7 G2 fix is the most decomposition-positive change of the whole gate. The seven named Executor seam methods (SnapshotWorktreeTree, MaterializeStageCommit, PublishStageMarker, ReadStageMarker, ClearStageMarker, AdvanceBranchExpectedOld, ResetIndexToHead) give bead 6 an INTERNAL layered structure — gitutil primitives → named seams → complete-flow consumer — with the boundary sentence pinned (internal/complete calls only the seams, no new gitutil import). This materially improves the bead's single-panel reviewability: the machine can now be reviewed layer-against-layer inside one PR, which answers the residual size concern better than a split would have (the layers stay in one review where the primitive-vs-consumer seam bugs this gate kept finding remain visible). All three executor files were already in chunk 6 (verified in my own earlier-round sweeps, and re-checked rather than assumed this round); the diff introduces no new file names anywhere, no depends_on changed in any of the eight commits, and chunk/section parity holds in its final state. The twenty-leg count is consistent under the plan's labeling convention (twenty roman-numeral legs, viii carrying two pinned runs), and the three new legs map one-to-one onto the three elided-case windows the honest at-least-once contract creates — the proportionality property that has held since round 5. The at-least-once contract itself (withdrawing round-6's exactly-once in place, with per-operation replay proofs) is an honesty improvement in the plan's own currency and changes no seam, file, or dependency. Nothing implementation-corrupting; final judgment recorded below.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-R8-1",
+      "severity": "INFO",
+      "title": "Final decomposition judgment after eight rounds: ten beads sound; bead 6 acceptable-but-large, keep whole — now with internal layering that answers the size concern",
+      "detail": "Bead 6's final shape: gitutil primitives, seven named Executor seams (thin-wrapped, mock-stubbed, boundary pinned), both gates' snapshot legs, the write-ahead M/R/S/G/T flow in complete.go under an honest at-least-once replay contract, the ADR-0041 amendment, and twenty fixture legs. The ADR-0030 seam layer added this round is what a well-executed split would have produced as an artifact boundary — but delivered INSIDE one bead, so the layer-crossing review (where this gate found every substantive protocol bug: synthetic artifact deletion, phantom staged deletions, the over-read transaction atomicity, silent interval-edit loss, the unprovable exactly-once) happens in one panel instead of across two. The twenty legs remain proportionate: every leg added since round 4 pins exactly one mechanism decision (crash windows xii/xiii, CAS race xiv, trailer elision xv-xvii, the at-least-once elision windows xviii-xx, the viii refuse/converge split). Keep whole; no split would improve reviewability."
+    },
+    {
+      "id": "R3-R8-2",
+      "severity": "INFO",
+      "title": "Chunk/section parity and dependency graph: final state, verified through the eighth commit",
+      "detail": "work_chunks depends_on identical across all eight commits, exactly matching all ten sections (1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]); chain depth 4 justified; beads 3/7/9 parallel-from-start; AC-5's bead-1/bead-2 split intact with every leg in the bead that owns its machinery. 2e73a0f3 names no edit sites outside already-listed files (the seam methods land in the three executor files chunk 6 has carried since round 1's fix). The round-3 recorded sweep baseline stands unbroken through five subsequent fix commits. My round-4 advisory (R3-R4-3: marker-present retrofit of bead-1-authored AC-5(ii)/(v) fixtures in files chunk 2 does not list) remains open, non-blocking, gate-force-discoverable, and implementation-resolvable without a plan edit — carried one final time for the tally's record."
+    }
+  ]
+}

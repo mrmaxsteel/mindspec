@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.8,
+  "rationale": "Zero-ask approver regression check on 27294e84 in the decomposition lens: clean. The round-4 fix touches only bead 6 (protocol restated as the M/R/S/G/T staged state machine with two-ref update-ref --stdin transactions; steps 1/4/5 rewritten; fixtures ix/x/xi added) and bead 1/lock-home wording (stale O_EXCL framings swept — a pure consistency fix with no seam impact). No depends_on changed in any of the five commits — frontmatter still exactly matches all ten sections. Chunk/section parity for the new material: every edit site the staged machinery names maps to files chunk 6 already lists (commit-tree builders and the transaction helper in internal/gitutil beside recordMergeSourceMarker — gitops.go/snapshot.go; the early sequence and staged flow in complete.go; fixtures ix-xi in complete_test.go; the extended amendment in ADR-0041 + its test); no new file names were introduced anywhere in the diff. On the lead's central question — bead 6's size — my judgment is ACCEPTABLE-BUT-LARGE, keep whole, with the rationale recorded as a finding rather than a block: the strongest argument is empirical, from this very panel's history. The two real protocol bugs the gate caught (round-2's synthetic artifact deletion, round-2's phantom staged deletions) both lived in the SEAM between primitive semantics and consumer expectation — exactly the class a primitives-only bead 6a reviewed apart from its consumer would miss. The bead's invariants (committed==measured; marker==tip by construction; plain-re-run converges at every kill point) are properties of the whole machine, and its eleven-leg kill/failure fixture matrix is the reviewability instrument that lets a single panel judge it. A split would buy one smaller PR at the cost of a serial-cycle round AND a review boundary drawn through the protocol's known bug habitat.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-R5-1",
+      "severity": "INFO",
+      "title": "Bead 6: acceptable-but-large — keep whole (final size judgment, with rationale)",
+      "detail": "Final scope: snapshot primitive, two commit-tree builders, the two-ref transaction helper, executor tree leg + tree-grounded input reads, both gates' snapshot legs, complete.go's early sequence + staged M/R/S/G/T machine replacing two porcelain paths, the ADR-0041 amendment, and eleven fixture legs plus the cross-checkout test. This is the plan's heaviest bead and sits at the upper bound of single-PR reviewability, but the split candidate (6a = gitutil/executor primitives, 6b = complete-flow + ADR + fixtures) draws the review boundary exactly where this gate's own five rounds found the real bugs: the synthetic-artifact-deletion and phantom-staged-deletion defects were both primitive-vs-consumer seam bugs, discovered because the protocol was reviewed as one unit. The invariants are whole-machine properties; the kill matrix (fixtures viii-xi + failure legs i-vii) gives the bead panel a complete falsification instrument. The serial-cycle cost of an extra bead buys no reviewability that the fixture matrix does not already provide. Judgment: keep whole. One editorial nit, not worth a round: step 4 still says 'reconcile path untouched' while stage T now clears the marker on the landed-merge-reconcile completion path and the early sequence adds reconcile-detection-first — 'untouched' is true of the reconcile MEASUREMENT (M^1..M) but no longer of the path in the strictest sense; the protocol paragraph states the actual behavior explicitly, so no ambiguity survives for an implementer."
+    },
+    {
+      "id": "R3-R5-2",
+      "severity": "INFO",
+      "title": "Chunk/section parity and dependency graph: final state verified",
+      "detail": "work_chunks depends_on: unchanged across all five commits, exactly matching all ten bead sections (1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]); chain depth 4 justified; beads 3/7/9 parallel-from-start. key_file_paths: the round-3 recorded sweep plus my independent full sweep, spot-re-verified after both subsequent fixes — the round-4/round-5 growth introduced no new edit sites outside already-listed files. My round-4 advisory (R3-R4-3: the G2 marker-present pinning of AC-5(ii)/(v) implies a bead-2 retrofit of bead-1-authored fixtures in files chunk 2 does not list) remains open and remains non-blocking for the reasons recorded there: discovery is mechanically forced by bead 2's own whole-tree -short gate, and the intended end state is documented in bead 2's own section. It can be folded into implementation without a plan edit."
+    },
+    {
+      "id": "R3-R5-3",
+      "severity": "INFO",
+      "title": "Lock-wording sweep (G2): consistency fix only, no decomposition impact",
+      "detail": "Bead 1 step 2 and the lock-home paragraph now agree: kernel-held on both platforms (flock / LockFileEx retained handle), with internal/journal contributing only the withReportsLock read-modify-write shape. No files, seams, or dependencies changed; the bead-1 deliverable boundary is unaffected."
+    }
+  ]
+}

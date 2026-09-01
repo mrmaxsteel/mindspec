@@ -1,0 +1,69 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.99,
+  "rationale": "All three of R5's round-3 asks are substantively answered at their stated boundary: a pre-panel marker/tip recognizer makes the post-update-ref, pre-index-refresh retry reachable; ADR-0041 section 3 and a kill fixture now cover that boundary; and the amendment draft accurately narrows refusal invariants while admitting gc-collectable unreachable loose objects. The strict marker == tip predicate is also fail-closed for an ordinary later manual commit: a foreign successor of C makes the marker stale and cannot be laundered as the gated C (subject to the existing spec-127 threat boundary that deliberate arbitrary refs/mindspec manipulation is not prevented). However, the plan extends the marker's claimed recovery coverage beyond what that predicate can represent. The artifact-sync commit advances the bead tip from marked C to S while the marker remains C until after bead-to-spec merge. A kill after sync and before merge therefore yields marker != tip; retry deletes the marker, falls through to the unchanged panel gate, and stale-SHA-blocks. That contradicts both the plan's claimed index-refresh -> sync -> merge forward-resume boundary and ADR-0041 section 2(i). The bead implementation prose also gives an impossible ordering in one place (marker-ref write before commit-tree has produced C), and the proposed ADR amendment does not spell out a complete marker lifecycle across the sync commit. This is a localized bead-6 protocol correction, but it is load-bearing design rather than an implementation detail, so the plan is not yet approvable.",
+  "concrete_changes_required": [
+    "Revise bead 6's durable resume protocol to cover every claimed post-gate interruption state through artifact sync and merge without accepting a foreign tip. In particular, specify how a run killed after the artifact-sync commit (tip S, original marker C) is distinguished from an ordinary later manual commit and reaches a bounded forward exit before ADR-0037 staleness. Use an atomic/provenance-preserving marker transition or narrow the claimed boundary and provide another genuine recovery mechanism; marker != tip -> delete -> normal panel is not sufficient for this state.",
+    "Make the protocol ordering and ADR-0041 amendment draft internally exact: commit-tree must produce C before a marker can point to C; state whether marker creation is fail-closed; enumerate marker state/cleanup at each ref-advancing step (materialization, artifact sync, merge); retain the scoped cannot-launder threat boundary; and add a red-on-revert kill fixture at the artifact-sync-to-merge boundary, not only update-ref-to-reset. Preserve the now-correct loose-object qualification."
+  ],
+  "findings": [
+    {
+      "id": "R5-R3-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "resume-detection-reality",
+      "summary": "The specific dead end raised in round 3, after C advances the branch but before the real index refresh succeeds, now has a reachable pre-panel resume path.",
+      "evidence": "Plan protocol step 3 requires an early marker check before ADR-0037: marker present and tip == C skips re-snapshot/content/panel gates and resumes at the idempotent mixed reset. Bead 6 step 4 wires that recognizer before the panel gate, and fixture (viii) kills after ref advance before reset, adds an interval edit, and requires plain re-run to land without rollback, re-panel, phantoms, or edit loss. Exact equality means an ordinary later commit cannot pass as C; deliberate marker-ref forgery remains outside the explicitly documented spec-127 local-ref threat boundary."
+    },
+    {
+      "id": "R5-R3-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "adr-0041-boundary-and-kill-fixture",
+      "summary": "The requested update-ref-to-index-refresh mutation boundary and its kill fixture are now assigned to ADR-0041 section 3.",
+      "evidence": "Bead 6 step 5 directs the ADR-0041 section 3 classification to gain the marker-driven boundary, and step 7(viii) pins the exact post-update-ref/pre-reset kill state. The plan additionally claims coverage through sync and merge; that broader new claim is defective and is recorded separately below rather than retroactively treating the original bounded ask as missed."
+    },
+    {
+      "id": "R5-R3-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "loose-object-qualification",
+      "summary": "The amendment draft now states the operational refusal invariants without falsely promising repository byte identity.",
+      "evidence": "Bead 6 step 5 says a refused content gate leaves the bead ref/tip, tracker state, real index, and worktree unchanged while temporary-index staging may leave gc-collectable unreachable loose objects, citing the existing neteffect preview precedent. This accurately resolves the round-3 qualification request."
+    },
+    {
+      "id": "R5-R4-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "class": "artifact-sync-breaks-resume-identity",
+      "summary": "The marker equality rule cannot resume the workflow after its own artifact-sync commit.",
+      "evidence": "The marker is defined as refs/mindspec/materialized/<bead-id> = C and is cleared only after bead-to-spec merge. The intervening artifact-sync commit advances the same bead branch to successor S. If the process dies after that commit but before merge, the next run observes marker C != tip S, deletes the marker as stale, and runs the unchanged ADR-0037 panel gate against reviewed SHA A versus S. It therefore blocks instead of following the plan's promised index-refresh -> artifact sync -> merge forward path. The equality predicate correctly refuses foreign successors but cannot distinguish this tool-authored successor without another atomic or corroborated state transition."
+    },
+    {
+      "id": "R5-R4-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "class": "protocol-and-amendment-ordering",
+      "summary": "The bead prose does not yet describe one buildable, complete marker protocol.",
+      "evidence": "The plan-level protocol creates C with commit-tree and then writes marker=C immediately before update-ref, which is feasible. Bead 6 step 4 instead calls the operation marker-ref write -> commit-tree from T -> update-ref, although C is unavailable before commit-tree. The ADR amendment instruction mentions marker-driven semantics but does not resolve this contradiction, state fail-closed behavior for a marker-write failure, or define marker evolution across the later ref-advancing artifact sync."
+    },
+    {
+      "id": "R5-ADR-REGRESSION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "other-adr-touchpoints",
+      "summary": "No regression was found in the other R5 ADR-conformance areas.",
+      "evidence": "OQ-1(a) still prices an explicit ADR-0041 section 1 reversal while retaining panel-before-tip-mutation, so ADR-0037 remains correctly untouched. OQ-2 keeps filesystem authority confined to pre-epic draft discovery, preserving ADR-0023's post-approval beads authority. Bead 7 retains the narrow ADR-0025 clarification for dirt entangleable by the worktree-creating next path."
+    },
+    {
+      "id": "R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "Plan validation succeeds at reviewed commit 6cdac6e5 with advisories only.",
+      "evidence": "mindspec validate plan 128-lifecycle-verb-state-honesty exits 0 and reports the three acknowledged decomposition warnings: 10 beads, scope redundancy 0.09, and dependency depth 4."
+    }
+  ]
+}

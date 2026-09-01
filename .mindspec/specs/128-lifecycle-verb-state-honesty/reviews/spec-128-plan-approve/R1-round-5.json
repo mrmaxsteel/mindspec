@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.88,
+  "rationale": "Zero-ask-approver regression check of 27294e84 against the two named targets, plus a sweep of the rest of the diff in this lens's territory. (1) S-STAGE PLUMBING SYNC vs the spec: FAITHFUL. The spec pins the sync commit's BEHAVIOR, not its porcelain mechanism — its Background describes 'the pathspec-scoped .beads sync commit' as the existing shape, and the surviving contract points are R4.2's artifact-confinement spirit and bead 6's fixture (vii) (artifact changes only in the sync commit). Building D by plumbing as C's tree plus the refreshed artifact blob makes the C->D delta artifact-only BY CONSTRUCTION — confinement equal to or stronger than the pathspec-scoped porcelain commit it replaces — and no AC anywhere pins the porcelain path. The two-ref transaction {C->D, marker->D} keeps the marker==tip invariant through the stage, which is what lets fixture (ix) (kill after sync) close the residual window I flagged as info in round 4 (R1-4-1): the re-run now resumes at the merge stage instead of stale-blocking after a stale-marker delete. That info item is thereby resolved beyond what I asked. (2) G-STAGE ROUTING INTO --resolve-merge vs the 127-consumed-not-modified non-goal: FAITHFUL, with one wording nit. The non-goal bars MODIFYING spec 127's shipped surfaces (adopt, preflight, --resolve-merge); the G stage does the opposite of a bypass — a preserved-merge conflict leaves marker==tip and the re-run resumes INTO the existing --resolve-merge machinery ('never around it'), with fixture (x) pinning convergence through the 127 machinery without re-panel or laundering. The preserved-merge semantics (forward reconcile, never abort) are untouched; what the reconcile completion path gains is only the clearing of 128's OWN marker ref — bookkeeping for new 128 state adjacent to the 127 surface, not a change to its recovery semantics. The plan's phrase 'reconcile path untouched' should strictly read 'reconcile SEMANTICS untouched; it additionally clears the 128 marker' — recorded as a trivial wording note, not a fidelity breach. REST OF THE DIFF: the corrected M-before-marker ordering strengthens fail-closedness (the commit object exists before any ref moves; a wholesale transaction abort leaves nothing advanced, marker included), preserving AC-6's tip-unchanged-on-refusal assertion; marker != tip now PROVES a foreign commit under the transactional invariant, so AC-7(i)'s stale-SHA behavior is preserved verbatim (fixture (xi) pins it) and the cannot-launder boundary is stronger than round 4's; the O_EXCL sweep lands both framings consistently with my round-4 R1-4-3 note (journal contributes the read-modify-write shape only). Nothing in the diff touches the standing verified core — trigger-2 discharge, the (c)-only vacations, dead option-2 arms, the 16-AC bead mapping, and the OQ resolutions all stand as verified across rounds 1-4. No asks; APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-5-1",
+      "severity": "trivial",
+      "title": "'Reconcile path untouched' now coexists with the reconcile-path orphaned-marker clear",
+      "detail": "Bead 6 step 4 says 'reconcile path untouched' while the early sequence and the T stage give the landed-merge-reconcile completion path a clear of 128's own marker ref. No semantic modification of the 127 machinery occurs — the marker is new 128 state and clearing it is bookkeeping — but one clause ('untouched in semantics; gains only the 128 marker clear') would remove the apparent self-contradiction for the bead-6 implementer. Wording only; does not affect the consumed-not-modified non-goal, which I judge honored."
+    },
+    {
+      "id": "R1-5-2",
+      "severity": "info",
+      "title": "Round-4 info items resolved by this fix",
+      "detail": "R1-4-1 (the sync-commit-to-merge non-convergent window) is closed by the S-stage transaction plus fixture (ix) — the exact marker-re-point refinement I sketched, delivered transactionally. R1-4-3 (O_EXCL framing) is swept in both locations. R1-4-2 (same-machine marker forgery) is strictly narrowed: under the transactional invariant a forged marker must accompany a self-authored tip to enable resume, which remains the same-machine repo-write trust class the gates have never defended against; the foreign-commit path now provably cannot launder (fixture (xi))."
+    },
+    {
+      "id": "R1-5-3",
+      "severity": "info",
+      "title": "Regression check passed: no contract surface moved",
+      "detail": "AC-6 (refusal leaves tip at reviewed SHA; retry decided by the same gate) and AC-7(i) (foreign post-review commit trips stale-SHA) are preserved under the staged machine — gates still precede stage M, the transaction is fail-closed wholesale, and marker != tip routes to today's stale-SHA evaluation. The S-stage replacement does not alter what any spec AC measures; fixtures (i)-(xi) now cover every stage boundary including both new kill points. The OQ resolutions, settled-fact conformance, and vacated-leg identifications are byte-identical to the round-4-approved text."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.96,
+  "rationale": "The plan remains broadly buildable, honestly scoped, and spec-faithful, and the R4 regression checks pass: validation exits 0 with only the three disclosed WARNs; work_chunks parses and maps positionally to Beads 1..10; and OQ-3 still mechanically dissolves the stored/derived warning window. However, round 6 introduces one load-bearing ambiguity in bead 6's replacement crash-recovery discriminator. It identifies D when marker-vs-parent changed paths are confined to the named artifact, otherwise C. C can legitimately be an empty commit when snapshot T equals predecessor A (for example, no residual non-artifact changes); its empty changed-path set is also confined to the artifact under ordinary subset/all-paths logic. Re-entry can therefore misclassify completed C as D and skip R/S, including artifact synchronization. This contradicts the plan's claim that the discriminator is total. The stage kind must be encoded or distinguished unambiguously and pinned for empty-tree-delta cases before approval; that is protocol design, not merely bead-local implementation choice.",
+  "concrete_changes_required": [
+    "Replace or tighten bead 6's C-versus-D re-entry discriminator so stage kind is unambiguous even when C has no tree delta and when the artifact-sync stage has no tree delta. Prefer encoding a machine-readable stage kind in the commit object (which remains covered by the marker OID), or specify another falsifiable invariant; add crash-resume fixtures for marker==tip at an empty C and at a no-op/empty D, proving R/S is neither skipped nor looped."
+  ],
+  "findings": [
+    {
+      "id": "R4-6-1",
+      "severity": "info",
+      "class": "prior-round-asks",
+      "status": "NEW_ISSUE",
+      "summary": "R4 approved rounds 1-5 with zero asks, so there are no prior R4 asks to classify. The discriminator issue below is new in reviewed commit b98d06c2's round-5 replacement protocol."
+    },
+    {
+      "id": "R4-6-2",
+      "severity": "info",
+      "class": "validation",
+      "summary": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited 0. It reported exactly the acknowledged advisory WARNs: decomposition-bead-count (10), decomposition-scope-redundancy (R=0.09), and decomposition-chain-depth (4)."
+    },
+    {
+      "id": "R4-6-3",
+      "severity": "info",
+      "class": "frontmatter-mapping",
+      "summary": "Ruby/Psych parsed the YAML frontmatter. work_chunks IDs and Bead-section IDs are both exactly 1,2,3,4,5,6,7,8,9,10 in positional order. Dependencies remain 1:none; 2:1; 3:none; 4:2,3; 5:2,3; 6:1; 7:1; 8:2; 9:none; 10:4,5. The reviewed plan blob matches the working copy."
+    },
+    {
+      "id": "R4-6-4",
+      "severity": "info",
+      "class": "oq3-mechanical-derivation",
+      "summary": "Current DerivePhaseFromChildren returns plan for zero or all-open lifecycle children, implement for any in_progress lifecycle child, and excludes non-lifecycle children. The warning at derive.go:179-193 requires a non-empty derived phase unequal to stored. Option 1 therefore gives plan==plan after plan approval, implement==implement after a lifecycle claim, and plan==plan after a non-lifecycle claim/trigger-2 state; the warning condition remains false."
+    },
+    {
+      "id": "R4-6-5",
+      "severity": "major",
+      "class": "crash-recovery-discriminator",
+      "status": "NEW_ISSUE",
+      "summary": "The new rule `diff(marker, marker^) confined to named artifact => D; else C` does not distinguish an empty C. The plan permits T==A, and `commit-tree T -p A` then creates C with zero changed paths. A /tmp Git 2.51.2 probe reproduced exactly that state: C was a distinct commit whose parent was A and whose `diff-tree C^ C` output was empty. Empty is vacuously artifact-confined for normal all-paths/subset predicates, so a post-C crash may resume at merge as though S had completed, skipping index refresh and artifact sync. Conversely, merely declaring empty=>C leaves a no-op D ambiguous. The claimed total discriminator therefore needs an explicit stage identity or another complete invariant."
+    },
+    {
+      "id": "R4-6-6",
+      "severity": "info",
+      "class": "git-documentation",
+      "summary": "The installed Git is 2.51.2. Its git-update-ref(1) source states that each individual ref update is atomic while a concurrent reader may still see a subset of modifications. This supports replacing the round-4 two-ref crash-atomicity assumption with a one-ref-at-a-time write-ahead design; it does not resolve the separate C/D stage-identification ambiguity."
+    }
+  ]
+}

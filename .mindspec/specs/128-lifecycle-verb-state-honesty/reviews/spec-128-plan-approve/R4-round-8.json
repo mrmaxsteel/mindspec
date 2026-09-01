@@ -1,0 +1,62 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Round 8 resolves every round-7 R4 elision-evidence ask by taking the expressly admissible alternative (b) in place: the false exactly-once claim is withdrawn where it appeared, the protocol is now explicitly at-least-once, and each replayable operation has a sufficient one-line idempotence/convergence argument. R overwrites the index from the current tip without touching the worktree or refs; S exports ADR-0025's deterministic current Dolt projection; dirt classification is read-only and refuses on current genuine dirt; merge reuses spec 127's preserved-merge/ancestry convergence. The absent-to-D CREATE route and both-elided no-marker route close the transition graph. Fixtures xviii, xix, and xx inject the three previously absent interruption shapes and require observable rerun/convergence behavior, making replay falsifiable at bead implementation review. The unchanged R4 checks also pass: plan validation exits 0 with only the three acknowledged decomposition warnings, work_chunks parses and maps positionally/dependency-wise to Beads 1-10, and OQ-3 still mechanically yields stored==derived across plan approval, lifecycle claim, and the non-lifecycle trigger-2 window. No remaining defect would corrupt a bead's implementation.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-7-1",
+      "severity": "info",
+      "class": "prior-round-ask",
+      "status": "ADDRESSED",
+      "summary": "The prior partial discriminator finding is resolved by withdrawing exactly-once rather than pretending elided stages leave durable evidence. Existing C/D commits remain trailer-classified, while missing commits are governed by the explicit at-least-once replay contract."
+    },
+    {
+      "id": "R4-7-2",
+      "severity": "info",
+      "class": "crash-recovery-discriminator",
+      "status": "ADDRESSED",
+      "summary": "The no-op-D crash window is now described truthfully: tip==marker==C re-enters through R and S, and both are allowed to replay. R's mixed reset converges to the same index; S's unchanged-state export converges to identical artifact bytes; the S-exit route remains mandatory before merge."
+    },
+    {
+      "id": "R4-7-3",
+      "severity": "info",
+      "class": "crash-recovery-discriminator",
+      "status": "ADDRESSED",
+      "summary": "The empty-C and both-elided boundaries are complete. When C elides, first publication may CREATE a D marker parenting A with the same CAS refusal. When both stages elide, no marker or ref movement is claimed; interruption re-enters as an ordinary run and replay is permitted."
+    },
+    {
+      "id": "R4-7-4",
+      "severity": "info",
+      "class": "fixture-coverage",
+      "status": "ADDRESSED",
+      "summary": "Fixtures xviii-xx cover the exact missing interruption points: after R with C elided and before D publication; after no-op S/D elision and before merge with marker C present; and both stages elided before merge. They require ordinary rerun or explicit R/S replay plus convergence, while xvii retains ordinary-D trailer coverage."
+    },
+    {
+      "id": "R4-8-1",
+      "severity": "info",
+      "class": "idempotence-proof",
+      "summary": "All four short proofs are implementation-usable. ResetIndexToHead is an overwrite-to-current-tip operation; export is a deterministic projection and is forward-correct if authoritative Dolt state advances; classification is a pure observation/refusal; and merge delegates to the already-pinned spec-127 convergence machinery. None relies on recovering evidence that elision did not persist."
+    },
+    {
+      "id": "R4-8-2",
+      "severity": "info",
+      "class": "validation",
+      "summary": "mindspec validate plan 128-lifecycle-verb-state-honesty exited 0 at reviewed commit 2e73a0f3. It emitted exactly the three acknowledged WARNs: bead count 10, scope redundancy R=0.09, and dependency-chain depth 4."
+    },
+    {
+      "id": "R4-8-3",
+      "severity": "info",
+      "class": "frontmatter-mapping",
+      "summary": "Ruby/Psych parsed the YAML frontmatter. work_chunks and Bead headings map positionally to IDs 1 through 10. Dependencies match: 1:none; 2:1; 3:none; 4:2,3; 5:2,3; 6:1; 7:1; 8:2; 9:none; 10:4,5. The plan file hash matches git show 2e73a0f3."
+    },
+    {
+      "id": "R4-8-4",
+      "severity": "info",
+      "class": "oq3-mechanical-derivation",
+      "summary": "OQ-3 remains mechanically sound. DerivePhaseFromChildren returns plan for zero/all-open lifecycle children, implement for any in_progress lifecycle child, and excludes non-lifecycle children. Option 1 therefore gives plan/plan after plan approval, implement/implement after the first lifecycle claim, and plan/plan in the non-lifecycle trigger-2 state, so derive.go's stored-versus-derived warning condition does not fire in those windows."
+    }
+  ]
+}

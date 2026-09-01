@@ -1,0 +1,21 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.9,
+  "rationale": "Zero-ask-approver regression check of 2e73a0f3 on the two named surfaces. (1) WITHDRAWAL HONESTY: sound. The round-6 exactly-once claim is withdrawn IN PLACE with its falsifier stated (unprovable after a post-no-op-S kill), and I grep-verified the withdrawal is complete — the only surviving occurrence of 'exactly once' in the plan is the withdrawal sentence itself; fixture (xv)'s old 'exactly once' wording was swept to the replay contract. The rejection rationale for the retain-empty-commits alternative is factually grounded in this repo's own workflow: the one-commit-per-subagent convention makes a clean committed tree the NORM, so empty trailer commits would stamp a contentless C onto essentially every standard completion — a real cost, honestly weighed, not a strawman. This is the house delete-over-patch method applied correctly. (2) AT-LEAST-ONCE CONTRACT vs R4.1/R4.3: faithful. R4.1 is untouched — the marker still publishes only after every gate passes, and the both-elided route leaves the tip at the reviewed SHA so a re-entry re-measures through the same gates. R4.3's plain-re-run promise is exactly what the contract's two halves deliver: not-skipped by routing (every path to the merge passes R and the S-exit contract) and not-looped by convergence (each replay is a state-function of current state), now pinned by fixtures (xviii)-(xx) rather than asserted. I additionally traced the one subtle replay case the proofs imply but do not walk: D elided at the first run (artifact unchanged), Dolt state changes before the replay — the replayed S export now differs, so a D is built on this replay, parenting on C via the expected-old CAS. That is within contract and within the spec: the artifact is measured by no gate BY DESIGN (excluded from T; R4.2's own rationale that no panel verdict covers the projection's content), so the late-built D bypasses nothing and needs no re-panel, and ADR-0025's build-artifact model calls the current projection forward-correct. The elided-case transition graph (first-publication CREATE covering absent-to-C and absent-to-D; the no-marker route) formalizes precisely the derivation I recorded as info R1-7-3 last round — my walk is now in-plan text plus fixture (xx). (3) The ADR-0030 seam enumeration is R5's territory; in this lens it creates no friction — the executor-scope question was adjudicated at round 2 (finding R1-2-3: chartered by OQ-1(a)), and 'internal/complete calls only these seams' adds a boundary discipline, not a contract change. Nothing in the diff touches the standing verified core (OQ resolutions, settled facts, (c)-only vacations, dead option-2 arms, trigger-2 discharge, 16-AC mapping). No implementation-corrupting defect; no asks; APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-8-1",
+      "severity": "info",
+      "title": "Withdrawal verified complete; replay contract preserves R4's promises",
+      "detail": "Grep confirms the sole 'exactly once' occurrence is the withdrawal sentence. The at-least-once contract's not-skipped/not-looped halves are what R4.3's plain-re-run recovery actually requires, and they are now fixture-pinned ((xviii)-(xx)) rather than prose-asserted. Round-7 info R1-7-3 (the both-elided no-marker walk) is formalized as in-plan text plus fixture (xx)."
+    },
+    {
+      "id": "R1-8-2",
+      "severity": "info",
+      "title": "Late-built D on replay traced and found contract-clean",
+      "detail": "If the artifact was unchanged at the first run (D elided) and Dolt state changes before the replay, the replayed S builds a D that no gate ever measured. This is by design, not a hole: the artifact is excluded from T and measured by no gate, panels never review the projection's content (the spec's own R4.2 rationale), and ADR-0025 defines the current projection as the correct cache state. Recorded so the bead-6 fixture author knows leg (xix)'s 'identical bytes for unchanged Dolt state' has a changed-Dolt sibling that is also correct behavior, should they choose to pin it."
+    }
+  ]
+}

@@ -1,133 +1,146 @@
 ---
-status: Draft
-spec_id: 128-lifecycle-verb-state-honesty
-version: "1"
 adr_citations:
-  - ADR-0023
-  - ADR-0025
-  - ADR-0035
-  - ADR-0037
-  - ADR-0041
-  - ADR-0042
+    - ADR-0023
+    - ADR-0025
+    - ADR-0035
+    - ADR-0037
+    - ADR-0041
+    - ADR-0042
+approved_at: "2026-09-01T18:30:35Z"
+approved_by: user
+bead_ids:
+    - mindspec-ta30.1
+    - mindspec-ta30.2
+    - mindspec-ta30.3
+    - mindspec-ta30.4
+    - mindspec-ta30.5
+    - mindspec-ta30.6
+    - mindspec-ta30.7
+    - mindspec-ta30.8
+    - mindspec-ta30.9
+    - mindspec-ta30.10
+spec_id: 128-lifecycle-verb-state-honesty
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/phase/phaselock.go
-      - internal/phase/phaselock_test.go
-      - internal/phase/order.go
-      - internal/phase/order_test.go
-      - internal/phase/writer_inventory_test.go
-      - cmd/mindspec/repair.go
-      - cmd/mindspec/repair_test.go
-      - internal/phase/migrate.go
-      - internal/approve/plan.go
-      - internal/approve/spec.go
-      - internal/approve/impl.go
-      - internal/approve/adopt.go
-      - internal/complete/complete.go
-      - cmd/mindspec/release.go
-      - .gitignore
-  - id: 2
-    depends_on:
-      - 1
-    key_file_paths:
-      - internal/approve/plan.go
-      - internal/approve/plan_test.go
-      - cmd/mindspec/next.go
-      - cmd/mindspec/release.go
-      - cmd/mindspec/release_test.go
-      - internal/complete/complete.go
-      - internal/phase/derive.go
-      - internal/phase/derive_recovery_test.go
-      - internal/phase/semantics_v2.go
-      - internal/phase/semantics_v2_test.go
-      - internal/approve/impl.go
-      - cmd/mindspec/repair.go
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/resolve/resolve.go
-      - internal/resolve/resolve_test.go
-      - cmd/mindspec/state.go
-      - cmd/mindspec/state_test.go
-      - internal/phase/derive.go
-      - internal/workspace/workspace.go
-      - .mindspec/adr/ADR-0023.md
-  - id: 4
-    depends_on:
-      - 2
-      - 3
-    key_file_paths:
-      - project-docs/user/guides/lifecycle-modes.md
-      - internal/phase/agreement_table_test.go
-      - .mindspec/adr/ADR-0023.md
-  - id: 5
-    depends_on:
-      - 2
-      - 3
-    key_file_paths:
-      - cmd/mindspec/instruct_tail.go
-      - cmd/mindspec/instruct_tail_test.go
-      - cmd/mindspec/spec.go
-      - cmd/mindspec/complete.go
-      - cmd/mindspec/verb_output_test.go
-      - internal/complete/complete.go
-      - internal/instruct/templates/indeterminate.md
-      - internal/instruct/run.go
-  - id: 6
-    depends_on:
-      - 1
-    key_file_paths:
-      - internal/complete/complete.go
-      - internal/complete/complete_test.go
-      - internal/validate/docsync.go
-      - internal/validate/adr_divergence.go
-      - internal/gitutil/gitops.go
-      - internal/gitutil/snapshot.go
-      - internal/gitutil/snapshot_test.go
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - .mindspec/adr/ADR-0041-gate-before-mutate.md
-      - cmd/mindspec/adr0041_amendment_test.go
-  - id: 7
-    depends_on:
-      - 1
-    key_file_paths:
-      - internal/next/guard.go
-      - internal/next/guard_test.go
-      - cmd/mindspec/next.go
-      - internal/approve/spec.go
-      - internal/approve/spec_test.go
-      - .mindspec/adr/ADR-0025-jsonl-as-build-artifact.md
-  - id: 8
-    depends_on:
-      - 2
-    key_file_paths:
-      - internal/next/select.go
-      - internal/next/select_test.go
-      - internal/next/beads.go
-      - cmd/mindspec/next.go
-      - cmd/mindspec/next_selection_test.go
-      - internal/resolve/target.go
-  - id: 9
-    depends_on: []
-    key_file_paths:
-      - internal/bead/bdcli.go
-      - internal/bead/bdcli_test.go
-      - internal/next/beads.go
-      - internal/next/beads_test.go
-  - id: 10
-    depends_on:
-      - 4
-      - 5
-    key_file_paths:
-      - internal/instruct/templates/idle.md
-      - internal/instruct/templates/review.md
-      - internal/instruct/templates_test.go
-      - project-docs/user/guides/merge-safety.md
-      - project-docs/user/guides/lifecycle-modes.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/phase/phaselock.go
+        - internal/phase/phaselock_test.go
+        - internal/phase/order.go
+        - internal/phase/order_test.go
+        - internal/phase/writer_inventory_test.go
+        - cmd/mindspec/repair.go
+        - cmd/mindspec/repair_test.go
+        - internal/phase/migrate.go
+        - internal/approve/plan.go
+        - internal/approve/spec.go
+        - internal/approve/impl.go
+        - internal/approve/adopt.go
+        - internal/complete/complete.go
+        - cmd/mindspec/release.go
+        - .gitignore
+    - depends_on:
+        - 1
+      id: 2
+      key_file_paths:
+        - internal/approve/plan.go
+        - internal/approve/plan_test.go
+        - cmd/mindspec/next.go
+        - cmd/mindspec/release.go
+        - cmd/mindspec/release_test.go
+        - internal/complete/complete.go
+        - internal/phase/derive.go
+        - internal/phase/derive_recovery_test.go
+        - internal/phase/semantics_v2.go
+        - internal/phase/semantics_v2_test.go
+        - internal/approve/impl.go
+        - cmd/mindspec/repair.go
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/resolve/resolve.go
+        - internal/resolve/resolve_test.go
+        - cmd/mindspec/state.go
+        - cmd/mindspec/state_test.go
+        - internal/phase/derive.go
+        - internal/workspace/workspace.go
+        - .mindspec/adr/ADR-0023.md
+    - depends_on:
+        - 2
+        - 3
+      id: 4
+      key_file_paths:
+        - project-docs/user/guides/lifecycle-modes.md
+        - internal/phase/agreement_table_test.go
+        - .mindspec/adr/ADR-0023.md
+    - depends_on:
+        - 2
+        - 3
+      id: 5
+      key_file_paths:
+        - cmd/mindspec/instruct_tail.go
+        - cmd/mindspec/instruct_tail_test.go
+        - cmd/mindspec/spec.go
+        - cmd/mindspec/complete.go
+        - cmd/mindspec/verb_output_test.go
+        - internal/complete/complete.go
+        - internal/instruct/templates/indeterminate.md
+        - internal/instruct/run.go
+    - depends_on:
+        - 1
+      id: 6
+      key_file_paths:
+        - internal/complete/complete.go
+        - internal/complete/complete_test.go
+        - internal/validate/docsync.go
+        - internal/validate/adr_divergence.go
+        - internal/gitutil/gitops.go
+        - internal/gitutil/snapshot.go
+        - internal/gitutil/snapshot_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - cmd/mindspec/adr0041_amendment_test.go
+    - depends_on:
+        - 1
+      id: 7
+      key_file_paths:
+        - internal/next/guard.go
+        - internal/next/guard_test.go
+        - cmd/mindspec/next.go
+        - internal/approve/spec.go
+        - internal/approve/spec_test.go
+        - .mindspec/adr/ADR-0025-jsonl-as-build-artifact.md
+    - depends_on:
+        - 2
+      id: 8
+      key_file_paths:
+        - internal/next/select.go
+        - internal/next/select_test.go
+        - internal/next/beads.go
+        - cmd/mindspec/next.go
+        - cmd/mindspec/next_selection_test.go
+        - internal/resolve/target.go
+    - depends_on: []
+      id: 9
+      key_file_paths:
+        - internal/bead/bdcli.go
+        - internal/bead/bdcli_test.go
+        - internal/next/beads.go
+        - internal/next/beads_test.go
+    - depends_on:
+        - 4
+        - 5
+      id: 10
+      key_file_paths:
+        - internal/instruct/templates/idle.md
+        - internal/instruct/templates/review.md
+        - internal/instruct/templates_test.go
+        - project-docs/user/guides/merge-safety.md
+        - project-docs/user/guides/lifecycle-modes.md
 ---
 # Plan: 128-lifecycle-verb-state-honesty
 

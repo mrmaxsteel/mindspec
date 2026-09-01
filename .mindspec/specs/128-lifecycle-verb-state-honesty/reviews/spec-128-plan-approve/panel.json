@@ -1,0 +1,10 @@
+{
+  "bead_id": null,
+  "spec": "128-lifecycle-verb-state-honesty",
+  "target": "spec/128-lifecycle-verb-state-honesty",
+  "round": 8,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "2e73a0f3be92c3e787132a425aa52b3d354cbdc0",
+  "approve_threshold": "n-1",
+  "gate": "plan_approve"
+}

@@ -1,0 +1,51 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.8,
+  "rationale": "Lens: spec-contract fidelity. The core OQ resolutions are faithful to the spec's settled facts and the AC mapping is near-complete, but two contract gaps block: (1) R2.4 places an explicit planning-stage obligation — re-reproduce #245's exact 0.12.0 shape at HEAD or disposition it fixed-by-spec-092 with R2.1's pinning test as the regression guard — and the plan is silent (grep-verified: no '245' and no '092' anywhere in plan.md); (2) AC-5(iv) is mapped to bead 2 but no step delivers it — the retained mismatch warning's final recovery line is today 'recovery: mindspec repair phase <spec-id>' (derive.go:190-193, re-read at the reviewed tree), a WRITE action, while AC-5(iv) verbatim requires 'a safe final recovery line — an inspection action, never the backward write'; bead 2's AC note instead asserts the warning 'retains its safe final recovery line', i.e. claims the existing line already complies, which contradicts the AC's wording without recording a refutation. POSITIVE verifications, each re-derived: OQ-3 option 1 does NOT relitigate settled fact 1 — it changes the WRITERS (plan-approve value, next's claim-advance, release's sanctioned child-derived sync) to match the settled derived row (all-open → plan, derive.go:387); the derivation itself is untouched, the exact opposite of the CLOSED option 3. The round-6 trigger-2 advisory discharge is genuine: in the trigger-2 state (non-lifecycle child completed, all lifecycle tasks open, no lifecycle claim ever made) stored is still 'plan' under option 1 — next's advance is lifecycle-conditioned, release's sync re-derives plan on all-open, and the lifecycle count excludes non-lifecycle children (spec's derive.go:347-352 fact) so a non-lifecycle in_progress never flips derivation — hence complete's step-6.5 NextMode=plan write is plan-over-plan, not backward, and exactly one unforced backward writer remains (release's sanctioned sync, AC-5(viii) distinguishing it, honored in bead 2 step 6). The vacated legs are correctly identified: the spec's own round-2 G7 text tags AC-6's diff-pathspec sentence and AC-7(ii)-(iv) as (c)-only, OQ-1 resolved to (a), and the Provenance table records the vacation; AC-7(i) survives intact — the panel stale-SHA gate is untouched under (a) and bead 6 step 5 pins it red-on-revert. AC-2's option-2 annotated-row arms are correctly dead: the plan-approve annotated arm is conditioned on option 2 (not taken), and the release plan-leg's annotated pair applies 'unless the sanctioned release-sync redesign leg is selected' — it is selected, so bead 4's two-surface-agreement-on-plan assertion is the spec's own designated arm. OQ-2's chosen carve-out and R1.4's refusal-form resolution both sit inside the spec's stated option sets (AC-1(ii) admits either form). All 16 ACs incl. lettered legs trace to beads whose file scope can deliver them; the AC-5 bead-1/bead-2 split matches the legs' machinery-vs-value-semantics grain and the Provenance table records it. Remaining findings are repairable plan-document edits, hence REQUEST_CHANGES, not REJECT, and no hard_block.",
+  "concrete_changes_required": [
+    "R2.4 discharge (MAJOR): add the mandated #245 disposition to the plan — either the HEAD re-reproduction result of the exact 0.12.0 shape (result lines entirely absent) or an explicit 'fixed by spec 092' disposition naming AC-14's result-before-guidance pinning test as the regression guard. The spec's R2.4 says this happens 'during planning'; the plan currently contains no mention of #245 or 092.",
+    "AC-5(iv) delivery (MAJOR): add an explicit step (bead 2, beside its derive_recovery_test.go/derive.go file claims) stating what the retained stored-vs-derived warning's final recovery line becomes where the warning is still reachable outside the dissolved windows — an inspection action per AC-5(iv)'s letter (e.g. a state-show/inspection command, possibly direction-conditional since 'repair phase' remains the correct forward-mismatch recovery) — OR record an explicit justification that the bead-1-guarded 'repair phase' line satisfies the AC and reconcile that with the AC's 'an inspection action, never the backward write' wording. Bead 2's current parenthetical ('retains its safe final recovery line') silently assumes the no-change reading.",
+    "R3.5 disposition (MINOR): record whether the conditionally-in-scope noise reduction (sharing one phase.Cache across the three named call sites, no new exported API) is taken or explicitly not taken. The plan resolves every other delegated choice; this one is unrecorded.",
+    "Bead 10 step 2 wording (MINOR): scope the merge-safety.md claim to gate-refused completes. 'A failed complete leaves the tip at the reviewed SHA' is true under (a) for every gate refusal but false for a post-gate failure (merge conflict / bd-close failure after CommitAll and the tracker sync commit land) — the tip is then advanced and a retry meets stale-SHA, same as HEAD today. Relatedly, the OQ-1 rationale's '(a) closes the entire class by construction' should say 'the entire gate-refusal class', matching R4.1's actual scope; as written it proves too much and the doc text inherits the overclaim.",
+    "OQ-3 wording (TRIVIAL): 'both become TRUE three-surface agreements (the release row keeps only its tail-less carve-out)' is self-contradictory — the tail-less carve-out makes the release row a TWO-surface agreement, which bead 4 step 2 states correctly. Fix the OQ-3 sentence to match."
+  ],
+  "findings": [
+    {
+      "id": "R1-1",
+      "severity": "major",
+      "title": "R2.4's plan-time obligation (#245 re-repro or fixed-by-092 disposition) is undischarged",
+      "detail": "Spec R2.4: 'During planning, #245's exact 0.12.0 shape (result lines entirely absent) is re-reproduced against HEAD or dispositioned fixed-by-spec-092 with the pinning test from R2.1 as the regression guard.' The plan resolves OQ-1/2/3/5, both advisories, the lock home, and the AC-5 split — but contains no occurrence of '245' or '092'. An explicit spec instruction addressed to this plan stage is simply absent."
+    },
+    {
+      "id": "R1-2",
+      "severity": "major",
+      "title": "AC-5(iv) mapped to bead 2 with no delivering step; the plan's parenthetical presumes the current line already complies",
+      "detail": "AC-5(iv): 'any retained form of the phase-mismatch warning ends with a safe final recovery line — an inspection action, never the backward write.' The retained emission at derive.go:190-193 ends with 'recovery: mindspec repair phase <spec-id>' — a write command. Under option 1 the warning is absent on both fixture routes (AC-5(i)'s arm, delivered), but it remains reachable on other mismatch states (e.g. a crash between ClaimBead and next's new stored-advance leaves stored=plan/derived=implement — a forward mismatch where 'repair phase' is the CORRECT recovery; a manually reopened bead under stored=review yields a backward one where the guarded repair now refuses). No bead step designs the retained line's fate; bead 2's AC note 'retains its safe final recovery line' asserts compliance the AC's 'inspection action' wording does not obviously grant. A test written to the AC's letter fails the current line."
+    },
+    {
+      "id": "R1-3",
+      "severity": "minor",
+      "title": "R3.5's conditionally-scoped noise reduction has no recorded disposition",
+      "detail": "R3.5 scopes the 3x-duplicate-warning reduction to exactly 'sharing one phase.Cache across the three named call sites with no new exported API'. The plan neither takes it nor declines it. Under option 1 the dissolved windows stop warning entirely, so declining may be right — but the delegated choice should be recorded like the others."
+    },
+    {
+      "id": "R1-4",
+      "severity": "minor",
+      "title": "OQ-1(a) rationale and bead 10's doc text overclaim the closed class",
+      "detail": "'(a) closes the entire class by construction: no complete-authored commit exists before any fallible gate' — true for gate refusals (R4.1/AC-6's actual scope), but after all gates pass, CommitAll and the tracker sync commit land BEFORE merge/close; a post-gate failure there leaves a complete-authored tip delta and the retry stale-blocks, unchanged from HEAD. No AC is unmet (AC-6/AC-7 are gate-refusal fixtures), but bead 10 step 2 would ship 'a failed complete leaves the tip at the reviewed SHA' into merge-safety.md as an unscoped general claim, which is false for that residual. Scope both sentences to gate-refused completes or name the residual."
+    },
+    {
+      "id": "R1-5",
+      "severity": "trivial",
+      "title": "OQ-3 section's 'TRUE three-surface agreements' contradicts the release row's tail-less two-surface carve-out",
+      "detail": "The parenthetical acknowledges the carve-out while the sentence claims three surfaces; bead 4 step 2 ('release (two surfaces, tail-less)') has it right. Cosmetic."
+    },
+    {
+      "id": "R1-6",
+      "severity": "info",
+      "title": "Verified sound under this lens (recorded so the tally need not re-derive)",
+      "detail": "OQ-3 option 1 changes writers, not the derivation — settled fact 1 is matched, not relitigated; the trigger-2 advisory discharge holds across all reachable verb sequences (next's advance is lifecycle-conditioned, release re-syncs to derived plan on all-open, derivation excludes non-lifecycle children); the (c)-only vacations (AC-6 pathspec sentence, AC-7(ii)-(iv)) match the spec's own round-2 G7 tags and AC-7(i) survives with a red-on-revert pin (bead 6 step 5); AC-2's option-2 annotated arms are dead by the spec's own conditionals and the release plan-leg redesign arm is the spec-designated one; R1.4's refusal-form choice and OQ-2's carve-out sit inside the spec's stated option sets; all 16 ACs trace to scope-capable beads via the Provenance table, with the AC-5 split at the legs' stated grain."
+    }
+  ]
+}

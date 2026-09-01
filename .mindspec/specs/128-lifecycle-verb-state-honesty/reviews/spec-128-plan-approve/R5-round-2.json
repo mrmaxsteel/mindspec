@@ -1,0 +1,77 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.98,
+  "rationale": "Round 2 materially improves the plan: the ADR-0023 draft carve-out remains narrow, the ADR-0025 amendment now has the requested next-claim-only scope fence, leaving ADR-0037 untouched remains correct, and the ADR-0041 reversal now explicitly preserves panel-before-mutation while replacing post-materialization content gates with a prospective-tree design. However, the exact snapshot/commit recipe is not yet buildable as claimed. A fresh temporary index followed by `git add -A -- . ':!<named-artifact>'` omits the tracked excluded artifact from tree T; committing T therefore deletes that artifact in the user commit, contradicting the claim that exclusion leaves the separate sync commit as its sole owner. Independently, `commit-tree T` plus `update-ref` advances the checked-out branch without updating its real index; a mechanical probe leaves a newly committed file reported as both staged-deleted and untracked. These are central protocol defects, not bead-level naming details: the proposed ADR-0041 replacement relies on T being the intended prospective tree and on the materialization commit leaving a coherent retryable worktree. The correction is small and localized to bead 6, but the plan document must state it before approval.",
+  "concrete_changes_required": [
+    "Revise the snapshot primitive so its temporary index is initialized from the exact bead tip (for example, `GIT_INDEX_FILE=<nonexistent-temp-path> git read-tree <tip>`) before `add -A` applies worktree changes with named-artifact exclusions. The resulting T must retain each excluded artifact's blob/mode from the tip; the user materialization commit must not delete or otherwise touch that path, leaving only the separate artifact-sync commit to update it.",
+    "Define the checked-out worktree index transition for the commit-from-T path. After the ref advances, the real index must agree with T without overwriting gate-to-commit interval edits; specify ordering, failure/retry handling, and the expected-old-tip protection rather than leaving `commit-tree` plus `update-ref` as the entire operation.",
+    "Extend bead 6's red-on-revert tests to assert (a) an excluded tracked artifact is unchanged in T and in the user commit and changes only in the artifact-sync commit, (b) an unchanged-after-snapshot worktree is clean after materialization, and (c) an interval edit remains exactly ordinary unstaged dirt, not an index/HEAD split such as staged deletion plus an untracked duplicate. Update the ADR-0041 amendment draft language to describe this corrected protocol accurately."
+  ],
+  "findings": [
+    {
+      "id": "R1-ASK-1",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "class": "prospective-snapshot-mechanism",
+      "summary": "The plan now covers tracked, untracked, deleted, staged, and unstaged work and names tree T as the measurement/commit boundary. But the stated fresh-temp-index command does not seed the index from the bead tip, so an excluded tracked artifact is absent from T and is deleted by the user commit. The exact mechanism therefore does not implement its own artifact-ownership claim."
+    },
+    {
+      "id": "R1-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "class": "ADR-0041-two-direction-replacement",
+      "summary": "The plan now explicitly retains panel-before-CommitAll with its reviewed-SHA/dirty-tree rationale and explicitly replaces gates-after-materialization with prospective-snapshot validation before complete-authored commits. That structural ADR treatment is correct. Its artifact-normalization rationale is still mechanically false under the named recipe because pathspec exclusion from an unseeded index produces deletion rather than preservation, and the commit primitive omits real-index reconciliation."
+    },
+    {
+      "id": "R1-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "snapshot-failure-fixtures",
+      "summary": "Bead 6 now names all requested red-on-revert legs: untracked source/doc/ADR content, a hook boundary, tracker export mutation, and gate-to-commit interval mutation. The newly discovered artifact-preservation and real-index-coherence cases require additional fixtures but do not erase the requested coverage that was added."
+    },
+    {
+      "id": "R1-ASK-4",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "ADR-0025-scope-fence",
+      "summary": "ADR Fitness now expressly limits the entangleable-dirt amendment to the worktree-creating `mindspec next` claim path and states that approve and every other dirty-tree guard remain unchanged unless separately amended."
+    },
+    {
+      "id": "N1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "class": "unseeded-temporary-index",
+      "summary": "Mechanical /tmp reproduction: with a tracked `artifact.jsonl`, a fresh GIT_INDEX_FILE and `git add -A -- . ':!artifact.jsonl'` followed by `write-tree` yields a tree containing ordinary files but no artifact. The plan's user commit would therefore record an artifact deletion before the sync commit, contrary to lines 160-189 and bead 6's ownership model."
+    },
+    {
+      "id": "N2",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "class": "checked-out-index-not-reconciled",
+      "summary": "Mechanical /tmp reproduction with a correctly seeded temporary index: after `commit-tree T -p <tip>` and `update-ref HEAD <commit> <tip>`, the real index remains at the old tip. A file newly included in T appears in `git status --short` as both `D  new.txt` and `?? new.txt`. The plan must refresh/reconcile the real index while preserving true interval edits and define recovery if that step fails."
+    },
+    {
+      "id": "F-ADR-0023",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "ADR-0023-narrow-carve-out",
+      "summary": "OQ-2 remains confined to pre-epic draft discovery requiring both the spec directory and conventional branch; beads remains the sole post-epic authority, so no general spec-artifact authority leak is introduced."
+    },
+    {
+      "id": "F-ADR-0037",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "ADR-0037-unchanged",
+      "summary": "Leaving ADR-0037 untouched is still correct: the panel gate remains before snapshot/commit mutation, reviewed_head_sha staleness and dirty-tree facts are unchanged, and the new content-gate mechanics remain outside internal/panel."
+    },
+    {
+      "id": "F-VALIDATE",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited 0 at reviewed commit 747bf9b3. It emitted only the three documented advisory warnings: 10-bead count, scope redundancy R=0.09, and dependency-chain depth 4."
+    }
+  ]
+}
