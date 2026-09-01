@@ -197,38 +197,58 @@ fallback at `:1210`), not the bead worktree. The protocol:
    WARN, `complete.go:928-933`, and fixture (iv)'s assertion) — reproduced:
    pre-reset status shows `D`+`??` for the same path, post-reset clean. A
    reset failure is non-rolled-back (forward-only), and the promised plain
-   re-run ACTUALLY CONVERGES via the **materialization-marker STATE MACHINE
-   (round-3 G1, extended to every tip transition at round-4 G1)**. The
-   invariant: the marker ref `refs/mindspec/materialized/<bead-id>` (spec-127
-   `recordMergeSourceMarker` precedent) is advanced IN THE SAME
-   `git update-ref --stdin` TRANSACTION as every tool-authored bead-ref
-   advance — verified this round: a `start/prepare/commit` transaction over
-   both refs with an expected-old on the bead ref aborts WHOLESALE on a
-   mismatch (fatal at prepare, neither ref moves) — so marker == tip is true
-   after every tool-authored advance BY CONSTRUCTION, and marker ≠ tip
-   PROVES a foreign commit. The stages: (M) build `C` with `commit-tree`
-   (the object exists before any ref moves — round-4 G1.2's ordering fix),
-   then one transaction {bead-ref `A→C` with expected-old `A`; marker → `C`}
-   — fail-closed: a transaction failure (concurrent tip move) refuses with
-   nothing advanced, marker included; (R) index refresh — no ref change,
-   idempotent; (S) artifact sync — `D` is built with the same plumbing shape
-   (C's tree + refreshed artifact blob, `commit-tree D -p C`), then one
-   transaction {bead-ref `C→D`; marker → `D`}; (G) the bead→spec merge —
-   the bead ref no longer moves; a preserved-merge conflict leaves
-   marker == tip, so a re-run resumes INTO the 127 `--resolve-merge`
-   machinery, never around it; (T) terminal: the marker is cleared after
-   the merge lands, on BOTH the ordinary and the landed-merge-reconcile
-   completion paths. Every run's early sequence, before the panel gate:
-   (1) landed-merge reconciliation detection FIRST (the existing spec-119
-   detection; if landed → reconcile path, clearing any orphaned marker —
-   round-4 G1.3); (2) marker == tip → RESUME mode: skip re-snapshot,
-   content gates, and the panel gate (the tip is the current panel round's
-   own gated materialization), continue forward from the first incomplete
-   stage; (3) marker ≠ tip → foreign commit after materialization: delete
-   the marker, proceed as a normal run, the stale-SHA gate evaluating
-   exactly as today — the cannot-launder boundary is retained. The
-   full M→R→S→G→T boundary joins the ADR-0041 §3 mutation-point
-   classification via the amendment. Consequences, each closing one
+   re-run ACTUALLY CONVERGES via the **WRITE-AHEAD materialization marker
+   (round-3 G1; round-4's two-ref-transaction form REPLACED at round-5 G1 —
+   replacement over patching, per house lesson)**. Why replaced:
+   `update-ref --stdin` transactions give locked all-or-nothing DECISION
+   semantics, but installation is per-ref — git's own documentation states
+   "while each individual <ref> is updated or deleted atomically, a
+   concurrent reader may still see a subset of the modifications"
+   (git-update-ref(1), verified against git 2.51.2 this round) — so a crash
+   mid-commit on the default files backend can leave ONE ref installed;
+   evidence grade: authoritative documentation + the documented per-ref
+   installation order, NOT a lab-reproduced crash window (fault-injecting
+   git's commit phase is out of reach here, and the doc makes the
+   reproduction unnecessary). The write-ahead protocol needs no multi-ref
+   atomicity at all — SIMPLER, and its git-version floor drops to plain
+   `update-ref`/`commit-tree`/`read-tree` (no floor beyond ancient git; the
+   fixtures run explicitly on the default files backend). Per stage: build
+   the commit OBJECT first, then durably publish the marker ref
+   `refs/mindspec/materialized/<bead-id>` → the intended NEW tip, then
+   advance the bead ref with expected-old — and because each intended tip is
+   built with `-p <predecessor>`, the marker's single OID encodes BOTH the
+   intended tip AND (as its first parent) the expected predecessor. (M):
+   build `C` (from `T`, `-p A`) → marker → `C` → bead-ref `A→C`
+   expected-old `A`. (R): index refresh — no ref change, idempotent.
+   (S): build `D` by plumbing (C's tree + refreshed artifact blob,
+   `-p C`) → marker → `D` → bead-ref `C→D` expected-old `C`, then the
+   S-stage exit contract (round-5 G2): refresh the real index to `D` (the
+   same index-only mixed reset), then classify remaining worktree dirt with
+   the existing artifact/user classifier — GENUINE non-artifact dirt
+   (interval edits) at this point REFUSES with a named-paths ADR-0035
+   refusal BEFORE any merge path that can force-remove the bead worktree:
+   an interval edit is preserved on disk behind a named refusal or an
+   explicitly safe recovery, never left uncommitted through a terminal
+   cleanup that removes its worktree. (G): merge — the bead ref no longer
+   moves; a preserved conflict resumes INTO the 127 `--resolve-merge`
+   machinery. (T): terminal marker clear on BOTH the
+   ordinary and landed-merge-reconcile completion paths. **Re-entry
+   discriminator (round-5 G3.2), total over the legitimate states**: with
+   marker `M*` present, tip == `M*` → the published stage COMPLETED — its
+   kind is identified structurally (diff `M*` vs `M*^` confined to the named
+   artifact → it is `D`, continue at the merge; otherwise it is `C`,
+   continue at R then S), with preserved-merge/landed states identifying
+   G/T; tip == `M*^` → the write-ahead is UNFINISHED — finish the bead-ref
+   advance (expected-old = tip) and continue; tip ∉ {`M*`, `M*^`} → FOREIGN:
+   delete the marker, proceed as a normal run, the stale-SHA gate evaluating
+   exactly as today — the cannot-launder boundary is retained. Every run's
+   early sequence, before the panel gate: (1) landed-merge reconciliation
+   detection FIRST (spec-119 detection; if landed → reconcile path, clearing
+   any orphaned marker — round-4 G1.3); (2) the discriminator above; resume
+   skips re-snapshot, content gates, and the panel gate (the marker is
+   published only after every gate passed). The full M→R→S→G→T boundary
+   joins the ADR-0041 §3 mutation-point classification via the amendment.
+   Consequences, each closing one
    G1.2 hole: a pre-commit hook cannot mutate the commit (plumbing runs no
    hooks); a worktree edit in the gate→commit interval cannot enter the
    commit (built from `T`; the edit stays ORDINARY UNSTAGED dirt after the
@@ -502,8 +522,10 @@ full sweep is now the recorded baseline.
   just-committed work) is preserved by measurement equivalence: the commits
   materialize exactly the measured content. The amendment text is pre-drafted
   in bead 6 and pinned by extending `cmd/mindspec/adr0041_amendment_test.go`.
-  §2/§3 (forward-reconcile, never rollback) are untouched — (a) introduces no
-  rollback.
+  §2 (forward-reconcile, never rollback) is unchanged — (a) introduces no
+  rollback; §3 IS amended (round-5 G3.1, aligning with bead 6's actual
+  disposition): it gains the M→R→S→G→T staged boundary classification with
+  the write-ahead marker's forward-resume semantics.
 - **ADR-0023** — **AMENDED, three edits**: (1) the OQ-2 draft-discovery
   exception (pre-epic drafts are filesystem-discovered; beads-authoritative
   from epic creation onward) — bead 3; (2) the OQ-4-resolved editorial strike/
@@ -827,15 +849,17 @@ Beads 2 and 3 (the post-states the tails must agree with).
    `add -A` with the named-artifact exclusion, then `write-tree`;
    worktree/real-index/refs untouched, asserted by test; the exclusion means
    unchanged-at-tip, never absent-from-`T`) and the staged materialization
-   machinery (round-4 G1): `commit-tree` builders for `C` (from `T`) and `D`
-   (C's tree + refreshed artifact blob), plus the two-ref transaction helper
-   (`update-ref --stdin` start/prepare/commit: bead ref with expected-old +
-   marker, atomic, wholesale-abort on mismatch — following the spec-127
-   `CommitTreeMerge`/`UpdateRef`/`recordMergeSourceMarker` precedents), the
-   index-only `reset --quiet --mixed`, and the failure legs of protocol
-   step 3 (transaction race → refusal + re-measure, nothing advanced;
-   reset failure → forward-only refusal, the resume machinery converging
-   the re-run).
+   machinery (round-4 G1, write-ahead form round-5 G1): `commit-tree`
+   builders for `C` (from `T`) and `D` (C's tree + refreshed artifact blob),
+   the write-ahead marker publish + expected-old single-ref advance helpers
+   (plain `update-ref` — following the spec-127
+   `CommitTreeMerge`/`UpdateRef`/`recordMergeSourceMarker` precedents; no
+   multi-ref transaction dependency, no git-version floor beyond plain
+   plumbing), the re-entry discriminator over {tip == marker, tip ==
+   marker-parent, foreign}, the index-only `reset --quiet --mixed`, and the
+   failure legs of protocol step 3 (expected-old race → refusal +
+   re-measure; reset failure → forward-only refusal, the resume machinery
+   converging the re-run).
 2. `internal/executor`: interface + `MindspecExecutor` + mock gain
    `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
    the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
@@ -849,18 +873,18 @@ Beads 2 and 3 (the post-states the tails must agree with).
    in protocol-step-3 order — landed-merge reconciliation detection FIRST
    (clearing any orphaned marker), then marker/tip evaluation (resume vs
    foreign-delete); snapshot taken once after the panel gate; both gates
-   measure it; on pass, the staged state machine runs in its CORRECTED order
-   (round-4 G1.2 — commit-tree BEFORE any marker can exist): build `C` from
-   `T` → transaction {bead-ref `A→C` expected-old; marker → `C`} →
-   index-only `reset --quiet --mixed` → build `D` by plumbing (C's tree +
-   refreshed artifact blob) → transaction {bead-ref `C→D`; marker → `D`} →
-   merge (resume routes into `--resolve-merge` on a preserved conflict) →
-   terminal marker clear on both completion paths. This replaces BOTH the
-   `CommitAll` porcelain path and the porcelain artifact-sync commit for
-   this flow; reconcile path untouched. Marker + transaction helpers live in
-   `internal/gitutil` beside the 127 `recordMergeSourceMarker` precedent
-   (`update-ref --stdin` start/prepare/commit; multi-ref atomicity + wholesale
-   abort on expected-old mismatch verified empirically this round).
+   measure it; on pass, the staged state machine runs in write-ahead order
+   (round-4 G1.2's commit-tree-first, round-5 G1's marker-before-ref): build
+   `C` from `T` → marker → `C` → bead-ref `A→C` expected-old → index-only
+   `reset --quiet --mixed` → build `D` by plumbing → marker → `D` →
+   bead-ref `C→D` expected-old → S-stage exit contract (index to `D`; dirt
+   classification; genuine interval-edit dirt refuses BEFORE the merge —
+   round-5 G2) → merge (resume routes into `--resolve-merge` on a preserved
+   conflict) → terminal marker clear on both completion paths. This replaces
+   BOTH the `CommitAll` porcelain path and the porcelain artifact-sync
+   commit for this flow; reconcile path untouched. Marker + advance helpers
+   live in `internal/gitutil` beside the 127 `recordMergeSourceMarker`
+   precedent.
 5. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 amendment REPLACES
    BOTH load-bearing statements (round-1 G1.4), describing the CORRECTED
    protocol (round-2 G2): (i) panel-before-`CommitAll` is RETAINED with its
@@ -873,10 +897,14 @@ Beads 2 and 3 (the post-states the tails must agree with).
    materialization op's index-refresh + expected-old-tip semantics, PLUS
    (round-3 G1.2, extended round-4 G1.5) the §3 mutation-point
    classification gains the FULL M→R→S→G→T staged boundary with the
-   transactional marker invariant (marker advanced in the same
-   `update-ref --stdin` transaction as every tool-authored bead-ref
-   advance; marker ≠ tip proves foreign; reconcile-detection before any
-   stale-marker decision; terminal clear on both completion paths), and
+   WRITE-AHEAD marker invariant (marker published before every tool-authored
+   bead-ref advance, its OID encoding intended tip + expected predecessor as
+   the commit's first parent; the total re-entry discriminator over
+   {tip == marker: stage complete, kind identified by the artifact-confined
+   diff test; tip == marker-parent: finish the advance; foreign: delete +
+   stale-SHA as at HEAD}; reconcile-detection before any stale-marker
+   decision; the S-stage exit contract; terminal clear on both completion
+   paths), and
    (round-3 G6, confirmed correct at round 4) the refusal
    guarantee is stated precisely rather than as repository-byte-identical: a
    refused content gate leaves the bead ref/tip, tracker state, real index,
@@ -892,7 +920,8 @@ Beads 2 and 3 (the post-states the tails must agree with).
    red-on-revert, a post-review non-tracker commit still trips stale-SHA
    (gate untouched).
 7. Failure-injection + red-on-revert fixture legs (round-1 G1.5, extended
-   round-2 G1/G2), all seven: (i) an UNTRACKED source/doc/ADR file in the
+   rounds 2–5; all legs run on the DEFAULT FILES REF BACKEND explicitly —
+   round-5 G1), all thirteen: (i) an UNTRACKED source/doc/ADR file in the
    worktree — the gate measures it and refuses before any commit; (ii) a
    pre-commit hook that adds/changes a source file — the committed tree is
    still ≡ `T` (plumbing runs no hooks); (iii) the tracker export changing
@@ -910,15 +939,24 @@ Beads 2 and 3 (the post-states the tails must agree with).
    before the reset, add an interval edit, then invoke the documented
    recovery (plain re-run) — it converges to a landed merge with NO
    rollback, NO re-panel, no phantom staged deletions, and the interval edit
-   preserved as ordinary dirt; a stale-marker variant (marker ≠ tip) is
-   cleaned and falls through to a normal run; (ix) kill AFTER the artifact-
-   sync transaction (tip `D`, marker `D` — round-4 G1.4): plain re-run
-   resumes at the merge stage and converges, no re-panel; (x) kill DURING a
-   preserved merge conflict (marker == tip == `D`): re-run / `--resolve-
-   merge` converges through the 127 machinery without re-paneling or
-   laundering; (xi) a genuinely foreign commit landed after materialization
-   (tip ≠ marker): marker deleted, panel stale-SHA blocks exactly as at
-   HEAD.
+   preserved on disk with the executable outcome pinned (round-5 G2): the
+   re-run's S-stage exit contract REFUSES pre-merge naming the edited
+   path — the file's content survives and no terminal cleanup removes the
+   worktree while it is uncommitted; a stale-marker variant (foreign tip) is
+   cleaned and falls through to a normal run; (ix) kill AFTER the
+   S-stage ref advance (tip `D`, marker `D` — round-4 G1.4): plain re-run
+   resumes at the S-exit contract then the merge and converges, no
+   re-panel, and an interval edit present at that point triggers the same
+   named refusal, never silent loss; (x) kill DURING a preserved merge
+   conflict (marker == tip == `D`): re-run / `--resolve-merge` converges
+   through the 127 machinery without re-paneling or laundering; (xi) a
+   genuinely foreign commit landed after materialization (tip ∉ {marker,
+   marker-parent}): marker deleted, panel stale-SHA blocks exactly as at
+   HEAD; (xii) kill BETWEEN marker→`C` and the `A→C` ref advance (marker
+   `C`, tip `A` == marker-parent — round-5 G1's one-ref-installed
+   ordering): plain re-run finishes the advance and converges, no re-panel;
+   (xiii) the same window at the S stage (marker `D`, tip `C` ==
+   marker-parent): plain re-run finishes `C→D` and converges.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
