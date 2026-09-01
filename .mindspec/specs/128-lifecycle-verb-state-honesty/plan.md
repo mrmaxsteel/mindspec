@@ -21,6 +21,12 @@ work_chunks:
       - cmd/mindspec/repair.go
       - cmd/mindspec/repair_test.go
       - internal/phase/migrate.go
+      - internal/approve/plan.go
+      - internal/approve/spec.go
+      - internal/approve/impl.go
+      - internal/approve/adopt.go
+      - internal/complete/complete.go
+      - cmd/mindspec/release.go
   - id: 2
     depends_on:
       - 1
@@ -33,6 +39,8 @@ work_chunks:
       - internal/complete/complete.go
       - internal/phase/derive.go
       - internal/phase/derive_recovery_test.go
+      - internal/phase/semantics_v2.go
+      - internal/phase/semantics_v2_test.go
   - id: 3
     depends_on: []
     key_file_paths:
@@ -72,6 +80,12 @@ work_chunks:
       - internal/complete/complete_test.go
       - internal/validate/docsync.go
       - internal/validate/adr_divergence.go
+      - internal/gitutil/gitops.go
+      - internal/gitutil/snapshot.go
+      - internal/gitutil/snapshot_test.go
+      - internal/executor/executor.go
+      - internal/executor/mindspec_executor.go
+      - internal/executor/mock.go
       - .mindspec/adr/ADR-0041-gate-before-mutate.md
       - cmd/mindspec/adr0041_amendment_test.go
   - id: 7
@@ -127,20 +141,63 @@ artifact-materialization commits (the `--commit-msg` `CommitAll` at
 `internal/complete/complete.go:815` and the pathspec-scoped `.beads` sync
 commit), measuring the bead worktree's *content* rather than its committed tip.
 
-**Mechanism, grounded**: today both gates late-bind the range head — `beadHead`
-is the branch NAME resolved at `complete.go:634` (`workspace.BeadBranch`), so
-`validate.ValidateDocsRange(root, base, beadHead, beadHead, exec)`
-(`complete.go:973`) and `validate.CheckADRDivergence(..., beadHead, beadHead)`
-(`:996`) resolve the ref at git-command time, after the commits — that is the
-concrete form of ADR-0041 §1's "range must include the just-committed user
-work". The reorder gives each gate a worktree-inclusive measurement variant:
-diff `base` against the bead worktree's current state (committed tip + index +
-working tree, evaluated in `wtPath`) instead of `base..ref`. The content
-measured pre-commit is identical to the content the commits then materialize:
-`CommitAll` commits exactly the worktree's dirt, and the sync commit is
-pathspec-scoped to the ADR-0025 artifact. Reconcile mode (`beadHead =
-landed.SHA`, `complete.go:704`) keeps its landed `M^1..M` measurement and is
-untouched — no commits are authored on that path.
+**Mechanism — the prospective-snapshot protocol (designed here, round-1 G1;
+every primitive claim re-derived at HEAD)**. Today both gates late-bind the
+range head — `beadHead` is the branch NAME resolved at `complete.go:634`, so
+`ValidateDocsRange(root, base, beadHead, beadHead, exec)` (`complete.go:973`)
+and `CheckADRDivergence(..., beadHead, beadHead)` (`:996`) resolve the ref at
+git-command time, after the commits. A naive "diff base against the worktree"
+replacement has three holes the round-1 gate found and this protocol closes:
+`CommitAll` → `commitWithExport` commits with `git add -A`
+(`mindspec_executor.go:1484` — untracked files INCLUDED) while every
+working-tree diff primitive is plain `git diff` (`gitutil.DiffNameOnlyRef`,
+`gitops.go:1352-1366`) — blind to untracked files; `commitWithExport` runs a
+bd export BEFORE staging (`:1491`), mutating content between measurement and
+commit; and `MindspecExecutor.ChangedFiles` is rooted at `g.Root`
+(`mindspec_executor.go:1221`, with a cwd-rooted `DiffNameOnlyRef("", head)`
+fallback at `:1210`), not the bead worktree. The protocol:
+
+1. **Snapshot** (new gitutil primitive `SnapshotWorktreeTree(wtPath,
+   excludePathspecs) (treeOID, error)`): in the bead worktree, stage the FULL
+   prospective content into a TEMPORARY index — `GIT_INDEX_FILE=<tmp> git -C
+   wtPath add -A -- . ':!<named-artifact>'` (tracked + untracked + deletions;
+   the ADR-0025 named artifact is pathspec-EXCLUDED — the sync commit owns it
+   and no gate reads it) — then `git write-tree` → tree OID `T`. The worktree,
+   real index, and refs are untouched (a temp index + loose objects only).
+2. **Measurement**: both gates measure `base → T` via a new tree-capable leg —
+   executor interface gains `ChangedFilesTree(workdir, base, treeOID)
+   ([]string, error)` (tree-vs-tree `git diff --name-only base T`, run `-C`
+   the bead worktree; untracked files appear because `add -A` staged them into
+   `T`; mock updated) — and every gate INPUT (OWNERSHIP manifests, domain
+   enumeration, doc/ADR file contents) is read FROM `T` (`FileAtRef` with
+   `T:path`), so attribution and content come from the same candidate tree the
+   commit will produce (G1.3's executor-grounding face). A test pins that
+   invoking `complete` from the main checkout still measures the bead
+   worktree's snapshot, not `g.Root`'s state.
+3. **Exactly-the-measured-tree guarantee, by construction**: on gate pass, the
+   user materialization commit is created FROM `T` itself — plumbing
+   `git commit-tree T -p <tip>` + fast-forward `update-ref` (new gitutil
+   primitive; `CommitTreeMerge`/`UpdateRef` from spec 127 are the house
+   precedent) — NOT by re-running `git add -A`. Consequences, each closing one
+   G1.2 hole: a pre-commit hook cannot mutate the commit (plumbing runs no
+   hooks); a worktree edit in the gate→commit interval cannot enter the commit
+   (the commit is built from `T`, the edit stays uncommitted dirt for the next
+   run); the bd export cannot enter it (the artifact is excluded from `T`; the
+   export lands in the separate, pathspec-scoped artifact-sync commit the flow
+   already has, which no gate measures — the artifact-only normalization
+   treatment). "Committed tree ≡ measured tree" is thereby mechanical, not
+   asserted: they are the same object.
+4. Reconcile mode (`beadHead = landed.SHA`, `complete.go:704`) keeps its
+   landed `M^1..M` measurement — no commits are authored on that path.
+
+**Honest scope (round-1 G5.4)**: (a) closes the **gate-refusal class** — no
+complete-authored commit can precede a fallible-gate refusal, so a refusal
+always leaves the tip at `reviewed_head_sha` and the retry meets the same
+gate. A POST-gate failure (bead→spec merge conflict, bd-close failure) still
+occurs after the materialization commits, exactly as at HEAD — recovery there
+is spec 127's preserved-merge/`--resolve-merge` and forward-reconcile
+machinery, and that residual is out of this spec's scope and stated, not
+papered over.
 
 **Why (a) over (b)/(c)**:
 - (b) rollback is a DOUBLE reversal (ADR-0041 §1 Reconcile "Never a rollback" +
@@ -151,10 +208,11 @@ untouched — no commits are authored on that path.
   the wedge. R4.1 demands the retry never be stale-blocked by ANY
   complete-authored delta — and the `--commit-msg` `CommitAll` commit is
   complete-authored too; under (c) a gate refusal after a non-empty `CommitAll`
-  still wedges the retry on stale-SHA. (a) closes the entire class by
-  construction: no complete-authored commit exists before any fallible gate, so
-  a refusal always leaves the tip at `reviewed_head_sha` and the retry meets
-  the same gate. Rejected as primary; NOT taken as a backstop either — one
+  still wedges the retry on stale-SHA. (a) closes the entire GATE-REFUSAL
+  class by construction (the honest-scope boundary above — post-gate failures
+  are out of scope and stated): no complete-authored commit exists before any
+  fallible gate, so a refusal always leaves the tip at `reviewed_head_sha` and
+  the retry meets the same gate. Rejected as primary; NOT taken as a backstop either — one
   mechanism, one amendment.
 
 **Consequences the spec pre-priced, now settled**: ADR-0041 §1 is amended as an
@@ -224,9 +282,10 @@ advisory's hazard evaporates under this option: in the complete→plan trigger-2
 state (non-lifecycle child completed, lifecycle tasks all open, no lifecycle
 claim ever made) stored is still `plan`, so `complete`'s step-6.5
 `NextMode=plan` write is plan-over-plan — NOT a backward write, and no
-sanctioning is needed for it. The agreement table's plan-approve row and the
-release row's plan leg both become TRUE three-surface agreements (the release
-row keeps only its tail-less carve-out). Option 2 would have preserved a
+sanctioning is needed for it. The agreement table's plan-approve row becomes a
+TRUE three-surface agreement; the release row's plan leg becomes a true
+TWO-surface agreement — its tail-less carve-out stands (round-1 G5.5's
+correction: a tail-less row cannot be a three-surface anything). Option 2 would have preserved a
 permanently quirky window (annotated rows, suppressed warnings, two unforced
 backward writers needing sanction); option 3 stays CLOSED — no audited
 refutation of settled fact 1 exists or is sought, and option 1 makes the
@@ -241,11 +300,15 @@ assert the true-agreement contract. AC-5(i)'s "or the warning is absent"
 mechanism arm is the one that fires — the fixtures assert NO stored-vs-derived
 warning is emitted on either route because there is no disagreement.
 
-**Sanction boundary (round-3 G5, honored)**: the ONLY unforced backward writer
-is `release`'s internal sync, which routes through a non-exported
-guard-bypassing entry of the same locked write helper (it presents fresh
-child-derived evidence by construction); the operator `repair phase` still
-refuses backward without `--force` + reason (AC-5(viii) distinguishes them).
+**Sanction boundary (round-3 G5, honored; API pinned per round-1 G4.2)**: the
+ONLY unforced backward writer is `release`'s sync, which is the single
+production caller of the exported `phase.SanctionedDerivedSync(root, epicID)`
+— created in bead 1 beside the comparator, doc-commented as the only
+sanctioned backward write surface, its exported-ness fenced by a call-site
+enumeration test (the `impl adopt` house pattern) pinning exactly one caller;
+it re-derives fresh child-derived evidence inside the lock's critical section
+by construction. The operator `repair phase` still refuses backward without
+`--force-backward` + reason (AC-5(viii) distinguishes them).
 
 ### OQ-5 — default-pick rule: **displayed row 1** (bd ready's priority-first order)
 
@@ -274,6 +337,39 @@ sanction), and AC-2's complete→plan trigger-2 fixture asserts TRUE agreement
 (no annotated-row treatment needed; the option-2 arm is dead). The sanction
 sentence stays true with exactly one sanctioned backward writer (release's
 sync). Bead 4's fixture list names trigger-2 explicitly.
+
+### Delegated dispositions the spec left to plan time, recorded (round-1 G5)
+
+- **R2.4 — #245's exact 0.12.0 shape, re-examined at HEAD (executed
+  2026-09-01, this round)**: the shape (success with zero result lines) is
+  STRUCTURALLY UNREACHABLE at HEAD — `complete`'s RunE has exactly one
+  success return, through `completeTail` (`cmd/mindspec/complete.go:145`),
+  whose first statement prints `complete.FormatResult` (`:157`), whose first
+  line is `"Bead %s closed."` (`internal/complete/complete.go:1380`); the
+  real-wiring tests `TestCompleteTail_NoteIsLastStdoutLine` /
+  `TestCompleteTail_NoNoteWhileCwdExists` were RUN this round and pass.
+  Disposition: **fixed-by-spec-092** (the completeTail extraction), with
+  AC-4's ordering pin and AC-14's `complete` row as the regression guards.
+  (A full end-to-end complete could not be executed in the fix round —
+  lifecycle verbs are barred here — so the executed evidence is the
+  real-wiring test run plus the single-success-path call-graph derivation.)
+- **AC-5(iv) — the retained warning's recovery line**: where the
+  stored-vs-derived mismatch warning remains reachable (out-of-band `bd`
+  edits; states outside the dissolved windows), its recovery line becomes
+  DIRECTION-CONDITIONAL (bead 2, at the emission site `derive.go:190-193`):
+  a FORWARD disagreement (derived ahead of stored) keeps
+  `recovery: mindspec repair phase <spec>` — safe and correct there; a
+  BACKWARD disagreement emits an inspection action
+  (`recovery: bd show <epic-id>` + a one-line explanation), never the
+  backward write — satisfying AC-5(iv)'s letter with belt (the line) and
+  suspenders (bead 1's guard would refuse the write anyway).
+- **R3.5 — phase.Cache noise reduction: TAKEN**, as a side effect of bead 3's
+  `state.go` recomposition: one derivation authoritative means one
+  `phase.Cache` constructed per invocation and passed through the existing
+  `WithCache` variants — within R3.5's stated bar (no new exported API).
+- **OQ-1 scope flow-through**: bead 10's `merge-safety.md` text and the
+  ADR-0041 amendment describe the GATE-REFUSAL guarantee only; post-gate
+  failure recovery remains the 127 machinery and the docs keep saying so.
 
 **(b) AC-4b seam shape — decided**: a package-level function seam
 `completeFetchChildrenFn = phase.FetchChildren` in `internal/complete`
@@ -315,8 +411,12 @@ plan as over-compressed (O3 measured ~10 independently-reviewable
 deliverables), and this spec covers six issue clusters with sixteen ACs —
 each bead here is one independently-reviewable deliverable with its own AC
 set, which is the sizing the gate history demands. The low scope-redundancy
-score reflects clean seams (beads share `complete.go`/`next.go` only where
-the dependency edges serialize them), and the depth-4 chain
+score reflects clean seams — the sharing policy actually applied (round-1
+G4.3): SAME-REGION overlap on a file gets a serializing dependency edge
+(bead 8 → 2 on `next.go`'s claim block; bead 6 → 1 on `complete.go`'s
+materialization region), while DISTINCT-REGION overlap relies on the serial
+bead cycle's one-at-a-time merges (bead 5 vs 6 on `complete.go`) — and the
+depth-4 chain
 (1→2→4→10 / 1→2→5→10) costs nothing in practice: the bead cycle executes
 serially, and beads 3, 7, 8, 9 are ready in parallel with the chain from the
 start.
@@ -345,7 +445,10 @@ start.
   1's unqualified "User-authored dirt still blocks" is scoped to dirt the
   claim can entangle (an empty set today — R5.1's derived enumeration); the
   named-artifact list model ("explicit and small … not a glob") is unchanged.
-  Bead 7.
+  **Scope fence (round-1 G6)**: the amendment is expressly limited to the
+  worktree-creating `mindspec next` claim path — `mindspec approve`'s and
+  every other dirty-tree guard's semantics are unchanged unless separately
+  amended. Bead 7.
 - **ADR-0037** — **NOT amended** (OQ-1 resolved to (a); §4 staleness and the
   `internal/panel` zero-subprocess confinement are untouched).
 - **ADR-0035** — APPLIED: every new refusal/warning keeps the copy-pastable
@@ -385,14 +488,34 @@ The root of the graph — R3.3's machinery, which four later beads consume.
 1. `internal/phase/order.go` (new): the lifecycle order comparator
    (`spec < plan < implement < review < done`; unknown values compare
    incomparable → treated as backward for guard purposes, stated in the doc
-   comment) + `internal/phase/order_test.go`.
+   comment) + `internal/phase/order_test.go`. Beside it, the **sanctioned
+   backward API** (round-1 G4.2 pin): exported
+   `phase.SanctionedDerivedSync(root, epicID) error` — re-derives the
+   child-derived phase INSIDE the lock's critical section and writes it,
+   backward permitted, doc-commented as the ONLY sanctioned backward write
+   surface; its exported-ness is fenced by a call-site enumeration test (the
+   `impl adopt` house pattern) pinning exactly ONE production caller
+   (`cmd/mindspec/release.go`, wired in bead 2). Bead 1 creates the API and
+   the fence; bead 2 wires the caller.
 2. `internal/phase/phaselock.go` (new): journal-idiom file lock
    (`flock(2)` unix / O_EXCL windows, per `internal/journal/lock.go:55-61`'s
-   pattern; lock-file path under the repo's `.mindspec/` runtime area, name
-   pinned here) exposing `WithPhaseWriteLock(root, epicID, fn)` — reads stored
+   pattern) exposing `WithPhaseWriteLock(root, epicID, fn)` — reads stored
    phase inside the critical section, passes it to `fn`, performs the
-   conditional `MergeMetadata` write `fn` returns, releases. Contention test
-   with real goroutines + real flock.
+   conditional `MergeMetadata` write `fn` returns, releases. **Operational
+   design (round-1 G3), pinned here:** lock path = `.mindspec/phase.lock`;
+   the managed `.gitignore` block gains that entry (beside the existing
+   `.mindspec/session.json` line) and a test asserts lock acquisition leaves
+   zero blockable git dirt; acquisition uses a BOUNDED wait (poll-with-
+   deadline, default 10s, constant pinned in the file) — on timeout, an
+   ADR-0035 refusal naming the lock path and a re-run recovery line (never a
+   delete-the-lock instruction); unix crashed holders self-release (flock is
+   kernel-held); the Windows O_EXCL path writes holder PID + RFC3339
+   timestamp into the file and treats a file older than the pinned staleness
+   bound as stale (remove + single retry, best-effort within the same-machine
+   model, documented). Tests: real-goroutine contention (`-race`), timeout
+   error propagation, crashed-holder recovery (kill the flock holder;
+   next acquire succeeds), stale-file takeover (seam-driven for the Windows
+   path), and the no-git-dirt assertion.
 3. Wrap every existing `mindspec_phase` writer in the lock (values unchanged
    in this bead): `plan.go:455`, `spec.go:76`, `complete.go:1366`,
    `release.go:152`, `impl.go:577-579`, `impl.go:611-613`, `adopt.go:424/:437`,
@@ -435,10 +558,11 @@ None (bd edges wired from `work_chunks[1]`).
    `implement`). A non-lifecycle child claim advances nothing. This is a NEW
    writer: it registers in the bead-1 inventory by construction.
 3. `cmd/mindspec/release.go`: the sanctioned redesign leg — `syncPhase`
-   (`release.go:152`) writes the fresh CHILD-DERIVED phase (from
-   `DerivePhaseDetail.Derived` computed inside the critical section), routed
-   through the lock helper's internal sanctioned entry (backward allowed here
-   only); the operator guard in `repair.go` is unaffected.
+   (`release.go:152`) becomes the ONE production caller of
+   `phase.SanctionedDerivedSync` (created + call-site-fenced in bead 1),
+   which re-derives the child-derived phase inside the critical section and
+   writes it, backward permitted; the operator guard in `repair.go` is
+   unaffected.
 4. `internal/complete/complete.go:1366`: step-6.5 keeps writing derived
    `NextMode` under the lock (wrapped in bead 1; value semantics unchanged —
    in the trigger-2 state this is plan-over-plan, not backward).
@@ -451,6 +575,28 @@ None (bd edges wired from `work_chunks[1]`).
    succeeded unforced (stored back to `plan`) while `mindspec repair phase`
    invoked on a constructed backward case still refuses without
    `--force-backward`.
+7. **Upgrade reconciliation for legacy epics (round-1 G2)** —
+   `internal/phase/semantics_v2.go` (new): `EnsurePhaseSemanticsV2(epicID)`,
+   the one-shot, idempotent, lock-protected reconciliation mirroring
+   ADR-0034's `EnsureMigrated` pattern and invoked from the same
+   ahead-of-preflight call sites (`impl.go:277`, `plan.go:300`,
+   `complete.go:522`) plus `next`'s claim path. **Durable discriminator**: the
+   epic metadata marker `mindspec_phase_semantics: "v2"`. Marker absent AND
+   the legacy signature holds (stored `implement`, ≥1 lifecycle child, all
+   open, none closed, none in_progress — under old semantics that is the
+   never-claimed plan-approve state; under v2 semantics stored would be
+   `plan` there) → rewrite stored to `plan` + write the marker, one critical
+   section. Marker absent, any other state (progressed, released-with-closed-
+   siblings, review, done) → write the marker only, phase untouched. Marker
+   present → no-op. The v2-unreachability claim is scoped honestly: an
+   out-of-band raw `bd update` can still manufacture the signature post-
+   marker, and the marker is exactly what prevents re-reconciling it.
+   **Five fixtures**: upgrade-before-first-claim (legacy → `plan` + marker);
+   upgrade-then-first-claim (claim advances to `implement`); non-lifecycle
+   claim (no advance, marker written); release (returns to `plan`, marker
+   present, no re-reconcile); already-progressed epics (each of
+   some-closed / in_progress / review / done — phase untouched, marker
+   written).
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
@@ -555,28 +701,56 @@ rows assert).
 **Depends on**
 Beads 2 and 3 (the post-states the tails must agree with).
 
-## Bead 6: Complete gate reorder (OQ-1(a)) + ADR-0041 §1 amendment
+## Bead 6: Complete gate reorder (OQ-1(a)) — the prospective-snapshot protocol + ADR-0041 §1 amendment
 
 **Steps**
-1. `internal/validate`: worktree-inclusive measurement variants of
-   `ValidateDocsRange` and `CheckADRDivergence` (diff `base` → worktree state
-   of `wtPath`; committed-range behavior preserved for reconcile mode and the
-   impl-approve whole-branch backstop, which keep their explicit refs).
-2. `internal/complete/complete.go`: move steps 3.5/3.6 (doc-sync,
-   ADR-divergence) BEFORE step 2.5 (`CommitAll`) and step 3 (artifact sync);
-   panel gate stays first; reconcile path untouched.
-3. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 reversal amendment
-   (pre-drafted text; measurement-equivalence rationale; §2/§3 untouched);
-   extend `cmd/mindspec/adr0041_amendment_test.go`.
-4. AC-6 fixture: panel-pass at SHA A + dirty tracker + doc-sync-failing
-   change → run 1 fails doc-sync with tip STILL at A; run 2 with
-   `--allow-doc-skew` is decided by doc-sync, never stale-SHA.
-5. AC-7(i) red-on-revert: a post-review non-tracker commit still trips
-   stale-SHA (gate untouched).
+1. `internal/gitutil`: the two snapshot primitives —
+   `SnapshotWorktreeTree(wtPath, excludePathspecs)` (temp-index `add -A` with
+   the named-artifact exclusion + `write-tree`; worktree/index/refs untouched,
+   asserted by test) and the plumbing commit-from-tree
+   (`commit-tree T -p <tip>` + fast-forward `update-ref`, following the
+   spec-127 `CommitTreeMerge`/`UpdateRef` precedent).
+2. `internal/executor`: interface + `MindspecExecutor` + mock gain
+   `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
+   the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
+   contents) read from `T:path`, never from `g.Root`'s checkout (closes the
+   `ChangedFiles` `g.Root`-rooting and the cwd-rooted `DiffNameOnlyRef("",…)`
+   fallback holes, `mindspec_executor.go:1210/:1221`).
+3. `internal/validate`: `ValidateDocsRange`/`CheckADRDivergence` snapshot legs
+   over `base → T` (BOTH gates, same protocol); committed-range behavior
+   preserved for reconcile mode and the impl-approve whole-branch backstop.
+4. `internal/complete/complete.go`: snapshot taken once after the panel gate;
+   both gates measure it; on pass, the user commit is created from `T`
+   (replacing the `CommitAll` porcelain path for this flow) and the artifact
+   sync commit follows; panel gate stays first; reconcile path untouched.
+5. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 amendment REPLACES
+   BOTH load-bearing statements (round-1 G1.4): (i) panel-before-`CommitAll`
+   is RETAINED with its reviewed-SHA rationale; (ii) gates-after-
+   materialization is REPLACED by prospective-snapshot-before-any-complete-
+   authored-commit, stating the artifact-only normalization treatment (the
+   export is excluded from `T` and measured by no gate) and why the gates
+   cannot vacuously miss content (untracked files are staged into `T`; the
+   commit IS `T`). No measured-equals-committed prose claim survives — the
+   equality is the commit-tree construction. Extend
+   `cmd/mindspec/adr0041_amendment_test.go`.
+6. AC-6 + AC-7(i) fixtures: panel-pass at SHA A + dirty tracker +
+   doc-sync-failing change → run 1 fails doc-sync with tip STILL at A; run 2
+   with `--allow-doc-skew` is decided by doc-sync, never stale-SHA; and
+   red-on-revert, a post-review non-tracker commit still trips stale-SHA
+   (gate untouched).
+7. Failure-injection fixture legs (round-1 G1.5), all four: (i) an UNTRACKED
+   source/doc/ADR file in the worktree — the gate measures it and refuses
+   before any commit; (ii) a pre-commit hook that adds/changes a source file —
+   the committed tree is still ≡ `T` (plumbing runs no hooks); (iii) the
+   tracker export changing content post-measurement — asserted confined to
+   the excluded artifact path; (iv) a worktree mutation in the
+   gate→commit interval — absent from the commit, present as dirt afterward.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
 - [ ] AC-6 fixture asserts `git rev-parse` tip unchanged across the refusal
+- [ ] Cross-checkout test: `complete` invoked from the main checkout measures
+      the bead worktree's snapshot
 
 **Acceptance Criteria**
 - AC-6 (convergence assertions; the (c)-only pathspec sentence vacated), AC-7
@@ -623,7 +797,10 @@ Bead 1 (the lock the backfill uses).
 **Steps**
 1. `internal/next/select.go`: total pick semantics (single-row validation —
    the `select.go:20-22` early return goes; 0=unset; negative rejected);
-   ONE selection function consumed by both paths.
+   ONE selection function consumed by both paths. The shared ready-set
+   CONSTRUCTION (query + spec filter + exclusion accounting, R6.1's "one
+   set-construction") lands beside `QueryReady` in `internal/next/beads.go`
+   (round-1 G4.3 — this is chunk 8's `beads.go` entry).
 2. `cmd/mindspec/next.go`: `runEmitOnly` receives `--pick` and builds the
    SAME ordered set via the same construction as the claim path; the
    positional emit-only bypass keeps `FetchBeadByID` + prints the pinned
@@ -680,9 +857,12 @@ None.
    template test pins the command name against the registered cobra command
    (AC-12's rename-is-red clause).
 2. `project-docs/user/guides/merge-safety.md`: R4.3's operator-visible
-   updates for the bead-6 reorder (a failed complete leaves the tip at the
-   reviewed SHA; plain re-run + original override is the whole recovery);
-   `lifecycle-modes.md` cross-links.
+   updates for the bead-6 reorder, scoped to the GATE-REFUSAL class (a
+   gate-refused complete leaves the tip at the reviewed SHA; plain re-run +
+   the original gate's override is the whole recovery; POST-gate failures —
+   merge conflicts, close failures — keep the 127 preserved-merge/forward-
+   reconcile guidance unchanged, and the doc says so); `lifecycle-modes.md`
+   cross-links.
 3. Doc-sync gate coverage over every touched source; final whole-tree
    `go test ./... -short` as the AC-13 method gate.
 
