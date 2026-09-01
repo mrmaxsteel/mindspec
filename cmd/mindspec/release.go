@@ -52,9 +52,12 @@ type releaseDeps struct {
 	// cursor rewind / mindspec_phase cache sync. A "" active bead or any error
 	// leaves the cursor untouched.
 	activeBead func(beadID string) (active string, epicID string, ok bool)
-	// syncPhase writes the mindspec_phase metadata cache on the epic (Step 6.5,
-	// mirrors complete.go). Best-effort; an error is a warning, never fatal.
-	syncPhase func(epicID, mode string)
+	// syncPhase re-derives and writes the epic's child-derived mindspec_phase
+	// (Step 6.5) via the sanctioned redesign leg (phase.SanctionedDerivedSync,
+	// spec 128 Bead 2) — backward permitted, re-derived fresh inside its own
+	// lock critical section, never a value precomputed by the caller.
+	// Best-effort; an error is a warning, never fatal.
+	syncPhase func(epicID string)
 
 	stdout io.Writer
 	stderr io.Writer
@@ -111,24 +114,39 @@ next to recover) rather than an "open + stale-worktree" collision.
 }
 
 // releaseSyncPhase performs release's step-6.5 cursor-rewind phase-cache
-// sync (value unchanged in this bead — bead 2 wires the sanctioned-sync
-// redesign leg), wrapped in the R3.3 phase write lock. It is a
-// best-effort write: a lock/write failure never fails `release` itself
-// (the sync is a cache refresh, not the terminal mutation), but round-1
-// panel G3 requires it be SURFACED, not silently discarded — rendered via
-// phase.DescribeLockFailure, which gives a lock TIMEOUT the full
-// ADR-0035 treatment (names .mindspec/phase.lock, ends with a copy-
-// pastable recovery COMMAND — round-2 panel G3: prose is not enough) and
-// any other failure (a genuine merge-write error) as-is. beadID supplies
-// that command ("mindspec release <bead-id>", the exact re-invocation
-// that hit the lock). Extracted to its own named, root-parameterized
-// function (rather than an inline closure capturing newReleaseDeps'
-// root) so it is directly unit-testable without exercising
-// newReleaseDeps' full bd/git wiring.
-func releaseSyncPhase(root, epicID, mode, beadID string) {
-	if syncErr := phase.WithPhaseWriteLock(root, epicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
-		return map[string]interface{}{"mindspec_phase": mode}, nil
-	}); syncErr != nil {
+// sync. Spec 128 Bead 2 (OQ-3 option 1, the sanction boundary): this is
+// the ONE production caller of phase.SanctionedDerivedSync — the child-
+// derived phase is re-derived FRESH inside that function's own lock
+// critical section (never precomputed here and merely closed over, the
+// exact stale-target race the R3.3 lock exists to close), backward move
+// permitted, because release's own guard-routed internal caller is
+// re-deriving from the epic's own fresh evidence rather than asking a
+// human to override a guard against possibly-stale evidence (the
+// operator-facing `mindspec repair phase` guard is unaffected).
+//
+// Ahead of the sync itself, a v2 phase-semantics self-heal
+// (phase.EnsurePhaseSemanticsV2) runs first — the same one-shot
+// reconciliation `plan approve`/`impl approve`/`complete`/`next`'s claim
+// path run — so a legacy epic converges before the sanctioned sync
+// re-derives, rather than the sync racing a stale pre-v2 stored value.
+//
+// Both calls are best-effort writes: a failure never fails `release`
+// itself (the sync is a cache refresh, not the terminal mutation), but
+// round-1 panel G3 requires it be SURFACED, not silently discarded —
+// rendered via phase.DescribeLockFailure, which gives a lock TIMEOUT the
+// full ADR-0035 treatment (names .mindspec/phase.lock, ends with a
+// copy-pastable recovery COMMAND — round-2 panel G3: prose is not
+// enough) and any other failure (a genuine merge-write error) as-is.
+// beadID supplies that command ("mindspec release <bead-id>", the exact
+// re-invocation that hit the lock). Extracted to its own named,
+// root-parameterized function (rather than an inline closure capturing
+// newReleaseDeps' root) so it is directly unit-testable without
+// exercising newReleaseDeps' full bd/git wiring.
+func releaseSyncPhase(root, epicID, beadID string) {
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
+	}
+	if syncErr := phase.SanctionedDerivedSync(root, epicID); syncErr != nil {
 		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
 	}
 }
@@ -171,12 +189,12 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		removeWorktree:   exec.RemoveBeadWorktreeAndRestore,
 		setOpen:          defaultSetOpen,
 		activeBead:       defaultActiveBead,
-		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
-		// in this bead — bead 2 wires the sanctioned-sync redesign leg).
-		// Round-1 panel G3: a lock/write failure is best-effort (the
-		// cursor-rewind cache sync never fails `release` itself) but is no
-		// longer silently discarded — see releaseSyncPhase.
-		syncPhase: func(epicID, mode string) { releaseSyncPhase(root, epicID, mode, beadID) },
+		// Spec 128 Bead 2: routed through phase.SanctionedDerivedSync (the
+		// sanctioned redesign leg) — see releaseSyncPhase. Round-1 panel
+		// G3: a lock/write failure is best-effort (the cursor-rewind
+		// cache sync never fails `release` itself) but is no longer
+		// silently discarded.
+		syncPhase: func(epicID string) { releaseSyncPhase(root, epicID, beadID) },
 		stdout:    os.Stdout,
 		stderr:    os.Stderr,
 	}
@@ -335,13 +353,13 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 
 	// Step 6 + 6.5: the cursor is DERIVED from bd's single in_progress child
 	// (ADR-0023), so Step 5's set-open already self-rewinds the derived cursor.
-	// Only sync the mindspec_phase metadata cache (mirror complete.go step 6.5)
-	// when the released bead WAS the active one; a non-active release leaves the
-	// cursor untouched.
+	// Only sync the mindspec_phase metadata cache (the sanctioned redesign
+	// leg, spec 128 Bead 2) when the released bead WAS the active one; a
+	// non-active release leaves the cursor untouched. No value is
+	// precomputed here — deps.syncPhase re-derives fresh inside its own
+	// lock critical section (phase.SanctionedDerivedSync).
 	if haveCursor && epicID != "" && active == beadID {
-		if newMode, derr := phase.DerivePhase(epicID); derr == nil && newMode != "" {
-			deps.syncPhase(epicID, newMode)
-		}
+		deps.syncPhase(epicID)
 	}
 
 	fmt.Fprintf(deps.stdout, "Released bead %s.\nWorktree removed; bead returned to open (assignee cleared).\n", idrender.Bead(beadID))

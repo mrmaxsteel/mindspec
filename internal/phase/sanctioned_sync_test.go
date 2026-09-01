@@ -38,14 +38,19 @@ import (
 )
 
 // sanctionedSyncAllowlist names the only files a production call site of
-// SanctionedDerivedSync may live in. Bead 1: empty of REAL callers (the
-// allowlist exists so a future addition is deliberate, not to claim one
-// exists yet) — bead 2 wires cmd/mindspec/release.go as the sole entry
-// and tightens the assertion below from "found ⊆ allowlist" to
-// "exactly one, and it is this file".
+// SanctionedDerivedSync may live in. Bead 2 wires
+// cmd/mindspec/release.go's releaseSyncPhase as the sole entry —
+// TestSanctionedDerivedSync_NoCallersOutsideAllowlist below now asserts
+// EXACTLY one call site (tightened from bead 1's "found ⊆ allowlist",
+// trivially satisfied by zero real callers).
 var sanctionedSyncAllowlist = map[string]bool{
 	"cmd/mindspec/release.go": true,
 }
+
+// sanctionedSyncSoleCallerFunc names the ONE function expected to call
+// SanctionedDerivedSync, in the ONE allowlisted file — bead 2's
+// tightening (round-3 G4.2) pins not just the file but the function.
+const sanctionedSyncSoleCallerFunc = "releaseSyncPhase"
 
 // phaseImportPath is this package's own import path, used to resolve
 // cross-package call sites by identity (O2-1/G1-B3-05 discipline: never
@@ -80,6 +85,16 @@ func TestSanctionedDerivedSync_NoCallersOutsideAllowlist(t *testing.T) {
 		if !sanctionedSyncAllowlist[s.file] {
 			t.Errorf("production call site of SanctionedDerivedSync found outside the allowlist: %s (func %s) — every caller must be a sanctioned, guard-routed internal sync, never an ad-hoc bypass of the mindspec repair phase operator guard", s.file, s.funcName)
 		}
+	}
+	// Bead 2 tightening (round-3 G4.2): bead 1's fence was satisfiable by
+	// zero real callers ("found ⊆ allowlist"); now that release.go wires
+	// the real one, the fence must assert EXACTLY one call site, in the
+	// exact function expected to be the sole sanctioned caller.
+	if len(sites) != 1 {
+		t.Fatalf("expected exactly ONE production call site of SanctionedDerivedSync, found %d: %v", len(sites), sites)
+	}
+	if sites[0].file != "cmd/mindspec/release.go" || sites[0].funcName != sanctionedSyncSoleCallerFunc {
+		t.Errorf("the sole call site must be cmd/mindspec/release.go's %s, got %s (func %s)", sanctionedSyncSoleCallerFunc, sites[0].file, sites[0].funcName)
 	}
 }
 

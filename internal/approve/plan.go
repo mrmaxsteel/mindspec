@@ -300,6 +300,18 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	if _, err := phase.EnsureMigrated(root, specID); err != nil {
 		return nil, err
 	}
+	// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
+	// reconciliation runs beside EnsureMigrated, under the SAME
+	// ahead-of-preflight exemption (spec 119 R1) — it must run AFTER
+	// EnsureMigrated (LegacyPhaseSignature requires mindspec_phase
+	// metadata to already exist) and before any preflight refusal below.
+	// No-op when no epic exists yet (pre-approve-spec) or lookup fails —
+	// mirroring EnsureMigrated's own "nothing to migrate" tolerance.
+	if epicID, epicErr := phase.FindEpicBySpecID(specID); epicErr == nil && epicID != "" {
+		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+			return nil, err
+		}
+	}
 	result := &PlanResult{SpecID: specID}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
@@ -447,7 +459,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
 	}
 
-	// Step 4b (Spec 080): Write mindspec_phase: implement to epic metadata.
+	// Step 4b (Spec 080): Write mindspec_phase to epic metadata.
 	// Must run AFTER Step 4 — see ordering invariant above. facts.parentID is
 	// guaranteed non-empty here — resolvePlanApprovePreflight refuses
 	// pre-mutation on both epic failure modes (P10), so no epic-less path
@@ -455,12 +467,17 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	//
 	// Spec 128 R3.3: wrapped in the phase write lock so a concurrent
 	// mindspec_phase writer can never land a stale value over this one
-	// (or vice versa). Value unchanged in this bead — bead 2 owns value
-	// semantics (OQ-3). Round-1/round-2 panel G3: a failure is best-effort
-	// (a warning, never fatal here) but a lock TIMEOUT is rendered with a
-	// copy-pastable re-run COMMAND via phase.DescribeLockFailure, not prose.
+	// (or vice versa). Spec 128 Bead 2 (OQ-3 option 1): writes `plan`
+	// (was `implement`) — the first LIFECYCLE claim in `mindspec next`
+	// now owns the advance to `implement` (cmd/mindspec/next.go), so
+	// stored and child-derived phase AGREE at every point of the
+	// plan-approve -> first-claim window (all-open children derive
+	// `plan` too, derive.go:387). Round-1/round-2 panel G3: a failure is
+	// best-effort (a warning, never fatal here) but a lock TIMEOUT is
+	// rendered with a copy-pastable re-run COMMAND via
+	// phase.DescribeLockFailure, not prose.
 	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
-		return map[string]interface{}{"mindspec_phase": "implement"}, nil
+		return map[string]interface{}{"mindspec_phase": state.ModePlan}, nil
 	}); err != nil {
 		result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec plan approve %s", idrender.Spec(specID))))
 	}

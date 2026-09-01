@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -22,6 +24,13 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
+
+// nextPhaseMergeMetadataFn is the test seam for advancePhaseOnClaim's
+// Step 5.2 mindspec_phase write (spec 128 Bead 2), matching the house
+// per-package seam convention (planMergeMetadataFn, completeMergeMetadataFn,
+// repairMergeMetadataFn) so a test can observe/stub the write without
+// hitting a real bd invocation.
+var nextPhaseMergeMetadataFn = bead.MergeMetadata
 
 var nextCmd = &cobra.Command{
 	Use:   "next",
@@ -314,6 +323,13 @@ team lead spawns fresh agents per bead.`,
 			_ = state.WriteSessionFile(root, sess)
 		}
 
+		// Step 5.2: Spec 128 Bead 2 (OQ-3 option 1) — advance stored
+		// phase after a successful lifecycle claim. Extracted to its own
+		// named function (matching claimFailureError/
+		// warnWorktreeSetupFailure's established pattern) so it is
+		// directly unit-testable without exercising the full RunE flow.
+		advancePhaseOnClaim(root, selected)
+
 		// Step 5.5: Create or reuse worktree
 		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
 		if wtErr != nil {
@@ -477,6 +493,50 @@ func formatClaimLine(id, title string) string {
 // empty string as identity, so this NEVER renders as `spec=""`.
 func formatStateLine(mode, specID, beadID string) string {
 	return fmt.Sprintf("State updated: mode=%s, spec=%s, bead=%s\n", mode, idrender.Spec(specID), idrender.Bead(beadID))
+}
+
+// advancePhaseOnClaim implements Step 5.2 (spec 128 Bead 2, OQ-3
+// option 1): after a successful ClaimBead, self-heal any legacy v2
+// phase-semantics signature, then advance the epic's stored
+// mindspec_phase to `implement` under the R3.3 lock, but ONLY for a
+// LIFECYCLE (task-typed or untyped — the ADR-0023 discriminator) claim;
+// a non-lifecycle claim (e.g. a `bug` bead) advances nothing.
+// Forward-only: no-op when already `implement` — this is a NEW writer,
+// so it registers in the bead-1 writer-inventory test (writer_inventory_test.go)
+// by construction; the composite literal below must stay lexically
+// nested inside the phase.WithPhaseWriteLock call for that AST-walk
+// test to recognize it as guarded.
+//
+// Best-effort — a failure here never fails `next` itself (the bead is
+// already claimed and the worktree not yet set up); a genuine
+// epic-lineage lookup failure (as opposed to the bead simply having no
+// epic lineage at all, phase.ErrNoEpicLineage) is still surfaced as a
+// warning rather than silently discarded.
+func advancePhaseOnClaim(root string, selected next.BeadInfo) {
+	epicID, _, epicErr := phase.FindEpicForBead(selected.ID)
+	if epicErr != nil {
+		if !errors.Is(epicErr, phase.ErrNoEpicLineage) {
+			fmt.Fprintf(os.Stderr, "warning: could not resolve epic for bead %s: %v\n", idrender.Bead(selected.ID), epicErr)
+		}
+		return
+	}
+	if epicID == "" {
+		return
+	}
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	if !phase.IsLifecycleIssueType(selected.IssueType) {
+		return
+	}
+	if lockErr := phase.WithPhaseWriteLock(root, epicID, nextPhaseMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
+		if stored == state.ModeImplement {
+			return nil, nil
+		}
+		return map[string]interface{}{"mindspec_phase": state.ModeImplement}, nil
+	}); lockErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", phase.DescribeLockFailure(lockErr, fmt.Sprintf("mindspec next %s", idrender.Bead(selected.ID))))
+	}
 }
 
 // claimFailureError builds the spec 093 Req 3 claim-failure recovery

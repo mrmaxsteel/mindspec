@@ -63,6 +63,18 @@ None
 // original bytes so callers can assert byte-identity after a refusal.
 func setupPreflightPlan(t *testing.T, specID, planContent string) (root, planPath string, original []byte) {
 	t.Helper()
+	// Spec 128 Bead 2: phase.EnsurePhaseSemanticsV2 now runs beside
+	// EnsureMigrated at ApprovePlan's ahead-of-preflight position and
+	// writes via phase's OWN mergeMetadataFn seam (never
+	// planMergeMetadataFn — see semantics_v2.go's doc comment on why it
+	// is deliberately NOT a caller-injected seam). None of these fixture
+	// epics carry the v2 marker (they predate it), so without this stub
+	// every preflight test below would attempt a REAL bd write. A no-op
+	// stub here is inert for every OTHER assertion these tests make
+	// (planRunBDFn/planRunBDCombinedFn/planMergeMetadataFn are separate
+	// seams), exactly like EnsureMigrated's own tests already stub this
+	// same seam for its (rarer) migration write.
+	noopStubPhaseMergeMetadataForTest(t)
 	root = t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
 		t.Fatalf("mkdir .mindspec: %v", err)
@@ -119,6 +131,19 @@ func assertPlanUnchangedAndNoMutation(t *testing.T, planPath string, original []
 	if calls := mockExec.CallsTo("CommitAll"); len(calls) != 0 {
 		t.Errorf("expected zero CommitAll calls on a preflight refusal, got %d", len(calls))
 	}
+}
+
+// noopStubPhaseMergeMetadataForTest stubs phase.mergeMetadataFn (the seam
+// phase.EnsureMigrated, phase.SanctionedDerivedSync, and
+// phase.EnsurePhaseSemanticsV2 all write through) to a harmless no-op for
+// the duration of one test. Spec 128 Bead 2: every ApprovePlan preflight
+// fixture predates the v2 marker, so EnsurePhaseSemanticsV2's ahead-of-
+// preflight marker-write would otherwise hit a REAL, unstubbed
+// bead.MergeMetadata call. Shared across this file's fixtures so each
+// test doesn't repeat the stub inline.
+func noopStubPhaseMergeMetadataForTest(t *testing.T) {
+	t.Helper()
+	t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 }
 
 // epicJSONFor builds the `bd list --type=epic` fixture response identifying
@@ -353,6 +378,7 @@ func stubApprovePlanEpic(t *testing.T, epicID, specID string) {
 // 097 R3) — but the historical silence is replaced by a warning naming the
 // absent block.
 func TestApprovePlan_MissingWorkChunks_WarnsAndApproves(t *testing.T) {
+	noopStubPhaseMergeMetadataForTest(t)
 	specID := "042-test"
 	planContent := `---
 status: Draft
@@ -426,6 +452,7 @@ None
 // `bd dep add` failure for one edge warns naming BOTH bead IDs of the
 // unwired edge, while approve still succeeds and the OTHER edges wire.
 func TestApprovePlan_DepAddFailure_WarnsBothIDs(t *testing.T) {
+	noopStubPhaseMergeMetadataForTest(t)
 	specID := "042-test"
 	planContent := `---
 status: Draft

@@ -128,6 +128,7 @@ func TestPlanLintDoubleAssignedFiles_TermsafeEscaped(t *testing.T) {
 // plan-lint finding (advisory — approve still succeeds) naming the
 // file and both beads.
 func TestApprovePlan_DoubleAssignedFile_LintWarns(t *testing.T) {
+	noopStubPhaseMergeMetadataForTest(t)
 	specID := "042-test"
 	planContent := `---
 status: Draft

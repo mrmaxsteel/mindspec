@@ -124,6 +124,17 @@ func stubApproveBeadsWithEpicRegistry(t *testing.T) {
 	t.Cleanup(approve.SetPlanListJSONForTest(func(args ...string) ([]byte, error) {
 		return []byte(`[]`), nil
 	}))
+	// Spec 128 Bead 2: phase.EnsurePhaseSemanticsV2 now runs beside
+	// EnsureMigrated at ApprovePlan's ahead-of-preflight position and
+	// writes via phase's OWN mergeMetadataFn seam (never a caller-
+	// injected one — see semantics_v2.go's doc comment). This fake
+	// epic-create seed above does not stamp the v2 marker (that lives in
+	// ApproveSpec's real epic-create call, out of this bead's scope), so
+	// without this stub every scenario below would attempt a REAL
+	// bd write. A no-op here is harmless for these scenarios (none
+	// inspect the marker itself) and mirrors the ADR-0034 migration's
+	// pre-seeded metadata trick just above for the identical reason.
+	t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		mu.Lock()

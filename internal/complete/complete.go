@@ -526,6 +526,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
 	epicID, epicErr := phase.FindEpicBySpecIDWithCache(epicCache, specID)
 	if epicErr == nil && epicID != "" {
+		// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
+		// reconciliation runs beside EnsureMigratedWithCache above, under
+		// the same ahead-of-preflight exemption — must run before the
+		// phase read immediately below.
+		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+			return nil, err
+		}
 		epicPhase, phaseErr := phase.DerivePhaseWithCache(epicCache, epicID)
 		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
 			// R4: beadID/specID are ID-typed positions (idrender);

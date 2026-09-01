@@ -56,6 +56,14 @@ func stubRepairPhaseEnv(t *testing.T, stored string, merge func(string, map[stri
 		"spec_num":             float64(92),
 		"spec_title":           "agent-contract-hardening",
 		"mindspec_migrated_at": "2026-01-01T00:00:00Z",
+		// Spec 128 Bead 2 (forward-compat, same convention bead 1 used
+		// for its own guard fixtures): marker PRESENT so
+		// phase.EnsurePhaseSemanticsV2's new self-heal call at
+		// repairPhaseRunE's entry no-ops here, leaving this fixture's
+		// pre-existing exactly-one-merge-call contract undisturbed. This
+		// helper predates v2 phase semantics; it is not itself testing
+		// the v2 reconciliation (that lives in semantics_v2_test.go).
+		"mindspec_phase_semantics": "v2",
 	}
 	if stored != "" {
 		meta["mindspec_phase"] = stored
@@ -513,6 +521,11 @@ func TestRepairPhase_TerminalRowClosedDoneMarkerAllClosedChildren(t *testing.T) 
 			"mindspec_migrated_at": "2026-01-01T00:00:00Z",
 			"mindspec_phase":       "done",
 			"mindspec_done":        true,
+			// Spec 128 Bead 2: marker PRESENT so the new
+			// EnsurePhaseSemanticsV2 self-heal at repairPhaseRunE's
+			// entry no-ops, preserving this fixture's exactly-one-
+			// merge-call contract (this test predates v2 semantics).
+			"mindspec_phase_semantics": "v2",
 		},
 	}}
 	children := []phase.ChildInfo{

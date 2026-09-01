@@ -1200,16 +1200,20 @@ func TestExtractPlanVersion(t *testing.T) {
 }
 
 // TestApprovePlan_CommitsBeforeWritingImplementPhase is a regression test for
-// the ordering bug where ApprovePlan flipped the epic's mindspec_phase to
-// "implement" BEFORE auto-committing plan.md. Because the pre-commit hook
-// (internal/hook/dispatch.go) blocks commits on spec/<id> branches when
-// mindspec_phase is "implement", flipping the phase first caused the plan
+// the ordering bug where ApprovePlan flipped the epic's mindspec_phase
+// BEFORE auto-committing plan.md. Because the pre-commit hook
+// (internal/hook/dispatch.go) blocks commits on spec/<id> branches once
+// mindspec_phase is past `plan`, flipping the phase first caused the plan
 // approval commit itself to be blocked. Callers had to retry with
 // MINDSPEC_ALLOW_MAIN=1 to unstick the approval.
 //
-// Invariant: every exec.CommitAll invocation must complete before the first
-// planMergeMetadataFn call that writes mindspec_phase=implement.
+// Spec 128 Bead 2 (OQ-3 option 1): the value step 4b writes changed from
+// `implement` to `plan` (plan.go:462) — `mindspec next`'s first LIFECYCLE
+// claim now owns the advance to `implement`. The ORDERING invariant this
+// test pins is unchanged: every exec.CommitAll invocation must complete
+// before the first planMergeMetadataFn call that writes mindspec_phase.
 func TestApprovePlan_CommitsBeforeWritingImplementPhase(t *testing.T) {
+	noopStubPhaseMergeMetadataForTest(t)
 	tmp := t.TempDir()
 	specID := "042-test"
 	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", specID)
@@ -1339,7 +1343,7 @@ None
 		if entry == "commit-all" {
 			lastCommit = i
 		}
-		if strings.HasPrefix(entry, "merge-metadata:") && strings.HasSuffix(entry, ":implement") {
+		if strings.HasPrefix(entry, "merge-metadata:") && strings.HasSuffix(entry, ":plan") {
 			if firstPhaseWrite < 0 {
 				firstPhaseWrite = i
 			}
@@ -1349,10 +1353,10 @@ None
 		t.Fatalf("expected at least one exec.CommitAll call; got calls: %v", callLog)
 	}
 	if firstPhaseWrite < 0 {
-		t.Fatalf("expected a merge-metadata:*:implement call; got calls: %v", callLog)
+		t.Fatalf("expected a merge-metadata:*:plan call; got calls: %v", callLog)
 	}
 	if firstPhaseWrite <= lastCommit {
-		t.Fatalf("ordering regression: phase=implement metadata write (idx=%d) must come AFTER final commit (idx=%d). Calls: %v",
+		t.Fatalf("ordering regression: phase=plan metadata write (idx=%d) must come AFTER final commit (idx=%d). Calls: %v",
 			firstPhaseWrite, lastCommit, callLog)
 	}
 }
