@@ -576,7 +576,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if needsPhaseReconcile && epicID != "" {
 		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
 		// in this bead).
-		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string) (map[string]interface{}, error) {
+		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string, bool) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"mindspec_phase": phaseDetail.Derived,
 			}, nil
@@ -615,7 +615,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		//
 		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
 		// in this bead).
-		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string) (map[string]interface{}, error) {
+		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string, bool) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"mindspec_phase": "done",
 				"mindspec_done":  true,

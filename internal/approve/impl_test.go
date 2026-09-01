@@ -244,13 +244,13 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 	t.Cleanup(restorePhaseMerge)
 
 	// Stub phase to return implement mode (not review)
+	epics := []phase.EpicInfo{{
+		ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+		IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
+	}}
 	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--type=epic" {
-				epics := []phase.EpicInfo{{
-					ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
-					IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(10), "spec_title": "test"},
-				}}
 				return json.Marshal(epics)
 			}
 		}
@@ -262,6 +262,19 @@ func TestApproveImpl_WrongMode(t *testing.T) {
 		return []byte("[]"), nil
 	})
 	t.Cleanup(restoreList)
+	// Spec 128 R3.3 (round-1 panel G1): EnsureMigrated's own
+	// WithPhaseWriteLock call performs a FRESH `bd show <epicID>` read
+	// under the lock (readPhaseForLock, not the SAME cache
+	// FindEpicBySpecIDWithCache warmed via --type=epic above) and now
+	// PROPAGATES a genuine lookup failure instead of silently collapsing
+	// it to "absent" — so the show path needs its own stub too.
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" && args[1] == "epic-parent" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
 
 	mock := &executor.MockExecutor{}
 

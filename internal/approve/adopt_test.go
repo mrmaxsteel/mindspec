@@ -98,6 +98,20 @@ func wireAdoptSeams(t *testing.T, epicID string) (closedCalls *int, metadata map
 	adoptFindEpicFn = func(specID string) (string, error) { return epicID, nil }
 	t.Cleanup(func() { adoptFindEpicFn = origFindEpic })
 
+	// Spec 128 R3.3 (round-1 panel G1): WithPhaseWriteLock's own fresh
+	// under-lock epic read now PROPAGATES a genuine lookup failure
+	// instead of silently collapsing it to "absent" — so, unlike before,
+	// this fixture's real `bd show <epicID>` call (there is no real bd
+	// repo here) must be stubbed too, or adoptFinalize's write would now
+	// correctly fail closed rather than silently proceeding. An empty
+	// list response is "successfully looked up, not found" (fetchEpic's
+	// own contract), which is a harmless, error-free outcome for this
+	// writer (it never branches on stored/present in this bead).
+	origRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil })
+	t.Cleanup(origRunBD)
+	origListJSON := phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil })
+	t.Cleanup(origListJSON)
+
 	origPhase := adoptDerivePhaseDetailFn
 	adoptDerivePhaseDetailFn = func(id string) (phase.PhaseDetail, error) {
 		return phase.PhaseDetail{EpicID: id, Stored: "", Derived: state.ModeReview}, nil

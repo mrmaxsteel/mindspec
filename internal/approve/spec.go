@@ -77,7 +77,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			// unchanged in this bead — bead 1 scope is the lock wrap
 			// only; R3.6's safe-replay semantics are a later bead's
 			// concern, so this still unconditionally writes "plan").
-			if err := phase.WithPhaseWriteLock(root, existingEpicID, bead.MergeMetadata, func(string) (map[string]interface{}, error) {
+			if err := phase.WithPhaseWriteLock(root, existingEpicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
 				return map[string]interface{}{"mindspec_phase": "plan"}, nil
 			}); err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))

@@ -457,7 +457,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// mindspec_phase writer can never land a stale value over this one
 	// (or vice versa). Value unchanged in this bead — bead 2 owns value
 	// semantics (OQ-3).
-	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string) (map[string]interface{}, error) {
+	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": "implement"}, nil
 	}); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))

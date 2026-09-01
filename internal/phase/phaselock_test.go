@@ -13,9 +13,11 @@ package phase
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -23,75 +25,158 @@ import (
 )
 
 // TestWithPhaseWriteLock_ExclusiveAcrossGoroutines is the barrier-
-// controlled two-contender exclusivity test: exactly one goroutine is
-// ever inside the critical section at a time, and the second (loser)
-// blocks until the first releases.
+// controlled two-contender exclusivity test (round-1 panel G6:
+// deterministic barriers, no sleep-based scheduling): a channel proves
+// the second contender has ATTEMPTED acquisition before the first
+// releases; a bounded negative window proves it CANNOT enter before
+// release; a positive channel wait proves it DOES enter afterward; both
+// calls' returned errors are checked.
 func TestWithPhaseWriteLock_ExclusiveAcrossGoroutines(t *testing.T) {
 	root := t.TempDir()
 	store := newFakeEpicStore("epic-1", nil)
 	store.stub(t)
 
-	var mu sync.Mutex
-	var insideCount, maxInside int
-	enter := func() {
-		mu.Lock()
-		insideCount++
-		if insideCount > maxInside {
-			maxInside = insideCount
-		}
-		mu.Unlock()
-	}
-	leave := func() {
-		mu.Lock()
-		insideCount--
-		mu.Unlock()
-	}
-
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(2)
-
+	firstDone := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		_ = WithPhaseWriteLock(root, "epic-1", store.merge, func(string) (map[string]interface{}, error) {
-			enter()
+		firstDone <- WithPhaseWriteLock(root, "epic-1", store.merge, func(string, bool) (map[string]interface{}, error) {
 			close(firstEntered)
 			<-releaseFirst
-			leave()
 			return map[string]interface{}{"mindspec_phase": "plan"}, nil
 		})
 	}()
-
 	<-firstEntered
-	// Give the second goroutine a generous head start to reach the lock
-	// and block on it before we release the first holder.
-	go func() {
-		defer wg.Done()
-		time.Sleep(50 * time.Millisecond)
-		close(releaseFirst)
-	}()
 
-	secondDone := make(chan struct{})
+	secondAttempting := make(chan struct{})
+	secondEntered := make(chan struct{})
+	secondDone := make(chan error, 1)
 	go func() {
-		_ = WithPhaseWriteLock(root, "epic-1", store.merge, func(string) (map[string]interface{}, error) {
-			enter()
-			leave()
+		close(secondAttempting)
+		secondDone <- WithPhaseWriteLock(root, "epic-1", store.merge, func(string, bool) (map[string]interface{}, error) {
+			close(secondEntered)
 			return map[string]interface{}{"mindspec_phase": "implement"}, nil
 		})
-		close(secondDone)
 	}()
+	// Deterministic: the second contender has started trying to acquire
+	// the SAME lock (attempted acquisition) before we ever release the
+	// first holder.
+	<-secondAttempting
 
-	wg.Wait()
+	// Deterministic negative window: with the first holder still
+	// holding, the second contender must NOT have entered — a bounded
+	// PROOF window (asserts it did not happen within a generous margin),
+	// not a scheduling nudge; the forward-progress claim is proven by
+	// the channel waits below, not by this window's duration.
 	select {
-	case <-secondDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("second WithPhaseWriteLock call never completed")
+	case <-secondEntered:
+		t.Fatal("second contender entered the critical section before the first released — mutual exclusion violated")
+	case <-time.After(150 * time.Millisecond):
 	}
 
-	if maxInside > 1 {
-		t.Errorf("maxInside = %d, want 1 — both goroutines were inside the critical section simultaneously", maxInside)
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Errorf("first WithPhaseWriteLock call returned an error: %v", err)
 	}
+
+	select {
+	case <-secondEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second contender never entered after the first released")
+	}
+	if err := <-secondDone; err != nil {
+		t.Errorf("second WithPhaseWriteLock call returned an error: %v", err)
+	}
+}
+
+// TestPhaseLock_CrashedHolderReleases_Unix is the plan step-2 (round-1
+// panel G4/R1/R2) crashed-holder recovery leg: a REAL subprocess
+// acquires the lock at a fixture path and is SIGKILLed while holding it;
+// the parent's next acquirePhaseFileLock must succeed promptly (well
+// under phaseLockWait) — flock is kernel-held, so a killed holder's lock
+// releases with its process: no PID/timestamp content, no takeover, no
+// deletion step is ever needed.
+//
+// The plan's Windows-leg disposition is seam-driven on non-Windows CI
+// (this repo's CI has no Windows runner —.github/workflows/ci.yml runs
+// linux/darwin only): shouldRetryWindowsLockError's classification
+// (round-1 panel G7) is tested directly, on every platform, in
+// phaselock_windows_errors_test.go. A real Windows subprocess
+// crashed-holder test analogous to this one is not exercised here —
+// LockFileEx's crashed-holder-releases behavior is documented Win32
+// kernel semantics (a handle's byte-range lock is released when the
+// process exits, same guarantee this test proves for flock), not this
+// package's own code, so the residual is a platform-semantics claim, not
+// an untested code path.
+func TestPhaseLock_CrashedHolderReleases_Unix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix leg — flock kernel-held-lock semantics; see the doc comment for the Windows disposition")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "phase.lock")
+	heldMarker := filepath.Join(dir, "held")
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess_AcquirePhaseLockAndHang$")
+	cmd.Env = append(os.Environ(),
+		"MINDSPEC_PHASELOCK_HELPER=1",
+		"MINDSPEC_PHASELOCK_HELPER_PATH="+path,
+		"MINDSPEC_PHASELOCK_HELPER_MARKER="+heldMarker,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting helper process: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(heldMarker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper process never signaled it held the lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("killing helper process: %v", err)
+	}
+	_ = cmd.Wait()
+
+	start := time.Now()
+	unlock, err := acquirePhaseFileLock(path, 2*time.Second, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquiring after crashed holder: %v", err)
+	}
+	defer unlock()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("acquisition after crashed holder took %v, want near-instant (flock releases with the killed process)", elapsed)
+	}
+}
+
+// TestHelperProcess_AcquirePhaseLockAndHang is invoked as a SUBPROCESS by
+// TestPhaseLock_CrashedHolderReleases_Unix — it is not a real test.
+// Guarded by the MINDSPEC_PHASELOCK_HELPER env var so a normal `go test`
+// run (which never sets it) just skips it immediately.
+func TestHelperProcess_AcquirePhaseLockAndHang(t *testing.T) {
+	if os.Getenv("MINDSPEC_PHASELOCK_HELPER") != "1" {
+		t.Skip("not invoked as a phaselock crashed-holder helper process")
+	}
+	path := os.Getenv("MINDSPEC_PHASELOCK_HELPER_PATH")
+	marker := os.Getenv("MINDSPEC_PHASELOCK_HELPER_MARKER")
+	unlock, err := acquirePhaseFileLock(path, 5*time.Second, 10*time.Millisecond)
+	if err != nil {
+		os.Exit(1)
+	}
+	defer unlock()
+	if err := os.WriteFile(marker, []byte(""), 0o600); err != nil {
+		os.Exit(1)
+	}
+	// Block "forever" (a sleep, not select{} — an empty select in the
+	// sole goroutine trips Go's own deadlock detector and would
+	// self-terminate the process instead of genuinely hanging until the
+	// parent's SIGKILL).
+	time.Sleep(time.Hour)
 }
 
 // TestAcquirePhaseFileLock_TimesOutWithoutDeleteInstruction pins the
@@ -136,6 +221,54 @@ func TestAcquirePhaseFileLock_TimesOutWithoutDeleteInstruction(t *testing.T) {
 	if elapsed > 3*time.Second {
 		t.Errorf("timeout took too long: %v (wanted ~200ms)", elapsed)
 	}
+}
+
+// TestDescribeLockFailure is round-1 panel G3: a best-effort caller
+// (release.go's/complete.go's step-6.5 sync) must surface, not discard,
+// a WithPhaseWriteLock failure — DescribeLockFailure is the shared
+// renderer both use. A lock TIMEOUT gets the full ADR-0035 treatment
+// (names the lock path, ends with a `recovery: ` line that never
+// advises deletion); any other error (a genuine merge-write failure) is
+// rendered as-is with no manufactured recovery line.
+func TestDescribeLockFailure(t *testing.T) {
+	t.Run("nil error renders empty", func(t *testing.T) {
+		if got := DescribeLockFailure(nil); got != "" {
+			t.Errorf("DescribeLockFailure(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("lock timeout names the path and ends with a re-run recovery line", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "phase.lock")
+		timeoutErr := fmt.Errorf("phase: acquire write lock at %s: %w", path, ErrPhaseLockTimeout)
+
+		got := DescribeLockFailure(timeoutErr)
+		if !strings.Contains(got, PhaseLockRelPath) {
+			t.Errorf("must name the lock path %s: %q", PhaseLockRelPath, got)
+		}
+		lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+		last := lines[len(lines)-1]
+		if !strings.HasPrefix(last, "recovery: ") {
+			t.Errorf("must end with a recovery: line, got last line %q", last)
+		}
+		// The recovery line itself SAYS "never delete it" — a bare
+		// substring check for "delete" would false-positive on that very
+		// safety sentence, so assert the POSITIVE safety phrasing.
+		if !strings.Contains(strings.ToLower(got), "never delete") {
+			t.Errorf("must explicitly advise against deleting/removing the lock file: %q", got)
+		}
+	})
+
+	t.Run("a non-timeout error is rendered as-is with no manufactured recovery line", func(t *testing.T) {
+		plain := errors.New("bd metadata merge-read failed for epic-1: connection refused")
+		got := DescribeLockFailure(plain)
+		if !strings.Contains(got, plain.Error()) {
+			t.Errorf("must contain the underlying error text: %q", got)
+		}
+		if strings.Contains(got, "recovery: ") {
+			t.Errorf("a plain (non-timeout) failure must not get a manufactured recovery line: %q", got)
+		}
+	})
 }
 
 // TestAcquirePhaseFileLock_LeftoverEmptyFileDoesNotBlock is the
@@ -205,7 +338,7 @@ func TestWithPhaseWriteLock_NoBlockableGitDirt(t *testing.T) {
 
 	store := newFakeEpicStore("epic-1", nil)
 	store.stub(t)
-	if err := WithPhaseWriteLock(root, "epic-1", store.merge, func(string) (map[string]interface{}, error) {
+	if err := WithPhaseWriteLock(root, "epic-1", store.merge, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": "plan"}, nil
 	}); err != nil {
 		t.Fatalf("WithPhaseWriteLock: %v", err)

@@ -10,8 +10,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -22,6 +20,19 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// stubRepairFindRoot fixture-scopes repairFindRootFn to root for the
+// duration of one test (round-1 panel G2, hard-block driver: production
+// findRoot()'s ambient-cwd resolution can walk up to the SHARED MAIN
+// checkout from a git-linked bead worktree — a real, observed failure
+// mode this seam exists to close for every test that reaches
+// WithPhaseWriteLock). Restores the original seam on t.Cleanup.
+func stubRepairFindRoot(t *testing.T, root string) {
+	t.Helper()
+	orig := repairFindRootFn
+	repairFindRootFn = func() (string, error) { return root, nil }
+	t.Cleanup(func() { repairFindRootFn = orig })
+}
 
 // TestRepairMergeMetadataFnDefaultsToBeadMergeMetadata kills panel-R3
 // mutant M4a-2: the production binding of the repair write seam MUST
@@ -40,6 +51,7 @@ func TestRepairMergeMetadataFnDefaultsToBeadMergeMetadata(t *testing.T) {
 // review), and swaps the repair merge seam for `merge`.
 func stubRepairPhaseEnv(t *testing.T, stored string, merge func(string, map[string]interface{}) error) {
 	t.Helper()
+	stubRepairFindRoot(t, t.TempDir())
 	meta := map[string]interface{}{
 		"spec_num":             float64(92),
 		"spec_title":           "agent-contract-hardening",
@@ -89,6 +101,7 @@ func stubRepairPhaseEnv(t *testing.T, stored string, merge func(string, map[stri
 // and leave them untouched once it lands.
 func stubRepairPhaseEnvWithChildren(t *testing.T, stored string, children []phase.ChildInfo, merge func(string, map[string]interface{}) error) {
 	t.Helper()
+	stubRepairFindRoot(t, t.TempDir())
 	meta := map[string]interface{}{
 		"spec_num":                 float64(92),
 		"spec_title":               "agent-contract-hardening",
@@ -149,22 +162,6 @@ func setForceBackwardFlag(t *testing.T, reason string) {
 		_ = f.Value.Set(origValue)
 		f.Changed = origChanged
 	})
-}
-
-// chdirForTest chdirs the process into dir and restores the original cwd
-// on cleanup. (testing.T.Chdir is Go 1.24+; this repo's CI matrix still
-// runs Go 1.22/1.23 — see .github/workflows/ci.yml — so a manual
-// os.Chdir/restore is used instead.)
-func chdirForTest(t *testing.T, dir string) {
-	t.Helper()
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir %s: %v", dir, err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(orig) })
 }
 
 // TestRepairPhase_BackwardMoveRefused is AC-5(ii): on the stored-implement/
@@ -295,18 +292,25 @@ func (s *concurrencyFixtureStore) epicsJSON() ([]byte, error) {
 // "review" while repair phase is inside (or waiting to enter) its
 // critical section — driven via the repairMergeMetadataFn seam plus a
 // contending goroutine on the REAL lock in a fixture repo — never ends
-// with stored regressed to "implement". repair's own target
-// (detail.Derived) is computed from the all-open-children state BEFORE
-// it acquires the lock — "plan" — so once the concurrent writer's fresher
-// "review" is visible under the lock, phase.IsBackwardMove("review",
-// "plan") is true and repair refuses; the final stored value is
-// "review".
+// with stored regressed to "implement". Round-1 panel G1/R3/R6: repair's
+// own derivation now runs FRESH, INSIDE its own critical section
+// (mirroring SanctionedDerivedSync), reading the same all-open children
+// fixture the concurrent writer never touches — so it derives "plan"
+// fresh, exactly as a pre-lock snapshot would have — and once the
+// concurrent writer's fresher "review" is visible under the lock,
+// phase.IsBackwardMove("review", "plan") is true and repair refuses; the
+// final stored value is "review".
+//
+// Round-1 panel G2 (hard-block driver): the lock root is fixture-scoped
+// via stubRepairFindRoot (a throwaway t.TempDir()) rather than resolved
+// via findRoot()'s ambient cwd, which — run from this bead's own linked
+// worktree — can walk up to the SHARED MAIN checkout and both fail in a
+// sandboxed CI environment and leave real dirt behind.
+//
+// Round-1 panel G6: deterministic barriers, not sleep-based scheduling.
 func TestRepairPhase_ConcurrentWriterNeverRegressed(t *testing.T) {
-	tmp := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o700); err != nil {
-		t.Fatalf("mkdir .mindspec: %v", err)
-	}
-	chdirForTest(t, tmp)
+	root := t.TempDir()
+	stubRepairFindRoot(t, root)
 
 	store := &concurrencyFixtureStore{metadata: map[string]interface{}{
 		"spec_num":                 float64(92),
@@ -343,15 +347,10 @@ func TestRepairPhase_ConcurrentWriterNeverRegressed(t *testing.T) {
 	repairMergeMetadataFn = store.merge
 	t.Cleanup(func() { repairMergeMetadataFn = origMerge })
 
-	root, err := findRoot()
-	if err != nil {
-		t.Fatalf("findRoot: %v", err)
-	}
-
 	holderEntered := make(chan struct{})
 	releaseHolder := make(chan struct{})
 	go func() {
-		_ = phase.WithPhaseWriteLock(root, "epic-92", store.merge, func(string) (map[string]interface{}, error) {
+		_ = phase.WithPhaseWriteLock(root, "epic-92", store.merge, func(string, bool) (map[string]interface{}, error) {
 			close(holderEntered)
 			<-releaseHolder
 			return map[string]interface{}{"mindspec_phase": "review"}, nil
@@ -359,20 +358,32 @@ func TestRepairPhase_ConcurrentWriterNeverRegressed(t *testing.T) {
 	}()
 	<-holderEntered
 
+	repairAttempting := make(chan struct{})
 	repairDone := make(chan error, 1)
 	go func() {
+		close(repairAttempting)
 		repairDone <- repairPhaseRunE(repairPhaseCmd, []string{"092-agent-contract-hardening"})
 	}()
+	// Deterministic: repairPhaseRunE's goroutine has started (and is
+	// therefore either inside or about to enter its own
+	// WithPhaseWriteLock acquisition attempt on the SAME lock) before we
+	// ever release the concurrent-writer holder.
+	<-repairAttempting
 
-	// Give repair's own lock-acquisition attempt time to actually block
-	// on the held lock before releasing the holder.
-	time.Sleep(50 * time.Millisecond)
+	// Deterministic negative window: repair cannot possibly have
+	// completed while the concurrent writer still holds the lock.
+	select {
+	case <-repairDone:
+		t.Fatal("repairPhaseRunE completed before the concurrent writer released the lock")
+	case <-time.After(150 * time.Millisecond):
+	}
+
 	close(releaseHolder)
 
 	select {
 	case repairErr := <-repairDone:
 		if repairErr == nil {
-			t.Fatal("expected repair phase to refuse: its precomputed target (plan, from the all-open state) is backward against the concurrent writer's fresher stored review")
+			t.Fatal("expected repair phase to refuse: its freshly-derived target (plan, from the all-open children) is backward against the concurrent writer's fresher stored review")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("repairPhaseRunE never returned")

@@ -1362,13 +1362,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// so that DerivePhase (metadata-first) returns the correct phase for
 	// downstream commands like `mindspec impl approve`. Reuses the epicID
 	// resolved once at the top (no extra `bd list --type=epic`).
-	//
-	// Spec 128 R3.3: wrapped in the phase write lock (value unchanged in
-	// this bead).
 	if nextMode != "" && epicID != "" {
-		_ = phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string) (map[string]interface{}, error) {
-			return map[string]interface{}{"mindspec_phase": nextMode}, nil
-		})
+		completeSyncPhase(root, epicID, nextMode)
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1377,6 +1372,25 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	return result, nil
+}
+
+// completeSyncPhase performs step 6.5's best-effort mindspec_phase cache
+// sync, wrapped in the R3.3 phase write lock (value unchanged in this
+// bead). A lock/write failure never fails `complete` itself — the sync
+// is a cache refresh, not the terminal mutation — but round-1 panel G3
+// requires it be SURFACED, not silently discarded: it is printed via
+// phase.DescribeLockFailure, which gives a lock TIMEOUT the full
+// ADR-0035 treatment (names .mindspec/phase.lock, ends with a re-run
+// recovery line that never advises deletion) and any other failure (a
+// genuine merge-write error) as-is. Extracted to its own named function
+// (rather than an inline closure inside Run) so it is directly
+// unit-testable without exercising Run's full preflight/gate machinery.
+func completeSyncPhase(root, epicID, nextMode string) {
+	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_phase": nextMode}, nil
+	}); syncErr != nil {
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr))
+	}
 }
 
 // FormatResult returns a human-readable summary of the completion.

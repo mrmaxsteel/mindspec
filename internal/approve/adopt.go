@@ -424,7 +424,7 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 	// this bead) — the audit-metadata map is built INSIDE the closure so
 	// its mindspec_phase write executes inside the lock's critical
 	// section.
-	if err := phase.WithPhaseWriteLock(root, epicID, adoptMergeMetadataFn, func(string) (map[string]interface{}, error) {
+	if err := phase.WithPhaseWriteLock(root, epicID, adoptMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		meta := map[string]interface{}{
 			"mindspec_phase":        "done",
 			"mindspec_done":         true,

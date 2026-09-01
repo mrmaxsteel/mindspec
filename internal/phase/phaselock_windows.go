@@ -66,6 +66,16 @@ var (
 // until either the lock is acquired or wait elapses. On timeout it
 // returns an error wrapping ErrPhaseLockTimeout. It returns an unlock
 // func that releases the lock and closes the handle.
+//
+// Round-1 panel G7: only ERROR_LOCK_VIOLATION (the requested byte range
+// is presently locked elsewhere) is treated as transient/retryable —
+// classified by shouldRetryWindowsLockError (phaselock_windows_errors.go,
+// no build constraint, testable on every platform). Any OTHER LockFileEx
+// failure (invalid handle, access denied, ...) closes the retained
+// handle and returns IMMEDIATELY as its own error — it is never silently
+// retried until the deadline and mistaken for ErrPhaseLockTimeout, which
+// would misreport a genuine, non-transient failure as ordinary lock
+// contention.
 func acquirePhaseFileLock(path string, wait, pollInterval time.Duration) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -97,9 +107,17 @@ func acquirePhaseFileLock(path string, wait, pollInterval time.Duration) (func()
 				_ = f.Close()
 			}, nil
 		}
+		var code uintptr
+		if errno, ok := callErr.(syscall.Errno); ok {
+			code = uintptr(errno)
+		}
+		if !shouldRetryWindowsLockError(code) {
+			_ = f.Close()
+			return nil, fmt.Errorf("LockFileEx: %w", callErr)
+		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
-			return nil, fmt.Errorf("%w: %s (%v)", ErrPhaseLockTimeout, path, callErr)
+			return nil, fmt.Errorf("%w: %s", ErrPhaseLockTimeout, path)
 		}
 		time.Sleep(pollInterval)
 	}

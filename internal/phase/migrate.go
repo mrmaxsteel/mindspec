@@ -55,6 +55,15 @@ func EnsureMigrated(root, specID string) (bool, error) {
 // stale legacy backfill (and vice versa: the backfill's own absent-check
 // re-reads the FRESH stored value under the lock, so it never re-fires
 // after another writer has already set a real phase).
+//
+// Round-1 panel G1: the absent-check is PRESENCE-aware, not merely
+// value-aware. A genuine epic-lookup failure under the lock is
+// propagated by WithPhaseWriteLock itself (fn is never invoked, no write
+// is attempted). A field that is PRESENT but fails validation (garbage,
+// or a value state.IsValidPhase rejects) is NOT "genuinely missing" —
+// only `present == false` backfills; a present-but-invalid value is left
+// untouched here (repair phase's operator-facing guard is the correct
+// lever for a corrupted value, not a silent backfill).
 func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error) {
 	epicID, err := FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
@@ -65,9 +74,9 @@ func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error)
 		migrated bool
 		derived  string
 	)
-	lockErr := WithPhaseWriteLock(root, epicID, mergeMetadataFn, func(stored string) (map[string]interface{}, error) {
-		if stored != "" {
-			return nil, nil // already migrated or post-080 native
+	lockErr := WithPhaseWriteLock(root, epicID, mergeMetadataFn, func(_ string, present bool) (map[string]interface{}, error) {
+		if present {
+			return nil, nil // already migrated, post-080 native, or present-but-invalid (not this backfill's concern)
 		}
 		children, _ := c.GetChildren(epicID)
 		derived = DerivePhaseFromChildren(children)
