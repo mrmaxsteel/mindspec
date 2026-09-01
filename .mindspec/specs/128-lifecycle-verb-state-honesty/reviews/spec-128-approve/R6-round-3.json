@@ -1,0 +1,61 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Round 3 fully addresses the OQ-1 conditionality/cost adjudication, explicit --spec failure behavior, and forced-backward-repair output asks. It only partially addresses the positional --emit-only coherence ask because R6.3 now states the exception but AC-10 still universally requires exclusion reporting on positional and --emit-only paths. The proposed repair serialization closes the named complete-versus-repair race in principle, but its claim to cover every mindspec_phase writer is false against the tree: internal/phase/migrate.go and internal/approve/spec.go are omitted, and the concrete In Scope list also omits them and the named impl writers. A legacy migration can therefore remain outside the lock and land a stale derived phase after a locked writer. Separately, AC-2 still acceptance-pins only the plan-approve carve-out and does not pin the new release row's tail-less and stored-vs-derived behavior. These are spec-contract defects, not merely plan-stage mechanism choices. `mindspec validate spec 128-lifecycle-verb-state-honesty` reported only the expected lifecycle-binding warning. `bd show mindspec-aytt` was blocked by the sandboxed Dolt LOCK open, so I independently read the same charter record from `.beads/issues.jsonl`.",
+  "concrete_changes_required": [
+    "Make AC-10 explicitly carry R6.3's positional --emit-only exception: that combination performs no ready query/filter, reports no exclusions, and must print only the pinned readiness-bypass disclosure. Clarify that any displayed-list wording applies only to paths that actually display a list.",
+    "Re-derive and enumerate every production mindspec_phase writer, route all writers that can race through the repo-scoped serialization primitive, and make the In Scope list match. At minimum account for internal/phase/migrate.go's EnsureMigratedWithCache write and internal/approve/spec.go's existing-epic write in addition to plan, complete, release, impl approve, and impl adopt. Extend AC-5 with an inventory/anti-drift assertion and a legacy-migration contention leg proving an unlocked stale derived value cannot land after a fresher locked write.",
+    "Update AC-2 so the release row's two documented carve-outs are acceptance-pinned: no instruct-tail assertion for the tail-less verb, and the plan leg asserts the documented stored-implement/child-derived-plan pair under both OQ-3 options unless the sanctioned release-sync redesign is selected."
+  ],
+  "findings": [
+    {
+      "id": "R6-R2-1",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "The positional emit-only exception is documented in R6.3 but contradicted by AC-10",
+      "evidence": "spec.md:132 and :134 now consistently say positional --emit-only uses FetchBeadByID, constructs no ready set, emits the readiness-bypass line, and reports no filter exclusions. But AC-10 at :192 still says that on every selection path, explicitly including positional and --emit-only, a partial filter exclusion prints its count and reason alongside the displayed list. The requested test appears in R6.3, but the normative acceptance surface remains mutually incompatible for the combined positional --emit-only case.",
+      "impact": "An implementation following R6.3 fails the literal AC-10 contract, while one satisfying AC-10 must issue the query/filter that R6.1 and R6.3 say is deliberately bypassed."
+    },
+    {
+      "id": "R6-R2-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "The lock mechanism is concrete, but the phase-writer inventory and scope are incomplete",
+      "evidence": "R3.3 at spec.md:113 says the lock is held by repair and every other mindspec_phase writer, then enumerates plan approve, complete, release, and impl approve/adopt. Tree search finds additional production writers: internal/phase/migrate.go:49-63 performs a read/derive/MergeMetadata migration write, and internal/approve/spec.go:69-78 merge-writes phase=plan for an existing epic. The detailed In Scope list at spec.md:150-156 omits both files and also names only internal/approve/plan.go, despite R3.3 requiring impl approve/adopt changes. AC-5(v) tests only a complete-style contender and contains no total writer-inventory assertion.",
+      "impact": "EnsureMigrated can derive an older phase outside the proposed lock and write it after a fresher locked lifecycle write, preserving the stale-over-fresh regression class the mechanism claims to eliminate. Future or currently omitted writers can silently bypass serialization."
+    },
+    {
+      "id": "R6-R2-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Panel-staleness exemption assertions are correctly conditional and the any-actor cost is adjudicated",
+      "evidence": "R4.2 at spec.md:120 limits the paths-only exemption to OQ-1(c) and gives a three-part accepted-cost rationale. AC-6 at :188 confines its diff-pathspec assertion to (c), and AC-7 at :189 confines legs (ii)-(iv), including the any-actor residual, to (c). OQ-1 at :217 repeats the same split while leaving mechanism selection to plan.",
+      "impact": "OQ-1(a) and (b) no longer inherit an unnecessary exemption, and option (c)'s review-integrity tradeoff is explicit."
+    },
+    {
+      "id": "R6-R2-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Explicit --spec lookup failure is required to fail closed on both paths",
+      "evidence": "R6.7 at spec.md:138 requires prefix, nonexistent full-ID, epic-error, and no-epic draft failures to refuse without global fallback on claim and emit-only paths. AC-15 at :198 pins a nonexistent full ID, an existing no-epic draft, recorded bd calls proving no global query, and the current fallback as the red-on-revert counterexample.",
+      "impact": "The prior silent scope widening is now contractually prohibited and acceptance-tested on both execution paths."
+    },
+    {
+      "id": "R6-R2-5",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Forced backward repair output must name the recorded reason",
+      "evidence": "R3.3 at spec.md:113 and AC-5(iii) at :187 both require the forced write's success line itself to name the recorded reason, in addition to storing it. R2.1 at :104 carries the same result-line obligation.",
+      "impact": "The user-visible success contract can no longer pass merely because hidden metadata recorded the reason."
+    },
+    {
+      "id": "R6-N3-1",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "title": "AC-2 does not pin the newly added release-row carve-outs",
+      "evidence": "R1.3 at spec.md:99 adds two release carve-outs: release is tail-less, and its plan leg is a stored-implement/child-derived-plan split under both OQ-3 options unless release sync is redesigned. AC-2 at :184 still describes the three named surfaces and identifies only 'the plan-approve row under OQ-3 option 2' as the documented carve-out case; it never states how the release fixture changes under either release disposition.",
+      "impact": "The implementation can satisfy AC-2 without testing the release tail-less boundary or the exact stored/derived split that round 3 added to make the agreement table honest."
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "All three R6 round-3 concrete changes are addressed at ad66efbc: AC-10 now carries the positional --emit-only exception; the production mindspec_phase inventory re-derives to the nine named MergeMetadata write sites, with the creation seed separately and coherently excluded, every writer brought into scope, anti-drift required by AC-5(vi), and migration contention required by AC-5(vii); and AC-2 now pins both release-row carve-outs. The whole-document adversarial pass nevertheless finds one uncovered reachable lifecycle regression exposed by that inventory. internal/approve/spec.go:71-78 labels its existing-epic path idempotent/backfill but unconditionally merge-writes mindspec_phase=plan, while cmd/mindspec/spec.go:185-207 and ApproveSpec have no phase gate. Re-running spec approve after plan approve can therefore overwrite implement (or a later stored phase) with plan. A shared lock prevents overlap but not this sequential regression, and AC-5(vi) only proves that the write is locked. R3.3's statement that each locked write is conditional on a stored value read under the lock is not made concrete for this writer, and no AC pins refusal, a true absent-only backfill, or honest no-op output. That is a covered lifecycle-verb state-honesty defect, not an open mechanism choice that can safely be left wholly to plan. Validation reported only the expected no-epic lifecycle-binding warning. bd show was blocked by the sandboxed Dolt LOCK, and gh issue access was unavailable, so charter grounding was re-read from .beads/issues.jsonl.",
+  "concrete_changes_required": [
+    "Define and acceptance-pin safe replay semantics for mindspec spec approve when the lifecycle epic already exists: the existing-epic path must not overwrite a non-empty later mindspec_phase with plan. It may perform a true absent-only backfill under the shared lock, fail closed on an out-of-phase replay, or use another explicitly justified non-regressing disposition; in every case its success/refusal output must honestly distinguish a mutation from a no-op. Add a red-on-revert fixture beginning with an existing epic at implement or later and prove that re-running spec approve cannot regress it to plan."
+  ],
+  "findings": [
+    {
+      "id": "R6-R4-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-3 positional emit-only coherence ask is fully addressed",
+      "evidence": "R6.3 at spec.md:134 and AC-10 at :192 now agree: positional --emit-only constructs no ready set, performs no filter, reports no exclusions, and prints only the readiness-bypass disclosure. Displayed-list reporting is limited to paths that actually construct/display the list.",
+      "impact": "The earlier normative contradiction between R6.3 and AC-10 is gone."
+    },
+    {
+      "id": "R6-R4-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-3 phase-writer inventory, scope, anti-drift, and migration-contention ask is addressed",
+      "evidence": "A fresh non-test scan at ad66efbc finds the nine represented MergeMetadata write sites: plan.go:455; spec.go:76; complete.go:1366; release.go:152; impl.go:577-579 and 611-613; adopt.go:424 via 437; repair.go:189-191; and migrate.go:59-61. spec.go:84 is a creation-time bd-create metadata seed rather than an update of a stored value. Spec scope at :76-77 and :150-156 includes every writer surface, AC-5(vi) makes a newly unlocked writer red, and AC-5(vii) requires EnsureMigrated to re-check absence under contention and preserve the fresher locked value.",
+      "impact": "The stale prose-enumeration failure mode and the legacy migration stale-over-fresh race are now falsifiably covered."
+    },
+    {
+      "id": "R6-R4-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-3 release-row acceptance ask is fully addressed",
+      "evidence": "AC-2 at spec.md:184 now asserts that release has only the state-show and derivation surfaces, has no instruct-tail assertion, and tests stored-implement/derived-plan under both OQ-3 options unless the sanctioned redesign is selected, in which case it tests two-surface agreement on plan.",
+      "impact": "Both documented release carve-outs are now executable acceptance obligations."
+    },
+    {
+      "id": "R6-R4-4",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Replaying spec approve can regress an existing epic despite the new lock contract",
+      "evidence": "internal/approve/spec.go:67-78 calls the existing-epic path idempotent and an ensure/backfill, but line 76 unconditionally MergeMetadata-writes mindspec_phase=plan. cmd/mindspec/spec.go:185-207 invokes ApproveSpec without a lifecycle-phase gate, and ApproveSpec validates the document then takes that existing-epic branch without checking whether the stored phase is absent, plan, implement, review, or done. updateSpecApproval at spec.go:152-179 also accepts an already-approved document. Thus a successful sequential re-run after plan.go:455 has written implement can write plan; the same shape can overwrite a later phase. R3.3's lock serializes this write but cannot make the sequential value safe. Its prose says every write is conditional on a stored value read inside the critical section, yet neither R3.3 nor AC-5 defines the condition/output for spec approve, and AC-5(vi) passes if this unconditional regression is merely placed inside the lock.",
+      "impact": "A lifecycle verb can report successful approval while moving durable state backward, violating the spec's state-honesty and no-indistinguishable-no-op goals. The implementation could satisfy every current lock AC and retain the regression."
+    },
+    {
+      "id": "R6-R4-5",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-4 structural validation has no new document error",
+      "evidence": "mindspec validate spec 128-lifecycle-verb-state-honesty completed with one warning only: lifecycle-binding says the draft has no beads epic and spec approve will create one.",
+      "impact": "The request for changes is based on the uncovered behavioral contract, not structural validation noise."
+    }
+  ]
+}

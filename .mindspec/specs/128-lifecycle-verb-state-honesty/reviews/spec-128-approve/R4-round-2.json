@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.99,
+  "rationale": "Both of R4's round-1 required changes are substantively addressed at reviewed commit 8a13b898: the document now gives the bd-availability discriminator for the two main-checkout shapes, R1.4 forbids successful empty mode, and AC-1 separately pins the spec-worktree contradiction, main-checkout discovery failure, and main-checkout successful draft discovery. Re-derivation confirms the mechanism: from the spec worktree, state show still prints idle plus activeSpec; from main under this sandbox, bd fails and state show prints an empty mode with exit 0; controlled bd shims reproduce idle on a successful empty epic query and empty mode on bd failure. The remaining requested source probes also reproduce, and validation exits 0 with the expected lifecycle-binding warning. However, the revised spec's claimed exact bd-unavailable reproduction line is not executable as written: `env PATH=/usr/bin:/bin mindspec state show` removes `/Users/Max/.local/bin/mindspec` itself from PATH and exits 127 before MindSpec runs. The same non-executable line is repeated as the AC-1(ii) validation proof, so it cannot prove lifecycle-discovery behavior or the future required refusal. This is a new, narrow but acceptance-relevant documentation defect requiring correction.",
+  "concrete_changes_required": [
+    "Correct every bd-failure reproduction/validation command in settled fact 6, the #220 live-evidence paragraph, and Validation Proofs so MindSpec itself is invoked successfully while only bd discovery is made to fail. For this recorded environment, use an absolute MindSpec path such as `env PATH=/usr/bin:/bin /Users/Max/.local/bin/mindspec state show`, or use a failing bd PATH shim with the MindSpec binary invoked absolutely. Remove or qualify the false claim that `env PATH=/usr/bin:/bin mindspec state show` uses the same `/Users/Max/.local/bin/mindspec` binary and yields `{\"mode\": \"\"}`."
+  ],
+  "findings": [
+    {
+      "id": "R4-R1-CC1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "summary": "Round-1 item 1 asked the Background/live evidence to report the empty main-checkout shape and distinguish it from the other observed shape. The revision now correctly identifies bd query success versus failure as the discriminator and explains the source path at derive.go:588-597. Re-derived with controlled shims from `/Users/Max/replit/mindspec`: a bd shim returning `[]` produces `{\"mode\":\"idle\"}` exit 0, while a bd shim exiting 1 produces `{\"mode\":\"\"}` exit 0. In the actual Codex sandbox, `bd show mindspec-aytt` fails opening the embedded Dolt LOCK with `operation not permitted`, and unqualified main-checkout state show accordingly produces empty mode exit 0. The spec-worktree invocation separately produces idle plus activeSpec exit 0. The invalid literal command used to document the failure is tracked as new finding F1 rather than negating the corrected discriminator."
+    },
+    {
+      "id": "R4-R1-CC2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "summary": "Round-1 item 2 asked for explicit main-checkout fixtures covering draft discovery and discovery failure while retaining the spec-worktree assertion. R1.4 and AC-1 now do exactly that in three separately asserted legs: spec-worktree no-epic draft, main-checkout injected discovery failure, and main-checkout successful draft-only discovery. AC-1(ii) explicitly forbids exit 0 with empty mode."
+    },
+    {
+      "id": "F1",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "class": "non-executable-live-evidence-and-validation-proof",
+      "summary": "The supposed exact command `env PATH=/usr/bin:/bin mindspec state show` does not run the stated `/Users/Max/.local/bin/mindspec` binary because that directory has been removed from PATH. Hand execution from both the reviewed spec worktree and `/Users/Max/replit/mindspec` prints `env: mindspec: No such file or directory` and exits 127, not empty-mode JSON with exit 0. This invalid command appears in settled fact 6, is cited again in the live-evidence paragraph, and is repeated under Validation Proofs for AC-1(ii). Invoking `/Users/Max/.local/bin/mindspec` absolutely under the reduced PATH does exercise the intended bd-not-found branch and produces the claimed empty-mode result from main. As written, though, the published proof is false and a future implementation could appear to satisfy its nonzero-exit wording merely because the shell could not locate MindSpec."
+    },
+    {
+      "id": "F2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "requested-probes-verified",
+      "summary": "The unchanged empirical source claims still reproduce at 8a13b898: `next` reads `--pick` but calls `runEmitOnly(specFlag, args)` without it; runEmitOnly selects `items[0]` when no positional ID is supplied; both ready-set paths use title-substring `containsSpecID`; plan.go writes `mindspec_phase=implement`; and `grep -rn adopt internal/instruct/` returns no matches."
+    },
+    {
+      "id": "F3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "`mindspec validate spec 128-lifecycle-verb-state-honesty` from the reviewed worktree exited 0 and reported one warning: `[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one`."
+    }
+  ]
+}

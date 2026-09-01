@@ -1,0 +1,41 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.8,
+  "rationale": "All four of my round-1 concrete asks are ADDRESSED in the 8a13b898 text, re-derived against the tree (classifications below), and the fix-author resolutions I audited hold: the OQ-3 option-3 audit bar correctly names the spec-114 audited-refutation mechanism as the only admission path (I endorse it), and the #255 narrowing produces a crisp exactly-one-owner boundary (filter-caused silence moves in via R6.3/AC-10/AC-10b; the readiness-truth consumption face stays with 129 — the double-disclaim seam is closed). Charter fidelity remains sound after the fix: the settled-fact-6 rewrite reconciles the charter's {\"mode\":\"\"} claim with the same-day idle observations via a reproduced bd-availability discriminator, which is the charter's own re-verify mandate honored rather than a relitigation, and R5.1's guard removal is the charter-sanctioned 'rebuild or drop' arm with a re-arm mechanism. However, the round-1 G7 row additions introduced a NEW internal-consistency defect in R1.3 that the G4 carve-out was created to prevent: the 'release → plan (no sibling closed)' row asserts three-surface agreement on plan, but I re-derived that release syncs mindspec_phase via the stored-trusting DerivePhase (cmd/mindspec/release.go:315-318 → internal/phase/derive.go:174-193, 'trusting stored phase'), so the post-release all-open state keeps stored implement against child-derived plan — under BOTH live OQ-3 arms (option 1 advances stored to implement at first claim; option 2 writes it at plan approve), making the row's asserted agreement unsatisfiable exactly like the pre-fix plan-approve row. One targeted change; hence REQUEST_CHANGES without hard_block.",
+  "concrete_changes_required": [
+    "R1.3: extend the plan-approve row's OQ-3 carve-out to the 'release → plan (no sibling closed)' row (or condition that row on the same design decision). Derived at the reviewed commit: release's step-6.5 sync calls phase.DerivePhase (release.go:315-318), which is stored-trusting (derive.go:174-193) — so releasing the sole claimed bead back to all-open leaves stored implement vs child-derived plan under both OQ-3 options (option 1 advances stored to implement at the first claim; option 2 wrote it at plan approve), and the row's three-surface agreement on plan is unsatisfiable without either the carve-out annotation or an explicit requirement redesigning release's phase sync. As a rider, note in R3.1/R3.2 that this release-produced state is a second deterministic reproduction route into the #248 warning window (release's own DerivePhase call emits the repair-phase hint on the disagreement it just preserved), so the R3 fixture's coverage statement includes it rather than being plan-approve-shaped only."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "NEW_ISSUE: 'release → plan' agreement-table row is unsatisfiable under the stored-trusting derivation — G4 carve-out not propagated to the G7 row additions",
+      "detail": "R1.3's new row 'release → plan (no sibling closed — ADR-0023.md:142)' asserts state show, the instruct tail, and the derivation agree on plan after release returns the epic to all-children-open. Re-derived at 8a13b898: release syncs mindspec_phase with phase.DerivePhase (release.go:311-318, 'mirror complete.go step 6.5'), and DerivePhase routes to DerivePhaseWithStatusWithCache, which returns the STORED phase on disagreement while emitting the #248 warning (derive.go:174-193). At release time stored is implement under both OQ-3 arms, so the sync writes implement back and the mode-reporting surfaces (stored-first per spec 080) report implement while DerivePhaseFromChildren over the all-open child set yields plan — the exact stored-leads-derived disagreement the fix's own plan-approve carve-out exists for, granted only to the plan-approve row. AC-2's fixture for this row is therefore unsatisfiable as specified, which would force a false fixture or a silent OQ-3-adjacent design decision at implementation time. Additionally, release's own DerivePhase call on this state emits the 'recovery: mindspec repair phase' hint — a second deterministic reproduction of the #248 self-worsening-hint window that R3's plan-approve-shaped fixture narrative does not name."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-1 ask 1 classification: ADDRESSED — OQ-1(c) machinery now conditional (with cosmetic residue)",
+      "detail": "My ask to condition the GateFacts-feeding language on OQ-1(c) is ADDRESSED: R4.2 now reads 'If the chosen mechanism involves a staleness-exemption fact (OQ-1(c)) — and only then —… under OQ-1(a)/(b) internal/panel is untouched'; the Impacted-Domains internal/panel entry and the In-Scope internal/panel/gate.go entry both carry explicit CONDITIONAL markers. Residue, cosmetic: (i) OQ-1's option (c) label still says 'exempt tool-authored tracker-only deltas' although R4.2's pin now deliberately drops 'tool-authored' in favor of paths-only — the option text should match the pin so a plan reader doesn't design a provenance check R4.2/AC-7(iii) forbid; (ii) the Impacted-Domains internal/complete entry ('the tracker-only staleness fact fed to GateFacts') and the In-Scope complete.go parenthetical ('tracker-only fact') still name (c)'s machinery without the conditional — harmless since complete is touched under every arm, but worth aligning."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-1 ask 2 classification: ADDRESSED — filter-drop loudness in-spec, #255 boundary now exactly-one-owner",
+      "detail": "R6.3 now requires loudness on every path: (a) partial exclusions print count and reason on default/--pick/positional/--emit-only alike, (b) the positional false-error is fixed, (c) non-empty-raw-filtered-to-empty is a loud non-zero error, never 'No ready work found'. AC-10 gained the all-paths partial-exclusion assertion and AC-10b pins the empty-after-filter case red-on-revert. The Non-Goals #255 entry now states the narrowing and assigns each face to exactly one spec — the seam where 128 and 129 could both disclaim the partial-drop defect is closed. Verified the residual 129 face (consumption of a genuinely-empty ready set as 'spec done') does not overlap R6.3's mechanism obligations."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-1 ask 3 classification: ADDRESSED — OQ-5 narrowed to the genuinely open half",
+      "detail": "OQ-5 now states the display ordering is settled (R6.2 + AC-9, bd ready order end-to-end) and only the default-pick rule over that settled display is open; the false 'AC-9 pins whichever choice is made' claim is replaced with the accurate split (the display-ordering half of AC-9 pins nothing about the default; the default-line assertion pins the printed rule, choice-independently); the non-first-default clash with 'Defaulting to first item' is named as friction the plan must resolve. This is exactly the reconciliation my ask requested."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-1 ask 4 classification: ADDRESSED — OQ-3 option-3 admission bar is the spec-114 audited-refutation mechanism",
+      "detail": "OQ-3 now closes option 3 absent 'an audited refutation of that settled fact with new evidence, through the established gate discipline (the any-unresolved-RC-blocks + audited-refutation mechanism spec 114 shipped)' and keeps the charter's flat do-not-relitigate. I audited this resolution as licensed and endorse it: it matches the project's shipped escape mechanism and leaves settled fact 1 binding by default."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-1 BRIEF item classification: MISSED (process, non-blocking) — 'Keep both' still half-carried in the round-2 BRIEF",
+      "detail": "The charter's method note mandates both a mandatory 'errors in this brief' report item and the contradiction license; the round-2 BRIEF again carries only the license. Not a spec.md defect and not blocking — the fix belongs in the panel BRIEF template. Restated here per the BRIEF's own errors-in-this-BRIEF licensing so it is not silently dropped between rounds."
+    }
+  ]
+}

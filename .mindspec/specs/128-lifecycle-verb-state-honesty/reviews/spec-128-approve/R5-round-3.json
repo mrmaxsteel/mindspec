@@ -1,0 +1,49 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Both of R5's round-2 concrete changes are substantively addressed at reviewed commit 9ac301ee. The normative documentation-surfaces, ADR-touchpoint, R5 requirement, and scope text now make the ADR-0025 amendment mandatory under every admissible R5 direction. AC-11 now makes ADR-0042's per-line free-text rendering rule red-on-revert with multi-line control-bearing stderr, termsafe.Escape routing, legitimate-text survival, and absence of raw control bytes. Re-reading all six touchpoint ADRs confirms the remaining characterizations are accurate: OQ-1(a) reverses ADR-0041 section 1's load-bearing post-materialization content-gate ordering, OQ-1(b) reverses its never-rollback/forward-reconcile contract, OQ-1(c) preserves ADR-0041 while narrowly amending ADR-0037 section 4 rather than downgrading staleness to a warning, and OQ-4 correctly distinguishes ADR-0023's stale line-107 row from the governing spec-095 amendment at line 140. The one surviving word 'conditional' is confined to the historical grill record; it is editorial residue, not a live ambiguity in the normative delivery contract, and is not gate-blocking for this spec document. Validation exits 0 with only the expected draft/no-epic warning.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R2-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:80, spec.md:87, spec.md:126-128, spec.md:156",
+      "summary": "The round-2 ADR-0025 mandatory-amendment ask is addressed.",
+      "evidence": "ADR-0025 decision item 1 unqualifiedly says user-authored dirt still blocks. The resulting spec now labels the R5 amendment MANDATORY in Documentation Surfaces, AMENDED (mandatory) in ADR Touchpoints, and mandatory in Scope; R5.1 and R5.3 continue to establish that both the default removal and the fallback --allow-dirty direction contradict that unqualified sentence, expressly leaving no no-amendment leg. These are the three delivery surfaces named by the round-2 concrete change."
+    },
+    {
+      "id": "R5-R2-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:89, spec.md:93, spec.md:135, spec.md:194",
+      "summary": "The round-2 ADR-0042 bd-stderr rendering ask is addressed.",
+      "evidence": "ADR-0042 section 2 requires arbitrary free-text error bodies to pass termsafe.Escape per field and per line. AC-11 now injects multi-line stderr with a control-bearing or otherwise termsafe-sensitive line, requires the legitimate schema-error line to survive, requires every surfaced line to route through termsafe.Escape, and forbids raw control bytes in rendered output. That test fails the unsafe raw-passthrough implementation that the round-2 AC permitted."
+    },
+    {
+      "id": "R5-R3-N1",
+      "classification": "NEW_ISSUE",
+      "severity": "low",
+      "location": "spec.md:228",
+      "summary": "The historical grill record retains stale 'conditional ADR-0025 amendment' wording.",
+      "evidence": "A whole-document wording scan finds the word 'conditional' for ADR-0025 only in the grill record's description of what the earlier self-answer added. The current normative surfaces at lines 80, 87, 126-128, and 156 all say the amendment is mandatory under both R5 directions. The stale historical sentence should ideally say 'mandatory', but it cannot reasonably authorize a no-amendment plan and therefore is not gate-blocking."
+    },
+    {
+      "id": "R5-R3-ADR",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:84-89, spec.md:120-122, spec.md:217-220",
+      "summary": "The remaining ADR touchpoints are characterized consistently with their governing text.",
+      "evidence": "ADR-0041 section 1 explicitly makes post-materialization doc/ADR gating load-bearing and its reconcile phase says never rollback; ADR-0037 section 4 blocks stale SHAs and rejects warn-on-mismatch, which the paths-only OQ-1(c) exception narrowly amends rather than silently weakening; ADR-0023 line 107 is the stale original plan row while line 140 is the governing amended implement row; ADR-0035's final safe recovery-line rule is carried by AC-4 and AC-5; ADR-0042's ID/free-text distinction is carried globally and now specifically by AC-11."
+    },
+    {
+      "id": "R5-R3-V",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "reviewed commit 9ac301eeb8f156ff3132db3f059b9b2ba2323845",
+      "summary": "Reviewed artifact identity and structural validation were verified.",
+      "evidence": "HEAD is exactly 9ac301eeb8f156ff3132db3f059b9b2ba2323845 and spec.md has no diff from that commit. `mindspec validate spec 128-lifecycle-verb-state-honesty` exits 0 and reports only the expected lifecycle-binding warning that the draft spec has no beads epic and spec approve will create one."
+    }
+  ]
+}

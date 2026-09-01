@@ -1,0 +1,36 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The round-4 patch is mostly ADR-conformant: the status-aware agreement-table surface accurately handles terminal epics; R3.6 carries ADR-0035 recovery semantics for a fail-closed replay and places absent-only phase backfill under the shared writer lock; and the prior OQ-1, ADR-0037, ADR-0025, ADR-0035, and ADR-0042 characterizations remain intact. However, re-conditioning the complete row to correctly say that a just-closed lifecycle bead plus remaining blocked lifecycle beads derives implement exposes a second stale original ADR-0023 edge-case row. ADR-0023:108 still says a mixed closed/open/blocked state derives plan, while shipped DerivePhaseFromChildren returns implement for every nonterminal lifecycle set containing a closed child. The spec mandates striking only ADR-0023:107 and repeatedly calls that the sole stale superseded edge-case row. Unless line 108 is also struck or supersede-annotated, the required documentation delivery remains internally contradictory. This is a narrow, grounded documentation correction, but it is gate-relevant because R1.3 makes mode-table honesty a first-class deliverable.",
+  "concrete_changes_required": [
+    "Extend the ADR-0023 editorial correction everywhere it is scoped (problem evidence/OQ-4 resolution, Documentation Surfaces, ADR Touchpoints, Scope, and the R1.3 table-delivery obligation as applicable) to strike or supersede-annotate original edge-case line 108 as well as line 107, because the spec-095 refined rule and derive.go:379-383 make a lifecycle set with at least one closed bead and no in-progress bead derive implement even when remaining beads include blocked statuses. Ensure the delivered agreement table cannot coexist with a still-live ADR row claiming that mixed closed/open/blocked derives plan."
+  ],
+  "findings": [
+    {
+      "id": "R5-R5-PRIOR",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "R5-round-4.json",
+      "summary": "R5 had zero round-4 asks; the unchanged ADR obligations regression-check clean except for the newly exposed ADR-0023 row.",
+      "evidence": "R5-round-4.json has an empty concrete_changes_required array. Commit 3a321066 changes only spec.md, and HEAD plus the reviewed spec artifact match 3a321066 exactly. `mindspec validate spec 128-lifecycle-verb-state-honesty` exits 0 with only the expected draft/no-epic lifecycle-binding warning."
+    },
+    {
+      "id": "R5-R5-ADR0023-BLOCKED-ROW",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "location": "spec.md:72, spec.md:80, spec.md:84, spec.md:99, spec.md:156; ADR-0023.md:107-108, ADR-0023.md:140-141; internal/phase/derive.go:345-387",
+      "summary": "The corrected complete-row blocked-state leg leaves a second stale ADR-0023 edge-case row live.",
+      "evidence": "The new R1.3 text correctly states that after complete, a just-closed lifecycle bead plus remaining blocked beads derives implement: DerivePhaseFromChildren counts every lifecycle child in lifecycleTotal, counts closed and in_progress specially, and returns implement whenever lifecycleClosed > 0 after excluding all-closed (derive.go:345-383); blocked statuses therefore do not restore plan. ADR-0023's governing spec-095 amendment says some lifecycle closed plus some open with none in_progress derives implement at line 140, but the original line 108 still says some closed, some open, some blocked derives plan. The spec identifies and schedules cleanup only for line 107, repeatedly calling it the stale row. A separate referenced agreement table does not make line 108 cease reading as live accepted guidance.",
+      "impact": "Implementers can deliver the new correct agreement table while leaving an accepted ADR with a directly contradictory blocked-state rule, defeating the spec's stated documentation-honesty outcome and creating two authoritative answers for the exact round-4-corrected state."
+    },
+    {
+      "id": "R5-R5-ROUND4-ADR-CONFORMANCE",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:99, spec.md:106, spec.md:116, spec.md:153, spec.md:182, spec.md:197",
+      "summary": "The remaining round-4 changes preserve the six-ADR contract.",
+      "evidence": "Using a DerivePhaseWithStatus-class surface is consistent with ADR-0023's epic-status terminal row: a closed epic with the done marker derives done, while idle remains zero-open-epic global discovery. R2's swallowed discovery-error disposition preserves ADR-0035's honest refusal/indeterminate posture. R3.6 requires ADR-0035 recovery for the fail-closed option, non-regression for every option, and the R3.3 lock for absent-only backfill; AC-16 pins later-phase preservation and legitimate empty-phase mutation. Nothing in the patch weakens ADR-0037's no-warn-downgrade rule, ADR-0025's mandatory-amendment pricing, or ADR-0042's render discipline."
+    }
+  ]
+}

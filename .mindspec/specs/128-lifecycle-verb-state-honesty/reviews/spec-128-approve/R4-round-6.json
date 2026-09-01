@@ -1,0 +1,51 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At reviewed commit b7deb948eb69ca9426147fc5fa419de894a1dfd8, the small round-5-resolution diff introduces no regression in R4's empirical territory, and its new claims are grounded, falsifiable, consistent, and honestly scoped. The newly named complete-to-plan all-open trigger re-derives end to end: internal/next/beads.go:101-103 skips only epic-typed ready items, so an open bug/non-lifecycle child can survive ready parsing and be claimed (subject to the separately documented title-substring residue); after that child is completed, internal/phase/derive.go:347-352 excludes it from lifecycle counts, and if every lifecycle task remains open, the fall-through at derive.go:387 returns plan. Existing phase tests include the all-task-open plus non-lifecycle-child case and pass, as do the internal/next tests. The alternative empty-lifecycle trigger at derive.go:366 also remains grounded. The required live probes reproduce the documented defects: from the spec worktree, mindspec state show exits 0 with mode idle alongside activeSpec 128-lifecycle-verb-state-honesty under both the normal and bd-unreachable PATHs; from the main checkout, this sandbox's normal environment and the deliberately bd-unreachable PATH both exit 0 with an empty mode, consistent with the spec's stated discovery-failure discriminator because bd/Dolt access is blocked here. Source inspection confirms runEmitOnly does not receive --pick and selects items[0] absent a positional; positional emit-only calls FetchBeadByID; containsSpecID is strings.Contains(title, specID) on both ready-set paths; plan approval writes mindspec_phase=implement at internal/approve/plan.go:455; and internal/instruct contains no adopt guidance. AC-4b accurately targets the live swallowed FetchChildren error and fabricated plan/write path at complete.go:1434-1436 and :1365-1366. The additive AC-16 done and same-value legs do not contradict the R4 evidence. Validation exits 0 with only the expected draft/no-epic warning. Open mechanism choices remain expressly chartered to plan stage and do not weaken this spec gate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R6-F1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "round-5-zero-ask-regression-check",
+      "summary": "R4 approved round 5 with zero asks. A fresh audit of b7deb948 found no regression in the required live-state, selection, phase-write, or guidance probes."
+    },
+    {
+      "id": "R4-R6-F2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "mode-plan-trigger-rederivation",
+      "summary": "The new derive.go:387 trigger is reachable as stated: ready parsing filters epic items at beads.go:101-103 but retains open non-epic issue types; completing such a non-lifecycle child leaves it excluded by derive.go:347-352, and an otherwise all-open lifecycle subset reaches the all-open plan return at :387. The title-substring filter can exclude some such children but does not make the trigger unreachable; a matching-title non-lifecycle child is claimable. Targeted internal/phase and internal/next tests passed."
+    },
+    {
+      "id": "R4-R6-F3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-live-state-probes",
+      "summary": "From the spec worktree, state show returned mode idle with non-empty activeSpec/specBranch and exit 0 under both normal and bd-unreachable PATHs. From main, both commands returned an empty mode and exit 0 because bd/Dolt discovery is unavailable in this sandbox, reproducing the documented failure shape rather than contradicting the healthy-bd idle branch."
+    },
+    {
+      "id": "R4-R6-F4",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-source-probes",
+      "summary": "runEmitOnly still lacks a pick parameter and defaults to items[0]; positional emit-only uses FetchBeadByID; containsSpecID remains a raw title substring check on claim and emit-only ready-set paths; plan.go:455 writes mindspec_phase=implement; and rg found no adopt occurrence under internal/instruct."
+    },
+    {
+      "id": "R4-R6-F5",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "round-6-additive-diff",
+      "summary": "The ADR-0023 :108 strike, AC-16 done/same-value legs, and AC-4b seam-driven failure leg are consistent with the inspected source. In particular, complete currently discards the FetchChildren error at :1434, derives plan from the nil set at :1435, and may sync that fabricated value at :1366, so AC-4b is red-on-revert and correctly scoped to the real result path."
+    },
+    {
+      "id": "R4-R6-F6",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "mindspec validate spec 128-lifecycle-verb-state-honesty exited 0 and reported exactly one issue: [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one."
+    }
+  ]
+}

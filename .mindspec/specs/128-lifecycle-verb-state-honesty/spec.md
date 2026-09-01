@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-09-01T16:51:40Z"
+approved_by: user
+status: Approved
 ---
 # Spec 128-lifecycle-verb-state-honesty: Lifecycle verb state honesty + claim/selection (spec-127 split, part 2)
 
@@ -240,7 +240,7 @@ Per the aytt charter, OQ-1/OQ-2/OQ-3/OQ-5 are deliberately **posed, not resolved
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-09-01
+- **Notes**: Approved via mindspec approve spec

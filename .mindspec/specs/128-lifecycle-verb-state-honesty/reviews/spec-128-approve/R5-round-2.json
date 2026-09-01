@@ -1,0 +1,68 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Round 2 substantively fixes four of R5's five prior asks: ADR-0041 rollback is now explicitly a reversal, the ADR-0037 exemption is honestly paths-only and narrowly tested, OQ-4 cites the governing ADR-0023 row at line 140, and AC-4/AC-5 now pin the ADR-0035 recovery form. The ADR-0025 ask is only partial because the document still calls its amendment conditional in three scope/touchpoint locations despite correctly stating that both admissible R5 directions require it. A new ADR-0042 falsifiability gap remains: R6.4/AC-11 require bd stderr passthrough but test only benign printable text, so raw control-bearing stderr can satisfy the AC while violating the declared per-line termsafe contract.",
+  "concrete_changes_required": [
+    "Make the ADR-0025 amendment unambiguously mandatory for R5 by replacing the surviving 'conditional R5 clarification' / 'priced conditional amendment' wording at spec.md lines 80, 87, and 154. The document already establishes at R5.1/R5.3 that every admissible direction amends ADR-0025 and that there is no no-amendment leg; the ADR Touchpoints and Scope lists must say the same thing.",
+    "Extend R6.4 and AC-11 to pin ADR-0042 rendering, not only content passthrough: inject multi-line bd stderr containing at least one raw control-bearing or otherwise termsafe-sensitive line, require the legitimate schema-error text to survive, require each surfaced line to route through termsafe.Escape, and assert that no raw control byte reaches the rendered error. The current benign `depends_on_id`-style assertion remains green under an unsafe raw-stderr implementation."
+  ],
+  "findings": [
+    {
+      "id": "R5-R1-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:85, spec.md:122, spec.md:214",
+      "summary": "The prior ADR-0041 rollback-pricing ask is addressed.",
+      "evidence": "ADR-0041:103-105 states 'Never a rollback', ADR-0041:144-153 pins forward reconciliation, and ADR-0041:372-380 rejects rollback. The revised touchpoint, R4.4, and OQ-1(b) now all identify rollback as a reversal requiring an ADR-0041 amendment while distinguishing it from option (a)'s gate-ordering reversal and option (c)'s ADR-0041-conforming path."
+    },
+    {
+      "id": "R5-R1-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:120, spec.md:186-187",
+      "summary": "The prior OQ-1(c) exemption-narrowness ask is addressed by an honest paths-only contract.",
+      "evidence": "R4.2 now uses ADR-0025's exact named-artifact list, today only `.beads/issues.jsonl`, expressly rejects a `.beads/**` glob, drops the unprovable authorship predicate, and records the any-actor residual. AC-7 separately pins non-artifact, mixed, any-actor named-artifact-only, and unlisted `.beads/config.yaml` cases. This is a narrow amendment of ADR-0037 section 4, not the general warn-on-staleness alternative rejected at ADR-0037:590-593."
+    },
+    {
+      "id": "R5-R1-3",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "location": "spec.md:80, spec.md:87, spec.md:126-128, spec.md:154",
+      "summary": "The ADR-0025 substance is corrected, but its delivery is still mislabeled conditional.",
+      "evidence": "ADR-0025:32 says user-authored dirt still blocks and ADR-0025:36 fixes an exact, non-glob artifact list. R5.1 correctly says removing the invoking-checkout user-dirt block amends that sentence; R5.3 correctly says `--allow-dirty` also amends it and that there is no no-amendment leg. Yet Documentation Surfaces, the ADR-0025 touchpoint heading, and In Scope still call the ADR-0025 change conditional. Since every live R5 outcome requires the amendment, those labels contradict the normative pricing and leave the plan's required ADR deliverable ambiguous."
+    },
+    {
+      "id": "R5-R1-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:72, spec.md:84, spec.md:217, spec.md:223",
+      "summary": "The prior OQ-4 citation ask is addressed, and the editorial resolution remains correct.",
+      "evidence": "Direct verification shows ADR-0023:107 is the stale original some-closed row and ADR-0023:140 is the governing spec-095 amended row deriving implement; line 142 is the all-open row. All four spec references now cite line 140, and striking or supersede-annotating line 107 is the correct editorial action."
+    },
+    {
+      "id": "R5-R1-5",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "spec.md:88, spec.md:106, spec.md:112-113, spec.md:184-185",
+      "summary": "The prior ADR-0035 recovery-form consistency ask is addressed for the two identified diagnostics.",
+      "evidence": "AC-4 now requires indeterminate complete-tail guidance to end in a copy-pastable final `recovery:` line, and AC-5(iv) requires any retained phase-mismatch warning to end in a safe inspection-first recovery line. AC-5(ii) separately pins the repair-phase refusal's final recovery. These match ADR-0035:39-53 and avoid the backward write prohibited by R3."
+    },
+    {
+      "id": "R5-R2-N1",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "location": "spec.md:89, spec.md:135, spec.md:192",
+      "summary": "AC-11 does not make the ADR-0042 free-text rendering touchpoint red-on-revert.",
+      "evidence": "ADR-0042:121-129 requires agent-writable error bodies to pass termsafe.Escape per field and per line. R6.4 requires bd stderr content to surface, while AC-11 injects only a printable schema-error line and asserts containment. A raw `fmt.Errorf(...stderr...)` implementation therefore satisfies AC-11. Existing whole-tree ID-render ratchets address ID-typed positions, but no generic lint proves arbitrary subprocess stderr is per-line termsafe-routed; the current tree's explicit `escapeLines` helper illustrates that this needs a render-site obligation and hostile test."
+    },
+    {
+      "id": "R5-R2-V",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "reviewed commit 8a13b898",
+      "summary": "Reviewed artifact and validation identity were verified.",
+      "evidence": "HEAD is exactly 8a13b898fc8822f991c0a253fc642e8427f5fc57 and spec.md has no diff from that commit. `mindspec validate spec 128-lifecycle-verb-state-honesty` reports only the expected draft-state warning that the spec has no beads epic and must be approved; it reports no structural spec error."
+    }
+  ]
+}

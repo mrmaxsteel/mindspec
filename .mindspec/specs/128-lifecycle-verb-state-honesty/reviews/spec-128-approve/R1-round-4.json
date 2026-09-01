@@ -1,0 +1,34 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.85,
+  "rationale": "Both of my round-3 asks are ADDRESSED (classifications below), re-derived against the tree at ad66efbc including spot-verification of the newly cited write sites (spec.go:76 existing-epic backfill vs :84 creation seed — the exclusion rationale is accurate; migrate.go:59-61 EnsureMigrated derived-phase write with the SetMergeMetadataForTest seam at :21). Under my charter-fidelity lens the document now passes the gate: all six settled facts are carried and re-derived (fact 6 legitimately deepened into the reproduced bd-availability discriminator the charter's own re-verify mandate demanded); OQ-1/2/3/5 are genuinely posed-not-resolved, with the per-arm tagging of AC-6/AC-7 and the OQ-3 option-3 audit bar actively protecting that openness; the charter-mandated fixture-shaped #248 evidence is delivered on two deterministic routes; every WHAT-MOVES subcomponent of #220/#186/#179/#187/#146-remainder/#221 maps to a requirement or an explicit rationale-carrying strike; the #255 boundary is exactly-one-owner and precise; and the scope fences now agree with the requirements they fence. The two surviving items are two-word cosmetic mismatches in non-normative parentheticals (findings below, third restatement) plus a BRIEF-template process note — none rises to a document-soundness defect, and per the gate's own calibration a spec passes when grounded, falsifiable, consistent, and honestly scoped, not when no further polish is imaginable.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "MINOR",
+      "title": "Round-3 ask 1 classification: ADDRESSED — scope fences propagated, plan.go unconditional",
+      "detail": "In Scope now lists internal/approve/plan.go as 'UNCONDITIONAL — the R3.3 lock wraps its :455 write regardless of OQ-3, which governs only the written value' (the exact correction I asked for), and adds internal/approve/impl.go (:577-579 reconcile + :611-613 done writes), internal/approve/adopt.go (:424/:437), internal/approve/spec.go (:76 backfill; :84 creation seed excluded with rationale), and internal/phase/migrate.go (:59-61) — all under the lock. Impacted Domains carries the matching four-writer unconditional obligation in the internal/approve entry and adds EnsureMigrated under core. The fence-vs-requirement contradiction is gone."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-3 ask 2 classification: ADDRESSED — writer inventory re-derived and mechanized beyond the ask",
+      "detail": "R3.3 now carries a from-scratch nine-site inventory (including the two impl.go writes I flagged, plus spec.go:76 and the genuinely dangerous pre-preflight EnsureMigrated backfill at migrate.go:59-61 that the round-2 enumeration missed entirely), explicitly de-asserts prose completeness as the load-bearing claim, and mechanizes the obligation exactly as I asked: AC-5(vi) is the grep/seam-anchored every-MergeMetadata-mindspec_phase-call-site-inside-lock test (new unlocked writer is red), AC-5(vii) adds the migration-contention leg, and the creation-seed exclusion carries its rationale (no stored value exists to race). I spot-verified spec.go:76/:84 and migrate.go:59-61/:21 against the tree; the citations hold. This is the R5.1/AC-14-grade anti-drift treatment my ask required."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Persisting cosmetic residues (third restatement — for disposition, not blocking)",
+      "detail": "(i) OQ-1's option (c) label still reads 'exempt tool-authored tracker-only deltas' while R4.2's binding pin is paths-only with 'tool-authored' deliberately dropped and the any-actor residual adjudicated — a plan reader skimming the OQ could design a provenance check AC-7(iii) forbids; suggested edit: 'exempt deltas confined to the named tracker-artifact set'. (ii) The Impacted-Domains internal/complete parenthetical still says 'the tracker-only staleness fact fed to GateFacts' without the OQ-1(c) conditional every sibling entry now carries. Both are non-normative parentheticals contradicted by correct binding text nearby (R4.2, AC-6/AC-7, the panel entries), which is why they do not gate approval — but per the findings-disposition discipline they should be fixed in the approval-round edit or explicitly refuted, not dropped a third time."
+    },
+    {
+      "severity": "MINOR",
+      "title": "BRIEF (process, non-blocking): mandatory errors-in-brief report item absent through all four rounds",
+      "detail": "The aytt charter's 'Keep both' method mandate remains half-carried in the panel BRIEF template: the contradiction license is present, the mandatory errors-in-this-brief report item is not. No round-1..4 BRIEF error affected my verdicts, so this stays MINOR; the fix belongs in the BRIEF/panel template for future panels, not in spec.md."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Round-4 fidelity positives (for the tally's record)",
+      "detail": "The G5 sanction boundary (R1.3 + AC-5(viii)) closes the one door the round-2 redesign leg could have opened — release's guard-routed sync is the ONLY unforced backward writer and the operator repair path still refuses — so posing the redesign leg costs nothing in guard integrity. AC-2 now pins both release-row carve-outs including the redesign-leg variant, keeping the agreement table falsifiable under every open OQ-3 outcome. The :142→:141 all-open-row correction resolves a re-raised R2 ask the consolidation had dropped, with the drop history recorded in the grill parenthetical rather than papered over — the method transparency the charter's 127 lessons mandate."
+    }
+  ]
+}

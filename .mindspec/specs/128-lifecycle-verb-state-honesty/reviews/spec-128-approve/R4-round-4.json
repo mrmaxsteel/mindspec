@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "R4 had no round-3 concrete_changes_required items, so round 4 required a regression audit of the fixes in R4's empirical territory. The reviewed commit is exactly ad66efbc200a194cd887c49ae759a714859f146d, and the resulting spec remains grounded and falsifiable. The worktree state probe still reproduces the central contradiction under both normal and bd-unreachable execution: mode idle with non-empty activeSpec. The main-checkout probe currently reproduces the successful empty-mode failure shape under both normal and reduced PATH because bd itself cannot open the embedded Dolt LOCK in this environment; that independently establishes that the normal run is not the spec's healthy-bd branch rather than contradicting its discriminator. Source re-derivation still shows that runEmitOnly never receives pick, positional emit-only bypasses readiness through FetchBeadByID, containsSpecID is a title substring filter on both ready-set paths, plan approval writes mindspec_phase=implement at plan.go:455, and internal/instruct has no adopt hit. The round-3 writer inventory also re-derives cleanly: the nine production MergeMetadata call sites that write mindspec_phase are plan.go:455, spec.go:76, complete.go:1366, release.go:152, impl.go:577-579 and :611-613, adopt.go:424 via :437, repair.go:189-191, and migrate.go:59-61; spec.go:84 is the sole creation seed and its exclusion rationale is sound. AC-5(vi) makes future inventory drift mechanically red, while AC-5(vii) pins the migration race. Validation exits 0 with only the expected no-epic warning. The open mechanism choices remain honestly chartered to plan stage and do not prevent this spec-document gate from passing.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R3-ASKS",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "summary": "R4-round-3 approved with an empty concrete_changes_required array. There was therefore no R4 round-3 ask to remediate; the required round-4 regression audit found no regression in R4's lens territory."
+    },
+    {
+      "id": "R4-R4-F1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-live-state-probes",
+      "summary": "At reviewed HEAD ad66efbc, mindspec state show from the spec worktree returned mode idle with activeSpec 128-lifecycle-verb-state-honesty and its spec branch. The same result appeared with bd removed from PATH. From /Users/Max/replit/mindspec, both normal and reduced-PATH runs returned mode as the empty string with exit 0. bd show mindspec-aytt from that checkout failed opening the embedded Dolt LOCK with operation not permitted, proving the current normal main-checkout run is also the discovery-failure branch. These observations reproduce the spec's two defect shapes and its stated bd-availability discriminator."
+    },
+    {
+      "id": "R4-R4-F2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-source-probes",
+      "summary": "The unchanged source claims reproduce at ad66efbc: next reads --pick but dispatches emit-only as runEmitOnly(specFlag, args); runEmitOnly fetches a positional ID directly and otherwise takes items[0]; containsSpecID is strings.Contains(title, specID) and is used on both claim and emit-only ready-set paths; internal/approve/plan.go:455 writes mindspec_phase=implement; and rg for adopt under internal/instruct returns no matches."
+    },
+    {
+      "id": "R4-R4-F3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "round-3-writer-inventory-regression-check",
+      "summary": "A fresh repository-wide search for production Go literals writing mindspec_phase finds the nine MergeMetadata writer call sites named by the revised spec: plan.go:455; spec.go:76; complete.go:1366; release.go:152; impl.go:577-579 and :611-613; adopt.go's metadata entry at :424 passed to adoptMergeMetadataFn at :437; repair.go:189-191; and migrate.go:59-61. spec.go:84 is separately a bd-create metadata seed for a not-yet-existing epic, so excluding it from the serialization lock is grounded. The revised scope includes all writer surfaces, and AC-5(vi)-(vii) makes inventory drift and migration contention falsifiable."
+    },
+    {
+      "id": "R4-R4-F4",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "mindspec validate spec 128-lifecycle-verb-state-honesty from the reviewed worktree exited 0 and reported exactly one warning: [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The draft is unusually well grounded, but it does not yet close its own honesty claim. R6.3 deliberately leaves the same title filter able to turn a non-empty bd-ready set into a successful-looking empty result on the default, pick, and emit-only paths; calling that #255's separate outcome class does not create an implementation boundary. Two covered state-changing verbs, release (#146) and repair phase (#248), are excluded from R1's agreement table and R2's purported every-state-changing-verb output contract. The backward-repair guard is specified only for a sequential fixture even though derivation and metadata write are separate operations, so a concurrent lifecycle transition can make the derived value stale and permit a backward write. Finally, AC-6 proves tracker path confinement but not the required tool authorship, allowing an independently-authored tracker-only post-review commit to be exempted, and AC-9 omits single-item and invalid-index pick boundaries. `mindspec validate spec 128-lifecycle-verb-state-honesty` reported only the expected pre-approval warning that no beads epic exists.",
+  "concrete_changes_required": [
+    "Resolve the R6.3/#255 seam in this spec: after the epic-scoped bd-ready query, either remove the redundant title filter or make every selector/no-work path (default, --pick, positional, and --emit-only) fail loudly whenever the filter excluded any ready bead. Add an AC covering a non-empty raw ready set that filters to empty and forbid the successful `No ready work found`/false-done outcome.",
+    "Expand the lifecycle agreement/output contract to cover `mindspec release` and `mindspec repair phase`, or narrow the phrase `every state-changing verb` with a justified taxonomy. Pin their post-state/result/guidance behavior, including release-to-plan versus release-to-implement and forced backward repair.",
+    "Specify and test `repair phase` concurrency semantics. A claim or completion between DerivePhaseDetail and MergeMetadata must not allow a stale derived value to move stored phase backward. Price any compare-and-swap, transaction, serialization, or bounded re-derive/retry mechanism required to make this falsifiable.",
+    "Strengthen R4/AC-6 so the stale-SHA exemption proves both tracker-only paths and provenance from the failed `complete` attempt. Add a negative fixture where an independent actor lands a `.beads/**`-only commit after review; it must remain stale and block just like AC-7's non-tracker commit.",
+    "Add R6 pick-boundary ACs: with exactly one ready bead, explicit `--pick 2` must error rather than silently select the sole bead, and explicitly supplied zero/negative indices must be rejected (or their semantics must be explicitly defined). Pin parity on claim and emit-only paths."
+  ],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "severity": "high",
+      "title": "R6.3 preserves #255's false-success path while modifying the exact same filter",
+      "evidence": "spec.md:131-133 requires claim/emit parity over the filtered ready set and only makes a positional exclusion truthful; spec.md:163 explicitly defers the filtered-empty outcome. Today cmd/mindspec/next.go:175-217 converts a non-empty epic-scoped result to `No ready work found.` with exit success after title filtering, while cmd/mindspec/next.go:430-444 does the same filtering on emit-only before returning an empty-set error. AC-10 exercises only a positional ID and AC-9 can pass with titles that survive the filter.",
+      "impact": "Default and --pick callers can still receive a successful no-op that is indistinguishable from genuinely exhausted work, contradicting the goal and leaving selection semantics dependent on titles. The #255 deferral is an outcome-label distinction, not a code or machinery boundary."
+    },
+    {
+      "id": "R6-F2",
+      "severity": "high",
+      "title": "The closed state-changing-verb inventory omits covered repair and release transitions",
+      "evidence": "spec.md:99's agreement table omits `release` and `repair phase`; spec.md:103 says `Every state-changing verb` and then supplies a closed list omitting both. Yet release is part of the #146 disposition and actively derives/syncs a new phase at cmd/mindspec/release.go:310-318, while R3 changes `repair phase` so it can write or force-write lifecycle phase. Neither command emits an instruct tail today; release's success at release.go:321-322 does not name its resulting mode, and repair's success at repair.go:198-206 does not establish output/guidance agreement.",
+      "impact": "The spec can pass while two in-scope lifecycle mutations continue to lack the state/output honesty promised for every such verb. Release also has at least two reachable post-modes depending on whether other work is ready/blocked."
+    },
+    {
+      "id": "R6-F3",
+      "severity": "high",
+      "title": "The repair backward guard has an unpriced derive-to-write race",
+      "evidence": "The current path derives at cmd/mindspec/repair.go:173 and separately merge-writes at 189-196. R3.3 and AC-5 cover only a static stored-implement/all-open fixture. If `next` claims or `complete` closes a child after derivation but before the write, the repair can persist the now-stale earlier phase even though its initial comparison was non-backward.",
+      "impact": "The command introduced to prevent self-worsening recovery can itself regress state under concurrency. A truly atomic guard may require substrate support beyond the currently listed cmd/phase merge-write surfaces, so this is also a scope/machinery leak."
+    },
+    {
+      "id": "R6-F4",
+      "severity": "high",
+      "title": "AC-6 proves path confinement but not tool authorship",
+      "evidence": "R4.2 requires an exempt delta to be both tool-authored and tracker-paths-only, but AC-6 asserts only that the ignored diff is confined to `.beads/**`; AC-7 tests only a non-tracker commit. No AC distinguishes `complete`'s own materialization commit from a user or concurrent process committing a tracker-only state change after review.",
+      "impact": "An implementation can satisfy every AC using pathspec alone and silently weaken ADR-0037 staleness for independent tracker state changes that the panel never reviewed."
+    },
+    {
+      "id": "R6-F5",
+      "severity": "medium",
+      "title": "Pick boundary behavior is under-specified and not red-on-revert",
+      "evidence": "AC-9 begins with at least two ready beads and tests len+1 only in that shape. Current internal/next/select.go:15-29 returns the sole item before validating pick, so `--pick 2` with one item is silently ignored; non-positive values also fall through to the default. R6.1's prose does not define explicit zero/negative input semantics.",
+      "impact": "A parity refactor can preserve deterministic but dishonest selector behavior at the empty/singleton/index boundary while AC-9 remains green."
+    }
+  ]
+}
