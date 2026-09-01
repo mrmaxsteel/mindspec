@@ -27,6 +27,7 @@ work_chunks:
       - internal/approve/adopt.go
       - internal/complete/complete.go
       - cmd/mindspec/release.go
+      - .gitignore
   - id: 2
     depends_on:
       - 1
@@ -42,6 +43,7 @@ work_chunks:
       - internal/phase/semantics_v2.go
       - internal/phase/semantics_v2_test.go
       - internal/approve/impl.go
+      - cmd/mindspec/repair.go
   - id: 3
     depends_on: []
     key_file_paths:
@@ -194,8 +196,22 @@ fallback at `:1210`), not the bead worktree. The protocol:
    staged deletions and pollute every status consumer (the residual-dirt
    WARN, `complete.go:928-933`, and fixture (iv)'s assertion) — reproduced:
    pre-reset status shows `D`+`??` for the same path, post-reset clean. A
-   reset failure is non-rolled-back (forward-only): the op refuses with a
-   recovery line naming the idempotent re-run. Consequences, each closing one
+   reset failure is non-rolled-back (forward-only), and the promised plain
+   re-run ACTUALLY CONVERGES via **resume detection running BEFORE the panel
+   gate (round-3 G1)**: immediately before the update-ref, a durable
+   MATERIALIZATION MARKER ref (`refs/mindspec/materialized/<bead-id>` = `C`;
+   the spec-127 `recordMergeSourceMarker` precedent) is written — only after
+   every gate has passed. Every run checks it early, before the panel gate:
+   marker present AND tip == `C` → RESUME mode — this tip advance is the
+   tool's own already-gated materialization from the current panel round, so
+   the run skips re-snapshot, content gates, and the panel gate, and
+   continues forward from the idempotent index refresh → artifact sync →
+   merge, clearing the marker after the bead→spec merge lands; marker
+   present but ≠ tip (crash between marker write and update-ref, or a later
+   manual commit) → the marker is stale: deleted, normal run proceeds, and
+   the panel stale-SHA gate evaluates exactly as today. The update-ref →
+   index-refresh → sync → merge boundary joins the ADR-0041 §3
+   mutation-point classification via the amendment. Consequences, each closing one
    G1.2 hole: a pre-commit hook cannot mutate the commit (plumbing runs no
    hooks); a worktree edit in the gate→commit interval cannot enter the
    commit (built from `T`; the edit stays ORDINARY UNSTAGED dirt after the
@@ -326,7 +342,14 @@ sanctioned backward write surface, its exported-ness fenced by a call-site
 enumeration test (the `impl adopt` house pattern) pinning exactly one caller;
 it re-derives fresh child-derived evidence inside the lock's critical section
 by construction. The operator `repair phase` still refuses backward without
-`--force-backward` + reason (AC-5(viii) distinguishes them).
+`--force-backward` + reason (AC-5(viii) distinguishes them). **Taxonomy
+note (round-3 G5)**: `EnsurePhaseSemanticsV2`'s one-shot legacy rewrite
+(`implement → plan` under the durable v2 marker) sits OUTSIDE the sanction
+taxonomy — it is a semantics TRANSLATION of an unchanged underlying fact
+from pre-v2 to v2 representation, performed once per epic and never again
+(the marker), not a lifecycle backward move; the "exactly one sanctioned
+backward writer" count refers to ongoing v2-semantics writers and is
+unchanged by it.
 
 ### OQ-5 — default-pick rule: **displayed row 1** (bd ready's priority-first order)
 
@@ -439,6 +462,15 @@ depth-4 chain
 serially, and beads 3, 7, 8, 9 are ready in parallel with the chain from the
 start.
 
+**Chunk/section reconciliation sweep (round-3 G4.1 — performed in full, not
+patched)**: every chunk's `key_file_paths` was reconciled against its bead
+section's named edit sites at round 3. Findings beyond the panel's ask:
+chunk 1 was missing `.gitignore` (bead 1's lock-path entry) — added; chunk 2
+was missing `cmd/mindspec/repair.go` (bead 2 step 7's reconciliation call
+site) — added, per the panel; all other chunks matched their sections. This
+class recurred three times because file additions were made ask-by-ask; the
+full sweep is now the recorded baseline.
+
 ## ADR Fitness
 
 - **ADR-0041** — **AMENDED (§1, a deliberate reversal — OQ-1(a))**: the
@@ -528,22 +560,26 @@ The root of the graph — R3.3's machinery, which four later beads consume.
    deadline, default 10s, constant pinned in the file) — on timeout, an
    ADR-0035 refusal naming the lock path and a re-run recovery line (never a
    delete-the-lock instruction); unix crashed holders self-release (flock is
-   kernel-held); the Windows O_EXCL path is **ownership/liveness-aware and
-   race-safe (round-2 G5)**: the lock file carries holder PID + RFC3339
-   timestamp, and takeover requires the holder PID NOT alive (process probe)
-   AND age beyond the pinned staleness bound, then proceeds
-   compare-and-delete (re-read; delete only while the content still matches
-   the exact stale identity diagnosed — never blind unlink, so two stale
-   contenders cannot unlink each other's FRESH locks), then O_EXCL-create
-   (atomic — exactly one winner), then POST-CREATE VERIFY (re-read; content
-   must equal own identity, else release and re-enter the bounded wait —
-   closing the residual delete/create interleave). A LIVE holder older than
-   the bound is never removed. Tests: real-goroutine contention (`-race`),
-   timeout error propagation, crashed-holder recovery (kill the flock
-   holder; next acquire succeeds), and seam-driven Windows legs:
-   stale-file takeover, live-holder-older-than-bound NOT removed,
-   concurrent stale contenders → exactly one winner; plus the no-git-dirt
-   assertion.
+   kernel-held); the Windows path uses a **mechanically atomic primitive
+   (round-3 G3 — the round-2 compare-and-delete + post-create-verify dance
+   is REPLACED, not repaired)**: `LockFileEx` (exclusive byte-range lock) on
+   a lock file opened with a RETAINED handle WITHOUT `FILE_SHARE_DELETE`,
+   held for the whole critical section — atomicity and ownership are the
+   OS's, release is owner-only (`UnlockFileEx` + `CloseHandle`), and a
+   crashed holder's lock releases with its process, mirroring flock
+   semantics. This moots the stale-file problem class entirely: the FILE is
+   not the lock (the byte-range lock is), so an empty or partial leftover
+   file never blocks — the round-2 crash-between-create-and-publish case is
+   dispositioned as unreachable (no identity publication exists to crash
+   before). No PID/timestamp content, no takeover, no deletion step. Tests:
+   real-goroutine contention (`-race`), timeout error propagation,
+   crashed-holder recovery (kill the holder; next acquire succeeds — both
+   platforms' semantics, the Windows leg seam-driven on non-Windows CI), the
+   barrier-controlled two-contender exclusivity test (exactly one inside the
+   critical section, the loser blocked until release — subsuming the
+   late-delete interleave the deleted design needed), a leftover-file leg
+   (pre-existing empty/partial lock file: acquisition simply succeeds); plus
+   the no-git-dirt assertion.
 3. Wrap every existing `mindspec_phase` writer in the lock (values unchanged
    in this bead): `plan.go:455`, `spec.go:76`, `complete.go:1366`,
    `release.go:152`, `impl.go:577-579`, `impl.go:611-613`, `adopt.go:424/:437`,
@@ -587,10 +623,12 @@ None (bd edges wired from `work_chunks[1]`).
    writer: it registers in the bead-1 inventory by construction.
 3. `cmd/mindspec/release.go`: the sanctioned redesign leg — `syncPhase`
    (`release.go:152`) becomes the ONE production caller of
-   `phase.SanctionedDerivedSync` (created + call-site-fenced in bead 1),
+   `phase.SanctionedDerivedSync` (created + zero-caller-fenced in bead 1),
    which re-derives the child-derived phase inside the critical section and
    writes it, backward permitted; the operator guard in `repair.go` is
-   unaffected.
+   unaffected. **This step also TIGHTENS bead 1's enumeration fence from
+   zero-callers-with-allowlist to exactly-one (round-3 G4.2 — the tightening
+   duty lives in the bead that executes it).**
 4. `internal/complete/complete.go:1366`: step-6.5 keeps writing derived
    `NextMode` under the lock (wrapped in bead 1; value semantics unchanged —
    in the trigger-2 state this is plan-over-plan, not backward).
@@ -640,15 +678,29 @@ None (bd edges wired from `work_chunks[1]`).
    written); and the READ-path fixture — on a legacy epic, `state show`
    emits the legacy notice (never the obsolete mismatch warning), then
    `repair phase` reconciles, then `state show` is clean.
+   **Fixture-state pinning (round-3 G2)**: because `EnsurePhaseSemanticsV2`
+   at repair's entry CONSUMES the marker-absent legacy condition before the
+   guard runs, every guard/warning fixture — AC-5(ii), (iv), (v), and
+   (viii) — is constructed with the v2 marker PRESENT (their backward states
+   built by post-marker means: seam writes or the sanctioned sync), so the
+   reconciliation is a no-op and the condition under test survives to the
+   guard; the marker-ABSENT stored-implement/all-open state is exclusively
+   the LEGACY fixture above, exercising notice + self-heal. Classification:
+   the legacy notice is a REPLACEMENT notice, not a retained form of the
+   phase-mismatch warning — AC-5(iv)'s test targets the retained warning
+   only.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
 - [ ] Both fixture routes assert zero warning emissions on stderr
 
 **Acceptance Criteria**
-- AC-5(i) (both routes, warning-absent arm), AC-5(iv) (the general mismatch
-  warning, where still reachable outside these windows, retains its safe final
-  recovery line), AC-5(viii)
+- AC-5(i) (both routes, warning-absent arm), AC-5(iv) (the RETAINED general
+  mismatch warning, where still reachable outside the dissolved windows,
+  carries the direction-conditional recovery per the recorded disposition —
+  forward keeps `repair phase`, backward emits the `bd show` inspection line;
+  the legacy notice is a replacement, outside this AC's target — round-3
+  G7/G2), AC-5(viii)
 
 **Depends on**
 Bead 1 (lock + guard + sanctioned entry).
@@ -767,13 +819,16 @@ Beads 2 and 3 (the post-states the tails must agree with).
 3. `internal/validate`: `ValidateDocsRange`/`CheckADRDivergence` snapshot legs
    over `base → T` (BOTH gates, same protocol); committed-range behavior
    preserved for reconcile mode and the impl-approve whole-branch backstop.
-4. `internal/complete/complete.go`: snapshot taken once after the panel gate;
-   both gates measure it; on pass, the three-part materialization op runs
-   (commit-tree from `T` → expected-old-tip `update-ref` → index-only
+4. `internal/complete/complete.go`: the EARLY resume check (before the panel
+   gate — protocol step 3's marker/tip recognition, with stale-marker
+   cleanup); snapshot taken once after the panel gate; both gates measure
+   it; on pass, the four-part materialization op runs (marker-ref write →
+   commit-tree from `T` → expected-old-tip `update-ref` → index-only
    `reset --quiet --mixed` in `wtPath`, with the protocol-step-3 failure
-   legs), replacing the `CommitAll` porcelain path for this flow; the
-   artifact sync commit follows; panel gate stays first; reconcile path
-   untouched.
+   legs; marker cleared after the bead→spec merge lands), replacing the
+   `CommitAll` porcelain path for this flow; the artifact sync commit
+   follows; reconcile path untouched. Marker-ref helpers live in
+   `internal/gitutil` beside the 127 `recordMergeSourceMarker` precedent.
 5. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 amendment REPLACES
    BOTH load-bearing statements (round-1 G1.4), describing the CORRECTED
    protocol (round-2 G2): (i) panel-before-`CommitAll` is RETAINED with its
@@ -783,7 +838,16 @@ Beads 2 and 3 (the post-states the tails must agree with).
    treatment (the artifact is unchanged in `T` and measured by no gate; only
    the sync commit updates it), why the gates cannot vacuously miss content
    (untracked files are staged into `T`; the commit IS `T`), and the
-   materialization op's index-refresh + expected-old-tip semantics. No
+   materialization op's index-refresh + expected-old-tip semantics, PLUS
+   (round-3 G1.2) the §3 mutation-point classification gains the
+   update-ref → index-refresh → sync → merge boundary with its
+   marker-driven forward-resume semantics, and (round-3 G6) the refusal
+   guarantee is stated precisely rather than as repository-byte-identical: a
+   refused content gate leaves the bead ref/tip, tracker state, real index,
+   and worktree unchanged, while UNREACHABLE LOOSE OBJECTS from the
+   temp-index staging may exist (gc-collectable — the same accepted class as
+   the existing non-mutating merge preview, `neteffect.go`'s
+   "unreferenced loose objects only" precedent). No
    measured-equals-committed prose claim survives — the equality is the
    commit-tree construction. Extend `cmd/mindspec/adr0041_amendment_test.go`.
 6. AC-6 + AC-7(i) fixtures: panel-pass at SHA A + dirty tracker +
@@ -805,7 +869,13 @@ Beads 2 and 3 (the post-states the tails must agree with).
    deletion; (vi) an unchanged-after-snapshot worktree is status-CLEAN after
    materialization — red against the phantom-staged-deletion state; (vii)
    the excluded artifact is byte-identical at tip, in `T`, and in the user
-   commit, changing only in the sync commit.
+   commit, changing only in the sync commit; (viii) the resume KILL fixture
+   (round-3 G1.2): advance the ref to `C` with the marker written, interrupt
+   before the reset, add an interval edit, then invoke the documented
+   recovery (plain re-run) — it converges to a landed merge with NO
+   rollback, NO re-panel, no phantom staged deletions, and the interval edit
+   preserved as ordinary dirt; a stale-marker variant (marker ≠ tip) is
+   cleaned and falls through to a normal run.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
