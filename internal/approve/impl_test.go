@@ -1007,12 +1007,18 @@ func TestApproveImplCallOrder(t *testing.T) {
 			id, ok := c.Fun.(*ast.Ident)
 			return ok && id.Name == "runOrphanObligationGate"
 		}},
-		{label: "implPhaseMetadataFn(reconcile, mindspec_phase only)", match: func(c *ast.CallExpr) bool {
-			id, ok := c.Fun.(*ast.Ident)
-			if !ok || id.Name != "implPhaseMetadataFn" || len(c.Args) < 2 {
+		{label: "phase.WithPhaseWriteLock(implPhaseMetadataFn, reconcile mindspec_phase only)", match: func(c *ast.CallExpr) bool {
+			// Spec 128 R3.3: the reconcile write now runs inside
+			// WithPhaseWriteLock's critical section — the direct
+			// implPhaseMetadataFn(...) CallExpr moved to a bare Ident
+			// argument (WithPhaseWriteLock's mergeMetadata param); the
+			// map literal it used to receive directly now lives inside
+			// the FuncLit's return statement.
+			name, ok := withPhaseWriteLockMergeFnName(c)
+			if !ok || name != "implPhaseMetadataFn" {
 				return false
 			}
-			return callMapHasKey(c.Args[1], "mindspec_phase") && !callMapHasKey(c.Args[1], "mindspec_done")
+			return withPhaseWriteLockReturnsMapWithKey(c, "mindspec_phase", "mindspec_done")
 		}},
 		{label: "implRunBDCombinedFn(\"close\")", match: func(c *ast.CallExpr) bool {
 			id, ok := c.Fun.(*ast.Ident)
@@ -1021,12 +1027,12 @@ func TestApproveImplCallOrder(t *testing.T) {
 			}
 			return firstArgStringLit(c) == "close"
 		}},
-		{label: "implPhaseMetadataFn(mindspec_phase=done)", match: func(c *ast.CallExpr) bool {
-			id, ok := c.Fun.(*ast.Ident)
-			if !ok || id.Name != "implPhaseMetadataFn" || len(c.Args) < 2 {
+		{label: "phase.WithPhaseWriteLock(implPhaseMetadataFn, mindspec_phase=done)", match: func(c *ast.CallExpr) bool {
+			name, ok := withPhaseWriteLockMergeFnName(c)
+			if !ok || name != "implPhaseMetadataFn" {
 				return false
 			}
-			return callMapHasKey(c.Args[1], "mindspec_done")
+			return withPhaseWriteLockReturnsMapWithKey(c, "mindspec_done", "")
 		}},
 		{label: "exec.CommitCount", match: func(c *ast.CallExpr) bool {
 			return isSelectorCall(c.Fun, "exec", "CommitCount")
@@ -2265,6 +2271,49 @@ func callMapHasKey(expr ast.Expr, key string) bool {
 		}
 	}
 	return false
+}
+
+// withPhaseWriteLockMergeFnName reports the name of the bare-identifier
+// mergeMetadata argument (WithPhaseWriteLock's 3rd positional parameter)
+// when c is a phase.WithPhaseWriteLock call — spec 128 R3.3's lock-wrap
+// shape every mindspec_phase writer now uses.
+func withPhaseWriteLockMergeFnName(c *ast.CallExpr) (string, bool) {
+	if !isSelectorCall(c.Fun, "phase", "WithPhaseWriteLock") || len(c.Args) < 4 {
+		return "", false
+	}
+	id, ok := c.Args[2].(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	return id.Name, true
+}
+
+// withPhaseWriteLockReturnsMapWithKey reports whether c's 4th argument (the
+// fn func(stored string) (map[string]interface{}, error) closure) returns a
+// map[string]interface{} composite literal carrying key, and — when
+// excludeKey is non-empty — NOT carrying excludeKey, disambiguating the
+// reconcile write (mindspec_phase only) from the done write (mindspec_phase
+// + mindspec_done).
+func withPhaseWriteLockReturnsMapWithKey(c *ast.CallExpr, key, excludeKey string) bool {
+	if len(c.Args) < 4 {
+		return false
+	}
+	lit, ok := c.Args[3].(*ast.FuncLit)
+	if !ok {
+		return false
+	}
+	found := false
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		cl, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		if callMapHasKey(cl, key) && (excludeKey == "" || !callMapHasKey(cl, excludeKey)) {
+			found = true
+		}
+		return true
+	})
+	return found
 }
 
 // --- Spec 091 Bead 5: warnings pipe (Req 22(a) + printing half of 22(b)) ---

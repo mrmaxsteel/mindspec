@@ -519,7 +519,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// below (and the eventual phase.DerivePhaseFromChildren call in
 	// advanceState) so legacy epics get their mindspec_phase metadata
 	// before any phase read. No-op when already migrated or no epic.
-	if _, err := phase.EnsureMigratedWithCache(epicCache, specID); err != nil {
+	if _, err := phase.EnsureMigratedWithCache(root, epicCache, specID); err != nil {
 		return nil, err
 	}
 
@@ -1362,8 +1362,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// so that DerivePhase (metadata-first) returns the correct phase for
 	// downstream commands like `mindspec impl approve`. Reuses the epicID
 	// resolved once at the top (no extra `bd list --type=epic`).
+	//
+	// Spec 128 R3.3: wrapped in the phase write lock (value unchanged in
+	// this bead).
 	if nextMode != "" && epicID != "" {
-		_ = completeMergeMetadataFn(epicID, map[string]interface{}{"mindspec_phase": nextMode})
+		_ = phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string) (map[string]interface{}, error) {
+			return map[string]interface{}{"mindspec_phase": nextMode}, nil
+		})
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.

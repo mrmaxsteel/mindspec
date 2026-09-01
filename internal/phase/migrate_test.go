@@ -8,6 +8,67 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
+// TestEnsureMigrated_NeverOverwritesFresherLockedWrite is AC-5(vii): the
+// legacy-migration backfill (EnsureMigrated, driven here via a real
+// SetMergeMetadataForTest merge seam shared with a contending locked
+// writer) never lands its derived value over a fresher write that landed
+// on the REAL R3.3 lock first — under the lock its absent-check re-runs
+// against the FRESH stored value and no-ops; the final stored value is
+// the locked writer's.
+func TestEnsureMigrated_NeverOverwritesFresherLockedWrite(t *testing.T) {
+	root := t.TempDir()
+	store := newFakeEpicStore("epic-7", map[string]interface{}{
+		"spec_num":   float64(7),
+		"spec_title": "legacy",
+		// mindspec_phase intentionally ABSENT: a legacy pre-080 epic —
+		// exactly the state EnsureMigrated's backfill targets.
+	})
+	store.stub(t)
+	t.Cleanup(SetMergeMetadataForTest(store.merge))
+
+	holderEntered := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	go func() {
+		_ = WithPhaseWriteLock(root, "epic-7", store.merge, func(string) (map[string]interface{}, error) {
+			close(holderEntered)
+			<-releaseHolder
+			return map[string]interface{}{"mindspec_phase": "plan"}, nil
+		})
+	}()
+	<-holderEntered
+
+	type result struct {
+		migrated bool
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		migrated, err := EnsureMigrated(root, "007-legacy")
+		done <- result{migrated, err}
+	}()
+
+	// Give EnsureMigrated's own lock-acquisition attempt time to actually
+	// block on the held lock before releasing the holder.
+	time.Sleep(50 * time.Millisecond)
+	close(releaseHolder)
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("EnsureMigrated: %v", r.err)
+		}
+		if r.migrated {
+			t.Error("expected migrated=false — under the lock the absent-check re-runs against the fresher stored value and no-ops")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("EnsureMigrated never returned")
+	}
+
+	if got := store.get("mindspec_phase"); got != "plan" {
+		t.Errorf("final stored mindspec_phase = %v, want %q (the locked writer's value, never the backfill's derived value)", got, "plan")
+	}
+}
+
 // stubFinders wires the bd seams so FindEpicBySpecID and FindEpic/GetChildren
 // resolve against in-memory fixtures. Returns a teardown.
 func stubFinders(t *testing.T, epicJSON, childrenJSON string) func() {
@@ -105,7 +166,7 @@ func TestLegacyMigratesOnFirstCommand(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("007-legacy")
+	migrated, err := EnsureMigrated(t.TempDir(), "007-legacy")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +205,7 @@ func TestMigratedEpicHasMigratedAtMarker(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	if _, err := EnsureMigrated("009-legacy"); err != nil {
+	if _, err := EnsureMigrated(t.TempDir(), "009-legacy"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	tsRaw, ok := captured["mindspec_migrated_at"].(string)
@@ -177,7 +238,8 @@ func TestEnsureMigratedIdempotent(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("003-mig")
+	root := t.TempDir()
+	migrated, err := EnsureMigrated(root, "003-mig")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +251,7 @@ func TestEnsureMigratedIdempotent(t *testing.T) {
 	}
 
 	// Second invocation: same expectations.
-	migrated2, err := EnsureMigrated("003-mig")
+	migrated2, err := EnsureMigrated(root, "003-mig")
 	if err != nil {
 		t.Fatalf("unexpected error on 2nd call: %v", err)
 	}
@@ -225,7 +287,7 @@ func TestEnsureMigratedNoEpicReturnsFalseNil(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("999-nonexistent")
+	migrated, err := EnsureMigrated(t.TempDir(), "999-nonexistent")
 	if err != nil {
 		t.Errorf("expected nil error when no epic exists, got %v", err)
 	}

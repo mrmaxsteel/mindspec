@@ -148,8 +148,12 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		removeWorktree:   exec.RemoveBeadWorktreeAndRestore,
 		setOpen:          defaultSetOpen,
 		activeBead:       defaultActiveBead,
+		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
+		// in this bead — bead 2 wires the sanctioned-sync redesign leg).
 		syncPhase: func(epicID, mode string) {
-			_ = bead.MergeMetadata(epicID, map[string]interface{}{"mindspec_phase": mode})
+			_ = phase.WithPhaseWriteLock(root, epicID, bead.MergeMetadata, func(string) (map[string]interface{}, error) {
+				return map[string]interface{}{"mindspec_phase": mode}, nil
+			})
 		},
 		stdout: os.Stdout,
 		stderr: os.Stderr,

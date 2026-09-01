@@ -297,7 +297,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// when no epic exists yet (pre-approve-spec). Migration errors fail
 	// the command (spec 089 Requirement 9). This is the ONE exempt
 	// pre-preflight mutation (spec 119 R1).
-	if _, err := phase.EnsureMigrated(specID); err != nil {
+	if _, err := phase.EnsureMigrated(root, specID); err != nil {
 		return nil, err
 	}
 	result := &PlanResult{SpecID: specID}
@@ -452,7 +452,14 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// guaranteed non-empty here — resolvePlanApprovePreflight refuses
 	// pre-mutation on both epic failure modes (P10), so no epic-less path
 	// reaches this point.
-	if err := planMergeMetadataFn(facts.parentID, map[string]interface{}{"mindspec_phase": "implement"}); err != nil {
+	//
+	// Spec 128 R3.3: wrapped in the phase write lock so a concurrent
+	// mindspec_phase writer can never land a stale value over this one
+	// (or vice versa). Value unchanged in this bead — bead 2 owns value
+	// semantics (OQ-3).
+	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_phase": "implement"}, nil
+	}); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
 	}
 

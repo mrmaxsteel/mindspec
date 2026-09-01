@@ -12,6 +12,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -85,6 +86,10 @@ attempted, and the lever is guaranteed to converge once applied.`,
 func init() {
 	repairCmd.AddCommand(repairPhaseCmd)
 	repairCmd.AddCommand(repairSpecTitleCmd)
+	// Spec 128 R3.3: the backward-move guard's force flag. Empty means
+	// "not forcing"; an explicit empty reason (--force-backward="") is
+	// rejected below, same discipline as --allow-doc-skew/--override-adr.
+	repairPhaseCmd.Flags().String("force-backward", "", "Record a reason and force a backward mindspec_phase move (refused by default, spec 128 R3.3)")
 }
 
 // repairSpecTitleRunE implements `mindspec repair spec-title <epic-id>
@@ -158,8 +163,32 @@ func repairSpecTitleRunE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// repairPhaseRunE implements `mindspec repair phase <spec-id>`.
+//
+// Spec 128 R3.3: the backward-move guard. The write happens inside
+// WithPhaseWriteLock's critical section, and the guard compares the
+// TARGET derived value (detail.Derived, computed once below — the
+// concurrency leg, AC-5(v), deliberately exercises a STALE target here)
+// against the FRESH stored value WithPhaseWriteLock reads under the lock
+// — never a pre-lock snapshot. A backward move is refused unless
+// --force-backward "<reason>" is passed, in which case it proceeds and
+// the reason is both recorded on the epic metadata and named in the
+// printed success line (AC-5(iii)).
 func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
+
+	root, err := findRoot()
+	if err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("repair phase: %v", err),
+			fmt.Sprintf("cd into a mindspec-managed repository and re-run `mindspec repair phase %s`", idrender.Spec(specID)),
+		)
+	}
+
+	forceBackwardReason, _ := cmd.Flags().GetString("force-backward")
+	if cmd.Flags().Changed("force-backward") && strings.TrimSpace(forceBackwardReason) == "" {
+		return fmt.Errorf("--force-backward requires a non-empty reason")
+	}
 
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
@@ -184,25 +213,57 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Req 19: merge-write via bead.MergeMetadata — preserves every
-	// unrelated metadata key on the epic.
-	if err := repairMergeMetadataFn(epicID, map[string]interface{}{
-		"mindspec_phase": detail.Derived,
-	}); err != nil {
+	var (
+		freshStored     string
+		refusedBackward bool
+		wroteWithForce  bool
+	)
+	lockErr := phase.WithPhaseWriteLock(root, epicID, repairMergeMetadataFn, func(stored string) (map[string]interface{}, error) {
+		freshStored = stored
+		if phase.IsBackwardMove(stored, detail.Derived) {
+			if forceBackwardReason == "" {
+				refusedBackward = true
+				return nil, nil
+			}
+			wroteWithForce = true
+			return map[string]interface{}{
+				"mindspec_phase":              detail.Derived,
+				"mindspec_phase_force_reason": forceBackwardReason,
+			}, nil
+		}
+		// Req 19: merge-write via bead.MergeMetadata — preserves every
+		// unrelated metadata key on the epic.
+		return map[string]interface{}{
+			"mindspec_phase": detail.Derived,
+		}, nil
+	})
+	if lockErr != nil {
 		return guard.NewFailure(
-			fmt.Sprintf("repair phase: writing mindspec_phase=%s to epic %s failed: %v", detail.Derived, epicID, err),
+			fmt.Sprintf("repair phase: writing mindspec_phase=%s to epic %s failed: %v", detail.Derived, epicID, lockErr),
 			fmt.Sprintf("mindspec repair phase %s", specID),
+		)
+	}
+	if refusedBackward {
+		return guard.NewFailure(
+			fmt.Sprintf("repair phase: refusing backward move for spec %s (epic %s): stored phase %q is ahead of the re-derived phase %q in lifecycle order (spec < plan < implement < review < done) — the derivation may be stale, or the epic genuinely regressed",
+				idrender.Spec(specID), idrender.Bead(epicID), freshStored, detail.Derived),
+			fmt.Sprintf("bd show %s   (inspect the epic before forcing a backward move)", idrender.Bead(epicID)),
+			fmt.Sprintf("mindspec repair phase %s --force-backward \"<reason>\"   (only if the backward move is intentional)", idrender.Spec(specID)),
 		)
 	}
 
 	fmt.Fprintf(os.Stderr, "event=lifecycle.phase_repaired spec=%s epic=%s stored=%s derived=%s\n",
-		specID, epicID, detail.Stored, detail.Derived)
-	if detail.Stored == detail.Derived {
+		specID, epicID, freshStored, detail.Derived)
+	switch {
+	case freshStored == detail.Derived:
 		fmt.Printf("Phase for %s already consistent: %s (merge-write refreshed; unrelated metadata keys preserved).\n",
 			specID, detail.Derived)
-	} else {
+	case wroteWithForce:
+		fmt.Printf("Phase for %s force-repaired: %q -> %q (reason: %q; epic %s; unrelated metadata keys preserved).\n",
+			idrender.Spec(specID), freshStored, detail.Derived, forceBackwardReason, idrender.Bead(epicID))
+	default:
 		fmt.Printf("Phase for %s repaired: %q -> %q (epic %s; unrelated metadata keys preserved).\n",
-			specID, detail.Stored, detail.Derived, epicID)
+			specID, freshStored, detail.Derived, epicID)
 	}
 	return nil
 }

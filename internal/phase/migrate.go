@@ -37,30 +37,51 @@ func SetMergeMetadataForTest(fn MergeMetadataFunc) func() {
 //
 // Constructs a fresh cache; hot-path callers (e.g. complete.Run, which resolves
 // the same epic again downstream) should use EnsureMigratedWithCache to share
-// the one `bd list --type=epic` lookup.
-func EnsureMigrated(specID string) (bool, error) {
-	return EnsureMigratedWithCache(NewCache(), specID)
+// the one `bd list --type=epic` lookup. root locates the R3.3 phase write
+// lock (`<root>/.mindspec/phase.lock`) this backfill now runs inside.
+func EnsureMigrated(root, specID string) (bool, error) {
+	return EnsureMigratedWithCache(root, NewCache(), specID)
 }
 
 // EnsureMigratedWithCache is the cache-aware variant of EnsureMigrated. The
 // spec→epic resolution and every epic read route through the supplied cache,
 // so a caller that also resolves the epic elsewhere in the same invocation
 // pays for at most one `bd list --type=epic` (spec 107 wave 1).
-func EnsureMigratedWithCache(c *Cache, specID string) (bool, error) {
+//
+// Spec 128 R3.3 (round-3 G1): the absent-check → derive → write sequence
+// now runs entirely INSIDE WithPhaseWriteLock's critical section — this
+// backfill is one of the mindspec_phase writers the R3.3 lock serializes,
+// so a concurrent writer's fresher value can never be clobbered by a
+// stale legacy backfill (and vice versa: the backfill's own absent-check
+// re-reads the FRESH stored value under the lock, so it never re-fires
+// after another writer has already set a real phase).
+func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error) {
 	epicID, err := FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
 		return false, nil // nothing to migrate
 	}
-	if storedPhase := readStoredPhaseWithCache(c, epicID); storedPhase != "" {
-		return false, nil // already migrated or post-080 native
+
+	var (
+		migrated bool
+		derived  string
+	)
+	lockErr := WithPhaseWriteLock(root, epicID, mergeMetadataFn, func(stored string) (map[string]interface{}, error) {
+		if stored != "" {
+			return nil, nil // already migrated or post-080 native
+		}
+		children, _ := c.GetChildren(epicID)
+		derived = DerivePhaseFromChildren(children)
+		migrated = true
+		return map[string]interface{}{
+			"mindspec_phase":       derived,
+			"mindspec_migrated_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}, nil
+	})
+	if lockErr != nil {
+		return false, fmt.Errorf("ensure-migrated %s: %w", specID, lockErr)
 	}
-	children, _ := c.GetChildren(epicID)
-	derived := DerivePhaseFromChildren(children)
-	if err := mergeMetadataFn(epicID, map[string]interface{}{
-		"mindspec_phase":       derived,
-		"mindspec_migrated_at": time.Now().UTC().Format(time.RFC3339Nano),
-	}); err != nil {
-		return false, fmt.Errorf("ensure-migrated %s: %w", specID, err)
+	if !migrated {
+		return false, nil
 	}
 	fmt.Fprintf(os.Stderr, "event=lifecycle.migrated spec=%s epic=%s phase=%s\n",
 		specID, epicID, derived)

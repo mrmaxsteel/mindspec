@@ -371,6 +371,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
+		File:       "cmd/mindspec/repair.go",
+		Func:       "repairPhaseRunE",
+		Detail:     "arg2:unprovable",
+		Rationale:  "disclosed-residual (spec 128 R3.3, the backward-move guard's refusal): the same unprovable-specID/epicID residual as the arg1 entry above, now also reached by the second command-position Sprintf in the multi-command guard.NewFailure this bead adds (`\"bd show %s   (inspect the epic before forcing a backward move)\"`, `\"mindspec repair phase %s --force-backward ...\"`) — both idrender-rendered (idrender.Spec/idrender.Bead), same disclosed gap as arg1, not a new provenance class.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
 		File:       "internal/approve/impl.go",
 		Func:       "ApproveImpl",
 		Detail:     "arg1:unprovable",
