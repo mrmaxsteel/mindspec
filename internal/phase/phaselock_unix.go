@@ -36,6 +36,9 @@ func acquirePhaseFileLock(path string, wait, pollInterval time.Duration) (func()
 
 	deadline := time.Now().Add(wait)
 	for {
+		if acquireAttemptHook != nil {
+			acquireAttemptHook()
+		}
 		// gosec G115 (pre-existing class, internal/journal/lock_unix.go's
 		// identical flock idiom): os.File.Fd() on a freshly-opened file
 		// descriptor is always a small non-negative int value in

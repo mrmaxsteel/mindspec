@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -80,7 +81,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			if err := phase.WithPhaseWriteLock(root, existingEpicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
 				return map[string]interface{}{"mindspec_phase": "plan"}, nil
 			}); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
+				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
 			}
 		} else {
 			if err := phase.CheckSpecNumberCollision(specNum); err != nil {

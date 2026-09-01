@@ -1,8 +1,10 @@
 package phase
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,18 +49,29 @@ func TestEnsureMigrated_NeverOverwritesFresherLockedWrite(t *testing.T) {
 		migrated bool
 		err      error
 	}
+	// Round-2 panel G4.1: the "attempted acquisition" proof must come
+	// from INSIDE the real kernel-level lock-acquisition path — a
+	// channel closed by the caller before invoking EnsureMigrated does
+	// NOT prove the goroutine was ever scheduled far enough to reach the
+	// actual syscall attempt.
 	attempting := make(chan struct{})
+	var attemptOnce sync.Once
+	t.Cleanup(SetAcquireAttemptHookForTest(func() {
+		attemptOnce.Do(func() { close(attempting) })
+	}))
 	done := make(chan result, 1)
 	go func() {
-		close(attempting)
 		migrated, err := EnsureMigrated(root, "007-legacy")
 		done <- result{migrated, err}
 	}()
-	// Deterministic: EnsureMigrated's goroutine has started (and is
-	// therefore either inside or about to enter its own
-	// WithPhaseWriteLock acquisition attempt on the SAME lock) before we
-	// ever release the holder.
-	<-attempting
+	// Deterministic: EnsureMigrated's goroutine has genuinely reached the
+	// real lock-acquisition syscall attempt before we ever release the
+	// holder.
+	select {
+	case <-attempting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("EnsureMigrated never reached a lock-acquisition attempt")
+	}
 
 	// Deterministic negative window: EnsureMigrated cannot possibly have
 	// completed while the holder still holds the lock.
@@ -169,6 +182,136 @@ func TestEnsureMigrated_InvalidButPresentPhaseNeverBackfilled(t *testing.T) {
 	}
 	if got := store.get("mindspec_phase"); got != "not-a-real-phase" {
 		t.Errorf("stored mindspec_phase mutated to %v, want the untouched original invalid value preserved", got)
+	}
+}
+
+// TestEnsureMigrated_ChildReadFailurePropagatesNoWrite is round-2 panel
+// G1 (hard-block driver, renewed one writer over): the backfill's OWN
+// children read (freshCache.GetChildren, run inside the WithPhaseWriteLock
+// callback once the stored-phase read has already succeeded and found
+// the field genuinely absent) must PROPAGATE a GetChildren failure —
+// never silently derive "plan" from the resulting nil slice. This is
+// distinct from TestEnsureMigrated_ReadErrorPropagatesNoWrite above
+// (which exercises the LOCK's own under-lock stored-phase read failing);
+// here the stored-phase read succeeds cleanly and the failure is
+// injected on the CHILDREN query specifically.
+func TestEnsureMigrated_ChildReadFailurePropagatesNoWrite(t *testing.T) {
+	root := t.TempDir()
+	wantErr := errors.New("bd list --parent: transient failure")
+	epicJSON := `{"id":"epic-13","title":"[SPEC 013-legacy] L","status":"open","issue_type":"epic","metadata":{"spec_num":13,"spec_title":"legacy"}}`
+
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return nil, wantErr
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+	calls := 0
+	restoreMerge := SetMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	migrated, err := EnsureMigrated(root, "013-legacy")
+	if err == nil {
+		t.Fatal("expected an error when the children read fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error does not wrap the underlying children-read failure: %v", err)
+	}
+	if migrated {
+		t.Error("expected migrated=false on a children-read failure")
+	}
+	if calls != 0 {
+		t.Errorf("MergeMetadata calls = %d, want 0 — a children-read failure must never trigger a write", calls)
+	}
+}
+
+// TestEnsureMigrated_CallerCacheStalenessNeverUsed is round-2 panel G1's
+// second ask: EnsureMigratedWithCache must derive children from a FRESH
+// per-call Cache constructed INSIDE the WithPhaseWriteLock callback,
+// never the caller-supplied Cache — which can have been pre-warmed with
+// child state that goes STALE before the lock is ever acquired. This
+// test pre-warms the caller's cache with an all-open snapshot (would
+// derive "plan" if reused), then mutates the underlying "world" to
+// all-closed BEFORE calling EnsureMigratedWithCache, and asserts the
+// WRITTEN value reflects the FRESH state ("review"), proving the stale
+// snapshot was never consulted.
+func TestEnsureMigrated_CallerCacheStalenessNeverUsed(t *testing.T) {
+	root := t.TempDir()
+	epicJSON := `{"id":"epic-20","title":"[SPEC 020-legacy] L","status":"open","issue_type":"epic","metadata":{"spec_num":20,"spec_title":"legacy"}}`
+
+	var mu sync.Mutex
+	children := []ChildInfo{{ID: "b1", Status: "open", IssueType: "task"}}
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				mu.Lock()
+				defer mu.Unlock()
+				b, _ := json.Marshal(children)
+				return b, nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	var captured map[string]interface{}
+	restoreMerge := SetMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+		captured = updates
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	// Caller pre-warms a Cache BEFORE the "real world" state changes —
+	// simulating the exact staleness class round-2 G1 targets: the prior
+	// EnsureMigratedWithCache reused THIS cache inside the critical
+	// section, so a change to the underlying children after this
+	// snapshot but before lock acquisition would have gone unnoticed.
+	staleCache := NewCache()
+	if _, err := staleCache.GetChildren("epic-20"); err != nil {
+		t.Fatalf("pre-warm: %v", err)
+	}
+
+	// Now the real world changes: all children close.
+	mu.Lock()
+	children = []ChildInfo{{ID: "b1", Status: "closed", IssueType: "task"}}
+	mu.Unlock()
+
+	migrated, err := EnsureMigratedWithCache(root, staleCache, "020-legacy")
+	if err != nil {
+		t.Fatalf("EnsureMigratedWithCache: %v", err)
+	}
+	if !migrated {
+		t.Fatal("expected migrated=true")
+	}
+	if captured["mindspec_phase"] != state.ModeReview {
+		t.Errorf("mindspec_phase = %v, want %q — the FRESH children state, not the stale pre-warmed cache's all-open snapshot (which would derive %q)",
+			captured["mindspec_phase"], state.ModeReview, state.ModePlan)
 	}
 }
 

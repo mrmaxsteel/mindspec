@@ -1,11 +1,13 @@
 package phase
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 )
 
 // mergeMetadataFn is the test seam for bead.MergeMetadata used by
@@ -64,6 +66,15 @@ func EnsureMigrated(root, specID string) (bool, error) {
 // only `present == false` backfills; a present-but-invalid value is left
 // untouched here (repair phase's operator-facing guard is the correct
 // lever for a corrupted value, not a silent backfill).
+//
+// Round-2 panel G1 (hard-block driver, renewed one writer over): the
+// children read inside the callback now uses a FRESH per-call Cache
+// constructed INSIDE the callback — never the caller-supplied `c`, whose
+// children could have been fetched (and cached) BEFORE this call ever
+// reached the lock, making it a stale snapshot at write time exactly
+// like the bug class round-1 fixed for SanctionedDerivedSync — and a
+// GetChildren failure now PROPAGATES (aborting with no write) instead of
+// silently deriving "plan" from the resulting nil slice.
 func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error) {
 	epicID, err := FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
@@ -78,7 +89,11 @@ func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error)
 		if present {
 			return nil, nil // already migrated, post-080 native, or present-but-invalid (not this backfill's concern)
 		}
-		children, _ := c.GetChildren(epicID)
+		freshCache := NewCache()
+		children, cerr := freshCache.GetChildren(epicID)
+		if cerr != nil {
+			return nil, fmt.Errorf("ensure-migrated: reading children of epic %s: %w", idrender.Bead(epicID), cerr)
+		}
 		derived = DerivePhaseFromChildren(children)
 		migrated = true
 		return map[string]interface{}{
@@ -87,7 +102,18 @@ func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error)
 		}, nil
 	})
 	if lockErr != nil {
-		return false, fmt.Errorf("ensure-migrated %s: %w", specID, lockErr)
+		// Round-2 panel G3: a lock TIMEOUT gets a copy-pastable recovery
+		// COMMAND, not prose — this function is caller-agnostic (wired
+		// from plan/impl/complete's own preflight), so `mindspec repair
+		// phase <spec-id>` (this file's own house convention: re-derive
+		// and merge-write the phase) is the one re-run every caller's
+		// verb converges on, unlike re-invoking the caller's own verb
+		// (which would re-run its OTHER preflight steps too).
+		var recoverySuffix string
+		if errors.Is(lockErr, ErrPhaseLockTimeout) {
+			recoverySuffix = fmt.Sprintf("\nrecovery: mindspec repair phase %s", idrender.Spec(specID))
+		}
+		return false, fmt.Errorf("ensure-migrated %s: %w%s", specID, lockErr, recoverySuffix)
 	}
 	if !migrated {
 		return false, nil

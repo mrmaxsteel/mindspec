@@ -240,12 +240,32 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		// concurrency leg is driven through the SetListJSONForTest
 		// children fixture, which this read observes exactly as
 		// SanctionedDerivedSync's own children read would).
+		//
+		// Round-2 panel G2: MUST be the status-aware surface, not bare
+		// phase.DerivePhaseFromChildren — bare children-derivation returns
+		// "review" for an all-closed set regardless of a done marker
+		// (derive.go:375), so at the prior revision `repair phase` on an
+		// already-terminal (closed epic, done marker) spec refused a
+		// phantom "backward move" to review and, if --force-backward'd,
+		// would have REGRESSED a healthy done epic. This restores the
+		// pre-spec-128 behavior (repair.go used phase.DerivePhaseDetail,
+		// the non-cache twin of DerivePhaseDetailWithCache, for exactly
+		// this reason) while keeping the fresh-per-call-Cache-inside-fn
+		// discipline this bead adds. Disclosed scope note: like
+		// readStoredPhaseWithCache (round-1's identical judgment call),
+		// DerivePhaseDetailWithCache is a pre-existing, widely-shared
+		// derivation helper whose OWN children-read swallows a
+		// GetChildren failure to "" internally — changing that established
+		// contract is out of this bead's scope, exactly as round-1 held
+		// for the stored-phase read; the derr check below is a defensive
+		// (currently unreachable) guard against the day that contract
+		// changes, kept honest rather than silently assumed impossible.
 		c := phase.NewCache()
-		children, cerr := c.GetChildren(epicID)
-		if cerr != nil {
-			return nil, fmt.Errorf("%w for spec %s (epic %s): %v", errRepairDerivationFailed, idrender.Spec(specID), idrender.Bead(epicID), cerr)
+		detail, derr := phase.DerivePhaseDetailWithCache(c, epicID)
+		if derr != nil {
+			return nil, fmt.Errorf("%w for spec %s (epic %s): %v", errRepairDerivationFailed, idrender.Spec(specID), idrender.Bead(epicID), derr)
 		}
-		derived := phase.DerivePhaseFromChildren(children)
+		derived := detail.Derived
 		if derived == "" {
 			return nil, fmt.Errorf("%w for spec %s from epic %s children", errRepairNoDerivedPhase, idrender.Spec(specID), idrender.Bead(epicID))
 		}

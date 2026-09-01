@@ -358,17 +358,28 @@ func TestRepairPhase_ConcurrentWriterNeverRegressed(t *testing.T) {
 	}()
 	<-holderEntered
 
+	// Round-2 panel G4.1: the "attempted acquisition" proof must come
+	// from INSIDE the real kernel-level lock-acquisition path — a
+	// channel closed by the caller before invoking repairPhaseRunE does
+	// NOT prove the goroutine was ever scheduled far enough to reach the
+	// actual syscall attempt.
 	repairAttempting := make(chan struct{})
+	var attemptOnce sync.Once
+	t.Cleanup(phase.SetAcquireAttemptHookForTest(func() {
+		attemptOnce.Do(func() { close(repairAttempting) })
+	}))
 	repairDone := make(chan error, 1)
 	go func() {
-		close(repairAttempting)
 		repairDone <- repairPhaseRunE(repairPhaseCmd, []string{"092-agent-contract-hardening"})
 	}()
-	// Deterministic: repairPhaseRunE's goroutine has started (and is
-	// therefore either inside or about to enter its own
-	// WithPhaseWriteLock acquisition attempt on the SAME lock) before we
-	// ever release the concurrent-writer holder.
-	<-repairAttempting
+	// Deterministic: repairPhaseRunE's goroutine has genuinely reached
+	// the real lock-acquisition syscall attempt before we ever release
+	// the concurrent-writer holder.
+	select {
+	case <-repairAttempting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("repairPhaseRunE never reached a lock-acquisition attempt")
+	}
 
 	// Deterministic negative window: repair cannot possibly have
 	// completed while the concurrent writer still holds the lock.
@@ -479,6 +490,85 @@ func TestRepairPhase_AlreadyConsistentStillMergeWrites(t *testing.T) {
 	}
 	if len(gotUpdates) != 1 || gotUpdates["mindspec_phase"] != "review" {
 		t.Errorf("merge updates = %v, want only mindspec_phase=review", gotUpdates)
+	}
+}
+
+// TestRepairPhase_TerminalRowClosedDoneMarkerAllClosedChildren is the
+// round-2 panel G2 pinning fixture: a closed epic with a done marker and
+// all-closed children must derive "done" (the status-aware surface) and
+// take the already-consistent path — never refuse as a "backward move"
+// to review, and never write anything on a forced retry either, since
+// there is nothing to fix. Red-on-revert: bare phase.DerivePhaseFromChildren
+// (ignoring epic status/done marker) returns "review" for an all-closed
+// child set, which IsBackwardMove("done", "review") calls backward,
+// causing repair to refuse — and, if an operator obeyed the printed
+// --force-backward hint, would regress a healthy done epic to review.
+func TestRepairPhase_TerminalRowClosedDoneMarkerAllClosedChildren(t *testing.T) {
+	stubRepairFindRoot(t, t.TempDir())
+	epics := []phase.EpicInfo{{
+		ID: "epic-92", Title: "[SPEC 092-agent-contract-hardening] Hardening", Status: "closed",
+		IssueType: "epic", Metadata: map[string]interface{}{
+			"spec_num":             float64(92),
+			"spec_title":           "agent-contract-hardening",
+			"mindspec_migrated_at": "2026-01-01T00:00:00Z",
+			"mindspec_phase":       "done",
+			"mindspec_done":        true,
+		},
+	}}
+	children := []phase.ChildInfo{
+		{ID: "b1", Status: "closed", IssueType: "task"},
+		{ID: "b2", Status: "closed", IssueType: "task"},
+	}
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return json.Marshal(children)
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" && args[1] == "epic-92" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	calls := 0
+	var gotUpdates map[string]interface{}
+	origMerge := repairMergeMetadataFn
+	repairMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		calls++
+		gotUpdates = updates
+		return nil
+	}
+	t.Cleanup(func() { repairMergeMetadataFn = origMerge })
+
+	out, err := captureStdout(t, func() error {
+		return repairPhaseRunE(repairPhaseCmd, []string{"092-agent-contract-hardening"})
+	})
+	if err != nil {
+		t.Fatalf("repair phase on a terminal done epic must succeed (already-consistent), got: %v", err)
+	}
+	if !strings.Contains(out, "already consistent") {
+		t.Errorf("expected the already-consistent success line, got: %q", out)
+	}
+	if strings.Contains(out, "force") {
+		t.Errorf("must never suggest --force-backward for an already-terminal done epic: %q", out)
+	}
+	// The merge-write still runs (idempotent refresh, matching the
+	// established already-consistent contract) but writes the SAME
+	// value back — stored effectively stays "done".
+	if calls != 1 {
+		t.Fatalf("merge seam calls = %d, want 1 (idempotent refresh)", calls)
+	}
+	if gotUpdates["mindspec_phase"] != "done" {
+		t.Errorf("mindspec_phase = %v, want %q (never regressed to review)", gotUpdates["mindspec_phase"], "done")
 	}
 }
 

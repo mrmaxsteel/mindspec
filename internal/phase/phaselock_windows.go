@@ -86,6 +86,9 @@ func acquirePhaseFileLock(path string, wait, pollInterval time.Duration) (func()
 	deadline := time.Now().Add(wait)
 	var ov win32Overlapped
 	for {
+		if acquireAttemptHook != nil {
+			acquireAttemptHook()
+		}
 		r, _, callErr := procLockFileEx.Call(
 			uintptr(handle),
 			uintptr(lockfileExclusiveLock|lockfileFailImmediately),

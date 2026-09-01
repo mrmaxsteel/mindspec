@@ -572,7 +572,8 @@ func TestFaultInjection_ApprovePlan_P3_ApprovalAutoCommit_KillThenConverge(t *te
 //   - p2b — the `bead_ids` frontmatter write (plan.go, writeBeadIDsToFrontmatter):
 //     "could not write bead IDs to plan frontmatter".
 //   - p4  — the phase=implement metadata write (planMergeMetadataFn):
-//     "could not write phase metadata".
+//     "could not sync phase metadata" (spec 128 round-2 panel G3:
+//     rendered via phase.DescribeLockFailure).
 //
 // This test fails BOTH simultaneously and pins that ApprovePlan still
 // succeeds, with a Warning recorded for each.
@@ -615,7 +616,7 @@ func TestFaultInjection_ApprovePlan_P2BP4_PostCreateWritesSwallowed(t *testing.T
 	}
 	found := false
 	for _, w := range result.Warnings {
-		if strings.Contains(w, "could not write phase metadata") {
+		if strings.Contains(w, "could not sync phase metadata") {
 			found = true
 		}
 	}

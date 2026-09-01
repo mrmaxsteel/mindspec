@@ -383,3 +383,78 @@ func guarded(root, epicID string, mergeFn phase.MergeMetadataFunc) error {
 		t.Fatalf("all three shapes nested inside WithPhaseWriteLock must be guarded, got violations: %v", violations)
 	}
 }
+
+// TestFindUnguardedPhaseWrites_CatchesHelperBuiltUpdateMapEvasion is
+// round-2 panel G4.2: AC-5(vi) requires a helper-built update map
+// reaching a MergeMetadata-family call OUTSIDE the lock to be red. The
+// evasion this probes: the "mindspec_phase" composite literal lives
+// inside a SEPARATE helper function (buildUpdate), not at the
+// mergeFn(...) call site itself — a call/dataflow-anchored companion to
+// the composite-literal/index-write anchors above. This is a POSITIVE
+// proof, not a walker change: findUnguardedPhaseWrites operates per-FILE
+// over every top-level FuncDecl's body, so a composite literal inside
+// ANY function — including one merely CALLED to build an update map
+// elsewhere — is found and, since it is not lexically nested inside a
+// WithPhaseWriteLock call anywhere in the file, correctly flagged as
+// unguarded regardless of which function ultimately hands it to
+// MergeMetadata. The genuine, disclosed residual (stated in this file's
+// doc comment) is narrower: a key or map built via string
+// concatenation/formatting, reflection, or data that never appears as a
+// visible composite literal or index-assignment ANYWHERE in the scanned
+// tree is still invisible — true whole-program data-flow analysis, which
+// this test does not attempt to close.
+func TestFindUnguardedPhaseWrites_CatchesHelperBuiltUpdateMapEvasion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "probe.go")
+	source := `package probe
+
+func buildUpdate() map[string]interface{} {
+	return map[string]interface{}{"mindspec_phase": "done"}
+}
+
+func evade(id string, mergeFn func(string, map[string]interface{}) error) {
+	updates := buildUpdate()
+	_ = mergeFn(id, updates)
+}
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatalf("writing probe source: %v", err)
+	}
+	violations := findUnguardedPhaseWrites(t, dir, path)
+	if len(violations) != 1 {
+		t.Fatalf("expected exactly 1 unguarded helper-built-update-map write, got %d: %v", len(violations), violations)
+	}
+	if !strings.Contains(violations[0], "buildUpdate") {
+		t.Errorf("violation should attribute to the helper function that actually builds the literal, got: %s", violations[0])
+	}
+}
+
+// TestFindUnguardedPhaseWrites_HelperBuiltUpdateMapGuardedWhenNested
+// proves the companion positive case: the SAME helper-built-map shape
+// is NOT flagged when the helper's call happens to be a closure literal
+// nested inside a WithPhaseWriteLock call (i.e. the composite literal
+// itself ends up lexically inside the lock call's extent).
+func TestFindUnguardedPhaseWrites_HelperBuiltUpdateMapGuardedWhenNested(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "probe.go")
+	source := `package probe
+
+import "github.com/mrmaxsteel/mindspec/internal/phase"
+
+func guarded(root, epicID string, mergeFn phase.MergeMetadataFunc) error {
+	return phase.WithPhaseWriteLock(root, epicID, mergeFn, func(string, bool) (map[string]interface{}, error) {
+		buildUpdate := func() map[string]interface{} {
+			return map[string]interface{}{"mindspec_phase": "done"}
+		}
+		return buildUpdate(), nil
+	})
+}
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatalf("writing probe source: %v", err)
+	}
+	violations := findUnguardedPhaseWrites(t, dir, path)
+	if len(violations) != 0 {
+		t.Fatalf("a helper closure LEXICALLY NESTED inside WithPhaseWriteLock must be guarded, got violations: %v", violations)
+	}
+}

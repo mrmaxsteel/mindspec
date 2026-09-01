@@ -614,14 +614,18 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		// of a fully successful ApproveImpl is mindspec_phase=done.
 		//
 		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
-		// in this bead).
+		// in this bead). Round-2 panel G3: a lock TIMEOUT gets a
+		// copy-pastable re-run COMMAND via phase.DescribeLockFailure, not
+		// prose — "mindspec impl approve <spec-id>" re-runs the whole
+		// verb, which is idempotent here (MUTATION 1/3's close is already
+		// tolerant of "already closed").
 		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string, bool) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"mindspec_phase": "done",
 				"mindspec_done":  true,
 			}, nil
 		}); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not set done marker on epic %s: %v", epicID, err))
+			result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
 		}
 	}
 

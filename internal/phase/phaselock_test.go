@@ -25,12 +25,17 @@ import (
 )
 
 // TestWithPhaseWriteLock_ExclusiveAcrossGoroutines is the barrier-
-// controlled two-contender exclusivity test (round-1 panel G6:
-// deterministic barriers, no sleep-based scheduling): a channel proves
-// the second contender has ATTEMPTED acquisition before the first
-// releases; a bounded negative window proves it CANNOT enter before
-// release; a positive channel wait proves it DOES enter afterward; both
-// calls' returned errors are checked.
+// controlled two-contender exclusivity test (round-1 panel G6 / round-2
+// panel G4.1: deterministic barriers, no sleep-based scheduling, and the
+// "attempted acquisition" proof must come from INSIDE the actual
+// kernel-level lock-acquisition path — a channel the caller closes
+// immediately before invoking WithPhaseWriteLock does NOT prove the
+// goroutine was ever scheduled far enough to reach the real syscall
+// attempt, so SetAcquireAttemptHookForTest fires from the real
+// acquirePhaseFileLock poll loop itself): a bounded negative window
+// proves the second contender CANNOT enter before release; a positive
+// channel wait proves it DOES enter afterward; both calls' returned
+// errors are checked.
 func TestWithPhaseWriteLock_ExclusiveAcrossGoroutines(t *testing.T) {
 	root := t.TempDir()
 	store := newFakeEpicStore("epic-1", nil)
@@ -48,20 +53,31 @@ func TestWithPhaseWriteLock_ExclusiveAcrossGoroutines(t *testing.T) {
 	}()
 	<-firstEntered
 
+	// Install the real acquisition-attempt hook AFTER the first holder is
+	// already inside — so only the SECOND contender's attempts fire it.
 	secondAttempting := make(chan struct{})
+	var attemptOnce sync.Once
+	t.Cleanup(SetAcquireAttemptHookForTest(func() {
+		attemptOnce.Do(func() { close(secondAttempting) })
+	}))
+
 	secondEntered := make(chan struct{})
 	secondDone := make(chan error, 1)
 	go func() {
-		close(secondAttempting)
 		secondDone <- WithPhaseWriteLock(root, "epic-1", store.merge, func(string, bool) (map[string]interface{}, error) {
 			close(secondEntered)
 			return map[string]interface{}{"mindspec_phase": "implement"}, nil
 		})
 	}()
-	// Deterministic: the second contender has started trying to acquire
-	// the SAME lock (attempted acquisition) before we ever release the
-	// first holder.
-	<-secondAttempting
+	// Deterministic: the second contender has genuinely reached the
+	// real, kernel-level lock-acquisition syscall attempt — not merely
+	// "the goroutine function started running" — before we ever release
+	// the first holder.
+	select {
+	case <-secondAttempting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second contender never reached a lock-acquisition attempt")
+	}
 
 	// Deterministic negative window: with the first holder still
 	// holding, the second contender must NOT have entered — a bounded
@@ -231,37 +247,38 @@ func TestAcquirePhaseFileLock_TimesOutWithoutDeleteInstruction(t *testing.T) {
 // advises deletion); any other error (a genuine merge-write failure) is
 // rendered as-is with no manufactured recovery line.
 func TestDescribeLockFailure(t *testing.T) {
+	const recoveryCommand = "mindspec release mindspec-abc123"
+
 	t.Run("nil error renders empty", func(t *testing.T) {
-		if got := DescribeLockFailure(nil); got != "" {
-			t.Errorf("DescribeLockFailure(nil) = %q, want empty", got)
+		if got := DescribeLockFailure(nil, recoveryCommand); got != "" {
+			t.Errorf("DescribeLockFailure(nil, ...) = %q, want empty", got)
 		}
 	})
 
-	t.Run("lock timeout names the path and ends with a re-run recovery line", func(t *testing.T) {
+	t.Run("lock timeout names the path and ends with the caller's recovery COMMAND", func(t *testing.T) {
 		dir := t.TempDir()
-		path := filepath.Join(dir, "phase.lock")
+		path := filepath.Join(dir, PhaseLockRelPath)
 		timeoutErr := fmt.Errorf("phase: acquire write lock at %s: %w", path, ErrPhaseLockTimeout)
 
-		got := DescribeLockFailure(timeoutErr)
+		got := DescribeLockFailure(timeoutErr, recoveryCommand)
 		if !strings.Contains(got, PhaseLockRelPath) {
 			t.Errorf("must name the lock path %s: %q", PhaseLockRelPath, got)
 		}
 		lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
 		last := lines[len(lines)-1]
-		if !strings.HasPrefix(last, "recovery: ") {
-			t.Errorf("must end with a recovery: line, got last line %q", last)
+		// Round-2 panel G3: the final line must be an actual copy-pastable
+		// COMMAND (the caller's own recoveryCommand argument), not prose.
+		if last != "recovery: "+recoveryCommand {
+			t.Errorf("last line = %q, want %q", last, "recovery: "+recoveryCommand)
 		}
-		// The recovery line itself SAYS "never delete it" — a bare
-		// substring check for "delete" would false-positive on that very
-		// safety sentence, so assert the POSITIVE safety phrasing.
-		if !strings.Contains(strings.ToLower(got), "never delete") {
-			t.Errorf("must explicitly advise against deleting/removing the lock file: %q", got)
+		if strings.Contains(strings.ToLower(got), "delete") || strings.Contains(strings.ToLower(got), "remove") {
+			t.Errorf("must never advise deleting/removing the lock file: %q", got)
 		}
 	})
 
 	t.Run("a non-timeout error is rendered as-is with no manufactured recovery line", func(t *testing.T) {
 		plain := errors.New("bd metadata merge-read failed for epic-1: connection refused")
-		got := DescribeLockFailure(plain)
+		got := DescribeLockFailure(plain, recoveryCommand)
 		if !strings.Contains(got, plain.Error()) {
 			t.Errorf("must contain the underlying error text: %q", got)
 		}

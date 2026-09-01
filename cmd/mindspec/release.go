@@ -117,17 +117,19 @@ next to recover) rather than an "open + stale-worktree" collision.
 // (the sync is a cache refresh, not the terminal mutation), but round-1
 // panel G3 requires it be SURFACED, not silently discarded — rendered via
 // phase.DescribeLockFailure, which gives a lock TIMEOUT the full
-// ADR-0035 treatment (names .mindspec/phase.lock, ends with a re-run
-// recovery line that never advises deletion) and any other failure (a
-// genuine merge-write error) as-is. Extracted to its own named,
-// root-parameterized function (rather than an inline closure capturing
-// newReleaseDeps' root) so it is directly unit-testable without
-// exercising newReleaseDeps' full bd/git wiring.
-func releaseSyncPhase(root, epicID, mode string) {
+// ADR-0035 treatment (names .mindspec/phase.lock, ends with a copy-
+// pastable recovery COMMAND — round-2 panel G3: prose is not enough) and
+// any other failure (a genuine merge-write error) as-is. beadID supplies
+// that command ("mindspec release <bead-id>", the exact re-invocation
+// that hit the lock). Extracted to its own named, root-parameterized
+// function (rather than an inline closure capturing newReleaseDeps'
+// root) so it is directly unit-testable without exercising
+// newReleaseDeps' full bd/git wiring.
+func releaseSyncPhase(root, epicID, mode, beadID string) {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": mode}, nil
 	}); syncErr != nil {
-		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr))
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
 	}
 }
 
@@ -174,7 +176,7 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		// Round-1 panel G3: a lock/write failure is best-effort (the
 		// cursor-rewind cache sync never fails `release` itself) but is no
 		// longer silently discarded — see releaseSyncPhase.
-		syncPhase: func(epicID, mode string) { releaseSyncPhase(root, epicID, mode) },
+		syncPhase: func(epicID, mode string) { releaseSyncPhase(root, epicID, mode, beadID) },
 		stdout:    os.Stdout,
 		stderr:    os.Stderr,
 	}

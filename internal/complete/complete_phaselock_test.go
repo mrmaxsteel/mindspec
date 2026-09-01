@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -44,20 +45,22 @@ func TestCompleteSyncPhase_LockTimeoutSurfacedNotDiscarded(t *testing.T) {
 	defer close(releaseHolder)
 
 	out := captureStderr(t, func() {
-		completeSyncPhase(root, "epic-1", "plan")
+		completeSyncPhase(root, "epic-1", "plan", "mindspec-bead1")
 	})
 
 	if !strings.Contains(out, phase.PhaseLockRelPath) {
 		t.Errorf("surfaced lock-timeout output must name the lock path: %q", out)
 	}
-	if !strings.Contains(out, "recovery: ") {
-		t.Errorf("surfaced lock-timeout output must end with a recovery line: %q", out)
+	// Round-2 panel G3: the final line must be an actual copy-pastable
+	// COMMAND (guard.HasFinalRecoveryLine's own convention), not prose.
+	if !guard.HasFinalRecoveryLine(out) {
+		t.Errorf("surfaced lock-timeout output must end with a recovery: <command> line: %q", out)
 	}
-	// The recovery line itself SAYS "never delete it" — a bare substring
-	// check for "delete" would false-positive on that very safety
-	// sentence, so assert the POSITIVE safety phrasing instead.
-	if !strings.Contains(strings.ToLower(out), "never delete") {
-		t.Errorf("must explicitly advise against deleting/removing the lock file: %q", out)
+	if !strings.Contains(out, "recovery: mindspec complete mindspec-bead1") {
+		t.Errorf("recovery line must be the re-runnable complete command: %q", out)
+	}
+	if strings.Contains(strings.ToLower(out), "delete") || strings.Contains(strings.ToLower(out), "remove") {
+		t.Errorf("must never advise deleting/removing the lock file: %q", out)
 	}
 }
 
@@ -76,7 +79,7 @@ func TestCompleteSyncPhase_WriteFailureSurfacedNoRecoveryLine(t *testing.T) {
 	root := t.TempDir()
 
 	out := captureStderr(t, func() {
-		completeSyncPhase(root, "epic-1", "plan")
+		completeSyncPhase(root, "epic-1", "plan", "mindspec-bead1")
 	})
 	if !strings.Contains(out, errMockLockSync.Error()) {
 		t.Errorf("must surface the underlying write failure: %q", out)
@@ -97,7 +100,7 @@ func TestCompleteSyncPhase_SuccessPrintsNothing(t *testing.T) {
 	root := t.TempDir()
 
 	out := captureStderr(t, func() {
-		completeSyncPhase(root, "epic-1", "plan")
+		completeSyncPhase(root, "epic-1", "plan", "mindspec-bead1")
 	})
 	if out != "" {
 		t.Errorf("completeSyncPhase must print nothing to stderr on success, got %q", out)

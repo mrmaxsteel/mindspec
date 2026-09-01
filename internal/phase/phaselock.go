@@ -77,6 +77,31 @@ func SetLockWaitForTest(wait, poll time.Duration) func() {
 	return func() { phaseLockWait, phaseLockPollInterval = origWait, origPoll }
 }
 
+// acquireAttemptHook, when non-nil, is called once per acquisition
+// ATTEMPT (each poll iteration, including the very first) from INSIDE
+// acquirePhaseFileLock (phaselock_unix.go / phaselock_windows.go) — a
+// test-only instrumentation seam (round-2 panel G4: a channel the
+// CALLER closes immediately before invoking WithPhaseWriteLock does NOT
+// prove the goroutine reached the actual kernel-level acquisition
+// attempt — the goroutine may simply not have been scheduled yet, so a
+// bounded "hasn't entered" negative window can pass even for an
+// unscheduled contender). This hook fires from the real syscall-level
+// attempt itself, giving tests a genuine, deterministic proof that a
+// contender has reached lock acquisition. Production code never sets
+// this (nil is a no-op).
+var acquireAttemptHook func()
+
+// SetAcquireAttemptHookForTest installs hook, called once per
+// acquisition attempt (poll iteration) inside acquirePhaseFileLock, for
+// building a deterministic "the contender has genuinely reached the
+// lock syscall" barrier in tests (any package). Returns a restore func.
+// Never called from production code.
+func SetAcquireAttemptHookForTest(hook func()) func() {
+	orig := acquireAttemptHook
+	acquireAttemptHook = hook
+	return func() { acquireAttemptHook = orig }
+}
+
 // ErrPhaseLockTimeout is returned (wrapped, so errors.Is matches) by
 // WithPhaseWriteLock when the bounded wait to acquire the lock expires.
 //
@@ -97,17 +122,23 @@ var ErrPhaseLockTimeout = errors.New("timed out waiting for the phase write lock
 // discarding it (round-1 panel G3). A lock-acquisition TIMEOUT
 // (errors.Is(err, ErrPhaseLockTimeout)) gets the ADR-0035 treatment: the
 // rendered message names the lock path and ends with a copy-pastable
-// `recovery: ` line that only ever advises a re-run, never deleting the
-// lock file. Any other error (e.g. a genuine merge-write failure) is
-// rendered as-is, with no recovery line manufactured for it — that
-// belongs to whatever wrote the failing value, not to this generic
-// lock-failure describer. Returns "" for a nil err.
-func DescribeLockFailure(err error) string {
+// `recovery: <command>` line — round-2 panel G3: the line must be an
+// actual re-runnable COMMAND, not prose ("re-run once the lock
+// clears..." is not a command an agent can paste). recoveryCommand is
+// the caller's own re-invocation of the verb that hit the lock (e.g.
+// "mindspec release <bead-id>", "mindspec plan approve <spec-id>") —
+// this package cannot guess it, since the same lock serializes many
+// distinct verbs; the caller supplies it. Any OTHER error (e.g. a
+// genuine merge-write failure) is rendered as-is, with no recovery line
+// manufactured for it — that belongs to whatever wrote the failing
+// value, not to this generic lock-failure describer. Returns "" for a
+// nil err.
+func DescribeLockFailure(err error, recoveryCommand string) string {
 	if err == nil {
 		return ""
 	}
 	if errors.Is(err, ErrPhaseLockTimeout) {
-		return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: re-run once the lock at %s clears (never delete it — a live holder means genuine contention, and a crashed holder's kernel-held lock has already released on its own)", err, PhaseLockRelPath)
+		return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: %s", err, recoveryCommand)
 	}
 	return fmt.Sprintf("could not sync phase metadata: %v", err)
 }

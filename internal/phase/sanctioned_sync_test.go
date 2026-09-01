@@ -26,6 +26,7 @@ package phase
 // exactly as the adopt fence's own doc comment states.
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -200,5 +201,113 @@ func phasePkgTestRepoRoot(t *testing.T) string {
 			t.Fatal("could not locate repo root (go.mod with mindspec module) walking up from " + wd)
 		}
 		dir = parent
+	}
+}
+
+// TestSanctionedDerivedSync_ChildReadFailurePropagatesNoWrite is round-1
+// panel G4.2 / round-2 panel G1.2: a children-read failure inside
+// SanctionedDerivedSync's fn must propagate as the underlying error, with
+// ZERO merge-write calls — never silently derive from a nil slice (the
+// exact bug class this whole spec exists to kill, and the same class
+// round-2 found one writer over in EnsureMigratedWithCache).
+func TestSanctionedDerivedSync_ChildReadFailurePropagatesNoWrite(t *testing.T) {
+	root := t.TempDir()
+	epicJSON := `{"id":"epic-30","title":"[SPEC 030-x] X","status":"open","issue_type":"epic","metadata":{"spec_num":30,"spec_title":"x"}}`
+	wantErr := errors.New("bd list --parent: transient failure")
+
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return nil, wantErr
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+	calls := 0
+	restoreMerge := SetMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	err := SanctionedDerivedSync(root, "epic-30")
+	if err == nil {
+		t.Fatal("expected an error when the children read fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error does not wrap the underlying children-read failure: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("merge calls = %d, want 0 on a children-read failure", calls)
+	}
+}
+
+// TestSanctionedDerivedSync_SuccessWritesDerivedPhaseViaRealLockAndMergeSeam
+// is round-1 panel G4.2 / round-2 panel G1.2's promised success test: it
+// exercises the REAL phase lock (a genuine t.TempDir() root, real
+// flock/LockFileEx acquisition — not a mocked lock) plus the real
+// SetMergeMetadataForTest merge seam end to end.
+func TestSanctionedDerivedSync_SuccessWritesDerivedPhaseViaRealLockAndMergeSeam(t *testing.T) {
+	root := t.TempDir()
+	epicJSON := `{"id":"epic-31","title":"[SPEC 031-x] X","status":"open","issue_type":"epic","metadata":{"spec_num":31,"spec_title":"x","mindspec_phase":"implement"}}`
+	childrenJSON := `[{"id":"b1","status":"closed","issue_type":"task"},{"id":"b2","status":"closed","issue_type":"task"}]`
+
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return []byte(childrenJSON), nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	var gotID string
+	var gotUpdates map[string]interface{}
+	calls := 0
+	restoreMerge := SetMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+		calls++
+		gotID = id
+		gotUpdates = updates
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	if err := SanctionedDerivedSync(root, "epic-31"); err != nil {
+		t.Fatalf("SanctionedDerivedSync: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("merge calls = %d, want 1", calls)
+	}
+	if gotID != "epic-31" {
+		t.Errorf("merge target = %q, want epic-31", gotID)
+	}
+	// All-closed children -> derived "review" — a BACKWARD move from the
+	// stored "implement", proving this really is the sanctioned
+	// backward-permitted surface (unlike the operator-facing repair
+	// guard, which would refuse this exact transition without --force).
+	if gotUpdates["mindspec_phase"] != "review" {
+		t.Errorf("mindspec_phase = %v, want %q (all-closed children, backward from stored implement)", gotUpdates["mindspec_phase"], "review")
 	}
 }

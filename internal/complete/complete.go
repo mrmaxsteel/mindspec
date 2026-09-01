@@ -1363,7 +1363,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// downstream commands like `mindspec impl approve`. Reuses the epicID
 	// resolved once at the top (no extra `bd list --type=epic`).
 	if nextMode != "" && epicID != "" {
-		completeSyncPhase(root, epicID, nextMode)
+		completeSyncPhase(root, epicID, nextMode, beadID)
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1380,16 +1380,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // is a cache refresh, not the terminal mutation — but round-1 panel G3
 // requires it be SURFACED, not silently discarded: it is printed via
 // phase.DescribeLockFailure, which gives a lock TIMEOUT the full
-// ADR-0035 treatment (names .mindspec/phase.lock, ends with a re-run
-// recovery line that never advises deletion) and any other failure (a
-// genuine merge-write error) as-is. Extracted to its own named function
-// (rather than an inline closure inside Run) so it is directly
-// unit-testable without exercising Run's full preflight/gate machinery.
-func completeSyncPhase(root, epicID, nextMode string) {
+// ADR-0035 treatment (names .mindspec/phase.lock, ends with a copy-
+// pastable recovery COMMAND — round-2 panel G3: prose is not enough) and
+// any other failure (a genuine merge-write error) as-is. beadID supplies
+// that command ("mindspec complete <bead-id>", the exact re-invocation
+// that hit the lock). Extracted to its own named function (rather than
+// an inline closure inside Run) so it is directly unit-testable without
+// exercising Run's full preflight/gate machinery.
+func completeSyncPhase(root, epicID, nextMode, beadID string) {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil
 	}); syncErr != nil {
-		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr))
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
 	}
 }
 

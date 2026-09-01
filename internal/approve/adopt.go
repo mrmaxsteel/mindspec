@@ -20,6 +20,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -441,7 +442,19 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 		}
 		return meta, nil
 	}); err != nil {
-		return fmt.Errorf("recording adopt audit marker on epic %s: %w", idrender.Bead(epicID), err)
+		// Round-2 panel G3: a lock TIMEOUT gets a copy-pastable re-run
+		// COMMAND, not prose — this error returns all the way up to
+		// adoptSpecRunE, which prints it raw with no recovery-line
+		// convention of its own, so the command must be baked in here.
+		// The reason is a PLACEHOLDER (<why>), matching this file's own
+		// established recovery-line convention elsewhere (never re-emit
+		// the agent-writable --reason value verbatim into a recovery
+		// line).
+		var recoverySuffix string
+		if errors.Is(err, phase.ErrPhaseLockTimeout) {
+			recoverySuffix = fmt.Sprintf("\nrecovery: mindspec impl adopt %s --reason \"<why>\"", idrender.Spec(specID))
+		}
+		return fmt.Errorf("recording adopt audit marker on epic %s: %w%s", idrender.Bead(epicID), err, recoverySuffix)
 	}
 
 	if _, err := adoptRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
