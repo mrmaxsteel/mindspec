@@ -197,21 +197,38 @@ fallback at `:1210`), not the bead worktree. The protocol:
    WARN, `complete.go:928-933`, and fixture (iv)'s assertion) — reproduced:
    pre-reset status shows `D`+`??` for the same path, post-reset clean. A
    reset failure is non-rolled-back (forward-only), and the promised plain
-   re-run ACTUALLY CONVERGES via **resume detection running BEFORE the panel
-   gate (round-3 G1)**: immediately before the update-ref, a durable
-   MATERIALIZATION MARKER ref (`refs/mindspec/materialized/<bead-id>` = `C`;
-   the spec-127 `recordMergeSourceMarker` precedent) is written — only after
-   every gate has passed. Every run checks it early, before the panel gate:
-   marker present AND tip == `C` → RESUME mode — this tip advance is the
-   tool's own already-gated materialization from the current panel round, so
-   the run skips re-snapshot, content gates, and the panel gate, and
-   continues forward from the idempotent index refresh → artifact sync →
-   merge, clearing the marker after the bead→spec merge lands; marker
-   present but ≠ tip (crash between marker write and update-ref, or a later
-   manual commit) → the marker is stale: deleted, normal run proceeds, and
-   the panel stale-SHA gate evaluates exactly as today. The update-ref →
-   index-refresh → sync → merge boundary joins the ADR-0041 §3
-   mutation-point classification via the amendment. Consequences, each closing one
+   re-run ACTUALLY CONVERGES via the **materialization-marker STATE MACHINE
+   (round-3 G1, extended to every tip transition at round-4 G1)**. The
+   invariant: the marker ref `refs/mindspec/materialized/<bead-id>` (spec-127
+   `recordMergeSourceMarker` precedent) is advanced IN THE SAME
+   `git update-ref --stdin` TRANSACTION as every tool-authored bead-ref
+   advance — verified this round: a `start/prepare/commit` transaction over
+   both refs with an expected-old on the bead ref aborts WHOLESALE on a
+   mismatch (fatal at prepare, neither ref moves) — so marker == tip is true
+   after every tool-authored advance BY CONSTRUCTION, and marker ≠ tip
+   PROVES a foreign commit. The stages: (M) build `C` with `commit-tree`
+   (the object exists before any ref moves — round-4 G1.2's ordering fix),
+   then one transaction {bead-ref `A→C` with expected-old `A`; marker → `C`}
+   — fail-closed: a transaction failure (concurrent tip move) refuses with
+   nothing advanced, marker included; (R) index refresh — no ref change,
+   idempotent; (S) artifact sync — `D` is built with the same plumbing shape
+   (C's tree + refreshed artifact blob, `commit-tree D -p C`), then one
+   transaction {bead-ref `C→D`; marker → `D`}; (G) the bead→spec merge —
+   the bead ref no longer moves; a preserved-merge conflict leaves
+   marker == tip, so a re-run resumes INTO the 127 `--resolve-merge`
+   machinery, never around it; (T) terminal: the marker is cleared after
+   the merge lands, on BOTH the ordinary and the landed-merge-reconcile
+   completion paths. Every run's early sequence, before the panel gate:
+   (1) landed-merge reconciliation detection FIRST (the existing spec-119
+   detection; if landed → reconcile path, clearing any orphaned marker —
+   round-4 G1.3); (2) marker == tip → RESUME mode: skip re-snapshot,
+   content gates, and the panel gate (the tip is the current panel round's
+   own gated materialization), continue forward from the first incomplete
+   stage; (3) marker ≠ tip → foreign commit after materialization: delete
+   the marker, proceed as a normal run, the stale-SHA gate evaluating
+   exactly as today — the cannot-launder boundary is retained. The
+   full M→R→S→G→T boundary joins the ADR-0041 §3 mutation-point
+   classification via the amendment. Consequences, each closing one
    G1.2 hole: a pre-commit hook cannot mutate the commit (plumbing runs no
    hooks); a worktree edit in the gate→commit interval cannot enter the
    commit (built from `T`; the edit stays ORDINARY UNSTAGED dirt after the
@@ -424,10 +441,13 @@ real result path.
 
 ### Two plan-scope decisions the beads depend on
 
-**R3.3 lock home**: `internal/phase/phaselock.go` — new file, journal-idiom
-(`acquireFileLock`: `flock(2)` unix / O_EXCL-lockfile windows, mirroring
-`internal/journal/lock.go:55-61`), lock file under `.mindspec/`
-(gitignored-adjacent runtime state, exact name pinned in bead 1). `internal/
+**R3.3 lock home**: `internal/phase/phaselock.go` — new file, kernel-held on
+both platforms (`flock(2)` unix / `LockFileEx` on a retained
+no-`FILE_SHARE_DELETE` handle on Windows — round-4 G2: the journal package
+contributes only its `withReportsLock` read-modify-write SHAPE,
+`internal/journal/lock.go:55-61`, not its O_EXCL-lockfile mechanism), lock
+file under `.mindspec/` (gitignored-adjacent runtime state, exact name
+pinned in bead 1). `internal/
 phase` is imported by every writer package (`internal/approve`,
 `internal/complete`, `cmd/mindspec`, and `phase` itself for `migrate.go`), so
 no new import edges are created; the lock helper exposes
@@ -548,9 +568,11 @@ The root of the graph — R3.3's machinery, which four later beads consume.
    callers outside the allowlist `{cmd/mindspec/release.go}` — satisfiable at
    bead 1's own gate, before release is wired (round-2 G3.1); bead 2 TIGHTENS
    the same test to exactly-one when it wires the caller.
-2. `internal/phase/phaselock.go` (new): journal-idiom file lock
-   (`flock(2)` unix / O_EXCL windows, per `internal/journal/lock.go:55-61`'s
-   pattern) exposing `WithPhaseWriteLock(root, epicID, fn)` — reads stored
+2. `internal/phase/phaselock.go` (new): kernel-held file lock — `flock(2)`
+   on unix, `LockFileEx` on Windows (round-4 G2: the journal package's
+   O_EXCL-lockfile idiom is NOT carried to this lock; only its
+   `withReportsLock` read-modify-write shape is) — exposing
+   `WithPhaseWriteLock(root, epicID, fn)` — reads stored
    phase inside the critical section, passes it to `fn`, performs the
    conditional `MergeMetadata` write `fn` returns, releases. **Operational
    design (round-1 G3), pinned here:** lock path = `.mindspec/phase.lock`;
@@ -804,12 +826,16 @@ Beads 2 and 3 (the post-states the tails must agree with).
    `read-tree <tip>` FIRST** — round-2 G1's synthetic-deletion fix — then
    `add -A` with the named-artifact exclusion, then `write-tree`;
    worktree/real-index/refs untouched, asserted by test; the exclusion means
-   unchanged-at-tip, never absent-from-`T`) and the materialization op
-   (`commit-tree T -p <tip>`, `update-ref` WITH the expected-old-tip operand,
-   then the index-only `reset --quiet --mixed` in `wtPath` — following the
-   spec-127 `CommitTreeMerge`/`UpdateRef` precedent, with the failure legs of
-   protocol step 3: update-ref race → refusal + re-measure; reset failure →
-   forward-only refusal naming the idempotent re-run).
+   unchanged-at-tip, never absent-from-`T`) and the staged materialization
+   machinery (round-4 G1): `commit-tree` builders for `C` (from `T`) and `D`
+   (C's tree + refreshed artifact blob), plus the two-ref transaction helper
+   (`update-ref --stdin` start/prepare/commit: bead ref with expected-old +
+   marker, atomic, wholesale-abort on mismatch — following the spec-127
+   `CommitTreeMerge`/`UpdateRef`/`recordMergeSourceMarker` precedents), the
+   index-only `reset --quiet --mixed`, and the failure legs of protocol
+   step 3 (transaction race → refusal + re-measure, nothing advanced;
+   reset failure → forward-only refusal, the resume machinery converging
+   the re-run).
 2. `internal/executor`: interface + `MindspecExecutor` + mock gain
    `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
    the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
@@ -819,16 +845,22 @@ Beads 2 and 3 (the post-states the tails must agree with).
 3. `internal/validate`: `ValidateDocsRange`/`CheckADRDivergence` snapshot legs
    over `base → T` (BOTH gates, same protocol); committed-range behavior
    preserved for reconcile mode and the impl-approve whole-branch backstop.
-4. `internal/complete/complete.go`: the EARLY resume check (before the panel
-   gate — protocol step 3's marker/tip recognition, with stale-marker
-   cleanup); snapshot taken once after the panel gate; both gates measure
-   it; on pass, the four-part materialization op runs (marker-ref write →
-   commit-tree from `T` → expected-old-tip `update-ref` → index-only
-   `reset --quiet --mixed` in `wtPath`, with the protocol-step-3 failure
-   legs; marker cleared after the bead→spec merge lands), replacing the
-   `CommitAll` porcelain path for this flow; the artifact sync commit
-   follows; reconcile path untouched. Marker-ref helpers live in
-   `internal/gitutil` beside the 127 `recordMergeSourceMarker` precedent.
+4. `internal/complete/complete.go`: the EARLY sequence before the panel gate
+   in protocol-step-3 order — landed-merge reconciliation detection FIRST
+   (clearing any orphaned marker), then marker/tip evaluation (resume vs
+   foreign-delete); snapshot taken once after the panel gate; both gates
+   measure it; on pass, the staged state machine runs in its CORRECTED order
+   (round-4 G1.2 — commit-tree BEFORE any marker can exist): build `C` from
+   `T` → transaction {bead-ref `A→C` expected-old; marker → `C`} →
+   index-only `reset --quiet --mixed` → build `D` by plumbing (C's tree +
+   refreshed artifact blob) → transaction {bead-ref `C→D`; marker → `D`} →
+   merge (resume routes into `--resolve-merge` on a preserved conflict) →
+   terminal marker clear on both completion paths. This replaces BOTH the
+   `CommitAll` porcelain path and the porcelain artifact-sync commit for
+   this flow; reconcile path untouched. Marker + transaction helpers live in
+   `internal/gitutil` beside the 127 `recordMergeSourceMarker` precedent
+   (`update-ref --stdin` start/prepare/commit; multi-ref atomicity + wholesale
+   abort on expected-old mismatch verified empirically this round).
 5. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 amendment REPLACES
    BOTH load-bearing statements (round-1 G1.4), describing the CORRECTED
    protocol (round-2 G2): (i) panel-before-`CommitAll` is RETAINED with its
@@ -839,9 +871,13 @@ Beads 2 and 3 (the post-states the tails must agree with).
    the sync commit updates it), why the gates cannot vacuously miss content
    (untracked files are staged into `T`; the commit IS `T`), and the
    materialization op's index-refresh + expected-old-tip semantics, PLUS
-   (round-3 G1.2) the §3 mutation-point classification gains the
-   update-ref → index-refresh → sync → merge boundary with its
-   marker-driven forward-resume semantics, and (round-3 G6) the refusal
+   (round-3 G1.2, extended round-4 G1.5) the §3 mutation-point
+   classification gains the FULL M→R→S→G→T staged boundary with the
+   transactional marker invariant (marker advanced in the same
+   `update-ref --stdin` transaction as every tool-authored bead-ref
+   advance; marker ≠ tip proves foreign; reconcile-detection before any
+   stale-marker decision; terminal clear on both completion paths), and
+   (round-3 G6, confirmed correct at round 4) the refusal
    guarantee is stated precisely rather than as repository-byte-identical: a
    refused content gate leaves the bead ref/tip, tracker state, real index,
    and worktree unchanged, while UNREACHABLE LOOSE OBJECTS from the
@@ -875,7 +911,14 @@ Beads 2 and 3 (the post-states the tails must agree with).
    recovery (plain re-run) — it converges to a landed merge with NO
    rollback, NO re-panel, no phantom staged deletions, and the interval edit
    preserved as ordinary dirt; a stale-marker variant (marker ≠ tip) is
-   cleaned and falls through to a normal run.
+   cleaned and falls through to a normal run; (ix) kill AFTER the artifact-
+   sync transaction (tip `D`, marker `D` — round-4 G1.4): plain re-run
+   resumes at the merge stage and converges, no re-panel; (x) kill DURING a
+   preserved merge conflict (marker == tip == `D`): re-run / `--resolve-
+   merge` converges through the 127 machinery without re-paneling or
+   laundering; (xi) a genuinely foreign commit landed after materialization
+   (tip ≠ marker): marker deleted, panel stale-SHA blocks exactly as at
+   HEAD.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
