@@ -41,6 +41,7 @@ work_chunks:
       - internal/phase/derive_recovery_test.go
       - internal/phase/semantics_v2.go
       - internal/phase/semantics_v2_test.go
+      - internal/approve/impl.go
   - id: 3
     depends_on: []
     key_file_paths:
@@ -158,12 +159,18 @@ commit; and `MindspecExecutor.ChangedFiles` is rooted at `g.Root`
 fallback at `:1210`), not the bead worktree. The protocol:
 
 1. **Snapshot** (new gitutil primitive `SnapshotWorktreeTree(wtPath,
-   excludePathspecs) (treeOID, error)`): in the bead worktree, stage the FULL
-   prospective content into a TEMPORARY index — `GIT_INDEX_FILE=<tmp> git -C
-   wtPath add -A -- . ':!<named-artifact>'` (tracked + untracked + deletions;
-   the ADR-0025 named artifact is pathspec-EXCLUDED — the sync commit owns it
-   and no gate reads it) — then `git write-tree` → tree OID `T`. The worktree,
-   real index, and refs are untouched (a temp index + loose objects only).
+   excludePathspecs) (treeOID, error)`): in the bead worktree, the temp index
+   is **SEEDED FROM THE BEAD TIP FIRST** — `GIT_INDEX_FILE=<tmp> git -C
+   wtPath read-tree <tip>` — then `add -A -- . ':!<named-artifact>'` stages
+   the full prospective content (tracked + untracked + deletions) over that
+   seed, then `git write-tree` → tree OID `T`. The seeding is load-bearing
+   (round-2 G1, empirically reproduced this round): an EMPTY temp index plus
+   the exclusion makes the tracked artifact ABSENT from `T`, and the commit
+   built from `T` silently DELETES `.beads/issues.jsonl` from the branch;
+   seeded, the exclusion means unchanged-at-tip — the artifact's tip
+   blob/mode is retained in `T`, never dropped. The worktree, real index,
+   and refs are untouched by the snapshot (a temp index + loose objects
+   only).
 2. **Measurement**: both gates measure `base → T` via a new tree-capable leg —
    executor interface gains `ChangedFilesTree(workdir, base, treeOID)
    ([]string, error)` (tree-vs-tree `git diff --name-only base T`, run `-C`
@@ -175,18 +182,29 @@ fallback at `:1210`), not the bead worktree. The protocol:
    invoking `complete` from the main checkout still measures the bead
    worktree's snapshot, not `g.Root`'s state.
 3. **Exactly-the-measured-tree guarantee, by construction**: on gate pass, the
-   user materialization commit is created FROM `T` itself — plumbing
-   `git commit-tree T -p <tip>` + fast-forward `update-ref` (new gitutil
-   primitive; `CommitTreeMerge`/`UpdateRef` from spec 127 are the house
-   precedent) — NOT by re-running `git add -A`. Consequences, each closing one
+   user materialization commit is created FROM `T` itself, as a three-part op
+   with the real-index transition specified (round-2 G2, mechanics reproduced
+   this round): (i) `C = git commit-tree T -p <tip>` (plumbing — no hooks);
+   (ii) `git update-ref refs/heads/bead/<id> C <expected-old-tip>` — the
+   expected-old-value operand makes a concurrent tip move FAIL the update
+   (ADR-0035 refusal, nothing advanced beyond loose objects, re-run
+   re-measures); (iii) `git reset --quiet --mixed` in `wtPath` — index-only
+   (worktree untouched), refreshing the checked-out branch's REAL index to
+   the new tip; without it, files newly tracked via `T` read as phantom
+   staged deletions and pollute every status consumer (the residual-dirt
+   WARN, `complete.go:928-933`, and fixture (iv)'s assertion) — reproduced:
+   pre-reset status shows `D`+`??` for the same path, post-reset clean. A
+   reset failure is non-rolled-back (forward-only): the op refuses with a
+   recovery line naming the idempotent re-run. Consequences, each closing one
    G1.2 hole: a pre-commit hook cannot mutate the commit (plumbing runs no
-   hooks); a worktree edit in the gate→commit interval cannot enter the commit
-   (the commit is built from `T`, the edit stays uncommitted dirt for the next
-   run); the bd export cannot enter it (the artifact is excluded from `T`; the
-   export lands in the separate, pathspec-scoped artifact-sync commit the flow
-   already has, which no gate measures — the artifact-only normalization
-   treatment). "Committed tree ≡ measured tree" is thereby mechanical, not
-   asserted: they are the same object.
+   hooks); a worktree edit in the gate→commit interval cannot enter the
+   commit (built from `T`; the edit stays ORDINARY UNSTAGED dirt after the
+   mixed reset, never an index/HEAD split); the bd export cannot enter it
+   (unchanged-at-tip in `T`; the export lands in the separate, pathspec-
+   scoped artifact-sync commit the flow already has, which no gate measures —
+   the artifact-only normalization treatment; `CommitPaths` is already
+   pathspec-limited, `gitops.go:1699`). "Committed tree ≡ measured tree" is
+   thereby mechanical, not asserted: they are the same object.
 4. Reconcile mode (`beadHead = landed.SHA`, `complete.go:704`) keeps its
    landed `M^1..M` measurement — no commits are authored on that path.
 
@@ -494,9 +512,10 @@ The root of the graph — R3.3's machinery, which four later beads consume.
    child-derived phase INSIDE the lock's critical section and writes it,
    backward permitted, doc-commented as the ONLY sanctioned backward write
    surface; its exported-ness is fenced by a call-site enumeration test (the
-   `impl adopt` house pattern) pinning exactly ONE production caller
-   (`cmd/mindspec/release.go`, wired in bead 2). Bead 1 creates the API and
-   the fence; bead 2 wires the caller.
+   `impl adopt` house pattern) whose bead-1 form asserts ZERO production
+   callers outside the allowlist `{cmd/mindspec/release.go}` — satisfiable at
+   bead 1's own gate, before release is wired (round-2 G3.1); bead 2 TIGHTENS
+   the same test to exactly-one when it wires the caller.
 2. `internal/phase/phaselock.go` (new): journal-idiom file lock
    (`flock(2)` unix / O_EXCL windows, per `internal/journal/lock.go:55-61`'s
    pattern) exposing `WithPhaseWriteLock(root, epicID, fn)` — reads stored
@@ -509,13 +528,22 @@ The root of the graph — R3.3's machinery, which four later beads consume.
    deadline, default 10s, constant pinned in the file) — on timeout, an
    ADR-0035 refusal naming the lock path and a re-run recovery line (never a
    delete-the-lock instruction); unix crashed holders self-release (flock is
-   kernel-held); the Windows O_EXCL path writes holder PID + RFC3339
-   timestamp into the file and treats a file older than the pinned staleness
-   bound as stale (remove + single retry, best-effort within the same-machine
-   model, documented). Tests: real-goroutine contention (`-race`), timeout
-   error propagation, crashed-holder recovery (kill the flock holder;
-   next acquire succeeds), stale-file takeover (seam-driven for the Windows
-   path), and the no-git-dirt assertion.
+   kernel-held); the Windows O_EXCL path is **ownership/liveness-aware and
+   race-safe (round-2 G5)**: the lock file carries holder PID + RFC3339
+   timestamp, and takeover requires the holder PID NOT alive (process probe)
+   AND age beyond the pinned staleness bound, then proceeds
+   compare-and-delete (re-read; delete only while the content still matches
+   the exact stale identity diagnosed — never blind unlink, so two stale
+   contenders cannot unlink each other's FRESH locks), then O_EXCL-create
+   (atomic — exactly one winner), then POST-CREATE VERIFY (re-read; content
+   must equal own identity, else release and re-enter the bounded wait —
+   closing the residual delete/create interleave). A LIVE holder older than
+   the bound is never removed. Tests: real-goroutine contention (`-race`),
+   timeout error propagation, crashed-holder recovery (kill the flock
+   holder; next acquire succeeds), and seam-driven Windows legs:
+   stale-file takeover, live-holder-older-than-bound NOT removed,
+   concurrent stale contenders → exactly one winner; plus the no-git-dirt
+   assertion.
 3. Wrap every existing `mindspec_phase` writer in the lock (values unchanged
    in this bead): `plan.go:455`, `spec.go:76`, `complete.go:1366`,
    `release.go:152`, `impl.go:577-579`, `impl.go:611-613`, `adopt.go:424/:437`,
@@ -591,12 +619,27 @@ None (bd edges wired from `work_chunks[1]`).
    present → no-op. The v2-unreachability claim is scoped honestly: an
    out-of-band raw `bd update` can still manufacture the signature post-
    marker, and the marker is exactly what prevents re-reconciling it.
-   **Five fixtures**: upgrade-before-first-claim (legacy → `plan` + marker);
+   **READ paths are covered without casual lock-taking (round-2 G4)**: the
+   legacy-signature predicate is exported (`phase.LegacyPhaseSignature(stored
+   string, children []ChildInfo) bool`, same file) and consumed lock-free by
+   the read-side consistency branch (`derive.go:179-193`) and `state show`:
+   when the marker is absent and the signature holds, the read path emits the
+   LEGACY NOTICE in place of the stored-vs-derived mismatch warning —
+   "legacy phase semantics detected (pre-v2 stored implement); recovery:
+   mindspec repair phase <spec-id>" — and that recovery command is made
+   correct by adding `repair phase` (and `release`) to
+   `EnsurePhaseSemanticsV2`'s invocation sites: repair reconciles
+   (legacy → `plan` + marker) BEFORE its guard evaluates, then no-ops as
+   already-consistent — the hint's execution improves state (R3.2-compliant),
+   with no read path ever taking the write lock.
+   **Six fixtures**: upgrade-before-first-claim (legacy → `plan` + marker);
    upgrade-then-first-claim (claim advances to `implement`); non-lifecycle
    claim (no advance, marker written); release (returns to `plan`, marker
    present, no re-reconcile); already-progressed epics (each of
    some-closed / in_progress / review / done — phase untouched, marker
-   written).
+   written); and the READ-path fixture — on a legacy epic, `state show`
+   emits the legacy notice (never the obsolete mismatch warning), then
+   `repair phase` reconciles, then `state show` is clean.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
@@ -705,11 +748,16 @@ Beads 2 and 3 (the post-states the tails must agree with).
 
 **Steps**
 1. `internal/gitutil`: the two snapshot primitives —
-   `SnapshotWorktreeTree(wtPath, excludePathspecs)` (temp-index `add -A` with
-   the named-artifact exclusion + `write-tree`; worktree/index/refs untouched,
-   asserted by test) and the plumbing commit-from-tree
-   (`commit-tree T -p <tip>` + fast-forward `update-ref`, following the
-   spec-127 `CommitTreeMerge`/`UpdateRef` precedent).
+   `SnapshotWorktreeTree(wtPath, excludePathspecs)` (temp index **seeded via
+   `read-tree <tip>` FIRST** — round-2 G1's synthetic-deletion fix — then
+   `add -A` with the named-artifact exclusion, then `write-tree`;
+   worktree/real-index/refs untouched, asserted by test; the exclusion means
+   unchanged-at-tip, never absent-from-`T`) and the materialization op
+   (`commit-tree T -p <tip>`, `update-ref` WITH the expected-old-tip operand,
+   then the index-only `reset --quiet --mixed` in `wtPath` — following the
+   spec-127 `CommitTreeMerge`/`UpdateRef` precedent, with the failure legs of
+   protocol step 3: update-ref race → refusal + re-measure; reset failure →
+   forward-only refusal naming the idempotent re-run).
 2. `internal/executor`: interface + `MindspecExecutor` + mock gain
    `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
    the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
@@ -720,31 +768,44 @@ Beads 2 and 3 (the post-states the tails must agree with).
    over `base → T` (BOTH gates, same protocol); committed-range behavior
    preserved for reconcile mode and the impl-approve whole-branch backstop.
 4. `internal/complete/complete.go`: snapshot taken once after the panel gate;
-   both gates measure it; on pass, the user commit is created from `T`
-   (replacing the `CommitAll` porcelain path for this flow) and the artifact
-   sync commit follows; panel gate stays first; reconcile path untouched.
+   both gates measure it; on pass, the three-part materialization op runs
+   (commit-tree from `T` → expected-old-tip `update-ref` → index-only
+   `reset --quiet --mixed` in `wtPath`, with the protocol-step-3 failure
+   legs), replacing the `CommitAll` porcelain path for this flow; the
+   artifact sync commit follows; panel gate stays first; reconcile path
+   untouched.
 5. `.mindspec/adr/ADR-0041-gate-before-mutate.md`: the §1 amendment REPLACES
-   BOTH load-bearing statements (round-1 G1.4): (i) panel-before-`CommitAll`
-   is RETAINED with its reviewed-SHA rationale; (ii) gates-after-
-   materialization is REPLACED by prospective-snapshot-before-any-complete-
-   authored-commit, stating the artifact-only normalization treatment (the
-   export is excluded from `T` and measured by no gate) and why the gates
-   cannot vacuously miss content (untracked files are staged into `T`; the
-   commit IS `T`). No measured-equals-committed prose claim survives — the
-   equality is the commit-tree construction. Extend
-   `cmd/mindspec/adr0041_amendment_test.go`.
+   BOTH load-bearing statements (round-1 G1.4), describing the CORRECTED
+   protocol (round-2 G2): (i) panel-before-`CommitAll` is RETAINED with its
+   reviewed-SHA rationale; (ii) gates-after-materialization is REPLACED by
+   prospective-snapshot-before-any-complete-authored-commit — the tip-seeded
+   snapshot (exclusion = unchanged-at-tip), the artifact-only normalization
+   treatment (the artifact is unchanged in `T` and measured by no gate; only
+   the sync commit updates it), why the gates cannot vacuously miss content
+   (untracked files are staged into `T`; the commit IS `T`), and the
+   materialization op's index-refresh + expected-old-tip semantics. No
+   measured-equals-committed prose claim survives — the equality is the
+   commit-tree construction. Extend `cmd/mindspec/adr0041_amendment_test.go`.
 6. AC-6 + AC-7(i) fixtures: panel-pass at SHA A + dirty tracker +
    doc-sync-failing change → run 1 fails doc-sync with tip STILL at A; run 2
    with `--allow-doc-skew` is decided by doc-sync, never stale-SHA; and
    red-on-revert, a post-review non-tracker commit still trips stale-SHA
    (gate untouched).
-7. Failure-injection fixture legs (round-1 G1.5), all four: (i) an UNTRACKED
-   source/doc/ADR file in the worktree — the gate measures it and refuses
-   before any commit; (ii) a pre-commit hook that adds/changes a source file —
-   the committed tree is still ≡ `T` (plumbing runs no hooks); (iii) the
-   tracker export changing content post-measurement — asserted confined to
-   the excluded artifact path; (iv) a worktree mutation in the
-   gate→commit interval — absent from the commit, present as dirt afterward.
+7. Failure-injection + red-on-revert fixture legs (round-1 G1.5, extended
+   round-2 G1/G2), all seven: (i) an UNTRACKED source/doc/ADR file in the
+   worktree — the gate measures it and refuses before any commit; (ii) a
+   pre-commit hook that adds/changes a source file — the committed tree is
+   still ≡ `T` (plumbing runs no hooks); (iii) the tracker export changing
+   content post-measurement — the artifact is unchanged-at-tip in `T` and
+   the export lands only in the sync commit; (iv) a worktree mutation in the
+   gate→commit interval — absent from the commit, and after the mixed reset
+   it is ORDINARY UNSTAGED dirt, never an index/HEAD split; (v) the
+   never-touches-artifact leg (round-2 G1): the user commit's diff vs tip
+   NEVER touches the named artifact — red against the empty-index synthetic
+   deletion; (vi) an unchanged-after-snapshot worktree is status-CLEAN after
+   materialization — red against the phantom-staged-deletion state; (vii)
+   the excluded artifact is byte-identical at tip, in `T`, and in the user
+   commit, changing only in the sync commit.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
