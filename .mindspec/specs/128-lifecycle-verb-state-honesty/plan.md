@@ -240,12 +240,32 @@ fallback at `:1210`), not the bead worktree. The protocol:
    bead 6, read via the existing `CommitMessageBody` primitive) — never
    inferred from the tree diff, which is ambiguous when `C` is a clean-tree
    completion or `D` is a no-op sync. Empty stages are ELIDED (pinned
-   decision, matching HEAD's no-op-commit behavior): a `T` equal to the
-   tip's tree builds no `C`, an unchanged artifact builds no `D` — the
-   discriminator stays total because a marker only ever points at a
-   trailer-carrying commit, and whichever stages exist appear in the parent
-   chain with their kinds legible; R and S run exactly once each, neither
-   skipped nor looped, whether or not their commits exist. With marker `M*`
+   decision, matching HEAD's no-op-commit behavior: a `T` equal to the
+   tip's tree builds no `C`, an unchanged artifact builds no `D` — retaining
+   empty trailer commits would stamp a contentless commit onto EVERY
+   standard bead completion, since a subagent-committed clean tree is the
+   norm), and the execution contract is therefore honestly **AT-LEAST-ONCE
+   with per-operation idempotent replay (round-7 G1, contract (b) — the
+   round-6 "exactly once" claim was unprovable after a post-no-op-S kill and
+   is withdrawn)**. The per-operation proof obligations, stated: R's index
+   refresh (`reset --quiet --mixed`) is a state-function of (tip, worktree)
+   — replay converges to the identical index and touches no worktree or
+   ref; S's export is ADR-0025's deterministic projection of Dolt state —
+   replay converges to identical bytes for unchanged Dolt state and to the
+   CURRENT projection otherwise, which is forward-correct for a cache; S's
+   dirt classification is a pure read + refusal; the merge stage carries the
+   127 preserved-merge/ancestry convergence machinery. "Not skipped" is
+   guaranteed by routing (every path to the merge passes through R and the
+   S-exit contract); "not looped" is bounded by convergence (each replay is
+   a state-function of current state). **The elided-case transition graph is
+   complete (round-7 G1)**: the FIRST marker publication of a run uses
+   CREATE semantics whatever it points at — absent→`C` normally, absent→`D`
+   when `C` elides (`D` then parents on `A`), with the same
+   failed-publication refusal; when BOTH stages elide (clean tree AND
+   unchanged artifact) there is NO marker and NO ref movement — the run
+   proceeds from the gates through the S-exit contract to the merge, and a
+   kill anywhere in that window re-enters as an ordinary run (tip still ==
+   reviewed SHA, panel gate passes, gates re-measure) — the no-marker route. With marker `M*`
    present: tip == `M*` → the published stage COMPLETED — its kind is read
    from the trailer (`C` → continue at R then S; `D` → continue at the ONE
    authoritative S-resume route: index refresh to `D` + the genuine-dirt
@@ -888,7 +908,18 @@ Beads 2 and 3 (the post-states the tails must agree with).
    (expected-old race → refusal + re-measure; failed marker publication →
    refusal naming the marker, no overwrite; reset failure → forward-only
    refusal, the resume machinery converging the re-run).
-2. `internal/executor`: interface + `MindspecExecutor` + mock gain
+2. `internal/executor`: **ADR-0030 seam conformance (round-7 G2)** — every
+   new git read/mutation the state machine performs is a NAMED method on the
+   `Executor` interface, implemented by `MindspecExecutor` as a thin wrap
+   over the bead-6 gitutil primitives and stubbed in `MockExecutor`:
+   `SnapshotWorktreeTree(wtPath, exclude)`,
+   `MaterializeStageCommit(wtPath, tree, parent, stage)` (builds `C`/`D`
+   with the pinned trailer), `PublishStageMarker(beadID, oid, expectedOld)`
+   (CAS: empty expectedOld = CREATE), `ReadStageMarker(beadID)`,
+   `ClearStageMarker(beadID)`, `AdvanceBranchExpectedOld(branch, new, old)`,
+   and `ResetIndexToHead(wtPath)` — `internal/complete` calls ONLY these
+   seams and gains no new `internal/gitutil` import (no unplanned boundary
+   crossing). The interface + `MindspecExecutor` + mock also gain
    `ChangedFilesTree(workdir, base, treeOID)` and tree-grounded input reads;
    the gate-input surfaces (OWNERSHIP manifests, domain enumeration, doc/ADR
    contents) read from `T:path`, never from `g.Root`'s checkout (closes the
@@ -930,7 +961,10 @@ Beads 2 and 3 (the post-states the tails must agree with).
    encoding intended tip + expected predecessor as the commit's first
    parent, stage kind encoded in the pinned `Mindspec-Stage` commit trailer
    — round-6 G1: read from the encoding, never the diff, total under empty
-   stages, which are elided; the total re-entry discriminator over
+   stages, which are elided under the round-7 AT-LEAST-ONCE idempotent-
+   replay contract (per-operation proofs stated; first-publication CREATE
+   covers absent→`C` and absent→`D`; the both-elided no-marker route
+   re-enters as an ordinary run); the total re-entry discriminator over
    {tip == marker: stage complete, kind from the trailer; tip ==
    marker-parent: finish the advance; foreign: delete + stale-SHA as at
    HEAD}; every `D`-resume passing through the single authoritative S-exit
@@ -952,8 +986,8 @@ Beads 2 and 3 (the post-states the tails must agree with).
    red-on-revert, a post-review non-tracker commit still trips stale-SHA
    (gate untouched).
 7. Failure-injection + red-on-revert fixture legs (round-1 G1.5, extended
-   rounds 2–6; all legs run on the DEFAULT FILES REF BACKEND explicitly —
-   round-5 G1), all seventeen: (i) an UNTRACKED source/doc/ADR file in the
+   rounds 2–7; all legs run on the DEFAULT FILES REF BACKEND explicitly —
+   round-5 G1), all twenty: (i) an UNTRACKED source/doc/ADR file in the
    worktree — the gate measures it and refuses before any commit; (ii) a
    pre-commit hook that adds/changes a source file — the committed tree is
    still ≡ `T` (plumbing runs no hooks); (iii) the tracker export changing
@@ -996,12 +1030,22 @@ Beads 2 and 3 (the post-states the tails must agree with).
    (xv) empty-`C` elision (clean-tree completion — round-6 G1): no `C` is
    built, `D` (if any) parents directly on `A`, and re-entry after an
    interruption classifies every present commit correctly from its trailer,
-   R and S each running exactly once; (xvi) no-op-`D` elision (unchanged
+   R and S replaying idempotently per the round-7 contract; (xvi)
+   no-op-`D` elision (unchanged
    artifact): no `D` is built, and a kill after the `A→C` advance resumes
    through R, S (which elides), the S-exit contract, and the merge; (xvii)
    ordinary artifact-changing `D`: trailer classification identifies `D`
    after interruption and the resume passes through the S-exit contract,
-   never straight to the merge.
+   never straight to the merge; (xviii) kill after R with `C` elided,
+   before any `D` publication (round-7 G1): nothing durable happened — tip
+   still at the reviewed SHA, no marker — re-entry is an ordinary run that
+   re-measures and converges; (xix) kill after a no-op `S` (`D` elided),
+   pre-merge, marker `C` present: re-entry replays R and S idempotently
+   (identical index; identical artifact bytes for unchanged Dolt state),
+   passes the S-exit contract, and converges — no loop, no skip (the
+   per-operation replay proofs asserted here); (xx) both stages elided,
+   kill pre-merge: the no-marker route — an ordinary re-run converges to
+   the landed merge.
 
 **Verification**
 - [ ] `go build ./... && go test ./... -short` green
