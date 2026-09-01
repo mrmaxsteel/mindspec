@@ -3,11 +3,112 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// everything written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = orig
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return buf.String()
+}
+
+// TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded is round-1 panel
+// G3: release's best-effort step-6.5 phase-cache sync must SURFACE a
+// lock-acquisition failure (never silently discard it, as the pre-round-1
+// `_ = phase.WithPhaseWriteLock(...)` did) — a real held lock forces a
+// genuine timeout (the wait is shrunk via phase.SetLockWaitForTest so the
+// test stays fast), and the surfaced text carries the full ADR-0035
+// treatment: names .mindspec/phase.lock and ends with a re-run recovery
+// line that never advises deletion.
+func TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded(t *testing.T) {
+	t.Cleanup(phase.SetLockWaitForTest(150*time.Millisecond, 10*time.Millisecond))
+	// Both WithPhaseWriteLock calls below (the holder's and
+	// releaseSyncPhase's) read the epic fresh under the lock — without
+	// stubbing these seams they would shell out to a REAL bd binary
+	// against a non-bd t.TempDir(), which can hang far longer than this
+	// test's bounded timeout window (the exact class of bug round-1
+	// panel G2 flagged elsewhere in this bead).
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	root := t.TempDir()
+
+	holderEntered := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	go func() {
+		_ = phase.WithPhaseWriteLock(root, "epic-1", func(string, map[string]interface{}) error { return nil }, func(string, bool) (map[string]interface{}, error) {
+			close(holderEntered)
+			<-releaseHolder
+			return nil, nil
+		})
+	}()
+	<-holderEntered
+	defer close(releaseHolder)
+
+	out := captureStderr(t, func() {
+		releaseSyncPhase(root, "epic-1", "plan", "mindspec-bead1")
+	})
+
+	if !strings.Contains(out, phase.PhaseLockRelPath) {
+		t.Errorf("surfaced lock-timeout output must name the lock path: %q", out)
+	}
+	// Round-2 panel G3: the final line must be an actual copy-pastable
+	// COMMAND, not prose.
+	if !guard.HasFinalRecoveryLine(out) {
+		t.Errorf("surfaced lock-timeout output must end with a recovery: <command> line: %q", out)
+	}
+	if !strings.Contains(out, "recovery: mindspec release mindspec-bead1") {
+		t.Errorf("recovery line must be the re-runnable release command: %q", out)
+	}
+	if strings.Contains(strings.ToLower(out), "delete") || strings.Contains(strings.ToLower(out), "remove") {
+		t.Errorf("must never advise deleting/removing the lock file: %q", out)
+	}
+}
+
+// TestReleaseSyncPhase_WriteFailureSurfacedNoRecoveryLine is round-1
+// panel G3's non-timeout leg: a genuine merge-write failure (not a lock
+// timeout) is surfaced as-is, with no manufactured ADR-0035 recovery
+// line. releaseSyncPhase hardcodes bead.MergeMetadata in production (no
+// injectable write seam, matching the house "merge semantics only"
+// convention repair.go's own comment states), so this test's failure is
+// a REAL bd invocation against a non-bd root — bd itself fails, which is
+// exactly the non-lock-timeout failure class DescribeLockFailure's
+// "render as-is" branch exists for (isolated unit-level proof:
+// internal/phase/phaselock_test.go's TestDescribeLockFailure).
+func TestReleaseSyncPhase_WriteFailureSurfacedNoRecoveryLine(t *testing.T) {
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	root := t.TempDir()
+
+	out := captureStderr(t, func() {
+		releaseSyncPhase(root, "epic-1", "plan", "mindspec-bead1")
+	})
+	if out == "" {
+		t.Fatal("expected releaseSyncPhase to surface the real bd write failure, got no output")
+	}
+	if strings.Contains(out, "recovery: ") {
+		t.Errorf("a plain (non-timeout) write failure must not get a manufactured recovery line: %q", out)
+	}
+}
 
 // releaseRecorder captures the order of the two destructive steps (Remove the
 // worktree, set the bead open) so tests can assert remove-FIRST / set-open-LAST

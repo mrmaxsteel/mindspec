@@ -274,7 +274,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// lifecycle command. No-op if the epic already has mindspec_phase, or
 	// when no epic exists yet. Migration errors fail the command
 	// (spec 089 Requirement 9).
-	if _, err := phase.EnsureMigrated(specID); err != nil {
+	if _, err := phase.EnsureMigrated(root, specID); err != nil {
 		return nil, err
 	}
 	var o ImplOpts
@@ -574,8 +574,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// re-derivation is deterministic, so a re-run repeats the
 	// reconcile idempotently.
 	if needsPhaseReconcile && epicID != "" {
-		if err := implPhaseMetadataFn(epicID, map[string]interface{}{
-			"mindspec_phase": phaseDetail.Derived,
+		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
+		// in this bead).
+		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string, bool) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"mindspec_phase": phaseDetail.Derived,
+			}, nil
 		}); err != nil {
 			return nil, guard.NewFailure(
 				fmt.Sprintf("reconciling stale phase for spec %s (stored %q, child-derived %q): %v", specID, phaseDetail.Stored, phaseDetail.Derived, err),
@@ -608,11 +612,20 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		// MUTATION (2/3): Spec 080 phase metadata write. Runs after
 		// (and supersedes) the Req 1 reconcile above — the end state
 		// of a fully successful ApproveImpl is mindspec_phase=done.
-		if err := implPhaseMetadataFn(epicID, map[string]interface{}{
-			"mindspec_phase": "done",
-			"mindspec_done":  true,
+		//
+		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
+		// in this bead). Round-2 panel G3: a lock TIMEOUT gets a
+		// copy-pastable re-run COMMAND via phase.DescribeLockFailure, not
+		// prose — "mindspec impl approve <spec-id>" re-runs the whole
+		// verb, which is idempotent here (MUTATION 1/3's close is already
+		// tolerant of "already closed").
+		if err := phase.WithPhaseWriteLock(root, epicID, implPhaseMetadataFn, func(string, bool) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"mindspec_phase": "done",
+				"mindspec_done":  true,
+			}, nil
 		}); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not set done marker on epic %s: %v", epicID, err))
+			result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
 		}
 	}
 

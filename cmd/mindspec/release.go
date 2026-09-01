@@ -110,6 +110,29 @@ next to recover) rather than an "open + stale-worktree" collision.
 	},
 }
 
+// releaseSyncPhase performs release's step-6.5 cursor-rewind phase-cache
+// sync (value unchanged in this bead — bead 2 wires the sanctioned-sync
+// redesign leg), wrapped in the R3.3 phase write lock. It is a
+// best-effort write: a lock/write failure never fails `release` itself
+// (the sync is a cache refresh, not the terminal mutation), but round-1
+// panel G3 requires it be SURFACED, not silently discarded — rendered via
+// phase.DescribeLockFailure, which gives a lock TIMEOUT the full
+// ADR-0035 treatment (names .mindspec/phase.lock, ends with a copy-
+// pastable recovery COMMAND — round-2 panel G3: prose is not enough) and
+// any other failure (a genuine merge-write error) as-is. beadID supplies
+// that command ("mindspec release <bead-id>", the exact re-invocation
+// that hit the lock). Extracted to its own named, root-parameterized
+// function (rather than an inline closure capturing newReleaseDeps'
+// root) so it is directly unit-testable without exercising
+// newReleaseDeps' full bd/git wiring.
+func releaseSyncPhase(root, epicID, mode, beadID string) {
+	if syncErr := phase.WithPhaseWriteLock(root, epicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_phase": mode}, nil
+	}); syncErr != nil {
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
+	}
+}
+
 // newReleaseDeps assembles the production seams for `mindspec release`.
 //
 // Removal routes through the CONCRETE *MindspecExecutor (ADR-0030): WorktreeOps
@@ -148,11 +171,14 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		removeWorktree:   exec.RemoveBeadWorktreeAndRestore,
 		setOpen:          defaultSetOpen,
 		activeBead:       defaultActiveBead,
-		syncPhase: func(epicID, mode string) {
-			_ = bead.MergeMetadata(epicID, map[string]interface{}{"mindspec_phase": mode})
-		},
-		stdout: os.Stdout,
-		stderr: os.Stderr,
+		// Spec 128 R3.3: wrapped in the phase write lock (value unchanged
+		// in this bead — bead 2 wires the sanctioned-sync redesign leg).
+		// Round-1 panel G3: a lock/write failure is best-effort (the
+		// cursor-rewind cache sync never fails `release` itself) but is no
+		// longer silently discarded — see releaseSyncPhase.
+		syncPhase: func(epicID, mode string) { releaseSyncPhase(root, epicID, mode, beadID) },
+		stdout:    os.Stdout,
+		stderr:    os.Stderr,
 	}
 }
 

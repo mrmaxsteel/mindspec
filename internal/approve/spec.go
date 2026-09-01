@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -72,9 +73,15 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		if existingEpicID != "" {
 			// Epic already exists — skip creation (idempotent).
 			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
-			// Spec 080: ensure mindspec_phase is set for existing epics
-			if err := bead.MergeMetadata(existingEpicID, map[string]interface{}{"mindspec_phase": "plan"}); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
+			// Spec 080: ensure mindspec_phase is set for existing epics.
+			// Spec 128 R3.3: wrapped in the phase write lock (values
+			// unchanged in this bead — bead 1 scope is the lock wrap
+			// only; R3.6's safe-replay semantics are a later bead's
+			// concern, so this still unconditionally writes "plan").
+			if err := phase.WithPhaseWriteLock(root, existingEpicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
+				return map[string]interface{}{"mindspec_phase": "plan"}, nil
+			}); err != nil {
+				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
 			}
 		} else {
 			if err := phase.CheckSpecNumberCollision(specNum); err != nil {

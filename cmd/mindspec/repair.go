@@ -10,8 +10,10 @@ package main
 // subcommand instead.
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -85,6 +87,10 @@ attempted, and the lever is guaranteed to converge once applied.`,
 func init() {
 	repairCmd.AddCommand(repairPhaseCmd)
 	repairCmd.AddCommand(repairSpecTitleCmd)
+	// Spec 128 R3.3: the backward-move guard's force flag. Empty means
+	// "not forcing"; an explicit empty reason (--force-backward="") is
+	// rejected below, same discipline as --allow-doc-skew/--override-adr.
+	repairPhaseCmd.Flags().String("force-backward", "", "Record a reason and force a backward mindspec_phase move (refused by default, spec 128 R3.3)")
 }
 
 // repairSpecTitleRunE implements `mindspec repair spec-title <epic-id>
@@ -158,8 +164,59 @@ func repairSpecTitleRunE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// repairFindRootFn is repairPhaseRunE's test seam for root resolution.
+// Production defaults to findRoot() (cwd-based `.mindspec`/`.git`
+// discovery). Round-1 panel G2/G4 (hard-block driver): from a git-linked
+// bead worktree, findRoot()'s ambient-cwd resolution can walk up to the
+// SHARED MAIN checkout (workspace.FindRoot resolves a linked worktree
+// back to its main repo root) — a real, observed failure mode: a test
+// run from this bead's own worktree wrote an untracked
+// .mindspec/phase.lock into the enclosing main checkout, and in a
+// sandboxed CI environment that cannot even open that path the whole
+// suite goes red. Every repair-phase test fixture-scopes this seam to a
+// throwaway t.TempDir() so the R3.3 phase lock never resolves to, reads
+// from, or writes into the real enclosing checkout.
+var repairFindRootFn = findRoot
+
+// errRepairDerivationFailed and errRepairNoDerivedPhase are repair
+// phase's two derivation-failure sentinels (errors.Is-matched below to
+// pick the right recovery command) — both now raised INSIDE
+// WithPhaseWriteLock's critical section (round-1 panel G1/G3/R6: the
+// derivation moves inside the lock, mirroring SanctionedDerivedSync, so
+// the guard compares fresh-stored against fresh-derived).
+var (
+	errRepairDerivationFailed = errors.New("repair phase: derivation failed")
+	errRepairNoDerivedPhase   = errors.New("repair phase: no derivable phase")
+)
+
+// repairPhaseRunE implements `mindspec repair phase <spec-id>`.
+//
+// Spec 128 R3.3: the backward-move guard. The phase DERIVATION (a fresh
+// per-call Cache reading children fresh — the SanctionedDerivedSync
+// house pattern, sanctioned_sync.go) and the guard comparison both run
+// INSIDE WithPhaseWriteLock's critical section, against the FRESH stored
+// value the lock reads — never a pre-lock snapshot — so the guard
+// compares fresh-vs-fresh and the written value is self-consistent at
+// write time (spec.md:113's pinned read-stored -> derive -> guard-compare
+// -> MergeMetadata mechanism). A backward move is refused unless
+// --force-backward "<reason>" is passed, in which case it proceeds and
+// the reason is both recorded on the epic metadata and named in the
+// printed success line (AC-5(iii)).
 func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	specID := args[0]
+
+	root, err := repairFindRootFn()
+	if err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("repair phase: %v", err),
+			fmt.Sprintf("cd into a mindspec-managed repository and re-run `mindspec repair phase %s`", idrender.Spec(specID)),
+		)
+	}
+
+	forceBackwardReason, _ := cmd.Flags().GetString("force-backward")
+	if cmd.Flags().Changed("force-backward") && strings.TrimSpace(forceBackwardReason) == "" {
+		return fmt.Errorf("--force-backward requires a non-empty reason")
+	}
 
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil || epicID == "" {
@@ -170,39 +227,95 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		return guard.NewFailure(msg, "mindspec spec list")
 	}
 
-	detail, err := phase.DerivePhaseDetail(epicID)
-	if err != nil {
-		return guard.NewFailure(
-			fmt.Sprintf("repair phase: deriving phase for spec %s (epic %s): %v", specID, epicID, err),
-			fmt.Sprintf("bd show %s", epicID),
-		)
-	}
-	if detail.Derived == "" {
-		return guard.NewFailure(
-			fmt.Sprintf("repair phase: could not derive a phase for spec %s from epic %s children", specID, epicID),
-			fmt.Sprintf("bd show %s", epicID),
-		)
-	}
+	var (
+		freshStored     string
+		freshDerived    string
+		refusedBackward bool
+		wroteWithForce  bool
+	)
+	lockErr := phase.WithPhaseWriteLock(root, epicID, repairMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
+		freshStored = stored
 
-	// Req 19: merge-write via bead.MergeMetadata — preserves every
-	// unrelated metadata key on the epic.
-	if err := repairMergeMetadataFn(epicID, map[string]interface{}{
-		"mindspec_phase": detail.Derived,
-	}); err != nil {
+		// Fresh, in-critical-section derivation (AC-5(v)'s stale-target
+		// concurrency leg is driven through the SetListJSONForTest
+		// children fixture, which this read observes exactly as
+		// SanctionedDerivedSync's own children read would).
+		//
+		// Round-2 panel G2: MUST be the status-aware surface, not bare
+		// phase.DerivePhaseFromChildren — bare children-derivation returns
+		// "review" for an all-closed set regardless of a done marker
+		// (derive.go:375), so at the prior revision `repair phase` on an
+		// already-terminal (closed epic, done marker) spec refused a
+		// phantom "backward move" to review and, if --force-backward'd,
+		// would have REGRESSED a healthy done epic. This restores the
+		// pre-spec-128 behavior (repair.go used phase.DerivePhaseDetail,
+		// the non-cache twin of DerivePhaseDetailWithCache, for exactly
+		// this reason) while keeping the fresh-per-call-Cache-inside-fn
+		// discipline this bead adds. Disclosed scope note: like
+		// readStoredPhaseWithCache (round-1's identical judgment call),
+		// DerivePhaseDetailWithCache is a pre-existing, widely-shared
+		// derivation helper whose OWN children-read swallows a
+		// GetChildren failure to "" internally — changing that established
+		// contract is out of this bead's scope, exactly as round-1 held
+		// for the stored-phase read; the derr check below is a defensive
+		// (currently unreachable) guard against the day that contract
+		// changes, kept honest rather than silently assumed impossible.
+		c := phase.NewCache()
+		detail, derr := phase.DerivePhaseDetailWithCache(c, epicID)
+		if derr != nil {
+			return nil, fmt.Errorf("%w for spec %s (epic %s): %v", errRepairDerivationFailed, idrender.Spec(specID), idrender.Bead(epicID), derr)
+		}
+		derived := detail.Derived
+		if derived == "" {
+			return nil, fmt.Errorf("%w for spec %s from epic %s children", errRepairNoDerivedPhase, idrender.Spec(specID), idrender.Bead(epicID))
+		}
+		freshDerived = derived
+
+		if phase.IsBackwardMove(stored, derived) {
+			if forceBackwardReason == "" {
+				refusedBackward = true
+				return nil, nil
+			}
+			wroteWithForce = true
+			return map[string]interface{}{
+				"mindspec_phase":              derived,
+				"mindspec_phase_force_reason": forceBackwardReason,
+			}, nil
+		}
+		// Req 19: merge-write via bead.MergeMetadata — preserves every
+		// unrelated metadata key on the epic.
+		return map[string]interface{}{
+			"mindspec_phase": derived,
+		}, nil
+	})
+	if lockErr != nil {
+		recovery := fmt.Sprintf("mindspec repair phase %s", specID)
+		if errors.Is(lockErr, errRepairDerivationFailed) || errors.Is(lockErr, errRepairNoDerivedPhase) {
+			recovery = fmt.Sprintf("bd show %s", epicID)
+		}
+		return guard.NewFailure(lockErr.Error(), recovery)
+	}
+	if refusedBackward {
 		return guard.NewFailure(
-			fmt.Sprintf("repair phase: writing mindspec_phase=%s to epic %s failed: %v", detail.Derived, epicID, err),
-			fmt.Sprintf("mindspec repair phase %s", specID),
+			fmt.Sprintf("repair phase: refusing backward move for spec %s (epic %s): stored phase %q is ahead of the re-derived phase %q in lifecycle order (spec < plan < implement < review < done) — the derivation may be stale, or the epic genuinely regressed",
+				idrender.Spec(specID), idrender.Bead(epicID), freshStored, freshDerived),
+			fmt.Sprintf("bd show %s   (inspect the epic before forcing a backward move)", idrender.Bead(epicID)),
+			fmt.Sprintf("mindspec repair phase %s --force-backward \"<reason>\"   (only if the backward move is intentional)", idrender.Spec(specID)),
 		)
 	}
 
 	fmt.Fprintf(os.Stderr, "event=lifecycle.phase_repaired spec=%s epic=%s stored=%s derived=%s\n",
-		specID, epicID, detail.Stored, detail.Derived)
-	if detail.Stored == detail.Derived {
+		specID, epicID, freshStored, freshDerived)
+	switch {
+	case freshStored == freshDerived:
 		fmt.Printf("Phase for %s already consistent: %s (merge-write refreshed; unrelated metadata keys preserved).\n",
-			specID, detail.Derived)
-	} else {
+			specID, freshDerived)
+	case wroteWithForce:
+		fmt.Printf("Phase for %s force-repaired: %q -> %q (reason: %q; epic %s; unrelated metadata keys preserved).\n",
+			idrender.Spec(specID), freshStored, freshDerived, forceBackwardReason, idrender.Bead(epicID))
+	default:
 		fmt.Printf("Phase for %s repaired: %q -> %q (epic %s; unrelated metadata keys preserved).\n",
-			specID, detail.Stored, detail.Derived, epicID)
+			specID, freshStored, freshDerived, epicID)
 	}
 	return nil
 }

@@ -3,6 +3,12 @@
 .mindspec/session.json
 .mindspec/current-spec.json
 
+# spec 128 R3.3 — the mindspec_phase write lock's dedicated lockfile
+# (internal/phase/phaselock.go). It carries no meaningful content of its
+# own: the OS-level lock (flock/LockFileEx) is the mutual-exclusion
+# primitive, never the file's bytes.
+.mindspec/phase.lock
+
 # spec 117 — the panel-disposition store's dedicated per-panel lockfile
 # (internal/panel/disposition_store.go). It serializes concurrent
 # `mindspec panel disposition append`/`check` invocations on

@@ -297,7 +297,7 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// when no epic exists yet (pre-approve-spec). Migration errors fail
 	// the command (spec 089 Requirement 9). This is the ONE exempt
 	// pre-preflight mutation (spec 119 R1).
-	if _, err := phase.EnsureMigrated(specID); err != nil {
+	if _, err := phase.EnsureMigrated(root, specID); err != nil {
 		return nil, err
 	}
 	result := &PlanResult{SpecID: specID}
@@ -452,8 +452,17 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// guaranteed non-empty here — resolvePlanApprovePreflight refuses
 	// pre-mutation on both epic failure modes (P10), so no epic-less path
 	// reaches this point.
-	if err := planMergeMetadataFn(facts.parentID, map[string]interface{}{"mindspec_phase": "implement"}); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
+	//
+	// Spec 128 R3.3: wrapped in the phase write lock so a concurrent
+	// mindspec_phase writer can never land a stale value over this one
+	// (or vice versa). Value unchanged in this bead — bead 2 owns value
+	// semantics (OQ-3). Round-1/round-2 panel G3: a failure is best-effort
+	// (a warning, never fatal here) but a lock TIMEOUT is rendered with a
+	// copy-pastable re-run COMMAND via phase.DescribeLockFailure, not prose.
+	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_phase": "implement"}, nil
+	}); err != nil {
+		result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec plan approve %s", idrender.Spec(specID))))
 	}
 
 	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
