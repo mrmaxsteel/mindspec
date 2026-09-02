@@ -286,13 +286,17 @@ func PanelGateDecision(f GateFacts) Decision {
 			round, termsafe.Escape(short(p.ReviewedHeadSHA)), termsafe.Escape(short(f.HeadSHA)), RawMergeFence(f.BeadID))}
 	}
 
-	// (7) Dirty tree — uncommitted USER edits would be auto-committed past
-	// review by CommitAll (Req 11). Artifact dirt is already filtered out by
-	// the caller. Skipped entirely when the worktree is absent (the
-	// missing-worktree partial-failure rerun window).
+	// (7) Dirty tree — uncommitted USER edits would be MATERIALIZED into a
+	// commit past review by the prospective-snapshot protocol (Req 11;
+	// spec 128 Bead 6 replaced the porcelain CommitAll this refusal used
+	// to name with commit-tree-built M/S-stage commits — the refusal
+	// reasoning is unchanged, only the mechanism's name). Artifact dirt is
+	// already filtered out by the caller. Skipped entirely when the
+	// worktree is absent (the missing-worktree partial-failure rerun
+	// window).
 	if !f.WorktreeAbsent && len(f.UserDirt) > 0 {
 		var b strings.Builder
-		fmt.Fprintf(&b, "uncommitted changes in %s — `mindspec complete` would auto-commit them past review (CommitAll); commit and re-panel, or revert:",
+		fmt.Fprintf(&b, "uncommitted changes in %s — `mindspec complete` would materialize them into a commit past review; commit and re-panel, or revert:",
 			termsafe.Escape(f.WorktreePath))
 		// The "\n  " separator is the template's OWN real newline — only
 		// the interpolated path itself is escaped, never the layout.

@@ -2,8 +2,9 @@ package complete
 
 // Spec 128 Bead 6 (OQ-1(a); ADR-0041 §1 amendment): the full failure-
 // injection + red-on-revert fixture matrix for the prospective-snapshot
-// protocol (plan §Bead 6 step 7), all twenty legs (i)-(xx). Every leg
-// runs on the DEFAULT FILES ref backend explicitly (no `-c
+// protocol (plan §Bead 6 step 7), the twenty original legs (i)-(xx) plus
+// three round-1-panel-fix legs (xxi)-(xxiii). Every leg runs on the
+// DEFAULT FILES ref backend explicitly (no `-c
 // extensions.refStorage=reftable` override anywhere in this file) and
 // drives REAL git via setupRealGitFaultFixture/wireRealGitFaultSeams —
 // never a mock standing in for the mechanism under test.
@@ -16,8 +17,9 @@ package complete
 //   TestBead6Leg_v_UserCommitNeverTouchesArtifact           (v)
 //   TestBead6Leg_vi_UnchangedWorktreeIsCleanAfterMaterialize (vi)
 //   TestBead6Leg_vii_ArtifactByteIdenticalUntilSyncCommit    (vii)
-//   TestBead6Leg_viii_a_ResumeKillBeforeReset_IntervalEditRefuses (viii-a)
-//   TestBead6Leg_viii_b_ResumeAfterClearingDirtConverges     (viii-b)
+//   TestBead6Leg_viii_a_ResumeKillBeforeReset_IntervalEditRefuses (viii-a;
+//     also covers the resume-after-clearing-dirt convergence leg — there
+//     is no separate standalone test for that scenario)
 //   TestBead6Leg_viii_b_StaleForeignMarkerFallsThroughToNormalRun (viii-b, stale-marker variant)
 //   TestBead6Leg_ix_KillAfterSStageAdvance_ConvergesAndIntervalEditRefuses (ix)
 //   TestBead6Leg_x_KillDuringPreservedMergeConflict          (x)
@@ -31,6 +33,9 @@ package complete
 //   TestBead6Leg_xviii_KillAfterRWithCElided_NoMarker        (xviii)
 //   TestBead6Leg_xix_KillAfterNoOpS_ResumeIdempotent          (xix)
 //   TestBead6Leg_xx_BothStagesElided_NoMarkerRoute            (xx)
+//   TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD (xxi; round-1 panel G1, R4's executed repro)
+//   TestBead6Leg_xxii_ResumeAfterStageAdvanceDoesNotTripStaleSHA (xxii; round-1 panel G5, R2's positive resume leg)
+//   TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConverges (xxiii; round-1 panel G5, the AC-6 composite flagship fixture)
 
 import (
 	"os"
@@ -1406,12 +1411,15 @@ func TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD(t *testing.T) {
 //
 // Deliberately ARTIFACT-ONLY dirt (no user-authored .go change): the
 // pre-existing panel gate (internal/panel/gate.go's dirty-tree clause,
-// Req 11 — bead 6 does not touch it) unconditionally BLOCKS whenever a
+// Req 11 — bead 6's decision logic is unchanged; round-2 only reworded
+// its refusal text from the retired CommitAll's name to the delivered
+// materialize-into-a-commit mechanism) unconditionally BLOCKS whenever a
 // panel is registered AND the worktree carries UNCOMMITTED USER dirt
-// ("would auto-commit them past review") — a live panel and fresh user
-// work are mutually exclusive by design, so the only stage this leg CAN
-// exercise under a live panel is the artifact-sync stage (D), which the
-// M-stage's own snapshot excludes entirely (materializedArtifactPaths).
+// ("would materialize them into a commit past review") — a live panel
+// and fresh user work are mutually exclusive by design, so the only
+// stage this leg CAN exercise under a live panel is the artifact-sync
+// stage (D), which the M-stage's own snapshot excludes entirely
+// (materializedArtifactPaths).
 // The property under test — resume bypasses the panel-gate re-check
 // entirely (Run's resumeStage!="" skip) — is IDENTICAL regardless of
 // which named stage's advance gets killed.
