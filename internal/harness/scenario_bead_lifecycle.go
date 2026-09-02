@@ -606,7 +606,7 @@ func ScenarioBeadsArtifactPassthrough() Scenario {
 			// scenario mirrors a real MindSpec repo where the JSONL is a versioned
 			// projection of Dolt state (ADR-0025). Retains the default sandbox
 			// ignores for .harness/, .worktrees/, and ephemeral .mindspec files.
-			sandbox.WriteFile(".gitignore", ".beads/*\n!.beads/issues.jsonl\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n")
+			sandbox.WriteFile(".gitignore", ".beads/*\n!.beads/issues.jsonl\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n.mindspec/phase.lock\n")
 
 			// Spec epic + one open task bead — the ready work the agent must claim.
 			epicID = sandbox.CreateSpecEpic(specID)
