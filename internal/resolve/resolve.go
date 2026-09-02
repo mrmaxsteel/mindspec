@@ -155,7 +155,13 @@ func DiscoverDraftSpecsWithCache(c *phase.Cache, root string) ([]DraftSpec, erro
 		candidates[specID] = true
 	}
 
-	branches, err := gitutil.LocalBranchRefs(root)
+	// Round-3 panel (ADV-1 remainder): gitutil.LocalBranchNames, never
+	// LocalBranchRefs — the latter's `%(refname:short)` disambiguates
+	// under a same-named tag (emitting "heads/spec/<id>" instead of
+	// "spec/<id>"), silently defeating the CutPrefix below and dropping
+	// a genuine branch-only draft from the candidate set entirely, before
+	// the qualified-ref tree probe (round-2's fix) is ever reached.
+	branches, err := gitutil.LocalBranchNames(root)
 	if err != nil {
 		return nil, fmt.Errorf("listing local branches: %w", err)
 	}

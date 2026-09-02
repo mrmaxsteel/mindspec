@@ -479,3 +479,32 @@ func TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt(t *test
 		t.Errorf("mode = %q, want %q — the shadow tag must not silently revert this to idle", mode, state.ModeSpec)
 	}
 }
+
+// TestDiscoverDraftSpecsWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt is
+// round-3 panel's regression pin AT THE LAYER THAT WAS ACTUALLY
+// VULNERABLE: the round-2 test above calls draftSpecStatusWithCache and
+// ResolveModeWithCache DIRECTLY with a known specID, bypassing branch
+// CANDIDATE ENUMERATION entirely — which is where the shadow-tag evasion
+// actually lived on the ambient (no-flag, main-checkout) path that AC-1
+// (iii)/G3 are about. DiscoverDraftSpecsWithCache built its branch
+// candidates from gitutil.LocalBranchRefs's `%(refname:short)`, which
+// disambiguates a same-named tag by emitting "heads/spec/<id>" instead of
+// "spec/<id>" — silently dropping the candidate before the round-2
+// qualified-ref probe fix is ever reached. Three round-3 slots
+// independently reproduced this end-to-end (ambient `state show` still
+// printed bare idle with the shadow tag present). Red-on-revert against
+// gitutil.LocalBranchRefs specifically.
+func TestDiscoverDraftSpecsWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt(t *testing.T) {
+	specID := "133-branchy-ambient"
+	root := newBranchOnlyDraftFixture(t, specID)
+	runGitCmd(t, root, "tag", "spec/"+specID, "main")
+	stubActiveEpics(t, nil, nil)
+
+	drafts, err := DiscoverDraftSpecsWithCache(phase.NewCache(), root)
+	if err != nil {
+		t.Fatalf("DiscoverDraftSpecsWithCache() error: %v", err)
+	}
+	if len(drafts) != 1 || drafts[0].SpecID != specID {
+		t.Fatalf("drafts = %+v, want exactly [%s] — the shadow tag must not drop the branch from candidate enumeration", drafts, specID)
+	}
+}

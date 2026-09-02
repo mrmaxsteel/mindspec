@@ -1760,6 +1760,37 @@ func LocalBranchRefs(workdir string) ([]string, error) {
 	return forEachRefShort(workdir, "refs/heads")
 }
 
+// LocalBranchNames returns the true short name of every local branch in
+// workdir, via `git for-each-ref --format=%(refname:lstrip=2) refs/heads`
+// — spec 128 Bead 3 round-3 panel (ADV-1 remainder): unlike
+// LocalBranchRefs's `%(refname:short)`, this is never subject to git's
+// ambiguous-short-name disambiguation. A same-named tag (`git tag
+// spec/128-foo main`, fetchable into any clone) makes `%(refname:short)`
+// for the branch `refs/heads/spec/128-foo` emit "heads/spec/128-foo"
+// instead of "spec/128-foo" (verified empirically) — silently breaking
+// any caller that strips a known prefix off the result. `lstrip=2`
+// unconditionally removes exactly the two "refs/heads/" path segments
+// regardless of ambiguity, so the result is always the true branch name;
+// it is byte-identical to `%(refname:short)` in the ordinary
+// (non-ambiguous) case.
+//
+// Deliberately a SIBLING of LocalBranchRefs, not a behavior change to it:
+// LocalBranchRefs is part of the Executor interface (MindspecExecutor,
+// MockExecutor) and is also called directly by
+// internal/layout/precondition.go and internal/lifecycle/finalize_orphans.go
+// — changing its output shape would be an unreviewed behavior change to
+// three other consumers outside this bead's scope. Callers that need the
+// disambiguation-safe form (currently: resolve.go's OQ-2 draft-branch
+// enumeration) call this instead.
+func LocalBranchNames(workdir string) ([]string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("for-each-ref refs/heads (lstrip=2): %w", err)
+	}
+	return splitLines(string(out)), nil
+}
+
 // RemoteTrackingRefs returns the short names of every remote-tracking ref
 // (`git for-each-ref --format=%(refname:short) refs/remotes`) in workdir —
 // e.g. "origin/main", "fork/feature" — the (2) remote-tracking source of the

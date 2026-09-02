@@ -454,3 +454,80 @@ func TestStateShow_MultipleDrafts_NoSpecFlag_ReturnsAmbiguityListing(t *testing.
 		t.Errorf("error should list both drafts: %v", err)
 	}
 }
+
+// newBranchOnlyDraftFixture is state_show_honesty_test.go's copy of
+// internal/resolve/draft_test.go's helper of the same name: a repo shaped
+// like the REAL `spec create` output as seen from a checkout that never
+// had the draft written into its own working tree — the spec/<id> branch
+// carries a real committed spec.md via a separate worktree that is then
+// removed, leaving root's own working tree untouched.
+func newBranchOnlyDraftFixture(t *testing.T, specID string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	runGitInDir(t, root, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline\n"), 0o644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	runGitInDir(t, root, "add", "-A")
+	runGitInDir(t, root, "commit", "-m", "baseline")
+
+	otherWT := t.TempDir()
+	runGitInDir(t, root, "worktree", "add", "-b", "spec/"+specID, otherWT)
+	specDir := filepath.Join(otherWT, ".mindspec", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# draft\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	runGitInDir(t, otherWT, "add", "-A")
+	runGitInDir(t, otherWT, "commit", "-m", "chore: initialize spec "+specID)
+	runGitInDir(t, root, "worktree", "remove", otherWT, "--force")
+
+	return root
+}
+
+// TestStateShow_AmbientMainCheckout_BranchOnlyDraft_ShadowTagDoesNotHideIt
+// is round-3 panel's end-to-end regression pin — the EXACT reproduction
+// all three round-3 slots ran: a same-named tag on `main` (reachable in
+// any clone via a normal `git fetch`) must not make ambient (no --spec)
+// `mindspec state show` from the main checkout fabricate bare idle for a
+// genuine branch-only draft. Round 2's qualified-ref tree-probe fix alone
+// did not close this — the shadow also broke branch CANDIDATE
+// ENUMERATION (gitutil.LocalBranchRefs's `%(refname:short)` disambiguates
+// under the tag, dropping the branch from the candidate set before the
+// probe is ever reached); round 3 fixes enumeration too
+// (gitutil.LocalBranchNames).
+func TestStateShow_AmbientMainCheckout_BranchOnlyDraft_ShadowTagDoesNotHideIt(t *testing.T) {
+	specID := "134-ambient-shadow"
+	root := newBranchOnlyDraftFixture(t, specID)
+	runGitInDir(t, root, "tag", "spec/"+specID, "main")
+	stubNoEpics(t)
+	resetStateShowFlags(t)
+	withTestChdir(t, root)
+
+	out, err := captureStdout(t, func() error {
+		return stateShowCmd.RunE(stateShowCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("state show error: %v\noutput:\n%s", err, out)
+	}
+
+	if strings.Contains(out, `"mode": "idle"`) {
+		t.Fatalf("ambient state show reverted the branch-only draft to bare idle under a same-named shadow tag (round-3 panel repro):\n%s", out)
+	}
+
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(out), &parsed); jsonErr != nil {
+		t.Fatalf("state show output not valid JSON: %v\noutput:\n%s", jsonErr, out)
+	}
+	if parsed["mode"] != "spec" {
+		t.Errorf(`mode = %v, want "spec"`, parsed["mode"])
+	}
+	if parsed["activeSpec"] != specID {
+		t.Errorf("activeSpec = %v, want %q", parsed["activeSpec"], specID)
+	}
+}
