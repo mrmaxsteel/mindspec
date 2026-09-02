@@ -69,8 +69,25 @@ func ResolveMode(root, specID string) (string, error) {
 // unreachable, Dolt down) is never conflated with "bd succeeded, no epic
 // found" — draftSpecStatusWithCache probes bd health directly and
 // propagates a failure rather than falling through to idle.
+//
+// Round-1 panel G2/F2a: phase.Cache does not memoize errors, so a first
+// FindEpicBySpecIDWithCache failure may be a transient bd flake rather
+// than a genuine "no epic" result. Before concluding anything about
+// drafts or idle, this probes bd health directly and — if bd is in fact
+// healthy — RE-RUNS the epic lookup against the now-warm cache. Without
+// this, a recovered epic lookup's result was silently discarded by the
+// draft/idle fallback below (empirically: a bd stub failing exactly the
+// first call, with a real in_progress epic, fabricated idle instead of
+// the epic's real derived phase).
 func ResolveModeWithCache(c *phase.Cache, root, specID string) (string, error) {
 	epicID, err := phase.FindEpicBySpecIDWithCache(c, specID)
+	if err != nil || epicID == "" {
+		if _, epicsErr := c.AllEpics(); epicsErr != nil {
+			return "", fmt.Errorf("querying epics for spec %s: %w", idrender.Spec(specID), epicsErr)
+		}
+		epicID, err = phase.FindEpicBySpecIDWithCache(c, specID)
+	}
+
 	if err != nil || epicID == "" {
 		isDraft, _, draftErr := draftSpecStatusWithCache(c, root, specID)
 		if draftErr != nil {
@@ -104,23 +121,25 @@ func DiscoverDraftSpecs(root string) ([]DraftSpec, error) {
 }
 
 // DiscoverDraftSpecsWithCache is the cache-aware variant of
-// DiscoverDraftSpecs. It enumerates every spec directory under
-// workspace.SpecsDir and keeps only those that pass draftSpecStatusWithCache
-// (spec dir + branch on disk, no beads epic). A genuine bd/discovery
-// failure encountered while probing any candidate propagates immediately
-// rather than being read as "not a draft" — never fabricate a result from a
-// failed read.
+// DiscoverDraftSpecs. It builds its candidate specID set from the UNION of
+// (a) every spec directory under workspace.SpecsDir and (b) every local
+// `spec/<id>` branch (round-1 panel G3, MAJOR): `spec create` commits the
+// spec directory only inside the spec workspace it creates, never to the
+// invoking checkout's own working tree, so an on-disk-only scan can never
+// enumerate a genuinely fresh draft from a different checkout (e.g. main)
+// — the branch is the one signal both checkouts share. Each candidate is
+// then filtered through draftSpecStatusWithCache (dir-or-tree content +
+// branch, no beads epic). A genuine bd/discovery/git failure encountered
+// while probing any candidate propagates immediately rather than being
+// read as "not a draft" — never fabricate a result from a failed read.
 func DiscoverDraftSpecsWithCache(c *phase.Cache, root string) ([]DraftSpec, error) {
+	candidates := map[string]bool{}
+
 	specsDir := workspace.SpecsDir(root)
 	entries, err := os.ReadDir(specsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("scanning specs directory %s: %w", specsDir, err)
 	}
-
-	var drafts []DraftSpec
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -133,6 +152,29 @@ func DiscoverDraftSpecsWithCache(c *phase.Cache, root string) ([]DraftSpec, erro
 		if idvalidate.SpecID(specID) != nil {
 			continue
 		}
+		candidates[specID] = true
+	}
+
+	branches, err := gitutil.LocalBranchRefs(root)
+	if err != nil {
+		return nil, fmt.Errorf("listing local branches: %w", err)
+	}
+	for _, b := range branches {
+		specID, ok := strings.CutPrefix(b, workspace.SpecBranchPrefix)
+		if !ok || idvalidate.SpecID(specID) != nil {
+			continue
+		}
+		candidates[specID] = true
+	}
+
+	specIDs := make([]string, 0, len(candidates))
+	for specID := range candidates {
+		specIDs = append(specIDs, specID)
+	}
+	sort.Strings(specIDs)
+
+	var drafts []DraftSpec
+	for _, specID := range specIDs {
 		isDraft, branch, draftErr := draftSpecStatusWithCache(c, root, specID)
 		if draftErr != nil {
 			return nil, draftErr
@@ -141,11 +183,21 @@ func DiscoverDraftSpecsWithCache(c *phase.Cache, root string) ([]DraftSpec, erro
 			drafts = append(drafts, DraftSpec{SpecID: specID, SpecBranch: branch})
 		}
 	}
-
-	sort.Slice(drafts, func(i, j int) bool {
-		return drafts[i].SpecID < drafts[j].SpecID
-	})
 	return drafts, nil
+}
+
+// specTreeCandidatePaths returns the git-tree-relative candidate paths for
+// specID's spec.md, one per SpecDir layout tier (flat, canonical, legacy —
+// mirroring workspace.SpecDir's own precedence list minus its worktree-
+// nested tiers, which do not apply when probing a branch's own root tree).
+// Forward-slash joined regardless of OS: these are git object-path
+// arguments, not filesystem paths.
+func specTreeCandidatePaths(specID string) []string {
+	return []string{
+		".mindspec/specs/" + specID + "/spec.md",
+		".mindspec/docs/specs/" + specID + "/spec.md",
+		"docs/specs/" + specID + "/spec.md",
+	}
 }
 
 // draftSpecStatusWithCache reports whether specID is a pre-epic draft
@@ -157,20 +209,30 @@ func DiscoverDraftSpecsWithCache(c *phase.Cache, root string) ([]DraftSpec, erro
 // read as "not a draft" — the same distinction ResolveModeWithCache draws:
 // bd succeeding with zero matches is honestly different from bd failing to
 // answer at all.
+//
+// Ordering (round-1 panel G6): the epic check runs FIRST — memoized/free
+// after the AllEpics health probe above, it short-circuits the common case
+// (a shipped spec already has an epic) before any git subprocess runs at
+// all, rather than after paying for a branch check + dir stat.
+//
+// Reach (round-1 panel G3, MAJOR): `spec create` writes the spec directory
+// ONLY into the spec workspace (internal/spec/create.go) and commits it
+// there — never to the invoking (e.g. main) checkout's own working tree —
+// so a plain os.Stat probe of THIS checkout can never see a genuinely
+// fresh draft from main. Once the branch is confirmed to exist, this falls
+// back to a git-tree-scoped check of the BRANCH'S OWN committed tree
+// (refs/objects are shared across worktrees of one repository, so the
+// draft is visible the instant spec create's auto-commit lands, with no
+// working-tree copy needed) before the plain on-disk check, which stays
+// first since it is free relative to a git subprocess and already covers
+// the from-inside-the-spec-worktree case (AC-1(i)).
 func draftSpecStatusWithCache(c *phase.Cache, root, specID string) (isDraft bool, branch string, err error) {
 	if _, epicsErr := c.AllEpics(); epicsErr != nil {
 		return false, "", fmt.Errorf("querying epics for spec %s: %w", idrender.Spec(specID), epicsErr)
 	}
 
-	dir, err := workspace.SpecDir(root, specID)
-	if err != nil {
-		return false, "", err
-	}
-	if _, statErr := os.Stat(dir); statErr != nil {
-		if os.IsNotExist(statErr) {
-			return false, "", nil
-		}
-		return false, "", fmt.Errorf("checking spec directory %s: %w", dir, statErr)
+	if epicID, epicErr := phase.FindEpicBySpecIDWithCache(c, specID); epicErr == nil && epicID != "" {
+		return false, "", nil // has an epic — not a draft
 	}
 
 	branch, err = workspace.SpecBranch(specID)
@@ -185,11 +247,26 @@ func draftSpecStatusWithCache(c *phase.Cache, root, specID string) (isDraft bool
 		return false, "", nil
 	}
 
-	epicID, epicErr := phase.FindEpicBySpecIDWithCache(c, specID)
-	if epicErr == nil && epicID != "" {
-		return false, "", nil // has an epic — not a draft
+	dir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return false, "", err
 	}
-	return true, branch, nil
+	if _, statErr := os.Stat(dir); statErr == nil {
+		return true, branch, nil
+	} else if !os.IsNotExist(statErr) {
+		return false, "", fmt.Errorf("checking spec directory %s: %w", dir, statErr)
+	}
+
+	for _, rel := range specTreeCandidatePaths(specID) {
+		exists, treeErr := gitutil.FileExistsAtRef(root, branch, rel)
+		if treeErr != nil {
+			return false, "", fmt.Errorf("checking %s at %s: %w", rel, branch, treeErr)
+		}
+		if exists {
+			return true, branch, nil
+		}
+	}
+	return false, "", nil
 }
 
 // ResolveSpecBranch and ResolveWorktree were thin shims around the

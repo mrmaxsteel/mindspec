@@ -82,15 +82,35 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 				return ambErr
 			}
 
-			// No bd-active spec resolved. ResolveTargetWithCache's error
-			// text does not yet distinguish "bd is healthy, nothing
-			// active" from "bd/discovery itself failed" — probe bd
-			// health directly, up front, before drawing any conclusion.
-			// A discovery failure is never read as "no drafts, therefore
-			// idle" (the named hazard: never fabricate a mode from a
-			// failed read).
+			// Round-1 panel G2/F2b: phase.Cache does not memoize errors,
+			// so this failure may be a transient bd flake rather than a
+			// genuine "nothing active" result — probe bd health directly,
+			// and if it recovers, RE-RUN target resolution against the
+			// now-warm cache before drawing any conclusion. Without this,
+			// a resolution that would have succeeded on retry was
+			// silently read as "bd healthy, nothing active" instead
+			// (the same discipline resolve.ResolveModeWithCache applies
+			// internally for its own epic lookup, G2/F2a).
 			if _, epicsErr := c.AllEpics(); epicsErr != nil {
 				return stateDiscoveryFailure("querying beads for active specs", epicsErr)
+			}
+			specID, resolveErr = resolve.ResolveTargetWithCache(c, root, specFlag)
+		}
+
+		if resolveErr != nil {
+			if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
+				return ambErr
+			}
+
+			// Round-1 panel G1 (R1/R4/R5/R6 four-slot convergence): an
+			// explicit --spec must never be answered with a DIFFERENT
+			// spec's ambient state or with bare idle — bd is confirmed
+			// healthy (probed above), so this is a genuine resolution
+			// failure for the requested target and must be reported as
+			// such. Only the no-target (ambient) case below may fall
+			// through to draft/idle discovery.
+			if specFlag != "" {
+				return resolveErr
 			}
 
 			// bd is healthy and reports nothing active. Check the OQ-2
@@ -139,6 +159,17 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 		mode, modeErr := resolve.ResolveModeWithCache(c, root, specID)
 		if modeErr != nil {
 			return stateDiscoveryFailure(fmt.Sprintf("deriving mode for spec %s", idrender.Spec(specID)), modeErr)
+		}
+
+		// Round-1 panel G1: idle is reachable on this success path ONLY
+		// via an explicit --spec pass-through to a spec ID with no epic
+		// and no on-disk draft (an auto-selected spec always has an
+		// epic; a worktree-derived spec ID always probes to at least
+		// `spec` mode) — never render the R1.1-banned idle-alongside-
+		// non-empty-activeSpec shape for a flagged spec that simply does
+		// not exist.
+		if specFlag != "" && mode == state.ModeIdle {
+			return fmt.Errorf("no active spec or draft found for %s; run `mindspec spec list` and re-run with a listed ID", idrender.Spec(specID))
 		}
 
 		// ActiveBead is a secondary, best-effort field (ADR-0042 degrade-
