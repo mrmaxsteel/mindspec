@@ -1,0 +1,45 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.85,
+  "rationale": "Contract-stability lens, round 2 over ada49e53. All three of my round-1 asks are resolved: G3 ADDRESSED via my extend-reach arm (FileExistsAtRef tree probe + on-disk-dirs ∪ local-spec-branches candidate union — verified in code, with the load-bearing precondition that the tree probe only runs post-BranchExistsIn correctly documented and ordered, since cat-file -e exits 128 for both absent-path and absent-ref); G4 ADDRESSED for the regression I flagged (run.go:134 now error-checks and falls back to handleNoState; red-on-revert test TestRun_ModeResolutionFailure_FallsBackGracefully; the honesty residual is pre-existing behavior, no longer this bead's regression — restated as a carry-forward with an ownership gap, see finding R3-2-2); G6 ADDRESSED (memoized epic check verified first in draftSpecStatusWithCache, before any git subprocess). The G1/G2 fixes are contract-sound from my lens: full-ID --spec still passes through verbatim (target.go:46-51) so an explicit draft --spec resolves to spec mode via the widened probe, and the new idle-refusal fires only for a flagged ID with no epic AND no draft — never the ambient path; the warm-cache re-run in both resolve.go and state.go reuses the same memoized AllEpics, so the retry cannot disagree with the health probe. specTreeCandidatePaths correctly mirrors workspace.SpecDir's non-worktree tiers (3 flat / 4 canonical / 5 legacy — the worktree tiers genuinely don't apply to a branch's own root tree). Verified green: internal/resolve, gitutil, instruct, lint, phase, and all 9 StateShow tests at ada49e53; bead worktree left byte-identical. Both bead-5 carry-forwards still stand and are re-recorded below. No new contradiction reachable now; the remaining windows are named, owned or ownership-flagged.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-2-G3",
+      "severity": "info",
+      "title": "Round-1 ask 1 (G3 main-checkout draft reach): ADDRESSED — extend-reach arm, mechanism verified",
+      "detail": "DiscoverDraftSpecsWithCache now enumerates the union of on-disk spec dirs and local spec/<id> branches (LocalBranchRefs is a pre-existing gitutil helper; SpecBranchPrefix from workspace), and draftSpecStatusWithCache falls back to gitutil.FileExistsAtRef over the three non-worktree SpecDir layout tiers once the branch is confirmed. The cat-file -e exit-128 ambiguity (path-absent vs ref-absent indistinguishable) is defused by ordering — the tree probe only runs after BranchExistsIn returns true — and the helper's doc comment states the precondition explicitly, so future callers are warned. Non-ExitError failures (git unrunnable) propagate rather than folding into absence, preserving the never-fabricate-from-a-failed-read discipline. The fixture newBranchOnlyDraftFixture reproduces spec create's real shape (worktree add + commit + worktree remove). One honest refinement of my round-1 claim, for the record: SpecDir's tier-1 worktree probe could already see a draft from main WHILE its spec worktree existed under the default .worktrees root — the true round-1 gaps were the enumeration (main's specs dir has no entry for a fresh draft, so it was never a candidate) and the worktree-removed-branch-survives case; the union fix closes both. Also noted, non-blocking: the ADR-0023 amendment sentence 'its spec directory and spec/<id> branch both exist' now means dir-on-disk OR dir-in-branch-tree — a slight wording drift the amendment tolerates ('filesystem-scoped' vs git-object-scoped); if any reviewer wants the sentence tightened, it is a one-line doc edit, not a mechanism issue."
+    },
+    {
+      "id": "R3-2-G4",
+      "severity": "info",
+      "title": "Round-1 ask 2 (run.go:134 accidental template failure): ADDRESSED — crash gone; honesty residual restated in R3-2-2",
+      "detail": "run.go:134 now checks the error and falls back to handleNoState, with a red-on-revert test (TestRun_ModeResolutionFailure_FallsBackGracefully) pinning that the 'loading template .md' failure shape is dead. The disclosed scope addition is honest — the consolidation's own guidance licensed touching run.go, and the commit message says so. The residual (a genuine bd partial failure now renders idle guidance in the standalone instruct verb) is exactly the pre-bead-3 status quo, so this bead no longer introduces any regression; but see R3-2-2 for the ownership gap the fix's own comment creates."
+    },
+    {
+      "id": "R3-2-G6",
+      "severity": "info",
+      "title": "Round-1 ask 3 (probe ordering): ADDRESSED",
+      "detail": "draftSpecStatusWithCache now runs the memoized FindEpicBySpecIDWithCache check first (free after the AllEpics health probe), so shipped specs are pruned before any git subprocess. Enumeration adds exactly one git call (LocalBranchRefs) per discovery run; branch-only candidates that survive the epic filter pay one BranchExistsIn plus at most three cat-file probes each — bounded by actual draft-shaped candidates, not by historical spec count."
+    },
+    {
+      "id": "R3-2-1",
+      "severity": "minor",
+      "title": "CARRY-FORWARD (a), re-recorded for bead 5: the planned indeterminate-form trigger cannot see in-worktree bd-failure fabrications",
+      "detail": "derive.go is untouched by ada49e53 (correctly — bead 5's territory), so ResolveContextFromDirWithCache still never returns a non-nil error and still back-fills fabricated phases on bd failure inside worktrees (WorktreeBead error → ModeImplement, derive.go:601-605; WorktreeSpec error → ModeSpec, derive.go:617-619). Bead 5 step 1 keys the indeterminate form on 'context error or empty phase' — a trigger those paths can never produce. From inside a worktree with bd down, emitInstruct will receive a well-formed fabricated Context while `state show` (this bead) correctly refuses. Bead 5 must either rewire emitInstruct to the error-propagating ResolveModeWithCache family or make derive.go stop swallowing; the tally should keep this note attached to bead 5's prompt so its fix is not vacuous for the in-worktree failure class."
+    },
+    {
+      "id": "R3-2-2",
+      "severity": "minor",
+      "title": "CARRY-FORWARD (b), re-recorded with a sharpened ownership gap: standalone `mindspec instruct` windows remain unowned",
+      "detail": "Two windows in internal/instruct/run.go survive round 2, both now pre-existing-shaped rather than this bead's regressions: (i) main-checkout-with-draft — the resolveErr fallback (run.go:121-127, untouched) reads pctx.Phase=idle from the draft-blind WorktreeMain branch, so `mindspec instruct` (and the SessionStart hook) renders idle 'Available Actions' while `state show` says spec for the same repo state; ResolveTargetWithCache is still not draft-aware, so the else-branch never engages for a main-checkout draft. (ii) bd-partial-failure — the G4 fix routes modeErr to handleNoState, which renders the idle template. The fix's own comment DISCLAIMS this call site as bead 5's territory ('the instruct tail itself is bead 5's stated territory, not this call site's') — which is accurate about bead 5's declared steps and is precisely the problem: no bead's declared list now owns run.go's two windows. Not blocking bead 3 (the spec's R2.3 names emitInstruct, and neither window is a regression of this bead), but the tally should either extend bead 5's scope in writing or file a follow-up bead so the standalone verb converges with the honest surfaces; silence would leave the cross-verb disagreement permanent."
+    },
+    {
+      "id": "R3-2-3",
+      "severity": "info",
+      "title": "G1/G2 contract check from this lens: no new inconsistency introduced",
+      "detail": "(i) --spec semantics after G1: a full hyphenated ID passes through ResolveSpecPrefixWithCache verbatim, so an explicit draft --spec derives spec mode via the widened probe; the new idle-refusal fires only when the flagged ID has no epic and no draft (the R1.1-banned shape is dead on the success path); a NUMERIC-PREFIX --spec (e.g. --spec 129) matches only bd-active specs, so a draft is findable by full ID but not by numeric prefix — an honest refusal with a recovery hint, noted as an acceptable asymmetry (prefix resolution is bd-scoped by design; extending it to drafts would be a small ergonomic follow-up, not a correctness need). (ii) G2's warm-cache re-run: both resolve.go's and state.go's retry consult the same memoized AllEpics the health probe just filled, so the retry and the probe cannot disagree; a persistent failure still refuses via stateDiscoveryFailure. (iii) Bead-2 interplay unchanged: the fix adds no epic-path code reachable for drafts; v2/legacy machinery remains epic-scoped. (iv) The spec-branch RED I attributed pre-existing in round 1 is confirmed fixed separately on the spec branch (d7dfbab8, fixtures-only per the round-2 dispatch); at ada49e53 the touched packages (resolve, gitutil, instruct, lint, phase) and all 9 StateShow tests pass, and the bead worktree was left byte-identical."
+    }
+  ]
+}

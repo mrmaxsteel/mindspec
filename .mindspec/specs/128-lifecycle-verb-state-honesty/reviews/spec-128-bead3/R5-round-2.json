@@ -1,0 +1,34 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 claude-sub",
+  "confidence": 0.85,
+  "rationale": "FAMILY SUBSTITUTION: codex remains capacity-degraded, so this round-2 verdict is again a Claude substitute in the R5 seat, inheriting my own round-1 sub verdict as baseline. Reviewed commit ada49e53 in the bead worktree; all new/changed tests run and pass; `go test ./... -short` green from the worktree; worktree left byte-identical (git status clean, zero diff vs ada49e53). ROUND-1 ASK CLASSIFICATION (re-derived, not taken on faith): my ask 1 (G1, propagate explicit --spec resolution failure) = ADDRESSED — state.go now health-probes and re-runs resolution against the warm cache, re-checks ambiguity, then returns the resolution error whenever specFlag is non-empty, and the success path refuses by name when a flagged spec derives idle (no epic, no draft) instead of printing the R1.1-banned idle+activeSpec shape; all four of my round-1 empirical repros re-run against a rebuilt binary now refuse exit 1 with on-point errors (single-draft + --spec 999: 'no spec found matching prefix' — no wrong-spec answer; invalid --spec 'bogus..name': the R3 ingress refusal now surfaces; zero-drafts + --spec 999: refusal, not ambient idle; valid-format nonexistent --spec 999-not-here: 'no active spec or draft found for 999-not-here', not idle+activeSpec), while the ambient no-flag single-draft and multi-draft paths remain honest; four regression fixtures pin exactly the consolidation's list. My ask 2 (G5, multi-draft tests) = ADDRESSED — pinned at both layers (TestDiscoverDraftSpecsWithCache_MultipleDrafts_SortedResult unit; TestStateShow_MultipleDrafts_NoSpecFlag_ReturnsAmbiguityListing at the state.go/ErrAmbiguousTarget layer), both passing, matching the behavior I hand-verified in round 1. SCHEMA/CORRECTNESS SWEEP OF THE NEW CODE: (1) FileExistsAtRef argv shape — `git -C <workdir> cat-file -e <ref>:<path>` with BOTH operands individually rejectOptionLike-gated before composition; I re-verified the doc comment's load-bearing claim empirically: `git cat-file -e` exits 128 for an absent path AND for an absent ref alike (no rev-parse-style clean exit-1), so ExitError→absent is only sound once the ref is independently confirmed — and the ONLY non-test call site (internal/resolve/resolve.go:261, draftSpecStatusWithCache's tree-probe loop) is unreachable without BranchExistsIn returning true first (the function early-returns not-draft on a missing branch); grep confirms no other caller. Non-ExitError failures (git missing, spawn failure) propagate. The helper's doc states the precondition explicitly. Sound. (2) Refusal shapes — the discovery-failure refusals are unchanged guard.NewFailure forms ending 'recovery: mindspec doctor'; the NEW flagged-idle refusal is a plain resolution-class error whose text matches internal/resolve/target.go's existing idiom verbatim (same 'run `mindspec spec list` and re-run with a listed ID' advice), and ADR-0035's Req 12 scope is guard-failure constructors routed through internal/guard, which this is not — house-consistent, no recovery-line obligation (info note only). (3) Ratchet-allowlist honesty — argv entry for FileExistsAtRef: Count 1 matches the single execCommand, and the gating description matches the code; inline entry for specTreeCandidatePaths: the justification's claim that workspace.SpecBranch(specID) (internally idvalidate-gated, fail-closed) runs earlier in draftSpecStatusWithCache than any tree-path composition is true in the shipped ordering (epic check → SpecBranch → BranchExistsIn → dir stat → tree probe), and specTreeCandidatePaths' three tiers exactly mirror workspace.SpecDir's tiers 3-5 (flat/canonical/legacy) minus its worktree tiers, as its comment claims. Both honest. (4) G2 warm-cache logic — phase.Cache verifiably does not memoize errors (AllEpics and FindEpicBySpecID cache only on success), so the health-probe-then-re-run pattern is correct, and after a healthy AllEpics the only FindEpicBySpecID error is the not-found sentinel, making the subsequent draft-probe fall-through sound. (5) G3 empirics — a branch-only draft (committed to spec/<id> only, removed from main's tree, the real spec-create shape) is discovered from the main checkout and renders {\"mode\":\"spec\",...}; a branch with NO spec.md at any tier is correctly excluded from the draft set with no stderr leakage from the failing cat-file probes.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "info",
+      "summary": "Round-1 ask classification: G1 (my ask 1) ADDRESSED — all four exit-0 repros re-verified refusing exit 1 against a rebuilt binary, ambient paths still honest, four regression fixtures landed. G5 (my ask 2) ADDRESSED — multi-draft pinned at both the unit and state.go layers as asked."
+    },
+    {
+      "id": "F2",
+      "severity": "info",
+      "summary": "FileExistsAtRef's branch-confirmation-first precondition is load-bearing and honored: absent-path and absent-ref both exit 128 (re-verified empirically), the doc comment says so, and the sole caller sits strictly after BranchExistsIn's early return — there is no path to FileExistsAtRef without a confirmed ref. rejectOptionLike gates both operands before the <ref>:<path> composition."
+    },
+    {
+      "id": "F3",
+      "severity": "info",
+      "summary": "The new flagged-idle refusal ('no active spec or draft found for <id>; run `mindspec spec list` ...') carries no ADR-0035 recovery line — deliberately consistent with the resolution-error class (target.go's identical idiom) rather than the guard-failure class ADR-0035 Req 12 governs. No change required; noting so the tally does not read it as a missed convention."
+    },
+    {
+      "id": "F4",
+      "severity": "info",
+      "summary": "G4's shipped disposition renders the idle template (handleNoState) when ResolveModeWithCache fails in standalone instruct — it closes the crash window G4 named, but retains the pre-bead bd-failure→idle render rather than the consolidation's literal 'return the error or render the explicit refusal'. Defensible: the tail-must-not-fail contract (OQ-2) rules out erroring, the indeterminate form is bead 5's designed deliverable, and the code comment plus carry-forward (a) record the debt. Suggest the tally ensure bead 5's prompt names run.go's modeErr→handleNoState fallback explicitly among its de-swallow targets."
+    },
+    {
+      "id": "F5",
+      "severity": "info",
+      "summary": "Ratchet entries verified honest: argv-table FileExistsAtRef Count 1 matches the single exec site with an accurate gating description; inline-allowlist specTreeCandidatePaths justification's ordering claim (SpecBranch's internal idvalidate gate precedes any tree-path composition) is true in the shipped function, and the three candidate tiers mirror workspace.SpecDir's non-worktree precedence exactly as documented."
+    }
+  ]
+}

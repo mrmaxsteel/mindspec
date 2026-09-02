@@ -1,0 +1,26 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Round-4 final confirm at f6847729 (author-of-record). The enumeration-layer fix is correct and its scope discipline is exemplary. (1) Mechanism verified: DiscoverDraftSpecsWithCache now enumerates branch candidates via the new gitutil.LocalBranchNames (`%(refname:lstrip=2)` on refs/heads), which strips exactly the two 'refs/heads/' segments unconditionally and is never subject to git's ambiguous-short-name disambiguation — closing the leg round 2 missed, where `%(refname:short)` emitted 'heads/spec/<id>' under a same-named tag and the CutPrefix silently dropped the candidate before the qualified-ref probe ever ran. (2) The disclosed LocalBranchRefs decision is verified, not taken on faith: I grepped every consumer — the Executor interface (executor.go:201, MindspecExecutor:1446, MockExecutor:260), internal/layout (mover.go:47 interface + precondition.go:158), and internal/lifecycle/finalize_orphans.go:38 — exactly the three out-of-scope consumers the commit names. Changing LocalBranchRefs's output shape in place would have been an unreviewed behavior change under those callers; the sibling function is precisely the right call under my lens, and resolve.go is the only switched caller (grep-confirmed). (3) Tests land at the layer that was actually vulnerable: the DiscoverDraftSpecsWithCache-level pin, the end-to-end ambient state-show fixture (the round-3 slots' exact repro: branch-only draft + shadow tag → mode spec, never bare idle), and the direct gitutil primitive test whose control leg even skips honestly if a git version doesn't disambiguate — all PASS in the bead worktree, along with go build ./..., the full TestStateShow set, and the lint ratchet tables (the new argv entry's 'entirely fixed literals + workdir -C' claim matches the actual argv). (4) The sweep disclosure (RemoteTrackingRefs left unfixed and reported to the orchestrator as out of scope; BranchExistsIn/BranchExists already qualified) is the honest disposition rather than a silent scope creep. My standing APPROVE holds for the unchanged remainder; worktree left byte-identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-R4-1",
+      "classification": "ADDRESSED",
+      "summary": "Round-3 enumeration-layer tag-shadow finding: fixed correctly at the enumeration layer with LocalBranchNames, pinned red-on-revert at three layers (gitutil primitive, DiscoverDraftSpecsWithCache, ambient state show end-to-end). Verified green in the bead worktree."
+    },
+    {
+      "id": "R1-R4-2",
+      "classification": "SCOPE_DECISION_VERIFIED",
+      "summary": "Keeping LocalBranchRefs byte-identical for its Executor/layout/lifecycle consumers and adding a sibling is the correct author-of-record disposition — the alternative (changing %(refname:short) to lstrip in place) would have silently altered output shape under three consumers this bead never reviewed. Consumer list grep-verified against the tree. Follow-up surfaced honestly: LocalBranchRefs's disambiguation hazard now exists as documented behavior its own callers should eventually audit (none of them CutPrefix on branch names today per the commit's sweep; RemoteTrackingRefs reported separately), which the orchestrator may file as a post-bead note rather than more scope here."
+    },
+    {
+      "id": "R1-R4-3",
+      "severity": "info",
+      "classification": "CARRY_FORWARD",
+      "blocking": false,
+      "summary": "Round-2 notes remain open as non-blocking follow-ups: R1-5 (exotic unflagged idle+activeSpec via manual branch deletion under a retained spec worktree — the G1 guard could drop its specFlag condition) and R1-6 (repo-scoped 'existence' wording clarification for the ADR-0023 amendment, ridable on bead 4's planned ADR touch)."
+    }
+  ]
+}

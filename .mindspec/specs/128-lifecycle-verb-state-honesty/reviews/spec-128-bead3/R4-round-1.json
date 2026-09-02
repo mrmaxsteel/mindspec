@@ -1,0 +1,31 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 claude-sub",
+  "confidence": 0.8,
+  "rationale": "Empirical lens, all probes run against the real binary built from 7b6d83f1 in the bead worktree plus a parent-commit (7b6d83f1~1) binary built from a /tmp clone for differential comparison. AC-1's three legs all hold: (i) spec-worktree draft renders {\"mode\":\"spec\",\"activeSpec\":...} exit 0; (ii) bd dead (exit-1 stub AND bd absent from PATH, probed in both main checkout and spec worktree) produces a non-zero refusal naming the failed query with the ADR-0035 'recovery: mindspec doctor' line and prints no JSON; (iii) main-checkout single draft renders mode:spec with specBranch, never bare idle. The parent binary reproduces all three dishonest captures exactly — bare {\"mode\":\"idle\"} for a main-checkout draft, {\"mode\":\"\"} exit 0 on bd failure, and {\"mode\":\"idle\",\"activeSpec\":\"129-...\"} from a draft spec worktree — and the three new state_show_honesty tests are all red at the parent commit (verified by copying the test file into the /tmp clone), so red-on-revert is confirmed both behaviorally and at test level. {\"mode\":\"\"} exit 0 hunt came up empty: ResolveModeWithCache now returns (\"\", err) on every failure path and state.go refuses on modeErr; DerivePhaseFromChildren never returns \"\" (empty lifecycle set -> plan); the stored-phase branch returns IsValidPhase-gated values only. Adversarial probes: two drafts -> ErrAmbiguousTarget listing both, exit 1; --spec <full-id> targets one of two drafts correctly; half-drafts (dir-only, branch-only) -> honest idle per the OQ-2 dir+branch definition; unreadable specs dir -> non-zero refusal; dir+branch+epic (crafted bd epic JSON with spec_num/spec_title/mindspec_phase) -> derived phase 'plan', the draft probe correctly defers to bd once an epic exists. Suites green: go build ./..., internal/resolve, cmd/mindspec (-short), internal/lint (ratchet accepts the two new allowlist entries), internal/phase; new tests also pass under -race. ADR-0023 amendment read: genuinely narrow (pre-epic draft discovery only, beads sole authority from spec approve onward, failure-propagation clause included). The one change requested is the flag-blind draft fallback (finding F1): it is a new exit-0 wrong-subject answer introduced by this commit, in a spec whose entire point is that state show never returns a confident answer that misdescribes reality. Worktree left byte-identical (git status clean, HEAD 7b6d83f1)." ,
+  "concrete_changes_required": [
+    "state.go stateShowCmd: when specFlag is non-empty and ResolveTargetWithCache fails with a non-ambiguity error, return that error (after the AllEpics health probe if you want failure-vs-empty distinguished) instead of falling into the flag-blind draft-discovery fallback. Empirical repro: repo with exactly one draft 128-probe-draft; `state show --spec 999` (unresolvable prefix) exits 0 with {\"mode\":\"spec\",\"activeSpec\":\"128-probe-draft\"} — an exit-0 answer naming a DIFFERENT spec than the one explicitly requested. A script parsing activeSpec after passing --spec acts on the wrong spec. Secondary symptom of the same flag-blindness: with two drafts, `state show --spec 031` (prefix form, unambiguous against the drafts) refuses as ambiguous listing both. Minimal honest fix is to propagate resolveErr when the flag was given; optionally filter discovered drafts by the flag/prefix to make prefix targeting of drafts work. Add a regression test for the --spec-given + draft-present path."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "summary": "Flag-blind draft fallback misattributes: `state show --spec 999` with one draft present answers exit 0 about a different spec (activeSpec names the draft, not the requested spec). Introduced by this commit: the parent binary returned {\"mode\":\"idle\"} exit 0 with no activeSpec for the same probe — also weak, but it did not affirmatively name the wrong subject. The no-active-spec fallback in state.go ignores specFlag entirely. See concrete_changes_required[0] for repro and fix."
+    },
+    {
+      "id": "F2",
+      "severity": "minor",
+      "summary": "Pre-existing, informational (not this bead's remit): `state show --spec 999-bogus-spec` (valid-format, nonexistent full ID) renders {\"mode\":\"idle\",\"activeSpec\":\"999-bogus-spec\",\"specBranch\":\"spec/999-bogus-spec\"} exit 0 — ResolveSpecPrefixWithCache passes hyphenated IDs through without an existence check, and per-spec idle is then technically defensible. Same shape exists at the parent commit. Worth a backlog note for bead 5 / follow-up, not a blocker here."
+    },
+    {
+      "id": "F3",
+      "severity": "nit",
+      "summary": "draftSpecStatusWithCache's tail swallows epicErr from FindEpicBySpecIDWithCache (treating any error as 'no epic -> draft'). Safe today because the function's own up-front c.AllEpics() health probe has already propagated genuine bd failures, and after a memoized AllEpics success the only FindEpicBySpecID error is the not-found sentinel. The invariant is one refactor away from breaking (e.g. if FindEpicBySpecID grows a new error class); a one-line comment stating the dependency, or matching the not-found error explicitly, would pin it. No behavior change required."
+    },
+    {
+      "id": "A",
+      "severity": "info",
+      "summary": "Judgment call A: SUPPORT on empirical merits. The implementer's claimed regression was verified concretely: `state show --spec 031-first-draft` with two drafts present correctly renders that draft, which works only because mode and activeBead are both sourced from the resolved specID through the single Cache; ResolveContextFromDirWithCache's WorktreeMain branch derives ambiguity from CWD and ignores --spec, so the literal ctx.Phase substitution would have broken explicit targeting. Within state show, one derivation (ResolveModeWithCache on the resolved specID) is now authoritative for both mode and activeBead — R1.2's letter is satisfied for this verb. ResolveContextFromDir's Phase remains live in instruct tails and other consumers, which the BRIEF assigns to bead 5; I found no path where the two derivations contradict each other inside state show at this commit."
+    }
+  ]
+}

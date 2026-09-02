@@ -1,0 +1,43 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Author-of-record review of 7b6d83f1. The core delivery is strong: plan §Bead 3 steps 1-5 are all present and only them (resolve.go draft probe + error propagation; state.go recompose on one phase.Cache; single-draft/multi-draft/failure rendering; the ADR-0023 amendment; AC-1's three hermetic legs, all verified green — go build + internal/resolve, cmd/mindspec, internal/lint all pass from the bead worktree). The ADR-0023 amendment is genuinely narrow: it scopes only the 'single state authority' sentence to post-approval lifecycle, defines the draft condition exactly per the plan's OQ-2 wording (spec dir + spec/<id> branch + no epic), explicitly reasserts beads' unchanged authority from spec approve onward, carries R1.4's failure-propagation rule, and is a pure 24-line addition that does not touch the :107/:108 rows (bead 4's strike). Bead-2 surfaces are undisturbed (diff touches none of plan.go/next/release/complete/phasesemantics). Judgment call A: I approve the deviation on the merits (see finding A). However, the recomposed --spec path has two honesty gaps in exactly this spec's defect class — one newly introduced by this bead's flag-blind draft fallback (state show can answer a question about spec X with spec Y's state, exit 0), one a pre-existing shape that R1.1's unconditional sentence, owned by this bead, forbids (idle-with-activeSpec for an explicitly flagged nonexistent spec). Both are contained fixes on the paths this bead rebuilt, so REQUEST_CHANGES rather than any harder verdict; no hard_block — the foundation is sound.",
+  "concrete_changes_required": [
+    "state.go fallback must not be flag-blind: when specFlag is non-empty and ResolveTargetWithCache errors non-ambiguously, do not run the unfiltered DiscoverDraftSpecsWithCache fallback. Either (a) filter discovered drafts to those matching the requested ID/prefix before rendering, or (b) after the AllEpics health probe confirms bd is healthy, propagate a not-found refusal naming the requested spec. Add a fixture: --spec <prefix-matching-nothing> with exactly one unrelated on-disk draft must NOT print that other draft's {\"mode\":\"spec\",\"activeSpec\":<other>} with exit 0.",
+    "Success path must not print the R1.1-forbidden shape for an explicitly flagged nonexistent spec: --spec <valid-format full ID with no epic, no spec dir, no branch> passes through ResolveSpecPrefixWithCache, ResolveModeWithCache honestly returns idle, and state.go then prints {\"mode\":\"idle\",\"activeSpec\":<id>,\"specBranch\":...} exit 0. Since idle on the success path is now reachable ONLY via this explicit-flag pass-through (auto-selected specs have epics; worktree-derived drafts probe to spec), the contained fix is: mode==idle with a non-empty explicit specFlag and no draft renders a not-found error (or drops activeSpec) instead of idle+activeSpec. Pin with a fixture.",
+    "Non-blocking: add a fixture for the multi-draft ErrAmbiguousTarget rendering in state.go (plan §Bead 3 step 3's second arm) — delivered in code but untested; cheap with the existing newDraftFixtureRoot helper."
+  ],
+  "findings": [
+    {
+      "id": "A",
+      "severity": "judgment-call",
+      "status": "assessed-approved",
+      "summary": "Deviation A (ResolveModeWithCache authoritative for both mode and activeBead, rather than the plan's literal 'context path authoritative') is APPROVED on the merits. R1.2's letter offers two arms — 'one derivation is authoritative and the other is either removed or asserted-consistent' — and the implementation takes the 'removed' arm cleanly: ResolveContextFromDir no longer appears in state.go at all, so no consistency assertion is owed. The implementer's factual premise verified against derive.go:627-637: ResolveContextFromDirWithCache's WorktreeMain branch calls DiscoverActiveSpecsWithCache with no --spec awareness, and with multiple active specs leaves Phase EMPTY — the literal substitution would both regress `state show --spec <one-of-several>` and reintroduce the {\"mode\":\"\"} shape this bead exists to kill. It would also render main-checkout drafts idle (DiscoverActiveSpecs is bd-based and cannot see drafts), violating AC-1(iii). The chosen direction gets draft-awareness once, in ResolveModeWithCache, serving both flagged and unflagged paths. Residual, for the record not as a defect: ResolveContextFromDirWithCache remains a second live mode derivation for the instruct tails (WorktreeSpec branch agrees with draft semantics; WorktreeMain branch does not see drafts) — the plan explicitly assigns that surface to bead 5 ('rides bead 3's draft derivation through emitInstruct'), so the disagreement window is scheduled, not orphaned. Bead 5's reviewers should verify the WorktreeMain tail path actually picks up draft awareness."
+    },
+    {
+      "id": "R1-1",
+      "severity": "major",
+      "status": "new-in-this-bead",
+      "summary": "Flag-blind draft fallback misattributes state. Path: `state show --spec 42` (numeric prefix) where no bd-active spec matches → ResolveSpecPrefixWithCache falls through to an error (target.go:85-88) → state.go's fallback block runs with NO reference to specFlag → DiscoverDraftSpecsWithCache finds exactly one unrelated draft (e.g. 077-other) → prints {\"mode\":\"spec\",\"activeSpec\":\"077-other\",...} exit 0. The user asked about spec 42 and got spec 77's state as a success. The old code's fallback printed a generic context/idle result, never a different named spec, so this misattribution is introduced by this bead. With multiple drafts the outcome degrades to an ambiguity listing that at least includes honest candidates; the single-unrelated-draft case is the dishonest one. Concrete change 1."
+    },
+    {
+      "id": "R1-2",
+      "severity": "major",
+      "status": "pre-existing-shape-under-this-bead's-requirement",
+      "summary": "R1.1's unconditional first sentence ('never reports \"mode\": \"idle\" together with a non-empty activeSpec') is still violated on the success path: `--spec 042-nonexistent-slug` (valid format) is a pass-through at target.go:46-51, ResolveModeWithCache returns idle (no epic, spec dir absent so the draft probe honestly says not-a-draft), and state.go:158-169 prints idle + activeSpec + specBranch, exit 0. The shape predates this bead (old ResolveMode did the same), but R1.1 is this bead's requirement and this bead rebuilt exactly this composition; the explicit-flag pass-through is now the ONLY route to idle on the success path, so the fix is contained there. Concrete change 2."
+    },
+    {
+      "id": "R1-3",
+      "severity": "minor",
+      "status": "non-blocking",
+      "summary": "Plan step 3's multi-draft arm (ErrAmbiguousTarget listing) is implemented in state.go but has no fixture; the 10 new tests cover single-draft, no-draft, and failure paths only. Concrete change 3."
+    },
+    {
+      "id": "R1-4",
+      "severity": "info",
+      "status": "verified-sound",
+      "summary": "Error-propagation design checked for the beads-1/2 hard-block class (fabricating a result from a failed read): draftSpecStatusWithCache probes c.AllEpics() health FIRST on the same memoized cache, so the tail FindEpicBySpecIDWithCache call can only fail with the not-found class (cache.go memoizes AllEpics on success; errors are never memoized so a genuinely-down bd fails the health probe) — treating that as 'is a draft' is honest, not fabrication. DiscoverDraftSpecsWithCache propagates per-candidate probe errors immediately; os.Stat/BranchExistsIn non-IsNotExist errors propagate; idvalidate.SpecID gates every enumerated directory name per the spec.List convention. The two new composition-allowlist entries conform to the house map-entry pattern with waist + early-gate rationale."
+    }
+  ]
+}

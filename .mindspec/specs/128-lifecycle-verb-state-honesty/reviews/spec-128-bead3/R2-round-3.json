@@ -1,0 +1,16 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.9,
+  "rationale": "Round-3 minimal confirm at a86d0bdd under the codebase-pin lens. The commit is exactly the disclosed shape: a two-line functional change (draftSpecStatusWithCache's tree-probe loop now passes the fully qualified refs/heads/<branch> to gitutil.FileExistsAtRef, plus the matching error-message ref) and ONE new regression test. Verified: (1) the new TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt is real and green in the bead worktree (-count=1 -short PASS), hermetic (reuses the newBranchOnlyDraftFixture t.TempDir/seam family; the shadow is a plain `git tag spec/<id> main` in the fixture repo); (2) red-on-revert PROBED, not assumed: in a /tmp archive of a86d0bdd with the probe reverted to the short branch name, the shadow-tag test fails exactly as its comment claims while the adjacent no-tag branch-only test correctly stays green — pinning that the failure is the tag-shadow resolution (refs/tags preferred over refs/heads on ambiguous short names), not fixture noise; (3) the qualified ref is precisely the ref BranchExistsIn already confirmed (refs/heads/<branch>, gitops.go's rev-parse --verify target), so FileExistsAtRef's documented precondition — treat ExitError as absence only once the ref is independently confirmed — is now satisfied against the SAME ref that was confirmed, closing the confirm-vs-probe gap; rejectOptionLike is unaffected by the refs/heads/ prefix; (4) full `go test -count=1 -short ./...` green from the bead worktree, which was left byte-identical (git status clean). Standing APPROVE confirmed for the unchanged remainder — my round-2 verification of ada49e53 (15 tests, four red-on-revert probes, fixture fidelity to spec create, allowlist conformance) carries forward untouched by this commit, and my round-2 nit/info findings (non-git fixture roots on two G1 legs; the guard comment's overclaim; warn-only CommitAll boundary) remain open as recorded, none blocking.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2r3-F1",
+      "severity": "info",
+      "title": "Round-3 fix verified end-to-end; carried-forward round-2 notes unchanged",
+      "detail": "The qualified-ref change is minimal and correct; its regression test is green at a86d0bdd and red (alone) with the short-ref form restored in a /tmp copy. No new surfaces touched, so the round-2 APPROVE basis stands. The three round-2 non-blocking findings (R2r2-F1 nit: give the two non-git-rooted G1 flag-blind fixtures a baseline git repo; R2r2-F2 info: guard-comment overclaim for the deleted-branch damaged state; R2r2-F3 info: warn-only spec-create CommitAll leaves a commit-less draft undiscoverable from main by design) are unaddressed by this commit and remain recorded for follow-up disposition, none blocking.",
+      "location": "internal/resolve/resolve.go (draftSpecStatusWithCache tree probe), internal/resolve/draft_test.go (TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt)"
+    }
+  ]
+}

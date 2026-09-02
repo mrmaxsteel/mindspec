@@ -1,0 +1,21 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Round-3 minimal confirm at a86d0bdd (author-of-record). The commit is exactly as scoped: two files, resolve.go's tree-probe loop now passes the fully qualified 'refs/heads/<branch>' to gitutil.FileExistsAtRef plus one regression test. I verified the fix's central claim against the code, not the commit message: BranchExistsIn verifies precisely 'refs/heads/'+name (gitops.go:125), so the qualified probe now targets the exact ref already confirmed — closing the gap where git's short-name resolution preferred a same-named refs/tags entry and cat-file silently answered from the tag's draftless tree. FileExistsAtRef's confirmed-ref precondition (its ExitError-means-absent safety condition) is therefore not just preserved but strengthened: confirmed ref and probed ref are now byte-identical. The error message correctly names the qualified ref. Ran the new TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt (PASS, 0.18s) — its fixture tags 'spec/<id>' at main so the short-ref form demonstrably resolves to the draftless tree, making the red-on-revert claim sound by construction — plus the full internal/resolve package (-short, green) and go build ./... from the bead worktree. Nothing else changed since round 2, so my round-2 APPROVE stands for the unchanged remainder (G1/G2 flag-honesty guards, G3 extend-reach, G4 run.go fallback, G5/G6, ratchet entries, ADR-0023 amendment, bead-2 surfaces untouched). Worktree left byte-identical. My two round-2 non-blocking notes (R1-5 exotic unflagged idle+activeSpec edge; R1-6 repo-scoped-existence wording for the ADR amendment) remain open as follow-ups and do not block.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-R3-1",
+      "classification": "ADDRESSED",
+      "summary": "Round-2 surviving item (tag-shadow evasion): fixed correctly and minimally. The qualified-ref probe matches BranchExistsIn's verified ref exactly; the regression test constructs the real shadow (same-named tag at a draftless commit, fetchable into any clone) and asserts both draftSpecStatusWithCache and ResolveModeWithCache still see the branch-only draft. Verified green in the bead worktree; the resolve package suite remains green around it."
+    },
+    {
+      "id": "R1-R3-2",
+      "severity": "info",
+      "classification": "CARRY_FORWARD",
+      "blocking": false,
+      "summary": "Round-2 notes R1-5 (unflagged idle+activeSpec reachable only via manual branch deletion under a retained spec worktree — the G1 guard could drop its specFlag condition) and R1-6 (one-line repo-scoped 'existence' clarification for the ADR-0023 amendment, ridable on bead 4's planned ADR touch) remain open, non-blocking follow-ups."
+    }
+  ]
+}
