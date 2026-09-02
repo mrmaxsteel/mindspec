@@ -133,6 +133,44 @@ func BranchExistsIn(workdir, name string) (bool, error) {
 	return false, fmt.Errorf("checking branch %s existence in %s: %w", name, workdir, err)
 }
 
+// FileExistsAtRef reports whether path exists as a blob/tree entry in
+// ref's tree, evaluated at workdir via `git cat-file -e <ref>:<path>` — no
+// working-tree checkout of ref is needed, since refs/objects are shared
+// across worktrees of the same repository (spec 128 Bead 3 round-1 panel
+// G3: a spec worktree's freshly-committed draft is visible from the main
+// checkout this way, even though it was never written to the main
+// checkout's own working tree).
+//
+// UNLIKE BranchExistsIn, `git cat-file -e`'s exit code does NOT distinguish
+// "path absent in that tree" from "ref itself absent" or "malformed ref"
+// — all three exit 128 (verified empirically; there is no `--quiet`-style
+// clean absent-exit-1 signal analogous to `rev-parse --verify`). Because
+// of that, this helper is ONLY safe to call once the caller has
+// independently confirmed ref exists (e.g. via BranchExistsIn) — under
+// that precondition an ExitError here unambiguously means "path absent in
+// ref's tree" (ref-absence and malformed-ref are already ruled out), and
+// this treats any ExitError as absence. Any OTHER error (git binary
+// missing, a process-start failure) is a genuine structural failure and
+// propagates rather than being folded into "absent" — the same
+// evidence-error discipline as BranchExistsIn.
+func FileExistsAtRef(workdir, ref, path string) (bool, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return false, err
+	}
+	if err := rejectOptionLike(path); err != nil {
+		return false, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "cat-file", "-e", ref+":"+path)...)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking %s existence at %s in %s: %w", path, ref, workdir, err)
+}
+
 // CreateBranch creates a new branch from the given base.
 func CreateBranch(name, from string) error {
 	if err := rejectOptionLike(name); err != nil {
@@ -1720,6 +1758,37 @@ func CommitPaths(workdir, msg string, paths []string) error {
 // (Req 11).
 func LocalBranchRefs(workdir string) ([]string, error) {
 	return forEachRefShort(workdir, "refs/heads")
+}
+
+// LocalBranchNames returns the true short name of every local branch in
+// workdir, via `git for-each-ref --format=%(refname:lstrip=2) refs/heads`
+// — spec 128 Bead 3 round-3 panel (ADV-1 remainder): unlike
+// LocalBranchRefs's `%(refname:short)`, this is never subject to git's
+// ambiguous-short-name disambiguation. A same-named tag (`git tag
+// spec/128-foo main`, fetchable into any clone) makes `%(refname:short)`
+// for the branch `refs/heads/spec/128-foo` emit "heads/spec/128-foo"
+// instead of "spec/128-foo" (verified empirically) — silently breaking
+// any caller that strips a known prefix off the result. `lstrip=2`
+// unconditionally removes exactly the two "refs/heads/" path segments
+// regardless of ambiguity, so the result is always the true branch name;
+// it is byte-identical to `%(refname:short)` in the ordinary
+// (non-ambiguous) case.
+//
+// Deliberately a SIBLING of LocalBranchRefs, not a behavior change to it:
+// LocalBranchRefs is part of the Executor interface (MindspecExecutor,
+// MockExecutor) and is also called directly by
+// internal/layout/precondition.go and internal/lifecycle/finalize_orphans.go
+// — changing its output shape would be an unreviewed behavior change to
+// three other consumers outside this bead's scope. Callers that need the
+// disambiguation-safe form (currently: resolve.go's OQ-2 draft-branch
+// enumeration) call this instead.
+func LocalBranchNames(workdir string) ([]string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("for-each-ref refs/heads (lstrip=2): %w", err)
+	}
+	return splitLines(string(out)), nil
 }
 
 // RemoteTrackingRefs returns the short names of every remote-tracking ref

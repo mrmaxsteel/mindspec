@@ -131,7 +131,18 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		// Derive mode from beads. Single cache-shared path:
 		//   - resolve.ResolveModeWithCache → cache.FindEpicBySpecID + cache.FindEpic
 		//   - phase.ResolveContextFromDirWithCache → reuses cached epic/children
-		mode, _ := resolve.ResolveModeWithCache(cache, mainRoot, specID)
+		//
+		// Spec 128 Bead 3 round-1 panel G4: ResolveModeWithCache now
+		// propagates a genuine discovery failure instead of collapsing it
+		// to idle (R1.4) — an empty Mode reaching Render below would fail
+		// obscurely on a ""+".md" template lookup. Fall back to the same
+		// graceful no-state handling used above for a resolution failure;
+		// distinguishing "indeterminate" from "idle" in the instruct tail
+		// itself is bead 5's stated territory, not this call site's.
+		mode, modeErr := resolve.ResolveModeWithCache(cache, mainRoot, specID)
+		if modeErr != nil {
+			return handleNoState(cache, mainRoot, format, out)
+		}
 		// Try to find active bead via phase context
 		pctx, _ := phase.ResolveContextFromDirWithCache(cache, mainRoot, localRoot)
 		activeBead := ""
