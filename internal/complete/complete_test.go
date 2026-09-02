@@ -871,13 +871,16 @@ func TestCompleteRunRejectsInvalidBeadIDArg(t *testing.T) {
 	}
 }
 
-// TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations (spec 119
-// final-review finding B): the call-order contract of the artifact-
-// materialization subphase (ADR-0041 §1). A doc-sync refusal fires AFTER
-// the optional user CommitAll (the local bead-branch commit whose tip the
-// gate must measure) but BEFORE every lifecycle-affecting mutation: no
-// `bd close`, no CompleteBead (merge/branch/worktree cleanup).
-func TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations(t *testing.T) {
+// TestRun_DocSyncRefusesBeforeAnyMaterialization (spec 128 Bead 6, AC-6;
+// supersedes the pre-bead-6
+// TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations, which
+// pinned the OLD gates-after-commit ordering ADR-0041 §1 now REVERSES).
+// A doc-sync refusal fires from the prospective-snapshot GATE, before
+// any complete-authored commit exists: zero materialization calls (no
+// MaterializeStageCommit, no branch-tip advance), and — a fortiori —
+// before every lifecycle-affecting mutation (no `bd close`, no
+// CompleteBead).
+func TestRun_DocSyncRefusesBeforeAnyMaterialization(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
@@ -893,7 +896,10 @@ func TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations(t *testing.T) {
 
 	mock := newMockExec()
 	mock.MergeBaseResult = "merge-base-sha"
-	// Source-only diff with no doc updates → doc-sync SevError.
+	// Source-only diff with no doc updates → doc-sync SevError. Under
+	// the fallback-to-ChangedFiles default (spec 128 bead 6's
+	// MockExecutor.ChangedFilesTree), this drives the gate's own
+	// snapshot-tree diff too.
 	mock.ChangedFilesResult = []string{"internal/contextpack/foo.go"}
 
 	_, err := Run(root, "bead-1", "", "did the work", mock, CompleteOpts{})
@@ -903,10 +909,14 @@ func TestRun_DocSyncRefusesAfterCommitAllBeforeTerminalMutations(t *testing.T) {
 	if !strings.Contains(err.Error(), "doc-sync") {
 		t.Errorf("error should mention doc-sync: %v", err)
 	}
-	// AFTER CommitAll: the user commit was materialized (forward-
-	// reconcilable local bead-branch commit, retained on refusal).
-	if calls := mock.CallsTo("CommitAll"); len(calls) != 1 {
-		t.Errorf("expected exactly 1 CommitAll (artifact materialization) BEFORE the doc-sync refusal, got %d", len(calls))
+	// BEFORE any materialization: the gate itself refused, so
+	// runMaterialization never reaches the elision check or the
+	// commit-tree/marker/branch-advance sequence.
+	if calls := mock.CallsTo("MaterializeStageCommit"); len(calls) != 0 {
+		t.Errorf("expected ZERO MaterializeStageCommit calls before the doc-sync refusal, got %d", len(calls))
+	}
+	if calls := mock.CallsTo("AdvanceBranchExpectedOld"); len(calls) != 0 {
+		t.Errorf("expected ZERO branch-tip advances before the doc-sync refusal, got %d", len(calls))
 	}
 	// BEFORE every lifecycle-affecting mutation.
 	if closeCalled {
@@ -2218,7 +2228,15 @@ func TestDefaultVerifyCommitted_AsOfHardReadFailureNeverFallsBack(t *testing.T) 
 	}
 }
 
-func TestRun_AutoCommitUsesExecutor(t *testing.T) {
+// TestRun_AutoCommitMaterializesViaSnapshot (spec 128 Bead 6; supersedes
+// the pre-bead-6 TestRun_AutoCommitUsesExecutor, which pinned the OLD
+// exec.CommitAll porcelain call the reorder replaces): a non-empty
+// commitMsg no longer drives a direct CommitAll — it flows into the
+// prospective-snapshot's materialization (M) stage, which builds the
+// commit via exec.MaterializeStageCommit(stage=materialization) and
+// advances the bead branch's tip via exec.AdvanceBranchExpectedOld,
+// targeting the MATCHED bead worktree.
+func TestRun_AutoCommitMaterializesViaSnapshot(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
@@ -2234,23 +2252,58 @@ func TestRun_AutoCommitUsesExecutor(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
+	// A non-empty snapshot tree, differing from the (default-empty) tip,
+	// so the M-stage elision check sees genuine content to materialize —
+	// modeling the "add feature X" work the --commit-msg text used to
+	// name explicitly.
+	// Distinguish the M-stage snapshot (artifact excluded) from the
+	// S-stage snapshot (no exclusions) by their distinct results —
+	// mirrors TestRun_ArtifactAndArtifactSyncStage's pattern — so the
+	// S-stage's own delta (changedFromCurrent, measured against the tip
+	// AFTER M's advance — fix-round G1) reads as EMPTY: nothing further
+	// changed post-materialization, so G1's non-artifact-delta refusal
+	// does not (incorrectly) treat M's ALREADY-materialized content as
+	// fresh interval dirt on the S check. A single fixed non-empty
+	// result for every SnapshotWorktreeTree/ChangedFilesTree call
+	// (regardless of stage) is not realistic enough to survive G1.
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-with-user-work", nil
+		}
+		return "tree-post-materialize", nil
+	}
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-user-work" {
+			return []string{"generated/output.bin"}, nil
+		}
+		return nil, nil
+	}
+
 	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify CommitAll was called via executor, targeting the MATCHED bead
-	// worktree — never the root/main checkout (final-review r2 F2).
-	commitCalls := mock.CallsTo("CommitAll")
-	if len(commitCalls) != 1 {
-		t.Fatalf("expected 1 CommitAll call, got %d", len(commitCalls))
+	// Verify the materialization commit was built via the executor,
+	// targeting the MATCHED bead worktree — never the root/main checkout
+	// (final-review r2 F2's invariant, now enforced by runMaterialization
+	// itself rather than exec.CommitAll).
+	buildCalls := mock.CallsTo("MaterializeStageCommit")
+	if len(buildCalls) == 0 {
+		t.Fatalf("expected at least 1 MaterializeStageCommit call, got %d", len(buildCalls))
 	}
-	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
-		t.Errorf("CommitAll path: got %q, want the matched bead worktree", path)
+	if path := buildCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
+		t.Errorf("MaterializeStageCommit path: got %q, want the matched bead worktree", path)
 	}
-	msg := commitCalls[0].Args[1].(string)
-	if !strings.Contains(msg, "impl(bead-1)") || !strings.Contains(msg, "add feature X") {
-		t.Errorf("CommitAll msg: got %q", msg)
+	if stage := buildCalls[0].Args[3].(string); stage != "materialization" {
+		t.Errorf("MaterializeStageCommit stage: got %q, want materialization", stage)
+	}
+	advCalls := mock.CallsTo("AdvanceBranchExpectedOld")
+	if len(advCalls) == 0 {
+		t.Fatal("expected at least 1 AdvanceBranchExpectedOld call")
+	}
+	if branch := advCalls[0].Args[0].(string); branch != "bead/bead-1" {
+		t.Errorf("AdvanceBranchExpectedOld branch: got %q, want bead/bead-1", branch)
 	}
 }
 
@@ -2423,8 +2476,10 @@ func TestRun_DirtyTreeHintIncludesBeadID(t *testing.T) {
 
 // TestRun_ArtifactOnlyDirtSucceeds: when the only dirt surviving the
 // ADR-0025 normalization is .beads/issues.jsonl, complete.Run folds it
-// into a follow-up `chore: sync beads artifact` commit (via the
-// executor) and proceeds — never blocking, never requiring --no-verify.
+// into the S-stage's artifact-sync commit (spec 128 Bead 6:
+// exec.MaterializeStageCommit(stage=artifact-sync), replacing the
+// pre-bead-6 pathspec-scoped exec.CommitPaths) and proceeds — never
+// blocking, never requiring --no-verify.
 func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 	saveAndRestore(t)
 
@@ -2436,6 +2491,22 @@ func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
 		gotRepoRoot, gotCwd = repoRoot, cwd
 		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+	// Distinguish the M-stage snapshot (artifact excluded) from the
+	// S-stage snapshot (no exclusions) by their distinct results, and
+	// make ONLY the artifact-including tree read as changed — modeling
+	// "only the artifact differs from tip".
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-without-artifact", nil
+		}
+		return "tree-with-artifact", nil
+	}
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-artifact" {
+			return []string{".beads/issues.jsonl"}, nil
+		}
+		return nil, nil
 	}
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
@@ -2460,25 +2531,23 @@ func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 		t.Errorf("classification paths: got repoRoot=%q cwd=%q, want both the bead worktree", gotRepoRoot, gotCwd)
 	}
 
-	// Req 7 + Spec 119 R3: exactly one follow-up commit, through the
-	// executor, at the bead worktree, with the DQ-4 message — staged via
-	// the EXPLICIT lifecycle-artifact pathspec (CommitPaths), never an
-	// `add -A` equivalent (AC-4).
-	commitCalls := mock.CallsTo("CommitPaths")
-	if len(commitCalls) != 1 {
-		t.Fatalf("expected 1 CommitPaths (artifact sync), got %d", len(commitCalls))
+	// Exactly one artifact-sync stage commit, through the executor, at
+	// the bead worktree — the M stage elides (no non-artifact content
+	// differs from tip).
+	var syncCalls []executor.MockCall
+	for _, c := range mock.CallsTo("MaterializeStageCommit") {
+		if c.Args[3].(string) == "artifact-sync" {
+			syncCalls = append(syncCalls, c)
+		}
+		if c.Args[3].(string) == "materialization" {
+			t.Errorf("expected the M stage to elide (no non-artifact content), got a materialization commit: %+v", c)
+		}
 	}
-	if path := commitCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
+	if len(syncCalls) != 1 {
+		t.Fatalf("expected 1 artifact-sync MaterializeStageCommit call, got %d", len(syncCalls))
+	}
+	if path := syncCalls[0].Args[0].(string); path != "/tmp/worktree-bead-1" {
 		t.Errorf("artifact-sync commit path: got %q, want bead worktree", path)
-	}
-	if msg := commitCalls[0].Args[1].(string); msg != "chore: sync beads artifact" {
-		t.Errorf("artifact-sync commit msg: got %q, want %q", msg, "chore: sync beads artifact")
-	}
-	if paths := commitCalls[0].Args[2].([]string); len(paths) != 1 || paths[0] != ".beads/issues.jsonl" {
-		t.Errorf("artifact-sync pathspec: got %v, want [.beads/issues.jsonl]", paths)
-	}
-	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
-		t.Errorf("artifact-only sync must never use CommitAll (add -A equivalent), got %d calls", len(calls))
 	}
 
 	// The terminal mutation still ran.
@@ -2487,12 +2556,14 @@ func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 	}
 }
 
-// TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit: the i4ad field
-// case — a pre-commit hook re-exports the JSONL DURING the auto-commit,
-// re-dirtying the tree immediately after. The residual artifact dirt is
-// folded into a follow-up commit (DQ-4: follow-up, never amend), so the
-// completion succeeds with two commits: impl(...) then the chore sync.
-func TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit(t *testing.T) {
+// TestRun_CommitMsgWithArtifactDirtBuildsBothStages (spec 128 Bead 6;
+// supersedes the pre-bead-6 TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit,
+// which pinned the OLD two-porcelain-commit shape): a non-empty
+// --commit-msg alongside surviving artifact dirt materializes BOTH
+// stages — M (stage=materialization, the user's own work) THEN S
+// (stage=artifact-sync, the tracker refresh) — never a single commit
+// carrying both, and never CommitAll/CommitPaths.
+func TestRun_CommitMsgWithArtifactDirtBuildsBothStages(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
@@ -2500,9 +2571,26 @@ func TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit(t *testing.T) {
 	mock := newMockExec()
 
 	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
-		// Post-auto-commit snapshot: the hook's re-export survives
-		// normalization (Dolt state changed since the commit's export).
 		return []string{".beads/issues.jsonl"}, nil, nil
+	}
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-without-artifact", nil
+		}
+		return "tree-with-artifact", nil
+	}
+	// The M-stage snapshot (artifact excluded) shows the user's own work
+	// changed from the ORIGINAL tip; the S-stage snapshot's own delta
+	// (fix-round G1: measured against the tip AFTER M's advance, which
+	// already contains that same user work) shows ONLY the artifact's
+	// own refresh — never widget.go again, or G1's non-artifact-delta
+	// refusal would (correctly) treat M's ALREADY-materialized content
+	// as fresh interval dirt on the S check.
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-artifact" {
+			return []string{".beads/issues.jsonl"}, nil
+		}
+		return []string{"internal/widget/widget.go"}, nil
 	}
 
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
@@ -2514,30 +2602,32 @@ func TestRun_ArtifactDirtAfterAutoCommitFollowUpCommit(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	_, err := Run(root, "bead-1", "", "implement the thing", mock, CompleteOpts{})
+	_, err := Run(root, "bead-1", "", "implement the thing", mock, CompleteOpts{AllowDocSkew: "test fixture has no doc tree"})
 	if err != nil {
-		t.Fatalf("post-auto-commit artifact re-export must never block, got: %v", err)
+		t.Fatalf("commit-msg + surviving artifact dirt must never block, got: %v", err)
 	}
 
-	// Spec 119 R3: the auto-commit (step 2.5) still uses CommitAll (the
-	// user's own work); the follow-up artifact-only sync now goes
-	// through the pathspec-scoped CommitPaths (AC-4).
-	autoCommitCalls := mock.CallsTo("CommitAll")
-	if len(autoCommitCalls) != 1 {
-		t.Fatalf("expected 1 CommitAll (the user's auto-commit), got %d", len(autoCommitCalls))
+	buildCalls := mock.CallsTo("MaterializeStageCommit")
+	var sawMaterialization, sawArtifactSync bool
+	for _, c := range buildCalls {
+		switch c.Args[3].(string) {
+		case "materialization":
+			sawMaterialization = true
+		case "artifact-sync":
+			sawArtifactSync = true
+		}
 	}
-	first := autoCommitCalls[0].Args[1].(string)
-	if !strings.Contains(first, "impl(bead-1)") || !strings.Contains(first, "implement the thing") {
-		t.Errorf("auto-commit message wrong, got %q", first)
+	if !sawMaterialization {
+		t.Error("expected a materialization-stage commit for the user's own work")
 	}
-
-	syncCalls := mock.CallsTo("CommitPaths")
-	if len(syncCalls) != 1 {
-		t.Fatalf("expected 1 CommitPaths (follow-up artifact sync), got %d", len(syncCalls))
+	if !sawArtifactSync {
+		t.Error("expected an artifact-sync-stage commit for the surviving tracker dirt")
 	}
-	second := syncCalls[0].Args[1].(string)
-	if second != "chore: sync beads artifact" {
-		t.Errorf("follow-up commit message wrong, got %q", second)
+	if calls := mock.CallsTo("CommitAll"); len(calls) != 0 {
+		t.Errorf("the reorder must never call the porcelain CommitAll, got %d calls", len(calls))
+	}
+	if calls := mock.CallsTo("CommitPaths"); len(calls) != 0 {
+		t.Errorf("the reorder must never call the porcelain CommitPaths, got %d calls", len(calls))
 	}
 }
 
@@ -2586,8 +2676,10 @@ func TestRun_ArtifactAndUserDirtBlocks(t *testing.T) {
 	}
 }
 
-// TestRun_ArtifactSyncCommitFailureAborts: HC-4 — if the follow-up
-// artifact-sync commit fails, the command fails BEFORE the terminal
+// TestRun_ArtifactSyncCommitFailureAborts: HC-4 — if the S-stage
+// artifact-sync commit build fails (spec 128 Bead 6:
+// exec.MaterializeStageCommit(stage=artifact-sync), replacing the
+// pre-bead-6 exec.CommitPaths), the command fails BEFORE the terminal
 // mutation (no bead close, no merge).
 func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	saveAndRestore(t)
@@ -2595,7 +2687,24 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.CommitPathsErr = fmt.Errorf("commit hook exploded")
+	mock.MaterializeStageCommitFn = func(wtPath, tree, parent, stage, subject string) (string, error) {
+		if stage == "artifact-sync" {
+			return "", fmt.Errorf("commit hook exploded")
+		}
+		return "c-sha", nil
+	}
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-without-artifact", nil
+		}
+		return "tree-with-artifact", nil
+	}
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-artifact" {
+			return []string{".beads/issues.jsonl"}, nil
+		}
+		return nil, nil
+	}
 
 	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
 		return []string{".beads/issues.jsonl"}, nil, nil
@@ -2614,7 +2723,7 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when the artifact-sync commit fails")
 	}
-	if !strings.Contains(err.Error(), "committing beads artifact sync") {
+	if !strings.Contains(err.Error(), "building the artifact-sync commit") {
 		t.Errorf("error should name the artifact-sync step, got: %v", err)
 	}
 	if closed {
@@ -2674,22 +2783,40 @@ func TestRun_ArtifactDirt_NoWorktreeRefusesMainCommit(t *testing.T) {
 	}
 }
 
-// TestRun_ArtifactDirt_ResidualDirtNamedInWarning (Spec 119 R3, AC-4): a
-// path that becomes dirty AFTER the artifact-dirt scan (simulated via
-// exec.Status returning an extra, unrelated dirty entry post-commit) is
-// EXCLUDED from the pathspec-scoped tracker commit and named in a warning —
-// never silently swept in.
-func TestRun_ArtifactDirt_ResidualDirtNamedInWarning(t *testing.T) {
+// TestRun_SExitContract_ResidualArtifactDirtWarns (Spec 128 Bead 6's
+// S-stage exit contract; supersedes the pre-bead-6
+// TestRun_ArtifactDirt_ResidualDirtNamedInWarning, which pinned the OLD
+// exec.Status-based residual check against the pathspec-scoped
+// CommitPaths call): the S-exit contract re-classifies the worktree
+// AFTER materialization via the SAME checkDirtyTreeFn seam. A residual
+// ARTIFACT-only dirt surviving that re-check (e.g. a hook re-exporting
+// mid-run) is a non-blocking WARN, never a refusal.
+func TestRun_SExitContract_ResidualArtifactDirtWarns(t *testing.T) {
 	saveAndRestore(t)
 
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.StatusFn = func(workdir string) (string, error) {
-		return " M unrelated-race-file.go\n", nil
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-without-artifact", nil
+		}
+		return "tree-with-artifact", nil
+	}
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-artifact" {
+			return []string{".beads/issues.jsonl"}, nil
+		}
+		return nil, nil
 	}
 
+	var checkCalls int
 	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		checkCalls++
+		// Every call reports the SAME artifact-only dirt: the pre-
+		// materialization safety check sees it (needsMaterialization),
+		// and the POST-materialization S-exit re-check sees it again
+		// (a hook re-exported it mid-run) — non-blocking either way.
 		return []string{".beads/issues.jsonl"}, nil, nil
 	}
 	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
@@ -2701,28 +2828,90 @@ func TestRun_ArtifactDirt_ResidualDirtNamedInWarning(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	origStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	// sExitContract prints via warnWriter (not raw os.Stderr) — redirect
+	// the package-level seam directly, mirroring the existing
+	// warnWriter-capture convention (see TestCompletePrintsDocSyncWarningAndProceeds).
+	orig := warnWriter
+	var captured strings.Builder
+	warnWriter = &captured
+	t.Cleanup(func() { warnWriter = orig })
+
 	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
-	w.Close()
-	os.Stderr = origStderr
-	var captured bytes.Buffer
-	io.Copy(&captured, r)
 
 	if err != nil {
-		t.Fatalf("residual dirt must never block completion, got: %v", err)
+		t.Fatalf("residual artifact dirt must never block completion, got: %v", err)
 	}
 	if !result.BeadClosed {
 		t.Error("expected BeadClosed=true")
 	}
-	if calls := mock.CallsTo("CommitPaths"); len(calls) != 1 {
-		t.Fatalf("expected 1 CommitPaths call, got %d", len(calls))
-	} else if paths := calls[0].Args[2].([]string); len(paths) != 1 || paths[0] != ".beads/issues.jsonl" {
-		t.Errorf("expected the pathspec to be EXACTLY [.beads/issues.jsonl], got %v (the residual file must be excluded)", paths)
+	if checkCalls < 2 {
+		t.Fatalf("expected checkDirtyTreeFn to run at least twice (pre-materialization + S-exit contract), got %d", checkCalls)
 	}
-	if !strings.Contains(captured.String(), "unrelated-race-file.go") {
-		t.Errorf("expected the residual dirty path to be named in a warning, got stderr: %q", captured.String())
+	if !strings.Contains(captured.String(), "WARN complete.residual_artifact_dirt") {
+		t.Errorf("expected the S-exit contract's residual-artifact-dirt warning, got: %q", captured.String())
+	}
+}
+
+// TestRun_SExitContract_ResidualUserDirtRefuses (Spec 128 Bead 6, plan
+// round-5 G2): a GENUINE non-artifact interval edit surviving the
+// S-exit contract's post-materialization re-check REFUSES, naming the
+// path, BEFORE any merge — never silently swept in, never a soft warn
+// (the pre-bead-6 residual-dirt path was a warning; this one dirt class
+// is NOT artifact-only, so the stricter contract applies).
+func TestRun_SExitContract_ResidualUserDirtRefuses(t *testing.T) {
+	saveAndRestore(t)
+
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "mol-parent-1")
+	mock := newMockExec()
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-without-artifact", nil
+		}
+		return "tree-with-artifact", nil
+	}
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if treeOID == "tree-with-artifact" {
+			return []string{".beads/issues.jsonl"}, nil
+		}
+		return nil, nil
+	}
+
+	var checkCalls int
+	checkDirtyTreeFn = func(repoRoot, cwd string) ([]string, []string, error) {
+		checkCalls++
+		if checkCalls == 1 {
+			// Pre-materialization: artifact-only, clears the safety check.
+			return []string{".beads/issues.jsonl"}, nil, nil
+		}
+		// S-exit re-check: a genuine non-artifact edit landed during
+		// materialization (the race/kill-window class).
+		return nil, []string{"unrelated-race-file.go"}, nil
+	}
+	resolveTargetFn = func(r, flag string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{
+			{Name: "worktree-bead-1", Path: "/tmp/worktree-bead-1", Branch: "bead/bead-1"},
+		}, nil
+	}
+	var closed bool
+	closeBeadFn = func(ids ...string) error { closed = true; return nil }
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected the S-exit contract to refuse on a genuine residual user edit")
+	}
+	if !strings.Contains(err.Error(), "unrelated-race-file.go") {
+		t.Errorf("refusal should name the residual path, got: %v", err)
+	}
+	if !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Errorf("refusal must end with a recovery line, got: %v", err)
+	}
+	if closed {
+		t.Error("bead must not be closed when the S-exit contract refuses")
+	}
+	if calls := mock.CallsTo("CompleteBead"); len(calls) != 0 {
+		t.Errorf("expected no CompleteBead call, got %d", len(calls))
 	}
 }
 
@@ -3731,15 +3920,32 @@ func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
 
 	mock := newMockExec()
 	mock.MergeBaseResult = "fork-sha"
-	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
-		if base == "fork-sha" && head == "bead/bead-1" {
-			// The bead's own diff: clean (no files at all).
+	// Spec 128 Bead 6: the gates now measure base..T (T = the snapshot
+	// tree returned by exec.SnapshotWorktreeTree), never the committed
+	// branch name. A distinctive sentinel tree value keeps this test's
+	// "the bead's own diff" concept meaningful under the new anchoring.
+	mock.SnapshotWorktreeTreeResult = "snapshot-tree-sha"
+	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
+		if workdir == "/tmp/worktree-bead-1" && treeOID == "snapshot-tree-sha" {
+			// Any call inspecting the CORRECT prospective snapshot tree
+			// sees the bead's genuinely clean prospective content —
+			// whether the gate's own base=fork-sha measurement, or
+			// runMaterialization's own M/S-stage elision probes
+			// (base=tip or base=currentTip, fix-round G1's S-stage
+			// delta check among them). Discriminating on treeOID alone
+			// (not base) matters here: this fixture's single fixed
+			// SnapshotWorktreeTreeResult means the M/S stages' own
+			// internal probes reuse the identical snapshot value the
+			// gates measure, so a base-inclusive match would
+			// (incorrectly) route those probes into the drift branch
+			// below and trip a materialization the bead's genuinely
+			// clean content never warrants.
 			return nil, nil
 		}
-		// ANY other range — notably the old working-tree-vs-base and
+		// ANY other treeOID/workdir — the old working-tree-vs-base and
 		// base..HEAD measurements — sees main-side drift that would
 		// trip both gates (doc-less source change). If the gates
-		// consult such a range, they false-block and this test fails.
+		// consult such args, they false-block and this test fails.
 		return []string{"README.md", "SECURITY.md", "internal/contextpack/drift.go"}, nil
 	}
 
@@ -3759,22 +3965,28 @@ func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
 		}
 	}
 
-	// Every gate diff must be the bead range — no ambient-HEAD or
+	// Every GATE diff must be the bead's prospective range (the bead
+	// worktree, base fork-sha, the snapshot tree) — no ambient-HEAD or
 	// working-tree measurement may remain. BOTH lanes must have
-	// diffed: doc-sync (ValidateDocsRange) and ADR-divergence
-	// (ValidateDivergence, reached via the fixture above) each issue
-	// exactly one ChangedFiles call, so fewer than two means a lane
-	// never measured anything and its anchoring is unpinned. Mutation
-	// M2b (head→"HEAD" at the complete.go CheckADRDivergence call)
-	// dies on the per-call args check.
-	cfCalls := mock.CallsTo("ChangedFiles")
-	if len(cfCalls) < 2 {
-		t.Fatalf("expected ChangedFiles calls from BOTH gate lanes (doc-sync + adr-divergence), got %d", len(cfCalls))
-	}
-	for _, c := range cfCalls {
-		if c.Args[0] != "fork-sha" || c.Args[1] != "bead/bead-1" {
-			t.Errorf("ChangedFiles(%v, %v): per-bead gates must diff fork-sha..bead/bead-1 only", c.Args[0], c.Args[1])
+	// diffed: doc-sync (ValidateDocsSnapshot) and ADR-divergence
+	// (ValidateDivergenceSnapshot, reached via the fixture above) each
+	// issue exactly one ChangedFilesTree(base=fork-sha) call, so fewer
+	// than two means a lane never measured anything and its anchoring is
+	// unpinned. Filtered to base=="fork-sha": runMaterialization's OWN
+	// elision probes (tip..T) also call ChangedFilesTree and are not
+	// gate calls.
+	var gateCalls int
+	for _, c := range mock.CallsTo("ChangedFilesTree") {
+		if c.Args[1] != "fork-sha" {
+			continue
 		}
+		gateCalls++
+		if c.Args[0] != "/tmp/worktree-bead-1" || c.Args[2] != "snapshot-tree-sha" {
+			t.Errorf("ChangedFilesTree(%v, %v, %v): per-bead gates must diff the bead worktree's fork-sha..snapshot-tree only", c.Args[0], c.Args[1], c.Args[2])
+		}
+	}
+	if gateCalls < 2 {
+		t.Fatalf("expected ChangedFilesTree(base=fork-sha) calls from BOTH gate lanes (doc-sync + adr-divergence), got %d", gateCalls)
 	}
 }
 

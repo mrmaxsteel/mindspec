@@ -148,12 +148,12 @@ func TestPanelGateDecision(t *testing.T) {
 			mustHave: []string{"reviewed", "branch now at", fence},
 		},
 		{
-			name: "dirty user tree → Block (CommitAll bypass)",
+			name: "dirty user tree → Block (materialize-past-review bypass)",
 			facts: GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"),
 				Res: result(defaultPanel(), 5, 0, 1, nil, nil), HeadSHA: sha,
 				WorktreePath: "/wt", UserDirt: []string{"src/main.go"}},
 			want:     Block,
-			mustHave: []string{"uncommitted changes in /wt", "CommitAll", "src/main.go", fence},
+			mustHave: []string{"uncommitted changes in /wt", "materialize them into a commit past review", "src/main.go", fence},
 		},
 		{
 			name: "worktree absent → dirty check skipped, falls through to threshold Allow",

@@ -91,6 +91,41 @@ func ValidateDivergence(
 	base, head, ownerRef string,
 	implApprove bool,
 ) (*Result, []DivergenceFinding) {
+	return validateDivergence(exec, root, specDir, beadID, base, head, ownerRef, implApprove, "")
+}
+
+// ValidateDivergenceSnapshot is bead 6's prospective-snapshot leg (spec
+// 128, OQ-1(a)): head is a candidate tree T (from
+// gitutil.SnapshotWorktreeTree, via the executor's SnapshotWorktreeTree
+// seam), NOT a committed ref; ownerRef is FORCED to the same treeOID, so
+// attribution and diffed content come from the identical candidate the
+// eventual commit will contain; wtPath is the bead worktree the
+// tree-vs-tree diff (ChangedFilesTree) runs in. The per-bead gate's
+// normal (non-reconcile) path is this leg's only caller — reconcile mode
+// and the impl-approve whole-branch backstop keep calling
+// ValidateDivergence unchanged.
+func ValidateDivergenceSnapshot(
+	exec executor.Executor,
+	root, specDir, beadID string,
+	base, treeOID, wtPath string,
+	implApprove bool,
+) (*Result, []DivergenceFinding) {
+	return validateDivergence(exec, root, specDir, beadID, base, treeOID, treeOID, implApprove, wtPath)
+}
+
+// validateDivergence is the shared implementation behind
+// ValidateDivergence and ValidateDivergenceSnapshot. snapshotWorktree ==
+// "" selects the legacy committed-range diff (exec.ChangedFiles); a
+// non-empty value selects the tree-vs-tree diff
+// (exec.ChangedFilesTree(snapshotWorktree, base, head)) — head is then a
+// tree OID, not a ref.
+func validateDivergence(
+	exec executor.Executor,
+	root, specDir, beadID string,
+	base, head, ownerRef string,
+	implApprove bool,
+	snapshotWorktree string,
+) (*Result, []DivergenceFinding) {
 	targetID := beadID
 	if targetID == "" {
 		targetID = filepath.Base(specDir)
@@ -179,8 +214,15 @@ func ValidateDivergence(
 	}
 	sort.Strings(candidateDomains)
 
-	// Diff range.
-	changed, err := exec.ChangedFiles(base, head)
+	// Diff range. snapshotWorktree != "" routes through bead 6's
+	// tree-vs-tree leg (head is then a candidate tree OID, not a ref) —
+	// see validateDivergence's own doc comment.
+	var changed []string
+	if snapshotWorktree != "" {
+		changed, err = exec.ChangedFilesTree(snapshotWorktree, base, head)
+	} else {
+		changed, err = exec.ChangedFiles(base, head)
+	}
 	if err != nil {
 		r.AddError("adr-divergence-diff", err.Error())
 		return r, nil
