@@ -18,15 +18,20 @@ package main
 // classifying it as mutating without a row is red.
 //
 // Hermeticity: every fixture root lives under t.TempDir(); the table
-// drives each verb via its real RunE/tail function with seams (bd/git
-// stubs, executor.MockExecutor via the newExecutorFn seam) — never a
-// live lifecycle in this repo. Two verbs (`next`, `impl adopt`) route
-// their bd interaction through OTHER packages' UNEXPORTED test seams
-// (internal/next exposes none at all; internal/approve's adopt-specific
-// seams — adoptFindEpicFn et al. — are package-private) that bead 5 has
-// no license to add (out of its declared file scope) — their rows are
-// documented rather than driven end-to-end; see the row comments below
-// and this bead's Deviations report.
+// drives ALL NINE verbs via their real RunE/tail function with seams —
+// bd/git stubs, executor.MockExecutor via the newExecutorFn seam, and (for
+// `next`/`impl adopt`, round-1 panel G2's four-slot convergence) a
+// PURELY CANNED fake `bd` executable on PATH (installFakeBD) — never a
+// live lifecycle in this repo, never a real bd process. `next` and
+// `impl adopt`'s non-phase-routed bd calls (internal/next's QueryReady/
+// ClaimBead; internal/approve's adopt-specific finalize writes) expose no
+// Go-level seam reachable from cmd/mindspec, but bd resolves via OS PATH
+// lookup regardless of package boundaries, so installFakeBD sidesteps
+// that wall entirely without a real bd process or a new exported seam in
+// either owning package; their PHASE-routed calls (FindEpicBySpecID,
+// DerivePhaseDetail, LifecycleChildIDsForEpic, GetChildren) stay
+// Go-seamed via phase.SetListJSONForTest/SetRunBDForTest exactly like
+// every other row.
 
 import (
 	"bytes"
@@ -380,7 +385,7 @@ var mindspecGuidanceMarkers = []string{"## MindSpec Lifecycle", "## Next Action"
 
 // withMockNewExecutor swaps newExecutorFn for a canned MockExecutor for
 // the duration of one test (spec 128 bead 5's AC-14 seam: drives spec
-// create/approve, plan approve, and impl approve/adopt's REAL RunE
+// create/approve, plan approve, next, and impl approve/adopt's REAL RunE
 // functions without a live git/bd lifecycle).
 func withMockNewExecutor(t *testing.T, mock *executor.MockExecutor) {
 	t.Helper()
@@ -713,38 +718,207 @@ func TestVerbOutput_RepairPhase(t *testing.T) {
 	resultBeforeGuidance(t, "repair phase", out, "already consistent")
 }
 
-// TestVerbOutput_NextAndImplAdopt_ScopeLimitation documents (rather than
-// drives end-to-end) the two rows this table cannot hermetically execute
-// without either a real bd binary+database or new exported test seams in
-// a package outside bead 5's declared file scope:
-//
-//   - `next`: internal/next exposes NO test seams for QueryReady/
-//     ClaimBead/GateReadiness/EnsureWorktree's bd calls (its runBDFn,
-//     evaluateReadinessFn are package-private) — unlike EVERY other
-//     package this table drives (internal/approve, internal/complete,
-//     cmd/mindspec's own release.go/repair.go), which all export or
-//     already expose a swappable seam.
-//   - `impl adopt`: internal/approve's adopt-specific seams
-//     (adoptFindEpicFn, adoptDerivePhaseDetailFn,
-//     adoptLifecycleChildIDsFn, adoptReadBeadStatusFn,
-//     adoptRunBDCombinedFn, adoptGetMetadataFn, adoptMergeMetadataFn —
-//     see internal/approve/adopt_test.go's wireAdoptSeams) are
-//     package-private; only phase.SetRunBDForTest/SetListJSONForTest are
-//     reachable, which is not sufficient on its own.
-//
-// Both verbs are still fully present in mutatingVerbRows (the
-// TotalCobraTreeClassification test above requires it) — their SOURCE
-// ordering (print the result, THEN call emitInstruct) is identical in
-// shape to spec create/spec approve/plan approve's already-driven rows
-// (a straight-line RunE with no branching on the success path), and
-// next.go's own already-extracted pieces (formatClaimLine,
-// formatStateLine, advancePhaseOnClaim) are independently unit-tested
-// elsewhere in this package (next_phase_advance_test.go et al.).
-func TestVerbOutput_NextAndImplAdopt_ScopeLimitation(t *testing.T) {
-	if nextCmd.RunE == nil {
-		t.Fatal("mindspec next must remain a runnable RunE command")
+// installFakeBD drops a fake, PURELY CANNED (never forwarding to a real
+// bd binary) `bd` executable into a temp dir and prepends it to the live
+// process PATH, restored via t.Cleanup (round-1 panel G2: the
+// next_ready_gate_test.go PATH-shim MECHANISM, generalized to a
+// self-contained fake rather than that file's forward-to-real-bd
+// variant — internal/next and internal/approve's adopt-specific bd calls
+// expose no Go-level seam reachable from cmd/mindspec, but bd resolves
+// via OS PATH lookup regardless of package boundaries, so this sidesteps
+// the wall entirely without a real bd process or a new exported seam in
+// either owning package). script receives argv (bd's own subcommand and
+// flags) as "$@" and must handle every bd invocation the driven verb's
+// non-phase-routed call sites make; phase-routed calls
+// (phase.FindEpicBySpecID, DerivePhaseDetail, LifecycleChildIDsForEpic,
+// GetChildren, etc.) stay Go-seamed via phase.SetListJSONForTest/
+// SetRunBDForTest and never reach this fake process at all.
+func installFakeBD(t *testing.T, script string) {
+	t.Helper()
+	fakeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
 	}
-	if implAdoptCmd.RunE == nil {
-		t.Fatal("mindspec impl adopt must remain a runnable RunE command")
+	origPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", fakeDir+string(os.PathListSeparator)+origPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
 	}
+	t.Cleanup(func() { _ = os.Setenv("PATH", origPath) })
+}
+
+// TestVerbOutput_Next drives the REAL nextCmd.RunE claim path (round-1
+// panel G2/G4/R4/R5/R6 four-slot convergence rejected the documented
+// scope-limitation this replaces): a fake bd on PATH answers `ready`
+// (one claimable task-typed bead) and `update ... --claim` (success);
+// phase.SetListJSONForTest/SetRunBDForTest report zero active epics so
+// the ambient spec-resolution step degrades harmlessly to the global
+// (unscoped) ready query; a MockExecutor stands in for the
+// worktree-creating leg (EnsureWorktree -> exec.DispatchBead). Asserts
+// the claim/state result lines precede any guidance marker.
+func TestVerbOutput_Next(t *testing.T) {
+	root := t.TempDir()
+	runGitInDir(t, root, "init", "-q", "-b", "main")
+	runGitInDir(t, root, "config", "user.email", "test@mindspec.invalid")
+	runGitInDir(t, root, "config", "user.name", "mindspec-test")
+	runGitInDir(t, root, "commit", "--allow-empty", "-q", "-m", "baseline")
+	withTestChdir(t, root)
+
+	const epicID = "epic-ac14next"
+	const beadID = epicID + ".1"
+	const specID = "900-ac14-next"
+
+	// The readiness gate's EvaluateReadiness reads real spec.md/plan.md
+	// files off disk (never seamed) — minimal but present content, with
+	// --allow-not-ready tolerating any failing signal so this fixture
+	// doesn't also need to satisfy the full MF-1..MF-4 floor.
+	specDir := filepath.Join(root, ".mindspec", "specs", specID)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n\n## Requirements\n\n1. R1\n"), 0o644); err != nil {
+		t.Fatalf("write spec.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\n---\n\n# Plan\n"), 0o644); err != nil {
+		t.Fatalf("write plan.md: %v", err)
+	}
+	runGitInDir(t, root, "add", "-A")
+	runGitInDir(t, root, "commit", "-q", "-m", "add spec/plan fixture")
+	if err := nextCmd.Flags().Set("allow-not-ready", "true"); err != nil {
+		t.Fatalf("set --allow-not-ready: %v", err)
+	}
+	t.Cleanup(func() { _ = nextCmd.Flags().Set("allow-not-ready", "false") })
+
+	installFakeBD(t, "#!/bin/sh\n"+
+		"case \"$1\" in\n"+
+		"  ready) echo '[{\"id\":\""+beadID+"\",\"title\":\"[IMPL "+specID+".1] AC-14 fixture bead\",\"status\":\"open\",\"priority\":1,\"issue_type\":\"task\"}]' ;;\n"+
+		"  update) exit 0 ;;\n"+
+		// readiness.fetchBeadRecordReal (a raw bead.RunBD call, NOT
+		// phase-seamed) needs a well-formed bd-show shape — no
+		// dependencies, so MF-3 trivially passes regardless.
+		"  show) echo '[{\"description\":\"AC-14 fixture bead\",\"dependencies\":[]}]' ;;\n"+
+		"  *) echo '[]' ;;\n"+
+		"esac\n")
+
+	epics := []phase.EpicInfo{{
+		ID: epicID, Title: "[SPEC " + specID + "] AC-14 next fixture", Status: "open",
+		IssueType: "epic", Metadata: map[string]interface{}{"spec_num": float64(900), "spec_title": "ac14-next"},
+	}}
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
+			}
+		}
+		return []byte("[]"), nil
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" && args[1] == beadID {
+			// phase.FindEpicForBead's expected shape: a dependency edge
+			// to the epic, resolving GateReadiness's owning-spec lookup.
+			return []byte(`[{"title":"fixture","dependencies":[{"id":"` + epicID + `","issue_type":"epic"}]}]`), nil
+		}
+		if len(args) >= 2 && args[0] == "show" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	}))
+
+	wtDir := filepath.Join(root, ".worktrees", "worktree-"+beadID)
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree dir: %v", err)
+	}
+	withMockNewExecutor(t, &executor.MockExecutor{
+		DispatchBeadResult: executor.WorkspaceInfo{Path: wtDir},
+	})
+
+	out, err := captureStdout(t, func() error {
+		return nextCmd.RunE(nextCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("next: %v\noutput:\n%s", err, out)
+	}
+	resultBeforeGuidance(t, "next", out, "Claiming", mindspecGuidanceMarkers...)
+	if !strings.Contains(out, "State updated: mode=implement") {
+		t.Errorf("expected the claimed task-typed bead to resolve mode=implement, got:\n%s", out)
+	}
+}
+
+// TestVerbOutput_ImplAdopt drives the REAL adoptSpecRunE (via a real
+// AdoptSpec call) over the attested-evidence path: phase.FindEpicBySpecID/
+// DerivePhaseDetail/LifecycleChildIDsForEpic are Go-seamed (a review-phase
+// epic with zero lifecycle children); no local spec/<id> branch exists
+// (adopt's own precondition — the branch has already been superseded);
+// no remote is configured and no surviving bead branches exist, so the
+// evidence lattice lands on an unverified trigger, and --attest-unverified
+// proceeds through the finalize path. A fake bd on PATH answers the
+// remaining non-phase-routed calls (show/list/update/close/export)
+// adoptFinalize's real writes make; a MockExecutor stands in for
+// exec.CommitPaths.
+func TestVerbOutput_ImplAdopt(t *testing.T) {
+	root := t.TempDir()
+	runGitInDir(t, root, "init", "-q", "-b", "main")
+	runGitInDir(t, root, "config", "user.email", "test@mindspec.invalid")
+	runGitInDir(t, root, "config", "user.name", "mindspec-test")
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
+		t.Fatalf("mkdir .mindspec: %v", err)
+	}
+	runGitInDir(t, root, "commit", "--allow-empty", "-q", "-m", "baseline")
+	withTestChdir(t, root)
+
+	const specID = "901-ac14-adopt"
+	const epicID = "epic-ac14-adopt"
+
+	installFakeBD(t, "#!/bin/sh\n"+
+		"case \"$1\" in\n"+
+		"  show) id=\"$2\"; echo \"[{\\\"id\\\":\\\"$id\\\",\\\"status\\\":\\\"open\\\",\\\"issue_type\\\":\\\"epic\\\",\\\"metadata\\\":{}}]\" ;;\n"+
+		"  list) echo '[]' ;;\n"+
+		"  update|close|export) exit 0 ;;\n"+
+		"  *) echo '[]' ;;\n"+
+		"esac\n")
+
+	epics := []phase.EpicInfo{{
+		ID: epicID, Title: "[SPEC " + specID + "] AC-14 adopt fixture", Status: "open",
+		IssueType: "epic", Metadata: map[string]interface{}{
+			"spec_num": float64(901), "spec_title": "ac14-adopt",
+			"mindspec_phase": "review", "mindspec_phase_semantics": "v2",
+		},
+	}}
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return []byte("[]"), nil // zero lifecycle children
+			}
+		}
+		return []byte("[]"), nil
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	}))
+
+	withMockNewExecutor(t, &executor.MockExecutor{})
+
+	if err := implAdoptCmd.Flags().Set("reason", "AC-14 fixture: content already reached main outside the lifecycle"); err != nil {
+		t.Fatalf("set --reason: %v", err)
+	}
+	if err := implAdoptCmd.Flags().Set("attest-unverified", "true"); err != nil {
+		t.Fatalf("set --attest-unverified: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = implAdoptCmd.Flags().Set("reason", "")
+		_ = implAdoptCmd.Flags().Set("attest-unverified", "false")
+	})
+
+	out, err := captureStdout(t, func() error {
+		return adoptSpecRunE(implAdoptCmd, []string{specID})
+	})
+	if err != nil {
+		t.Fatalf("impl adopt: %v\noutput:\n%s", err, out)
+	}
+	resultBeforeGuidance(t, "impl adopt", out, "adopted via attestation", mindspecGuidanceMarkers...)
 }

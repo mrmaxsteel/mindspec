@@ -641,12 +641,12 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 				ctx.DerivationFailed = true
 				ctx.DerivationError = phaseErr.Error()
 			}
-		} else if err != nil && !beadsDirMissing(root) {
+		} else if err != nil && !BeadsDirMissing(root) {
 			// Distinguish "bd healthy, no epic yet" (a pre-epic draft —
 			// ModeSpec below is the honest, non-error answer) from a
 			// genuine bd/Dolt failure, the same probe
 			// resolve.ResolveModeWithCache applies to its own epic
-			// lookup (round-1 panel G2/F2a precedent). beadsDirMissing
+			// lookup (round-1 panel G2/F2a precedent). BeadsDirMissing
 			// short-circuits first: a workspace with no .beads/ directory
 			// at all (bead.Preflight's own "run 'beads init'" precondition,
 			// checked the same on-disk way, never by bd's error TEXT) has
@@ -657,7 +657,19 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 				ctx.DerivationError = epicsErr.Error()
 			}
 		}
-		if ctx.Phase == "" && !ctx.DerivationFailed {
+		// Round-1 panel G1/G3 (hard block): this backfill is UNCONDITIONAL,
+		// matching WorktreeBead's ModeImplement fallback above — it fires
+		// even when ctx.DerivationFailed is true. Honest consumers
+		// (cmd/mindspec/instruct_tail.go, internal/instruct/run.go) check
+		// DerivationFailed BEFORE ever reading Phase, so this does not
+		// resurrect the "failure presented as idle" bug the field exists
+		// to close. Gating this on !DerivationFailed left Phase=="" on a
+		// genuine failure, which silently flipped internal/cleanup's
+		// active-spec refusal (cleanup.go: `ctx.Phase != ""`) from
+		// fail-closed to fail-open for a bd outage in a spec worktree —
+		// exactly the "additive, values unchanged" claim this field's own
+		// doc comment makes, now actually true for every arm.
+		if ctx.Phase == "" {
 			ctx.Phase = state.ModeSpec // spec worktree without epic → spec mode
 		}
 		// Check for active bead
@@ -676,7 +688,7 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 			ctx.Phase = specs[0].Phase
 		case err == nil && len(specs) == 0:
 			ctx.Phase = state.ModeIdle
-		case err != nil && beadsDirMissing(root):
+		case err != nil && BeadsDirMissing(root):
 			// No .beads/ directory at all: this workspace has never used
 			// the beads lifecycle (bead.Preflight's own "run 'beads
 			// init'" precondition, re-checked here the same on-disk way —
@@ -693,7 +705,7 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 	return ctx, nil
 }
 
-// beadsDirMissing reports whether root has no .beads/ directory at all —
+// BeadsDirMissing reports whether root has no .beads/ directory at all —
 // the same on-disk precondition bead.Preflight checks before ever
 // shelling out to bd (internal/bead/bdcli.go's "run 'beads init'" case).
 // Spec 128 R2.3: a workspace that has never used the beads lifecycle
@@ -702,8 +714,10 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 // the ordinary, permanently-legitimate "nothing has started here yet"
 // idle state. This is checked via the filesystem, never by matching bd's
 // error TEXT (the same discipline ErrNoEpicLineage's doc comment states:
-// "never classify by error text").
-func beadsDirMissing(root string) bool {
+// "never classify by error text"). Exported (round-1 panel G5.1) so
+// internal/instruct's own idle-vs-indeterminate arrival points apply the
+// identical precondition rather than a second, potentially-drifting copy.
+func BeadsDirMissing(root string) bool {
 	_, err := os.Stat(filepath.Join(root, ".beads"))
 	return os.IsNotExist(err)
 }

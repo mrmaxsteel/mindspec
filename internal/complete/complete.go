@@ -1467,8 +1467,13 @@ func FormatResult(r *Result) string {
 		// AC-4b (spec 128 bead 5): the result summary renders the SAME
 		// indeterminate marker text the instruct tail does — never a
 		// fabricated `plan` (or any other mode) derived from the failed
-		// post-close child read.
-		fmt.Fprintf(&sb, "cannot determine mode: %s\n", r.IndeterminateReason)
+		// post-close child read. IndeterminateReason wraps an error
+		// chain that may embed agent-writable content (bd/git output),
+		// so it is termsafe.Escape'd here at the render sink — round-1
+		// panel G6, matching the identical classification
+		// ratchet_template_test.go assigns the tail template's own
+		// {{termsafe .IndeterminateReason}} interpolation (ADR-0042).
+		fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason))
 		return sb.String()
 	}
 	switch r.NextMode {

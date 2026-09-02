@@ -15,6 +15,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
 
@@ -282,6 +284,93 @@ func TestCompleteTail_SuccessBranch_AgreesWithResultNextMode(t *testing.T) {
 	resultBeforeGuidance(t, "complete (success branch)", out, "Bead bead-ac4 closed.", "## MindSpec Lifecycle")
 }
 
+// modeHeadings maps each real state.Mode* to its instruct template's own
+// heading line — used to assert MECHANICAL agreement between
+// Result.NextMode and what the REAL tail actually rendered (round-1
+// panel G3): a generic callback assertion (as in the test above) cannot
+// catch the tail rendering a DIFFERENT mode than the one the result
+// summary claimed, since a stub instructFn renders whatever the test
+// tells it to, not what production derivation actually computes.
+var modeHeadings = map[string]string{
+	state.ModeIdle:      "MindSpec — No Active Work",
+	state.ModeSpec:      "MindSpec — Spec Mode",
+	state.ModePlan:      "MindSpec — Plan Mode",
+	state.ModeImplement: "MindSpec — Implementation Mode",
+	state.ModeReview:    "MindSpec — Review Mode",
+}
+
+// TestCompleteTail_SuccessBranch_RealEmitInstructAgreesWithResultNextMode
+// is round-1 panel G3: drives completeTail with the REAL production
+// emitInstruct (not a stub) against a real fixture whose epic
+// independently derives to state.ModeImplement, and asserts the rendered
+// tail's heading equals the ONE heading Result.NextMode names — and no
+// other mode's heading appears. This would go RED if an implement result
+// were ever paired with review/plan/idle/indeterminate guidance (the
+// exact regression a generic stub callback cannot detect).
+func TestCompleteTail_SuccessBranch_RealEmitInstructAgreesWithResultNextMode(t *testing.T) {
+	root := t.TempDir()
+	withTestChdir(t, root)
+
+	epics := []phase.EpicInfo{{
+		ID: "epic-ac4-real", Title: "[SPEC 902-ac4-real] AC-4 real fixture", Status: "open",
+		IssueType: "epic", Metadata: map[string]interface{}{
+			"spec_num": float64(902), "spec_title": "ac4-real",
+			"mindspec_phase": state.ModeImplement, "mindspec_phase_semantics": "v2",
+		},
+	}}
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return json.Marshal(epics)
+			}
+		}
+		return []byte("[]"), nil
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" {
+			return json.Marshal(epics)
+		}
+		return []byte("[]"), nil
+	}))
+
+	// emitInstruct (the real production instructFn) writes directly to
+	// the literal os.Stdout — it does not respect an injected io.Writer,
+	// exactly like production's own completeTail(os.Stdout, os.Stderr,
+	// ...) call site. A bytes.Buffer passed as completeTail's stdout
+	// parameter would therefore capture ONLY FormatResult's own output,
+	// silently missing emitInstruct's — so this test redirects the real
+	// os.Stdout (captureStdout) and passes it through explicitly,
+	// matching production byte-for-byte.
+	stderrBuf := &bytes.Buffer{}
+	out, err := captureStdout(t, func() error {
+		completeTail(os.Stdout, stderrBuf, root, root, &complete.Result{
+			BeadID:   "bead-ac4-real",
+			NextMode: state.ModeImplement,
+			NextSpec: "902-ac4-real",
+		}, emitInstruct)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureStdout: %v", err)
+	}
+
+	want := modeHeadings[state.ModeImplement]
+	if !strings.Contains(out, want) {
+		t.Fatalf("rendered tail does not agree with Result.NextMode=%q (want heading %q); got:\n%s", state.ModeImplement, want, out)
+	}
+	for mode, heading := range modeHeadings {
+		if mode == state.ModeImplement {
+			continue
+		}
+		if strings.Contains(out, heading) {
+			t.Errorf("rendered tail contains a DIFFERENT mode's heading %q (mode %q) alongside the expected %q — Result.NextMode and the real rendered template disagree:\n%s", heading, mode, want, out)
+		}
+	}
+	if stderrBuf.Len() != 0 {
+		t.Errorf("unexpected stderr (a real emitInstruct failure would mean the fixture is wrong): %q", stderrBuf.String())
+	}
+}
+
 // TestCompleteTail_IndeterminateBranch_NeverCallsInstructFn is AC-4's
 // failure branch (spec 128 bead 5, AC-4b's real-wiring companion): when
 // result.NextModeIndeterminate is true, completeTail renders the shared
@@ -327,6 +416,87 @@ func TestCompleteTail_IndeterminateBranch_NeverCallsInstructFn(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+// TestAdoptSpecTail_VerifiedSuccess_EmitsResultThenInstructTail is round-1
+// panel G4: `mindspec impl adopt`'s success path was missing its
+// post-result instruct tail entirely (every other lifecycle-transitioning
+// verb — complete, impl approve — emits one). This drives the REAL
+// production adoptSpecTail with a hand-built verified AdoptResult and
+// asserts the result line precedes the (injected) guidance, and that the
+// non-fatal tail-warning behavior matches completeTail/implApproveTail.
+func TestAdoptSpecTail_VerifiedSuccess_EmitsResultThenInstructTail(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	instructFnCalled := false
+	adoptSpecTail(&stdout, &stderr, "/repo", &approve.AdoptResult{
+		SpecID:   "008-adopt-verified",
+		EpicID:   "epic-adopt-1",
+		Verified: true,
+	}, func(root string) error {
+		instructFnCalled = true
+		if root != "/repo" {
+			t.Errorf("instructFn root: got %q, want %q", root, "/repo")
+		}
+		fmt.Fprintln(&stdout, "## MindSpec Lifecycle\ninstruct guidance line")
+		return nil
+	})
+
+	if !instructFnCalled {
+		t.Fatal("adoptSpecTail must call the instruct tail on a successful adopt (round-1 panel G4)")
+	}
+	out := stdout.String()
+	resultBeforeGuidance(t, "impl adopt (verified)", out, "adopted (landed evidence VERIFIED)", "## MindSpec Lifecycle")
+	if stderr.Len() != 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+// TestAdoptSpecTail_AttestedSuccess_EmitsResultThenInstructTail is G4's
+// second success leg (verified and attested are the two DISTINCT success
+// shapes AdoptSpec can return; both must carry the tail).
+func TestAdoptSpecTail_AttestedSuccess_EmitsResultThenInstructTail(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	instructFnCalled := false
+	adoptSpecTail(&stdout, &stderr, "/repo", &approve.AdoptResult{
+		SpecID:   "008-adopt-attested",
+		EpicID:   "epic-adopt-2",
+		Verified: false,
+		Trigger:  "branch-absent-no-source",
+	}, func(root string) error {
+		instructFnCalled = true
+		fmt.Fprintln(&stdout, "## MindSpec Lifecycle\ninstruct guidance line")
+		return nil
+	})
+
+	if !instructFnCalled {
+		t.Fatal("adoptSpecTail must call the instruct tail on the attested success path too")
+	}
+	out := stdout.String()
+	resultBeforeGuidance(t, "impl adopt (attested)", out, "adopted via attestation", "## MindSpec Lifecycle")
+	if !strings.Contains(out, "trigger=branch-absent-no-source") {
+		t.Errorf("expected the attestation trigger named in the result line, got:\n%s", out)
+	}
+}
+
+// TestAdoptSpecTail_InstructFailure_IsNonFatalWarning matches
+// completeTail/implApproveTail's contract: a tail-render failure is a
+// stderr warning, never a fatal error — the adopt itself already
+// succeeded.
+func TestAdoptSpecTail_InstructFailure_IsNonFatalWarning(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	adoptSpecTail(&stdout, &stderr, "/repo", &approve.AdoptResult{
+		SpecID:   "008-adopt-warn",
+		Verified: true,
+	}, func(string) error {
+		return errors.New("simulated instruct failure")
+	})
+
+	if !strings.Contains(stdout.String(), "adopted (landed evidence VERIFIED)") {
+		t.Errorf("result line missing from stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: could not emit guidance: simulated instruct failure") {
+		t.Errorf("expected a non-fatal stderr warning, got: %q", stderr.String())
 	}
 }
 

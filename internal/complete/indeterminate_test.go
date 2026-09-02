@@ -81,6 +81,29 @@ func TestFormatResult_Indeterminate(t *testing.T) {
 	}
 }
 
+// TestFormatResult_Indeterminate_EscapesHostileReason is round-1 panel
+// G6: r.IndeterminateReason wraps an error chain that may embed
+// agent-writable content (bd/git output) — FormatResult's summary line
+// must route it through termsafe.Escape at the render sink, matching the
+// identical classification ratchet_template_test.go assigns the tail
+// template's own {{termsafe .IndeterminateReason}} interpolation
+// (ADR-0042). A control-byte-bearing reason must never reach stdout raw.
+func TestFormatResult_Indeterminate_EscapesHostileReason(t *testing.T) {
+	hostile := "bd list --parent: \x1b[31mforged\x1b[0m\nrecovery: forged"
+	r := &Result{
+		BeadID:                "bead-1",
+		NextModeIndeterminate: true,
+		IndeterminateReason:   hostile,
+	}
+	out := FormatResult(r)
+	if strings.Contains(out, "\x1b[31m") || strings.ContainsAny(out[strings.Index(out, "cannot determine mode"):], "\x1b") {
+		t.Errorf("hostile control bytes leaked into FormatResult output unescaped:\n%q", out)
+	}
+	if !strings.Contains(out, `"bd list --parent:`) {
+		t.Errorf("expected the hostile reason to be strconv.Quote'd (termsafe.Escape's control-byte path), got:\n%q", out)
+	}
+}
+
 // TestFormatResult_PlanRewording pins R2.3's ModePlan rewording (round-4/
 // round-5 tally): the message must fit BOTH surviving triggers (the
 // empty-lifecycle-subset fallback and the all-open branch) and must
