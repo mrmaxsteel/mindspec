@@ -1,0 +1,27 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.92,
+  "rationale": "Author-of-record round 3 (confirm) on fix commit 3f35e4e3 (bead worktree, byte-identical before/after; go build clean; internal/hook + cmd/mindspec -short green; both new hook tests PASS individually; two of the previously-red real-bd no-short E2E tests re-run targeted WITHOUT -short and PASS — TestBeadReadyCheck_TemporalFlow_RealPlanApproveAndComplete 212.9s, TestNextReadyGate_PositiveBead_ClaimsWithNoPromptNoRefusal 84.3s — empirically confirming the pre-commit-hook fix on the exact bootstrap path that was red). All three of my confirm duties check out. (1) HONEST RETRACTION: the commit message explicitly and precisely falsifies round-1's 'Phase fallback VALUES unchanged for existing callers' disclosure for the WorktreeMain no-.beads arm — the value changed from \"\" to \"idle\", and internal/hook.ReadState is exactly the consumer whose nil-vs-non-nil contract pivoted on it. The retraction names the mechanism correctly (the old nil-sentinel fired on empty Mode as an ACCIDENTAL side effect of the pre-bead-5 discovery-error collapse; the honest-idle fix was intentional and stays). Candor note from my own lens: my round-1 review verified that disclosure arm-by-arm, caught the WorktreeSpec violation, and marked WorktreeMain 'unchanged' — I missed the no-.beads sub-arm's \"\"->idle change too; round-2's bisected evidence corrects both the disclosure and my verification of it. (2) SCOPE: internal/hook/hook.go is outside the bead's declared list but is the round-2 tally's named target, and it is the right DESIGN-level fix: reverting derive.go's honest idle would resurrect the exact state-dishonesty this spec exists to close, while the consumer-side phase.BeadsDirMissing(root) check — placed BEFORE phase.ResolveContext, on-disk, never error-text-matching, the same predicate convention the bead established — restores the historical 'not initialized, allow' contract without touching the designed 'block commits on protected branches in ANY mode including idle' behavior for a genuinely bd-initialized workspace (runPreCommit's st==nil allow contract confirmed at dispatch.go:85). It even spares uninitialized workspaces the bd subprocess the old accidental path still paid. This is the same consumer-repair discipline as round-1's G1, correctly applied in the opposite direction because here the new derivation value is the honest one. (3) TESTS: readstate_test.go pins BOTH contract halves against the REAL ReadState (no .beads -> nil; .beads present + healthy stubs + zero active specs -> non-nil ModeIdle), and the 'no test in this package exercised the real ReadState before' claim is corroborated — dispatch_test.go's runPreCommit tests all inject a synthetic stateFn. Both tests PASS. G2 (the other slot's round-2 ask) also verified while confirming: the vacuity diagnosis was correct (resultBeforeGuidance skips absent markers), and the de-vacuation is REAL — '# Bead Context:' is rendered unconditionally by contextpack/beadctx.go:70 on next's actual success-path guidance, so the ordering loop now always fires, with the instruct-tail markers retained for the fallback leg. No new issues; deviations claim ('scoped exactly to the tally-named files plus the new test file') matches the 3-file diff. Verdict: APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-R3-C1",
+      "severity": "NOTE",
+      "title": "Round-2 G1 fix confirmed: honest retraction, correct design direction, both contract halves pinned",
+      "detail": "The commit message retracts round-1's 'values unchanged' disclosure for exactly the WorktreeMain no-.beads arm (\"\" -> \"idle\") and identifies internal/hook.ReadState as the pivoting consumer — mechanically accurate. The fix keeps the honest-idle derivation and repairs the consumer with the bead's own on-disk BeadsDirMissing predicate, placed before any bd query; the designed block-idle-commits-on-initialized-protected-branch behavior is preserved and pinned (readstate_test.go half 2). Empirical confirmation: two of the previously-red real-bd E2E tests re-run without -short PASS from the bead worktree."
+    },
+    {
+      "id": "R1-R3-C2",
+      "severity": "NOTE",
+      "title": "Reviewer self-correction on the round-1 disclosure verification",
+      "detail": "My round-1 arm-by-arm check of the 'Phase fallback VALUES unchanged' claim caught the WorktreeSpec violation but marked WorktreeMain unchanged, missing that the new beadsDirMissing arm changed the no-.beads error case's value from \"\" to \"idle\". The round-2 hard block's bisected evidence corrected this; recorded here so the audit trail shows the disclosure AND its round-1 verification were both incomplete on that arm."
+    },
+    {
+      "id": "R1-R3-C3",
+      "severity": "NOTE",
+      "title": "G2 marker de-vacuation verified real",
+      "detail": "resultBeforeGuidance's loop is a no-op for markers absent from the output, so round-2's vacuity finding was correct. The added '# Bead Context:' heading is unconditional in contextpack.RenderBeadContext (beadctx.go:70), so TestVerbOutput_Next's ordering assertion now always exercises at least one real guidance marker on next's actual success path; the instruct-tail markers remain for the emitInstruct fallback leg."
+    }
+  ]
+}

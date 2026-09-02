@@ -1,0 +1,26 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The round-2 fix restores nil for the no-.beads bootstrap case and preserves non-nil idle for a healthy initialized repository, but it does not satisfy the stated two-halves contract. BeadsDirMissing(root) is exactly os.Stat(root/.beads) followed by os.IsNotExist(err): when .beads exists and bd/Dolt discovery fails, the predicate is false and ReadState continues. ResolveContext then returns a non-nil Context with DerivationFailed=true and an empty Phase on WorktreeMain; ReadState ignores DerivationFailed, copies the empty Phase, and its final empty-mode/no-session check returns nil. runPreCommit interprets that nil as 'mindspec not initialized, allow', so a protected-branch commit can slip through during an initialized repository's bd outage. A clean /tmp probe clone at reviewed commit 3f35e4e3 reproduced this: both new ReadState tests passed, while an added .beads-present/discovery-error test failed because ReadState returned nil. This is a spec-branch-corrupting branch-protection bypass. The disclosure retraction itself is honest: the commit message and round-3 brief explicitly retract the earlier 'fallback values unchanged' claim for WorktreeMain's no-.beads arm and accurately explain the historical empty-to-idle change.",
+  "concrete_changes_required": [
+    "Make ReadState return nil only at the explicit genuinely-uninitialized BeadsDirMissing(root) check (or an equivalently narrow pre-initialization condition); after .beads is present, a phase-derivation failure must still produce a non-nil HookState so protected branches remain blocked.",
+    "Add a direct regression test for .beads present plus failing phase/Beads discovery and no session, asserting ReadState is non-nil; preferably also drive runPreCommit/Run on a protected branch and assert Block."
+  ],
+  "findings": [
+    {
+      "id": "R5-G1",
+      "severity": "hard_block",
+      "title": "Initialized-but-bd-down state still collapses to nil and bypasses protected-branch blocking",
+      "evidence": "internal/hook/hook.go first returns nil only when phase.BeadsDirMissing(root) is true, but later returns nil whenever hs.Mode and hs.SessionStartedAt are both empty. internal/phase/derive.go's WorktreeMain error arm sets DerivationFailed/DerivationError while leaving Phase empty when .beads exists. ReadState does not inspect DerivationFailed, so the later nil fallback fires. internal/hook/dispatch.go treats st == nil as uninitialized and returns Pass.",
+      "probe": "In a clean /tmp clone of 3f35e4e3, a temporary test created .mindspec and .beads, made phase.SetListJSONForTest and SetRunBDForTest return a bd-unavailable error, and asserted ReadState() != nil. It failed with 'initialized workspace with bd discovery failure returned nil; protected-branch hook would allow'. The two committed ReadState tests passed in the same run."
+    },
+    {
+      "id": "R5-N1",
+      "severity": "note",
+      "title": "Prior fallback-value disclosure is candidly retracted",
+      "evidence": "The reviewed commit message explicitly says the earlier claim was falsified for WorktreeMain's no-.beads arm, identifies the value change from empty to idle, and names internal/hook as the affected consumer. The round-3 brief repeats that limitation without minimizing it."
+    }
+  ]
+}

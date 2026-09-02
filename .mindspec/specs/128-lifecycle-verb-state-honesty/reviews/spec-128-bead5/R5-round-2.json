@@ -1,0 +1,49 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "All three round-1 asks are behaviorally resolved at reviewed commit 3c472ac9. The new AC-4 success regression drives completeTail through the real emitInstruct path, requires the heading selected by Result.NextMode, rejects every other mode heading, and keeps the indeterminate branch mutually exclusive. AC-14 now executes all nine lifecycle-mutating verbs, including the real nextCmd.RunE and adoptSpecRunE paths; their PATH shim is purely canned and has no forwarding route to a real bd. impl adopt now emits its result before guidance, with verified and attested result shapes plus the non-fatal tail-warning path pinned. The raw-ID render allowlist relocation is honest: exactly the two SpecID/EpicID entries moved from adoptSpecRunE to the extracted adoptSpecTail, their counts remain two, their validation provenance remains valid, and the bidirectional lint ratchet passes. No spec-branch-corrupting defect was found. The focused regressions, all verb-output tests, build, and the split full short suite passed; the reviewed bead worktree remained clean at the reviewed commit.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R1-AC4-SUCCESS-AGREEMENT",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/cwdsafety_test.go:287",
+      "summary": "The success branch is now driven through real emitInstruct and mechanically checked against Result.NextMode.",
+      "evidence": "TestCompleteTail_SuccessBranch_RealEmitInstructAgreesWithResultNextMode passed. Its fixture derives implement, asserts the implementation heading is present, loops over all other mode headings to assert absence, rejects stderr, and the companion success/indeterminate tests keep the branches exclusive."
+    },
+    {
+      "id": "R5-R1-AC14-DRIVES",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/verb_output_test.go:758; cmd/mindspec/verb_output_test.go:857",
+      "summary": "next and impl adopt now have real handler executions, completing behavioral coverage of all nine AC-14 verbs.",
+      "evidence": "TestVerbOutput_Next drives nextCmd.RunE through claim, readiness, executor dispatch, state-result, and guidance ordering. TestVerbOutput_ImplAdopt drives adoptSpecRunE through approve.AdoptSpec's attested finalize path and the production adopt tail. installFakeBD is a closed shell case statement with canned responses and no exec/delegation to a real bd. The complete TestVerbOutput_ family passed, including total cobra-tree classification and all nine verb behaviors. The executions remain separate named tests rather than a single literal Go table, but the required real output paths and ordering assertions are present; this is test organization, not a behavioral or spec-branch integrity defect."
+    },
+    {
+      "id": "R5-R1-ADOPT-TAIL",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/impl.go:111; cmd/mindspec/cwdsafety_test.go:424",
+      "summary": "impl adopt now emits the result-first instruct tail and pins both success shapes.",
+      "evidence": "adoptSpecRunE calls adoptSpecTail only after AdoptSpec succeeds. The verified and attested tests each assert result-before-guidance; the attested test also pins the trigger, and a third test pins non-fatal warning behavior when guidance rendering fails. All three passed."
+    },
+    {
+      "id": "R5-R2-LINT-ALLOWLIST-MOVE",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "internal/lint/ratchet_inline_allowlist_test.go:83",
+      "summary": "The raw-ID allowlist move follows the extracted rendering site without weakening its gate.",
+      "evidence": "The diff removes only adoptSpecRunE's two Count:2 SpecID/EpicID render keys and adds equivalent adoptSpecTail keys. adoptSpecRunE still validates the input spec ID before AdoptSpec, adoptSpecTail is reached only after successful AdoptSpec, and EpicID retains AdoptSpec's internal validation provenance. TestRawIDRenderForbidden and its stale-entry/unaudited-site subtests passed."
+    },
+    {
+      "id": "R5-R2-QUALITY-GATES",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "reviewed commit 3c472ac9dd16df96666539535918d1609e404c29",
+      "summary": "Build and tests pass under their compatible fixture environments, and the bead worktree is byte-clean.",
+      "evidence": "make build passed (apart from a non-fatal external Go module stat-cache permission warning). MINDSPEC_ALLOW_MAIN=1 go test ./cmd/mindspec -short passed so temporary main-branch fixture commits can run; all other packages passed go test -short under the normal environment so hook-denial tests retain their intended precondition. Focused AC-4, adopt-tail, AC-14, and lint tests passed. git diff, git diff --cached, and git status were empty and HEAD remained the reviewed commit. No manual probe clone was created; test temp directories were cleanup-managed."
+    }
+  ]
+}

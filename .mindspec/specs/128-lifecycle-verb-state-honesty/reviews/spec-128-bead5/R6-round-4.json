@@ -1,0 +1,27 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "ModeIndeterminate is safe on protected branches but is mishandled by the spec-branch half of runPreCommit. ReadState maps every Context.DerivationFailed result to the sentinel, including a spec worktree whose healthy state is implement. runPreCommit blocks a spec/* branch only when Mode equals the literal implement; indeterminate matches neither the idle fast path nor the implement block and falls through to Pass. A clean-clone probe at reviewed commit 7cc6421a established ModeImplement and Block with healthy bd data, then changed only discovery to fail: ReadState returned non-nil ModeIndeterminate while preserving a claimed-bead session, and the real Run(\"pre-commit\", ..., ReadState, true) returned Pass with an empty message on the same spec branch. This permits direct commits to the spec integration branch precisely while the hook cannot prove that implementation mode has ended, so it meets the panel's spec-branch-corruption blocking threshold. Consumer enumeration found no second HookState.Mode reader: session-start uses internal/instruct independently, and the carried session fields are not consulted by runPreCommit. Protected-branch formatting is sane (it blocks and prints mode: indeterminate); the defect is the literal-mode spec-branch switch. internal/hook passed and make build succeeded. go test ./... -short reached broad package success but hit the 10-minute timeout in unrelated tests waiting on real bd subprocesses in internal/instruct and internal/validate. The bead worktree remained clean and the probe clone was deleted.",
+  "concrete_changes_required": [
+    "In runPreCommit, explicitly handle state.ModeIndeterminate on spec/* branches by failing closed. Use an honest indeterminate-state message rather than claiming the lifecycle is definitely implement; the existing escape hatch can cover a deliberate legitimate spec-branch commit while discovery is unavailable.",
+    "Add a regression test through the real ReadState -> Run path on a spec/* branch: first establish a healthy stored implement phase and Block, then make bd discovery fail and assert non-nil ModeIndeterminate still produces Block. Include the no-session case or a claimed-bead session case so session metadata cannot accidentally mask the sentinel behavior."
+  ],
+  "findings": [
+    {
+      "id": "R6-R4-G1",
+      "severity": "hard_block",
+      "title": "ModeIndeterminate bypasses the spec-branch implementation commit gate",
+      "evidence": "internal/hook/hook.go:248-255 replaces the spec-worktree fallback phase with state.ModeIndeterminate whenever Context.DerivationFailed is true. internal/hook/dispatch.go:124 blocks spec/* only for the exact literal implement, while line 139 returns Pass for every other non-idle mode. The clean probe used one spec/* repository and valid epic metadata with mindspec_phase=implement: healthy discovery yielded ModeImplement and Block; after flipping only both bd seams to unavailable, ReadState yielded ModeIndeterminate with BeadClaimedAt still populated and Run returned Pass/action=0 with no message.",
+      "impact": "During an implementation-phase bd/Dolt outage, a direct commit can land on the spec integration branch instead of a bead branch. The hook has lost the fact needed to prove the commit is allowed, but the unknown sentinel is treated as an allowed known mode.",
+      "classification": "BLOCKING"
+    },
+    {
+      "id": "R6-R4-CONSUMERS",
+      "severity": "info",
+      "title": "All other HookState.Mode interactions are bounded",
+      "evidence": "Repository-wide HookState/ReadState enumeration found runPreCommit as the only production consumer. On protected branches its any-mode block handles and formats the sentinel correctly. SessionSource, SessionStartedAt, and BeadClaimedAt are copied into HookState but never affect dispatch; session-start bypasses HookState and calls instruct directly. No HookState path validates the sentinel against state.ValidModes, persists it, or sends it to another formatter."
+    }
+  ]
+}

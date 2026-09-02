@@ -1,0 +1,38 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.98,
+  "rationale": "Both round-2 asks are addressed at reviewed commit 3f35e4e3. The ten previously failing no-short cmd/mindspec tests all pass: nine completed in the requested grouped run, and the tenth passed in an immediate isolated rerun after the grouped invocation reached Go's default 10-minute package timeout while rebuilding that final fixture (no assertion or hook failure occurred). The two direct internal/hook tests pass and prove both halves of the ReadState contract: a genuinely uninitialized no-.beads workspace returns nil, while a bd-initialized healthy-idle workspace returns a non-nil idle state. The G2 marker fix is non-vacuous: an instrumented disposable-clone run captured TestVerbOutput_Next stdout with 'Claiming' before all three real guidance markers '# Bead Context:', '## Work Chunk', and '**When done**'. The empirical instruct windows, complete AC-4b seam, complete indeterminate tail, total cobra classification, and all nine AC-14 verb rows pass. No spec-branch-corrupting defect was found; the bead worktree remained clean and byte-identical at 3f35e4e3, and the disposable probe clone/cache were deleted.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4R3-G1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "ReadState hard block cleared",
+      "detail": "Passed the exact ten tests named by the round-2 R4 verdict: four TestBeadClarify cases, TestBeadReadyCheck_TemporalFlow_RealPlanApproveAndComplete, and five TestNextReadyGate cases. The requested regex also selected five additional fast TestBeadClarify cases, which passed. The grouped run reached the default 10-minute Go package timeout only as the final named test began rebuilding its sandbox binary; that final test then passed alone in 49.38s. TestReadState_BeadsDirMissing_ReturnsNil and TestReadState_BeadsDirPresent_HealthyIdle_ReturnsNonNilIdle both pass, confirming the fix restores bootstrap-time allow without weakening initialized-idle protection."
+    },
+    {
+      "id": "R4R3-G2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "Next ordering assertion is grounded in real captured guidance",
+      "detail": "A temporary t.Log probe in a disposable clone captured the real TestVerbOutput_Next output. 'Claiming' appeared first, followed by '# Bead Context:', '## Work Chunk', and '**When done**'; the production test now supplies those exact markers to resultBeforeGuidance alongside the instruct-tail markers. TestVerbOutput_Next and the complete TestVerbOutput_ AC-14 set pass."
+    },
+    {
+      "id": "R4R3-WINDOWS",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "R4 empirical windows and AC-4b seam are green",
+      "detail": "Main/draft guidance renders Spec Mode rather than idle; a real derivation-health failure renders indeterminate rather than idle; an uninitialized no-.beads workspace renders honest idle. The complete child-read failure seam returns NextModeIndeterminate with empty mode/bead values, carries the real reason, performs no step-6.5 mindspec_phase write, and the tail renders the same indeterminate recovery form without calling a fresh instruct derivation."
+    },
+    {
+      "id": "R4R3-INTEGRITY",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Reviewed worktree untouched and scratch removed",
+      "detail": "Final bead-worktree status was clean at 3f35e4e35c4db0a435655bd47e9b7ae24be8b200. The disposable /tmp probe clone, its dedicated Go cache, and captured logs were deleted and absence-checked."
+    }
+  ]
+}

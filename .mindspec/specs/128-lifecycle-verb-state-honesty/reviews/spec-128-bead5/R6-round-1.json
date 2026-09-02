@@ -1,0 +1,77 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "The implementation closes several named honesty paths and its tests are green, but adversarial CLI probes found two reachable paths that still render idle without an honest derivation, and AC-14 is not satisfied for two of its nine mandatory verbs. These are behavioral acceptance failures, not merely missing test polish.",
+  "concrete_changes_required": [
+    "Make the protected-checkout fast path prove beads health before rendering idle when .beads exists, including the zero-draft-candidate case; add a red-on-revert CLI or Run test where main is protected, .beads exists, there are no spec candidates, bd is unavailable, and output is indeterminate rather than idle.",
+    "Treat a beads-derived main-context Phase==idle as a draft-discovery arrival point, not only nil/empty Phase. Add coverage from an unprotected checkout for one draft (spec guidance), multiple drafts (ambiguity listing), and no drafts (idle).",
+    "Honor numeric --spec prefixes for pre-epic drafts, or refuse the unresolved explicit target; never fall through to idle. Pin numeric-prefix, full-ID, nonexistent, and ambiguous-prefix forms so an explicit target cannot be silently discarded.",
+    "Satisfy AC-14 for mindspec next and mindspec impl adopt by execution-driving their real RunE/tail wiring and asserting result-before-guidance. Add the minimal hermetic seams required in the owning packages rather than replacing the required assertions with a scope-limitation presence test."
+  ],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "severity": "major",
+      "title": "Protected zero-candidate derivation failure still renders idle",
+      "evidence": "internal/instruct/run.go returns handleIdleOrDraft immediately on a protected checkout. DiscoverDraftSpecsWithCache probes beads only while evaluating a candidate; with no spec directories or spec/* branches it returns an empty slice without a health probe, and handleNoState renders idle. Reproduced at 68ede240 in a committed main-branch fixture with .mindspec/ and .beads/ present, no draft candidates, and PATH=/usr/bin:/bin: `mindspec instruct` exited 0 with `# MindSpec — No Active Work` and `## Available Actions`, while the same fixture on an unprotected branch rendered `Cannot Determine Mode` for the missing bd executable.",
+      "impact": "R2.3's central rule is violated at the first run.go arrival point: a genuine inability to derive state is presented as observed idle."
+    },
+    {
+      "id": "R6-F2",
+      "severity": "major",
+      "title": "The second draft arrival point excludes Phase==idle and loses numeric --spec targets",
+      "evidence": "After ResolveTargetWithCache fails, run.go calls handleIdleOrDraft only when pctx is nil or pctx.Phase is empty. ResolveContextFromDirWithCache deliberately returns Phase=idle for a healthy main-context zero-epic result, so the code constructs an idle Focus directly and never scans drafts. In a fixture with healthy empty bd output and a branch-only draft spec/129-unrelated-draft, state show reported mode spec; `mindspec instruct` from feature/r6 reported No Active Work. `mindspec instruct --spec 129-unrelated-draft` correctly rendered Spec Mode, but `--spec 129` reported No Active Work because prefix resolution consults active epics only and the fallback discards the explicit target. The same condition makes multiple drafts render idle from an unprotected checkout instead of the existing ambiguity listing.",
+      "impact": "Window (a) is only fixed on the protected no-flag path. CWD and --spec variants still fabricate idle despite confirmed pre-epic work."
+    },
+    {
+      "id": "R6-F3",
+      "severity": "major",
+      "title": "Disclosure D does not satisfy AC-14",
+      "evidence": "TestVerbOutput_NextAndImplAdopt_ScopeLimitation only checks that nextCmd.RunE and implAdoptCmd.RunE are non-nil. It executes neither verb and asserts neither a result line nor result-before-guidance ordering. Classification rows being red-if-removed establish inventory, not the per-verb output behavior AC-14 explicitly requires for all nine verbs.",
+      "impact": "A source-order regression in either uncovered RunE remains green, so the required anti-regression contract is incomplete."
+    },
+    {
+      "id": "DISCLOSURE-A",
+      "severity": "assessment",
+      "title": "A — beadsDirMissing guard",
+      "assessment": "Acceptable in principle and needed to preserve honest idle for an uninitialized workspace; the no-.beads test is meaningful. It is not sufficient integration coverage, because F1 bypasses beads health entirely when .beads exists but draft candidate enumeration is empty."
+    },
+    {
+      "id": "DISCLOSURE-B",
+      "severity": "assessment",
+      "title": "B — newExecutorFn seam",
+      "assessment": "Acceptable scoped support for hermetic real-RunE testing. The seam is additive and defaults to the production executor. Its comments should stop claiming next and impl adopt are driven until F3 is actually resolved."
+    },
+    {
+      "id": "DISCLOSURE-C",
+      "severity": "assessment",
+      "title": "C — rewritten mode-resolution test",
+      "assessment": "Acceptable. The obsolete idle-on-failure assertion had to flip, and the renamed test preserves the old useful protection by asserting that the accidental loading-template-.md failure does not return while additionally pinning the real failure reason and indeterminate recovery line."
+    },
+    {
+      "id": "DISCLOSURE-D",
+      "severity": "assessment",
+      "title": "D — next and impl adopt scope limitation",
+      "assessment": "Not acceptable under AC-14's letter or purpose. Needing new seams does not waive the explicit nine-verb execution assertion; this is the substantive F3 blocker."
+    },
+    {
+      "id": "R6-F4",
+      "severity": "assessment",
+      "title": "completeTail indeterminate edges",
+      "assessment": "No additional blocker found. The result path propagates the post-close read error, keeps NextMode/NextBead empty, returns before step 6.5, and completeTail does not call instructFn on the indeterminate branch. The pre-existing removed-CWD note intentionally remains the last line when applicable."
+    },
+    {
+      "id": "R6-F5",
+      "severity": "assessment",
+      "title": "Bead-4 pin inventory",
+      "assessment": "The claim that no agreement-table cell changed is accurate: the commit changes only row-1 explanatory prose/comment and separately adds a real emitInstruct draft test. The historical row-1 proxy still does not execute cmd/mindspec emitInstruct, but the new AC-3 test covers the behavior that changed; no undisclosed cell-mode edit was found."
+    },
+    {
+      "id": "R6-F6",
+      "severity": "verification",
+      "title": "Build and tests",
+      "evidence": "At reviewed SHA 68ede240feeab4292e818ac752a477ebf5b523e3, `go build ./... && go test ./... -short` passed. Targeted cmd/mindspec AC-14/AC-3/complete-tail tests and internal/complete indeterminate tests also passed. The bead worktree was clean before and after review; the /tmp probe tree was deleted."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Ask 1 clears on independent re-derivation at reviewed commit 7cc6421a: in a fresh /tmp snapshot, a main-worktree fixture with .beads present, forced phase/beads discovery failure, and no session made ReadState return a non-nil HookState whose Mode was indeterminate; real Run(\"pre-commit\", &Input{}, ReadState, true) on protected main returned Block. Ask 2 does not clear: the claim that nil is now reachable only through FindLocalRoot failure or BeadsDirMissing is false. A healthy main-worktree resolution with more than one active spec intentionally leaves Context.Phase empty and DerivationFailed false; with no session, ReadState's final legacy check still returns nil. The real protected-branch hook interprets that nil as uninitialized and passes the commit. This is a reproducible protected-branch corruption bypass, so the hard block remains. The committed internal/hook suite and full go test ./... -short suite pass, demonstrating that this route is currently unpinned rather than contradicted by existing tests.",
+  "concrete_changes_required": [
+    "Make ReadState's post-root/post-.beads path non-nil for the multiple-active-spec ambiguity case. Prefer removing the final implicit empty-mode/no-session nil sentinel now that the two sanctioned pre-initialization exits are explicit, or explicitly map ambiguity to a non-empty honest mode before that check.",
+    "Add a regression test with .beads present, two healthy active specs, and no session that asserts ReadState is non-nil, then drive real Run(\"pre-commit\", &Input{}, ReadState, true) on a configured protected branch and assert Block.",
+    "Update the nil-path invariant comments to match the executable control flow and verify every reachable empty-Phase, non-derivation-failure context cannot reach runPreCommit's st == nil allow branch."
+  ],
+  "findings": [
+    {
+      "id": "G1",
+      "severity": "hard_block",
+      "title": "Multiple active specs remain a third reachable ReadState nil route and bypass protected-branch enforcement",
+      "evidence": "internal/phase/derive.go:682-703 handles zero and one active specs but deliberately leaves Phase empty for more than one. internal/hook/hook.go:247-255 then copies that empty Phase with derivationFailed=false, and lines 284-293 return nil when there is no session. internal/hook/dispatch.go:84-86 treats nil as uninitialized and returns Pass before the protected-branch block. A fresh round-4 probe at 7cc6421a constructed two valid open epics with stored spec/plan phases, .beads present, no session, and protected main; ReadState returned nil. The companion required outage probe passed with non-nil ModeIndeterminate and Block.",
+      "impact": "A repository with concurrent active specs and no session file can commit directly on protected main despite pre-commit enforcement. This is the same class of branch-protection fail-open defect as the prior-round hard block.",
+      "classification": "Ask 1 PASS; Ask 2 FAIL"
+    }
+  ]
+}

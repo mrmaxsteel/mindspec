@@ -1,0 +1,37 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Round 3 closes the prior hard block without introducing a spec-branch-corrupting residue. ReadState has only one production caller, the hook command's lazy pre-commit state function. Its new on-disk guard restores nil for a genuinely uninitialized workspace, while a .beads-present, healthy, zero-active-spec workspace remains non-nil idle and therefore retains protected-branch blocking. An actual-binary scratch probe also showed that a merely present but empty .beads directory does not enter the healthy-idle half: failed discovery leaves state indeterminate/nil and the hook allows, matching the pre-existing never-block behavior rather than fabricating idle. Other ResolveContext consumers touched by the earlier WorktreeMain empty-to-idle arm-value change were enumerated; guard ignores Phase, target resolution independently queries active specs, cleanup's active-spec refusal remains unchanged, and both instruct arrival paths explicitly distinguish DerivationFailed/empty Phase before consuming Phase. G2 is non-vacuous on both next guidance legs: the successful RenderBeadContext leg is recognized by '# Bead Context:', '## Work Chunk', and '**When done**', while the generic emitInstruct fallback is recognized by the existing headings, including '## Next Action', which is present in indeterminate.md as well as every other fallback template. No blocking defect was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-R3-READSTATE-CONSUMERS",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "ReadState and empty-Phase consumer residue is bounded",
+      "evidence": "Repository-wide grep found hook.ReadState called in production only from cmd/mindspec/hook.go as the lazy stateFn for hook.Run. The ResolveContext consumers are internal/hook, internal/guard, internal/resolve/target, internal/cleanup, internal/instruct, and cmd/mindspec/instruct_tail. None adds a newly unsafe mutation path: guard consumes SpecID/worktree only; target performs its own active-spec query; cleanup preserves its historical Phase fallback semantics; and both instruct surfaces test DerivationFailed/empty Phase before rendering."
+    },
+    {
+      "id": "R6-R3-TWO-HALVES",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Uninitialized and initialized-idle hook states remain distinct",
+      "evidence": "TestReadState_BeadsDirMissing_ReturnsNil and TestReadState_BeadsDirPresent_HealthyIdle_ReturnsNonNilIdle passed directly. A compiled-binary /tmp probe on protected main returned exit 0 with no .beads and also returned exit 0 with an empty .beads directory: the latter is not mislabeled healthy idle because real bd discovery fails, leaving ReadState nil. Thus mere path presence does not accidentally select the blocking healthy-idle half; a corrupt/unreadable store remains a discovery failure under the existing fail-open hook contract."
+    },
+    {
+      "id": "R6-R3-G2",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Next ordering markers cover real context and generic fallback guidance",
+      "evidence": "TestVerbOutput_Next now supplies the real RenderBeadContext/completion markers '# Bead Context:', '## Work Chunk', and '**When done**' in addition to mindspecGuidanceMarkers, and passed. The success leg always has '# Bead Context:' and completion adds '**When done**'; the generic emitInstruct fallback is covered by '## Next Action', including the indeterminate template. TestVerbOutput_TotalCobraTreeClassification also passed."
+    },
+    {
+      "id": "R6-R3-VERIFICATION",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Build, tests, commit identity, and scratch hygiene",
+      "evidence": "At 3f35e4e35c4db0a435655bd47e9b7ae24be8b200, go build of cmd/mindspec to /tmp passed; focused short tests for internal/hook, internal/phase, internal/instruct, and cmd/mindspec passed; the direct ReadState and AC-14 next/classification tests passed with -count=1; and go test ./... -short passed. The bead worktree remained clean, and all R6 /tmp probe/build artifacts were deleted."
+    }
+  ]
+}

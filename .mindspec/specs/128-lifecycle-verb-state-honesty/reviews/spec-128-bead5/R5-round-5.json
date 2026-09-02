@@ -1,0 +1,41 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "All three round-4 asks are addressed at reviewed commit 0f7f2216. I independently re-derived the hard-block fixture in a fresh /tmp clone: with .beads present, two healthy active specs, and no session.json, ReadState returned a non-nil HookState with Mode indeterminate, and real Run(\"pre-commit\", &Input{}, ReadState, true) on protected main returned Block. My final nil-route audit found exactly two reachable ReadState nil exits: workspace.FindLocalRoot failure and phase.BeadsDirMissing(root). The trailing empty-mode/no-session check is unreachable by construction because ResolveContext always returns a non-nil Context with nil error; after .beads is known present, every non-empty Phase is copied to hs.Mode and every empty Phase, including multi-active ambiguity and derivation failure, is mapped to ModeIndeterminate. The new direct and end-to-end regressions pin the required behavior, and the rewritten invariant comments match the executable paths. go build ./..., go test ./internal/hook -count=1, and go test ./... -short -count=1 passed in the reviewed bead worktree. The scratch probe clone was removed, and the bead worktree remained clean at 0f7f2216. No spec-branch-corrupting defect was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R4-ASK-1-TWO-ACTIVE-NIL-ROUTE",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/hook/hook.go:256-264",
+      "summary": "The two-active-specs ambiguity now returns a non-nil indeterminate hook state.",
+      "evidence": "The predicate is widened to ctx.DerivationFailed || ctx.Phase == \"\", matching the instruct-tail honesty surface. My independent no-session probe supplied two healthy active spec epics and observed ReadState=&{Mode:indeterminate ...}, never nil."
+    },
+    {
+      "id": "R5-R4-ASK-2-REAL-PROBE-REGRESSION",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/hook/readstate_test.go:192-268",
+      "summary": "Direct ReadState and real pre-commit decision regressions pin the ambiguity case.",
+      "evidence": "TestReadState_MultipleActiveSpecs_ReturnsNonNilIndeterminate asserts the returned sentinel with no session, and TestPreCommit_MultipleActiveSpecs_BlocksOnProtectedBranch drives real Run(\"pre-commit\", &Input{}, ReadState, true) on protected main. The focused hook suite passed, and my separate scratch-clone probe independently observed Action Block."
+    },
+    {
+      "id": "R5-R4-ASK-3-NIL-INVARIANT",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/hook/hook.go:203-306; internal/phase/derive.go:576-705",
+      "summary": "The nil-route invariant now matches the complete reachable control flow.",
+      "evidence": "ReadState has three syntactic nil returns. The first two are the sanctioned pre-initialization routes: no local root and missing .beads. The final check cannot fire: ResolveContext delegates to ResolveContextFromDirWithCache, which always returns its allocated non-nil Context and nil error; ReadState assigns any non-empty ctx.Phase to hs.Mode and maps any empty ctx.Phase to ModeIndeterminate while setting indeterminate=true. Thus neither conjunct combination required by the final nil check is reachable after initialization."
+    },
+    {
+      "id": "R5-R5-QUALITY-GATES",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "reviewed commit 0f7f2216ba36abe35604e35be63fc57448e75e47",
+      "summary": "Build, focused hook tests, and the full short suite pass without altering the reviewed worktree.",
+      "evidence": "go build ./... exited 0; go test ./internal/hook -count=1 passed; go test ./... -short -count=1 passed across all packages. git status, unstaged diff, and staged diff were empty afterward, and HEAD remained 0f7f2216."
+    }
+  ]
+}

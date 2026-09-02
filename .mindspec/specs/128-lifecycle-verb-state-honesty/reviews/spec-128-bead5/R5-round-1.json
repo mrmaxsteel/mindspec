@@ -1,0 +1,77 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The indeterminate template and additive derivation-failure signal are correctly shaped, AC-4's indeterminate branch is isolated, and the full short build/test gate passes. Two acceptance-contract gaps remain. First, AC-4's purported success-branch agreement test proves only that completeTail calls its callback and omits the indeterminate marker; it never proves the callback rendered the same mode as Result.NextMode. In a /tmp mutation probe, changing the callback output from generic guidance to an explicit Review Mode tail while Result.NextMode remained implement still passed TestCompleteTail_SuccessBranch_AgreesWithResultNextMode. This leaves the production independent re-derivation able to disagree with the result without a red test. Second, disclosure D does not satisfy AC-14's letter: next and impl adopt are classification entries, not table-driven executions of their real output behavior. Removing both entries does make the classification test red (7 entries versus 9), so that narrow disclosure is true, but TestVerbOutput_NextAndImplAdopt_ScopeLimitation asserts only that RunE is non-nil. More seriously, its source-ordering rationale is false for impl adopt: adoptSpecRunE prints its result at impl.go:111-115 and returns at :116 without calling emitInstruct at all, despite R2.1/R2.2 and the terminal agreement row requiring the mode-transitioning verb's idle guidance tail. These are acceptance failures, not hard-block evidence. `go build ./... && go test ./... -short` passed in the bead worktree; the reviewed worktree remained byte-identical and the /tmp probe clone was deleted.",
+  "concrete_changes_required": [
+    "Make complete's successful tail mechanically agree with Result.NextMode and add an AC-4 test that drives the real successful context/render path and asserts the mode-specific rendered template equals Result.NextMode. The test must fail when an implement result is paired with review/plan/idle/indeterminate guidance; the current generic callback assertion is insufficient.",
+    "Complete AC-14 for `mindspec next` and `mindspec impl adopt` with table-driven executions of their real RunE/output wiring, adding narrowly scoped seams if required. Assert the actual success result precedes every guidance surface, not merely that the commands are registered.",
+    "Add the required post-result idle instruct tail to successful `mindspec impl adopt` (with the same non-fatal tail-warning behavior used by lifecycle verbs), and pin both verified and attested success paths so removal or reordering is red."
+  ],
+  "findings": [
+    {
+      "id": "R5-AC4-SUCCESS-AGREEMENT-UNPINNED",
+      "classification": "NEW_ISSUE",
+      "severity": "major",
+      "location": "cmd/mindspec/cwdsafety_test.go:248-283; cmd/mindspec/complete.go:159-179",
+      "summary": "AC-4's successful branch does not assert that the tail mode agrees with Result.NextMode.",
+      "evidence": "The test fixes NextMode to implement but its callback prints only a generic `## MindSpec Lifecycle` marker. Assertions check callback invocation, absence of `cannot determine mode`, and ordering. A scratch mutation made that callback print an explicit `# MindSpec — Review Mode` while keeping NextMode=implement; the named agreement test still passed. Production completeTail delegates to an independent emitInstruct re-derivation, so this is a real unguarded disagreement window rather than only a test-name defect."
+    },
+    {
+      "id": "R5-D-AC14-SCOPE-LIMITATION",
+      "classification": "DISCLOSURE_D_NOT_ACCEPTABLE",
+      "severity": "major",
+      "location": "cmd/mindspec/verb_output_test.go:716-750; cmd/mindspec/impl.go:81-116; cmd/mindspec/next.go:293-393",
+      "summary": "The next/adopt classification rows are red-if-removed, but they are not AC-14 output rows, and impl adopt does not emit the claimed guidance tail.",
+      "evidence": "Deleting both mutatingVerbRows entries in a /tmp clone made TestVerbOutput_TotalCobraTreeClassification fail with 7 entries versus 9, confirming the narrow red-if-removed claim. However, TestVerbOutput_NextAndImplAdopt_ScopeLimitation checks only RunE != nil and cannot fail if result/guidance ordering regresses. Its comment says both handlers print the result then call emitInstruct; adoptSpecRunE instead prints its result and immediately returns. AC-14 explicitly requires all nine verbs to be covered by table-driven output assertions, while R2.1/R2.2 and the terminal agreement row require impl adopt's idle tail."
+    },
+    {
+      "id": "R5-TEMPLATE-CONTRACT",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "internal/instruct/templates/indeterminate.md:1-21; internal/instruct/instruct.go:93-99,213-238",
+      "summary": "The indeterminate template satisfies ADR-0035 and ADR-0042.",
+      "evidence": "The real reason is rendered at the template sink through the shared `termsafe` function, preventing line/control-byte forging while preserving ordinary printable error text. The final non-empty line is the copy-pastable safe action `recovery: mindspec doctor`, and tests assert that terminal position on the exercised paths."
+    },
+    {
+      "id": "R5-CONTEXT-ADDITIVE-FIELDS",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "internal/phase/derive.go:108-130,601-693; cmd/mindspec/instruct_tail.go:23-36; internal/instruct/run.go:119-133",
+      "summary": "DerivationFailed/DerivationError are additive and correctly consumed by the honesty-sensitive instruct paths without changing existing Phase fallback values.",
+      "evidence": "The bead/spec/main branches distinguish genuine lookup failures from successful absence and preserve the historical Phase fallback where one existed. emitInstruct and Run consult DerivationFailed before trusting Phase. Existing consumers were traced: resolve uses context identity, guard uses identity/worktree routing, cleanup retains conservative existing phase behavior, and hook retains the explicitly compatibility-preserved Phase value; no required signature or JSON consumer is broken by the additive omitempty fields."
+    },
+    {
+      "id": "R5-AC4-INDETERMINATE-BRANCH",
+      "classification": "ACCEPTABLE",
+      "severity": "info",
+      "location": "cmd/mindspec/cwdsafety_test.go:285-330; internal/complete/complete.go:1376-1405,1463-1473; cmd/mindspec/complete.go:159-176",
+      "summary": "The AC-4b indeterminate result/tail branch is mutually isolated and avoids a fabricated phase write.",
+      "evidence": "advanceState propagates the failed child read, Run sets the indeterminate sentinel and returns before step 6.5, FormatResult emits the reason without a mode, and completeTail renders that same reason directly without invoking the fresh derivation callback. The branch test asserts the callback is unreachable, idle markers are absent, and the final recovery line remains last."
+    },
+    {
+      "id": "R5-A-BEADS-DIR-GUARD",
+      "classification": "DISCLOSURE_A_ACCEPTABLE",
+      "severity": "info",
+      "location": "internal/phase/derive.go:644-660,679-713",
+      "summary": "The beadsDirMissing addition is a justified honesty guard.",
+      "evidence": "It distinguishes a workspace that has never initialized beads from an unhealthy initialized beads/Dolt lookup using filesystem state rather than brittle error text. That preserves honest spec/idle absence behavior and prevents the new failure signal from turning ordinary uninitialized workspaces into false indeterminate states."
+    },
+    {
+      "id": "R5-B-EXECUTOR-SEAM",
+      "classification": "DISCLOSURE_B_ACCEPTABLE",
+      "severity": "info",
+      "location": "cmd/mindspec/root.go:28-42",
+      "summary": "The newExecutorFn seam is a narrow, behavior-preserving test seam.",
+      "evidence": "Production newExecutor remains the stable call-site wrapper and defaults to executor.NewMindspecExecutor; tests can inject MockExecutor without altering command construction. The out-of-list edit is proportionate to hermetic AC-14 execution, though disclosure D shows more seams are still needed."
+    },
+    {
+      "id": "R5-C-RENAMED-MODE-ERROR-TEST",
+      "classification": "DISCLOSURE_C_ACCEPTABLE",
+      "severity": "info",
+      "location": "internal/instruct/run_mode_error_test.go:27-69",
+      "summary": "Flipping the old idle assertion is required by R2.3, and the old crash protection remains pinned.",
+      "evidence": "The renamed test now requires the real error reason, indeterminate marker, absence of idle guidance, and final recovery line. It separately retains the original no-accidental-`.md`-template-load assertion, so the old assertion's legitimate graceful-rendering protection survives while its dishonest idle expectation is removed."
+    }
+  ]
+}
