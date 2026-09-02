@@ -441,3 +441,41 @@ func TestDraftSpecStatusWithCache_BranchOnlyDraft_VisibleViaTreeProbe(t *testing
 		t.Errorf("drafts = %+v, want exactly [%s]", drafts, specID)
 	}
 }
+
+// TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt is
+// round-2 panel G1/ADV-1's regression pin: a same-named tag on a commit
+// that does NOT carry the draft (reachable in any clone via a normal
+// `git fetch`) must never hide a branch-only draft. git's ambiguous-
+// short-name resolution prefers refs/tags over refs/heads, so probing the
+// SHORT branch name would resolve against the TAG's (draftless) tree
+// instead of the branch BranchExistsIn already confirmed — silently
+// reverting the draft to idle. Red-on-revert against exactly that
+// regression.
+func TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt(t *testing.T) {
+	specID := "132-branchy"
+	root := newBranchOnlyDraftFixture(t, specID)
+	// The shadow: a tag with the SAME short name as the draft branch,
+	// pointing at `main` — a commit that never had the draft.
+	runGitCmd(t, root, "tag", "spec/"+specID, "main")
+	stubActiveEpics(t, nil, nil)
+
+	c := phase.NewCache()
+	isDraft, branch, err := draftSpecStatusWithCache(c, root, specID)
+	if err != nil {
+		t.Fatalf("draftSpecStatusWithCache() error: %v", err)
+	}
+	if !isDraft {
+		t.Fatalf("isDraft = false, want true — a same-named shadow tag must not hide the branch-committed draft")
+	}
+	if branch != "spec/"+specID {
+		t.Errorf("branch = %q, want %q", branch, "spec/"+specID)
+	}
+
+	mode, err := ResolveModeWithCache(c, root, specID)
+	if err != nil {
+		t.Fatalf("ResolveModeWithCache() error: %v", err)
+	}
+	if mode != state.ModeSpec {
+		t.Errorf("mode = %q, want %q — the shadow tag must not silently revert this to idle", mode, state.ModeSpec)
+	}
+}

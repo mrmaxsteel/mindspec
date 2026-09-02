@@ -257,10 +257,19 @@ func draftSpecStatusWithCache(c *phase.Cache, root, specID string) (isDraft bool
 		return false, "", fmt.Errorf("checking spec directory %s: %w", dir, statErr)
 	}
 
+	// Round-2 panel G1/ADV-1: probe the FULLY QUALIFIED ref
+	// ("refs/heads/<branch>"), never the short branch name — git's
+	// ambiguous-short-name resolution prefers refs/tags, so a same-named
+	// tag (reachable in any clone via a normal fetch) would silently
+	// shadow the branch BranchExistsIn just confirmed, and cat-file would
+	// resolve against the TAG's tree instead. "refs/heads/<branch>" is
+	// exactly the ref BranchExistsIn verified above, so this closes the
+	// gap between what was confirmed and what gets probed.
+	qualifiedRef := "refs/heads/" + branch
 	for _, rel := range specTreeCandidatePaths(specID) {
-		exists, treeErr := gitutil.FileExistsAtRef(root, branch, rel)
+		exists, treeErr := gitutil.FileExistsAtRef(root, qualifiedRef, rel)
 		if treeErr != nil {
-			return false, "", fmt.Errorf("checking %s at %s: %w", rel, branch, treeErr)
+			return false, "", fmt.Errorf("checking %s at %s: %w", rel, qualifiedRef, treeErr)
 		}
 		if exists {
 			return true, branch, nil
