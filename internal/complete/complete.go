@@ -1394,6 +1394,29 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // that hit the lock). Extracted to its own named function (rather than
 // an inline closure inside Run) so it is directly unit-testable without
 // exercising Run's full preflight/gate machinery.
+//
+// Recorded residual (spec 128 Bead 2 round-1 panel G6/R3-G3, NOT
+// gate-blocking, accepted): sanctioned_sync_test.go's exactly-one-caller
+// fence over phase.SanctionedDerivedSync is LEXICAL — it proves
+// release.go's releaseSyncPhase is the only DIRECT call site, not that
+// no OTHER writer can land a semantically-equivalent backward-converging
+// write. This function writes advanceState's freshly-derived nextMode
+// unconditionally under the lock — the same "re-derive fresh, write
+// unconditionally" shape SanctionedDerivedSync exists to be the SOLE
+// sanctioned surface for. In a marker-present RESIDUE state reachable
+// only after a previously-surfaced release-sync failure or a crash
+// between claim and next's own advance (stored=implement, all lifecycle
+// children open), completing an unrelated non-lifecycle child would
+// write `plan` over `implement` here — semantically the identical
+// backward derived-sync, just not routed through the fenced surface.
+// It is CORRECTIVE in effect (converges stored toward derived) and its
+// precondition is always a state some OTHER warning already surfaced,
+// so this is accepted as-is for this bead rather than gate-blocking.
+// Routed to beads 4/5 (the agreement-table/result-message work): either
+// fold completeSyncPhase's write through a stored-aware no-op-on-backward
+// guard (making the "exactly one sanctioned backward writer" sentence
+// semantically true, not just lexically fenced), or extend the
+// agreement-table wording to name this fence's honest scope.
 func completeSyncPhase(root, epicID, nextMode, beadID string) {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil

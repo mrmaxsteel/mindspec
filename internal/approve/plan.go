@@ -307,6 +307,30 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// metadata to already exist) and before any preflight refusal below.
 	// No-op when no epic exists yet (pre-approve-spec) or lookup fails —
 	// mirroring EnsureMigrated's own "nothing to migrate" tolerance.
+	//
+	// Round-1 panel G4 (documented fail-safe contract, the "document AND
+	// test" resolution rather than propagating): a genuine FindEpicBySpecID
+	// failure here is BEST-EFFORT-swallowed, not propagated, for two
+	// independent reasons that together prove a legacy epic can never be
+	// permanently skipped:
+	//  1. resolvePlanApprovePreflight (a few lines below) INDEPENDENTLY
+	//     re-resolves the SAME epic and refuses FAIL-CLOSED (P10) if THAT
+	//     lookup also fails — so a lookup failure that is NOT transient
+	//     (the epic genuinely cannot be found) still blocks the approve
+	//     before any mutation, never silently proceeding unreconciled.
+	//  2. If this lookup fails but a later one (here, in preflight, or in
+	//     ANY other lifecycle verb) succeeds, the reconciliation
+	//     opportunity is NOT lost — EnsurePhaseSemanticsV2 is idempotent
+	//     and re-runs at every OTHER verb's own ahead-of-preflight entry
+	//     (impl.go:277, complete.go's step-1.5 guard, next's claim path,
+	//     repair.go's entry, release.go); the very next lifecycle command
+	//     touching this epic reconciles it then. A failed attempt here
+	//     also writes NOTHING (TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite),
+	//     so there is nothing to "undo" or leave half-applied.
+	// TestApprovePlan_V2PreflightLookupFailureDoesNotCrashOrBypassPreflight
+	// (plan_test.go) proves leg 1: a transient failure at THIS call site
+	// never lets ApprovePlan silently succeed past a real preflight
+	// refusal.
 	if epicID, epicErr := phase.FindEpicBySpecID(specID); epicErr == nil && epicID != "" {
 		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
 			return nil, err
@@ -476,7 +500,20 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// best-effort (a warning, never fatal here) but a lock TIMEOUT is
 	// rendered with a copy-pastable re-run COMMAND via
 	// phase.DescribeLockFailure, not prose.
-	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
+	//
+	// Round-1 panel G1/R3-G1: `stored` is WithPhaseWriteLock's own FRESH
+	// read — a `mindspec next` claim can interleave between the
+	// preflight all-open safety check (a pre-lock read) and this write,
+	// advancing stored to `implement` first. Writing `plan` unconditionally
+	// would then land BACKWARD over that fresher claim. Refuse (no-op)
+	// whenever the fresh stored value is already AHEAD of `plan` in the
+	// lifecycle order — the interleaved claim's own value stands, and the
+	// direction-conditional AC-5(iv) warning (derive.go) will name the
+	// correct (forward) recovery if anything ever looks inconsistent.
+	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(stored string, present bool) (map[string]interface{}, error) {
+		if present && phase.IsBackwardMove(stored, state.ModePlan) {
+			return nil, nil
+		}
 		return map[string]interface{}{"mindspec_phase": state.ModePlan}, nil
 	}); err != nil {
 		result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec plan approve %s", idrender.Spec(specID))))

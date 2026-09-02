@@ -132,23 +132,57 @@ next to recover) rather than an "open + stale-worktree" collision.
 //
 // Both calls are best-effort writes: a failure never fails `release`
 // itself (the sync is a cache refresh, not the terminal mutation), but
-// round-1 panel G3 requires it be SURFACED, not silently discarded —
-// rendered via phase.DescribeLockFailure, which gives a lock TIMEOUT the
-// full ADR-0035 treatment (names .mindspec/phase.lock, ends with a
-// copy-pastable recovery COMMAND — round-2 panel G3: prose is not
-// enough) and any other failure (a genuine merge-write error) as-is.
-// beadID supplies that command ("mindspec release <bead-id>", the exact
-// re-invocation that hit the lock). Extracted to its own named,
-// root-parameterized function (rather than an inline closure capturing
-// newReleaseDeps' root) so it is directly unit-testable without
-// exercising newReleaseDeps' full bd/git wiring.
-func releaseSyncPhase(root, epicID, beadID string) {
+// round-1 panel G3 requires it be SURFACED, not silently discarded. The
+// two legs get DIFFERENT recovery treatment (round-1 panel G5/R3-G2 —
+// the pre-fix-round `mindspec release <bead-id>` recovery was a DEAD END
+// on BOTH legs: the bead is already open by the time a re-run happens,
+// so Step 6.5's own activeBead-cursor precondition is never met again):
+//   - EnsurePhaseSemanticsV2 failure: the self-heal is idempotent and its
+//     own effect (when it does anything at all) is a forward translation
+//     — `mindspec repair phase <spec-id>` genuinely converges (that verb
+//     runs the identical self-heal at its own entry), so it gets the
+//     SAME always-convergent treatment as next.go's advance-on-claim
+//     failure (describePhaseSyncFailure).
+//   - SanctionedDerivedSync failure: this IS the sanctioned BACKWARD
+//     write (AC-5(viii)'s own twin pins that the unforced OPERATOR guard
+//     REFUSES this exact backward state) — there is genuinely NO
+//     unforced copy-pastable fix. Recorded disposition: the recovery
+//     line names ONLY the safe inspection action (`bd show <epic-id>`,
+//     matching AC-5(iv)'s backward-branch convention and the house
+//     "never a --force on the greppable recovery line" rule this
+//     package's own dirty-tree refusal already follows), with the
+//     forcing escape named as a separately-labeled operator choice in
+//     the message body. A fuller fix (e.g. surfacing this state through
+//     the agreement-table/result-message work) is explicitly routed to
+//     beads 4/5, named here so it is not a silent dead end.
+//
+// Extracted to its own named, root-parameterized function (rather than
+// an inline closure capturing newReleaseDeps' root) so it is directly
+// unit-testable without exercising newReleaseDeps' full bd/git wiring.
+func releaseSyncPhase(root, epicID, specID string) {
+	recovery := nextPhaseAdvanceRecoveryCommand(specID)
 	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
-		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
+		fmt.Fprintln(os.Stderr, describePhaseSyncFailure(err, recovery))
 	}
 	if syncErr := phase.SanctionedDerivedSync(root, epicID); syncErr != nil {
-		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID))))
+		fmt.Fprintln(os.Stderr, describeReleaseSyncFailure(syncErr, epicID, specID))
 	}
+}
+
+// describeReleaseSyncFailure renders a SanctionedDerivedSync failure —
+// see releaseSyncPhase's doc comment for the disposition this
+// implements (round-1 panel G5/R3-G2). specID may be empty (the same
+// "<spec-id>" placeholder convention as elsewhere).
+func describeReleaseSyncFailure(err error, epicID, specID string) string {
+	specRef := "<spec-id>"
+	if specID != "" {
+		specRef = idrender.Spec(specID)
+	}
+	return fmt.Sprintf(
+		"could not sync phase metadata for epic %s: %v\n"+
+			"Operator choice — this is the sanctioned backward move (release), so no unforced automatic fix exists; force it only if intentional: mindspec repair phase %s --force-backward \"<reason>\".\n"+
+			"recovery: bd show %s",
+		idrender.Bead(epicID), err, specRef, idrender.Bead(epicID))
 }
 
 // newReleaseDeps assembles the production seams for `mindspec release`.
@@ -166,12 +200,16 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 	// The bead worktree is nested under its spec worktree. Resolving the spec
 	// worktree from the bead's epic mirrors how complete.go finds the bead
 	// worktree; the path is used only for the dirty-check (the executor's
-	// Remove resolves the worktree by name via bd).
+	// Remove resolves the worktree by name via bd). The same resolved specID
+	// is reused below for releaseSyncPhase's convergent recovery commands
+	// (spec 128 Bead 2 round-1 panel G5) — one lookup, two uses.
 	specWorktree := root
+	var resolvedSpecID string
 	if _, specID, ferr := phase.FindEpicForBead(beadID); ferr == nil && specID != "" {
 		// specID is D1-checked (phase.FindEpicForBead only returns a
 		// non-empty specID that already passed idvalidate.SpecID) — this
 		// waist call cannot fail.
+		resolvedSpecID = specID
 		if swt, swErr := workspace.SpecWorktreePath(root, cfg, specID); swErr == nil {
 			specWorktree = swt
 		}
@@ -194,7 +232,7 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		// G3: a lock/write failure is best-effort (the cursor-rewind
 		// cache sync never fails `release` itself) but is no longer
 		// silently discarded.
-		syncPhase: func(epicID string) { releaseSyncPhase(root, epicID, beadID) },
+		syncPhase: func(epicID string) { releaseSyncPhase(root, epicID, resolvedSpecID) },
 		stdout:    os.Stdout,
 		stderr:    os.Stderr,
 	}

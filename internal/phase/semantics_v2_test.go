@@ -158,12 +158,27 @@ func TestEnsurePhaseSemanticsV2_UpgradeThenFirstClaim(t *testing.T) {
 // epic whose only children are non-lifecycle (e.g. a `bug`) is NOT the
 // legacy signature (LegacyPhaseSignature only counts lifecycle
 // children) — the marker is written but the phase is left untouched.
+// TestEnsurePhaseSemanticsV2_NonLifecycleClaimNoAdvanceMarkerWritten is
+// the round-1 panel G2.2/R6-4 canonical reshape: a REAL claim of a
+// non-lifecycle bead (a `bug` bead, claimed via `next`, so it is
+// in_progress — not merely "open", which never exercises a claim at
+// all) alongside all-open lifecycle work. Plan step 2's "a non-lifecycle
+// child claim advances nothing" contract: stored stays `plan` (option
+// 1's post-plan-approve value), the marker is written, and — critically
+// — stored MUST equal the independently-derived phase (the lifecycle-
+// only derivation, spec 095, ignores the in_progress bug entirely, so it
+// also derives `plan`), proving this is not an accidental agreement.
 func TestEnsurePhaseSemanticsV2_NonLifecycleClaimNoAdvanceMarkerWritten(t *testing.T) {
 	root := t.TempDir()
+	children := []ChildInfo{
+		lifecycleChild("t1", "open"),
+		lifecycleChild("t2", "open"),
+		{ID: "bug-1", Status: "in_progress", IssueType: "bug"},
+	}
 	store := &v2FixtureStore{
 		epicID:   "epic-1",
-		metadata: map[string]interface{}{"mindspec_phase": state.ModeImplement},
-		children: []ChildInfo{{ID: "bug-1", Status: "open", IssueType: "bug"}},
+		metadata: map[string]interface{}{"mindspec_phase": state.ModePlan},
+		children: children,
 	}
 	store.stub(t)
 
@@ -178,13 +193,65 @@ func TestEnsurePhaseSemanticsV2_NonLifecycleClaimNoAdvanceMarkerWritten(t *testi
 		t.Fatalf("EnsurePhaseSemanticsV2: %v", err)
 	}
 	if rewrote {
-		t.Error("a non-lifecycle-only child set must never be treated as the legacy signature")
+		t.Error("a non-lifecycle claim (stored plan) must never be treated as the legacy signature")
 	}
 	if _, ok := gotUpdates["mindspec_phase"]; ok {
-		t.Errorf("phase must be left untouched, got updates %v", gotUpdates)
+		t.Errorf("phase must be left untouched (zero phase advance), got updates %v", gotUpdates)
 	}
 	if gotUpdates[PhaseSemanticsV2MarkerKey] != PhaseSemanticsV2Value {
 		t.Errorf("marker must still be written, got %v", gotUpdates)
+	}
+	if derived := DerivePhaseFromChildren(children); derived != state.ModePlan {
+		t.Fatalf("fixture sanity: DerivePhaseFromChildren = %q, want %q (the in_progress bug must not affect derivation)", derived, state.ModePlan)
+	}
+}
+
+// TestEnsurePhaseSemanticsV2_NonLifecycleClaimShape_ChildReadFailurePropagates
+// is round-1 panel G2.2's paired failure case: on the SAME canonical
+// non-lifecycle-claim shape, a children-read failure must still
+// propagate with ZERO merge calls — the marker-absent "not legacy, so
+// marker-only" early-return path must never silently swallow a read
+// failure as "nothing to reconcile, safe to proceed."
+func TestEnsurePhaseSemanticsV2_NonLifecycleClaimShape_ChildReadFailurePropagates(t *testing.T) {
+	root := t.TempDir()
+	wantErr := errors.New("bd list --parent: transient failure")
+	epicJSON := func() []byte {
+		b, _ := json.Marshal([]EpicInfo{{ID: "epic-1", Title: "fixture", Status: "open", IssueType: "epic",
+			Metadata: map[string]interface{}{"mindspec_phase": state.ModePlan}}})
+		return b
+	}
+	t.Cleanup(SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "show" && args[1] == "epic-1" {
+			return epicJSON(), nil
+		}
+		return []byte("[]"), nil
+	}))
+	t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return epicJSON(), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return nil, wantErr
+			}
+		}
+		return []byte("[]"), nil
+	}))
+	calls := 0
+	t.Cleanup(SetMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	}))
+
+	_, err := EnsurePhaseSemanticsV2(root, "epic-1")
+	if err == nil {
+		t.Fatal("expected an error when the children read fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error does not wrap the underlying children-read failure: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("merge calls = %d, want 0 on a children-read failure", calls)
 	}
 }
 
@@ -222,6 +289,57 @@ func TestEnsurePhaseSemanticsV2_ReleaseReturnsToPlanMarkerPresentNoReReconcile(t
 	}
 }
 
+// TestEnsurePhaseSemanticsV2_MarkerForwardCompat is round-1 panel G3: a
+// PRESENT marker of ANY value — a future generation's value, or an
+// out-of-band malformed non-string value — is already-discriminated and
+// must be left completely untouched: never overwritten with "v2", and
+// the legacy rewrite must never run over it (proven here by starting
+// each case on the exact legacy STORED/CHILDREN signature — stored
+// implement, all lifecycle children open — which would otherwise
+// definitely trigger the rewrite).
+func TestEnsurePhaseSemanticsV2_MarkerForwardCompat(t *testing.T) {
+	cases := []struct {
+		name        string
+		markerValue interface{}
+	}{
+		{"future-value-v3", "v3"},
+		{"malformed-non-string", true},
+		{"malformed-number", float64(2)},
+		{"empty-string-value", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := &v2FixtureStore{
+				epicID: "epic-1",
+				metadata: map[string]interface{}{
+					"mindspec_phase":          state.ModeImplement,
+					PhaseSemanticsV2MarkerKey: tc.markerValue,
+				},
+				children: []ChildInfo{lifecycleChild("b1", "open"), lifecycleChild("b2", "open")},
+			}
+			store.stub(t)
+
+			calls := 0
+			t.Cleanup(SetMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+				calls++
+				return nil
+			}))
+
+			rewrote, err := EnsurePhaseSemanticsV2(root, "epic-1")
+			if err != nil {
+				t.Fatalf("EnsurePhaseSemanticsV2: %v", err)
+			}
+			if rewrote {
+				t.Errorf("%s: a present marker of any value must never trigger the legacy rewrite, even over the exact legacy signature", tc.name)
+			}
+			if calls != 0 {
+				t.Errorf("%s: a present marker (any value) must be a ZERO-call no-op — it must never be overwritten with %q, got %d calls", tc.name, PhaseSemanticsV2Value, calls)
+			}
+		})
+	}
+}
+
 // TestEnsurePhaseSemanticsV2_AlreadyProgressedEpicsPhaseUntouchedMarkerWritten
 // is the already-progressed group: some-closed / in_progress / review /
 // done, marker absent — none of these match LegacyPhaseSignature (which
@@ -237,6 +355,11 @@ func TestEnsurePhaseSemanticsV2_AlreadyProgressedEpicsPhaseUntouchedMarkerWritte
 		{"in-progress", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "in_progress")}},
 		{"review", state.ModeReview, []ChildInfo{lifecycleChild("b1", "closed"), lifecycleChild("b2", "closed")}},
 		{"done", state.ModeDone, []ChildInfo{lifecycleChild("b1", "closed")}},
+		// Round-1 panel G2.1 (R5): blocked / custom-status lifecycle
+		// children must ALSO get marker-only treatment, never the legacy
+		// stored->plan rewrite — they are not the "all open" signature.
+		{"blocked", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "blocked")}},
+		{"custom-status", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "needs-review"), lifecycleChild("b2", "open")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -335,6 +458,14 @@ func TestLegacyPhaseSignature_TableDriven(t *testing.T) {
 		{"plan stored", state.ModePlan, []ChildInfo{lifecycleChild("b1", "open")}, false},
 		{"review stored", state.ModeReview, []ChildInfo{lifecycleChild("b1", "closed")}, false},
 		{"implement all-open but only non-lifecycle children", state.ModeImplement, []ChildInfo{{ID: "bug-1", Status: "open", IssueType: "bug"}}, false},
+		// Round-1 panel G2/G5 (R5-legacy-signature): a POSITIVE "every
+		// child is open" check — blocked/custom/unknown statuses are
+		// NEITHER closed nor in_progress, so a negative check would have
+		// wrongly matched them as legacy. They must NOT match.
+		{"implement with one blocked", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "blocked"), lifecycleChild("b2", "open")}, false},
+		{"implement all blocked", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "blocked")}, false},
+		{"implement with one custom status", state.ModeImplement, []ChildInfo{lifecycleChild("b1", "needs-review"), lifecycleChild("b2", "open")}, false},
+		{"implement with one empty status", state.ModeImplement, []ChildInfo{{ID: "b1", Status: "", IssueType: "task"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

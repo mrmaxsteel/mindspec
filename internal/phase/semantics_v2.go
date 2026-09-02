@@ -56,10 +56,17 @@ const PhaseSemanticsV2Value = "v2"
 // LegacyPhaseSignature reports whether stored/children match the
 // pre-v2 plan-approve signature: stored phase is `implement`, at least
 // one LIFECYCLE child exists (the ADR-0023 task-typed-or-untyped
-// discriminator classifyChild already encodes), and none of them are
-// closed or in_progress — i.e. plan-approve ran (writing the old
-// `implement` value) but no bead has ever been claimed. Under v2
-// semantics that exact state would have stored `plan` instead.
+// discriminator classifyChild already encodes), and EVERY lifecycle
+// child's normalized status is EXACTLY `open` — i.e. plan-approve ran
+// (writing the old `implement` value) but no bead has ever been claimed.
+// Under v2 semantics that exact state would have stored `plan` instead.
+//
+// Round-1 panel G2/G5 (hard-block-adjacent, R5): this is a POSITIVE
+// "all open" check, not a negative "none closed/in_progress" one — a
+// `blocked`, empty, or otherwise custom/unknown status is NEITHER closed
+// nor in_progress, so a negative check would have wrongly classified a
+// blocked-child epic (a genuinely different, non-legacy state) as
+// legacy. Every lifecycle child must affirmatively be `open`.
 //
 // Lock-free and read-only by design (plan round-2 G4): this predicate
 // never takes the R3.3 write lock — it exists so READ paths (derive.go's
@@ -70,20 +77,17 @@ func LegacyPhaseSignature(stored string, children []ChildInfo) bool {
 	if stored != state.ModeImplement {
 		return false
 	}
-	var lifecycleTotal, closed, inProgress int
+	var lifecycleTotal, open int
 	for _, c := range children {
 		if classifyChild(c.IssueType) != childLifecycle {
 			continue
 		}
 		lifecycleTotal++
-		switch strings.ToLower(strings.TrimSpace(c.Status)) {
-		case "closed":
-			closed++
-		case "in_progress":
-			inProgress++
+		if strings.ToLower(strings.TrimSpace(c.Status)) == "open" {
+			open++
 		}
 	}
-	return lifecycleTotal > 0 && closed == 0 && inProgress == 0
+	return lifecycleTotal > 0 && open == lifecycleTotal
 }
 
 // EnsurePhaseSemanticsV2 runs the one-shot, idempotent, lock-protected v2
@@ -111,7 +115,8 @@ func LegacyPhaseSignature(stored string, children []ChildInfo) bool {
 // test the distinction).
 //
 // Three outcomes, in order (plan step 7):
-//   - marker present → no-op (both marker and phase untouched).
+//   - marker PRESENT (any value at all, round-1 panel G3) → no-op (both
+//     marker and phase untouched).
 //   - marker absent AND LegacyPhaseSignature(stored, children) holds →
 //     rewrite stored to `plan` AND write the marker, in the SAME
 //     critical section (never two writes).
@@ -130,11 +135,17 @@ func EnsurePhaseSemanticsV2(root, epicID string) (bool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ensure-phase-semantics-v2: reading epic %s: %w", idrender.Bead(epicID), err)
 		}
+		// Round-1 panel G3: forward-compat marker discrimination. ANY
+		// present value — "v2", a future "v3"/"v4", or even a malformed
+		// non-string value from an out-of-band edit — means this epic
+		// has ALREADY been discriminated (natively created under some
+		// known-or-future semantics generation, or already reconciled)
+		// and must never be overwritten with "v2" or have the legacy
+		// rewrite run over it. Only a genuinely ABSENT key is eligible
+		// for this one-shot.
 		if epic != nil && epic.Metadata != nil {
-			if raw, ok := epic.Metadata[PhaseSemanticsV2MarkerKey]; ok {
-				if s, ok := raw.(string); ok && s == PhaseSemanticsV2Value {
-					return nil, nil // marker present -> no-op, phase untouched.
-				}
+			if _, ok := epic.Metadata[PhaseSemanticsV2MarkerKey]; ok {
+				return nil, nil // marker present (any value) -> no-op, phase untouched.
 			}
 		}
 
@@ -157,8 +168,10 @@ func EnsurePhaseSemanticsV2(root, epicID string) (bool, error) {
 }
 
 // hasV2MarkerWithCache reports whether epicID's metadata already carries
-// the v2 marker, via the SAME cache c (memoized by Cache.FindEpic) the
-// caller is already using — round-2 G4's lock-free read-side consumer
+// the phase-semantics discriminator marker (ANY value — round-1 panel
+// G3 forward-compat, matching EnsurePhaseSemanticsV2's own presence-only
+// check), via the SAME cache c (memoized by Cache.FindEpic) the caller
+// is already using — round-2 G4's lock-free read-side consumer
 // (derive.go's stored-vs-derived consistency branch): it never takes the
 // R3.3 write lock, and when the caller already resolved the epic on this
 // cache moments earlier (as derive.go's readStoredPhaseWithCache does),
@@ -168,10 +181,6 @@ func hasV2MarkerWithCache(c *Cache, epicID string) bool {
 	if err != nil || epic == nil || epic.Metadata == nil {
 		return false
 	}
-	raw, ok := epic.Metadata[PhaseSemanticsV2MarkerKey]
-	if !ok {
-		return false
-	}
-	s, ok := raw.(string)
-	return ok && s == PhaseSemanticsV2Value
+	_, ok := epic.Metadata[PhaseSemanticsV2MarkerKey]
+	return ok
 }
