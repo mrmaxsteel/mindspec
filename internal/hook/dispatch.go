@@ -7,6 +7,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -106,6 +107,31 @@ func runPreCommit(stateFn func() *HookState) Result {
 	// Non-protected branch: idle mode has no further restrictions
 	if st.Mode == "" || st.Mode == "idle" {
 		return Result{Action: Pass}
+	}
+
+	// Fail closed on a spec/ branch when the mode is genuinely
+	// indeterminate (spec 128 bead 5 round-4 panel G2/R6): ReadState
+	// maps a bd/Dolt discovery failure OR an unresolved multi-active-
+	// spec ambiguity to state.ModeIndeterminate, and that sentinel
+	// matched NEITHER the idle fast-path above (it is not "" or "idle")
+	// NOR the implement-mode check below (it is not literally
+	// "implement") — so it silently fell through to the final Pass,
+	// permitting a direct spec-branch commit precisely when the hook
+	// cannot prove implementation mode has ended. Blocked explicitly,
+	// with an HONEST message naming the real cause — never claiming the
+	// mode is implement when it genuinely could not be determined. The
+	// escape hatch still covers a deliberate legitimate commit while
+	// discovery is unavailable.
+	if st.Mode == state.ModeIndeterminate && strings.HasPrefix(branch, "spec/") {
+		msg := fmt.Sprintf("mindspec: cannot determine lifecycle mode for spec branch '%s' — refusing a direct commit while the mode is indeterminate.", termsafe.Escape(branch))
+		msg += "\n  This is a bd/Dolt discovery failure or an unresolved ambiguity, never assumed to be a safe post-implement state."
+		msg += "\n  Run: mindspec doctor   (diagnose the underlying failure)"
+		if st.ActiveWorktree != "" {
+			msg += fmt.Sprintf("\n  Or switch to your bead worktree: %s", containment.EmitCd(st.ActiveWorktree))
+		}
+		msg += "\n  Legitimate direct spec-branch commit while discovery is unavailable may use the escape hatch:"
+		msg += "\n    MINDSPEC_ALLOW_MAIN=1 git commit ..."
+		return Result{Action: Block, Message: msg}
 	}
 
 	// Block: on a spec/ branch during implement mode — code belongs on bead branches.

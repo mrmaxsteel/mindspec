@@ -231,24 +231,33 @@ func ReadState() *HookState {
 
 	hs := &HookState{}
 
-	// Spec 128 bead 5 round-3 panel G1 (hard block — the mirror case of
-	// round-2's fix): once .beads/ exists, a genuine bd/Dolt derivation
-	// failure must NEVER read as "no state" below — that would let a
-	// protected-branch commit slip through during an outage, exactly
-	// the branch-protection bypass BeadsDirMissing's own narrow,
-	// explicit check above exists to avoid confusing with this
-	// DIFFERENT (post-initialization) case. Only WorktreeMain's error
-	// arm reaches here with an otherwise-empty ctx.Phase —
-	// WorktreeSpec/WorktreeBead's DerivationFailed arms both keep their
-	// non-empty ModeSpec/ModeImplement backfill from round-1's fix — so
-	// this sets the honest indeterminate sentinel rather than leaving
-	// Mode empty and falling through to the uninitialized-workspace nil
-	// path below.
-	derivationFailed := false
+	// Spec 128 bead 5 round-3/round-4 panel G1 (hard block — the mirror
+	// case of round-2's fix, closed in two passes): once .beads/ exists,
+	// EVERY way ctx.Phase can come back empty must read as the honest
+	// indeterminate sentinel here, never as "no state" — that would let
+	// a protected-branch commit slip through, exactly the branch-
+	// protection bypass BeadsDirMissing's own narrow, explicit check
+	// above exists to avoid confusing with this DIFFERENT
+	// (post-initialization) case. Two distinct Context shapes reach
+	// here with an empty Phase and must BOTH latch indeterminate:
+	//   - ctx.DerivationFailed (a genuine bd/Dolt derivation failure —
+	//     round-3's original fix);
+	//   - ctx.Phase == "" with DerivationFailed FALSE (the WorktreeMain
+	//     multi-active-spec AMBIGUITY arm — derive.go's uncovered
+	//     `err == nil && len(specs) > 1` case leaves Phase "" on
+	//     purpose, "caller handles ambiguity" — round-4's fix, mirroring
+	//     cmd/mindspec/instruct_tail.go:30's identical
+	//     `ctx.DerivationFailed || ctx.Phase == ""` predicate for the
+	//     same Context shape).
+	// WorktreeSpec/WorktreeBead never produce an empty Phase (round-1's
+	// unconditional ModeSpec/ModeImplement backfill), so every OTHER
+	// empty-Phase Context reaching this line is one of these two
+	// post-initialization cases — never a third, undiscovered one.
+	indeterminate := false
 	ctx, ctxErr := phase.ResolveContext(root)
 	if ctxErr == nil && ctx != nil {
-		if ctx.DerivationFailed {
-			derivationFailed = true
+		if ctx.DerivationFailed || ctx.Phase == "" {
+			indeterminate = true
 			hs.Mode = state.ModeIndeterminate
 		} else {
 			hs.Mode = ctx.Phase
@@ -281,15 +290,16 @@ func ReadState() *HookState {
 		hs.BeadClaimedAt = sess.BeadClaimedAt
 	}
 
-	// The narrowed nil contract (round-3 panel G1): "no state" is
-	// reachable ONLY via the two genuinely-pre-initialization checks
-	// above (no local root found; .beads/ absent) — never here. A
-	// derivation failure already guarantees hs.Mode is non-empty
-	// (ModeIndeterminate, set above), so !derivationFailed is
+	// The narrowed nil contract (round-3/round-4 panel G1): "no state"
+	// is reachable ONLY via the two genuinely-pre-initialization checks
+	// above (no local root found; .beads/ absent) — never here. Both
+	// post-initialization empty-Phase shapes (derivation failure,
+	// multi-active-spec ambiguity) already guarantee hs.Mode is
+	// non-empty (ModeIndeterminate, set above), so !indeterminate is
 	// belt-and-suspenders self-documentation, not load-bearing: it
 	// makes the invariant explicit rather than relying on that
 	// non-emptiness holding by construction.
-	if hs.Mode == "" && hs.SessionStartedAt == "" && !derivationFailed {
+	if hs.Mode == "" && hs.SessionStartedAt == "" && !indeterminate {
 		return nil
 	}
 
