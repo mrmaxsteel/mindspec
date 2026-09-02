@@ -19,13 +19,21 @@ instead). The enforcement is structural, not name-only: this table's
 verbatim and compared, cell by cell, against the Go source of truth
 (`agreementTableRows` in that file) by
 `TestAgreementTable_DocRowsCrossPinFixtures`; each row's fixture then
-reads its expected values from that SAME record rather than a separately
-hardcoded literal, and is checked against the real production functions
-(`phase.DerivePhaseWithCache`, `resolve.ResolveModeWithCache`,
-`instruct.Render`). Editing any one of {this table, that record, the
-shipped derivation} without the other two — including editing only a
-row's mode cells while leaving its name alone — fails the suite. A row
-name added to the Go list with no matching fixture function fails too
+reads its expected values from that SAME record and checks them against
+real production functions (`phase.DerivePhaseWithCache`,
+`resolve.ResolveModeWithCache`, `instruct.Render`, and — for the eight
+rows whose canonical epic fixture carries a stored phase —
+`phase.DerivePhaseFromChildren` run directly on the fixture's children,
+independent of whatever that epic's stored phase says). Editing this
+table's cells alone, or editing this table AND `agreementTableRows`
+together to the same wrong value, both fail: each of those eight rows'
+canonical fixture inputs are hardcoded to the real verb's own write
+semantics in the Go source (never copied from the row record), so
+changing the record does not change what the fixture actually feeds
+production code, and the `DerivePhaseFromChildren` leg checks the record
+against a pure function of the (also independently-fixed) children with
+no stored-phase trust involved at all. A row name added to the Go list
+with no matching fixture function fails too
 (`TestAgreementTable_Rows`'s own lookup).
 
 ## Reading the table
@@ -49,7 +57,7 @@ name added to the Go list with no matching fixture function fails too
 
 | Row | State show | Instruct tail | Derivation | Notes |
 |:----|:-----------|:--------------|:-----------|:------|
-| `spec create → spec` | `spec` | `spec` | *(no epic — see below)* | Pre-epic draft: spec directory + `spec/<id>` branch exist, no epic. There is no epic ID to feed the status-aware derivation, so this row is a carved TWO-surface row (state show + tail) — never a re-use of the tail's own context result counted a second time as "derivation" (R1.3 licenses per-row carve-outs where surfaces are designed to differ). **Disclosed scope:** the fixture asserts the tail via the `WorktreeSpec` context-path proxy only; the verb's OWN `emitInstruct` invocation from the main checkout is a different, not-yet-draft-aware path that still renders `idle` until bead 5 delivers AC-3. |
+| `spec create → spec` | `spec` | `spec` | `spec` | Pre-epic draft: spec directory + `spec/<id>` branch exist, no epic. Three DISTINCT mechanisms, no double-counting: state show via `resolve.ResolveModeWithCache`'s per-spec draft check; the tail via `ResolveContextFromDirWithCache`'s path-convention `WorktreeSpec` branch; derivation via `resolve.DiscoverDraftSpecsWithCache`, bead 3's own enumerate-all discovery (bd-health-probed, git-branch-verified, on-disk-tree-verified) — the status-aware analog for a no-epic state that `DerivePhaseWithStatus` itself cannot express. **Disclosed scope:** the tail assertion is the `WorktreeSpec` context-path proxy only; the verb's OWN `emitInstruct` invocation from the main checkout is a different, not-yet-draft-aware path that still renders `idle` until bead 5 delivers AC-3. |
 | `spec approve → plan` | `plan` | `plan` | `plan` | Epic just created, no children yet ("Epic exists, no children → plan"). |
 | `plan approve → plan` | `plan` | `plan` | `plan` | **Settled fact 1.** OQ-3 option 1: `plan approve` now writes `mindspec_phase: "plan"` (not `implement`); all lifecycle children exist and are open, none claimed. TRUE three-surface agreement — the pre-128 stored-`implement`/derived-`plan` window is dissolved, not merely suppressed. |
 | `next (claim) → implement` | `implement` | `implement` | `implement` | The first lifecycle claim advances stored phase to `implement` (a new writer, `cmd/mindspec/next.go`'s `advancePhaseOnClaim`); one child `in_progress`. |
@@ -67,12 +75,14 @@ name added to the Go list with no matching fixture function fails too
 
 ## Carve-outs, spelled out
 
-- **Spec-create row**: no epic exists yet, so there is nothing for the
-  status-aware derivation to run against — this is a genuine two-surface
-  row (state show + tail), not a three-surface row with one cell
-  duplicated. Its Derivation cell is the literal sentinel
-  `*(no epic — see below)*`, matching this section, never a restated copy
-  of the tail's own value.
+Spec-create is NOT a carve-out (round-2 tally ruling): R1.3/AC-2 name the
+status-aware derivation surface for every row, and this table does not
+narrow that on its own authority. Its Derivation cell is asserted against
+`resolve.DiscoverDraftSpecsWithCache` — bead 3's own status-aware,
+enumerate-all draft-discovery mechanism — invoked independently of the
+tail's context-path call (separate function, separate Cache, no shared
+result). The two carve-outs that ARE spec-authorized:
+
 - **Release rows and repair phase rows**: both verbs mutate lifecycle
   state but emit no instruct tail (R2.1) — there is no third surface to
   check, ever, for either verb. All four of these rows assert two-surface
