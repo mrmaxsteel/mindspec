@@ -1,0 +1,33 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.85,
+  "rationale": "Round 2 at f490fd26, re-derived (not inherited). CLASSIFICATION OF MY TWO ROUND-1 ASKS: (1) Legacy-shapes recovery-chain reword — ADDRESSED. The guide's bullet now states the real chain explicitly: the stored-vs-derived warning's OWN recovery line is the inspection action `bd show <epic-id>` and 'deliberately never names the backward write itself (AC-5(iv))'; the `--force-backward` escape is attributed to repair's unforced-refusal output, and the chain is spelled 'warning -> inspect (bd show) -> repair's unforced refusal -> --force-backward'. This matches the delivered surfaces I verified in round 1 (derive.go:214-217's bd-show backward warning; repair.go:321's refusal naming --force-backward) — the misattribution is gone, and the new closing sentence even hands the story off to the new forced-backward table row. (2) Row-1 WorktreeSpec-proxy disclosure — ADDRESSED, and beyond the ask: the disclosure appears BOTH in the guide's row-1 Notes ('the fixture asserts the tail via the WorktreeSpec context-path proxy only; the verb's OWN emitInstruct invocation from the main checkout is a different, not-yet-draft-aware path that still renders idle until bead 5 delivers AC-3') AND in the test file's doc comment (lines ~64-72, naming the real-cwd WorktreeMain branch and plan step 2), scoping the 'asserted' claim honestly to the exercised surface. Additionally the row was restructured into a genuine two-surface row with the `*(no epic — see below)*` Derivation sentinel, removing the round-1 double-counting. SEQUENCING RE-CHECK against the fixed/new assertions: still clean — post-spec semantics, no pre-bead-5 pins. Every tail assertion targets the phase-level template-selection inputs (ResolveContextFromDirWithCache -> BuildContextWithCache -> Render) with healthy bd seams, so bead 5's indeterminate trigger (context error / empty phase) remains unreachable in every fixture; the two NEW repair-phase rows are tail-less and drive phase.EnsurePhaseSemanticsV2 / the forced-write post-state — repair.go is outside bead 5's scope entirely; the rewritten terminal row asserts state.go's genuinely-idle branch preconditions (non-ambiguous resolution error, bd health probe, zero drafts) plus success-discovery WorktreeMain idle, both arms bead 5 keeps; and no CELL in the now-structurally-pinned agreementTableRows is one bead 5 must change (bead 5's ModePlan result-message reword lives in FormatResult text and the un-pinned Notes prose, and the two complete->plan rows remain the stable wording target — the correct dependency direction). The structural cross-pin (all four cells parsed and compared both ways, rowFixtures lookup failing loudly on an unregistered row) strengthens the anti-drift property without introducing any bead-5-fragile assertion. Taxonomy correction verified against delivered code: the guide now admits phase.IsBackwardMove(\"review\", \"implement\") is true for advancePhaseOnClaim's disclosed case, uses the binding carry-forward label 'evidence-fresh forward-by-intent', scopes 'exactly one sanctioned backward writer' to SanctionedDerivedSync's fenced general-purpose surface, and adds the completeSyncPhase disclosed-residual bullet — which I cross-checked against complete.go:1398-1420's own doc comment: that comment routes the residue to 'beads 4/5: either fold ... or extend the agreement-table wording to name this fence's honest scope', and the guide's bullet IS that extension, so the routed obligation is genuinely discharged, not re-deferred. Suite green at f490fd26 (TestAgreementTable* pass, ~60s with the real-git fixtures); worktree byte-identical. One info-level carry-forward recorded below; no changes required.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-R2-1",
+      "severity": "info",
+      "summary": "Both round-1 asks ADDRESSED: recovery-chain reword matches delivered derive.go/repair.go surfaces; row-1 proxy disclosure present in guide and test, with the row honestly restructured to two-surface",
+      "detail": "G5 reword verified against round-1 code reads (derive.go:214-217 backward warning ends with `recovery: bd show <epic-id>`; repair.go:321 refusal names --force-backward). G3 disclosure present in both artifacts and scoped exactly as asked; the Derivation cell is now the carve-out sentinel, cross-pinned byte-for-byte."
+    },
+    {
+      "id": "R3-R2-2",
+      "severity": "info",
+      "summary": "Sequencing remains sound after the restructure: no assertion pins a pre-bead-5 tail; new repair rows and the rewritten terminal row are outside or stable under bead 5's contracted changes",
+      "detail": "Healthy-seam fixtures keep bead 5's indeterminate form unreachable; repair.go is not in bead 5's scope; the terminal row's success-discovery idle survives both the indeterminate change and any WorktreeMain draft-awareness bead 5 adds; no agreementTableRows cell requires a bead-5 edit."
+    },
+    {
+      "id": "R3-R2-3",
+      "severity": "info",
+      "summary": "Carry-forward for bead 5 (prose-only, not cross-pinned): refresh the row-1 'until bead 5 delivers AC-3' disclosure once AC-3 lands",
+      "detail": "The guide row-1 Notes and the test doc comment both say the verb's main-checkout emitInstruct path 'still renders idle until bead 5 delivers AC-3' and 'is NOT draft-aware at this commit'. Notes/comment prose is deliberately outside the four-cell cross-pin, so bead 5 can and should update both sentences to past-tense/removed when AC-3 lands — otherwise the guide ships a stale present-tense claim. One-line doc sweep, natural to bead 5 (or bead 10's docs pass); recorded so the tally can carry it into bead 5's prompt."
+    },
+    {
+      "id": "R3-R2-4",
+      "severity": "info",
+      "summary": "completeSyncPhase disclosed residual is a genuine discharge of complete.go's routed obligation, not a re-deferral",
+      "detail": "complete.go:1398-1420's recorded residual offers two dispositions ('fold the write through a stored-aware guard' OR 'extend the agreement-table wording to name this fence's honest scope'); the guide's new disclosed-residual bullet implements the second, with the lexical-fence caveat stated on the SanctionedDerivedSync bullet too. Consistent with bead 2's delivered semantics; the stored-aware-guard option remains available to a future bead as complete.go's comment records."
+    }
+  ]
+}

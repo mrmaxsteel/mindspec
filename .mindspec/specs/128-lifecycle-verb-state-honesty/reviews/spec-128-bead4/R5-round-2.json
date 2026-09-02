@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.99,
+  "rationale": "Round-1 taxonomy wording is corrected, and the ADR-0023 strike annotations remain precise and scoped. However, the row-1 double-counting ask is not satisfied as represented in the round-2 brief: f490fd26 contains no independent status-aware derivation assertion over the canonical spec-create fixture. It replaces the derivation cell with a no-epic sentinel and a two-surface carve-out, but the binding round-1 consolidation permitted that alternative only if explicitly approved; the approved spec R1.3/AC-2 and plan Bead 4 still require the status-aware derivation surface for this row. A second correctness defect remains in the claimed structural anti-drift pin: most row fixtures construct the epic's authoritative stored phase from row.derivation itself. DerivePhaseWithStatusWithCache explicitly trusts a valid stored phase, so changing a guide row and agreementTableRows together can change both the expected output and the fixture input while production derivation logic remains untouched; the fixture can stay green (possibly emitting only a non-failing mismatch warning). These are binding agreement-table correctness defects, not wording nits, and would corrupt the spec branch's AC-2 evidence if merged. `go build ./... && go test ./... -short` passed at f490fd26; the bead worktree remained clean and byte-identical by git diff/status.",
+  "concrete_changes_required": [
+    "Satisfy the binding row-1 disposition rather than self-authorizing a new contract: add the independent status-aware derivation assertion over the canonical fixture, or obtain explicit approval for the no-epic two-surface carve-out and amend the binding spec/plan contract before relying on the sentinel. Keep the already-correct disclosure that the current tail assertion exercises only the WorktreeSpec proxy path.",
+    "Make canonical fixture inputs independent of agreementTableRows expected cells. In particular, do not seed v2Epic storedPhase from row.derivation for the ordinary rows. Pin each verb's canonical post-state independently (preferably by executing/asserting its production writer where feasible), then compare production state-show, tail, and status-aware derivation outputs to the structurally parsed row record. Add a probe showing that changing the guide and Go record together to a wrong mode while leaving production behavior unchanged turns the suite red."
+  ],
+  "findings": [
+    {
+      "id": "R5-R1-ASK-1",
+      "classification": "MISSED",
+      "severity": "high",
+      "title": "Row 1 still lacks the required independent status-aware derivation assertion",
+      "detail": "rowSpecCreate asserts ResolveModeWithCache and the WorktreeSpec ResolveContextFromDirWithCache tail proxy, then checks only that row.derivation equals sentinelNoEpic. No DerivePhaseWithStatus-class call exists over this row's fixture. The guide likewise changes the row to a carved two-surface contract. Consolidated round-1 G3.2 allowed a no-epic carve-out only if explicitly approved; no such approval amended spec R1.3/AC-2 or plan Bead 4, both of which still name the status-aware derivation surface for the row. The round-2 brief's statement that an independent derivation assertion now exists is therefore factually false."
+    },
+    {
+      "id": "R5-R1-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "advancePhaseOnClaim now uses the binding taxonomy",
+      "detail": "The guide labels advancePhaseOnClaim exactly as evidence-fresh forward-by-intent and explains the fresh under-lock child derivation, including the review-stored to implement case and its relationship to the general SanctionedDerivedSync surface. It also discloses completeSyncPhase's narrower backward-order residue rather than overstating the lexical fence."
+    },
+    {
+      "id": "R5-R2-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "The structural cell pin remains self-fulfilling through stored-phase fixture inputs",
+      "detail": "Rows 2-8 and the terminal post-state call v2Epic with row.derivation as storedPhase; release/repair post-states do the same after writer assertions. Production DerivePhaseWithStatusWithCache returns a valid stored phase directly and uses child derivation only for a warning. Consequently, a coordinated wrong edit to a guide row and agreementTableRows also mutates the fixture's authoritative input, letting derivation, state-show, and tail echo the edited value without any production behavior change. For example, changing complete-to-review's three cells and record to plan seeds stored plan over all-closed children; the mismatch warning is not a test failure. This contradicts the file and guide claim that changing table plus record while leaving shipped derivation unchanged is caught, and it does not provide independent evidence for AC-2."
+    },
+    {
+      "id": "R5-ADR-VERIFY",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "ADR strike annotations and scoped integrity remain correct",
+      "detail": "ADR-0023's two stale edge-case rows are visibly struck and unambiguously point to the governing refined some-closed plus some-open plus none-in_progress equals implement row. The blocked-child explanation correctly states that blocked counts as neither closed nor in_progress. The bead commit's ADR diff is confined to those annotations and the guide reference; f490fd26 adds no ADR changes, so bead 3's draft-discovery amendment remains untouched."
+    },
+    {
+      "id": "R5-VERIFY",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "title": "Required verification is green and the reviewed tree is clean",
+      "detail": "At reviewed commit f490fd26da55306e986f005562190f405e77cbb5, `go build ./... && go test ./... -short` exited 0, including internal/phase. Go emitted a sandbox-only inability to update its global module stat cache outside the workspace, but the build and suite completed successfully. Final `git status --short` and `git diff --exit-code` were clean."
+    }
+  ]
+}

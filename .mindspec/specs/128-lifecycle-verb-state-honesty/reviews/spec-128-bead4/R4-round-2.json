@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": "high",
+  "rationale": "Reviewed commit f490fd26da55306e986f005562190f405e77cbb5. R4's round-1 blocker is resolved: in an isolated /tmp archive of that exact commit, changing only the spec-approve row's State-show cell from `plan` to `implement` while leaving the row identifier and fixture code untouched makes `go test ./internal/phase -run AgreementTable -count=1` fail in TestAgreementTable_DocRowsCrossPinFixtures with the precise doc-versus-fixture cell mismatch. The structural record is also consumed by the executable surface assertions, and missing fixture registrations fail explicitly. `go build ./...` exited 0. The first unconstrained full-suite attempt was interrupted by host temp-volume exhaustion (`no space left on device`) across unrelated TempDir users; rerunning the complete short suite serially with a dedicated scratch temp root (`go test -p 1 ./... -short -count=1`) exited 0, including internal/phase. The bead worktree remained byte-identical and at the reviewed SHA. No new defect, and specifically no spec-branch-corrupting defect, was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R1-F1",
+      "classification": "ADDRESSED",
+      "severity": "resolved",
+      "title": "Per-surface cell edits now make the agreement suite red",
+      "evidence": "In a /tmp copy made from `git archive f490fd26`, edited only lifecycle-modes.md row `spec approve → plan`, State-show `plan`→`implement`. `go test ./internal/phase -run AgreementTable -count=1` exited 1 and reported doc `{stateShow:implement tail:plan derivation:plan}` versus fixture `{stateShow:plan tail:plan derivation:plan}`. This directly re-runs and reverses R4's round-1 green-stays-green probe."
+    },
+    {
+      "id": "R4-R2-F2",
+      "classification": "NO_NEW_ISSUE",
+      "severity": "info",
+      "title": "Build and full short suite pass under bounded temp concurrency",
+      "evidence": "`go build ./...` exited 0. An initial parallel `go test ./... -short -count=1` exhausted the host temp volume and failed unrelated TempDir/git-init calls; the diagnostic signature was uniformly `no space left on device`, while internal/phase passed. A clean serial rerun using a dedicated /tmp root, `go test -p 1 ./... -short -count=1`, exited 0 for every package."
+    },
+    {
+      "id": "R4-R2-F3",
+      "classification": "NO_NEW_ISSUE",
+      "severity": "info",
+      "title": "Structural fixtures and reviewed-worktree integrity verified",
+      "evidence": "The row fixtures compare real derivation/state-show/tail results against `row.derivation`, `row.stateShow`, and `row.tail`; the doc parser compares all four contracted columns; rowFixtures lookup rejects unregistered rows. Final integrity checks showed HEAD `f490fd26da55306e986f005562190f405e77cbb5`, empty `git status --short`, clean `git diff --exit-code`, and clean `git diff --check f490fd26^ f490fd26`."
+    }
+  ]
+}

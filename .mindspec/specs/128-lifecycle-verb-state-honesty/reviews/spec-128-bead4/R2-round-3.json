@@ -1,0 +1,29 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.9,
+  "rationale": "Round-3 codebase-pin confirmation of 8abb8e06. BOTH round-2 asks ADDRESSED. Ask 1 (break the stored-echo circularity): the seven ordinary rows no longer seed the fixture epic's stored phase from row.derivation — each hardcodes the state.Mode* literal its verb's real production writer produces (and the terminal row is decoupled the same way, beyond what I asked) — and every ordinary row gained assertChildDerivation, a stored-independent leg checking phase.DerivePhaseFromChildren(children) directly against the record. My exact round-2 acceptance probe, re-run in a fresh /tmp copy of 8abb8e06: editing BOTH the doc row and the agreementTableRows entry for `complete → review (last bead)` to plan/plan/plan (children unchanged, all closed) now FAILS on five distinct assertions — derivation, state show, tail context, instruct template selector, and the new DerivePhaseFromChildren leg. I additionally probed the two literal-decoupled rows that have no child leg: the terminal row's joint done->idle tamper fails on the direct status-aware derivation against the hardcoded ModeDone-seeded closed epic, and the spec-create row's joint spec->plan Derivation tamper fails on the DiscoverDraftSpecsWithCache-backed literal assertion. Ask 2 (correct the false header claim): the header now describes exactly what shipped — the round-1 overclaim is replaced by the two-mechanism account (hardcoded canonical inputs + the pure-function child leg) with an honestly disclosed residual: a coordinated THREE-way tamper (doc + record + the row's own hardcoded Go fixture literal) would still defeat the three-surface checks for the eight stored-carrying rows, while assertChildDerivation and the writer-driven rows' written-value assertions remain unconditionally record-independent. That residual is acceptable: it amounts to rewriting the test itself, which no anti-drift fixture can defend against, and it is stated, not hidden. The guide's parallel claim was reworded to match and no longer overpromises. Bonus verified beyond my asks: the round-2 G2 tally ruling landed — spec-create is a genuine three-surface row again (per-spec ResolveModeWithCache, WorktreeSpec tail proxy still disclosed, and an independently-cached DiscoverDraftSpecsWithCache derivation leg — three chains with no shared call site), with its doc cell updated from the retired no-epic sentinel to `spec` and the sentinel constant removed. Baseline suite green in both the bead worktree and the untampered /tmp copy (go build ./... clean, TestAgreementTable all pass); bead worktree verified clean before and after; all three probe copies deleted from scratch per round-3 conduct. AC-2's anti-drift clause and R1.3's cannot-silently-drift sentence now hold at every tamper level short of rewriting the fixture code itself.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-2 ask 1 (non-circular fixture legs): ADDRESSED — acceptance probe red on five legs",
+      "detail": "Fresh /tmp copy of 8abb8e06: joint doc+record falsification of complete->review to plan/plan/plan fails with derivation=review want plan, state show=review want plan, tail context=review want plan, instruct selector=review want plan, and DerivePhaseFromChildren=review want plan (the new stored-independent leg, agreement_table_test.go assertChildDerivation). Stored seeding audited across all rows in the diff: every v2Epic call now takes a hardcoded literal (ModePlan/ModeImplement/ModeReview/ModeDone), never row.derivation; the four writer-driven rows (release x2, repair x2) unchanged and already independent via their written-value assertions against real SanctionedDerivedSync/EnsurePhaseSemanticsV2 output."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-2 ask 2 (false header claim): ADDRESSED — claim now matches mechanism, residual disclosed",
+      "detail": "The header's round-1 sentence (\"cannot be made to agree with a wrong record\") is gone; the replacement states the hardcoded-input + child-derivation-leg design and explicitly names the surviving three-way-tamper residual (doc + record + the row's own Go literal) plus which legs remain unconditionally independent. The guide's anti-drift paragraph was corrected in the same commit and now claims exactly the two-way guarantee the probes confirm."
+    },
+    {
+      "severity": "INFO",
+      "title": "Literal-decoupled rows probed beyond the mandated acceptance bar",
+      "detail": "Terminal row joint tamper (Derivation done->idle in doc+record): red — the closed epic seeded with hardcoded ModeDone derives done, mismatching the tampered record. Spec-create joint tamper (Derivation spec->plan in doc+record): red — the row asserts row.derivation against the state.ModeSpec literal backed by an independent DiscoverDraftSpecsWithCache confirmation. Both failures land in the row's own fixture, not just the cross-pin, confirming the decoupling is real for the two rows that cannot carry a DerivePhaseFromChildren leg."
+    },
+    {
+      "severity": "INFO",
+      "title": "Hygiene",
+      "detail": "Bead worktree at 8abb8e06 verified clean (git status empty) before and after all runs; go build ./... and go test -short -run TestAgreementTable ./internal/phase/ green from the bead worktree; all three /tmp probe copies (driftprobe, driftprobe2, driftprobe3) deleted from the scratchpad per the round-3 disk instruction."
+    }
+  ]
+}
