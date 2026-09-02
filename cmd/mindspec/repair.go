@@ -227,6 +227,24 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		return guard.NewFailure(msg, "mindspec spec list")
 	}
 
+	// Spec 128 Bead 2 (plan step 7): the v2 phase-semantics self-heal
+	// runs BEFORE the derive-and-guard section below, so a legacy epic
+	// (marker absent, stored `implement`, all-open) reconciles to `plan`
+	// + the durable marker first, then the guard/derivation runs against
+	// the now-consistent state — the recovery command the LEGACY NOTICE
+	// (derive.go) names for this exact state is `mindspec repair phase
+	// <spec-id>`, and this call is what makes that command actually
+	// converge rather than repeatedly reporting the same legacy warning.
+	// Runs OUTSIDE the WithPhaseWriteLock call below (the lock is
+	// non-reentrant — calling a locked helper from inside another fn
+	// self-blocks until ErrPhaseLockTimeout).
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("repair phase: v2 phase-semantics reconciliation for spec %s (epic %s) failed: %v", idrender.Spec(specID), idrender.Bead(epicID), err),
+			fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID)),
+		)
+	}
+
 	var (
 		freshStored     string
 		freshDerived    string

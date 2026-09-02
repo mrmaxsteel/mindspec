@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -22,6 +24,13 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
+
+// nextPhaseMergeMetadataFn is the test seam for advancePhaseOnClaim's
+// Step 5.2 mindspec_phase write (spec 128 Bead 2), matching the house
+// per-package seam convention (planMergeMetadataFn, completeMergeMetadataFn,
+// repairMergeMetadataFn) so a test can observe/stub the write without
+// hitting a real bd invocation.
+var nextPhaseMergeMetadataFn = bead.MergeMetadata
 
 var nextCmd = &cobra.Command{
 	Use:   "next",
@@ -314,6 +323,13 @@ team lead spawns fresh agents per bead.`,
 			_ = state.WriteSessionFile(root, sess)
 		}
 
+		// Step 5.2: Spec 128 Bead 2 (OQ-3 option 1) — advance stored
+		// phase after a successful lifecycle claim. Extracted to its own
+		// named function (matching claimFailureError/
+		// warnWorktreeSetupFailure's established pattern) so it is
+		// directly unit-testable without exercising the full RunE flow.
+		advancePhaseOnClaim(root, selected)
+
 		// Step 5.5: Create or reuse worktree
 		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
 		if wtErr != nil {
@@ -477,6 +493,122 @@ func formatClaimLine(id, title string) string {
 // empty string as identity, so this NEVER renders as `spec=""`.
 func formatStateLine(mode, specID, beadID string) string {
 	return fmt.Sprintf("State updated: mode=%s, spec=%s, bead=%s\n", mode, idrender.Spec(specID), idrender.Bead(beadID))
+}
+
+// advancePhaseOnClaim implements Step 5.2 (spec 128 Bead 2, OQ-3
+// option 1): after a successful ClaimBead, self-heal any legacy v2
+// phase-semantics signature, then advance the epic's stored
+// mindspec_phase to `implement` under the R3.3 lock, but ONLY for a
+// LIFECYCLE (task-typed or untyped — the ADR-0023 discriminator) claim;
+// a non-lifecycle claim (e.g. a `bug` bead) advances nothing.
+// Forward-only: no-op when already `implement` — this is a NEW writer,
+// so it registers in the bead-1 writer-inventory test (writer_inventory_test.go)
+// by construction; the composite literal below must stay lexically
+// nested inside the phase.WithPhaseWriteLock call for that AST-walk
+// test to recognize it as guarded.
+//
+// Round-1 panel G1 (hard block — the core defect): the write is issued
+// AFTER ClaimBead already ran (Step 5), so it can be arbitrarily
+// "delayed" relative to the claim (worktree setup, agent scheduling).
+// By the time this fn finally runs INSIDE the lock, a concurrent
+// `release` or `complete` invocation may have ALREADY mutated the child
+// set — and, via its own guarded write, stored — out from under the
+// stale "we just claimed it, so implement is still correct" assumption
+// the pre-fix code made. The fn therefore re-derives the CURRENT child
+// state on a FRESH per-call Cache (never one built before the lock was
+// acquired — the same named hazard bead 1 was hard-blocked on twice)
+// and writes `implement` ONLY while that fresh evidence still agrees:
+// if release already returned the sole claimed bead to open (derived
+// plan) or complete already closed it (derived review, or implement
+// again if other lifecycle beads remain open), this write no-ops rather
+// than regressing that fresher state back to implement.
+//
+// Failure-semantics contract (round-1 panel G1.4): best-effort — a
+// failure here never fails `next` itself (the bead is already claimed
+// and the worktree not yet set up), so a genuine race remains POSSIBLE
+// (next's own claim advance losing a lock timeout or merge-write leaves
+// stored behind derived momentarily). What the contract GUARANTEES is
+// that the divergence is always FORWARD (derived implement, stored
+// whatever it was — plan in the common case) and NAMES A RECOVERY
+// COMMAND THAT ACTUALLY CONVERGES: `mindspec repair phase <spec-id>`,
+// never the dead-end `mindspec next <bead-id>` (the bead is already
+// in_progress, so a re-run can never re-select it — round-1 panel
+// G5/R3-G2). The forward direction means the unforced operator guard
+// permits that command unconditionally.
+//
+// A genuine epic-lineage lookup failure (as opposed to the bead simply
+// having no epic lineage at all, phase.ErrNoEpicLineage) is still
+// surfaced as a warning rather than silently discarded.
+func advancePhaseOnClaim(root string, selected next.BeadInfo) {
+	epicID, specID, epicErr := phase.FindEpicForBead(selected.ID)
+	if epicErr != nil {
+		if !errors.Is(epicErr, phase.ErrNoEpicLineage) {
+			fmt.Fprintf(os.Stderr, "warning: could not resolve epic for bead %s: %v\n", idrender.Bead(selected.ID), epicErr)
+		}
+		return
+	}
+	if epicID == "" {
+		return
+	}
+	recovery := nextPhaseAdvanceRecoveryCommand(specID)
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", describePhaseSyncFailure(err, recovery))
+	}
+	if !phase.IsLifecycleIssueType(selected.IssueType) {
+		return
+	}
+	if lockErr := phase.WithPhaseWriteLock(root, epicID, nextPhaseMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
+		if stored == state.ModeImplement {
+			return nil, nil
+		}
+		// Fresh per-call Cache — never a Cache built before this call
+		// reached the lock.
+		freshCache := phase.NewCache()
+		children, cerr := freshCache.GetChildren(epicID)
+		if cerr != nil {
+			return nil, fmt.Errorf("advance-phase-on-claim: reading children of epic %s: %w", idrender.Bead(epicID), cerr)
+		}
+		if phase.DerivePhaseFromChildren(children) != state.ModeImplement {
+			// The fresh evidence no longer supports advancing to
+			// implement — a concurrent release/complete already moved
+			// stored to something else. NEVER overwrite fresher state.
+			return nil, nil
+		}
+		return map[string]interface{}{"mindspec_phase": state.ModeImplement}, nil
+	}); lockErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", describePhaseSyncFailure(lockErr, recovery))
+	}
+}
+
+// describePhaseSyncFailure renders advancePhaseOnClaim's best-effort
+// failures with the ALWAYS-convergent recovery command (round-1 panel
+// G1.4/G5): unlike phase.DescribeLockFailure's general contract (a
+// non-timeout failure gets no manufactured recovery line, because
+// "that belongs to whatever wrote the failing value" — its own doc
+// comment), this specific write's convergent fix is the SAME regardless
+// of failure shape (a lock timeout or a genuine merge-write error), so
+// the recovery line is appended unconditionally rather than only on the
+// timeout leg.
+func describePhaseSyncFailure(err error, recovery string) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, phase.ErrPhaseLockTimeout) {
+		return phase.DescribeLockFailure(err, recovery)
+	}
+	return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: %s", err, recovery)
+}
+
+// nextPhaseAdvanceRecoveryCommand renders advancePhaseOnClaim's
+// convergent recovery (round-1 panel G1.4/G5): `mindspec repair phase
+// <spec-id>` when specID is known, else the documented "<spec-id>"
+// placeholder (specIDForEpicWithCache's own convention) for the rare
+// case a bead resolves to an epic without resolvable spec metadata.
+func nextPhaseAdvanceRecoveryCommand(specID string) string {
+	if specID == "" {
+		return "mindspec repair phase <spec-id>"
+	}
+	return fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID))
 }
 
 // claimFailureError builds the spec 093 Req 3 claim-failure recovery

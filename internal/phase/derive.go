@@ -177,18 +177,47 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		// Run child-based derivation as consistency check.
 		childPhase := deriveFromChildrenOrStatusWithCache(c, epicID, epicStatus)
 		if childPhase != "" && childPhase != storedPhase {
-			// Spec 092 Req 2: the consistency warning carries the
-			// recovery-line convention (ADR-0035) so agents can grep
-			// and paste the fix. The recovery command is
-			// `mindspec repair phase <spec-id>` — NEVER a raw
-			// `bd update` metadata command, which has replace
-			// semantics over the entire metadata map (Req 19/HC-5).
-			// The line is hand-formatted here because internal/guard
-			// imports this package (import cycle); the external-
-			// package test derive_recovery_test.go keeps the format
-			// aligned with guard.HasFinalRecoveryLine.
-			fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
-				epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
+			// Spec 128 Bead 2 (plan step 7/8): a marker-absent epic
+			// whose stored/children match the pre-v2 legacy signature
+			// (LegacyPhaseSignature, semantics_v2.go) gets a REPLACEMENT
+			// notice instead of the general mismatch warning below —
+			// its recovery (`mindspec repair phase`) is made correct by
+			// EnsurePhaseSemanticsV2 also running at repair phase's own
+			// entry (repair.go), which reconciles legacy -> plan + marker
+			// BEFORE the guard evaluates. This branch never takes the
+			// R3.3 write lock (LegacyPhaseSignature and the marker read
+			// below are both lock-free, round-2 panel G4).
+			if !hasV2MarkerWithCache(c, epicID) {
+				if children, cerr := c.GetChildren(epicID); cerr == nil && LegacyPhaseSignature(storedPhase, children) {
+					fmt.Fprintf(os.Stderr, "warning: epic %s: legacy phase semantics detected (pre-v2 stored implement)\nrecovery: mindspec repair phase %s\n",
+						epicID, specIDForEpicWithCache(c, epicID))
+					return storedPhase, nil
+				}
+			}
+			// Spec 092 Req 2 / spec 128 AC-5(iv): the consistency warning
+			// carries the recovery-line convention (ADR-0035) so agents
+			// can grep and paste the fix. Direction-conditional (bead 2,
+			// round-1 G5 disposition): a FORWARD disagreement (the
+			// child-derived phase is AHEAD of stored in lifecycle order)
+			// keeps the existing `mindspec repair phase <spec-id>`
+			// recovery — safe and correct there. A BACKWARD disagreement
+			// (derived is BEHIND stored) never emits that command —
+			// writing it would move the epic backward — and instead ends
+			// with an inspection action (`bd show <epic-id>`), belt (this
+			// line) alongside suspenders (the R3.3 guard itself refuses
+			// an unforced backward write regardless). Never a raw `bd
+			// update` metadata command, which has replace semantics over
+			// the entire metadata map (Req 19/HC-5). Hand-formatted here
+			// because internal/guard imports this package (import
+			// cycle); the external-package test derive_recovery_test.go
+			// keeps the format aligned with guard.HasFinalRecoveryLine.
+			if IsBackwardMove(storedPhase, childPhase) {
+				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase) — the derived phase is BEHIND stored in lifecycle order; writing it would move the epic backward\nrecovery: bd show %s\n",
+					idrender.Bead(epicID), storedPhase, childPhase, idrender.Bead(epicID))
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
+					epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
+			}
 		}
 		return storedPhase, nil
 	}
@@ -328,6 +357,16 @@ func classifyChild(issueType string) childClass {
 	default:
 		return childNonLifecycle
 	}
+}
+
+// IsLifecycleIssueType reports whether issueType classifies as a
+// LIFECYCLE child — task-typed or untyped (empty), the ADR-0023
+// discriminator classifyChild already encodes for phase derivation.
+// Exported for cmd/mindspec/next.go's claim-path phase advance (spec 128
+// Bead 2, OQ-3 option 1): claiming a non-lifecycle bead (e.g. a `bug`)
+// must never advance stored mindspec_phase.
+func IsLifecycleIssueType(issueType string) bool {
+	return classifyChild(issueType) == childLifecycle
 }
 
 // DerivePhaseFromChildren implements the pure logic of phase derivation.

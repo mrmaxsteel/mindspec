@@ -289,6 +289,14 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, fmt.Errorf("no epic found for spec %s: %w", specID, err)
 	}
 
+	// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
+	// reconciliation runs beside EnsureMigrated above, under the SAME
+	// ahead-of-preflight exemption — must run AFTER EnsureMigrated and
+	// BEFORE the review/done gate below reads phaseDetail.
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		return nil, err
+	}
+
 	// Verify state is review mode: all children closed, pending final merge.
 	//
 	// Spec 092 Req 1 (mindspec-3smk): the stored mindspec_phase is a

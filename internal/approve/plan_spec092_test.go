@@ -330,6 +330,7 @@ func TestPlanValidationFailure_AggregatesAllIssues(t *testing.T) {
 // unit" end-to-end pin: a single plan-approve invocation against a plan
 // with multiple distinct violations reports them ALL at once.
 func TestApprovePlan_SinglePassAggregatedValidationError(t *testing.T) {
+	noopStubPhaseMergeMetadataForTest(t)
 	tmp := t.TempDir()
 	specID := "042-test"
 	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", specID)
