@@ -33,6 +33,58 @@ var (
 	exportBeadsFn     = bead.Export
 )
 
+// entangleableClaimPaths is the R5.1 DERIVED enumeration (spec 128,
+// #179): the repo-relative paths a worktree-creating `mindspec next`
+// claim can itself WRITE in the invoking checkout. At this base that set
+// is exactly (a) `.mindspec/session.json` (state.WriteSessionFile's
+// BeadClaimedAt stamp) — gitignored (.gitignore:3), so it can never
+// appear as blockable dirt in the first place; (b) `.beads/issues.jsonl`
+// — ADR-0025's sole named artifact, already exempt via artifactPaths
+// above; and (c) the new bead worktree directory, created only AFTER
+// this guard runs (and itself gitignored, `.worktrees/`). None of the
+// three can ever surface as TRACKED user dirt, so the claim-entangleable
+// set is EMPTY today.
+//
+// This list stays empty until a future claim step writes a new TRACKED
+// path outside that set, at which point appending the path here re-arms
+// the block for it (CheckDirtyTreeProportional). AC-8(ii)'s
+// enumeration-pinning test derives the paths a REAL claim run actually
+// writes in the invoking checkout and asserts they match this list —
+// red the moment a future claim step writes a tracked path this list
+// omits.
+var entangleableClaimPaths []string
+
+// EntangleableClaimPaths returns a copy of the current R5.1 enumeration,
+// for the cross-package anti-drift pin (AC-8(ii): a real-claim-run
+// fixture in cmd/mindspec derives the paths an actual claim writes and
+// asserts they match this list).
+func EntangleableClaimPaths() []string {
+	out := make([]string, len(entangleableClaimPaths))
+	copy(out, entangleableClaimPaths)
+	return out
+}
+
+// SetEntangleableClaimPathsForTest swaps entangleableClaimPaths for a
+// test's duration and returns a restore func. AC-8(iii)'s seam-injected
+// refusal leg uses this to keep the block machinery under test even
+// though the real enumeration is empty today: inject a path here, dirty
+// it, and CheckDirtyTreeProportional must still refuse via the preserved
+// DirtyTreeFailure contract.
+func SetEntangleableClaimPathsForTest(paths []string) func() {
+	orig := entangleableClaimPaths
+	entangleableClaimPaths = paths
+	return func() { entangleableClaimPaths = orig }
+}
+
+func isEntangleableClaimPath(p string) bool {
+	for _, e := range entangleableClaimPaths {
+		if p == e {
+			return true
+		}
+	}
+	return false
+}
+
 func defaultStatusPorcelain(cwd string) (string, error) {
 	// Use StatusWithStderr (CombinedOutput-based) so stderr is preserved on
 	// failure — a missing `-C` target or corrupt index otherwise exits with
@@ -130,6 +182,55 @@ func parsePorcelain(out string) []string {
 func CheckDirtyTree(repoRoot, cwd string) (userDirt []string, err error) {
 	_, userDirt, err = CheckDirtyTreeDetail(repoRoot, cwd)
 	return userDirt, err
+}
+
+// CheckDirtyTreeProportional narrows CheckDirtyTree's user-dirt result to
+// R5.1's derived entanglement enumeration (spec 128, #179 — the ADR-0025
+// clarifying amendment, scoped to the worktree-creating `mindspec next`
+// claim path ONLY; every other dirty-tree guard, including `mindspec
+// spec approve`'s and `mindspec release`'s, is unaffected and keeps
+// calling CheckDirtyTree/CheckDirtyTreeDetail directly).
+//
+// The artifact/user-dirt classification itself is unchanged (ADR-0025);
+// this only reclassifies what happens to the USER-dirt half: dirt on a
+// path the claim can itself write is blockingDirt (today: none —
+// entangleableClaimPaths is empty); every other user dirt is
+// ignoredDirt, so the caller can print an informational notice naming it
+// (Max's standing directive, 2026-09-02: visibility without the block)
+// while PROCEEDING with the claim.
+func CheckDirtyTreeProportional(repoRoot, cwd string) (blockingDirt, ignoredDirt []string, err error) {
+	_, userDirt, err := CheckDirtyTreeDetail(repoRoot, cwd)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range userDirt {
+		if isEntangleableClaimPath(p) {
+			blockingDirt = append(blockingDirt, p)
+		} else {
+			ignoredDirt = append(ignoredDirt, p)
+		}
+	}
+	return blockingDirt, ignoredDirt, nil
+}
+
+// IgnoredDirtNotice formats the one-line informational stderr notice
+// naming unrelated dirty user paths a worktree-creating claim IGNORED
+// (Max's standing directive, 2026-09-02): the claim proceeds despite
+// this dirt, but the removal of the old block must not also remove
+// visibility into what it ignored. Callers print this only when
+// ignoredDirt is non-empty — never on a clean tree.
+//
+// Each entry is an agent-writable porcelain filename (same provenance as
+// DirtyTreeFailure's dirty-path lines), so it is escaped per-path via
+// termsafe.Escape (ADR-0042) before joining onto the single line — a
+// hostile filename can forge neither extra output lines nor control
+// bytes.
+func IgnoredDirtNotice(ignoredDirt []string) string {
+	escaped := make([]string, len(ignoredDirt))
+	for i, p := range ignoredDirt {
+		escaped[i] = termsafe.Escape(p)
+	}
+	return fmt.Sprintf("note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): %s", strings.Join(escaped, ", "))
 }
 
 // DirtyTreeFailure formats the blocking user-dirt guard failure for

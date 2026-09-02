@@ -33,6 +33,19 @@ func SetSpecRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
 	return func() { specRunBDFn = orig }
 }
 
+// specMergeMetadataFn wraps bead.MergeMetadata for testability (spec 128
+// Bead 7 — matches the established planMergeMetadataFn/implMergeMetadataFn/
+// adoptMergeMetadataFn convention).
+var specMergeMetadataFn = bead.MergeMetadata
+
+// SetSpecMergeMetadataForTest swaps specMergeMetadataFn for testing and
+// returns a restore function.
+func SetSpecMergeMetadataForTest(fn func(issueID string, updates map[string]interface{}) error) func() {
+	orig := specMergeMetadataFn
+	specMergeMetadataFn = fn
+	return func() { specMergeMetadataFn = orig }
+}
+
 // SpecResult holds the result of spec approval.
 type SpecResult struct {
 	SpecID   string
@@ -73,15 +86,12 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		if existingEpicID != "" {
 			// Epic already exists — skip creation (idempotent).
 			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
-			// Spec 080: ensure mindspec_phase is set for existing epics.
-			// Spec 128 R3.3: wrapped in the phase write lock (values
-			// unchanged in this bead — bead 1 scope is the lock wrap
-			// only; R3.6's safe-replay semantics are a later bead's
-			// concern, so this still unconditionally writes "plan").
-			if err := phase.WithPhaseWriteLock(root, existingEpicID, bead.MergeMetadata, func(string, bool) (map[string]interface{}, error) {
-				return map[string]interface{}{"mindspec_phase": "plan"}, nil
-			}); err != nil {
+			// Spec 128 R3.6 (round-4 G2): see backfillExistingEpicPhase's
+			// doc comment for the chosen disposition and rationale.
+			if msg, err := backfillExistingEpicPhase(root, existingEpicID); err != nil {
 				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
+			} else if msg != "" {
+				result.Warnings = append(result.Warnings, msg)
 			}
 		} else {
 			if err := phase.CheckSpecNumberCollision(specNum); err != nil {
@@ -152,6 +162,54 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	}
 
 	return result, nil
+}
+
+// backfillExistingEpicPhase applies spec 128 R3.6's replay-safety
+// disposition for ApproveSpec's existing-epic path (round-4 G2, a
+// #248-class defect: the pre-128 write unconditionally set
+// mindspec_phase="plan", regressing a replayed `spec approve` against an
+// epic already at implement/review/done). Extracted to its own named
+// function — matching advancePhaseOnClaim/claimFailureError's
+// established pattern (cmd/mindspec/next.go) — so it is directly
+// unit-testable without exercising spec.md validation or executor
+// commits.
+//
+// Disposition: ABSENT-ONLY BACKFILL under the bead-1 R3.3 lock
+// (WithPhaseWriteLock's fn receives the fresh, under-lock stored value).
+// stored == "" covers both a genuinely absent mindspec_phase field and a
+// present-but-invalid one (phaseReadOutcome's contract, phaselock.go) —
+// neither carries a USABLE stored phase, so both are legitimate backfill
+// targets; any other stored value (plan/implement/review/done) is a
+// later-or-same-value replay and is left untouched. The fail-closed
+// refusal alternative is explicitly NOT taken: a replay is a legitimate
+// idempotent re-run of `spec approve` against an epic that already
+// exists (the no-error path just above this call site), and refusing it
+// would break that existing idempotence contract.
+//
+// The returned message distinguishes all three outcomes for the
+// caller's output (R3.6: "the output honestly distinguishes a mutation
+// from a no-op") — a genuine backfill, a same-value no-op replay, and a
+// later-phase-untouched no-op replay each get their own text, and a
+// replay that changed nothing never claims to have set the phase. err
+// is WithPhaseWriteLock's own error (lock timeout / merge-write
+// failure); message is "" when err is non-nil.
+func backfillExistingEpicPhase(root, epicID string) (message string, err error) {
+	err = phase.WithPhaseWriteLock(root, epicID, specMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
+		if stored == "" {
+			message = "phase backfilled: plan (stored phase was empty)"
+			return map[string]interface{}{"mindspec_phase": "plan"}, nil
+		}
+		if stored == "plan" {
+			message = `spec approve replay: stored phase already "plan" — nothing mutated`
+		} else {
+			message = fmt.Sprintf("spec approve replay: stored phase %q left untouched (spec approve never regresses lifecycle phase)", stored)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return message, nil
 }
 
 // updateSpecApproval reads a spec file and updates canonical frontmatter fields

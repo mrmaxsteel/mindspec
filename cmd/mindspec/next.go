@@ -118,15 +118,22 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Artifact-aware dirty-tree guard (ADR-0025).
-		// `.beads/issues.jsonl` is a build artifact co-managed by bd; dirt on
-		// that path alone is auto-handled via `bd export`. User-authored dirt
-		// still blocks — the guard's purpose is to protect user code.
-		userDirt, err := next.CheckDirtyTree(root, cwd)
+		// Step 1: Proportional claim guard (ADR-0025's clarifying
+		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
+		// build artifact co-managed by bd; dirt on that path alone is
+		// auto-handled via `bd export`. Of the remaining user dirt, only
+		// dirt on a path THIS worktree-creating claim can itself write
+		// still blocks — an EMPTY set today (R5.1's derived enumeration:
+		// the claim's own writes are either gitignored or the exempt
+		// artifact above). An unrelated dirty file in the invoking
+		// checkout no longer blocks; it is named on stderr (Max's
+		// standing directive, 2026-09-02 — visibility without the block)
+		// and the claim proceeds.
+		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd)
 		if err != nil {
 			return fmt.Errorf("checking working tree: %w", err)
 		}
-		if len(userDirt) > 0 {
+		if len(blockingDirt) > 0 {
 			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
 			// worktree-context line and ends with a `recovery:` line. The
 			// old multi-line "Recovery steps: 1..3" stderr block advised
@@ -134,7 +141,10 @@ team lead spawns fresh agents per bead.`,
 			// agent merely ran `next` from the wrong directory. The active
 			// worktree (when one exists) is the steer-to target; resolving
 			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, userDirt, guard.ActiveWorktreePath(root))
+			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+		}
+		if len(ignoredDirt) > 0 {
+			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
 		}
 
 		// Step 1.5: Resolve target spec if ambiguous
