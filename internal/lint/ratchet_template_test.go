@@ -54,6 +54,11 @@ var templateFieldClassification = map[string]tmplClass{
 	// routed through the termsafe template func per item.
 	"idle.md {{termsafe .}}": classTermsafeText,
 
+	// indeterminate.md — spec 128 bead 5: IndeterminateReason wraps a
+	// bd/git error chain (may embed agent-writable IDs/paths from
+	// wrapped lookups), routed through the termsafe template func.
+	"indeterminate.md {{termsafe .IndeterminateReason}}": classTermsafeText,
+
 	// implement.md
 	"implement.md {{.ActiveSpec}}": classSpineGatedID,
 	"implement.md {{.ActiveBead}}": classSpineGatedID,
@@ -186,11 +191,12 @@ func TestInstructTemplateFieldClassification(t *testing.T) {
 	if len(found) == 0 {
 		t.Fatal("no template interpolations found — the scanner has regressed")
 	}
-	// Census pin (S2-F2): 14 audited rendering interpolations across
-	// the instruct templates (incl. ambiguous.md's two). Update BOTH
-	// the classification map and this count when templates change.
-	if len(templateFieldClassification) != 14 {
-		t.Errorf("template classification census drift: map has %d entries, the audited census is 14", len(templateFieldClassification))
+	// Census pin (S2-F2): 15 audited rendering interpolations across
+	// the instruct templates (incl. ambiguous.md's two; spec 128 bead 5
+	// added indeterminate.md's one). Update BOTH the classification map
+	// and this count when templates change.
+	if len(templateFieldClassification) != 15 {
+		t.Errorf("template classification census drift: map has %d entries, the audited census is 15", len(templateFieldClassification))
 	}
 	failOnProblems(t, "scan (d) template classification",
 		classifyTemplates(found, templateFieldClassification))

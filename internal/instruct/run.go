@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
@@ -76,15 +77,15 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 	// PERF-1: per-invocation cache, shared by every cache-aware helper below.
 	cache := phase.NewCache()
 
-	// Protected branch check FIRST: main/master → always idle.
-	// This must run before guard/worktree checks which query beads (slow
-	// dolt cold start). Decision only (IsProtectedCheckout, git/config,
-	// no beads) — handleNoState below does the single idle render, with
-	// the shared invocation cache (final-review F1: the old
-	// RenderIdleIfProtected call here rendered idle a FIRST time just to
-	// decide, discarding the output and its lifecycle scan).
+	// Protected branch check FIRST: main/master → always idle... or a
+	// pre-epic draft (spec 128 R2.3 window (a)). This must run before
+	// guard/worktree checks which query beads (slow dolt cold start).
+	// Decision only (IsProtectedCheckout, git/config, no beads) up to
+	// this point; handleIdleOrDraft below pays the single bd-backed
+	// draft-discovery scan the common idle case still needs to rule out
+	// (final-review F1's shared-cache discipline preserved).
 	if specFlag == "" && IsProtectedCheckout(mainRoot) {
-		return handleNoState(cache, mainRoot, format, out)
+		return handleIdleOrDraft(cache, mainRoot, format, out)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -117,10 +118,70 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		if ambErr, ok := resolveErr.(*resolve.ErrAmbiguousTarget); ok {
 			return handleAmbiguous(cache, mainRoot, format, out, ambErr)
 		}
-		// Try phase context for beads-derived state.
+		if specFlag != "" {
+			// Round-1 panel G5.3 (the flag-honoring class, third
+			// appearance): an EXPLICIT --spec target that failed to
+			// resolve against ACTIVE (bd) specs may still name a
+			// pre-epic draft, which bd cannot see at all. Never silently
+			// fall through to ambient state (a different spec, or idle)
+			// for an explicit target — honor the draft if one matches
+			// (numeric prefix or full ID), report ambiguity if more than
+			// one does, or refuse with resolveErr's own message (never a
+			// fabricated one) when none does.
+			draft, ambiguousDrafts, draftErr := resolveSpecFlagAgainstDrafts(cache, mainRoot, specFlag)
+			if draftErr != nil {
+				return handleIndeterminate(cache, mainRoot, format, out, draftErr.Error())
+			}
+			if draft != nil {
+				return handleDraft(cache, mainRoot, format, out, *draft)
+			}
+			if len(ambiguousDrafts) > 0 {
+				active := make([]resolve.SpecStatus, len(ambiguousDrafts))
+				for i, d := range ambiguousDrafts {
+					active[i] = resolve.SpecStatus{SpecID: d.SpecID, Mode: state.ModeSpec, Active: true}
+				}
+				return handleAmbiguous(cache, mainRoot, format, out, &resolve.ErrAmbiguousTarget{Active: active})
+			}
+			return resolveErr
+		}
+		// Try phase context for beads-derived state (ambient — no
+		// explicit target was given, so falling through to idle/draft
+		// discovery below is honest, not flag-blind).
 		pctx, ctxErr := phase.ResolveContextWithCache(cache, mainRoot)
-		if ctxErr != nil || pctx == nil || pctx.Phase == "" {
-			return handleNoState(cache, mainRoot, format, out)
+		if ctxErr != nil {
+			return handleIndeterminate(cache, mainRoot, format, out, ctxErr.Error())
+		}
+		if pctx != nil && pctx.DerivationFailed {
+			// Spec 128 R2.3 window (b): a genuine bd/Dolt lookup failure
+			// inside ResolveContextFromDirWithCache must render
+			// indeterminate, never the fallback Phase value it carries
+			// for other (best-effort) callers.
+			return handleIndeterminate(cache, mainRoot, format, out, pctx.DerivationError)
+		}
+		if pctx == nil || pctx.Phase == "" {
+			return handleIdleOrDraft(cache, mainRoot, format, out)
+		}
+		// Round-1 panel G5.2: a beads-derived Phase of ModeIdle (the
+		// WorktreeMain zero-active-specs case) is ALSO a draft-discovery
+		// arrival point, not only an empty Phase — bd has no trace of a
+		// pre-epic draft, so "0 active bd specs" and "genuinely idle" are
+		// not yet distinguishable without the same on-disk/branch check
+		// handleIdleOrDraft already applies. ModeIdle is reachable from
+		// no OTHER ResolveContextFromDirWithCache branch (WorktreeSpec/
+		// WorktreeBead never return it), so this can't misfire on an
+		// unrelated legitimate idle. Gated on BeadsDirMissing (the same
+		// precondition handleIdleOrDraft's own zero-candidate probe
+		// uses): when .beads is genuinely absent, derive.go's WorktreeMain
+		// arm already produced this ModeIdle via its OWN BeadsDirMissing-
+		// aware path — re-probing here would call
+		// resolve.DiscoverDraftSpecsWithCache's per-candidate bd health
+		// check unconditionally (a DIFFERENT function, deliberately never
+		// BeadsDirMissing-aware — internal/resolve's own genuine-failure-
+		// propagation invariant, draft_test.go), turning any on-disk
+		// leftover spec directory into a spurious indeterminate the
+		// instant bd itself is unreachable.
+		if pctx.Phase == state.ModeIdle && !phase.BeadsDirMissing(mainRoot) {
+			return handleIdleOrDraft(cache, mainRoot, format, out)
 		}
 		mc = &state.Focus{
 			Mode:       pctx.Phase,
@@ -135,13 +196,13 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		// Spec 128 Bead 3 round-1 panel G4: ResolveModeWithCache now
 		// propagates a genuine discovery failure instead of collapsing it
 		// to idle (R1.4) — an empty Mode reaching Render below would fail
-		// obscurely on a ""+".md" template lookup. Fall back to the same
-		// graceful no-state handling used above for a resolution failure;
-		// distinguishing "indeterminate" from "idle" in the instruct tail
-		// itself is bead 5's stated territory, not this call site's.
+		// obscurely on a ""+".md" template lookup. Bead 5 (R2.3): that
+		// propagated failure renders the honest indeterminate form here,
+		// never idle — a discovery failure is never presented as a
+		// derived idle state.
 		mode, modeErr := resolve.ResolveModeWithCache(cache, mainRoot, specID)
 		if modeErr != nil {
-			return handleNoState(cache, mainRoot, format, out)
+			return handleIndeterminate(cache, mainRoot, format, out, modeErr.Error())
 		}
 		// Try to find active bead via phase context
 		pctx, _ := phase.ResolveContextFromDirWithCache(cache, mainRoot, localRoot)
@@ -214,6 +275,147 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 			"mode":         mc.Mode,
 			"template":     mc.Mode + ".md",
 		}))
+	fmt.Fprint(out, output)
+	return nil
+}
+
+// handleIdleOrDraft is reached at both of Run's "nothing beads-derived
+// resolved" arrival points (the protected-checkout fast path, and the
+// no-context fallback after ResolveTargetWithCache/ResolveContextWithCache
+// both come up empty). The common case really is idle, but a pre-epic
+// draft (OQ-2: spec directory + `spec/<id>` branch, no epic yet) is
+// invisible to bd — `spec create` commits the draft only to its own spec
+// branch, never to the invoking (often main) checkout's working tree — so
+// this consults the same on-disk/branch draft scan `state show` already
+// applies (bead 3) before concluding idle (spec 128 R2.3 window (a)): a
+// standalone `mindspec instruct` run must agree with `state show` for a
+// draft-only state instead of reporting bare idle.
+func handleIdleOrDraft(cache *phase.Cache, root, format string, out io.Writer) error {
+	drafts, err := resolve.DiscoverDraftSpecsWithCache(cache, root)
+	if err != nil {
+		return handleIndeterminate(cache, root, format, out, err.Error())
+	}
+	switch len(drafts) {
+	case 0:
+		// Round-1 panel G5.1: zero on-disk/branch candidates means
+		// DiscoverDraftSpecsWithCache's own per-candidate health probe
+		// (draftSpecStatusWithCache's AllEpics call) never ran at all —
+		// bd health was never actually confirmed before concluding idle.
+		// Probe it explicitly, skipped only when .beads itself is absent
+		// (a workspace that has never used the beads lifecycle is
+		// honestly idle — phase.BeadsDirMissing's convention elsewhere).
+		if !phase.BeadsDirMissing(root) {
+			if _, epicsErr := cache.AllEpics(); epicsErr != nil {
+				return handleIndeterminate(cache, root, format, out, epicsErr.Error())
+			}
+		}
+		return handleNoState(cache, root, format, out)
+	case 1:
+		return handleDraft(cache, root, format, out, drafts[0])
+	default:
+		active := make([]resolve.SpecStatus, len(drafts))
+		for i, d := range drafts {
+			active[i] = resolve.SpecStatus{SpecID: d.SpecID, Mode: state.ModeSpec, Active: true}
+		}
+		return handleAmbiguous(cache, root, format, out, &resolve.ErrAmbiguousTarget{Active: active})
+	}
+}
+
+// handleDraft renders spec-mode guidance for a single confirmed pre-epic
+// draft — the honest answer for a draft-only state (spec 128 R2.3), never
+// idle.md's "Available Actions" block.
+func handleDraft(cache *phase.Cache, root, format string, out io.Writer, d resolve.DraftSpec) error {
+	mc := &state.Focus{Mode: state.ModeSpec, ActiveSpec: d.SpecID}
+	ctx := BuildContextWithCache(cache, root, mc)
+
+	if format == "json" {
+		output, err := RenderJSON(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, output)
+		return nil
+	}
+
+	output, err := Render(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(out, output)
+	return nil
+}
+
+// resolveSpecFlagAgainstDrafts matches an explicit --spec target that
+// failed to resolve against ACTIVE (bd) specs against the on-disk/branch
+// draft set (round-1 panel G5.3): a numeric target (no hyphen, all
+// digits) matches by the same zero-padded 3-digit prefix convention
+// resolve.ResolveSpecPrefixWithCache uses for active specs; any other
+// value matches by exact SpecID. Returns (draft, nil, nil) for exactly
+// one match, (nil, matches, nil) for more than one (ambiguous), and
+// (nil, nil, nil) for none — the caller decides how to render each case.
+// A genuine discovery failure propagates as err.
+func resolveSpecFlagAgainstDrafts(cache *phase.Cache, root, specFlag string) (draft *resolve.DraftSpec, ambiguous []resolve.DraftSpec, err error) {
+	drafts, derr := resolve.DiscoverDraftSpecsWithCache(cache, root)
+	if derr != nil {
+		return nil, nil, derr
+	}
+
+	isNumeric := specFlag != "" && !strings.Contains(specFlag, "-")
+	if isNumeric {
+		for _, r := range specFlag {
+			if r < '0' || r > '9' {
+				isNumeric = false
+				break
+			}
+		}
+	}
+
+	var matches []resolve.DraftSpec
+	if isNumeric {
+		padded := fmt.Sprintf("%03s", specFlag)
+		for _, d := range drafts {
+			if len(d.SpecID) >= 3 && d.SpecID[:3] == padded {
+				matches = append(matches, d)
+			}
+		}
+	} else {
+		for _, d := range drafts {
+			if d.SpecID == specFlag {
+				matches = append(matches, d)
+			}
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, nil, nil
+	case 1:
+		return &matches[0], nil, nil
+	default:
+		return nil, matches, nil
+	}
+}
+
+// handleIndeterminate renders the shared indeterminate-mode guidance
+// (spec 128 R2.3): reason names the discovery failure or unresolved
+// ambiguity that prevents deriving a real mode. Never idle — a failure to
+// derive state is never presented as a derived idle state.
+func handleIndeterminate(cache *phase.Cache, root, format string, out io.Writer, reason string) error {
+	ctx := BuildIndeterminateContextWithCache(cache, root, reason)
+
+	if format == "json" {
+		output, err := RenderJSON(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, output)
+		return nil
+	}
+
+	output, err := Render(ctx)
+	if err != nil {
+		return err
+	}
 	fmt.Fprint(out, output)
 	return nil
 }

@@ -91,6 +91,7 @@ func saveAndRestore(t *testing.T) {
 	origFetchBeadByID := fetchBeadByIDFn
 	origFetchBeadAsOf := fetchBeadAsOfFn
 	origMergeMeta := completeMergeMetadataFn
+	origFetchChildren := completeFetchChildrenFn
 	origGetMeta := completeGetMetadataFn
 	origGitEmail := gitUserEmailFn
 	origCheckDirty := checkDirtyTreeFn
@@ -121,6 +122,7 @@ func saveAndRestore(t *testing.T) {
 		fetchBeadByIDFn = origFetchBeadByID
 		fetchBeadAsOfFn = origFetchBeadAsOf
 		completeMergeMetadataFn = origMergeMeta
+		completeFetchChildrenFn = origFetchChildren
 		completeGetMetadataFn = origGetMeta
 		gitUserEmailFn = origGitEmail
 		checkDirtyTreeFn = origCheckDirty
@@ -1156,7 +1158,10 @@ func TestAdvanceState_NextReady(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, nextBead := advanceState("epic-123")
+	mode, nextBead, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode != state.ModeImplement {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeImplement)
 	}
@@ -1184,7 +1189,10 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, nextBead := advanceState("epic-123")
+	mode, nextBead, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode != state.ModePlan {
 		t.Errorf("mode: got %q, want %q", mode, state.ModePlan)
 	}
@@ -1212,7 +1220,10 @@ func TestAdvanceState_AllDone(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, nextBead := advanceState("epic-123")
+	mode, nextBead, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode != state.ModeReview {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeReview)
 	}
@@ -1247,7 +1258,10 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, nextBead := advanceState("epic-123")
+	mode, nextBead, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode != state.ModeImplement {
 		t.Errorf("in_progress bead must hold phase in implement: got %q, want %q (not review)", mode, state.ModeImplement)
 	}
@@ -1282,7 +1296,10 @@ func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, _ := advanceState("epic-123")
+	mode, _, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode == state.ModeReview {
 		t.Errorf("custom-status child must prevent review flip: got %q", mode)
 	}
@@ -1310,7 +1327,10 @@ func TestAdvanceState_UndeclaredCustomStatusIsNotIterated(t *testing.T) {
 	}
 
 	chdirIntoRoot(t, root)
-	mode, _ := advanceState("epic-123")
+	mode, _, err := advanceState("epic-123")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	// Only the `closed` bead is seen → all closed → review.
 	if mode != state.ModeReview {
 		t.Errorf("undeclared custom status must not be iterated: got mode %q, want %q", mode, state.ModeReview)
@@ -1324,7 +1344,10 @@ func TestAdvanceState_NoEpic(t *testing.T) {
 	// Empty epicID (spec→epic resolution found nothing) → idle. Spec 107 wave 1:
 	// advanceState now takes the epicID resolved once by Run; "" short-circuits
 	// to idle without any bd query (ADR-0023: no lifecycle.yaml needed).
-	mode, nextBead := advanceState("")
+	mode, nextBead, err := advanceState("")
+	if err != nil {
+		t.Fatalf("advanceState: %v", err)
+	}
 	if mode != state.ModeIdle {
 		t.Errorf("mode: got %q, want %q", mode, state.ModeIdle)
 	}
