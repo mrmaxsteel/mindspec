@@ -383,21 +383,24 @@ func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
 // this phase leaves tracker and git state byte-identical to the pre-call
 // state (modulo the exempt migration below).
 //
-// Steps 2.5–3 (the optional user CommitAll and the pathspec-scoped
-// artifact-sync commit) are the ARTIFACT-MATERIALIZATION subphase: local,
-// bead-branch-only, never-main commits that materialize the tip the two
-// content gates validate. The never-main property is ENFORCED, not
-// assumed: BOTH legs refuse (guard.NewFailure, `mindspec next` recovery)
-// when no bead worktree matched — neither ever falls back to committing
-// on the root/main checkout (final-review r2 F2).
-// The doc-sync and ADR-divergence gates (step 3.5)
-// deliberately run AFTER that subphase — their base..beadHead range must
-// include the just-committed user work — so a doc/ADR refusal MAY follow
-// those local commits. That is a documented, forward-reconcilable
-// exception, NOT a byte-identical refusal: the worktree and its bead-branch
-// commits are retained, nothing lifecycle-affecting has happened, and a
-// re-run after repair converges (see ADR-0041 §1). The step-3.75 durable-
-// obligation reconciliation is the last such pre-terminal refusal point.
+// Steps 2.5–3.5 (below) are the ARTIFACT-MATERIALIZATION subphase (spec
+// 128 Bead 6, OQ-1(a); ADR-0041 §1 amendment): the doc-sync and
+// ADR-divergence content gates now run over the bead worktree's
+// PROSPECTIVE content — a candidate tree captured via
+// exec.SnapshotWorktreeTree — BEFORE any complete-authored commit
+// exists, and materialization (runMaterialization's commit-tree-built
+// M/S-stage commits) runs ONLY on a full gate pass. The never-main
+// property is ENFORCED, not assumed: runMaterialization refuses
+// (guard.NewFailure, `mindspec next` recovery) when no bead worktree
+// matched — it never falls back to committing on the root/main checkout
+// (final-review r2 F2). Because no complete-authored commit exists
+// before the gates run, a doc/ADR refusal here leaves the worktree and
+// the bead branch's tip exactly as they were BEFORE this invocation
+// (never the "local commits already landed, refusal follows them" shape
+// the pre-bead-6 design carried) — a re-run after repair meets the
+// identical gate (see ADR-0041 §1/§3(i) for the full protocol and its
+// precise refusal guarantee). The step-3.75 durable-obligation
+// reconciliation is the last such pre-terminal refusal point.
 // Together, every refusal above fires BEFORE any LIFECYCLE-AFFECTING
 // mutation (bd close, the bead→spec merge, branch/worktree deletion, or
 // any main-branch commit) — the byte-identical claim, however, is made
@@ -661,9 +664,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if err != nil {
 		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
 		// infra error, not "no worktree" — swallowing it used to leave
-		// wtPath == "" and let the --commit-msg CommitAll below fall back
-		// to the root/main checkout. Propagate as a preflight refusal
-		// (nothing has mutated yet) instead of guessing.
+		// wtPath == "" and let the --commit-msg materialization (the
+		// pre-bead-6 CommitAll; now runMaterialization) fall back to the
+		// root/main checkout. Propagate as a preflight refusal (nothing
+		// has mutated yet) instead of guessing.
 		// R4: beadID is an ID-typed position — idrender.Bead.
 		return nil, fmt.Errorf("listing bead worktrees for %s: %w", safeBeadID, err)
 	}
@@ -759,12 +763,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// 2.25. AUTHORITATIVE panel gate (Spec 099 Bead 2, R1+R2+R5; ADR-0037).
 	// This is the in-binary enforcement point — it runs over the DECLARED
-	// beadID (no shell parsing; ADR-0036) and BEFORE step-2.5 exec.CommitAll,
-	// bd close (step 4), and the bead→spec merge (step 5). The ordering is
-	// load-bearing: CommitAll advances the bead/<id> tip PAST
-	// reviewed_head_sha (false-firing §4 staleness) and clears user dirt
-	// (false-clearing §5), so the gate measures the PRE-CommitAll beadHead
-	// tip. It calls the SAME panel.PanelGateDecision over panel.GateFacts
+	// beadID (no shell parsing; ADR-0036) and BEFORE the artifact-
+	// materialization subphase (steps 2.5–3.5, above; spec 128 Bead 6's
+	// runMaterialization), bd close (step 4), and the bead→spec merge
+	// (step 5). The ordering is load-bearing: materialization advances
+	// the bead/<id> tip PAST reviewed_head_sha (false-firing §4
+	// staleness) and clears user dirt (false-clearing §5), so the gate
+	// measures the PRE-materialization beadHead tip. It calls the SAME
+	// panel.PanelGateDecision over panel.GateFacts
 	// from the SAME panel.ResolveGateFacts the PreToolUse hook uses — the
 	// hook is now a defense-in-depth backstop, and the two cannot disagree.
 	//
@@ -832,8 +838,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// 2.26. Spec 127 R4(a) — the §1-phase work-destruction preflight for
 	// this verb's OWN bead→spec merge (CompleteBead's MergeInto), sited
-	// immediately after the panel gate and BEFORE step 2.5's artifact-
-	// materialization subphase (the CommitAll below) — so a refusal here
+	// immediately after the panel gate and BEFORE the artifact-
+	// materialization subphase (steps 2.5–3.5, below) — so a refusal here
 	// leaves tracker and git state byte-identical to the pre-call state,
 	// same as every other step-1-through-2.25 preflight fact. Skipped
 	// entirely in reconcile mode: there the bead's work already landed

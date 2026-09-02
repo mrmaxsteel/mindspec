@@ -143,12 +143,15 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
      Reconcile mode (the landed-merge path, `beadHead` anchored at the
      already-landed merge commit) is UNCHANGED — it keeps its own
      `M^1..M` measurement over the committed range; no commits are
-     authored on that path, so there is nothing for this protocol to
-     reorder there. Both content gates keep this artifact-only
-     normalization: `CommitPaths` (used only by the reconcile path's
-     pre-existing helpers, not this protocol) stays pathspec-limited, and
-     the artifact remains unmeasured by either gate — only the sync
-     stage's own commit ever touches it.
+     authored on that path at all (reconcile never runs `CommitPaths` or
+     any other commit-producing helper — its gates only ever READ an
+     already-landed range), so there is nothing for this protocol to
+     reorder there. Both content gates keep the artifact
+     (`.beads/issues.jsonl`) unmeasured as either source or documentation
+     in EVERY mode — reconcile's committed-range diff and this
+     protocol's prospective-snapshot diff alike — because it matches
+     neither classifier's path prefixes; only the sync stage's own
+     commit ever touches it.
 
      **Honest scope**: this closes the GATE-REFUSAL class — no
      complete-authored commit can precede a fallible content-gate
@@ -236,13 +239,16 @@ operator's Ctrl-C — between two of its mutations, the recovery contract is:
   no-op; `isAlreadyRemovedErr`/`isAlreadyClosedErr` absorb re-removals and
   re-closes. Each of these is a DELIBERATE idempotency property of the
   underlying operation, not a hope.
-- **`complete`'s commits never target protected `main`.** The artifact-
-  sync leg is pathspec-scoped and refuses rather than commit onto a main
-  checkout (Spec 119 R3/AC-3/AC-4), and the user `--commit-msg` `CommitAll`
-  leg refuses identically when no bead worktree matches (it targets the
-  matched bead worktree ONLY — no root fallback) — a forward-reconcile
-  contract that can commit onto the wrong branch is not actually safe to
-  retry blindly.
+- **`complete`'s commits never target protected `main`.** Spec 128 Bead 6
+  (OQ-1(a)) replaced the pathspec-scoped artifact-sync commit and the
+  user `--commit-msg` `CommitAll` with the prospective-snapshot
+  protocol's commit-tree-built M/S-stage commits (§1, above); the
+  never-main property survives that reorder as an ENFORCED refusal, not
+  an assumption: `runMaterialization` refuses (rather than falling back
+  to the root/main checkout) whenever no bead worktree matches — it
+  targets the matched bead worktree ONLY (Spec 119 R3/AC-3/AC-4) — a
+  forward-reconcile contract that can commit onto the wrong branch is
+  not actually safe to retry blindly.
 - **A failure that cannot forward-reconcile is a refusal, not a silent
   partial state.** Every mutation whose failure cannot be absorbed by a
   bounded re-invocation (a durable-obligation marker write, a post-close

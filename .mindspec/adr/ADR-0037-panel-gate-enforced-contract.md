@@ -348,12 +348,29 @@ class.
 ### 5. Dirty tree: uncommitted user edits block
 
 When a registered panel matches the bead, uncommitted **user-authored**
-changes in the bead worktree block: `mindspec complete` would
-auto-commit them past review (CommitAll runs after the hook fires),
-making a post-approval "tiny touch-up" the cheapest stale-verdict
-bypass. ADR-0025 artifact paths (`.beads/issues.jsonl`) are filtered
-out first — artifact dirt is designed-for and never blocks at
-complete time.
+changes in the bead worktree block: `mindspec complete` would commit
+them past review, making a post-approval "tiny touch-up" the cheapest
+stale-verdict bypass. ADR-0025 artifact paths (`.beads/issues.jsonl`)
+are filtered out first — artifact dirt is designed-for and never blocks
+at complete time.
+
+> **Amendment (2026-09-02, spec 128 — the mechanism this section
+> blocked, renamed):** This section's original text named the specific
+> commit path that would carry an unreviewed touch-up past the gate —
+> `CommitAll`, running "after the hook fires." Spec 128 Bead 6
+> (OQ-1(a); ADR-0041 §1 amendment) retired `CommitAll` (and the
+> pathspec-scoped artifact-sync `CommitPaths`) from this path entirely,
+> replacing both with the prospective-snapshot protocol's commit-tree-
+> built M/S-stage commits (`runMaterialization`). The DECISION this
+> section governs is byte-identical — this gate still blocks on any
+> USER dirt whenever a panel is registered for the bead, per
+> `internal/panel/gate.go`'s dirty-tree clause — only the mechanism
+> that would otherwise carry the touch-up past review changed names.
+> The section text above now says "commit them past review" rather
+> than naming a specific retired command, so it never needs re-dating
+> the next time the underlying commit mechanism's name changes; the
+> refusal string itself (`internal/panel/gate.go`) says "materialize
+> them into a commit past review."
 
 ### 6. Fail-open without a panel, fail-closed with one
 
