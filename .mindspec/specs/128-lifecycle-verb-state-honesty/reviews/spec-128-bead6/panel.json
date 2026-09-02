@@ -1,0 +1,10 @@
+{
+  "bead_id": "mindspec-ta30.6",
+  "spec": "128-lifecycle-verb-state-honesty",
+  "target": "bead/mindspec-ta30.6",
+  "round": 5,
+  "expected_reviewers": 6,
+  "reviewed_head_sha": "44e6cf2fa79b7d3d83cbdf31c5a03fdfe330981a",
+  "approve_threshold": "n-1",
+  "gate": "bead"
+}

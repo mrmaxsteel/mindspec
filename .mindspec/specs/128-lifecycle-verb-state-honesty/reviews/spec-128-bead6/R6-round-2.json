@@ -1,0 +1,83 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R6 claude-sub",
+  "confidence": 0.93,
+  "rationale": "The R6-slot round-1 hard block is cleared on this slot's own re-derivation at ad08acf7, not on the fix report. The center finding (the classifier-to-D-snapshot race) is closed mechanically: the S-stage now classifies the EXACT delta about to be committed (ChangedFilesTree(currentTip, tree2), where tree2 is the very tree MaterializeStageCommit receives) and refuses on any non-artifact path before D is built or the marker published (materialize.go:355-377). Because tree2 is an immutable tree object, nothing that arrives after its snapshot can enter D; anything arriving before it is in the classified delta. I re-ran the decorator repro two ways: leg xxi passes at ad08acf7 (refusal, race file preserved on disk, tip never past C, marker correctly naming C), and in a /tmp copy of the tree with only the exact-delta refusal removed, leg xxi goes red with the run COMPLETING successfully — reproducing R4's round-1 exploit and proving the fixture detects precisely the fixed defect, not a fixture accident. The CAS clear, error propagation, closed discriminator, ADR rewording (with a red-on-revert stale-sentence pin), and commit-msg preservation all verify against the delivered code and their tests, which I ran individually; the full -short suite is 48/48 green in the bead worktree. The G5 adaptation is sound per my own derivation (finding R6r2-G5 below). Remaining observations are nits, not blockers.",
+  "prior_ask_classifications": [
+    {
+      "ask": 1,
+      "round_1_id": "R6-C-WINDOW (+ R6-DEVIATION-B, the same mechanism)",
+      "classification": "ADDRESSED",
+      "evidence": "materialize.go:339-345 (pre-S classification) and 375-377 (the load-bearing exact-delta refusal via nonArtifactPaths on changedFromCurrent, before MaterializeStageCommit at 391 and PublishStageMarker at 395). The refusal inspects the same tree2 the commit is built from, so the race is closed by construction: a mutation before the snapshot lands in the classified delta; one after it cannot be in tree2 and is caught by the (now defensive) sExitContract with the file preserved. Both the normal route and the stageMaterialization resume route converge on this one block. Ran leg xxi at ad08acf7: PASS. Red-on-revert in a scratch copy (removing only the three refusal lines): leg xxi FAILS with 'expected the S-stage snapshot race to REFUSE rather than complete successfully' — the round-1 exploit reproduced, so the fix is load-bearing. This also discharges R6-DEVIATION-B: the unscoped full re-snapshot is now safe because its output is classified, not trusted."
+    },
+    {
+      "ask": 2,
+      "round_1_id": "R6-MARKER-CLEAR-TOCTOU",
+      "classification": "ADDRESSED",
+      "evidence": "gitutil.ClearMaterializationMarker (materialize.go:356-376) now runs `update-ref -d <ref> <expectedOID>` — git's atomic delete-with-old-value form — with idempotent success when the ref is already absent and a named CAS-mismatch error when a different marker is present. All four clear routes pass the observed OID: the discriminator's two foreign-clear branches (complete/materialize.go:140,178), the reconcile orphan clear (complete.go:754), and the terminal clear (complete.go:1165, best-effort by design). TestClearMaterializationMarker_InterleavingCannotDeleteNewerMarker implements exactly my asked interleaving (clear observed X, concurrent invocation publishes Y, stale clear fails and Y survives): PASS, alongside the Idempotent and CASMismatchFails tests."
+    },
+    {
+      "ask": 3,
+      "round_1_id": "R6-S-MARKER-READ-DISCARDED",
+      "classification": "ADDRESSED",
+      "evidence": "The S-stage pre-publish ReadStageMarker error now propagates (materialize.go:378-386) instead of degrading to CREATE semantics; the discriminator's bead-tip RevParseRef (123-130) and oid^ parent resolution (154-161) likewise propagate rather than reclassifying as FOREIGN. Ran the three injection tests (TestRun_SStageMarkerReadErrorAbortsBeforePublish asserting no PublishStageMarker call and no bead close after the injected failure; TestResolveMaterializationDiscriminator_BeadTipReadErrorPropagates and _ParentResolutionErrorPropagates each asserting no marker clear): all PASS."
+    },
+    {
+      "ask": 4,
+      "round_1_id": "R6-UNKNOWN-STAGE",
+      "classification": "ADDRESSED",
+      "evidence": "isKnownStage closes the set over {materialization, artifact-sync} (materialize.go:90-92); the discriminator routes empty/unknown values through the foreign-clear path with a CAS clear against the observed OID (132-144), so nothing outside the closed set can reach the artifact-sync resume branch or skip the panel/content gates. gitutil.ReadStageTrailer reports duplicate Mindspec-Stage trailers as ambiguous/absent (len(found) != 1) rather than picking one. Ran TestResolveMaterializationDiscriminator_UnknownStageClearsAndProceeds, _EmptyStageClearsAndProceeds, TestReadStageTrailer_DuplicateIsAmbiguous, and _MalformedValueIsPresentButNotAKnownStage: all PASS."
+    },
+    {
+      "ask": 5,
+      "round_1_id": "R6-ADR-C-MISMATCH",
+      "classification": "ADDRESSED",
+      "evidence": "ADR-0041 §1 now REPLACES (not appends beside) the old check-after-D-only sentence with a dedicated interval-edit-classification paragraph describing the delivered mechanism — the refusal over ChangedFilesTree(currentTip, T') at the exact tree about to be committed, before MaterializeStageCommit/marker publication, with the post-D S-exit contract explicitly demoted to 'DEFENSIVE only'. §3(i)'s S bullet now reads classify-then-build-D-then-defensive-re-check. TestADR0041G1_DeliveredOrderingClosesRace anchors the new sentences and TestADR0041G1_OldCheckAfterDWordingGone is red-on-revert on the exact stale sentence my round-1 finding quoted: both PASS."
+    },
+    {
+      "ask": 6,
+      "round_1_id": "R6-DEVIATION-A",
+      "classification": "ADDRESSED",
+      "evidence": "The panel's preferred fix was taken: MaterializeStageCommit widened by a subject parameter through the interface, MindspecExecutor, and MockExecutor. materializationSubject (materialize.go:78-83) formats `impl(<bead>): <msg>` — byte-identical to the pre-bead-6 shape at main (complete.go:814 at ae45fd7a) — and the M-stage call site passes it (296); the executor's fixed stage-named subjects are now fallbacks for the empty-subject case only, with the artifact-sync stage keeping its historical 'chore: sync beads artifact'. TestMindspecExecutor_MaterializeStageCommitPreservesCallerSubject pins verbatim survival at the seam: PASS. Nit (non-blocking): no fixture leg asserts the final commit subject end-to-end; the seam pin plus the one-line call-site wiring cover the mechanism."
+    }
+  ],
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6r2-G5",
+      "severity": "NONE",
+      "title": "The G5 adaptation's mutual-exclusivity claim holds at gate-observable state; the leg's substitution is sound",
+      "evidence": "Re-derived independently: an M-stage build requires len(changedFromTip) > 0, i.e. the worktree differs from the tip in non-artifact paths, which `git status --porcelain` necessarily shows and panel/gate.go's userDirtPaths reports as UserDirt (its artifactPaths exemption is the same single-entry '.beads/issues.jsonl' set as complete's materializedArtifactPaths, so the two classifiers cannot diverge today). Clause (7) (gate.go:293) blocks whenever a panel is registered, the worktree resolves, and UserDirt > 0 — so with any state a fixture can stage before Run() starts, M-stage-under-live-panel is unreachable: R2's literal kill point cannot be built deterministically. The only reachable routes are (a) dirt landing in the gate-pass-to-snapshot TOCTOU interval with --commit-msg, and (b) the Req-11 fail-open pass-throughs (worktree absent / porcelain failure) — both PRE-EXISTING postures inherited from the CommitAll era, not widened by bead 6 (the pre-bead-6 CommitAll ran in the same post-gate interval). And Run's resumeStage guard (complete.go:789) is stage-agnostic — a resumed M-stage kill would exercise the identical panel-gate-skip path leg xxii pins via the artifact-sync advance, so the substituted leg asserts the same property. Leg xxii itself PASSES, with the marker/tip agreement and post-convergence clear asserted.",
+      "impact": "No change required. The claimed property is tested; the M-stage kill case adds no distinct resume-side coverage."
+    },
+    {
+      "id": "R6r2-SEAMS",
+      "severity": "NONE",
+      "title": "The two widened seams carry no contract regression",
+      "evidence": "ClearStageMarker(beadID, expectedOID): all four production call sites pass the OID the invocation just observed; expectedOID==\"\" is a documented no-op so no caller can accidentally get unconditional-delete semantics; the terminal clear stays best-effort (a CAS mismatch there warns without failing a successful completion — correct, since it means another invocation owns newer evidence). MaterializeStageCommit(+subject): both production call sites audited (M passes the operator subject, S passes \"\" for the historical fixed subject); the argv-ratchet and inline-allowlist tables were extended for both widenings (update-ref -d gained the CAS operand; materializationSubject's beadID position documented as idvalidate-gated at Run ingress). The full executor package (112s, includes the seam round-trips) and the entire -short suite (48/48 packages) are green in the bead worktree.",
+      "impact": "None."
+    },
+    {
+      "id": "R6r2-G5-DOC-NIT",
+      "severity": "NIT",
+      "title": "The M-stage-kill disposition lives only in leg xxii's comment block",
+      "evidence": "The reasoning for why R2's literal M-stage kill is unbuildable under a live panel (Req-11 mutual exclusivity) and why the artifact-sync substitution asserts the identical property is stated thoroughly in TestBead6Leg_xxii's doc comment, but not in ADR-0041 or the plan text.",
+      "impact": "Discoverability only — a future reader of the ADR alone will not learn the disposition. The test comment is a legitimate home for it; no change required for this bead."
+    },
+    {
+      "id": "R6r2-SUBJECT-E2E-NIT",
+      "severity": "NIT",
+      "title": "No end-to-end fixture asserts the materialization commit's final subject",
+      "evidence": "materializationSubject is exercised indirectly (leg xxi passes commitMsg=\"work\") and the seam preservation test pins the executor half verbatim, but no leg asserts `impl(<bead>): <msg>` on the landed C commit's message.",
+      "impact": "A future regression in the one-line call-site wiring (materialize.go:296) would escape the suite. Cheap to add later; not blocking."
+    },
+    {
+      "id": "R6r2-VERIFICATION",
+      "severity": "NONE",
+      "title": "Verification performed at ad08acf7 in the bead worktree",
+      "evidence": "Worktree confirmed at ad08acf7 with clean porcelain before and after review. Ran: legs xxi/xxii/xxiii + the five fix-round injection/discriminator tests (all PASS, 4.6s); gitutil clear/trailer tests incl. the interleaving test (PASS); the full internal/executor package (PASS, 104s); TestMaterializeStageConstants_MirrorGitutilExactly (PASS); the two TestADR0041G1 pins (PASS); the full `go test ./... -short -count=1` (48/48 ok, exit 0). Red-on-revert of the G1 refusal was performed in a git-archive copy under the session scratchpad — the bead worktree was never edited — and the scratch copy was deleted afterward. The no-short cmd/mindspec run was not repeated this round (the -short cmd/mindspec package is green here and the BRIEF reports the 475.6s no-short run green at this exact commit).",
+      "impact": "The verdict rests on this slot's own execution and re-derivation, per the round-2 duty."
+    }
+  ]
+}

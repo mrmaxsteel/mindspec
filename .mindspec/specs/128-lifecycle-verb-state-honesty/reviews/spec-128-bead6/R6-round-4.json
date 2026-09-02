@@ -1,0 +1,16 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Verified reviewed commit f3488f95cd90526f03334a0734fe1effc8c383d2 in the specified bead worktree. The round-4 diff is prose-only: two ADR Markdown files and comments in internal/complete/complete.go; no executable statement, test, interface, fixture, or generated artifact changed. Spot-checking the load-bearing step-2.25 ordering comment confirms that the stale CommitAll description was replaced with the delivered artifact-materialization/runMaterialization mechanism while preserving the correct reason the panel gate must precede materialization: tip advancement would stale the reviewed SHA and clearing user dirt would invalidate the gate observation. The disclosed additional ADR-0041 reconcile sentence is also a documentation correction consistent with the adjacent statement that reconcile authors no commits. This does not disturb the implementation approved in rounds 2 and 3, so my standing verdict remains APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6R4-PROSE-CONFINEMENT",
+      "severity": "NONE",
+      "title": "Retired-mechanism sweep is confined to accurate prose updates",
+      "evidence": "git show f3488f95 --stat and full diff inspection report exactly three modified files: .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md, .mindspec/adr/ADR-0041-gate-before-mutate.md, and internal/complete/complete.go. The Go-file hunks alter comments only. The step-2.25 comment now names the artifact-materialization subphase/runMaterialization and retains the panel-before-materialization stale-SHA and user-dirt reasoning. The disclosed extra ADR-0041 edit removes an inaccurate CommitPaths-in-reconcile claim and states the classifier-based exclusion actually delivered.",
+      "impact": "No mechanism or behavior changed; the prose now matches the already-approved implementation."
+    }
+  ]
+}

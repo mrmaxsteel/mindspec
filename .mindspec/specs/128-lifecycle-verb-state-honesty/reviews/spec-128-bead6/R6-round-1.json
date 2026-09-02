@@ -1,0 +1,91 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "The prospective gate snapshot and the M-stage CAS materially improve gate-refusal convergence, and the shipped twenty-leg group plus ADR pins pass. However, deviation C does not close the load-bearing interval-edit invariant: after the pre-S classifier returns clean, the implementation takes a full add -A snapshot with no exclusions and commits every changed path in that tree as D. A non-artifact mutation in that exact window is therefore swept into D. The defensive re-check runs only after D publication, bead-ref advance, and reset, so the newly committed path is clean and invisible to it. The twenty legs do not inject this window: viii-a/ix place dirt before the pre-S check or after D. Concurrent same-bead safety also has a recovery-evidence deletion race because marker clear is read-then-unconditional-delete rather than CAS, and the S marker read discards operational errors. These are fixable implementation defects, but the first two violate the protocol's core preservation and write-ahead invariants and warrant a hard block.",
+  "concrete_changes_required": [
+    "Close deviation C's classifier-to-D-snapshot race mechanically. At minimum, inspect ChangedFilesTree(currentTip, tree2) and refuse before building/publishing D if any changed path is outside the named artifact set; alternatively build D from currentTip plus a pathspec-scoped artifact refresh. Add a deterministic fault-injection leg that creates a non-artifact path after the pre-S classifier returns clean but before/during SnapshotWorktreeTree for D, and assert it is named, remains uncommitted/on disk, and no merge/cleanup occurs.",
+    "Make marker clearing compare-and-swap against the OID the invocation observed/owns (including foreign-marker and terminal-clear routes). Add an interleaving test where a clear reads marker X, another invocation replaces/publishes Y, and the stale clear cannot delete Y.",
+    "Propagate ReadStageMarker errors in the S-stage expectedOld lookup instead of treating them as marker absence/CREATE semantics. Add a red-on-revert error-injection test proving no D build/publication/ref advance follows a marker-read failure.",
+    "Validate the Mindspec-Stage value against exactly materialization and artifact-sync before returning a resume stage. Unknown non-empty trailer values must not take the artifact-sync resume branch or bypass panel/content gates; add malformed/foreign marker tests.",
+    "Update ADR-0041 section 3(i) to describe the delivered pre-S classification ordering and the post-snapshot non-artifact exclusion/refusal that actually closes the interval. Its current 'build D, then S-exit dirt contract' wording documents the old vulnerable ordering.",
+    "Preserve the operator-supplied completion message in C's subject/body through the Executor seam, or explicitly revise the CLI/help/recovery contract that currently promises the supplied description drives the auto-commit. Treating it as unused authorization while writing a fixed subject is an observable audit-history regression, not merely cosmetic."
+  ],
+  "findings": [
+    {
+      "id": "R6-C-WINDOW",
+      "severity": "CRITICAL",
+      "deviation": "C",
+      "title": "A mutation after pre-S classification is still silently swept into D",
+      "evidence": "internal/complete/materialize.go:267-320 classifies at lines 276-281, then calls SnapshotWorktreeTree(wtPath, nil) at line 292. That primitive performs add -A over the whole worktree. The resulting tree is accepted solely on len(changedFromCurrent)>0 and committed/published/advanced/reset at lines 300-317. sExitContract runs afterward at line 320; after reset, a path captured in D is clean and cannot be reported at lines 337-342. The comments at lines 289-291 assume no later mutation rather than enforce it. The passing viii-a/ix fixtures inject before the classifier or after D, not between lines 281 and 292.",
+      "impact": "A concurrent editor, watcher, formatter, or process can have non-artifact work committed into the artifact-sync commit without gate measurement or operator intent. This breaks the explicit preserved-or-refused/never-silently-committed invariant and makes deviation B unsafe."
+    },
+    {
+      "id": "R6-MARKER-CLEAR-TOCTOU",
+      "severity": "CRITICAL",
+      "title": "A stale concurrent clear can delete another invocation's write-ahead evidence",
+      "evidence": "internal/gitutil/materialize.go:333-345 first reads the marker, then executes update-ref -d without an expected-old operand. If marker X is replaced by Y between the read and delete, the stale clear deletes Y. Leg xiv covers competing CREATE publication only; it does not interleave clear with publication/replacement.",
+      "impact": "A concurrent complete can lose the marker after another invocation advances the bead ref. A kill in that state re-enters without the evidence the discriminator relies on, violating the write-ahead recovery guarantee."
+    },
+    {
+      "id": "R6-S-MARKER-READ-DISCARDED",
+      "severity": "MAJOR",
+      "title": "S-stage fabricates marker absence on an operational read failure",
+      "evidence": "internal/complete/materialize.go:301-304 only uses the marker result when merr == nil; every non-nil error falls through with expectedOld empty and attempts CREATE publication. This contradicts the binding error-discarding fence that every read propagates and no absence/default is fabricated.",
+      "impact": "Infrastructure/ref/trailer read failures are converted into a different mutation attempt and refusal shape, obscuring the true fault and potentially publishing from facts the invocation failed to establish."
+    },
+    {
+      "id": "R6-UNKNOWN-STAGE",
+      "severity": "MAJOR",
+      "title": "Unknown non-empty stage trailers are treated as completed artifact-sync resumes",
+      "evidence": "resolveMaterializationDiscriminator returns any non-empty stage when tip == marker (materialize.go:82-95). runMaterialization handles materialization explicitly and sends every other value through its artifact-sync else branch (lines 250-264), skipping panel and content gates. ReadStageTrailer validates only the key prefix, not the value.",
+      "impact": "A malformed, cross-wired, or foreign marker commit with an unknown Mindspec-Stage value can enter the most advanced resume route instead of failing closed."
+    },
+    {
+      "id": "R6-DEVIATION-A",
+      "severity": "MAJOR",
+      "deviation": "A",
+      "title": "The supplied completion message is silently discarded",
+      "evidence": "cmd/mindspec/complete.go advertises complete <bead-id> [commit message...] and says the message auto-commits changes. internal/executor/mindspec_executor.go:1470-1484 always chooses a fixed stage subject, while commitMsg is used only as a boolean permission for dirty work in internal/complete/materialize.go.",
+      "impact": "User-authored audit context disappears from Git history even though the CLI still solicits and describes it as the commit message. The stage trailer can remain machine-owned while the operator description is preserved in the subject/body."
+    },
+    {
+      "id": "R6-DEVIATION-B",
+      "severity": "CRITICAL",
+      "deviation": "B",
+      "title": "Full D re-snapshot is unsafe under the delivered C coupling",
+      "evidence": "SnapshotWorktreeTree(wtPath, nil) is intentionally unscoped. Its safety depends on the assertion that the earlier classifier proved only artifact content can differ, but that fact is stale immediately after the classifier returns and no changed-path allowlist is enforced on tree2.",
+      "impact": "Deviation B amplifies the C race from ordinary residual dirt into silently committed user content."
+    },
+    {
+      "id": "R6-ADR-C-MISMATCH",
+      "severity": "MAJOR",
+      "deviation": "C",
+      "title": "ADR-0041 does not describe deviation C's delivered ordering",
+      "evidence": "ADR-0041 section 1 says S builds D 'with a final S-exit dirt re-classification'; section 3(i) says S is 'build commit D ... then the S-exit dirt contract.' Neither states that the primary classifier runs before D's snapshot, and neither addresses the still-open classifier-to-snapshot race.",
+      "impact": "The architectural record documents the ordering that the deviation says was unsafe, while omitting the actual pre-S mechanism and its required atomicity/allowlist condition."
+    },
+    {
+      "id": "R6-MARKER-ISOLATION",
+      "severity": "NONE",
+      "title": "Normal marker lookup is isolated per bead",
+      "evidence": "MaterializationMarkerRef(beadID) composes refs/mindspec/materialized/<bead-id>, and all executor read/publish/clear calls pass the current bead ID. Bead A's correctly named marker is not consulted by bead B's normal run.",
+      "impact": "No ordinary cross-bead leakage found; malformed/cross-wired marker values still need the stage validation above."
+    },
+    {
+      "id": "R6-NO-WORKTREE-GATES",
+      "severity": "NONE",
+      "title": "No-bead-worktree fallback preserves committed gate semantics",
+      "evidence": "complete.go routes reconcile or wtPath==empty through runCommittedRangeGate(base, beadHead, ownerRef=beadHead), which is equivalent to snapshot T==beadHead for committed content. runMaterialization then refuses root user/artifact dirt or a requested auto-commit rather than attributing root content to the bead; a clean no-op proceeds.",
+      "impact": "No gate-equivalence defect found in this fallback path."
+    },
+    {
+      "id": "R6-VERIFICATION",
+      "severity": "NONE",
+      "title": "Shipped suites pass but do not cover the blocking interleavings",
+      "evidence": "At 482bcd2f: go build ./... and go test ./... -short -count=1 exited 0. The targeted TestBead6Leg_ group passed all named legs, and the ADR0041 cmd tests passed. The tests confirm the intended nominal and listed kill paths, but not classifier-to-snapshot mutation, clear-vs-publish, or marker-read-error boundaries.",
+      "impact": "The verdict is based on uncovered boundary behavior visible in production control flow, not a general suite failure."
+    }
+  ]
+}
