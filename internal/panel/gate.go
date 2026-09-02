@@ -180,7 +180,7 @@ type GateFacts struct {
 //	(5) missing ref   → Allow + Warn  (rerun-after-merge)
 //	(5b) transient gitErr → Allow + Warn  (honest, NOT "merge landed")
 //	(6) stale SHA     → Block  (the lola-f4a8 pin)
-//	(7) dirty tree    → Block  (CommitAll bypass; skipped when worktree absent)
+//	(7) dirty tree    → Block  (materialize-past-review bypass; skipped when worktree absent)
 //	(8) incomplete    → Block  (verdicts < expected_reviewers)
 //	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
 //	(9.5) unresolved  → Block  (unresolved REQUEST_CHANGES / unrecognized

@@ -1616,37 +1616,6 @@ func joinResultErrorMessages(r *validate.Result) string {
 	return strings.Join(msgs, "; ")
 }
 
-// residualDirtyPaths parses `git status --porcelain` output (as returned by
-// exec.Status) and returns any path NOT in known — the Spec 119 R3 (Bead 1
-// Step 3) warning signal for a file that became dirty AFTER the
-// artifact-dirt scan (a hook, a race) and was therefore excluded from the
-// pathspec-scoped tracker commit (the `never an add -A equivalent`
-// guarantee). known is the exact artifactDirt pathspec just committed.
-func residualDirtyPaths(porcelain string, known []string) []string {
-	knownSet := make(map[string]bool, len(known))
-	for _, k := range known {
-		knownSet[k] = true
-	}
-	var extra []string
-	for _, line := range strings.Split(porcelain, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		p := strings.TrimSpace(line[3:])
-		if idx := strings.Index(p, " -> "); idx >= 0 {
-			// Rename entry ("XY orig -> new"); the new path is what
-			// matters for classification.
-			p = p[idx+4:]
-		}
-		if p == "" || knownSet[p] {
-			continue
-		}
-		extra = append(extra, p)
-	}
-	return extra
-}
-
 // resolveBeadWorktree pins the bead's worktree path and the ref the
 // per-bead gates (step 3.5) measure against (beadHead) from the bd
 // worktree list: the matched worktree's actual branch when one exists,
