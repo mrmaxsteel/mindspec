@@ -837,7 +837,19 @@ func TestVerbOutput_Next(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next: %v\noutput:\n%s", err, out)
 	}
-	resultBeforeGuidance(t, "next", out, "Claiming", mindspecGuidanceMarkers...)
+	// Round-2 panel G2: next's success-path guidance is the bead-context
+	// prompt (contextpack.RenderBeadContext), NOT the instruct tail —
+	// none of mindspecGuidanceMarkers occurs in it, so passing only
+	// those markers made resultBeforeGuidance degrade to a vacuous
+	// presence check (no marker found at all -> the loop never fires ->
+	// the assertion trivially "passes" regardless of true ordering).
+	// The bead-context headings are the REAL markers this fixture's
+	// captured output actually contains (verified against the real
+	// wiring); mindspecGuidanceMarkers ride along too so the assertion
+	// stays meaningful even if a future fixture change makes
+	// RenderBeadContext fail and next.go fall back to emitInstruct.
+	nextGuidanceMarkers := append([]string{"# Bead Context:", "## Work Chunk", "**When done**"}, mindspecGuidanceMarkers...)
+	resultBeforeGuidance(t, "next", out, "Claiming", nextGuidanceMarkers...)
 	if !strings.Contains(out, "State updated: mode=implement") {
 		t.Errorf("expected the claimed task-typed bead to resolve mode=implement, got:\n%s", out)
 	}

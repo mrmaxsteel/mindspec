@@ -206,6 +206,29 @@ func ReadState() *HookState {
 		return nil
 	}
 
+	// Spec 128 bead 5 round-2 panel G1 (hard block): a genuinely
+	// uninitialized workspace (no .beads/ directory at all) must still
+	// read as "no state" here — runPreCommit's own `st == nil` check
+	// documents exactly this contract ("mindspec not initialized,
+	// allow"). Before this bead, that fell out as a side effect of
+	// phase.ResolveContext's WorktreeMain arm leaving Phase empty on a
+	// bd-outage/no-.beads error; bead 5's honest-idle fix (derive.go's
+	// BeadsDirMissing-aware arm) now correctly derives ModeIdle for that
+	// same case instead — a real, intentional improvement for instruct/
+	// state-show honesty, but it silently changed this nil-sentinel's
+	// input from "" to "idle", flipping the pre-commit hook from allow
+	// to block for every bootstrap-time commit on a protected branch
+	// before `bd init` has run. Checked explicitly, on-disk, before ever
+	// resolving phase context — matching bead.Preflight's own
+	// convention (never by matching bd's error TEXT) — so a genuinely
+	// idle (bd-initialized, no active spec) workspace on main still
+	// blocks exactly as designed ("Block: commits on protected branches
+	// in ANY mode (including idle)" below), while an uninitialized one
+	// still doesn't.
+	if phase.BeadsDirMissing(root) {
+		return nil
+	}
+
 	hs := &HookState{}
 
 	ctx, ctxErr := phase.ResolveContext(root)
