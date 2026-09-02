@@ -231,9 +231,28 @@ func ReadState() *HookState {
 
 	hs := &HookState{}
 
+	// Spec 128 bead 5 round-3 panel G1 (hard block — the mirror case of
+	// round-2's fix): once .beads/ exists, a genuine bd/Dolt derivation
+	// failure must NEVER read as "no state" below — that would let a
+	// protected-branch commit slip through during an outage, exactly
+	// the branch-protection bypass BeadsDirMissing's own narrow,
+	// explicit check above exists to avoid confusing with this
+	// DIFFERENT (post-initialization) case. Only WorktreeMain's error
+	// arm reaches here with an otherwise-empty ctx.Phase —
+	// WorktreeSpec/WorktreeBead's DerivationFailed arms both keep their
+	// non-empty ModeSpec/ModeImplement backfill from round-1's fix — so
+	// this sets the honest indeterminate sentinel rather than leaving
+	// Mode empty and falling through to the uninitialized-workspace nil
+	// path below.
+	derivationFailed := false
 	ctx, ctxErr := phase.ResolveContext(root)
 	if ctxErr == nil && ctx != nil {
-		hs.Mode = ctx.Phase
+		if ctx.DerivationFailed {
+			derivationFailed = true
+			hs.Mode = state.ModeIndeterminate
+		} else {
+			hs.Mode = ctx.Phase
+		}
 		hs.ActiveSpec = ctx.SpecID
 		cfg, cfgErr := config.Load(root)
 		if cfgErr != nil {
@@ -262,7 +281,15 @@ func ReadState() *HookState {
 		hs.BeadClaimedAt = sess.BeadClaimedAt
 	}
 
-	if hs.Mode == "" && hs.SessionStartedAt == "" {
+	// The narrowed nil contract (round-3 panel G1): "no state" is
+	// reachable ONLY via the two genuinely-pre-initialization checks
+	// above (no local root found; .beads/ absent) — never here. A
+	// derivation failure already guarantees hs.Mode is non-empty
+	// (ModeIndeterminate, set above), so !derivationFailed is
+	// belt-and-suspenders self-documentation, not load-bearing: it
+	// makes the invariant explicit rather than relying on that
+	// non-emptiness holding by construction.
+	if hs.Mode == "" && hs.SessionStartedAt == "" && !derivationFailed {
 		return nil
 	}
 

@@ -16,6 +16,7 @@ package hook
 // each test chdirs the whole process for its duration.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,5 +85,89 @@ func TestReadState_BeadsDirPresent_HealthyIdle_ReturnsNonNilIdle(t *testing.T) {
 	}
 	if got.Mode != state.ModeIdle {
 		t.Errorf("Mode = %q, want %q", got.Mode, state.ModeIdle)
+	}
+}
+
+// TestReadState_BeadsDirPresent_DerivationFailure_ReturnsNonNil is
+// round-3 panel G1 (hard block — the MIRROR case of round-2's fix,
+// reproduced and bisected against 3f35e4e3): once .beads/ exists, a
+// genuine bd/Dolt derivation failure (phase.Context.DerivationFailed)
+// must NEVER read as "no state" — the old unconditional
+// `hs.Mode == "" && hs.SessionStartedAt == ""` check fired for this case
+// too (WorktreeMain's error arm leaves ctx.Phase empty), letting
+// runPreCommit treat a genuine outage as "not initialized, allow" — a
+// protected-branch commit could slip through during exactly the failure
+// this hook exists to guard against. No session file exists in this
+// fixture either, so the OLD code's fallthrough condition was fully
+// satisfied before this fix.
+func TestReadState_BeadsDirPresent_DerivationFailure_ReturnsNonNil(t *testing.T) {
+	root := t.TempDir()
+	chdirForReadState(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	wantErr := errors.New("bd: dolt daemon unreachable")
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return nil, wantErr
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}))
+
+	got := ReadState()
+	if got == nil {
+		t.Fatal("ReadState() on a .beads-present workspace with a genuine derivation failure = nil, want non-nil (a branch-protection bypass: runPreCommit would allow the commit)")
+	}
+	if got.Mode != state.ModeIndeterminate {
+		t.Errorf("Mode = %q, want %q (the honest indeterminate sentinel, never idle or empty)", got.Mode, state.ModeIndeterminate)
+	}
+}
+
+// TestPreCommit_BeadsDirPresent_DerivationFailure_BlocksOnProtectedBranch
+// drives the REAL Run("pre-commit", ..., ReadState, true) — production
+// wiring end to end, not an injected staticState — on a real git repo,
+// protected branch, with .beads/ present and bd genuinely failing:
+// asserts Block. This is round-3 panel G1's second ask: the direct
+// ReadState unit test above proves the return value; this proves the
+// hook DECISION built on it.
+func TestPreCommit_BeadsDirPresent_DerivationFailure_BlocksOnProtectedBranch(t *testing.T) {
+	root := t.TempDir()
+	mustGitInit(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	mindspecDir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(mindspecDir, 0o755); err != nil {
+		t.Fatalf("mkdir .mindspec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(`
+protected_branches: [main]
+enforcement:
+  pre_commit_hook: true
+`), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir %s: %v", root, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	wantErr := errors.New("bd: dolt daemon unreachable")
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return nil, wantErr
+	}))
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}))
+
+	r := Run("pre-commit", &Input{}, ReadState, true)
+	if r.Action != Block {
+		t.Errorf("expected Block for a protected-branch commit during a genuine bd outage on an initialized workspace, got %v (message: %q)", r.Action, r.Message)
 	}
 }
