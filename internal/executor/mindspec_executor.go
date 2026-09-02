@@ -1453,6 +1453,78 @@ func (g *MindspecExecutor) RemoteTrackingRefs(workdir string) ([]string, error) 
 	return gitutil.RemoteTrackingRefs(workdir)
 }
 
+// --- prospective-snapshot / write-ahead materialization (spec 128 Bead 6) --
+
+// SnapshotWorktreeTree builds the candidate tree T for wtPath. Thin
+// pass-through to gitutil.
+func (g *MindspecExecutor) SnapshotWorktreeTree(wtPath string, exclude []string) (string, error) {
+	return gitutil.SnapshotWorktreeTree(wtPath, exclude)
+}
+
+// ChangedFilesTree diffs base against treeOID, `-C workdir`. Thin
+// pass-through to gitutil.
+func (g *MindspecExecutor) ChangedFilesTree(workdir, base, treeOID string) ([]string, error) {
+	return gitutil.ChangedFilesTree(workdir, base, treeOID)
+}
+
+// stageCommitSubject picks the write-ahead stage commit's human-readable
+// subject. Spec 128 Bead 6: the Executor seam's MaterializeStageCommit
+// signature (wtPath, tree, parent, stage) has no message parameter — the
+// per-run operator `--commit-msg` text this replaces (the old
+// `impl(<bead>): <msg>` CommitAll subject) is no longer carried into the
+// commit-tree-built materialization commit; see this bead's Deviations
+// note. The artifact-sync stage keeps the exact subject the porcelain
+// `chore: sync beads artifact` CommitPaths call used, for continuity.
+func stageCommitSubject(stage string) string {
+	switch stage {
+	case gitutil.StageArtifactSync:
+		return "chore: sync beads artifact"
+	default:
+		return "mindspec: materialize bead completion"
+	}
+}
+
+// MaterializeStageCommit builds a write-ahead stage commit. Thin
+// pass-through to gitutil, with the subject chosen internally (see
+// stageCommitSubject) so the Executor seam's frozen 4-argument signature
+// carries no message parameter.
+func (g *MindspecExecutor) MaterializeStageCommit(wtPath, tree, parent, stage string) (string, error) {
+	return gitutil.MaterializeStageCommit(wtPath, tree, parent, stage, stageCommitSubject(stage))
+}
+
+// PublishStageMarker publishes beadID's write-ahead marker. Thin
+// pass-through to gitutil, rooted at g.Root: marker refs live in the
+// shared object database and are visible from every worktree of this
+// repository, so no wtPath is needed.
+func (g *MindspecExecutor) PublishStageMarker(beadID, oid, expectedOld string) error {
+	return gitutil.PublishMaterializationMarker(g.Root, beadID, oid, expectedOld)
+}
+
+// ReadStageMarker resolves beadID's write-ahead marker and its stage
+// trailer. Thin pass-through to gitutil, rooted at g.Root.
+func (g *MindspecExecutor) ReadStageMarker(beadID string) (oid, stage string, present bool, err error) {
+	return gitutil.ReadMaterializationMarker(g.Root, beadID)
+}
+
+// ClearStageMarker deletes beadID's write-ahead marker. Thin pass-through
+// to gitutil, rooted at g.Root.
+func (g *MindspecExecutor) ClearStageMarker(beadID string) error {
+	return gitutil.ClearMaterializationMarker(g.Root, beadID)
+}
+
+// AdvanceBranchExpectedOld moves refs/heads/<branch> via compare-and-swap.
+// Thin pass-through to gitutil, rooted at g.Root: branch refs, like marker
+// refs, are shared across every worktree of this repository.
+func (g *MindspecExecutor) AdvanceBranchExpectedOld(branch, newSHA, expectedOld string) error {
+	return gitutil.AdvanceBranchExpectedOld(g.Root, branch, newSHA, expectedOld)
+}
+
+// ResetIndexToHead runs the index-only mixed reset in wtPath. Thin
+// pass-through to gitutil.
+func (g *MindspecExecutor) ResetIndexToHead(wtPath string) error {
+	return gitutil.ResetIndexOnlyMixed(wtPath)
+}
+
 // commitWithExport runs the pre-stage beads export, then delegates to the
 // underlying commit. Used by every executor path that ends in `git commit`
 // so every mindspec-driven commit carries current beads state.

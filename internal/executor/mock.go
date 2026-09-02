@@ -82,6 +82,31 @@ type MockExecutor struct {
 	RemoteTrackingRefsFn     func(workdir string) ([]string, error)
 	RemoteTrackingRefsResult []string
 	RemoteTrackingRefsErr    error
+
+	// Prospective-snapshot / write-ahead materialization seams (spec 128
+	// Bead 6). The *Fn hooks, when non-nil, fully drive the corresponding
+	// method; otherwise the simple result/err fields are returned. Every
+	// field defaults to its Go zero value, which drives the "nothing to
+	// materialize" (both stages elide) path for any test that never
+	// configures these.
+	SnapshotWorktreeTreeFn       func(wtPath string, exclude []string) (string, error)
+	SnapshotWorktreeTreeResult   string
+	SnapshotWorktreeTreeErr      error
+	ChangedFilesTreeFn           func(workdir, base, treeOID string) ([]string, error)
+	ChangedFilesTreeResult       []string
+	ChangedFilesTreeErr          error
+	MaterializeStageCommitFn     func(wtPath, tree, parent, stage string) (string, error)
+	MaterializeStageCommitResult string
+	MaterializeStageCommitErr    error
+	PublishStageMarkerFn         func(beadID, oid, expectedOld string) error
+	PublishStageMarkerErr        error
+	ReadStageMarkerFn            func(beadID string) (string, string, bool, error)
+	ClearStageMarkerFn           func(beadID string) error
+	ClearStageMarkerErr          error
+	AdvanceBranchExpectedOldFn   func(branch, newSHA, expectedOld string) error
+	AdvanceBranchExpectedOldErr  error
+	ResetIndexToHeadFn           func(wtPath string) error
+	ResetIndexToHeadErr          error
 }
 
 // MockCall records a single method invocation.
@@ -271,6 +296,85 @@ func (m *MockExecutor) RemoteTrackingRefs(workdir string) ([]string, error) {
 		return m.RemoteTrackingRefsFn(workdir)
 	}
 	return m.RemoteTrackingRefsResult, m.RemoteTrackingRefsErr
+}
+
+// --- prospective-snapshot / write-ahead materialization (spec 128 Bead 6) --
+
+func (m *MockExecutor) SnapshotWorktreeTree(wtPath string, exclude []string) (string, error) {
+	m.record("SnapshotWorktreeTree", wtPath, exclude)
+	if m.SnapshotWorktreeTreeFn != nil {
+		return m.SnapshotWorktreeTreeFn(wtPath, exclude)
+	}
+	return m.SnapshotWorktreeTreeResult, m.SnapshotWorktreeTreeErr
+}
+
+// ChangedFilesTree records its own call, then dispatches: an explicit
+// ChangedFilesTreeFn always wins; an explicitly-configured (non-nil, even
+// if empty) ChangedFilesTreeResult or a non-nil ChangedFilesTreeErr wins
+// next; otherwise it DELEGATES to ChangedFiles(base, treeOID) — reusing
+// whatever ChangedFilesResult/ChangedFilesFn a test already configured.
+// This default keeps every PRE-bead-6 test that drives the per-bead
+// content gates via ChangedFilesResult/ChangedFilesFn working unchanged
+// after those gates moved onto the tree-vs-tree leg (spec 128 bead 6) —
+// only a test that cares about tree-vs-tree-specific behavior need
+// configure the ChangedFilesTree* fields at all.
+func (m *MockExecutor) ChangedFilesTree(workdir, base, treeOID string) ([]string, error) {
+	m.record("ChangedFilesTree", workdir, base, treeOID)
+	if m.ChangedFilesTreeFn != nil {
+		return m.ChangedFilesTreeFn(workdir, base, treeOID)
+	}
+	if m.ChangedFilesTreeResult != nil || m.ChangedFilesTreeErr != nil {
+		return m.ChangedFilesTreeResult, m.ChangedFilesTreeErr
+	}
+	return m.ChangedFiles(base, treeOID)
+}
+
+func (m *MockExecutor) MaterializeStageCommit(wtPath, tree, parent, stage string) (string, error) {
+	m.record("MaterializeStageCommit", wtPath, tree, parent, stage)
+	if m.MaterializeStageCommitFn != nil {
+		return m.MaterializeStageCommitFn(wtPath, tree, parent, stage)
+	}
+	return m.MaterializeStageCommitResult, m.MaterializeStageCommitErr
+}
+
+func (m *MockExecutor) PublishStageMarker(beadID, oid, expectedOld string) error {
+	m.record("PublishStageMarker", beadID, oid, expectedOld)
+	if m.PublishStageMarkerFn != nil {
+		return m.PublishStageMarkerFn(beadID, oid, expectedOld)
+	}
+	return m.PublishStageMarkerErr
+}
+
+func (m *MockExecutor) ReadStageMarker(beadID string) (string, string, bool, error) {
+	m.record("ReadStageMarker", beadID)
+	if m.ReadStageMarkerFn != nil {
+		return m.ReadStageMarkerFn(beadID)
+	}
+	return "", "", false, nil
+}
+
+func (m *MockExecutor) ClearStageMarker(beadID string) error {
+	m.record("ClearStageMarker", beadID)
+	if m.ClearStageMarkerFn != nil {
+		return m.ClearStageMarkerFn(beadID)
+	}
+	return m.ClearStageMarkerErr
+}
+
+func (m *MockExecutor) AdvanceBranchExpectedOld(branch, newSHA, expectedOld string) error {
+	m.record("AdvanceBranchExpectedOld", branch, newSHA, expectedOld)
+	if m.AdvanceBranchExpectedOldFn != nil {
+		return m.AdvanceBranchExpectedOldFn(branch, newSHA, expectedOld)
+	}
+	return m.AdvanceBranchExpectedOldErr
+}
+
+func (m *MockExecutor) ResetIndexToHead(wtPath string) error {
+	m.record("ResetIndexToHead", wtPath)
+	if m.ResetIndexToHeadFn != nil {
+		return m.ResetIndexToHeadFn(wtPath)
+	}
+	return m.ResetIndexToHeadErr
 }
 
 // Compile-time interface check.

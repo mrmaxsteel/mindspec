@@ -194,6 +194,12 @@ internal/complete/complete.go	adrDivergenceFailure	arg2:unprovable
 internal/complete/complete.go	adrDivergenceFailure	arg3:unprovable
 internal/complete/complete.go	attestedRestoreFailure	arg1:unprovable
 internal/complete/complete.go	attestedRestoreFailure	arg2:unprovable
+internal/complete/materialize.go	resolveMaterializationDiscriminator	arg1:unprovable
+internal/complete/materialize.go	runMaterialization	arg1:unprovable
+internal/complete/materialize.go	sExitGenuineDirtRefusal	arg1:unprovable
+internal/complete/materialize.go	userDirtRefusal	arg1:unprovable
+internal/complete/materialize.go	materializationRaceRefusal	arg1:unprovable
+internal/complete/materialize.go	materializationResetRefusal	arg1:unprovable
 internal/complete/panel_advisory.go	panelGate	arg1:unprovable
 internal/complete/panel_advisory.go	reconcilePendingRefutations	arg1:unprovable
 internal/executor/layout_guard.go	mergeLayoutRegressionFailure	arg1:unprovable

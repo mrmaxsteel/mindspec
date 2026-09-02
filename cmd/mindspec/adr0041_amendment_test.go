@@ -146,3 +146,89 @@ func TestADR0041FourthVerbClause_CitedAtGateCallSite(t *testing.T) {
 		t.Error("cmd/mindspec/next.go's gate call site does not cite the \"preflight-leg-only addition\" clause")
 	}
 }
+
+// --- Spec 128 Bead 6 (OQ-1(a)): the prospective-snapshot §1 REVERSAL --------
+//
+// ADR-0041 §1's "Artifact materialization" bullet is REPLACED, not
+// appended to: the ORIGINAL text asserted the gates validate the
+// committed tip AFTER the materialization commits ("deliberately
+// validate the resulting committed bead tip after this subphase"). Spec
+// 128 Bead 6 reverses this — gates now run BEFORE any complete-authored
+// commit, over a prospective snapshot. These tests pin BOTH halves of a
+// genuine reversal: the new mechanism's own anchors are present, AND the
+// old mechanism's defining sentence is GONE (red-on-revert against a
+// future edit that merely appends new prose beside the stale claim
+// rather than replacing it).
+
+// TestADR0041OQ1a_ProspectiveSnapshotAnchorsPresent pins the new
+// mechanism's discriminating vocabulary: the tip-seeded snapshot, the
+// tree-capable gate leg, and the "committed tree ≡ measured tree by
+// construction" claim.
+func TestADR0041OQ1a_ProspectiveSnapshotAnchorsPresent(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	for _, want := range []string{
+		"prospective-snapshot protocol",
+		"SnapshotWorktreeTree",
+		"seeded from the worktree's own HEAD tip FIRST",
+		"ChangedFilesTree",
+		"GATE-REFUSAL class",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("ADR-0041's OQ-1(a) amendment is missing anchor %q", want)
+		}
+	}
+}
+
+// TestADR0041OQ1a_OldGatesAfterCommitClaimGone is the reversal's
+// red-on-revert half: the ORIGINAL §1 sentence asserting the gates
+// validate the committed tip AFTER the materialization commits must be
+// GONE from the shipped ADR — its presence would mean the amendment
+// merely appended new prose beside a claim it was supposed to replace.
+func TestADR0041OQ1a_OldGatesAfterCommitClaimGone(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	for _, stale := range []string{
+		"deliberately validate the resulting committed bead tip",
+		"a doc/ADR refusal MAY land after those local commits",
+	} {
+		if strings.Contains(text, stale) {
+			t.Errorf("ADR-0041 still carries the pre-bead-6 gates-after-commit claim %q — the OQ-1(a) reversal must REPLACE this text, not merely append beside it", stale)
+		}
+	}
+}
+
+// TestADR0041OQ1a_WriteAheadMarkerInvariant pins §3(i)'s staged-boundary
+// classification: the M/R/S/G/T names, the write-ahead marker's per-ref
+// CAS publication, the pinned Mindspec-Stage trailer, and the
+// AT-LEAST-ONCE (never exactly-once) execution contract.
+func TestADR0041OQ1a_WriteAheadMarkerInvariant(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	for _, want := range []string{
+		"staged-boundary classification",
+		"write-ahead marker invariant",
+		"compare-and-swap",
+		"Mindspec-Stage",
+		"re-entry discriminator",
+		"AT-LEAST-ONCE with per-operation idempotent replay",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("ADR-0041's §3(i) staged-boundary section is missing anchor %q", want)
+		}
+	}
+}
+
+// TestADR0041OQ1a_HonestScopeStated pins the honest-scope carve-out: a
+// POST-gate failure (a merge conflict, a bd-close failure) still occurs
+// after the materialization commits, exactly as before this bead — the
+// amendment must state this residual rather than overclaiming
+// byte-identical safety for every failure mode.
+func TestADR0041OQ1a_HonestScopeStated(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	for _, want := range []string{
+		"Honest scope",
+		"POST-gate failure",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("ADR-0041's OQ-1(a) amendment is missing the honest-scope anchor %q", want)
+		}
+	}
+}

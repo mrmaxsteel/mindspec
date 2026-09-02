@@ -71,13 +71,38 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 // preserves the on-disk working-tree read (the `mindspec validate docs`
 // CLI). source_globs is deliberately NOT ref-anchored — see sourceGlobs.
 func ValidateDocsRange(root, base, head, ownerRef string, exec executor.Executor) *Result {
+	return validateDocsRange(root, base, head, ownerRef, exec, "")
+}
+
+// ValidateDocsSnapshot is bead 6's prospective-snapshot leg (spec 128,
+// OQ-1(a)): base is the same merge-base the committed-range gate uses;
+// treeOID is a candidate tree T (from gitutil.SnapshotWorktreeTree, via
+// the executor's SnapshotWorktreeTree seam) rather than a committed ref;
+// wtPath is the bead worktree the tree-vs-tree diff (ChangedFilesTree)
+// runs in — never a hardcoded root, never the caller's cwd. The OWNERSHIP
+// attribution input (manifests + domain enumeration) is read from treeOID
+// too (git accepts a bare tree OID anywhere a ref is accepted), so
+// attribution and diffed content come from the identical candidate the
+// eventual commit will contain. Reconcile mode and the impl-approve
+// whole-branch backstop keep calling ValidateDocsRange unchanged — this
+// leg is for the per-bead gate's normal (non-reconcile) path only.
+func ValidateDocsSnapshot(root, base, treeOID, wtPath string, exec executor.Executor) *Result {
+	return validateDocsRange(root, base, treeOID, treeOID, exec, wtPath)
+}
+
+// validateDocsRange is the shared implementation behind ValidateDocsRange
+// and ValidateDocsSnapshot. snapshotWorktree == "" selects the legacy
+// committed-range diff (exec.ChangedFiles); a non-empty value selects the
+// tree-vs-tree diff (exec.ChangedFilesTree(snapshotWorktree, base, head))
+// — head is then a tree OID, not a ref.
+func validateDocsRange(root, base, head, ownerRef string, exec executor.Executor, snapshotWorktree string) *Result {
 	r := &Result{SubCommand: "docs"}
 
-	if base == "" {
+	if base == "" && snapshotWorktree == "" {
 		base = "HEAD~1"
 	}
 
-	changed, err := getChangedFiles(exec, base, head)
+	changed, err := getChangedFiles(exec, base, head, snapshotWorktree)
 	if err != nil {
 		r.AddError("git-diff", fmt.Sprintf("cannot get changed files: %v", err))
 		return r
@@ -285,9 +310,19 @@ func checkUnclaimedSource(r *Result, exec executor.Executor, root, ownerRef stri
 
 // getChangedFiles returns the list of changed files for the requested
 // range, routing through the Executor boundary instead of shelling out.
-// head == "" means "working tree vs base" (the executor's empty-base
-// idiom); a non-empty head means the committed range base..head.
-func getChangedFiles(exec executor.Executor, base, head string) ([]string, error) {
+// snapshotWorktree != "" selects bead 6's tree-vs-tree leg
+// (exec.ChangedFilesTree(snapshotWorktree, base, head), head being a tree
+// OID); otherwise head == "" means "working tree vs base" (the executor's
+// empty-base idiom) and a non-empty head means the committed range
+// base..head.
+func getChangedFiles(exec executor.Executor, base, head, snapshotWorktree string) ([]string, error) {
+	if snapshotWorktree != "" {
+		files, err := exec.ChangedFilesTree(snapshotWorktree, base, head)
+		if err != nil {
+			return nil, fmt.Errorf("changed files for %s vs snapshot tree %s: %w", base, head, err)
+		}
+		return files, nil
+	}
 	if head == "" {
 		files, err := exec.ChangedFiles("", base)
 		if err != nil {
