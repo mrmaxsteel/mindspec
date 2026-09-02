@@ -17,6 +17,7 @@ Typos, small bugfixes, doc corrections — the standard GitHub flow:
 1. Fork and branch: `git checkout -b fix/<short-description>` — never commit to `main`. (If you've run `mindspec setup`, the pre-commit hook enforces this.)
 2. Make the change. `make test` (the short suite) must pass; run `golangci-lint run` and `go vet ./...` if you touched Go code.
 3. If you changed behavior under `cmd/` or `internal/`, update the matching docs — doc-sync is a gate in this repo, and PRs that let code and docs drift won't pass review.
+   Docs must not get ahead of the binary, either: a doc describing a capability that hasn't shipped must carry a planned-claim marker registered in [`project-docs/claims-registry.yaml`](project-docs/claims-registry.yaml) (that file's header documents the convention), and a config key nothing reads yet is described as *declared, not yet enforced* — the same annotation `mindspec config show` prints. The rule runs both ways: never describe a key as a higher layer than it occupies, and never demote one either — a key a skill actually reads must not be documented as declared-only.
 4. Open a PR with a clear description of the defect and the fix. One logical change per PR.
 
 Expect your PR to be reviewed by a panel as well as a human — MindSpec dogfoods its own review machinery on incoming changes. The verdicts you get back are structured findings; "concrete changes required" means exactly that.

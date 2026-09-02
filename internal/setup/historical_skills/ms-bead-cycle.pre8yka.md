@@ -78,7 +78,7 @@ merge terminal         (panel-approved bead — mindspec complete)
 `/ms-bead-impl`'s dispatch ingress (`mindspec bead ready-check`, plus the staged prompt's Phase 0) can refuse a bead before any code is written. A subagent return whose first line is `NOT READY: <bead-id>` is its OWN outcome, handled distinctly from every other outcome:
 
 - **No panel round is consumed** — nothing was implemented, so there is nothing to review.
-- **Excluded from the consecutive-impl-failures brake** — today that brake is `/ms-spec-autopilot`'s hardcoded two-failure halt; the `loop.halt.max_consecutive_impl_failures` key that will govern it is declared, not yet enforced. The brake stops *repeated failed implementations* (post-damage); NOT READY is the pre-damage refusal that PREVENTS them. Counting it toward the same brake would punish the gate for working.
+- **Excluded from `loop.halt.max_consecutive_impl_failures`** — that brake stops *repeated failed implementations* (post-damage); NOT READY is the pre-damage refusal that PREVENTS them. Counting it toward the same brake would punish the gate for working.
 - **Never routed to `/ms-bead-fix`** — there is no implementation to fix.
 - **The bead worktree remains intact** — zero commits were made.
 

@@ -1,0 +1,155 @@
+# Docs claims registry — the machine-readable side of the
+# "declared vs enforced" documentation convention.
+#
+# THE CONVENTION
+#
+#   A config surface can exist — parsed, defaulted, validated, and printed
+#   by `mindspec config show` — without anything reading it to change
+#   behavior. Docs distinguish three layers, and must describe each
+#   surface as the layer it actually occupies — never a lower layer as a
+#   higher one, and never a higher layer as a lower one (a skill-read key
+#   documented as declared-only misleads exactly as badly: a reader sets
+#   or ignores it "because it does nothing" and a skill silently changes
+#   behavior on it):
+#
+#     enforced in the binary   a gate or verb that exits non-zero / behaves
+#     enforced in prompt-space a skill reads the key and obeys it
+#                              (instruction-level: this binds a compliant
+#                              agent; the binary does not check it, and a
+#                              non-compliant agent can ignore it)
+#     declared only            parsed + validated + surfaced, read by nothing
+#
+#   Scope note: the shipped skills corpus (plugins/mindspec/skills/**,
+#   installed into consumer repos by `mindspec setup`) is a live public
+#   surface but is NOT yet scanned by the docs-truth lint; layer
+#   truthfulness there is maintained by review, not mechanically.
+#
+#   Declared-only surfaces are described in docs with the same annotation
+#   the binary prints: "declared, not yet enforced". Prose may describe
+#   what an unshipped capability or unenforced key WILL do only in future
+#   tense, under an inline planned-claim marker whose id resolves to an
+#   entry in this file.
+#
+# CONTRACT (consumed by the docs-truth lint):
+#
+# 1. Public docs (README.md and project-docs/**, excluding
+#    project-docs/user/archive/ and this file — see docsScopeRoots /
+#    docsScopeExcludeDirs / docsScopeExcludeFiles in
+#    internal/lint/docs_truth_docs_test.go for the exact boundary) may
+#    describe a capability absent from the shipped binary/skills ONLY
+#    when the claim carries the inline marker below AND the marker's id
+#    is registered here. An unlabelled future-capability claim, or a
+#    marker whose id is not registered, fails the lint. Anonymous
+#    "coming soon" prose is not a label — it is the failure mode this
+#    registry exists to prevent.
+#
+# 2. Inline marker grammar (exact):
+#
+#        *(planned — claim `<id>`, <free text>)*
+#
+#    <id> matches [a-z0-9][a-z0-9-]* and names a key under `claims:`.
+#    Lint regex:  \*\(planned — claim `([a-z0-9][a-z0-9-]*)`[^)]*\)\*
+#    Placement, and what it covers (F2-r2-1/A2 — coverage span must match
+#    placement, or an unlabelled line silently inherits a label no reader
+#    sees on it):
+#      - ON A HEADING LINE: the marker names the whole section that
+#        heading introduces. Coverage runs to (not including) the next
+#        heading of equal-or-higher level. This stays wide on purpose —
+#        the heading is itself the reader-visible label for everything
+#        under it (e.g. autonomy.md's per-level headings, whose sections
+#        legitimately bury a config-key token several lines below).
+#      - ANYWHERE ELSE (a sentence, a list item, a table cell, a
+#        blockquote line): the marker names only its own paragraph/list
+#        item/table row/quote line — coverage ends at the next blank
+#        line, the next list item, the next table row (leading-pipe
+#        markdown, pipe-less markdown, or HTML <tr>), the next
+#        blockquote line, or the next heading, whichever comes first.
+#        It no longer bleeds into a sibling list item, a later row of
+#        the same table, a later line of the same quote, or a later
+#        paragraph in the same section. The one
+#        exception: if that paragraph is immediately followed (skipping
+#        only blank lines) by a fenced code block, coverage extends
+#        through that code block too — "the paragraph introducing the
+#        code block that contains it" (e.g. README.md:110's inline
+#        marker, introducing the `loop:` example immediately below it).
+#
+# 3. `tokens` are the literal strings, as they appear in docs, whose
+#    presence asserts the claim. The lint checks both directions: every
+#    token occurrence inside the scanned surface sits under a marker, and
+#    every entry here has at least one marked site in `locations`.
+#
+# 4. When a claim's token is itself a `mindspec ...` invocation or a
+#    `/ms-*` skill/workflow reference, the lint MAY enforce deletion
+#    mechanically (checkClaimsLanded, internal/lint/docs_truth_registry_test.go):
+#    once that exact token resolves against the real command tree or skill
+#    universe — the SAME ground truth R1/R2 check docs against — the entry
+#    and its markers must be removed in the same change, or the lint fails.
+#    "May", not "always": existence-resolution can only prove that a
+#    referent EXISTS, never that it satisfies a becomes_true_when
+#    demanding more (claimLandedRequiresBehavior, same file — a
+#    placeholder Cobra command that merely resolves, or a stub SKILL.md
+#    that merely exists, is not the same as the behavior actually
+#    landing). As of this writing BOTH real invocation/skill-shaped
+#    claims below (loop-status, fix-cycle) are in that excluded set —
+#    their becomes_true_when describes behavior beyond existence, so
+#    mechanical enforcement does not fire for them today; deletion stays
+#    review-driven until a claim-specific behavioral oracle is written.
+#    A claim whose tokens are plain config-key names (asserting a BEHAVIOR
+#    change, not an existence fact — e.g. loop-governance's gate_authority/
+#    handoff_log/max_beads_per_wake) is not landed-checkable this way
+#    either, for the same underlying reason, and also relies on the
+#    author deleting it by hand when the owning work lands. An entry
+#    without a named owner never enters this file: a claim nobody has
+#    committed to build gets retracted from the docs, not registered.
+#
+# 5. `owner`, `locations`, and `becomes_true_when` are read and validated
+#    by the lint (checkClaimFieldsValid): `owner` and `becomes_true_when`
+#    must be non-empty, and every entry in `locations` must resolve to a
+#    scanned file that itself carries a marker for this claim's id. A
+#    `tokens` edit on an EXISTING claim (widening, narrowing, or removing)
+#    is separately ratcheted (goldenClaimTokens, TestClaimsTokensMatchGolden):
+#    it fails until a paired Go-side golden table is updated in the same
+#    change, so the edit shows up as a reviewable diff rather than
+#    invisible YAML growth that inherits an existing claim's legitimacy.
+
+version: 1
+
+claims:
+  loop-status:
+    tokens:
+      - "mindspec loop status"
+    owner: "roadmap Core 4 — governed-autonomy kernel (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/autonomy.md
+    becomes_true_when: >-
+      `mindspec loop status` exists as a binary verb and reports open
+      panels, rounds, budget consumed, and halt state derived from repo
+      state.
+
+  loop-governance:
+    tokens:
+      - "gate_authority"
+      - "handoff_log"
+      - "max_beads_per_wake"
+    owner: "roadmap Core 4 — governed-autonomy kernel (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/autonomy.md
+    becomes_true_when: >-
+      the binary reads loop.* to change behavior — gate authority consulted
+      at the approve gates, halt conditions checked, budget ceilings
+      enforced, handoff log written — and `mindspec config show` drops the
+      "declared, not yet enforced" annotation on loop:.
+
+  fix-cycle:
+    tokens:
+      - "/ms-fix-cycle"
+    owner: "roadmap Core 6 — governed fix lane (ROADMAP-2026-07-next-batch)"
+    locations:
+      - README.md
+      - project-docs/user/guides/brownfield.md
+    becomes_true_when: >-
+      plugins/mindspec/skills/ms-fix-cycle/SKILL.md exists and runs the
+      discover -> reproduce -> one-commit patch -> panel -> PR lane
+      end-to-end on a repo with no .mindspec/.

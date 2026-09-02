@@ -17,7 +17,7 @@ instruction file pointers) for a particular coding agent.
 Supported agents:
   claude    Claude Code (.claude/settings.json, commands, CLAUDE.md)
   codex     OpenAI Codex CLI (AGENTS.md, git hooks)
-  copilot   GitHub Copilot (.github/copilot-instructions.md, prompts)
+  copilot   GitHub Copilot (.github/copilot-instructions.md, skills, hooks)
 
 Run 'mindspec setup <agent>' after 'mindspec init' to complete onboarding.`,
 }
@@ -67,12 +67,13 @@ Use --check to see what would be created without writing files.`,
 
 var setupCopilotCmd = &cobra.Command{
 	Use:   "copilot",
-	Short: "Set up GitHub Copilot integration (instructions, prompt files)",
+	Short: "Set up GitHub Copilot integration (instructions, skills, hooks)",
 	Long: `Creates GitHub Copilot-specific configuration:
 
   - .github/copilot-instructions.md with pointer to AGENTS.md and MindSpec guidance
-  - .github/hooks/mindspec.json with sessionStart and preToolUse hooks
-  - .github/prompts/*.prompt.md workflow prompt files (spec-approve, plan-approve, etc.)
+  - .github/hooks/mindspec.json with a sessionStart hook only (there is no
+    preToolUse hook and no plan-mode edit gate for Copilot)
+  - .agents/skills/ms-*/SKILL.md workflow skills (spec-approve, plan-approve, etc.)
 
 This command is idempotent — re-running it skips existing items.
 Use --check to see what would be created without writing files.`,

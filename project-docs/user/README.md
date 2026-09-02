@@ -10,7 +10,7 @@ AI coding agents are powerful but unstructured. Without guardrails they:
 - **Skip documentation** — code ships, docs rot
 - **Resist scope discipline** — a "small feature" becomes a refactor of three subsystems
 
-MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from domain docs, ADRs, and the Context Map so the agent gets exactly the right context without manual prompt engineering — and an **observability layer** (AgentMind) that shows you exactly what your agent is doing, spending, and how efficiently it's working.
+MindSpec treats these as system design problems, not prompting problems. It provides a **gated development lifecycle** where architecture divergence is detected and blocked until explicitly resolved, **bounded contexts** borrowed from domain-driven design to manage what the agent sees — deterministic, token-budgeted context packs assembled from the spec, plan, domain docs, and cited ADRs so the agent gets exactly the right context without manual prompt engineering — and **OTLP telemetry export** that pairs with [AgentMind](https://github.com/mrmaxsteel/agentmind), a standalone observability dashboard that shows you exactly what your agent is doing, spending, and how efficiently it's working.
 
 ## The Workflow
 
@@ -36,38 +36,23 @@ Documentation stays current because the system won't let you skip it — beads c
 
 ## AgentMind — AI Agent Observability UI
 
-AgentMind gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working.
+[AgentMind](https://github.com/mrmaxsteel/agentmind) is a **standalone companion product** (its own repo, install, and docs — extracted from mindspec per ADR-0026/ADR-0027) that gives you real-time visibility into what your agent is doing, what it's spending, and how efficiently it's working: a 3D activity graph, per-model token and cost tracking, tool/MCP analytics, and session recording/replay — all from standard OpenTelemetry data.
 
-- **3D Activity Graph** — Agents, tools, MCP servers, and LLM endpoints rendered as an interactive force-directed constellation, updating live
-- **Token & Cost Tracking** — Input tokens, output tokens, cache reads, cache creation tokens, and estimated USD cost — broken down per model
-- **Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized, with frequency histograms
-- **Model Statistics** — Per-model breakdown of API calls, token usage, and cost across multi-model sessions
-- **Session Recording & Replay** — Capture full sessions as NDJSON, replay at any speed, filter by lifecycle phase
-- **Benchmarking** — Compare agentic workflows side-by-side with automated A/B/C testing, delta reporting, and qualitative analysis
-
-<!-- TODO: Add screenshot or GIF -->
-
-### Quick Start
+MindSpec's side of the integration is OTLP export configuration, nothing more:
 
 ```bash
-# 1. Build MindSpec
-make build
-
-# 2. Start AgentMind
-./bin/mindspec agentmind serve
+# 1. Install AgentMind from its repo, then start it
+agentmind serve
 # OTLP receiver on :4318, UI at http://localhost:8420
 
-# 3. Configure Claude Code
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+# 2. Point your agent's telemetry at it
+mindspec otel setup --endpoint http://localhost:4318   # Claude Code (default)
+mindspec otel setup --endpoint http://localhost:4318 --codex
 
-# 4. Open http://localhost:8420
+# 3. Open http://localhost:8420
 ```
 
-Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4318`.
+Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:4318` — and any OTLP/HTTP receiver can stand in for AgentMind.
 
 **Full guide:** [AgentMind guide](guides/agentmind.md)
 
@@ -80,7 +65,7 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 | **Full workflow with Claude Code** | [Claude Code guide](guides/claude-code.md) |
 | **Full workflow with GitHub Copilot** | [Copilot guide](guides/copilot.md) |
 | **Full workflow with Codex** | [Codex guide](guides/codex.md) |
-| **Visualize & benchmark agent activity** | [AgentMind guide](guides/agentmind.md) |
+| **Observability (OTLP export + the standalone AgentMind)** | [AgentMind guide](guides/agentmind.md) |
 | **Complete reference** | [USAGE.md](../../.mindspec/core/USAGE.md) |
 
 ---
@@ -89,18 +74,14 @@ Any OTLP-compatible agent works — point the standard `OTEL_EXPORTER_OTLP_ENDPO
 
 ### Context Packs
 
-MindSpec assembles deterministic, token-budgeted context for each phase. A context pack pulls from the spec, relevant domain docs, applicable ADRs, glossary terms, neighboring bounded contexts (via the Context Map), and active policies — then deduplicates and respects token budgets.
-
-```bash
-mindspec context pack 009-my-feature
-```
+Context packs are bead-scoped. When a plan is approved, each bead is pre-populated with its context fields (requirements, acceptance criteria, cited ADRs, file paths); `mindspec context bead <bead-id>` renders that into a deterministic context document, and `mindspec context bead <bead-id> --max-tokens <n>` emits the token-budgeted layout — spec, plan section, cited ADR decisions, domain docs, and file paths, with a SHA-256 provenance record of every input.
 
 ### Architecture Decision Records
 
 ADRs are a governed primitive. Plans must cite the ADRs they rely on. If implementation needs to deviate from a cited ADR, the agent stops and escalates — you approve a new superseding ADR or reject the divergence.
 
 ```bash
-mindspec adr create --title "Use WebSockets for real-time updates" --domain viz
+mindspec adr create "Use WebSockets for real-time updates" --domain viz
 mindspec adr list --status accepted
 ```
 
@@ -114,20 +95,21 @@ mindspec instruct
 
 ### Domain-Driven Design
 
-Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs route through the Context Map, expanding one hop to include neighboring bounded contexts. Domain-scoped ADRs live alongside domain docs.
+Bounded contexts reduce ambiguity. Specs declare impacted domains. Domain-scoped ADRs live alongside domain docs, and the Context Map records the relationships between domains.
 
 ---
 
 ## CLI Reference
 
-### AgentMind & Observability
+### Observability
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec agentmind serve` | Start OTLP receiver + web UI (tokens, cost, tool analytics, 3D graph) |
-| `mindspec agentmind replay <file>` | Replay a recorded NDJSON session at any speed |
-| `mindspec bench setup\|collect\|report` | A/B/C benchmark agent workflows with comparative reporting |
+| `mindspec otel setup --endpoint <url>` | Write OTLP exporter config for Claude Code, Codex, or env exports |
+| `mindspec otel status` | Show the currently configured OTEL endpoint (read-only) |
 | `mindspec trace summary <file>` | Summarize NDJSON trace events |
+
+(The old `mindspec agentmind|viz|bench` verbs moved to the standalone [agentmind repo](https://github.com/mrmaxsteel/agentmind); they remain for one release as hidden deprecation stubs that print a pointer and exit 2.)
 
 ### Workflow
 
@@ -136,17 +118,15 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 | `mindspec instruct` | Emit mode-appropriate agent guidance |
 | `mindspec state show` | Show current mode and active work |
 | `mindspec next` | Claim next ready bead, create worktree |
-| `mindspec complete` | Close bead, remove worktree, advance state |
-| `mindspec approve spec <id>` | Approve spec, transition to Plan Mode |
-| `mindspec approve plan <id>` | Approve plan, transition to Implementation |
-| `mindspec approve impl <id>` | Approve implementation, return to Idle |
+| `mindspec complete <bead-id>` | Close bead, remove worktree, advance state |
+| `mindspec spec approve <id>` | Approve spec, transition to Plan Mode |
+| `mindspec plan approve <id>` | Approve plan, transition to Implementation |
+| `mindspec impl approve <id>` | Approve implementation, return to Idle |
 
 ### Context & Documentation
 
 | Command | Description |
 |:--------|:------------|
-| `mindspec context pack <id>` | Generate token-budgeted context pack |
-| `mindspec glossary list\|match\|show` | Term lookup and section extraction |
 | `mindspec adr create\|list\|show` | ADR lifecycle management |
 | `mindspec validate spec\|plan\|docs` | Pre-flight validation checks |
 
@@ -155,10 +135,10 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 | Command | Description |
 |:--------|:------------|
 | `mindspec init` | Bootstrap project structure and AGENTS.md |
-| `mindspec setup claude` | Configure Claude Code integration (hooks, commands, CLAUDE.md) |
-| `mindspec setup copilot` | Configure GitHub Copilot integration (instructions, prompt files) |
+| `mindspec setup claude` | Configure Claude Code integration (hooks, skills, CLAUDE.md) |
+| `mindspec setup copilot` | Configure GitHub Copilot integration (instructions, hooks, skills) |
 | `mindspec migrate` | Emit prompt to reorganize existing docs into canonical structure |
-| `mindspec spec-init <id>` | Create new specification |
+| `mindspec spec create <id>` | Create new specification |
 | `mindspec doctor` | Project health checks |
 
 ## Project Structure
@@ -166,13 +146,17 @@ Bounded contexts reduce ambiguity. Specs declare impacted domains. Context packs
 ```
 your-project/
 ├── .mindspec/
-│   ├── docs/                   # Canonical docs (core, domains, adr, specs, guides)
-│   ├── policies.yml            # Canonical architecture policies
-│   └── state.json              # Current mode, active spec/bead (committed)
-├── .beads/                     # Beads work graph (committed)
-├── docs_archive/               # Migration archive outputs by run-id
-├── AGENTS.md                   # Minimal bootstrap (points to CLI)
-└── CLAUDE.md                   # Minimal bootstrap (points to CLI)
+│   ├── config.yaml          # panels; runner (skill-read); models/loop (declared, not yet enforced)
+│   ├── specs/               # versioned specs + plans + panel verdicts
+│   ├── adr/                 # Architecture Decision Records
+│   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests
+│   ├── context-map.md       # relationships between domains
+│   ├── reviews/             # ad-hoc review panels
+│   └── core/                # reference docs (USAGE, MODES, state machine)
+├── .beads/                  # the work graph (committed, git-native)
+├── .claude/                 # agent integration (or .agents/, .github/)
+├── AGENTS.md                # cross-agent conventions
+└── CLAUDE.md                # Claude Code entry point
 ```
 
 ## Design Principles

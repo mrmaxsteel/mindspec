@@ -46,26 +46,14 @@ mindspec doctor
 
 ### 5. Optional: Enable AgentMind Observability
 
-Start AgentMind:
+[AgentMind](agentmind.md) is a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind). Start it, then configure Codex's OTEL export:
 
 ```bash
-./bin/mindspec agentmind serve
+agentmind serve                                                # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318 --codex
 ```
 
-Configure Codex OTEL export for AgentMind:
-
-```bash
-./bin/mindspec agentmind setup codex
-```
-
-This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and keeps prompt logging redacted by default (`otel.log_user_prompt = false`).
-
-Fallback import (if OTEL was not enabled during a session):
-
-```bash
-./bin/mindspec agentmind setup codex --session ~/.codex/sessions/<...>/rollout-<...>.jsonl --output /tmp/codex-session.ndjson
-./bin/mindspec agentmind replay /tmp/codex-session.ndjson
-```
+This configures `~/.codex/config.toml` to use OTLP/HTTP at `http://localhost:4318` and always writes `otel.log_user_prompt = false` (prompt text stays redacted; a hand-set `true` does not survive a re-run — see the [AgentMind guide](agentmind.md) for the full merge-semantics caveat).
 
 ## The Workflow
 
@@ -80,7 +68,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 **1. Start a specification**
 
 ```bash
-mindspec spec-init 001-my-feature
+mindspec spec create 001-my-feature
 ```
 
 **2. Draft the spec collaboratively**
@@ -94,7 +82,7 @@ mindspec validate spec 001-my-feature
 **3. Approve the spec**
 
 ```bash
-mindspec approve spec 001-my-feature
+mindspec spec approve 001-my-feature
 ```
 
 **4. Draft the plan**
@@ -104,22 +92,22 @@ The agent creates `.mindspec/specs/001-my-feature/plan.md` with work chunks and 
 **5. Approve the plan**
 
 ```bash
-mindspec approve plan 001-my-feature
+mindspec plan approve 001-my-feature
 ```
 
 **6. Claim work and implement**
 
 ```bash
-mindspec next       # Claim first ready bead, create worktree
+mindspec next                 # Claim first ready bead, create worktree
 # ... implement ...
-mindspec complete   # Close bead, advance state
-mindspec next       # Repeat until all beads done
+mindspec complete <bead-id>   # Close bead, advance state
+mindspec next                 # Repeat until all beads done
 ```
 
 **7. Approve the implementation**
 
 ```bash
-mindspec approve impl 001-my-feature
+mindspec impl approve 001-my-feature
 ```
 
 ## Differences from Claude Code Integration
@@ -127,9 +115,9 @@ mindspec approve impl 001-my-feature
 | Feature | Claude Code | Codex |
 |:--------|:-----------|:------|
 | Session guidance | Auto (SessionStart hook) | Manual (agent reads AGENTS.md) |
-| Custom commands | `/spec-approve` etc. | Direct CLI: `mindspec approve spec` |
-| OTLP telemetry | Built-in export | Supported via `~/.codex/config.toml` |
-| AgentMind viz | Full support | Supported (OTEL-first + JSONL fallback) |
+| Custom commands | `/ms-spec-approve` etc. | Direct CLI: `mindspec spec approve <id>` |
+| OTLP telemetry | `mindspec otel setup` | `mindspec otel setup --codex` (writes `~/.codex/config.toml`) |
+| AgentMind | OTLP export | OTLP export |
 
 ## Limitations
 

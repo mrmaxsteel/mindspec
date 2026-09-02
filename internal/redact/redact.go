@@ -138,6 +138,12 @@ var CommandTokens = map[string]struct{}{
 	"agentmind": {},
 	"viz":       {},
 	"bench":     {},
+	// mindspec-ng3g, W0 Bead 9: the hidden `__cmdtree` introspection
+	// command (cmd/mindspec/cmdtree_dump.go) — dispatchable like any
+	// other hidden command (spec-init, the deprecated shims above), so
+	// its success/friction events are still emittable and must not be
+	// silently dropped.
+	"__cmdtree": {},
 }
 
 // SubcommandTokens is the closed-set enum of mindspec leaf SUBCOMMAND

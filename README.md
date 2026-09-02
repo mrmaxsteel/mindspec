@@ -37,18 +37,18 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
 - **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A six-reviewer panel with six distinct lenses across two model families is the verifier; the tally is code, not conversation.
 - **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
 - **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
-- **An autonomy ladder, not an autonomy switch** — run interactively, run a supervised autopilot, or grant a governed unattended loop with named halt conditions, budget ceilings, and a handoff log. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
+- **An autonomy ladder, not an autonomy switch** — run interactively or run a supervised autopilot today, and climb from there toward a governed unattended loop with named halt conditions, budget ceilings, and a handoff log *(planned — claim `loop-governance`, roadmap Core 4)*. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
 - **Every escape hatch audited** — overrides like `--override-adr` and `--allow-doc-skew` exist, but each use is journaled to a redacted, local friction log. Where overrides concentrate is where the system improves next.
 
 ## The loop
 
-Every phase transition is a gate. Who holds each gate — you or a review panel — is configuration; what the gate checks is not.
+Every phase transition is a gate. What a gate checks is fixed in the binary; the design puts *who holds it* — you or a review panel — in configuration ([the autonomy ladder](#the-autonomy-ladder)).
 
 **Spec** — define what "done" looks like: problem statement, ≥3 falsifiable acceptance criteria each paired with a runnable proof, impacted domains, ADR touchpoints. The `ms-spec-grill` skill then interrogates the draft one question at a time, hunting synonym-dodges ("support", "handle", "improve"), non-falsifiable claims, cross-requirement contradictions, and repo claims the tree doesn't back up. No code allowed.
 
 **Plan** — decompose the spec into beads: independently completable work items with per-bead acceptance criteria. The plan validator checks decomposition against published research thresholds and requires ADR citations covering every impacted domain. If the plan needs to deviate from a cited ADR, it stops and escalates — you approve a superseding ADR or reject the divergence.
 
-**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic, token-budgeted context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
+**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
 
 **Review** — after the last bead merges, a final panel reviews the cumulative spec branch against main: scope drift, inter-bead coherence, release readiness. Approval merges spec → main via PR, and the lifecycle returns to idle.
 
@@ -62,13 +62,13 @@ MindSpec tracks work in [Beads](https://github.com/gastownhall/beads) — a git-
 
 This is not an incidental choice; it's what makes the loop possible.
 
-Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
+Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id> --max-tokens <n>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
 
 Fresh context per work item isn't a suggestion, it's enforced: the session-freshness gate hard-errors if an agent tries to claim a bead from a stale, compacted, or already-claimed session. Context quality degrades as sessions age; MindSpec makes the fresh start mandatory rather than hopeful.
 
 ## Review panels
 
-Every bead merge — and, on the higher autonomy rungs, every gate — is judged by a review panel:
+Every bead merge — and, on the planned higher autonomy rungs, every gate — is judged by a review panel:
 
 - **Six reviewers, two model families**, launched in parallel. Cross-family review catches what any single model family systematically misses.
 - **Six distinct lenses, not six clones**: author-of-record (does the diff match the plan?), codebase pin (do the files and tests actually exist and pass?), contract stability, empirical prober (runs the validators by hand), schema correctness, and next-bead integration.
@@ -107,7 +107,7 @@ Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip a
 | **3 — Scheduled loop** | cron / heartbeat | as level 2, plus budget ceilings per wake |
 | **4 — Fleet** | a queue of specs | as level 3, parallel across specs (beads stay serial within a spec, by design) |
 
-The governance profile lives in `.mindspec/config.yaml`, and it selects **who holds each gate — never what the evidence is**:
+Levels 0 and 1 are what ships today; levels 2–4 are the committed design *(planned — claim `loop-governance`, roadmap Core 4)*. The governance profile below already lives in `.mindspec/config.yaml` — parsed, defaulted, validated, and surfaced by `mindspec config show` — but every `loop:` key is **declared, not yet enforced**: nothing reads it to change behavior until the governed-loop kernel lands. When it does, the profile selects **who holds each gate — never what the evidence is**:
 
 ```yaml
 panel:
@@ -133,7 +133,7 @@ loop:
 
 Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated.
 
-An unattended loop accrues four costs, and all four are silent while it runs — verification debt, comprehension rot, cognitive surrender, and token blowout. Each gets a structural guard here, not advice:
+An unattended loop accrues four costs, and all four are silent while it runs — verification debt, comprehension rot, cognitive surrender, and token blowout. Each gets a structural guard in the design, not advice:
 
 | Cost | The guard |
 |:-----|:----------|
@@ -142,7 +142,7 @@ An unattended loop accrues four costs, and all four are silent while it runs —
 | **Cognitive surrender** | the non-delegable gates keep one door permanently human; the loop can execute, but it cannot decide |
 | **Token blowout** | budget ceilings are a precondition for unattended running, not a reaction to the first surprising bill |
 
-`mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
+`mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)* will be the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
 
 The level-by-level walkthrough — prerequisites, halt conditions, recovery, and the handoff review workflow — is in the [autonomy guide](project-docs/user/guides/autonomy.md).
 
@@ -189,34 +189,35 @@ Then tell your agent what to build. The SessionStart hook runs `mindspec instruc
 4. **Implement** — the bead loop runs: fresh agent per bead, panel per merge
 5. **Review** — final panel over the whole branch, you approve, spec merges to main
 
-When you're ready to loosen your grip, `/ms-spec-autopilot` runs the whole bead loop for a spec (level 1), and the `loop:` profile takes you up the ladder from there.
+When you're ready to loosen your grip, `/ms-spec-autopilot` runs the whole bead loop for a spec (level 1); the rungs above it are where the roadmap goes next ([The autonomy ladder](#the-autonomy-ladder)).
 
 ### Existing codebase
 
 ```bash
 cd existing-project
-mindspec onboard --infer   # reverse-onboard: inferred context map, domains,
-                           # ownership manifests, and as-built ADRs (Status: Proposed)
-mindspec setup claude
+mindspec init            # additive scaffold — existing files are never overwritten
+mindspec setup claude    # or: codex, copilot
+mindspec migrate         # emits the agent prompt to reorganize existing docs
+                         # into the canonical layout
 ```
 
-Inferred ADRs are marked as such and count as provisional coverage — promoting them to Accepted is an explicit ceremony, so the agent's guesses about your architecture never silently become the record. A `mode: brownfield` profile softens doc-sync from error to warning while the friction journal keeps score of the actual skew.
+Onboarding an existing repo is agent-assisted, not automated: your agent declares the bounded contexts (`mindspec domain add`), maps them to code (`mindspec ownership populate`), records the decisions already embodied in the code as ADRs (`mindspec adr create`), and classifies doc-sync sources (`mindspec source populate`) — with `mindspec doctor` checking the result at every step. The [brownfield guide](project-docs/user/guides/brownfield.md) walks the full sequence.
 
-For repos you don't want to onboard at all, `/ms-fix-cycle` runs a governed fix lane — discover, reproduce in a sandbox, patch with one commit, panel-review, PR with CI watch — with no `.mindspec/` required and the merge click left to a human.
+For repos you don't want to onboard at all, a governed fix lane — discover, reproduce in a sandbox, patch with one commit, panel review, PR with CI watch, no `.mindspec/` required, merge click left to a human — is planned as `/ms-fix-cycle` *(planned — claim `fix-cycle`, roadmap Core 6)*.
 
 ## Works with your agent
 
 **Claude Code is the first-class integration** — `mindspec setup claude` installs the hooks, the `ms-*` skill family, and the gates. **OpenAI Codex CLI** and **GitHub Copilot** are supported the same way (`mindspec setup codex|copilot`), and Codex additionally serves as the second model family on review panels.
 
-Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:`), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
+Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:` — dispatched on by the panel-run skill today; the binary itself annotates the key *declared; read by skills, not enforced by the binary*), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
 
-MindSpec is CLI-first and works standalone: every gate, validator, and panel verb is a testable command, which is also what makes the unattended rungs of the ladder trustworthy.
+MindSpec is CLI-first and works standalone: every gate, validator, and panel verb is a testable command, which is also what is designed to make the unattended rungs of the ladder trustworthy.
 
 ## Built with itself
 
 MindSpec is fully self-hosted: **every feature since day one has shipped through its own lifecycle** — 100+ specs, 40+ architecture decision records, and, since the panel gate landed, a review-verdict trail carried with every merge — all in this repo. The `.mindspec/` directory here isn't a demo; it's the actual development history.
 
-It is also continuously tested against real agents: a behavioral harness runs live LLM sessions through every lifecycle phase and scores them on forward progress, retries, and wasted turns. The harness's failure taxonomy (skipped gates, shortcut closes, commits to main) doubles as the live monitor set for unattended loops — failures observed in testing become halt conditions in production.
+It is also continuously tested against real agents: a behavioral harness runs live LLM sessions through every lifecycle phase and scores them on forward progress, retries, and wasted turns. The harness's failure taxonomy (skipped gates, shortcut closes, commits to main) is the designed monitor set for the planned unattended rungs *(planned — claim `loop-governance`, roadmap Core 4)* — failures observed in testing become halt conditions when the governed loop lands.
 
 ## Design principles
 
@@ -245,7 +246,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | The decomposition research behind the plan gate | [scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md) |
 | Workflow state machine (allowed transitions) | [WORKFLOW-STATE-MACHINE.md](.mindspec/core/WORKFLOW-STATE-MACHINE.md) |
 | Complete command reference | [USAGE.md](.mindspec/core/USAGE.md) |
-| Observability (OTEL + AgentMind) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` points telemetry at any OTLP/HTTP receiver |
+| Observability (OTLP export; pairs with the standalone [AgentMind](https://github.com/mrmaxsteel/agentmind) dashboard) | [AgentMind guide](project-docs/user/guides/agentmind.md) — `mindspec otel setup --endpoint <url>` writes exporter config for any OTLP/HTTP receiver |
 | Release history | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Project structure
@@ -253,7 +254,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 ```
 your-project/
 ├── .mindspec/
-│   ├── config.yaml          # panels, models, runner, loop governance
+│   ├── config.yaml          # panels; runner (skill-read); models/loop (declared, not yet enforced)
 │   ├── specs/               # versioned specs + plans + panel verdicts
 │   ├── adr/                 # Architecture Decision Records
 │   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests

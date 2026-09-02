@@ -40,8 +40,11 @@ func resetConfigShowGateFlags(t *testing.T) {
 // TestConfigShow_EmitsPanelModelsLoop asserts that renderConfig(DefaultConfig())
 // (a pure function — no fs, no process) surfaces the panel reviewers, the raw
 // approve_threshold expression, the empty models block, loop.enabled=false,
-// runner: claude-code-skills, and the "declared, not yet enforced" annotation
-// on each of the three inert blocks (spec 109 AC6).
+// runner: claude-code-skills, the "declared, not yet enforced" annotation on
+// the two truly-inert blocks (models/loop), and the distinct skill-read
+// annotation on runner: (spec 109 AC6; annotation split per mindspec-hw2n —
+// runner: is read by ms-panel-run/SKILL.md, so calling it declared-only
+// would violate CONTRIBUTING.md's docs-truth convention).
 func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
 	out, err := renderConfig(config.DefaultConfig())
 	if err != nil {
@@ -69,15 +72,25 @@ func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
 		t.Errorf("expected loop with enabled: false, got:\n%s", out)
 	}
 
-	// runner: default, INERT.
+	// runner: default, skill-read (not declared-only — ms-panel-run/
+	// SKILL.md genuinely dispatches on this key).
 	if !strings.Contains(out, "runner: claude-code-skills") {
 		t.Errorf("expected runner: claude-code-skills, got:\n%s", out)
 	}
 
-	// The three inert blocks (models/loop/runner) are each annotated; panel
-	// (which DOES drive behavior today) is not one of them.
-	if got := strings.Count(out, "declared, not yet enforced"); got < 3 {
-		t.Errorf("expected the \"declared, not yet enforced\" annotation on all three inert blocks (models/loop/runner), got %d occurrences:\n%s", got, out)
+	// The two truly-inert blocks (models/loop) are each annotated
+	// declared-only; panel: (which DOES drive behavior today) is not one
+	// of them, and neither is runner: (see below).
+	if got := strings.Count(out, "declared, not yet enforced"); got != 2 {
+		t.Errorf("expected the \"declared, not yet enforced\" annotation on exactly the two inert blocks (models/loop), got %d occurrences:\n%s", got, out)
+	}
+
+	// runner: gets its own distinct annotation — it is read by a shipped
+	// skill (ms-panel-run/SKILL.md), so labeling it declared-only would
+	// demote a skill-read key, which CONTRIBUTING.md's docs-truth
+	// convention forbids just as much as promoting an unread one.
+	if !strings.Contains(out, "runner: claude-code-skills  # declared; read by skills, not enforced by the binary") {
+		t.Errorf("expected runner: to carry the skill-read annotation (not declared-only), got:\n%s", out)
 	}
 }
 

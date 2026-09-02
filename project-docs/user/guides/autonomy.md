@@ -12,6 +12,8 @@ Level 3   Scheduled loop   cron-triggered; budget ceilings per wake
 Level 4   Fleet            parallel across specs (serial within each — by design)
 ```
 
+**What ships today vs. what is designed:** levels 0 and 1 are fully operational. Levels 2–4 are the committed design *(planned — claim `loop-governance`, roadmap Core 4)*: the `loop:` governance profile shown below is already parsed, defaulted, validated, and printed by `mindspec config show`, but it is **declared, not yet enforced** — nothing reads it to change behavior yet. This guide marks each rung accordingly; the load-time refusals called out below are live today.
+
 ## Level 0 — Interactive
 
 The default. You approve every phase transition yourself:
@@ -47,9 +49,9 @@ What level 1 changes:
 
 **Stay here until:** autopilot runs complete without you intervening mid-spec, and reading panel verdicts has convinced you the panels catch what you would have caught.
 
-## Level 2 — Governed loop
+## Level 2 — Governed loop *(planned — claim `loop-governance`, roadmap Core 4)*
 
-Level 2 is where gate authority itself is delegated — a scoped grant, written as configuration:
+Level 2 is where gate authority itself will be delegated — a scoped grant, written as configuration:
 
 ```yaml
 # .mindspec/config.yaml
@@ -74,11 +76,11 @@ loop:
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
 
-With `gate_authority: panel` on a gate, `approve` runs a panel against that target (a spec, a plan, or the final branch diff) and accepts the panel's decision under the same quorum, staleness, and threshold semantics the bead-merge gate has always used. The config is refused at load time if it tries to weaken the floor: `panel_skip` under `gate_authority`, a non-`halt` value for `on_reject`, or an always-pass threshold are all rejected before the loop starts.
+Once the governed-loop kernel lands, `gate_authority: panel` on a gate will mean `approve` runs a panel against that target (a spec, a plan, or the final branch diff) and accepts the panel's decision under the same quorum, staleness, and threshold semantics the bead-merge gate has always used. What is live today is the load-time floor: the config is refused if it tries to weaken it — `panel_skip` under `gate_authority`, a non-`halt` value for `on_reject`, or an always-pass threshold are all rejected before any loop starts.
 
 ### Halt conditions
 
-A governed loop's most important behavior is stopping. Every halt is named, logged, and leaves state that a human (or a fresh controller) can pick up — nothing about a halt is exceptional or unrecoverable, because lifecycle state is derived from beads and git, never from the halted session's memory.
+A governed loop's most important behavior is stopping. These are the named halts the design commits to — every halt named, logged, leaving state that a human (or a fresh controller) can pick up, because lifecycle state is derived from beads and git, never from the halted session's memory. (Today the bounded-rounds behavior is implemented by the level-1 autopilot skills — an instruction-level cap that binds a compliant agent, not a gate the binary checks; a REJECT does halt in the binary, via `mindspec complete`'s panel gate. The `loop.halt` config keys that will govern this in the binary are declared, not yet enforced.)
 
 | Halt | Trigger | Typical recovery |
 |:-----|:--------|:-----------------|
@@ -91,7 +93,7 @@ A governed loop's most important behavior is stopping. Every halt is named, logg
 
 ### What deliberately stays human
 
-Three things are not delegable at any level, and this is the mechanism that keeps unattended mistakes from compounding rather than a leftover of caution:
+Three things are not delegable at any level, and this is the mechanism that keeps unattended mistakes from compounding rather than a leftover of caution. These floors are live today — enforced at config load and in the panel decision matrix, not deferred to the kernel:
 
 1. **Skipping a panel.** `MINDSPEC_SKIP_PANEL` is env-only, human-only, and audited on the bead record. A loop must never self-authorize skipping its own verifier.
 2. **Overriding a REJECT.** `on_reject: halt` is the only accepted value. Auto-fixing a rejection is the definition of verification debt.
@@ -99,26 +101,26 @@ Three things are not delegable at any level, and this is the mechanism that keep
 
 ### The handoff log
 
-Every gate decision a panel makes in your place is appended to the handoff log (`.mindspec/loop/AUTOPILOT-LOG.md` in the profile above): the target, the round, the vote, the dissents, and any overrides or halts. Reviewing the log is the level-2 contract — your oversight moves from per-decision to per-batch, but it does not disappear. If reading the log ever surprises you, that's the signal to step back down a level and find out why.
+Every gate decision a panel makes in your place will be appended to the handoff log (`.mindspec/loop/AUTOPILOT-LOG.md` in the profile above): the target, the round, the vote, the dissents, and any overrides or halts. (The `handoff_log` key is declared today; nothing writes the log until the kernel lands.) Reviewing the log is the level-2 contract — your oversight moves from per-decision to per-batch, but it does not disappear. If reading the log ever surprises you, that's the signal to step back down a level and find out why.
 
 **Stay here until:** governed runs complete or halt cleanly, and the handoff log reads the way you'd have decided yourself.
 
-## Level 3 — Scheduled loop
+## Level 3 — Scheduled loop *(planned — claim `loop-governance`, roadmap Core 4)*
 
 Level 3 removes you as the trigger. A scheduler (cron, a CI schedule, a heartbeat) wakes a fresh controller, which rehydrates the loop's position from beads + git + panel state, works within its budget, and exits.
 
 What level 3 adds on top of the governance profile:
 
-- **Budget ceilings per wake** — `budget.max_beads_per_wake` (and a token budget, if configured) bound how much any single unattended wake can do. A wake that hits its ceiling exits cleanly mid-spec; the next wake resumes from derived state.
-- **A pull-based supervisor surface** — `mindspec loop status` reports open panels and their rounds, the exact PASS/BLOCK each gate would return, beads remaining, budget consumed, escape hatches used this run, and halt state. Point your monitoring at it; MindSpec deliberately emits no telemetry stream of its own.
+- **Budget ceilings per wake** — `budget.max_beads_per_wake` (and a token budget, if configured) will bound how much any single unattended wake can do. A wake that hits its ceiling exits cleanly mid-spec; the next wake resumes from derived state.
+- **A pull-based supervisor surface** — `mindspec loop status` *(planned — claim `loop-status`, roadmap Core 4)* will report open panels and their rounds, the exact PASS/BLOCK each gate would return, beads remaining, budget consumed, escape hatches used this run, and halt state. Point your monitoring at it; MindSpec deliberately emits no telemetry stream of its own.
 - **CI as a gate, not a hope** — the executor watches PR checks and re-verifies mergeability before any merge; a CI failure maps to a named halt rather than a retry loop.
-- **Live monitors** — the failure detectors developed in MindSpec's behavioral test harness (skipped lifecycle steps, shortcut bead closes, forced bypasses, commits to main) run against the live event stream; any hit halts the loop.
+- **Live monitors** — the failure detectors developed in MindSpec's behavioral test harness (skipped lifecycle steps, shortcut bead closes, forced bypasses, commits to main) will run against the live event stream; any hit halts the loop.
 
 **Controller hygiene:** the fresh-context rule applies to the orchestrator too, not just the workers. Controllers are re-instantiated per spec (or per phase) rather than grown — safe because a controller holds no unique state; everything rehydrates from the repo. A long-running controller accumulating hundreds of thousands of tokens of panel plumbing is a bug, not a badge.
 
 **Stay here until:** you've reviewed several morning-after handoff logs and stopped finding anything you'd have decided differently.
 
-## Level 4 — Fleet
+## Level 4 — Fleet *(planned — claim `loop-governance`, roadmap Core 4)*
 
 A queue of specs, worked in parallel — one governed loop per spec, each with its own worktree lineage, panels, and handoff log.
 
@@ -126,7 +128,7 @@ The constraint that makes level 4 sane: **beads stay serial within a spec, by de
 
 ## Climbing down
 
-The ladder works in both directions, and stepping down is cheap: set a gate back to `human`, or `loop.enabled: false`, and you're at level 1; stop invoking autopilot and you're at level 0. The friction journal (`mindspec report`) is the compass for *when* — if escape-hatch use is concentrating somewhere, that's the part of the system that isn't ready for the rung you're on.
+The ladder works in both directions, and stepping down is cheap: stop invoking autopilot and you're at level 0; once the governed kernel lands, setting a gate back to `human` — or `loop.enabled: false` — will return you from level 2 to level 1. The friction journal (`mindspec report`) is the compass for *when* — if escape-hatch use is concentrating somewhere, that's the part of the system that isn't ready for the rung you're on.
 
 ## Related
 

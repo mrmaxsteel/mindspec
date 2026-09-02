@@ -1,301 +1,59 @@
 # AgentMind — AI Agent Observability
 
-AgentMind is a real-time observability dashboard for AI coding agents. It combines a 3D activity graph with token consumption tracking, cost estimation, tool analytics, and session benchmarking — all from standard OpenTelemetry data.
+AgentMind is a real-time observability dashboard for AI coding agents: a 3D activity graph with token consumption tracking, cost estimation, tool analytics, and session recording/replay — all from standard OpenTelemetry data.
 
-## What You Get
+**AgentMind is a standalone companion product, not a mindspec feature.** It lives in its own repository at [`github.com/mrmaxsteel/agentmind`](https://github.com/mrmaxsteel/agentmind), with its own install, releases, and documentation — that repo's docs are authoritative for the product itself. It was extracted from mindspec by specs 083/084 (ADR-0026, ADR-0027): the mindspec binary has no agentmind dependency and never spawns it, and a permanent CI gate (`internal/specgate/verify_no_agentmind_dep_test.go`) keeps it that way. The two integrate one way, over OTLP/HTTP.
 
-**3D Activity Graph** — Agents, tools, MCP servers, data sources, and LLM endpoints rendered as an interactive force-directed constellation with a starfield aesthetic. Edges animate on activity, nodes scale with usage.
+> **If you remember the old verbs:** `mindspec agentmind serve|replay|setup`, `mindspec viz`, and `mindspec bench …` were removed by spec 084. For one release they survive as hidden deprecation stubs that print a one-line pointer and exit 2. The replacements are `agentmind …` (installed from its own repo) and `mindspec otel setup`.
 
-**Token & Cost Tracking** — Input tokens, output tokens, cache reads, and cache creation tokens tracked per model. Estimated USD cost aggregated in real time. Cache hit rate calculated automatically.
+## Quick start
 
-**Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized. The UI shows frequency histograms so you can see which tools dominate a session.
+### 1. Install and start AgentMind
 
-**Model Statistics** — Per-model breakdown of API calls, token usage, and cost. Supports multi-model sessions (e.g., Opus for planning, Haiku for quick lookups).
-
-**Session Recording & Replay** — Capture full sessions as NDJSON files. Replay at 0.5x to 50x speed, or instant. Filter replay by lifecycle phase.
-
-**Benchmarking** — Compare agentic workflows head-to-head with automated A/B/C testing, pairwise delta reporting, and AI-driven qualitative analysis.
-
-## Node Types
-
-| Node Type | Color | What It Represents |
-|:----------|:------|:-------------------|
-| `agent` | Teal/Cyan | An AI agent (Claude Code, Codex, custom) |
-| `tool` | Green | A tool the agent calls (file read, web search, etc.) |
-| `mcp_server` | Purple | An MCP server providing tools |
-| `data_source` | Orange | A file, database, or external data source |
-| `llm_endpoint` | Yellow | The LLM API being called |
-
-Edges represent calls between nodes: `model_call` (LLM requests with token counts), `tool_call`, `mcp_call`, `retrieval`, `write`, and `spawn` (agent hierarchy).
-
-## Quick Start (< 2 minutes)
-
-### 1. Build
+Install AgentMind from [its repository](https://github.com/mrmaxsteel/agentmind), then:
 
 ```bash
-make build
-```
-
-### 2. Start AgentMind
-
-```bash
-./bin/mindspec agentmind serve
+agentmind serve
 # OTLP receiver listening on :4318
 # Web UI at http://localhost:8420
 ```
 
-### 3. Configure Your Agent
+### 2. Point your agent at it — mindspec's side of the integration
 
-#### Claude Code
-
-```bash
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-```
-
-For persistent configuration, add to `.claude/settings.local.json`:
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"
-  }
-}
-```
-
-#### Codex
-
-Use the built-in helper to configure `~/.codex/config.toml`:
+MindSpec's entire role is writing the OTLP exporter configuration (it performs zero network I/O and never validates the endpoint):
 
 ```bash
-./bin/mindspec agentmind setup codex
+mindspec otel setup --endpoint http://localhost:4318            # Claude Code (default target)
+mindspec otel setup --endpoint http://localhost:4318 --codex    # Codex (~/.codex/config.toml)
+mindspec otel setup --endpoint http://localhost:4318 --target env  # print POSIX export lines
+mindspec otel status                                            # read-only: show what's configured
 ```
 
-If Codex is already pointed at another OTEL collector, MindSpec prints a warning and leaves it unchanged. To replace an existing endpoint explicitly:
+For Claude Code this writes the telemetry env block into `.claude/settings.local.json`, overwriting the OTEL keys and preserving every other setting; for Codex the entire `[otel]` table — including a nested `[otel.exporter]` — is replaced wholesale with mindspec's canonical block, not merged key-by-key. That means any non-mindspec key co-located under `[otel]` (for example a hand-added `environment = "..."`) is destroyed, and `log_user_prompt` is always reset to `false` on every run: an explicit `log_user_prompt = true` you set previously does **not** survive a re-run. Standard (`[name]`) tables outside the `[otel]` namespace keep their contents, but their order and surrounding blank lines are not preserved byte-for-byte; an array-of-tables (`[[name]]`) appearing after an `[otel]`/`[otel.*]` header, with no intervening standard `[name]` header, is destroyed along with the otel block — one that appears after an intervening standard header (which closes the `[otel]` zone) is preserved. (Whether this is the intended behavior or the code owes a fix to match its own documented merge contract is an open question — see `mindspec-tnf6`.) It does **not** detect or warn about an existing endpoint: re-running `otel setup` against a config that already points at another OTEL collector silently replaces that endpoint. Check with `mindspec otel status` first if you're not sure what's configured.
 
-```bash
-./bin/mindspec agentmind setup codex --force
-```
+Any OTLP-compatible agent works without mindspec's help: point the standard OpenTelemetry environment variables (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.) at `http://localhost:4318`. And the receiver doesn't have to be AgentMind — anything that speaks OTLP/HTTP works (Honeycomb, Tempo, Jaeger, opentelemetry-collector-contrib).
 
-Equivalent Codex settings:
+### 3. Open the UI
 
-```toml
-[otel]
-exporter = { "otlp-http" = { endpoint = "http://localhost:4318/v1/logs", protocol = "json" } }
-trace_exporter = "none"
-log_user_prompt = false
-```
+Navigate to [http://localhost:8420](http://localhost:8420). Activity appears as your agent starts working.
 
-By default, this keeps `otel.log_user_prompt = false` so prompt text is redacted in telemetry unless you explicitly opt in.
-Codex expects the full OTLP logs path, so the endpoint includes `/v1/logs`.
+## What AgentMind shows
 
-#### Any OTLP-Compatible Agent
+The feature descriptions below are as of the extraction (specs 083/084); the [agentmind repo](https://github.com/mrmaxsteel/agentmind) is authoritative for the current product.
 
-Point the standard OpenTelemetry environment variables to `http://localhost:4318`. AgentMind accepts OTLP/HTTP JSON on that port.
+**3D Activity Graph** — Agents, tools, MCP servers, data sources, and LLM endpoints rendered as an interactive force-directed constellation. Edges animate on activity, nodes scale with usage. Node types: `agent`, `tool`, `mcp_server`, `data_source`, `llm_endpoint`; edges represent `model_call`, `tool_call`, `mcp_call`, `retrieval`, `write`, and `spawn` (agent hierarchy).
 
-### 4. Open the UI
+**Token & Cost Tracking** — Input, output, cache-read, and cache-creation tokens tracked per model from OTLP metrics (`claude_code.token.usage`, `claude_code.cost.usage`; Codex aliases like `codex.token.usage` are normalized into the same pathways). Estimated USD cost aggregated in real time; cache hit rate calculated as `cache_read / (input + cache_read + cache_create)`.
 
-Navigate to [http://localhost:8420](http://localhost:8420) in your browser. Activity appears as your agent starts working.
+**Tool & MCP Analytics** — Every tool call and MCP server interaction counted and categorized, with frequency histograms.
 
-## What the UI Shows
+**Session Recording & Replay** — Capture full sessions as NDJSON (`agentmind serve --output session.ndjson` or the UI's save button), then `agentmind replay session.ndjson` at 0.5x–50x speed or instant, with lifecycle-phase filtering. Replay accumulates the same metrics as live mode.
 
-### Live HUD Metrics
+**Benchmarking** — The A/B/C workflow-comparison framework (formerly `mindspec bench`) moved to the agentmind repo with the rest of the subsystem; ADR-0028 records the move. The old `mindspec bench setup|collect|report` verbs are deprecation stubs.
 
-The heads-up display in the top-right corner shows:
+To label your agent in the graph, set the `agent.name` resource attribute (`OTEL_RESOURCE_ATTRIBUTES="agent.name=MyBot"`). Multiple agents can send telemetry to the same AgentMind instance; each appears as a distinct node.
 
-| Metric | What It Means |
-|:-------|:-------------|
-| Events/sec | Live telemetry ingestion rate |
-| Errors | Parse/processing error count |
-| Avg latency | Response time in milliseconds |
-| Nodes | Active nodes in the graph |
-| Edges | Active connections between nodes |
-| Sampling | Whether auto-sampling is active (kicks in at 100+ events/sec) |
+## Related
 
-### Detail Cards
-
-Click any node or edge to see its detail card:
-
-- **Agent nodes**: API call count, cumulative tokens (in/out), estimated cost
-- **Tool nodes**: Call count, category (retrieval/write/generic)
-- **MCP server nodes**: Call frequency, connected tools
-- **LLM endpoint nodes**: Per-model token breakdown, cost
-- **Edges**: Call count, input/output token counts for model calls
-
-### Recording Dashboard
-
-When a session completes or you save a recording, the dashboard shows:
-
-- Session duration
-- Total events, nodes, and edges
-- Cumulative token usage (input, output, cache read, cache create)
-- Estimated cost in USD
-- Tool call histogram with relative frequency bars
-- MCP server call counts
-
-## Token & Cost Metrics
-
-AgentMind collects token and cost data from OTLP metrics:
-
-| Metric | Source |
-|:-------|:-------|
-| Input tokens | `claude_code.token.usage` (type: input) |
-| Output tokens | `claude_code.token.usage` (type: output) |
-| Cache read tokens | `claude_code.token.usage` (type: cacheRead) |
-| Cache creation tokens | `claude_code.token.usage` (type: cacheCreation) |
-| Cost (USD) | `claude_code.cost.usage` |
-
-All metrics are aggregated per model, so you can see exactly how much each model variant contributes to token usage and cost in a multi-model session.
-
-Codex OTEL aliases such as `codex.api_request`, `codex.token.usage`, and `codex.cost.usage` are normalized into the same model/token pathways used by Claude telemetry.
-Codex `codex.sse_event` records with `event.kind=response.web_search_call.completed` are normalized into `WebSearch` tool-call edges.
-
-**Cache hit rate** is calculated as: `cache_read / (input + cache_read + cache_create)`
-
-## Recording Sessions
-
-Capture events to an NDJSON file for later replay or benchmarking:
-
-```bash
-./bin/mindspec agentmind serve --output session.ndjson
-```
-
-Events are appended to the file in real time. You can also save directly from the UI using the save-recording button.
-
-## Replay
-
-Replay a recorded session:
-
-```bash
-./bin/mindspec agentmind replay session.ndjson
-# UI at http://localhost:8420
-
-# Speed up playback
-./bin/mindspec agentmind replay session.ndjson --speed 5
-
-# Max speed (no delays)
-./bin/mindspec agentmind replay session.ndjson --speed 0
-
-# Replay a specific spec's recording
-./bin/mindspec agentmind replay --spec 022-agentmind-viz-mvp
-
-# Filter to a specific lifecycle phase
-./bin/mindspec agentmind replay session.ndjson --phase implement
-```
-
-Replay accumulates the same metrics as live mode — token counts, cost, tool histograms — so you can analyze completed sessions after the fact.
-
-## Codex JSONL Fallback Import
-
-If Codex OTEL export is unavailable, you can convert a local Codex session JSONL file into AgentMind NDJSON and replay it.
-
-```bash
-# Convert a Codex session file
-./bin/mindspec agentmind setup codex --session ~/.codex/sessions/2026/02/16/rollout-2026-02-16T13-12-24-019c6694-aa05-76e0-98b1-46390fb71add.jsonl
-
-# Explicit output path
-./bin/mindspec agentmind setup codex --session /path/to/rollout.jsonl --output /tmp/codex-session.ndjson
-
-# Replay converted output
-./bin/mindspec agentmind replay /tmp/codex-session.ndjson
-```
-
-By default, output is written next to the input file as `<input-name>-agentmind.ndjson`.
-
-## Benchmarking
-
-AgentMind includes a benchmarking framework for comparing agentic workflows against each other.
-
-### Setup
-
-```bash
-mindspec bench setup --spec 025-my-feature
-```
-
-This creates three isolated sessions: `no-docs` (baseline without MindSpec docs), `baseline` (with docs but no workflow), and `mindspec` (full MindSpec workflow). Each session runs in its own git worktree.
-
-### Collect
-
-```bash
-mindspec bench collect --spec 025-my-feature
-```
-
-Runs all three sessions with configurable timeouts, max turns, and auto-retry. Each session's telemetry is recorded as NDJSON.
-
-### Report
-
-```bash
-mindspec bench report --spec 025-my-feature
-```
-
-Generates a comparative report with:
-
-| Metric | What's Compared |
-|:-------|:---------------|
-| API calls | Total LLM requests per session |
-| Input/output tokens | Absolute counts and deltas |
-| Cache hit rate | How efficiently each workflow uses context caching |
-| Cost (USD) | Estimated spend per session, per model |
-| Output/input ratio | How "chatty" the agent is relative to context consumed |
-| Per-model breakdown | Token and cost deltas for each model variant |
-
-Reports are available in table format (human-readable) and JSON (programmatic). N-way comparison supports 3+ sessions side-by-side.
-
-`mindspec bench report` now aggregates both Claude and Codex NDJSON event aliases in the same session summary pipeline.
-
-## Customizing Agent Labels
-
-Set the `agent.name` resource attribute to label your agent in the graph:
-
-```bash
-export OTEL_RESOURCE_ATTRIBUTES="agent.name=MyBot"
-```
-
-## Multi-Agent Visualization
-
-Multiple agents can send telemetry to the same AgentMind instance. Each agent appears as a distinct node. Point multiple agent processes at the same `OTEL_EXPORTER_OTLP_ENDPOINT`.
-
-## UI Controls
-
-| Control | Action |
-|:--------|:-------|
-| **Click** node or edge | Show detail card with metrics |
-| **Search** field | Filter nodes by name, type, or ID |
-| **Pause/Resume** button | Freeze/unfreeze the graph |
-| **Camera Reset** button | Reset the 3D camera position |
-| **Save Recording** button | Download events as NDJSON |
-
-## Server Options
-
-```bash
-./bin/mindspec agentmind serve \
-  --otlp-port 4318 \    # OTLP/HTTP receiver port (default: 4318)
-  --ui-port 8420 \       # Web UI port (default: 8420)
-  --output events.ndjson # Write events to file
-```
-
-## Architecture (Brief)
-
-AgentMind runs as a single process with three components:
-
-1. **OTLP/HTTP receiver** on `:4318` — accepts standard OpenTelemetry log and metric data
-2. **WebSocket server** — pushes graph updates and stats to connected browsers (~500ms intervals)
-3. **Three.js frontend** — renders a force-directed 3D graph with real-time metric overlays
-
-Performance caps: 500 nodes, 2000 edges, auto-sampling at 100+ events/sec.
-
-### What Gets Collected
-
-| OTLP Endpoint | Events |
-|:--------------|:-------|
-| `/v1/logs` | API requests, tool calls, tool results, MCP calls |
-| `/v1/metrics` | Token usage (input, output, cache read, cache create), cost (USD) |
-
-Events are normalized into graph nodes and edges, with metrics aggregated per node for the detail cards and dashboard.
+- [Installing AgentMind alongside MindSpec](../../installation/agentmind.md) — the integration contract in full
+- ADR-0026 (AgentMind extracted to standalone repo) · ADR-0027 (mindspec is OTEL-only) · ADR-0028 (bench rescue procedure)

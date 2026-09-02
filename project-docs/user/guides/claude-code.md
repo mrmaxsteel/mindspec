@@ -23,15 +23,24 @@ make build && make install
 mindspec init
 ```
 
-This scaffolds the full directory structure: `.mindspec/` (core, domains, specs), `GLOSSARY.md`, `CLAUDE.md`, `.claude/` hooks, and more. All creation is additive — existing files are never overwritten.
+This scaffolds `.mindspec/` (domains, specs, a context-map skeleton), `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, and `.gitignore` entries. All creation is additive — existing files are never overwritten. It does not create the Claude Code integration; that is the next step.
 
-### 3. Verify
+### 3. Configure Claude Code and Beads
+
+```bash
+mindspec setup claude
+bd init
+```
+
+`mindspec setup claude` installs the SessionStart hook into `.claude/settings.json`, the `/ms-*` skills into `.claude/skills/`, and the managed `CLAUDE.md` block. `bd init` creates the `.beads/` work graph the lifecycle tracks work in.
+
+### 4. Verify
 
 ```bash
 mindspec doctor
 ```
 
-Should report zero errors.
+`mindspec doctor` flags anything still missing (for example, a `.beads/` directory that hasn't been initialized).
 
 ## The Workflow
 
@@ -53,7 +62,7 @@ You and the agent fill in the spec: goal, requirements, acceptance criteria, imp
 
 **3. Approve the spec**
 
-Type `/ms-spec-approve`. This validates the spec, updates its frontmatter to `APPROVED`, closes the spec-approve molecule step, generates a context pack, and transitions to Plan Mode.
+Type `/ms-spec-approve`. This validates the spec, updates its frontmatter to `APPROVED`, closes the spec-approve molecule step, and transitions to Plan Mode.
 
 **4. Draft the plan**
 
@@ -78,7 +87,7 @@ The agent writes code within the bead's declared scope, creates tests, and updat
 **8. Complete the bead**
 
 ```bash
-mindspec complete
+mindspec complete <bead-id>
 ```
 
 This closes the bead, removes the worktree, and advances state. If more beads are ready, run `mindspec next` again. When all beads are done, the state transitions to Review Mode.
@@ -107,13 +116,12 @@ No need to maintain sprawling static instruction files. The CLI is the source of
 
 ## Observability
 
-Use [AgentMind](agentmind.md) to visualize agent activity in real time:
+Use [AgentMind](agentmind.md) — a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind) — to visualize agent activity in real time:
 
 ```bash
-mindspec agentmind serve    # Start the visualization server
+agentmind serve                                        # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318   # point Claude Code's OTLP export at it
 ```
-
-Then configure Claude Code's OTLP export to point to `http://localhost:4318`.
 
 ## Reference
 

@@ -39,8 +39,7 @@ mindspec setup copilot
 
 This creates:
 - `.github/copilot-instructions.md` — workspace instructions pointing to `AGENTS.md`
-- `.github/hooks/mindspec.json` — hooks for session start guidance and plan mode gate enforcement
-- `.github/hooks/mindspec-plan-gate.sh` — preToolUse script that blocks code edits during plan mode
+- `.github/hooks/mindspec.json` — a sessionStart hook that runs `mindspec hook session-start` for session-start guidance
 - `.agents/skills/` — workflow skills (`/ms-spec-create`, `/ms-spec-approve`, etc.)
 
 ### 4. Verify
@@ -51,10 +50,11 @@ mindspec doctor
 
 ### 5. Optional: Enable AgentMind Observability
 
-Start AgentMind:
+[AgentMind](agentmind.md) is a standalone companion product installed from [its own repo](https://github.com/mrmaxsteel/agentmind). Start it, then point your agent's OTLP export at it:
 
 ```bash
-./bin/mindspec agentmind serve
+agentmind serve                                        # the standalone binary, not a mindspec verb
+mindspec otel setup --endpoint http://localhost:4318
 ```
 
 ## Copilot CLI (Terminal)
@@ -90,7 +90,7 @@ Idle ──→ Spec Mode ──human gate──→ Plan Mode ──human gate─
 **1. Start a specification**
 
 ```bash
-mindspec spec-init 001-my-feature
+mindspec spec create 001-my-feature
 ```
 
 Or use `/ms-spec-create` in Copilot Chat.
@@ -106,7 +106,7 @@ mindspec validate spec 001-my-feature
 **3. Approve the spec**
 
 ```bash
-mindspec approve spec 001-my-feature
+mindspec spec approve 001-my-feature
 ```
 
 Or use `/ms-spec-approve` in Copilot Chat.
@@ -118,7 +118,7 @@ The agent creates `.mindspec/specs/001-my-feature/plan.md` with work chunks and 
 **5. Approve the plan**
 
 ```bash
-mindspec approve plan 001-my-feature
+mindspec plan approve 001-my-feature
 ```
 
 Or use `/ms-plan-approve` in Copilot Chat.
@@ -126,16 +126,16 @@ Or use `/ms-plan-approve` in Copilot Chat.
 **6. Claim work and implement**
 
 ```bash
-mindspec next       # Claim first ready bead, create worktree
+mindspec next                 # Claim first ready bead, create worktree
 # ... implement ...
-mindspec complete   # Close bead, advance state
-mindspec next       # Repeat until all beads done
+mindspec complete <bead-id>   # Close bead, advance state
+mindspec next                 # Repeat until all beads done
 ```
 
 **7. Approve the implementation**
 
 ```bash
-mindspec approve impl 001-my-feature
+mindspec impl approve 001-my-feature
 ```
 
 Or use `/ms-impl-approve` in Copilot Chat.
@@ -145,10 +145,10 @@ Or use `/ms-impl-approve` in Copilot Chat.
 | Feature | Claude Code | Codex | Copilot CLI | Copilot Chat (VS Code) |
 |:--------|:-----------|:------|:------------|:----------------------|
 | Instruction file | `CLAUDE.md` → `AGENTS.md` | `AGENTS.md` | `AGENTS.md` | `.github/copilot-instructions.md` → `AGENTS.md` |
-| Session guidance | Auto (SessionStart hook) | Manual (reads AGENTS.md) | Auto (sessionStart hook) | Auto (reads instructions on open + sessionStart hook) |
-| Custom commands | `.claude/commands/*.md` | Direct CLI | Direct CLI | `.github/prompts/*.prompt.md` |
-| OTLP telemetry | Built-in export | Supported via config | Not yet supported | Not yet supported |
-| AgentMind viz | Full support | Supported (OTEL + JSONL) | Not yet supported | Not yet supported |
+| Session guidance | Auto (SessionStart hook) | Manual (reads AGENTS.md) | sessionStart hook installed (`.github/hooks/mindspec.json`) | Reads instructions on open + installed sessionStart hook |
+| Skills | `.claude/skills/*/SKILL.md` | `.agents/skills/*/SKILL.md` | `.agents/skills/*/SKILL.md` | `.agents/skills/*/SKILL.md` |
+| OTLP telemetry | `mindspec otel setup` | `mindspec otel setup --codex` | Not yet supported | Not yet supported |
+| AgentMind | OTLP export | OTLP export | Not yet supported | Not yet supported |
 
 ## Instruction Layering
 
@@ -163,12 +163,11 @@ Agent-specific files are thin pointers to the universal `AGENTS.md`, which holds
 
 ## Hooks
 
-`mindspec setup copilot` installs hooks in `.github/hooks/mindspec.json`:
+`mindspec setup copilot` installs one hook in `.github/hooks/mindspec.json`:
 
-- **sessionStart** — runs `mindspec instruct` automatically when a Copilot session begins
-- **preToolUse** — enforces the plan mode gate: blocks code-editing tools while MindSpec is in plan mode, similar to Claude's `PreToolUse` hook
+- **sessionStart** — runs `mindspec hook session-start --format copilot` when a Copilot session begins, emitting mode-appropriate guidance
 
-These hooks are the Copilot equivalent of Claude Code's `.claude/settings.json` hooks.
+This is the Copilot equivalent of Claude Code's `.claude/settings.json` SessionStart hook. There is no plan-mode gate hook for Copilot: nothing blocks code edits during plan mode.
 
 ## Limitations
 
