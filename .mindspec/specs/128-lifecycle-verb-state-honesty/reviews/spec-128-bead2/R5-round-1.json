@@ -1,0 +1,66 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The implementation gets the critical lifecycle classification right by making next's IsLifecycleIssueType delegate directly to derive.go's own classifyChild rule, and its locked marker write, direction-conditional recovery, sanctioned release sync, and deviations A-F are otherwise sound. However, LegacyPhaseSignature does not implement the plan's exact all-open predicate: it accepts every lifecycle-child status except closed and in_progress. A blocked or custom-status lifecycle child therefore matches the purported never-claimed/all-open legacy state and can cause EnsurePhaseSemanticsV2 to rewrite stored implement backward to plan. The direct predicate table tests omit these boundary cases. Build and the full short suite passed, as did focused schema/recovery tests; the bead worktree remained clean with no phase.lock.",
+  "concrete_changes_required": [
+    "Make LegacyPhaseSignature require every lifecycle child's normalized status to be exactly open, in addition to requiring stored implement and at least one lifecycle child. Treat blocked, custom, empty, or otherwise unknown statuses as non-matches. Add direct table cases for blocked and at least one unknown/custom status, plus an EnsurePhaseSemanticsV2 fixture proving those states receive marker-only updates and never a mindspec_phase rewrite."
+  ],
+  "findings": [
+    {
+      "id": "R5-legacy-signature",
+      "severity": "high",
+      "assessment": "internal/phase/semantics_v2.go's LegacyPhaseSignature increments lifecycleTotal for task/untyped children and rejects only normalized closed or in_progress statuses. It consequently returns true for blocked and arbitrary custom statuses. The binding plan requires stored implement, at least one lifecycle child, and all lifecycle children open; blocked is explicitly recognized elsewhere in the spec and cache status model as distinct from open. Because this predicate gates the one-time backward representation rewrite, the mismatch can translate a progressed or otherwise non-canonical epic as though it were the old never-claimed plan-approve state."
+    },
+    {
+      "id": "R5-classifier",
+      "severity": "none",
+      "assessment": "advancePhaseOnClaim and derivation use exactly the same lifecycle discriminator. next calls phase.IsLifecycleIssueType(selected.IssueType), and that exported helper returns classifyChild(issueType) == childLifecycle; DerivePhaseFromChildren switches on the same classifyChild function. Both normalize case/whitespace, classify task and empty as lifecycle, epic as structural, and every other explicit type as non-lifecycle, so no stored-vs-derived type-classification desynchronization exists."
+    },
+    {
+      "id": "R5-marker-one-shot",
+      "severity": "none",
+      "assessment": "The marker mechanism is genuinely lock-protected and idempotent for an exact v2 marker. Marker and children are read through a fresh cache inside WithPhaseWriteLock; read failures abort without a merge; legacy phase plus marker are emitted in one merge update; marker-only states preserve phase; and an exact existing v2 marker returns nil updates, producing zero merge calls. The one-shot claim is correctly scoped against out-of-band post-marker mutation. The predicate defect above affects which first-run branch fires, not the locking or replay mechanics."
+    },
+    {
+      "id": "R5-recovery-shape",
+      "severity": "none",
+      "assessment": "The retained general mismatch warning has the required ADR-0035 shape. Forward disagreements end with the safe merge-semantics command mindspec repair phase <spec-id>; backward disagreements never emit that writer and instead end with the inspection action bd show <epic-id>. Both focused tests passed, the final recovery line is machine-greppable, and the backward ID is rendered through idrender."
+    },
+    {
+      "id": "A",
+      "severity": "none",
+      "assessment": "Acceptable. EnsurePhaseSemanticsV2 is a phase-owned migration-shaped writer, so using phase.mergeMetadataFn matches EnsureMigrated and SanctionedDerivedSync and avoids conflating it with each verb's own phase-value seam. Fault injection remains available through SetMergeMetadataForTest; dedicated tests observe updates and prove children-read failure causes zero writes. This does not materially weaken writer-level fault coverage."
+    },
+    {
+      "id": "B",
+      "severity": "none",
+      "assessment": "Acceptable. The added no-op phase-owned merge stubs isolate pre-v2 ApprovePlan and harness fixtures from the new unconditional first-run marker write. They do not stub planMergeMetadataFn, so tests that assert the verb's own plan-phase write and commit-before-write ordering still observe it. Dedicated semantics_v2 tests cover the real marker decision/update shape."
+    },
+    {
+      "id": "C",
+      "severity": "none",
+      "assessment": "Acceptable. Pre-setting the v2 marker in existing repair guard fixtures is the correct forward-compatibility construction: it keeps those tests focused on their exactly-one operator merge while the marker-absent legacy path is separately exercised by notice-and-self-heal tests. The AC-5(viii) backward fixture is also correctly post-marker so reconciliation cannot consume the condition under test."
+    },
+    {
+      "id": "D",
+      "severity": "none",
+      "assessment": "Acceptable. The regression test now detects the plan-valued phase write and still compares its first occurrence with the last CommitAll occurrence, preserving the original commit-before-phase-write ordering invariant after the OQ-3 value change."
+    },
+    {
+      "id": "E",
+      "severity": "none",
+      "assessment": "Acceptable. repair.go's new diagnostic renders IDs through idrender without a ratchet increase. derive.go's raw epicID count rises from two to four because the legacy notice and retained forward-warning each use the pre-existing validated-ID plus spec-lookup formatting shape; the backward branch is fully idrender-wrapped. The allowlist count and rationale match the actual new sites rather than weakening the gate generically."
+    },
+    {
+      "id": "F",
+      "severity": "none",
+      "assessment": "Acceptable. complete's existing step-6.5 value path remains unchanged; the bead adds only the ahead-of-preflight EnsurePhaseSemanticsV2 call near the initial phase read. The later advanceState/completeSyncPhase flow is byte-semantically untouched for this deviation."
+    },
+    {
+      "id": "R5-verification",
+      "severity": "none",
+      "assessment": "In the bead worktree at 798841b92459dc83359b5b7eac4b203f5c8f8594, go build ./... && go test ./... -short passed. Focused internal/phase tests for LegacyPhaseSignature, EnsurePhaseSemanticsV2, legacy/AC-5(iv) warnings, #248 routes, and the exact-one sanctioned caller passed; focused cmd/mindspec tests for claim advancement, AC-5(viii), and release sync passed. git status was clean and no phase.lock remained."
+    }
+  ]
+}

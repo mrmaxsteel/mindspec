@@ -1,0 +1,73 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "All six round-1 R6 asks are addressed at reviewed commit 542992b49743c3a31f28e65b7354231da154e0f8. I independently re-proved the hard-block core: both repository real-lock interleave tests passed repeatedly, and a separate temporary overlay probe launched advancePhaseOnClaim while a fresher review writer held the real phase lock; after review landed, the delayed claim writer re-read the closed child state and preserved review in 20/20 runs. The implementation derives children from a fresh cache inside the write-lock closure, plan approval refuses a backward plan write over a fresher claim, and the focused timeout/merge-failure tests plus direct repair tests establish the declared warning-only contract: any claim-write residue is forward-only and the emitted repair-phase recovery converges, while backward repair remains refused. Presence-only marker discrimination, the four future/malformed marker fixtures, the canonical non-lifecycle claimed shape and paired read-failure case, strict exactly-open legacy matching, and the FindEpicBySpecID fail-safe coverage all passed. The disclosed G6 lexical-fence limitation is genuine but corrective-only, explicitly routed to beads 4/5, and does not corrupt the spec branch or downstream beads. Full short tests passed and the bead worktree remained byte-identical at the reviewed commit with no phase.lock residue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-1",
+      "classification": "ADDRESSED",
+      "severity": "resolved_hard_block",
+      "title": "Claim writer now derives fresh evidence under the same lock and does not regress release/complete state",
+      "evidence": "cmd/mindspec/next.go constructs phase.NewCache and reads children inside WithPhaseWriteLock, writing implement only when the fresh child derivation is implement. internal/approve/plan.go independently refuses a plan write when the fresh stored phase is ahead. TestAdvancePhaseOnClaim_StaleEvidenceNeverOverwritesFresherPlan passed 10/10. Normal-path adversarial tracing across concurrent claims, release of the active/non-sole bead, complete, impl approve, and impl adopt found no producer that can leave fresher review/done with claim-supported in_progress evidence and then be regressed by this writer."
+    },
+    {
+      "id": "R6-2",
+      "classification": "ADDRESSED",
+      "severity": "resolved_hard_block",
+      "title": "Required real-lock interleave proofs are present and independently reproduced",
+      "evidence": "TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsRelease and TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsComplete each passed 10/10 using the real phase lock; the release test calls the actual SanctionedDerivedSync surface. My separate /tmp overlay probe held the real lock in a fresher review writer, started advancePhaseOnClaim behind it, landed review, and verified the delayed writer preserved review in 20/20 runs."
+    },
+    {
+      "id": "R6-3",
+      "classification": "ADDRESSED",
+      "severity": "resolved_hard_block",
+      "title": "Warning-only claim failure has forward-only residue and convergent recovery",
+      "evidence": "The claim mutation precedes the cache write, so a timeout or merge failure can leave stored plan and derived implement, never the reverse. Both TestAdvancePhaseOnClaim_LockTimeoutSurfacesConvergentRecovery and TestAdvancePhaseOnClaim_MergeFailureSurfacesConvergentRecovery passed 10/10 and require `recovery: mindspec repair phase 010-test`, excluding the dead-end next recovery. TestRepairPhase_WritesDerivedViaMergeSeam and the forward/backward AC-5(iv) tests passed 10/10: forward repair writes the fresh derived phase; backward repair refuses and preserves the fresher stored value. EnsurePhaseSemanticsV2 is one locked write, so its failures are zero-write rather than partial marker/phase mutations."
+    },
+    {
+      "id": "R6-4",
+      "classification": "ADDRESSED",
+      "severity": "major_resolved",
+      "title": "Phase-semantics marker is presence-only and forward-compatible",
+      "evidence": "EnsurePhaseSemanticsV2 and hasV2MarkerWithCache now treat any present mindspec_phase_semantics key as discriminated. TestEnsurePhaseSemanticsV2_MarkerForwardCompat passed 10/10 for future string v3, malformed boolean, malformed number, and empty string, each over the exact legacy signature and requiring zero writes/no rewrite."
+    },
+    {
+      "id": "R6-5",
+      "classification": "ADDRESSED",
+      "severity": "major_resolved",
+      "title": "Non-lifecycle fixture now models a canonical claim and its read-failure path",
+      "evidence": "TestEnsurePhaseSemanticsV2_NonLifecycleClaimNoAdvanceMarkerWritten uses stored plan, open lifecycle tasks, and an in_progress bug; it asserts no phase update, marker persistence, and an independent derived plan. The paired TestEnsurePhaseSemanticsV2_NonLifecycleClaimShape_ChildReadFailurePropagates requires the child-read error to propagate with zero merge calls. Both passed 10/10. LegacyPhaseSignature also now requires every normalized lifecycle status to equal open; blocked, custom, and empty cases passed in the table and marker-only fixture group."
+    },
+    {
+      "id": "R6-6",
+      "classification": "ADDRESSED",
+      "severity": "moderate_resolved",
+      "title": "FindEpicBySpecID discard has a documented and tested fail-safe contract",
+      "evidence": "internal/approve/plan.go documents why the first best-effort lookup cannot bypass reconciliation: resolvePlanApprovePreflight independently re-resolves and fails closed, while every later lifecycle entry retries the idempotent reconciliation. TestApprovePlan_V2PreflightLookupFailureDoesNotCrashOrBypassPreflight passed 10/10 for a transient first-call failure followed by successful independent resolution; the existing TestApprovePlan_Preflight_AllEpicsQueryFailure_RefusesPreMutation covers the persistent-failure leg and passed in the full suite."
+    },
+    {
+      "id": "G5-recovery-disposition",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Recovery text is direction-conditional and avoids dead-end lifecycle replays",
+      "evidence": "Next and release self-heal failures name repair phase where the residue is forward and unforced repair converges. A sanctioned release-sync failure is backward, so its final recovery line is the safe `bd show <epic-id>` inspection; --force-backward is separately labeled as an operator choice rather than placed on the recovery line. Focused release and derive recovery tests passed 10/10."
+    },
+    {
+      "id": "G6-lexical-fence-residual",
+      "classification": "ADDRESSED",
+      "severity": "non_blocking_residual",
+      "title": "Exactly-one sanctioned caller fence remains lexical, with honest routing",
+      "evidence": "completeSyncPhase can still perform a semantically equivalent backward-converging write only in an already-surfaced failure-residue state. Its doc comment states that the exactly-one SanctionedDerivedSync fence is lexical, explains why the effect is corrective, and routes the semantic tightening/agreement-table wording to beads 4/5. This is a disclosed finding, not a branch-corruption block."
+    },
+    {
+      "id": "verification",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Build, tests, scratch probe, and byte-identity checks",
+      "evidence": "At 542992b49743c3a31f28e65b7354231da154e0f8: go build ./... exited 0; go test ./... -short passed. Focused concurrency, failure, marker, canonical-fixture, lookup-fail-safe, repair, and recovery tests passed at count=10; the independent delayed-review scratch probe passed at count=20. All fixture lock roots and scratch artifacts were under /tmp and removed. Final git status in the bead worktree was empty, HEAD was unchanged, and no .mindspec/phase.lock existed."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Reviewed commit 542992b49743c3a31f28e65b7354231da154e0f8 passes the round-2 empirical regression lens and the whole-bead gate. An isolated build and go test -short ./... passed. The new real-lock next-vs-release and next-vs-complete interleave tests passed, as did the AC-5(viii) sanctioned-sync/operator-refusal twin, all three #248 route fixtures, the exactly-one direct-caller fence, the v2 semantics suite, and the exact legacy-signature table. A fresh /tmp production-CLI arc reproduced plan approval storing plan with the v2 marker and no phase warning; the first lifecycle claim advanced stored phase to implement and state show remained warning-free; production release reopened and unassigned the bead and its sanctioned sync returned stored phase to plan, followed by a warning-free state show. A legacy-shaped epic emitted the replacement notice, repair phase reconciled it to plan plus the v2 marker, and the following state show was clean. The reviewed bead worktree remained clean at the reviewed commit with no phase.lock. The disclosed G6 lexical-fence residual is real but corrective, bounded to a previously surfaced failure residue, and explicitly routed to beads 4/5; it does not threaten the spec branch or downstream bead execution.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "ROUND2_INTERLEAVES",
+      "classification": "ADDRESSED",
+      "detail": "TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsRelease and TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsComplete both passed against the reviewed commit. The fresh derivation under the write lock prevents a delayed claim-side writer from regressing the fresher release/complete result."
+    },
+    {
+      "id": "ARC_PROBE",
+      "classification": "GREEN",
+      "detail": "Fresh epic arc: plan approve exited 0 with stored plan and mindspec_phase_semantics=v2; state show emitted no warning; claiming lifecycle bead probe-128.1 advanced stored phase to implement; release exited 0, returned the bead to open with assignee cleared, and SanctionedDerivedSync returned stored phase to plan; post-release state show emitted no warning."
+    },
+    {
+      "id": "AC5_AND_248_FIXTURES",
+      "classification": "GREEN",
+      "detail": "Passed TestAC5viii_ReleasedAllOpenState_SanctionedSyncSucceedsOperatorGuardRefuses, TestRoute248_PlanApproveShaped, TestRoute248_ReleaseShaped, TestRoute248_ComplexTriggerTwo_PlanOverPlanNeverBackward, and TestSanctionedDerivedSync_NoCallersOutsideAllowlist."
+    },
+    {
+      "id": "LEGACY_SELF_HEAL",
+      "classification": "GREEN",
+      "detail": "A marker-absent stored-implement/all-lifecycle-open fixture emitted the legacy phase-semantics notice and repair recovery. repair phase exited 0, persisted stored plan and the v2 marker, and the next state show was warning-free. The full EnsurePhaseSemanticsV2 and LegacyPhaseSignature suites also passed."
+    },
+    {
+      "id": "G6_LEXICAL_FENCE",
+      "classification": "DISCLOSED_ROUTED_RESIDUAL_NON_BLOCKING",
+      "detail": "The exactly-one SanctionedDerivedSync test is a direct-call lexical fence and does not prevent completeSyncPhase from making a semantically equivalent backward-converging write in a marker-present failure-residue state. The code documents the precise reachability and routes resolution to beads 4/5. The write converges fresh derived state under the lock after an already-surfaced failure; it does not corrupt the spec branch or block downstream beads."
+    },
+    {
+      "id": "BUILD_TEST_INTEGRITY",
+      "classification": "GREEN",
+      "detail": "Isolated go build succeeded and go test -short ./... passed across all packages. Targeted tests were rerun with -count=1. The reviewed worktree finished byte-clean at 542992b4 and contained no phase.lock."
+    }
+  ]
+}

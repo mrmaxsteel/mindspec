@@ -1,0 +1,39 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": "high",
+  "rationale": "Round-2 regression check at 542992b4 under the codebase-pin lens. (1) The new interleave/lock-timeout/merge-failure tests are real and green — I ran them individually with -v -count=1 and each executes (no skips): TestAdvancePhaseOnClaim_StaleEvidenceNeverOverwritesFresherPlan (single-threaded stale-evidence no-op, zero merge calls), TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsRelease (drives the REAL phase.SanctionedDerivedSync through a real lock acquire/release to land plan, then the delayed advance through the real lock; asserts stored stays plan), TestAdvancePhaseOnClaim_RealLockInterleave_DelayedVsComplete (real WithPhaseWriteLock write mirroring completeSyncPhase lands review; delayed advance never regresses it), TestAdvancePhaseOnClaim_LockTimeoutSurfacesConvergentRecovery (a genuinely HELD real lock via goroutine + SetLockWaitForTest; asserts 'recovery: mindspec repair phase 010-test' present AND 'recovery: mindspec next' banned), and TestAdvancePhaseOnClaim_MergeFailureSurfacesConvergentRecovery (error injected into the dedicated nextPhaseMergeMetadataFn seam; same convergent/banned pair). The production code they pin is genuinely changed: advancePhaseOnClaim's lock fn now builds a fresh phase.NewCache INSIDE the critical section, propagates a children-read failure with no write, and writes implement only while DerivePhaseFromChildren still says implement; plan.go step 4b consults the lock's own fresh stored read and no-ops on IsBackwardMove(stored, plan) — pinned by TestApprovePlan_Step4bRefusesBackwardOverFresherClaim, which asserts zero ':plan' merge calls when stored is already implement at write time. (2) The incidental lint-ratchet entry is honest: releaseSyncPhase's single new raw-epicID occurrence is exactly the argument-passing hop fmt.Fprintln(os.Stderr, describeReleaseSyncFailure(syncErr, epicID, specID)), and the callee idrender.Bead-wraps epicID in BOTH of its renders (the failure header and the 'recovery: bd show %s' line) plus idrender.Spec-wraps specID (with the house '<spec-id>' placeholder for empty); Count 1 matches, the key follows the sibling 'file func fmt.Fprintln(...epicID...)' pattern, the Gate text states provenance, and the exact-match-both-directions ratchet (STALE flagging proven by its own fixture subtest) is fresh-green — so 1 is the true count, not padding. Only that one line was added to the allowlist. describePhaseSyncFailure and nextPhaseAdvanceRecoveryCommand introduce no unwrapped ID renders (idrender.Spec-routed, and 'recovery' is not an ID-named identifier). Broader regression sweep in my territory: full ./... -short zero failures, touched packages fresh-green with -count=1 (cmd/mindspec 91s, phase 3.7s, approve 117s, lint 4.3s, complete 81s); the round-1 fence, route fixtures, ratchet counts, and stub separation all still hold; G2's LegacyPhaseSignature positive all-open check gains blocked/custom/empty table + fixture cases; G3's presence-only marker check is proven over the exact legacy signature for v3/bool/number/empty-string values with zero merge calls; worktree left byte-identical, no phase.lock residue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2r2-1",
+      "severity": "none",
+      "title": "Interleave/lock-timeout/merge-failure tests — real, executing, and pinning the actual mechanism",
+      "detail": "All five run individually green with -v -count=1. The two interleave tests use the real R3.3 lock (DelayedVsRelease via the actual SanctionedDerivedSync surface; DelayedVsComplete via a real WithPhaseWriteLock write in completeSyncPhase's shape) against a mutex-protected mutable fixture whose merge seam writes back into the fixture — so the final stored value is genuinely the composition of both writers, not an assertion on a stub call list. The interleaves are sequential-by-construction (first writer completes, then the delayed advance runs), which is exactly the G1 defect shape (a delayed write over an already-landed mutation); the lock itself serializes the truly-concurrent case, and the fresh-read-inside-lock property those tests pin is what makes serialization sufficient."
+    },
+    {
+      "id": "R2r2-2",
+      "severity": "none",
+      "title": "Ratchet allowlist entry (release.go arg-hop) — verified honest",
+      "detail": "describeReleaseSyncFailure renders epicID exclusively through idrender.Bead (both occurrences) and specID through idrender.Spec or the '<spec-id>' placeholder; its own body therefore contributes zero raw sites, consistent with exactly one new entry (the Fprintln argument hop, Count 1). The exact-match ratchet is fresh-green in both directions. Entry key and Gate prose match the house pattern of the surrounding entries."
+    },
+    {
+      "id": "R2r2-3",
+      "severity": "none",
+      "title": "G5's split recovery treatment — mechanically consistent with the tests",
+      "detail": "The self-heal leg and next's advance share describePhaseSyncFailure (always-convergent 'repair phase', the documented deliberate departure from DescribeLockFailure's no-line-on-non-timeout contract); the sanctioned-sync leg's greppable recovery line is the safe 'bd show <epic-id>' with --force-backward named only in the body — matching the AC-5(iv) backward-branch convention derive_v2_test.go pins and the release_test.go assertions."
+    },
+    {
+      "id": "R2r2-4",
+      "severity": "minor",
+      "title": "Round-1 minor notes R2-1 and R2-2 carry forward (not asked, not blocking)",
+      "detail": "Neither was in concrete_changes_required, and neither was addressed: complete.go's step-1.5 guard still reads DerivePhaseWithCache on the pre-reconciliation epicCache (one-run lenient-only staleness in a narrow legacy corner), and internal/harness/lifecycle_scenario_test.go's comment still claims ApproveSpec stamps the v2 marker at epic creation (no production code does). Both remain minor; the first is adjacent to the G6 residual now documented at completeSyncPhase and naturally folds into the same beads-4/5 disposition."
+    },
+    {
+      "id": "R2r2-5",
+      "severity": "info",
+      "title": "Presence-only marker check widens the derive.go notice suppression consistently",
+      "detail": "hasV2MarkerWithCache now matches ANY present value, mirroring EnsurePhaseSemanticsV2's own check — so an epic with a future/malformed marker gets the general mismatch warning (correct: its recovery converges via repair's entry-point reconciliation being a no-op and the guard handling direction), never a legacy notice promising a rewrite that would not fire. The two checks cannot desync; both are presence-only on the same key."
+    }
+  ]
+}

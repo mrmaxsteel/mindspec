@@ -1,0 +1,69 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.82,
+  "rationale": "Contract-stability lens, re-derived end-to-end in the bead worktree (build + go test -short across internal/phase, internal/approve, internal/complete, cmd/mindspec, internal/harness, internal/next, internal/lint — all PASS, worktree left byte-identical). (1) Warning-dissolution window: HOLDS at every sequential rest point. plan.go step 4b now writes state.ModePlan under WithPhaseWriteLock (plan.go:479); the all-open lifecycle derivation returns ModePlan (derive.go:426, and the lifecycle-total==0 branch at :405); next.go Step 5.2 (advancePhaseOnClaim, next.go:518) advances stored->implement immediately after ClaimBead for lifecycle claims only (IsLifecycleIssueType routes through the SAME classifyChild discriminator the derivation uses, so stored and derived can never desync on classification); release re-derives fresh inside SanctionedDerivedSync's own critical section. Sequential re-approval regression is impossible: checkExistingBeadsSafety runs inside resolvePlanApprovePreflight (plan.go:210) and hard-refuses on any in_progress/closed child BEFORE step 4b, so re-approve is only reachable in all-open states where plan-over-plan is a no-op value-wise. The route_248 fixtures pin the rest states; the transition legs are pinned separately (next_phase_advance_test.go, TestAC5viii). Residuals are all forward-direction and loudly recoverable (findings G1/G2). (2) Legacy-notice/self-heal loop: AIRTIGHT. The notice (derive.go:188-194) is gated on marker-absent AND LegacyPhaseSignature, both lock-free reads off the same memoized epic object (no torn marker-vs-stored read); EnsurePhaseSemanticsV2 runs at repair-phase entry (repair.go:238, before the guard evaluates) and at plan-approve/impl-approve/complete/next-claim/release entries; the marker and the legacy->plan rewrite land in ONE merge-write inside one critical section (never two writes, no partially-healed state); marker-present short-circuits forever; a marker-only write for non-legacy epics means the notice can never fire spuriously on native-v2 epics later manufactured into the legacy shape (they get the generic backward warning instead — correct, since their implement was claim-earned). TestDerivePhase_LegacyNoticeSelfHealsViaRepairPhase pins notice -> heal -> zero-stderr clean. The only re-trigger vector is an out-of-band raw bd metadata replace deleting the marker — disclosed in the file doc as a scoped residual; re-heal then converges again, so even that is a lap, not a loop. Verified complete.go's heal-then-gate ordering is real, not defeated by the shared epicCache: neither FindEpicBySpecIDWithCache nor EnsureMigratedWithCache populates Cache.epicByID, so DerivePhaseWithCache's readStoredPhaseWithCache issues a fresh bd show AFTER the heal (deviation F verified sound). (3) Trigger-2: the sanction sentence stays true. Complete's entry heal precedes advanceState/step 6.5; the spec-095 lifecycle-only derivation makes a non-lifecycle-child completion derive plan over stored plan (TestRoute248_ComplexTriggerTwo pins it, plus IsBackwardMove(plan,plan)==false); the AST fence now asserts EXACTLY one SanctionedDerivedSync call site, pinned to file AND function (releaseSyncPhase). One semantic caveat recorded as finding G3. (4) Deviation A is the right long-term shape (finding A). Verdict APPROVE: every AC leg under my lens holds on the designed paths; the three residuals (G1-G3) are failure-residue or race interleavings that end in loud, forward-recoverable states, each with a cheap suggested hardening for the fix round or beads 4/5 — none is a silent-corruption or contract-inversion class.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "A",
+      "severity": "accept",
+      "title": "Deviation A: hardcoded internal mergeMetadataFn seam — right long-term shape",
+      "detail": "ACCEPTABLE, and the correct shape for beads 4/5. EnsurePhaseSemanticsV2 is a migration-shaped one-shot exactly like EnsureMigrated; per-verb seams (implPhaseMetadataFn etc.) exist so a verb's OWN value writes are individually observable, and threading this writer through them would corrupt the meaning of verb-specific 'seam never called' assertions (the impl_test.go preflight-refusal assertion the implementer cites is real). Fault-injection coverage is NOT weakened: TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite observes/blocks the write through phase.SetMergeMetadataForTest, proving the propagate-no-write contract through the package seam. Beads 4/5 are READ-path consumers: LegacyPhaseSignature and both marker constants are exported, and agreement-table/result-message fixtures can synthesize metadata JSON exactly as route_248_test.go's probeEpicState does — no write seam needed. One forward note, not a defect: hasV2MarkerWithCache is unexported; if bead 4's agreement table needs a marker read from outside package phase, a small exported lock-free read helper will be needed then."
+    },
+    {
+      "id": "B",
+      "severity": "accept",
+      "title": "Deviation B: no-op stubs are the known tax of the unconditional first-run marker write",
+      "detail": "Acceptable and structurally necessary: the marker MUST be written unconditionally on first run (else 'native v2' and 'pre-v2 legacy' stay indistinguishable forever and the notice could false-fire on native-v2 epics that later manufacture the legacy shape). The stubs target phase's package-internal seam while the tests' own assertions target verb-specific seams (verified in TestApprovePlan_CommitsBeforeWritingImplementPhase: noopStubPhaseMergeMetadataForTest silences only the marker write; the ordering assertion still observes SetPlanMergeMetadataForTest), so no real write the tests assert on is masked. Deep recount of all 18 sites is R2's lens; suites pass."
+    },
+    {
+      "id": "C",
+      "severity": "accept",
+      "title": "Deviation C: pre-set v2 markers in repair fixtures",
+      "detail": "Acceptable — bead-1's established forward-compat pattern; keeps the pre-existing exactly-one-merge-call assertions meaningful now that repair-phase entry adds the self-heal call (repair.go:238, correctly OUTSIDE the later WithPhaseWriteLock — the non-reentrancy note is accurate)."
+    },
+    {
+      "id": "D",
+      "severity": "accept",
+      "title": "Deviation D: retargeted ordering test still pins commit-before-phase-write",
+      "detail": "Verified in plan_test.go:1215-1354: the callLog still records every exec.CommitAll against the first planMergeMetadataFn write and asserts lastCommit < firstPhaseWrite; only the asserted suffix changed :implement -> :plan, which IS this bead's OQ-3 change. The ordering invariant's rationale (pre-commit hook blocks commits once phase is PAST plan) is if anything safer now — the value written no longer trips the hook at all — and the test still guards against reordering."
+    },
+    {
+      "id": "E",
+      "severity": "accept",
+      "title": "Deviation E: ratchet recount consistent with the branch split",
+      "detail": "The single warning site genuinely became three branches (legacy notice, forward, backward); the backward branch is fully idrender-wrapped and repair.go's new Sprintf wraps specID in idrender.Spec. The 2->4 derive.go count matches the forward branch retaining the two pre-existing raw renders plus the split. Lint suite passes. Line-by-line recount audit is R2's lens; nothing I traced weakens the gate."
+    },
+    {
+      "id": "F",
+      "severity": "accept",
+      "title": "Deviation F: complete.go untouched beyond the Ensure call — and the heal-then-gate ordering is real",
+      "detail": "Verified, including the subtle hazard the deviation note doesn't mention: the impl-only guard's DerivePhaseWithCache uses the shared epicCache created BEFORE the heal, but neither EnsureMigratedWithCache nor FindEpicBySpecIDWithCache populates Cache.epicByID (they touch only allEpics/specToEpic), so readStoredPhaseWithCache's FindEpic issues a fresh bd show AFTER EnsurePhaseSemanticsV2's write. The 'must run before the phase read immediately below' comment is therefore actually true, not just lexically true. Any future code that calls epicCache.FindEpic before the Ensure call would silently defeat this — worth a one-line comment on epicCache's declaration, but not a defect today."
+    },
+    {
+      "id": "G1",
+      "severity": "minor",
+      "title": "Step 4b's lock fn ignores `stored` — a concurrent claim between preflight and step 4b lands plan over implement",
+      "detail": "plan.go:479's fn writes state.ModePlan unconditionally, discarding the fresh `stored` value WithPhaseWriteLock hands it. The preflight's all-open safety check (plan.go:210) makes this safe sequentially, but that decision is a pre-lock read: a `mindspec next` claim that interleaves between preflight and step 4b advances stored to implement, and step 4b then writes plan over it — an unsanctioned backward landing, exactly the stale-decision shape WithPhaseWriteLock's own caller-obligation 1 (G8) warns about. Consequence is loud and recoverable (forward mismatch warning with correct repair recovery; self-corrects on the next lifecycle claim), and the interleaving requires concurrent lifecycle verbs on one spec, so this is minor — but the fix is one line and squarely in this bead's contract: inside fn, `if present && phase.IsBackwardMove(stored, state.ModePlan) { return nil, nil }` (the documented 'refused backward move' no-op leg). Suggest folding into this bead's fix round if one runs; otherwise file for bead 4/5."
+    },
+    {
+      "id": "G2",
+      "severity": "minor",
+      "title": "Lock-timeout recovery commands at the two new best-effort sites cannot converge",
+      "detail": "advancePhaseOnClaim (next.go:534) renders a lock timeout with recovery `mindspec next <bead-id>` — but the bead is now in_progress, so that exact re-invocation can never re-reach Step 5.2 (filterReadyItems excludes non-open; SelectWorkByName errors). releaseSyncPhase (release.go) renders `mindspec release <bead-id>` — but the release already succeeded (bead open), so a re-run's activeBead cursor no longer matches and Step 6.5 is skipped; the sync can never re-run. Both violate ADR-0035's substance (the pasted line is supposed to BE the fix) while following the round-1 G3 disposition's letter ('the exact re-invocation that hit the lock') — the disposition wording itself is the flaw here (contradiction licensed; migrate.go's own comment already establishes why the caller's verb is the wrong recovery when it doesn't converge). Convergent commands: for the next-advance failure, `mindspec repair phase <spec-id>` (forward — the unforced operator guard permits it). For the release-sync failure the honest answer is harder: AC-5(viii)'s own twin pins that the unforced operator guard REFUSES this exact backward state, so the only convergent operator command is `mindspec repair phase <spec-id> --force-backward \"<reason>\"` — meaning today's release failure path leaves NO unforced copy-pastable fix at all, only the later backward `bd show` inspection line. Suggest fixing both strings in the bead-4/5 result-message work (which owns exactly this text) or a small follow-up; not blocking because the subsequent derive-time warnings do eventually name a correct action."
+    },
+    {
+      "id": "G3",
+      "severity": "info",
+      "title": "The sanction fence is lexical, not semantic: completeSyncPhase can still land a backward-converging write in failure-residue states",
+      "detail": "The exactly-one AST fence pins SanctionedDerivedSync's callers, and trigger-2 is genuinely plan-over-plan on all designed paths (entry heal + spec-095 lifecycle-only derivation, pinned by TestRoute248_ComplexTriggerTwo). But completeSyncPhase (complete.go:1398) writes advanceState's nextMode unconditionally under the lock, and in a marker-present residue state (stored=implement, all lifecycle open — reachable only after a surfaced release-sync failure or a crash between claim and advance), completing a non-lifecycle child writes plan over implement: semantically the same backward derived-sync SanctionedDerivedSync exists to be the sole surface for, just not through it, and invisible to the fence. It converges stored toward derived, so it is corrective in effect, and the precondition is always a previously-warned failure state — hence info, and explicitly pre-existing/out-of-bead-scope ('value unchanged in this bead'). Record for beads 4/5: either route completeSyncPhase's write through a stored-aware no-op-on-backward guard (making the sanction sentence semantically true) or extend the fence's claim honestly in the agreement-table wording."
+    },
+    {
+      "id": "G4",
+      "severity": "info",
+      "title": "Residual transient inside `next` between claim and advance is forward-direction and correctly recoverable",
+      "detail": "Between ClaimBead (Step 5) and advancePhaseOnClaim (Step 5.2) stored=plan while derived=implement; a crash or lock failure there persists that state. This does not undermine the dissolution claim: the disagreement is FORWARD, so the direction-conditional AC-5(iv) warning names `mindspec repair phase <spec-id>` which the unforced guard permits — the #248 self-worsening property (a recovery line that moves the epic backward) is structurally impossible in every residual I could construct on the new paths. Also verified the classification input is trustworthy: selected.IssueType always comes from bd's ready/show JSON (filterReadyItems already depends on it to exclude epics), so a bug-typed bead cannot arrive with an empty IssueType and be misclassified as lifecycle."
+    }
+  ]
+}
