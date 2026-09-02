@@ -44,6 +44,14 @@ var (
 	fetchBeadAsOfFn         = next.FetchBeadAsOf
 	findEpicForBeadFn       = phase.FindEpicForBead
 	completeMergeMetadataFn = bead.MergeMetadata
+	// completeFetchChildrenFn is the AC-4b seam (spec 128 bead 5, the
+	// exact house pattern of completeMergeMetadataFn above): advanceState's
+	// post-close children read routes through this package-level function
+	// variable instead of calling phase.FetchChildren directly, so a test
+	// can inject a failing read without a real bd/Dolt failure and assert
+	// the indeterminate form renders through complete's REAL result path
+	// — never a fabricated `plan` derived from a nil child set.
+	completeFetchChildrenFn = phase.FetchChildren
 	// completeGetMetadataFn is the read half of the metadata seam pair (Spec
 	// 114 R2/Bead 2, carry-forward #1): the durable-obligation marker write
 	// (panelGate's persistRefutationPending) and the pre-close
@@ -304,6 +312,15 @@ type Result struct {
 	NextBead        string
 	NextSpec        string
 	SpecWorktree    string
+	// NextModeIndeterminate is true when advanceState's post-close child
+	// read failed (AC-4b, spec 128 bead 5): NextMode/NextBead carry their
+	// zero values rather than a mode fabricated from a nil child set.
+	// FormatResult renders the indeterminate form and step-6.5 skips its
+	// phase-sync write entirely when this is set.
+	NextModeIndeterminate bool
+	// IndeterminateReason is the human-readable cause when
+	// NextModeIndeterminate is true.
+	IndeterminateReason string
 }
 
 func defaultFindLocalRoot() (string, error) {
@@ -1359,8 +1376,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// 6. Advance state. advanceState re-reads the post-close child set fresh
-	// (phase.FetchChildren) against the epic resolved once above.
-	nextMode, nextBead := advanceState(epicID)
+	// (completeFetchChildrenFn/phase.FetchChildren) against the epic
+	// resolved once above.
+	nextMode, nextBead, advanceErr := advanceState(epicID)
+	if advanceErr != nil {
+		// AC-4b (spec 128 bead 5): a failed post-close child read renders
+		// the indeterminate form in BOTH the result summary and the tail
+		// — never a fabricated `plan` derived from a nil child set.
+		// NextMode/NextBead stay at their zero values; NextSpec is still
+		// the already-resolved (not derived-from-the-failed-read) spec.
+		result.NextModeIndeterminate = true
+		result.IndeterminateReason = advanceErr.Error()
+		result.NextSpec = specID
+		return result, nil
+	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
 	result.NextSpec = specID
@@ -1368,7 +1397,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 6.5. Sync stored phase (Spec 080): keep epic mindspec_phase in sync
 	// so that DerivePhase (metadata-first) returns the correct phase for
 	// downstream commands like `mindspec impl approve`. Reuses the epicID
-	// resolved once at the top (no extra `bd list --type=epic`).
+	// resolved once at the top (no extra `bd list --type=epic`). Skipped
+	// entirely above on the indeterminate return — no value fabricated
+	// from a nil child set is ever written (AC-4b).
 	if nextMode != "" && epicID != "" {
 		completeSyncPhase(root, epicID, nextMode, beadID)
 	}
@@ -1432,6 +1463,14 @@ func FormatResult(r *Result) string {
 	if r.WorktreeRemoved {
 		sb.WriteString("Worktree removed.\n")
 	}
+	if r.NextModeIndeterminate {
+		// AC-4b (spec 128 bead 5): the result summary renders the SAME
+		// indeterminate marker text the instruct tail does — never a
+		// fabricated `plan` (or any other mode) derived from the failed
+		// post-close child read.
+		fmt.Fprintf(&sb, "cannot determine mode: %s\n", r.IndeterminateReason)
+		return sb.String()
+	}
 	switch r.NextMode {
 	case state.ModeImplement:
 		fmt.Fprintf(&sb, "Next bead ready: %s\n", idrender.Bead(r.NextBead))
@@ -1444,7 +1483,15 @@ func FormatResult(r *Result) string {
 		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
-		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", idrender.Spec(r.NextSpec))
+		// R2.3 (spec 128 bead 5, round-4/round-5 tally): reworded to fit
+		// the TWO triggers that actually survive AC-4b's fix — the
+		// empty-lifecycle-subset fallback (zero lifecycle children) and
+		// the all-open branch (lifecycle children exist but none has
+		// ever been claimed or closed). "Remaining beads are blocked"
+		// was true for NEITHER: `blocked` is a distinct child status
+		// from "still open, unclaimed", and the empty-subset trigger has
+		// no lifecycle beads to be blocked at all.
+		fmt.Fprintf(&sb, "No lifecycle work has started yet. Mode: plan (spec: %s)\n", idrender.Spec(r.NextSpec))
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
 			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
@@ -1474,15 +1521,26 @@ func FormatResult(r *Result) string {
 // guidance for plan / review / idle.
 //
 // epicID is the spec's epic, resolved once by Run and passed in ("" when no
-// epic exists → idle). The child set is re-read FRESH via phase.FetchChildren
-// (a single all-status `bd list --parent` call, uncached) so it reflects the
-// `bd close` this run just performed rather than a memoized pre-close view.
-func advanceState(epicID string) (mode, nextBead string) {
+// epic exists → idle). The child set is re-read FRESH via
+// completeFetchChildrenFn/phase.FetchChildren (a single all-status
+// `bd list --parent` call, uncached) so it reflects the `bd close` this run
+// just performed rather than a memoized pre-close view.
+//
+// AC-4b (spec 128 bead 5): a failed child read propagates as err rather
+// than being silently discarded into a nil child set that
+// DerivePhaseFromChildren would derive as `plan` — a discovery failure
+// serialized as a fabricated mode. Run maps a non-nil err to
+// Result.NextModeIndeterminate; mode/nextBead are meaningless ("", "")
+// whenever err is non-nil and callers MUST check err first.
+func advanceState(epicID string) (mode, nextBead string, err error) {
 	if epicID == "" {
-		return state.ModeIdle, ""
+		return state.ModeIdle, "", nil
 	}
 
-	children, _ := phase.FetchChildren(epicID)
+	children, ferr := completeFetchChildrenFn(epicID)
+	if ferr != nil {
+		return "", "", fmt.Errorf("reading post-close child set for epic %s: %w", idrender.Bead(epicID), ferr)
+	}
 	derivedPhase := phase.DerivePhaseFromChildren(children)
 
 	if derivedPhase == state.ModeImplement {
@@ -1493,7 +1551,7 @@ func advanceState(epicID string) (mode, nextBead string) {
 			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
 				var ready []bead.BeadInfo
 				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-					return state.ModeImplement, ready[0].ID
+					return state.ModeImplement, ready[0].ID, nil
 				}
 			}
 		}
@@ -1501,10 +1559,10 @@ func advanceState(epicID string) (mode, nextBead string) {
 		// is blocked on a dep that just closed but hasn't propagated, or the
 		// only remaining work is in_progress with a peer). Stay in implement
 		// without a concrete next bead rather than flipping to review.
-		return state.ModeImplement, ""
+		return state.ModeImplement, "", nil
 	}
 
-	return derivedPhase, ""
+	return derivedPhase, "", nil
 }
 
 // buildSkewMetadata returns a metadata map with the override reason,

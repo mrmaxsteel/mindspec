@@ -449,11 +449,18 @@ func followUp(id, status string) phase.ChildInfo {
 //   - tail:        phase.ResolveContextFromDirWithCache's WorktreeSpec
 //     branch — an unconditional PATH-CONVENTION shortcut (no epic found
 //     -> ModeSpec) with no git/bd verification of its own. DISCLOSED
-//     (round-1 G3.1, unchanged): this is the only surface this row
-//     proxies rather than the verb's own real invocation, because the
-//     verb's own emitInstruct (main-checkout WorktreeMain) is not yet
-//     draft-aware at this commit and still renders idle until bead 5's
-//     AC-3.
+//     (round-1 G3.1): this remains the only surface this row proxies
+//     rather than the verb's own real invocation — not because
+//     emitInstruct is draft-unaware (bead 5's AC-3 fixed exactly that:
+//     the main-checkout WorktreeMain path now consults
+//     resolve.DiscoverDraftSpecsWithCache before finalizing idle) but
+//     because emitInstruct lives in package main (cmd/mindspec) and
+//     cannot be imported by this internal/phase_test package. The real
+//     invocation is pinned separately by cmd/mindspec's own AC-3 test
+//     (verb_output_test.go's TestEmitInstruct_MainCheckoutSingleDraft_
+//     RendersSpecModeNotIdle), which drives emitInstruct end-to-end from
+//     a main-checkout draft fixture and confirms it renders spec mode,
+//     never idle — the same conclusion this proxy asserts.
 //   - derivation:  resolve.DiscoverDraftSpecsWithCache — bead 3's own
 //     ENUMERATE-ALL discovery mechanism (internal/resolve/resolve.go),
 //     invoked with a fresh, independent Cache that shares no variable

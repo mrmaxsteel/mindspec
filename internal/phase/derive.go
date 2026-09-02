@@ -112,6 +112,22 @@ type Context struct {
 	Phase        string `json:"phase"`
 	WorktreePath string `json:"worktree_path"`
 	EpicID       string `json:"epic_id"`
+	// DerivationFailed is true when a GENUINE bd/Dolt lookup failure was
+	// encountered while resolving Phase — never when a lookup simply and
+	// successfully found nothing (a pre-epic draft, or a fresh worktree
+	// with no active spec, both leave this false). Spec 128 R2.3 scope
+	// extension: ResolveContextFromDirWithCache's per-case fallbacks
+	// (e.g. "bead worktree implies implement") used to silently back-fill
+	// Phase on error, making a real discovery failure indistinguishable
+	// from a legitimately-derived value. Phase keeps its historical
+	// fallback VALUE for callers that only read it (state show, the
+	// bead-4 agreement-table fixtures) — this field is the new, additive
+	// signal that lets an instruct-tail caller render the honest
+	// indeterminate form instead of trusting that fallback.
+	DerivationFailed bool `json:"derivation_failed,omitempty"`
+	// DerivationError is the human-readable cause when DerivationFailed
+	// is true.
+	DerivationError string `json:"derivation_error,omitempty"`
 }
 
 // SpecIDFromMetadata constructs a spec ID from num and title, checked
@@ -596,12 +612,21 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 		if err == nil && derivedSpecID != "" {
 			ctx.SpecID = derivedSpecID
 			ctx.EpicID = epicID
+		} else if err != nil && !errors.Is(err, ErrNoEpicLineage) {
+			// A genuine lookup failure (bd/Dolt), not "this bead
+			// honestly has no epic lineage" — record it so the tail
+			// can render indeterminate instead of trusting the
+			// ModeImplement fallback below as if it were derived.
+			ctx.DerivationFailed = true
+			ctx.DerivationError = err.Error()
 		}
-		phase, err := derivePhaseForSpecWithCache(c, ctx.EpicID)
-		if err == nil {
+		phase, phaseErr := derivePhaseForSpecWithCache(c, ctx.EpicID)
+		if phaseErr == nil {
 			ctx.Phase = phase
 		} else {
 			ctx.Phase = state.ModeImplement // bead worktree implies implement
+			ctx.DerivationFailed = true
+			ctx.DerivationError = phaseErr.Error()
 		}
 
 	case workspace.WorktreeSpec:
@@ -609,12 +634,30 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 		epicID, err := FindEpicBySpecIDWithCache(c, specID)
 		if err == nil && epicID != "" {
 			ctx.EpicID = epicID
-			phase, err := DerivePhaseWithCache(c, epicID)
-			if err == nil {
+			phase, phaseErr := DerivePhaseWithCache(c, epicID)
+			if phaseErr == nil {
 				ctx.Phase = phase
+			} else {
+				ctx.DerivationFailed = true
+				ctx.DerivationError = phaseErr.Error()
+			}
+		} else if err != nil && !beadsDirMissing(root) {
+			// Distinguish "bd healthy, no epic yet" (a pre-epic draft —
+			// ModeSpec below is the honest, non-error answer) from a
+			// genuine bd/Dolt failure, the same probe
+			// resolve.ResolveModeWithCache applies to its own epic
+			// lookup (round-1 panel G2/F2a precedent). beadsDirMissing
+			// short-circuits first: a workspace with no .beads/ directory
+			// at all (bead.Preflight's own "run 'beads init'" precondition,
+			// checked the same on-disk way, never by bd's error TEXT) has
+			// never used the beads lifecycle — that is honestly ModeSpec
+			// below, not a health failure worth an extra bd probe.
+			if _, epicsErr := c.AllEpics(); epicsErr != nil {
+				ctx.DerivationFailed = true
+				ctx.DerivationError = epicsErr.Error()
 			}
 		}
-		if ctx.Phase == "" {
+		if ctx.Phase == "" && !ctx.DerivationFailed {
 			ctx.Phase = state.ModeSpec // spec worktree without epic → spec mode
 		}
 		// Check for active bead
@@ -626,17 +669,43 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 
 	case workspace.WorktreeMain:
 		specs, err := DiscoverActiveSpecsWithCache(c)
-		if err == nil && len(specs) == 1 {
+		switch {
+		case err == nil && len(specs) == 1:
 			ctx.SpecID = specs[0].SpecID
 			ctx.EpicID = specs[0].EpicID
 			ctx.Phase = specs[0].Phase
-		} else if err == nil && len(specs) == 0 {
+		case err == nil && len(specs) == 0:
 			ctx.Phase = state.ModeIdle
+		case err != nil && beadsDirMissing(root):
+			// No .beads/ directory at all: this workspace has never used
+			// the beads lifecycle (bead.Preflight's own "run 'beads
+			// init'" precondition, re-checked here the same on-disk way —
+			// never by matching bd's error TEXT). That is honestly idle,
+			// not a bd/Dolt health failure.
+			ctx.Phase = state.ModeIdle
+		case err != nil:
+			ctx.DerivationFailed = true
+			ctx.DerivationError = err.Error()
 		}
 		// Multiple specs: leave specID empty (caller handles ambiguity)
 	}
 
 	return ctx, nil
+}
+
+// beadsDirMissing reports whether root has no .beads/ directory at all —
+// the same on-disk precondition bead.Preflight checks before ever
+// shelling out to bd (internal/bead/bdcli.go's "run 'beads init'" case).
+// Spec 128 R2.3: a workspace that has never used the beads lifecycle
+// makes every bd query fail (real bd: "Error: no beads database found"),
+// which is NOT a health failure worth reporting as indeterminate — it is
+// the ordinary, permanently-legitimate "nothing has started here yet"
+// idle state. This is checked via the filesystem, never by matching bd's
+// error TEXT (the same discipline ErrNoEpicLineage's doc comment states:
+// "never classify by error text").
+func beadsDirMissing(root string) bool {
+	_, err := os.Stat(filepath.Join(root, ".beads"))
+	return os.IsNotExist(err)
 }
 
 // CheckSpecNumberCollision checks if a spec number is already in use.

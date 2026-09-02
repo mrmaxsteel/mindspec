@@ -25,10 +25,23 @@ const approvalGatesBlock = `  mindspec spec approve <id>   Approve a spec and tr
   mindspec plan approve <id>   Approve a plan and transition toward Implementation Mode
   mindspec impl approve <id>   Approve implementation and transition to idle`
 
-// newExecutor creates a MindspecExecutor rooted at the given path.
-// Used as a factory function across CLI commands.
-func newExecutor(root string) executor.Executor {
+// newExecutorFn creates the Executor every CLI verb RunE composes with
+// (a MindspecExecutor rooted at the given path by default). Package-level
+// function variable (spec 128 bead 5, AC-14): the total-classification
+// table test drives spec create/approve, plan approve, next, complete,
+// and impl approve/adopt's REAL RunE functions with an injected
+// executor.MockExecutor instead of a live git lifecycle in this repo
+// (the plan's own hermeticity mandate) — the exact house pattern of
+// internal/complete's completeMergeMetadataFn-class seams.
+var newExecutorFn = func(root string) executor.Executor {
 	return executor.NewMindspecExecutor(root)
+}
+
+// newExecutor is the stable call-site name every CLI command uses;
+// kept as a thin wrapper so command files read `newExecutor(root)`
+// rather than the seam variable name directly.
+func newExecutor(root string) executor.Executor {
+	return newExecutorFn(root)
 }
 
 // Set by goreleaser ldflags.

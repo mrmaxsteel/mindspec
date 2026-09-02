@@ -76,15 +76,15 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 	// PERF-1: per-invocation cache, shared by every cache-aware helper below.
 	cache := phase.NewCache()
 
-	// Protected branch check FIRST: main/master → always idle.
-	// This must run before guard/worktree checks which query beads (slow
-	// dolt cold start). Decision only (IsProtectedCheckout, git/config,
-	// no beads) — handleNoState below does the single idle render, with
-	// the shared invocation cache (final-review F1: the old
-	// RenderIdleIfProtected call here rendered idle a FIRST time just to
-	// decide, discarding the output and its lifecycle scan).
+	// Protected branch check FIRST: main/master → always idle... or a
+	// pre-epic draft (spec 128 R2.3 window (a)). This must run before
+	// guard/worktree checks which query beads (slow dolt cold start).
+	// Decision only (IsProtectedCheckout, git/config, no beads) up to
+	// this point; handleIdleOrDraft below pays the single bd-backed
+	// draft-discovery scan the common idle case still needs to rule out
+	// (final-review F1's shared-cache discipline preserved).
 	if specFlag == "" && IsProtectedCheckout(mainRoot) {
-		return handleNoState(cache, mainRoot, format, out)
+		return handleIdleOrDraft(cache, mainRoot, format, out)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -119,8 +119,18 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		}
 		// Try phase context for beads-derived state.
 		pctx, ctxErr := phase.ResolveContextWithCache(cache, mainRoot)
-		if ctxErr != nil || pctx == nil || pctx.Phase == "" {
-			return handleNoState(cache, mainRoot, format, out)
+		if ctxErr != nil {
+			return handleIndeterminate(cache, mainRoot, format, out, ctxErr.Error())
+		}
+		if pctx != nil && pctx.DerivationFailed {
+			// Spec 128 R2.3 window (b): a genuine bd/Dolt lookup failure
+			// inside ResolveContextFromDirWithCache must render
+			// indeterminate, never the fallback Phase value it carries
+			// for other (best-effort) callers.
+			return handleIndeterminate(cache, mainRoot, format, out, pctx.DerivationError)
+		}
+		if pctx == nil || pctx.Phase == "" {
+			return handleIdleOrDraft(cache, mainRoot, format, out)
 		}
 		mc = &state.Focus{
 			Mode:       pctx.Phase,
@@ -135,13 +145,13 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		// Spec 128 Bead 3 round-1 panel G4: ResolveModeWithCache now
 		// propagates a genuine discovery failure instead of collapsing it
 		// to idle (R1.4) — an empty Mode reaching Render below would fail
-		// obscurely on a ""+".md" template lookup. Fall back to the same
-		// graceful no-state handling used above for a resolution failure;
-		// distinguishing "indeterminate" from "idle" in the instruct tail
-		// itself is bead 5's stated territory, not this call site's.
+		// obscurely on a ""+".md" template lookup. Bead 5 (R2.3): that
+		// propagated failure renders the honest indeterminate form here,
+		// never idle — a discovery failure is never presented as a
+		// derived idle state.
 		mode, modeErr := resolve.ResolveModeWithCache(cache, mainRoot, specID)
 		if modeErr != nil {
-			return handleNoState(cache, mainRoot, format, out)
+			return handleIndeterminate(cache, mainRoot, format, out, modeErr.Error())
 		}
 		// Try to find active bead via phase context
 		pctx, _ := phase.ResolveContextFromDirWithCache(cache, mainRoot, localRoot)
@@ -214,6 +224,84 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 			"mode":         mc.Mode,
 			"template":     mc.Mode + ".md",
 		}))
+	fmt.Fprint(out, output)
+	return nil
+}
+
+// handleIdleOrDraft is reached at both of Run's "nothing beads-derived
+// resolved" arrival points (the protected-checkout fast path, and the
+// no-context fallback after ResolveTargetWithCache/ResolveContextWithCache
+// both come up empty). The common case really is idle, but a pre-epic
+// draft (OQ-2: spec directory + `spec/<id>` branch, no epic yet) is
+// invisible to bd — `spec create` commits the draft only to its own spec
+// branch, never to the invoking (often main) checkout's working tree — so
+// this consults the same on-disk/branch draft scan `state show` already
+// applies (bead 3) before concluding idle (spec 128 R2.3 window (a)): a
+// standalone `mindspec instruct` run must agree with `state show` for a
+// draft-only state instead of reporting bare idle.
+func handleIdleOrDraft(cache *phase.Cache, root, format string, out io.Writer) error {
+	drafts, err := resolve.DiscoverDraftSpecsWithCache(cache, root)
+	if err != nil {
+		return handleIndeterminate(cache, root, format, out, err.Error())
+	}
+	switch len(drafts) {
+	case 0:
+		return handleNoState(cache, root, format, out)
+	case 1:
+		return handleDraft(cache, root, format, out, drafts[0])
+	default:
+		active := make([]resolve.SpecStatus, len(drafts))
+		for i, d := range drafts {
+			active[i] = resolve.SpecStatus{SpecID: d.SpecID, Mode: state.ModeSpec, Active: true}
+		}
+		return handleAmbiguous(cache, root, format, out, &resolve.ErrAmbiguousTarget{Active: active})
+	}
+}
+
+// handleDraft renders spec-mode guidance for a single confirmed pre-epic
+// draft — the honest answer for a draft-only state (spec 128 R2.3), never
+// idle.md's "Available Actions" block.
+func handleDraft(cache *phase.Cache, root, format string, out io.Writer, d resolve.DraftSpec) error {
+	mc := &state.Focus{Mode: state.ModeSpec, ActiveSpec: d.SpecID}
+	ctx := BuildContextWithCache(cache, root, mc)
+
+	if format == "json" {
+		output, err := RenderJSON(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, output)
+		return nil
+	}
+
+	output, err := Render(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(out, output)
+	return nil
+}
+
+// handleIndeterminate renders the shared indeterminate-mode guidance
+// (spec 128 R2.3): reason names the discovery failure or unresolved
+// ambiguity that prevents deriving a real mode. Never idle — a failure to
+// derive state is never presented as a derived idle state.
+func handleIndeterminate(cache *phase.Cache, root, format string, out io.Writer, reason string) error {
+	ctx := BuildIndeterminateContextWithCache(cache, root, reason)
+
+	if format == "json" {
+		output, err := RenderJSON(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, output)
+		return nil
+	}
+
+	output, err := Render(ctx)
+	if err != nil {
+		return err
+	}
 	fmt.Fprint(out, output)
 	return nil
 }

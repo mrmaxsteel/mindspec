@@ -245,6 +245,91 @@ func TestCompleteTail_NoNoteWhileCwdExists(t *testing.T) {
 	}
 }
 
+// TestCompleteTail_SuccessBranch_AgreesWithResultNextMode is AC-4's
+// success branch (spec 128 bead 5), driven over the REAL production
+// completeTail wiring: when result.NextModeIndeterminate is false, the
+// tail calls instructFn (never instruct.RenderIndeterminate) and the
+// output contains no indeterminate marker — the two branches are
+// mutually exclusive, asserted only in their own driving case (round-2
+// G11 — a tail that always renders the indeterminate marker would pass
+// this branch vacuously, which is exactly why AC-4 requires the SUCCESS
+// branch to assert its ABSENCE, not just the failure branch's presence).
+func TestCompleteTail_SuccessBranch_AgreesWithResultNextMode(t *testing.T) {
+	root := t.TempDir()
+	instructFnCalled := false
+
+	var stdout, stderr bytes.Buffer
+	completeTail(&stdout, &stderr, root, root,
+		&complete.Result{
+			BeadID:   "bead-ac4",
+			NextMode: state.ModeImplement,
+			NextBead: "bead-ac4-next",
+			NextSpec: "008-ac4",
+		},
+		func(r string) error {
+			instructFnCalled = true
+			fmt.Fprintln(&stdout, "## MindSpec Lifecycle\ninstruct guidance line")
+			return nil
+		})
+
+	if !instructFnCalled {
+		t.Fatal("the success branch must call instructFn (the real per-mode tail), not instruct.RenderIndeterminate")
+	}
+	out := stdout.String()
+	if strings.Contains(out, "cannot determine mode") {
+		t.Errorf("success branch output must contain no indeterminate marker; got:\n%s", out)
+	}
+	resultBeforeGuidance(t, "complete (success branch)", out, "Bead bead-ac4 closed.", "## MindSpec Lifecycle")
+}
+
+// TestCompleteTail_IndeterminateBranch_NeverCallsInstructFn is AC-4's
+// failure branch (spec 128 bead 5, AC-4b's real-wiring companion): when
+// result.NextModeIndeterminate is true, completeTail renders the shared
+// indeterminate form directly (instruct.RenderIndeterminate) and MUST
+// NOT call instructFn at all — a fresh independent re-derivation there
+// could disagree with (or paper over, via stale metadata) the exact
+// failure the result summary just reported. The output carries the
+// indeterminate marker, no idle.md guidance, and ends with a
+// copy-pastable final `recovery:` line (ADR-0035).
+func TestCompleteTail_IndeterminateBranch_NeverCallsInstructFn(t *testing.T) {
+	root := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	completeTail(&stdout, &stderr, root, root,
+		&complete.Result{
+			BeadID:                "bead-ac4b",
+			NextModeIndeterminate: true,
+			IndeterminateReason:   "reading post-close child set for epic epic-ac4b: bd list --parent: simulated failure",
+			NextSpec:              "008-ac4b",
+		},
+		func(r string) error {
+			t.Fatal("instructFn must NOT be called on the indeterminate branch")
+			return nil
+		})
+
+	out := stdout.String()
+	if !strings.Contains(out, "Bead bead-ac4b closed.") {
+		t.Errorf("FormatResult summary missing; stdout:\n%s", out)
+	}
+	if !strings.Contains(out, "cannot determine mode") {
+		t.Errorf("expected the indeterminate marker text, got:\n%s", out)
+	}
+	if strings.Contains(out, "## Available Actions") {
+		t.Errorf("idle.md's Available Actions block must never appear on the indeterminate branch; got:\n%s", out)
+	}
+	if strings.Contains(out, "No Active Work") {
+		t.Errorf("idle.md's heading must never appear on the indeterminate branch; got:\n%s", out)
+	}
+	// emitCdBackNote appends nothing here (invocation cwd exists), so the
+	// tail's own final recovery line stays the true last non-empty line.
+	if got := lastLine(strings.TrimRight(out, "\n")); got != "recovery: mindspec doctor" {
+		t.Errorf("expected the tail to end with a copy-pastable recovery line, got %q; full output:\n%s", got, out)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+}
+
 // TestEmitCdBackNote_SilentWhileInvocationCwdExists: the NOTE is a
 // removed-directory recovery channel, not noise on the happy path.
 func TestEmitCdBackNote_SilentWhileInvocationCwdExists(t *testing.T) {
