@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // BeadInfo represents a work item from Beads.
@@ -35,7 +36,7 @@ var (
 func QueryReady() ([]BeadInfo, error) {
 	out, err := runBDFn("ready", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("bd ready failed: %w", err)
+		return nil, fmt.Errorf("bd ready failed: %s", renderBDError(err))
 	}
 
 	return ParseBeadsJSON(out)
@@ -51,10 +52,36 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	}
 	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err != nil {
-		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, err)
+		return nil, fmt.Errorf("bd ready for epic %s failed: %s", epicID, renderBDError(err))
 	}
 
 	return ParseBeadsJSON(out)
+}
+
+// renderBDError formats a bd command failure for inclusion in a
+// terminal-facing wrapping message, escaping EVERY line individually
+// through termsafe.Escape (ADR-0042) before rejoining (bead
+// mindspec-ta30.9, spec 128 R6.4/AC-11).
+//
+// bd's captured stderr (internal/bead's wrapBDError already folds a
+// bounded excerpt into err.Error(), per RunBD/tracedOutput) is what
+// makes the #146 schema-error class of failure diagnosable at all — the
+// content leg of AC-11 — but that same stderr is agent-writable/
+// hostile-adjacent: a compromised or hostile bd (or a shim standing in
+// for it) can emit ANSI escapes, carriage returns, or other control
+// bytes on stderr. Escaping per line — the DirtyTreeFailure house
+// pattern (internal/next/guard.go) — keeps a single hostile line from
+// forging additional lines or controlling the terminal, while leaving
+// ordinary printable-ASCII diagnostic text (the actual schema-error
+// wording) byte-identical. This is the RENDER boundary: the escape
+// happens here, in the wrapping error message construction, not inside
+// bdcli.go's capture.
+func renderBDError(err error) string {
+	lines := strings.Split(err.Error(), "\n")
+	for i, line := range lines {
+		lines[i] = termsafe.Escape(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ParseBeadsJSON parses the JSON output from bd commands into BeadInfo slices.

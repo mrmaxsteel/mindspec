@@ -2,6 +2,8 @@ package bead
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -589,6 +591,106 @@ func TestBeadExists_BdUnavailable(t *testing.T) {
 	}
 	if exists {
 		t.Error("expected exists=false on bd invocation failure")
+	}
+}
+
+// --- bd stderr passthrough tests (bead mindspec-ta30.9, spec 128 R6.4/AC-11) ---
+
+// TestRunBD_SurfacesStderrOnFailure pins AC-11's content leg at the
+// bdcli.go layer: a failing bd whose stderr carries the #146 schema-error
+// text must have that text land in RunBD's returned error, not just in
+// the discarded exec.ExitError.Stderr field.
+func TestRunBD_SurfacesStderrOnFailure(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	const schemaErrLine = `Error 1105 (HY000): column "depends_on_id" could not be found`
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `echo '`+schemaErrLine+`' >&2; exit 1`)
+	}
+
+	_, err := RunBD("ready", "--json")
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	if !strings.Contains(err.Error(), "depends_on_id") {
+		t.Errorf("expected the bd schema-error line to survive into RunBD's error, got: %v", err)
+	}
+	if err.Error() == "exit status 1" {
+		t.Error("RunBD's error must not degrade to the bare, content-free \"exit status 1\" (the #146 discard bug)")
+	}
+}
+
+// TestRunBD_CapsLongStderr pins the pinned excerpt cap: a pathologically
+// long stderr is bounded to bdStderrExcerptLineCap lines with a
+// truncation marker, rather than surfacing unboundedly.
+func TestRunBD_CapsLongStderr(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	const totalLines = bdStderrExcerptLineCap + 10
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", fmt.Sprintf(`for i in $(seq 1 %d); do echo "stderr-line-$i" >&2; done; exit 1`, totalLines))
+	}
+
+	_, err := RunBD("ready", "--json")
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, fmt.Sprintf("stderr-line-%d", bdStderrExcerptLineCap)) {
+		t.Errorf("expected the excerpt to include up through line %d, got: %s", bdStderrExcerptLineCap, msg)
+	}
+	if strings.Contains(msg, fmt.Sprintf("stderr-line-%d", bdStderrExcerptLineCap+1)) {
+		t.Errorf("excerpt exceeded the %d-line cap, got: %s", bdStderrExcerptLineCap, msg)
+	}
+	if !strings.Contains(msg, "truncated") {
+		t.Errorf("expected a truncation marker when stderr exceeds the cap, got: %s", msg)
+	}
+}
+
+// TestRunBD_EmptyStderrUnchanged pins the passthrough case: a failure
+// with no captured stderr (e.g. `false`) must not gain a spurious ": "
+// suffix or otherwise be rewritten — errors.As must still find the
+// underlying *exec.ExitError directly, exactly as BeadExists/
+// IsUnsupportedFlagError depend on.
+func TestRunBD_EmptyStderrUnchanged(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
+	}
+
+	_, err := RunBD("show", "mindspec-missing", "--json")
+	if err == nil {
+		t.Fatal("expected an error from `false`")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected errors.As to find *exec.ExitError, got: %v (%T)", err, err)
+	}
+}
+
+// TestIsUnsupportedFlagError_SurvivesTracedOutputWrapping is the
+// regression pin for the errors.As chain-integrity claim in wrapBDError's
+// doc comment: IsUnsupportedFlagError (used by internal/complete's
+// bd-version graceful degradation, bead mindspec-uopd) must still detect
+// an "unknown flag" failure after tracedOutput's stderr-surfacing wrap.
+func TestIsUnsupportedFlagError_SurvivesTracedOutputWrapping(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `echo 'Error: unknown flag: --as-of' >&2; exit 1`)
+	}
+
+	_, err := RunBD("show", "mindspec-abc", "--as-of", "HEAD", "--json")
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	if !IsUnsupportedFlagError(err, "as-of") {
+		t.Errorf("expected IsUnsupportedFlagError to detect the unknown-flag failure through the stderr-wrapped error, got: %v", err)
 	}
 }
 
