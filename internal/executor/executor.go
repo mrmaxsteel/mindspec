@@ -238,7 +238,16 @@ type Executor interface {
 	// stage commit from tree, parented on parent, carrying the pinned
 	// Mindspec-Stage trailer for stage (gitutil.StageMaterialization or
 	// gitutil.StageArtifactSync). It does not publish any ref or marker.
-	MaterializeStageCommit(wtPath, tree, parent, stage string) (oid string, err error)
+	//
+	// subject is the commit's human-readable subject line. Fix-round G6:
+	// widened by this one parameter (a disclosed seam-list deviation) so
+	// the operator's own --commit-msg text can survive into the
+	// materialization commit exactly as the pre-bead-6 porcelain
+	// CommitAll subject did — an empty subject falls back to a fixed,
+	// stage-named default ("mindspec: materialize bead completion" /
+	// "chore: sync beads artifact"), never silently discarding a
+	// caller-supplied one.
+	MaterializeStageCommit(wtPath, tree, parent, stage, subject string) (oid string, err error)
 
 	// PublishStageMarker publishes oid as beadID's write-ahead
 	// materialization marker via per-ref compare-and-swap: expectedOld ==
@@ -256,11 +265,18 @@ type Executor interface {
 	// marker" after clearing it.
 	ReadStageMarker(beadID string) (oid, stage string, present bool, err error)
 
-	// ClearStageMarker deletes beadID's write-ahead marker (the terminal
-	// (T) step, run on both the ordinary and the landed-merge-reconcile
-	// completion paths). Idempotent: clearing an absent marker is a no-op
-	// success.
-	ClearStageMarker(beadID string) error
+	// ClearStageMarker deletes beadID's write-ahead marker via
+	// compare-and-swap against expectedOID — the exact OID this
+	// invocation observed/owns (fix-round G4): the delete FAILS if the
+	// marker's CURRENT value differs (another invocation has since
+	// published a NEW marker), so a stale clear can never delete
+	// evidence it does not own. Run on the terminal (T) step (both the
+	// ordinary and the landed-merge-reconcile completion paths) and on
+	// every foreign/corrupt-marker clear in the re-entry discriminator.
+	// expectedOID == "" means this invocation believes no marker exists
+	// (a no-op). Idempotent: clearing an ALREADY-absent marker (whether
+	// via a prior clear or a race) is a no-op success, never an error.
+	ClearStageMarker(beadID, expectedOID string) error
 
 	// AdvanceBranchExpectedOld moves the local branch ref
 	// `refs/heads/<branch>` to newSHA, requiring its CURRENT value to

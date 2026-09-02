@@ -747,9 +747,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if err != nil {
 			return nil, err
 		}
-	} else if clrErr := exec.ClearStageMarker(beadID); clrErr != nil {
+	} else if orphanOID, _, present, rerr := exec.ReadStageMarker(beadID); rerr != nil {
 		// R4: beadID is an ID-typed position — idrender.Bead.
-		return nil, fmt.Errorf("clearing orphaned materialization marker for %s: %w", safeBeadID, clrErr)
+		return nil, fmt.Errorf("reading orphaned materialization marker for %s: %w", safeBeadID, rerr)
+	} else if present {
+		if clrErr := exec.ClearStageMarker(beadID, orphanOID); clrErr != nil {
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			return nil, fmt.Errorf("clearing orphaned materialization marker for %s: %w", safeBeadID, clrErr)
+		}
 	}
 
 	// 2.25. AUTHORITATIVE panel gate (Spec 099 Bead 2, R1+R2+R5; ADR-0037).
@@ -1154,8 +1159,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// stray marker left behind after a genuinely successful completion is
 	// caught by the discriminator's own FOREIGN branch on any later
 	// invocation naming this bead (the tip will no longer match it).
-	if clrErr := exec.ClearStageMarker(beadID); clrErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not clear materialization marker for %s: %v\n", safeBeadID, clrErr)
+	if finalOID, _, present, rerr := exec.ReadStageMarker(beadID); rerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not read materialization marker for %s before the terminal clear: %v\n", safeBeadID, rerr)
+	} else if present {
+		if clrErr := exec.ClearStageMarker(beadID, finalOID); clrErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not clear materialization marker for %s: %v\n", safeBeadID, clrErr)
+		}
 	}
 
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the

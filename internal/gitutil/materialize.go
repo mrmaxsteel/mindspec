@@ -160,21 +160,31 @@ func buildStageCommitMessage(subject, stage string) string {
 // ReadStageTrailer parses ref's commit message (via CommitMessageBody)
 // for the pinned Mindspec-Stage trailer. present is false — with a nil
 // error — when the commit carries no such trailer (an ordinary,
-// non-write-ahead commit): bead 6's re-entry discriminator reads the
-// stage from this ENCODING alone, never infers it from a tree diff,
-// which is ambiguous when a stage's own content happens to be a no-op.
+// non-write-ahead commit), OR when it carries MORE THAN ONE
+// Mindspec-Stage line (fix-round G2): a well-formed write-ahead commit
+// this protocol builds carries exactly one, so any duplicate — whether
+// consistent or conflicting — is an AMBIGUOUS encoding (a crafted or
+// corrupt commit), never resolved by picking one arbitrarily. Bead 6's
+// re-entry discriminator reads the stage from this ENCODING alone,
+// never infers it from a tree diff, which is ambiguous when a stage's
+// own content happens to be a no-op — and never guesses past an
+// ambiguous encoding either.
 func ReadStageTrailer(workdir, ref string) (stage string, present bool, err error) {
 	body, err := CommitMessageBody(workdir, ref)
 	if err != nil {
 		return "", false, err
 	}
 	prefix := MindspecStageTrailerKey + ": "
+	var found []string
 	for _, line := range strings.Split(body, "\n") {
 		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix)), true, nil
+			found = append(found, strings.TrimSpace(strings.TrimPrefix(line, prefix)))
 		}
 	}
-	return "", false, nil
+	if len(found) != 1 {
+		return "", false, nil
+	}
+	return found[0], true, nil
 }
 
 // MaterializeStageCommit builds (via `git commit-tree`, plumbing — no
@@ -324,23 +334,43 @@ func ReadMaterializationMarker(workdir, beadID string) (oid, stage string, prese
 	return oid, stage, true, nil
 }
 
-// ClearMaterializationMarker deletes beadID's write-ahead marker ref
-// (bead 6's terminal (T) step, run on both the ordinary and the
-// landed-merge-reconcile completion paths). Idempotent by explicit
-// pre-check (not by relying on git's own -d semantics for an absent
-// ref, which are not guaranteed uniform across git versions): a caller
-// may clear an already-absent marker with no error.
-func ClearMaterializationMarker(workdir, beadID string) error {
-	_, _, present, err := ReadMaterializationMarker(workdir, beadID)
-	if err != nil {
-		return err
-	}
-	if !present {
+// ClearMaterializationMarker deletes beadID's write-ahead marker ref via
+// COMPARE-AND-SWAP against expectedOID — the exact OID the caller
+// observed/owns (fix-round G4): `git update-ref -d <ref> <expectedOID>`
+// is git's own documented delete-with-old-value form (git-update-ref(1):
+// "Delete the reference ... if it is exactly at <oldvalue>"), so the
+// delete FAILS ATOMICALLY if another invocation has since published a
+// DIFFERENT marker — a stale clear (one that observed an OLDER value
+// before a race) can never delete evidence it does not own, closing the
+// clear-side counterpart to the marker-publish CAS.
+//
+// expectedOID == "" means the caller believes no marker exists (a
+// no-op: there is nothing to CAS against). Idempotent for the caller's
+// OWN OID too: if the marker has ALREADY been cleared (by this call
+// racing a concurrent clear, or a prior invocation) the ref is simply
+// absent, which is treated as success, not a CAS mismatch — cleared is
+// cleared, regardless of who did it. A marker present with a DIFFERENT
+// current value than expectedOID is a genuine mismatch and returns an
+// error naming it, run on both the ordinary and the landed-merge-
+// reconcile completion paths.
+func ClearMaterializationMarker(workdir, beadID, expectedOID string) error {
+	if expectedOID == "" {
 		return nil
 	}
-	cmd := execCommand("git", gitArgs(workdir, "update-ref", "-d", MaterializationMarkerRef(beadID))...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("update-ref -d %s: %s", MaterializationMarkerRef(beadID), strings.TrimSpace(string(out)))
+	cmd := execCommand("git", gitArgs(workdir, "update-ref", "-d", MaterializationMarkerRef(beadID), expectedOID)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	curOID, _, present, rerr := ReadMaterializationMarker(workdir, beadID)
+	if rerr == nil && !present {
+		// Already gone (this call's own effect, a concurrent clear, or a
+		// prior invocation) — idempotent success.
+		return nil
+	}
+	if rerr == nil && present && curOID != expectedOID {
+		return fmt.Errorf("clear-marker CAS mismatch for %s: expected %s, found %s (a concurrent invocation has since published a different marker — not deleted): %s",
+			beadID, expectedOID, curOID, strings.TrimSpace(string(out)))
+	}
+	return fmt.Errorf("update-ref -d (CAS) %s (expected %s): %s", MaterializationMarkerRef(beadID), expectedOID, strings.TrimSpace(string(out)))
 }

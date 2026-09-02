@@ -1308,3 +1308,325 @@ func TestBead6Leg_xx_BothStagesElided_NoMarkerRoute(t *testing.T) {
 		t.Errorf("expected exactly 2 CompleteBead calls (1 pre-merge kill + 1 real convergence), got %d", ex.completeBeadCalls)
 	}
 }
+
+// --- (xxi): fix-round G1 — a mutation landing between the pre-S dirt
+// classification and the S-stage's own SnapshotWorktreeTree call must
+// REFUSE, never land silently in commit D. -------------------------
+
+// sStageSnapshotRaceExecutor counts SnapshotWorktreeTree calls and, on
+// the SECOND call (the S-stage's own artifact-sync `add -A` snapshot),
+// injects a worktree write BEFORE delegating to the real snapshot —
+// modeling an external writer (an editor flush, a concurrent agent)
+// landing in the exact window between runMaterialization's pre-S dirt
+// classification and the S-stage's own tree2 snapshot. This is the
+// round-1 panel's R4 slot's EXECUTED repro: at 482bcd2f (pre-fix-round),
+// the injected file was silently swept into commit D and the run
+// SUCCEEDED with BeadClosed, the file present at the final bead tip.
+// Fix-round G1 closes this by classifying D's own exact delta
+// (changedFromCurrent) and refusing on any non-artifact path there,
+// before MaterializeStageCommit/PublishStageMarker ever runs.
+type sStageSnapshotRaceExecutor struct {
+	executor.Executor
+	t             *testing.T
+	inject        func()
+	snapshotCalls int
+}
+
+func (e *sStageSnapshotRaceExecutor) SnapshotWorktreeTree(wtPath string, exclude []string) (string, error) {
+	e.snapshotCalls++
+	if e.snapshotCalls == 2 && e.inject != nil {
+		e.inject()
+	}
+	return e.Executor.SnapshotWorktreeTree(wtPath, exclude)
+}
+
+func TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD(t *testing.T) {
+	saveAndRestore(t)
+	const specID, beadID = "930-leg21", "mindspec-128leg21.1"
+	root, _, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
+	wireRealGitFaultSeams(t, specID)
+	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+	preTip := gateRevParse(t, root, beadBranch)
+
+	// Pre-existing content so the M-stage snapshot (call 1) has
+	// something real to build C from — mirrors leg iv's setup.
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "widget", "widget.go"),
+		[]byte("package widget\n\nfunc New() {}\n\nfunc TwentyOne() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
+	ex := &sStageSnapshotRaceExecutor{Executor: base, t: t, inject: func() {
+		if err := os.WriteFile(filepath.Join(wtPath, "race-file.txt"), []byte("interval\n"), 0o644); err != nil {
+			t.Fatalf("writing race file: %v", err)
+		}
+	}}
+
+	if _, err := Run(root, beadID, specID, "work", ex, CompleteOpts{}); err == nil {
+		t.Fatal("expected the S-stage snapshot race to REFUSE rather than complete successfully")
+	}
+
+	// The M-stage commit C must have landed (the refusal is a POST-R,
+	// PRE-D-publish refusal, not a rejection of the whole run) — the
+	// branch tip must have moved off preTip to C, but no FURTHER: the
+	// race file must never appear at any committed tip.
+	cCommit := gateRevParse(t, root, beadBranch)
+	if cCommit == preTip {
+		t.Error("expected the M-stage commit C to have landed before the S-stage refusal fired")
+	}
+	if fileExistsAtRef(t, root, cCommit, "race-file.txt") {
+		t.Error("the race file must be ABSENT from every committed tip — it must never reach commit D")
+	}
+	if status := gitStatusPorcelain(t, wtPath); !strings.Contains(status, "race-file.txt") {
+		t.Errorf("expected the race file to survive on disk as untracked dirt behind the refusal, got status: %q", status)
+	}
+	// The M-stage's OWN write-ahead marker (published before the S-stage
+	// race even runs) legitimately survives, naming C as the resumable
+	// stage — the refusal happens strictly AFTER M's publish and strictly
+	// BEFORE the S-stage's own PublishStageMarker call, so this is the
+	// correct resumption evidence for a later re-run, not a leak.
+	if oid, stage, present := readMarker(t, root, beadID); !present || oid != cCommit || stage != stageMaterialization {
+		t.Errorf("expected the surviving marker to name C (%s) at stage %q, got oid=%q stage=%q present=%v", cCommit, stageMaterialization, oid, stage, present)
+	}
+}
+
+// --- (xxii): fix-round G5 — resume after a stage advance does not trip
+// the panel's stale-SHA gate, even with a LIVE panel registered.
+
+// TestBead6Leg_xxii_ResumeAfterStageAdvanceDoesNotTripStaleSHA is R2's
+// positive resume leg (round-1 panel G5): a panel registered at A, a
+// stage advance landing for real then killed (marker == tip == the new
+// commit), a re-run WITHOUT any foreign commit landing on the bead
+// branch must CONVERGE (BeadClosed, ancestor, marker cleared) rather
+// than trip the panel's stale-SHA check against a tip that no longer
+// equals the panel's own ReviewedHeadSHA (A) — proving Run's
+// resumeStage=="" guard on the panel gate holds even with a real,
+// otherwise-would-trip panel in place, not just in the marker-only legs
+// (ix/xii) that register no panel at all.
+//
+// Deliberately ARTIFACT-ONLY dirt (no user-authored .go change): the
+// pre-existing panel gate (internal/panel/gate.go's dirty-tree clause,
+// Req 11 — bead 6 does not touch it) unconditionally BLOCKS whenever a
+// panel is registered AND the worktree carries UNCOMMITTED USER dirt
+// ("would auto-commit them past review") — a live panel and fresh user
+// work are mutually exclusive by design, so the only stage this leg CAN
+// exercise under a live panel is the artifact-sync stage (D), which the
+// M-stage's own snapshot excludes entirely (materializedArtifactPaths).
+// The property under test — resume bypasses the panel-gate re-check
+// entirely (Run's resumeStage!="" skip) — is IDENTICAL regardless of
+// which named stage's advance gets killed.
+func TestBead6Leg_xxii_ResumeAfterStageAdvanceDoesNotTripStaleSHA(t *testing.T) {
+	saveAndRestore(t)
+	const specID, beadID = "930-leg22", "mindspec-128leg22.1"
+	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
+	wireRealGitFaultSeams(t, specID)
+	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+
+	checkDirtyTreeFn = next.CheckDirtyTreeDetail
+	if err := os.MkdirAll(filepath.Join(wtPath, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A committed baseline artifact first (mirrors leg xvii): a genuinely
+	// untracked .beads/ classifies as the directory entry itself, not
+	// the per-file artifact shape the classifier matches. Committed (and
+	// the panel registered at the RESULTING tip) BEFORE the actual dirty
+	// edit below and before the panel is registered, so the baseline
+	// commit itself is never mistaken for foreign drift against the
+	// panel's own reviewed SHA.
+	if err := os.WriteFile(filepath.Join(wtPath, ".beads", "issues.jsonl"), []byte(`{"id":"base"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "--", ".beads")
+	gitRun(t, wtPath, "commit", "-q", "-m", "baseline artifact")
+
+	a := gateRevParse(t, root, beadBranch)
+	writePanel(t, root, specID+"-leg22", panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+		ReviewedHeadSHA: a,
+	}, approveVerdicts(6))
+
+	if err := os.WriteFile(filepath.Join(wtPath, ".beads", "issues.jsonl"), []byte(`{"id":"leg22"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
+	// No user dirt exists, so the M-stage is elided entirely — the
+	// artifact-sync (S) stage's own advance is the FIRST (and only)
+	// AdvanceBranchExpectedOld call this run makes.
+	ex := &killAfterExecutor{Executor: base, t: t, killAdvanceAfterCall: 1}
+
+	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{}); err == nil {
+		t.Fatal("expected the post-advance kill to fail Run")
+	}
+
+	dCommit := gateRevParse(t, root, beadBranch)
+	if dCommit == a {
+		t.Fatal("expected the artifact-sync advance to have moved the tip off A before the kill landed")
+	}
+	if oid, stage, present := readMarker(t, root, beadID); !present || oid != dCommit || stage != stageArtifactSync {
+		t.Fatalf("expected a surviving marker naming the artifact-sync commit (%s), got oid=%q stage=%q present=%v", dCommit, oid, stage, present)
+	}
+
+	ex.killAdvanceAfterCall = 0
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
+	if err != nil {
+		t.Fatalf("expected the resume (no foreign commit) to converge WITHOUT tripping the panel's stale-SHA gate (registered at A=%s, tip now %s), got: %v", a, dCommit, err)
+	}
+	if res == nil || !res.BeadClosed {
+		t.Fatalf("expected BeadClosed, got %+v", res)
+	}
+	if !isAncestorIn(t, root, beadBranch, specBranch) {
+		t.Error("expected the bead branch to be an ancestor of the spec branch after convergence")
+	}
+	if _, _, present := readMarker(t, root, beadID); present {
+		t.Error("expected the write-ahead marker to be cleared after convergence")
+	}
+}
+
+// --- (xxiii): fix-round G5 — the MISSING AC-6 composite flagship fixture.
+
+// setupAC6FlagshipFixture builds a real-git fixture whose bead branch tip
+// is a source-only change RELATIVE TO ITS OWN MERGE-BASE: spec.md,
+// plan.md, the ADR, and the domain's OWNERSHIP.yaml are all committed on
+// MAIN before the spec/bead branches ever fork, so ATTRIBUTION (which
+// reads the full snapshot tree, independent of diff range) still finds
+// the domain properly claimed — but the base..head DIFF the doc-sync
+// gate measures contains ONLY the new .go file, no doc file at all,
+// genuinely tripping doc-sync's plain "source changed, no docs updated"
+// lane (never ADR-divergence, which never sees anything unowned).
+func setupAC6FlagshipFixture(t *testing.T, specID, beadID string) (root, specBranch, beadBranch string) {
+	t.Helper()
+	root = t.TempDir()
+	gitRun(t, root, "init", "-q", "-b", "main")
+	gitRun(t, root, "config", "user.email", "test@example.invalid")
+	gitRun(t, root, "config", "user.name", "test")
+	gitRun(t, root, "config", "commit.gpgsign", "false")
+	writeFile(t, root, ".mindspec/docs/specs/"+specID+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- flagship\n")
+	writeFile(t, root, ".mindspec/docs/specs/"+specID+"/plan.md",
+		"---\nstatus: Approved\nspec_id: \""+specID+"\"\nversion: \"1\"\nadr_citations:\n  - ADR-9600\n---\n\n# Plan\n")
+	writeFile(t, root, ".mindspec/docs/adr/ADR-9600.md",
+		"# ADR-9600: Flagship\n\n"+
+			"- **Date**: 2026-01-01\n"+
+			"- **Status**: Accepted\n"+
+			"- **Domain(s)**: flagship\n"+
+			"- **Supersedes**: n/a\n"+
+			"- **Superseded-by**: n/a\n\n"+
+			"## Decision\nTest fixture.\n")
+	writeFile(t, root, ".mindspec/docs/domains/flagship/OWNERSHIP.yaml", "paths:\n  - internal/flagship/**\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "base (docs+ownership pre-fork)")
+
+	specBranch = "spec/" + specID
+	beadBranch = "bead/" + beadID
+	gitRun(t, root, "checkout", "-q", "-b", specBranch)
+	gitRun(t, root, "checkout", "-q", "-b", beadBranch)
+	writeFile(t, root, "internal/flagship/flagship.go", "package flagship\n\nfunc New() {}\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-q", "-m", "impl: flagship source-only change")
+	gitRun(t, root, "checkout", "-q", "main")
+
+	specWtPath := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+	if err := os.MkdirAll(filepath.Dir(specWtPath), 0o755); err != nil {
+		t.Fatalf("mkdir worktrees dir: %v", err)
+	}
+	gitRun(t, root, "worktree", "add", specWtPath, specBranch)
+
+	return root, specBranch, beadBranch
+}
+
+// TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConverges
+// is round-1 panel G5's missing composite: the spec's headline two-run
+// retry-convergence assertion (AC-6), pinned end-to-end against a REAL
+// panel and REAL doc-sync gate. A panel registered at reviewed SHA A +
+// a dirty tracker + a doc-sync-failing change: run 1 REFUSES at doc-sync
+// (never the panel's stale-SHA gate) with the tip asserted STILL A; a
+// plain retry meets the IDENTICAL gate; run 2 with --allow-doc-skew is
+// decided by doc-sync (converges), never falling through to a
+// manufactured stale-SHA block — the #186 regression this whole bead
+// exists to close, pinned at the composite level R4's hand-driven
+// flagship run exercised live.
+func TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConverges(t *testing.T) {
+	saveAndRestore(t)
+	const specID, beadID = "930-leg23", "mindspec-128leg23.1"
+	root, specBranch, beadBranch := setupAC6FlagshipFixture(t, specID, beadID)
+	wireRealGitFaultSeams(t, specID)
+	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+
+	// A committed BASELINE artifact first (mirrors leg xvii/xxii): a
+	// genuinely untracked .beads/ collapses to the directory entry
+	// itself in `git status --porcelain` (`?? .beads/`), which the
+	// panel gate's own artifact-path exemption
+	// (internal/panel/gate.go's isArtifactPath, an EXACT match on
+	// `.beads/issues.jsonl`) does NOT recognize — tracking it first (and
+	// registering the panel AFTER, at the resulting tip) makes the
+	// later edit a per-file `M .beads/issues.jsonl` line, which the
+	// exemption does match, so this dirt never trips the pre-existing
+	// panel-gate dirty-tree block (Req 11) a live panel would otherwise
+	// apply.
+	if err := os.MkdirAll(filepath.Join(wtPath, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, ".beads", "issues.jsonl"), []byte(`{"id":"base"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "--", ".beads")
+	gitRun(t, wtPath, "commit", "-q", "-m", "baseline artifact")
+
+	a := gateRevParse(t, root, beadBranch)
+	writePanel(t, root, specID+"-leg23", panel.Panel{
+		BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 6,
+		ReviewedHeadSHA: a,
+	}, approveVerdicts(6))
+
+	// The genuine dirty tracker file, alongside the bead branch's own
+	// already-committed doc-sync-failing source change.
+	if err := os.WriteFile(filepath.Join(wtPath, ".beads", "issues.jsonl"), []byte(`{"id":"leg23-x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
+
+	// Run 1: refuses at doc-sync, NOT at the panel's stale-SHA gate — the
+	// tip must remain byte-identical to A.
+	if _, err := Run(root, beadID, specID, "", base, CompleteOpts{}); err == nil {
+		t.Fatal("expected run 1 to refuse at doc-sync")
+	} else {
+		if !strings.Contains(err.Error(), "doc-sync") {
+			t.Errorf("expected run 1's refusal to be attributable to doc-sync, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "git merge bead/"+beadID) {
+			t.Errorf("run 1 must NOT fail at the panel's stale-SHA gate (the raw-merge fence), got: %v", err)
+		}
+	}
+	if got := gateRevParse(t, root, beadBranch); got != a {
+		t.Errorf("expected the tip to remain EXACTLY A (%s) after the doc-sync refusal, got %s", a, got)
+	}
+
+	// A plain retry meets the IDENTICAL doc-sync gate — never a
+	// manufactured staleness (the #186 mechanism this bead closes).
+	if _, err := Run(root, beadID, specID, "", base, CompleteOpts{}); err == nil {
+		t.Fatal("expected the plain retry to meet the identical doc-sync gate")
+	} else if !strings.Contains(err.Error(), "doc-sync") {
+		t.Errorf("expected the retry's refusal to be attributable to doc-sync (not staleness), got: %v", err)
+	}
+	if got := gateRevParse(t, root, beadBranch); got != a {
+		t.Errorf("expected the tip to remain EXACTLY A (%s) after the retry's refusal too, got %s", a, got)
+	}
+
+	// Run 2: --allow-doc-skew lets doc-sync's OWN gate class decide
+	// (and here, pass) — never re-routed through the panel's stale-SHA
+	// gate.
+	res, err := Run(root, beadID, specID, "", base, CompleteOpts{AllowDocSkew: "test: ac-6 flagship override"})
+	if err != nil {
+		t.Fatalf("expected --allow-doc-skew to let doc-sync decide (and converge), got: %v", err)
+	}
+	if res == nil || !res.BeadClosed {
+		t.Fatalf("expected BeadClosed, got %+v", res)
+	}
+	if !isAncestorIn(t, root, beadBranch, specBranch) {
+		t.Error("expected the bead branch to be an ancestor of the spec branch after convergence")
+	}
+	if _, _, present := readMarker(t, root, beadID); present {
+		t.Error("expected the write-ahead marker to be cleared after convergence")
+	}
+}

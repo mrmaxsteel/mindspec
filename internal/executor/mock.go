@@ -95,13 +95,13 @@ type MockExecutor struct {
 	ChangedFilesTreeFn           func(workdir, base, treeOID string) ([]string, error)
 	ChangedFilesTreeResult       []string
 	ChangedFilesTreeErr          error
-	MaterializeStageCommitFn     func(wtPath, tree, parent, stage string) (string, error)
+	MaterializeStageCommitFn     func(wtPath, tree, parent, stage, subject string) (string, error)
 	MaterializeStageCommitResult string
 	MaterializeStageCommitErr    error
 	PublishStageMarkerFn         func(beadID, oid, expectedOld string) error
 	PublishStageMarkerErr        error
 	ReadStageMarkerFn            func(beadID string) (string, string, bool, error)
-	ClearStageMarkerFn           func(beadID string) error
+	ClearStageMarkerFn           func(beadID, expectedOID string) error
 	ClearStageMarkerErr          error
 	AdvanceBranchExpectedOldFn   func(branch, newSHA, expectedOld string) error
 	AdvanceBranchExpectedOldErr  error
@@ -329,10 +329,10 @@ func (m *MockExecutor) ChangedFilesTree(workdir, base, treeOID string) ([]string
 	return m.ChangedFiles(base, treeOID)
 }
 
-func (m *MockExecutor) MaterializeStageCommit(wtPath, tree, parent, stage string) (string, error) {
-	m.record("MaterializeStageCommit", wtPath, tree, parent, stage)
+func (m *MockExecutor) MaterializeStageCommit(wtPath, tree, parent, stage, subject string) (string, error) {
+	m.record("MaterializeStageCommit", wtPath, tree, parent, stage, subject)
 	if m.MaterializeStageCommitFn != nil {
-		return m.MaterializeStageCommitFn(wtPath, tree, parent, stage)
+		return m.MaterializeStageCommitFn(wtPath, tree, parent, stage, subject)
 	}
 	return m.MaterializeStageCommitResult, m.MaterializeStageCommitErr
 }
@@ -353,10 +353,10 @@ func (m *MockExecutor) ReadStageMarker(beadID string) (string, string, bool, err
 	return "", "", false, nil
 }
 
-func (m *MockExecutor) ClearStageMarker(beadID string) error {
-	m.record("ClearStageMarker", beadID)
+func (m *MockExecutor) ClearStageMarker(beadID, expectedOID string) error {
+	m.record("ClearStageMarker", beadID, expectedOID)
 	if m.ClearStageMarkerFn != nil {
-		return m.ClearStageMarkerFn(beadID)
+		return m.ClearStageMarkerFn(beadID, expectedOID)
 	}
 	return m.ClearStageMarkerErr
 }

@@ -2256,9 +2256,27 @@ func TestRun_AutoCommitMaterializesViaSnapshot(t *testing.T) {
 	// so the M-stage elision check sees genuine content to materialize —
 	// modeling the "add feature X" work the --commit-msg text used to
 	// name explicitly.
-	mock.SnapshotWorktreeTreeResult = "snapshot-tree-1"
+	// Distinguish the M-stage snapshot (artifact excluded) from the
+	// S-stage snapshot (no exclusions) by their distinct results —
+	// mirrors TestRun_ArtifactAndArtifactSyncStage's pattern — so the
+	// S-stage's own delta (changedFromCurrent, measured against the tip
+	// AFTER M's advance — fix-round G1) reads as EMPTY: nothing further
+	// changed post-materialization, so G1's non-artifact-delta refusal
+	// does not (incorrectly) treat M's ALREADY-materialized content as
+	// fresh interval dirt on the S check. A single fixed non-empty
+	// result for every SnapshotWorktreeTree/ChangedFilesTree call
+	// (regardless of stage) is not realistic enough to survive G1.
+	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
+		if len(exclude) > 0 {
+			return "tree-with-user-work", nil
+		}
+		return "tree-post-materialize", nil
+	}
 	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
-		return []string{"generated/output.bin"}, nil
+		if treeOID == "tree-with-user-work" {
+			return []string{"generated/output.bin"}, nil
+		}
+		return nil, nil
 	}
 
 	_, err := Run(root, "bead-1", "", "add feature X", mock, CompleteOpts{})
@@ -2561,12 +2579,16 @@ func TestRun_CommitMsgWithArtifactDirtBuildsBothStages(t *testing.T) {
 		}
 		return "tree-with-artifact", nil
 	}
-	// BOTH trees differ from tip: the user's own work is present even
-	// with the artifact excluded (M-stage), and the artifact itself
-	// differs too (S-stage).
+	// The M-stage snapshot (artifact excluded) shows the user's own work
+	// changed from the ORIGINAL tip; the S-stage snapshot's own delta
+	// (fix-round G1: measured against the tip AFTER M's advance, which
+	// already contains that same user work) shows ONLY the artifact's
+	// own refresh — never widget.go again, or G1's non-artifact-delta
+	// refusal would (correctly) treat M's ALREADY-materialized content
+	// as fresh interval dirt on the S check.
 	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
 		if treeOID == "tree-with-artifact" {
-			return []string{"internal/widget/widget.go", ".beads/issues.jsonl"}, nil
+			return []string{".beads/issues.jsonl"}, nil
 		}
 		return []string{"internal/widget/widget.go"}, nil
 	}
@@ -2665,7 +2687,7 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 	root := setupTempRoot(t)
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
-	mock.MaterializeStageCommitFn = func(wtPath, tree, parent, stage string) (string, error) {
+	mock.MaterializeStageCommitFn = func(wtPath, tree, parent, stage, subject string) (string, error) {
 		if stage == "artifact-sync" {
 			return "", fmt.Errorf("commit hook exploded")
 		}
@@ -3904,11 +3926,23 @@ func TestPerBeadGatesAnchorToBeadFork_MainDriftDoesNotBlock(t *testing.T) {
 	// "the bead's own diff" concept meaningful under the new anchoring.
 	mock.SnapshotWorktreeTreeResult = "snapshot-tree-sha"
 	mock.ChangedFilesTreeFn = func(workdir, base, treeOID string) ([]string, error) {
-		if workdir == "/tmp/worktree-bead-1" && base == "fork-sha" && treeOID == "snapshot-tree-sha" {
-			// The bead's own prospective diff: clean (no files at all).
+		if workdir == "/tmp/worktree-bead-1" && treeOID == "snapshot-tree-sha" {
+			// Any call inspecting the CORRECT prospective snapshot tree
+			// sees the bead's genuinely clean prospective content —
+			// whether the gate's own base=fork-sha measurement, or
+			// runMaterialization's own M/S-stage elision probes
+			// (base=tip or base=currentTip, fix-round G1's S-stage
+			// delta check among them). Discriminating on treeOID alone
+			// (not base) matters here: this fixture's single fixed
+			// SnapshotWorktreeTreeResult means the M/S stages' own
+			// internal probes reuse the identical snapshot value the
+			// gates measure, so a base-inclusive match would
+			// (incorrectly) route those probes into the drift branch
+			// below and trip a materialization the bead's genuinely
+			// clean content never warrants.
 			return nil, nil
 		}
-		// ANY other args — notably the old working-tree-vs-base and
+		// ANY other treeOID/workdir — the old working-tree-vs-base and
 		// base..HEAD measurements — sees main-side drift that would
 		// trip both gates (doc-less source change). If the gates
 		// consult such args, they false-block and this test fails.

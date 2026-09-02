@@ -86,7 +86,7 @@ func TestMindspecExecutor_MaterializeStageCommitPicksSubjectByStage(t *testing.T
 	tree := revParseForMaterializeSeam(t, dir, "HEAD^{tree}")
 
 	g := &MindspecExecutor{Root: dir}
-	c, err := g.MaterializeStageCommit(dir, tree, parent, gitutil.StageMaterialization)
+	c, err := g.MaterializeStageCommit(dir, tree, parent, gitutil.StageMaterialization, "")
 	if err != nil {
 		t.Fatalf("MaterializeStageCommit: %v", err)
 	}
@@ -99,10 +99,10 @@ func TestMindspecExecutor_MaterializeStageCommitPicksSubjectByStage(t *testing.T
 		t.Fatalf("CommitMessageBody: %v", err)
 	}
 	if !strings.Contains(body, "mindspec: materialize bead completion") {
-		t.Errorf("expected the materialization subject, got %q", body)
+		t.Errorf("expected the default materialization subject on an empty subject arg, got %q", body)
 	}
 
-	d, err := g.MaterializeStageCommit(dir, tree, c, gitutil.StageArtifactSync)
+	d, err := g.MaterializeStageCommit(dir, tree, c, gitutil.StageArtifactSync, "")
 	if err != nil {
 		t.Fatalf("MaterializeStageCommit (artifact-sync): %v", err)
 	}
@@ -111,7 +111,35 @@ func TestMindspecExecutor_MaterializeStageCommitPicksSubjectByStage(t *testing.T
 		t.Fatalf("CommitMessageBody: %v", err)
 	}
 	if !strings.Contains(dBody, "chore: sync beads artifact") {
-		t.Errorf("expected the artifact-sync subject, got %q", dBody)
+		t.Errorf("expected the default artifact-sync subject on an empty subject arg, got %q", dBody)
+	}
+}
+
+// TestMindspecExecutor_MaterializeStageCommitPreservesCallerSubject is
+// fix-round G6's seam-level pin: a non-empty subject passed by the
+// caller (internal/complete, carrying the operator's --commit-msg text)
+// survives verbatim into the commit — the executor's own fixed default
+// is used ONLY as a fallback for an empty subject, never overriding one.
+func TestMindspecExecutor_MaterializeStageCommitPreservesCallerSubject(t *testing.T) {
+	dir := initRepoForMaterializeSeam(t)
+	parent := revParseForMaterializeSeam(t, dir, "HEAD")
+	tree := revParseForMaterializeSeam(t, dir, "HEAD^{tree}")
+
+	g := &MindspecExecutor{Root: dir}
+	callerSubject := "impl(mindspec-seam.1): a real operator message"
+	c, err := g.MaterializeStageCommit(dir, tree, parent, gitutil.StageMaterialization, callerSubject)
+	if err != nil {
+		t.Fatalf("MaterializeStageCommit: %v", err)
+	}
+	body, err := gitutil.CommitMessageBody(dir, c)
+	if err != nil {
+		t.Fatalf("CommitMessageBody: %v", err)
+	}
+	if !strings.Contains(body, callerSubject) {
+		t.Errorf("expected the caller's own subject to survive verbatim, got %q", body)
+	}
+	if strings.Contains(body, "mindspec: materialize bead completion") {
+		t.Errorf("the fixed default subject must NOT appear alongside a caller-supplied one, got %q", body)
 	}
 }
 
@@ -122,7 +150,7 @@ func TestMindspecExecutor_StageMarkerAndBranchAdvanceRoundTrip(t *testing.T) {
 
 	g := &MindspecExecutor{Root: dir}
 	tree := revParseForMaterializeSeam(t, dir, "HEAD^{tree}")
-	c, err := g.MaterializeStageCommit(dir, tree, a, gitutil.StageMaterialization)
+	c, err := g.MaterializeStageCommit(dir, tree, a, gitutil.StageMaterialization, "")
 	if err != nil {
 		t.Fatalf("MaterializeStageCommit: %v", err)
 	}
@@ -154,7 +182,7 @@ func TestMindspecExecutor_StageMarkerAndBranchAdvanceRoundTrip(t *testing.T) {
 		t.Errorf("expected a clean status after ResetIndexToHead, got %q", out)
 	}
 
-	if err := g.ClearStageMarker(beadID); err != nil {
+	if err := g.ClearStageMarker(beadID, c); err != nil {
 		t.Fatalf("ClearStageMarker: %v", err)
 	}
 	_, _, present, err = g.ReadStageMarker(beadID)

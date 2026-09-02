@@ -1467,13 +1467,15 @@ func (g *MindspecExecutor) ChangedFilesTree(workdir, base, treeOID string) ([]st
 	return gitutil.ChangedFilesTree(workdir, base, treeOID)
 }
 
-// stageCommitSubject picks the write-ahead stage commit's human-readable
-// subject. Spec 128 Bead 6: the Executor seam's MaterializeStageCommit
-// signature (wtPath, tree, parent, stage) has no message parameter — the
-// per-run operator `--commit-msg` text this replaces (the old
-// `impl(<bead>): <msg>` CommitAll subject) is no longer carried into the
-// commit-tree-built materialization commit; see this bead's Deviations
-// note. The artifact-sync stage keeps the exact subject the porcelain
+// stageCommitSubject picks the write-ahead stage commit's DEFAULT
+// human-readable subject, used only when the caller passes an empty
+// subject. Spec 128 Bead 6 fix-round G6: the Executor seam widened by
+// one subject parameter so a caller-supplied one (the operator's own
+// --commit-msg text, formatted by internal/complete exactly as the
+// pre-bead-6 porcelain CommitAll subject was) always wins; this default
+// exists only for the no-message case (an artifact-only completion, or
+// the artifact-sync stage, which never carries a --commit-msg at all).
+// The artifact-sync stage keeps the exact subject the porcelain
 // `chore: sync beads artifact` CommitPaths call used, for continuity.
 func stageCommitSubject(stage string) string {
 	switch stage {
@@ -1485,11 +1487,14 @@ func stageCommitSubject(stage string) string {
 }
 
 // MaterializeStageCommit builds a write-ahead stage commit. Thin
-// pass-through to gitutil, with the subject chosen internally (see
-// stageCommitSubject) so the Executor seam's frozen 4-argument signature
-// carries no message parameter.
-func (g *MindspecExecutor) MaterializeStageCommit(wtPath, tree, parent, stage string) (string, error) {
-	return gitutil.MaterializeStageCommit(wtPath, tree, parent, stage, stageCommitSubject(stage))
+// pass-through to gitutil: an empty subject falls back to
+// stageCommitSubject's fixed, stage-named default; a non-empty one
+// (fix-round G6) is used verbatim, preserving the caller's own text.
+func (g *MindspecExecutor) MaterializeStageCommit(wtPath, tree, parent, stage, subject string) (string, error) {
+	if subject == "" {
+		subject = stageCommitSubject(stage)
+	}
+	return gitutil.MaterializeStageCommit(wtPath, tree, parent, stage, subject)
 }
 
 // PublishStageMarker publishes beadID's write-ahead marker. Thin
@@ -1506,10 +1511,11 @@ func (g *MindspecExecutor) ReadStageMarker(beadID string) (oid, stage string, pr
 	return gitutil.ReadMaterializationMarker(g.Root, beadID)
 }
 
-// ClearStageMarker deletes beadID's write-ahead marker. Thin pass-through
-// to gitutil, rooted at g.Root.
-func (g *MindspecExecutor) ClearStageMarker(beadID string) error {
-	return gitutil.ClearMaterializationMarker(g.Root, beadID)
+// ClearStageMarker deletes beadID's write-ahead marker via
+// compare-and-swap against expectedOID. Thin pass-through to gitutil,
+// rooted at g.Root.
+func (g *MindspecExecutor) ClearStageMarker(beadID, expectedOID string) error {
+	return gitutil.ClearMaterializationMarker(g.Root, beadID, expectedOID)
 }
 
 // AdvanceBranchExpectedOld moves refs/heads/<branch> via compare-and-swap.

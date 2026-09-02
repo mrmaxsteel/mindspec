@@ -46,13 +46,67 @@ const (
 // this package should widen its surface through for one constant.
 var materializedArtifactPaths = []string{".beads/issues.jsonl"}
 
+// nonArtifactPaths returns the subset of paths NOT in
+// materializedArtifactPaths (fix-round G1): the S-stage's own delta
+// (exec.ChangedFilesTree(currentTip, tree2)) is expected to contain
+// ONLY the named artifact's own refresh — anything else in that exact
+// delta is classified here, at the tree actually about to be committed,
+// rather than trusted from an earlier, separate read.
+func nonArtifactPaths(paths []string) []string {
+	known := make(map[string]bool, len(materializedArtifactPaths))
+	for _, p := range materializedArtifactPaths {
+		known[p] = true
+	}
+	var out []string
+	for _, p := range paths {
+		if !known[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// materializationSubject renders the M-stage commit's subject from the
+// operator's own --commit-msg text (fix-round G6): "" when commitMsg is
+// empty (the executor then falls back to its own fixed, stage-named
+// default), else the exact `impl(<bead>): <msg>` shape the pre-bead-6
+// porcelain CommitAll subject used — beadID is a FUNCTIONAL position
+// here (a commit-message prefix, not a terminal-facing display), so it
+// stays RAW per this file's own idrender convention (idrender.Bead is
+// for display positions only); beadID already passed idvalidate.BeadID
+// at Run's ingress (AC-6) before ever reaching this function.
+func materializationSubject(beadID, commitMsg string) string {
+	if commitMsg == "" {
+		return ""
+	}
+	return fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
+}
+
+// isKnownStage reports whether stage is one of the two CLOSED,
+// recognized Mindspec-Stage trailer values (round-1/round-5/round-6
+// panel G2): the discriminator must never resume on anything else — a
+// missing, empty, or unrecognized value is corrupt/foreign evidence,
+// never a license to skip the panel or content gates.
+func isKnownStage(stage string) bool {
+	return stage == stageMaterialization || stage == stageArtifactSync
+}
+
 // resolveMaterializationDiscriminator is bead 6's re-entry discriminator
-// (plan round-5 G3.2, made total at round-6 G1): reads beadID's
-// write-ahead marker, if any, and classifies this invocation as either a
-// normal run (resumeStage == "") or a resume of a specific completed
-// stage. A resume value is ALWAYS one of the two stage constants above —
-// never inferred from a tree diff, always read from the marker commit's
-// own Mindspec-Stage trailer via exec.ReadStageMarker.
+// (plan round-5 G3.2, made total at round-6 G1, closed over the known
+// stage set at round-1 fix-round G2): reads beadID's write-ahead marker,
+// if any, and classifies this invocation as either a normal run
+// (resumeStage == "") or a resume of a specific completed stage. A
+// resume value is ALWAYS one of the two stage constants above — never
+// inferred from a tree diff, always read from the marker commit's own
+// Mindspec-Stage trailer via exec.ReadStageMarker, and never anything
+// outside {materialization, artifact-sync} (isKnownStage) — an unknown,
+// ambiguous, or duplicate-encoded trailer is corrupt/foreign evidence,
+// cleared and treated exactly like an absent one, never resumed on.
+//
+// Every git read failure here PROPAGATES (fix-round G3): a transient
+// probe failure is never silently downgraded to a default classification
+// (clear-and-proceed, or CREATE semantics) — the five-bead hazard class
+// this codebase's own hazard fence exists to close.
 //
 // beadBranch is the ref the discriminator resolves the CURRENT tip
 // against (workspace.BeadBranch(beadID) or the worktree-listed
@@ -68,22 +122,22 @@ func resolveMaterializationDiscriminator(exec executor.Executor, root, beadID, b
 
 	tip, tipErr := exec.RevParseRef(root, beadBranch)
 	if tipErr != nil {
-		// The branch itself is unreadable here — reconcile detection
-		// above already handles the "branch genuinely gone" case before
-		// this discriminator runs, so this is an unexpected condition.
-		// Treat conservatively as foreign: clear the marker and let the
-		// normal-run path re-evaluate from current, re-read facts.
-		if clrErr := exec.ClearStageMarker(beadID); clrErr != nil {
-			return "", fmt.Errorf("clearing materialization marker for %s (tip unreadable: %v): %w", idrender.Bead(beadID), tipErr, clrErr)
-		}
-		return "", nil
+		// PROPAGATE (fix-round G3): a transient read failure here must
+		// never be downgraded to "treat as foreign and delete the
+		// marker" — that would destroy write-ahead recovery evidence on
+		// exactly the kind of blip a retry would otherwise absorb.
+		return "", fmt.Errorf("resolving %s's current tip while reading its materialization marker: %w", idrender.Bead(beadID), tipErr)
 	}
 
-	if stage == "" {
-		// A foreign marker object (present, but carrying no
-		// Mindspec-Stage trailer): identical treatment to "no marker" —
-		// clear it and proceed as a normal run.
-		if clrErr := exec.ClearStageMarker(beadID); clrErr != nil {
+	if stage == "" || !isKnownStage(stage) {
+		// A foreign or corrupt marker object (present, but carrying no
+		// Mindspec-Stage trailer, an unrecognized value, or an ambiguous
+		// duplicate-trailer encoding — gitutil.ReadStageTrailer reports
+		// duplicates as absent): identical treatment to "no marker" —
+		// clear it (CAS against the exact OID just observed) and proceed
+		// as a normal run. The panel and content gates then re-evaluate
+		// fully; nothing resumes on unverified evidence.
+		if clrErr := exec.ClearStageMarker(beadID, oid); clrErr != nil {
 			return "", fmt.Errorf("clearing foreign materialization marker for %s: %w", idrender.Bead(beadID), clrErr)
 		}
 		return "", nil
@@ -97,7 +151,16 @@ func resolveMaterializationDiscriminator(exec executor.Executor, root, beadID, b
 	// tip == marker^ (the marker's own first parent): the write-ahead
 	// advance is UNFINISHED — finish it (expected-old = tip) and resume
 	// at the now-complete stage.
-	if parent, perr := exec.RevParseRef(root, oid+"^"); perr == nil && tip == parent {
+	parent, perr := exec.RevParseRef(root, oid+"^")
+	if perr != nil {
+		// PROPAGATE (fix-round G3): resolving the marker's own first
+		// parent should always succeed (oid is a real commit this
+		// invocation or a predecessor built) — a failure here is treated
+		// as a genuine read error, never silently reclassified as
+		// FOREIGN (which would delete the marker on a transient blip).
+		return "", fmt.Errorf("resolving %s's write-ahead marker parent %s^: %w", idrender.Bead(beadID), oid, perr)
+	}
+	if tip == parent {
 		if advErr := exec.AdvanceBranchExpectedOld(beadBranch, oid, tip); advErr != nil {
 			return "", guard.NewFailure(
 				fmt.Sprintf("bead %s's write-ahead materialization marker names %s as the intended tip, but finishing the branch advance from %s failed: %v", idrender.Bead(beadID), oid, tip, advErr),
@@ -109,10 +172,10 @@ func resolveMaterializationDiscriminator(exec executor.Executor, root, beadID, b
 
 	// FOREIGN: tip is neither the marker nor its parent — a genuinely
 	// foreign commit landed on the bead branch after materialization.
-	// Delete the marker; the panel gate's stale-SHA check below evaluates
-	// exactly as it would with no marker at all — the cannot-launder
-	// boundary is retained.
-	if clrErr := exec.ClearStageMarker(beadID); clrErr != nil {
+	// Delete the marker (CAS against the exact OID just observed); the
+	// panel gate's stale-SHA check below evaluates exactly as it would
+	// with no marker at all — the cannot-launder boundary is retained.
+	if clrErr := exec.ClearStageMarker(beadID, oid); clrErr != nil {
 		return "", fmt.Errorf("clearing stale materialization marker for %s: %w", idrender.Bead(beadID), clrErr)
 	}
 	return "", nil
@@ -230,7 +293,7 @@ func runMaterialization(in materializationInput) error {
 			return fmt.Errorf("measuring the snapshot's delta from %s's tip: %w", idrender.Bead(beadID), cErr)
 		}
 		if len(changedFromTip) > 0 {
-			c, buildErr := exec.MaterializeStageCommit(wtPath, tree, tip, stageMaterialization)
+			c, buildErr := exec.MaterializeStageCommit(wtPath, tree, tip, stageMaterialization, materializationSubject(beadID, in.commitMsg))
 			if buildErr != nil {
 				return fmt.Errorf("building the materialization commit for %s: %w", idrender.Bead(beadID), buildErr)
 			}
@@ -298,11 +361,34 @@ func runMaterialization(in materializationInput) error {
 		return fmt.Errorf("measuring the artifact-sync delta for %s: %w", idrender.Bead(beadID), cErr)
 	}
 	if len(changedFromCurrent) > 0 {
+		// Fix-round G1: classify the EXACT tree about to be committed.
+		// preUserDirt was empty at the pre-S check above, so BY
+		// CONSTRUCTION the only legitimate delta between currentTip and
+		// tree2 is the named artifact's own refresh — any OTHER path
+		// here means a mutation raced the window between that check and
+		// this snapshot's own `add -A` (an external writer: an editor
+		// flush, a concurrent agent — no privileged seam required).
+		// Refuse naming it BEFORE MaterializeStageCommit/publication:
+		// this closes the classification-to-snapshot race totally,
+		// because the check now inspects the same data the commit is
+		// built from, not a separate, earlier read.
+		if nonArtifact := nonArtifactPaths(changedFromCurrent); len(nonArtifact) > 0 {
+			return sExitGenuineDirtRefusal(beadID, nonArtifact)
+		}
+		oid, _, present, merr := exec.ReadStageMarker(beadID)
+		if merr != nil {
+			// PROPAGATE (fix-round G3): a marker-read failure here must
+			// never silently degrade to CREATE semantics (expectedOld ==
+			// "") — if a marker genuinely exists (from the M-stage's own
+			// publish), a spurious CREATE attempt would race against it
+			// instead of correctly CAS-advancing from it.
+			return fmt.Errorf("reading materialization marker for %s before the artifact-sync publish: %w", idrender.Bead(beadID), merr)
+		}
 		expectedOld := ""
-		if oid, _, present, merr := exec.ReadStageMarker(beadID); merr == nil && present && oid != "" {
+		if present {
 			expectedOld = oid
 		}
-		d, buildErr := exec.MaterializeStageCommit(wtPath, tree2, currentTip, stageArtifactSync)
+		d, buildErr := exec.MaterializeStageCommit(wtPath, tree2, currentTip, stageArtifactSync, "")
 		if buildErr != nil {
 			return fmt.Errorf("building the artifact-sync commit for %s: %w", idrender.Bead(beadID), buildErr)
 		}

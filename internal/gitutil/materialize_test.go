@@ -195,6 +195,48 @@ func TestReadStageTrailer_ForeignCommitIsAbsentNotError(t *testing.T) {
 	}
 }
 
+// TestReadStageTrailer_DuplicateIsAmbiguous is fix-round G2's pin: a
+// commit carrying TWO Mindspec-Stage trailer lines — even consistent
+// ones — is an AMBIGUOUS encoding (a well-formed write-ahead commit
+// this protocol builds carries exactly one), reported as absent
+// (present==false, stage=="") rather than resolved by picking either
+// value. This is what routes a crafted/corrupt marker commit down the
+// SAME foreign-clear path as a no-trailer commit in
+// resolveMaterializationDiscriminator, never a resume.
+func TestReadStageTrailer_DuplicateIsAmbiguous(t *testing.T) {
+	dir := initGitRepo(t)
+	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m",
+		"crafted subject\n\nMindspec-Stage: materialization\nMindspec-Stage: artifact-sync\n")
+	stage, present, err := ReadStageTrailer(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("ReadStageTrailer: %v", err)
+	}
+	if present || stage != "" {
+		t.Errorf("expected a duplicate-trailer commit to read as ambiguous (absent), got stage=%q present=%v", stage, present)
+	}
+}
+
+// TestReadStageTrailer_MalformedValueIsPresentButNotAKnownStage: a
+// single trailer line with an unrecognized value is PRESENT (the
+// encoding itself is well-formed — exactly one trailer) but names a
+// value outside the closed {materialization, artifact-sync} set.
+// Whether that value is a legitimate stage is resolveMaterializationDiscriminator's
+// job (isKnownStage), not ReadStageTrailer's — this test pins that
+// ReadStageTrailer itself does no validation of the VALUE, only of the
+// trailer's cardinality.
+func TestReadStageTrailer_MalformedValueIsPresentButNotAKnownStage(t *testing.T) {
+	dir := initGitRepo(t)
+	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m",
+		"crafted subject\n\nMindspec-Stage: some-bogus-value\n")
+	stage, present, err := ReadStageTrailer(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("ReadStageTrailer: %v", err)
+	}
+	if !present || stage != "some-bogus-value" {
+		t.Errorf("expected present=true stage=%q (verbatim, unvalidated), got present=%v stage=%q", "some-bogus-value", present, stage)
+	}
+}
+
 // TestReadMaterializationMarker_AbsentIsNotError: no marker ref yet
 // published reads back present==false, err==nil — the same "genuinely
 // absent" contract as RevParseRef's ErrRefNotFound, wrapped into a
@@ -253,24 +295,91 @@ func TestPublishMaterializationMarker_ExpectedOldMismatchFails(t *testing.T) {
 	}
 }
 
-// TestClearMaterializationMarker_Idempotent: clearing an absent marker
-// is a no-op success; clearing a present one removes it.
+// TestClearMaterializationMarker_Idempotent: clearing with expectedOID
+// == "" (nothing believed to exist) is a no-op success; CAS-clearing a
+// present marker against its OWN observed OID removes it.
 func TestClearMaterializationMarker_Idempotent(t *testing.T) {
 	dir := initGitRepo(t)
 	beadID := "mindspec-test.1"
-	if err := ClearMaterializationMarker(dir, beadID); err != nil {
-		t.Fatalf("clearing an absent marker must no-op, got: %v", err)
+	if err := ClearMaterializationMarker(dir, beadID, ""); err != nil {
+		t.Fatalf("clearing with expectedOID==\"\" must no-op, got: %v", err)
 	}
 	c := mustRevParse(t, dir, "HEAD")
 	if err := PublishMaterializationMarker(dir, beadID, c, ""); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if err := ClearMaterializationMarker(dir, beadID); err != nil {
-		t.Fatalf("clearing a present marker: %v", err)
+	if err := ClearMaterializationMarker(dir, beadID, c); err != nil {
+		t.Fatalf("clearing a present marker (CAS against its own OID): %v", err)
 	}
 	_, _, present, err := ReadMaterializationMarker(dir, beadID)
 	if err != nil || present {
 		t.Errorf("expected the marker to be gone, present=%v err=%v", present, err)
+	}
+	// Clearing the now-absent marker again (idempotent: this call's own
+	// effect) with the SAME expectedOID must still succeed.
+	if err := ClearMaterializationMarker(dir, beadID, c); err != nil {
+		t.Errorf("re-clearing an already-absent marker (idempotent) must not error, got: %v", err)
+	}
+}
+
+// TestClearMaterializationMarker_CASMismatchFails: clearing against a
+// STALE expectedOID (one the marker no longer holds) fails and leaves
+// the CURRENT marker untouched — a clear can never delete evidence it
+// does not own.
+func TestClearMaterializationMarker_CASMismatchFails(t *testing.T) {
+	dir := initGitRepo(t)
+	beadID := "mindspec-test.1"
+	c := mustRevParse(t, dir, "HEAD")
+	if err := PublishMaterializationMarker(dir, beadID, c, ""); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	staleOID := "0123456789012345678901234567890123456789"
+	if err := ClearMaterializationMarker(dir, beadID, staleOID); err == nil {
+		t.Fatal("expected a CAS mismatch to fail the clear")
+	}
+	oid, _, present, err := ReadMaterializationMarker(dir, beadID)
+	if err != nil || !present || oid != c {
+		t.Errorf("expected the marker to remain %s after the refused CAS clear, got oid=%q present=%v err=%v", c, oid, present, err)
+	}
+}
+
+// TestClearMaterializationMarker_InterleavingCannotDeleteNewerMarker is
+// fix-round G4's interleaving pin: an invocation that observed marker X
+// (captured its OID early) must NOT be able to delete a marker Y a
+// LATER, concurrent invocation has since published — even though, by
+// the time the stale clear runs, some marker again exists (Y, not X).
+func TestClearMaterializationMarker_InterleavingCannotDeleteNewerMarker(t *testing.T) {
+	dir := initGitRepo(t)
+	beadID := "mindspec-test.1"
+	x := mustRevParse(t, dir, "HEAD")
+	if err := PublishMaterializationMarker(dir, beadID, x, ""); err != nil {
+		t.Fatalf("publish X: %v", err)
+	}
+	// This invocation observed X early (as a stale clear would).
+	staleObservedOID := x
+
+	// A "concurrent invocation" clears X and publishes a NEW marker Y in
+	// between — genuinely CAS-clearing X first (as a real invocation
+	// would), then publishing Y fresh.
+	if err := ClearMaterializationMarker(dir, beadID, x); err != nil {
+		t.Fatalf("concurrent invocation's own clear of X: %v", err)
+	}
+	mustWrite(t, dir, "extra.txt", "y\n")
+	mustRunGit(t, dir, "add", "-A")
+	mustRunGit(t, dir, "commit", "-q", "-m", "second")
+	y := mustRevParse(t, dir, "HEAD")
+	if err := PublishMaterializationMarker(dir, beadID, y, ""); err != nil {
+		t.Fatalf("publish Y: %v", err)
+	}
+
+	// The STALE clear (still holding its early-observed X) must fail —
+	// it must NOT delete Y.
+	if err := ClearMaterializationMarker(dir, beadID, staleObservedOID); err == nil {
+		t.Fatal("expected the stale clear (observed X) to fail rather than delete the newer marker Y")
+	}
+	oid, _, present, err := ReadMaterializationMarker(dir, beadID)
+	if err != nil || !present || oid != y {
+		t.Errorf("expected marker Y (%s) to survive the stale clear untouched, got oid=%q present=%v err=%v", y, oid, present, err)
 	}
 }
 

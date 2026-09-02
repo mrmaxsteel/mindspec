@@ -111,16 +111,35 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
      (`-p <tip>`), (R) the real index is refreshed to `C`
      (`reset --quiet --mixed`, index-only — the worktree is untouched),
      (S) the tracker artifact's refreshed blob materializes as commit `D`
-     (`-p C`, or directly on the tip if `C` elides), with a final S-exit
-     dirt re-classification that REFUSES on any GENUINE non-artifact dirt
-     surviving materialization, named, before the merge. Empty stages
-     elide (a `T` equal to the tip's tree builds no `C`; an unchanged
-     artifact builds no `D`) rather than stamping a contentless commit
-     onto every ordinary completion. Because no complete-authored commit
-     exists before the gates run, a gate refusal now ALWAYS leaves the
-     bead branch tip at `reviewed_head_sha`, byte-identical to the
-     pre-call state for this subphase too — the retry meets the identical
-     gate, never a false panel-staleness block and never masked dirt.
+     (`-p C`, or directly on the tip if `C` elides). Empty stages elide
+     (a `T` equal to the tip's tree builds no `C`; an unchanged artifact
+     builds no `D`) rather than stamping a contentless commit onto every
+     ordinary completion. Because no complete-authored commit exists
+     before the gates run, a gate refusal now ALWAYS leaves the bead
+     branch tip at `reviewed_head_sha`, byte-identical to the pre-call
+     state for this subphase too — the retry meets the identical gate,
+     never a false panel-staleness block and never masked dirt.
+
+     **S's own interval-edit classification (round-1 panel fix, spec
+     128 Bead 6)**: `D`'s content is a SECOND, SEPARATE snapshot of the
+     worktree taken after `R`'s index refresh — a real window exists
+     between that snapshot and any earlier read of worktree state, into
+     which an external writer (an editor flush, a concurrent agent) can
+     land a GENUINE non-artifact edit. The delivered classification
+     closes this at the exact tree about to be committed, not at an
+     earlier, separate read: after computing `D`'s own delta from the
+     current tip (`ChangedFilesTree(currentTip, T')`, where `T'` is the
+     S-stage's own snapshot), the run REFUSES — named paths, before
+     `MaterializeStageCommit`/the marker publication for `D` — if that
+     delta contains ANY path outside the named-artifact set. Because the
+     check inspects the SAME data the commit is built from rather than a
+     prior read, the classification-to-snapshot race is closed by
+     construction, not narrowed: there is no window left in which a
+     swept edit could reach `D` undetected. The pre-existing post-`D`
+     S-exit dirt re-classification (§3(i)) still runs, but is now
+     DEFENSIVE only — a belt-and-suspenders re-confirmation that nothing
+     changed between the delta check and the merge, not the primary
+     enforcement point.
      Reconcile mode (the landed-merge path, `beadHead` anchored at the
      already-landed merge commit) is UNCHANGED — it keeps its own
      `M^1..M` measurement over the committed range; no commits are
@@ -338,8 +357,11 @@ rather than five independent, ad-hoc mutation points:
 - **M** — build commit `C` (from `T`, `-p <tip>`).
 - **R** — refresh the real index to `C` (`reset --quiet --mixed`,
   index-only; the worktree is untouched).
-- **S** — build commit `D` (`-p C`, or `-p <tip>` when `C` elides), then
-  the S-exit dirt contract.
+- **S** — classify the exact delta about to be committed (any path
+  outside the named-artifact set REFUSES here, before `D` is ever
+  built — round-1 panel fix, above), then build commit `D` (`-p C`, or
+  `-p <tip>` when `C` elides), then the S-exit dirt contract as a
+  defensive re-check.
 - **G** — the bead→spec merge (unchanged — the pre-existing
   preserved-merge/`--resolve-merge` machinery this protocol hands off
   to, never reimplemented here).

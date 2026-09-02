@@ -216,6 +216,41 @@ func TestADR0041OQ1a_WriteAheadMarkerInvariant(t *testing.T) {
 	}
 }
 
+// TestADR0041G1_DeliveredOrderingClosesRace pins round-1 panel fix G7:
+// the ADR must describe the DELIVERED ordering — S's interval-edit
+// classification runs over the exact delta about to be committed,
+// BEFORE `D` is ever built, with the post-`D` S-exit contract demoted
+// to a defensive re-check — rather than the plan-literal check-after-D
+// wording this replaces.
+func TestADR0041G1_DeliveredOrderingClosesRace(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	for _, want := range []string{
+		"interval-edit classification",
+		"classification-to-snapshot race is closed by",
+		"before `MaterializeStageCommit`/the marker publication for `D`",
+		"DEFENSIVE only",
+		"defensive re-check",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("ADR-0041's G1 delivered-ordering amendment is missing anchor %q", want)
+		}
+	}
+}
+
+// TestADR0041G1_OldCheckAfterDWordingGone is G1's red-on-revert half:
+// the pre-fix-round §1 sentence describing the S-exit re-classification
+// as running only AFTER `D` is built (with no pre-D delta classification
+// at all) must be GONE from the shipped ADR — its presence would mean
+// the amendment merely appended new prose beside a claim it was supposed
+// to replace, exactly the defect R4-F2 found.
+func TestADR0041G1_OldCheckAfterDWordingGone(t *testing.T) {
+	text := adr0041NormalizedText(t)
+	stale := "with a final S-exit dirt re-classification that REFUSES on any GENUINE non-artifact dirt surviving materialization, named, before the merge"
+	if strings.Contains(text, stale) {
+		t.Errorf("ADR-0041 still carries the pre-fix-round check-after-D-only wording %q — G1's delivered-ordering amendment must REPLACE this text, not merely append beside it", stale)
+	}
+}
+
 // TestADR0041OQ1a_HonestScopeStated pins the honest-scope carve-out: a
 // POST-gate failure (a merge conflict, a bd-close failure) still occurs
 // after the materialization commits, exactly as before this bead — the
