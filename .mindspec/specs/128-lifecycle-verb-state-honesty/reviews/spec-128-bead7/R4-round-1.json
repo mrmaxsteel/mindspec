@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.98,
+  "rationale": "Empirical review at artifact commit 694b9d46 passes the R4 lens. The three AC-8(i) real-bd/real-git variants all succeeded and verified the notice, in_progress claim state, and bead worktree creation for an untracked file, an untracked directory tree, and a modified tracked file. AC-8(ii)'s real-claim enumeration pin passed. AC-8(iii)'s seam injection classified only the injected entangled path as blocking and routed it through the preserved DirtyTreeFailure invariants while leaving unrelated dirt out of the refusal. A separately hand-driven claim in a disposable /tmp repository emitted the required one-line stderr notice naming operator-notes.txt, returned exit 0, and left the bead in_progress; the installed bd independently refused worktree creation under the world-writable /tmp ancestry and emitted its existing recovery warning, so actual successful worktree creation is established by the three isolated integration fixtures rather than that manual /tmp leg. All five AC-16 dispositions passed: absent phase writes plan with honest backfill output, same-value plan performs zero writes with honest no-op output, and implement/review/done each remain untouched with zero writes. The reviewed worktree remained byte-identical and all scratch fixtures were cleaned.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-B7-AC8-I",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "summary": "All three AC-8(i) real claim variants proceed with notice and create worktrees.",
+      "evidence": "go test ./cmd/mindspec -run '^TestNextCmd_ClaimGuard_(UnrelatedDirtVariantsProceedWithNotice|EnumerationPin)$' -count=1 -v -timeout 30m passed. Subtests untracked_file, untracked_directory_tree, and modified_tracked_file passed; their assertions require claim success, a notice naming the dirty path, status in_progress, and existence of the new bead worktree. The real-claim enumeration pin also passed."
+    },
+    {
+      "id": "R4-B7-MANUAL",
+      "classification": "VERIFIED_WITH_ENVIRONMENT_CAVEAT",
+      "severity": "info",
+      "summary": "A hand-driven /tmp claim names unrelated dirt, claims successfully, and exits zero.",
+      "evidence": "In a disposable real Git+bd fixture, with untracked operator-notes.txt in the invoking checkout, the reviewed binary emitted as stderr line 1: 'note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): operator-notes.txt'; the command exit was 0 and bd show reported the bead status in_progress. Current bd then rejected its worktree-create subprocess because BEADS_DIR was beneath world-writable /tmp and emitted the pre-existing recovery warning. This is fixture-environment behavior, not a reviewed-code failure; the three Go integration fixtures above independently establish successful worktree creation."
+    },
+    {
+      "id": "R4-B7-AC8-III",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "summary": "Seam-injected entanglement re-arms refusal through the preserved DirtyTreeFailure contract.",
+      "evidence": "TestCheckDirtyTreeProportional_InjectedEntanglementBlocks passed. With entangled.txt injected and both entangled.txt and unrelated.txt dirty, blockingDirt was exactly [entangled.txt], ignoredDirt exactly [unrelated.txt], and DirtyTreeFailure satisfied the shared contract invariants, named entangled.txt, and omitted unrelated.txt. The reviewed diff contains no changed DirtyTreeFailure contract lines."
+    },
+    {
+      "id": "R4-B7-AC16",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "summary": "All AC-16 replay/backfill legs pass with mutation honesty.",
+      "evidence": "The targeted internal/approve run passed EmptyStoredPhaseBackfillsPlan, SameValuePlanReplayIsNoOp, and LaterPhaseReplayLeavesItUntouched with implement, review, and done subtests. The tests assert exactly one plan write for absent metadata, zero writes for plan/implement/review/done, backfill wording only on the mutation path, and stored-phase naming on no-op paths."
+    },
+    {
+      "id": "R4-B7-INTEGRITY",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "summary": "Build, artifact identity, byte integrity, and scratch cleanup passed.",
+      "evidence": "make build completed; targeted tests all passed; HEAD remained 694b9d46e9f1f85e4e44a3143859b098548acce6; git diff, git diff --cached, and git status --porcelain were empty; both disposable /tmp fixture roots were deleted."
+    }
+  ]
+}

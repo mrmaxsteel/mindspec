@@ -1,0 +1,52 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The notice is correctly termsafe-escaped per path and routed to process stderr, and the ordinary blockingDirt/ignoredDirt split is exclusive and order-preserving. The phase write is also correctly enclosed by WithPhaseWriteLock. However, backfillExistingEpicPhase violates its binding absent-only contract by discarding the presence bit and overwriting a present-but-invalid phase with plan. In addition, the new entanglement classifier's exact destination-only path matching does not conservatively recognize rename-source dirt or Git's collapsed untracked-directory entries, so the promised future re-arming mechanism can still ignore dirt touching an injected writable path. Focused tests and `go test ./... -short -count=1` pass, but neither edge is covered.",
+  "concrete_changes_required": [
+    "Make backfillExistingEpicPhase consume the WithPhaseWriteLock presence bit and write plan only when mindspec_phase is genuinely absent. A present-but-invalid value must remain untouched or be explicitly refused, with honest output distinct from a real backfill; add a regression test for that case.",
+    "Make proportional entanglement matching conservative across porcelain shapes: a rename/copy must block when either source or destination intersects an entangleable path, and a collapsed untracked directory must block when it contains or is an ancestor of an entangleable path. Add seam-driven tests for both cases while preserving deterministic notice/failure ordering."
+  ],
+  "findings": [
+    {
+      "id": "R5-B7-1",
+      "classification": "CONTRACT_BREACH",
+      "severity": "high",
+      "location": "internal/approve/spec.go:177-205",
+      "summary": "The alleged absent-only backfill overwrites present-but-invalid metadata.",
+      "evidence": "WithPhaseWriteLock deliberately supplies `(stored, present)` and documents present-but-invalid as `(\"\", true)`, distinct from genuine absence `(\"\", false)`. backfillExistingEpicPhase names its disposition ABSENT-ONLY but declares the callback as `func(stored string, _ bool)` and writes plan whenever `stored == \"\"`. Thus a present invalid value is silently converted into a backfill despite the lock API's presence-aware contract. The tests exercise absent, plan, implement, review, and done, but omit present-invalid."
+    },
+    {
+      "id": "R5-B7-2",
+      "classification": "CORRECTNESS_GAP",
+      "severity": "medium",
+      "location": "internal/next/guard.go:143-165, 187-213; internal/next/entangle_test.go:120-150",
+      "summary": "The block/ignore split can miss dirt that touches an entangleable path.",
+      "evidence": "parsePorcelain reduces `R  old -> new` to only `new`, so an injected entangleable `old` is classified as ignored. Git also commonly reports an untracked tree as `dir/`; exact equality does not detect an injected entangleable `dir/file`. The simple modified-file seam test passes, but the stated mechanism that appending a future tracked write path re-arms blocking is not true for these porcelain shapes."
+    },
+    {
+      "id": "R5-B7-3",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/guard.go:201-233; cmd/mindspec/next.go:132-148",
+      "summary": "Ordinary split exclusivity, ordering, hostile-path escaping, and stderr routing are correct.",
+      "evidence": "Each non-artifact user path enters exactly one of blockingDirt or ignoredDirt through a single if/else and retains porcelain order; clean/artifact-only input enters neither by design. IgnoredDirtNotice applies termsafe.Escape independently to every path before joining, preventing raw controls or forged lines. The caller emits the notice with fmt.Fprintln(os.Stderr), not stdout, so structured stdout remains uncontaminated."
+    },
+    {
+      "id": "R5-B7-4",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/approve/spec.go:196-212; internal/phase/phaselock.go:239-257",
+      "summary": "The backfill read/decision/write sequence is inside the phase lock and normal no-op output is distinct.",
+      "evidence": "WithPhaseWriteLock acquires the repo-scoped lock, performs a fresh presence-aware epic read, invokes the callback, and executes any metadata merge before unlock. For valid stored values, plan emits an explicit nothing-mutated message while implement/review/done say the stored phase was left untouched, distinct from the genuine backfill message."
+    },
+    {
+      "id": "R5-B7-5",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "reviewed commit 694b9d46e9f1f85e4e44a3143859b098548acce6",
+      "summary": "Artifact identity and test state were verified without modifying the bead worktree.",
+      "evidence": "The bead worktree HEAD is exactly 694b9d46e9f1f85e4e44a3143859b098548acce6. Focused AC-8/AC-16 tests passed, followed by `go test ./... -short -count=1` passing across all packages. Final tracked-tree comparison against HEAD was clean."
+    }
+  ]
+}

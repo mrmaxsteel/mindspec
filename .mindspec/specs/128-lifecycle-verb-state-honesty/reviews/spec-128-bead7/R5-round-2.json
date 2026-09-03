@@ -1,0 +1,49 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Both prior R5 asks are resolved at reviewed commit 953e9abb265e03d531e6574aa470d07b348f2fc8. The absent-only phase backfill now consumes the presence bit: genuinely absent metadata writes plan, present-but-invalid metadata performs zero writes and reports that distinct condition, same-value plan reports an ordinary no-op, and later valid phases remain untouched. The proportional guard alone now consumes NUL-delimited porcelain, preserves both rename/copy operands, blocks when either operand intersects an entangleable path, and conservatively blocks collapsed untracked-directory ancestors. Ignored-dirt rendering applies strconv.Quote to every rendered entry before comma-joining, preventing control/newline injection and forged list boundaries. The disclosed bonus fixes are coherent and exercised: write classes are gated by anchor/cwd equality, StatusZWithStderr keeps successful stderr warnings out of the parseable NUL stream, the two lint-ratchet entries accurately classify their new call sites, and mindspecCmdName removes the forbidden literal at the test exec boundary without changing behavior. Focused unit/seam tests, real fixture tests, go build ./..., and the full short suite passed; the bead worktree remained byte-identical and clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R2-1",
+      "classification": "RESOLVED",
+      "severity": "info",
+      "location": "internal/approve/spec.go; internal/approve/spec_replay_test.go",
+      "summary": "The backfill presence-bit defect is fixed.",
+      "evidence": "backfillExistingEpicPhase now branches on present before inspecting stored. The present-but-invalid regression passed and observed zero MergeMetadata calls. The three requested message classes are distinct in source and assertions: real absence says phase was backfilled; present-but-invalid says it was left untouched and names repair-phase inspection; ordinary same-value replay says nothing mutated. Later implement/review/done values have a separate left-untouched message and remain zero-write no-ops. All focused TestBackfillExistingEpicPhase_* tests passed."
+    },
+    {
+      "id": "R5-R2-2",
+      "classification": "RESOLVED",
+      "severity": "info",
+      "location": "internal/next/guard.go; internal/next/entangle_test.go",
+      "summary": "Porcelain parsing and entanglement matching are conservative across the requested shapes.",
+      "evidence": "CheckDirtyTreeProportional uses its own --porcelain -z path while legacy CheckDirtyTree/Detail retain the old parser. parsePorcelainZ consumes the extra original-path field for R/C statuses. entryIntersectsEntangleable checks both current and original paths, while only a ?? entry ending in slash receives ancestor treatment. The requested parse, rename-away, rename-into, unrelated-rename, directory-ancestor, directory-nonancestor, and injected-entanglement seam tests all passed with deterministic entry ordering."
+    },
+    {
+      "id": "R5-R2-3",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/guard.go: IgnoredDirtNotice",
+      "summary": "strconv.Quote closes the one-line notice boundary.",
+      "evidence": "Every rendered dirty entry is unconditionally strconv.Quote'd before strings.Join(..., \", \"). Thus embedded control bytes/newlines are escaped and a literal comma-space inside a filename remains inside one quoted unit rather than forging a second list item. The hostile-control and comma-boundary tests passed."
+    },
+    {
+      "id": "R5-R2-4",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "cmd/mindspec/next_claim_guard_test.go; cmd/mindspec/next_gitignore_refusal_test.go; internal/gitutil/gitops.go; internal/lint",
+      "summary": "The four disclosed bonus fixes are acceptable.",
+      "evidence": "The recording-enabled and gitignore-entry-absent real enumeration pins passed, demonstrating anchor-observable predictions. All modified/deleted/renamed-away/symlinked .gitignore refusal fixtures passed their byte-identical assertions; the symlink case also exercises successful git stderr warning separation from the NUL stream. The two lint-ratchet rows accurately mirror their sibling audit classes, and the command-name constant is a test-only literal-boundary accommodation with unchanged argv."
+    },
+    {
+      "id": "R5-R2-5",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "reviewed commit 953e9abb265e03d531e6574aa470d07b348f2fc8",
+      "summary": "Artifact identity, gates, and worktree cleanliness were verified.",
+      "evidence": "HEAD matched the reviewed SHA. go build ./... exited 0; go test ./... -short -count=1 passed across all packages. Final git status and both cached/uncached diffs against HEAD were empty. Test fixtures used their own temporary repositories and left the bead worktree unchanged."
+    }
+  ]
+}

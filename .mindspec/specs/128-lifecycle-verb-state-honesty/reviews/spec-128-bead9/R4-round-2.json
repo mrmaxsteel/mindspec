@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": "high",
+  "rationale": "Reviewed commit 446900446205ebac7c5c35fb26ef7c5f29c05cc6 addresses the round-1 chain-loss defect without changing the hostile-stderr rendering behavior. The real built mindspec next --emit-only path, driven by a PATH-prepended hostile fake bd in an isolated clone, preserved the schema diagnostic, emitted no raw ESC/CR/SOH bytes, retained stderr line 020, omitted line 021, and emitted exactly one 20-line truncation marker. Focused tests confirmed errors.As reaches *exec.ExitError through QueryReady's bdRenderedError wrapper, IsUnsupportedFlagError classifies through FetchBeadAsOf, and BeadExists still classifies a non-empty-stderr exit. The fix is confined to the expected bead-9 files and has no bead-7 file overlap. The recorded G3 deferral does not constitute a spec-branch-corrupting defect under this panel's blocking threshold: the armed metadata-rendering leg is explicitly disclosed and deferred rather than misrepresented as fixed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-1 hostile rendering behavior remains intact",
+      "evidence": "At 44690044, the end-to-end fake-bd probe produced raw_ESC=0, raw_CR=0, raw_SOH=0, marker_count=1, has_020=1, and has_021=0 while retaining the depends_on_id schema-error text."
+    },
+    {
+      "severity": "info",
+      "title": "Error classification chain is restored",
+      "evidence": "Focused regression tests passed for bdRenderedError.Unwrap, QueryReady errors.As(*exec.ExitError), FetchBeadAsOf IsUnsupportedFlagError, and BeadExists with non-empty stderr. The implementation uses %w into bdRenderedError, whose Unwrap returns the original error."
+    },
+    {
+      "severity": "info",
+      "title": "Diff confinement and deferred G3 disposition are acceptable",
+      "evidence": "The reviewed fix changes only internal/bead/bdcli.go, internal/bead/bdcli_test.go, internal/next/beads.go, internal/next/beads_test.go, and internal/next/ready_gate.go; none overlaps bead 7's next.go/guard.go files. The BRIEF expressly records the remaining metadata-write rendering leg as deferred, and it is not a spec-branch-corrupting defect."
+    }
+  ]
+}

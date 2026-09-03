@@ -1,0 +1,36 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Re-derived independently at reviewed commit 953e9abb. My four round-1 asks classify as follows: (1) the .gitignore write class is PARTIALLY RESOLVED—direct invocation at the canonical spec-worktree path now blocks, but samePath is lexical and can be bypassed by another spelling of the same physical worktree; (2) the modified/deleted/renamed-away/symlinked real-binary refusal coverage is RESOLVED for canonical direct invocation—I ran the suite uncached with a 30-minute timeout and all four passed, proving byte-identical refusal; (3) the gitignore-absent anti-drift leg is RESOLVED for its canonical fixture—I ran it and it passed, as did the recording-enabled pin—but it does not cover the anchor-equivalence failures below; (4) -z porcelain parsing, preservation of both rename sides, and unambiguous quoted notice boundaries are RESOLVED. I also ran the default enumeration pin, internal/next, internal/gitutil, the AC-16 backfill tests, and a fresh build successfully. Of the four disclosed bonus fixes, StatusZWithStderr stream separation, the two lint-ratchet entries, and mindspecCmdName are acceptable; the anchor-mismatch bonus fix is defective. In a clean disposable clone I proved os.Getwd preserves a shell-entered symlink alias, proved ComputeEntangleablePaths returns [] when repoRoot and cwd name the same physical tree through real/alias paths, and then reproduced the failure through the real binary: with dirty entry-absent .gitignore in a spec worktree, invoking next through a symlink alias printed that .gitignore was unrelated, claimed the bead, and appended the worktree rule to that same dirty tracked spec-branch file. This is an evidence-bearing spec-branch-mutating regression, so the hard block remains under the panel's stated threshold. A second independently reproduced omission exists for supported custom worktree_root plus recording: claimAnchorRoot honors cfg.WorktreeRoot while workspace.SpecDir does not, so the gate can exclude root-targeted recording writes.",
+  "concrete_changes_required": [
+    "Replace lexical samePath(anchor, cwd) gating with a derivation based on the invoking Git working tree's canonical top-level and each resolved write target. Resolve symlinks/filesystem identity, treat invocation from any subdirectory or symlink alias of that tree as the same observed tree, and include a write iff its resolved target is contained by that observed top-level.",
+    "Add real-claim regressions for invoking from a subdirectory and through a symlink alias to the spec worktree, with dirty entry-absent .gitignore; both must refuse before claim and leave bead state, branches, worktrees, symlink targets, and file bytes unchanged.",
+    "Close the custom worktree_root recording divergence: derive recording entanglement from the actual resolved EventsPath/ManifestPath targets (or make recording/workspace resolution consistently cfg-aware), and pin a recording-enabled custom-root fixture where dirty root/spec-worktree recording files cannot be waved through and then read-modify-written.",
+    "Correct ComputeEntangleablePaths' contradictory comments so they describe the actual, single target-resolution rule after the fix; the current block says recording always writes under repoRoot while the implementation and later comment assume the spec-worktree anchor."
+  ],
+  "findings": [
+    {
+      "id": "R6-R2-F1",
+      "severity": "critical",
+      "title": "Lexical samePath gate is bypassable and permits mutation of dirty spec-branch .gitignore",
+      "evidence": "internal/next/guard.go samePath uses only filepath.Abs/Clean and never resolves symlinks or the Git top-level. Disposable-clone unit probe: ComputeEntangleablePaths(realSpecWorktree, symlinkAlias, specID) returned [] instead of [.gitignore]. Environment probe showed os.Getwd returned the shell-entered alias when PWD named it. Real-binary fixture then invoked mindspec next with cwd/PWD set to a symlink alias of the target spec worktree: output said `.gitignore` was unrelated and not blocked, the command claimed successfully, and the dirty tracked file changed from the human bytes to those bytes plus `# mindspec worktrees` and `.worktrees/`.",
+      "impact": "The guard's claimed observability boundary can be spoofed without leaving the target worktree. A claim mutates a dirty tracked file on the spec branch after explicitly telling the operator it will not touch that path. Invocation from a subdirectory has the same lexical-mismatch mechanism because git status remains top-level-relative while cwd differs from the anchor."
+    },
+    {
+      "id": "R6-R2-F2",
+      "severity": "major",
+      "title": "Custom worktree_root makes the recording anchor gate disagree with the actual recording targets",
+      "evidence": "claimAnchorRoot uses workspace.SpecWorktreePath(root, cfg, specID), honoring cfg.WorktreeRoot. recording.EventsPath/ManifestPath use workspace.SpecDir, whose existing-worktree probe uses DefaultWorktreesDir(root), hardcoded to .worktrees. In a disposable-clone probe with worktree_root=.wt, recording enabled, a .wt spec-worktree directory, and root recording paths, ComputeEntangleablePaths(root, root, specID) returned [] although EventsPath/ManifestPath resolved to the root checkout and are written by claim step 7.5.",
+      "impact": "With the supported custom worktree_root configuration, dirty tracked recording state in the invoking root checkout can be classified as unrelated and then read-modify-written by the same claim. The two default-root anti-drift pins cannot detect this configuration-specific false negative."
+    },
+    {
+      "id": "R6-R2-F3",
+      "severity": "info",
+      "title": "Canonical dirt-shape and anti-drift coverage passes",
+      "evidence": "Fresh runs at 953e9abb: TestNextCmd_ClaimGuard_GitignoreVariantsRefuseByteIdentical PASS for modified, deleted, renamed_away, and symlinked; default, RecordingEnabled, and GitignoreEntryAbsent enumeration pins PASS; go test ./internal/next ./internal/gitutil PASS; all TestBackfillExistingEpicPhase_* legs PASS; make build PASS (with a non-fatal sandbox-denied module stat-cache warning).",
+      "impact": "The round-1 parser, presence-bit, canonical .gitignore, and canonical anti-drift defects are fixed. The requested change is confined to making target/observability identity honest across supported invocation paths and configuration."
+    }
+  ]
+}

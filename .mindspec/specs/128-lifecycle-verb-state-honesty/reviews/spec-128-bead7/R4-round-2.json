@@ -1,0 +1,39 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "At reviewed commit 953e9abb265e03d531e6574aa470d07b348f2fc8, the round-1 enumeration defect is addressed and no spec-branch-corrupting defect remains. I re-ran the three real unrelated-dirt variants (untracked file, collapsed untracked directory tree, and modified tracked file) and both new non-empty anti-drift pin legs (recording enabled and absent worktree-root .gitignore entry); all passed against freshly built fixtures. I also ran the four real .gitignore refusal variants requested by the round-2 brief (modified, deleted, renamed away, and symlinked); every leg passed its byte-identical refusal audit. A separate hand-driven /tmp repository emitted the required one-line stderr notice naming the unrelated dirty file, proceeded to claim the real bead, and returned exit 0. Source re-derivation confirms G1-G5: ComputeEntangleablePaths derives the conditional recording and .gitignore write classes; both are observability-gated against the same anchor preference used by the executor; HasGitignoreEntry and EnsureGitignoreEntry share one presence predicate; proportional checking alone uses unambiguous NUL porcelain, checks both rename sides and collapsed-directory ancestry, and quotes notice entries; and spec replay consumes the phase presence bit so present-but-invalid metadata is left untouched with distinct output. The four disclosed bonus fixes are acceptable: anchor mismatch is covered by the two worktree-local pins, StatusZWithStderr keeps successful stderr advisories out of the NUL stream and the symlink leg passes, the two ratchet entries are narrowly justified and their lint tests pass, and mindspecCmdName satisfies the literal-exec constraint without changing execution. Legacy dirty-tree guards remain on CheckDirtyTree/CheckDirtyTreeDetail, so proportional behavior is confined to the worktree-creating next claim path. The reviewed worktree was byte-identical before and after review, and the isolated probe repository was cleaned.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R2-F1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "summary": "The round-1 factual error about an empty entangleable set is corrected. The recording-enabled pin observed exactly manifest.json plus events.ndjson, and the absent-entry pin predicted and observed exactly .gitignore; both real claims passed."
+    },
+    {
+      "id": "R4-R2-F2",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "summary": "The three requested unrelated-dirt variants all proceeded with notices and successful claims: untracked_file, untracked_directory_tree, and modified_tracked_file. The focused package run passed in 695.808s."
+    },
+    {
+      "id": "R4-R2-F3",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "summary": "The .gitignore attack surface is fail-closed and byte-preserving. Modified, deleted, renamed-away, and symlinked variants all passed; the focused package run passed in 347.205s."
+    },
+    {
+      "id": "R4-R2-F4",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "summary": "A hand-driven real claim in an isolated temporary repository, with r4-unrelated-notes.txt dirty, printed exactly one informational stderr line naming the quoted path, changed the bead to in_progress, and returned exit 0. The fixture's later worktree setup produced a Beads path-safety warning caused by macOS /tmp-to-/private/tmp canonicalization; this did not affect the requested notice/proceed/exit-0 observation, and the mandated real-binary tests independently proved successful worktree creation."
+    },
+    {
+      "id": "R4-R2-F5",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "summary": "Supplemental focused checks passed for absent-only phase backfill, present-but-invalid no-write replay, same-value replay, implement/review/done replay, HasGitignoreEntry parity with EnsureGitignoreEntry, workspace-composition ratchets, and inline-branch-composition ratchets. make build and git diff --check also passed; the build emitted only a non-fatal Go module stat-cache permission warning outside the writable workspace."
+    }
+  ]
+}

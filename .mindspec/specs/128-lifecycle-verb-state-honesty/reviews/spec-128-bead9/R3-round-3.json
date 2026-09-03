@@ -1,0 +1,23 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "confidence": 0.85,
+  "rationale": "Round-3 classification of my two round-2 asks against d59622b3, re-derived from the diff, the termsafe source, and live test runs. ASK 1 (armed metadata-seam leg): FIXED at source, exactly the disposition I preferred — RecordReadinessOverride and RollbackReadinessOverride (internal/next/ready_gate.go:115-127/:148-156) now wrap mergeMetadataFn's/deleteMetadataKeysFn's errors in bdRenderedError with no added prefix, so cmd/mindspec/next.go's %v render at :286 and the rollback warning now receive already-escaped text without any change to bead 7's file, and the chain stays intact (the pre-existing propagation tests, which pass, confirm no identity/Is breakage through the new wrap). The commit message also corrects the round-2 false premise in plain terms ('this leg was armed, not hypothetical'), which is the honesty half of my ask delivered. ASK 2 (red-on-revert pins): DELIVERED and VERIFIED GENUINE. I re-derived both assertions rather than trusting the labels: TestFetchBeadByID_AC11RenderingLeg drives a PATH-shimmed fake bd emitting a real ESC byte (\\033[31m) and CRLF through the REAL RunBD -> tracedOutput -> wrapBDError chain and asserts (a) the schema-error text survives and (b) !strings.ContainsAny(msg, \"\\x1b\\r\\x00\"); TestGateReadiness_RenderingLegControlBytesEscaped swaps evaluateReadinessFn to a control-bearing error and asserts the same pair. Red-on-revert holds analytically: with the bdRenderedError wrapper removed, the call site reverts to a bare %w, err.Error() then contains the raw \\x1b and \\r from stderr verbatim, and the ContainsAny assertion fires — while the pre-existing chain tests would stay green, which is exactly the gap these close. The tests are not vacuously green either: termsafe.Escape (internal/termsafe/termsafe.go:37-44) strconv.Quotes any line containing a rune <0x20, so \\r and \\x1b are both escaped with the wrapper present — I ran both tests (PASS) plus the full internal/bead and internal/next suites (ok 6.0s / 12.4s, -short, count=1) at d59622b3, and the bead worktree is clean. Residual non-blocking notes below; nothing gates."
+  ,
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-r3-1",
+      "severity": "info",
+      "title": "Both round-2 asks delivered and verified; false refutation corrected at source",
+      "detail": "The armed merge-read/delete-read leg is now escaped at RecordReadinessOverride/RollbackReadinessOverride inside ready_gate.go (in-bounds, no next.go change), with the commit message explicitly retracting the 'not-yet-armed via tracedCombined' claim. The two render pins are genuine red-on-revert: assertion structure (ContainsAny on \\x1b/\\r/\\x00 against err.Error()) fails on wrapper removal at each call-site class, and termsafe.Escape's <0x20 quoting makes them green only with the escape in place. Verified by test run at d59622b3."
+    },
+    {
+      "id": "R3-r3-2",
+      "severity": "info",
+      "title": "Non-blocking: the newest wrap sites themselves have no render pin; bead mindspec-6gsy's text is now partially stale",
+      "detail": "Removing the bdRenderedError wrap from RecordReadinessOverride/RollbackReadinessOverride (the sites added THIS round) fails no test — the two new pins cover the FetchBeadByID and GateReadiness classes I named in round 2, and the wrapper type itself is unit-pinned, so residual risk is small and I do not gate on it; a one-liner test can ride along with follow-up work. Separately, follow-up bead mindspec-6gsy still describes the RecordReadinessOverride %v leg as deferred-until-ta30.7 and repeats the tracedCombined-discard framing; with the source-level fix landed, that bead should be trimmed to describePhaseSyncFailure (genuinely next.go-bound, still armed) plus the genuine MergeMetadata write-half output-discard gap — bookkeeping for the orchestrator, not a code change on this bead."
+    }
+  ]
+}
