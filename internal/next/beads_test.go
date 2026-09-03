@@ -116,6 +116,36 @@ exit 1`)
 	}
 }
 
+// TestFetchBeadByID_AC11RenderingLeg is round-2 panel's red-on-revert pin
+// for FetchBeadByID's own render leg — distinct from
+// TestFetchBeadAsOf_IsUnsupportedFlagErrorClassifiesThroughWrapper below,
+// which pins the CHAIN but would stay green even if the bdRenderedError
+// wrapper were dropped from FetchBeadByID's call site (reverting to a
+// bare %w of err). This test fails specifically on that regression: a
+// fake bd emitting a control-bearing stderr line must not leak the raw
+// control byte into FetchBeadByID's rendered error text.
+func TestFetchBeadByID_AC11RenderingLeg(t *testing.T) {
+	origRunBD := runBDFn
+	t.Cleanup(func() { runBDFn = origRunBD })
+	runBDFn = bead.RunBD
+
+	writeFakeBD(t, `printf 'Error 1105 (HY000): column "depends_on_id" could not be found\n' >&2
+printf 'noise\033[31mmore-noise\r\n' >&2
+exit 1`)
+
+	_, err := FetchBeadByID("mindspec-abc")
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depends_on_id") {
+		t.Errorf("schema-error text must survive rendering, got: %q", msg)
+	}
+	if strings.ContainsAny(msg, "\x1b\r\x00") {
+		t.Errorf("a raw control byte reached FetchBeadByID's rendered error: %q", msg)
+	}
+}
+
 // TestRenderBDError_EscapesEveryLineIndividually is a focused unit test
 // of the render-boundary helper itself: each line of a multi-line error
 // is escaped independently (the DirtyTreeFailure house pattern), so a
