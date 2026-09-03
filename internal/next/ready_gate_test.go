@@ -244,6 +244,38 @@ func TestRecordReadinessOverride_PropagatesWriteFailure(t *testing.T) {
 	}
 }
 
+// TestRecordReadinessOverride_HostileFailureRendersEscaped pins spec 128
+// Bead 8's folded-in ta30.9 render-leg follow-up (verified live in this
+// worktree rather than assumed): RecordReadinessOverride already wraps a
+// MergeMetadata failure in bdRenderedError (ready_gate.go:130), so any
+// caller formatting the returned error via %v/%s — e.g.
+// cmd/mindspec/next.go's readinessOverrideFailure — gets the SAME
+// per-line termsafe.Escape treatment bd-ready failures get (ADR-0042),
+// with no second escaping path required at the call site. A hostile
+// control byte (ESC) in the underlying failure text must never survive
+// raw into err.Error().
+func TestRecordReadinessOverride_HostileFailureRendersEscaped(t *testing.T) {
+	orig := mergeMetadataFn
+	t.Cleanup(func() { mergeMetadataFn = orig })
+
+	hostile := "bd metadata merge-write failed\x1b[31mFORGED\x1b[0m"
+	mergeMetadataFn = func(issueID string, updates map[string]interface{}) error {
+		return errors.New(hostile)
+	}
+
+	err := RecordReadinessOverride("mindspec-abcd.1", []string{"MF-1"})
+	if err == nil {
+		t.Fatal("expected the MergeMetadata failure to propagate")
+	}
+	rendered := err.Error()
+	if strings.ContainsRune(rendered, 0x1b) {
+		t.Errorf("raw ESC byte survived into RecordReadinessOverride's rendered error: %q", rendered)
+	}
+	if !strings.Contains(rendered, "FORGED") {
+		t.Errorf("expected the underlying hostile text to survive (quoted, not raw) into the rendered error, got: %q", rendered)
+	}
+}
+
 // TestRollbackReadinessOverride_DeletesExactlyTheMarkerKey pins the
 // G3-OVERRIDE-ORPHAN rollback shape (spec 124 final-review r1): a failed
 // ClaimBead after the marker-before-claim write must delete EXACTLY the

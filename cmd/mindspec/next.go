@@ -59,6 +59,25 @@ team lead spawns fresh agents per bead.`,
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
 		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
 
+		// Spec 128 Bead 8 round-1 panel G2: --pick < 0 is pure arg
+		// validation — checked IMMEDIATELY after flag parsing, before
+		// EVERYTHING else on either path (positional-vs-pick mutual
+		// exclusion, the --emit-only dispatch below, scope resolution,
+		// the dirty-tree guard, the ready query). This is the single
+		// shared entry point for both the claim path and --emit-only
+		// (runEmitOnly is only ever reached via the dispatch below), so
+		// one check here covers both: an invalid pick refuses with ZERO
+		// side effects — no bd call, no dirty-tree check, nothing
+		// claimed/fetched — rather than surfacing deep inside SelectWork
+		// after real work already ran. G4/R5's explicit decision, stated
+		// here rather than left implicit: --pick=0 is NOT invalid — it is
+		// the documented "unset" sentinel (OQ-5's default-to-row-1 path,
+		// SelectWork's own pick==0 branch); only a NEGATIVE value is
+		// rejected.
+		if pick < 0 {
+			return fmt.Errorf("pick %d is invalid: must be >= 0 (0 selects the default)", pick)
+		}
+
 		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
 		// mutually exclusive selectors — the positional names a specific bead,
 		// --pick is an index into the ready set, and they may disagree. Reject
@@ -81,12 +100,12 @@ team lead spawns fresh agents per bead.`,
 
 		// Emit-only mode: build and print primer without claiming or state changes
 		if emitOnly {
-			return runEmitOnly(specFlag, args)
+			return runEmitOnly(root, specFlag, pick, args)
 		}
 
 		// Step 0a: --spec prefix resolution (e.g., "079" → "079-location-agnostic-commands")
 		if specFlag != "" {
-			resolved, resolveErr := resolve.ResolveSpecPrefix(specFlag)
+			resolved, resolveErr := resolve.ResolveSpecPrefixProven(root, specFlag)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -186,33 +205,20 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 2: Query ready work (scoped to spec's epic if available)
-		var items []next.BeadInfo
-		if specFlag != "" {
-			// Find epic via beads metadata query (ADR-0023).
-			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
-			if epicErr == nil && epicID != "" {
-				items, err = next.QueryReadyForEpic(epicID)
-			} else {
-				items, err = next.QueryReady()
-			}
-		} else {
-			items, err = next.QueryReady()
-		}
+		// Step 2/2.5: Construct the ready set — bd-ready query (global, or
+		// scoped to specFlag's epic) plus the spec-title filter, as ONE
+		// shared construction with --emit-only (R6.1/AC-9 parity, spec
+		// 128 Bead 8). BuildReadySet REFUSES rather than silently
+		// widening to the global, unscoped `bd ready` query when specFlag
+		// is set and its epic can't be resolved — the removed
+		// FindEpicBySpecID-fails fallback that used to live here (R6.7/
+		// AC-15) — and errors loudly rather than silently succeeding when
+		// the filter drops every returned item (R6.3(c)/AC-10b).
+		rs, err := next.BuildReadySet(root, specFlag)
 		if err != nil {
-			return fmt.Errorf("querying ready work: %w", err)
+			return err
 		}
-
-		// Step 2.5: Filter by target spec if specified
-		if specFlag != "" {
-			var filtered []next.BeadInfo
-			for _, item := range items {
-				if containsSpecID(item.Title, specFlag) {
-					filtered = append(filtered, item)
-				}
-			}
-			items = filtered
-		}
+		items := rs.Filtered
 
 		// Step 3: Handle no-work case — also check for in-progress bead with
 		// missing worktree (stale recovery). If a bead is in_progress but its
@@ -256,18 +262,21 @@ team lead spawns fresh agents per bead.`,
 		if len(args) > 0 {
 			named = args[0]
 		}
+		if notice := rs.ExclusionNotice(); notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+		}
 		if len(items) > 1 {
 			fmt.Printf("Ready work (%d items):\n", len(items))
 			fmt.Print(next.FormatWorkList(items))
 			fmt.Println()
 			if pick == 0 && named == "" {
-				fmt.Println("Defaulting to first item. Use --pick=N to select a specific item.")
+				fmt.Println("Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.")
 			}
 		}
 
 		var selected next.BeadInfo
 		if named != "" {
-			selected, err = next.SelectWorkByName(items, named)
+			selected, err = next.SelectNamedFromReadySet(rs, named)
 		} else {
 			selected, err = next.SelectWork(items, pick)
 		}
@@ -305,10 +314,7 @@ team lead spawns fresh agents per bead.`,
 			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
 				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
 			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
-				return guard.NewFailure(
-					fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(selected.ID), err),
-					"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
-				)
+				return readinessOverrideFailure(selected.ID, err)
 			}
 		}
 
@@ -437,63 +443,83 @@ func completionGuidance(beadID string) string {
 	return sb.String()
 }
 
-// runEmitOnly handles the --emit-only path: build and print primer without claiming.
-func runEmitOnly(specFlag string, args []string) error {
-	var selected next.BeadInfo
-
-	if len(args) > 0 {
-		// Explicit bead ID provided as positional argument
-		info, err := next.FetchBeadByID(args[0])
-		if err != nil {
-			return fmt.Errorf("fetching bead %s: %w", args[0], err)
+// runEmitOnly handles the --emit-only path: build and print primer without
+// claiming. specFlag is prefix-resolved and existence-proven identically
+// to the claim path (spec 128 R6.7) — refusing before any ready query
+// when an explicit --spec names no actual spec, rather than falling back
+// to the global, unscoped `bd ready` (the removed next.go:417-424
+// fallback).
+func runEmitOnly(root, specFlag string, pick int, args []string) error {
+	if specFlag != "" {
+		resolved, resolveErr := resolve.ResolveSpecPrefixProven(root, specFlag)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		selected = info
-	} else {
-		// Query ready work and pick the first item
-		var items []next.BeadInfo
-		var err error
-		if specFlag != "" {
-			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
-			if epicErr == nil && epicID != "" {
-				items, err = next.QueryReadyForEpic(epicID)
-			} else {
-				items, err = next.QueryReady()
-			}
-		} else {
-			items, err = next.QueryReady()
-		}
-		if err != nil {
-			return fmt.Errorf("querying ready work: %w", err)
-		}
-
-		if specFlag != "" {
-			var filtered []next.BeadInfo
-			for _, item := range items {
-				if containsSpecID(item.Title, specFlag) {
-					filtered = append(filtered, item)
-				}
-			}
-			items = filtered
-		}
-
-		if len(items) == 0 {
-			return fmt.Errorf("no ready work found for --emit-only")
-		}
-		selected = items[0]
+		specFlag = resolved
 	}
 
+	if len(args) > 0 {
+		// Explicit bead ID provided as positional argument — R6.1's
+		// pinned preview semantics: fetch by ID directly, bypassing
+		// ready-set membership and the spec filter entirely (a preview
+		// needs no claimable bead), and SAY SO in the output rather than
+		// leaving the asymmetry with the claim path unstated.
+		info, err := next.FetchBeadByID(args[0])
+		if err != nil {
+			// round-1 panel G3 audit: args[0] is an ID-typed position on
+			// this path (FetchBeadByID does no short-form resolution —
+			// unlike the claim path's positional, it must already be the
+			// full bead ID or FetchBeadByID's own idvalidate.BeadID gate
+			// refuses first), so idrender.Bead — not termsafe.Escape — is
+			// the matching convention: a clean full ID renders
+			// byte-identical, a malformed/hostile one is force-quoted.
+			return fmt.Errorf("fetching bead %s: %w", idrender.Bead(args[0]), err)
+		}
+		fmt.Println("emit-only: bead fetched by ID; readiness not checked.")
+		return emitOnlyPrimer(info)
+	}
+
+	// Query ready work and select, via the SAME shared construction the
+	// claim path uses (R6.1/AC-9 parity).
+	rs, err := next.BuildReadySet(root, specFlag)
+	if err != nil {
+		return err
+	}
+	items := rs.Filtered
+	if len(items) == 0 {
+		return fmt.Errorf("no ready work found for --emit-only")
+	}
+
+	if notice := rs.ExclusionNotice(); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	if len(items) > 1 {
+		fmt.Printf("Ready work (%d items):\n", len(items))
+		fmt.Print(next.FormatWorkList(items))
+		fmt.Println()
+		if pick == 0 {
+			fmt.Println("Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.")
+		}
+	}
+
+	selected, err := next.SelectWork(items, pick)
+	if err != nil {
+		return fmt.Errorf("selecting work: %w", err)
+	}
+
+	return emitOnlyPrimer(selected)
+}
+
+// emitOnlyPrimer renders and prints the bead context primer for the
+// --emit-only path. Extracted so both the positional-bypass branch and
+// the ready-set-selection branch share one render call.
+func emitOnlyPrimer(selected next.BeadInfo) error {
 	rendered, err := contextpack.RenderBeadContext(selected.ID)
 	if err != nil {
 		return fmt.Errorf("rendering bead context: %w", err)
 	}
-
 	fmt.Print(rendered)
 	return nil
-}
-
-// containsSpecID checks if a bead title references the given spec ID.
-func containsSpecID(title, specID string) bool {
-	return strings.Contains(title, specID)
 }
 
 // formatClaimLine renders the "Claiming [<id>] <title> ..." line printed
@@ -611,6 +637,15 @@ func advancePhaseOnClaim(root string, selected next.BeadInfo) {
 // of failure shape (a lock timeout or a genuine merge-write error), so
 // the recovery line is appended unconditionally rather than only on the
 // timeout leg.
+//
+// The non-timeout leg's err can be bd/lock-derived (a merge-write failure
+// wrapping bd's own possibly-hostile stderr, or a children-read failure
+// via freshCache.GetChildren) — spec 128 Bead 8's folded-in ta30.9
+// render-leg follow-up: next.RenderBDError applies the SAME per-line
+// termsafe.Escape discipline bdRenderedError uses (ADR-0042) rather than
+// forking a second escaping path. The timeout leg is untouched —
+// ErrPhaseLockTimeout wraps only an internal lock-file path, never
+// agent-writable content.
 func describePhaseSyncFailure(err error, recovery string) string {
 	if err == nil {
 		return ""
@@ -618,7 +653,7 @@ func describePhaseSyncFailure(err error, recovery string) string {
 	if errors.Is(err, phase.ErrPhaseLockTimeout) {
 		return phase.DescribeLockFailure(err, recovery)
 	}
-	return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: %s", err, recovery)
+	return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: %s", next.RenderBDError(err), recovery)
 }
 
 // nextPhaseAdvanceRecoveryCommand renders advancePhaseOnClaim's
@@ -639,6 +674,28 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 // pre-093 bare `fmt.Errorf("claiming bead: %w")` — is unit-testable
 // (next_recovery_test.go); reverting the call site to the bare wrap
 // fails TestClaimFailureError_FullRecipe.
+// readinessOverrideFailure builds the guard failure for a
+// RecordReadinessOverride write failure (Step 4.6). Extracted from the
+// RunE closure for direct unit-testability (spec 128 Bead 8's folded-in
+// ta30.9 render-leg follow-up): err is bd/lock-derived and MAY carry
+// hostile content (bd's own possibly-adversarial stderr, folded in by
+// bdcli.go's wrapBDError). RecordReadinessOverride already returns it
+// wrapped in bdRenderedError (internal/next/ready_gate.go:130, bead
+// mindspec-ta30.9 round-2 panel) — but this call site wraps it AGAIN via
+// next.RenderBDError before formatting, so the escaping guarantee lives
+// HERE, explicitly, rather than resting on an implicit fmt %v/error-
+// interface interaction with a detail of a different file that a future
+// refactor could silently break. Re-wrapping an already-escaped error is
+// a safe no-op (termsafe.Escape's output is plain printable ASCII, which
+// re-escapes byte-identical), so this is defense in depth, not a second
+// divergent escaping path.
+func readinessOverrideFailure(beadID string, err error) error {
+	return guard.NewFailure(
+		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(beadID), next.RenderBDError(err)),
+		"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+	)
+}
+
 func claimFailureError(root, specFlag string, selected next.BeadInfo, claimErr error) error {
 	return next.ClaimFailure(root, recoveryConfig(root),
 		selected.ID, recoverySpecSlug(root, specFlag, selected), claimErr)
@@ -709,7 +766,7 @@ func unmergedBeadError(o lifecycle.Orphan) error {
 }
 
 func init() {
-	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready")
+	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
 	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
