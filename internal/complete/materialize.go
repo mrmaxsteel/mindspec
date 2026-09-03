@@ -24,6 +24,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -82,6 +83,56 @@ func materializationSubject(beadID, commitMsg string) string {
 	return fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
 }
 
+// stageMarkerAttestationKey is the bd-metadata key pairing a bead with
+// the exact marker OID THIS BINARY last published for it (final-review
+// round 1, R6 F1/G1 — the marker-provenance attestation). The write-ahead
+// marker ref alone proves nothing about WHO published it: a hand-authored
+// commit ending in a clean `Mindspec-Stage` trailer plus an ordinary
+// `git update-ref refs/mindspec/materialized/<bead> <tip>` reproduced
+// every structural property the discriminator checked, and the S-resume
+// route then skipped the panel AND content gates for ungated content
+// (R6's executed repro). The attestation is the binary-side publication
+// evidence — written through the bd metadata seam immediately BEFORE the
+// ref publish, mirroring the spec-127 landed-merge evidence pattern
+// (`mindspec_landed_merge_sha`) — and the discriminator honors a resume
+// ONLY when the attestation names the observed marker OID exactly. The
+// key persists after completion as an audit record (like the landed
+// binding); each publication overwrites it.
+const stageMarkerAttestationKey = "mindspec_stage_marker_oid"
+
+// readStageMarkerAttestation reads beadID's recorded attestation OID, ""
+// when absent or non-string. A READ FAILURE propagates (fix-round G3's
+// discipline): it is never mapped to "unattested" — that would clear
+// genuine write-ahead evidence on a bd blip — and never to "attested".
+func readStageMarkerAttestation(beadID string) (string, error) {
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return "", err
+	}
+	oid, _ := meta[stageMarkerAttestationKey].(string)
+	return strings.TrimSpace(oid), nil
+}
+
+// recordStageMarkerAttestation writes the attestation for oid — called
+// immediately BEFORE each marker-ref publish. The ordering means a crash
+// window can leave an attestation without a ref (harmless: the ref is
+// required first, and the next publication overwrites) but a
+// discriminator-verified ref published by this binary always has its
+// attestation already durable — a legitimate crash never demotes its own
+// resume evidence to FOREIGN. On failure, refuses BEFORE anything is
+// published (aerr is bd-derived — escaped per G3's render discipline).
+func recordStageMarkerAttestation(beadID, oid string) error {
+	if aerr := completeMergeMetadataFn(beadID, map[string]interface{}{
+		stageMarkerAttestationKey: oid,
+	}); aerr != nil {
+		return guard.NewFailure(
+			fmt.Sprintf("bead %s's materialization failed while recording the write-ahead marker attestation: %v — refusing before any marker publish; nothing was published.", idrender.Bead(beadID), next.RenderBDError(aerr)),
+			fmt.Sprintf("mindspec complete %s   (re-run once bd metadata writes are healthy)", idrender.Bead(beadID)),
+		)
+	}
+	return nil
+}
+
 // isKnownStage reports whether stage is one of the two CLOSED,
 // recognized Mindspec-Stage trailer values (round-1/round-5/round-6
 // panel G2): the discriminator must never resume on anything else — a
@@ -93,15 +144,27 @@ func isKnownStage(stage string) bool {
 
 // resolveMaterializationDiscriminator is bead 6's re-entry discriminator
 // (plan round-5 G3.2, made total at round-6 G1, closed over the known
-// stage set at round-1 fix-round G2): reads beadID's write-ahead marker,
-// if any, and classifies this invocation as either a normal run
-// (resumeStage == "") or a resume of a specific completed stage. A
-// resume value is ALWAYS one of the two stage constants above — never
-// inferred from a tree diff, always read from the marker commit's own
-// Mindspec-Stage trailer via exec.ReadStageMarker, and never anything
-// outside {materialization, artifact-sync} (isKnownStage) — an unknown,
+// stage set at round-1 fix-round G2, provenance-authenticated at
+// final-review round 1 G1): reads beadID's write-ahead marker, if any,
+// and classifies this invocation as either a normal run (resumeStage ==
+// "") or a resume of a specific completed stage. A resume value is
+// ALWAYS one of the two stage constants above — never inferred from a
+// tree diff, always read from the marker commit's own Mindspec-Stage
+// trailer via exec.ReadStageMarker, and never anything outside
+// {materialization, artifact-sync} (isKnownStage) — an unknown,
 // ambiguous, or duplicate-encoded trailer is corrupt/foreign evidence,
 // cleared and treated exactly like an absent one, never resumed on.
+//
+// PROVENANCE (final-review round 1, R6 F1): before EITHER success leg
+// honors a resume, the marker OID must be corroborated by the binary's
+// own bd-metadata attestation (stageMarkerAttestationKey — see its doc
+// comment for the executed forgery this closes). The trailer and the
+// ref are both authorable with ordinary repo git access; the attestation
+// is what makes the marker MARKER-PUBLISHED rather than merely
+// marker-shaped. A trailer-bearing marker WITHOUT a matching attestation
+// is FOREIGN: cleared, then a normal run — the panel gate and every
+// content gate re-evaluate in full; nothing resumes on unverified
+// evidence.
 //
 // Every git read failure here PROPAGATES (fix-round G3): a transient
 // probe failure is never silently downgraded to a default classification
@@ -143,8 +206,38 @@ func resolveMaterializationDiscriminator(exec executor.Executor, root, beadID, b
 		return "", nil
 	}
 
+	// PROVENANCE gate (final-review round 1 G1): both success legs below
+	// require the attestation to name the observed marker OID exactly
+	// before anything resumes or advances a branch ref toward the marker.
+	// Evaluated ONLY on a genuine resume candidate — the structural
+	// foreign/corrupt/error legs need no bd read. attestedOrClear returns
+	// foreign=true after clearing an unattested marker: marker-shaped but
+	// not marker-published (R6 F1's forged-ref route, or a
+	// pre-attestation-era leftover) — the caller then proceeds as a
+	// normal run and the panel + content gates re-evaluate in full.
+	attestedOrClear := func() (foreign bool, err error) {
+		attested, aerr := readStageMarkerAttestation(beadID)
+		if aerr != nil {
+			return false, fmt.Errorf("reading the stage-marker attestation for %s: %w", idrender.Bead(beadID), aerr)
+		}
+		if attested == oid {
+			return false, nil
+		}
+		if clrErr := exec.ClearStageMarker(beadID, oid); clrErr != nil {
+			return false, fmt.Errorf("clearing unattested materialization marker for %s: %w", idrender.Bead(beadID), clrErr)
+		}
+		return true, nil
+	}
+
 	if tip == oid {
-		// The published stage COMPLETED.
+		// The published stage COMPLETED — resume only with provenance.
+		foreign, verr := attestedOrClear()
+		if verr != nil {
+			return "", verr
+		}
+		if foreign {
+			return "", nil
+		}
 		return stage, nil
 	}
 
@@ -161,6 +254,16 @@ func resolveMaterializationDiscriminator(exec executor.Executor, root, beadID, b
 		return "", fmt.Errorf("resolving %s's write-ahead marker parent %s^: %w", idrender.Bead(beadID), oid, perr)
 	}
 	if tip == parent {
+		// PROVENANCE gate BEFORE the branch advance (final-review round 1
+		// G1): a forged marker must never pull the bead branch's real ref
+		// forward onto it.
+		foreign, verr := attestedOrClear()
+		if verr != nil {
+			return "", verr
+		}
+		if foreign {
+			return "", nil
+		}
 		if advErr := exec.AdvanceBranchExpectedOld(beadBranch, oid, tip); advErr != nil {
 			return "", guard.NewFailure(
 				fmt.Sprintf("bead %s's write-ahead materialization marker names %s as the intended tip, but finishing the branch advance from %s failed: %v", idrender.Bead(beadID), oid, tip, advErr),
@@ -297,6 +400,9 @@ func runMaterialization(in materializationInput) error {
 			if buildErr != nil {
 				return fmt.Errorf("building the materialization commit for %s: %w", idrender.Bead(beadID), buildErr)
 			}
+			if aerr := recordStageMarkerAttestation(beadID, c); aerr != nil {
+				return aerr
+			}
 			if pubErr := exec.PublishStageMarker(beadID, c, ""); pubErr != nil {
 				return materializationRaceRefusal(beadID, "publishing", pubErr)
 			}
@@ -324,7 +430,7 @@ func runMaterialization(in materializationInput) error {
 		if err := exec.ResetIndexToHead(wtPath); err != nil {
 			return materializationResetRefusal(beadID, err)
 		}
-		return sExitContract(in, wtPath, beadID, nil)
+		return sExitContract(in, wtPath, beadID)
 	}
 
 	// --- Pre-S dirt classification (plan round-5 G2, moved BEFORE the
@@ -336,7 +442,7 @@ func runMaterialization(in materializationInput) error {
 	// HERE, before the S-stage's own `add -A` snapshot could otherwise
 	// silently sweep it into D alongside the artifact refresh. Only a
 	// clean-except-artifact worktree proceeds to the snapshot below.
-	preArtifactDirt, preUserDirt, dErr := checkDirtyTreeFn(wtPath, wtPath)
+	_, preUserDirt, dErr := checkDirtyTreeFn(wtPath, wtPath)
 	if dErr != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", dErr)
 	}
@@ -392,6 +498,9 @@ func runMaterialization(in materializationInput) error {
 		if buildErr != nil {
 			return fmt.Errorf("building the artifact-sync commit for %s: %w", idrender.Bead(beadID), buildErr)
 		}
+		if aerr := recordStageMarkerAttestation(beadID, d); aerr != nil {
+			return aerr
+		}
 		if pubErr := exec.PublishStageMarker(beadID, d, expectedOld); pubErr != nil {
 			return materializationRaceRefusal(beadID, "publishing", pubErr)
 		}
@@ -403,23 +512,31 @@ func runMaterialization(in materializationInput) error {
 		}
 	}
 
-	return sExitContract(in, wtPath, beadID, preArtifactDirt)
+	return sExitContract(in, wtPath, beadID)
 }
 
 // sExitContract is the S-stage exit contract (plan round-5 G2): a final
 // re-classification of worktree dirt with the SAME artifact/user
 // classifier the pre-S check above uses (plumbing never mutates the
 // worktree between that check and here, so this is a defensive re-
-// confirmation, not expected to find anything NEW) plus the WARN for
-// artifact dirt already known to have survived materialization
-// (knownResidualArtifactDirt, passed by the caller when it already ran
-// the classification — nil on the pure-resume route, which re-derives
-// its own). Residual artifact dirt (e.g. a hook re-exporting mid-run) is
-// a non-blocking WARN, mirroring the pre-bead-6 residual-dirt warning;
-// genuine non-artifact dirt still REFUSES here too, in case anything
-// changed since the pre-S check (belt-and-suspenders, not the primary
-// enforcement point — see runMaterialization's own pre-S check for that).
-func sExitContract(in materializationInput, wtPath, beadID string, knownResidualArtifactDirt []string) error {
+// confirmation, not expected to find anything NEW). Residual artifact
+// dirt (e.g. a hook re-exporting mid-run) is a non-blocking WARN,
+// mirroring the pre-bead-6 residual-dirt warning; genuine non-artifact
+// dirt still REFUSES here too, in case anything changed since the pre-S
+// check (belt-and-suspenders, not the primary enforcement point — see
+// runMaterialization's own pre-S check for that).
+//
+// Final-review round 1 (R7 F6/G6): the fresh classification below is the
+// SOLE authority for the survived-materialization claim. The removed
+// `knownResidualArtifactDirt` fallback fired only when this fresh read
+// found artifactDirt EMPTY — i.e. exactly when the earlier-known dirt
+// did NOT survive (the S-stage committed it into D, or the classifier's
+// own `bd export` normalized it away) — so its message asserted the
+// opposite of what the gating measurement had just found. The WARN's
+// subject is the house kebab-case grammar (R5/R11: `bead-scope`,
+// `missing-source-globs`, ... — never a dotted/snake_case one-off), and
+// its paths are termsafe-escaped like every other dirt render.
+func sExitContract(in materializationInput, wtPath, beadID string) error {
 	artifactDirt, userDirt, err := checkDirtyTreeFn(wtPath, wtPath)
 	if err != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", err)
@@ -428,9 +545,7 @@ func sExitContract(in materializationInput, wtPath, beadID string, knownResidual
 		return sExitGenuineDirtRefusal(beadID, userDirt)
 	}
 	if len(artifactDirt) > 0 {
-		fmt.Fprintf(in.warnWriter, "WARN complete.residual_artifact_dirt: %v (survived materialization; non-blocking per ADR-0025)\n", artifactDirt)
-	} else if len(knownResidualArtifactDirt) > 0 {
-		fmt.Fprintf(in.warnWriter, "WARN complete.residual_artifact_dirt: %v (survived materialization; non-blocking per ADR-0025)\n", knownResidualArtifactDirt)
+		fmt.Fprintf(in.warnWriter, "WARN residual-artifact-dirt: %v (survived materialization; non-blocking per ADR-0025)\n", termsafeEscapeEach(artifactDirt))
 	}
 	return nil
 }
@@ -438,10 +553,13 @@ func sExitContract(in materializationInput, wtPath, beadID string, knownResidual
 // sExitGenuineDirtRefusal renders the S-exit contract's named-paths
 // refusal for a GENUINE non-artifact interval edit surviving
 // materialization: preserved on disk, no rollback, no re-panel, before
-// any merge path that could force-remove the bead worktree.
+// any merge path that could force-remove the bead worktree. The paths
+// are attacker-choosable filenames — termsafe-escaped per entry
+// (final-review round 1 G3's render discipline, matching
+// userDirtRefusal above).
 func sExitGenuineDirtRefusal(beadID string, userDirt []string) error {
 	return guard.NewFailure(
-		fmt.Sprintf("bead %s has genuine uncommitted changes surviving materialization: %v — refusing before any merge (the edit is preserved on disk; no rollback, no re-panel).", idrender.Bead(beadID), userDirt),
+		fmt.Sprintf("bead %s has genuine uncommitted changes surviving materialization: %v — refusing before any merge (the edit is preserved on disk; no rollback, no re-panel).", idrender.Bead(beadID), termsafeEscapeEach(userDirt)),
 		fmt.Sprintf("mindspec complete %s   (commit or revert the named path(s), then re-run)", idrender.Bead(beadID)),
 	)
 }

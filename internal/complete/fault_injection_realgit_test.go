@@ -165,6 +165,38 @@ func wireRealGitFaultSeams(t *testing.T, specID string) {
 	findLocalRootFn = func() (string, error) { return "", fakeErr("test: no local root") }
 	closeBeadFn = func(...string) error { return nil }
 	fakeBdOnPath(t)
+
+	// Final-review round 1 (R6 F1/G1): the write-ahead marker is only
+	// honored when the binary-side bd attestation
+	// (stageMarkerAttestationKey) names its OID, so every resume leg in
+	// this fixture matrix needs the metadata seam pair to genuinely
+	// ROUND-TRIP within one test — the PATH-fronted fake bd above accepts
+	// `bd update` but stores nothing, which would misclassify every
+	// legitimate resume as FOREIGN. An in-memory per-test store (the
+	// stubMergeBindingSeams shape from internal/executor) stands in for
+	// bd's metadata; saveAndRestore (already run by every caller) restores
+	// the production seams afterward. The forged-marker leg (xxiv) rides
+	// the same store: its forger writes no attestation, so the mismatch
+	// is real, not an artifact of a lobotomized read.
+	attest := map[string]map[string]interface{}{}
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		m := attest[id]
+		if m == nil {
+			m = map[string]interface{}{}
+			attest[id] = m
+		}
+		for k, v := range updates {
+			m[k] = v
+		}
+		return nil
+	}
+	completeGetMetadataFn = func(id string) (map[string]interface{}, error) {
+		out := map[string]interface{}{}
+		for k, v := range attest[id] {
+			out[k] = v
+		}
+		return out, nil
+	}
 }
 
 // fakeBdOnPath puts a fixture-local `bd` at the front of PATH for the

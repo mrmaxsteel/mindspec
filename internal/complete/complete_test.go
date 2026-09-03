@@ -2847,8 +2847,14 @@ func TestRun_SExitContract_ResidualArtifactDirtWarns(t *testing.T) {
 	if checkCalls < 2 {
 		t.Fatalf("expected checkDirtyTreeFn to run at least twice (pre-materialization + S-exit contract), got %d", checkCalls)
 	}
-	if !strings.Contains(captured.String(), "WARN complete.residual_artifact_dirt") {
+	// Final-review round 1 (R5/R11, G6): the WARN subject is the house
+	// kebab-case grammar — the dotted+snake_case `complete.residual_
+	// artifact_dirt` one-off is gone.
+	if !strings.Contains(captured.String(), "WARN residual-artifact-dirt") {
 		t.Errorf("expected the S-exit contract's residual-artifact-dirt warning, got: %q", captured.String())
+	}
+	if strings.Contains(captured.String(), "residual_artifact_dirt") {
+		t.Errorf("the dotted/snake_case WARN subject must not resurface, got: %q", captured.String())
 	}
 }
 

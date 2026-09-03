@@ -394,19 +394,41 @@ another's recovery evidence; a failed bead-ref advance leaves the
 already-published marker in place as write-ahead evidence for the next
 run's re-entry discriminator.
 
+**Marker provenance (spec 128 final-review amendment)**: the ref and the
+trailer are both authorable with ordinary repo git access — a
+hand-authored trailer-bearing commit plus `git update-ref` reproduces
+every structural property above, and the final review's adversary slot
+executed exactly that forgery to resume-skip the panel and content gates.
+Publication therefore pairs the marker with a binary-written bd-metadata
+**attestation** (`mindspec_stage_marker_oid`, recorded through the bead
+metadata seam immediately BEFORE each ref publish — mirroring the
+spec-127 landed-merge evidence pattern), and the discriminator honors a
+resume ONLY when the attestation names the observed marker OID exactly. A
+trailer-bearing marker WITHOUT the matching attestation is classified
+FOREIGN: cleared, then a normal fully-gated run. The attestation persists
+after completion as an audit record; each publication overwrites it. An
+attestation-read failure PROPAGATES (never mapped to "unattested", which
+would destroy genuine recovery evidence on a bd blip; never to
+"attested").
+
 **The re-entry discriminator**, evaluated before the panel gate on every
 non-reconcile run: absent marker → normal run (re-snapshot, re-gate,
-rebuild); tip == marker → the published stage COMPLETED (its kind read
-from the trailer) — resume at R+S (`C`) or the sole S-exit-then-merge
-route (`D`), skipping the re-snapshot, the content gates, AND the panel
-gate entirely, because the marker's own existence proves those already
-passed; tip == marker's own first parent → the write-ahead advance is
-UNFINISHED — finish it (expected-old = tip), then resume as above; tip
-∉ {marker, marker's parent} → FOREIGN — a genuinely different commit
-landed on the branch after materialization — delete the marker and
-proceed as a normal run, the stale-SHA panel gate evaluating exactly as
-it would with no marker at all (the cannot-launder boundary is
-retained). The execution contract this discriminator makes true is
+rebuild); tip == marker AND the attestation names the marker OID → the
+published stage COMPLETED (its kind read from the trailer) — resume at
+R+S (`C`) or the sole S-exit-then-merge route (`D`), skipping the
+re-snapshot, the content gates, AND the panel gate entirely, because the
+ATTESTED publication proves those already passed in the invocation that
+published it (never the marker's bare existence — see the provenance
+amendment above); tip == marker's own first parent AND the attestation
+matches → the write-ahead advance is UNFINISHED — finish it (expected-old
+= tip), then resume as above (the provenance check runs BEFORE the
+advance, so a forged marker can never pull the branch ref forward); an
+attestation mismatch on either leg → FOREIGN — clear the marker and
+proceed as a normal run; tip ∉ {marker, marker's parent} → FOREIGN — a
+genuinely different commit landed on the branch after materialization —
+delete the marker and proceed as a normal run, the stale-SHA panel gate
+evaluating exactly as it would with no marker at all (the cannot-launder
+boundary is retained). The execution contract this discriminator makes true is
 honestly **AT-LEAST-ONCE with per-operation idempotent replay** — NOT
 exactly-once, which is unprovable after a kill immediately following a
 no-op stage: R's index refresh is a pure state-function of (tip,

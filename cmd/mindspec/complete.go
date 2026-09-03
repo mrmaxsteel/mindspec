@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/instruct"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -169,12 +170,12 @@ func completeTail(stdout, stderr io.Writer, root, invocationCwd string, result *
 		// a different, fabricated mode.
 		output, err := instruct.RenderIndeterminate(root, result.IndeterminateReason)
 		if err != nil {
-			fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+			fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 		} else {
 			fmt.Fprint(stdout, output)
 		}
 	} else if err := instructFn(root); err != nil {
-		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	emitCdBackNote(stdout, invocationCwd, root)

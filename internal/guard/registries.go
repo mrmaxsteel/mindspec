@@ -587,6 +587,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
+		File:       "internal/complete/materialize.go",
+		Func:       "recordStageMarkerAttestation",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s   (re-run once bd metadata writes are healthy)\", idrender.Bead(beadID)))` — the final-review G1 marker-provenance attestation's pre-publish write-failure refusal, the same shape as its six bead-6 siblings above.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
 		File:       "internal/complete/panel_advisory.go",
 		Func:       "reconcilePendingRefutations",
 		Detail:     "arg1:unprovable",

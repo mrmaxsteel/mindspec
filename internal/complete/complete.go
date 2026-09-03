@@ -518,8 +518,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// A real lineage-lookup failure: refuse before the migration and
 		// before any mutation, naming the retry re-invocation.
 		// R4: beadID is an ID-typed position — idrender.Bead.
+		// Final-review round 1 (R2/G3): lineageErr chains bd stderr
+		// (wrapBDError) — escape like the sibling malformed-metadata
+		// branch above already does.
 		return nil, guard.NewFailure(
-			fmt.Sprintf("resolving bead %s's epic lineage failed: %v — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, lineageErr),
+			fmt.Sprintf("resolving bead %s's epic lineage failed: %s — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, termsafe.Escape(lineageErr.Error())),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
 	}
@@ -737,14 +740,17 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 2.12. Write-ahead materialization discriminator (Spec 128 Bead 6,
 	// OQ-1(a) protocol step 3/round-5 G3.2): runs BEFORE the panel gate,
 	// same as the reconcile detection above. A non-empty resumeStage
-	// means a PRIOR invocation already published a write-ahead marker
-	// whose stage the current bead-branch tip corroborates as complete —
-	// this run resumes the mechanical remainder (R+S, or the S-exit
-	// contract alone) WITHOUT re-running the panel gate or the content
-	// gates, which the marker's own existence proves already passed. In
-	// reconcile mode the bead's work already landed via a merge outside
-	// this invocation, so any orphaned marker for it is cleared instead
-	// (round-4 G1.3) rather than discriminated.
+	// means a PRIOR invocation of THIS BINARY already published a
+	// write-ahead marker — corroborated by both the current bead-branch
+	// tip AND the binary-written bd attestation
+	// (stageMarkerAttestationKey, final-review round 1 G1: the ref and
+	// trailer alone are hand-authorable and prove nothing about who
+	// published them) — so this run resumes the mechanical remainder
+	// (R+S, or the S-exit contract alone) WITHOUT re-running the panel
+	// gate or the content gates, which that attested publication proves
+	// already passed. In reconcile mode the bead's work already landed
+	// via a merge outside this invocation, so any orphaned marker for it
+	// is cleared instead (round-4 G1.3) rather than discriminated.
 	var resumeStage string
 	if reconcile == nil {
 		resumeStage, err = resolveMaterializationDiscriminator(exec, root, beadID, beadHead)
@@ -782,8 +788,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// post-completion audit writes (Reqs 13b/13e).
 	//
 	// Spec 128 Bead 6: SKIPPED entirely on a write-ahead resume
-	// (resumeStage != "") — the marker's own existence proves this bead's
-	// panel decision already passed in the invocation that published it;
+	// (resumeStage != "") — a resume is only ever honored for a marker
+	// whose OID the binary's own bd attestation corroborates
+	// (final-review round 1 G1), and that attested publication happened
+	// strictly AFTER this same gate passed in the publishing invocation;
 	// re-running it here would re-panel a bead whose gate outcome is
 	// already durable. panelReg stays nil on that path, exactly as it
 	// does on every other pre-existing fail-open/no-panel path below.
@@ -1334,7 +1342,14 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil
 	}); syncErr != nil {
-		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(syncErr, fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
+		// Final-review round 1 (R5/G3): the non-timeout leg's syncErr can
+		// chain a bd merge-write failure's raw stderr — wrap with
+		// next.RenderBDError BEFORE DescribeLockFailure renders it.
+		// bdRenderedError preserves Unwrap, so the describer's own
+		// timeout-vs-other classification (and this function's recorded
+		// disposition: no manufactured recovery line on the non-timeout
+		// leg) is unchanged; only the rendered text is per-line escaped.
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(next.RenderBDError(syncErr), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
 	}
 }
 

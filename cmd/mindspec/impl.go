@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -130,7 +131,7 @@ func adoptSpecTail(stdout, stderr io.Writer, root string, result *approve.AdoptR
 	}
 	fmt.Fprintln(stdout)
 	if err := instructFn(root); err != nil {
-		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 }
 
@@ -313,7 +314,7 @@ func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID strin
 	fmt.Fprintln(stdout)
 
 	if err := instructFn(root); err != nil {
-		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	// Spec 092 Req 4: when the shell's invocation directory was removed

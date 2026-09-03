@@ -357,7 +357,21 @@ func ClearMaterializationMarker(workdir, beadID, expectedOID string) error {
 	if expectedOID == "" {
 		return nil
 	}
-	cmd := execCommand("git", gitArgs(workdir, "update-ref", "-d", MaterializationMarkerRef(beadID), expectedOID)...)
+	// Final-review round 1 (R12/G8): gate BOTH dynamic operands like every
+	// sibling marker primitive in this file (UpdateRefCAS gates all three
+	// of its operands). Every current caller passes a rev-parse-produced
+	// hex SHA for expectedOID, but ADR-0042 §1 forbids trusting an
+	// id-shaped operand by PROVENANCE — this runtime gate is what the
+	// argv-audit table's opClassRejectOptionLikeGated entry claims, and it
+	// catches a future caller forwarding non-SHA text.
+	ref := MaterializationMarkerRef(beadID)
+	if err := rejectOptionLike(ref); err != nil {
+		return err
+	}
+	if err := rejectOptionLike(expectedOID); err != nil {
+		return err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "update-ref", "-d", ref, expectedOID)...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil

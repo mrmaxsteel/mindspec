@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/spf13/cobra"
@@ -222,7 +223,9 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	if err != nil || epicID == "" {
 		msg := fmt.Sprintf("repair phase: no lifecycle epic found for spec %s", idrender.Spec(specID))
 		if err != nil {
-			msg += fmt.Sprintf(": %v", err)
+			// Final-review round 1 (R5/G3): err chains bd stderr — escape
+			// at this render sink.
+			msg += fmt.Sprintf(": %v", next.RenderBDError(err))
 		}
 		return guard.NewFailure(msg, "mindspec spec list")
 	}
@@ -239,8 +242,10 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	// non-reentrant — calling a locked helper from inside another fn
 	// self-blocks until ErrPhaseLockTimeout).
 	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		// Final-review round 1 (R5/G3): err can chain bd stderr (children
+		// read / merge write) — escape at this render sink.
 		return guard.NewFailure(
-			fmt.Sprintf("repair phase: v2 phase-semantics reconciliation for spec %s (epic %s) failed: %v", idrender.Spec(specID), idrender.Bead(epicID), err),
+			fmt.Sprintf("repair phase: v2 phase-semantics reconciliation for spec %s (epic %s) failed: %v", idrender.Spec(specID), idrender.Bead(epicID), next.RenderBDError(err)),
 			fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID)),
 		)
 	}
@@ -311,7 +316,9 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		if errors.Is(lockErr, errRepairDerivationFailed) || errors.Is(lockErr, errRepairNoDerivedPhase) {
 			recovery = fmt.Sprintf("bd show %s", epicID)
 		}
-		return guard.NewFailure(lockErr.Error(), recovery)
+		// Final-review round 1 (R5/G3): lockErr can chain bd stderr (the
+		// in-lock derivation and merge write) — render the escaped form.
+		return guard.NewFailure(next.RenderBDError(lockErr).Error(), recovery)
 	}
 	if refusedBackward {
 		return guard.NewFailure(

@@ -2,8 +2,9 @@ package complete
 
 // Spec 128 Bead 6 (OQ-1(a); ADR-0041 §1 amendment): the full failure-
 // injection + red-on-revert fixture matrix for the prospective-snapshot
-// protocol (plan §Bead 6 step 7), the twenty original legs (i)-(xx) plus
-// three round-1-panel-fix legs (xxi)-(xxiii). Every leg runs on the
+// protocol (plan §Bead 6 step 7), the twenty original legs (i)-(xx),
+// three round-1-panel-fix legs (xxi)-(xxiii), and the final-review
+// marker-forgery leg (xxiv). Every leg runs on the
 // DEFAULT FILES ref backend explicitly (no `-c
 // extensions.refStorage=reftable` override anywhere in this file) and
 // drives REAL git via setupRealGitFaultFixture/wireRealGitFaultSeams —
@@ -36,6 +37,7 @@ package complete
 //   TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD (xxi; round-1 panel G1, R4's executed repro)
 //   TestBead6Leg_xxii_ResumeAfterStageAdvanceDoesNotTripStaleSHA (xxii; round-1 panel G5, R2's positive resume leg)
 //   TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConverges (xxiii; round-1 panel G5, the AC-6 composite flagship fixture)
+//   TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates (xxiv; final-review round 1 G1, R6 F1's executed marker-spoof repro)
 
 import (
 	"os"
@@ -1636,5 +1638,72 @@ func TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConve
 	}
 	if _, _, present := readMarker(t, root, beadID); present {
 		t.Error("expected the write-ahead marker to be cleared after convergence")
+	}
+}
+
+// --- (xxiv): FORGED marker + trailer never resumes past the gates ----------
+//
+// Final-review round 1 (R6 F1/G1) — the executed marker-spoof repro,
+// verbatim: in the claimed bead's worktree, hand-author ONE commit whose
+// message ends with a single clean `Mindspec-Stage: artifact-sync`
+// trailer, carrying a file no OWNERSHIP.yaml claims (the same file class
+// the adr-divergence gate demonstrably refuses on the normal path —
+// leg i), then publish the forged marker with an ordinary
+// `git update-ref refs/mindspec/materialized/<bead-id> <tip>`, then run
+// complete. Pre-fix: resumeStage=artifact-sync, the panel AND content
+// gates skipped entirely, the unowned file merged to the spec branch,
+// exit 0, zero warnings. Post-fix: the marker REF is corroborated by the
+// binary's bd attestation (stageMarkerAttestationKey) — a trailer-bearing
+// tip WITHOUT the matching binary-side attestation is FOREIGN: cleared,
+// then a NORMAL run whose content gates refuse the unowned file before
+// any merge.
+func TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates(t *testing.T) {
+	saveAndRestore(t)
+	const specID, beadID = "930-leg24", "mindspec-128leg24.1"
+	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
+	wireRealGitFaultSeams(t, specID)
+	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+	preSpecTip := gateRevParse(t, root, specBranch)
+
+	// The forged commit: unowned content + a clean, single Mindspec-Stage
+	// trailer — authored with ordinary porcelain git, exactly what an impl
+	// agent with repo access can do.
+	if err := os.MkdirAll(filepath.Join(wtPath, "internal", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "core", "smuggled.go"),
+		[]byte("package core\n\nfunc Smuggled() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "-A")
+	gitRun(t, wtPath, "commit", "-q", "-m", "impl: innocuous-looking work", "-m", "Mindspec-Stage: artifact-sync")
+	forgedTip := gateRevParse(t, root, beadBranch)
+	gitRun(t, root, "update-ref", "refs/mindspec/materialized/"+beadID, forgedTip)
+
+	// Fixture sanity: the forgery is structurally perfect — marker
+	// present, known stage, tip == marker.
+	if oid, stage, present := readMarker(t, root, beadID); !present || stage != gitutil.StageArtifactSync || oid != forgedTip {
+		t.Fatalf("fixture sanity: forged marker should read as a well-formed artifact-sync marker, got oid=%s stage=%q present=%v", oid, stage, present)
+	}
+
+	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
+	_, err := Run(root, beadID, specID, "", base, CompleteOpts{})
+	if err == nil {
+		t.Fatal("the forged marker resumed past the content gates — the R6 F1 bypass is open")
+	}
+	if !strings.Contains(err.Error(), "adr-divergence") {
+		t.Errorf("expected the NORMAL run's adr-divergence refusal on the smuggled unowned file, got: %v", err)
+	}
+	// The forged, unattested marker was cleared (FOREIGN), not honored.
+	if _, _, present := readMarker(t, root, beadID); present {
+		t.Error("expected the forged marker to be cleared as FOREIGN (unattested)")
+	}
+	// Nothing merged: the spec branch tip is untouched and the smuggled
+	// file never reached it.
+	if got := gateRevParse(t, root, specBranch); got != preSpecTip {
+		t.Errorf("spec branch moved across the refused forgery: got %s want %s", got, preSpecTip)
+	}
+	if fileContainsAtRef(t, root, specBranch, "internal/core/smuggled.go", "Smuggled") {
+		t.Error("the smuggled unowned file reached the spec branch")
 	}
 }

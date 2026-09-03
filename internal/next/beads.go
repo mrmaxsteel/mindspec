@@ -3,10 +3,12 @@ package next
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -208,19 +210,23 @@ func emptyAfterFilterError(raw []BeadInfo, specFlag string) error {
 // Never falls back to the global `bd ready` query — the caller returns
 // this error directly (AC-15).
 func scopeResolutionRefusal(root, specFlag string, epicErr error) error {
+	// Final-review round 1 (R5/G3): all three chained errors below can
+	// carry wrapBDError'd raw bd stderr (AllEpics / draft discovery /
+	// FindEpicBySpecID) — wrap each in bdRenderedError so the rendered
+	// text is per-line escaped while errors.Is/As still reach the chain.
 	c := phase.NewCache()
 	if _, allErr := c.AllEpics(); allErr != nil {
-		return fmt.Errorf("resolving --spec %s: querying epics failed: %w", idrender.Spec(specFlag), allErr)
+		return fmt.Errorf("resolving --spec %s: querying epics failed: %w", idrender.Spec(specFlag), &bdRenderedError{err: allErr})
 	}
 	isDraft, draftErr := resolve.IsDraftSpecWithCache(c, root, specFlag)
 	if draftErr != nil {
-		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), draftErr)
+		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), &bdRenderedError{err: draftErr})
 	}
 	if isDraft {
 		return fmt.Errorf("spec %s exists but has no epic; run `mindspec spec approve %s` first", idrender.Spec(specFlag), idrender.Spec(specFlag))
 	}
 	if epicErr != nil {
-		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), epicErr)
+		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), &bdRenderedError{err: epicErr})
 	}
 	return fmt.Errorf("no spec found matching %s; run `mindspec spec list` and re-run with a listed ID", idrender.Spec(specFlag))
 }
@@ -274,10 +280,25 @@ func (e *bdRenderedError) Unwrap() error { return e.err }
 // happens here, in the wrapping error message construction, not inside
 // bdcli.go's capture. See bdRenderedError for the chain-preserving
 // wrapper that calls this from its Error() method.
+//
+// Final-review round 1 (R5/G3, found by the real-chain fixture): a
+// CLEAN printable-ASCII stderr line is identity under termsafe.Escape,
+// so a hostile bd could still forge a standalone machine-greppable
+// `recovery: <anything>` line (guard.RecoveryPrefix — the ADR-0035
+// convention agents grep and paste). Any line that would read as one is
+// force-quoted (strconv.Quote via termsafe's whole-string treatment is
+// wrong here — the line is printable — so quote directly), making it
+// visibly DATA. A genuine nested recovery line traveling through a
+// bd-derived chain degrades to its quoted form: text preserved, paste
+// authority stripped — the safe direction.
 func renderBDError(err error) string {
 	lines := strings.Split(err.Error(), "\n")
 	for i, line := range lines {
-		lines[i] = termsafe.Escape(line)
+		escaped := termsafe.Escape(line)
+		if strings.HasPrefix(strings.TrimSpace(escaped), guard.RecoveryPrefix) {
+			escaped = strconv.Quote(line)
+		}
+		lines[i] = escaped
 	}
 	return strings.Join(lines, "\n")
 }

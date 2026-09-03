@@ -329,9 +329,11 @@ team lead spawns fresh agents per bead.`,
 			// the rollback itself also fails, naming the orphaned key.
 			if len(gateResult.FailingSignals) > 0 {
 				if rbErr := next.RollbackReadinessOverride(selected.ID); rbErr != nil {
+					// Final-review round 1 (R5/G3): rbErr is bd-derived
+					// (metadata delete) — escape at this render sink.
 					fmt.Fprintf(os.Stderr,
 						"WARNING: claim failed AND rolling back the --allow-not-ready override marker on %s also failed: %v — an orphaned mindspec_readiness_override marker may remain; remove that metadata key before re-claiming or dispatching this bead\n",
-						idrender.Bead(selected.ID), rbErr)
+						idrender.Bead(selected.ID), next.RenderBDError(rbErr))
 				} else {
 					fmt.Fprintf(os.Stderr,
 						"note: rolled back the --allow-not-ready override marker on %s (claim failed — no override left behind)\n",
@@ -407,14 +409,14 @@ team lead spawns fresh agents per bead.`,
 				// completion section may scroll out of small-context models.
 				fmt.Print(completionGuidance(selected.ID))
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
+				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", next.RenderBDError(renderErr))
 				if err := emitInstruct(root); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+					fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 				}
 			}
 		} else {
 			if err := emitInstruct(root); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+				fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 			}
 		}
 
@@ -591,7 +593,11 @@ func advancePhaseOnClaim(root string, selected next.BeadInfo) {
 	epicID, specID, epicErr := phase.FindEpicForBead(selected.ID)
 	if epicErr != nil {
 		if !errors.Is(epicErr, phase.ErrNoEpicLineage) {
-			fmt.Fprintf(os.Stderr, "warning: could not resolve epic for bead %s: %v\n", idrender.Bead(selected.ID), epicErr)
+			// Final-review round 1 (R2/G3): epicErr chains
+			// FindEpicForBead -> wrapBDError's raw stderr excerpt —
+			// escape at this render sink like the function's other two
+			// failure legs (describePhaseSyncFailure / RenderBDError).
+			fmt.Fprintf(os.Stderr, "warning: could not resolve epic for bead %s: %v\n", idrender.Bead(selected.ID), next.RenderBDError(epicErr))
 		}
 		return
 	}

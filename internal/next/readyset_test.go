@@ -3,6 +3,7 @@ package next
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -524,11 +525,12 @@ func TestSelectWorkByName_HostileNameRendersEscaped(t *testing.T) {
 }
 
 // TestSelectWorkByName_AmbiguousCleanShortFormByteIdentical pins the
-// "clean IDs byte-identical" half for the AMBIGUOUS message specifically
-// (a hostile name can never reach this branch: bd-returned IDs are always
-// clean, so a control-byte-bearing name can never genuinely
-// strings.HasSuffix-match two of them — only a clean short form can be
-// genuinely ambiguous).
+// "clean IDs byte-identical" half for the AMBIGUOUS message. The
+// candidate list renders through idrender.Bead's validate-or-quote gate
+// — NOT on an assumption that bd-returned IDs are clean (they are
+// agent-writable, ADR-0042's own empirical finding; `bd create --force
+// --id=<arbitrary>` is proven unsafe): a grammar-valid ID renders
+// byte-identical, anything else force-quotes.
 func TestSelectWorkByName_AmbiguousCleanShortFormByteIdentical(t *testing.T) {
 	items := []BeadInfo{
 		{ID: "mindspec-mol-qmq", Title: "First suffix match"},
@@ -540,6 +542,73 @@ func TestSelectWorkByName_AmbiguousCleanShortFormByteIdentical(t *testing.T) {
 		t.Fatal("expected an ambiguity error")
 	}
 	if !strings.Contains(err.Error(), "mindspec-qmq") {
-		t.Errorf("expected the clean short form's example ID to render byte-identical, got: %v", err)
+		t.Errorf("expected the clean candidate IDs to render byte-identical, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mindspec-mol-qmq") {
+		t.Errorf("expected BOTH real candidates to be named, got: %v", err)
+	}
+}
+
+// TestSelectWorkByName_AmbiguousHostileCandidateIDsForceQuoted: two
+// agent-authored hostile IDs CAN genuinely suffix-match one selector —
+// the ambiguity candidate list must route them through
+// idrender.Bead's force-quote, never render them raw.
+func TestSelectWorkByName_AmbiguousHostileCandidateIDsForceQuoted(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "evil\x1b[31m-qmq", Title: "First hostile match"},
+		{ID: "also;evil-qmq", Title: "Second hostile match"},
+	}
+
+	_, err := SelectWorkByName(items, "qmq")
+	if err == nil {
+		t.Fatal("expected an ambiguity error")
+	}
+	if strings.ContainsRune(err.Error(), 0x1b) {
+		t.Errorf("raw ESC byte from a hostile candidate ID survived: %q", err.Error())
+	}
+}
+
+// --- Final-review round 1 (R5/G4): printable-hostile selectors --------
+//
+// ADR-0042's motivating rule: termsafe.Escape is IDENTITY on printable
+// ASCII, so control-byte pins alone cannot catch a `x;evil` or
+// `$(evil)` selector surviving into a copy-pasteable command example.
+// The fix removed every dynamic operand from executable-shaped
+// (backtick-fenced `mindspec next ...`) spans; these pin that no
+// rendered error carries a command shape with the hostile selector as
+// its operand, for the exact printable classes ADR-0042 distinguishes.
+
+func TestSelectorErrors_PrintableHostileNeverInCommandShape(t *testing.T) {
+	hostiles := []string{"x;evil", "$(evil)", "a b --help", "--help", "`evil`"}
+
+	for _, hostile := range hostiles {
+		// Not-found leg (SelectWorkByName).
+		_, err := SelectWorkByName([]BeadInfo{{ID: "mindspec-aaaa", Title: "real"}}, hostile)
+		if err == nil {
+			t.Fatalf("expected a not-found error for %q", hostile)
+		}
+		if strings.Contains(err.Error(), "mindspec next "+hostile) {
+			t.Errorf("selector %q survived into a command-shaped span: %q", hostile, err.Error())
+		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("%q", hostile)) {
+			t.Errorf("selector %q should still be named (quoted) for diagnosis, got: %q", hostile, err.Error())
+		}
+
+		// Excluded leg (exclusionReasonForName): force a suffix match on
+		// an excluded raw item whose suffix IS the hostile text — the
+		// rendered error must not embed the selector in a command shape.
+		rs := ReadySet{
+			Raw: []BeadInfo{
+				{ID: "mindspec-aaaa", Title: "[042-fixture] kept"},
+				{ID: "mindspec-" + hostile, Title: "unrelated"},
+			},
+			Filtered: []BeadInfo{{ID: "mindspec-aaaa", Title: "[042-fixture] kept"}},
+			SpecFlag: "042-fixture",
+		}
+		if exclErr, excluded := exclusionReasonForName(rs, hostile); excluded {
+			if strings.Contains(exclErr.Error(), "mindspec next "+hostile) {
+				t.Errorf("excluded selector %q survived into a command-shaped span: %q", hostile, exclErr.Error())
+			}
+		}
 	}
 }

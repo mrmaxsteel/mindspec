@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -88,8 +89,12 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
 			// Spec 128 R3.6 (round-4 G2): see backfillExistingEpicPhase's
 			// doc comment for the chosen disposition and rationale.
+			// Final-review round 1 (R2/G3): the backfill error can chain a
+			// bd merge-write failure's raw stderr — wrap before
+			// DescribeLockFailure renders it (bdRenderedError preserves
+			// Unwrap, so the timeout classification inside is unchanged).
 			if msg, err := backfillExistingEpicPhase(root, existingEpicID); err != nil {
-				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
+				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(next.RenderBDError(err), fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
 			} else if msg != "" {
 				result.Warnings = append(result.Warnings, msg)
 			}
@@ -102,7 +107,10 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
 			out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
 			if epicErr != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", epicErr))
+				// Final-review round 1 (R2/G3): epicErr carries
+				// wrapBDError'd raw bd stderr and this warning is printed
+				// verbatim by cmd/mindspec/spec.go — escape at the append.
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", next.RenderBDError(epicErr)))
 			} else {
 				var created struct {
 					ID string `json:"id"`

@@ -339,6 +339,12 @@ exclusively through eight new `Executor` interface methods
   `ClearStageMarker` deletes via compare-and-swap against the exact OID
   this invocation owns, so a stale clear can never delete evidence it
   does not own; clearing an already-absent marker is an idempotent no-op.
+  These three stay PURE git primitives: the marker's provenance
+  authentication (spec 128 final review — the `mindspec_stage_marker_oid`
+  bd attestation written before each publish and required to match at
+  resume, ADR-0041's provenance amendment) lives in the ENFORCEMENT
+  layer (`internal/complete/materialize.go`), which owns the bd-metadata
+  seam this boundary deliberately excludes.
 - **`AdvanceBranchExpectedOld(branch, newSHA, expectedOld)`** moves
   `refs/heads/<branch>` via compare-and-swap — the tip advance a
   concurrent mover cannot silently clobber.

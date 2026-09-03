@@ -239,6 +239,15 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 	}
 
 	// Fallback for pre-080 epics: derive from children/status (backward compat).
+	//
+	// Final-review round 1 (R6 F2, the AC-4b class): a failed child read
+	// PROPAGATES here instead of feeding DerivePhaseFromChildren a nil set
+	// — which would RETURN a fabricated `plan` with a nil error, the exact
+	// error-discarding derivation this spec exists to kill (spec.md: "a
+	// lifecycle-discovery failure is never serialized as a successful
+	// empty or idle mode"). Callers already map a non-nil error to the
+	// indeterminate machinery (Context.DerivationFailed / state show's
+	// discovery refusal).
 	if epicStatus == "" {
 		epicStatus = queryEpicStatusWithCache(c, epicID)
 	}
@@ -246,10 +255,16 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone, nil
 		}
-		children, _ := c.GetChildren(epicID)
+		children, cerr := c.GetChildren(epicID)
+		if cerr != nil {
+			return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
+		}
 		return DerivePhaseFromChildren(children), nil
 	}
-	children, _ := c.GetChildren(epicID)
+	children, cerr := c.GetChildren(epicID)
+	if cerr != nil {
+		return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
+	}
 	return DerivePhaseFromChildren(children), nil
 }
 
@@ -324,6 +339,14 @@ func readStoredPhaseWithCache(c *Cache, epicID string) string {
 
 // deriveFromChildrenOrStatusWithCache runs child-based phase derivation for consistency checking.
 // Returns the derived phase, or "" if derivation fails.
+//
+// Final-review round 1 (R6 F2): a failed child read returns "" — the
+// documented derivation-failed sentinel, which makes the AC-5(iv)
+// consistency check SKIP (DerivePhaseWithStatusWithCache's `childPhase
+// != ""` guard) — never a phase fabricated from the nil child set a
+// failed `bd list --parent` yields. Pre-fix, a partial bd outage made
+// the consistency warning assert `child-derived phase "plan"` for a
+// derivation that never ran (reproduced live by the final panel's R6).
 func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) string {
 	if epicStatus == "" {
 		epicStatus = queryEpicStatusWithCache(c, epicID)
@@ -332,10 +355,16 @@ func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) st
 		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone
 		}
-		children, _ := c.GetChildren(epicID)
+		children, cerr := c.GetChildren(epicID)
+		if cerr != nil {
+			return ""
+		}
 		return DerivePhaseFromChildren(children)
 	}
-	children, _ := c.GetChildren(epicID)
+	children, cerr := c.GetChildren(epicID)
+	if cerr != nil {
+		return ""
+	}
 	return DerivePhaseFromChildren(children)
 }
 
@@ -555,7 +584,17 @@ func DiscoverActiveSpecsWithCache(c *Cache) ([]ActiveSpec, error) {
 		}
 
 		// Fallback for pre-080 epics: derive from children.
-		children, _ := c.GetChildren(epic.ID)
+		//
+		// Final-review round 1 (R6 F2): a failed child read PROPAGATES —
+		// skipping just this epic could serialize a false `idle` when it
+		// is the only active spec, and deriving from the nil set would
+		// fabricate `plan`; neither is an honest answer to a discovery
+		// failure. (The D1 degrade above is for hostile per-epic DATA;
+		// this is an infrastructure read failure.)
+		children, cerr := c.GetChildren(epic.ID)
+		if cerr != nil {
+			return nil, fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epic.ID), cerr)
+		}
 
 		phase := DerivePhaseFromChildren(children)
 		if phase == state.ModeDone {

@@ -173,6 +173,13 @@ func releaseSyncPhase(root, epicID, specID string) {
 // see releaseSyncPhase's doc comment for the disposition this
 // implements (round-1 panel G5/R3-G2). specID may be empty (the same
 // "<spec-id>" placeholder convention as elsewhere).
+//
+// Final-review round 1 (R2/R5, G3): err can chain a fresh-cache
+// GetChildren -> `bd list` -> wrapBDError's raw stderr excerpt — escape
+// via next.RenderBDError at this render sink, exactly as the SAME
+// releaseSyncPhase's EnsurePhaseSemanticsV2 leg two lines above already
+// does (describePhaseSyncFailure); pre-fix these were adjacent
+// escaped/raw twins.
 func describeReleaseSyncFailure(err error, epicID, specID string) string {
 	specRef := "<spec-id>"
 	if specID != "" {
@@ -182,7 +189,7 @@ func describeReleaseSyncFailure(err error, epicID, specID string) string {
 		"could not sync phase metadata for epic %s: %v\n"+
 			"Operator choice — this is the sanctioned backward move (release), so no unforced automatic fix exists; force it only if intentional: mindspec repair phase %s --force-backward \"<reason>\".\n"+
 			"recovery: bd show %s",
-		idrender.Bead(epicID), err, specRef, idrender.Bead(epicID))
+		idrender.Bead(epicID), next.RenderBDError(err), specRef, idrender.Bead(epicID))
 }
 
 // newReleaseDeps assembles the production seams for `mindspec release`.

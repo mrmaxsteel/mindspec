@@ -89,16 +89,16 @@ func exclusionReasonForName(rs ReadySet, name string) (error, bool) {
 	if match == nil {
 		return nil, false
 	}
-	// round-1 panel G3: name is the caller-supplied positional selector —
-	// agent-writable free text, NOT guaranteed to be ID-shaped (it may be
-	// a short suffix form, per SelectWorkByName's own resolution rules),
-	// so idrender.Bead's ID-validate-or-quote contract would needlessly
-	// force-quote a perfectly legitimate short form. termsafe.Escape is
-	// the right tool: every printable-ASCII selector (full ID or short
-	// form) renders byte-identical; a hostile control byte gets the
-	// whole-string Go-quote treatment instead.
-	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; it cannot be claimed via `mindspec next %s` while excluded",
-		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag), termsafe.Escape(name)), true
+	// Final-review round 1 (R5/G4, superseding round-1 panel G3's
+	// termsafe treatment): the caller-supplied selector no longer
+	// appears inside a command-shaped example at all. ADR-0042's rule is
+	// that termsafe is IDENTITY on printable ASCII, so `x;evil` or
+	// `$(evil)` interpolated into a backtick-fenced `mindspec next ...`
+	// line survived byte-raw into copy-pasteable command text. The
+	// matched ID (idrender-gated) names the bead; the executable-shaped
+	// guidance carries NO dynamic operand.
+	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; drop the positional or re-run `mindspec next` without `--spec` to claim it outside this scope",
+		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag)), true
 }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched
@@ -139,31 +139,35 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 	// if more than one ready item suffix-matches, the short form is genuinely
 	// ambiguous and we error (telling the caller to qualify with the full ID)
 	// rather than silently claim an order-dependent arbitrary bead.
-	var match *BeadInfo
-	ambiguous := false
+	var matches []BeadInfo
 	for i := range items {
 		if strings.HasSuffix(items[i].ID, "-"+name) {
-			if match != nil {
-				ambiguous = true
-				break
-			}
-			match = &items[i]
+			matches = append(matches, items[i])
 		}
 	}
-	if ambiguous {
-		// round-1 panel G3: the first %q already Go-quotes name safely
-		// (no raw control byte survives); the second occurrence — inside
-		// the backtick-fenced example — was a RAW %s and is the finding.
-		// termsafe.Escape here for the same reason as
-		// exclusionReasonForName: name may be a legitimate short form,
-		// not necessarily ID-shaped.
-		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set; qualify it with the full bead ID (e.g. `mindspec-%s`)", name, termsafe.Escape(name))
+	if len(matches) > 1 {
+		// Final-review round 1 (R5/G4, superseding round-1 panel G3):
+		// the prior `e.g. \`mindspec-%s\`` example both hardcoded one
+		// project's issue prefix and interpolated the selector into an
+		// executable-looking span where termsafe is identity on
+		// printable shell metacharacters. Name the REAL candidates
+		// instead — each through idrender.Bead's validate-or-quote gate
+		// (bd IDs are agent-writable, ADR-0042) — and keep the free-text
+		// selector in a %q position only.
+		ids := make([]string, len(matches))
+		for i, m := range matches {
+			ids[i] = idrender.Bead(m.ID)
+		}
+		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))
 	}
-	if match != nil {
-		return *match, nil
+	if len(matches) == 1 {
+		return matches[0], nil
 	}
 
-	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); it cannot be claimed via `mindspec next %s`", name, termsafe.Escape(name))
+	// Final-review round 1 (R5/G4): the executable-shaped guidance
+	// carries NO dynamic operand — the unresolvable selector appears
+	// only in the %q position.
+	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); run `mindspec next` with no positional to list claimable work", name)
 }
 
 // FormatWorkList returns a formatted numbered list of work items for display.

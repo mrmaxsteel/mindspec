@@ -8,6 +8,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -44,9 +45,13 @@ type stateOutput struct {
 // query: a discovery failure fails loudly rather than emitting a second
 // "indeterminate" success shape (that form is reserved for the instruct
 // tail, which must not fail the verb it trails — OQ-2's resolution).
+//
+// Final-review round 1 (R5/G3): err chains bd-derived text (AllEpics /
+// ResolveMode -> wrapBDError's raw stderr excerpt) — escape via
+// next.RenderBDError at this render sink.
 func stateDiscoveryFailure(query string, err error) error {
 	return guard.NewFailure(
-		fmt.Sprintf("state show: %s failed: %v", query, err),
+		fmt.Sprintf("state show: %s failed: %v", query, next.RenderBDError(err)),
 		"mindspec doctor",
 	)
 }
@@ -108,9 +113,11 @@ If multiple active specs exist and no --spec is given, shows the ambiguity.`,
 			// healthy (probed above), so this is a genuine resolution
 			// failure for the requested target and must be reported as
 			// such. Only the no-target (ambient) case below may fall
-			// through to draft/idle discovery.
+			// through to draft/idle discovery. Final-review round 1
+			// (R5/G3): the returned error's rendered text can chain bd
+			// stderr — wrap for the terminal boundary (Unwrap preserved).
 			if specFlag != "" {
-				return resolveErr
+				return next.RenderBDError(resolveErr)
 			}
 
 			// bd is healthy and reports nothing active. Check the OQ-2
