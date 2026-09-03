@@ -344,3 +344,199 @@ func TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft(t *testing.T) {
 		t.Errorf("the other spec's bead must remain untouched (open) after the refused invocation, got status %q", status)
 	}
 }
+
+// --- Round-1 panel G1: the spec-mandated pinned-line tests were missing ---
+
+// TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1 pins
+// AC-9's "the no-pick default path prints the self-describing line" on
+// the --emit-only display path: with >=2 ready beads and neither --pick
+// nor a positional given, the EXACT OQ-5 default line is printed, and
+// the primer that's actually emitted is displayed row 1 (the
+// higher-priority bead).
+func TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "968-selection-default-emit"
+	_, bead1, _ := nextSelectionTwoReadyBeads(t, sb, specID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", specID, "--emit-only")
+	if err != nil {
+		t.Fatalf("default-pick --emit-only: %v\n%s", err, out)
+	}
+	const wantLine = "Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item."
+	if !strings.Contains(out, wantLine) {
+		t.Errorf("expected the exact OQ-5 default line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "**Bead**: "+bead1) {
+		t.Errorf("expected the default pick to select displayed row 1 (%s), got:\n%s", bead1, out)
+	}
+}
+
+// nextSelectionDefaultClaimSpecMD/PlanMD mirror
+// nextSelectionParitySpecMD/PlanMD (a confirmed-passing two-independent-
+// bead readiness fixture) under a fresh spec ID so this test's real
+// claim doesn't collide with TestNextSelection_ClaimPickMatchesEmitOnlyPick's.
+const nextSelectionDefaultClaimSpecID = "967-selection-default-claim"
+
+// TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1 pins AC-9's
+// default-line assertion on the CLAIM path: with >=2 ready beads and no
+// selector given, the exact OQ-5 default line prints AND the bead
+// actually claimed is displayed row 1 (the higher-priority bead) —
+// closing the round-1 G1(a) gap (grep 'Defaulting' in *_test.go
+// previously returned zero).
+func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	planMD := strings.ReplaceAll(nextSelectionParityPlanMD, "977-selection-parity", nextSelectionDefaultClaimSpecID)
+	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, nextSelectionDefaultClaimSpecID, nextSelectionParitySpecMD, planMD)
+	bead1 := epicID + ".1"
+	bead2 := epicID + ".2"
+	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
+		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+	}
+	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
+		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
+	}
+
+	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionDefaultClaimSpecID)
+	if err != nil {
+		t.Fatalf("default-pick claim: %v\n%s", err, out)
+	}
+	const wantLine = "Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item."
+	if !strings.Contains(out, wantLine) {
+		t.Errorf("expected the exact OQ-5 default line, got:\n%s", out)
+	}
+	if !strings.Contains(out, bead1) {
+		t.Errorf("expected the default pick to claim displayed row 1 (%s), got:\n%s", bead1, out)
+	}
+
+	status, _ := nextReadyGateBDStatus(t, sb, bead1)
+	if status != "in_progress" {
+		t.Errorf("expected %s (displayed row 1) to be claimed by the no-selector default path, got status %q", bead1, status)
+	}
+	statusOther, _ := nextReadyGateBDStatus(t, sb, bead2)
+	if statusOther != "open" {
+		t.Errorf("expected %s (displayed row 2) to remain untouched by the default pick, got status %q", bead2, statusOther)
+	}
+}
+
+// TestNextSelection_PositionalEmitOnly_BypassesSpecFilter pins the round-1
+// G1(b) gap: R6.3(a)'s one documented exception. `--spec <s> <bead-id>
+// --emit-only` against a ready bead whose title does NOT reference the
+// spec must still proceed (R6.1's pinned bypass — positional --emit-only
+// never constructs the ready set, never applies the spec filter), print
+// ONLY the pinned bypass line, with no exclusion report and no false
+// readiness claim.
+func TestNextSelection_PositionalEmitOnly_BypassesSpecFilter(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "966-selection-bypass"
+	epicID := sb.CreateSpecEpic(specID)
+	// Title deliberately does NOT reference specID — this bead would be
+	// EXCLUDED by the spec-title filter on every OTHER path.
+	beadID := sb.CreateBead("Unrelated work item", "task", epicID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", specID, beadID, "--emit-only")
+	if err != nil {
+		t.Fatalf("expected the positional --emit-only preview to proceed despite the title not referencing the spec, got: %v\n%s", err, out)
+	}
+	const wantBypassLine = "emit-only: bead fetched by ID; readiness not checked."
+	if !strings.Contains(out, wantBypassLine) {
+		t.Errorf("expected the exact pinned bypass line, got:\n%s", out)
+	}
+	if strings.Contains(out, "excluded") {
+		t.Errorf("positional --emit-only must report NO exclusions (R6.3(a)'s documented exception — it never constructs the ready set), got:\n%s", out)
+	}
+	if strings.Contains(out, "is ready") || strings.Contains(out, "Ready work") {
+		t.Errorf("positional --emit-only must never claim readiness — 'readiness not checked' is the only readiness-shaped statement, got:\n%s", out)
+	}
+	if !strings.Contains(out, "**Bead**: "+beadID) {
+		t.Errorf("expected the primer to still be emitted for the fetched bead, got:\n%s", out)
+	}
+}
+
+// --- Round-1 panel G2: --pick < 0 boundary, validated before ANY side effect ---
+
+// TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects pins
+// that positional + --pick=-1 refuses on BOTH paths before ANY fetch or
+// claim, and before the (unrelated) positional-vs-positive-pick mutual-
+// exclusion message — the negative-pick check runs first and
+// unconditionally.
+func TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "965-selection-negative-pick"
+	epicID := sb.CreateSpecEpic(specID)
+	beadID := sb.CreateBead("["+specID+"] Solo", "task", epicID)
+
+	outClaim, err := sb.Run("mindspec", "next", beadID, "--pick=-1")
+	if err == nil {
+		t.Fatalf("expected positional + --pick=-1 to refuse on the claim path, got exit 0:\n%s", outClaim)
+	}
+	if !strings.Contains(outClaim, "pick") || !strings.Contains(outClaim, "invalid") {
+		t.Errorf("expected the invalid-pick refusal, got:\n%s", outClaim)
+	}
+	statusClaim, _ := nextReadyGateBDStatus(t, sb, beadID)
+	if statusClaim != "open" {
+		t.Errorf("expected zero side effects (bead unclaimed) after the refused claim-path invocation, got status %q", statusClaim)
+	}
+
+	outEmit, err := sb.Run("mindspec", "next", beadID, "--pick=-1", "--emit-only")
+	if err == nil {
+		t.Fatalf("expected positional + --pick=-1 to refuse on --emit-only too, got exit 0:\n%s", outEmit)
+	}
+	if strings.Contains(outEmit, "emit-only: bead fetched by ID") {
+		t.Errorf("the invalid-pick refusal must preempt --emit-only's positional bypass entirely — no bypass line, got:\n%s", outEmit)
+	}
+	statusEmit, _ := nextReadyGateBDStatus(t, sb, beadID)
+	if statusEmit != "open" {
+		t.Errorf("expected zero side effects after the refused --emit-only invocation, got status %q", statusEmit)
+	}
+}
+
+// TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds pins that an
+// invalid --pick refuses even when the (would-be) ready set is entirely
+// empty — never the silent "No ready work found" success path, on
+// either the claim or --emit-only path.
+func TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "964-selection-negative-empty"
+	sb.CreateSpecEpic(specID) // epic with ZERO children — genuinely empty ready set
+
+	outClaim, err := sb.Run("mindspec", "next", "--spec", specID, "--pick=-1")
+	if err == nil {
+		t.Fatalf("expected --pick=-1 against an empty ready set to refuse (claim path), got exit 0:\n%s", outClaim)
+	}
+	if strings.Contains(outClaim, "No ready work found") {
+		t.Errorf("an invalid pick must refuse as an invalid-pick error, never render as the unrelated 'No ready work found' success line, got:\n%s", outClaim)
+	}
+	if !strings.Contains(outClaim, "invalid") {
+		t.Errorf("expected the invalid-pick refusal, got:\n%s", outClaim)
+	}
+
+	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--pick=-1", "--emit-only")
+	if err == nil {
+		t.Fatalf("expected --pick=-1 to refuse on --emit-only too, got exit 0:\n%s", outEmit)
+	}
+	if strings.Contains(outEmit, "No ready work found") || strings.Contains(outEmit, "no ready work found") {
+		t.Errorf("an invalid pick must never render as any 'no ready work' outcome, got:\n%s", outEmit)
+	}
+	if !strings.Contains(outEmit, "invalid") {
+		t.Errorf("expected the invalid-pick refusal, got:\n%s", outEmit)
+	}
+}
+
+// TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped pins
+// round-1 panel G3's audit of the emit-only positional fetch-error wrap:
+// a hostile positional ID never leaks a raw control byte, whether it
+// fails idvalidate.BeadID inside FetchBeadByID or in the outer
+// "fetching bead %s" wrap this bead's fix now routes through
+// idrender.Bead.
+func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	hostile := "mindspec-\x1b[31mFORGED\x1b[0m"
+
+	out, err := sb.Run("mindspec", "next", hostile, "--emit-only")
+	if err == nil {
+		t.Fatalf("expected a hostile positional ID to refuse, got exit 0:\n%s", out)
+	}
+	if strings.ContainsRune(out, 0x1b) {
+		t.Errorf("raw ESC byte survived into the rendered refusal: %q", out)
+	}
+}

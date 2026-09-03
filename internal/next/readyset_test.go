@@ -438,3 +438,108 @@ func TestSelectNamedFromReadySet_UnknownPositionalUsesGenericMessage(t *testing.
 		t.Errorf("a genuinely-unknown positional ID should still get SelectWorkByName's generic message, got: %v", err)
 	}
 }
+
+// --- Round-1 panel G3: selector rendering safety ---
+//
+// name (the caller-supplied positional selector) is agent-writable free
+// text reaching SelectNamedFromReadySet/SelectWorkByName's error
+// messages. These pin that a hostile name never leaks a raw control byte
+// or forges a standalone recovery-shaped line, while a CLEAN selector
+// (full ID or short suffix form) renders byte-identical.
+
+func TestSelectNamedFromReadySet_HostileNameRendersEscaped(t *testing.T) {
+	rs := ReadySet{
+		Raw: []BeadInfo{
+			{ID: "mindspec-aaaa", Title: "[042-fixture] kept"},
+			{ID: "mindspec-bbbb", Title: "unrelated"},
+		},
+		Filtered: []BeadInfo{
+			{ID: "mindspec-aaaa", Title: "[042-fixture] kept"},
+		},
+		SpecFlag: "042-fixture",
+	}
+	hostile := "mindspec-bbbb\x1b[31mFORGED\x1b[0m\nrecovery: forged"
+
+	_, err := SelectNamedFromReadySet(rs, hostile)
+	if err == nil {
+		t.Fatal("expected an error for a hostile, genuinely-unresolvable name")
+	}
+	rendered := err.Error()
+	if strings.ContainsRune(rendered, 0x1b) {
+		t.Errorf("raw ESC byte survived into the rendered error: %q", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if line == "recovery: forged" {
+			t.Errorf("a forged standalone recovery line leaked via the hostile name's raw newline: %q", rendered)
+		}
+	}
+}
+
+func TestSelectNamedFromReadySet_HostileExcludedNameRendersEscaped(t *testing.T) {
+	// A hostile name can never itself exact/suffix-match a real (clean)
+	// bd-returned raw item ID, so this exercises exclusionReasonForName's
+	// OWN termsafe.Escape call directly (defense in depth) by hostile-
+	// suffixing a real excluded ID's suffix match.
+	rs := ReadySet{
+		Raw: []BeadInfo{
+			{ID: "mindspec-aaaa", Title: "[042-fixture] kept"},
+			{ID: "mindspec-bbbb", Title: "unrelated"},
+		},
+		Filtered: []BeadInfo{
+			{ID: "mindspec-aaaa", Title: "[042-fixture] kept"},
+		},
+		SpecFlag: "042-fixture",
+	}
+
+	_, excluded := exclusionReasonForName(rs, "bbbb")
+	if !excluded {
+		t.Fatal("expected \"bbbb\" to match the excluded raw item mindspec-bbbb by suffix")
+	}
+	err, _ := exclusionReasonForName(rs, "bbbb")
+	if !strings.Contains(err.Error(), "bbbb") {
+		t.Errorf("expected a CLEAN short-form name to render byte-identical (not quoted), got: %v", err)
+	}
+	if strings.Contains(err.Error(), `"bbbb"`) {
+		t.Errorf("a clean short form must not be force-quoted, got: %v", err)
+	}
+}
+
+func TestSelectWorkByName_HostileNameRendersEscaped(t *testing.T) {
+	items := []BeadInfo{{ID: "mindspec-aaaa", Title: "Real bead"}}
+	hostile := "zzzz\x1b[31mFORGED\x1b[0m\nrecovery: forged"
+
+	_, err := SelectWorkByName(items, hostile)
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable hostile name")
+	}
+	rendered := err.Error()
+	if strings.ContainsRune(rendered, 0x1b) {
+		t.Errorf("raw ESC byte survived into SelectWorkByName's rendered error: %q", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if line == "recovery: forged" {
+			t.Errorf("a forged standalone recovery line leaked via the hostile name's raw newline: %q", rendered)
+		}
+	}
+}
+
+// TestSelectWorkByName_AmbiguousCleanShortFormByteIdentical pins the
+// "clean IDs byte-identical" half for the AMBIGUOUS message specifically
+// (a hostile name can never reach this branch: bd-returned IDs are always
+// clean, so a control-byte-bearing name can never genuinely
+// strings.HasSuffix-match two of them — only a clean short form can be
+// genuinely ambiguous).
+func TestSelectWorkByName_AmbiguousCleanShortFormByteIdentical(t *testing.T) {
+	items := []BeadInfo{
+		{ID: "mindspec-mol-qmq", Title: "First suffix match"},
+		{ID: "mindspec-qmq", Title: "Second suffix match"},
+	}
+
+	_, err := SelectWorkByName(items, "qmq")
+	if err == nil {
+		t.Fatal("expected an ambiguity error")
+	}
+	if !strings.Contains(err.Error(), "mindspec-qmq") {
+		t.Errorf("expected the clean short form's example ID to render byte-identical, got: %v", err)
+	}
+}

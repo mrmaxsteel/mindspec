@@ -59,6 +59,25 @@ team lead spawns fresh agents per bead.`,
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
 		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
 
+		// Spec 128 Bead 8 round-1 panel G2: --pick < 0 is pure arg
+		// validation — checked IMMEDIATELY after flag parsing, before
+		// EVERYTHING else on either path (positional-vs-pick mutual
+		// exclusion, the --emit-only dispatch below, scope resolution,
+		// the dirty-tree guard, the ready query). This is the single
+		// shared entry point for both the claim path and --emit-only
+		// (runEmitOnly is only ever reached via the dispatch below), so
+		// one check here covers both: an invalid pick refuses with ZERO
+		// side effects — no bd call, no dirty-tree check, nothing
+		// claimed/fetched — rather than surfacing deep inside SelectWork
+		// after real work already ran. G4/R5's explicit decision, stated
+		// here rather than left implicit: --pick=0 is NOT invalid — it is
+		// the documented "unset" sentinel (OQ-5's default-to-row-1 path,
+		// SelectWork's own pick==0 branch); only a NEGATIVE value is
+		// rejected.
+		if pick < 0 {
+			return fmt.Errorf("pick %d is invalid: must be >= 0 (0 selects the default)", pick)
+		}
+
 		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
 		// mutually exclusive selectors — the positional names a specific bead,
 		// --pick is an index into the ready set, and they may disagree. Reject
@@ -447,7 +466,14 @@ func runEmitOnly(root, specFlag string, pick int, args []string) error {
 		// leaving the asymmetry with the claim path unstated.
 		info, err := next.FetchBeadByID(args[0])
 		if err != nil {
-			return fmt.Errorf("fetching bead %s: %w", args[0], err)
+			// round-1 panel G3 audit: args[0] is an ID-typed position on
+			// this path (FetchBeadByID does no short-form resolution —
+			// unlike the claim path's positional, it must already be the
+			// full bead ID or FetchBeadByID's own idvalidate.BeadID gate
+			// refuses first), so idrender.Bead — not termsafe.Escape — is
+			// the matching convention: a clean full ID renders
+			// byte-identical, a malformed/hostile one is force-quoted.
+			return fmt.Errorf("fetching bead %s: %w", idrender.Bead(args[0]), err)
 		}
 		fmt.Println("emit-only: bead fetched by ID; readiness not checked.")
 		return emitOnlyPrimer(info)
@@ -740,7 +766,7 @@ func unmergedBeadError(o lifecycle.Orphan) error {
 }
 
 func init() {
-	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready")
+	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
 	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")

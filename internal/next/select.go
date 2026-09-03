@@ -89,8 +89,16 @@ func exclusionReasonForName(rs ReadySet, name string) (error, bool) {
 	if match == nil {
 		return nil, false
 	}
+	// round-1 panel G3: name is the caller-supplied positional selector —
+	// agent-writable free text, NOT guaranteed to be ID-shaped (it may be
+	// a short suffix form, per SelectWorkByName's own resolution rules),
+	// so idrender.Bead's ID-validate-or-quote contract would needlessly
+	// force-quote a perfectly legitimate short form. termsafe.Escape is
+	// the right tool: every printable-ASCII selector (full ID or short
+	// form) renders byte-identical; a hostile control byte gets the
+	// whole-string Go-quote treatment instead.
 	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; it cannot be claimed via `mindspec next %s` while excluded",
-		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag), name), true
+		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag), termsafe.Escape(name)), true
 }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched
@@ -143,13 +151,19 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 		}
 	}
 	if ambiguous {
-		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set; qualify it with the full bead ID (e.g. `mindspec-%s`)", name, name)
+		// round-1 panel G3: the first %q already Go-quotes name safely
+		// (no raw control byte survives); the second occurrence — inside
+		// the backtick-fenced example — was a RAW %s and is the finding.
+		// termsafe.Escape here for the same reason as
+		// exclusionReasonForName: name may be a legitimate short form,
+		// not necessarily ID-shaped.
+		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set; qualify it with the full bead ID (e.g. `mindspec-%s`)", name, termsafe.Escape(name))
 	}
 	if match != nil {
 		return *match, nil
 	}
 
-	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); it cannot be claimed via `mindspec next %s`", name, name)
+	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); it cannot be claimed via `mindspec next %s`", name, termsafe.Escape(name))
 }
 
 // FormatWorkList returns a formatted numbered list of work items for display.
