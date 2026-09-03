@@ -175,29 +175,53 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 // commits.
 //
 // Disposition: ABSENT-ONLY BACKFILL under the bead-1 R3.3 lock
-// (WithPhaseWriteLock's fn receives the fresh, under-lock stored value).
-// stored == "" covers both a genuinely absent mindspec_phase field and a
-// present-but-invalid one (phaseReadOutcome's contract, phaselock.go) —
-// neither carries a USABLE stored phase, so both are legitimate backfill
-// targets; any other stored value (plan/implement/review/done) is a
-// later-or-same-value replay and is left untouched. The fail-closed
-// refusal alternative is explicitly NOT taken: a replay is a legitimate
+// (WithPhaseWriteLock's fn receives the fresh, under-lock stored value
+// AND its presence bit). Round-1 panel G4 (round-2 fix): the presence
+// bit is CONSUMED, not discarded — only present == false (a genuinely
+// absent mindspec_phase field) is a legitimate backfill target. present
+// == true with stored == "" is a DIFFERENT case (phaseReadOutcome's
+// contract, phaselock.go): the field exists but failed validation — a
+// present-but-invalid value. Writing "plan" over that would silently
+// discard whatever the corrupt/forward-incompatible value was, so it is
+// left untouched instead, with output distinct from BOTH a real backfill
+// and an ordinary same/later-value no-op. Any valid stored value
+// (plan/implement/review/done) is a later-or-same-value replay and is
+// likewise left untouched. The fail-closed refusal alternative is
+// explicitly NOT taken for any of these: a replay is a legitimate
 // idempotent re-run of `spec approve` against an epic that already
 // exists (the no-error path just above this call site), and refusing it
 // would break that existing idempotence contract.
 //
-// The returned message distinguishes all three outcomes for the
-// caller's output (R3.6: "the output honestly distinguishes a mutation
-// from a no-op") — a genuine backfill, a same-value no-op replay, and a
-// later-phase-untouched no-op replay each get their own text, and a
-// replay that changed nothing never claims to have set the phase. err
-// is WithPhaseWriteLock's own error (lock timeout / merge-write
-// failure); message is "" when err is non-nil.
+// The returned message distinguishes all FOUR outcomes for the caller's
+// output (R3.6: "the output honestly distinguishes a mutation from a
+// no-op") — a genuine backfill, a present-but-invalid no-op, a
+// same-value no-op replay, and a later-phase-untouched no-op replay each
+// get their own text, and a replay that changed nothing never claims to
+// have set the phase. err is WithPhaseWriteLock's own error (lock
+// timeout / merge-write failure); message is "" when err is non-nil.
 func backfillExistingEpicPhase(root, epicID string) (message string, err error) {
-	err = phase.WithPhaseWriteLock(root, epicID, specMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
-		if stored == "" {
+	err = phase.WithPhaseWriteLock(root, epicID, specMergeMetadataFn, func(stored string, present bool) (map[string]interface{}, error) {
+		if !present {
+			// Genuinely absent (phaseReadOutcome's contract, phaselock.go)
+			// — the ONLY legitimate backfill target. Round-1 panel G4: a
+			// present-but-invalid value (below) must NOT take this path,
+			// since writing "plan" over it would silently discard
+			// whatever the corrupt/forward-incompatible value was.
 			message = "phase backfilled: plan (stored phase was empty)"
 			return map[string]interface{}{"mindspec_phase": "plan"}, nil
+		}
+		if stored == "" {
+			// Present but INVALID (round-1 panel G4): the field exists
+			// but its value failed state.IsValidPhase — a corrupt write,
+			// or a phase value this build doesn't recognize yet. Leaving
+			// it untouched is the safe choice: we don't know what the
+			// intended value was, so overwriting it with "plan" would be
+			// a silent, potentially-destructive guess. The message is
+			// deliberately distinct from BOTH the backfill wording above
+			// and the ordinary no-op wording below, so this case is never
+			// conflated with either.
+			message = "spec approve replay: stored phase present but invalid — left untouched (no phase value was written; run `mindspec repair phase` to inspect)"
+			return nil, nil
 		}
 		if stored == "plan" {
 			message = `spec approve replay: stored phase already "plan" — nothing mutated`

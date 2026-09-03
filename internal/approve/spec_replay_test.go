@@ -20,9 +20,11 @@ import (
 // backfillExistingEpicPhase's fresh, under-lock FindEpic read of epicID
 // sees the given stored mindspec_phase. present=false with any stored
 // value omits the metadata key entirely (a genuinely absent field);
-// present=true sets it to stored (including stored=="" for the
-// present-but-invalid case, though no AC-16 leg below exercises that
-// combination — the absent-key leg is the one R3.6 names).
+// present=true sets it to stored — including stored=="" for the
+// PRESENT-BUT-INVALID case (state.IsValidPhase rejects the empty
+// string, so this combination reaches readPhaseForLock's Present:true,
+// Stored:"" branch — round-1 panel G4's
+// TestBackfillExistingEpicPhase_PresentButInvalidLeftUntouched below).
 func wireBackfillFixture(t *testing.T, epicID, stored string, present bool) {
 	t.Helper()
 	metadata := map[string]interface{}{}
@@ -71,6 +73,44 @@ func TestBackfillExistingEpicPhase_EmptyStoredPhaseBackfillsPlan(t *testing.T) {
 	}
 	if !strings.Contains(msg, "backfilled") {
 		t.Errorf("expected the message to name the backfill mutation, got %q", msg)
+	}
+}
+
+// Round-1 panel G4 regression: a PRESENT but INVALID mindspec_phase
+// value (the field exists but failed state.IsValidPhase — corruption, or
+// a forward-incompatible value) must be left untouched, NOT silently
+// treated as a backfill target. Before the fix, backfillExistingEpicPhase
+// keyed only on stored=="" and could not distinguish this from a
+// genuinely absent field — it would have overwritten the invalid value
+// with "plan", discarding it. The output must also be distinct from
+// BOTH the real-backfill wording and the ordinary same/later-value no-op
+// wording, so this case is never conflated with either.
+func TestBackfillExistingEpicPhase_PresentButInvalidLeftUntouched(t *testing.T) {
+	root := t.TempDir()
+	epicID := "epic-128-invalid"
+	wireBackfillFixture(t, epicID, "", true) // present=true, stored="" -> present-but-invalid
+	calls := 0
+	restore := SetSpecMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	})
+	defer restore()
+
+	msg, err := backfillExistingEpicPhase(root, epicID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("a present-but-invalid value must be a ZERO-write no-op (never silently overwritten with plan), got %d calls", calls)
+	}
+	if strings.Contains(msg, "backfilled") {
+		t.Errorf("a present-but-invalid no-op must never claim a backfill occurred: %q", msg)
+	}
+	if !strings.Contains(msg, "invalid") {
+		t.Errorf("expected the message to name the present-but-invalid case distinctly, got %q", msg)
+	}
+	if strings.Contains(strings.ToLower(msg), "nothing mutated") {
+		t.Errorf("the present-but-invalid message must be distinct from the ordinary same-value no-op wording, got %q", msg)
 	}
 }
 

@@ -118,36 +118,17 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Proportional claim guard (ADR-0025's clarifying
-		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
-		// build artifact co-managed by bd; dirt on that path alone is
-		// auto-handled via `bd export`. Of the remaining user dirt, only
-		// dirt on a path THIS worktree-creating claim can itself write
-		// still blocks — an EMPTY set today (R5.1's derived enumeration:
-		// the claim's own writes are either gitignored or the exempt
-		// artifact above). An unrelated dirty file in the invoking
-		// checkout no longer blocks; it is named on stderr (Max's
-		// standing directive, 2026-09-02 — visibility without the block)
-		// and the claim proceeds.
-		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd)
-		if err != nil {
-			return fmt.Errorf("checking working tree: %w", err)
-		}
-		if len(blockingDirt) > 0 {
-			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
-			// worktree-context line and ends with a `recovery:` line. The
-			// old multi-line "Recovery steps: 1..3" stderr block advised
-			// `git restore .` — destructive over the HUMAN's dirt when the
-			// agent merely ran `next` from the wrong directory. The active
-			// worktree (when one exists) is the steer-to target; resolving
-			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
-		}
-		if len(ignoredDirt) > 0 {
-			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
-		}
-
-		// Step 1.5: Resolve target spec if ambiguous
+		// Step 0d: Resolve target spec if ambiguous. MOVED ahead of the
+		// dirty-tree guard below (spec 128 Bead 7 round-1 panel fix): the
+		// guard's entanglement enumeration is per-spec-aware (it must know
+		// the target spec's recording paths, if any), so the target spec
+		// needs to be known BEFORE the guard runs whenever it is
+		// resolvable at all. This does not change behavior for --spec
+		// callers (specFlag is already set from Step 0a); for the no-flag
+		// path it means an ambiguous-target exit now happens before the
+		// dirty-tree check runs rather than after — a genuinely dirty tree
+		// AND an ambiguous target is vanishingly rare, and knowing which
+		// spec you're even targeting is the more fundamental question.
 		if specFlag == "" {
 			targetSpec, err := resolve.ResolveTarget(root, "")
 			if err != nil {
@@ -164,6 +145,37 @@ team lead spawns fresh agents per bead.`,
 			} else {
 				specFlag = targetSpec
 			}
+		}
+
+		// Step 1: Proportional claim guard (ADR-0025's clarifying
+		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
+		// build artifact co-managed by bd; dirt on that path alone is
+		// auto-handled via `bd export`. Of the remaining user dirt, only
+		// dirt ComputeEntangleablePaths names as a path THIS
+		// worktree-creating claim can itself write still blocks — round-1
+		// panel fix: that set is per-spec-aware (the target spec's
+		// recording paths, when recording is enabled) and conditional on
+		// .gitignore's current state, not unconditionally empty. Every
+		// other unrelated dirty file in the invoking checkout still does
+		// not block; it is named on stderr (Max's standing directive,
+		// 2026-09-02 — visibility without the block) and the claim
+		// proceeds.
+		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specFlag)
+		if err != nil {
+			return fmt.Errorf("checking working tree: %w", err)
+		}
+		if len(blockingDirt) > 0 {
+			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
+			// worktree-context line and ends with a `recovery:` line. The
+			// old multi-line "Recovery steps: 1..3" stderr block advised
+			// `git restore .` — destructive over the HUMAN's dirt when the
+			// agent merely ran `next` from the wrong directory. The active
+			// worktree (when one exists) is the steer-to target; resolving
+			// it costs bd calls only on this failure path.
+			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+		}
+		if len(ignoredDirt) > 0 {
+			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
 		}
 
 		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed

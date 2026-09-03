@@ -86,7 +86,13 @@ func TestNextCmd_DirtyTree_UnrelatedDirtNoLongerBlocks(t *testing.T) {
 
 	// Max's standing directive (2026-09-02): the ignored dirt is still
 	// named, on stderr, as a one-line informational notice — visibility
-	// without the block.
+	// without the block. Round-1 panel G5/R1: pin the notice's
+	// IDENTIFYING PREFIX too, not just the path — a silent rewording (or
+	// a bare path dump with no notice framing at all) must go red here,
+	// not just at the internal/next unit level.
+	if !strings.Contains(stderr.String(), "claiming despite unrelated dirty path(s)") {
+		t.Errorf("expected the ignored-dirt notice's stable prefix in stderr; stderr:\n%s", stderr.String())
+	}
 	if !strings.Contains(stderr.String(), "notes.txt") {
 		t.Errorf("expected the ignored-dirt notice to name notes.txt; stderr:\n%s", stderr.String())
 	}

@@ -2,7 +2,9 @@ package next
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -10,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -28,36 +31,32 @@ var artifactPaths = []string{
 // Package-level function variables for testability. Tests swap these to
 // simulate porcelain output and to verify bd export is invoked when and only
 // when an artifact path is dirty.
+//
+// statusPorcelainFn (newline `--porcelain`) backs CheckDirtyTree/
+// CheckDirtyTreeDetail only — unchanged. statusPorcelainZFn (`-z`,
+// round-1 panel G3/G6) backs CheckDirtyTreeProportional only. Both share
+// exportBeadsFn for the artifact-normalization retry.
 var (
-	statusPorcelainFn = defaultStatusPorcelain
-	exportBeadsFn     = bead.Export
+	statusPorcelainFn  = defaultStatusPorcelain
+	statusPorcelainZFn = defaultStatusPorcelainZ
+	exportBeadsFn      = bead.Export
 )
 
-// entangleableClaimPaths is the R5.1 DERIVED enumeration (spec 128,
-// #179): the repo-relative paths a worktree-creating `mindspec next`
-// claim can itself WRITE in the invoking checkout. At this base that set
-// is exactly (a) `.mindspec/session.json` (state.WriteSessionFile's
-// BeadClaimedAt stamp) — gitignored (.gitignore:3), so it can never
-// appear as blockable dirt in the first place; (b) `.beads/issues.jsonl`
-// — ADR-0025's sole named artifact, already exempt via artifactPaths
-// above; and (c) the new bead worktree directory, created only AFTER
-// this guard runs (and itself gitignored, `.worktrees/`). None of the
-// three can ever surface as TRACKED user dirt, so the claim-entangleable
-// set is EMPTY today.
-//
-// This list stays empty until a future claim step writes a new TRACKED
-// path outside that set, at which point appending the path here re-arms
-// the block for it (CheckDirtyTreeProportional). AC-8(ii)'s
-// enumeration-pinning test derives the paths a REAL claim run actually
-// writes in the invoking checkout and asserts they match this list —
-// red the moment a future claim step writes a tracked path this list
-// omits.
+// entangleableClaimPaths is a TEST-INJECTABLE residual on top of
+// ComputeEntangleablePaths' two DERIVED classes below (R5.1, spec 128
+// #179). It stays empty in production; AC-8(iii)'s seam-injected refusal
+// leg uses SetEntangleableClaimPathsForTest to add a path here so the
+// block machinery stays exercised independent of the real, dynamic
+// classes. A future claim step that writes some THIRD tracked path not
+// covered by either derived class would need this residual appended for
+// real, permanently — that append is what re-arms the block for it.
 var entangleableClaimPaths []string
 
-// EntangleableClaimPaths returns a copy of the current R5.1 enumeration,
-// for the cross-package anti-drift pin (AC-8(ii): a real-claim-run
-// fixture in cmd/mindspec derives the paths an actual claim writes and
-// asserts they match this list).
+// EntangleableClaimPaths returns a copy of the current test-injectable
+// residual (see entangleableClaimPaths above). It does NOT include the
+// two dynamic classes ComputeEntangleablePaths derives per call — use
+// ComputeEntangleablePaths for the full, honest enumeration a given
+// repoRoot/specID pair produces (AC-8(ii)'s anti-drift pin).
 func EntangleableClaimPaths() []string {
 	out := make([]string, len(entangleableClaimPaths))
 	copy(out, entangleableClaimPaths)
@@ -76,13 +75,129 @@ func SetEntangleableClaimPathsForTest(paths []string) func() {
 	return func() { entangleableClaimPaths = orig }
 }
 
-func isEntangleableClaimPath(p string) bool {
-	for _, e := range entangleableClaimPaths {
-		if p == e {
-			return true
+// ComputeEntangleablePaths returns the FULL R5.1 entanglement
+// enumeration for one `mindspec next` worktree-creating claim, honest
+// about the two conditional write classes the round-1 panel found
+// missing from the original "exactly (a)(b)(c), all gitignored/exempt"
+// claim (spec 128 Bead 7 round-1 panel, G1/F1/F1-R6):
+//
+//  1. `.gitignore` — DispatchBead's EnsureGitignoreEntry
+//     (internal/executor/mindspec_executor.go) writes at
+//     resolveAnchorRoot(specID): the target spec's WORKTREE if one
+//     already exists on disk (the typical case — a bead only exists
+//     under an already plan-approved, and therefore worktree-having,
+//     spec), else repoRoot. claimAnchorRoot below replicates that exact
+//     preference. The write is a no-op when cfg.WorktreeRoot's entry is
+//     ALREADY present there (gitutil.HasGitignoreEntry is the SAME
+//     presence check EnsureGitignoreEntry itself uses, so the two can
+//     never diverge) — genuine only when absent.
+//  2. The TARGET spec's two recording paths — `recording.EmitBeadMarker`
+//     and `recording.AddBeadToPhase` (cmd/mindspec/next.go's claim-path
+//     step 7.5) ALWAYS write under repoRoot (unconditionally — unlike
+//     the .gitignore write, this one does NOT route through
+//     resolveAnchorRoot), append events.ndjson and read-modify-write
+//     manifest.json, but ONLY when recording.enabled is true AND that
+//     spec already has a recording directory there (a dir that doesn't
+//     exist can't appear in porcelain output regardless, so this
+//     function does not re-check HasRecording itself). specID == ""
+//     omits this class entirely — a conservative "unknown, so not
+//     claimed as entangled" choice.
+//
+// BOTH classes are gated on OBSERVABILITY (round-1 fix-round hardening,
+// caught by this bead's own AC-8(ii) e2e fixtures): the dirty-tree
+// guard's porcelain snapshot is scoped to cwd's OWN working tree — a
+// write landing in a DIFFERENT linked worktree (e.g. the .gitignore
+// write anchored at the spec worktree while the agent invokes `next`
+// from the main checkout) can never collide with, or even be seen
+// alongside, dirt cwd's own `git status` could ever report. A class is
+// therefore included only when its write target's working tree equals
+// cwd's: the .gitignore class when claimAnchorRoot(repoRoot, specID) ==
+// cwd; the recording class when repoRoot == cwd (its target is always
+// repoRoot, unconditionally).
+//
+// The `.mindspec/session.json` (gitignored) and bead-worktree-directory
+// (gitignored, `.worktrees/`) classes from the original enumeration
+// remain correctly excluded — they can never surface as tracked
+// porcelain dirt regardless of config, so they need no runtime check
+// here. The test-injectable residual (entangleableClaimPaths) is unioned
+// in last, unconditionally (a test asserting a specific write class
+// should not also have to fake cwd/anchor agreement).
+func ComputeEntangleablePaths(repoRoot, cwd, specID string) []string {
+	var paths []string
+	cfg, cfgErr := config.Load(repoRoot)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+
+	// Shared anchor: workspace.SpecDir (which recording.EventsPath/
+	// ManifestPath resolve through) prefers the spec's WORKTREE copy of
+	// `.mindspec/specs/<specID>` whenever one exists on disk — the exact
+	// same existence preference resolveAnchorRoot applies for the
+	// .gitignore write. Both write classes are therefore observable from
+	// the SAME anchor.
+	anchor := claimAnchorRoot(repoRoot, cfg, specID)
+
+	if samePath(anchor, cwd) && !gitutil.HasGitignoreEntry(cwd, cfg.WorktreeRoot) {
+		paths = append(paths, ".gitignore")
+	}
+
+	if specID != "" && samePath(anchor, cwd) && recording.IsEnabled(repoRoot) {
+		// Relative to cwd (== anchor here), matching what `git status`
+		// run FROM cwd actually reports — workspace.SpecDir (which these
+		// resolve through) prefers the spec worktree's OWN copy of
+		// `.mindspec/specs/<specID>` whenever one exists, so the
+		// resolved absolute path already sits under anchor, not
+		// necessarily under repoRoot.
+		if p, err := recording.EventsPath(repoRoot, specID); err == nil {
+			if rel, relErr := filepath.Rel(cwd, p); relErr == nil {
+				paths = append(paths, filepath.ToSlash(rel))
+			}
+		}
+		if p, err := recording.ManifestPath(repoRoot, specID); err == nil {
+			if rel, relErr := filepath.Rel(cwd, p); relErr == nil {
+				paths = append(paths, filepath.ToSlash(rel))
+			}
 		}
 	}
-	return false
+
+	paths = append(paths, entangleableClaimPaths...)
+	return paths
+}
+
+// claimAnchorRoot replicates MindspecExecutor.resolveAnchorRoot's
+// preference (internal/executor/mindspec_executor.go) without importing
+// the executor package (internal/next stays on the enforcement side of
+// the executor/enforcement boundary, ADR-0030): the target spec's
+// worktree if one already exists on disk, else repoRoot. specID == ""
+// or an invalid/nonexistent worktree path degrades to repoRoot, the same
+// ambient-helper fallback resolveAnchorRoot itself uses.
+func claimAnchorRoot(repoRoot string, cfg *config.Config, specID string) string {
+	if specID == "" {
+		return repoRoot
+	}
+	specWt, err := workspace.SpecWorktreePath(repoRoot, cfg, specID)
+	if err != nil {
+		return repoRoot
+	}
+	if fi, statErr := os.Stat(specWt); statErr == nil && fi.IsDir() {
+		return specWt
+	}
+	return repoRoot
+}
+
+// samePath compares two filesystem paths for equality after resolving
+// each to a cleaned absolute form (so "/repo" and "/repo/" or a
+// relative "." compare equal to their absolute counterparts). Neither
+// input is required to exist; a resolution failure falls back to a raw
+// string compare rather than erroring, matching this package's
+// ambient-helper degrade convention.
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return filepath.Clean(absA) == filepath.Clean(absB)
 }
 
 func defaultStatusPorcelain(cwd string) (string, error) {
@@ -90,6 +205,18 @@ func defaultStatusPorcelain(cwd string) (string, error) {
 	// failure — a missing `-C` target or corrupt index otherwise exits with
 	// an opaque *ExitError whose message the caller cannot surface.
 	out, err := gitutil.StatusWithStderr(cwd)
+	if err != nil {
+		return "", fmt.Errorf("checking working tree: %w", err)
+	}
+	return out, nil
+}
+
+// defaultStatusPorcelainZ is statusPorcelainZFn's default implementation
+// — the NUL-terminated `-z` form CheckDirtyTreeProportional parses
+// (round-1 panel G3/G6). CheckDirtyTree/CheckDirtyTreeDetail keep using
+// the newline form above unchanged.
+func defaultStatusPorcelainZ(cwd string) (string, error) {
+	out, err := gitutil.StatusZWithStderr(cwd)
 	if err != nil {
 		return "", fmt.Errorf("checking working tree: %w", err)
 	}
@@ -184,30 +311,158 @@ func CheckDirtyTree(repoRoot, cwd string) (userDirt []string, err error) {
 	return userDirt, err
 }
 
-// CheckDirtyTreeProportional narrows CheckDirtyTree's user-dirt result to
-// R5.1's derived entanglement enumeration (spec 128, #179 — the ADR-0025
-// clarifying amendment, scoped to the worktree-creating `mindspec next`
-// claim path ONLY; every other dirty-tree guard, including `mindspec
-// spec approve`'s and `mindspec release`'s, is unaffected and keeps
-// calling CheckDirtyTree/CheckDirtyTreeDetail directly).
+// dirtyEntry is one parsed `git status --porcelain -z` record. Path is
+// the current path (the ONLY path for anything but a rename/copy);
+// OrigPath is non-empty only for rename/copy records (status containing
+// 'R' or 'C'), carrying the path the entry moved/copied FROM. The `-z`
+// form gives each field a literal NUL terminator rather than the
+// newline form's " -> "-joined single string, so a rename's two paths
+// are never ambiguous to split (round-1 panel G3/G6) and no path needs
+// quote-escaping for embedded whitespace.
+type dirtyEntry struct {
+	Status   string
+	Path     string
+	OrigPath string
+}
+
+// dirCollapsed reports whether Path is a collapsed untracked-directory
+// entry (git's default untracked-files=normal mode reports an entirely
+// untracked directory as ONE such entry, "?? dir/", rather than
+// enumerating its contents).
+func (e dirtyEntry) dirCollapsed() bool {
+	return strings.HasSuffix(e.Path, "/")
+}
+
+// parsePorcelainZ parses `git status --porcelain -z` output (NUL-
+// terminated records; a rename/copy record is "XY PATH\0ORIG_PATH\0" —
+// the NEW path first, then the original — verified against real git
+// output, spec 128 Bead 7 round-1 fix).
+func parsePorcelainZ(out string) []dirtyEntry {
+	if out == "" {
+		return nil
+	}
+	fields := strings.Split(out, "\x00")
+	var entries []dirtyEntry
+	for i := 0; i < len(fields); {
+		f := fields[i]
+		i++
+		if f == "" {
+			continue
+		}
+		if len(f) < 4 {
+			continue
+		}
+		status := f[:2]
+		path := f[3:]
+		e := dirtyEntry{Status: status, Path: path}
+		if strings.ContainsAny(status, "RC") && i < len(fields) {
+			e.OrigPath = fields[i]
+			i++
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// classifyDirtyZ partitions parsed -z entries into co-managed artifact
+// dirt and user dirt, matching classifyDirty's exact-new-path-only rule
+// (a rename's OrigPath is not consulted for artifact classification —
+// unchanged scope from the pre-round-1 behavior; only entanglement
+// matching below considers both sides of a rename).
+func classifyDirtyZ(entries []dirtyEntry) (artifactEntries, userEntries []dirtyEntry) {
+	for _, e := range entries {
+		if isArtifactPath(e.Path) {
+			artifactEntries = append(artifactEntries, e)
+		} else {
+			userEntries = append(userEntries, e)
+		}
+	}
+	return
+}
+
+// entryIntersectsEntangleable reports whether e collides with any path
+// in entangleable — checking BOTH sides of a rename/copy (round-1 panel
+// G3/G6: "a rename/copy must block when either source or destination
+// intersects an entangleable path") and, for a collapsed untracked
+// directory, whether the directory contains (is an ancestor of) an
+// entangleable path.
+func entryIntersectsEntangleable(e dirtyEntry, entangleable []string) bool {
+	if pathIntersectsEntangleable(e.Path, e.dirCollapsed(), entangleable) {
+		return true
+	}
+	if e.OrigPath != "" && pathIntersectsEntangleable(e.OrigPath, false, entangleable) {
+		return true
+	}
+	return false
+}
+
+func pathIntersectsEntangleable(p string, dirCollapsed bool, entangleable []string) bool {
+	for _, want := range entangleable {
+		if p == want {
+			return true
+		}
+		if dirCollapsed && strings.HasPrefix(want, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderDirtyEntry formats e for a human-facing message: a rename/copy
+// renders as "old -> new" (git's own convention, and unambiguous here
+// since DirtyTreeFailure places one entry per line and IgnoredDirtNotice
+// quotes every entry — see below); anything else renders as its bare
+// path.
+func renderDirtyEntry(e dirtyEntry) string {
+	if e.OrigPath != "" {
+		return e.OrigPath + " -> " + e.Path
+	}
+	return e.Path
+}
+
+// CheckDirtyTreeProportional narrows the dirty-tree guard to R5.1's
+// derived entanglement rule (spec 128, #179 — the ADR-0025 clarifying
+// amendment, scoped to the worktree-creating `mindspec next` claim path
+// ONLY; every other dirty-tree guard, including `mindspec spec
+// approve`'s and `mindspec release`'s, is unaffected and keeps calling
+// CheckDirtyTree/CheckDirtyTreeDetail directly, unchanged).
+//
+// specID is the caller's best-known RESOLVED target spec (possibly ""
+// when next.go could not determine one before the guard runs) — it
+// feeds ComputeEntangleablePaths' per-spec recording-path class
+// (round-1 panel G1/F1).
 //
 // The artifact/user-dirt classification itself is unchanged (ADR-0025);
-// this only reclassifies what happens to the USER-dirt half: dirt on a
-// path the claim can itself write is blockingDirt (today: none —
-// entangleableClaimPaths is empty); every other user dirt is
-// ignoredDirt, so the caller can print an informational notice naming it
-// (Max's standing directive, 2026-09-02: visibility without the block)
-// while PROCEEDING with the claim.
-func CheckDirtyTreeProportional(repoRoot, cwd string) (blockingDirt, ignoredDirt []string, err error) {
-	_, userDirt, err := CheckDirtyTreeDetail(repoRoot, cwd)
+// this reclassifies what happens to the USER-dirt half: dirt on a path
+// ComputeEntangleablePaths names is blockingDirt; every other user dirt
+// is ignoredDirt, so the caller can print an informational notice naming
+// it (Max's standing directive, 2026-09-02: visibility without the
+// block) while PROCEEDING with the claim.
+func CheckDirtyTreeProportional(repoRoot, cwd, specID string) (blockingDirt, ignoredDirt []string, err error) {
+	entangleable := ComputeEntangleablePaths(repoRoot, cwd, specID)
+
+	out, err := statusPorcelainZFn(cwd)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, p := range userDirt {
-		if isEntangleableClaimPath(p) {
-			blockingDirt = append(blockingDirt, p)
+	artifactEntries, userEntries := classifyDirtyZ(parsePorcelainZ(out))
+
+	if len(artifactEntries) > 0 {
+		if err := exportBeadsFn(repoRoot); err != nil {
+			return nil, nil, fmt.Errorf("normalizing beads export: %w", err)
+		}
+		out2, err := statusPorcelainZFn(cwd)
+		if err != nil {
+			return nil, nil, err
+		}
+		_, userEntries = classifyDirtyZ(parsePorcelainZ(out2))
+	}
+
+	for _, e := range userEntries {
+		if entryIntersectsEntangleable(e, entangleable) {
+			blockingDirt = append(blockingDirt, renderDirtyEntry(e))
 		} else {
-			ignoredDirt = append(ignoredDirt, p)
+			ignoredDirt = append(ignoredDirt, renderDirtyEntry(e))
 		}
 	}
 	return blockingDirt, ignoredDirt, nil
@@ -220,17 +475,23 @@ func CheckDirtyTreeProportional(repoRoot, cwd string) (blockingDirt, ignoredDirt
 // visibility into what it ignored. Callers print this only when
 // ignoredDirt is non-empty — never on a clean tree.
 //
-// Each entry is an agent-writable porcelain filename (same provenance as
-// DirtyTreeFailure's dirty-path lines), so it is escaped per-path via
-// termsafe.Escape (ADR-0042) before joining onto the single line — a
-// hostile filename can forge neither extra output lines nor control
-// bytes.
+// Each entry is agent-writable porcelain text (same provenance as
+// DirtyTreeFailure's dirty-path lines), so it is rendered via
+// strconv.Quote UNCONDITIONALLY (round-1 panel G3/G5/G6's "unambiguous
+// notice boundaries" ask) rather than termsafe.Escape's printable-ASCII-
+// passthrough rule: this notice joins multiple entries on ONE line with
+// ", ", so a hostile path containing a literal ", " could otherwise
+// masquerade as a boundary between two DIFFERENT paths — Quote's
+// internal backslash-escaping of `"` keeps every entry self-delimiting
+// regardless of what it contains, closing both the control-byte/line-
+// forging risk termsafe.Escape defends against AND this list's
+// additional multi-entry ambiguity risk.
 func IgnoredDirtNotice(ignoredDirt []string) string {
-	escaped := make([]string, len(ignoredDirt))
+	quoted := make([]string, len(ignoredDirt))
 	for i, p := range ignoredDirt {
-		escaped[i] = termsafe.Escape(p)
+		quoted[i] = strconv.Quote(p)
 	}
-	return fmt.Sprintf("note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): %s", strings.Join(escaped, ", "))
+	return fmt.Sprintf("note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): %s", strings.Join(quoted, ", "))
 }
 
 // DirtyTreeFailure formats the blocking user-dirt guard failure for
