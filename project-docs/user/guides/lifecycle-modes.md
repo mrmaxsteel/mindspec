@@ -199,4 +199,9 @@ backward on purpose), and it is the guard of last resort if a future
 writer's forward/backward classification is ever wrong.
 
 See also [merge-safety.md](merge-safety.md) for the release/merge-safety
-verbs this table's `release` rows summarize the state-honesty half of.
+verbs this table's `release` rows summarize the state-honesty half of,
+including its "Gate-refused `mindspec complete` converges on a plain
+retry" section for the `complete` rows' gate-before-mutate reorder
+(spec 128 R4, #186) and its `mindspec impl adopt` section for the
+frozen-contract/externally-merged-predecessor guidance this file's
+terminal row's `idle`/`done` split is the destination state of.

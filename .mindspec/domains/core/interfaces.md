@@ -357,6 +357,73 @@ panel:
     # adhoc: absent -> resolves to bead's mix
 ```
 
+### Phase write lock, backward comparator, sanctioned sync (spec 128 R3.3, `internal/phase`)
+
+```go
+package phase
+
+// PhaseLockRelPath is the repo-relative lockfile path: ".mindspec/phase.lock".
+const PhaseLockRelPath = ".mindspec/phase.lock"
+
+// ErrPhaseLockTimeout is returned (wrapped; errors.Is matches) when the
+// bounded poll-with-deadline wait for the lock expires.
+var ErrPhaseLockTimeout error
+
+// WithPhaseWriteLock acquires the repo-scoped, kernel-held phase lock,
+// reads epicID's stored mindspec_phase, calls fn(stored, present) for the
+// caller's decision, performs fn's returned conditional MergeMetadata
+// write (mergeMetadata), and releases. EVERY mindspec_phase writer in the
+// codebase routes through this.
+func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error)) error
+
+// DescribeLockFailure renders the ADR-0035 recovery text for a lock
+// failure (naming the lock path + recoveryCommand) when
+// errors.Is(err, ErrPhaseLockTimeout); passes non-lock errors through.
+func DescribeLockFailure(err error, recoveryCommand string) string
+
+// SetLockWaitForTest overrides the bounded wait/poll-interval for one
+// test; never called from production code.
+func SetLockWaitForTest(wait, poll time.Duration) func()
+
+// IsBackwardMove reports whether moving stored mindspec_phase from `from`
+// to `to` is backward in the lifecycle total order (spec < plan <
+// implement < review < done). Either value outside the five named phases
+// (including "") is UNKNOWN — incomparable pairs report backward.
+func IsBackwardMove(from, to string) bool
+
+// SanctionedDerivedSync is the ONE sanctioned internal backward-write
+// surface: re-derives epicID's child-derived phase and writes it inside
+// the lock's own critical section, backward permitted, no force/reason.
+// Its only production caller is cmd/mindspec/release.go's releaseSyncPhase
+// (enforced by a call-site enumeration test).
+func SanctionedDerivedSync(root, epicID string) error
+
+// PhaseSemanticsV2MarkerKey/PhaseSemanticsV2Value name the durable
+// per-epic marker ("mindspec_phase_semantics": "v2") that makes the
+// legacy-to-v2 phase-semantics rewrite below a true one-shot.
+const PhaseSemanticsV2MarkerKey = "mindspec_phase_semantics"
+const PhaseSemanticsV2Value = "v2"
+
+// LegacyPhaseSignature reports whether stored/children match the pre-v2
+// plan-approve signature (stored "implement", every lifecycle child
+// still "open") that EnsurePhaseSemanticsV2 rewrites to "plan" + the marker.
+func LegacyPhaseSignature(stored string, children []ChildInfo) bool
+
+// EnsurePhaseSemanticsV2 performs that one-shot rewrite for epicID under
+// the phase write lock, gated by the marker so it can never re-fire.
+func EnsurePhaseSemanticsV2(root, epicID string) (bool, error)
+
+// DerivePhaseWithStatus(WithCache) is the STATUS-AWARE derivation surface
+// (spec 128 AC-2's per-row agreement-table derivation leg): trusts a
+// present stored mindspec_phase, but runs the child-derived phase as a
+// consistency check and emits a direction-conditional stderr warning on
+// disagreement — a forward disagreement recommends `mindspec repair
+// phase`; a backward one recommends only inspection (`bd show <epic>`),
+// never a command that would move the epic backward.
+func DerivePhaseWithStatus(epicID, epicStatus string) (string, error)
+func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string, error)
+```
+
 ## Consumed Interfaces
 
 - **context-system**: Glossary parsing (for broken-link validation in doctor)

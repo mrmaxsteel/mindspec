@@ -1045,3 +1045,211 @@ substitute, and the branch actually scanned is recorded in the audit
 either way. The verb registered its `reattest` token in
 core-owned `internal/redact.CommandTokens` (the standing new-top-level-
 command rule — see the core domain interfaces doc).
+
+## Lifecycle verb state honesty (spec 128)
+
+Spec 128 closes the class of bugs where a lifecycle verb's *reported* mode
+disagreed with, or fabricated, its *actual* state (GH #220/#245/#248/#186/
+#179/#187/#146/#221). It touches every mode-transitioning verb; this
+section groups the changes by the requirement that motivated them. The
+core domain's architecture doc covers the `mindspec_phase` write lock,
+backward-move comparator, sanctioned-sync, and v2-semantics translation
+this section's writers all route through.
+
+### R1 — Draft-mode honesty and discovery-failure honesty
+
+`internal/resolve.ResolveModeWithCache` no longer collapses a no-epic spec
+straight to `idle`: OQ-2's resolution treats a spec directory + `spec/<id>`
+branch with no lifecycle epic yet as a legitimate pre-epic DRAFT, returning
+`ModeSpec` (`resolve.go`). Critically, this is disambiguated from a genuine
+discovery FAILURE (R1.4, the named hazard): `draftSpecStatusWithCache`
+probes bd health directly and propagates a failure rather than falling
+through to a false idle — the 2026-09-01 counterexample this spec exists
+to kill (`{"mode":"idle","activeSpec":"128-…"}` for a fresh draft, and a
+bare `{"mode": ""}` exit 0 when bd was unreachable). `target.go`'s
+`ResolveSpecPrefixProven` extends `ResolveSpecPrefix`'s existing numeric-
+prefix branch (which already proves existence via epic discovery) to the
+full-hyphenated-ID passthrough branch: it now PROVES the resolved ID names
+either an epic-bearing spec or a legitimate on-disk draft, via the
+execution domain's `gitutil.FileExistsAtRef` cross-worktree visibility fix
+(a freshly committed draft on a spec worktree's branch is visible from the
+main checkout through the shared object store, without checkout).
+
+`cmd/mindspec/state.go`'s `state show` — a read-only query — surfaces a bd/
+Dolt discovery failure as a hard, non-zero `stateDiscoveryFailure` refusal
+(`guard.NewFailure` naming `mindspec doctor`) rather than a silent
+`{"mode": ""}` success. This is a DIFFERENT honesty contract than the
+instruct tail's (below): `state show` must not exit 0 on a failure it
+cannot honestly render, while the tail (which must never fail the verb it
+trails) gets the indeterminate rendering instead.
+
+### R2/R2.3 — The indeterminate-mode instruct tail, never a fabricated idle/plan
+
+`internal/state.ModeIndeterminate` (core domain) is the sentinel this
+domain's `internal/instruct` and `internal/resolve` packages exist to
+select instead of fabricating `idle.md`/a wrong mode for a failure they
+never actually observed. `internal/instruct/run.go` gained three new
+handlers: `handleIdleOrDraft` (the protected-branch/no-`--spec` fast path
+now consults the same on-disk/branch draft scan `state show` uses before
+concluding idle — `mindspec instruct` run standalone must agree with
+`state show`), `handleDraft` (renders spec-mode guidance, never idle's
+"Available Actions" block, for a confirmed pre-epic draft), and
+`handleIndeterminate` (renders `templates/indeterminate.md` via
+`BuildIndeterminateContext(WithCache)`/`RenderIndeterminate` for a genuine
+discovery failure or unresolved multi-active-spec ambiguity). `internal/
+hook/dispatch.go`'s pre-commit hook was extended to fail CLOSED on a
+spec-branch commit when `ReadState` maps to `ModeIndeterminate`: that
+sentinel matched neither the prior idle fast-path nor the implement-mode
+check, so it silently fell through to Pass — permitting a direct
+spec-branch commit precisely when the hook cannot prove implementation
+mode has ended. The refusal names the real indeterminate cause, never a
+fabricated "not in implement mode" claim.
+
+`internal/complete/complete.go`'s `advanceState` is the concrete AC-4b
+fix: its post-close children read now routes through the
+`completeFetchChildrenFn` seam (the `completeMergeMetadataFn` house
+pattern) instead of calling `phase.FetchChildren` directly, and a failed
+read PROPAGATES as an error — `Result.NextModeIndeterminate` +
+`IndeterminateReason` — rather than being silently discarded into a nil
+child set that `DerivePhaseFromChildren` would have derived as a
+fabricated `plan`. `FormatResult` renders the SAME indeterminate marker
+text in the result summary that `completeTail` renders in the instruct
+tail (both routed through `termsafe.Escape`, since the reason may embed
+agent-writable bd/git output), and the step-6.5 phase-sync write is
+skipped entirely on this path — no value derived from a failed read is
+ever written. `FormatResult`'s `plan`-mode message was also reworded
+(R2.3, round-4/5 tally): the two triggers that actually reach it are the
+empty-lifecycle-subset fallback and the all-open-children branch, neither
+of which is "remaining beads are blocked" (a distinct, and false, claim
+the old wording made).
+
+### R3/R3.6 — The backward-move guard and replay-safety
+
+`cmd/mindspec/repair.go` gained the operator-facing backward-move guard:
+`mindspec repair phase` reads the stored phase under the write lock,
+refuses via `phase.IsBackwardMove` unless `--force-backward "<reason>"` is
+given (the flag's empty-reason case is rejected with the same discipline
+as `--allow-doc-skew`/`--override-adr`), and a forced write's success line
+names the recorded reason. `EnsurePhaseSemanticsV2` also runs at this
+verb's own entry, ahead of the guard, so a legacy-signature epic is
+reconciled to v2 semantics before the guard ever evaluates it.
+
+`internal/approve/spec.go`'s `backfillExistingEpicPhase` fixes R3.6's
+#248-class defect: `ApproveSpec`'s existing-epic path used to
+unconditionally write `mindspec_phase="plan"`, regressing a REPLAYED
+`spec approve` against an epic already at `implement`/`review`/`done`.
+The extracted function (matching `next.go`'s established
+`advancePhaseOnClaim`/`claimFailureError` pattern) now reads the stored
+value under the lock and only backfills when it is genuinely absent,
+naming the no-op/refusal disposition in the output when a replay finds
+the phase already set — distinguishing a real backfill from a no-op.
+
+### R4 — The gate-before-mutate reorder (#186)
+
+OQ-1 resolved to (a): reorder the panel/content gates to run BEFORE any
+`complete`-authored commit, rather than (b) rolling back an authored
+commit or (c) computing a staleness-exemption fact. `internal/complete/
+materialize.go` (new) is `mindspec complete`'s orchestration of the
+execution domain's prospective-snapshot protocol (see that domain's
+architecture doc for the git-level M/R/S/G/T mechanics): it takes ONE
+snapshot of the bead worktree's prospective content AFTER the panel gate
+(`internal/complete/panel_advisory.go`'s `panelGate`, still the sole
+authoritative panel-gate enforcement, still running over the
+DECLARED beadID with zero shell parsing), runs the per-bead content gates
+against that snapshot BEFORE any commit exists
+(`internal/validate/docsync.go`'s `ValidateDocsSnapshot` and
+`internal/validate/adr_divergence.go`'s `CheckADRDivergenceSnapshot` /
+`divergence.go`'s `ValidateDivergenceSnapshot` — new tree-vs-tree legs
+alongside the unchanged committed-range functions reconcile mode and
+`impl approve`'s whole-branch backstop still call), and only on a full
+gate pass materializes the snapshot into the bead branch's real commits.
+Because no complete-authored commit exists before the gates run, a gate
+refusal now ALWAYS leaves the bead branch tip at `reviewed_head_sha` —
+the retry meets the identical gate, never a false panel-staleness block
+and never masked dirt (AC-6/AC-7(i)). `internal/panel/gate.go` itself is
+UNTOUCHED structurally under this OQ-1(a) resolution (the zero-subprocess
+`internal/panel` leaf stays config-free and un-widened) — only its
+user-dirt refusal's wording was updated to name the new commit-tree-built
+mechanism instead of the retired porcelain `CommitAll` commit it used to
+describe. `cmd/mindspec/complete.go`'s `completeTail` routes an
+`AC-4b`-style indeterminate result through the SAME reason `Run` already
+resolved, never re-deriving independently. See ADR-0041 §1's amendment and
+§3(i) for the full staged-boundary protocol and honest-scope statement
+(the GATE-REFUSAL class is closed by construction; a POST-gate failure —
+merge conflict, `bd close` failure — is unchanged 127 preserved-merge/
+forward-reconcile territory, out of this reorder's scope).
+
+### R5 — The proportional dirty-tree claim guard (#179)
+
+`internal/next/guard.go`'s `ComputeEntangleablePaths` replaces the
+whole-tree invoking-checkout dirty block for the worktree-creating claim
+path with a DERIVED enumeration: the entanglement is exactly
+`.mindspec/session.json` (gitignored, never blockable), `.beads/
+issues.jsonl` via bd export (ADR-0025's sole named artifact, already
+exempt), and the new bead worktree directory (created only after the
+guard runs) — the claim-entangleable user-dirt set is therefore EMPTY
+today, so the invoking-worktree user-dirt block is REMOVED for this path
+specifically (every other dirty-tree guard, `spec approve`'s and
+`release`'s included, is unaffected). `entangleableClaimPaths` is a
+test-injectable residual on top of the two derived classes
+(`SetEntangleableClaimPathsForTest`) so the refusal machinery
+(`DirtyTreeFailure`'s worktree-context + final-recovery-line contract,
+unchanged) stays exercised by a seam-injected leg (AC-8(iii)) even though
+the real, dynamic entanglement is empty. `CheckDirtyTreeProportional`
+narrows the guard to this rule for the claim path only.
+
+### R6 — Deterministic, honest bead selection (#187/#146)
+
+`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` are R6.1's ONE
+shared ready-set construction: the `bd ready` query plus the spec-title
+filter, consumed IDENTICALLY by the claim path and `--emit-only`, so
+`--pick N` always names the same bead on both paths for the same N (AC-9)
+and a filter drop is reported the same way on both (R6.3). `select.go`'s
+`SelectWork` makes pick semantics TOTAL: `--pick N` (N≥1) always indexes
+the displayed list, even with exactly one item — the prior single-item
+early return that bypassed pick validation is gone (red-on-revert);
+`--pick 0` means unset, and a negative pick errors rather than being
+silently ignored. `SelectNamedFromReadySet` gives a positional bead ID
+that IS ready but excluded by the spec-title filter an honest exclusion-
+reason error instead of the generic "not found or not ready" (R6.3(b)/
+AC-10). `BuildReadySet`'s `scopeResolutionRefusal` (R6.7/AC-15) refuses an
+explicit `--spec` whose epic resolution fails — genuine discovery failure,
+legitimate on-disk draft, or a truly nonexistent spec — naming the real
+cause, on BOTH paths, and NEVER falls back to the global unscoped `bd
+ready` query the pre-128 code silently substituted.
+
+`internal/next/beads.go`'s `bdRenderedError`/`RenderBDError` and
+`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together
+deliver AC-11: bd's captured stderr now survives into mindspec's own error
+text (content half, execution domain), escaped per-line via
+`termsafe.Escape` before reaching any terminal-facing message (rendering
+half, this domain) — so a hostile/control-bearing bd stderr line cannot
+forge terminal control sequences. `cmd/mindspec/next.go` also gained a new
+`mindspec_phase` writer under the R3.3 lock (`nextPhaseMergeMetadataFn`,
+line ~608): the claim path's own phase advance, exported via
+`phase.DerivePhaseFromChildren` for this exact caller.
+
+Struck without implementation, with rationale recorded in the spec (not
+re-litigated here): #146 #2(a)'s prose `Depends on` parser (the
+`work_chunks`→`bd dep add` mechanism already covers it) and #146 #3's
+doctor suggestions (already shipped pre-128).
+
+### R7 — Frozen-contract / externally-merged guidance and AC-14's total verb classification
+
+R7's instruct-template and `merge-safety.md` changes are covered in the
+project docs guide (`project-docs/user/guides/merge-safety.md`) and the
+template test (`cmd/mindspec`) — see that guide for the operator-facing
+text. `cmd/mindspec/root.go`'s `newExecutorFn` package-level seam and the
+cobra-tree total-classification test (`verb_output_test.go`,
+`mutatingVerbRows`/`mutatingVerbAliases`/`nonMutatingAllowlist`) mechanize
+AC-14: every RUNNABLE registered command must be classified as one of
+R2.1's nine mutating verbs (or a function-pointer-verified alias) or in
+the rationale-carrying non-mutating allowlist — registering a new command
+without classifying it, or classifying one as mutating without a row, is
+red. `internal/guard/registries.go` gained rationale entries for
+`repair.go`'s new multi-line `guard.NewFailure` recovery text (the
+backward-move refusal's `bd show`/`mindspec repair phase --force-backward`
+lines) in the same disclosed-residual vocabulary the registry already
+uses for unprovable ID-substitution positions. `internal/bootstrap/
+bootstrap.go`'s `starterGitignore` gained `.mindspec/phase.lock` so
+greenfield projects gitignore the new lockfile from their first commit.

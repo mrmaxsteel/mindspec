@@ -103,6 +103,44 @@ resumption/drift-collapse mechanics behind fault-injectable seams):**
 | `UpdateRef(workdir, ref, sha)` / `ResetSoft(workdir, target)` | Move a ref / branch tip onto the collapse result. |
 | `recordMergeSourceMarker` (unexported; `MergeSourceMarkerRef(source)` names the ref) | Writes the merge-start marker ref `MergeInto`/`MergeBranch` record so resumption can corroborate WHICH source a preserved merge belongs to. |
 
+### Prospective-snapshot / write-ahead materialization primitives (spec 128 Bead 6, `internal/gitutil/materialize.go`)
+
+The eight `Executor` interface methods `internal/complete` calls to
+implement the #186 gate-before-mutate reorder (workflow domain, ADR-0041
+§1 amendment) — no new `internal/gitutil` import crosses the ADR-0030
+boundary:
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Touches no real index/ref/worktree state. |
+| `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. |
+| `MaterializeStageCommit(wtPath, tree, parent, stage, subject)` | Builds a commit via plumbing (`git commit-tree`, no hooks) carrying the pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`; `StageMaterialization`/`StageArtifactSync`) — read back on re-entry instead of inferred from a tree diff. |
+| `PublishStageMarker(beadID, oid, expectedOld)` / `ReadStageMarker(beadID)` / `ClearStageMarker(beadID, expectedOID)` | The write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`, all via per-ref compare-and-swap: publish before either stage's branch advances (CREATE semantics when `expectedOld == ""`), read to discriminate a resumed run, clear on the terminal step only against the OID this invocation owns. |
+| `AdvanceBranchExpectedOld(branch, newSHA, expectedOld)` | CAS branch-ref advance a concurrent mover cannot silently clobber. |
+| `ResetIndexToHead(wtPath)` | Index-only `reset --mixed HEAD` refreshing the real index to the just-advanced tip without touching worktree files. |
+
+Together: `M` builds candidate commit `C` from `T`; `R` resets the index to
+`C`; `S` re-classifies the exact delta about to be committed (any
+non-artifact path outside the named set REFUSES here, before commit `D` is
+built) then builds `D`; `G` is the pre-existing preserved-merge machinery
+(unchanged); `T` clears the marker on both completion paths. `MockExecutor`
+stubs all eight with configurable results defaulting to zero values, so a
+pre-existing test that never configures them exercises the
+nothing-to-materialize (both stages elide) path unchanged.
+
+### bd stderr passthrough content (spec 128 R6.4/AC-11, `internal/bead/bdcli.go`)
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `wrapBDError(err)` | Decorates a failed bd invocation so its captured `exec.ExitError.Stderr` becomes part of the returned error's rendered text (previously discarded by every `%w`-wrapping caller — a stale-binary schema error surfaced as a bare "exit status 1"). |
+| `bdStderrExcerptLineCap` (20) | Bounds the surfaced excerpt for a pathological/hostile bd; legitimate bd/Dolt diagnostics are one to a handful of lines. |
+
+This is the CONTENT half of AC-11 only — non-exit errors and whitespace-only
+stderr pass through unchanged. The workflow domain's `internal/next`
+applies the per-line `termsafe.Escape` RENDERING half (ADR-0042) before any
+of this text reaches a terminal, since raw bd stderr is agent-writable/
+hostile-adjacent.
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()` for locating the repository root
