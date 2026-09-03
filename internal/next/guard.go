@@ -65,10 +65,11 @@ func EntangleableClaimPaths() []string {
 
 // SetEntangleableClaimPathsForTest swaps entangleableClaimPaths for a
 // test's duration and returns a restore func. AC-8(iii)'s seam-injected
-// refusal leg uses this to keep the block machinery under test even
-// though the real enumeration is empty today: inject a path here, dirty
-// it, and CheckDirtyTreeProportional must still refuse via the preserved
-// DirtyTreeFailure contract.
+// refusal leg uses this to keep the block machinery under test
+// independent of the two real, conditional dynamic classes
+// ComputeEntangleablePaths derives (round-1 F1/G1): inject a path here,
+// dirty it, and CheckDirtyTreeProportional must still refuse via the
+// preserved DirtyTreeFailure contract.
 func SetEntangleableClaimPathsForTest(paths []string) func() {
 	orig := entangleableClaimPaths
 	entangleableClaimPaths = paths
@@ -93,27 +94,44 @@ func SetEntangleableClaimPathsForTest(paths []string) func() {
 //     never diverge) — genuine only when absent.
 //  2. The TARGET spec's two recording paths — `recording.EmitBeadMarker`
 //     and `recording.AddBeadToPhase` (cmd/mindspec/next.go's claim-path
-//     step 7.5) ALWAYS write under repoRoot (unconditionally — unlike
-//     the .gitignore write, this one does NOT route through
-//     resolveAnchorRoot), append events.ndjson and read-modify-write
-//     manifest.json, but ONLY when recording.enabled is true AND that
-//     spec already has a recording directory there (a dir that doesn't
-//     exist can't appear in porcelain output regardless, so this
-//     function does not re-check HasRecording itself). specID == ""
-//     omits this class entirely — a conservative "unknown, so not
-//     claimed as entangled" choice.
+//     step 7.5) — append events.ndjson and read-modify-write
+//     manifest.json under WHATEVER absolute directory
+//     recording.EventsPath/ManifestPath resolve to. That resolution
+//     goes through workspace.SpecDir, which ALSO prefers the spec
+//     worktree's copy when one exists — but round-2 panel G2: SpecDir's
+//     own worktree-existence probe is not cfg-aware (it hardcodes
+//     `.worktrees` via DefaultWorktreesDir, never honoring a custom
+//     cfg.WorktreeRoot), so under a custom worktree_root it can resolve
+//     a DIFFERENT tree than claimAnchorRoot's cfg-aware preference does
+//     for .gitignore. Rather than replicate (and now duplicate-drift)
+//     that resolution, this function trusts recording's OWN answer
+//     unconditionally and gates purely on CONTAINMENT (below) — correct
+//     by construction no matter which tree SpecDir actually picked.
+//     recording.enabled must be true; specID == "" omits this class
+//     entirely — a conservative "unknown, so not claimed as entangled"
+//     choice.
 //
-// BOTH classes are gated on OBSERVABILITY (round-1 fix-round hardening,
-// caught by this bead's own AC-8(ii) e2e fixtures): the dirty-tree
-// guard's porcelain snapshot is scoped to cwd's OWN working tree — a
-// write landing in a DIFFERENT linked worktree (e.g. the .gitignore
-// write anchored at the spec worktree while the agent invokes `next`
-// from the main checkout) can never collide with, or even be seen
-// alongside, dirt cwd's own `git status` could ever report. A class is
-// therefore included only when its write target's working tree equals
-// cwd's: the .gitignore class when claimAnchorRoot(repoRoot, specID) ==
-// cwd; the recording class when repoRoot == cwd (its target is always
-// repoRoot, unconditionally).
+// BOTH classes are gated on CONTAINMENT (round-2 panel G1, a hard
+// block): a class is included iff its RESOLVED absolute write target
+// falls inside the CANONICAL top-level of cwd's OWN git working tree —
+// never by comparing an anchor string to cwd. The prior
+// samePath(anchor, cwd) lexical-equality gate was wrong two ways a real
+// e2e fixture now pins: invoking `next` from a SUBDIRECTORY of the
+// anchor tree disarmed every class (porcelain is toplevel-relative
+// regardless of cwd — the exact reason workspace.FindRoot exists — so
+// the guard was observing real dirt while every class silently went
+// dark), and a symlink alias of the tree evaded it outright (a
+// different lexical string resolving to the identical tree). toplevelOf
+// resolves cwd's `git rev-parse --show-toplevel` through
+// filepath.EvalSymlinks so a subdirectory invocation and a symlinked
+// alias both resolve to the SAME canonical identity as the tree itself;
+// containedRel resolves the write target the same way and reports its
+// path relative to THAT toplevel (never relative to cwd — the old
+// filepath.Rel(cwd, ...) base was ALSO wrong, since porcelain paths are
+// toplevel-relative regardless of cwd, and would never have matched a
+// subdirectory cwd's relative form anyway). A target outside the
+// toplevel entirely is excluded, never forced into a leaking
+// "../"-prefixed relative path.
 //
 // The `.mindspec/session.json` (gitignored) and bead-worktree-directory
 // (gitignored, `.worktrees/`) classes from the original enumeration
@@ -121,7 +139,7 @@ func SetEntangleableClaimPathsForTest(paths []string) func() {
 // porcelain dirt regardless of config, so they need no runtime check
 // here. The test-injectable residual (entangleableClaimPaths) is unioned
 // in last, unconditionally (a test asserting a specific write class
-// should not also have to fake cwd/anchor agreement).
+// should not also have to fake toplevel/containment agreement).
 func ComputeEntangleablePaths(repoRoot, cwd, specID string) []string {
 	var paths []string
 	cfg, cfgErr := config.Load(repoRoot)
@@ -129,33 +147,22 @@ func ComputeEntangleablePaths(repoRoot, cwd, specID string) []string {
 		cfg = config.DefaultConfig()
 	}
 
-	// Shared anchor: workspace.SpecDir (which recording.EventsPath/
-	// ManifestPath resolve through) prefers the spec's WORKTREE copy of
-	// `.mindspec/specs/<specID>` whenever one exists on disk — the exact
-	// same existence preference resolveAnchorRoot applies for the
-	// .gitignore write. Both write classes are therefore observable from
-	// the SAME anchor.
-	anchor := claimAnchorRoot(repoRoot, cfg, specID)
+	toplevel := toplevelOf(cwd)
 
-	if samePath(anchor, cwd) && !gitutil.HasGitignoreEntry(cwd, cfg.WorktreeRoot) {
-		paths = append(paths, ".gitignore")
+	anchor := claimAnchorRoot(repoRoot, cfg, specID)
+	if rel, ok := containedRel(toplevel, filepath.Join(anchor, ".gitignore")); ok && !gitutil.HasGitignoreEntry(anchor, cfg.WorktreeRoot) {
+		paths = append(paths, rel)
 	}
 
-	if specID != "" && samePath(anchor, cwd) && recording.IsEnabled(repoRoot) {
-		// Relative to cwd (== anchor here), matching what `git status`
-		// run FROM cwd actually reports — workspace.SpecDir (which these
-		// resolve through) prefers the spec worktree's OWN copy of
-		// `.mindspec/specs/<specID>` whenever one exists, so the
-		// resolved absolute path already sits under anchor, not
-		// necessarily under repoRoot.
+	if specID != "" && recording.IsEnabled(repoRoot) {
 		if p, err := recording.EventsPath(repoRoot, specID); err == nil {
-			if rel, relErr := filepath.Rel(cwd, p); relErr == nil {
-				paths = append(paths, filepath.ToSlash(rel))
+			if rel, ok := containedRel(toplevel, p); ok {
+				paths = append(paths, rel)
 			}
 		}
 		if p, err := recording.ManifestPath(repoRoot, specID); err == nil {
-			if rel, relErr := filepath.Rel(cwd, p); relErr == nil {
-				paths = append(paths, filepath.ToSlash(rel))
+			if rel, ok := containedRel(toplevel, p); ok {
+				paths = append(paths, rel)
 			}
 		}
 	}
@@ -185,19 +192,93 @@ func claimAnchorRoot(repoRoot string, cfg *config.Config, specID string) string 
 	return repoRoot
 }
 
-// samePath compares two filesystem paths for equality after resolving
-// each to a cleaned absolute form (so "/repo" and "/repo/" or a
-// relative "." compare equal to their absolute counterparts). Neither
-// input is required to exist; a resolution failure falls back to a raw
-// string compare rather than erroring, matching this package's
-// ambient-helper degrade convention.
-func samePath(a, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
-	if errA != nil || errB != nil {
-		return a == b
+// toplevelOf resolves cwd's git working tree's CANONICAL top-level
+// directory (round-2 panel G1): gitutil.Toplevel (`git rev-parse
+// --show-toplevel`) — which resolves correctly from any subdirectory of
+// the tree — followed by filepath.EvalSymlinks, so a symlink alias of
+// the tree resolves to the SAME identity as the tree itself. A
+// resolution failure (cwd not inside a git repo, or a transient git
+// error) degrades to cwd unresolved, the pre-fix behavior, rather than
+// erroring the whole guard.
+func toplevelOf(cwd string) string {
+	top, err := gitutil.Toplevel(cwd)
+	if err != nil {
+		// No git toplevel resolvable (e.g. a bare fixture directory in a
+		// unit test) — fall back to cwd itself, but STILL run it through
+		// the same EvalSymlinks pass below. Skipping that here would
+		// compare an unresolved cwd against a resolved target
+		// (evalSymlinksBestEffort always resolves what it can), turning
+		// every path into a spurious "escapes the toplevel" mismatch
+		// purely from symlink-vs-canonical lexical form (e.g. macOS
+		// t.TempDir()'s /var/folders/... vs realpath's
+		// /private/var/folders/...), not a real containment failure.
+		top = cwd
 	}
-	return filepath.Clean(absA) == filepath.Clean(absB)
+	if resolved, evalErr := filepath.EvalSymlinks(top); evalErr == nil {
+		return resolved
+	}
+	return top
+}
+
+// containedRel resolves target (an absolute path that need not exist
+// yet — recording.EventsPath's events.ndjson is a case in point: a
+// FRESH file the coming claim is about to create) via
+// evalSymlinksBestEffort and reports whether the result is CONTAINED
+// within toplevel (equal to it or a descendant) — the round-2 panel G1
+// replacement for the old samePath(anchor, cwd) lexical-equality gate.
+// On success it returns target's path relative to toplevel in slash
+// form, matching porcelain's own toplevel-relative convention; a target
+// outside toplevel entirely reports ok=false rather than a leaking
+// "../"-prefixed relative path.
+func containedRel(toplevel, target string) (rel string, ok bool) {
+	resolvedTarget := resolveContainingDirs(target)
+	r, err := filepath.Rel(toplevel, resolvedTarget)
+	if err != nil {
+		return "", false
+	}
+	if r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(r), true
+}
+
+// resolveContainingDirs resolves symlinks in p's DIRECTORY chain only —
+// walking up to the nearest existing ancestor (a fresh recording.
+// EventsPath target's own `recording/` directory may not exist yet
+// either — StartRecording's os.MkdirAll only runs once recording.enabled
+// is toggled on, which the caller's fixture may not have exercised) —
+// and rejoins p's own basename UNRESOLVED, even when that basename is
+// itself a symlink. This is deliberate, not an oversight: a bug hunted
+// down by this bead's OWN "symlinked .gitignore" e2e fixture. `git
+// status` reports a symlinked .gitignore under its OWN tracked name,
+// ".gitignore" — never the name of whatever it points to — so resolving
+// the leaf itself here would compute a containedRel result
+// (e.g. "gitignore-target.txt") that can never match that porcelain
+// name, silently un-entangling a genuinely dirty, symlinked .gitignore.
+// Resolving only the ANCESTOR directories still correctly normalizes a
+// symlink ALIAS of the observed tree (this function's actual job) while
+// leaving the tracked leaf name intact for porcelain matching. Reaching
+// the filesystem root without finding an existing ancestor degrades to
+// the raw, unresolved path — the ambient-helper degrade convention this
+// package already uses elsewhere (e.g. claimAnchorRoot's fallback to
+// repoRoot).
+func resolveContainingDirs(p string) string {
+	dir := filepath.Dir(p)
+	suffix := []string{filepath.Base(p)}
+	for {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p
+		}
+		suffix = append(suffix, filepath.Base(dir))
+		dir = parent
+	}
 }
 
 func defaultStatusPorcelain(cwd string) (string, error) {

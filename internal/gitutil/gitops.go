@@ -1241,6 +1241,23 @@ func gitArgs(workdir string, args ...string) []string {
 
 // --- read helpers ----------------------------------------------------------
 
+// Toplevel returns the canonical top-level directory of the git working
+// tree containing workdir (`git rev-parse --show-toplevel`), trimmed —
+// resolves correctly whether workdir IS the top-level or a subdirectory
+// of it. Spec 128 Bead 7 round-2 panel G1: the proportional claim
+// guard's containment check needs the OBSERVED tree's canonical root
+// (not the invocation cwd itself, which may be a subdirectory or a
+// symlink alias) so it can test whether a resolved write target falls
+// inside that same tree.
+func Toplevel(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--show-toplevel")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse --show-toplevel: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // RevParseHEAD returns the HEAD commit SHA of workdir, trimmed.
 func RevParseHEAD(workdir string) (string, error) {
 	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "HEAD")...)
