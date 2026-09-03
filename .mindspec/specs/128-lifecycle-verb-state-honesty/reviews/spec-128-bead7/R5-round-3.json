@@ -1,0 +1,49 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Reviewed commit 3018a6591f54d3a37568db9c46dad0ddc0d32d90 closes the round-2 containment defects without introducing a spec-branch-corrupting path. toplevelOf derives the observed Git tree from any existing subdirectory and canonicalizes a symlink alias; containedRel compares against that canonical root, accepts an exact-root target as '.', rejects true parent/sibling escapes, and resolves existing directory symlinks even when several target levels do not yet exist. resolveContainingDirs deliberately preserves the leaf basename, which is required to match Git porcelain's tracked symlink name. The disclosed leaf-symlink bonus fix passed both its unit regression and the real claim refusal fixture with byte-identical no-op assertions. A scratch overlay probe found that directory-form inputs ending in a separator duplicate the last component, but neither production caller supplies a directory-form target: all targets are concrete files (.gitignore, events.ndjson, manifest.json). Under the panel's explicit rule to block only on spec-branch-corrupting defects, that dormant helper limitation is non-blocking. Build, focused containment tests, command-level subdirectory/symlink/leaf-symlink fixtures, and the full short suite passed; the bead worktree remained clean and exactly at the reviewed SHA, and scratch artifacts were removed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R3-1",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/guard.go:203-242; internal/gitutil/gitops.go:1252-1259",
+      "summary": "Canonical toplevel containment handles root, subdirectory, alias, equality, and escape boundaries correctly for production targets.",
+      "evidence": "toplevelOf uses git rev-parse --show-toplevel followed by EvalSymlinks. Focused tests passed for root, subdirectory, symlink alias, direct child, outside sibling, and the full proportional guard. The scratch probe additionally observed containedRel(root, root) == ('.', true), rejected a sibling sharing the root's lexical prefix, and rejected a deep nonexistent target beneath an existing directory symlink that escaped the tree."
+    },
+    {
+      "id": "R5-R3-2",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/guard.go:245-282; internal/next/containment_test.go:133-182",
+      "summary": "Nearest-existing-ancestor walking is ordered correctly and leaf symlinks retain their porcelain identity.",
+      "evidence": "For root/one/two/three/leaf with all nested levels absent, resolveContainingDirs walks to root and rejoins suffix components in forward order; the probe returned one/two/three/leaf. The leaf-symlink unit test returned the symlink's own basename rather than its target. The real symlinked-.gitignore claim fixture refused and preserved bead status, branches, worktrees, symlink target, and checked file bytes."
+    },
+    {
+      "id": "R5-R3-3",
+      "classification": "NON_BLOCKING_LIMITATION",
+      "severity": "low",
+      "location": "internal/next/guard.go:265-282",
+      "summary": "Trailing separators on directory-form targets duplicate the final component, but no reviewed production call can supply that shape.",
+      "evidence": "The scratch overlay probe observed containedRel(root, root + separator) return basename(root) rather than '.', and root/one/two/three/ return one/two/three/three. filepath.Base and filepath.Dir each clean the trailing separator, after which resolveContainingDirs rejoins the same basename. ComputeEntangleablePaths calls containedRel only with filepath.Join(anchor, '.gitignore') and recording EventsPath/ManifestPath file paths, so this cannot disarm or misclassify an actual claim write and is not a spec-branch-corrupting defect."
+    },
+    {
+      "id": "R5-R3-4",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "cmd/mindspec/next_claim_guard_containment_test.go; cmd/mindspec/next_gitignore_refusal_test.go",
+      "summary": "The real claim-path regressions confirm confinement and byte-identical refusal.",
+      "evidence": "The command-level custom-root, subdirectory-invocation, and symlink-alias fixture selection passed in 150.818s. The disclosed symlinked-.gitignore variant passed separately in 51.134s. These fixtures use disposable repositories and directly compare pre/post lifecycle state and relevant bytes."
+    },
+    {
+      "id": "R5-R3-5",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "reviewed commit 3018a6591f54d3a37568db9c46dad0ddc0d32d90",
+      "summary": "Artifact identity, build, regression suite, and cleanliness were verified.",
+      "evidence": "HEAD matched the reviewed SHA. make build exited 0. The focused internal/next containment suite passed, the full go test ./... -short -count=1 suite passed, and final git status plus cached and uncached diffs were empty. The /tmp overlay probe directory was removed."
+    }
+  ]
+}

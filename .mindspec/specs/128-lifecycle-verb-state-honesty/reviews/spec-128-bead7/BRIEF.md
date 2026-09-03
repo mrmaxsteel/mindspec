@@ -2,14 +2,14 @@
 ## Panel Registration
 
 - **Slug**: `spec-128-bead7`
-- **Round**: 2
+- **Round**: 3
 - **Branch**: `bead/mindspec-ta30.7`
-- **Reviewed commit**: `953e9abb265e03d531e6574aa470d07b348f2fc8`
+- **Reviewed commit**: `3018a6591f54d3a37568db9c46dad0ddc0d32d90`
 
 ## Your job
 
 Review the diff at the reviewed commit above and write your verdict as
-a single JSON file named `<your-slot>-round-2.json` beside this BRIEF
+a single JSON file named `<your-slot>-round-3.json` beside this BRIEF
 (the panel artifact schema — see `.mindspec/domains/workflow/interfaces.md`
 § Panel Artifact Schema). Required and optional top-level fields:
 
@@ -40,13 +40,13 @@ AC-8 (three legs) + AC-16 (five legs) — read in place in spec.md §R5/R5.1/R3.
 
 ## Prior-Round Asks
 
-Round 1: 2A/4RC + R6 hard block — the derived-empty enumeration was FACTUALLY WRONG (R3: recording-marker writes at next.go:373-377; R6: DispatchBead's .gitignore write). Fixed as ONE commit `953e9abb` (12 files, +1537/-183) — the commit under review.
+Round 1: 2A/4RC+HB (enumeration factually wrong) → fix 953e9abb. Round 2: 3A/3RC (R1 ×2, R3 ×3, R6 ×4 with HB — convergent: lexical samePath's subdir/symlink evasion; custom worktree_root recording divergence; stale ADR/comments). Round-2 fix as ONE commit `3018a659` — the commit under review.
 
-Resolutions: **G1** ComputeEntangleablePaths(repoRoot, cwd, specID) — two real conditional classes (target spec's recording paths when recording.enabled; .gitignore when the entry is absent), BOTH gated on samePath(claimAnchorRoot, cwd) (a write class is entangleable only when its real target tree is the one the guard's porcelain observes — claimAnchorRoot replicates resolveAnchorRoot ADR-0030-safely); HasGitignoreEntry extracted from EnsureGitignoreEntry's own check (can't diverge); spec-target resolution moved ahead of the guard. **G2** two new e2e pin legs (RecordingEnabled; GitignoreEntryAbsent) — the pin can now observe both classes. **G3** -z parsing ONLY in CheckDirtyTreeProportional (old parser byte-identical for release/complete); renames check both sides; untracked-dir ancestors block; notice paths strconv.Quote'd (boundary-forging closed). **G4** presence-bit consumed; present-but-invalid untouched with distinct message + regression test. **G5** wording pinned at unit + real-binary levels.
+Resolutions: **G1** containment replaces equality — toplevelOf(cwd) (rev-parse --show-toplevel + EvalSymlinks) and containedRel resolving the DIRECTORY chain only; real-claim subdir + symlink-alias regressions refuse byte-identically. **G2** closed BY CONSTRUCTION: the recording class trusts EventsPath/ManifestPath's own resolution and gates purely on containment (correct wherever SpecDir sends it); pinned with R3's exact custom-root decoy fixture. **G3** ADR-0025 amendment rewritten to the shipped mechanism. **G4** header comments honest. **DISCLOSED BONUS BUG (judge it)**: the first containment cut resolved the LEAF symlink too — a dirty symlinked .gitignore resolved to its target's name, missed porcelain's tracked-name match, and wrongly PROCEEDED (caught by the round-1 symlinked-refusal e2e going red); fixed via resolveContainingDirs (dirs resolved, leaf basename kept) + TestContainedRel_SymlinkLeafKeepsOwnTrackedName.
 
-Disclosed bonus fixes (judge them): anchor-mismatch (the samePath gate); StatusZWithStderr stream-separation (git stderr warnings were corrupting the -z stream — reproduced via symlinked .gitignore); two lint-ratchet table entries (mirroring sibling justifications); mindspecCmdName const (specgate literal constraint).
+Both suites verifiably green from full logs (-short 48/48; no-short 1054.3s; -race ×4 packages).
 
-Round-2 duty: R6's hard block clears ONLY on its own re-derivation (re-probe the .gitignore attack surface at 953e9abb incl. your modified/deleted/renamed/symlinked cases — now real tests); R3 re-derives the recording finding (run the RecordingEnabled pin; verify the samePath gating logic yourself); R1/R5 classify your asks; R2/R4 verify confinement + confirm. Re-verdict at 953e9abb.
+Round-3 duty: R6's hard block clears ONLY on its own re-derivation (re-probe subdir + symlink-alias + the leaf-symlink case at 3018a659); R3 re-derives the custom-root fixture + judges the by-construction G2 closure; R1 classifies its ADR/comment asks; R2/R4/R5 verify confinement + confirm. Re-verdict at 3018a659.
 
 ## Reviewer conduct (binding)
 
