@@ -540,3 +540,82 @@ func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) 
 		t.Errorf("raw ESC byte survived into the rendered refusal: %q", out)
 	}
 }
+
+// --- Round-2 panel residual: R6.3(a)'s partial-exclusion NOTICE is
+// actually PRINTED, not just content-pinned at the unit level. ---
+//
+// internal/next.ReadySet.ExclusionNotice() was already unit-tested for
+// its CONTENT (internal/next/readyset_test.go), but nothing at the CLI
+// level asserted the two next.go call sites
+// (fmt.Fprintln(os.Stderr, notice)) actually run — deleting both would
+// have stayed green. These fixtures mix a plan-approved (readiness-
+// satisfying) two-bead set with a THIRD, bare, title-unreferenced bead
+// under the SAME epic so the filter partially excludes (not fully —
+// AC-10b's loud-error path is a different, already-covered case) while
+// the claim/preview still succeeds on the remaining, matching bead.
+
+const nextSelectionNoticeClaimSpecID = "963-selection-notice-claim"
+const nextSelectionNoticeEmitSpecID = "962-selection-notice-emit"
+
+// TestNextSelection_ClaimPath_PartialExclusionNoticePrinted pins the
+// claim-path call site: with a partial filter exclusion, the "excluded
+// by spec filter" notice is actually printed to the command's output
+// (not merely computable), and the claim of the remaining, matching bead
+// still succeeds.
+func TestNextSelection_ClaimPath_PartialExclusionNoticePrinted(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	planMD := strings.ReplaceAll(nextSelectionParityPlanMD, "977-selection-parity", nextSelectionNoticeClaimSpecID)
+	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, nextSelectionNoticeClaimSpecID, nextSelectionParitySpecMD, planMD)
+	bead1 := epicID + ".1"
+	bead2 := epicID + ".2"
+	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
+		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+	}
+	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
+		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
+	}
+	// A THIRD, bare, ready bead under the SAME epic whose title does NOT
+	// reference the spec — the spec-title filter drops it (partial
+	// exclusion: 1 of 3 raw items), while bead1/bead2 still pass.
+	excludedBead := sb.CreateBead("Unrelated work item", "task", epicID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionNoticeClaimSpecID)
+	if err != nil {
+		t.Fatalf("expected the claim to succeed on the remaining matching bead despite the partial exclusion: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "excluded by spec filter") {
+		t.Errorf("expected the partial-exclusion notice to be PRINTED (not merely computable) on the claim path, got:\n%s", out)
+	}
+	if !strings.Contains(out, bead1) {
+		t.Errorf("expected the default pick to still claim %s (the higher-priority MATCHING bead), got:\n%s", bead1, out)
+	}
+	status, _ := nextReadyGateBDStatus(t, sb, bead1)
+	if status != "in_progress" {
+		t.Errorf("expected %s to be claimed despite the partial exclusion, got status %q", bead1, status)
+	}
+	excludedStatus, _ := nextReadyGateBDStatus(t, sb, excludedBead)
+	if excludedStatus != "open" {
+		t.Errorf("the filter-excluded bead must remain untouched (open), got status %q", excludedStatus)
+	}
+}
+
+// TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted pins the
+// --emit-only call site the same way, on a bare (no plan.md) epic+bead
+// fixture — --emit-only never runs the readiness gate, so no plan
+// approval is needed to get a clean success here.
+func TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	epicID, bead1, _ := nextSelectionTwoReadyBeads(t, sb, nextSelectionNoticeEmitSpecID)
+	sb.CreateBead("Unrelated work item", "task", epicID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionNoticeEmitSpecID, "--emit-only")
+	if err != nil {
+		t.Fatalf("expected the --emit-only preview to succeed despite the partial exclusion: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "excluded by spec filter") {
+		t.Errorf("expected the partial-exclusion notice to be PRINTED (not merely computable) on the --emit-only path, got:\n%s", out)
+	}
+	if !strings.Contains(out, "**Bead**: "+bead1) {
+		t.Errorf("expected the default pick to still preview %s (the higher-priority MATCHING bead), got:\n%s", bead1, out)
+	}
+}
