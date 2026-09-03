@@ -1,6 +1,7 @@
 package gitutil
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -677,23 +678,37 @@ func PushBranchForceWithLease(branch, expectedSHA string) error {
 	return nil
 }
 
+// HasGitignoreEntry reports whether root's .gitignore already contains
+// entry, as a bare or trailing-slash line. A missing/unreadable
+// .gitignore counts as the entry being absent — the same condition
+// EnsureGitignoreEntry treats as "no existing content" below (spec 128
+// Bead 7 round-1 panel G1: the caller of this function uses it to decide
+// whether a coming EnsureGitignoreEntry call will actually WRITE, so the
+// two functions' notion of "present" must stay identical).
+func HasGitignoreEntry(root, entry string) bool {
+	data, err := readFile(root + "/.gitignore")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == entry || trimmed == entry+"/" {
+			return true
+		}
+	}
+	return false
+}
+
 // EnsureGitignoreEntry adds an entry to .gitignore if not already present.
 func EnsureGitignoreEntry(root, entry string) error {
-	gitignorePath := root + "/.gitignore"
+	if HasGitignoreEntry(root, entry) {
+		return nil // Already present
+	}
 
-	// Read existing content
+	gitignorePath := root + "/.gitignore"
 	data, err := readFile(gitignorePath)
 	if err != nil {
 		data = nil // File doesn't exist yet
-	}
-
-	// Check if already present
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == entry || trimmed == entry+"/" {
-			return nil // Already present
-		}
 	}
 
 	// Append
@@ -1226,6 +1241,23 @@ func gitArgs(workdir string, args ...string) []string {
 
 // --- read helpers ----------------------------------------------------------
 
+// Toplevel returns the canonical top-level directory of the git working
+// tree containing workdir (`git rev-parse --show-toplevel`), trimmed —
+// resolves correctly whether workdir IS the top-level or a subdirectory
+// of it. Spec 128 Bead 7 round-2 panel G1: the proportional claim
+// guard's containment check needs the OBSERVED tree's canonical root
+// (not the invocation cwd itself, which may be a subdirectory or a
+// symlink alias) so it can test whether a resolved write target falls
+// inside that same tree.
+func Toplevel(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--show-toplevel")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse --show-toplevel: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // RevParseHEAD returns the HEAD commit SHA of workdir, trimmed.
 func RevParseHEAD(workdir string) (string, error) {
 	cmd := execCommand("git", gitArgs(workdir, "rev-parse", "HEAD")...)
@@ -1327,6 +1359,39 @@ func StatusWithStderr(workdir string) (string, error) {
 		return "", fmt.Errorf("status --porcelain: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// StatusZWithStderr runs `git status --porcelain -z` and returns stdout
+// on success, with stderr folded into the error on failure. The
+// NUL-terminated `-z` form is unambiguous where the newline form is not:
+// a rename/copy record's original path is a dedicated NUL-terminated
+// field (never a " -> "-joined substring a hostile filename could
+// forge), and no path needs quote-escaping for embedded whitespace or
+// control bytes — every field boundary is a literal NUL byte (spec 128
+// Bead 7 round-1 panel G3/G6: proportional claim-guard entanglement
+// matching needs both sides of a rename and cannot risk a crafted
+// filename masquerading as a different record).
+//
+// Deliberately NOT CombinedOutput (unlike StatusWithStderr above): git
+// can emit an advisory warning to stderr while still exiting 0 and
+// still producing valid porcelain on stdout (reproduced: repointing a
+// tracked symlinked `.gitignore` prints "warning: unable to access
+// '.gitignore': Too many levels of symbolic links" yet reports "M
+// .gitignore" and exits 0). Combining the streams would splice that
+// warning text into the middle of the NUL-delimited byte stream the
+// caller parses field-by-field, corrupting it. Stdout and stderr are
+// captured separately so a SUCCESSFUL run's parseable bytes are never
+// contaminated by an advisory message; stderr is folded in only for the
+// genuine-failure (non-zero exit) case StatusWithStderr already covers.
+func StatusZWithStderr(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "-z")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("status --porcelain -z: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 // LsFiles runs `git ls-files <args...>` in workdir (workdir=="" → cwd) and
