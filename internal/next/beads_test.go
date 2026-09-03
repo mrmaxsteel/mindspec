@@ -1,7 +1,9 @@
 package next
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -139,3 +141,66 @@ func TestRenderBDError_EscapesEveryLineIndividually(t *testing.T) {
 type multilineErr struct{ msg string }
 
 func (e *multilineErr) Error() string { return e.msg }
+
+// --- Round-1 panel G1: bdRenderedError must preserve the errors.As/Is
+// chain through the render boundary, not just get the escaped text right.
+
+// TestBdRenderedError_UnwrapExposesUnderlyingError is the direct unit
+// pin: Error() is the escaped text, Unwrap() is the ORIGINAL error
+// unchanged.
+func TestBdRenderedError_UnwrapExposesUnderlyingError(t *testing.T) {
+	underlying := errors.New("exit status 1: hostile\x1b[31mline")
+	wrapped := &bdRenderedError{err: underlying}
+
+	if got := wrapped.Unwrap(); got != underlying {
+		t.Errorf("Unwrap() = %v, want the exact underlying error %v", got, underlying)
+	}
+	if strings.ContainsRune(wrapped.Error(), 0x1b) {
+		t.Errorf("Error() must render the escaped text, got: %q", wrapped.Error())
+	}
+}
+
+// TestQueryReady_ErrorsAsReachesExitError pins that errors.As can still
+// find the underlying *exec.ExitError through QueryReady's returned
+// error — the round-0 regression G1 caught: %s-interpolating
+// renderBDError into the wrapping fmt.Errorf severed the chain entirely.
+func TestQueryReady_ErrorsAsReachesExitError(t *testing.T) {
+	origRunBD := runBDFn
+	t.Cleanup(func() { runBDFn = origRunBD })
+	runBDFn = bead.RunBD
+
+	writeFakeBD(t, `echo 'Error 1105 (HY000): column "depends_on_id" could not be found' >&2
+exit 1`)
+
+	_, err := QueryReady()
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected errors.As to reach *exec.ExitError through QueryReady's error, got: %v (chain broken)", err)
+	}
+}
+
+// TestFetchBeadAsOf_IsUnsupportedFlagErrorClassifiesThroughWrapper pins
+// the PRODUCTION consumer of this chain: internal/complete's
+// defaultVerifyCommitted calls bead.IsUnsupportedFlagError(err, "as-of")
+// on FetchBeadAsOf's returned error to detect a pre-1.0.4 bd and fall
+// back gracefully. That classification must still work now that the
+// error is wrapped in bdRenderedError for display.
+func TestFetchBeadAsOf_IsUnsupportedFlagErrorClassifiesThroughWrapper(t *testing.T) {
+	origRunBD := runBDFn
+	t.Cleanup(func() { runBDFn = origRunBD })
+	runBDFn = bead.RunBD
+
+	writeFakeBD(t, `echo 'Error: unknown flag: --as-of' >&2
+exit 1`)
+
+	_, err := FetchBeadAsOf("mindspec-abc", "HEAD")
+	if err == nil {
+		t.Fatal("expected an error from the failing fake bd")
+	}
+	if !bead.IsUnsupportedFlagError(err, "as-of") {
+		t.Errorf("expected IsUnsupportedFlagError to classify through the bdRenderedError wrapper, got: %v", err)
+	}
+}

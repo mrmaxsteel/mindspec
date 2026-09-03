@@ -694,6 +694,72 @@ func TestIsUnsupportedFlagError_SurvivesTracedOutputWrapping(t *testing.T) {
 	}
 }
 
+// TestBeadExists_NotFoundWithNonEmptyStderr is round-1 panel G1's
+// explicit ask: BeadExists must still classify a bd-ran-but-not-found
+// failure correctly (exists=false, err=nil) even when stderr is
+// NON-EMPTY and therefore actually goes through wrapBDError's
+// fmt.Errorf("%w: ...") wrap — unlike TestBeadExists_NotFound above,
+// which uses `false` (empty stderr, an early-return passthrough that
+// exercises no wrapping at all). errors.As must still unwrap through the
+// wrap to find *exec.ExitError.
+func TestBeadExists_NotFoundWithNonEmptyStderr(t *testing.T) {
+	origExec := execCommand
+	defer func() { execCommand = origExec }()
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `echo 'Error: bead mindspec-missing not found' >&2; exit 1`)
+	}
+
+	exists, err := BeadExists("mindspec-missing")
+	if err != nil {
+		t.Fatalf("expected nil err (errors.As should still classify *exec.ExitError through the wrap), got: %v", err)
+	}
+	if exists {
+		t.Error("expected exists=false when bd exits non-zero")
+	}
+}
+
+// --- Round-1 panel G4: whitespace-only stderr passes through unchanged ---
+
+// TestWrapBDError_WhitespaceOnlyStderrPassesThrough pins the four cases
+// named in round-1 panel review: a failure whose stderr is empty or
+// carries only whitespace (spaces/tabs, bare LFs, bare CRLFs) must not
+// be decorated at all — the returned error stays the plain, undecorated
+// *exec.ExitError (no ": <excerpt>" suffix, since an excerpt of pure
+// whitespace has zero diagnostic value).
+func TestWrapBDError_WhitespaceOnlyStderrPassesThrough(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{"empty", `exit 1`},
+		{"spaces-and-tabs", `printf '   \t  ' >&2; exit 1`},
+		{"LF-only", `printf '\n\n\n' >&2; exit 1`},
+		{"CRLF-only", `printf '\r\n\r\n' >&2; exit 1`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			origExec := execCommand
+			defer func() { execCommand = origExec }()
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				return exec.Command("sh", "-c", tc.script)
+			}
+
+			_, err := RunBD("ready", "--json")
+			if err == nil {
+				t.Fatal("expected an error from the failing fake bd")
+			}
+			if err.Error() != "exit status 1" {
+				t.Errorf("expected the bare, undecorated exit error for whitespace-only stderr, got: %q", err.Error())
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("expected errors.As to find *exec.ExitError directly (passthrough, no wrap), got: %v", err)
+			}
+		})
+	}
+}
+
 // --- MergeMetadata tests (Spec 092 Bead 3, Req 19) ---
 
 // TestMergeMetadata_PreservesUnrelatedKeys is the before/after diff

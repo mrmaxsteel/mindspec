@@ -67,7 +67,12 @@ type GateResult struct {
 func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error) {
 	report, err := evaluateReadinessFn(root, beadID)
 	if err != nil {
-		return nil, fmt.Errorf("evaluating readiness for %s: %w", idrender.Bead(beadID), err)
+		// bd mindspec-ta30.9 round-1 panel G2: EvaluateReadiness reads bd
+		// transitively (fetchBeadRecordReal -> bead.RunBD), so its error
+		// can carry bd's own stderr text; wrap it through bdRenderedError
+		// (beads.go) so that text is escaped at THIS render boundary too,
+		// with the chain (errors.As/Is) preserved unchanged.
+		return nil, fmt.Errorf("evaluating readiness for %s: %w", idrender.Bead(beadID), &bdRenderedError{err: err})
 	}
 
 	if report.AllPass() {

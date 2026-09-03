@@ -36,7 +36,7 @@ var (
 func QueryReady() ([]BeadInfo, error) {
 	out, err := runBDFn("ready", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("bd ready failed: %s", renderBDError(err))
+		return nil, fmt.Errorf("bd ready failed: %w", &bdRenderedError{err: err})
 	}
 
 	return ParseBeadsJSON(out)
@@ -52,16 +52,46 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	}
 	out, err := runBDFn("ready", "--parent", epicID, "--json")
 	if err != nil {
-		return nil, fmt.Errorf("bd ready for epic %s failed: %s", epicID, renderBDError(err))
+		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, &bdRenderedError{err: err})
 	}
 
 	return ParseBeadsJSON(out)
 }
 
-// renderBDError formats a bd command failure for inclusion in a
-// terminal-facing wrapping message, escaping EVERY line individually
-// through termsafe.Escape (ADR-0042) before rejoining (bead
-// mindspec-ta30.9, spec 128 R6.4/AC-11).
+// bdRenderedError decorates a bd-command-derived error for terminal-facing
+// display without severing its Unwrap chain (bead mindspec-ta30.9,
+// round-1 panel fix, spec 128 R6.4/AC-11 G1).
+//
+// Error() returns renderBDError(err) — every line of the underlying
+// error's text escaped individually via termsafe.Escape (ADR-0042)
+// before rejoining, the DirtyTreeFailure house pattern
+// (internal/next/guard.go) — so a hostile/control-bearing bd stderr line
+// can't forge terminal control sequences once it reaches a caller's
+// rendered message. Unwrap() returns the underlying error UNCHANGED, so
+// errors.As/errors.Is still finds whatever the underlying error chain
+// carries (a *exec.ExitError; bead.IsUnsupportedFlagError's detection)
+// exactly as if this wrapper were absent.
+//
+// This replaces the bead-9 round-0 approach of interpolating
+// renderBDError(err) into a fmt.Errorf format string via %s — that got
+// the escaped TEXT right but silently discarded the chain, a regression
+// relative to the pre-bead-9 %w-wrapping code that would have broken
+// bead.IsUnsupportedFlagError (internal/complete's bd-version graceful
+// degradation) and any BeadExists-style errors.As classification
+// reached through QueryReady/QueryReadyForEpic/FetchBeadByID/
+// FetchBeadAsOf/GateReadiness. Callers embed this type via %w (e.g.
+// `fmt.Errorf("bd ready failed: %w", &bdRenderedError{err: err})`) so
+// the OUTER error's own Unwrap reaches this wrapper, which reaches the
+// original error, preserving the full multi-level chain end to end.
+type bdRenderedError struct{ err error }
+
+func (e *bdRenderedError) Error() string { return renderBDError(e.err) }
+func (e *bdRenderedError) Unwrap() error { return e.err }
+
+// renderBDError formats a bd command failure's error text for inclusion
+// in a terminal-facing message, escaping EVERY line individually through
+// termsafe.Escape (ADR-0042) before rejoining (bead mindspec-ta30.9,
+// spec 128 R6.4/AC-11).
 //
 // bd's captured stderr (internal/bead's wrapBDError already folds a
 // bounded excerpt into err.Error(), per RunBD/tracedOutput) is what
@@ -75,7 +105,8 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 // ordinary printable-ASCII diagnostic text (the actual schema-error
 // wording) byte-identical. This is the RENDER boundary: the escape
 // happens here, in the wrapping error message construction, not inside
-// bdcli.go's capture.
+// bdcli.go's capture. See bdRenderedError for the chain-preserving
+// wrapper that calls this from its Error() method.
 func renderBDError(err error) string {
 	lines := strings.Split(err.Error(), "\n")
 	for i, line := range lines {
@@ -219,7 +250,7 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 	}
 	out, err := runBDFn("show", id, "--json")
 	if err != nil {
-		return BeadInfo{}, fmt.Errorf("bd show %s failed: %w", id, err)
+		return BeadInfo{}, fmt.Errorf("bd show %s failed: %w", id, &bdRenderedError{err: err})
 	}
 	return parseBeadShowJSON(out, id)
 }
@@ -232,9 +263,10 @@ func FetchBeadByID(id string) (BeadInfo, error) {
 //
 // Callers on an older bd that predates the --as-of flag get a bd CLI error
 // (`unknown flag: --as-of`) wrapped into the returned error's chain via
-// fmt.Errorf's %w; use bead.IsUnsupportedFlagError(err, "as-of") to detect
-// that case and fall back to FetchBeadByID (see
-// internal/complete.defaultVerifyCommitted).
+// fmt.Errorf's %w (through bdRenderedError, which preserves the chain
+// while escaping the rendered text — bead mindspec-ta30.9 round-1 panel
+// fix); use bead.IsUnsupportedFlagError(err, "as-of") to detect that case
+// and fall back to FetchBeadByID (see internal/complete.defaultVerifyCommitted).
 func FetchBeadAsOf(id, ref string) (BeadInfo, error) {
 	// Gate-all-ids (ADR-0042 §1, round 9): id feeds a `bd show` argv
 	// build directly — validate BEFORE any bd spawn.
@@ -243,7 +275,7 @@ func FetchBeadAsOf(id, ref string) (BeadInfo, error) {
 	}
 	out, err := runBDFn("show", id, "--as-of", ref, "--json")
 	if err != nil {
-		return BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w", id, ref, err)
+		return BeadInfo{}, fmt.Errorf("bd show %s --as-of %s failed: %w", id, ref, &bdRenderedError{err: err})
 	}
 	return parseBeadShowJSON(out, id)
 }

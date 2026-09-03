@@ -461,8 +461,14 @@ const bdStderrExcerptLineCap = 20
 //
 // The excerpt is capped at bdStderrExcerptLineCap lines, with a
 // truncation marker appended when the real stderr has more. Non-exit
-// errors (bd not found, etc.) and exit errors with empty stderr pass
-// through unchanged.
+// errors (bd not found, etc.) and exit errors with empty OR
+// whitespace-only stderr (round-1 panel G4: e.g. a bd that writes only a
+// trailing newline, blank lines, or bare CR/LF noise to stderr before
+// exiting non-zero) pass through completely unchanged — decorating a
+// failure with an excerpt that is itself just whitespace would add
+// visual noise with zero diagnostic content, so the whitespace check
+// runs BEFORE any decoration is attempted, not as a post-hoc empty-
+// excerpt fallback.
 //
 // The original error is preserved via %w, so errors.As(err, &exitErr)
 // still finds the underlying *exec.ExitError exactly as before this
@@ -472,13 +478,17 @@ const bdStderrExcerptLineCap = 20
 // is deliberately NOT done here — this only shapes the error TEXT that
 // reaches a caller's message construction. The render-boundary
 // termsafe.Escape lives in the caller that actually prints to a
-// terminal; see internal/next's QueryReady/QueryReadyForEpic.
+// terminal; see internal/next's bdRenderedError/QueryReady/
+// QueryReadyForEpic.
 func wrapBDError(err error) error {
 	if err == nil {
 		return nil
 	}
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || len(exitErr.Stderr) == 0 {
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	if strings.TrimSpace(string(exitErr.Stderr)) == "" {
 		return err
 	}
 	excerpt, truncated := capStderrLines(exitErr.Stderr, bdStderrExcerptLineCap)
