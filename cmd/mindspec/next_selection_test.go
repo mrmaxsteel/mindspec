@@ -1,0 +1,346 @@
+package main
+
+// next_selection_test.go pins spec 128 Bead 8's CLI-level selection ACs
+// end to end against a real bd + git sandbox (reusing
+// next_ready_gate_test.go's nextReadyGateSetupSandbox / Sandbox helpers,
+// since bd's actual priority-respecting `bd ready` ordering is the thing
+// under test):
+//
+//   - AC-9:  pick/emit parity + total pick semantics (single-ready-item
+//     out-of-range pick errors).
+//   - AC-10: a positional bead ID present in the raw ready set but
+//     excluded by the spec filter names the exclusion reason, never the
+//     false "not found or not ready".
+//   - AC-10b: a non-empty raw ready set that filters to empty is a loud
+//     error, never "No ready work found".
+//   - AC-15: explicit --spec scope honesty — a nonexistent full-ID spec
+//     and an existing draft spec both refuse without ever falling back
+//     to the global, unscoped `bd ready` query.
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/harness"
+)
+
+// nextSelectionTwoReadyBeads creates an epic with two ready (unclaimed,
+// undepended) beads titled to reference specID, with DETERMINISTIC
+// differing priorities (bead1 higher priority than bead2) so `bd ready`'s
+// priority-first order is stable across the test's several invocations.
+func nextSelectionTwoReadyBeads(t *testing.T, sb *harness.Sandbox, specID string) (epicID, bead1, bead2 string) {
+	t.Helper()
+	epicID = sb.CreateSpecEpic(specID)
+	bead1 = sb.CreateBead("["+specID+"] Alpha", "task", epicID)
+	bead2 = sb.CreateBead("["+specID+"] Beta", "task", epicID)
+	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
+		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+	}
+	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
+		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
+	}
+	return epicID, bead1, bead2
+}
+
+// TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick pins AC-9's
+// core: --emit-only --pick 1 and --emit-only --pick 2 emit DIFFERENT
+// beads, in bd ready's priority-first order, and --pick 3 (out of range)
+// errors on the emit-only path.
+func TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "978-selection-fixture"
+	_, bead1, bead2 := nextSelectionTwoReadyBeads(t, sb, specID)
+
+	out1, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1", "--emit-only")
+	if err != nil {
+		t.Fatalf("--pick 1 --emit-only: %v\n%s", err, out1)
+	}
+	out2, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "2", "--emit-only")
+	if err != nil {
+		t.Fatalf("--pick 2 --emit-only: %v\n%s", err, out2)
+	}
+	// Both outputs list the full ready set (both bead IDs), so the
+	// parity check is on the rendered PRIMER's own "**Bead**: <id>" line
+	// — the actually-SELECTED bead — not on mere presence anywhere in
+	// the ready-work listing.
+	primer1 := "**Bead**: " + bead1
+	primer2 := "**Bead**: " + bead2
+	if !strings.Contains(out1, primer1) {
+		t.Errorf("expected --pick 1 to emit the higher-priority bead %s (displayed row 1), got:\n%s", bead1, out1)
+	}
+	if !strings.Contains(out2, primer2) {
+		t.Errorf("expected --pick 2 to emit %s, got:\n%s", bead2, out2)
+	}
+	if strings.Contains(out1, primer2) || strings.Contains(out2, primer1) {
+		t.Errorf("--pick 1 and --pick 2 must emit DIFFERENT beads as the SELECTED primer:\npick1=%s\npick2=%s", out1, out2)
+	}
+
+	outRange, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "3", "--emit-only")
+	if err == nil {
+		t.Fatalf("expected --pick 3 (out of range on a 2-item ready set) to error, got exit 0:\n%s", outRange)
+	}
+	if !strings.Contains(outRange, "out of range") {
+		t.Errorf("expected an 'out of range' error, got:\n%s", outRange)
+	}
+}
+
+const nextSelectionParitySpecMD = `---
+title: Selection Parity Fixture
+status: Approved
+---
+# Selection Parity Fixture
+
+## Acceptance Criteria
+- [ ] AC-1 — bead 1 satisfies the readiness floor.
+- [ ] AC-2 — bead 2 satisfies the readiness floor.
+`
+
+// nextSelectionParityPlanMD wires TWO independent (no depends_on between
+// them) work chunks so both beads are simultaneously ready — mirroring
+// next_ready_gate_test.go's nextReadyGatePositivePlanMD shape (a
+// confirmed-passing readiness-floor fixture) so this test exercises real
+// `bd ready`/readiness-gate plumbing rather than a bare epic+bead
+// shortcut that skips the plan.md the readiness floor requires.
+const nextSelectionParityPlanMD = `---
+status: Draft
+spec_id: 977-selection-parity
+version: "1"
+adr_citations: []
+work_chunks:
+  - id: 1
+    depends_on: []
+    key_file_paths:
+      - internal/fixture/selection_parity_one.go
+  - id: 2
+    depends_on: []
+    key_file_paths:
+      - internal/fixture/selection_parity_two.go
+---
+# Plan: 977-selection-parity
+
+## ADR Fitness
+
+No existing ADRs are impacted; this is a self-contained test fixture.
+
+## Testing Strategy
+
+Unit tests via ` + "`go test`" + `.
+
+## Bead 1: Alpha
+
+**Steps**
+1. Create internal/fixture/selection_parity_one.go
+2. Implement the fixture function
+3. Add a unit test
+
+**Verification**
+- [ ] ` + "`go test ./internal/fixture/`" + ` passes
+
+**Acceptance Criteria**
+- [ ] AC-1 — bead 1 satisfies the readiness floor.
+
+**Depends on**
+None
+
+## Bead 2: Beta
+
+**Steps**
+1. Create internal/fixture/selection_parity_two.go
+2. Implement the fixture function
+3. Add a unit test
+
+**Verification**
+- [ ] ` + "`go test ./internal/fixture/`" + ` passes
+
+**Acceptance Criteria**
+- [ ] AC-2 — bead 2 satisfies the readiness floor.
+
+**Depends on**
+None
+`
+
+// TestNextSelection_ClaimPickMatchesEmitOnlyPick pins AC-9's cross-path
+// parity: the claim path's --pick 1 claims the SAME bead --emit-only
+// --pick 1 named. Uses a real plan-approve-backed two-bead fixture (both
+// independently ready, matching next_ready_gate_test.go's confirmed-
+// passing shape) since the readiness floor's plan.md/spec.md read is a
+// hard error a bare epic+bead fixture can't satisfy.
+func TestNextSelection_ClaimPickMatchesEmitOnlyPick(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "977-selection-parity"
+	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, specID, nextSelectionParitySpecMD, nextSelectionParityPlanMD)
+	bead1 := epicID + ".1"
+	bead2 := epicID + ".2"
+	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
+		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+	}
+	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
+		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
+	}
+
+	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1", "--emit-only")
+	if err != nil {
+		t.Fatalf("--pick 1 --emit-only: %v\n%s", err, outEmit)
+	}
+	if !strings.Contains(outEmit, "**Bead**: "+bead1) {
+		t.Fatalf("expected --pick 1 --emit-only to name %s, got:\n%s", bead1, outEmit)
+	}
+
+	outClaim, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1")
+	if err != nil {
+		t.Fatalf("--pick 1 (claim path): %v\n%s", err, outClaim)
+	}
+	if !strings.Contains(outClaim, bead1) {
+		t.Errorf("expected the claim path's --pick 1 to claim %s (matching the emit-only preview), got:\n%s", bead1, outClaim)
+	}
+
+	status, _ := nextReadyGateBDStatus(t, sb, bead1)
+	if status != "in_progress" {
+		t.Errorf("expected %s to be claimed (in_progress) after --pick 1, got status %q", bead1, status)
+	}
+}
+
+// TestNextSelection_SingleReadyItem_OutOfRangePickErrors is AC-9's
+// pinned red-on-revert: an explicit out-of-range --pick against exactly
+// ONE ready bead must error, never silently select the sole item.
+func TestNextSelection_SingleReadyItem_OutOfRangePickErrors(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "976-selection-single"
+	epicID := sb.CreateSpecEpic(specID)
+	sb.CreateBead("["+specID+"] Solo", "task", epicID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "2", "--emit-only")
+	if err == nil {
+		t.Fatalf("expected --pick 2 against a single-item ready set to error, got exit 0:\n%s", out)
+	}
+	if !strings.Contains(out, "out of range") {
+		t.Errorf("expected an 'out of range' error, got:\n%s", out)
+	}
+}
+
+// TestNextSelection_PositionalExcludedByFilter_NamesReason pins AC-10: a
+// positional bead ID present in the raw ready set but excluded by
+// mindspec's spec-title filter gets an error naming the exclusion
+// reason — never the false "not found or not ready".
+func TestNextSelection_PositionalExcludedByFilter_NamesReason(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "975-selection-excluded"
+	epicID := sb.CreateSpecEpic(specID)
+	// Title deliberately does NOT reference specID.
+	beadID := sb.CreateBead("Unrelated work item", "task", epicID)
+
+	out, err := sb.Run("mindspec", "next", "--spec", specID, beadID)
+	if err == nil {
+		t.Fatalf("expected the positional claim of a filter-excluded bead to refuse, got exit 0:\n%s", out)
+	}
+	if strings.Contains(out, "not found or not ready") {
+		t.Errorf("AC-10: the false 'not found or not ready' message must not appear for a filter-excluded positional bead, got:\n%s", out)
+	}
+	if !strings.Contains(out, beadID) || !strings.Contains(out, "excluded") {
+		t.Errorf("expected the refusal to name the excluded bead and the reason, got:\n%s", out)
+	}
+}
+
+// TestNextSelection_AllExcludedByFilter_LoudError pins AC-10b: a
+// non-empty raw ready set that the spec filter drops to EMPTY is a loud
+// error naming the exclusions — never the silent "No ready work found"
+// success line — on both the claim and --emit-only paths.
+func TestNextSelection_AllExcludedByFilter_LoudError(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+	specID := "974-selection-all-excluded"
+	epicID := sb.CreateSpecEpic(specID)
+	sb.CreateBead("Unrelated work one", "task", epicID)
+	sb.CreateBead("Unrelated work two", "task", epicID)
+
+	outClaim, err := sb.Run("mindspec", "next", "--spec", specID)
+	if err == nil {
+		t.Fatalf("expected the claim path to refuse when every ready bead is filter-excluded, got exit 0:\n%s", outClaim)
+	}
+	if strings.Contains(outClaim, "No ready work found") {
+		t.Errorf("AC-10b: 'No ready work found' must not appear when the raw ready set was non-empty but fully filtered, got:\n%s", outClaim)
+	}
+
+	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--emit-only")
+	if err == nil {
+		t.Fatalf("expected --emit-only to refuse the same way, got exit 0:\n%s", outEmit)
+	}
+	if strings.Contains(outEmit, "No ready work found") {
+		t.Errorf("AC-10b: 'No ready work found' must not appear on --emit-only either, got:\n%s", outEmit)
+	}
+}
+
+// TestNextSelection_ExplicitSpecScopeHonesty_NonexistentSpec pins
+// AC-15(i): an explicit --spec naming a full spec ID that resolves to no
+// epic and no on-disk draft refuses, on BOTH paths, without ever
+// claiming/emitting a bead from a DIFFERENT, globally-ready epic — the
+// removed silent global `bd ready` fallback would otherwise hand back
+// exactly that other bead.
+func TestNextSelection_ExplicitSpecScopeHonesty_NonexistentSpec(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+
+	// A genuinely different, globally-ready epic — if the bogus --spec
+	// silently fell back to global `bd ready`, THIS is the bead it would
+	// hand back.
+	otherEpic := sb.CreateSpecEpic("973-other-spec")
+	otherBead := sb.CreateBead("[973-other-spec] Unrelated", "task", otherEpic)
+
+	bogusSpec := "999-does-not-exist-anywhere"
+
+	outClaim, err := sb.Run("mindspec", "next", "--spec", bogusSpec)
+	if err == nil {
+		t.Fatalf("expected the claim path to refuse for a nonexistent --spec, got exit 0:\n%s", outClaim)
+	}
+	if !strings.Contains(outClaim, bogusSpec) {
+		t.Errorf("expected the refusal to name the nonexistent spec, got:\n%s", outClaim)
+	}
+	if strings.Contains(outClaim, otherBead) {
+		t.Errorf("a nonexistent --spec must never fall back to a DIFFERENT spec's ready bead (AC-15(i)), got:\n%s", outClaim)
+	}
+
+	outEmit, err := sb.Run("mindspec", "next", "--spec", bogusSpec, "--emit-only")
+	if err == nil {
+		t.Fatalf("expected --emit-only to refuse the same way, got exit 0:\n%s", outEmit)
+	}
+	if strings.Contains(outEmit, otherBead) {
+		t.Errorf("--emit-only must never fall back to a DIFFERENT spec's ready bead either, got:\n%s", outEmit)
+	}
+
+	status, _ := nextReadyGateBDStatus(t, sb, otherBead)
+	if status != "open" {
+		t.Errorf("the other spec's bead must remain untouched (open) after the refused invocations, got status %q", status)
+	}
+}
+
+// TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft pins
+// AC-15(ii): an existing on-disk draft spec (no epic yet) refuses with
+// the honest no-epic/not-approved message, never a false "doesn't exist"
+// claim, and never selects a bead from another spec.
+func TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft(t *testing.T) {
+	sb := nextReadyGateSetupSandbox(t)
+
+	otherEpic := sb.CreateSpecEpic("972-other-spec")
+	otherBead := sb.CreateBead("[972-other-spec] Unrelated", "task", otherEpic)
+
+	draftSpecID := "971-draft-fixture"
+	sb.WriteFile(".mindspec/specs/"+draftSpecID+"/spec.md", "# draft\n")
+	sb.Commit("setup: draft spec directory")
+	if out, err := sb.Run("git", "branch", "spec/"+draftSpecID); err != nil {
+		t.Fatalf("git branch spec/%s: %v\n%s", draftSpecID, err, out)
+	}
+
+	out, err := sb.Run("mindspec", "next", "--spec", draftSpecID)
+	if err == nil {
+		t.Fatalf("expected the claim path to refuse for a draft (no-epic) --spec, got exit 0:\n%s", out)
+	}
+	if !strings.Contains(out, "no epic") {
+		t.Errorf("expected the honest no-epic/not-approved message, got:\n%s", out)
+	}
+	if strings.Contains(out, otherBead) {
+		t.Errorf("a draft --spec must never select a bead from ANOTHER spec (AC-15(ii)), got:\n%s", out)
+	}
+
+	status, _ := nextReadyGateBDStatus(t, sb, otherBead)
+	if status != "open" {
+		t.Errorf("the other spec's bead must remain untouched (open) after the refused invocation, got status %q", status)
+	}
+}

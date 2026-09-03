@@ -9,28 +9,88 @@ import (
 )
 
 // SelectWork picks a work item from the list.
-// If exactly one item, it is returned directly (auto-claim).
-// If multiple, it prints a numbered list and returns the selected index.
-// The pick parameter selects a specific item (1-based); 0 means default to first.
+//
+// Total pick semantics (spec 128 R6.1/AC-9, round-1 G10): 0 means unset —
+// the OQ-5 default resolution (displayed row 1, bd ready's priority-first
+// order); a negative pick is rejected with an error rather than silently
+// ignored; any pick >= 1 indexes the DISPLAYED list (FormatWorkList's
+// numbering) REGARDLESS of how many items it has — including exactly one,
+// where an out-of-range pick (e.g. --pick 2 against a single-item list)
+// now errors instead of silently returning the sole item. The prior
+// single-item early return that bypassed pick validation is gone
+// (red-on-revert: it used to return items[0] for ANY pick value once
+// len(items)==1).
 func SelectWork(items []BeadInfo, pick int) (BeadInfo, error) {
 	if len(items) == 0 {
 		return BeadInfo{}, fmt.Errorf("no items to select from")
 	}
-
-	if len(items) == 1 {
+	if pick < 0 {
+		return BeadInfo{}, fmt.Errorf("pick %d is invalid: must be >= 0 (0 selects the default)", pick)
+	}
+	if pick == 0 {
+		// OQ-5 resolution: default to displayed row 1 — bd ready's
+		// priority-first order, preserved end-to-end (R6.2).
 		return items[0], nil
 	}
-
-	// Multiple items — validate pick or default to first
-	if pick > 0 {
-		if pick > len(items) {
-			return BeadInfo{}, fmt.Errorf("pick %d out of range (1-%d)", pick, len(items))
-		}
-		return items[pick-1], nil
+	if pick > len(items) {
+		return BeadInfo{}, fmt.Errorf("pick %d out of range (1-%d)", pick, len(items))
 	}
+	return items[pick-1], nil
+}
 
-	// Default: return first item
-	return items[0], nil
+// SelectNamedFromReadySet resolves a positional bead ID against a
+// spec-scoped ReadySet — the claim path's positional resolution (spec 128
+// R6.1). It defers to SelectWorkByName over the FILTERED (displayed) set
+// for the normal cases, but first checks whether name identifies an item
+// the spec-title filter DROPPED from the raw ready set (R6.3(b)/AC-10): a
+// positional bead ID that IS ready but was excluded by mindspec's spec
+// filter gets the honest exclusion-reason error instead of
+// SelectWorkByName's generic "not found or not ready" — a filtered-out
+// bead is a documented reason, not a mystery. An ambiguous match among
+// excluded raw items is deliberately NOT resolved here — SelectWorkByName's
+// own ambiguity/not-found message on the filtered set stays authoritative
+// rather than this function guessing which excluded bead the caller meant.
+func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
+	if rs.SpecFlag != "" && rs.ExcludedCount() > 0 {
+		if err, excluded := exclusionReasonForName(rs, name); excluded {
+			return BeadInfo{}, err
+		}
+	}
+	return SelectWorkByName(rs.Filtered, name)
+}
+
+// exclusionReasonForName reports whether name identifies (by exact ID or
+// suffix, matching SelectWorkByName's own resolution rules) EXACTLY ONE
+// item in rs.Raw that is not present in rs.Filtered — i.e. an item the
+// spec-title filter actually dropped (never a recomputation of the
+// filter itself; membership is checked against the real, already-computed
+// Filtered set).
+func exclusionReasonForName(rs ReadySet, name string) (error, bool) {
+	if name == "" {
+		return nil, false
+	}
+	kept := map[string]struct{}{}
+	for _, item := range rs.Filtered {
+		kept[item.ID] = struct{}{}
+	}
+	var match *BeadInfo
+	for i := range rs.Raw {
+		item := &rs.Raw[i]
+		if _, ok := kept[item.ID]; ok {
+			continue // present in the filtered set — not an exclusion case
+		}
+		if item.ID == name || strings.HasSuffix(item.ID, "-"+name) {
+			if match != nil {
+				return nil, false // ambiguous among excluded items — defer to SelectWorkByName
+			}
+			match = item
+		}
+	}
+	if match == nil {
+		return nil, false
+	}
+	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; it cannot be claimed via `mindspec next %s` while excluded",
+		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag), name), true
 }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched

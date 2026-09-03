@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -56,6 +57,172 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	}
 
 	return ParseBeadsJSON(out)
+}
+
+// RenderBDError wraps err for safe terminal-facing rendering identically
+// to bdRenderedError (every line of err.Error() escaped individually via
+// termsafe.Escape, ADR-0042) — exported so a caller OUTSIDE this package
+// (cmd/mindspec/next.go's describePhaseSyncFailure, spec 128 Bead 8's
+// folded-in ta30.9 render-leg follow-up) can render an arbitrary
+// bd/lock-derived error safely via %v/%s without forking a second
+// escaping path. Callers format the RETURNED error (not err directly) —
+// e.g. fmt.Sprintf("...: %v", next.RenderBDError(err)). Returns nil for a
+// nil err so callers can wrap unconditionally.
+func RenderBDError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &bdRenderedError{err: err}
+}
+
+// ReadySet is spec 128 R6.1's ONE ready-set construction result — the
+// bd-ready query plus the spec-title filter, and the exclusion accounting
+// the filter drops — consumed IDENTICALLY by the claim path
+// (cmd/mindspec/next.go's RunE) and the --emit-only path (runEmitOnly), so
+// `--pick N` always names the same bead on both for the same N (AC-9
+// parity) and a filter drop is reported the same way on both (R6.3).
+type ReadySet struct {
+	// Filtered is the DISPLAYED/selectable list, in bd ready's returned
+	// order (R6.2, preserved end-to-end) — the spec-title filter already
+	// applied. Callers select from THIS list, never Raw.
+	Filtered []BeadInfo
+	// Raw is the pre-filter list bd ready / bd ready --parent returned.
+	// Never displayed or selected from directly — SelectNamedFromReadySet
+	// consults it ONLY to name the true exclusion reason for a positional
+	// ID the filter dropped (R6.3(b)/AC-10).
+	Raw []BeadInfo
+	// SpecFlag is the scope this set was constructed for; "" means
+	// unscoped (no filter was applied — Raw and Filtered are the same
+	// slice).
+	SpecFlag string
+}
+
+// ExcludedCount reports how many raw items the spec-title filter dropped.
+func (rs ReadySet) ExcludedCount() int {
+	return len(rs.Raw) - len(rs.Filtered)
+}
+
+// ExclusionNotice renders the R6.3(a) loud-drop line for a partial filter
+// exclusion, or "" when the filter dropped nothing (including the
+// unscoped case, where ExcludedCount is always 0). The caller decides
+// where to print it — this function performs no I/O.
+func (rs ReadySet) ExclusionNotice() string {
+	n := rs.ExcludedCount()
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d ready bead(s) excluded by spec filter: title does not reference spec %s", n, idrender.Spec(rs.SpecFlag))
+}
+
+// containsSpecID checks if a bead title references the given spec ID —
+// the step-2.5 filter both the claim and --emit-only paths apply when a
+// spec scope is given.
+func containsSpecID(title, specID string) bool {
+	return strings.Contains(title, specID)
+}
+
+// BuildReadySet performs spec 128 R6.1's shared ready-set construction:
+// the bd-ready query (global when specFlag is "", scoped to specFlag's
+// epic otherwise) plus the spec-title filter — the SAME construction the
+// claim path and the --emit-only path both build selection over, so
+// `--pick N` names the same bead on either path for the same N (AC-9).
+//
+// R6.7 scope honesty (round-2 G8): when specFlag != "" and its epic can't
+// be resolved — no epic (including a legitimate on-disk draft, which gets
+// its own "spec exists but has no epic" refusal) or a genuine bd/discovery
+// error — this REFUSES rather than silently widening to the global,
+// unscoped `bd ready` query (the removed next.go:166-171/:417-424
+// fallback). QueryReady (the global query) is NEVER called in that
+// branch — AC-15's "no global bd ready query is issued" assertion holds
+// by construction, not by convention. An operator who scoped a command to
+// a spec must never receive another spec's bead because the scope
+// silently widened.
+//
+// R6.3(c): a non-empty raw ready set that the spec-title filter reduces
+// to EMPTY is a loud error naming the exclusions here — never a silent
+// success the caller could mistake for "No ready work found" (AC-10b). A
+// genuinely empty raw set (bd ready itself returned nothing) is NOT an
+// error — ReadySet.Filtered is simply empty, and the caller's existing
+// "No ready work found" handling applies.
+func BuildReadySet(root, specFlag string) (ReadySet, error) {
+	if specFlag == "" {
+		items, err := QueryReady()
+		if err != nil {
+			return ReadySet{}, err
+		}
+		return ReadySet{Filtered: items, Raw: items}, nil
+	}
+
+	epicID, epicErr := phase.FindEpicBySpecID(specFlag)
+	if epicErr != nil || epicID == "" {
+		return ReadySet{}, scopeResolutionRefusal(root, specFlag, epicErr)
+	}
+
+	raw, err := QueryReadyForEpic(epicID)
+	if err != nil {
+		return ReadySet{}, err
+	}
+
+	var filtered []BeadInfo
+	for _, item := range raw {
+		if containsSpecID(item.Title, specFlag) {
+			filtered = append(filtered, item)
+		}
+	}
+
+	if len(filtered) == 0 && len(raw) > 0 {
+		return ReadySet{}, emptyAfterFilterError(raw, specFlag)
+	}
+
+	return ReadySet{Filtered: filtered, Raw: raw, SpecFlag: specFlag}, nil
+}
+
+// emptyAfterFilterError renders R6.3(c)'s loud empty-after-filter error
+// (AC-10b): the string "No ready work found" must never appear for this
+// case, so this is a distinct, non-empty-set error naming every excluded
+// bead and the reason — never the empty-set success path.
+func emptyAfterFilterError(raw []BeadInfo, specFlag string) error {
+	ids := make([]string, 0, len(raw))
+	for _, item := range raw {
+		ids = append(ids, idrender.Bead(item.ID))
+	}
+	return fmt.Errorf("%d ready bead(s) excluded by spec filter: title does not reference spec %s (%s)",
+		len(raw), idrender.Spec(specFlag), strings.Join(ids, ", "))
+}
+
+// scopeResolutionRefusal builds the R6.7 explicit-scope refusal for a
+// specFlag whose epic lookup failed. Three cases, distinguished the same
+// way resolve.ResolveModeWithCache draws the honesty line between a
+// genuine discovery failure and an honest "no epic" result:
+//
+//  1. A genuine bd/discovery failure (bd unreachable, Dolt down) —
+//     refuses naming that failure, never silently treated as "no epic".
+//  2. An existing on-disk pre-epic DRAFT (spec 128 Bead 3 made drafts
+//     first-class) — refuses with the honest "no epic; not approved yet"
+//     steer, naming the actual `spec approve` recovery, never a false
+//     "doesn't exist" claim.
+//  3. Genuinely no such spec at all — refuses naming the spec (this is
+//     the residual case if a caller reaches BuildReadySet with a specFlag
+//     that ResolveSpecPrefixProven did not already prove exists).
+//
+// Never falls back to the global `bd ready` query — the caller returns
+// this error directly (AC-15).
+func scopeResolutionRefusal(root, specFlag string, epicErr error) error {
+	c := phase.NewCache()
+	if _, allErr := c.AllEpics(); allErr != nil {
+		return fmt.Errorf("resolving --spec %s: querying epics failed: %w", idrender.Spec(specFlag), allErr)
+	}
+	isDraft, draftErr := resolve.IsDraftSpecWithCache(c, root, specFlag)
+	if draftErr != nil {
+		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), draftErr)
+	}
+	if isDraft {
+		return fmt.Errorf("spec %s exists but has no epic; run `mindspec spec approve %s` first", idrender.Spec(specFlag), idrender.Spec(specFlag))
+	}
+	if epicErr != nil {
+		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), epicErr)
+	}
+	return fmt.Errorf("no spec found matching %s; run `mindspec spec list` and re-run with a listed ID", idrender.Spec(specFlag))
 }
 
 // bdRenderedError decorates a bd-command-derived error for terminal-facing
