@@ -67,7 +67,12 @@ type GateResult struct {
 func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error) {
 	report, err := evaluateReadinessFn(root, beadID)
 	if err != nil {
-		return nil, fmt.Errorf("evaluating readiness for %s: %w", idrender.Bead(beadID), err)
+		// bd mindspec-ta30.9 round-1 panel G2: EvaluateReadiness reads bd
+		// transitively (fetchBeadRecordReal -> bead.RunBD), so its error
+		// can carry bd's own stderr text; wrap it through bdRenderedError
+		// (beads.go) so that text is escaped at THIS render boundary too,
+		// with the chain (errors.As/Is) preserved unchanged.
+		return nil, fmt.Errorf("evaluating readiness for %s: %w", idrender.Bead(beadID), &bdRenderedError{err: err})
 	}
 
 	if report.AllPass() {
@@ -108,12 +113,23 @@ func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error)
 // refusal-zero-mutation audit stays intact. This function itself never
 // swallows the write error — it returns it for the caller to fail on.
 func RecordReadinessOverride(beadID string, signals []string) error {
-	return mergeMetadataFn(beadID, map[string]interface{}{
+	if err := mergeMetadataFn(beadID, map[string]interface{}{
 		bead.MetaKeyReadinessOverride: map[string]interface{}{
 			"signals":    signals,
 			"overridden": time.Now().UTC().Format(time.RFC3339),
 		},
-	})
+	}); err != nil {
+		// bd mindspec-ta30.9 round-2 panel: bead.MergeMetadata's
+		// read-merge-write reads via GetMetadata -> tracedOutput FIRST, so
+		// a merge-READ failure can carry bd's own (possibly hostile)
+		// stderr text already folded in by bdcli.go's wrapBDError. This
+		// leg is ARMED, not hypothetical — wrap through bdRenderedError so
+		// that text is escaped once a caller (cmd/mindspec/next.go's %v
+		// render into guard.NewFailure) puts it on the terminal, while
+		// leaving the chain (errors.As/Is) intact unchanged.
+		return &bdRenderedError{err: err}
+	}
+	return nil
 }
 
 // RollbackReadinessOverride deletes the durable `--allow-not-ready`
@@ -129,5 +145,12 @@ func RecordReadinessOverride(beadID string, signals []string) error {
 // failure as the primary error. Deleting a key that is already absent
 // is a no-op (nil).
 func RollbackReadinessOverride(beadID string) error {
-	return deleteMetadataKeysFn(beadID, bead.MetaKeyReadinessOverride)
+	if err := deleteMetadataKeysFn(beadID, bead.MetaKeyReadinessOverride); err != nil {
+		// Same disposition as RecordReadinessOverride above:
+		// bead.DeleteMetadataKeys also reads via GetMetadata ->
+		// tracedOutput first, so a delete-READ failure can carry folded
+		// bd stderr text — wrap for the render boundary, chain intact.
+		return &bdRenderedError{err: err}
+	}
+	return nil
 }

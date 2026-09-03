@@ -145,6 +145,39 @@ func TestGateReadiness_EvaluationErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestGateReadiness_RenderingLegControlBytesEscaped is round-2 panel's
+// red-on-revert pin for GateReadiness's own render leg: a chain test
+// alone (errors.As reaching through) would stay green even if the
+// bdRenderedError wrapper were dropped from GateReadiness's evaluation-
+// error wrap (reverting to a bare %w of err). This directly swaps
+// evaluateReadinessFn to return a control-bearing error — as a real
+// EvaluateReadiness failure would when it reads bd transitively via
+// fetchBeadRecordReal -> bead.RunBD and bd's stderr carries hostile
+// bytes — and asserts the schema-error text survives while no raw
+// control byte reaches GateReadiness's rendered error.
+func TestGateReadiness_RenderingLegControlBytesEscaped(t *testing.T) {
+	orig := evaluateReadinessFn
+	t.Cleanup(func() { evaluateReadinessFn = orig })
+
+	evaluateReadinessFn = func(root, beadID string) (*readiness.Report, error) {
+		return nil, errors.New("bd show " + beadID +
+			" failed: exit status 1: Error 1105 (HY000): column \"depends_on_id\" could not be found\n" +
+			"noise\x1b[31mmore-noise\r")
+	}
+
+	_, err := GateReadiness("root", "mindspec-abc", false)
+	if err == nil {
+		t.Fatal("expected the evaluation error to propagate")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depends_on_id") {
+		t.Errorf("schema-error text must survive rendering, got: %q", msg)
+	}
+	if strings.ContainsAny(msg, "\x1b\r\x00") {
+		t.Errorf("a raw control byte reached GateReadiness's rendered error: %q", msg)
+	}
+}
+
 // TestRecordReadinessOverride_WritesMarkerViaMergeMetadata pins the
 // durable-marker write shape: RecordReadinessOverride calls
 // bead.MergeMetadata (via the mergeMetadataFn seam) with EXACTLY the

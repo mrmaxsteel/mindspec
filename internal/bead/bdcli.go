@@ -439,7 +439,89 @@ func GetMetadata(issueID string) (map[string]interface{}, error) {
 	return merged, nil
 }
 
+// bdStderrExcerptLineCap bounds how many lines of a failed bd command's
+// captured stderr are surfaced into the returned error text (bead
+// mindspec-ta30.9, spec 128 R6.4/AC-11, motivated by #146: a stale bd
+// binary's `Error 1105 (HY000): column "depends_on_id" could not be
+// found` schema error was captured into exec.ExitError.Stderr and then
+// silently discarded by every `%w`-wrapping caller, leaving only the
+// useless "exit status 1"). bd/Dolt failures worth diagnosing — schema
+// errors, "unknown flag" messages, lock-contention notices — are one to
+// a handful of lines; the cap exists to bound a pathological or hostile
+// bd emitting unbounded stderr, not to trim legitimate diagnostics.
+const bdStderrExcerptLineCap = 20
+
+// wrapBDError decorates a failed bd invocation's error so its captured
+// stderr text (exec.ExitError.Stderr, already populated by cmd.Output()
+// whenever cmd.Stderr is nil) is part of the returned error's rendered
+// text — not just a struct field a caller must know to reach into. A
+// plain fmt.Errorf("...: %w", err) by any caller (e.g. internal/next's
+// QueryReady/QueryReadyForEpic) then surfaces the real bd/Dolt failure
+// instead of just "exit status 1".
+//
+// The excerpt is capped at bdStderrExcerptLineCap lines, with a
+// truncation marker appended when the real stderr has more. Non-exit
+// errors (bd not found, etc.) and exit errors with empty OR
+// whitespace-only stderr (round-1 panel G4: e.g. a bd that writes only a
+// trailing newline, blank lines, or bare CR/LF noise to stderr before
+// exiting non-zero) pass through completely unchanged — decorating a
+// failure with an excerpt that is itself just whitespace would add
+// visual noise with zero diagnostic content, so the whitespace check
+// runs BEFORE any decoration is attempted, not as a post-hoc empty-
+// excerpt fallback.
+//
+// The original error is preserved via %w, so errors.As(err, &exitErr)
+// still finds the underlying *exec.ExitError exactly as before this
+// wrapping was introduced (BeadExists, IsUnsupportedFlagError).
+//
+// Rendering safety (escaping hostile control bytes for terminal display)
+// is deliberately NOT done here — this only shapes the error TEXT that
+// reaches a caller's message construction. The render-boundary
+// termsafe.Escape lives in the caller that actually prints to a
+// terminal; see internal/next's bdRenderedError/QueryReady/
+// QueryReadyForEpic.
+func wrapBDError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	if strings.TrimSpace(string(exitErr.Stderr)) == "" {
+		return err
+	}
+	excerpt, truncated := capStderrLines(exitErr.Stderr, bdStderrExcerptLineCap)
+	if excerpt == "" {
+		return err
+	}
+	if truncated {
+		return fmt.Errorf("%w: %s\n... (stderr truncated at %d lines)", err, excerpt, bdStderrExcerptLineCap)
+	}
+	return fmt.Errorf("%w: %s", err, excerpt)
+}
+
+// capStderrLines splits raw stderr bytes into lines, trims a trailing
+// empty line left by a final newline, and joins at most maxLines of them
+// back together. It reports whether the input had more lines than
+// maxLines (truncated).
+func capStderrLines(raw []byte, maxLines int) (excerpt string, truncated bool) {
+	text := strings.TrimRight(string(raw), "\n")
+	if text == "" {
+		return "", false
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n"), false
+	}
+	return strings.Join(lines[:maxLines], "\n"), true
+}
+
 // tracedOutput runs a bd command via cmd.Output() with trace instrumentation.
+// On failure, the returned error's captured stderr is folded into the
+// error's own rendered text (see wrapBDError) so every RunBD/ListJSON/
+// GetMetadata/etc. caller benefits without having to reach into
+// exec.ExitError.Stderr itself.
 func tracedOutput(op string, args []string) ([]byte, error) {
 	start := time.Now()
 	cmd := execCommand("bd", args...)
@@ -451,7 +533,10 @@ func tracedOutput(op string, args []string) ([]byte, error) {
 			"args": args,
 			"ok":   err == nil,
 		}))
-	return out, err
+	if err != nil {
+		return out, wrapBDError(err)
+	}
+	return out, nil
 }
 
 // tracedCombined runs a bd command via cmd.CombinedOutput() with trace instrumentation.
