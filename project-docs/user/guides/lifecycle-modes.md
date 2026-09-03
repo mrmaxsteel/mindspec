@@ -21,10 +21,13 @@ verbatim and compared, cell by cell, against the Go source of truth
 `TestAgreementTable_DocRowsCrossPinFixtures`; each row's fixture then
 reads its expected values from that SAME record and checks them against
 real production functions (`phase.DerivePhaseWithCache`,
-`resolve.ResolveModeWithCache`, `instruct.Render`, and — for the eight
-rows whose canonical epic fixture carries a stored phase —
+`resolve.ResolveModeWithCache`, `instruct.Render`, and — for the seven
+ordinary three-surface rows plus the forced-backward row —
 `phase.DerivePhaseFromChildren` run directly on the fixture's children,
-independent of whatever that epic's stored phase says). Editing this
+independent of whatever that epic's stored phase says; the terminal row
+and the repair-phase v2 row also carry seeded stored phases but have no
+such leg by design — bare `DerivePhaseFromChildren` cannot express
+`done` for an all-closed set). Editing this
 table's cells alone, or editing this table AND `agreementTableRows`
 together to the same wrong value, both fail: each of those eight rows'
 canonical fixture inputs are hardcoded to the real verb's own write
@@ -44,7 +47,9 @@ with no matching fixture function fails too
   selects (`ctx.Mode` feeding `internal/instruct`'s `<mode>.md` template
   lookup).
 - **Derivation** is the status-aware phase derivation
-  (`phase.DerivePhaseWithStatus`-class, `derive.go:166`/`:174`) run
+  (`phase.DerivePhaseWithStatus`/`DerivePhaseWithStatusWithCache` in
+  `internal/phase/derive.go` — function names, since line citations here
+  have already gone stale once) run
   directly against the fixture's epic. Bare child-count derivation
   (`DerivePhaseFromChildren`) cannot express the terminal rows on its
   own — it returns `review` for an all-closed child set, not `done` —
@@ -171,7 +176,9 @@ sanctioned backward writer.
 - **Disclosed residual, not silently excepted:** `internal/complete
   /complete.go`'s `completeSyncPhase` (the step-6.5 writer behind this
   table's `complete` rows) is forward-by-intent in every state this table
-  fixtures, but its own doc comment (`complete.go:1398-1420`) records a
+  fixtures, but its own doc comment (`completeSyncPhase` in
+  `internal/complete/complete.go` — cited by function name; the previous
+  line-range citation was falsified by a later bead's edits above it) records a
   narrower reachable residue this bead does not close: in an
   out-of-band state not fixtured here — stored `implement` after a
   previously-surfaced release-sync failure, or a crash between a claim

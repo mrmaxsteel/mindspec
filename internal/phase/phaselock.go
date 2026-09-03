@@ -2,14 +2,26 @@ package phase
 
 // phaselock.go — spec 128 (lifecycle-verb-state-honesty) Bead 1, R3.3: the
 // repo-scoped, kernel-held write lock that serializes EVERY
-// mindspec_phase writer — `plan approve` (plan.go:455), `spec approve`'s
-// existing-epic backfill (spec.go:76), `complete`'s step-6.5 sync
-// (complete.go:1366), `release`'s step-6.5 sync (release.go:152),
-// `impl approve`'s reconcile + done writes (impl.go:577-579/:611-613),
-// `impl adopt`'s done write (adopt.go:424/:437), `EnsureMigrated`'s
-// ADR-0034 backfill (migrate.go), and `mindspec repair phase`
-// (repair.go:189-191) — so a concurrent writer can never land a stale
-// value over a fresher one (AC-5(v)).
+// mindspec_phase writer — `plan approve` (internal/approve/plan.go's
+// ApprovePlan phase-write closure), `spec approve`'s existing-epic
+// backfill (internal/approve/spec.go's backfillExistingEpicPhase),
+// `next`'s claim-time advance (cmd/mindspec/next.go's
+// advancePhaseOnClaim — bead 2's OQ-3 writer), `complete`'s step-6.5
+// sync (internal/complete/complete.go's completeSyncPhase), `release`'s
+// step-6.5 sync (via phase.SanctionedDerivedSync, sanctioned_sync.go —
+// release.go itself never calls WithPhaseWriteLock directly),
+// `impl approve`'s reconcile + done writes (internal/approve/impl.go),
+// `impl adopt`'s done write (internal/approve/adopt.go),
+// `EnsureMigrated`'s ADR-0034 backfill (migrate.go), the one-shot v2
+// phase-semantics translation (semantics_v2.go's
+// EnsurePhaseSemanticsV2), and `mindspec repair phase`
+// (cmd/mindspec/repair.go's repairPhaseRunE) — so a concurrent writer
+// can never land a stale value over a fresher one (AC-5(v)). Function
+// names, not line numbers, on purpose: the numbers drifted on every
+// edit above them (final-review round 1 G7), and
+// writer_inventory_test.go's AST walk — which maintains no list — is
+// the structural fence; this header is the sole human-readable
+// inventory and must stay complete.
 //
 // Kernel-held on both platforms so a crashed holder's lock releases with
 // its process — there is NO PID/timestamp content, NO takeover, and NO

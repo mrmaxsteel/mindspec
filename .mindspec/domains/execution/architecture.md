@@ -348,7 +348,7 @@ exclusively through eight new `Executor` interface methods
 - **`AdvanceBranchExpectedOld(branch, newSHA, expectedOld)`** moves
   `refs/heads/<branch>` via compare-and-swap — the tip advance a
   concurrent mover cannot silently clobber.
-- **`ResetIndexToHead(wtPath)`** runs the index-only `reset --mixed HEAD`
+- **`ResetIndexToHead(wtPath)`** runs the index-only `reset --quiet --mixed HEAD`
   refreshing the real index to match the just-advanced HEAD's tree, leaving
   worktree files untouched — without it, a commit-tree-built commit's newly
   tracked paths read as phantom staged deletions in `git status`.

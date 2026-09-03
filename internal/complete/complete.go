@@ -1332,12 +1332,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // backward derived-sync, just not routed through the fenced surface.
 // It is CORRECTIVE in effect (converges stored toward derived) and its
 // precondition is always a state some OTHER warning already surfaced,
-// so this is accepted as-is for this bead rather than gate-blocking.
-// Routed to beads 4/5 (the agreement-table/result-message work): either
-// fold completeSyncPhase's write through a stored-aware no-op-on-backward
-// guard (making the "exactly one sanctioned backward writer" sentence
-// semantically true, not just lexically fenced), or extend the
-// agreement-table wording to name this fence's honest scope.
+// so this is accepted as-is rather than gate-blocking. DISCHARGED
+// (final-review round 1 G7): the routing to beads 4/5 offered two
+// options — a stored-aware no-op-on-backward guard, or extending the
+// agreement-table wording to name this fence's honest scope — and bead
+// 4 took the second: the disclosure lives in
+// project-docs/user/guides/lifecycle-modes.md's "Disclosed residual,
+// not silently excepted" bullet (the writer-taxonomy section). The
+// residue itself remains as described; it is disclosed, not fixed.
 func completeSyncPhase(root, epicID, nextMode, beadID string) {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil

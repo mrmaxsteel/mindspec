@@ -284,7 +284,7 @@ type Executor interface {
 	// concurrent mover cannot silently clobber.
 	AdvanceBranchExpectedOld(branch, newSHA, expectedOld string) error
 
-	// ResetIndexToHead runs the index-only `reset --mixed HEAD` in wtPath
+	// ResetIndexToHead runs the index-only `reset --quiet --mixed HEAD` in wtPath
 	// — refreshes the REAL index to match HEAD's tree (which the caller
 	// has just advanced via AdvanceBranchExpectedOld), leaving wtPath's
 	// worktree files untouched. Without this, a path newly tracked via a

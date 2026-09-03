@@ -4,7 +4,9 @@ package phase
 // step 7 (round-1 G2): the v2 phase-semantics upgrade reconciliation.
 //
 // OQ-3 option 1 changes plan-approve's WRITTEN value from `implement` to
-// `plan` (semantics_v2.go's sibling change, plan.go:462). An epic that
+// `plan` (semantics_v2.go's sibling change: internal/approve/plan.go's
+// ApprovePlan phase-write closure — the `state.ModePlan` merge-write
+// under the R3.3 lock). An epic that
 // went through `plan approve` under the OLD (pre-v2) semantics — stored
 // `implement`, at least one lifecycle child, all of them still open (no
 // claim was ever made) — carries a value that is now WRONG under v2

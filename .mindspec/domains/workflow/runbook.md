@@ -211,9 +211,14 @@ enumeration):
    #186): `complete`'s content gates (doc-sync, ADR-divergence) now run
    against a prospective snapshot of the bead worktree BEFORE any
    complete-authored commit exists. A refusal — e.g. doc-sync failing —
-   leaves the bead branch tip at `reviewed_head_sha`; re-running the same
-   command with the appropriate override (`--allow-doc-skew "<reason>"`)
-   is the whole recovery. This is the GATE-REFUSAL class specifically:
+   leaves the bead branch tip at `reviewed_head_sha`; re-running after
+   fixing the skew, or with the override for the gate that refused
+   (`--allow-doc-skew "<reason>"` for doc-sync, `--override-adr
+   "<reason>"` for ADR-divergence), is the recovery — the two gates run
+   sequentially, so overriding one can surface the other; neither
+   override is the whole recovery on its own (see merge-safety.md's
+   "Gate-refused `mindspec complete` converges on a plain retry" for the
+   full two-retry contract). This is the GATE-REFUSAL class specifically:
    see `project-docs/user/guides/merge-safety.md` for the distinct
    POST-gate class (a merge conflict, a `bd close` failure), whose
    preserved-merge/forward-reconcile recovery (spec 127) is UNCHANGED by

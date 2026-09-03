@@ -674,12 +674,6 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 	return fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID))
 }
 
-// claimFailureError builds the spec 093 Req 3 claim-failure recovery
-// error for the `mindspec next` ClaimBead caller. Extracted from the
-// RunE closure so the wiring — the FULL recipe is returned, never the
-// pre-093 bare `fmt.Errorf("claiming bead: %w")` — is unit-testable
-// (next_recovery_test.go); reverting the call site to the bare wrap
-// fails TestClaimFailureError_FullRecipe.
 // readinessOverrideFailure builds the guard failure for a
 // RecordReadinessOverride write failure (Step 4.6). Extracted from the
 // RunE closure for direct unit-testability (spec 128 Bead 8's folded-in
@@ -702,6 +696,15 @@ func readinessOverrideFailure(beadID string, err error) error {
 	)
 }
 
+// claimFailureError builds the spec 093 Req 3 claim-failure recovery
+// error for the `mindspec next` ClaimBead caller. Extracted from the
+// RunE closure so the wiring — the FULL recipe is returned, never the
+// pre-093 bare `fmt.Errorf("claiming bead: %w")` — is unit-testable
+// (next_recovery_test.go); reverting the call site to the bare wrap
+// fails TestClaimFailureError_FullRecipe. (Final-review round 1 G7:
+// re-attached — bead 8 inserted readinessOverrideFailure between this
+// comment and its function with no separating blank line, so godoc
+// attributed it to the wrong function.)
 func claimFailureError(root, specFlag string, selected next.BeadInfo, claimErr error) error {
 	return next.ClaimFailure(root, recoveryConfig(root),
 		selected.ID, recoverySpecSlug(root, specFlag, selected), claimErr)

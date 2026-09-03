@@ -181,12 +181,17 @@ populate` prompt emitter — never an inferred `npm test`.
 Every writer of an epic's `mindspec_phase` metadata key — `spec approve`'s
 existing-epic backfill (`internal/approve/spec.go`'s
 `backfillExistingEpicPhase`), `plan approve` (`plan.go`'s step-4b
-`WithPhaseWriteLock` write), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
+`WithPhaseWriteLock` write), `next`'s claim-time advance
+(`cmd/mindspec/next.go`'s `advancePhaseOnClaim` — the bead-7 writer this
+spec itself added, classified forward-by-intent in lifecycle-modes.md's
+writer taxonomy), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
 `release`'s step-6.5 sync (`cmd/mindspec/release.go`), `impl approve`'s
 reconcile and done writes (`internal/approve/impl.go`), `impl adopt`'s done
 write (`internal/approve/adopt.go`), `mindspec repair phase`
-(`cmd/mindspec/repair.go`), and `phase.EnsureMigrated`'s ADR-0034 backfill
-(`migrate.go`) — now executes inside `phase.WithPhaseWriteLock(root, epicID,
+(`cmd/mindspec/repair.go`), `phase.EnsureMigrated`'s ADR-0034 backfill
+(`migrate.go`), and the one-shot v2 phase-semantics translation
+(`semantics_v2.go`'s `EnsurePhaseSemanticsV2`) — now executes inside
+`phase.WithPhaseWriteLock(root, epicID,
 mergeMetadata, fn)`: a repo-scoped, KERNEL-HELD lock at `.mindspec/phase.lock`
 (`PhaseLockRelPath`) that reads the stored phase, hands it to `fn`, performs
 `fn`'s returned conditional `MergeMetadata` write, and releases — so a
