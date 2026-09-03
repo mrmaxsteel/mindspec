@@ -411,6 +411,24 @@ attestation-read failure PROPAGATES (never mapped to "unattested", which
 would destroy genuine recovery evidence on a bd blip; never to
 "attested").
 
+**Honest trust boundary (final-review round 2, R12)**: the attestation
+NARROWS the forgery, it does not close it. bd metadata is written with
+ordinary `bd` CLI access — which every implementer agent in this
+project's own workflow holds by design — so an actor who forges the ref
+and trailer can also write the pairing attestation with one additional
+ordinary bd call. What the attestation actually buys: it defeats
+git-only forgery (the exact round-1 executed repro), it forces the
+forger to leave a durable, attributable write in the tracker's audit
+trail rather than only in reflog-able git refs, and it converts the
+premise from "a marker-shaped ref proves gates passed" to "the local
+operator environment's bd store corroborates the publication". The
+resume-skip-the-gates optimization therefore explicitly TRUSTS the local
+operator environment; it is not an adversarial-integrity control against
+a bd-capable actor. The escalation that would close it — when commit
+signing is enabled, require the marker commit's signature to verify
+against an operator-trusted key before honoring any resume (attested AND
+signature-verified) — is tracked as follow-up bead `mindspec-an8q`.
+
 **The re-entry discriminator**, evaluated before the panel gate on every
 non-reconcile run: absent marker → normal run (re-snapshot, re-gate,
 rebuild); tip == marker AND the attestation names the marker OID → the

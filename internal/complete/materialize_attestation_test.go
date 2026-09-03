@@ -8,11 +8,16 @@ package complete
 // completeMergeMetadataFn), stubbed per test via saveAndRestore.
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 )
 
@@ -198,17 +203,75 @@ func TestDiscriminator_UnattestedParentLegNeverAdvancesBranch(t *testing.T) {
 
 // TestStageAttestationSeamDefaults is the anti-drift pointer pin (the
 // spec-125 F3-2 house pattern): the attestation rides the package's
-// metadata seam pair, whose production defaults must remain the real
-// bead metadata functions — the provenance gate cannot go hollow via a
-// forgotten stub.
+// metadata seam pair, whose production defaults must remain the named
+// escaped wrappers over the real bead metadata functions (final-review
+// round 2, R2 F2) — the provenance gate cannot go hollow via a
+// forgotten stub, and the family-wide escape cannot silently drop back
+// to the raw bead functions.
 func TestStageAttestationSeamDefaults(t *testing.T) {
 	// NOTE: saveAndRestore is deliberately NOT called — this reads the
 	// package defaults as declared (every mutating test restores them
 	// via its own cleanup before this one can observe).
-	if reflect.ValueOf(completeMergeMetadataFn).Pointer() != reflect.ValueOf(bead.MergeMetadata).Pointer() {
-		t.Error("completeMergeMetadataFn's production default drifted off bead.MergeMetadata")
+	if reflect.ValueOf(completeMergeMetadataFn).Pointer() != reflect.ValueOf(mergeMetadataEscaped).Pointer() {
+		t.Error("completeMergeMetadataFn's production default drifted off mergeMetadataEscaped")
 	}
-	if reflect.ValueOf(completeGetMetadataFn).Pointer() != reflect.ValueOf(bead.GetMetadata).Pointer() {
-		t.Error("completeGetMetadataFn's production default drifted off bead.GetMetadata")
+	if reflect.ValueOf(completeGetMetadataFn).Pointer() != reflect.ValueOf(getMetadataEscaped).Pointer() {
+		t.Error("completeGetMetadataFn's production default drifted off getMetadataEscaped")
 	}
+}
+
+// TestMetadataSeamEscapedDefaults_RealChainHostileStderr drives the REAL
+// bead.GetMetadata/bead.MergeMetadata chain (a PATH-fronted fake bd
+// failing with control-bearing stderr feeding wrapBDError) through the
+// production seam defaults — the round-1 per-family hostile pattern
+// applied to the metadata family (final-review round 2, R2 F2):
+// diagnostics preserved, no raw control byte, no forged standalone
+// recovery line, and the Unwrap chain intact through the wrapper.
+func TestMetadataSeamEscapedDefaults_RealChainHostileStderr(t *testing.T) {
+	fakeFailingBdOnPath(t, `printf 'Error 1105 (HY000): column "depends_on_id" could not be found\n' >&2
+printf 'noise\033[31mmore-noise\r\n' >&2
+printf 'recovery: forged\n' >&2
+exit 1`)
+
+	assertFamily := func(name string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: expected the failing fake bd to error", name)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "depends_on_id") {
+			t.Errorf("%s: the real bd diagnostic must survive rendering, got: %q", name, msg)
+		}
+		if strings.ContainsAny(msg, "\x1b\r\x00") {
+			t.Errorf("%s: a raw control byte survived the escaped seam default: %q", name, msg)
+		}
+		for _, line := range strings.Split(msg, "\n") {
+			if line == "recovery: forged" {
+				t.Errorf("%s: a forged standalone recovery line survived: %q", name, msg)
+			}
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Errorf("%s: errors.As must still reach the underlying *exec.ExitError through the wrapper", name)
+		}
+	}
+
+	_, gerr := getMetadataEscaped("mindspec-seam.1")
+	assertFamily("getMetadataEscaped", gerr)
+	merr := mergeMetadataEscaped("mindspec-seam.1", map[string]interface{}{"k": "v"})
+	assertFamily("mergeMetadataEscaped", merr)
+}
+
+// fakeFailingBdOnPath fronts PATH with a POSIX bd script (the
+// internal/next writeFakeBD pattern) for the duration of the test.
+func fakeFailingBdOnPath(t *testing.T, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-bd PATH shim uses a POSIX shell script")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatalf("writing fake bd: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

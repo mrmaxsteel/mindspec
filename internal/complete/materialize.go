@@ -98,6 +98,21 @@ func materializationSubject(beadID, commitMsg string) string {
 // ONLY when the attestation names the observed marker OID exactly. The
 // key persists after completion as an audit record (like the landed
 // binding); each publication overwrites it.
+//
+// HONEST TRUST BOUNDARY (final-review round 2, R12): this NARROWS the
+// forgery, it does not close it. bd metadata is writable with ordinary
+// bd CLI access — which every implementer agent holds by design — so a
+// forger of the ref+trailer can also write the pairing attestation with
+// one more ordinary bd call. What it buys: git-only forgery (the
+// round-1 executed repro) is dead, a successful forgery now leaves a
+// durable attributable write in the tracker's audit trail, and the
+// resume optimization's premise is stated truthfully — it TRUSTS the
+// local operator environment's bd store, it is not an
+// adversarial-integrity control against a bd-capable actor. The
+// signature-verified escalation (attested AND marker-commit signature
+// verified against an operator-trusted key, when signing is enabled) is
+// follow-up bead mindspec-an8q. See ADR-0041's provenance amendment for
+// the same statement at the decision level.
 const stageMarkerAttestationKey = "mindspec_stage_marker_oid"
 
 // readStageMarkerAttestation reads beadID's recorded attestation OID, ""
@@ -114,13 +129,29 @@ func readStageMarkerAttestation(beadID string) (string, error) {
 }
 
 // recordStageMarkerAttestation writes the attestation for oid — called
-// immediately BEFORE each marker-ref publish. The ordering means a crash
-// window can leave an attestation without a ref (harmless: the ref is
-// required first, and the next publication overwrites) but a
-// discriminator-verified ref published by this binary always has its
-// attestation already durable — a legitimate crash never demotes its own
-// resume evidence to FOREIGN. On failure, refuses BEFORE anything is
-// published (aerr is bd-derived — escaped per G3's render discipline).
+// immediately BEFORE each marker-ref publish. The write-before-publish
+// ordering creates TWO crash windows (final-review round 2, R7 N1 —
+// enumerated honestly rather than generalized away):
+//
+//  1. Attestation written, ref publish never landed, NO marker present
+//     (the M-stage's absent→C window): harmless — the discriminator
+//     consults the attestation only when a marker ref exists, and the
+//     next publication overwrites the orphaned value.
+//  2. Attestation written for the NEXT stage while the ref still names
+//     the PREVIOUS one (the C→D window: attestation=D recorded, the
+//     ref-publish CAS from C never landed): on re-run the discriminator
+//     reads oid=C, compares attested(D) != C, and classifies the
+//     LEGITIMATE C marker FOREIGN — clearing it and falling back to a
+//     normal, fully re-gated run (which, with a registered panel and a
+//     tip already past reviewed_head_sha, can also mean a stale-SHA
+//     panel refusal before convergence).
+//
+// So the honest guarantee is one-directional: a crash in the
+// attestation-to-publish window can COST the resume (degrading to the
+// fully-gated path, never silently), but no crash — and no forgery —
+// ever ADMITS an unattested resume. On failure, refuses BEFORE anything
+// is published (aerr is bd-derived — escaped per G3's render
+// discipline).
 func recordStageMarkerAttestation(beadID, oid string) error {
 	if aerr := completeMergeMetadataFn(beadID, map[string]interface{}{
 		stageMarkerAttestationKey: oid,
@@ -155,16 +186,19 @@ func isKnownStage(stage string) bool {
 // ambiguous, or duplicate-encoded trailer is corrupt/foreign evidence,
 // cleared and treated exactly like an absent one, never resumed on.
 //
-// PROVENANCE (final-review round 1, R6 F1): before EITHER success leg
-// honors a resume, the marker OID must be corroborated by the binary's
-// own bd-metadata attestation (stageMarkerAttestationKey — see its doc
-// comment for the executed forgery this closes). The trailer and the
-// ref are both authorable with ordinary repo git access; the attestation
-// is what makes the marker MARKER-PUBLISHED rather than merely
-// marker-shaped. A trailer-bearing marker WITHOUT a matching attestation
-// is FOREIGN: cleared, then a normal run — the panel gate and every
-// content gate re-evaluate in full; nothing resumes on unverified
-// evidence.
+// PROVENANCE (final-review round 1, R6 F1; trust boundary stated
+// honestly in round 2, R12): before EITHER success leg honors a resume,
+// the marker OID must be corroborated by the binary's own bd-metadata
+// attestation (stageMarkerAttestationKey — see its doc comment for the
+// executed forgery this NARROWS, and for the trust boundary: git-only
+// forgery is dead, but a bd-capable actor can still pair the
+// attestation; the resume trusts the local operator environment's bd
+// store — escalation is bead mindspec-an8q). The trailer and the ref
+// are both authorable with ordinary repo git access; the attestation is
+// the bd-store corroboration of publication. A trailer-bearing marker
+// WITHOUT a matching attestation is FOREIGN: cleared, then a normal run
+// — the panel gate and every content gate re-evaluate in full; nothing
+// resumes on evidence the local bd store does not corroborate.
 //
 // Every git read failure here PROPAGATES (fix-round G3): a transient
 // probe failure is never silently downgraded to a default classification

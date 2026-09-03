@@ -182,7 +182,7 @@ Every writer of an epic's `mindspec_phase` metadata key — `spec approve`'s
 existing-epic backfill (`internal/approve/spec.go`'s
 `backfillExistingEpicPhase`), `plan approve` (`plan.go`'s step-4b
 `WithPhaseWriteLock` write), `next`'s claim-time advance
-(`cmd/mindspec/next.go`'s `advancePhaseOnClaim` — the bead-7 writer this
+(`cmd/mindspec/next.go`'s `advancePhaseOnClaim` — the bead-2 writer this
 spec itself added, classified forward-by-intent in lifecycle-modes.md's
 writer taxonomy), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
 `release`'s step-6.5 sync (`cmd/mindspec/release.go`), `impl approve`'s

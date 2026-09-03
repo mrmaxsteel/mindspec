@@ -322,8 +322,9 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	//     ANY other lifecycle verb) succeeds, the reconciliation
 	//     opportunity is NOT lost — EnsurePhaseSemanticsV2 is idempotent
 	//     and re-runs at every OTHER verb's own ahead-of-preflight entry
-	//     (impl.go:277, complete.go's step-1.5 guard, next's claim path,
-	//     repair.go's entry, release.go); the very next lifecycle command
+	//     (internal/approve/impl.go's ApproveImpl, complete.go's step-1.5
+	//     guard, next's claim path, repair.go's entry, release.go); the
+	//     very next lifecycle command
 	//     touching this epic reconciles it then. A failed attempt here
 	//     also writes NOTHING (TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite),
 	//     so there is nothing to "undo" or leave half-applied.
@@ -496,7 +497,8 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// now owns the advance to `implement` (cmd/mindspec/next.go), so
 	// stored and child-derived phase AGREE at every point of the
 	// plan-approve -> first-claim window (all-open children derive
-	// `plan` too, derive.go:387). Round-1/round-2 panel G3: a failure is
+	// `plan` too — DerivePhaseFromChildren's all-open arm,
+	// internal/phase/derive.go). Round-1/round-2 panel G3: a failure is
 	// best-effort (a warning, never fatal here) but a lock TIMEOUT is
 	// rendered with a copy-pastable re-run COMMAND via
 	// phase.DescribeLockFailure, not prose.

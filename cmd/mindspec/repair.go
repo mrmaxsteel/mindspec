@@ -267,7 +267,9 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		// Round-2 panel G2: MUST be the status-aware surface, not bare
 		// phase.DerivePhaseFromChildren — bare children-derivation returns
 		// "review" for an all-closed set regardless of a done marker
-		// (derive.go:375), so at the prior revision `repair phase` on an
+		// (DerivePhaseFromChildren's all-closed arm, internal/phase/
+		// derive.go — function anchor, final-review round 2 R7 N2), so at
+		// the prior revision `repair phase` on an
 		// already-terminal (closed epic, done marker) spec refused a
 		// phantom "backward move" to review and, if --force-backward'd,
 		// would have REGRESSED a healthy done epic. This restores the

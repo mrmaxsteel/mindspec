@@ -42,9 +42,19 @@ var (
 	// defaultVerifyCommitted doc comment for how this is used and how it
 	// degrades on an older bd. Tests swap this to simulate an
 	// unsupported-flag response or a definitive closed/open committed read.
-	fetchBeadAsOfFn         = next.FetchBeadAsOf
-	findEpicForBeadFn       = phase.FindEpicForBead
-	completeMergeMetadataFn = bead.MergeMetadata
+	fetchBeadAsOfFn   = next.FetchBeadAsOf
+	findEpicForBeadFn = phase.FindEpicForBead
+	// completeMergeMetadataFn/completeGetMetadataFn default to the
+	// ESCAPED wrappers below (final-review round 2, R2 F2): both bead
+	// metadata primitives carry wrapBDError'd raw bd stderr (GetMetadata
+	// directly, MergeMetadata via its merge-read leg), and this package
+	// renders their chains at eight sinks (the reconcile-evidence
+	// refusal, four override warnings, the obligation-read refusal, two
+	// audit warnings). Wrapping ONCE at the seam default converts every
+	// present and future sink in the package; bdRenderedError preserves
+	// Unwrap, so bead.IsUnsupportedFlagError and errors.As classification
+	// are unaffected.
+	completeMergeMetadataFn = mergeMetadataEscaped
 	// completeFetchChildrenFn is the AC-4b seam (spec 128 bead 5, the
 	// exact house pattern of completeMergeMetadataFn above): advanceState's
 	// post-close children read routes through this package-level function
@@ -59,8 +69,9 @@ var (
 	// reconciliation (reconcilePendingRefutations) both read bead metadata
 	// through this seam BEFORE unioning/deciding. A read/parse error is
 	// fail-closed by construction (bead.GetMetadata) — never a license to
-	// proceed as if the store were empty.
-	completeGetMetadataFn = bead.GetMetadata
+	// proceed as if the store were empty. Escaped default — see
+	// completeMergeMetadataFn's comment above.
+	completeGetMetadataFn = getMetadataEscaped
 	gitUserEmailFn        = bead.GitUserEmail
 	// checkDirtyTreeFn is the ADR-0025 artifact-aware tree classification
 	// shared with `mindspec next` (spec 092 Req 6, DQ-2: direct reuse of
@@ -154,6 +165,32 @@ var (
 	// (DestructionEvidenceError) against non-existent refs.
 	completeWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
 )
+
+// mergeMetadataEscaped/getMetadataEscaped are the production defaults of
+// the metadata seam pair (final-review round 2, R2 F2): thin wrappers
+// over bead.MergeMetadata/bead.GetMetadata that route any returned error
+// through next.RenderBDError, so its wrapBDError-folded raw bd stderr is
+// per-line escaped at EVERY sink that renders the chain — the same
+// discipline as the round-1 sweep, applied once at the seam instead of
+// eight times at the sinks. Unwrap is preserved end to end
+// (bdRenderedError), so errors.Is/As classification through the seam is
+// byte-identical to the unwrapped defaults. Named functions (not
+// closures) so the seam-default anti-drift pin
+// (materialize_attestation_test.go) can pointer-pin them.
+func mergeMetadataEscaped(issueID string, updates map[string]interface{}) error {
+	if err := bead.MergeMetadata(issueID, updates); err != nil {
+		return next.RenderBDError(err)
+	}
+	return nil
+}
+
+func getMetadataEscaped(issueID string) (map[string]interface{}, error) {
+	meta, err := bead.GetMetadata(issueID)
+	if err != nil {
+		return meta, next.RenderBDError(err)
+	}
+	return meta, nil
+}
 
 // defaultVerifyCommitted is the production committed-state verifier for the
 // spec 098 Req 2 post-close durability gate. Per the HONESTY-CLAUSE above,

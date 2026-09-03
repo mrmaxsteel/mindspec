@@ -29,9 +29,14 @@ and the repair-phase v2 row also carry seeded stored phases but have no
 such leg by design — bare `DerivePhaseFromChildren` cannot express
 `done` for an all-closed set). Editing this
 table's cells alone, or editing this table AND `agreementTableRows`
-together to the same wrong value, both fail: each of those eight rows'
-canonical fixture inputs are hardcoded to the real verb's own write
-semantics in the Go source (never copied from the row record), so
+together to the same wrong value, both fail: each of the seven ordinary
+rows' and the terminal row's canonical fixture inputs are hardcoded to
+the real verb's own write semantics in the Go source (never copied from
+the row record) — the forced-backward row instead seeds its stored
+phase from the record but is held independent by two pre-use setup
+guards (`DerivePhaseFromChildren` against independently-fixed children
+must equal the record's value, and `IsBackwardMove` must prove the
+premise genuinely backward) — so
 changing the record does not change what the fixture actually feeds
 production code, and the `DerivePhaseFromChildren` leg checks the record
 against a pure function of the (also independently-fixed) children with
