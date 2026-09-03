@@ -20,6 +20,27 @@ You are not currently working on any spec or bead.
 ### Git rules
 - You should not need any raw git commands — all git operations are handled by mindspec
 - Raw git is available for repair/recovery but the happy path never requires it
+
+## New Implementation Work
+
+All new implementation work goes through a new spec — **including
+implementing a contract a previous spec already froze.** Freezing an
+interface's shape (an ADR, a spec's frozen contract) and building an
+implementation against it are two different specs; a frozen contract does
+not obviate an implementation spec.
+
+If a spec's implementation already reached `main` outside the lifecycle
+(e.g. merged via an external GitHub PR while its spec branch was deleted
+or went stale) and it is stuck in review mode with no way to complete the
+normal gates, its named exit is `mindspec impl adopt`, never a manual
+bypass of approval:
+
+```bash
+mindspec impl adopt <spec-id> --reason "<why the content already reached main outside the lifecycle>"
+```
+
+See `project-docs/user/guides/merge-safety.md` for what it verifies and
+what it refuses.
 {{- if .BranchProtection}}
 
 ## Branch Protection

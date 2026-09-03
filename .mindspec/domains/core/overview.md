@@ -43,6 +43,22 @@ The `doctor` command validates:
 
 ## Maintenance Notes
 
+- **2026-09-03 (spec 128, lifecycle-verb-state-honesty):** `internal/phase`
+  gained a repo-scoped, kernel-held write lock (`phaselock.go`,
+  `.mindspec/phase.lock`) that now serializes every `mindspec_phase`
+  metadata writer across the codebase, a total-order backward-move
+  comparator (`order.go`'s `IsBackwardMove`), the one sanctioned internal
+  backward-write surface (`sanctioned_sync.go`'s `SanctionedDerivedSync`),
+  and a one-shot legacy-to-v2 phase-semantics translation
+  (`semantics_v2.go`). `internal/state` gained the `ModeIndeterminate`
+  sentinel mode, excluded from `ValidModes`, that the workflow domain's
+  instruct tail selects instead of fabricating idle guidance for an
+  undiscovered failure. See `architecture.md`'s "The `mindspec_phase`
+  write lock, backward-move comparator, and sanctioned sync" section and
+  `interfaces.md` for the exported surface; the consuming verbs
+  (`repair phase`, `plan approve`, `spec
+  approve`, `complete`, `release`, `impl approve`/`adopt`) live in the
+  workflow domain.
 - **2026-07-02 (spec 107 wave 1):** `internal/phase` gained the exported
   `FetchChildren(epicID)` wrapper — the uncached single-call children query
   (delegating to the package-private `fetchChildren`) that `mindspec complete`

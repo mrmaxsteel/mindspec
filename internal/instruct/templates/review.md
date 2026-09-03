@@ -37,10 +37,26 @@ All implementation beads are complete. Present the work for human review before 
 
 ## Forbidden Actions
 
-- New feature work (create a new spec instead)
+- New feature work — including implementing a contract THIS spec (or a
+  previous one) already froze — goes through a new spec instead; a frozen
+  contract does not obviate an implementation spec
 - Significant refactoring beyond the spec's scope
 - Closing out without human approval
 - Manually closing the lifecycle epic via `bd close` — `mindspec impl approve` handles this automatically
+
+## Externally-Merged Predecessor
+
+If this spec's implementation already reached `main` outside the
+lifecycle (e.g. merged via an external GitHub PR while this spec branch
+went stale), its named exit is `mindspec impl adopt`, never a manual
+bypass of the human gate below:
+
+```bash
+mindspec impl adopt <spec-id> --reason "<why the content already reached main outside the lifecycle>"
+```
+
+See `project-docs/user/guides/merge-safety.md` for what it verifies and
+what it refuses.
 
 ## Review Checklist
 

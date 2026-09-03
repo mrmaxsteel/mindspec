@@ -292,3 +292,100 @@ precondition BEFORE mutating, so a preserved merge can never be
 swallowed into a two-parent `chore:` commit (AC-9(v)(ε); enforced at the
 `commitWithExport` funnel, the only production caller of
 `gitutil.CommitAll`).
+
+## Prospective-snapshot / write-ahead materialization primitives (spec 128 Bead 6, OQ-1(a))
+
+Spec 128's #186 fix (workflow domain's `complete` gate reorder — see that
+domain's architecture doc) needed a way for `mindspec complete`'s content
+gates (doc-sync, ADR-divergence) to measure a bead worktree's PROSPECTIVE
+content BEFORE any complete-authored commit exists, so a gate refusal never
+leaves the bead branch tip advanced past the reviewed SHA. This domain
+supplies the git-I/O primitives that make that possible
+(`internal/gitutil/materialize.go`), exposed to the workflow caller
+exclusively through eight new `Executor` interface methods
+(`internal/executor/executor.go`) — `internal/complete` gains no new
+`internal/gitutil` import for the reorder (ADR-0030 boundary preserved):
+
+- **`SnapshotWorktreeTree(wtPath, exclude)`** builds a candidate tree `T`
+  from the worktree's prospective content (tracked + untracked + deletions,
+  exactly what `git add -A` would stage) via a TEMPORARY index — the real
+  index, refs, and worktree are never touched, only unreferenced loose
+  objects are written. The temp index is seeded from the worktree's own
+  HEAD tip FIRST, then `add -A` stages over that seed with `exclude`'s
+  paths (today `.beads/issues.jsonl`) left out — seeding is load-bearing:
+  an unseeded index plus the exclusion would make the excluded, currently
+  tracked artifact ABSENT from `T`, silently deleting it from any commit
+  built from `T`; seeded, the exclusion means "unchanged at tip".
+- **`ChangedFilesTree(workdir, base, treeOID)`** diffs a committed ref
+  against a bare tree OID (`-C workdir`, never a hardcoded root or the
+  caller's cwd) — the tree-vs-tree leg the doc-sync/ADR-divergence gates
+  use to measure `base..T` directly, so "committed tree ≡ measured tree"
+  is mechanical once materialization runs.
+- **`MaterializeStageCommit(wtPath, tree, parent, stage, subject)`** builds
+  a commit object via plumbing (`git commit-tree`, no hooks) carrying a
+  pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`,
+  `StageMaterialization`/`StageArtifactSync`) naming which of the two
+  materialization stages it is — read back from the trailer on re-entry,
+  never inferred from a tree diff (ambiguous when a stage's content is a
+  no-op). An empty `subject` falls back to a stage-named default, never
+  silently discarding an operator-supplied `--commit-msg`.
+- **`PublishStageMarker`/`ReadStageMarker`/`ClearStageMarker`** implement
+  the write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`:
+  before either stage commit's branch advances, the intended tip is
+  durably published via per-ref compare-and-swap (`PublishStageMarker`'s
+  `expectedOld` — "" for CREATE semantics on the first publication of a
+  run, the prior OID for the `C`→`D` transition). A failed publication
+  refuses rather than overwriting another invocation's recovery evidence.
+  `ClearStageMarker` deletes via compare-and-swap against the exact OID
+  this invocation owns, so a stale clear can never delete evidence it
+  does not own; clearing an already-absent marker is an idempotent no-op.
+- **`AdvanceBranchExpectedOld(branch, newSHA, expectedOld)`** moves
+  `refs/heads/<branch>` via compare-and-swap — the tip advance a
+  concurrent mover cannot silently clobber.
+- **`ResetIndexToHead(wtPath)`** runs the index-only `reset --mixed HEAD`
+  refreshing the real index to match the just-advanced HEAD's tree, leaving
+  worktree files untouched — without it, a commit-tree-built commit's newly
+  tracked paths read as phantom staged deletions in `git status`.
+
+Together these implement the M(aterialize)→R(eset)→S(ync)→G(merge)→T(erminal
+clear) staged sequence (ADR-0041 §3(i)): `M` builds candidate commit `C`
+from `T` (`-p <tip>`); `R` refreshes the real index to `C`; `S` re-classifies
+the exact delta about to be committed — any path outside the named-artifact
+set REFUSES here, before the artifact-sync commit `D` is ever built — then
+builds `D` (`-p C`); `G` is the pre-existing preserved-merge machinery,
+untouched; `T` clears the marker on both the ordinary and landed-merge-
+reconcile completion paths. `MockExecutor` (`internal/executor/mock.go`)
+stubs all eight methods with configurable results/errors, defaulting to
+zero values so a pre-existing test that never configures them exercises
+the "nothing to materialize" (both stages elide) path unchanged.
+
+`internal/bead/bdcli.go`'s `wrapBDError` (spec 128 R6.4/AC-11, motivated by
+#146) decorates a failed bd invocation so its captured stderr
+(`exec.ExitError.Stderr`) becomes part of the returned error's rendered
+text — previously discarded by every `%w`-wrapping caller, leaving only
+"exit status 1" for a diagnosable schema-drift or stale-binary failure. The
+excerpt is capped at `bdStderrExcerptLineCap` (20) lines with a truncation
+marker; non-exit errors and whitespace-only stderr pass through unchanged
+rather than being decorated with visual noise. This is the CONTENT half of
+AC-11 — the workflow domain's `internal/next` applies the per-line
+`termsafe.Escape` RENDERING half before any such text reaches a terminal.
+
+Two smaller `internal/gitutil` additions support workflow-domain honesty
+requirements without themselves changing merge/materialization behavior:
+`gitignore.go`'s `RuntimeIgnoreEntries` — the single canonical
+never-track-these list `bootstrap`, `setup`, and `doctor` all share — gained
+`.mindspec/phase.lock` (R3.3's lockfile); `gitops.go` gained
+`FileExistsAtRef(workdir, ref, path)` (R1's cross-worktree draft-visibility
+fix — `git cat-file -e` sees a freshly-committed spec draft on another
+worktree's branch via the shared object store, without checking it out) and
+`HasGitignoreEntry(root, entry)` (R5's claim-guard needs to know, in
+advance, whether a coming `EnsureGitignoreEntry` call will actually WRITE,
+so the two functions' notion of "present" must stay identical).
+
+`internal/harness/sandbox.go` gained `.mindspec/phase.lock` to its list of
+paths a sandbox fixture must gitignore/tolerate alongside `session.json`
+(R3.3's lockfile is a local-runtime artifact, never version-controlled);
+`scenario_bead_lifecycle.go` and `scenario_contract_hardening.go` exercise
+the reordered materialization sequence end-to-end as fault-injection
+scenarios (the KILL-TESTED/DOCUMENTED-FORWARD-SAFE classification, ADR-0041
+§3, § M→R→S→G→T staged boundary, §3(i)).

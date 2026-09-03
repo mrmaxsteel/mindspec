@@ -205,6 +205,51 @@ enumeration):
    is constructor-routed from a single source of truth shared by both
    `internal/approve/plan.go` emitters.
 
+### Lifecycle-verb behaviour changes an operator will notice (spec 128)
+
+1. **A gate-refused `mindspec complete` converges on a plain retry** (R4,
+   #186): `complete`'s content gates (doc-sync, ADR-divergence) now run
+   against a prospective snapshot of the bead worktree BEFORE any
+   complete-authored commit exists. A refusal — e.g. doc-sync failing —
+   leaves the bead branch tip at `reviewed_head_sha`; re-running the same
+   command with the appropriate override (`--allow-doc-skew "<reason>"`)
+   is the whole recovery. This is the GATE-REFUSAL class specifically:
+   see `project-docs/user/guides/merge-safety.md` for the distinct
+   POST-gate class (a merge conflict, a `bd close` failure), whose
+   preserved-merge/forward-reconcile recovery (spec 127) is UNCHANGED by
+   this reorder.
+2. **`mindspec repair phase` now refuses a backward move by default**
+   (R3.3): moving an epic's stored phase backward in lifecycle order
+   (`spec < plan < implement < review < done`) requires
+   `--force-backward "<reason>"`; the forced success line names the
+   recorded reason. A stuck lock (`.mindspec/phase.lock`) refusal is a
+   genuine concurrent writer, not a stale file — see the core domain
+   runbook.
+3. **A replayed `mindspec spec approve` no longer regresses phase** (R3.6,
+   #248-class): re-running `spec approve` against an epic already past
+   `plan` leaves the stored phase unchanged and reports a no-op rather
+   than silently backfilling `plan` over `implement`/`review`/`done`.
+4. **`mindspec next --spec <id>` never silently widens scope** (R6.7,
+   AC-15): an explicit `--spec` whose epic can't be resolved (a genuinely
+   nonexistent spec, a not-yet-approved draft, or a real discovery
+   failure) now refuses naming the cause instead of falling back to the
+   global unscoped `bd ready` query.
+5. **`mindspec next`'s selection is deterministic and every drop is
+   loud** (R6, #187/#146): `--pick N` behaves identically on the claim and
+   `--emit-only` paths for the same ready set; a spec-title filter that
+   excludes ready beads always prints the excluded count and reason —
+   "No ready work found" never means "some were excluded and I didn't
+   tell you." A failing `bd` shell-out's stderr now surfaces in
+   mindspec's own error text (escaped, never raw).
+6. **`mindspec next`'s dirty-tree guard on a worktree-creating claim no
+   longer blocks on unrelated user dirt** (R5, #179): the guard now
+   blocks only on the claim's actual derived entanglement — an
+   entry-absent `.gitignore` at the claim anchor, or (when recording is
+   enabled) the target spec's recording paths — and names every other
+   dirty path on stderr instead of silently ignoring it ("note: claiming
+   despite unrelated dirty path(s) this claim does not touch..."); every
+   other verb's dirty-tree guard is unaffected.
+
 ## Maintenance Notes
 
 - **2026-07-02 (spec 107 wave 1):** The hidden `spec init` alias
