@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Author-of-record walk of plan §Bead 8 + the folded-in ta30.9 follow-up against `git show 7f4ad41b`, in the bead worktree (left byte-identical; unit legs re-run green: internal/next 15.3s ok, internal/resolve ok, the three next_render_test.go legs PASS). The code delivery is faithful: (1) select.go's total pick semantics are exactly the plan's — the single-item early return is gone, negative rejected, 0=unset, out-of-range errors at every set size, ONE SelectWork consumed by both paths (claim RunE and runEmitOnly both call next.SelectWork over rs.Filtered). (2) OQ-5 is honored EXACTLY: BuildReadySet appends in bd ready's returned order, FormatWorkList numbers 1..N in slice order, and SelectWork(items, 0) returns items[0] — so the defaulted bead IS displayed row 1, and the printed line text matches the plan's pinned wording byte-for-byte at both print sites (cmd/mindspec/next.go:254 and :475): 'Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.' The AC-9 CLI legs are real-bd with deterministic distinct priorities and assert selection via the primer's own '**Bead**:' line, pinning order = bd ready priority order. (3) Disclosure A resolves cleanly: grep shows the unproven ResolveSpecPrefix's only remaining non-test callers are cmd/mindspec/complete.go:51 and internal/complete/complete.go:138's seam — the complete path, outside R6.7's scope; BOTH next entry points (RunE step 0a next.go:89, runEmitOnly next.go:435) use ResolveSpecPrefixProven, so the unproven original is unreachable on every path that needed the proof. (4) AC-15's seam-recorded no-global-query assertion is genuinely present (runBDFn 'ready' recording in all three TestBuildReadySet_ScopeRefusal_* tests) plus behavioral CLI legs proving the other spec's bead stays open. (5) The ta30.9 render legs are delivered and pinned red-on-revert (readinessOverrideFailure extraction + describePhaseSyncFailure non-timeout leg through next.RenderBDError, hostile-ESC tests at cmd and internal levels). (6) Disclosure B's ordering is acceptable as grafted: the NONEXISTENT-spec refusal correctly precedes everything (step 0a), and only the draft no-epic steer sits behind the dirty-tree/unmerged guards — see finding F3. WHAT BLOCKS: two output-surface assertions the spec explicitly mandates as tests do not exist anywhere in the tree, so two pinned lines are revert-silent — against this bead's own DESIGN requirement ('ACs pin what messages say ... with red-on-revert tests') and the spec's letter. See F1/F2.",
+  "concrete_changes_required": [
+    "F1 (AC-9 last sentence / OQ-5): add a test asserting the no-pick default path actually PRINTS the pinned self-describing line. Spec OQ-5 says 'AC-9's default-line assertion pins that printed rule' — that assertion is the mechanism that pins the OQ-5 resolution, and it does not exist: grep for 'Defaulting' across all *_test.go returns zero hits (the only matches are the two print sites in cmd/mindspec/next.go:254/:475). Reverting the line to the old 'Defaulting to first item. Use --pick=N to select a specific item.' — or defaulting to a different row while printing the new text — leaves the whole suite green. A CLI leg on the existing two-ready-bead fixture (no --pick, assert output contains 'Defaulting to item 1 (bd ready priority order)' AND the selected/claimed bead is the displayed row-1/higher-priority bead) pins both the rule and its self-description on at least one path; cover the other path or extract the line to a shared constant asserted once.",
+    "F2 (R6.3(a) round-3 G3 / AC-10 final sentence / R6.1): add the spec's explicitly-demanded positional --emit-only test. Spec R6.3(a): 'a test drives positional --emit-only with --spec and a title-unreferenced ready bead and asserts the preview proceeds with the bypass line, with no exclusion report and no false readiness claim.' No test anywhere drives positional --emit-only, and the pinned bypass line 'emit-only: bead fetched by ID; readiness not checked' appears in zero tests (tree-wide grep) — so AC-10's 'must print only the pinned readiness-bypass disclosure' and R6.1's 'a test pins both behaviors' are both unenforced; deleting the bypass println at next.go's positional branch leaves the suite green. While adding it, also assert the exclusion NOTICE actually reaches stderr on at least one set-constructing CLI path (ExclusionNotice content is unit-pinned but both fmt.Fprintln(os.Stderr, notice) print sites are unasserted)."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "title": "OQ-5 default line printed but pinned by no test — AC-9's default-line assertion missing, revert-silent",
+      "evidence": "cmd/mindspec/next.go:254 and :475 print the plan-exact line; `grep -rn 'Defaulting' --include='*_test.go'` over the tree returns nothing; spec.md OQ-5: 'AC-9's default-line assertion pins that printed rule'; AC-9: 'The no-pick default path prints the self-describing line naming the ordering and default rule R6.2 requires (round-1 G5)'; bead DESIGN: red-on-revert pins for changed message strings."
+    },
+    {
+      "id": "F2",
+      "severity": "major",
+      "title": "Positional --emit-only bypass-line test (spec R6.3(a), explicitly specified) not written; bypass line and exclusion-notice prints unasserted",
+      "evidence": "grep for 'readiness not checked' in *_test.go: zero hits; no test invokes `next <bead-id> --emit-only` at all (next_positional_test.go covers only help text); AC-10 final sentence and R6.1's 'a test pins both behaviors' therefore unenforced. Behavior itself verified correct by reading runEmitOnly (next.go:435-447: proof, FetchBeadByID, pinned line, no ready query)."
+    },
+    {
+      "id": "F3",
+      "severity": "minor",
+      "title": "Disclosure B accepted with one recorded asymmetry (no change requested under the binding no-reorder instruction)",
+      "evidence": "The two scope-refusal classes surface at different depths on the claim path: nonexistent-spec refuses at step 0a (next.go:89, before the dirty-tree guard — good), but the draft's approve-first steer only surfaces from BuildReadySet at step 2, AFTER the dirty-tree guard and step 1.7 — an operator with blocking dirt targeting a draft learns about dirt first and 'run spec approve' only after cleaning, though no claim could ever proceed for a draft. checkUnmergedBeads is a no-op for a draft (no bead branches), so no wrong error interposes. Consequence is sequencing UX only; consistent with the prompt's grafted-not-reordered instruction."
+    },
+    {
+      "id": "F4",
+      "severity": "info",
+      "title": "Bypass line carries a trailing period beyond the spec's quoted text — within tolerance",
+      "evidence": "Impl prints 'emit-only: bead fetched by ID; readiness not checked.' vs the spec's quoted 'emit-only: bead fetched by ID; readiness not checked' (introduced under 'e.g.' at R6.1); substring containment holds, so any F2 test written against the spec's text passes. No change needed beyond writing F2's test against the spec wording."
+    },
+    {
+      "id": "F5",
+      "severity": "info",
+      "title": "Disclosure A verified resolved — unproven ResolveSpecPrefix unreachable on every path that needed the proof",
+      "evidence": "Non-test callers of the unproven original: cmd/mindspec/complete.go:51 and internal/complete/complete.go:138 (the seam) only — the complete path, which R6.7/AC-15 do not govern. Both next entry points use ResolveSpecPrefixProven (next.go:89, :435). The Proven sibling's draft passthrough correctly defers the no-epic steer to BuildReadySet's scopeResolutionRefusal so the two refusal messages never collide (target_test.go pins all four branches)."
+    }
+  ]
+}

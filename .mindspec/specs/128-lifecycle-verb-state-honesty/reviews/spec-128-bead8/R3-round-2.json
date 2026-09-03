@@ -1,0 +1,33 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 confirm at 8193ca97, contract-stability lens. (1) Diff confinement VERIFIED: the fix commit touches exactly cmd/mindspec/next.go, internal/next/select.go, and two test files — all inside this bead's declared scope; the non-test changes are precisely the G2 pick-boundary hoist (+ G4 help text) and the G3 selector-rendering conversions, nothing else. internal/next/beads.go, internal/resolve/target.go, and every round-1 contract surface (SelectWork's semantics, BuildReadySet, ResolveSpecPrefixProven) are byte-untouched, so all of my round-1 caller-graph and alignment conclusions carry forward unchanged. (2) The DISCLOSED RENDERING JUDGMENT is sound under the contract lens, and the split leaves NO selector-bearing render site unconverted. Full sweep of every formatted render of the caller-supplied selector across both paths: SelectWorkByName's ambiguous branch (select.go:160) and not-found branch (select.go:166) — first occurrence %q (Go-quote, control-safe), second occurrence inside the backtick fence now termsafe.Escape; exclusionReasonForName (select.go:97) — termsafe.Escape; SelectWorkByName's empty-name branch — no interpolation; runEmitOnly's positional fetch-error (next.go:476) — idrender.Bead. The claim path's `named` reaches output only through those functions' returned errors (the call site wraps as 'selecting work: %w' with no second raw render), and no other Errorf/Printf in either file interpolates the selector. The dividing rule is principled and mechanically enforced where it matters: the idrender site's premise (args[0] must be a full ID) is guaranteed by FetchBeadByID's own idvalidate.BeadID gate (beads.go:414-417), which refuses before the error wrap can ever render a non-ID; the termsafe sites' premise (the claim-path selector legitimately includes short suffix forms that idvalidate.BeadID rejects — beadIDPattern requires a hyphenated slug, so 'ta30'-style short forms fail it) is exactly SelectWorkByName's documented grammar, so idrender.Bead there would force-quote every legitimate short form. Both conventions neutralize the house threat (terminal control forgery, ADR-0042); the split only chooses display fidelity per site's actual grammar, with the reason documented in a comment at each site — a future editor has the rule in front of them. (3) G2's hoisted pick<0 check duplicates SelectWork's own guard (identical message text) — assessed as deliberate defense in depth, not drift: SelectWork stays total as a library API for any future caller while RunE refuses with zero side effects; the runEmitOnly dispatch sits below the check so both paths are covered at one choke point as claimed. (4) Gates re-run at 8193ca97 in the bead worktree: go build ./... clean; go test -short internal/next (13.1s ok) + cmd/mindspec (39.0s ok); worktree left byte-identical (git status clean). My round-1 findings F1-F5 were all advisory/non-blocking, were not among the four fix groups, and are neither invalidated nor worsened by this diff — they stand as follow-up candidates only.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-F1",
+      "severity": "info",
+      "blocking": false,
+      "title": "Selector-render sweep complete — no unconverted site",
+      "detail": "Exhaustive grep of formatted renders involving name/named/args[0] in cmd/mindspec/next.go and internal/next/select.go finds exactly four selector-bearing sites, all converted per the disclosed convention: select.go:160 and :166 (%q + termsafe.Escape), exclusionReasonForName (termsafe.Escape), next.go:476 (idrender.Bead, premise enforced upstream by FetchBeadByID's idvalidate.BeadID gate). The claim path adds no raw render of its own ('selecting work: %w' wrap only).",
+      "files": ["internal/next/select.go:89-166", "cmd/mindspec/next.go:466-478"]
+    },
+    {
+      "id": "R2-F2",
+      "severity": "nit",
+      "blocking": false,
+      "title": "Backticks survive termsafe.Escape inside the fenced command examples — out of the house threat model, noting for the record",
+      "detail": "termsafe.Escape keeps printable ASCII byte-identical, so a printable-hostile selector containing a backtick can visually close the `mindspec next ...` fence in the ambiguous/not-found/exclusion messages. Within ADR-0042's threat model (terminal control-sequence forgery) this is out of scope — no control bytes survive, and the %q first occurrence in each message shows the exact quoted selector alongside — so this is a record-keeping nit, not an ask. R6 owns the hostile-leg merits.",
+      "files": ["internal/next/select.go:160-166"]
+    },
+    {
+      "id": "R2-F3",
+      "severity": "info",
+      "blocking": false,
+      "title": "pick<0 rule now stated twice (RunE top + SelectWork) with identical text — deliberate defense in depth",
+      "detail": "The G2 hoist keeps SelectWork's own pick<0 guard, so the rule lives at two sites with the same message string. Acceptable: SelectWork must stay total as a library API, and the RunE check is what buys the zero-side-effect refusal. Trivial divergence risk; the new e2e legs pin the surface behavior either way.",
+      "files": ["cmd/mindspec/next.go:62-78", "internal/next/select.go:27-29"]
+    }
+  ]
+}

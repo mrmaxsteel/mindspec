@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Round-2 re-derivation at 8193ca97 (bead worktree, left byte-identical; go build clean). MY TWO CORE ASKS ARE DELIVERED AND VERIFIED BY EXECUTION: I ran all six new e2e tests live — TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1 (16.2s), TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1 (77.2s), TestNextSelection_PositionalEmitOnly_BypassesSpecFilter (11.7s), both NegativePick tests, and the hostile-ID render test — ALL PASS against real bd. Text verification: the tests pin wantLine = 'Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.' — byte-identical to the plan's OQ-5 pinned wording — and wantBypassLine = 'emit-only: bead fetched by ID; readiness not checked.' — the implemented text, containing the spec's R6.3(a) quoted string as its prefix. Both are now genuinely red-on-revert (a Contains assertion on the exact text). The default-line tests additionally prove the RULE, not just the line: the claim-path test asserts displayed row 1 (the higher-priority bead) ends up in_progress while row 2 stays open; the emit-only test asserts the primer's '**Bead**:' line names row 1. The bypass test matches R6.3(a)'s specified shape exactly (title-unreferenced ready bead, preview proceeds, exact bypass line, no 'excluded' report, no readiness-shaped claim). I also reviewed the G2/G3 code changes riding this commit: G2's early pick<0 check at the shared RunE entry is correct (runEmitOnly is only reachable through it, message text matches SelectWork's own retained check, --pick=0 sentinel preserved and now help-documented) and its zero-side-effects tests are real; G3's termsafe.Escape-vs-idrender.Bead discrimination (free-form selector vs required-full-ID position) is the right convention split and each new render leg carries a hostile-ESC pin plus a clean-short-form byte-identical pin. No OQ-5 or pinned-wording regression anywhere in the delta. ONE RESIDUAL BLOCKS: my round-1 F2 was delivered without its explicit rider — the partial-exclusion NOTICE print is still revert-silent (F6). It is narrow and cheap, but it was a stated concrete_changes_required clause and it guards an AC-10 sub-clause ('a partial filter exclusion prints the excluded count and reason'), on a message string this bead introduced — the same revert-silence class this panel just fixed for the other two lines.",
+  "concrete_changes_required": [
+    "F6 (residual of round-1 F2's rider, AC-10 partial-exclusion clause): add one CLI-level assertion that the partial-exclusion notice is actually PRINTED on a set-constructing path. Today `grep -rn 'excluded by spec filter' --include='*_test.go' cmd/` returns zero hits and ExclusionNotice is only content-pinned at unit level (readyset_test.go:202), so deleting BOTH `fmt.Fprintln(os.Stderr, notice)` sites in cmd/mindspec/next.go (claim path and runEmitOnly) leaves the whole suite green while silently voiding AC-10's 'a partial filter exclusion prints the excluded count and reason alongside the displayed list'. Smallest fix: one new e2e test on the nextSelectionTwoReadyBeads shape plus ONE extra title-unreferenced bead under the same epic — run `mindspec next --spec <s> --emit-only` (or the claim path), assert output contains '1 ready bead(s) excluded by spec filter' (and still selects/claims displayed row 1 of the FILTERED list). One path suffices; both print sites share ReadySet.ExclusionNotice so a single wiring pin per path-family is proportionate — but at least one must exist."
+  ],
+  "findings": [
+    {
+      "id": "F1-closed",
+      "severity": "resolved",
+      "title": "Round-1 F1 delivered: OQ-5 default line pinned on BOTH paths, rule + wording, verified by execution",
+      "evidence": "TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1 and TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1 assert the exact plan-pinned text (byte-identical to plan.md's OQ-5 section) AND that the selected/claimed bead is displayed row 1 under real bd priority order (row 2 asserted untouched on the claim path). Both run PASS in this worktree (77.2s / 16.2s, real bd + plan-approve fixture)."
+    },
+    {
+      "id": "F2-closed",
+      "severity": "resolved",
+      "title": "Round-1 F2 core delivered: R6.3(a)'s positional --emit-only test exists in the spec's exact specified shape, verified by execution",
+      "evidence": "TestNextSelection_PositionalEmitOnly_BypassesSpecFilter drives `next --spec <s> <bead-id> --emit-only` against a title-unreferenced ready bead: proceeds, asserts the exact pinned bypass line 'emit-only: bead fetched by ID; readiness not checked.', asserts no 'excluded' report and no readiness-shaped claim, and asserts the primer emits the fetched bead. PASS (11.7s). The trailing period beyond the spec's quoted text remains within tolerance (round-1 F4): the spec's string is a strict prefix of the pinned text."
+    },
+    {
+      "id": "F6",
+      "severity": "minor",
+      "title": "Round-1 F2's rider not delivered: the partial-exclusion notice print sites remain revert-silent",
+      "evidence": "Zero cmd-level tests contain 'excluded by spec filter'; the only ExclusionNotice assertions are unit-level content pins (internal/next/readyset_test.go:143,202). Both fmt.Fprintln(os.Stderr, notice) wirings in cmd/mindspec/next.go can be deleted with the suite staying green, voiding AC-10's partial-exclusion print clause. This was an explicit clause of my round-1 concrete_changes_required (F2: 'While adding it, also assert the exclusion NOTICE actually reaches stderr...'). Behavior itself verified correct by reading both call sites; only the enforcement pin is missing."
+    },
+    {
+      "id": "F7",
+      "severity": "info",
+      "title": "G2/G3 (other slots' round-1 asks) reviewed for faithfulness — sound, no regression to my lens's surfaces",
+      "evidence": "G2: pick<0 validated once at the shared RunE entry before positional dispatch/emit-only dispatch/scope resolution/guards (cmd/mindspec/next.go:59-77 region), refusal text identical to SelectWork's retained defense-in-depth check, --pick=0 sentinel preserved and documented in the flag help; zero-side-effects e2e tests PASS. G3: termsafe.Escape for the free-form positional selector (exclusionReasonForName, SelectWorkByName's two legs — the selector may be a legitimate short form, so idrender.Bead would force-quote it) vs idrender.Bead for runEmitOnly's required-full-ID position — the discrimination is argued in-code and each leg carries a hostile-ESC pin plus a clean-input byte-identical pin. The OQ-5 default line and bypass line texts are untouched by this delta."
+    }
+  ]
+}

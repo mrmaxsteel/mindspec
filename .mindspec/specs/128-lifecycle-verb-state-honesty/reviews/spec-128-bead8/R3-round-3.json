@@ -1,0 +1,8 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-3 minimal confirm at e9acc634, contract-stability lens. Confinement VERIFIED: the commit is TEST-ONLY — 79 added lines in cmd/mindspec/next_selection_test.go (two new CLI-level pins for the R6.3(a) partial-exclusion notice call sites, one per path), zero production files touched. Every contract surface from my round-1 review (SelectWork/BuildReadySet caller graph, ResolveSpecPrefixProven/ResolveSpecPrefix alignment, scopeResolutionRefusal's three-way discrimination, the guard ordering) and the round-2 selector-rendering split are byte-identical to what I already verified, so both prior verdicts carry forward unchanged. The addition itself is contract-POSITIVE for my lens: it pins that the two fmt.Fprintln(os.Stderr, notice) call sites in next.go actually execute (previously deletable-while-green), and the claim-path leg additionally pins two behavioral contracts I care about — the default pick still selects the higher-priority MATCHING bead under a partial exclusion, and the filter-excluded bead's bd state is left untouched (open). Author reports red-on-revert verified by stubbing both print sites. Gates re-run at e9acc634 in the bead worktree: go build ./... clean; both new tests PASS against the real-bd sandbox (claim leg 75.6s, emit-only leg 18.4s, package ok); worktree left byte-identical (git status clean). My standing advisory findings (round-1 F1-F5, round-2 nits) remain non-blocking follow-up candidates, unaffected by this commit. Standing APPROVE confirmed.",
+  "concrete_changes_required": [],
+  "findings": []
+}

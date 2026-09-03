@@ -1,0 +1,19 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 re-verification at 8193ca97, all by execution in the bead worktree (left byte-identical, clean tree confirmed). My round-1 concrete change is DELIVERED and RE-DERIVED: TestNextSelection_PositionalEmitOnly_BypassesSpecFilter is genuinely real-bd (same nextReadyGateSetupSandbox helper that t.Fatalf's when bd is absent and drives the real built binary), and I ran it green (12.0s). All four mandated properties are asserted over CombinedOutput (stdout AND stderr, so the stderr exclusion notice cannot hide): (a) the preview PROCEEDS — err==nil plus the primer's '**Bead**: <id>' line — for a bead whose title deliberately does NOT reference the --spec (the exact input every other path would exclude); (b) the EXACT pinned bypass line 'emit-only: bead fetched by ID; readiness not checked.' — byte-identical to next.go:478, trailing period included, so deleting the line is now red (the round-1 gap closed); (c) NO exclusion report — asserts absence of 'excluded'; (d) no false readiness claim — asserts absence of 'is ready' and 'Ready work', leaving 'readiness not checked' as the only readiness-shaped statement. A negative assertion at next_selection_test.go:484 additionally pins that the bypass line never appears on the non-positional emit-only path (the conditionality R5 flagged). Regression sweep at THIS commit: the fix also touched select.go (termsafe.Escape on caller-supplied selector text) and next.go (pick<0 hoisted to pure arg validation before both paths), so I re-ran the FULL real-bd CLI selection suite — all 13 TestNextSelection_* tests pass (286s), including the round-1 seven and the six new round-2 tests (default-line row-1 on both paths, negative-pick zero-side-effects, hostile-ID/name rendering) — plus internal/next, internal/resolve, internal/bead full packages (which include the b9 pin set) and go build ./..., all green.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-1 ask fully delivered and verified",
+      "detail": "The spec-mandated positional --emit-only pinning test (AC-10 last sentence / R6.3(a) round-2 G5 / R6.1) now exists, is real-bd, asserts all four required properties, and is red-on-revert against next.go:478. The fix went further than asked: a hostile-ID variant (TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped) and a bypass-line-absent-elsewhere negative assertion."
+    },
+    {
+      "severity": "minor",
+      "title": "Carried non-blocking advisories from round 1 (unchanged, still advisory)",
+      "detail": "(1) TestNextSelection_PositionalExcludedByFilter_NamesReason still exercises the AC-10b emptyAfterFilterError route rather than SelectNamedFromReadySet (single-bead fixture); the true mixed-set positional path remains unit-covered only — acceptable, noted for completeness. (2) ResolveSpecPrefixProven's theoretical transient-bd-recovery race (false 'no spec found' if the epic lookup fails and bd recovers before the draft check's AllEpics re-fetch) is untouched — vanishingly narrow, common bd-down case verified honest. Neither was in my round-1 concrete_changes_required; neither blocks."
+    }
+  ]
+}
