@@ -22,20 +22,37 @@ panel-staleness block or masked dirt.
 
 - **A GATE-REFUSAL** — doc-sync or ADR-divergence rejects the prospective
   content — leaves the bead branch tip **exactly** at `reviewed_head_sha`,
-  byte-identical to before the call. The recovery is a plain re-run with
-  the appropriate override:
+  byte-identical to before the call. Two distinct retries follow from
+  here, and they are NOT interchangeable:
+
+  - **A plain re-run, no override** — after you've actually fixed the
+    doc skew or ADR divergence — re-evaluates the SAME content-gate class
+    that refused, against the same unchanged tip. It never manufactures a
+    false panel-staleness block, because the tip never moved. If the
+    underlying issue is genuinely fixed, this gate now passes; if it
+    isn't, the same gate refuses again with the same message.
+  - **A re-run WITH the override** (`--allow-doc-skew "<reason>"` /
+    `--override-adr "<reason>"`) **bypasses that gate class
+    unconditionally** — the reason is recorded, not evaluated as a fix —
+    and execution proceeds to whatever runs next. Doc-sync and
+    ADR-divergence run SEQUENTIALLY (doc-sync first): `--allow-doc-skew`
+    alone can still surface a fresh ADR-divergence refusal that never
+    ran before, and that is correctly a DIFFERENT gate refusing, not a
+    contradiction of the "tip never moved" guarantee above. Neither
+    override is "the whole recovery" on its own when both classes of
+    skew are present — passing both flags (or fixing one and overriding
+    the other) is what a fully-skewed worktree needs.
 
   ```bash
   mindspec complete <bead-id> "msg" --allow-doc-skew "<reason>"
   mindspec complete <bead-id> "msg" --override-adr "<reason>"
   ```
 
-  That is the **whole** recovery — no branch surgery, no re-panel, no
-  inspecting `reviewed_head_sha` by hand. If the underlying skew persists
-  (the override reason doesn't actually fix the content), the same gate
-  refuses again on the retry with the same message; it never fails at a
-  DIFFERENT gate (the panel stale-SHA check) than the one that refused
-  first.
+  What IS guaranteed regardless of which retry you choose: no branch
+  surgery, no re-panel, no inspecting `reviewed_head_sha` by hand, and
+  the retry never fails at the panel stale-SHA gate — only ever at a
+  content gate (the same one, unchanged; or a later one, freshly
+  evaluated because an earlier one was overridden past).
 - **A POST-gate failure** — a bead→spec merge conflict, a `bd close`
   failure, anything that happens AFTER a full gate pass has already
   materialized the real commits — is a **different class**, unchanged by

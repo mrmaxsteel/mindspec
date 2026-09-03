@@ -243,8 +243,12 @@ enumeration):
    mindspec's own error text (escaped, never raw).
 6. **`mindspec next`'s dirty-tree guard on a worktree-creating claim no
    longer blocks on unrelated user dirt** (R5, #179): the guard now
-   blocks only on the claim's actual (currently empty) entanglement set;
-   every other verb's dirty-tree guard is unaffected.
+   blocks only on the claim's actual derived entanglement — an
+   entry-absent `.gitignore` at the claim anchor, or (when recording is
+   enabled) the target spec's recording paths — and names every other
+   dirty path on stderr instead of silently ignoring it ("note: claiming
+   despite unrelated dirty path(s) this claim does not touch..."); every
+   other verb's dirty-tree guard is unaffected.
 
 ## Maintenance Notes
 

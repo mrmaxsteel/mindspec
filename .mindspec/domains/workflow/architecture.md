@@ -344,14 +344,22 @@ bounded, idempotent forward path back to completion or a clean named
 refusal on any interruption — never a rollback). The idempotent ADR-0034
 migration is the one exempt pre-preflight mutation in all three verbs,
 since it is itself read-only-or-idempotent. `complete` additionally has an
-**artifact-materialization subphase** (ADR-0041 §1): the optional user
-`CommitAll` and the pathspec-scoped artifact-sync commit — local,
-bead-branch-only, never-`main` — after which the doc-sync and
-ADR-divergence gates validate the resulting committed bead tip and may
-refuse; that refusal is forward-reconcilable (the bead-branch commits are
-retained; a re-run after repair converges), not byte-identical. The
-byte-identical-refusal claim holds only for the enumerated preflight
-refusals.
+**artifact-materialization subphase** (ADR-0041 §1) — **REPLACED by spec
+128 Bead 6 (OQ-1(a)); the paragraph below describes the CURRENT, landed
+design, not the superseded one this file used to carry here.** The
+original design committed the optional user `CommitAll` and the
+pathspec-scoped artifact-sync commit FIRST (local, bead-branch-only,
+never-`main`), then ran the doc-sync/ADR-divergence gates against that
+already-committed tip — a refusal there retained those commits and was
+therefore forward-reconcilable, NOT byte-identical, unlike the enumerated
+preflight refusals. That ordering is gone: the content gates now run
+against a **prospective snapshot** of the bead worktree's content taken
+BEFORE any complete-authored commit exists, so a content-gate refusal
+here is now ALSO byte-identical to the pre-call state — the bead branch
+tip never advances past `reviewed_head_sha` on a gate refusal, full stop.
+See § Lifecycle verb state honesty (spec 128) → R4 below for the full
+M/R/S/G/T staged protocol this replaced it with, and the execution
+domain's architecture doc for the git-level primitives.
 
 ### `mindspec complete`: lineage-authoritative preflight + forward reconcile
 
@@ -1183,36 +1191,62 @@ forward-reconcile territory, out of this reorder's scope).
 
 `internal/next/guard.go`'s `ComputeEntangleablePaths` replaces the
 whole-tree invoking-checkout dirty block for the worktree-creating claim
-path with a DERIVED enumeration: the entanglement is exactly
-`.mindspec/session.json` (gitignored, never blockable), `.beads/
-issues.jsonl` via bd export (ADR-0025's sole named artifact, already
-exempt), and the new bead worktree directory (created only after the
-guard runs) — the claim-entangleable user-dirt set is therefore EMPTY
-today, so the invoking-worktree user-dirt block is REMOVED for this path
-specifically (every other dirty-tree guard, `spec approve`'s and
-`release`'s included, is unaffected). `entangleableClaimPaths` is a
-test-injectable residual on top of the two derived classes
-(`SetEntangleableClaimPathsForTest`) so the refusal machinery
-(`DirtyTreeFailure`'s worktree-context + final-recovery-line contract,
-unchanged) stays exercised by a seam-injected leg (AC-8(iii)) even though
-the real, dynamic entanglement is empty. `CheckDirtyTreeProportional`
+path with a DERIVED enumeration — not an unconditionally empty one. Two
+CONDITIONAL classes, each gated on CONTAINMENT (the resolved absolute
+write target must fall inside the canonical top-level of the invoking
+checkout's own git working tree — a subdirectory cwd or a symlinked
+worktree alias must not disarm the check): (1) `.gitignore` at the claim
+anchor (the target spec's worktree if one exists, else repo root), but
+ONLY when `cfg.WorktreeRoot`'s entry is genuinely ABSENT there — a claim
+that would actually write a fresh `.gitignore` line; (2) the target
+spec's two recording paths (`events.ndjson`, `manifest.json`), but ONLY
+when `recording.enabled` is true and the resolved path is contained.
+`.mindspec/session.json` (gitignored) and the new bead worktree directory
+(gitignored `.worktrees/`, and created only after the guard runs) remain
+correctly excluded — they can never surface as tracked dirt regardless of
+config, so they need no runtime check. Dirt intersecting either
+conditional class still BLOCKS the claim (`CheckDirtyTreeProportional`
+classifies it into `blockingDirt`); every OTHER unrelated dirty path no
+longer blocks (narrowed, not removed) and is instead named on stderr via
+the test-pinned `IgnoredDirtNotice` line ("note: claiming despite
+unrelated dirty path(s) this claim does not touch (not blocked —
+ADR-0025 R5.1): ..."), never silently dropped. Every other dirty-tree
+guard (`spec approve`'s and `release`'s included) is unaffected.
+`entangleableClaimPaths` is a test-injectable residual unioned on top of
+the two derived classes (`SetEntangleableClaimPathsForTest`) so the
+refusal machinery (`DirtyTreeFailure`'s worktree-context +
+final-recovery-line contract, unchanged) stays exercised by a
+seam-injected leg (AC-8(iii)) independent of which conditional classes
+happen to be live in a given fixture. `CheckDirtyTreeProportional`
 narrows the guard to this rule for the claim path only.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
 `internal/next/beads.go`'s `ReadySet`/`BuildReadySet` are R6.1's ONE
 shared ready-set construction: the `bd ready` query plus the spec-title
-filter, consumed IDENTICALLY by the claim path and `--emit-only`, so
-`--pick N` always names the same bead on both paths for the same N (AC-9)
-and a filter drop is reported the same way on both (R6.3). `select.go`'s
-`SelectWork` makes pick semantics TOTAL: `--pick N` (N≥1) always indexes
-the displayed list, even with exactly one item — the prior single-item
-early return that bypassed pick validation is gone (red-on-revert);
-`--pick 0` means unset, and a negative pick errors rather than being
-silently ignored. `SelectNamedFromReadySet` gives a positional bead ID
-that IS ready but excluded by the spec-title filter an honest exclusion-
-reason error instead of the generic "not found or not ready" (R6.3(b)/
-AC-10). `BuildReadySet`'s `scopeResolutionRefusal` (R6.7/AC-15) refuses an
+filter, preserving `bd ready`'s own returned (priority-respecting) order
+end-to-end with no post-query reordering. For the NON-positional flows —
+the default (no pick, no positional arg) and `--pick N` — the claim path
+and `--emit-only` consume the SAME constructed `ReadySet` identically, so
+`--pick N` always names the same bead on both for the same N (AC-9) and a
+filter drop is reported the same way on both (R6.3). **The positional
+`--emit-only` combination is the one documented exception (R6.3(a)):** it
+never calls `BuildReadySet` at all — no ready-set construction, no
+readiness check, no spec-title filter, no exclusion accounting — and
+instead fetches the named bead directly by ID (`next.FetchBeadByID`) and
+prints the pinned bypass line verbatim, `"emit-only: bead fetched by ID;
+readiness not checked."`, with no exclusion report and no readiness
+claim. (Positional CLAIM, by contrast, still resolves against the ready
+set via `SelectNamedFromReadySet`, below — only emit-only's positional
+form bypasses it.) `select.go`'s `SelectWork` makes pick semantics TOTAL:
+`--pick N` (N≥1) always indexes the displayed list, even with exactly one
+item — the prior single-item early return that bypassed pick validation
+is gone (red-on-revert); `--pick 0` means unset, and a negative pick
+errors rather than being silently ignored. `SelectNamedFromReadySet`
+gives a positional bead ID (on the CLAIM path) that IS ready but excluded
+by the spec-title filter an honest exclusion-reason error instead of the
+generic "not found or not ready" (R6.3(b)/AC-10). `BuildReadySet`'s
+`scopeResolutionRefusal` (R6.7/AC-15) refuses an
 explicit `--spec` whose epic resolution fails — genuine discovery failure,
 legitimate on-disk draft, or a truly nonexistent spec — naming the real
 cause, on BOTH paths, and NEVER falls back to the global unscoped `bd

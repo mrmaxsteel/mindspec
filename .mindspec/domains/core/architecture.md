@@ -179,8 +179,9 @@ populate` prompt emitter — never an inferred `npm test`.
 ## The `mindspec_phase` write lock, backward-move comparator, and sanctioned sync (spec 128 R3.3, Bead 1)
 
 Every writer of an epic's `mindspec_phase` metadata key — `spec approve`'s
-existing-epic backfill (`internal/approve/spec.go:76`), `plan approve`
-(`plan.go:455`), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
+existing-epic backfill (`internal/approve/spec.go`'s
+`backfillExistingEpicPhase`), `plan approve` (`plan.go`'s step-4b
+`WithPhaseWriteLock` write), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
 `release`'s step-6.5 sync (`cmd/mindspec/release.go`), `impl approve`'s
 reconcile and done writes (`internal/approve/impl.go`), `impl adopt`'s done
 write (`internal/approve/adopt.go`), `mindspec repair phase`

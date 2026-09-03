@@ -311,15 +311,15 @@ complete-gated.
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `ComputeEntangleablePaths(repoRoot, cwd, specID)` | Derives the worktree-creating claim path's true entanglement set (today: the gitignored session file and the already-exempt beads-artifact export — an empty user-dirt set). |
-| `EntangleableClaimPaths()` / `SetEntangleableClaimPathsForTest` | Test-injectable residual on top of the derived classes, keeping the block machinery exercised (AC-8(iii)) independent of the real, currently-empty entanglement. |
+| `ComputeEntangleablePaths(repoRoot, cwd, specID)` | Derives the worktree-creating claim path's entanglement set as two CONTAINMENT-gated conditional classes — an entry-absent `.gitignore` at the claim anchor, and (when recording is enabled) the target spec's `events.ndjson`/`manifest.json` — never unconditionally empty; dirt on either class still blocks. |
+| `EntangleableClaimPaths()` / `SetEntangleableClaimPathsForTest` | Test-injectable residual unioned on top of the two derived classes, keeping the block machinery exercised (AC-8(iii)) independent of which conditional classes are live in a given fixture. |
 | `CheckDirtyTreeProportional(repoRoot, cwd, specID) (blockingDirt, ignoredDirt []string, err error)` | Narrows the dirty-tree guard to the derived rule for the claim path only; every other caller (`spec approve`, `release`) is unaffected. |
 
 **Deterministic, honest bead selection (`internal/next`, R6):**
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `ReadySet{Filtered, Raw, SpecFlag}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | R6.1's ONE ready-set construction result — `Filtered` is the displayed/selectable list, `Raw` the pre-filter list (consulted only to name a true exclusion reason) — consumed identically by the claim and `--emit-only` paths so `--pick N` names the same bead on both (AC-9). |
+| `ReadySet{Filtered, Raw, SpecFlag}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | R6.1's ONE ready-set construction result — `Filtered` is the displayed/selectable list, `Raw` the pre-filter list (consulted only to name a true exclusion reason) — consumed identically by the claim path and the NON-positional `--emit-only` flows (default and `--pick N`) so `--pick N` names the same bead on both (AC-9). **Positional `--emit-only` never constructs one at all** (R6.3(a)) — it fetches by ID and prints the pinned bypass line `"emit-only: bead fetched by ID; readiness not checked."`, with no exclusion report. |
 | `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, epic-scoped otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
 | `SelectWork(items, pick)` (`select.go`) | Total pick semantics: `pick >= 1` always indexes the displayed list, even with exactly one item; `0` means unset; negative errors. |
 | `SelectNamedFromReadySet(rs, name)` | Positional resolution against a `ReadySet`: a filtered-out-but-ready bead gets the honest exclusion reason, never the generic "not found or not ready". |

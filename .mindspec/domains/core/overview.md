@@ -53,8 +53,10 @@ The `doctor` command validates:
   (`semantics_v2.go`). `internal/state` gained the `ModeIndeterminate`
   sentinel mode, excluded from `ValidModes`, that the workflow domain's
   instruct tail selects instead of fabricating idle guidance for an
-  undiscovered failure. See § below and `interfaces.md` for the exported
-  surface; the consuming verbs (`repair phase`, `plan approve`, `spec
+  undiscovered failure. See `architecture.md`'s "The `mindspec_phase`
+  write lock, backward-move comparator, and sanctioned sync" section and
+  `interfaces.md` for the exported surface; the consuming verbs
+  (`repair phase`, `plan approve`, `spec
   approve`, `complete`, `release`, `impl approve`/`adopt`) live in the
   workflow domain.
 - **2026-07-02 (spec 107 wave 1):** `internal/phase` gained the exported

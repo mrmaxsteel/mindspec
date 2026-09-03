@@ -64,7 +64,10 @@ Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to th
   prospective snapshot BEFORE any complete-authored commit, closing the
   #186 false-panel-staleness wedge by construction (R4, OQ-1(a));
   `internal/next`'s worktree-creating claim guard was narrowed to a
-  derived (today empty) entanglement set (R5, #179); bead selection
+  derived, conditionally non-empty entanglement set — an entry-absent
+  `.gitignore` at the claim anchor and, when recording is enabled, the
+  target spec's recording paths, each gated on containment (R5, #179);
+  bead selection
   became deterministic and every filter drop loud, with bd's stderr
   surfaced end-to-end (R6, #187/#146); and idle/review guidance now names
   the `mindspec impl adopt` exit for a frozen-contract/externally-merged
