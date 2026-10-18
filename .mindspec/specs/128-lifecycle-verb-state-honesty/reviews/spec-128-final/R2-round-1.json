@@ -1,0 +1,79 @@
+{
+  "reviewer_id": "R2 fable",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Lens: inter-bead seams. The three named seams were traced end-to-end in the code and all three HOLD (details in findings F5-F7). The REQUEST_CHANGES rests on a fourth seam the per-bead panels could not see: bead 9 (ta30.9) changed what EVERY bead.RunBD-derived error carries tree-wide — wrapBDError (internal/bead/bdcli.go:483) now folds up to 20 raw, UNESCAPED bd stderr lines into the error text — and the per-line termsafe escape discipline that bead 9/bead 8 built for exactly this content (bdRenderedError, next.RenderBDError, escapeLines) was applied at some render sinks but not others. Four concrete unescaped sinks remain at the tip, two of them authored by THIS branch. This violates the branch's own contract (R6.4/AC-11, ADR-0042: the escape boundary held at every render sink; the BRIEF's R5/R12 lenses state it as 'the ADR-0042 boundary held at every NEW render sink'). The threat model is the one bead 9's own doc comments adopt: 'a compromised or hostile bd (or a shim standing in for it)' emitting ANSI/control bytes on stderr. Each fix is a one-line wrap with the already-exported next.RenderBDError or termsafe. Empirics: go build clean; internal/complete, internal/next, internal/phase, internal/approve, and the targeted cmd/mindspec seam suites all PASS (-short, -count=1) at 8eaeb05e. internal/instruct could NOT be completed in this environment: three attempts (601s/240s/60s timeouts) all hung inside TestRenderJSON_PanelState -> BuildContext -> contextpack.RenderBeadContext -> a real `bd show` subprocess read, under the heavy concurrent bd/Dolt load of this 12-slot panel. That test predates the branch (present at merge-base ae45fd7a; panelstate_test.go untouched by the diff) and the hang is machine-global-bd non-hermeticity (the z4ps class already on file), not a tip regression — but another slot on a quiet machine should confirm the package goes green. I did not run the no-short cmd/mindspec suite (30m) — the tally should confirm another slot did.",
+  "concrete_changes_required": [
+    "cmd/mindspec/next.go:594 (advancePhaseOnClaim, NEW in this branch, bead 2): the 'warning: could not resolve epic for bead %s: %v' line renders epicErr RAW. epicErr chains phase.FindEpicForBeadWithCache -> 'bd show %s failed: %w' (derive.go:910) -> wrapBDError's unescaped stderr excerpt. The SAME function's other two failure legs (describePhaseSyncFailure via next.RenderBDError, readinessOverrideFailure) were swept by bead 8's folded-in ta30.9 follow-up; this leg was missed and no test covers it. Wrap epicErr with next.RenderBDError.",
+    "cmd/mindspec/release.go:182 (describeReleaseSyncFailure, NEW in this branch, bead 2): renders the SanctionedDerivedSync error RAW via %v. That error can chain freshCache.GetChildren -> bd list -> wrapBDError'd stderr. Two lines above in the SAME releaseSyncPhase (release.go:164-165), the EnsurePhaseSemanticsV2 error is escaped via describePhaseSyncFailure/next.RenderBDError — adjacent escaped/raw twins. Wrap err with next.RenderBDError (the timeout leg can keep DescribeLockFailure as next.go's describePhaseSyncFailure does).",
+    "internal/complete/complete.go:522 (Run's lineage-lookup refusal): renders lineageErr RAW via %v into a guard.NewFailure body, while the SIBLING branch at complete.go:503 escapes the SAME error via termsafe.Escape(lineageErr.Error()). The sink predates the branch, but bead 9 widened what flows into it (bd stderr). Escape it the same way :503 does (or via next.RenderBDError).",
+    "internal/approve/spec.go:105 ('could not create lifecycle epic: %v'): epicErr from specRunBDFn (bd create) carries wrapBDError'd stderr and lands RAW in result.Warnings, which cmd/mindspec/spec.go:210 prints verbatim to stderr. Escape at the append (termsafe per-line or next.RenderBDError). While there, sweep for any remaining %v-rendered RunBD-derived errors outside the already-escaped surfaces (release.go's defaultSetOpenVia, ClaimFailure's escapeLines, complete.go's bdRenderedError-wrapped fetch paths are already correct).",
+    "MINOR (docs): project-docs/user/guides/lifecycle-modes.md cites 'complete.go:1398-1420' for completeSyncPhase's disclosed backward-write residual; the comment actually sits at ~complete.go:1297-1332 (1398-1420 is advanceState's doc comment). Anchor by function name, not line numbers."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "MAJOR",
+      "title": "Bead-9 seam: bd stderr now flows tree-wide into error text, but four render sinks print it unescaped",
+      "detail": "bead.RunBD -> tracedOutput -> wrapBDError (bdcli.go:483-502) folds raw exec.ExitError.Stderr bytes (line-capped at 20, NO escaping — deliberate, the render boundary is downstream) into every returned error. Bead 9's panel swept internal/next's query surfaces (bdRenderedError) and bead 8 swept two cmd/mindspec/next.go legs, but the sweep stopped at bead boundaries: cmd/mindspec/next.go:594 and cmd/mindspec/release.go:182 are branch-authored raw sinks (bead 2's code, written before bead 9 landed, revisited by bead 8 only partially), and internal/complete/complete.go:522 + internal/approve/spec.go:105 are merge-base-era sinks whose payload bead 9 silently widened. The in-file contrasts (complete.go:503 escapes what :522 does not; release.go:165 escapes what :168/182 does not) show this is drift, not a decided exemption. Per the branch's own AC-11/ADR-0042 standard these must be escaped; fixes are mechanical.",
+      "files": ["cmd/mindspec/next.go:594", "cmd/mindspec/release.go:182", "internal/complete/complete.go:522", "internal/approve/spec.go:105", "internal/bead/bdcli.go:483"]
+    },
+    {
+      "id": "F2",
+      "severity": "MINOR",
+      "title": "Stale line citation in lifecycle-modes.md for the disclosed completeSyncPhase residual",
+      "detail": "The 'Disclosed residual, not silently excepted' bullet cites complete.go:1398-1420; the residual doc comment actually lives at ~1297-1332. The disclosure itself is intact and honest — bead 2's routed debt ('extend the agreement-table wording to name this fence's honest scope') WAS paid by this section — only the anchor is wrong.",
+      "files": ["project-docs/user/guides/lifecycle-modes.md:171"]
+    },
+    {
+      "id": "F3",
+      "severity": "MINOR",
+      "title": "b7/b8 degenerate path: guard runs spec-blind while step 7.5 still writes a title-derived spec's recording paths (observation, documented residual — judge, no change demanded)",
+      "detail": "When Step 0d's resolve.ResolveTarget fails NON-ambiguously (e.g. a transient ActiveSpecs discovery error), specFlag stays \"\" and CheckDirtyTreeProportional omits the recording-path entanglement class entirely (guard.go:157, the documented 'unknown, so not claimed as entangled' choice). But the claim then proceeds via the global ready set, and step 7.5 (next.go:390-396) writes recording paths under resolved.SpecID — parsed from the bead TITLE — so the claim can append/RMW a spec's dirty events.ndjson/manifest.json the guard never enumerated. Requires a transient discovery failure racing a working bd ready plus recording enabled plus dirty recording paths — narrow, and the bead-7 panel documented the \"\" omission. Non-blocking suggestion: derive the guard's spec from the selected bead when specFlag==\"\" is unresolvable, or re-run the entanglement check pre-claim once the spec is known.",
+      "files": ["cmd/mindspec/next.go:151-167", "internal/next/guard.go:143-172"]
+    },
+    {
+      "id": "F4",
+      "severity": "MINOR",
+      "title": "b8's AC-10b loud empty-after-filter error now precedes Step-3's in-progress worktree recovery (observation, designed behavior)",
+      "detail": "Pre-128, a spec-scoped ready set that the title filter reduced to empty fell silently into Step 3, whose in-progress-recovery leg could recreate a claimed bead's missing worktree. Post-128, BuildReadySet errors first (emptyAfterFilterError), so a mis-titled ready sibling under the same epic (e.g. a hand-filed follow-up child without the spec slug in its title) blocks the missing-worktree recovery behind the exclusion error. The error is honest, names every excluded bead, and is the gated AC-10b design — recorded here only so the interaction is a known consequence, not a surprise.",
+      "files": ["internal/next/beads.go:173-175", "cmd/mindspec/next.go:226-255"]
+    },
+    {
+      "id": "F5",
+      "severity": "INFO",
+      "title": "Named seam 1 (b5 indeterminate skip vs b6 M/R/S/G/T staging): HOLDS",
+      "detail": "Derivation runs exactly once, at Run step 6 (advanceState), strictly AFTER every staging boundary: M/R/S at steps 2.5-3.5 (runMaterialization), G (merge) at step 5, T (terminal marker clear) at step 5.1. There is no stage boundary an indeterminate derivation could interleave: on advanceErr, Run sets NextModeIndeterminate and returns BEFORE step 6.5's completeSyncPhase — no phase value fabricated from a nil child set is ever written — and completeTail routes the tail through instruct.RenderIndeterminate with the SAME reason (never a fresh re-derivation that could disagree). Both render sinks escape the reason (termsafe in FormatResult; the template's {{termsafe}}). The resume path (resumeStage != \"\") changes nothing here — it rejoins the same sequence before step 4. An indeterminate return after T-clear leaves a closed+merged bead with the marker cleared; re-invocation converges via the reconcile leg and retries advanceState. materialize.go touches no phase state at all (no internal/phase import). The 23 bead-6 fixture legs + indeterminate tests pass at the tip.",
+      "files": ["internal/complete/complete.go:1260-1294", "internal/complete/materialize.go", "cmd/mindspec/complete.go:157-181"]
+    },
+    {
+      "id": "F6",
+      "severity": "INFO",
+      "title": "Named seam 2 (b7 containment guard vs b8 Step 0d resolution reorder): HOLDS on every path",
+      "detail": "Explicit --spec: resolved AND existence-proven at Step 0a (ResolveSpecPrefixProven) before the guard — correct specID. Ambient: Step 0d resolves before the guard (the bead-7 round-1 reorder); ambiguous targets exit BEFORE the guard with zero side effects. Positional: the positional is resolved against the ALREADY spec-scoped ready set (SelectNamedFromReadySet), so a claimable positional's spec always equals the specFlag the guard used; a positional outside the scope gets the honest exclusion/not-in-ready-set error, never a claim under a mismatched guard. The guard's containment machinery (toplevelOf/containedRel/resolveContainingDirs) correctly resolves subdirectory and symlink invocations and gates both dynamic classes on containment in cwd's canonical toplevel. The one imperfect path is the non-ambiguous ResolveTarget failure — filed separately as F3. EnsureWorktree's anchor (resolveAnchorRoot) and the guard's claimAnchorRoot replicate the same preference, and the SpecDir custom-root divergence is the already-filed mindspec-mmz5 residual.",
+      "files": ["cmd/mindspec/next.go:106-198", "internal/next/guard.go:143-282", "internal/next/select.go:53-101"]
+    },
+    {
+      "id": "F7",
+      "severity": "INFO",
+      "title": "Named seam 3 (b2 value semantics vs b7 absent-only backfill): HOLDS — single lock, fresh under-lock evidence, all interleavings converge forward",
+      "detail": "Both writers serialize on the SAME kernel-held lock file: WithPhaseWriteLock roots at <root>/.mindspec/phase.lock, and every phase-writing verb derives root via workspace.FindRoot, which resolves a linked worktree back to the MAIN repo root (workspace.go:33-101) — so `spec approve` in a spec worktree and `next` at the main checkout contend on one lock. backfillExistingEpicPhase consumes the presence bit (absent-only; present-but-invalid and any valid stored value are distinct no-ops with distinct honest messages). advancePhaseOnClaim re-derives from a FRESH per-call Cache INSIDE the lock and writes implement only while that fresh evidence agrees. Interleavings: backfill-then-advance writes plan then corrects to implement; advance-then-backfill no-ops ('later phase left untouched'); backfill between ClaimBead and the advance is corrected by the advance's fresh derivation. The bead-1 writer-inventory AST fence walks ALL of cmd/ and internal/, so bead 7's cross-package writer registers as guarded. EnsurePhaseSemanticsV2 (not called from spec approve) leaves a legacy-signature epic for the next verb's entry to translate — the backfill handles it honestly meanwhile ('never regresses'). One caveat stands, already disclosed: completeSyncPhase still closes over a pre-lock nextMode (WithPhaseWriteLock's caller-obligation-1 shape) — the accepted, documented residual per lifecycle-modes.md (see F2 for its stale anchor).",
+      "files": ["internal/phase/phaselock.go:239-275", "internal/approve/spec.go:202-237", "cmd/mindspec/next.go:590-629", "internal/workspace/workspace.go:33-101", "internal/phase/writer_inventory_test.go:70-98"]
+    },
+    {
+      "id": "F8",
+      "severity": "INFO",
+      "title": "Environment-limited result: internal/instruct suite could not complete under concurrent panel load (pre-existing non-hermetic test, not a tip regression)",
+      "detail": "Three -short runs (601s, 240s, 60s timeouts) all hung in TestRenderJSON_PanelState -> BuildContext -> contextpack.RenderBeadContext -> a blocked real `bd show` subprocess read, with ~15 concurrent go-test processes from this panel sharing the machine-global bd/Dolt. The test and its real-bd dependency predate the branch (present at merge-base ae45fd7a; panelstate_test.go is untouched by the diff) — the same package-level hermeticity class as the already-filed z4ps. The tally should get one clean internal/instruct run from a quiet slot (or serially) before closing; the branch's own instruct changes (run.go arrival points, indeterminate template) are exercised by run_arrival_points_test.go/run_mode_error_test.go within the same package run.",
+      "files": ["internal/instruct/panelstate_test.go:838-869", "internal/instruct/instruct.go:176-187"]
+    },
+    {
+      "id": "F9",
+      "severity": "INFO",
+      "title": "Free-hunt checks that came back clean",
+      "detail": "(a) b6 resume-skips-panel-gate cannot launder ungated content: the marker publishes only AFTER the panel+content gates pass; a foreign commit breaks tip==marker (FOREIGN -> clear -> full re-gate); interval edits refuse at the pre-S classification against the exact tree to be committed; a stale marker over a recreated branch with no worktree refuses ('cannot safely resume'). Marker refs are CAS-guarded (update-ref with expected-old) in the shared object DB, and the deliberate-forgery limit is honestly disclosed at gitops.go:195-220. (b) b9's bdRenderedError preserves the Unwrap chain, so bead.IsUnsupportedFlagError's --as-of degradation in complete still classifies through the wrapper. (c) The b6 stage-string duplication (materialize.go vs gitutil) is pinned equal by materialize_stage_constants_test.go. (d) Step 5.6's writePanelAuditMetadata is nil-safe for the resume path's nil panelReg. (e) complete's chdir-to-root before advanceState protects the post-close bd reads on every caller. Worktree left byte-identical (only the panel dir itself is untracked); build artifacts went to scratch.",
+      "files": ["internal/complete/materialize.go:94-182", "internal/gitutil/gitops.go:195-226", "internal/next/beads.go:228-256"]
+    }
+  ]
+}

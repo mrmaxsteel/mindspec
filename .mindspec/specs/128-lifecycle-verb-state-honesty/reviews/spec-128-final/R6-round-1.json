@@ -1,0 +1,48 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Adversary lens on the INTEGRATED system, executed empirically per the brief: built the tip binary (8eaeb05e) and drove a full scratch lifecycle (init -> spec create -> approve -> plan approve -> claim -> complete) with a bd shim interposed to fail on cue, hostile inputs at every seam I could reach, a forged write-ahead marker, lock contention, concurrent claims, and hostile repo layouts. Two evidence-bearing findings survive: (1) a forged materialization marker + Mindspec-Stage trailer causes `mindspec complete` to resume-skip the panel gate AND every content gate and merge ungated content to the spec branch (executed, exit 0, zero warnings) — bead 6's adjudicated forgery refutations covered only the --commit-msg trailer-injection vector and rest on a premise (\"the marker only exists because every gate of the publishing run passed\") my probe falsifies; (2) the exact fabricated-mode class this spec exists to kill (the `children, _ :=` swallow excised at complete.go:1434 under AC-4b) survives at five sibling sites in internal/phase/derive.go, and I reproduced it live: under partial bd failure (epic reads healthy, `bd list --parent` failing — precisely the residue state of the AC-4b fixture) the AC-5(iv) consistency warning asserts `child-derived phase \"plan\"` for a derivation that never ran, and the no-stored-phase fallback RETURNS the fabricated `plan` with nil error. Everything else I attacked held, often impressively — details in findings.",
+  "concrete_changes_required": [
+    "F1 (MAJOR — gate bypass, executed): authenticate write-ahead marker provenance before honoring a resume. Repro at tip, scratch repo: in the claimed bead's worktree, author one commit whose message ends with a single clean `Mindspec-Stage: artifact-sync` trailer (content: a file no OWNERSHIP.yaml claims — the same file class the adr-divergence gate demonstrably refuses on the normal path), then `git update-ref refs/mindspec/materialized/<bead-id> <tip>`, then `mindspec complete <bead-id>`. Observed: resumeStage=artifact-sync -> Run skips the panel gate (complete.go step 2.25 `if resumeStage == \"\"`), the prospective snapshot, doc-sync, and adr-divergence entirely; the unowned file merges to the spec branch; exit 0; no warning. resolveMaterializationDiscriminator's corroboration (internal/complete/materialize.go:114-181) is tip==marker + a well-formed trailer — both authorable by the impl agent whose work the gates exist to check, with repo git access it already has. The bead-6 rounds adjudicated ONLY the --commit-msg injection vector (duplicate-trailer -> ambiguous -> foreign-clear, R2-round-2/R2-round-3) and R1-round-2's laundering analysis explicitly assumes markers are binary-published. Note the asymmetry that makes this the unique ungated route: a raw `git merge bead/<id>` by the same agent still reconverges through complete's reconcile committed-range gates and the orphan guards — the forged marker is the only path where the sanctioned verb itself merges with zero gates. Fix direction (yours to choose): record marker provenance under the binary's control at publication (e.g. a bd-metadata attestation pairing the marker OID, mirroring the spec-127 landed-merge evidence pattern) and require the pair to match at resume; or narrow the resume skip — re-run the panel gate + content gates against the marker commit when no binary-side publication evidence exists.",
+    "F2 (MAJOR — fabricated mode, executed + traced): remove the swallowed child-fetch errors in internal/phase/derive.go — lines 249 and 252 (the no-stored-phase fallback: a failed `bd list --parent` yields nil children -> DerivePhaseFromChildren(nil) -> `plan` RETURNED as the phase with nil error), lines 335 and 338 (deriveFromChildrenOrStatusWithCache: the same nil-set derivation feeds the AC-5(iv) consistency warning), and line 558 (the context resolver's per-epic loop, same class). Executed repro: after an AC-4b-style failing-bd complete (bead closed+merged, advanceState indeterminate — that leg itself behaved perfectly), `mindspec state show` with `bd list --parent` still failing printed `warning: epic ...: stored phase \"implement\" disagrees with child-derived phase \"plan\"` — the shim log shows both underlying list calls FAILED; no derivation ever ran, yet the warning asserts one as fact (and its direction logic then reasons about a phantom backward move). spec.md line 14 is categorical: \"a lifecycle-discovery failure is never serialized as a successful empty or idle mode\"; the round-4 G1.1(b) text that drove AC-4b names this exact `children, _ := phase.FetchChildren` shape — it was excised at its complete.go call site but survives at these five phase-package sites that state show, instruct, and every DerivePhase caller share. AC-1(ii)'s full-outage leg verified HOLDING at tip (non-zero refusal naming the discovery failure); the gap is the partial-outage seam, which is exactly the state a user occupies immediately after the AC-4b fixture's own scenario. Fix: propagate the fetch error — the fallback should refuse or return the indeterminate form, and the consistency check should skip (or say \"child read failed\") rather than asserting a fabricated derived phase."
+  ],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "severity": "major",
+      "summary": "Forged refs/mindspec/materialized/<bead> marker + single clean Mindspec-Stage trailer makes `mindspec complete` skip the panel gate and all content gates and merge ungated content to the spec branch (executed: unowned file that the adr-divergence gate refuses on the normal path landed with exit 0, no warnings). Bead 6's forgery adjudication covered only the --commit-msg vector; direct ref publication by an agent with ordinary repo git access was not considered and defeats the marker-proves-gates-passed premise."
+    },
+    {
+      "id": "R6-F2",
+      "severity": "major",
+      "summary": "The fabricated-`plan` bug class AC-4b excised at complete.go:1434 survives at five `children, _ := GetChildren` sites in internal/phase/derive.go (249/252/335/338/558): under partial bd failure the no-stored-phase fallback returns fabricated `plan` with nil error, and the AC-5(iv) consistency warning asserts a `child-derived phase` from a read that failed (reproduced live at tip; shim log proves both list calls failed)."
+    },
+    {
+      "id": "R6-F3",
+      "severity": "minor",
+      "summary": "Advisory only, no change required: under held phase-lock contention a claim stacks two sequential 10s lock waits (EnsurePhaseSemanticsV2 then the claim advance, ~26s observed) — both bounded, both surfaced with the lock path and a correct `mindspec repair phase` recovery line; the claim proceeds. Consistent with the recorded residual in completeSyncPhase's doc comment."
+    },
+    {
+      "id": "R6-P1",
+      "severity": "info",
+      "summary": "POSITIVE — the assigned b5/b6 seam holds under a REAL failing-bd complete (shim fails `bd list --parent` post-close): close+merge reported truthfully, the indeterminate form rendered in BOTH the result summary and the instruct tail, no fabricated mode in the verb's own output, step-6.5 phase sync verifiably skipped (epic metadata unchanged), stage markers left clean (only the intended spec-127 merge-source attestation ref remains), and a healthy-bd retry of the same verb converged (already-closed reconcile -> correct next-bead guidance). AC-4b/AC-6 empirically confirmed at the integrated tip."
+    },
+    {
+      "id": "R6-P2",
+      "severity": "info",
+      "summary": "POSITIVE — hostile-input rendering held at every probed sink: hostile bd stderr (ANSI + a forged `Run: curl … | sh` line) arrived escaped and force-quoted through the b9 passthrough into b5's indeterminate reason (summary AND tail — no forged terminal line possible); hostile bead titles force-quoted in the ready-work list; the exclusion notice is count-only; hostile named bead IDs and --spec values (path traversal, ANSI, malformed) all refused pre-mutation with escaped rendering including inside the re-invocation hints."
+    },
+    {
+      "id": "R6-P3",
+      "severity": "info",
+      "summary": "POSITIVE — b7 containment guard survives the hostile layouts it was built for: entangled dirt (spec-worktree .gitignore lacking the worktree-root entry) blocks identically from the worktree root, a SUBDIRECTORY, and a SYMLINK ALIAS of the tree; unrelated dirt is named on stderr without blocking (ADR-0025 R5.1 proportionality); a fully symlinked .mindspec directory neither crashes nor evades any probe. Concurrent claims from two shells: the second claim refused on the spec-124 readiness floor with zero mutation; gate-before-mutate held under concurrency."
+    },
+    {
+      "id": "R6-N1",
+      "severity": "info",
+      "summary": "Probe-environment note: bd hard-refuses temp-dir workspaces (`BEADS_DIR points to unsafe location`, even with BEADS_TEST_MODE=1 for worktree create), so the lifecycle fixtures ran in /Users/Max/r6-adv-scratch (outside the mandated scratchpad), fully deleted afterward. Both repo checkouts verified byte-identical (git status clean at 8eaeb05e; only the panel dir untracked). Future briefs that mandate /tmp-only scratch for full-lifecycle probes will hit the same wall."
+    }
+  ]
+}

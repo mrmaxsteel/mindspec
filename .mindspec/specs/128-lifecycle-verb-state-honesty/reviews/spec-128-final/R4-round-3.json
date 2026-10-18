@@ -1,0 +1,16 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "At tip a8ac1fc4, `git show a8ac1fc4 --stat` reports exactly the advertised 8-file patch (199 insertions, 38 deletions). Inspection of the full patch confirms it is confined to the six Round 2 residual groups described in the Round 3 addendum: metadata-family escaping plus its hostile real-chain regression; crash-window comment honesty; three function-anchored citations; bead-2 attribution; agreement-table prose precision; and the ADR/code-comment trust-boundary disclosure. The only runtime change is the complete-package metadata seam default routing through RenderBDError while preserving Unwrap; the remaining changes are tests, comments, or documentation. None touches the spec-approve success tail, ApproveSpec real-executor behavior, or the Round 2 regressions that established R4's empirical lifecycle basis. My standing verdict is therefore unchanged.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-round-3-confirm",
+      "classification": "CONFIRMED",
+      "severity": "NONE",
+      "title": "Round 3 residual patch does not disturb R4's approved basis",
+      "evidence": "The 8 touched files are ADR-0041, core architecture documentation, repair.go, approve/plan.go, complete.go, materialize.go, materialize_attestation_test.go, and lifecycle-modes.md. R4's Round 2 basis concerned the truthful spec-approve tail and real-executor ApproveSpec commit/clean-state behavior; neither implementation surface nor its cited regressions is modified by a8ac1fc4."
+    }
+  ]
+}

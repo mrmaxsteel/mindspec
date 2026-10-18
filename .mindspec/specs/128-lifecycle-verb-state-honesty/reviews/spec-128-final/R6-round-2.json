@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R6 claude-sub",
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Round-2 duty executed empirically at tip 0783a507: rebuilt the binary, rebuilt the full scratch lifecycle fixture, and RE-RAN my round-1 marker-spoof repro byte-for-byte (hand-authored commit with a single clean `Mindspec-Stage: artifact-sync` trailer carrying an unowned file + `git update-ref refs/mindspec/materialized/<bead>`). The bypass is CLOSED: the forged marker classified FOREIGN, the run proceeded fully gated, the adr-divergence gate refused the unowned file (exit 1), the marker ref was cleared, and the spec branch tip did not move. Leg xxiv (TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates) pins the repro verbatim with all three postconditions (refusal text, marker cleared, spec branch untouched + smuggled-file absence), and the MockExecutor attestation legs pin the per-leg contract. I then judged the attestation design adversarially, including EXECUTING the escalated forgery (details in R6-A1): the residual is real, deliberate-only, inspection-detectable, and inside the trust envelope bd metadata already carries — I ask only for one honesty sentence in the ADR, non-blocking. G2 re-verified: my round-1 partial-outage repro re-executed live at tip with a logged failing shim (both `bd list --parent` calls denied) — the fabricated `child-derived phase \"plan\"` warning is GONE; all five derive.go sites now propagate or return the documented sentinel; the four named regression tests (derive_swallow_test.go) cover both arms + DiscoverActiveSpecs. Both my round-1 majors: ADDRESSED.",
+  "concrete_changes_required": [],
+  "ask_classification": {
+    "R6-F1 (marker forgery gate bypass)": "ADDRESSED — executed re-run of the exact repro now refuses (adr-divergence), marker cleared, spec branch untouched; leg xxiv + materialize_attestation_test.go pin it; provenance check runs before the branch-advance leg so a forged marker can no longer pull the bead ref forward; attestation-read failure propagates (never mapped to attested OR unattested); exact-OID pairing defeats stale-attestation replay for new content (new content moves the tip off the attested OID). One NEW minor, non-blocking doc ask filed as R6-A1.",
+    "R6-F2 (derive.go fabricated plan)": "ADDRESSED — consistency arm re-executed live at tip under the identical failing-`bd list --parent` shim (shim log proves both child reads denied): no fabricated warning, stored phase trusted, exit 0; pre-fix the same shape asserted `child-derived phase \"plan\"`. Fallback arms (derive.go:258/264) and DiscoverActiveSpecs (:594) verified in code to propagate, each pinned by a named test in derive_swallow_test.go; the consistency channel returns the documented \"\" sentinel (:358/:364) which the `childPhase != \"\"` guard skips. Note my live probe could not drive the no-stored-phase arm end-to-end because this bd version MERGES `--metadata` updates (the stored key cannot be removed via bd update), so that arm rests on the unit pin + code trace — solid.",
+    "R6-F3 (stacked lock waits)": "N/A — was advisory-only in round 1, no change requested or required."
+  },
+  "findings": [
+    {
+      "id": "R6-A1",
+      "severity": "minor",
+      "blocking": false,
+      "summary": "ADR honesty sentence for the attestation's trust envelope. I EXECUTED the escalated forgery at tip: `bd update <bead> --metadata '{\"mindspec_stage_marker_oid\":\"<forged-tip>\"}'` (one agent-runnable command; this bd version's merge semantics even preserve the other keys) + the same forged marker ref → the discriminator honored the resume, every gate was skipped, and the unowned file merged to the spec branch. This does NOT reopen F1: my round-1 fix direction (option (a)) explicitly modeled the spec-127 landed-merge pattern, which has the identical property; bd metadata is already the load-bearing store for landed-merge evidence and mindspec_phase, so a metadata-writing forger already had equivalent-power attacks pre-existing on main; the forgery now requires naming a source-known magic key in a deliberate bd write (unreachable by accident) and is inspection-detectable in Dolt history. But ADR-0041's new marker-provenance paragraph says the ATTESTED publication \"proves\" the gates passed, while the SAME document's re-attest amendment models the right convention (\"detectable-by-inspection, NOT cryptographically tamper-proof, and this amendment claims exactly that and no more\", ADR-0041 line ~628). Ask: add one equivalent sentence to the marker-provenance amendment (and optionally the stageMarkerAttestationKey doc comment's \"binary-side publication evidence\" phrasing) naming the bd-write-surface residual, so the ADR claims exactly what the mechanism provides. Doc-only, non-blocking."
+    },
+    {
+      "id": "R6-P1",
+      "severity": "info",
+      "summary": "POSITIVE — attestation design withstood the adversarial angles beyond the executed ones: cross-bead attestation reuse impossible (per-bead key, exact-OID compare); stale-attestation replay after completion cannot smuggle NEW content (a new commit moves the tip to neither the attested OID nor a commit whose child the marker is — and the unfinished-advance leg checks attestation BEFORE AdvanceBranchExpectedOld, so a forged marker cannot pull the branch ref); the attestation-write-before-ref-publish crash window is benign as documented (attestation without ref is inert; next publication overwrites); a TOCTOU racer needs the same bd write surface as the direct forgery, gaining nothing. The pre-fix in-flight-marker disclosure (FOREIGN once post-upgrade, one extra fully-gated run) is the safe direction of the migration."
+    },
+    {
+      "id": "R6-P2",
+      "severity": "info",
+      "summary": "POSITIVE — G2 empirically clean at tip: with stored=review present and both `bd list --parent` reads failing (logged shim), `state show` emitted clean stored-trusted output with no consistency warning and no fabricated derived phase — the exact scenario that pre-fix asserted `child-derived phase \"plan\"` from a failed read. Full-outage AC-1(ii) behavior unaffected (verified round 1)."
+    },
+    {
+      "id": "R6-N1",
+      "severity": "info",
+      "summary": "Non-finding observations for the record: (1) this bd (1.1.0) MERGES `bd update --metadata` rather than replacing — code comments citing replace semantics (e.g. derive.go's Req 19/HC-5 rationale for never emitting raw `bd update` metadata recovery commands) are directionally stale but the guidance they justify remains correct, so nothing to change; (2) probe environment as in round 1: bd refuses temp-dir workspaces, so fixtures ran under a $HOME scratch dir, fully deleted; both checkouts verified byte-identical at 0783a507 (only the panel dir untracked); (3) mid-session harness classifier outages delayed some probes — all probes eventually executed, none skipped."
+    }
+  ]
+}
