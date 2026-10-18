@@ -12,8 +12,9 @@
 > placement only. The conduct doctrine below is unchanged and this ADR stays
 > its normative home. The role-local conduct fragments that the five panel
 > skills carry move into the binary-owned `panel brief` template when that
-> template ships (ADR-0045 Decision 3); until then they are staged content
-> under ADR-0045 Decision 5.
+> template ships (ADR-0045 Decision 3, specs 130–131); until then they are
+> grandfathered under ADR-0045 Decision 5's transition clause, and they are
+> removed at its Implementation order step 7.
 
 ---
 

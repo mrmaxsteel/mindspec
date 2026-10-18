@@ -114,8 +114,9 @@ it must be structurally impossible rather than merely discouraged.
 > open-ended staging area. Under ADR-0045 a skill holds harness mechanics
 > only: judgement prompts become binary-owned templates (its Decision 3),
 > and a rule staged in a skill must name its target gate or config key and
-> a removal date (its Decision 5). The ratchet direction and L1–L3 are
-> unchanged.
+> a removal date (its Decision 5). The ratchet direction, L1 and L2 are
+> unchanged. L3 gains ADR-0045 Decision 2: `instruct` becomes the only
+> guidance channel, and it is rendered from the rule table.
 
 ### 2. Precedent chain — already-shipped evidence
 

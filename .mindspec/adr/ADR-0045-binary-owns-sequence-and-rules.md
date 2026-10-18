@@ -49,12 +49,12 @@ This causes these problems:
    - rationale or history.
 
    Put a command sequence in `next-action`. Put a rule in a gate or in config. Put a judgement prompt in a binary template. Put rationale in an ADR or in the docs.
-5. **Staging is temporary.** A new rule can start in a skill (ADR-0040 §1). It must show the ID of its target gate or config key, and a removal date. `doctor` reports a staged rule that is past its date. This replaces two parts of ADR-0040 §1. The first is the open-ended staging area. The second is the default answer "start it at L4 if its correctness depends on judgment". Judgement now goes into a binary template (Decision 3), and a rule never goes into a skill.
+5. **Staging is temporary.** A new rule can start in a skill (ADR-0040 §1). It must show the ID of its target gate or config key, and a removal date. `doctor` reports a staged rule that is past its date. *Transition:* this marking duty applies to a rule that is staged in a skill after this ADR is accepted. Skill content that already existed is grandfathered until Implementation order step 7 removes it. The `doctor` date check starts when the rule table (step 1) exists, because the rule table holds the target IDs. This replaces two parts of ADR-0040 §1. The first is the open-ended staging area. The second is the default answer "start it at L4 if its correctness depends on judgment". Judgement now goes into a binary template (Decision 3), and a rule never goes into a skill.
 6. **A skill is a stub that loads one canonical source.** `mindspec setup` installs stubs, not full copies. `doctor` reports a skill that differs from the canonical source.
 
 ### Relation to ADR-0044
 
-ADR-0044 calls reviewer conduct "L4 skill-layer doctrine". It puts role-local conduct fragments in the five panel skills. This ADR changes only where that text is placed, not what it says. When the binary-owned `panel brief` template ships (Decision 3), the conduct fragments move into that template, and the skills cite nothing. Until then, the fragments in the skills are staged content under Decision 5. ADR-0044 stays the normative home of the conduct itself.
+ADR-0044 calls reviewer conduct "L4 skill-layer doctrine". It puts role-local conduct fragments in the five panel skills. This ADR changes only where that text is placed, not what it says. When the binary-owned `panel brief` template ships (Decision 3), the conduct fragments move into that template, and the skills cite nothing. Until then, the fragments in the skills are grandfathered under the Decision 5 transition. Their target is the `panel brief` template (specs 130–131). They are removed at Implementation order step 7. ADR-0044 stays the normative home of the conduct itself.
 
 ## Consequences
 
