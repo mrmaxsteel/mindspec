@@ -11,3 +11,9 @@ paths:
   - internal/version/**
   - internal/journal/**
   - .mindspec/domains/core/OWNERSHIP.yaml
+  # spec 128 Bead 10 (tally-carried from bead 1's --override-adr): the
+  # root .gitignore's single ".mindspec/phase.lock" entry (R3.3) was
+  # unowned when bead 1 landed it. Claimed here, in core, because core
+  # owns internal/phase/** and the lock (phaselock.go) whose lockfile
+  # path that entry ignores — the machinery that motivated the entry.
+  - .gitignore

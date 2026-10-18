@@ -1,0 +1,40 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The round-1 LegacyPhaseSignature defect is fully corrected at reviewed commit 542992b4. Re-derived from source, the predicate now matches only stored implement plus at least one lifecycle child plus every lifecycle child's trim-space/lowercase-normalized status exactly open; blocked, custom, empty, closed, and in_progress lifecycle statuses do not match, while non-lifecycle children remain excluded through the same classifyChild rule used by derivation. Direct table cases and reconciliation fixtures prove blocked/custom states receive marker-only updates and never a phase rewrite. Marker discrimination is consistently presence-only in both the locked writer and read-side check, preventing future, malformed, numeric, boolean, or empty-string values from being overwritten or treated as marker-absent. The unchanged correctness lens also remains sound: claim classification delegates to derivation's classifier, and direction-conditional recovery keeps repair phase only for forward disagreement while backward disagreement ends in bd show. The disclosed G6 lexical-fence residual is accurately documented and routed to beads 4/5 and is not a correctness block for this bead. Build, focused tests, and the full short suite passed; the bead worktree remained clean with no phase.lock.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-legacy-signature",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "LegacyPhaseSignature now requires stored == implement, lifecycleTotal > 0, and open == lifecycleTotal, where open is counted only when strings.ToLower(strings.TrimSpace(status)) == open. Its lifecycle population is selected through classifyChild, so task and normalized-empty issue types count while epic and explicit non-task types do not. The direct table covers one/two all-open positives and zero-lifecycle, closed, in_progress, wrong-stored, non-lifecycle-only, mixed/all blocked, custom, and empty-status negatives. TestEnsurePhaseSemanticsV2_AlreadyProgressedEpicsPhaseUntouchedMarkerWritten additionally proves blocked and custom marker-absent fixtures produce the v2 marker only, with no mindspec_phase update. This exactly satisfies the round-1 ask and removes the corrupting backward-rewrite case."
+    },
+    {
+      "id": "R5-G3-marker-presence",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "EnsurePhaseSemanticsV2 checks metadata key presence with map lookup and returns a zero-write no-op for any present value; hasV2MarkerWithCache uses the identical presence-only rule on the read path. TestEnsurePhaseSemanticsV2_MarkerForwardCompat exercises v3, boolean, numeric, and empty-string values over the exact otherwise-rewritable legacy shape and proves zero merge calls and no rewrite. A nil value is also covered by the source predicate because map-key presence remains true independent of value."
+    },
+    {
+      "id": "R5-correctness-regression-check",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "No regression was found in the remainder of the unchanged R5 lens. IsLifecycleIssueType remains a direct wrapper around classifyChild == childLifecycle, so next's advance decision and DerivePhaseFromChildren use the same normalized task/untyped-vs-non-lifecycle rule. AC-5(iv)'s forward warning retains the convergent mindspec repair phase recovery, while its backward warning emits only the safe bd show inspection recovery line. Focused tests for both directions and the legacy-notice substitution passed."
+    },
+    {
+      "id": "R5-G6-lexical-fence-residual",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "assessment": "The requested disposition is present in completeSyncPhase's doc comment: it explicitly distinguishes the exactly-one lexical SanctionedDerivedSync caller fence from the semantically equivalent corrective backward write reachable in a previously surfaced failure-residue state, explains why it is accepted for this bead, and routes semantic tightening or agreement-table wording to beads 4/5. The residual remains a finding but does not corrupt this bead's intended semantics and is not a block."
+    },
+    {
+      "id": "R5-round-2-verification",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "At 542992b49743c3a31f28e65b7354231da154e0f8, go build ./... passed; focused LegacyPhaseSignature, marker-forward-compat, marker-only progressed-state, legacy-notice, and forward/backward recovery tests passed; go test ./... -short -count=1 passed; git diff --check passed. Test temporary roots were placed under /tmp. Final git status was clean and no phase.lock existed in the bead worktree."
+    }
+  ]
+}

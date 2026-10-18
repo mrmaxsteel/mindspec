@@ -90,6 +90,13 @@ type Context struct {
 	// (P8/AC-12/AC-15) — never a re-derived copy. Populated in idle mode
 	// only; templates/idle.md renders it verbatim.
 	LifecycleFindings []string `json:"lifecycle_findings,omitempty"`
+	// IndeterminateReason carries the human-readable discovery-failure
+	// (or unresolved-ambiguity) cause when Mode is state.ModeIndeterminate
+	// (spec 128 R2.3): populated ONLY for indeterminate renders, and
+	// always a REAL reason — never a fabricated mode dressed up as one.
+	// templates/indeterminate.md renders it through the `termsafe`
+	// template func (the reason may embed bd/git error text).
+	IndeterminateReason string `json:"indeterminate_reason,omitempty"`
 }
 
 // JSONOutput is the structured output for --format=json.
@@ -201,6 +208,35 @@ func BuildContextWithCache(c *phase.Cache, root string, mc *state.Focus) *Contex
 	}
 
 	return ctx
+}
+
+// BuildIndeterminateContextWithCache builds the shared indeterminate-mode
+// rendering context (spec 128 R2.3): Mode is set to the sentinel
+// state.ModeIndeterminate so Render selects templates/indeterminate.md by
+// the same ctx.Mode+".md" convention every other mode uses, and reason is
+// carried through as IndeterminateReason. Callers MUST pass a REAL
+// discovery-failure or ambiguity cause — this exists to replace a
+// fabricated fallback mode, never to manufacture a new one.
+func BuildIndeterminateContextWithCache(c *phase.Cache, root, reason string) *Context {
+	mc := &state.Focus{Mode: state.ModeIndeterminate}
+	ctx := BuildContextWithCache(c, root, mc)
+	ctx.IndeterminateReason = reason
+	return ctx
+}
+
+// BuildIndeterminateContext is the fresh-cache variant of
+// BuildIndeterminateContextWithCache.
+func BuildIndeterminateContext(root, reason string) *Context {
+	return BuildIndeterminateContextWithCache(phase.NewCache(), root, reason)
+}
+
+// RenderIndeterminate renders the shared markdown indeterminate tail
+// directly — the convenience external callers (cmd/mindspec's
+// instruct-tail helpers: emitInstruct and completeTail) use so a
+// discovered bd/Dolt failure or unresolved ambiguity renders honestly
+// instead of falling back to idle.md.
+func RenderIndeterminate(root, reason string) (string, error) {
+	return Render(BuildIndeterminateContext(root, reason))
 }
 
 // Render produces markdown guidance for the given context.

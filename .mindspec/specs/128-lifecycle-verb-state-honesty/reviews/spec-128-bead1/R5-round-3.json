@@ -1,0 +1,46 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Regression review of commit 293ef0ee found no defect that would corrupt the spec branch or impede downstream beads. The repair callback now uses the status-aware DerivePhaseDetailWithCache surface, so closed epic plus done marker correctly remains done; the separately fresh stored value supplied by WithPhaseWriteLock remains the value used by IsBackwardMove. The disclosed shared-helper residual is real but acceptably bounded: an internal child-read failure can be swallowed and derive plan, yet against tool-produced stored values that yields either a harmless plan refresh, an unforced backward refusal for implement/review/done, or a conservative refusal for absent/invalid metadata. No production writer stores spec, the only known unforced forward-corruption case. The comparator, Windows LockFileEx implementation, migration absence check, and forced-reason write remain correct. Build, full short tests, phase race tests, Windows cross-compilation, and focused uncached tests passed; the bead worktree remained byte-identical and clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R3-terminal-derivation",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "The round-2 status-awareness regression is fixed. repairPhaseRunE constructs a fresh Cache inside the locked callback, calls DerivePhaseDetailWithCache, uses detail.Derived, and compares it with the independent fresh stored value passed by WithPhaseWriteLock. TestRepairPhase_TerminalRowClosedDoneMarkerAllClosedChildren pins closed epic plus done marker plus all-closed children to the already-consistent done path, with no force suggestion or regression to review."
+    },
+    {
+      "id": "R5-R3-shared-helper-residual",
+      "classification": "ACCEPTED_RESIDUAL",
+      "severity": "low",
+      "assessment": "DerivePhaseDetailWithCache always returns nil error and deriveFromChildrenOrStatusWithCache swallows GetChildren failures; a failed read therefore reaches DerivePhaseFromChildren(nil) and produces plan. Thus repair does reopen a discovery-failure path, and its derr check cannot currently catch it. The disposition is nevertheless sound at this max-round boundary because the guard contains the reachable unforced effects: stored plan is refreshed to the same value; stored implement/review/done is classified backward and refused with zero writes; absent or invalid stored metadata is conservatively refused. A bad forward write would require stored spec, which no production mindspec_phase writer emits. An explicitly forced backward operation remains intentionally operator-authorized and records its reason. Redesigning the established shared helper is not required for this bead, but a future strict/error-returning derivation surface would remove the misleading-refusal residual."
+    },
+    {
+      "id": "R5-R3-order",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "IsBackwardMove still implements the complete spec < plan < implement < review < done order: known equal/forward pairs are allowed, known backward pairs are refused, and either unknown operand is conservatively treated as backward. Exhaustive and focused tests pass."
+    },
+    {
+      "id": "R5-R3-windows",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "The Windows path retains the os.File and underlying handle for the whole critical section, requests an exclusive synchronous LockFileEx range from zero, unlocks the same range through the retained handle before Close, omits FILE_SHARE_DELETE through Go's syscall.Open behavior, retries only ERROR_LOCK_VIOLATION, and immediately closes/returns on other errors. The round-3 acquisition hook does not alter those semantics, and Windows/amd64 phase tests cross-compile successfully."
+    },
+    {
+      "id": "R5-R3-migration-force",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "EnsureMigratedWithCache performs the decisive presence-aware absent check under WithPhaseWriteLock, constructs a fresh callback-local Cache for child discovery, propagates child-read failure with zero writes, and cannot overwrite a fresher serialized phase. Forced backward repair writes mindspec_phase and mindspec_phase_force_reason together under the lock and prints the same reason; an empty explicit reason is rejected before any merge."
+    },
+    {
+      "id": "R5-R3-verification",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "At exact HEAD 293ef0ee6b43bb9e450f4071dbaf548eeffd73dc: go build ./..., go test ./... -short, go test -race ./internal/phase/..., Windows/amd64 phase-test cross-compilation, and focused uncached repair/migration/comparator tests all passed. git diff --check passed; final porcelain status was empty and no .mindspec/phase.lock existed in the bead worktree."
+    }
+  ]
+}

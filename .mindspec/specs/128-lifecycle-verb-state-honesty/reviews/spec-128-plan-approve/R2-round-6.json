@@ -1,0 +1,37 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.92,
+  "rationale": "Round-6 zero-ask regression check of b98d06c2 under the grounding lens, both assigned evidence claims verified — one against the installed documentation, one by lab. (1) DOC CLAIM VERIFIED VERBATIM: installed git is 2.51.2, and git-update-ref(1) states (man page, TRANSACTIONS section): 'If all <ref>s can be locked with matching <old-oid>s simultaneously, all modifications are performed. Otherwise, no modifications are performed. Note that while each individual <ref> is updated or deleted atomically, a concurrent reader may still see a subset of the modifications.' The plan quotes the subset sentence exactly, and the author's interpretation is the sound reading of the pair: the transaction gives all-or-nothing DECISION semantics at lock time (which is precisely what my round-5 lab demonstrated — prepare-abort on expected-old mismatch), while installation is per-ref, so a crash mid-commit can leave one ref installed. The replacement of the two-ref transaction is therefore a genuine deepening, not a walk-back: my round-5 lab evidence proved the decision property and could not have probed the crash-installation window, and the plan now records exactly that evidence-grade distinction ('authoritative documentation + documented per-ref installation order, NOT a lab-reproduced crash window') — honest grading, and replacement-over-patching is the right shape since the write-ahead design needs no multi-ref atomicity at all and drops the version floor to plain plumbing. (2) WRITE-AHEAD MECHANICS VERIFIED BY LAB (fresh scratch repo, files backend): the marker commit's first parent encodes the predecessor exactly as claimed (C built -p A gives marker^ == A; D built -p C gives marker^ == C); the crash-window state tip == marker^ is detectable and the finish-advance ('expected-old = tip') installs cleanly; the structural kind test discriminates correctly — C's marker-vs-marker^ diff was exactly the non-artifact path (f.txt, NOT artifact-confined → classified C) while D's was exactly the named artifact (artifact.jsonl only → classified D, predecessor == C); and a foreign tip ∉ {M*, M*^} is detected. All three re-entry legs of the discriminator are real states I constructed and probed. (3) The protocol text is consistent across the protocol paragraph, bead 6, and the ADR-0041 draft description in write-ahead terms, and my round-5 minor finding R2-5-3 (no index refresh after S) is ADDRESSED by this commit's G2 S-stage exit contract, which pins exactly the refresh-to-D plus dirt classification plus the named-paths refusal before any worktree-removing path — a stronger resolution than my one-line suggestion, closing the silent-interval-edit-loss hole R6 found alongside it. ONE minor precision residual, non-blocking: the structural kind test ('diff M* vs M*^ confined to the named artifact → D, else C') is vacuously artifact-confined when the first-parent diff is EMPTY. This can only bite if the tool ever publishes a marker for an empty C (worktree tree == tip tree at snapshot) or an empty D (refreshed blob == tip blob); today's flow only commits when there is something to commit, and S is presumably skipped when the artifact is unchanged, but the plan does not explicitly pin the stage-skip conditions that make the discriminator total. One sentence ('M is skipped when T equals the tip tree; S is skipped when the refreshed blob equals the tip blob — hence every published marker has a nonempty first-parent diff') would close it. Recording for fold-in; it does not warrant a round.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-6-1",
+      "severity": "info",
+      "claim": "git-update-ref(1) subset-of-modifications sentence verified verbatim on installed git 2.51.2; the decision-vs-installation reading is correct.",
+      "evidence": "man git-update-ref, TRANSACTIONS: all-or-nothing at lock time ('If all <ref>s can be locked … Otherwise, no modifications are performed') immediately followed by the quoted per-ref installation caveat. Consistent with my round-5 lab (which proved decision atomicity only) and with the plan's recorded evidence grade.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-6-2",
+      "severity": "info",
+      "claim": "Single-OID write-ahead mechanics verified by lab: predecessor-as-first-parent, all three re-entry states, structural C/D kind test.",
+      "evidence": "Scratch repo: marker^==A for C and ==C for D; tip==marker^ window constructed and finish-advance with expected-old=tip installed; diff M*^..M* = {f.txt} for C (not artifact-confined) and = {artifact.jsonl} for D (confined); foreign tip ∉ {M*, M*^} detected.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-6-3",
+      "severity": "info",
+      "claim": "My round-5 minor finding R2-5-3 (post-S real-index staleness) is ADDRESSED.",
+      "evidence": "b98d06c2's G2 S-stage exit contract: refresh the real index to D (index-only mixed reset), classify remaining dirt, named-paths ADR-0035 refusal on genuine non-artifact dirt BEFORE any worktree-removing merge path; fixtures (viii)/(ix) revised to executable outcomes.",
+      "disposition": "Discharged; no action."
+    },
+    {
+      "id": "R2-6-4",
+      "severity": "minor",
+      "claim": "The structural kind test is vacuous on an empty first-parent diff; the plan does not pin the stage-skip conditions that make the discriminator total.",
+      "evidence": "diff M* vs M*^ 'confined to the named artifact' is vacuously true when empty, which would classify an empty C as D and resume at the merge, skipping R/S. Only reachable if the tool publishes a marker for an empty C (T == tip tree) or empty D (refreshed blob == tip blob) — states the flow presumably skips, but the skip is unstated.",
+      "disposition": "Non-blocking: add one sentence pinning that M/S are skipped when their diff would be empty (so every published marker has a nonempty first-parent diff) on the next touch of plan.md."
+    }
+  ]
+}

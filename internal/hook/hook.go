@@ -206,11 +206,62 @@ func ReadState() *HookState {
 		return nil
 	}
 
+	// Spec 128 bead 5 round-2 panel G1 (hard block): a genuinely
+	// uninitialized workspace (no .beads/ directory at all) must still
+	// read as "no state" here — runPreCommit's own `st == nil` check
+	// documents exactly this contract ("mindspec not initialized,
+	// allow"). Before this bead, that fell out as a side effect of
+	// phase.ResolveContext's WorktreeMain arm leaving Phase empty on a
+	// bd-outage/no-.beads error; bead 5's honest-idle fix (derive.go's
+	// BeadsDirMissing-aware arm) now correctly derives ModeIdle for that
+	// same case instead — a real, intentional improvement for instruct/
+	// state-show honesty, but it silently changed this nil-sentinel's
+	// input from "" to "idle", flipping the pre-commit hook from allow
+	// to block for every bootstrap-time commit on a protected branch
+	// before `bd init` has run. Checked explicitly, on-disk, before ever
+	// resolving phase context — matching bead.Preflight's own
+	// convention (never by matching bd's error TEXT) — so a genuinely
+	// idle (bd-initialized, no active spec) workspace on main still
+	// blocks exactly as designed ("Block: commits on protected branches
+	// in ANY mode (including idle)" below), while an uninitialized one
+	// still doesn't.
+	if phase.BeadsDirMissing(root) {
+		return nil
+	}
+
 	hs := &HookState{}
 
+	// Spec 128 bead 5 round-3/round-4 panel G1 (hard block — the mirror
+	// case of round-2's fix, closed in two passes): once .beads/ exists,
+	// EVERY way ctx.Phase can come back empty must read as the honest
+	// indeterminate sentinel here, never as "no state" — that would let
+	// a protected-branch commit slip through, exactly the branch-
+	// protection bypass BeadsDirMissing's own narrow, explicit check
+	// above exists to avoid confusing with this DIFFERENT
+	// (post-initialization) case. Two distinct Context shapes reach
+	// here with an empty Phase and must BOTH latch indeterminate:
+	//   - ctx.DerivationFailed (a genuine bd/Dolt derivation failure —
+	//     round-3's original fix);
+	//   - ctx.Phase == "" with DerivationFailed FALSE (the WorktreeMain
+	//     multi-active-spec AMBIGUITY arm — derive.go's uncovered
+	//     `err == nil && len(specs) > 1` case leaves Phase "" on
+	//     purpose, "caller handles ambiguity" — round-4's fix, mirroring
+	//     cmd/mindspec/instruct_tail.go:30's identical
+	//     `ctx.DerivationFailed || ctx.Phase == ""` predicate for the
+	//     same Context shape).
+	// WorktreeSpec/WorktreeBead never produce an empty Phase (round-1's
+	// unconditional ModeSpec/ModeImplement backfill), so every OTHER
+	// empty-Phase Context reaching this line is one of these two
+	// post-initialization cases — never a third, undiscovered one.
+	indeterminate := false
 	ctx, ctxErr := phase.ResolveContext(root)
 	if ctxErr == nil && ctx != nil {
-		hs.Mode = ctx.Phase
+		if ctx.DerivationFailed || ctx.Phase == "" {
+			indeterminate = true
+			hs.Mode = state.ModeIndeterminate
+		} else {
+			hs.Mode = ctx.Phase
+		}
 		hs.ActiveSpec = ctx.SpecID
 		cfg, cfgErr := config.Load(root)
 		if cfgErr != nil {
@@ -239,7 +290,16 @@ func ReadState() *HookState {
 		hs.BeadClaimedAt = sess.BeadClaimedAt
 	}
 
-	if hs.Mode == "" && hs.SessionStartedAt == "" {
+	// The narrowed nil contract (round-3/round-4 panel G1): "no state"
+	// is reachable ONLY via the two genuinely-pre-initialization checks
+	// above (no local root found; .beads/ absent) — never here. Both
+	// post-initialization empty-Phase shapes (derivation failure,
+	// multi-active-spec ambiguity) already guarantee hs.Mode is
+	// non-empty (ModeIndeterminate, set above), so !indeterminate is
+	// belt-and-suspenders self-documentation, not load-bearing: it
+	// makes the invariant explicit rather than relying on that
+	// non-emptiness holding by construction.
+	if hs.Mode == "" && hs.SessionStartedAt == "" && !indeterminate {
 		return nil
 	}
 

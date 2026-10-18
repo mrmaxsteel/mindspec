@@ -112,6 +112,22 @@ type Context struct {
 	Phase        string `json:"phase"`
 	WorktreePath string `json:"worktree_path"`
 	EpicID       string `json:"epic_id"`
+	// DerivationFailed is true when a GENUINE bd/Dolt lookup failure was
+	// encountered while resolving Phase — never when a lookup simply and
+	// successfully found nothing (a pre-epic draft, or a fresh worktree
+	// with no active spec, both leave this false). Spec 128 R2.3 scope
+	// extension: ResolveContextFromDirWithCache's per-case fallbacks
+	// (e.g. "bead worktree implies implement") used to silently back-fill
+	// Phase on error, making a real discovery failure indistinguishable
+	// from a legitimately-derived value. Phase keeps its historical
+	// fallback VALUE for callers that only read it (state show, the
+	// bead-4 agreement-table fixtures) — this field is the new, additive
+	// signal that lets an instruct-tail caller render the honest
+	// indeterminate form instead of trusting that fallback.
+	DerivationFailed bool `json:"derivation_failed,omitempty"`
+	// DerivationError is the human-readable cause when DerivationFailed
+	// is true.
+	DerivationError string `json:"derivation_error,omitempty"`
 }
 
 // SpecIDFromMetadata constructs a spec ID from num and title, checked
@@ -177,23 +193,61 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		// Run child-based derivation as consistency check.
 		childPhase := deriveFromChildrenOrStatusWithCache(c, epicID, epicStatus)
 		if childPhase != "" && childPhase != storedPhase {
-			// Spec 092 Req 2: the consistency warning carries the
-			// recovery-line convention (ADR-0035) so agents can grep
-			// and paste the fix. The recovery command is
-			// `mindspec repair phase <spec-id>` — NEVER a raw
-			// `bd update` metadata command, which has replace
-			// semantics over the entire metadata map (Req 19/HC-5).
-			// The line is hand-formatted here because internal/guard
-			// imports this package (import cycle); the external-
-			// package test derive_recovery_test.go keeps the format
-			// aligned with guard.HasFinalRecoveryLine.
-			fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
-				epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
+			// Spec 128 Bead 2 (plan step 7/8): a marker-absent epic
+			// whose stored/children match the pre-v2 legacy signature
+			// (LegacyPhaseSignature, semantics_v2.go) gets a REPLACEMENT
+			// notice instead of the general mismatch warning below —
+			// its recovery (`mindspec repair phase`) is made correct by
+			// EnsurePhaseSemanticsV2 also running at repair phase's own
+			// entry (repair.go), which reconciles legacy -> plan + marker
+			// BEFORE the guard evaluates. This branch never takes the
+			// R3.3 write lock (LegacyPhaseSignature and the marker read
+			// below are both lock-free, round-2 panel G4).
+			if !hasV2MarkerWithCache(c, epicID) {
+				if children, cerr := c.GetChildren(epicID); cerr == nil && LegacyPhaseSignature(storedPhase, children) {
+					fmt.Fprintf(os.Stderr, "warning: epic %s: legacy phase semantics detected (pre-v2 stored implement)\nrecovery: mindspec repair phase %s\n",
+						epicID, specIDForEpicWithCache(c, epicID))
+					return storedPhase, nil
+				}
+			}
+			// Spec 092 Req 2 / spec 128 AC-5(iv): the consistency warning
+			// carries the recovery-line convention (ADR-0035) so agents
+			// can grep and paste the fix. Direction-conditional (bead 2,
+			// round-1 G5 disposition): a FORWARD disagreement (the
+			// child-derived phase is AHEAD of stored in lifecycle order)
+			// keeps the existing `mindspec repair phase <spec-id>`
+			// recovery — safe and correct there. A BACKWARD disagreement
+			// (derived is BEHIND stored) never emits that command —
+			// writing it would move the epic backward — and instead ends
+			// with an inspection action (`bd show <epic-id>`), belt (this
+			// line) alongside suspenders (the R3.3 guard itself refuses
+			// an unforced backward write regardless). Never a raw `bd
+			// update` metadata command, which has replace semantics over
+			// the entire metadata map (Req 19/HC-5). Hand-formatted here
+			// because internal/guard imports this package (import
+			// cycle); the external-package test derive_recovery_test.go
+			// keeps the format aligned with guard.HasFinalRecoveryLine.
+			if IsBackwardMove(storedPhase, childPhase) {
+				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase) — the derived phase is BEHIND stored in lifecycle order; writing it would move the epic backward\nrecovery: bd show %s\n",
+					idrender.Bead(epicID), storedPhase, childPhase, idrender.Bead(epicID))
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
+					epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
+			}
 		}
 		return storedPhase, nil
 	}
 
 	// Fallback for pre-080 epics: derive from children/status (backward compat).
+	//
+	// Final-review round 1 (R6 F2, the AC-4b class): a failed child read
+	// PROPAGATES here instead of feeding DerivePhaseFromChildren a nil set
+	// — which would RETURN a fabricated `plan` with a nil error, the exact
+	// error-discarding derivation this spec exists to kill (spec.md: "a
+	// lifecycle-discovery failure is never serialized as a successful
+	// empty or idle mode"). Callers already map a non-nil error to the
+	// indeterminate machinery (Context.DerivationFailed / state show's
+	// discovery refusal).
 	if epicStatus == "" {
 		epicStatus = queryEpicStatusWithCache(c, epicID)
 	}
@@ -201,10 +255,16 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone, nil
 		}
-		children, _ := c.GetChildren(epicID)
+		children, cerr := c.GetChildren(epicID)
+		if cerr != nil {
+			return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
+		}
 		return DerivePhaseFromChildren(children), nil
 	}
-	children, _ := c.GetChildren(epicID)
+	children, cerr := c.GetChildren(epicID)
+	if cerr != nil {
+		return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
+	}
 	return DerivePhaseFromChildren(children), nil
 }
 
@@ -279,6 +339,14 @@ func readStoredPhaseWithCache(c *Cache, epicID string) string {
 
 // deriveFromChildrenOrStatusWithCache runs child-based phase derivation for consistency checking.
 // Returns the derived phase, or "" if derivation fails.
+//
+// Final-review round 1 (R6 F2): a failed child read returns "" — the
+// documented derivation-failed sentinel, which makes the AC-5(iv)
+// consistency check SKIP (DerivePhaseWithStatusWithCache's `childPhase
+// != ""` guard) — never a phase fabricated from the nil child set a
+// failed `bd list --parent` yields. Pre-fix, a partial bd outage made
+// the consistency warning assert `child-derived phase "plan"` for a
+// derivation that never ran (reproduced live by the final panel's R6).
 func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) string {
 	if epicStatus == "" {
 		epicStatus = queryEpicStatusWithCache(c, epicID)
@@ -287,10 +355,16 @@ func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) st
 		if hasDoneMarkerWithCache(c, epicID) {
 			return state.ModeDone
 		}
-		children, _ := c.GetChildren(epicID)
+		children, cerr := c.GetChildren(epicID)
+		if cerr != nil {
+			return ""
+		}
 		return DerivePhaseFromChildren(children)
 	}
-	children, _ := c.GetChildren(epicID)
+	children, cerr := c.GetChildren(epicID)
+	if cerr != nil {
+		return ""
+	}
 	return DerivePhaseFromChildren(children)
 }
 
@@ -328,6 +402,16 @@ func classifyChild(issueType string) childClass {
 	default:
 		return childNonLifecycle
 	}
+}
+
+// IsLifecycleIssueType reports whether issueType classifies as a
+// LIFECYCLE child — task-typed or untyped (empty), the ADR-0023
+// discriminator classifyChild already encodes for phase derivation.
+// Exported for cmd/mindspec/next.go's claim-path phase advance (spec 128
+// Bead 2, OQ-3 option 1): claiming a non-lifecycle bead (e.g. a `bug`)
+// must never advance stored mindspec_phase.
+func IsLifecycleIssueType(issueType string) bool {
+	return classifyChild(issueType) == childLifecycle
 }
 
 // DerivePhaseFromChildren implements the pure logic of phase derivation.
@@ -500,7 +584,17 @@ func DiscoverActiveSpecsWithCache(c *Cache) ([]ActiveSpec, error) {
 		}
 
 		// Fallback for pre-080 epics: derive from children.
-		children, _ := c.GetChildren(epic.ID)
+		//
+		// Final-review round 1 (R6 F2): a failed child read PROPAGATES —
+		// skipping just this epic could serialize a false `idle` when it
+		// is the only active spec, and deriving from the nil set would
+		// fabricate `plan`; neither is an honest answer to a discovery
+		// failure. (The D1 degrade above is for hostile per-epic DATA;
+		// this is an infrastructure read failure.)
+		children, cerr := c.GetChildren(epic.ID)
+		if cerr != nil {
+			return nil, fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epic.ID), cerr)
+		}
 
 		phase := DerivePhaseFromChildren(children)
 		if phase == state.ModeDone {
@@ -557,12 +651,21 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 		if err == nil && derivedSpecID != "" {
 			ctx.SpecID = derivedSpecID
 			ctx.EpicID = epicID
+		} else if err != nil && !errors.Is(err, ErrNoEpicLineage) {
+			// A genuine lookup failure (bd/Dolt), not "this bead
+			// honestly has no epic lineage" — record it so the tail
+			// can render indeterminate instead of trusting the
+			// ModeImplement fallback below as if it were derived.
+			ctx.DerivationFailed = true
+			ctx.DerivationError = err.Error()
 		}
-		phase, err := derivePhaseForSpecWithCache(c, ctx.EpicID)
-		if err == nil {
+		phase, phaseErr := derivePhaseForSpecWithCache(c, ctx.EpicID)
+		if phaseErr == nil {
 			ctx.Phase = phase
 		} else {
 			ctx.Phase = state.ModeImplement // bead worktree implies implement
+			ctx.DerivationFailed = true
+			ctx.DerivationError = phaseErr.Error()
 		}
 
 	case workspace.WorktreeSpec:
@@ -570,11 +673,41 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 		epicID, err := FindEpicBySpecIDWithCache(c, specID)
 		if err == nil && epicID != "" {
 			ctx.EpicID = epicID
-			phase, err := DerivePhaseWithCache(c, epicID)
-			if err == nil {
+			phase, phaseErr := DerivePhaseWithCache(c, epicID)
+			if phaseErr == nil {
 				ctx.Phase = phase
+			} else {
+				ctx.DerivationFailed = true
+				ctx.DerivationError = phaseErr.Error()
+			}
+		} else if err != nil && !BeadsDirMissing(root) {
+			// Distinguish "bd healthy, no epic yet" (a pre-epic draft —
+			// ModeSpec below is the honest, non-error answer) from a
+			// genuine bd/Dolt failure, the same probe
+			// resolve.ResolveModeWithCache applies to its own epic
+			// lookup (round-1 panel G2/F2a precedent). BeadsDirMissing
+			// short-circuits first: a workspace with no .beads/ directory
+			// at all (bead.Preflight's own "run 'beads init'" precondition,
+			// checked the same on-disk way, never by bd's error TEXT) has
+			// never used the beads lifecycle — that is honestly ModeSpec
+			// below, not a health failure worth an extra bd probe.
+			if _, epicsErr := c.AllEpics(); epicsErr != nil {
+				ctx.DerivationFailed = true
+				ctx.DerivationError = epicsErr.Error()
 			}
 		}
+		// Round-1 panel G1/G3 (hard block): this backfill is UNCONDITIONAL,
+		// matching WorktreeBead's ModeImplement fallback above — it fires
+		// even when ctx.DerivationFailed is true. Honest consumers
+		// (cmd/mindspec/instruct_tail.go, internal/instruct/run.go) check
+		// DerivationFailed BEFORE ever reading Phase, so this does not
+		// resurrect the "failure presented as idle" bug the field exists
+		// to close. Gating this on !DerivationFailed left Phase=="" on a
+		// genuine failure, which silently flipped internal/cleanup's
+		// active-spec refusal (cleanup.go: `ctx.Phase != ""`) from
+		// fail-closed to fail-open for a bd outage in a spec worktree —
+		// exactly the "additive, values unchanged" claim this field's own
+		// doc comment makes, now actually true for every arm.
 		if ctx.Phase == "" {
 			ctx.Phase = state.ModeSpec // spec worktree without epic → spec mode
 		}
@@ -587,17 +720,45 @@ func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error
 
 	case workspace.WorktreeMain:
 		specs, err := DiscoverActiveSpecsWithCache(c)
-		if err == nil && len(specs) == 1 {
+		switch {
+		case err == nil && len(specs) == 1:
 			ctx.SpecID = specs[0].SpecID
 			ctx.EpicID = specs[0].EpicID
 			ctx.Phase = specs[0].Phase
-		} else if err == nil && len(specs) == 0 {
+		case err == nil && len(specs) == 0:
 			ctx.Phase = state.ModeIdle
+		case err != nil && BeadsDirMissing(root):
+			// No .beads/ directory at all: this workspace has never used
+			// the beads lifecycle (bead.Preflight's own "run 'beads
+			// init'" precondition, re-checked here the same on-disk way —
+			// never by matching bd's error TEXT). That is honestly idle,
+			// not a bd/Dolt health failure.
+			ctx.Phase = state.ModeIdle
+		case err != nil:
+			ctx.DerivationFailed = true
+			ctx.DerivationError = err.Error()
 		}
 		// Multiple specs: leave specID empty (caller handles ambiguity)
 	}
 
 	return ctx, nil
+}
+
+// BeadsDirMissing reports whether root has no .beads/ directory at all —
+// the same on-disk precondition bead.Preflight checks before ever
+// shelling out to bd (internal/bead/bdcli.go's "run 'beads init'" case).
+// Spec 128 R2.3: a workspace that has never used the beads lifecycle
+// makes every bd query fail (real bd: "Error: no beads database found"),
+// which is NOT a health failure worth reporting as indeterminate — it is
+// the ordinary, permanently-legitimate "nothing has started here yet"
+// idle state. This is checked via the filesystem, never by matching bd's
+// error TEXT (the same discipline ErrNoEpicLineage's doc comment states:
+// "never classify by error text"). Exported (round-1 panel G5.1) so
+// internal/instruct's own idle-vs-indeterminate arrival points apply the
+// identical precondition rather than a second, potentially-drifting copy.
+func BeadsDirMissing(root string) bool {
+	_, err := os.Stat(filepath.Join(root, ".beads"))
+	return os.IsNotExist(err)
 }
 
 // CheckSpecNumberCollision checks if a spec number is already in use.

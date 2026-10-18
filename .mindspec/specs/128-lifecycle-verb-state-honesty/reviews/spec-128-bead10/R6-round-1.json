@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "The landed implementation and focused short suites are sound, but the final docs sweep materially oversells or contradicts that implementation in the exact adversarial areas assigned to R6. The workflow architecture retains the obsolete pre-spec-128 commit-before-content-gates account directly alongside the new prospective-snapshot account. The new proportional-dirt prose says the production entanglement set is empty, while the landed bead-7 code conditionally includes .gitignore and recording events/manifest paths and its tests pin refusal for those paths versus the exact unrelated-dirt notice. The merge-safety guide also says a retry with an override will hit the same refusing gate/message, although a non-empty override explicitly bypasses that gate and may proceed to a different gate or post-gate failure. Finally, the ReadySet prose universally describes claim/emit-only parity without naming the test-pinned positional --emit-only exception, which directly fetches by ID and emits the exact readiness-bypass disclosure without querying/filtering the ready set. These are public behavioral-contract defects in the final docs bead and require correction before approval.",
+  "concrete_changes_required": [
+    "Replace or explicitly supersede the stale spec-119 artifact-materialization paragraph in `.mindspec/domains/workflow/architecture.md` (currently lines 346-354): it still says commits precede doc-sync/ADR-divergence and a content-gate refusal retains commits. Reconcile it with the landed prospective-snapshot gate-before-commit protocol described later in the same file.",
+    "Correct every 'today empty' entanglement claim in `.mindspec/domains/workflow/{architecture,interfaces,overview}.md`. Document the actual conditional production classes from `ComputeEntangleablePaths`: an entry-absent `.gitignore` at the resolved claim anchor and, when recording is enabled and contained in the invoking tree, `events.ndjson` and `manifest.json`. State that dirt intersecting those paths blocks; only other user dirt produces `note: claiming despite unrelated dirty path(s) this claim does not touch ...` and proceeds.",
+    "Rewrite `project-docs/user/guides/merge-safety.md` lines 23-38 so it distinguishes (a) a plain retry without an override, which re-evaluates the same content-gate class without manufactured panel staleness, from (b) a retry with `--allow-doc-skew` or `--override-adr`, which bypasses the corresponding gate and can reach another content gate or a later failure. Remove guarantees of the 'same message', 'whole recovery', and total convergence beyond what the code establishes.",
+    "Scope the deterministic-selection/ReadySet prose to the non-positional and `--pick` flows and explicitly carry R6.3(a)'s positional `--emit-only` exception: it never constructs a ReadySet, never checks readiness or applies the spec-title filter, reports no exclusion, and prints exactly `emit-only: bead fetched by ID; readiness not checked.` Also describe ordering as preservation of the returned `bd ready` order for the same ready set, not global determinism across changing invocations."
+  ],
+  "findings": [
+    {
+      "id": "R6-B10-1",
+      "severity": "HIGH",
+      "title": "Workflow architecture simultaneously documents mutually exclusive complete-gate orderings",
+      "location": ".mindspec/domains/workflow/architecture.md:346-354, 1147-1180",
+      "detail": "The older paragraph says optional user/artifact commits occur first, then doc-sync and ADR-divergence may refuse while retaining those commits, and that such refusal is not byte-identical. The new R4 section says the content gates run against one prospective snapshot before any complete-authored commit and a refusal leaves the tip at reviewed_head_sha. `internal/complete/materialize.go:264-283` and `internal/complete/complete_test.go:878-926` support only the latter. A reader cannot obey both accounts; the stale paragraph defeats the purpose of the docs sweep."
+    },
+    {
+      "id": "R6-B10-2",
+      "severity": "HIGH",
+      "title": "The docs falsely call the proportional claim entanglement set empty and misstate when the dirt notice fires",
+      "location": ".mindspec/domains/workflow/architecture.md:1184-1199; .mindspec/domains/workflow/interfaces.md:314-316; .mindspec/domains/workflow/overview.md:66-68",
+      "detail": "The added docs enumerate only session/artifact/worktree paths and repeatedly say the real or current user-dirt entanglement is empty. Landed `ComputeEntangleablePaths` instead conditionally adds `.gitignore` when the configured worktree-root entry is absent (`internal/next/guard.go:152-155`) and recording events/manifest paths when recording is enabled and the resolved targets are contained (`:157-168`). `CheckDirtyTreeProportional` classifies intersections as blocking and only non-intersections as ignored (`:516-549`); the caller prints the test-pinned `note: claiming despite unrelated dirty path(s) this claim does not touch ...` only for a non-empty ignored set (`cmd/mindspec/next.go:182-198`). The real-claim `.gitignore` and recording containment tests pin refusals, so the prose contradicts both code and bead-7 message behavior."
+    },
+    {
+      "id": "R6-B10-3",
+      "severity": "MEDIUM",
+      "title": "Merge-safety promises same-gate/same-message behavior even when the named override bypasses that gate",
+      "location": "project-docs/user/guides/merge-safety.md:23-38, 49-53",
+      "detail": "The guide presents override commands as the whole recovery, then says persistent skew causes the same gate to refuse with the same message and never a different gate. In code, `AllowDocSkew != \"\"` suppresses the doc-sync refusal (`internal/complete/materialize.go:271-275`) and execution continues immediately to ADR-divergence (`:277-282`); `OverrideADR` similarly skips its gate. The flagship test pins that a plain no-override retry remains attributable to doc-sync, while the allow-doc-skew run passes and closes (`internal/complete/bead6_fixture_legs_test.go:1613-1633`). The doc conflates these two cases and promises more than the tests or code guarantee."
+    },
+    {
+      "id": "R6-B10-4",
+      "severity": "MEDIUM",
+      "title": "Universal ReadySet parity prose omits the exact test-pinned positional emit-only bypass",
+      "location": ".mindspec/domains/workflow/architecture.md:1203-1219; .mindspec/domains/workflow/interfaces.md:322-325; .mindspec/domains/workflow/overview.md:67-69",
+      "detail": "The docs say the ready-set/filter construction is consumed identically by the claim and emit-only paths and that every filter drop is loud. But positional `--emit-only` branches before `BuildReadySet`, fetches the bead directly, does not check readiness or apply the spec filter, and prints `emit-only: bead fetched by ID; readiness not checked.` (`cmd/mindspec/next.go:461-479`). `TestNextSelection_PositionalEmitOnly_BypassesSpecFilter` pins that exact line and forbids any exclusion or readiness claim (`cmd/mindspec/next_selection_test.go:421-449`). This exception is normative AC-10/R6.3(a), not an incidental edge, and must be explicit wherever parity is stated universally."
+    },
+    {
+      "id": "R6-B10-V",
+      "severity": "INFO",
+      "title": "Artifact identity, focused tests/build, and cleanliness verified",
+      "detail": "Reviewed HEAD is exactly `66be65a790cf7236c7a4123c2af9dcd7a57f71b9`. `go test ./internal/next ./internal/complete ./cmd/mindspec -short` passed, followed by `go build ./...` exiting 0 (with a non-fatal Go module stat-cache permission warning). Post-run `git status --short`, `git diff --exit-code`, and `git diff --cached --exit-code` were clean; no reviewer scratch directory existed under /tmp."
+    }
+  ]
+}

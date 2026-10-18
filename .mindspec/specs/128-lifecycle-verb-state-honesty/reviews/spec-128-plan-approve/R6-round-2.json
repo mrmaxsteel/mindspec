@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Round 2 materially improves the plan: the executor seam is now grounded, the candidate tree is intended to be immutable, legacy phase state has a durable v2 discriminator, and the phase lock has a bounded operational design. However, the exact snapshot recipe is mechanically wrong for its named-artifact exclusion: a fresh temporary index plus `add -A` omits the excluded tracked path, so T records its deletion. An isolated clone probe of the documented command produced `D .beads/issues.jsonl` and 6,979 entries in T versus 6,980 in HEAD. The legacy reconciliation also remains absent from read/derivation paths, and the Windows age-only stale-lock takeover can remove a live holder's lock and races between contenders. These are focused, implementable plan corrections, not grounds for rejection or a hard block.",
+  "concrete_changes_required": [
+    "Correct the prospective-snapshot algorithm so the temporary index is initialized from the exact parent/tip tree before applying `add -A` with exclusions (for example, `git read-tree <tip>` into the temporary index). Pin that the excluded tracked artifact retains the parent blob in T and in the user materialization commit, while its later export change appears only in the artifact-sync commit; add a red-on-revert test that would catch the synthetic deletion reproduced in this review.",
+    "Finish the legacy-v2 invocation story for read/derivation entry points. Ensure that `state show` (and any shared phase derivation used by instruct tails) cannot continue to expose the old stored=implement/all-open mismatch indefinitely before a mutating lifecycle verb happens to run; name the invocation seam and add an upgrade-before-first-claim state-show fixture, or define an equally honest non-mutating compatibility treatment that removes the obsolete warning safely.",
+    "Replace the Windows age-only stale-lock deletion with an ownership- and liveness-aware, race-safe takeover protocol. It must never remove a still-live holder merely because its timestamp crossed the stale bound, and two simultaneous stale contenders must not unlink one another's newly acquired lock. Add fixtures for a live holder older than the bound and concurrent stale takeovers, in addition to the planned crashed-holder and stale-file tests."
+  ],
+  "findings": [
+    {
+      "id": "R6-R1-ASK-1",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "title": "Legacy phase reconciliation is durable but not invoked by read paths",
+      "detail": "Plan lines 578-599 add idempotent, lock-protected `EnsurePhaseSemanticsV2`, the durable `mindspec_phase_semantics: v2` marker, a bounded legacy signature, and all five requested state fixtures. It is invoked from impl/plan/complete ahead-of-preflight sites and next's claim path. But my round-1 ask explicitly required lifecycle/read invocation paths: neither `state show` nor the shared derivation path is named. An upgraded old epic at stored=implement with all lifecycle children open therefore still reports the obsolete disagreement until some mutating command performs reconciliation."
+    },
+    {
+      "id": "R6-R1-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "The snapshot construction deletes the excluded tracked artifact",
+      "detail": "The immutable-tree/commit-tree design correctly closes hooks, interval edits, untracked content, and post-measurement export injection in principle. But plan lines 160-168 and bead-6 lines 707-712 specify a fresh `GIT_INDEX_FILE` followed directly by `git add -A -- . ':(exclude).beads/issues.jsonl'`. A fresh index has no parent entries, so the exclusion means the tracked artifact is absent from T, not preserved from the tip. In an isolated /tmp clone, the exact recipe yielded `git diff --name-status HEAD T -- .beads/issues.jsonl` = `D .beads/issues.jsonl` and T had one fewer entry than HEAD. The later commit-tree step would therefore materialize a synthetic artifact deletion. Seed the temporary index from the exact parent tree before applying worktree changes and exclusions."
+    },
+    {
+      "id": "R6-R1-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Candidate-tree validation is grounded at the execution boundary",
+      "detail": "Bead 6 now scopes internal/gitutil, internal/executor interface, MindspecExecutor and mock, plus validation and complete. `ChangedFilesTree(workdir, base, treeOID)` is explicitly workdir-rooted; OWNERSHIP, domain enumeration, and doc/ADR contents are read from T; and a cross-checkout test pins complete-from-main against the bead worktree. This closes the g.Root and untracked-input holes identified in round 1, subject to correcting T construction itself."
+    },
+    {
+      "id": "R6-R1-ASK-4",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "The Windows stale-lock recovery protocol can violate mutual exclusion",
+      "detail": "Bead 1 now pins `.mindspec/phase.lock`, managed gitignore coverage, a 10-second bounded wait, ADR-0035 timeout refusal, Unix crash release, Windows PID/timestamp content, stale takeover, and dirt/contention/error tests. But its Windows rule declares staleness solely by file age and then removes the path plus retries. A legitimate long-running holder can cross that age bound and have its lock removed. Also, two contenders that both inspect the same stale file can race: one may create a new lock after removal and the other may unlink that new lock. PID is written but no liveness or ownership-token validation is specified."
+    },
+    {
+      "id": "R6-ROUND2-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Plan validation succeeds with the three disclosed advisory warnings",
+      "detail": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited successfully and reported only the disclosed bead-count, scope-redundancy, and chain-depth warnings. The validation run did not change the already-untracked review directory status."
+    }
+  ]
+}

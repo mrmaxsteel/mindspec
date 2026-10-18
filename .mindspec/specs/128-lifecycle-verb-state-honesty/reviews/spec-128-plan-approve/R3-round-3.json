@@ -1,0 +1,42 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.7,
+  "rationale": "Both of my round-2 asks are ADDRESSED by f72803bb, and this round's growth (bead 6's three-part materialization + seven fixture legs, bead 1's Windows takeover protocol, bead 2's read-path/legacy-notice treatment) keeps every bead a single coherent deliverable — the additions are corrections and hardening of the same mechanisms, not new deliverables smuggled in. But the fix commit again introduced one frontmatter omission of the exact class this panel has now fixed twice: bead 2 step 7's G4 treatment adds `repair phase` to EnsurePhaseSemanticsV2's invocation sites ('repair reconciles ... BEFORE its guard evaluates' — the guard bead 1 places in cmd/mindspec/repair.go, and repair.go hosts no existing EnsureMigrated-style preflight to piggyback on, so a new call is added to that file), yet chunk 2's key_file_paths — which gained internal/approve/impl.go for this same step last round — omit cmd/mindspec/repair.go. release.go, the other new invocation site, is listed. I swept ALL TEN bead sections' named edit sites against their chunks this round: this is the only omission (chunks 1, 3-10 fully reconcile; bead 1's 'managed .gitignore block' entry is plausibly a code-constant change rather than a direct .gitignore edit, so not flagged). Second, smaller: the fence-tightening duty ('bead 2 TIGHTENS the same test to exactly-one when it wires the caller') is recorded only in bead 1's step 1 — bead 2's own step 3 names the fence as 'created + call-site-fenced in bead 1' without stating bead 2's tightening obligation, so a bead-2 implementer working from bead 2's section would wire the caller and leave the fence at zero-outside-allowlist, silently stranding the OQ-3 boundary's 'pinning exactly one caller' end-state. Both fixes are one line each. Deps parity re-verified post-fix: work_chunks depends_on still exactly matches all ten sections (1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]); no depends_on changed this round.",
+  "concrete_changes_required": [
+    "work_chunks id 2: add cmd/mindspec/repair.go (bead 2 step 7 now wires EnsurePhaseSemanticsV2 into repair phase ahead of its guard — a new call in that file; release.go, the other site added by the same G4 fix, is already listed). Given this class has recurred in all three fix commits, do the fix as a full sweep: reconcile every chunk's key_file_paths against its bead section's named edit sites one final time (my sweep found only this one omission, so the sweep should be quick and should land as the closing check).",
+    "Bead 2 step 3: add the tightening clause — after wiring syncPhase as the caller, bead 2 tightens the bead-1 call-site fence from zero-callers-outside-allowlist to exactly-one — so the duty lives in the bead that executes it, not only in bead 1's step 1."
+  ],
+  "findings": [
+    {
+      "id": "R3-R3-1",
+      "severity": "INFO",
+      "title": "Round-2 ask 1 (fence satisfiability at bead 1's gate): ADDRESSED",
+      "detail": "Bead 1 step 1 now states the phased fence exactly as asked: the bead-1 form asserts ZERO production callers outside the allowlist {cmd/mindspec/release.go} — green at bead 1's own gate before release is wired — and bead 2 tightens to exactly-one. The OQ-3 sanction-boundary paragraph still says 'pinning exactly one caller' without the phasing, but that reads as the end-state invariant (true after bead 2) while the bead section carries the implementation phasing — consistent, not contradictory. The one residual is that the tightening half of the duty is stated only in bead 1's section (see R3-R3-4)."
+    },
+    {
+      "id": "R3-R3-2",
+      "severity": "INFO",
+      "title": "Round-2 ask 2 (chunk-2 impl.go): ADDRESSED",
+      "detail": "internal/approve/impl.go now appears in chunk 2's key_file_paths, matching step 7's impl.go:277 invocation site. But the same fix commit's G4 expansion introduced a sibling omission in the same chunk (R3-R3-3)."
+    },
+    {
+      "id": "R3-R3-3",
+      "severity": "MINOR",
+      "title": "NEW_ISSUE (third recurrence of the omission class): chunk 2 omits cmd/mindspec/repair.go, an edit site added by this round's G4 fix",
+      "detail": "Bead 2 step 7 (round-2 G4): 'that recovery command is made correct by adding repair phase (and release) to EnsurePhaseSemanticsV2's invocation sites: repair reconciles (legacy → plan + marker) BEFORE its guard evaluates'. The guard lives in cmd/mindspec/repair.go (bead 1 step 4), and repair.go is not among the existing EnsureMigrated ahead-of-preflight sites (impl.go:277 / plan.go:300 / complete.go:522), so the invocation is a new call added to repair.go — an edit site chunk 2's key_file_paths omit while listing release.go, the other site the same sentence adds. Each of the three fix commits has now introduced exactly this defect (747bf9b3: impl.go; f72803bb: repair.go) into the chunk it was expanding — key_file_paths seed the bead's file_paths bd metadata, impl-context surface, and scope-advisory baseline via internal/approve/plan.go:602-623. A one-line add plus a closing full-sweep reconcile (mine found no other omission across all ten beads) ends the class."
+    },
+    {
+      "id": "R3-R3-4",
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: the fence-tightening duty is recorded only in bead 1's section, not in bead 2's",
+      "detail": "Bead 1 step 1 says 'bead 2 TIGHTENS the same test to exactly-one when it wires the caller', but bead 2 step 3 — the section a bead-2 implementer works from — describes the fence only as 'created + call-site-fenced in bead 1' with no tightening obligation. A bead-2 subagent following its own section to the letter wires syncPhase and ships, leaving the fence permanently at zero-outside-allowlist: every test green, no drift signal, and the OQ-3 sanction boundary's 'exactly one caller' claim never becomes enforced. Cross-bead duties belong in the bead that executes them (the principle behind my round-1 sanctioned-entry finding). One clause in bead 2 step 3 closes it."
+    },
+    {
+      "id": "R3-R3-5",
+      "severity": "INFO",
+      "title": "Decomposition coherence after this round's growth: verified, still sound",
+      "detail": "Bead 6's additions (tip-seeded snapshot, three-part materialization with expected-old-tip update-ref and index-only mixed reset, fixture legs v-vii) are corrections to the one protocol it already owned — the committed≡measured invariant is still only reviewable end-to-end, so the keep-whole judgment from round 2 stands; it remains the plan's heaviest bead but a single deliverable. Bead 1's Windows ownership/liveness-aware takeover is lock-machinery detail inside its existing remit. Bead 2's legacy-notice read-path treatment is correctly placed with the migration it discriminates for, and creates no missing edge: the notice emits from derive.go's consistency branch (chunk 2 lists derive.go), reachable by state show both before and after bead 3's recomposition, so bead 2's read-path fixture does not depend on bead 3. Full sweep of every bead section's named edit sites vs its chunk: only the repair.go omission (R3-R3-3). depends_on parity: unchanged and exact across all ten beads."
+    }
+  ]
+}

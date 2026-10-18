@@ -1,0 +1,47 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Author-of-record round 2 against ada49e53, re-derived from the diff and a full green run (go build + internal/resolve, internal/gitutil, internal/instruct, internal/lint, cmd/mindspec all pass -short from the bead worktree; worktree left byte-identical). All three of my round-1 asks are ADDRESSED with the exact counterexample fixtures I specified. The disclosed scope additions (gitutil.FileExistsAtRef, run.go G4, the two ratchet entries) are sanctioned by the consolidation, honestly documented, and house-conformant — I verified each claim against the code rather than the commit message. Judgment call A stands approved from round 1 (the 'removed' arm of R1.2; factual premise verified at derive.go's WorktreeMain branch). Plan §Bead 3 steps remain delivered; bead-2 surfaces remain untouched by both commits. Two residual notes below are info/minor and do not block.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-1",
+      "round_1_ask": "flag-blind draft fallback must not answer about a different spec",
+      "classification": "ADDRESSED",
+      "summary": "state.go now propagates resolveErr whenever specFlag is non-empty and resolution fails after the G2 health-probe-plus-warm-cache-rerun (only the ambient no-flag case may fall through to draft/idle discovery). Verified by re-derivation: the fallback block is now guarded by `if specFlag != \"\" { return resolveErr }` with ambiguity still passing through first. My exact repro is pinned as TestStateShow_FlagBlind_UnresolvableSpecWithOneDraft_Refuses (--spec 999 with unrelated draft 129-foo must not print 129-foo's state), plus the zero-draft and invalid-format legs. Red-on-revert: the fixtures assert against the precise round-1 dishonest shapes."
+    },
+    {
+      "id": "R1-2",
+      "round_1_ask": "no R1.1-banned idle+activeSpec for an explicitly flagged nonexistent spec",
+      "classification": "ADDRESSED",
+      "summary": "The success path now refuses by name when specFlag != \"\" and the honestly-derived mode is idle (no epic, no draft): 'no active spec or draft found for <id>; run `mindspec spec list`...'. Pinned by TestStateShow_FlaggedNonexistentSpec_RefusesInsteadOfIdle, which asserts non-zero exit, no idle shape, and no stdout. The guard's placement comment correctly derives why idle on the success path is reachable only via the hyphenated --spec pass-through (auto-selected specs always have epics; worktree-derived IDs probe to at least spec mode) — with one exotic exception noted in R1-5."
+    },
+    {
+      "id": "R1-3",
+      "round_1_ask": "fixture for the multi-draft ErrAmbiguousTarget rendering",
+      "classification": "ADDRESSED",
+      "summary": "Pinned at both layers per G5: TestDiscoverDraftSpecsWithCache_MultipleDrafts_SortedResult (unit) and TestStateShow_MultipleDrafts_NoSpecFlag_ReturnsAmbiguityListing (command layer)."
+    },
+    {
+      "id": "R1-4",
+      "severity": "info",
+      "classification": "NEW_SCOPE_VERIFIED",
+      "summary": "Disclosed scope additions judged honest under the author-of-record lens. (1) gitutil.FileExistsAtRef: rejectOptionLike gates both ref and path before composing the single <ref>:<path> cat-file argument; ExitError-means-absent is safe ONLY under the documented confirmed-ref precondition, and the sole caller (draftSpecStatusWithCache) honors it — the tree probe runs strictly after BranchExistsIn returns true; non-exit errors propagate. Four tests including workdir pinning and non-ExitError propagation. (2) run.go G4: modeErr now falls back to handleNoState instead of letting an empty Mode reach Render as a \"\"+\".md\" template failure — the comment correctly defers indeterminate-vs-idle tail honesty to bead 5, and the consolidation sanctioned this exact touch. (3) The two ratchet entries' justifications match the code I read: the argv entry mirrors the BranchExistsIn class, and the inline entry's claim that workspace.SpecBranch (idvalidate-gated) runs before specTreeCandidatePaths composes any tree path is true in the current call order. (4) G6's reorder (memoized epic check before any git subprocess) preserves honesty: after the AllEpics health probe on the same cache, a FindEpicBySpecID failure can only be the not-found class, so swallowing it and proceeding to the draft probe fabricates nothing. (5) G3's widened draft condition (branch required, then on-disk dir OR branch-tree spec.md) keeps half-created states non-drafts: dir-without-branch and branch-without-content both honestly resolve to not-a-draft."
+    },
+    {
+      "id": "R1-5",
+      "severity": "minor",
+      "classification": "NEW_ISSUE",
+      "blocking": false,
+      "summary": "Residual exotic edge, unflagged path: a retained spec WORKTREE whose spec/<id> branch was manually deleted and whose epic does not exist would still print idle+activeSpec with exit 0 — ResolveTargetWithCache derives the specID from the worktree name, ResolveModeWithCache finds no epic and the draft probe now (correctly) requires the branch, so mode=idle, and the new G1 guard fires only when specFlag != \"\". Requires manual repo surgery (branch deletion while keeping the worktree) to reach, so non-blocking; since no legitimate unflagged path yields idle with a non-empty specID, the guard condition could simply drop the specFlag test to close R1.1's letter completely. Fine as a follow-up or folded into bead 5's tail work."
+    },
+    {
+      "id": "R1-6",
+      "severity": "info",
+      "classification": "NEW_ISSUE",
+      "blocking": false,
+      "summary": "The ADR-0023 amendment (unchanged in ada49e53) says a draft's 'spec directory and spec/<id> branch both exist'; under G3's extend-reach the directory may exist only as committed content in the branch's tree, not in the invoking checkout's working tree. The charitable repo-scoped reading of 'exists' covers this, so the amendment is not contradicted, but a one-line clarification (existence is repo-scoped: on disk in a checkout or committed to the branch's tree) would remove the ambiguity — could ride bead 4's already-planned ADR-0023 touch (:107/:108 strike) rather than another commit here."
+    }
+  ]
+}

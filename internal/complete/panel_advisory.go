@@ -107,18 +107,20 @@ var (
 
 // panelGate is the AUTHORITATIVE in-binary panel gate (Spec 099 Bead 2,
 // R1+R5; ADR-0037). It runs in complete.Run at the step-2.25 site — BEFORE
-// exec.CommitAll, bd close, and the bead→spec merge — over the DECLARED
-// beadID (no shell parsing; ADR-0036 Zero Framework Cognition). It invokes
-// the extracted panel.PanelGateDecision over panel.GateFacts produced by
-// panel.ResolveGateFacts. With the PreToolUse hook retired, this in-binary
-// gate is the sole authoritative panel-gate enforcement — it gathers the
-// staleness + dirty-tree facts itself rather than leaning on any hook.
+// the artifact-materialization subphase (spec 128 Bead 6's
+// runMaterialization), bd close, and the bead→spec merge — over the
+// DECLARED beadID (no shell parsing; ADR-0036 Zero Framework Cognition). It
+// invokes the extracted panel.PanelGateDecision over panel.GateFacts
+// produced by panel.ResolveGateFacts. With the PreToolUse hook retired,
+// this in-binary gate is the sole authoritative panel-gate enforcement —
+// it gathers the staleness + dirty-tree facts itself rather than leaning
+// on any hook.
 //
-// Ordering is load-bearing: the gate measures the bead/<id> tip as it stands
-// BEFORE CommitAll. CommitAll would advance the tip past reviewed_head_sha
-// (false-firing the §4 staleness clause) and clear user dirt (false-clearing
-// the §5 dirty-tree clause), so the gate must run first (RED-on-revert if
-// moved after CommitAll).
+// Ordering is load-bearing: the gate measures the bead/<id> tip as it
+// stands BEFORE materialization. Materialization would advance the tip
+// past reviewed_head_sha (false-firing the §4 staleness clause) and clear
+// user dirt (false-clearing the §5 dirty-tree clause), so the gate must
+// run first (RED-on-revert if moved after materialization).
 //
 // Hatches (§7): the env-only skip (panel.SkipPanelEnv) and the
 // enforcement.panel_gate config toggle short-circuit to a silent pass; the

@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.92,
+  "rationale": "Round-8 zero-ask regression check of 2e73a0f3 under the grounding lens. SEAM AUDIT (G2): the claim 'chunk 6 already carried the executor files (checked, not assumed)' is TRUE — internal/executor/executor.go, mindspec_executor.go, and mock.go are all in chunk 6's key_file_paths (and have been since 747bf9b3). The seven named seam methods (SnapshotWorktreeTree, MaterializeStageCommit, PublishStageMarker, ReadStageMarker, ClearStageMarker, AdvanceBranchExpectedOld, ResetIndexToHead) plus ChangedFilesTree collide with NOTHING in internal/executor or internal/gitutil — all genuinely new identifiers on a real interface (Executor at executor.go:19) with a real mock (MockExecutor at mock.go:7). The boundary sentence ('internal/complete calls ONLY these seams and gains no new gitutil import') matches a discipline the package already documents about itself: internal/complete has zero non-comment gitutil imports today, and panel_advisory.go:94-96 states the no-direct-gitutil-import seam-routing rule explicitly — so the ADR-0030 conformance claim is grounded in existing practice, not aspiration. IDEMPOTENCE PREMISES (G1): three of four verify cleanly. R's mixed reset as a state-function of (tip, worktree), index-only — lab-verified in my rounds 5/6. S's export as a deterministic projection — ADR-0025's OWN text, verbatim: ':15 a deterministic projection: bd export rewrites it from the current Dolt rows' and ':19 given Dolt state at time T, bd export produces byte-identical output every time'; the forward-correct-for-a-cache framing under changed Dolt state is a fair extension of the same decision item. The merge premise rides the 127 convergence machinery verified in rounds 2-4 (merge_resumption.go, CommitTreeMerge, preserved-merge resume). The elided-transition-graph completion is coherent with my round-7 CREATE lab (CREATE semantics are value-agnostic, so absent→D parenting on A behaves identically to absent→C), and the both-elided no-marker route is sound (no ref movement, tip still at reviewed SHA, ordinary re-entry). The at-least-once contract choice itself is honest engineering — the round-6 exactly-once claim IS unprovable after a post-no-op-S kill, and the withdrawal is stated in place rather than silently edited, which is the evidence discipline this panel exists to enforce. ONE minor precision defect, NOT implementation-corrupting: the fourth premise — 'S's dirt classification is a pure read + refusal' — is inaccurate about the classifier the plan names. The S-exit contract says 'the existing artifact/user classifier', and that function, next.CheckDirtyTreeDetail (guard.go:336-357), is only conditionally pure: when artifact dirt is present it calls exportBeadsFn(repoRoot) — a worktree WRITE to .beads/issues.jsonl — then re-classifies (guard.go:347-355). On the S-exit path the artifact should be clean (S just committed the fresh projection), so the write branch fires only if Dolt changed mid-run, and even then the write is the same deterministic projection the S-export proof already covers — replay still converges, so the at-least-once contract HOLDS; only the 'pure read' label is wrong for the named entry point. Bead 6 should either call the pure classification core (classifyDirty over status, without the normalization branch) or restate the premise as 'read + idempotent normalization per the S-export proof'. One clause; recording as minor for fold-in, not blocking at the round-8 bar.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-8-1",
+      "severity": "info",
+      "claim": "Seam audit clean: chunk-6 executor files present as claimed; seven seam names + ChangedFilesTree are collision-free new identifiers; the no-gitutil-import boundary matches internal/complete's existing documented discipline.",
+      "evidence": "plan.md chunk 6 key_file_paths (executor.go/mindspec_executor.go/mock.go); grep of internal/executor + internal/gitutil finds none of the eight names; internal/complete has no non-comment gitutil reference and panel_advisory.go:94-96 documents the seam-routing rule.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-8-2",
+      "severity": "info",
+      "claim": "Three of four idempotence premises verified: R reset (lab, rounds 5/6), S export determinism (ADR-0025:15/:19 verbatim), merge convergence (127 machinery, rounds 2-4); elided graph coherent with the round-7 CREATE lab; the in-place withdrawal of the exactly-once claim is honest evidence discipline.",
+      "evidence": "ADR-0025 decision item 1 text; prior-round lab records; merge_resumption.go; CREATE semantics are value-agnostic so absent→D behaves as absent→C.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-8-3",
+      "severity": "minor",
+      "claim": "The premise 'S's dirt classification is a pure read + refusal' misdescribes the named classifier.",
+      "evidence": "The S-exit contract names 'the existing artifact/user classifier'; next.CheckDirtyTreeDetail (internal/next/guard.go:336-357) writes the worktree on its artifact-dirt branch (exportBeadsFn at :347 — bd export normalization) before re-classifying. Conditionally impure; the write is the deterministic projection so at-least-once replay still converges — the CONTRACT holds, the premise label does not.",
+      "disposition": "Non-blocking fold-in: bead 6 either calls the pure classification core (classifyDirty over status, no normalization branch) or restates the premise as 'read + idempotent normalization covered by the S-export proof'. One clause; not implementation-corrupting."
+    }
+  ]
+}

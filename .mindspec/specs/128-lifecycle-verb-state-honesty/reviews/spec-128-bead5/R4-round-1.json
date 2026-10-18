@@ -1,0 +1,74 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "The requested empirical probes pass at reviewed commit 68ede240: a main checkout with one branch-only draft and a healthy zero-epic bd response renders spec guidance; an initialized workspace with an explicit failing bd renders the indeterminate form and never idle; and an uninitialized workspace with no .beads renders honest idle. The AC-4b seam tests drive complete.Run through a failed post-close child read and verify an indeterminate Result, the shared indeterminate tail, empty NextMode/NextBead, and no step-6.5 mindspec_phase write. The AC-14 test family is green and total cobra classification covers the registered command tree, but disclosure D is not AC-14-complete: next and impl adopt are only checked for non-nil RunE functions. Their row does not invoke either verb or assert that its result precedes guidance, while AC-14 explicitly requires that assertion for every R2.1 verb. Source-order commentary and classification presence do not substitute for the required executable regression pin. Disclosures A-C are acceptable; D requires correction before approval.",
+  "concrete_changes_required": [
+    "Add hermetic seams or an equivalent in-scope test harness sufficient to execute the real RunE success paths for `mindspec next` and `mindspec impl adopt`, then assert each pinned result summary appears before every guidance marker. Replace the current TestVerbOutput_NextAndImplAdopt_ScopeLimitation existence-only check with those executable AC-14 assertions."
+  ],
+  "findings": [
+    {
+      "id": "R4-D",
+      "classification": "NOT_ACCEPTABLE",
+      "severity": "high",
+      "title": "Disclosure D leaves two AC-14 verb rows untested",
+      "detail": "TestVerbOutput_NextAndImplAdopt_ScopeLimitation only asserts nextCmd.RunE and implAdoptCmd.RunE are non-nil. It neither executes either success path nor calls resultBeforeGuidance. AC-14 requires a table-driven test covering every R2.1 verb and asserting each result summary precedes guidance. The total-classification test proves registration/classification, not output ordering, so both tests pass even if either RunE prints guidance before its result."
+    },
+    {
+      "id": "R4-A",
+      "classification": "ACCEPTABLE",
+      "severity": "none",
+      "title": "Disclosure A preserves honest uninitialized-workspace behavior",
+      "detail": "The beadsDirMissing addition is justified by the honesty requirement. A scratch git workspace with no .beads, with a deliberately failing bd on PATH, rendered `MindSpec — No Active Work`, included idle guidance, and exited 0 rather than reporting a spurious discovery failure."
+    },
+    {
+      "id": "R4-B",
+      "classification": "ACCEPTABLE",
+      "severity": "none",
+      "title": "Disclosure B is a behavior-preserving executor seam",
+      "detail": "newExecutor remains the stable production call site and delegates to newExecutorFn, whose default still constructs executor.NewMindspecExecutor(root). The seam is narrowly test-oriented and changes no default production behavior. It supports real RunE tests already present, though it is not by itself sufficient to close disclosure D."
+    },
+    {
+      "id": "R4-C",
+      "classification": "ACCEPTABLE",
+      "severity": "none",
+      "title": "Disclosure C replaces a dishonest expectation while preserving the old crash guard",
+      "detail": "The renamed mode-resolution-failure test now requires the indeterminate marker, the underlying failure reason, no idle heading, and an ADR-0035 recovery line. It retains the prior protection by explicitly rejecting the accidental empty-mode `loading template` failure. The targeted test passed."
+    },
+    {
+      "id": "R4-WINDOWS",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "All three standalone instruct windows were hand-probed",
+      "detail": "In disposable /tmp git fixtures using the artifact-built binary: main plus one branch-only draft with bd returning [] rendered `MindSpec — Spec Mode` for 999-r4-draft and no idle Available Actions; a non-protected initialized checkout with .beads and bd exiting 1 rendered `MindSpec — Cannot Determine Mode` with the bd failure and `This is NOT idle`; an uninitialized main checkout without .beads rendered `MindSpec — No Active Work`. All exited 0. The probe tree was deleted and absence verified."
+    },
+    {
+      "id": "R4-AC4B",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Complete's failed-child-read seam is honest and non-mutating at step 6.5",
+      "detail": "Targeted internal/complete tests passed: advanceState propagates the child-read error; Run returns NextModeIndeterminate with the real reason and leaves NextMode/NextBead empty; FormatResult contains no fabricated lifecycle mode; and captured metadata updates contain no mindspec_phase write. TestCompleteTail_IndeterminateBranch_NeverCallsInstructFn also passed, proving the tail renders the same indeterminate form directly and does not perform a fresh instruct re-derivation."
+    },
+    {
+      "id": "R4-AC14",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "AC-14 suite passes but only seven of nine verb orderings are executable",
+      "detail": "The targeted cmd/mindspec family passed, including total cobra-tree classification and executable result-order checks for spec create, spec approve, plan approve, complete, impl approve, release, and repair phase. The suite itself labels next and impl adopt as a scope limitation and checks existence only. This is precisely the unmet acceptance-criterion leg described in R4-D, not a flaky or environmental test failure."
+    },
+    {
+      "id": "R4-PINS",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Disclosed prose and template-pin adjustments are consistent",
+      "detail": "The agreement-table change updates prose explaining that the phase-package row remains a proxy; it does not change a pinned cell mode. lifecycle-modes.md makes the corresponding prose-only synchronization. The template census rises from 14 to 15 exactly for indeterminate.md's single termsafe-rendered IndeterminateReason interpolation."
+    },
+    {
+      "id": "R4-INTEGRITY",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Reviewed artifact remained untouched",
+      "detail": "After builds and tests, the bead worktree had no porcelain status entries or tracked diff and HEAD remained 68ede240feeab4292e818ac752a477ebf5b523e3. All probe artifacts under /tmp/spec128-r4-probes-round1 were deleted before verdict writing."
+    }
+  ]
+}

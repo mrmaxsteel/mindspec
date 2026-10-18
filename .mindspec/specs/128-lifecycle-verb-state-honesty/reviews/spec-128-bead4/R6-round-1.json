@@ -1,0 +1,57 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The artifact is green and the live row fixtures use marker-present v2 state correctly, but Bead 4's load-bearing AC-2 anti-drift claim is not implemented. TestAgreementTable_DocRowsCrossPinFixtures parses only the first-column row identifiers and compares them with a manually maintained string slice; it never reads the State show, Instruct tail, Derivation, or Notes cells and never proves that a registered identifier has a fixture function. A table-mode or carve-out edit therefore stays green unchanged, and a new table row plus one string literal also stays green without a fixture. Separately, the guide claims to cover every lifecycle verb's success state but omits repair phase, even though repair is an explicitly covered durable-state verb with reachable ordinary-forward, already-consistent-after-v2-reconciliation, and forced-backward successes. The no-deferral claim survives this review: current tail assertions pin valid mode/template selection, not bead 5's future indeterminate output form or command-level spec-create tail text. The v2 marker discipline also survives: every epic-bearing agreement fixture is built through v2Epic, while the draft row legitimately has no epic.",
+  "concrete_changes_required": [
+    "Replace the row-name-only cross-pin with a structural table-to-fixture contract that makes edits to every contracted cell red and mechanically binds each documented row to an actual fixture case. At minimum, parse and compare the documented state-show, tail, and derivation expectations plus carve-out identity against fixture-owned case data; adding a row identifier to a slice must not satisfy the gate without executable assertions.",
+    "Add repair phase success rows and fixtures, or explicitly and consistently narrow the guide's every-lifecycle-verb/per-verb claim with a contract-grounded rationale. Coverage must include the reachable v2-reconciliation success/no-op shape and a forced-backward success, using the tail-less two-surface carve-out appropriate to repair."
+  ],
+  "findings": [
+    {
+      "id": "R6-B4-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "location": "internal/phase/agreement_table_test.go:305-323,625-662,685-734; project-docs/user/guides/lifecycle-modes.md:13-18,39-51",
+      "summary": "The claimed table/fixture anti-drift property checks only row names, not row contracts or fixture existence.",
+      "evidence": "parseAgreementTableRows discards every cell except the first. TestAgreementTable_DocRowsCrossPinFixtures then compares that first-column set only with agreementTableRowIDs. Changing, for example, the plan-approve State show cell from plan to review leaves the parsed identifier unchanged and all tests green. Likewise, adding a Markdown row and the same identifier to agreementTableRowIDs satisfies the cross-pin without adding any TestAgreementTable_* fixture. This directly contradicts AC-2's requirement that editing the table without the fixture or vice versa is red.",
+      "impact": "The primary Bead 4 guarantee can silently drift: published modes and carve-outs may disagree with executable fixtures while the suite passes. This is an acceptance-criterion failure and warrants a hard block."
+    },
+    {
+      "id": "R6-B4-2",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "location": "project-docs/user/guides/lifecycle-modes.md:3-18,39-53,70-83,119-122; cmd/mindspec/repair.go:230-338",
+      "summary": "A reachable successful lifecycle verb, repair phase, is omitted from the purported every-verb table.",
+      "evidence": "The guide says it audited every lifecycle verb's success state and describes differences as explicit rather than omission, but its eleven rows contain no repair phase row. repairPhaseRunE first runs EnsurePhaseSemanticsV2, then can return success when already consistent, write a forward-derived phase, or force-write a backward-derived phase with a recorded reason. Lines 328-336 render all three as successful results. The guide mentions only the unforced refusal path, which is not a substitute for these reachable successes.",
+      "impact": "The table's verb inventory and its public completeness claim are false, and forced repair/v2-reconciliation success states have no AC-2 fixture tying state show to status-aware derivation."
+    },
+    {
+      "id": "R6-B4-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/phase/agreement_table_test.go:220-253,327-365,590-621; plan.md:871-884",
+      "summary": "The no-deferral claim does not freeze bead 5's contracted tail semantics.",
+      "evidence": "Agreement fixtures assert a valid resolved mode, BuildContext's selector mode, and successful rendering of that mode's existing template. They do not assert fallback-to-idle on context error or empty phase, do not snapshot current tail text, and do not pin command-level spec-create output. Bead 5 can add indeterminate.md and route spec create through the spec-mode tail without breaking a pre-bead-5 golden expectation.",
+      "impact": "No sequencing defect was found in the tail assertions themselves."
+    },
+    {
+      "id": "R6-B4-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/phase/agreement_table_test.go:278-295,367-621",
+      "summary": "Marker-fixture discipline is correctly applied to the documented epic-bearing rows.",
+      "evidence": "v2Epic always includes mindspec_phase_semantics=v2 and every epic-bearing agreement row uses v2Epic. The spec-create row is correctly markerless because its canonical state has no epic. Release fixtures start marker-present before exercising SanctionedDerivedSync, so they cannot accidentally pass through the one-shot legacy reconciliation path.",
+      "impact": "The existing row expectations are not contaminated by pre-v2 reconciliation, though the omitted repair reconciliation success still needs its own row."
+    },
+    {
+      "id": "R6-B4-V",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "reviewed commit 6f75235bb4db8359ae969f22d580da7c3841845a",
+      "summary": "Artifact identity, tests, and byte-identity were verified.",
+      "evidence": "HEAD matched 6f75235bb4db8359ae969f22d580da7c3841845a. go test ./internal/phase -run AgreementTable -count=1 passed, followed by go build ./... and go test ./... -short passing. The Go command emitted a non-fatal module stat-cache permission warning. A final git diff --exit-code and git status check were clean, confirming the bead worktree remained byte-identical."
+    }
+  ]
+}

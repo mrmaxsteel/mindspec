@@ -1,0 +1,56 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "The shared BuildReadySet/SelectWork spine preserves bd-ready ordering and removes the explicit-scope global fallback on both non-positional paths, and the build, full short suite, and targeted race suite pass. However, adversarial composition exposes two release-blocking gaps. First, AC-9's total negative-pick contract is enforced only inside SelectWork: when a positional bead is also supplied, RunE's selector check accepts pick < 0 and both the claim and emit-only positional branches bypass SelectWork, silently ignoring the invalid flag. Second, the new filter-exclusion error safely renders the matched bead and spec but then interpolates the attacker-controlled positional selector raw in a backticked command; an overlay probe using a control-bearing ready-set ID reproduced a forged newline. These are concrete command-boundary correctness and terminal-safety defects in bead-8-owned paths.",
+  "concrete_changes_required": [
+    "Reject pick < 0 at the command boundary before either positional branch can run, on both claim and emit-only paths. Add CLI-level tests for a positional bead combined with --pick=-1 on both paths; each must exit non-zero without fetching, selecting, or claiming a bead. Preserve the specified --pick=0-as-unset behavior deliberately.",
+    "At internal/next/select.go's exclusionReasonForName error, render the final positional selector with the shared terminal-safe/ID-safe renderer instead of raw %s (and audit the adjacent selector-bearing recovery strings reached by this new path). Add a hostile-ID/selector test containing newline, ESC, and printable-malformed input that asserts no raw control byte or forged line reaches the rendered error while clean valid IDs remain byte-identical."
+  ],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "classification": "NEW_ISSUE",
+      "severity": "MAJOR",
+      "acceptance_criteria": ["AC-9"],
+      "title": "A negative --pick is silently ignored whenever a positional bead is present",
+      "detail": "cmd/mindspec/next.go:55-67 rejects the positional/--pick combination only when pick > 0. The new negative validation exists only in internal/next.SelectWork. On emit-only, cmd/mindspec/next.go:442-453 takes the positional FetchBeadByID branch before SelectWork; on the claim path, positional resolution similarly calls SelectNamedFromReadySet rather than SelectWork. Therefore `mindspec next BEAD --pick=-1` and its `--emit-only` variant do not produce AC-9's required negative-pick error; the flag is silently ignored. The current negative test calls SelectWork directly and misses both command-level bypasses."
+    },
+    {
+      "id": "R6-F2",
+      "classification": "NEW_ISSUE",
+      "severity": "MAJOR",
+      "acceptance_criteria": ["AC-10"],
+      "title": "The new exclusion-reason error permits line forging through the positional selector",
+      "detail": "internal/next/select.go:92-93 renders match.ID with idrender.Bead and rs.SpecFlag with idrender.Spec, but inserts `name` raw into the final backticked `mindspec next %s` suggestion. ParseBeadsJSON does not validate IDs, so a hostile bd response can place a control-bearing ID in ReadySet.Raw; supplying that same selector reaches this exact-match branch. A temporary overlay test constructed ID/name `mindspec-bad\\nFORGED` and confirmed err.Error() contains a literal newline inside the suggested command. The temporary probe passed (reproduced the defect) and was removed afterward."
+    },
+    {
+      "id": "R6-A",
+      "classification": "DISCLOSURE_A_ASSESSED",
+      "severity": "NONE",
+      "title": "The unproven resolver is not reachable on a next path that requires existence proof",
+      "detail": "Both explicit-scope entry legs in cmd/mindspec/next.go call ResolveSpecPrefixProven before ready-set work. ResolveSpecPrefix/ResolveSpecPrefixWithCache remain reachable from complete and other workflows, but no next selection route uses them for an explicit --spec. Numeric prefixes are existence-proven by active-spec discovery; full IDs are proven as epic-bearing or on-disk drafts. No disclosure-A blocker found."
+    },
+    {
+      "id": "R6-B",
+      "classification": "DISCLOSURE_B_ASSESSED",
+      "severity": "INFO",
+      "title": "Claim-path guards can mask the draft no-epic refusal; emit-only does not share that ordering",
+      "detail": "For an existing draft, ResolveSpecPrefixProven intentionally passes the ID through, after which the claim path runs the proportional dirty-tree guard and checkUnmergedBeads before BuildReadySet emits the no-epic/approve-first refusal (cmd/mindspec/next.go:150-200). Emit-only goes directly from proof to BuildReadySet. Thus dirt or an unmerged-branch condition can be the first claim-path error while emit-only reports no-epic immediately. This is a disclosed user-facing ordering difference, not an AC-9 selection divergence, and the binding instruction explicitly retained the ordering; no additional change requested here."
+    },
+    {
+      "id": "R6-PARITY",
+      "classification": "VERIFIED_WITH_EXCEPTIONS_ABOVE",
+      "severity": "NONE",
+      "title": "Ordering, tie handling, query count, escaping, and explicit-scope fallback audit",
+      "detail": "Both non-positional paths call BuildReadySet once and SelectWork over its Filtered slice; there is no in-process sort or alternate tie-break, so each invocation preserves exactly the order returned by its single bd ready query. Separate CLI invocations can naturally observe different mutable tracker snapshots, but no second ready query exists inside either selection path. Hostile titles and issue types in displayed rows route through termsafe.Escape; displayed/empty-after-filter IDs and spec values route through idrender; hostile --spec values are rejected with quoted diagnostics before query construction. The only production QueryReady call is BuildReadySet's specFlag == empty branch. One pre-existing implicit-scope behavior remains at cmd/mindspec/next.go:132-146: non-ambiguous ResolveTarget errors are swallowed and the no---spec path proceeds globally. It is not an AC-15 explicit---spec fallback, but it remains a silent global fallback after failed auto-resolution and should stay visible in future scope-honesty work."
+    },
+    {
+      "id": "R6-GATES",
+      "classification": "VERIFIED",
+      "severity": "NONE",
+      "title": "Build and tests pass at the reviewed commit with a clean worktree",
+      "detail": "At 7f4ad41b2c16f551f2c583ede961cb29ff31bffc: `go build ./...` exited 0; `go test ./... -short` exited 0; and `go test -race ./internal/next ./internal/resolve ./cmd/mindspec -run 'Test(BuildReadySet|SelectWork|SelectNamedFromReadySet|ResolveSpecPrefixProven|NextSelection_)' -count=1` exited 0. git diff --check was clean, git diff --quiet confirmed no tracked changes, git status --short was empty, and all /tmp probe/cache scratch was removed."
+    }
+  ]
+}

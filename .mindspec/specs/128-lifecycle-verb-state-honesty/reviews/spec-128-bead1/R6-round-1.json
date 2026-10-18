@@ -1,0 +1,67 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Bead 2 can use the general lock callback and can tighten the sanctioned-call fence without redesign, but bead 1 is not safe or verified enough to integrate. SanctionedDerivedSync discards the child-read error and derives plan from the resulting nil slice, so bead 2's release wiring can turn failed discovery into a sanctioned backward write. The required go test ./... -short gate is red in the reviewed linked worktree because repair tests resolve the lock to the shared main checkout, where the lock cannot be opened in this review sandbox; an untracked main-checkout .mindspec/phase.lock is present and is not ignored by main's pre-merge .gitignore. AC-5(v)'s claimed barrier test and AC-5(vii)'s migration-contention test use sleeps rather than an acquisition-attempt barrier, so they can pass without proving the loser contended. The AC-5(vi) inventory test is also not total: it detects string-keyed composite literals, not MergeMetadata write dataflow, and misses writers assembled through index assignment or helpers.",
+  "concrete_changes_required": [
+    "Make SanctionedDerivedSync propagate GetChildren/derivation-read failures and add behavioral tests proving no metadata write occurs on read failure, plus a success test over the real lock/merge seam before bead 2 wires release.",
+    "Make the repair tests hermetic in linked worktrees by injecting or otherwise fixture-scoping the lock root while preserving production's shared repo lock, and ensure the required full short suite passes from the bead worktree without creating blockable dirt in the main checkout.",
+    "Replace the sleep-based phaselock and migration-contention scheduling with deterministic attempt/blocked/release barriers; assert the second contender has attempted acquisition before releasing the first, cannot enter before release, does enter afterward, and returns no error.",
+    "Strengthen the AC-5(vi) inventory test to enumerate actual MergeMetadata-family phase writes independent of map-construction syntax, including index-assignment/helper-built update maps, and prove red-on-new-unlocked-writer behavior.",
+    "Remove the untracked shared-main .mindspec/phase.lock once no process holds it; the reviewed bead worktree itself is currently clean."
+  ],
+  "findings": [
+    {
+      "severity": "blocker",
+      "title": "SanctionedDerivedSync fabricates plan when child discovery fails",
+      "evidence": "internal/phase/sanctioned_sync.go calls children, _ := c.GetChildren(epicID), then DerivePhaseFromChildren(children). A read error therefore becomes nil children and plan, which is written under the sanctioned backward bypass. There are no behavioral tests for SanctionedDerivedSync, only its caller-enumeration fence.",
+      "next_bead_impact": "Bead 2 replaces release's current pre-derivation guard with this surface; a bd read failure after release mutation could then write plan rather than suppressing the sync."
+    },
+    {
+      "severity": "blocker",
+      "title": "Required short suite is red and linked-worktree lock dirt is not covered",
+      "evidence": "go build ./... completed, but go test ./... -short failed in cmd/mindspec: TestRepairPhase_BackwardMoveRefused, TestRepairPhase_ForceBackwardWritesAndRecordsReason, TestRepairPhase_WritesDerivedViaMergeSeam, and TestRepairPhase_AlreadyConsistentStillMergeWrites all tried /Users/Max/replit/mindspec/.mindspec/phase.lock and received operation not permitted. git -C /Users/Max/replit/mindspec status --porcelain -- .mindspec/phase.lock reports an untracked lock file, while the ignore entry exists only in the bead branch. The no-dirt test uses a standalone temp repo and does not exercise linked-worktree root resolution. The bead worktree's own git status is clean."
+    },
+    {
+      "severity": "major",
+      "title": "AC-5(v) barrier test is timing-based and can pass vacuously",
+      "evidence": "TestWithPhaseWriteLock_ExclusiveAcrossGoroutines releases the first holder after a 50ms sleep. It has no signal that the second goroutine attempted acquisition before release, does not assert that second entry is impossible while the holder remains blocked, ignores both lock-call errors, and only checks maxInside > 1. A schedule where contender two starts after release passes."
+    },
+    {
+      "severity": "major",
+      "title": "AC-5(vii) migration-contention test does not prove real contention",
+      "evidence": "TestEnsureMigrated_NeverOverwritesFresherLockedWrite starts EnsureMigrated, sleeps 50ms, and releases the holder without an observable acquisition-attempt barrier. The test can pass if EnsureMigrated is not scheduled until after release; it then sees plan and no-ops without having contended. Twenty race-enabled repetitions passed, but that validates race freedom, not the intended interleaving."
+    },
+    {
+      "severity": "major",
+      "title": "AC-5(vi) writer inventory is syntax-shaped rather than total",
+      "evidence": "writer_inventory_test.go marks string-keyed mindspec_phase entries in composite literals as guarded when lexically nested in WithPhaseWriteLock. A new unlocked MergeMetadata writer using updates := map[string]interface{}{} followed by updates[\"mindspec_phase\"] = value, or a helper-built map, is invisible. It also does not anchor detection to MergeMetadata-family calls as AC-5(vi) requires."
+    },
+    {
+      "severity": "info",
+      "title": "Deviation A assessment",
+      "assessment": "The root/epicID/mergeMetadata/callback signature is an acceptable and more useful divergence from the plan shorthand. It preserves per-caller write seams, supports next's new writer, and can atomically write phase plus the semantics-v2 marker. The signature is not the problem; the accompanying inventory test overclaims totality and must be strengthened."
+    },
+    {
+      "severity": "info",
+      "title": "Deviation B assessment",
+      "assessment": "Acceptable mechanical change. All three production callers pass root, the repository builds, and the cache-aware shape remains usable by EnsurePhaseSemanticsV2. Test-root handling is deficient, but adding root to the API is correct for locating the shared lock."
+    },
+    {
+      "severity": "info",
+      "title": "Deviation C assessment",
+      "assessment": "Acceptable and honestly disclosed. The added arg2 registry entry mirrors the existing repairPhaseRunE arg1 residual, identifies the same unvalidated specID/derived epicID provenance, notes idrender rendering without pretending it proves validation, and is paired with the lint manifest entry."
+    },
+    {
+      "severity": "info",
+      "title": "Deviation D assessment",
+      "assessment": "Acceptable. The AST anchors now match WithPhaseWriteLock with implPhaseMetadataFn as the third argument and inspect the callback's returned map; they retain the prior reconcile-before-close and done-write-after-close ordering assertions without weakening their phase/done disambiguation."
+    },
+    {
+      "severity": "info",
+      "title": "Bead-2 fence and lock integration assessment",
+      "assessment": "The sanctioned-call walker already returns file and enclosing function, so bead 2 can tighten it from subset-of-allowlist to exactly one cmd/mindspec/release.go syncPhase call with a small assertion change. WithPhaseWriteLock's map-return callback is adequate for next's first-lifecycle-claim advance and EnsurePhaseSemanticsV2's combined marker/phase update. Targeted go test -race ./internal/phase/... passed, including 20 repeated runs of the two named contention tests, but the tests' synchronization gaps remain."
+    }
+  ]
+}

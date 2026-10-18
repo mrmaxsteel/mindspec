@@ -1,0 +1,36 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The round-4 replay ask is PARTIAL at reviewed commit 3a321066. New R3.6 correctly requires non-regressing spec-approve replay semantics, places an absent-only backfill under the R3.3 lock, permits a fail-closed or justified non-regressing alternative, and requires output to distinguish mutation from no-op. AC-16 is red on today's unconditional write for stored implement/review and separately pins the legitimate empty-phase backfill. However, the acceptance surface does not cover all reachable states named by R3.6: it omits stored done even though FindEpicBySpecID deliberately discovers closed epics, and it omits the canonical stored-plan same-value replay whose output must identify a no-op rather than claim a backfill mutation. An implementation can special-case implement/review and empty to pass AC-16 while still regressing done to plan or dishonestly describing a plan-to-plan write. The rest of the document remains grounded and internally coherent in the R6 adversarial/completeness lens, and its open mechanism choices are appropriately chartered to plan stage; this narrow runnable-coverage gap is the remaining blocker. Structural validation reports only the expected no-epic lifecycle-binding warning. bd show mindspec-aytt could not run because the sandbox denied the embedded Dolt LOCK, so no claim relies on that unavailable result.",
+  "concrete_changes_required": [
+    "Extend AC-16 with a stored mindspec_phase=done variant and assert replay leaves done unchanged with honest no-op/refusal output. Also add a stored mindspec_phase=plan same-value replay leg asserting that output identifies no mutation (and does not claim a backfill). Keep the existing implement, review, and empty-phase legs."
+  ],
+  "findings": [
+    {
+      "id": "R6-R5-1",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Round-4 safe-replay ask is specified but not acceptance-pinned across its reachable state boundary",
+      "evidence": "R3.6 at spec.md:116 names existing epics at implement, review, or done and requires every disposition's output to distinguish mutation from no-op. AC-16 at spec.md:200 supplies fixtures only for implement, review, and EMPTY. The production lookup is not limited to open epics: internal/phase/cache.go:243-247 queries epics with --status=open,in_progress,closed, and internal/phase/derive_test.go:647-667 explicitly proves FindEpicBySpecID returns a closed epic. internal/approve/spec.go:71-76 then takes the existing-epic path and today unconditionally writes plan. Therefore a future implementation that guards only implement/review passes AC-16 while retaining a reachable done-to-plan regression. Likewise, an immediate replay at stored plan is a same-value no-op, but AC-16 does not make dishonest 'phase backfilled' output red for that state.",
+      "impact": "AC-16 does not fully falsify R3.6 or the prior round's 'implement or later' and mutation-vs-no-op ask. A lifecycle verb could still regress a terminal epic or misstate the most ordinary replay while all written acceptance legs pass."
+    },
+    {
+      "id": "R6-R5-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "The core non-regressing replay requirement and lock boundary are now explicit",
+      "evidence": "The 3a321066 diff adds R3.6's absent-only/locked, fail-closed, or justified non-regressing dispositions; requires mutation-vs-no-op output; adds internal/approve/spec.go to Scope for safe replay; and adds AC-16's current-regression and legitimate-empty-backfill fixtures.",
+      "impact": "The implementation design is no longer free to retain the unconditional later-phase regression; only the two acceptance-boundary variants above remain to make the contract fully executable."
+    },
+    {
+      "id": "R6-R5-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Round-5 structural validation found no new document error",
+      "evidence": "mindspec validate spec 128-lifecycle-verb-state-honesty completed with one warning only: lifecycle-binding reports that the draft has no beads epic and spec approve will create one.",
+      "impact": "The request for changes is based on the replay acceptance gap, not structural-validation noise."
+    }
+  ]
+}

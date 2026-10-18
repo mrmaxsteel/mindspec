@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Against reviewed commit 2e73a0f3be92c3e787132a425aa52b3d354cbdc0, every round-7 R6 blocker is ADDRESSED. The first-publication rule now gives absent-to-D the same CREATE CAS and refusal as absent-to-C; the both-elided case has an explicit no-marker ordinary-run route; and the post-no-op-S ambiguity is resolved by withdrawing the false exactly-once promise in favor of at-least-once replay with operation-specific convergence arguments. Fixtures (xviii), (xix), and (xx) pin the three omitted boundaries: C-elided pre-D interruption, D-elided post-S interruption, and both-elided pre-merge interruption. I attacked the replay claim with a named non-idempotent-across-time operation: `bd export` can produce different JSONL bytes if authoritative Dolt state changes between the first S and replay. That does not corrupt completion: ADR-0025 makes the JSONL a current-state cache, so the later projection is forward-correct; if it is newly non-empty the replay materializes D through the now-defined C-to-D or absent-to-D CAS edge. R/reset is a true state-function for fixed tip and worktree, dirt classification is read-only, and merge/terminal recovery retains spec 127's landed/preserved-merge convergence. The remaining shorthand that lists the common absent-to-C and C-to-D transitions does not negate the explicit normative first-publication rule, generic empty-expectedOld Executor seam, ADR amendment instruction, or red-on-revert fixtures. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the three disclosed decomposition warnings. No implementation-corrupting defect remains at the plan gate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-R8-ABSENT-TO-D-CREATE",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "C-elided first publication now has a race-safe absent-to-D edge",
+      "detail": "The normative transition graph states that the first marker publication uses CREATE regardless of whether it points to C or directly to D, with D parenting on A and the same failed-publication refusal. Bead 6 also pins `PublishStageMarker(..., expectedOld)` with empty expectedOld meaning CREATE, and fixtures (xv) and (xviii) exercise the C-elided route."
+    },
+    {
+      "id": "R6-R8-BOTH-ELIDED-NO-MARKER",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Both-elided completion now has a defined no-marker recovery route",
+      "detail": "When C and D both elide, the plan explicitly leaves tip and marker unchanged, routes the first run through R/S-exit to merge, and makes any retry an ordinary run that re-panels, re-measures, and converges. This removes the previously indistinguishable state from an exactly-once contract by making replay intentional."
+    },
+    {
+      "id": "R6-R8-POST-NOOP-S",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Post-no-op-S interruption is covered by honest at-least-once replay",
+      "detail": "With marker C retained after D elides, re-entry deliberately repeats R and S before the single S-exit route. The plan no longer claims exactly-once execution; it proves R as a convergent mixed reset, S as a deterministic projection for fixed Dolt state and a forward-correct current projection if Dolt changed, the classifier as a pure read/refusal, and merge via existing convergence machinery."
+    },
+    {
+      "id": "R6-R8-FIXTURES-XVIII-XIX-XX",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "The three requested red-on-revert crash fixtures are assigned to bead 6",
+      "detail": "Fixture (xviii) kills after R while C is elided and before D publication; (xix) kills after no-op S with marker C and requires idempotent replay through S-exit; (xx) kills pre-merge with both stages elided and requires the no-marker rerun to land. The count is consistently updated to all twenty."
+    },
+    {
+      "id": "R6-R8-NONIDEMPOTENT-EXPORT-ATTACK",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Changing-Dolt replay is non-identical but forward-correct and CAS-contained",
+      "detail": "A concrete adversarial replay is `bd export` after another actor changes Dolt between the first no-op S and retry: the second output need not equal the first. The plan expressly covers this case as a current projection rather than falsely asserting byte identity across changed authority. Because `.beads/issues.jsonl` is an ADR-0025 build artifact, newer bytes are the correct cache; a resulting D is published through expected-old C-to-D or first-publication absent-to-D CAS. This is convergence under changing input, not implementation corruption, and needs no plan-gate change."
+    }
+  ]
+}

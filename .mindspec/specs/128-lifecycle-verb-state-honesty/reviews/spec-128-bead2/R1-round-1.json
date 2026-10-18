@@ -1,0 +1,70 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Author-of-record lens on commit 798841b9. Plan §Bead 2's seven steps are each delivered and nothing outside them is touched. Step 1: internal/approve/plan.go:471 now writes state.ModePlan under the bead-1 lock (was \"implement\"). Step 2: cmd/mindspec/next.go's new advancePhaseOnClaim (Step 5.2) advances stored->implement under WithPhaseWriteLock only for a LIFECYCLE claim (phase.IsLifecycleIssueType, the exported classifyChild==childLifecycle discriminator), no-op when already implement, non-lifecycle claims advance nothing; it is a new writer registered by lexical nesting for the bead-1 writer-inventory AST test (suite green). Step 3: releaseSyncPhase is the ONE production caller of phase.SanctionedDerivedSync (grep confirms exactly one non-test call site), the runRelease call site no longer precomputes DerivePhase, and sanctioned_sync_test.go's fence is genuinely tightened from found-subset-of-allowlist to exactly-one-call-site-in-the-named-function (releaseSyncPhase pinned by name). Step 4: complete.go:1366's step-6.5 value semantics untouched; only the ahead-of-preflight EnsurePhaseSemanticsV2 call was added at the step-1.5 guard. Step 5: route_248_test.go constructs both routes (plan-approve-shaped and release-shaped) plus the trigger-2 plan-over-plan case, asserting stored==derived AND zero stderr at every probe; probes are hand-constructed post-verb snapshots, with the verb writes proven compositionally in plan_test.go/next_phase_advance_test.go/the AC-5(viii) test. Step 6: TestAC5viii drives ONE released all-open state through both surfaces — SanctionedDerivedSync succeeds unforced writing plan with no force-reason, repairPhaseRunE refuses with a recovery line naming --force-backward and zero merge-writes. Step 7: semantics_v2.go delivers the marker-keyed one-shot (marker present -> no-op; absent+legacy -> rewrite plan + marker in ONE critical section/single updates map; absent+other -> marker only), fresh per-call Cache built INSIDE the lock fn with read failures propagating and no write attempted (the bead-1 hard-block class addressed), lock-free LegacyPhaseSignature consumed by derive.go's read-side legacy-notice branch, and all six invocation sites present (impl.go, plan.go, complete.go, next's claim path, repair phase entry — making the notice's recovery command actually converge — and release). The direction-conditional AC-5(iv) recovery matches the recorded disposition: forward keeps repair-phase, backward emits the bd-show inspection line. go build + go test ./... -short fully green including a -count=1 rerun of cmd/mindspec and internal/phase; worktree left byte-identical with no residual phase.lock. All six deviations assessed acceptable (findings A-F below).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "DEV-A",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable",
+      "note": "Hardcoding phase's internal mergeMetadataFn in EnsurePhaseSemanticsV2 is the RIGHT design, not merely a tolerable one: the per-verb injected seams (implPhaseMetadataFn, planMergeMetadataFn) exist so each verb's OWN value writes are individually observable, and TestApproveImpl_LifecycleClassificationErrorRefusesPreMutation's 'seam never called on preflight refusal' assertion would become a false negative if an unrelated migration-shaped writer shared it. It matches the EnsureMigrated/SanctionedDerivedSync convention exactly. Fault-injection coverage is NOT weakened: SetMergeMetadataForTest can still stub, observe, or fail the write (TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite and the self-heal fixture both use it), and the caller error paths remain drivable."
+    },
+    {
+      "id": "DEV-B",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable",
+      "note": "The 13 ApprovePlan + 5 harness no-op stubs are the necessary consequence of the new unconditional first-run marker write and do not mask any assertion: the tests that DO pin phase-value writes (e.g. TestApprovePlan_CommitsBeforeWritingImplementPhase's callLog) observe planMergeMetadataFn / the executor seam, which the phase-package stub does not intercept."
+    },
+    {
+      "id": "DEV-C",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable — in fact plan-mandated",
+      "note": "Pre-setting the v2 marker in repair fixtures is not a deviation at all: plan §Bead 2 step 7's round-3 G2 fixture-state pinning explicitly requires every guard/warning fixture be constructed marker-PRESENT so the reconciliation no-ops and the condition under test survives to the guard. The implementer followed the plan."
+    },
+    {
+      "id": "DEV-D",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable",
+      "note": "TestApprovePlan_CommitsBeforeWritingImplementPhase still pins the load-bearing ORDERING invariant (every exec.CommitAll before the first planMergeMetadataFn mindspec_phase write — firstPhaseWrite > lastCommit assertion intact); only the pinned VALUE moved implement->plan, which is this bead's own OQ-3 change. The doc comment was updated to state the invariant value-neutrally."
+    },
+    {
+      "id": "DEV-E",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable — honest recount",
+      "note": "The derive.go allowlist bump 2->4 is arithmetically honest: the original single warning carried 2 raw-epicID occurrences (direct arg + specIDForEpicWithCache(c, epicID)); the split leaves two raw branches of identical shape (legacy notice, forward warning) = 4, while the backward branch is fully idrender.Bead-wrapped (zero raw). repair.go's new Sprintf was wrapped in idrender.Spec/idrender.Bead rather than allowlisted — a ratchet-respecting choice, not gate-weakening."
+    },
+    {
+      "id": "DEV-F",
+      "severity": "info",
+      "verdict_on_deviation": "acceptable",
+      "note": "complete.go:1366 untouched beyond the EnsurePhaseSemanticsV2 call added at the step-1.5 guard is exactly plan step 4 ('value semantics unchanged in this bead' — the trigger-2 state is plan-over-plan, proven non-backward by TestRoute248_ComplexTriggerTwo)."
+    },
+    {
+      "id": "R1-1",
+      "severity": "low",
+      "note": "Latent sanction-boundary fray, plan-conformant so non-blocking: advancePhaseOnClaim writes implement whenever stored != implement, which the plan itself pinned ('no-op when already implement'). On a stored-review epic that gains a late-filed lifecycle bead claimed via next, that is a reachable UNFORCED backward write (review->implement) outside SanctionedDerivedSync, slightly fraying the spec's 'the sanctioned internal release-sync caller is the ONLY unforced backward writer' sentence. Honesty is preserved (the claimed in_progress child makes the derivation say implement too, so stored==derived holds after the write), and the write is lock-guarded and inventory-registered. Recommend bead 4's agreement table (or the sanction-taxonomy doc comment) record next's claim-advance as a fresh-evidence forward-by-intent writer with this edge named, rather than leaving the ONLY-writer sentence absolute."
+    },
+    {
+      "id": "R1-2",
+      "severity": "low",
+      "note": "plan.go's invocation gate discards FindEpicBySpecID's error silently (if epicID, epicErr := ...; epicErr == nil && epicID != \"\") — next.go by contrast warns on non-ErrNoEpicLineage failures. Benign here because resolvePlanApprovePreflight independently refuses on both epic failure modes (P10) immediately after, so a transient lookup failure cannot let an unreconciled legacy epic slip through to a successful approve; noting for R6's error-discarding sweep so it is a considered exemption, not an oversight."
+    },
+    {
+      "id": "R1-3",
+      "severity": "info",
+      "note": "LegacyPhaseSignature operationalizes the plan's 'all open, none closed, none in_progress' as lifecycleTotal>0 && closed==0 && inProgress==0, so a dep-blocked (status neither closed nor in_progress) lifecycle child still qualifies as legacy. That is the correct reading — a plan-approved-never-claimed epic can legitimately hold blocked children — and consistent with the spec's own 'blocked is neither closed nor in_progress' derivation note."
+    },
+    {
+      "id": "R1-4",
+      "severity": "info",
+      "note": "The #248 route fixtures are compositional: each probe hand-constructs the post-verb metadata/children snapshot rather than driving the real verb, with the producing writes proven in plan_test.go (merge-metadata:*:plan), next_phase_advance_test.go (claim advance), and TestAC5viii (release sync writes plan). Acceptable at unit level; R4's end-to-end hand-probe is the seam-free confirmation of the same chain."
+    },
+    {
+      "id": "R1-5",
+      "severity": "info",
+      "note": "BRIEF cross-check: plan.go's phase-write is at plan.go:471 in the commit (BRIEF says :462 — the cited line is the comment block's start, not an error of substance). The staged prompt's invocation-site line numbers matched exactly per the commit message; no BRIEF contradiction rises to a finding."
+    }
+  ]
+}

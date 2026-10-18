@@ -268,7 +268,10 @@ func TestFaultInjection_ApproveImpl_I1_PhaseReconcileWrite_KillThenConverge(t *t
 //     impl.go): a non-"already closed" failure appends
 //     "could not close lifecycle epic ...".
 //   - i3 — the phase=done write (`implPhaseMetadataFn`, the done branch):
-//     a failure appends "could not set done marker on epic ...".
+//     a failure appends "could not sync phase metadata ..." (spec 128
+//     round-2 panel G3: rendered via phase.DescribeLockFailure, which
+//     gives a lock TIMEOUT a copy-pastable recovery command and any
+//     other failure — like this fault injection — as-is).
 //   - i5 — the post-FinalizeEpic override-metadata writes
 //     (`implMergeMetadataFn`, the AllowDocSkew/OverrideADR/SupersedeADR
 //     branches): a failure appends "could not record ... metadata on ...".
@@ -322,7 +325,7 @@ func TestFaultInjection_ApproveImpl_I2I3I5_PostPreflightWritesSwallowed(t *testi
 		t.Errorf("expected FinalizeEpic to have run exactly once, got %d", len(mock.CallsTo("FinalizeEpic")))
 	}
 	joined := strings.Join(result.Warnings, " | ")
-	for _, want := range []string{"could not close lifecycle epic", "could not set done marker", "could not record impl-skew override metadata"} {
+	for _, want := range []string{"could not close lifecycle epic", "could not sync phase metadata", "could not record impl-skew override metadata"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected a warning containing %q, got warnings: %v", want, result.Warnings)
 		}

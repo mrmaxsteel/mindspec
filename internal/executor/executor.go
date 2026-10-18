@@ -204,6 +204,93 @@ type Executor interface {
 	// in workdir (e.g. "origin/main", "fork/feature") — the remote-tracking
 	// source of the migrate-layout discovery scan.
 	RemoteTrackingRefs(workdir string) ([]string, error)
+
+	// --- prospective-snapshot / write-ahead materialization primitives
+	// (spec 128 Bead 6, OQ-1(a); ADR-0041 §1 amendment) ---
+	//
+	// These eight methods are the ENTIRE git-I/O surface the
+	// prospective-snapshot protocol needs: internal/complete calls ONLY
+	// these (plus the pre-existing query methods above) and gains no new
+	// internal/gitutil import (ADR-0030) for the reorder. MindspecExecutor
+	// thin-wraps the internal/gitutil primitives of the same shape;
+	// MockExecutor stubs each with a configurable result/error, defaulting
+	// to zero values so a pre-existing test that never configures them
+	// exercises the "nothing to materialize" (both stages elide) path.
+
+	// SnapshotWorktreeTree builds a candidate tree T from wtPath's
+	// PROSPECTIVE content (tracked + untracked + deletions, exactly what
+	// `git add -A` would stage), seeded from wtPath's own HEAD tip first so
+	// a path named in exclude is carried over UNCHANGED rather than
+	// dropped. wtPath's real index, refs, and worktree are never touched —
+	// only unreferenced loose objects are written. exclude is a list of
+	// repo-relative paths (e.g. ".beads/issues.jsonl") to exclude from
+	// staging.
+	SnapshotWorktreeTree(wtPath string, exclude []string) (tree string, err error)
+
+	// ChangedFilesTree returns the changed paths between base (a
+	// commit-ish) and treeOID (typically a bare tree object from
+	// SnapshotWorktreeTree), diffed `-C workdir` — never a hardcoded root,
+	// never the caller's cwd, so the per-bead content gates always measure
+	// the SAME bead worktree the snapshot was taken in.
+	ChangedFilesTree(workdir, base, treeOID string) ([]string, error)
+
+	// MaterializeStageCommit builds (via plumbing, no hooks) a write-ahead
+	// stage commit from tree, parented on parent, carrying the pinned
+	// Mindspec-Stage trailer for stage (gitutil.StageMaterialization or
+	// gitutil.StageArtifactSync). It does not publish any ref or marker.
+	//
+	// subject is the commit's human-readable subject line. Fix-round G6:
+	// widened by this one parameter (a disclosed seam-list deviation) so
+	// the operator's own --commit-msg text can survive into the
+	// materialization commit exactly as the pre-bead-6 porcelain
+	// CommitAll subject did — an empty subject falls back to a fixed,
+	// stage-named default ("mindspec: materialize bead completion" /
+	// "chore: sync beads artifact"), never silently discarding a
+	// caller-supplied one.
+	MaterializeStageCommit(wtPath, tree, parent, stage, subject string) (oid string, err error)
+
+	// PublishStageMarker publishes oid as beadID's write-ahead
+	// materialization marker via per-ref compare-and-swap: expectedOld ==
+	// "" gives CREATE semantics (fails if the marker already exists);
+	// a non-empty expectedOld requires the marker's CURRENT value to equal
+	// it exactly. A failed publication is the caller's refusal territory —
+	// this never overwrites another invocation's recovery evidence.
+	PublishStageMarker(beadID, oid, expectedOld string) error
+
+	// ReadStageMarker resolves beadID's write-ahead marker, if any, and
+	// the Mindspec-Stage trailer of the commit it points at. present ==
+	// false (nil error) means no marker is published for beadID. present
+	// == true with stage == "" means a FOREIGN marker object (no
+	// Mindspec-Stage trailer) — the caller treats this identically to "no
+	// marker" after clearing it.
+	ReadStageMarker(beadID string) (oid, stage string, present bool, err error)
+
+	// ClearStageMarker deletes beadID's write-ahead marker via
+	// compare-and-swap against expectedOID — the exact OID this
+	// invocation observed/owns (fix-round G4): the delete FAILS if the
+	// marker's CURRENT value differs (another invocation has since
+	// published a NEW marker), so a stale clear can never delete
+	// evidence it does not own. Run on the terminal (T) step (both the
+	// ordinary and the landed-merge-reconcile completion paths) and on
+	// every foreign/corrupt-marker clear in the re-entry discriminator.
+	// expectedOID == "" means this invocation believes no marker exists
+	// (a no-op). Idempotent: clearing an ALREADY-absent marker (whether
+	// via a prior clear or a race) is a no-op success, never an error.
+	ClearStageMarker(beadID, expectedOID string) error
+
+	// AdvanceBranchExpectedOld moves the local branch ref
+	// `refs/heads/<branch>` to newSHA, requiring its CURRENT value to
+	// equal expectedOld exactly — the compare-and-swap tip advance a
+	// concurrent mover cannot silently clobber.
+	AdvanceBranchExpectedOld(branch, newSHA, expectedOld string) error
+
+	// ResetIndexToHead runs the index-only `reset --quiet --mixed HEAD` in wtPath
+	// — refreshes the REAL index to match HEAD's tree (which the caller
+	// has just advanced via AdvanceBranchExpectedOld), leaving wtPath's
+	// worktree files untouched. Without this, a path newly tracked via a
+	// commit-tree-built commit reads as a phantom staged deletion in `git
+	// status`.
+	ResetIndexToHead(wtPath string) error
 }
 
 // WorkspaceInfo describes a created workspace.

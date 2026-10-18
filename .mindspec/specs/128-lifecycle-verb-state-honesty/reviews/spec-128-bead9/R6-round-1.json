@@ -1,0 +1,33 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Adversarial review of artifact 2691189d confirms AC-11's content and rendering legs. The real RunBD path uses cmd.Output, folds non-empty ExitError.Stderr into a line-capped error while preserving the underlying ExitError with %w, and QueryReady/QueryReadyForEpic route each resulting line through termsafe.Escape. Raw ESC, CR, NUL, invalid UTF-8, bidi, and other non-ASCII/control-bearing lines therefore become single-line quoted text; printable schema diagnostics survive unchanged. The large-stderr concern is bounded before capStderrLines: this toolchain's os/exec.Cmd.Output installs prefixSuffixSaver with N=32 KiB and retains only a prefix and suffix. An empirical /tmp probe that emitted 128 MiB on stderr captured 65,570 bytes and included Go's omission marker, so stderr does not accumulate gigabytes in MindSpec memory. Interleaved streams are drained without deadlock, but their chronology is intentionally not reconstructed: stdout is returned separately and ignored on the failing QueryReady path, while stderr order is retained subject to the standard-library prefix/suffix truncation and MindSpec's 20-line excerpt. Printable-ASCII stderr can still add visually plausible lines or reproduce either truncation marker exactly; that is an unauthenticated-framing/persuasion residual, not an AC-11 violation, because ADR-0042 section 2 explicitly prescribes per-line termsafe escaping for line-oriented free text and treats persuasion framing as a non-goal. Scope is exactly the four briefed files, with no overlap with bead 7's next.go/guard.go track. `go test -race ./internal/bead ./internal/next`, `go test ./... -short`, and `go build ./cmd/mindspec` all passed in the bead worktree; the worktree remained byte-identical and /tmp probes were cleaned.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-OBS-1",
+      "severity": "NOTE",
+      "title": "Control-byte line forging is blocked, but printable diagnostic framing and truncation markers are spoofable",
+      "detail": "renderBDError splits on LF and applies termsafe.Escape to every element. A CR/ESC/NUL-bearing element is quoted and cannot overwrite or inject terminal lines. A hostile bd may nevertheless emit ordinary printable lines such as `Error: ...`, `Usage: ...`, or the exact text `... (stderr truncated at 20 lines)`; those remain byte-identical and can look tool-authored. Go's own `... omitting N bytes ...` marker is likewise child-spoofable. This is not a defect against the approved contract: ADR-0042 section 2 requires per-line escaping for free-text bodies and explicitly does not authenticate or fence persuasion content. If provenance labeling is desired later, prefix every escaped child-stderr line with a MindSpec-authored label and give tool-generated markers a separately labeled frame; escaping alone cannot authenticate printable ASCII."
+    },
+    {
+      "id": "R6-OBS-2",
+      "severity": "NOTE",
+      "title": "Stderr memory is bounded upstream; the 20-line cap is a presentation cap, not the first memory bound",
+      "detail": "In Go 1.26.1, Cmd.Output sets nil Stderr to prefixSuffixSaver{N: 32 << 10}; it retains at most a 32 KiB prefix plus 32 KiB suffix and a short omission marker. The 128 MiB empirical probe produced ExitError.Stderr of 65,570 bytes. capStderrLines then limits displayed logical LF-delimited lines to 20. A huge single line may still render roughly 64 KiB, but cannot cause stderr-sized application allocation. Separately, Cmd.Output's stdout uses bytes.Buffer and remains unbounded if a malicious bd floods stdout; that is pre-existing RunBD behavior and outside this stderr-specific bead/AC."
+    },
+    {
+      "id": "R6-OBS-3",
+      "severity": "NOTE",
+      "title": "Interleaved stdout/stderr chronology is intentionally unavailable on failure",
+      "detail": "Cmd.Output captures stdout and stderr into separate writers, so it drains both streams but cannot preserve their cross-stream write order. tracedOutput returns partial stdout alongside the wrapped error, while QueryReady and QueryReadyForEpic discard that stdout on error and surface only stderr. This does not violate AC-11, which requires the failing bd's stderr line and safe rendering, and it avoids presenting attacker-controlled partial JSON as a diagnostic. No combined-order claim appears in the implementation or contract."
+    },
+    {
+      "id": "R6-OBS-4",
+      "severity": "INFO",
+      "title": "Verification and parallel-track isolation passed",
+      "detail": "Artifact 2691189d changes only internal/bead/bdcli.go, internal/bead/bdcli_test.go, internal/next/beads.go, and internal/next/beads_test.go. It does not touch bead 7's internal/next/guard.go or cmd/mindspec/next.go. Race tests for both changed packages, the full short suite, and the cmd/mindspec build passed. Pre/post git status and diffs were clean."
+    }
+  ]
+}

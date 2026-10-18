@@ -7,6 +7,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,7 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := bead.Preflight(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", err)
+		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", next.RenderBDError(err))
 	}
 
 	exec := newExecutor(root)
@@ -78,7 +79,7 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  2. Run `mindspec next` to claim your first bead\n")
 	fmt.Println()
 	if err := emitInstruct(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	return nil

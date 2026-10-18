@@ -18,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
@@ -41,17 +42,36 @@ var (
 	// defaultVerifyCommitted doc comment for how this is used and how it
 	// degrades on an older bd. Tests swap this to simulate an
 	// unsupported-flag response or a definitive closed/open committed read.
-	fetchBeadAsOfFn         = next.FetchBeadAsOf
-	findEpicForBeadFn       = phase.FindEpicForBead
-	completeMergeMetadataFn = bead.MergeMetadata
+	fetchBeadAsOfFn   = next.FetchBeadAsOf
+	findEpicForBeadFn = phase.FindEpicForBead
+	// completeMergeMetadataFn/completeGetMetadataFn default to the
+	// ESCAPED wrappers below (final-review round 2, R2 F2): both bead
+	// metadata primitives carry wrapBDError'd raw bd stderr (GetMetadata
+	// directly, MergeMetadata via its merge-read leg), and this package
+	// renders their chains at eight sinks (the reconcile-evidence
+	// refusal, four override warnings, the obligation-read refusal, two
+	// audit warnings). Wrapping ONCE at the seam default converts every
+	// present and future sink in the package; bdRenderedError preserves
+	// Unwrap, so bead.IsUnsupportedFlagError and errors.As classification
+	// are unaffected.
+	completeMergeMetadataFn = mergeMetadataEscaped
+	// completeFetchChildrenFn is the AC-4b seam (spec 128 bead 5, the
+	// exact house pattern of completeMergeMetadataFn above): advanceState's
+	// post-close children read routes through this package-level function
+	// variable instead of calling phase.FetchChildren directly, so a test
+	// can inject a failing read without a real bd/Dolt failure and assert
+	// the indeterminate form renders through complete's REAL result path
+	// — never a fabricated `plan` derived from a nil child set.
+	completeFetchChildrenFn = phase.FetchChildren
 	// completeGetMetadataFn is the read half of the metadata seam pair (Spec
 	// 114 R2/Bead 2, carry-forward #1): the durable-obligation marker write
 	// (panelGate's persistRefutationPending) and the pre-close
 	// reconciliation (reconcilePendingRefutations) both read bead metadata
 	// through this seam BEFORE unioning/deciding. A read/parse error is
 	// fail-closed by construction (bead.GetMetadata) — never a license to
-	// proceed as if the store were empty.
-	completeGetMetadataFn = bead.GetMetadata
+	// proceed as if the store were empty. Escaped default — see
+	// completeMergeMetadataFn's comment above.
+	completeGetMetadataFn = getMetadataEscaped
 	gitUserEmailFn        = bead.GitUserEmail
 	// checkDirtyTreeFn is the ADR-0025 artifact-aware tree classification
 	// shared with `mindspec next` (spec 092 Req 6, DQ-2: direct reuse of
@@ -145,6 +165,32 @@ var (
 	// (DestructionEvidenceError) against non-existent refs.
 	completeWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
 )
+
+// mergeMetadataEscaped/getMetadataEscaped are the production defaults of
+// the metadata seam pair (final-review round 2, R2 F2): thin wrappers
+// over bead.MergeMetadata/bead.GetMetadata that route any returned error
+// through next.RenderBDError, so its wrapBDError-folded raw bd stderr is
+// per-line escaped at EVERY sink that renders the chain — the same
+// discipline as the round-1 sweep, applied once at the seam instead of
+// eight times at the sinks. Unwrap is preserved end to end
+// (bdRenderedError), so errors.Is/As classification through the seam is
+// byte-identical to the unwrapped defaults. Named functions (not
+// closures) so the seam-default anti-drift pin
+// (materialize_attestation_test.go) can pointer-pin them.
+func mergeMetadataEscaped(issueID string, updates map[string]interface{}) error {
+	if err := bead.MergeMetadata(issueID, updates); err != nil {
+		return next.RenderBDError(err)
+	}
+	return nil
+}
+
+func getMetadataEscaped(issueID string) (map[string]interface{}, error) {
+	meta, err := bead.GetMetadata(issueID)
+	if err != nil {
+		return meta, next.RenderBDError(err)
+	}
+	return meta, nil
+}
 
 // defaultVerifyCommitted is the production committed-state verifier for the
 // spec 098 Req 2 post-close durability gate. Per the HONESTY-CLAUSE above,
@@ -304,6 +350,15 @@ type Result struct {
 	NextBead        string
 	NextSpec        string
 	SpecWorktree    string
+	// NextModeIndeterminate is true when advanceState's post-close child
+	// read failed (AC-4b, spec 128 bead 5): NextMode/NextBead carry their
+	// zero values rather than a mode fabricated from a nil child set.
+	// FormatResult renders the indeterminate form and step-6.5 skips its
+	// phase-sync write entirely when this is set.
+	NextModeIndeterminate bool
+	// IndeterminateReason is the human-readable cause when
+	// NextModeIndeterminate is true.
+	IndeterminateReason string
 }
 
 func defaultFindLocalRoot() (string, error) {
@@ -365,21 +420,24 @@ func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
 // this phase leaves tracker and git state byte-identical to the pre-call
 // state (modulo the exempt migration below).
 //
-// Steps 2.5–3 (the optional user CommitAll and the pathspec-scoped
-// artifact-sync commit) are the ARTIFACT-MATERIALIZATION subphase: local,
-// bead-branch-only, never-main commits that materialize the tip the two
-// content gates validate. The never-main property is ENFORCED, not
-// assumed: BOTH legs refuse (guard.NewFailure, `mindspec next` recovery)
-// when no bead worktree matched — neither ever falls back to committing
-// on the root/main checkout (final-review r2 F2).
-// The doc-sync and ADR-divergence gates (step 3.5)
-// deliberately run AFTER that subphase — their base..beadHead range must
-// include the just-committed user work — so a doc/ADR refusal MAY follow
-// those local commits. That is a documented, forward-reconcilable
-// exception, NOT a byte-identical refusal: the worktree and its bead-branch
-// commits are retained, nothing lifecycle-affecting has happened, and a
-// re-run after repair converges (see ADR-0041 §1). The step-3.75 durable-
-// obligation reconciliation is the last such pre-terminal refusal point.
+// Steps 2.5–3.5 (below) are the ARTIFACT-MATERIALIZATION subphase (spec
+// 128 Bead 6, OQ-1(a); ADR-0041 §1 amendment): the doc-sync and
+// ADR-divergence content gates now run over the bead worktree's
+// PROSPECTIVE content — a candidate tree captured via
+// exec.SnapshotWorktreeTree — BEFORE any complete-authored commit
+// exists, and materialization (runMaterialization's commit-tree-built
+// M/S-stage commits) runs ONLY on a full gate pass. The never-main
+// property is ENFORCED, not assumed: runMaterialization refuses
+// (guard.NewFailure, `mindspec next` recovery) when no bead worktree
+// matched — it never falls back to committing on the root/main checkout
+// (final-review r2 F2). Because no complete-authored commit exists
+// before the gates run, a doc/ADR refusal here leaves the worktree and
+// the bead branch's tip exactly as they were BEFORE this invocation
+// (never the "local commits already landed, refusal follows them" shape
+// the pre-bead-6 design carried) — a re-run after repair meets the
+// identical gate (see ADR-0041 §1/§3(i) for the full protocol and its
+// precise refusal guarantee). The step-3.75 durable-obligation
+// reconciliation is the last such pre-terminal refusal point.
 // Together, every refusal above fires BEFORE any LIFECYCLE-AFFECTING
 // mutation (bd close, the bead→spec merge, branch/worktree deletion, or
 // any main-branch commit) — the byte-identical claim, however, is made
@@ -497,8 +555,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// A real lineage-lookup failure: refuse before the migration and
 		// before any mutation, naming the retry re-invocation.
 		// R4: beadID is an ID-typed position — idrender.Bead.
+		// Final-review round 1 (R2/G3): lineageErr chains bd stderr
+		// (wrapBDError) — escape like the sibling malformed-metadata
+		// branch above already does.
 		return nil, guard.NewFailure(
-			fmt.Sprintf("resolving bead %s's epic lineage failed: %v — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, lineageErr),
+			fmt.Sprintf("resolving bead %s's epic lineage failed: %s — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, termsafe.Escape(lineageErr.Error())),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
 	}
@@ -519,13 +580,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// below (and the eventual phase.DerivePhaseFromChildren call in
 	// advanceState) so legacy epics get their mindspec_phase metadata
 	// before any phase read. No-op when already migrated or no epic.
-	if _, err := phase.EnsureMigratedWithCache(epicCache, specID); err != nil {
+	if _, err := phase.EnsureMigratedWithCache(root, epicCache, specID); err != nil {
 		return nil, err
 	}
 
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
 	epicID, epicErr := phase.FindEpicBySpecIDWithCache(epicCache, specID)
 	if epicErr == nil && epicID != "" {
+		// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
+		// reconciliation runs beside EnsureMigratedWithCache above, under
+		// the same ahead-of-preflight exemption — must run before the
+		// phase read immediately below.
+		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+			return nil, err
+		}
 		epicPhase, phaseErr := phase.DerivePhaseWithCache(epicCache, epicID)
 		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
 			// R4: beadID/specID are ID-typed positions (idrender);
@@ -636,9 +704,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if err != nil {
 		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
 		// infra error, not "no worktree" — swallowing it used to leave
-		// wtPath == "" and let the --commit-msg CommitAll below fall back
-		// to the root/main checkout. Propagate as a preflight refusal
-		// (nothing has mutated yet) instead of guessing.
+		// wtPath == "" and let the --commit-msg materialization (the
+		// pre-bead-6 CommitAll; now runMaterialization) fall back to the
+		// root/main checkout. Propagate as a preflight refusal (nothing
+		// has mutated yet) instead of guessing.
 		// R4: beadID is an ID-typed position — idrender.Bead.
 		return nil, fmt.Errorf("listing bead worktrees for %s: %w", safeBeadID, err)
 	}
@@ -705,14 +774,46 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// 2.12. Write-ahead materialization discriminator (Spec 128 Bead 6,
+	// OQ-1(a) protocol step 3/round-5 G3.2): runs BEFORE the panel gate,
+	// same as the reconcile detection above. A non-empty resumeStage
+	// means a PRIOR invocation of THIS BINARY already published a
+	// write-ahead marker — corroborated by both the current bead-branch
+	// tip AND the binary-written bd attestation
+	// (stageMarkerAttestationKey, final-review round 1 G1: the ref and
+	// trailer alone are hand-authorable and prove nothing about who
+	// published them) — so this run resumes the mechanical remainder
+	// (R+S, or the S-exit contract alone) WITHOUT re-running the panel
+	// gate or the content gates, which that attested publication proves
+	// already passed. In reconcile mode the bead's work already landed
+	// via a merge outside this invocation, so any orphaned marker for it
+	// is cleared instead (round-4 G1.3) rather than discriminated.
+	var resumeStage string
+	if reconcile == nil {
+		resumeStage, err = resolveMaterializationDiscriminator(exec, root, beadID, beadHead)
+		if err != nil {
+			return nil, err
+		}
+	} else if orphanOID, _, present, rerr := exec.ReadStageMarker(beadID); rerr != nil {
+		// R4: beadID is an ID-typed position — idrender.Bead.
+		return nil, fmt.Errorf("reading orphaned materialization marker for %s: %w", safeBeadID, rerr)
+	} else if present {
+		if clrErr := exec.ClearStageMarker(beadID, orphanOID); clrErr != nil {
+			// R4: beadID is an ID-typed position — idrender.Bead.
+			return nil, fmt.Errorf("clearing orphaned materialization marker for %s: %w", safeBeadID, clrErr)
+		}
+	}
+
 	// 2.25. AUTHORITATIVE panel gate (Spec 099 Bead 2, R1+R2+R5; ADR-0037).
 	// This is the in-binary enforcement point — it runs over the DECLARED
-	// beadID (no shell parsing; ADR-0036) and BEFORE step-2.5 exec.CommitAll,
-	// bd close (step 4), and the bead→spec merge (step 5). The ordering is
-	// load-bearing: CommitAll advances the bead/<id> tip PAST
-	// reviewed_head_sha (false-firing §4 staleness) and clears user dirt
-	// (false-clearing §5), so the gate measures the PRE-CommitAll beadHead
-	// tip. It calls the SAME panel.PanelGateDecision over panel.GateFacts
+	// beadID (no shell parsing; ADR-0036) and BEFORE the artifact-
+	// materialization subphase (steps 2.5–3.5, above; spec 128 Bead 6's
+	// runMaterialization), bd close (step 4), and the bead→spec merge
+	// (step 5). The ordering is load-bearing: materialization advances
+	// the bead/<id> tip PAST reviewed_head_sha (false-firing §4
+	// staleness) and clears user dirt (false-clearing §5), so the gate
+	// measures the PRE-materialization beadHead tip. It calls the SAME
+	// panel.PanelGateDecision over panel.GateFacts
 	// from the SAME panel.ResolveGateFacts the PreToolUse hook uses — the
 	// hook is now a defense-in-depth backstop, and the two cannot disagree.
 	//
@@ -722,55 +823,68 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// (MINDSPEC_SKIP_PANEL never named in a block — HC-7; enforcement.panel_gate)
 	// are honored. The matched registration is reused below for the
 	// post-completion audit writes (Reqs 13b/13e).
+	//
+	// Spec 128 Bead 6: SKIPPED entirely on a write-ahead resume
+	// (resumeStage != "") — a resume is only ever honored for a marker
+	// whose OID the binary's own bd attestation corroborates
+	// (final-review round 1 G1), and that attested publication happened
+	// strictly AFTER this same gate passed in the publishing invocation;
+	// re-running it here would re-panel a bead whose gate outcome is
+	// already durable. panelReg stays nil on that path, exactly as it
+	// does on every other pre-existing fail-open/no-panel path below.
+	var panelReg *panel.Registration
 	advisoryOut := panelAdvisoryOut
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
 	}
-	// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
-	// copy here for the enforcement.panel_gate toggle (default true) AND
-	// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
-	// advisory below compares against. gateCfgErr is deliberately non-fatal
-	// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
-	// true default on a load error) — the advisory below is simply skipped
-	// on that same error, never blocking the gate.
-	gateCfg, gateCfgErr := config.Load(root)
-	panelGateEnabled := true
-	if gateCfgErr == nil {
-		panelGateEnabled = gateCfg.Enforcement.PanelGate
-	}
-	// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
-	// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
-	// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
-	// tree it honors the co-located reviews ONLY (root review/ ignored once
-	// flat). panelGateRoots picks the set from workspace.DetectLayout.
-	// (Only the GATE scans panels; the step-3.75 obligation reconciliation
-	// below settles pending markers from bead metadata alone, Spec 114 R2
-	// round-3 redesign — it never reads a panel directory.)
-	gateRoots := panelGateRoots(root, wtPath, specID)
-	panelReg, panelGateErr := panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
-	if panelGateErr != nil {
-		return nil, panelGateErr
-	}
-	// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
-	// per spec 112 R7): the Allow/Block decision above is already final;
-	// this only surfaces a legitimately smaller/larger substituted reviewer
-	// quorum, never altering it. panelReg is nil on panelGate's fail-open
-	// paths (empty bead ID, no registered panel — the common panel-less
-	// `mindspec complete`); PanelGateAdvisoryDefault's arguments deref
-	// panelReg.Panel, so it must be guarded here even though
-	// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
-	// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
-	// unknown recorded gate, while gates: is configured) — no note prints.
-	if gateCfgErr == nil && panelReg != nil {
-		if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
-			reviewerCountAdvisory(panelReg, def, advisoryOut)
+	if resumeStage == "" {
+		// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
+		// copy here for the enforcement.panel_gate toggle (default true) AND
+		// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
+		// advisory below compares against. gateCfgErr is deliberately non-fatal
+		// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
+		// true default on a load error) — the advisory below is simply skipped
+		// on that same error, never blocking the gate.
+		gateCfg, gateCfgErr := config.Load(root)
+		panelGateEnabled := true
+		if gateCfgErr == nil {
+			panelGateEnabled = gateCfg.Enforcement.PanelGate
+		}
+		// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
+		// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
+		// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
+		// tree it honors the co-located reviews ONLY (root review/ ignored once
+		// flat). panelGateRoots picks the set from workspace.DetectLayout.
+		// (Only the GATE scans panels; the step-3.75 obligation reconciliation
+		// below settles pending markers from bead metadata alone, Spec 114 R2
+		// round-3 redesign — it never reads a panel directory.)
+		gateRoots := panelGateRoots(root, wtPath, specID)
+		var panelGateErr error
+		panelReg, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		if panelGateErr != nil {
+			return nil, panelGateErr
+		}
+		// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
+		// per spec 112 R7): the Allow/Block decision above is already final;
+		// this only surfaces a legitimately smaller/larger substituted reviewer
+		// quorum, never altering it. panelReg is nil on panelGate's fail-open
+		// paths (empty bead ID, no registered panel — the common panel-less
+		// `mindspec complete`); PanelGateAdvisoryDefault's arguments deref
+		// panelReg.Panel, so it must be guarded here even though
+		// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
+		// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
+		// unknown recorded gate, while gates: is configured) — no note prints.
+		if gateCfgErr == nil && panelReg != nil {
+			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
+				reviewerCountAdvisory(panelReg, def, advisoryOut)
+			}
 		}
 	}
 
 	// 2.26. Spec 127 R4(a) — the §1-phase work-destruction preflight for
 	// this verb's OWN bead→spec merge (CompleteBead's MergeInto), sited
-	// immediately after the panel gate and BEFORE step 2.5's artifact-
-	// materialization subphase (the CommitAll below) — so a refusal here
+	// immediately after the panel gate and BEFORE the artifact-
+	// materialization subphase (steps 2.5–3.5, below) — so a refusal here
 	// leaves tracker and git state byte-identical to the pre-call state,
 	// same as every other step-1-through-2.25 preflight fact. Skipped
 	// entirely in reconcile mode: there the bead's work already landed
@@ -787,175 +901,36 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
-	// 2.5. Auto-commit if commit message provided (via Executor). Skipped
-	// entirely in reconcile mode (Spec 119 R4): there is no bead worktree
-	// to commit into — the work already landed — so a --commit-msg
-	// carried into a reconcile re-invocation is a no-op rather than a
-	// commit on whatever happens to be checked out at root.
+	// 2.5–3.5 REPLACED (Spec 128 Bead 6, OQ-1(a); ADR-0041 §1 amendment):
+	// the artifact-materialization commits (the old --commit-msg CommitAll
+	// and the pathspec-scoped artifact-sync CommitPaths) and the per-bead
+	// content gates (doc-sync, ADR-divergence) are now ONE unified
+	// prospective-snapshot protocol — the gates measure the bead
+	// worktree's PROSPECTIVE content (a candidate tree, via
+	// exec.SnapshotWorktreeTree) BEFORE any complete-authored commit
+	// exists, and materialization runs ONLY after a full gate pass, in
+	// write-ahead order (build C -> publish marker -> advance ref ->
+	// reset index -> build D -> publish marker -> advance ref -> reset
+	// index -> the S-exit dirt contract). See materialize.go's
+	// runMaterialization and ADR-0041 §1/§3 for the full protocol this
+	// transmits; resumeStage (resolved at step 2.12, above) skips the
+	// re-snapshot and the content gates entirely on a write-ahead resume.
 	//
-	// Final-review r2 (F2): the user CommitAll targets the MATCHED bead
-	// worktree ONLY — there is no root fallback. wtPath == "" here means
-	// the bead's worktree is missing (pruned/removed) while its bead/<id>
-	// ref still exists (reconcile detection above did not fire), and root
-	// is the main checkout (Run's own contract), so an unguarded CommitAll
-	// would commit user work onto `main`. Refuse instead, mirroring the
-	// step-3 artifact-sync guard (R3/AC-3) — same convergent recovery:
-	// `mindspec next` recreates the missing worktree.
-	if commitMsg != "" && reconcile == nil {
-		if wtPath == "" {
-			// R4: beadID/specID are ID-typed positions (idrender); root
-			// is a filesystem path (operator-chosen, out of the
-			// agent-writable-content render-sink scope), not escaped.
-			return nil, guard.NewFailure(
-				fmt.Sprintf("bead %s's --commit-msg auto-commit would commit user work on the main checkout (%s) — no bead worktree matched; refusing.", safeBeadID, root),
-				fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s \"...\"`)", idrender.Spec(specID), safeBeadID, safeBeadID),
-			)
-		}
-		msg := fmt.Sprintf("impl(%s): %s", beadID, commitMsg)
-		if err := exec.CommitAll(wtPath, msg); err != nil {
-			return nil, fmt.Errorf("auto-commit failed: %w", err)
-		}
+	// Reconcile mode is UNCHANGED (ADR-0041 §1: "Reconcile mode... keeps
+	// its landed M^1..M measurement — no commits are authored on that
+	// path"): there is no bead worktree to snapshot, so every per-bead
+	// gate measures the LANDED merge commit's own M^1..M diff via the
+	// pre-existing committed-range gate functions, exactly as before this
+	// bead. The SAME committed-range leg also covers the "no bead
+	// worktree matched, but its branch still exists" case (wtPath == "",
+	// reconcile == nil): with no worktree there is nothing to snapshot
+	// either, so the gates fall back to measuring the branch's own
+	// COMMITTED tip — there is no uncommitted content a snapshot could
+	// see that a worktree-less bead could possibly hold anyway.
+	specDir, sdErr := workspace.SpecDir(root, specID)
+	if sdErr != nil {
+		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
 	}
-
-	// 3. Artifact-aware clean-tree check (spec 092 Reqs 6/7, ADR-0025,
-	// mindspec-i4ad). The classification is the exact one `mindspec next`
-	// uses (next.CheckDirtyTreeDetail, DQ-2): artifact dirt
-	// (.beads/issues.jsonl) is normalized via `bd export` and never
-	// blocks; only user-authored dirt blocks. checkPath is passed as BOTH
-	// repoRoot and cwd so the normalization targets the same checkout
-	// whose status is being classified (bead.Export writes
-	// <workdir>/.beads/issues.jsonl).
-	// Skipped entirely in reconcile mode (Spec 119 R4): there is no bead
-	// worktree whose dirt this could classify — the work already landed
-	// through some other bead->spec merge.
-	if reconcile == nil {
-		checkPath := wtPath
-		if checkPath == "" {
-			checkPath = root // No worktree — check main tree
-		}
-		artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(checkPath, checkPath)
-		if dirtErr != nil {
-			return nil, fmt.Errorf("checking working tree: %w", dirtErr)
-		}
-		if len(userDirt) > 0 {
-			// User dirt blocks even when artifact dirt coexists — the
-			// artifact handling below must never mask user-authored changes.
-			// Each porcelain line is an agent-writable filename (R4): escape
-			// per-line so a hostile filename cannot forge extra lines or
-			// control bytes into the terminal-facing message.
-			msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
-				strings.Join(termsafeEscapeEach(userDirt), "\n  "))
-			if wtPath == "" {
-				msg += "\nno active bead worktree is set — claim work with `mindspec next`, commit in the printed worktree, then rerun `mindspec complete`"
-			}
-			// Spec 092 Req 8 (mindspec-tjat): worktree-context line naming
-			// where the command ran vs. the checkout this guard evaluated.
-			// Last body line — it precedes the final recovery line (Req 12
-			// ordering). Getwd failure falls back to checkPath: a degraded
-			// but truthful context line beats no line.
-			cwd, cwdErr := completeGetwdFn()
-			if cwdErr != nil || cwd == "" {
-				cwd = checkPath
-			}
-			msg += "\n" + workspace.ContextLine(cwd, checkPath)
-			if wtPath == "" {
-				return nil, guard.NewFailure(msg, "mindspec next")
-			}
-			// Existing auto-commit hint, now a Req 12 recovery line.
-			// R4: beadID is an ID-typed position — idrender.Bead.
-			return nil, guard.NewFailure(msg,
-				fmt.Sprintf("mindspec complete %s \"describe what you did\"", safeBeadID))
-		}
-		if len(artifactDirt) > 0 {
-			// Spec 119 R3 (Bead 1 Step 3): the tracker commit must land
-			// on the spec branch — never on `main`. wtPath == "" means no
-			// bead worktree matched, so checkPath fell back to root — the
-			// MAIN repo root (Run's own contract: "root is the main repo
-			// root"), i.e. the main checkout. Refuse with a named
-			// re-invocation command rather than committing there (AC-3).
-			//
-			// The recovery command is NOT "cd + re-run `mindspec complete`"
-			// (bead-panel finding, mindspec-lc12.1 fix-up): every input to
-			// this resolution — root, wtPath, checkPath — comes from
-			// cwd-INDEPENDENT sources (workspace.FindRoot walks to the same
-			// repo root regardless of cwd; wtPath comes from `bd worktree
-			// list`, never from the shell's directory). Re-running
-			// `mindspec complete` from anywhere, including "inside the spec
-			// worktree", reaches this exact same branch and refuses again —
-			// an infinite loop. The genuinely convergent recovery is
-			// `mindspec next`: when a bead is in-progress with a missing
-			// worktree, `next` positively detects that (ResolveActiveBead)
-			// and recreates it (EnsureWorktree; see internal/next/guard.go's
-			// WorktreeSetupFailure/ClaimFailure recipes — "re-run detects
-			// the in-progress bead and auto-recovers the worktree"), after
-			// which `mindspec complete` finds a real wtPath and this
-			// refusal no longer fires.
-			if wtPath == "" {
-				// R4: beadID/specID are ID-typed positions (idrender);
-				// checkPath is a filesystem path, out of scope.
-				return nil, guard.NewFailure(
-					fmt.Sprintf("bead %s's beads-artifact tracker sync would commit on the main checkout (%s) — refusing.", safeBeadID, checkPath),
-					fmt.Sprintf("mindspec next --spec %s %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", idrender.Spec(specID), safeBeadID, safeBeadID),
-				)
-			}
-			// Req 7 (DQ-4): artifact dirt that survives normalization (e.g.
-			// a pre-commit hook re-exported the JSONL during the auto-commit
-			// above) is COMMITTED, not ignored — as a follow-up commit, never
-			// an amend — so the bead→spec merge below operates on a genuinely
-			// clean tree and field workarounds (--no-verify, core.hooksPath)
-			// are never necessary. The commit stays behind the executor
-			// (ADR-0030).
-			//
-			// Spec 119 R3: staged with an EXPLICIT lifecycle-artifact
-			// pathspec (artifactDirt, e.g. .beads/issues.jsonl) — never an
-			// `add -A` equivalent — so a file that becomes dirty between
-			// this scan and the commit (a hook, a race) is never silently
-			// swept into the tracker-only commit (AC-4).
-			if err := exec.CommitPaths(checkPath, "chore: sync beads artifact", artifactDirt); err != nil {
-				return nil, fmt.Errorf("committing beads artifact sync: %w", err)
-			}
-			// HC-3: self-heal is silent-on-success save one structured line.
-			// R4: artifactDirt entries are porcelain-derived filenames —
-			// agent-writable — escape per-element before joining (mirrors
-			// the userDirt handling above; escaping the already-joined
-			// whole would also quote the ", " separators).
-			fmt.Fprintf(os.Stderr, "event=complete.artifact_synced paths=%s\n",
-				strings.Join(termsafeEscapeEach(artifactDirt), ","))
-			// Residual-dirt warning (AC-4): CommitPaths staged EXACTLY
-			// artifactDirt, never `add -A`, so any OTHER path still
-			// dirty in the tree is surfaced by name instead of being
-			// silently swept in.
-			if residual, statusErr := exec.Status(checkPath); statusErr == nil {
-				if extra := residualDirtyPaths(residual, artifactDirt); len(extra) > 0 {
-					// R4: same porcelain-filename escaping as above.
-					fmt.Fprintf(os.Stderr, "WARN complete.unexpected_dirty_paths: %s (not included in the artifact sync commit)\n",
-						strings.Join(termsafeEscapeEach(extra), ", "))
-				}
-			}
-		}
-	}
-
-	// 3.5. Spec 086 (F2) doc-sync enforcement gate. The measured range
-	// is anchored to the BEAD's own work: base is the bead branch's
-	// fork point from the spec branch (merge-base(specBranch,
-	// beadHead)) and head is the bead branch tip (beadHead, resolved
-	// at step 2). It is deliberately NOT relative to the ambient HEAD
-	// of whatever checkout this process runs from — that measured
-	// main-side drift from the repo root (false blocks,
-	// mindspec-aqey) and an empty range from the spec worktree
-	// (vacuous passes, mindspec-perm). The whole-branch backstop at
-	// impl approve (internal/approve/impl.go) keeps its explicit
-	// main..specBranch refs and is unaffected. The
-	// `--allow-doc-skew "<reason>"` override allows the gate to pass
-	// without doc updates; the reason is recorded on bead metadata
-	// only AFTER the terminal mutation (`exec.CompleteBead`) succeeds
-	// (see step 5.5 below).
-	// Spec 119 R4 (Bead 1 Step 5): the reconcile path evaluates every
-	// per-bead gate against the LANDED merge commit's own M^1..M diff
-	// instead of computing a merge-base against the now-absent bead/<id>
-	// ref — the exit-128 bug this fixes. No exec.MergeBase call is made
-	// on this path (AC-5); beadHead was already reanchored to the landed
-	// commit's SHA at reconcile detection above.
 	var base string
 	if reconcile != nil {
 		base = reconcile.landed.FirstParent
@@ -966,73 +941,31 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
 		}
 	}
-	// OWNERSHIP attribution (manifests + domain enumeration) is read
-	// from beadHead — the SAME ref the gate diffs — so an OWNERSHIP
-	// claim committed on the bead branch satisfies its own gate with no
-	// override (spec 095 / mindspec-vvs9).
-	docResult := validate.ValidateDocsRange(root, base, beadHead, beadHead, exec)
-	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
-	// failure decision so they print on every run — including when
-	// HasFailures() is false and the flow proceeds normally, and on
-	// the override/error paths.
-	printResultWarnings(warnWriter, docResult)
-	if docResult.HasFailures() {
-		if opts.AllowDocSkew == "" {
-			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
+	if reconcile != nil || wtPath == "" {
+		if err := runCommittedRangeGate(root, beadID, beadHead, specDir, base, exec, opts, warnWriter); err != nil {
+			return nil, err
 		}
-		// Override path: fall through. Metadata is written AFTER the
-		// terminal mutation succeeds (panel CONSENSUS revision 4).
 	}
-	specDir, sdErr := workspace.SpecDir(root, specID)
-	if sdErr != nil {
-		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
-	}
-	// The gate runs EXACTLY ONCE (revision 3 — no probe-call). The
-	// findings slice is consumed by the supersede path below to seed
-	// the placeholder ADR's Domains field. The failure-decision is
-	// bypassed when either override or supersede flag is set. Same
-	// bead-branch anchoring as doc-sync above: base..beadHead.
-	// Ownership ref = beadHead, same as doc-sync above (spec 095).
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, beadHead)
-	// Same severity-generic pipe for the ADR-divergence gate: any
-	// SevWarning the gate emits (e.g. adr-divergence-proposed) renders
-	// without further wiring. No-op while the gate emits none.
-	printResultWarnings(warnWriter, adrResult)
-
-	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
-	// WARN — hooked into this same gate-evaluation phase, right beside
-	// the doc-sync/ADR-divergence gates it shares base/beadHead/specDir
-	// with. It never affects the pass/fail decision below (HC:
-	// bead_scope.go's own doc comment) and is a pure best-effort print.
-	beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
-
-	// Pre-create the placeholder ADR FIRST when --supersede-adr is
-	// requested, so the new file exists on disk even if a downstream
-	// step fails (Bead 3 step 4 ordering rule).
-	var supersedeNewID string
-	if opts.SupersedeADR != "" {
-		// Seed Domains from the structured findings slice (revision 2
-		// — NO fmt.Sprintf parsing of Issue messages). When no
-		// violation exists the seed list is empty and the operator
-		// fills it in later when editing the placeholder.
-		var seedDomains []string
-		for _, f := range adrFindings {
-			if f.Kind == "uncovered" && f.Domain != "" {
-				seedDomains = []string{f.Domain}
-				break
-			}
+	if reconcile == nil {
+		// runMaterialization handles BOTH cases: wtPath != "" runs the
+		// full snapshot-gate-materialize sequence (the gate above did NOT
+		// already run in this branch); wtPath == "" is a pure dirt-check
+		// refusal-or-noop (the committed-range gate above already ran).
+		if err := runMaterialization(materializationInput{
+			exec:        exec,
+			root:        root,
+			beadID:      beadID,
+			beadHead:    beadHead,
+			wtPath:      wtPath,
+			specDir:     specDir,
+			commitMsg:   commitMsg,
+			base:        base,
+			opts:        opts,
+			resumeStage: resumeStage,
+			warnWriter:  warnWriter,
+		}); err != nil {
+			return nil, err
 		}
-		title := "Placeholder for " + opts.SupersedeADR
-		if _, err := adrCreateWithIDFn(root, opts.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
-			return nil, fmt.Errorf("--supersede-adr: %w", err)
-		}
-		supersedeNewID = opts.SupersedeADR
-	}
-
-	// Gate-failure decision: only fatal when no override/supersede
-	// flag is set.
-	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
-		return nil, adrDivergenceFailure(beadID, joinResultErrorMessages(adrResult))
 	}
 
 	// 3.75. DURABLE-OBLIGATION reconciliation (Spec 114 R2, Bead 2): every
@@ -1267,6 +1200,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 	}
 
+	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the
+	// ordinary completion path (exec.CompleteBead just merged and cleaned
+	// up bead/<id> — the write-ahead marker's job is done) and the
+	// landed-merge-reconcile completion path immediately above (the
+	// evidence write just succeeded). Best-effort: a clear failure here
+	// never fails an otherwise-successful completion — the marker is a
+	// resumption AID, not part of the terminal mutation itself, and a
+	// stray marker left behind after a genuinely successful completion is
+	// caught by the discriminator's own FOREIGN branch on any later
+	// invocation naming this bead (the tip will no longer match it).
+	if finalOID, _, present, rerr := exec.ReadStageMarker(beadID); rerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not read materialization marker for %s before the terminal clear: %v\n", safeBeadID, rerr)
+	} else if present {
+		if clrErr := exec.ClearStageMarker(beadID, finalOID); clrErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not clear materialization marker for %s: %v\n", safeBeadID, clrErr)
+		}
+	}
+
 	// 5.5. Spec 086 (F2): record doc-sync skew override AFTER the
 	// terminal bead→spec merge (`exec.CompleteBead`) returns nil. This
 	// mirrors ApproveImpl's post-FinalizeEpic discipline — the override
@@ -1310,10 +1261,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// caller passes both).
 		reason := opts.OverrideADR
 		if reason == "" {
-			reason = "superseded by " + supersedeNewID
+			reason = "superseded by " + opts.SupersedeADR
 		}
 		meta := map[string]interface{}{
-			"mindspec_adr_supersede_id":     supersedeNewID,
+			"mindspec_adr_supersede_id":     opts.SupersedeADR,
 			"mindspec_adr_supersede_reason": reason,
 			"mindspec_adr_supersede_at":     time.Now().UTC().Format(time.RFC3339),
 			"mindspec_adr_supersede_by":     gitUserEmailFn(),
@@ -1352,8 +1303,20 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// 6. Advance state. advanceState re-reads the post-close child set fresh
-	// (phase.FetchChildren) against the epic resolved once above.
-	nextMode, nextBead := advanceState(epicID)
+	// (completeFetchChildrenFn/phase.FetchChildren) against the epic
+	// resolved once above.
+	nextMode, nextBead, advanceErr := advanceState(epicID)
+	if advanceErr != nil {
+		// AC-4b (spec 128 bead 5): a failed post-close child read renders
+		// the indeterminate form in BOTH the result summary and the tail
+		// — never a fabricated `plan` derived from a nil child set.
+		// NextMode/NextBead stay at their zero values; NextSpec is still
+		// the already-resolved (not derived-from-the-failed-read) spec.
+		result.NextModeIndeterminate = true
+		result.IndeterminateReason = advanceErr.Error()
+		result.NextSpec = specID
+		return result, nil
+	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
 	result.NextSpec = specID
@@ -1361,9 +1324,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// 6.5. Sync stored phase (Spec 080): keep epic mindspec_phase in sync
 	// so that DerivePhase (metadata-first) returns the correct phase for
 	// downstream commands like `mindspec impl approve`. Reuses the epicID
-	// resolved once at the top (no extra `bd list --type=epic`).
+	// resolved once at the top (no extra `bd list --type=epic`). Skipped
+	// entirely above on the indeterminate return — no value fabricated
+	// from a nil child set is ever written (AC-4b).
 	if nextMode != "" && epicID != "" {
-		_ = completeMergeMetadataFn(epicID, map[string]interface{}{"mindspec_phase": nextMode})
+		completeSyncPhase(root, epicID, nextMode, beadID)
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1374,12 +1339,78 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	return result, nil
 }
 
+// completeSyncPhase performs step 6.5's best-effort mindspec_phase cache
+// sync, wrapped in the R3.3 phase write lock (value unchanged in this
+// bead). A lock/write failure never fails `complete` itself — the sync
+// is a cache refresh, not the terminal mutation — but round-1 panel G3
+// requires it be SURFACED, not silently discarded: it is printed via
+// phase.DescribeLockFailure, which gives a lock TIMEOUT the full
+// ADR-0035 treatment (names .mindspec/phase.lock, ends with a copy-
+// pastable recovery COMMAND — round-2 panel G3: prose is not enough) and
+// any other failure (a genuine merge-write error) as-is. beadID supplies
+// that command ("mindspec complete <bead-id>", the exact re-invocation
+// that hit the lock). Extracted to its own named function (rather than
+// an inline closure inside Run) so it is directly unit-testable without
+// exercising Run's full preflight/gate machinery.
+//
+// Recorded residual (spec 128 Bead 2 round-1 panel G6/R3-G3, NOT
+// gate-blocking, accepted): sanctioned_sync_test.go's exactly-one-caller
+// fence over phase.SanctionedDerivedSync is LEXICAL — it proves
+// release.go's releaseSyncPhase is the only DIRECT call site, not that
+// no OTHER writer can land a semantically-equivalent backward-converging
+// write. This function writes advanceState's freshly-derived nextMode
+// unconditionally under the lock — the same "re-derive fresh, write
+// unconditionally" shape SanctionedDerivedSync exists to be the SOLE
+// sanctioned surface for. In a marker-present RESIDUE state reachable
+// only after a previously-surfaced release-sync failure or a crash
+// between claim and next's own advance (stored=implement, all lifecycle
+// children open), completing an unrelated non-lifecycle child would
+// write `plan` over `implement` here — semantically the identical
+// backward derived-sync, just not routed through the fenced surface.
+// It is CORRECTIVE in effect (converges stored toward derived) and its
+// precondition is always a state some OTHER warning already surfaced,
+// so this is accepted as-is rather than gate-blocking. DISCHARGED
+// (final-review round 1 G7): the routing to beads 4/5 offered two
+// options — a stored-aware no-op-on-backward guard, or extending the
+// agreement-table wording to name this fence's honest scope — and bead
+// 4 took the second: the disclosure lives in
+// project-docs/user/guides/lifecycle-modes.md's "Disclosed residual,
+// not silently excepted" bullet (the writer-taxonomy section). The
+// residue itself remains as described; it is disclosed, not fixed.
+func completeSyncPhase(root, epicID, nextMode, beadID string) {
+	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
+		return map[string]interface{}{"mindspec_phase": nextMode}, nil
+	}); syncErr != nil {
+		// Final-review round 1 (R5/G3): the non-timeout leg's syncErr can
+		// chain a bd merge-write failure's raw stderr — wrap with
+		// next.RenderBDError BEFORE DescribeLockFailure renders it.
+		// bdRenderedError preserves Unwrap, so the describer's own
+		// timeout-vs-other classification (and this function's recorded
+		// disposition: no manufactured recovery line on the non-timeout
+		// leg) is unchanged; only the rendered text is per-line escaped.
+		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(next.RenderBDError(syncErr), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
+	}
+}
+
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Bead %s closed.\n", idrender.Bead(r.BeadID))
 	if r.WorktreeRemoved {
 		sb.WriteString("Worktree removed.\n")
+	}
+	if r.NextModeIndeterminate {
+		// AC-4b (spec 128 bead 5): the result summary renders the SAME
+		// indeterminate marker text the instruct tail does — never a
+		// fabricated `plan` (or any other mode) derived from the failed
+		// post-close child read. IndeterminateReason wraps an error
+		// chain that may embed agent-writable content (bd/git output),
+		// so it is termsafe.Escape'd here at the render sink — round-1
+		// panel G6, matching the identical classification
+		// ratchet_template_test.go assigns the tail template's own
+		// {{termsafe .IndeterminateReason}} interpolation (ADR-0042).
+		fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason))
+		return sb.String()
 	}
 	switch r.NextMode {
 	case state.ModeImplement:
@@ -1393,7 +1424,15 @@ func FormatResult(r *Result) string {
 		}
 		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 	case state.ModePlan:
-		fmt.Fprintf(&sb, "Remaining beads are blocked. Mode: plan (spec: %s)\n", idrender.Spec(r.NextSpec))
+		// R2.3 (spec 128 bead 5, round-4/round-5 tally): reworded to fit
+		// the TWO triggers that actually survive AC-4b's fix — the
+		// empty-lifecycle-subset fallback (zero lifecycle children) and
+		// the all-open branch (lifecycle children exist but none has
+		// ever been claimed or closed). "Remaining beads are blocked"
+		// was true for NEITHER: `blocked` is a distinct child status
+		// from "still open, unclaimed", and the empty-subset trigger has
+		// no lifecycle beads to be blocked at all.
+		fmt.Fprintf(&sb, "No lifecycle work has started yet. Mode: plan (spec: %s)\n", idrender.Spec(r.NextSpec))
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
 			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
@@ -1423,15 +1462,26 @@ func FormatResult(r *Result) string {
 // guidance for plan / review / idle.
 //
 // epicID is the spec's epic, resolved once by Run and passed in ("" when no
-// epic exists → idle). The child set is re-read FRESH via phase.FetchChildren
-// (a single all-status `bd list --parent` call, uncached) so it reflects the
-// `bd close` this run just performed rather than a memoized pre-close view.
-func advanceState(epicID string) (mode, nextBead string) {
+// epic exists → idle). The child set is re-read FRESH via
+// completeFetchChildrenFn/phase.FetchChildren (a single all-status
+// `bd list --parent` call, uncached) so it reflects the `bd close` this run
+// just performed rather than a memoized pre-close view.
+//
+// AC-4b (spec 128 bead 5): a failed child read propagates as err rather
+// than being silently discarded into a nil child set that
+// DerivePhaseFromChildren would derive as `plan` — a discovery failure
+// serialized as a fabricated mode. Run maps a non-nil err to
+// Result.NextModeIndeterminate; mode/nextBead are meaningless ("", "")
+// whenever err is non-nil and callers MUST check err first.
+func advanceState(epicID string) (mode, nextBead string, err error) {
 	if epicID == "" {
-		return state.ModeIdle, ""
+		return state.ModeIdle, "", nil
 	}
 
-	children, _ := phase.FetchChildren(epicID)
+	children, ferr := completeFetchChildrenFn(epicID)
+	if ferr != nil {
+		return "", "", fmt.Errorf("reading post-close child set for epic %s: %w", idrender.Bead(epicID), ferr)
+	}
 	derivedPhase := phase.DerivePhaseFromChildren(children)
 
 	if derivedPhase == state.ModeImplement {
@@ -1442,7 +1492,7 @@ func advanceState(epicID string) (mode, nextBead string) {
 			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
 				var ready []bead.BeadInfo
 				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-					return state.ModeImplement, ready[0].ID
+					return state.ModeImplement, ready[0].ID, nil
 				}
 			}
 		}
@@ -1450,10 +1500,10 @@ func advanceState(epicID string) (mode, nextBead string) {
 		// is blocked on a dep that just closed but hasn't propagated, or the
 		// only remaining work is in_progress with a peer). Stay in implement
 		// without a concrete next bead rather than flipping to review.
-		return state.ModeImplement, ""
+		return state.ModeImplement, "", nil
 	}
 
-	return derivedPhase, ""
+	return derivedPhase, "", nil
 }
 
 // buildSkewMetadata returns a metadata map with the override reason,
@@ -1492,6 +1542,67 @@ func adrDivergenceFailure(beadID, findings string) error {
 		fmt.Sprintf("mindspec complete %s   (re-run after the OWNERSHIP.yaml fix or the revert)", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --override-adr \"<reason>\"", safeBeadID),
 		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", safeBeadID))
+}
+
+// runCommittedRangeGate runs the pre-bead-6 committed-range doc-sync +
+// ADR-divergence gates (base..beadHead, ownerRef=beadHead) — the leg
+// reconcile mode has always used, now shared with the "no bead worktree
+// matched" case (spec 128 Bead 6): with no worktree to snapshot, the
+// gates measure the branch's own committed tip instead.
+func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec executor.Executor, opts CompleteOpts, warnWriter io.Writer) error {
+	// OWNERSHIP attribution (manifests + domain enumeration) is read
+	// from beadHead — the SAME ref the gate diffs — so an OWNERSHIP
+	// claim committed on the bead branch satisfies its own gate with
+	// no override (spec 095 / mindspec-vvs9).
+	docResult := validate.ValidateDocsRange(root, base, beadHead, beadHead, exec)
+	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
+	// failure decision so they print on every run.
+	printResultWarnings(warnWriter, docResult)
+	if docResult.HasFailures() && opts.AllowDocSkew == "" {
+		return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
+	}
+	// The gate runs EXACTLY ONCE. Same bead-branch anchoring as doc-sync
+	// above: base..beadHead. Ownership ref = beadHead.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, beadHead)
+	printResultWarnings(warnWriter, adrResult)
+	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
+	// WARN — never affects the pass/fail decision.
+	beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
+	return handleADRGateOutcome(root, beadID, opts, adrResult, adrFindings)
+}
+
+// handleADRGateOutcome is the shared ADR-divergence gate outcome handler
+// (spec 128 Bead 6): the --supersede-adr placeholder pre-create (BEFORE
+// the pass/fail decision, so the new file exists on disk even if a
+// downstream step fails — Bead 3 step-4 ordering rule) and the
+// gate-failure decision itself (fatal only when neither
+// --override-adr nor --supersede-adr is set). Shared verbatim between
+// the reconcile path's committed-range gate call and the normal path's
+// prospective-snapshot gate call (materialize.go's runMaterialization)
+// so the two modes can never drift in how they interpret the same
+// override flags.
+func handleADRGateOutcome(root, beadID string, opts CompleteOpts, adrResult *validate.Result, adrFindings []validate.DivergenceFinding) error {
+	if opts.SupersedeADR != "" {
+		// Seed Domains from the structured findings slice (revision 2 —
+		// NO fmt.Sprintf parsing of Issue messages). When no violation
+		// exists the seed list is empty and the operator fills it in
+		// later when editing the placeholder.
+		var seedDomains []string
+		for _, f := range adrFindings {
+			if f.Kind == "uncovered" && f.Domain != "" {
+				seedDomains = []string{f.Domain}
+				break
+			}
+		}
+		title := "Placeholder for " + opts.SupersedeADR
+		if _, err := adrCreateWithIDFn(root, opts.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
+			return fmt.Errorf("--supersede-adr: %w", err)
+		}
+	}
+	if opts.OverrideADR == "" && opts.SupersedeADR == "" && adrResult.HasFailures() {
+		return adrDivergenceFailure(beadID, joinResultErrorMessages(adrResult))
+	}
+	return nil
 }
 
 // attestedRestoreFailure renders spec 121 R5(c)'s attested-restore forward
@@ -1557,37 +1668,6 @@ func joinResultErrorMessages(r *validate.Result) string {
 		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
 	}
 	return strings.Join(msgs, "; ")
-}
-
-// residualDirtyPaths parses `git status --porcelain` output (as returned by
-// exec.Status) and returns any path NOT in known — the Spec 119 R3 (Bead 1
-// Step 3) warning signal for a file that became dirty AFTER the
-// artifact-dirt scan (a hook, a race) and was therefore excluded from the
-// pathspec-scoped tracker commit (the `never an add -A equivalent`
-// guarantee). known is the exact artifactDirt pathspec just committed.
-func residualDirtyPaths(porcelain string, known []string) []string {
-	knownSet := make(map[string]bool, len(known))
-	for _, k := range known {
-		knownSet[k] = true
-	}
-	var extra []string
-	for _, line := range strings.Split(porcelain, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		p := strings.TrimSpace(line[3:])
-		if idx := strings.Index(p, " -> "); idx >= 0 {
-			// Rename entry ("XY orig -> new"); the new path is what
-			// matters for classification.
-			p = p[idx+4:]
-		}
-		if p == "" || knownSet[p] {
-			continue
-		}
-		extra = append(extra, p)
-	}
-	return extra
 }
 
 // resolveBeadWorktree pins the bead's worktree path and the ref the

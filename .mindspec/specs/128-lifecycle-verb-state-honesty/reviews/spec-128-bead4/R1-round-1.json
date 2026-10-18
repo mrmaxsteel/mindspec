@@ -1,0 +1,32 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.82,
+  "rationale": "Author-of-record lens. Plan §Bead 4's four steps are delivered in exactly the three contracted files and nothing else: the guide with the marker-delimited 11-row table (step 1), the 734-line fixture suite (step 2), the ADR-0023 strike (step 3), and the cross-pin (step 4, TestAgreementTable_DocRowsCrossPinFixtures). Verified against code: the ADR strike annotations match the spec's quoted :107/:108 rows by content and the diff is a single hunk at lines 104-116, so bead-3's OQ-2 draft-discovery amendment (ADR-0023.md:204) is untouched; carry-forward item 1 (blocked-child legacy shape) is named in §Legacy shapes and matches semantics_v2.go's G2 strictness (blocked is neither closed nor in_progress, no self-heal) with the real repair --force-backward flag (repair.go:93); item 3 (preserve-invalid-stored) is named as a distinct shape and is truthful — IsBackwardMove treats an invalid stored value as incomparable-therefore-backward (order.go:43-45), so plan.go step 4b's no-op genuinely preserves it; item 2's substance (advancePhaseOnClaim as an evidence-fresh writer whose implement-over-review write is legitimate, alongside the review-stored reasoning) is delivered in §Writer taxonomy and matches next.go:542-583's actual closure. go build and the agreement-table tests are green; worktree left clean. The REQUEST_CHANGES is carry-forward item 4: the sanction-sentence truth check is asserted but not actually performed against the strongest documented threat to the sentence. Bead 2's accepted residual in completeSyncPhase's own doc comment (internal/complete/complete.go:1398-1420) explicitly routes a choice to beads 4/5: either fold completeSyncPhase through a stored-aware no-op-on-backward guard, or 'extend the agreement-table wording to name this fence's honest scope' — because completeSyncPhase writes advanceState's freshly-derived nextMode unconditionally under the lock and, in the documented reachable residue state (stored=implement after a surfaced release-sync failure or claim/advance crash window, all lifecycle children open), lands plan over implement: a semantically identical backward-converging write not routed through the fenced SanctionedDerivedSync surface. Bead 4 delivered the taxonomy's universal sentence ('Every mindspec_phase writer ... exactly one sanctioned backward writer', guide lines 94-98/106-112) WITHOUT naming completeSyncPhase, and plan.md contains no bead-5/6 step folding the guard, so neither routed option was taken; the commit trailer says 'Deviations: none'. As shipped, the guide's central truth-claim is only lexically true, in a document whose entire purpose is state honesty — and the guide's own forward-by-evidence definition ('never a value older than what it just observed') would equally admit SanctionedDerivedSync, so without the completeSyncPhase caveat the three-way taxonomy cannot actually draw the line it claims. Doc-only fix, small.",
+  "concrete_changes_required": [
+    "project-docs/user/guides/lifecycle-modes.md §Writer taxonomy: discharge the routed bead-2 residual (internal/complete/complete.go:1398-1420) by naming completeSyncPhase and its honest scope — the exactly-one-caller fence over phase.SanctionedDerivedSync is LEXICAL (sole direct call site), and completeSyncPhase can land a semantically-equivalent backward-converging write (plan over stored implement) in the documented residue state reachable after a previously-surfaced release-sync failure or a crash between claim and next's advance. Either add it to the taxonomy with that stated scope (corrective-in-effect, precondition always previously surfaced, accepted residual per bead-2 G6/R3-G3), or reword the 'exactly one sanctioned backward writer' sentence to the lexical claim the fence actually proves. If the implementer instead lands the no-op-on-backward fold in complete.go, the sentence may stand as written — but then the plan/commit must record that as the taken option, not 'Deviations: none'.",
+    "Same section, minor precision while editing: the advancePhaseOnClaim bullet calls the implement-over-review write 'a forward move', but the codebase's own comparator this guide sits beside orders implement < review (IsBackwardMove(review, implement) is true, internal/phase/order.go). Use the carry-forward's own framing — an evidence-fresh CONVERGING write driven by fresh child evidence, not a regression — rather than a direction word the shipped comparator contradicts."
+  ],
+  "findings": [
+    {
+      "id": "R1-4.1",
+      "severity": "major",
+      "summary": "Carry-forward item 4 not genuinely discharged: the writer-taxonomy's universal 'exactly one sanctioned backward writer' claim omits completeSyncPhase, whose own bead-2 doc comment (complete.go:1398-1420) documents a reachable backward-converging write outside the fenced surface and explicitly routed 'name this fence's honest scope in the agreement-table wording' to this bead. Neither routed option (guard fold / wording extension) was taken; commit records 'Deviations: none'."
+    },
+    {
+      "id": "R1-4.2",
+      "severity": "minor",
+      "summary": "advancePhaseOnClaim bullet describes the implement-over-review write as 'a forward move'; the shipped IsBackwardMove comparator (order.go) orders implement < review, so the guide contradicts the comparator it documents. Substance of carry-forward item 2 is otherwise delivered (evidence-fresh reasoning present, matches next.go:542-583); the 'forward-by-evidence' label vs the carry-forward's 'forward-by-intent' phrasing is an acceptable refinement."
+    },
+    {
+      "id": "R1-4.3",
+      "severity": "note",
+      "summary": "ADR-0023 edit adds a 'not superseded, still accurate' annotation to the third edge-case row (multiple in_progress) beyond the mandated :107/:108 strikes — harmless editorial clarity, in the same hunk, no change required. Strike content verified exact against the spec's quoted rows; bead-3's OQ-2 amendment paragraph (line 204) untouched (single-hunk diff)."
+    },
+    {
+      "id": "R1-4.4",
+      "severity": "note",
+      "summary": "Positive verifications: carry-forward items 1 and 3 delivered and code-verified (semantics_v2.go G2 strictness; IsBackwardMove invalid-value conservatism making plan.go step 4b's preserve claim truthful); merge-safety.md link target exists; go build ./... and the AgreementTable tests green in the bead worktree; worktree left byte-identical."
+    }
+  ]
+}

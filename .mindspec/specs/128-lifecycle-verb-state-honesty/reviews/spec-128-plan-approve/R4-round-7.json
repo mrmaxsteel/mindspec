@@ -1,0 +1,59 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.98,
+  "rationale": "The reviewed plan remains broadly spec-faithful and the unchanged R4 checks pass, but the round-6 empty-diff fix is only partial. Trailer-encoded kinds make existing C and D commits unambiguous, yet eliding a stage also elides the durable evidence that the stage ran. After a no-op S, for example, tip and marker still identify C; a crash before merge is therefore indistinguishable from a crash immediately after C, and the prescribed re-entry runs R and S again. The symmetric empty-C window can replay R, and if both commits are elided there is no marker at all. Fixtures xv-xvii do not cover these post-elision crash boundaries. This is a load-bearing recovery-state defect that can direct bead 6 to implement a false run-once protocol, so the plan should not pass until the elision/replay contract is made mechanically honest.",
+  "concrete_changes_required": [
+    "Give every completed M/S boundary durable, unambiguous recovery evidence even when its tree is unchanged (for example, retain trailer-bearing empty C/D commits or specify equivalent persistent stage state), OR explicitly replace the run-exactly-once claim with a replay-safe at-least-once protocol and prove every replayed operation is idempotent and preserves the convergence contract.",
+    "Extend the bead-6 failure fixtures to interrupt (a) after R when C was elided but before any D publication, (b) after a no-op S/D elision but before merge, and (c) when both C and D are elided. Assert the chosen truthful contract: either R/S are not replayed, or replay is explicitly permitted and proven safe. Keep fixture xvii's ordinary-D trailer classification coverage."
+  ],
+  "findings": [
+    {
+      "id": "R4-7-1",
+      "severity": "major",
+      "class": "prior-round-ask",
+      "status": "PARTIAL",
+      "summary": "Round 6's discriminator ask is addressed for commits that exist: Mindspec-Stage trailers distinguish materialization from artifact-sync without consulting ambiguous tree diffs. It is not addressed for elided stages, because no durable observation records that an elided stage completed."
+    },
+    {
+      "id": "R4-7-2",
+      "severity": "major",
+      "class": "crash-recovery-discriminator",
+      "status": "NEW_ISSUE",
+      "summary": "No-op D elision contradicts the claimed R/S run-once reconciliation. After C is published and advanced, S may run and elide D because the artifact is unchanged. Until merge/terminal clear, the durable state remains tip==marker==C. A crash there re-enters through the C trailer and runs R then S again; it cannot distinguish post-C/pre-R from post-S/pre-merge."
+    },
+    {
+      "id": "R4-7-3",
+      "severity": "major",
+      "class": "crash-recovery-discriminator",
+      "status": "NEW_ISSUE",
+      "summary": "Empty-C elision has the symmetric missing-boundary problem: before a later D marker is published, a crash after R leaves no materialization marker and a rerun can repeat R. If C and D are both elided, no stage marker exists at all. Trailer readability cannot recover a stage for which no commit object was created."
+    },
+    {
+      "id": "R4-7-4",
+      "severity": "major",
+      "class": "fixture-coverage",
+      "status": "NEW_ISSUE",
+      "summary": "Fixture xv covers empty-C classification only generically and does not pin the crash after R/before D-publication window. Fixture xvi kills after A-to-C and proves the pre-S resume path, but does not kill after no-op S before merge, where the ambiguity occurs. Fixture xvii adequately pins ordinary artifact-changing D classification."
+    },
+    {
+      "id": "R4-7-5",
+      "severity": "info",
+      "class": "validation",
+      "summary": "mindspec validate plan 128-lifecycle-verb-state-honesty exited 0 at reviewed commit c15860ab. It emitted exactly the three acknowledged WARNs: bead count 10, scope redundancy R=0.09, and dependency-chain depth 4."
+    },
+    {
+      "id": "R4-7-6",
+      "severity": "info",
+      "class": "frontmatter-mapping",
+      "summary": "Ruby/Psych parsed the YAML frontmatter. work_chunks and Bead headings both map positionally to IDs 1 through 10. Dependencies remain 1:none; 2:1; 3:none; 4:2,3; 5:2,3; 6:1; 7:1; 8:2; 9:none; 10:4,5. The working plan matches reviewed commit c15860ab."
+    },
+    {
+      "id": "R4-7-7",
+      "severity": "info",
+      "class": "oq3-mechanical-derivation",
+      "summary": "OQ-3 remains mechanically sound. DerivePhaseFromChildren returns plan for zero/all-open lifecycle children, implement for any in_progress lifecycle child, and ignores non-lifecycle children. With option 1, stored and derived are plan after plan approval, implement after the first lifecycle claim, and still plan after a non-lifecycle-only claim/trigger-2 state. The warning at derive.go:179-193 therefore does not trigger in those windows."
+    }
+  ]
+}

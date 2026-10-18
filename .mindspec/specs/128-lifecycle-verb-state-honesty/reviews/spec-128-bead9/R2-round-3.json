@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-3 minimal confirm of d59622b3, codebase-pin lens. (1) THE TWO NEW RED-ON-REVERT TESTS RUN AND PROVEN RED-ON-REVERT: TestFetchBeadByID_AC11RenderingLeg and TestGateReadiness_RenderingLegControlBytesEscaped both PASS as committed; I then reverted BOTH wrapper call sites to bare %w of err (FetchBeadByID in beads.go, GateReadiness in ready_gate.go) and both tests FAILED exactly as designed, closing the round-2 gap where chain tests alone stayed green on a dropped wrapper. Worktree restored and verified byte-identical afterward (git diff HEAD --quiet clean). The FetchBeadByID test drives the real PATH-shimmed bead.RunBD chain; the GateReadiness test's evaluateReadinessFn seam-swap is appropriate for that site since the wrapper AT the GateReadiness wrap is what's under test. (2) READY_GATE METADATA-SEAM WRAPS SOUND: RecordReadinessOverride/RollbackReadinessOverride now return &bdRenderedError{err} on seam failure with no added prefix, preserving the raw-error contract; their ONLY non-test callers are cmd/mindspec/next.go:285/303 (bead 7's file, untouched by this commit), which render via %v — text byte-identical for printable errors, chain intact via Unwrap. The commit's armed-not-hypothetical claim checks out: MergeMetadata/DeleteMetadataKeys both read via GetMetadata -> tracedOutput first, so a read failure carries wrapBDError-folded bd stderr. (3) SCOPE/OVERLAP: exactly three files, all inside internal/next (beads_test.go, ready_gate.go, ready_gate_test.go); cmd/mindspec/next.go, internal/next/guard.go, and internal/approve/spec.go remain untouched — parallel-track boundary held, and the round-1 accepted-risk note for next.go's own two legs stands unchanged. Suites: fresh -short -count=1 full runs green (internal/next 10.8s, internal/bead 5.6s); go build ./... clean. Standing APPROVE confirmed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "blocking": false,
+      "title": "Carried from rounds 1-2: truncated wrap branch still has no errors.As-survival pin",
+      "detail": "Unchanged advisory: wrapBDError's truncated-branch %w is still not pinned by an errors.As assertion (TestRunBD_CapsLongStderr checks content/cap/marker only). Non-blocking; close whenever convenient."
+    },
+    {
+      "severity": "cosmetic",
+      "blocking": false,
+      "title": "Carried from rounds 1-2: writeFakeBD uses os.Setenv instead of t.Setenv",
+      "detail": "Unchanged and harmless today; t.Setenv would self-guard against a future t.Parallel addition in the package."
+    }
+  ]
+}

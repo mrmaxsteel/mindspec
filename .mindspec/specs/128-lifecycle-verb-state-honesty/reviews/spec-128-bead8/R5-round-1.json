@@ -1,0 +1,68 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": 0.97,
+  "rationale": "The core implementation is structurally sound: SelectWork has total, deterministic behavior for every set size and integer pick; BuildReadySet preserves bd order and counts dropped rows once; the exported RenderBDError is the same chain-preserving renderer as the internal bdRenderedError path; and the bypass disclosure is located only in positional --emit-only. However, RunE validates selector conflict only when pick > 0. Consequently --pick=-1 is silently ignored whenever a positional bead is supplied, and positional --emit-only enters FetchBeadByID instead of rejecting the negative pick. This violates AC-9's unconditional negative-pick rejection and weakens the claimed 'positional only, never --pick' bypass boundary. A second CLI edge also skips SelectWork validation: with no ready items, claim mode handles the empty set as successful no-work before a negative pick can be rejected. The full short suite passes, but it lacks these combinations, so the acceptance contract is not yet closed.",
+  "concrete_changes_required": [
+    "Validate pick < 0 immediately after flag parsing and before positional dispatch, emit-only dispatch, scope/dirty guards, ready querying, or empty-set handling. Preserve the existing positive-pick-versus-positional mutual-exclusion rule (and decide explicitly whether a syntactically supplied --pick=0 counts as unset or as a conflicting selector).",
+    "Add CLI-level regression coverage for at least: positional --emit-only plus --pick=-1 (must fail before FetchBeadByID and must not print the readiness-bypass line), positional claim plus --pick=-1 (must fail before any readiness/claim work), and no-positional --pick=-1 with an empty ready set (must exit non-zero for the invalid pick rather than report successful no-work)."
+  ],
+  "findings": [
+    {
+      "id": "R5-B8-1",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "location": "cmd/mindspec/next.go:57-64, cmd/mindspec/next.go:81-83, cmd/mindspec/next.go:443-454",
+      "summary": "Negative --pick is ignored on positional paths and can reach the emit-only readiness bypass.",
+      "evidence": "RunE rejects positional-plus-pick only under len(args) > 0 && pick > 0. A negative value therefore reaches runEmitOnly, whose len(args) > 0 branch calls FetchBeadByID and would print 'emit-only: bead fetched by ID; readiness not checked.' on a successful fetch; the claim path likewise selects by name without calling SelectWork. A non-mutating `go run ./cmd/mindspec next --emit-only --pick=-1 mindspec-ta30.8` probe reached the 'fetching bead ...' error path (database access was sandbox-denied), proving argument validation did not reject -1. This contradicts AC-9: 'a negative --pick is rejected with an error rather than silently ignored.'"
+    },
+    {
+      "id": "R5-B8-2",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/select.go:23-39",
+      "summary": "SelectWork itself has coherent total semantics across 0/1/N-sized sets.",
+      "evidence": "For size 0, every pick returns 'no items to select from'. For size 1, pick 0 defaults to row 1, negative rejects, pick 1 selects row 1, and pick >1 is out of range. For size N, pick 0 defaults to row 1, negative rejects, picks 1..N select exactly the displayed 1-based row, and pick >N is out of range. The removed single-item shortcut closes the former validation bypass. The defect in R5-B8-1 is at the CLI routing layer, which does not always call this total function."
+    },
+    {
+      "id": "R5-B8-3",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "internal/next/beads.go:76-118, internal/next/beads.go:147-176",
+      "summary": "Exclusion accounting is row-based and does not double-count a bead that satisfies the title predicate multiple ways.",
+      "evidence": "The construction has one post-query exclusion predicate: strings.Contains(title, specFlag). Each raw row is visited once and appended at most once; ExcludedCount is len(Raw)-len(Filtered). Thus repeated occurrences of the spec ID in one title, or the same bead also satisfying the epic query scope, cannot create multiple exclusion counts. The epic constraint is a bd query scope, not a second post-filter reason. Partial and all-excluded cases are reported from the same raw/filtered construction."
+    },
+    {
+      "id": "R5-B8-4",
+      "classification": "VERIFIED_WITH_CAVEAT",
+      "severity": "low",
+      "location": "internal/next/beads.go:62-75, internal/next/beads.go:250-278, cmd/mindspec/next.go:648-670",
+      "summary": "RenderBDError is single-wrap equivalent to the internal renderer and preserves the error chain; its double-wrap idempotence comment is overstated.",
+      "evidence": "For a raw non-nil error, RenderBDError returns the same bdRenderedError type whose Error calls renderBDError and whose Unwrap returns the original error; nil maps to nil. This establishes text and chain equivalence at one wrapping level. However, readinessOverrideFailure normally receives an error already wrapped by RecordReadinessOverride and wraps it again. The comment says this is byte-identical because the first output is printable ASCII, but termsafe.Escape explicitly preserves printable non-ASCII runes inside quoted output and documents non-idempotence for that residual. This does not reopen the raw-control-byte safety hole, but the byte-identical assertion should be corrected or directly tested under the intended input domain."
+    },
+    {
+      "id": "R5-B8-A",
+      "classification": "DISCLOSURE_A_ASSESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/next.go:88-95, cmd/mindspec/next.go:434-441, internal/resolve/target.go:106-153",
+      "summary": "The sibling ResolveSpecPrefixProven design does not leave an unproven explicit --spec path in mindspec next.",
+      "evidence": "Both claim and emit-only explicitly route non-empty --spec through ResolveSpecPrefixProven before their ready query. Auto-detected targets are subsequently required to resolve an epic in BuildReadySet. The older ResolveSpecPrefix remains reachable in complete-related callers, but not on either next path that AC-15 requires to prove a full-ID spec exists."
+    },
+    {
+      "id": "R5-B8-B",
+      "classification": "DISCLOSURE_B_ASSESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/next.go:88-200",
+      "summary": "Claim-mode guards can mask the draft/no-epic scope refusal; emit-only cannot, but the disclosed ordering is binding and does not silently widen scope.",
+      "evidence": "A nonexistent explicit full ID is rejected by ResolveSpecPrefixProven before the guards. An existing draft passes that existence proof, so claim mode may return a dirty-tree or unmerged-bead refusal before BuildReadySet emits the approve-first no-epic steer; emit-only reaches the scope refusal without those guards. This is a user-facing error-priority difference, not a selection-scope correctness failure: no global ready query or out-of-scope selection occurs."
+    },
+    {
+      "id": "R5-B8-V",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "reviewed commit 7f4ad41b2c16f551f2c583ede961cb29ff31bffc",
+      "summary": "Artifact identity, tests, build, and byte-identical worktree condition were checked.",
+      "evidence": "HEAD equals the reviewed commit. Focused internal/next and cmd/mindspec selection/render tests passed; `go build ./...` passed (with only a sandbox-denied Go module stat-cache warning); and `go test ./... -short` passed. Final git status/diff checks in the bead worktree were clean, and no scratch binary remained."
+    }
+  ]
+}

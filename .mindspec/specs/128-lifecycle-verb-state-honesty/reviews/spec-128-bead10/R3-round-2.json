@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Round 2 over fix commit 0a9932d8. Both round-1 asks re-derived from scratch against the code, not just re-read. (1) R3-1 entanglement contradiction: all four workflow docs now state the landed rule — two CONDITIONAL, containment-gated classes (an entry-absent .gitignore at the claim anchor; the target spec's events.ndjson/manifest.json when recording is enabled), never unconditionally empty, dirt on either class still blocking, session.json/worktree-dir excluded because gitignored, 'narrowed, not removed'. Traced line-by-line against internal/next/guard.go: ComputeEntangleablePaths derives exactly those two classes gated on containedRel(toplevelOf(cwd), ...) with the HasGitignoreEntry absence check and recording.IsEnabled condition; CheckDirtyTreeProportional routes intersecting user dirt to blockingDirt (blocks) and everything else to ignoredDirt; the quoted stderr notice in architecture.md matches guard.go:575's IgnoredDirtNotice string verbatim ('note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): ...'), and it is genuinely test-pinned (entangle_test.go's TestIgnoredDirtNotice_PinsStableWording). The prose now agrees with ADR-0025's R5.1 amendment on every point I checked, including the containment-not-lexical gating and the visibility-notice requirement. (2) R3-2 retry sentence: merge-safety.md now splits the plain retry (same content-gate class re-evaluated against the unchanged tip; same message if unfixed) from the override retry (bypasses that gate class unconditionally — 'the reason is recorded, not evaluated as a fix' — and can surface a fresh ADR-divergence refusal because doc-sync runs first and returns early). Both statements are exactly what materialize.go pins: docResult.HasFailures() && opts.AllowDocSkew == \"\" at line ~273 returns before the ADR gate ever evaluates; handleADRGateOutcome's OverrideADR/SupersedeADR check bypasses unconditionally. The only categorical guarantee retained — the retry never fails at the panel stale-SHA gate — holds by construction: a gate refusal publishes no marker and advances no ref, so the retry's discriminator finds nothing and the panel gate re-passes on the unchanged reviewed_head_sha tip. The rewrite also correctly notes both flags may be needed when both skew classes are present (each flag silences only its own gate). Riders in the same commit checked for contract contradictions from my lens: G3's REPLACED artifact-materialization paragraph now matches ADR-0041 §1's amended ordering (and honestly describes the superseded design as superseded); G4's positional --emit-only bypass line is real and verbatim (cmd/mindspec/next.go:478 prints 'emit-only: bead fetched by ID; readiness not checked.'). Worktree left byte-identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-R2-1",
+      "severity": "info",
+      "title": "Round-1 R3-1 (ADR-0025 contradiction, four docs) RESOLVED",
+      "detail": "workflow/architecture.md §R5, overview.md, runbook.md point 6, and interfaces.md's ComputeEntangleablePaths/EntangleableClaimPaths rows all rewritten to the delivered conditional-class rule and verified against guard.go (ComputeEntangleablePaths, CheckDirtyTreeProportional, IgnoredDirtNotice — quoted notice text matches the pinned string verbatim). No remaining 'empty today' / 'exactly (a)(b)(c)' claims; the ADR-0025 R5.1 amendment and the docs now agree.",
+      "files": [
+        ".mindspec/domains/workflow/architecture.md",
+        ".mindspec/domains/workflow/overview.md",
+        ".mindspec/domains/workflow/runbook.md",
+        ".mindspec/domains/workflow/interfaces.md"
+      ]
+    },
+    {
+      "id": "R3-R2-2",
+      "severity": "info",
+      "title": "Round-1 R3-2 (retry-sentence overpromise) RESOLVED",
+      "detail": "merge-safety.md's gate-refusal section now claims only what materialize.go's sequential gate evaluation and the marker-free refusal path guarantee: plain retry re-meets the same content-gate class; an override bypasses unconditionally and may surface the sequentially-later ADR-divergence gate for its first evaluation; the sole categorical promise kept is that no retry can fail at the panel stale-SHA gate. Each clause traced true. The residual ceteris-paribus reading (e.g. brand-new user dirt between runs failing the panel gate's dirt clause, which is not the stale-SHA clause) is the ordinary implicit assumption of any retry contract, not an overpromise.",
+      "files": [
+        "project-docs/user/guides/merge-safety.md"
+      ]
+    }
+  ]
+}

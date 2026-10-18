@@ -1,0 +1,34 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": "high",
+  "rationale": "Author-of-record regression check of the round-1 fix commit 542992b4 (single commit, as required). SCOPE: every change stays inside plan §Bead 2's territory — next.go's advancePhaseOnClaim (step 2), plan.go's step-4b write + v2 invocation gate (steps 1/7), release.go's sync legs (step 3), semantics_v2.go's predicate/marker (step 7), the corresponding test files, complete.go gaining ONLY a doc comment (the G6 residual record — deviation F remains behaviorally true: no code change at completeSyncPhase), and one honest lint-allowlist entry. No file outside Bead 2's plan scope is touched. PLAN FIDELITY OF THE G1 RESHAPE: the two behavioral changes are concurrency refinements the SPEC ITSELF mandates, not scope creep — spec R3.3's concurrency section requires every mindspec_phase write be 'conditional on the stored value read in the same critical section' with 'never a stale-over-fresh overwrite', so plan.go step-4b's new no-op-when-stored-is-ahead guard (IsBackwardMove(stored, plan) on the lock's own fresh read) and advancePhaseOnClaim's write-only-while-fresh-derivation-says-implement (fresh per-call Cache constructed inside the lock fn, read failure propagates with no write) are the plan's steps 1-2 made R3.3-conformant, with the OQ-3 value semantics themselves unchanged: plan-approve still writes plan in the normal path, the first lifecycle claim still advances to implement, non-lifecycle claims still advance nothing, release still syncs derived via the sole SanctionedDerivedSync caller. G5 MESSAGE DISCIPLINE (my assigned judgment): the split treatment is faithful to the house convention — next's advance and release's self-heal leg share describePhaseSyncFailure, whose deliberate departure from DescribeLockFailure's no-recovery-for-non-timeout contract is documented at the function and justified (the convergent fix is identical regardless of failure shape, and repair phase genuinely converges because the same self-heal runs at repair's own entry); release's sanctioned-sync leg ends its greppable final line with the safe inspection action (recovery: bd show <epic-id>) exactly per AC-5(iv)'s backward-branch convention, with --force-backward named only as a separately-labeled operator choice in the body — never on the recovery line — matching the dirty-tree-refusal precedent. The dead-end 'mindspec release <bead-id>' / 'mindspec next <bead-id>' recoveries are gone. MY ROUND-1 ADVISORIES: R1-1 (late-lifecycle-bead review->implement unforced backward write) is DISSOLVED — the claim advance now writes only when fresh derivation itself says implement, so no write can ever disagree with fresh evidence; R1-2 (silent FindEpicBySpecID discard) got exactly the disposition I asked for and better — G4 documents the two-leg fail-safe contract (preflight's independent fail-closed P10 lookup; idempotent re-run at every other verb's entry with nothing-half-applied) AND proves leg 1 with TestApprovePlan_V2PreflightLookupFailureDoesNotCrashOrBypassPreflight; R1-3 (blocked-child legacy classification) was resolved the OPPOSITE way from my round-1 lean, and correctly so — the positive every-child-exactly-open check implements the plan's primary 'all open' phrasing and prevents auto-rewriting a genuinely different state; the residual (a legacy epic with an explicitly-blocked child now routes through the general backward warning to the safe bd show line rather than self-healing) is safe-by-construction and disclosed. EMPIRICS: go build green; full go test ./... -short green with zero non-ok packages; forced -count=1 -race rerun of cmd/mindspec, internal/approve, internal/phase green (the two real-lock interleave tests, the stale-evidence-never-overwrites test, lock-timeout/merge-failure convergent-recovery tests, step-4b backward-refusal test, marker forward-compat table, and blocked/custom LegacyPhaseSignature table all present and passing); worktree left byte-identical, no residual phase.lock.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-2.1",
+      "severity": "info",
+      "note": "Scope verified file-by-file against plan §Bead 2: 10 files changed, all within the bead's steps or their tests; complete.go's change is comment-only (G6 residual routed to beads 4/5 in the doc comment, with the two candidate resolutions named), so round-1 deviation F still holds behaviorally."
+    },
+    {
+      "id": "R1-2.2",
+      "severity": "info",
+      "note": "The G1 conditional writes are spec-R3.3-mandated refinements, not plan drift: the OQ-3 value semantics are unchanged in every non-contended path, and in contended paths the fresher writer's value now always stands (proven by TestApprovePlan_Step4bRefusesBackwardOverFresherClaim and the two real-lock interleave tests under -race)."
+    },
+    {
+      "id": "R1-2.3",
+      "severity": "info",
+      "note": "G5 split treatment judged FAITHFUL: convergent repair-phase recovery on the two legs where that command provably converges (self-heal is idempotent and re-runs at repair's own entry); inspection-only recovery line on the sanctioned-backward leg where no unforced fix exists, force escape confined to a labeled body sentence. describePhaseSyncFailure's documented departure from DescribeLockFailure's general contract is a considered, function-local exception, and the new ratchet allowlist entry (release.go releaseSyncPhase Fprintln epicID, count 1) is honest — an argument-passing hop with both actual renders idrender.Bead-wrapped inside describeReleaseSyncFailure."
+    },
+    {
+      "id": "R1-2.4",
+      "severity": "info",
+      "note": "My round-1 advisories all discharged: R1-1 dissolved by construction (writes only on fresh-derivation agreement); R1-2 resolved via G4's document-and-test disposition, which I verify as sound — the two-leg argument (fail-closed preflight for persistent failures, idempotent every-verb re-run for transient ones, zero partial writes) closes the window I flagged; R1-3's opposite resolution (positive-open predicate) is the safer and more plan-literal reading."
+    },
+    {
+      "id": "R1-2.5",
+      "severity": "low",
+      "note": "Disclosed residual worth carrying to bead 4's agreement-table work alongside G6: a marker-absent legacy epic holding an explicitly blocked-status lifecycle child no longer self-heals (by G2 design) and instead lives behind the general backward-direction warning whose only unforced exit is operator judgment. Safe (nothing is auto-rewritten, the recovery line is the inspection action) and correctly disclosed in LegacyPhaseSignature's doc comment; the agreement-table/legacy documentation should name this shape so an operator meeting it knows repair-phase-with-force plus a reason is the intended path. Non-blocking."
+    }
+  ]
+}

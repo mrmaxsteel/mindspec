@@ -1,12 +1,319 @@
 package phase
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
+
+// TestEnsureMigrated_NeverOverwritesFresherLockedWrite is AC-5(vii): the
+// legacy-migration backfill (EnsureMigrated, driven here via a real
+// SetMergeMetadataForTest merge seam shared with a contending locked
+// writer) never lands its derived value over a fresher write that landed
+// on the REAL R3.3 lock first — under the lock its absent-check re-runs
+// against the FRESH stored value and no-ops; the final stored value is
+// the locked writer's.
+//
+// Round-1 panel G6: deterministic barriers, not sleep-based scheduling —
+// a channel proves EnsureMigrated's goroutine has attempted acquisition
+// before the holder releases; a bounded negative window proves it cannot
+// complete before release; a channel wait proves it completes afterward.
+func TestEnsureMigrated_NeverOverwritesFresherLockedWrite(t *testing.T) {
+	root := t.TempDir()
+	store := newFakeEpicStore("epic-7", map[string]interface{}{
+		"spec_num":   float64(7),
+		"spec_title": "legacy",
+		// mindspec_phase intentionally ABSENT: a legacy pre-080 epic —
+		// exactly the state EnsureMigrated's backfill targets.
+	})
+	store.stub(t)
+	t.Cleanup(SetMergeMetadataForTest(store.merge))
+
+	holderEntered := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	go func() {
+		_ = WithPhaseWriteLock(root, "epic-7", store.merge, func(string, bool) (map[string]interface{}, error) {
+			close(holderEntered)
+			<-releaseHolder
+			return map[string]interface{}{"mindspec_phase": "plan"}, nil
+		})
+	}()
+	<-holderEntered
+
+	type result struct {
+		migrated bool
+		err      error
+	}
+	// Round-2 panel G4.1: the "attempted acquisition" proof must come
+	// from INSIDE the real kernel-level lock-acquisition path — a
+	// channel closed by the caller before invoking EnsureMigrated does
+	// NOT prove the goroutine was ever scheduled far enough to reach the
+	// actual syscall attempt.
+	attempting := make(chan struct{})
+	var attemptOnce sync.Once
+	t.Cleanup(SetAcquireAttemptHookForTest(func() {
+		attemptOnce.Do(func() { close(attempting) })
+	}))
+	done := make(chan result, 1)
+	go func() {
+		migrated, err := EnsureMigrated(root, "007-legacy")
+		done <- result{migrated, err}
+	}()
+	// Deterministic: EnsureMigrated's goroutine has genuinely reached the
+	// real lock-acquisition syscall attempt before we ever release the
+	// holder.
+	select {
+	case <-attempting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("EnsureMigrated never reached a lock-acquisition attempt")
+	}
+
+	// Deterministic negative window: EnsureMigrated cannot possibly have
+	// completed while the holder still holds the lock.
+	select {
+	case <-done:
+		t.Fatal("EnsureMigrated completed before the contending holder released the lock")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(releaseHolder)
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("EnsureMigrated: %v", r.err)
+		}
+		if r.migrated {
+			t.Error("expected migrated=false — under the lock the absent-check re-runs against the fresher stored value and no-ops")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("EnsureMigrated never returned")
+	}
+
+	if got := store.get("mindspec_phase"); got != "plan" {
+		t.Errorf("final stored mindspec_phase = %v, want %q (the locked writer's value, never the backfill's derived value)", got, "plan")
+	}
+}
+
+// TestEnsureMigrated_ReadErrorPropagatesNoWrite is round-1 panel G1: a
+// genuine epic-lookup FAILURE under the lock must propagate as
+// EnsureMigrated's own error — never silently collapse to "absent" and
+// trigger a backfill write from nothing.
+func TestEnsureMigrated_ReadErrorPropagatesNoWrite(t *testing.T) {
+	root := t.TempDir()
+	wantErr := errors.New("bd show: transient failure")
+
+	// FindEpicBySpecIDWithCache must still resolve the epic (via
+	// AllEpics/--type=epic) so EnsureMigrated reaches the lock; the
+	// FAILURE is injected on the `bd show <epicID>` read the lock's
+	// fresh under-lock read performs.
+	epicListJSON := `[{"id":"epic-11","title":"[SPEC 011-legacy] L","status":"open","issue_type":"epic","metadata":{"spec_num":11,"spec_title":"legacy"}}]`
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte(epicListJSON), nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return nil, wantErr
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	calls := 0
+	restoreMerge := SetMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	migrated, err := EnsureMigrated(root, "011-legacy")
+	if err == nil {
+		t.Fatal("expected an error when the under-lock epic read fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error does not wrap the underlying read failure: %v", err)
+	}
+	if migrated {
+		t.Error("expected migrated=false on a read failure")
+	}
+	if calls != 0 {
+		t.Errorf("MergeMetadata calls = %d, want 0 — a read failure must never trigger a write", calls)
+	}
+}
+
+// TestEnsureMigrated_InvalidButPresentPhaseNeverBackfilled is round-1
+// panel G1: a mindspec_phase value that is PRESENT but fails validation
+// (garbage, or a stale/typo'd string) is NOT "genuinely missing" —
+// EnsureMigrated must never treat it as a backfill target.
+func TestEnsureMigrated_InvalidButPresentPhaseNeverBackfilled(t *testing.T) {
+	root := t.TempDir()
+	store := newFakeEpicStore("epic-12", map[string]interface{}{
+		"spec_num":       float64(12),
+		"spec_title":     "legacy",
+		"mindspec_phase": "not-a-real-phase", // present, but state.IsValidPhase rejects it
+	})
+	store.stub(t)
+	calls := 0
+	t.Cleanup(SetMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+		calls++
+		return store.merge(id, updates)
+	}))
+
+	migrated, err := EnsureMigrated(root, "012-legacy")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if migrated {
+		t.Error("expected migrated=false — a present-but-invalid value is not a genuinely-missing field")
+	}
+	if calls != 0 {
+		t.Errorf("MergeMetadata calls = %d, want 0 — present-but-invalid must never be backfilled", calls)
+	}
+	if got := store.get("mindspec_phase"); got != "not-a-real-phase" {
+		t.Errorf("stored mindspec_phase mutated to %v, want the untouched original invalid value preserved", got)
+	}
+}
+
+// TestEnsureMigrated_ChildReadFailurePropagatesNoWrite is round-2 panel
+// G1 (hard-block driver, renewed one writer over): the backfill's OWN
+// children read (freshCache.GetChildren, run inside the WithPhaseWriteLock
+// callback once the stored-phase read has already succeeded and found
+// the field genuinely absent) must PROPAGATE a GetChildren failure —
+// never silently derive "plan" from the resulting nil slice. This is
+// distinct from TestEnsureMigrated_ReadErrorPropagatesNoWrite above
+// (which exercises the LOCK's own under-lock stored-phase read failing);
+// here the stored-phase read succeeds cleanly and the failure is
+// injected on the CHILDREN query specifically.
+func TestEnsureMigrated_ChildReadFailurePropagatesNoWrite(t *testing.T) {
+	root := t.TempDir()
+	wantErr := errors.New("bd list --parent: transient failure")
+	epicJSON := `{"id":"epic-13","title":"[SPEC 013-legacy] L","status":"open","issue_type":"epic","metadata":{"spec_num":13,"spec_title":"legacy"}}`
+
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				return nil, wantErr
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+	calls := 0
+	restoreMerge := SetMergeMetadataForTest(func(string, map[string]interface{}) error {
+		calls++
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	migrated, err := EnsureMigrated(root, "013-legacy")
+	if err == nil {
+		t.Fatal("expected an error when the children read fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error does not wrap the underlying children-read failure: %v", err)
+	}
+	if migrated {
+		t.Error("expected migrated=false on a children-read failure")
+	}
+	if calls != 0 {
+		t.Errorf("MergeMetadata calls = %d, want 0 — a children-read failure must never trigger a write", calls)
+	}
+}
+
+// TestEnsureMigrated_CallerCacheStalenessNeverUsed is round-2 panel G1's
+// second ask: EnsureMigratedWithCache must derive children from a FRESH
+// per-call Cache constructed INSIDE the WithPhaseWriteLock callback,
+// never the caller-supplied Cache — which can have been pre-warmed with
+// child state that goes STALE before the lock is ever acquired. This
+// test pre-warms the caller's cache with an all-open snapshot (would
+// derive "plan" if reused), then mutates the underlying "world" to
+// all-closed BEFORE calling EnsureMigratedWithCache, and asserts the
+// WRITTEN value reflects the FRESH state ("review"), proving the stale
+// snapshot was never consulted.
+func TestEnsureMigrated_CallerCacheStalenessNeverUsed(t *testing.T) {
+	root := t.TempDir()
+	epicJSON := `{"id":"epic-20","title":"[SPEC 020-legacy] L","status":"open","issue_type":"epic","metadata":{"spec_num":20,"spec_title":"legacy"}}`
+
+	var mu sync.Mutex
+	children := []ChildInfo{{ID: "b1", Status: "open", IssueType: "task"}}
+	restoreList := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--type=epic" {
+				return []byte("[" + epicJSON + "]"), nil
+			}
+			if strings.HasPrefix(a, "--parent") {
+				mu.Lock()
+				defer mu.Unlock()
+				b, _ := json.Marshal(children)
+				return b, nil
+			}
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreList)
+	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("[" + epicJSON + "]"), nil
+		}
+		return []byte("[]"), nil
+	})
+	t.Cleanup(restoreRun)
+
+	var captured map[string]interface{}
+	restoreMerge := SetMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+		captured = updates
+		return nil
+	})
+	t.Cleanup(restoreMerge)
+
+	// Caller pre-warms a Cache BEFORE the "real world" state changes —
+	// simulating the exact staleness class round-2 G1 targets: the prior
+	// EnsureMigratedWithCache reused THIS cache inside the critical
+	// section, so a change to the underlying children after this
+	// snapshot but before lock acquisition would have gone unnoticed.
+	staleCache := NewCache()
+	if _, err := staleCache.GetChildren("epic-20"); err != nil {
+		t.Fatalf("pre-warm: %v", err)
+	}
+
+	// Now the real world changes: all children close.
+	mu.Lock()
+	children = []ChildInfo{{ID: "b1", Status: "closed", IssueType: "task"}}
+	mu.Unlock()
+
+	migrated, err := EnsureMigratedWithCache(root, staleCache, "020-legacy")
+	if err != nil {
+		t.Fatalf("EnsureMigratedWithCache: %v", err)
+	}
+	if !migrated {
+		t.Fatal("expected migrated=true")
+	}
+	if captured["mindspec_phase"] != state.ModeReview {
+		t.Errorf("mindspec_phase = %v, want %q — the FRESH children state, not the stale pre-warmed cache's all-open snapshot (which would derive %q)",
+			captured["mindspec_phase"], state.ModeReview, state.ModePlan)
+	}
+}
 
 // stubFinders wires the bd seams so FindEpicBySpecID and FindEpic/GetChildren
 // resolve against in-memory fixtures. Returns a teardown.
@@ -105,7 +412,7 @@ func TestLegacyMigratesOnFirstCommand(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("007-legacy")
+	migrated, err := EnsureMigrated(t.TempDir(), "007-legacy")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +451,7 @@ func TestMigratedEpicHasMigratedAtMarker(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	if _, err := EnsureMigrated("009-legacy"); err != nil {
+	if _, err := EnsureMigrated(t.TempDir(), "009-legacy"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	tsRaw, ok := captured["mindspec_migrated_at"].(string)
@@ -177,7 +484,8 @@ func TestEnsureMigratedIdempotent(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("003-mig")
+	root := t.TempDir()
+	migrated, err := EnsureMigrated(root, "003-mig")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +497,7 @@ func TestEnsureMigratedIdempotent(t *testing.T) {
 	}
 
 	// Second invocation: same expectations.
-	migrated2, err := EnsureMigrated("003-mig")
+	migrated2, err := EnsureMigrated(root, "003-mig")
 	if err != nil {
 		t.Fatalf("unexpected error on 2nd call: %v", err)
 	}
@@ -225,7 +533,7 @@ func TestEnsureMigratedNoEpicReturnsFalseNil(t *testing.T) {
 	})
 	defer restoreMerge()
 
-	migrated, err := EnsureMigrated("999-nonexistent")
+	migrated, err := EnsureMigrated(t.TempDir(), "999-nonexistent")
 	if err != nil {
 		t.Errorf("expected nil error when no epic exists, got %v", err)
 	}

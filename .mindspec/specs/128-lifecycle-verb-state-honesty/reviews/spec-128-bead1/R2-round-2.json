@@ -1,0 +1,42 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens, round 2 against 99d75484. Both of my round-1 asks classify ADDRESSED, re-derived empirically (never from the fix report): the hardened AC-5(vi) walker turns RED on both of my round-1 evasion shapes when planted in a REAL production file in a /tmp copy (map-index write flagged at internal/complete/probe_evasion.go:7 with a [map-index write] tag; const-bound composite-literal key flagged at :12), the canonical unwrap-one-site revert still turns it red (completeSyncPhase unwrapped -> complete.go:1389 flagged), and the crashed-holder test now exists as a real SIGKILL-subprocess test that passes under -race. Suites green: `go build ./...` OK; `go test ./internal/phase/... ./cmd/mindspec/... -short` green; internal/approve and internal/complete green under -race with -count=1; internal/lint + internal/guard green. The lint-ratchet recounts are honest tightening, not gate-weakening (counts DECREASED 5->1 epicID / 3->1 specID, verified by hand-counting repairPhaseRunE: exactly one raw-specID Sprintf, the `mindspec repair phase %s` re-run recovery in the lockErr branch, and exactly one raw-epicID Sprintf, the `bd show %s` recovery — both exactly as the updated Gate text describes; the unchanged Printf/Fprintf entries also still match the code). Bead worktree left byte-identical; no stray phase.lock in the bead worktree, spec worktree, or main checkout.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-r2-ASK1",
+      "classification": "ADDRESSED",
+      "severity": "INFO",
+      "summary": "Round-1 ask 1 (inventory-walker hardening OR narrowed claim): the fix did BOTH. The walker now recognizes three write shapes (literal composite key; lvalue map-index assignment, with rvalue reads deliberately and correctly unflagged; file-local-const-bound key in either shape) and ships four self-tests (red-on-evasion for shapes 2+3, read-not-flagged, guarded-shapes-not-flagged), all green under -race. I re-derived independently: both evasion shapes planted in a real internal/complete production file turned TestMindspecPhaseWritesAllLockGuarded red with exact file:line, and the canonical unwrap-one-site revert stayed red after the rewrite."
+    },
+    {
+      "id": "R2-r2-ASK1-DOC",
+      "classification": "ADDRESSED",
+      "severity": "INFO",
+      "summary": "The disclosed opaque-helper residual doc comment is honest — in fact conservative. It names the genuinely unresolved classes (helper-built maps passed opaquely, package-level consts declared in a DIFFERENT file, concatenated/formatted keys) and explicitly scopes the guarantee to the accidental-drift threat model, not adversarial evasion. My probe of the residual's own example (`completeMergeMetadataFn(id, buildPhaseUpdate())`) was actually CAUGHT — the helper's composite literal is itself outside any lock call and got flagged — so the stated residual UNDERSTATES coverage in the common same-file case; the truly invisible cases are the cross-file-const and formatted-key ones the comment also names. A false total guarantee is exactly what the disclosure avoids."
+    },
+    {
+      "id": "R2-r2-ASK2",
+      "classification": "ADDRESSED",
+      "severity": "INFO",
+      "summary": "Round-1 ask 2 (crashed-holder test): TestPhaseLock_CrashedHolderReleases_Unix is a real subprocess test — the helper process (TestHelperProcess_AcquirePhaseLockAndHang, env-guarded) acquires the lock at a fixture path, signals via a marker file, is SIGKILLed while holding, and the parent's next acquirePhaseFileLock succeeds with a <1s bound asserted. Green under -race (0.03s). The Windows-leg disposition is now an ARGUED, documented deviation in the test's own doc comment (no Windows CI runner; LockFileEx handle-release-on-exit is documented Win32 kernel semantics, not this package's code) backed by the seam-driven TestShouldRetryWindowsLockError classification test in phaselock_windows_errors_test.go, which runs on every platform. This satisfies my round-1 'deliver or disclose-and-argue' condition on both halves."
+    },
+    {
+      "id": "R2-r2-RATCHET",
+      "severity": "INFO",
+      "summary": "Ratchet recounts verified honest: rawIDRenderAllowlist repairPhaseRunE Sprintf counts dropped 5->1 (epicID) and 3->1 (specID) because the G1 rework moved the derivation and its raw Sprintf sites inside the critical section where they are now idrender-wrapped (verified in the current repairPhaseRunE body — the closure's errors use idrender.Spec/idrender.Bead). Hand-count of the surviving raw sites matches the entries exactly, and the updated Gate rationale text names them accurately. The round-1 opaque-operand registry+manifest arg2 entry (deviation C) is unchanged and still matches its house-pattern sibling; internal/lint and internal/guard suites green."
+    },
+    {
+      "id": "R2-r2-1",
+      "severity": "MINOR",
+      "summary": "Leftover from my round-1 non-blocking note (R2-4): writer_inventory_test.go's header still says the walk runs 'excluding this package's own lock/order/migrate/sanctioned-sync plumbing and test files', but the walker only excludes _test.go files and testdata dirs — the phase package's plumbing IS walked and passes because its writes sit inside WithPhaseWriteLock calls (stronger than claimed, so purely a doc-accuracy nit). Non-blocking; fine to fold into any later doc sweep."
+    },
+    {
+      "id": "R2-r2-2",
+      "severity": "INFO",
+      "summary": "Codebase-pin spot-checks on the rest of the fix: the fn-signature change to func(stored string, present bool) rippled correctly (all nine wrap sites plus the anchor helpers in impl_test.go updated; TestApproveImplCallOrder green in an uncached -race run, so deviation D's ordering pins survived the second signature change); completeSyncPhase/releaseSyncPhase named extractions exist with per-path tests (internal/complete/complete_phaselock_test.go, cmd/mindspec/release_test.go additions); repairFindRootFn seam exists and repair tests fixture-scope the lock root; full -short run of the two named suites green from the bead worktree with zero git dirt afterward and no phase.lock residue in the bead worktree, spec worktree, or main checkout."
+    }
+  ]
+}

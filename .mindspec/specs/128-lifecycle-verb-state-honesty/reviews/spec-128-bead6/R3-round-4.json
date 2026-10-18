@@ -1,0 +1,18 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-4 minimal confirm at f3488f95 (round-3 retired-mechanism sweep). Confinement verified: three files (internal/complete/complete.go, .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md), prose-only — I grepped the complete.go hunks for any non-comment changed line and found none; all 58 changed lines there are doc comments. The step-2.25 panel-gate ordering rationale — the item my lens most cares about — preserves its load-bearing reasoning exactly: the delivered text still states the ordering is load-bearing because materialization advances the bead tip PAST reviewed_head_sha (false-firing ADR-0037 §4 staleness) and clears user dirt (false-clearing §5), so the gate must measure the pre-materialization tip; only the mechanism name changed from the retired CommitAll to the materialization subphase, which is factually what advances the tip at this tip of the branch. ADR-0037 §5's dirty-tree block keeps its decision text byte-identical and adds a dated amendment note explaining the mechanism rename — the correct amendment discipline for normative ADR text. ADR-0041's §2 retry-safety bullet now grounds the never-main property in runMaterialization's wtPath==\"\" refusal, which matches the code I verified in round 1 (materialize.go's no-worktree refusal is the real enforcement). No behavior, test, or gate-semantics change anywhere in the commit; every artifact my rounds-2/3 APPROVE rested on is unchanged. Standing APPROVE confirmed.",
+  "concrete_changes_required": [],
+  "prior_round_asks": {
+    "round-3": "My round-3 verdict had zero concrete changes; this commit delivers round-3's five dispatched retired-mechanism rewordings plus one disclosed same-class fix, all prose."
+  },
+  "findings": [
+    {
+      "id": "R3-r4-1",
+      "severity": "info",
+      "title": "Step-2.25 rationale rewording verified reasoning-preserving",
+      "detail": "The two-pronged justification for gate-before-materialization ordering (false-firing staleness against reviewed_head_sha; false-clearing of the user dirt the panel decision measured) survives verbatim in structure; only the dead CommitAll referent was replaced with the delivered materialization subphase. The comment now accurately narrates the code beneath it."
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.98,
+  "rationale": "Round 3 closes the two reproduced Git happy-path defects: the temporary index is now tip-seeded, and materialization now uses an expected-old-tip ref update followed by a mixed reset of the real index. The requested artifact/index/interval red-on-revert legs are present, the ADR-0023 draft carve-out remains narrowly pre-epic, ADR-0025's bead-7 amendment remains fenced to the worktree-creating next claim path, and leaving ADR-0037 untouched remains correct. However, the corrected protocol's stated reset-failure recovery is not true. After update-ref advances the extant bead branch from the reviewed SHA to C, a reset failure or process death leaves the real index stale. Immediate re-invocation cannot reach the promised idempotent reset: complete's unchanged panel gate runs first and ADR-0037 section 4 blocks because the live bead ref is now C rather than reviewed_head_sha. This is exactly the dead-end recovery shape ADR-0041 section 2(i) forbids. The proposed ADR-0041 amendment also needs to state that snapshotting writes unreachable loose objects before the content gates; a gate refusal preserves refs, tracker, index, and worktree, but is not repository-byte-identical unless the snapshot uses an isolated object store. These are localized bead-6 plan corrections, not a rejection of OQ-1(a), but the plan must name a real forward-reconcile path and accurately amend the governing ADR before approval.",
+  "concrete_changes_required": [
+    "Revise bead 6's materialization failure protocol so an interruption or failure after the expected-old-tip update-ref but before successful real-index refresh has a genuine bounded forward exit that is reachable despite ADR-0037's unchanged stale-SHA gate. Do not name bare re-invocation as idempotent unless pre-panel current-state reconciliation actually recognizes C and completes the pending index refresh safely.",
+    "Add the new update-ref-to-index-refresh boundary to ADR-0041 section 3's mutation-point classification and pin it with a red-on-revert failure/kill fixture: advance the ref to C, fail or interrupt before reset, invoke the documented recovery, and assert convergence without rollback, re-paneling, phantom staged deletion, or loss of interval edits.",
+    "Make the ADR-0041 amendment draft explicit about snapshot side effects. With the stated temporary index plus ordinary object database, a refused content gate may leave unreachable loose objects, so replace or qualify the existing repository-byte-identical language for this exception while preserving the precise guarantee that the bead ref/tip, tracker state, real index, and worktree are unchanged. Alternatively specify an isolated object-store mechanism that makes the stronger claim true."
+  ],
+  "findings": [
+    {
+      "id": "R5-R2-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "seeded-temporary-index",
+      "summary": "The snapshot index is now seeded from the exact bead tip before add -A applies the named-artifact exclusion.",
+      "evidence": "Plan protocol step 1 and bead 6 step 1 both require read-tree <tip> before add -A, define exclusion as unchanged-at-tip, and add fixture legs (v) and (vii) proving that T and the user commit retain the artifact blob/mode and only the sync commit updates it."
+    },
+    {
+      "id": "R5-R2-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "class": "index-transition-and-forward-recovery",
+      "summary": "The expected-old-tip update and mixed-reset transition are specified correctly for the happy path, but the reset-failure retry is unreachable.",
+      "evidence": "Protocol step 3 orders commit-tree T, update-ref refs/heads/bead/<id> C <expected-old-tip>, then reset --quiet --mixed in wtPath. That makes clean and interval-edit outcomes coherent. But complete.go's authoritative panel gate precedes materialization, and ADR-0037 section 4 blocks an extant bead ref whose live tip differs from reviewed_head_sha. Once update-ref succeeds, a failed reset followed by the promised bare re-run is therefore stale-blocked before any repair can execute, contradicting ADR-0041 section 2(i)'s genuine-forward-exit rule."
+    },
+    {
+      "id": "R5-R2-ASK-3",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "class": "red-on-revert-and-adr-0041-draft",
+      "summary": "All three requested artifact/clean/index-split fixture legs were added, but the ADR-0041 amendment description still carries an inaccurate recovery claim and omits the snapshot's loose-object exception.",
+      "evidence": "Bead 6 legs (iv)-(vii) cover ordinary interval dirt, user-commit-never-touches-artifact, clean-after-materialization, and byte identity through T/user commit. The same bead calls reset failure forward-only with an idempotent re-run, which the unchanged pre-materialization panel gate prevents. Snapshot step 1 expressly writes loose objects, while the current ADR says enumerated preflight refusals leave the repository byte-identical; the amendment step does not direct the implementer to qualify that statement."
+    },
+    {
+      "id": "R5-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "class": "post-cas-index-refresh-deadlock",
+      "summary": "A crash or terminal reset error after the CAS ref advance manufactures a stale-panel dead end.",
+      "evidence": "State at interruption: branch ref and HEAD resolve to C, C's parent is the reviewed old tip, the real index still represents the old tip, and the worktree remains untouched. On re-run the branch still exists, so ADR-0037's missing-ref reconcile exception does not apply; reviewed_head_sha != C blocks. The plan names no pre-panel recognizer or alternative recovery that can reach the pending reset."
+    },
+    {
+      "id": "R5-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "class": "adr-0041-byte-identity-accuracy",
+      "summary": "Prospective snapshotting is pre-commit, not mutation-free, under the stated object-storage mechanism.",
+      "evidence": "read-tree/add/write-tree through a temporary index leaves the worktree, real index, and refs untouched, but add/write-tree write blob/tree objects to the repository object database. A doc-sync or ADR-divergence refusal can therefore leave unreachable loose objects. The amended ADR should state the narrower operational invariants or isolate the temporary objects before claiming repository-byte-identical refusal behavior."
+    },
+    {
+      "id": "R5-ADR-REGRESSION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "other-adr-touchpoints",
+      "summary": "The remaining ADR resolutions stay conformant.",
+      "evidence": "OQ-2 limits filesystem authority to spec-directory-plus-conventional-branch discovery before epic creation, preserving beads as post-epic authority under ADR-0023. ADR Fitness fences ADR-0025's entangleable-dirt clarification to the worktree-creating next claim path. OQ-1(a) preserves ADR-0037's panel-before-tip-mutation ordering and stale-SHA decision, so ADR-0037 and internal/panel correctly remain untouched."
+    },
+    {
+      "id": "R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "Plan validation succeeds at the reviewed commit.",
+      "evidence": "HEAD is f72803bbb49be5f786150047b674c91a555a13ea. mindspec validate plan 128-lifecycle-verb-state-honesty exits 0 with only the three decomposition advisories already answered in the plan: bead count 10, scope redundancy 0.09, and dependency depth 4."
+    }
+  ]
+}

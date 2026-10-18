@@ -1,0 +1,37 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.93,
+  "rationale": "Round-7 zero-ask regression check of c15860ab under the grounding lens; both fresh claims verified — the primitive against the shipped tree, the ref semantics by lab. (1) `CommitMessageBody` EXISTS as claimed: internal/gitutil/gitops.go:907-923, doc-commented with its spec-127 bead-6 provenance, implemented as `git log -1 --format=%B <ref> --` returning the raw message byte-verbatim minus git's own trailing newline — a full-body read that trivially supports parsing a pinned `Mindspec-Stage:` trailer, and it is already seam-wired in shipped code (executor/merge_resumption.go:40 `commitMessageBodyFn = gitutil.CommitMessageBody`). Lab-confirmed end-to-end: a commit built by `commit-tree -m` with the trailer appended (no hooks, no message cleanup on the plumbing path) yields the trailer byte-verbatim through `%B`, and `git interpret-trailers --parse` recognizes it as a well-formed trailer. (2) `update-ref` CREATE semantics HOLD as described, lab-verified in both plumbing forms: creating an absent ref with the empty old-value operand succeeds; repeating it while the ref exists fails atomically ('cannot lock ref … reference already exists' via the --stdin `create` verb; 'update_ref failed … cannot lock ref' via the operand form) with the existing value untouched — so the absent→C publication is a genuine atomic fail-if-exists CAS, and the C→D expected-old advance also verified. The plan's G2 design claims sit squarely on these verified semantics: one invocation can never overwrite another's marker, and a failed bead-ref advance leaves the marker as write-ahead evidence. The instrument choice (per-ref git CAS, deliberately NOT the bead-1 phase lock) is coherent — it keeps the materialization machinery free of any lock-ordering edge with the phase-metadata subsystem, and git's own ref locking provides the serialization the consolidation asked for. (3) My round-6 minor finding R2-6-4 (empty-diff discriminator vacuity) — which the BRIEF records as the convergent core of round 6 — is ADDRESSED by a STRONGER mechanism than my suggested sentence: the stage kind is now durably ENCODED in the pinned trailer rather than inferred from the tree diff, empty stages are elided (matching HEAD's no-op behavior) so every published marker points at a trailer-carrying commit, totality holds by construction, and fixtures (xv)/(xvi)/(xvii) pin the empty-C / no-op-D / ordinary-D classifications. G3's single authoritative S-resume route also removes the continue-at-the-merge shortcut my round-6 lab had exercised, which makes every tip==marker-D re-entry pass the index-refresh + dirt-classifier path — strictly safer. Six rounds of grounding audit are now fully discharged: every mechanism in the OQ-1 protocol rests on primitives I have verified against the tree (CommitMessageBody, CommitTreeMerge/UpdateRef, recordMergeSourceMarker, neteffect, CommitPaths) or by lab (two-ref decision atomicity, per-ref installation caveat per git-update-ref(1) on 2.51.2, write-ahead first-parent encoding, CREATE/expected-old CAS, trailer round-trip). ONE info-grade implementation note for bead 6, not a plan defect: the user-supplied `--commit-msg` text is embedded in the same message body as the tool's appended trailer, so a user message that itself ends with a `Mindspec-Stage:` line would cohabit the final trailer block — bead 6 should pin last-occurrence-wins parsing (or reject/escape the pinned key in user text) when it pins the exact key. One line at implementation time; the discriminator's safety margin (G3's single S-resume route) already bounds the worst misread.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-7-1",
+      "severity": "info",
+      "claim": "CommitMessageBody exists with spec-127 provenance and supports trailer reads.",
+      "evidence": "internal/gitutil/gitops.go:907-923 (`git log -1 --format=%B`, byte-verbatim minus one trailing newline; 'Spec 127 bead-6 fix round 2' doc comment); seam use at internal/executor/merge_resumption.go:40. Lab: commit-tree-built commit returns the `Mindspec-Stage: materialization` trailer verbatim via %B; `git interpret-trailers --parse` recognizes it.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-7-2",
+      "severity": "info",
+      "claim": "update-ref CREATE semantics (atomic fail-if-exists) and expected-old CAS verified by lab on git 2.51.2.",
+      "evidence": "Empty-old-value create on absent ref succeeds; on existing ref both the operand form and the --stdin `create` verb fail with 'reference already exists'/'cannot lock ref', value untouched; expected-old advance succeeds with the correct old value.",
+      "disposition": "No action."
+    },
+    {
+      "id": "R2-7-3",
+      "severity": "info",
+      "claim": "My round-6 minor R2-6-4 (empty-diff discriminator) is ADDRESSED — by encoding, not inference.",
+      "evidence": "Pinned Mindspec-Stage trailer read via CommitMessageBody; empty stages elided with the R/S stages still running exactly once (only their commits conditionally absent); fixtures (xv)-(xvii); carried into the ADR-0041 §3 draft.",
+      "disposition": "Discharged; no action."
+    },
+    {
+      "id": "R2-7-4",
+      "severity": "info",
+      "claim": "Bead-6 implementation note: user --commit-msg text shares the message body with the appended trailer.",
+      "evidence": "A user message ending in its own `Mindspec-Stage:` line would cohabit the final trailer block; the plan pins the exact key and reader in bead 6 but not the collision rule.",
+      "disposition": "Pin last-occurrence-wins parsing (or reject/escape the pinned key in user text) when bead 6 pins the exact key — one line at implementation time; G3's single S-resume route already bounds the worst misread. Not a plan defect."
+    }
+  ]
+}

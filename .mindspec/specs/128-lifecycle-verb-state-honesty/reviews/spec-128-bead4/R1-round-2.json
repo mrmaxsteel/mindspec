@@ -1,0 +1,29 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.88,
+  "rationale": "Author-of-record lens, round 2 over f490fd26. Both my round-1 asks re-derived from the delivered text, not the commit message. ASK 1 (completeSyncPhase discharge) ADDRESSED: the writer-taxonomy section now carries a dedicated 'Disclosed residual, not silently excepted' bullet naming completeSyncPhase with its complete.go:1398-1420 citation, the exact residue state (stored implement after a surfaced release-sync failure or claim/advance crash window, all lifecycle children open), the plan-over-implement backward-in-order write outside the fenced surface, the accepted-as-is disposition, and — the load-bearing part — an explicit re-scoping of the 'exactly one sanctioned backward writer' sentence to SanctionedDerivedSync's fenced general-purpose surface ('not a claim that no code path anywhere can ever produce an equivalent effect'). The SanctionedDerivedSync bullet also now names its exactly-one-caller fence as LEXICAL. This is precisely the routed option (b) from bead-2's residual; the sanction-sentence truth check is now genuinely performed, not asserted. ASK 2 (advancePhaseOnClaim wording) ADDRESSED: the bullet uses the carry-forward's binding 'evidence-fresh forward-by-intent' label, states outright that phase.IsBackwardMove(review, implement) is true and that the write is 'deliberately not labeled forward', and gives a coherent reason it is still not a second sanctioned backward writer (intent-scoped — only ever writes implement from one specific fresh fact — vs a general re-derive-and-write-anything surface); the description matches next.go:542-583's actual under-lock re-derivation. Whole-bead re-judgment: the fix's other changes hold up under my lens. The two new repair rows extend the table beyond R1.3's literal row list, but they answer round-1 G6 (a consolidated panel ask, the legitimate channel for scope extension) and every claim in them is code-verified this round: repair.go:241 runs EnsurePhaseSemanticsV2 as its first step, :300 records mindspec_phase_force_reason, :329 prints the quoted 'already consistent' line, and both rows correctly carry repair's tail-less two-surface shape. The G5 recovery-chain reword is now TRUE to code where round 1's version was not: derive.go:215's backward warning recovers to 'bd show <epic-id>' (never the backward write, AC-5(iv)), and repair's unforced refusal at repair.go:321 is what names --force-backward — the guide's four-step chain matches. The spec-create row's round-1 'no deferral' overclaim is replaced by an honest disclosed-scope note (WorktreeSpec proxy path only; the verb's own emitInstruct renders idle until bead 5's AC-3). Carry-forward items 1 and 3 remain named (item 1 improved by the chain correction). ADR-0023 is untouched this round (two-file commit), so my round-1 certifications of the :107/:108 strikes and the intact bead-3 amendment paragraph stand. go build green; TestAgreementTable_Rows passes all 13 rows and TestAgreementTable_DocRowsCrossPinFixtures passes at HEAD; worktree left clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-4.1-r2",
+      "severity": "resolved",
+      "summary": "Round-1 ask 1 (completeSyncPhase discharge): ADDRESSED. Disclosed-residual bullet names the writer, cites its own doc comment, describes the reachable backward-converging residue, and scopes the 'exactly one sanctioned backward writer' sentence to the fenced surface instead of a universal claim — the routed option (b) taken exactly."
+    },
+    {
+      "id": "R1-4.2-r2",
+      "severity": "resolved",
+      "summary": "Round-1 ask 2 (advancePhaseOnClaim wording): ADDRESSED. Binding carry-forward label 'evidence-fresh forward-by-intent' restored; the guide now states IsBackwardMove(review, implement) is true and deliberately avoids calling the write 'forward', with the intent-scoped justification; matches next.go's actual closure."
+    },
+    {
+      "id": "R1-4.5",
+      "severity": "note",
+      "summary": "Residual wording tension, non-blocking: the taxonomy's category definition says evidence-fresh forward-by-intent 'writes only when that fresh evidence itself calls for forward motion', while the advancePhaseOnClaim bullet then (correctly) admits the write can be backward-in-order. The bullet resolves the tension explicitly two sentences later, so the section as a whole is honest; a future edit could tighten the category definition to 'calls for the verb's own target phase' to remove the momentary contradiction."
+    },
+    {
+      "id": "R1-4.6",
+      "severity": "note",
+      "summary": "Positive verifications this round: repair rows' four factual claims all code-verified (repair.go:241/:300/:321/:329); G5 chain matches derive.go:215 + repair.go:321; ADR-0023 untouched (round-1 strike certifications stand); suite green at HEAD (13/13 rows + structural cross-pin); worktree byte-identical."
+    }
+  ]
+}

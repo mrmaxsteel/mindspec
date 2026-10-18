@@ -1,0 +1,22 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R8 opus",
+  "confidence": 0.9,
+  "round": 3,
+  "reviewed_commit": "a8ac1fc4",
+  "rationale": "a8ac1fc4 changes test code in only one file, internal/complete/materialize_attestation_test.go. It updates the seam-default pointer pin to point at the named escaped wrappers, and it adds TestMetadataSeamEscapedDefaults_RealChainHostileStderr. The new test is hermetic. It prepends a fake bd from a t.TempDir() to PATH with t.Setenv, which is restored automatically. The fake never touches this repo's bd store or git state. The bead ID is synthetic, and the test skips on Windows the same way the sibling fakeBdOnPath does. The test discriminates. In a scratch export, I reverted both wrappers to return the raw error, and the test went RED on both families for the control byte and for the forged recovery line. The test also pins the errors.As path through to *exec.ExitError, so dropping Unwrap would be caught too. The other seven files change only comments, docs or the seam default, so they do not touch the gate files or fixture legs behind my round-2 basis. My round-2 probes A and B concerned materialize.go's attestation comparison and the store in wireRealGitFaultSeams, and neither is altered by this diff (materialize.go's changes are comment-only). The package now has a third fake-bd helper: fakeBdOnPath, fakeFailingBdOnPath and the cross-package writeFakeBD. That is advisory duplication and does not block. It belongs with the R8-2 duplication finding I already have standing.",
+  "concrete_changes_required": [],
+  "findings": [
+    "Diff 0783a507..a8ac1fc4: 8 files. The only test change is materialize_attestation_test.go (the pointer pin is retargeted, and one real-chain hostile test plus the fakeFailingBdOnPath helper are added). Production code changes: complete.go adds the named wrappers mergeMetadataEscaped and getMetadataEscaped as the seam defaults. materialize.go, repair.go and plan.go change only comments.",
+    "Hermeticity: the fake bd lives under t.TempDir() and PATH is set with t.Setenv, so nothing persists. The script only writes stderr and exits 1, so there are no writes to the repo or .beads. The test does not call t.Parallel, so the process-wide PATH mutation is safe. Verified by observation: `git status --short` and `git diff --stat` are unchanged after every run (only the untracked reviews/ dir, which existed before).",
+    "Conventions: saveAndRestore is not needed because the test calls the wrappers directly and does not mutate the seams. The helper copies the house fakeBdOnPath pattern: the Windows skip, a 0o755 POSIX script, and t.Setenv for PATH. It is a third near-duplicate fake-bd helper, which is advisory and falls under the standing R8-2 finding.",
+    "go vet ./internal/complete/ ./internal/approve/ ./cmd/mindspec/ -> clean. gofmt -l on the changed dirs -> empty.",
+    "go test -short -count=1 ./internal/complete/ ./internal/approve/ ./internal/next/ -> ok/ok/ok (78.9s / 76.7s / 21.1s).",
+    "go test -race -short -count=1 ./internal/complete/ ./internal/approve/ -> ok (54.2s) / ok (44.7s).",
+    "go test -v -run 'TestMetadataSeamEscapedDefaults|TestStageAttestationSeamDefaults' ./internal/complete/ -> both PASS.",
+    "MUTATION PROBE (scratch git-archive export of a8ac1fc4, under the R8 scratch dir): changed both wrappers to return the raw err in place of next.RenderBDError(err). TestMetadataSeamEscapedDefaults_RealChainHostileStderr FAILED with 4 errors: 'a raw control byte survived' and 'a forged standalone recovery line survived', for both getMetadataEscaped and mergeMetadataEscaped. The test bites.",
+    "go test -short -count=1 ./... -> 48/48 packages ok, zero FAIL.",
+    "Round-2 basis check: the bead-6 fixture legs, wireRealGitFaultSeams and the attestation comparison in materialize.go are not code-changed by this diff, so probes A and B still stand. The new test adds no harness.Sandbox build and no -short skip, so R8-4 (runtime) is not worsened."
+  ]
+}

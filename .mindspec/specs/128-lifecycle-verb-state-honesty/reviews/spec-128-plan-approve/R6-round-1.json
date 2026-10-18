@@ -1,0 +1,44 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Option 1 is coherent for epics created after the upgrade, but the plan does not reconcile already-present old-semantics epics, so its claimed dissolution of the plan-approve warning is not upgrade-safe. The gate reorder also relies on an untrue measurement-equivalence assertion: the current executor is rooted at the main checkout, git diff does not include untracked files, CommitAll refreshes the tracker and stages after validation, and commit hooks can change what lands. Finally, the proposed lock inherits materially different Unix/Windows failure behavior without specifying recovery, timeout semantics, or even an ignore rule for the persistent repo-local lockfile. These are implementable corrections, so REQUEST_CHANGES rather than REJECT; none warrants an unoverrideable hard block.",
+  "concrete_changes_required": [
+    "Add an explicit, idempotent upgrade reconciliation for existing epics whose stored phase reflects the old plan-approve semantics (especially stored=implement with all lifecycle children open and none ever claimed). Define the durable discriminator that distinguishes this legacy window from a legitimate released/between-beads state, name the invoking lifecycle/read paths, make the write lock-protected, and add fixtures for upgrade-before-first-claim, upgrade-then-first-claim, non-lifecycle claim, release, and already-progressed epics.",
+    "Replace bead 6's asserted pre-gate/commit equivalence with a concrete snapshot protocol. The gates must validate exactly the tree that is later committed, including staged, unstaged, and untracked paths, and no export, hook, or concurrent edit may add content after validation without forcing revalidation/refusal. Add failure-injection tests for an untracked source file, a pre-commit hook that changes/adds a source file, tracker export changing content after measurement, and worktree mutation between the two gates and CommitAll.",
+    "Ground the worktree-inclusive validation API at the execution boundary. The existing MindspecExecutor.ChangedFiles and ref readers are rooted at g.Root, not wtPath; specify the executor/interface and implementation changes needed to diff base against the bead worktree and to read OWNERSHIP/domain/config inputs from the same candidate tree. Add those files to bead 6's scope and test that invoking complete from main still measures the bead worktree rather than main.",
+    "Complete the phase-lock operational design: choose and gitignore the exact lock path; define bounded wait/cancellation and an ADR-0035 recovery on contention; define crash/stale-file handling for the Windows O_EXCL path; and test timeout/error propagation, crashed-holder recovery, stale-file behavior, and that lock acquisition leaves no blockable git dirt. Do not rely only on Unix real-flock contention tests."
+  ],
+  "findings": [
+    {
+      "id": "R6-1",
+      "severity": "high",
+      "title": "Option 1 has no migration for old-semantics mid-lifecycle epics",
+      "detail": "Plan lines 210-240 and bead 2 change future plan approvals to stored=plan and advance on the first lifecycle claim. But internal/phase/migrate.go:54-56 explicitly no-ops whenever a stored phase already exists. An epic produced by the old binary can therefore upgrade with stored=implement while every lifecycle child remains open; state derivation continues to warn and trust implement, ordinary repair is now required to refuse the backward implement->plan move, and a non-lifecycle claim advances nothing. The plan's claim that the #248 window dissolves on both routes is consequently true only for newly written state. There is also no reliable inference from all-open children alone: the same child shape can follow release, so migration needs durable version/provenance evidence or an explicitly safe alternative, not a blind backward rewrite. No bead owns this upgrade path or its fixtures."
+    },
+    {
+      "id": "R6-2",
+      "severity": "high",
+      "title": "Gates-before-commit does not validate the content CommitAll actually commits",
+      "detail": "Plan lines 126-143 and bead 6 assert that pre-gate worktree content is identical to later materialization. Current executor.CommitAll (internal/executor/mindspec_executor.go:1194-1198) runs commitWithExport at commit time, after the proposed gates; current ChangedFiles working-tree semantics are git diff based and omit untracked files; CommitAll stages all changes; and commit hooks can modify/add tracked content after validation. A concurrent editor can do the same in the gap. Thus a source file can land without either doc-sync or ADR-divergence measuring it. This is a trust-boundary regression from validating an immutable committed tip. The AC-6 fixture checks only tip convergence on refusal and would not catch validate-X/commit-Y behavior."
+    },
+    {
+      "id": "R6-3",
+      "severity": "high",
+      "title": "The proposed worktree-inclusive gate is not grounded in the current executor and attribution APIs",
+      "detail": "Bead 6 scopes internal/validate and internal/complete but omits internal/executor and internal/gitutil. Executor.ChangedFiles(base, head) has no workdir argument, and MindspecExecutor.ChangedFiles shells out under g.Root (internal/executor/mindspec_executor.go:1201-1222); complete's executor is rooted at the main repo, while the candidate is wtPath. OWNERSHIP/domain enumeration is currently ref-backed when ownerRef is non-empty and root-backed on disk when empty, so a newly edited/untracked OWNERSHIP file also needs an explicit candidate-tree source. Merely passing an empty head or saying 'evaluated in wtPath' cannot produce the stated measurement. This API seam and its tests are homeless in the 10-bead cut."
+    },
+    {
+      "id": "R6-4",
+      "severity": "medium",
+      "title": "The phase lock can create persistent dirt or an unrecoverable lifecycle outage",
+      "detail": "The plan says the exact lock name is pinned under .mindspec but bead 1 does not include .gitignore, and the pinned commit ignores only .mindspec/session.json and .mindspec/current-spec.json there. Unix flock leaves the lockfile present after unlock/crash, so an unignored name becomes permanent user dirt. The referenced Windows journal implementation uses O_EXCL, waits 30 seconds, then fails forever on a crashed holder's stale file; Unix LOCK_EX has no timeout and can hang indefinitely. The plan tests only successful real-flock contention and does not specify error propagation, user recovery, stale ownership, cancellation, or platform parity. Since every phase writer is wrapped, one stale/contended lock can disable plan approve, next, complete, release, repair, migration, and finalization."
+    },
+    {
+      "id": "R6-5",
+      "severity": "info",
+      "title": "Plan validation has only the disclosed advisory warnings",
+      "detail": "mindspec validate plan 128-lifecycle-verb-state-honesty completed with the three documented WARNs: 10-bead count, scope redundancy R=0.09, and dependency-chain depth 4. These are not additional blockers, but they do not cover the failure modes above."
+    }
+  ]
+}

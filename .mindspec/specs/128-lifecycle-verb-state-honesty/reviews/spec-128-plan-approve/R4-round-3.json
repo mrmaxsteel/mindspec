@@ -1,0 +1,46 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "The plan at reviewed commit f72803bbb49be5f786150047b674c91a555a13ea remains buildable, honestly scoped, and spec-faithful under R4's empirical lens. R4 had zero asks in rounds 1 and 2, so round 3 is a regression review rather than an ask-resolution audit. The reviewed plan blob exactly matches the working copy. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the same three advisory decomposition warnings already disclosed and answered by the Decomposition Note. A fresh YAML parse yields ten contiguous work_chunks mapped position-for-position to Bead sections 1 through 10, and the structured dependency lists still match the prose. Mechanical tracing of derive.go confirms OQ-3 option 1 keeps the warning predicate false after plan approval, after a first lifecycle claim, and in the non-lifecycle trigger-2 state. An independent /tmp Git lab also reproduced round-2 G1: an empty temporary index plus artifact exclusion drops the tracked artifact, whereas seeding with `read-tree <tip>` before excluded `add -A` retains the artifact's exact tip blob while capturing ordinary additions, modifications, and deletions without touching the real index. The corrected protocol claims are therefore empirically sound. No residual rises above bead-level implementation detail, and every relevant behavior is assigned to a bead with red-on-revert fixtures.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R3-F1",
+      "severity": "none",
+      "class": "prior-round-asks",
+      "summary": "R4 approved rounds 1 and 2 with empty concrete_changes_required arrays. There are no R4 asks to classify as ADDRESSED, PARTIAL, or MISSED; regression review of f72803bb found no NEW_ISSUE in R4 territory."
+    },
+    {
+      "id": "R4-R3-F2",
+      "severity": "none",
+      "class": "validation",
+      "summary": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited 0 and reported exactly three WARNs: decomposition-bead-count (10 beads), decomposition-scope-redundancy (R=0.09), and decomposition-chain-depth (depth 4). These are advisory, explicitly priced by the plan's Decomposition Note, and do not indicate a parse, schema, mapping, or buildability failure."
+    },
+    {
+      "id": "R4-R3-F3",
+      "severity": "none",
+      "class": "frontmatter-mapping",
+      "summary": "Fresh YAML parsing produced 10 work_chunks and 10 Bead headings. Chunk IDs and heading IDs are the contiguous sequence 1..10 in identical positions, matching plan.go's `id N` to `bead_ids[N-1]` contract. Dependencies also match the corresponding prose: 1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]. The round-2 addition of internal/approve/impl.go is present in chunk 2, consistent with Bead 2's EnsurePhaseSemanticsV2 invocation-site scope."
+    },
+    {
+      "id": "R4-R3-F4",
+      "severity": "none",
+      "class": "oq3-mechanical-derivation",
+      "summary": "DerivePhaseFromChildren returns plan for an empty lifecycle set and for all-open lifecycle children, implement for any in-progress lifecycle child, and excludes explicit non-lifecycle children. Under option 1, plan approve writes stored plan while all lifecycle beads are open, so childPhase==storedPhase and derive.go:179 is false. After the first lifecycle task/untyped claim, child derivation becomes implement and the planned next writer advances stored to implement, again making :179 false. A non-lifecycle claim advances nothing and is excluded from derivation; therefore trigger-2 remains plan-over-plan. The #248 warning window is dissolved rather than hidden."
+    },
+    {
+      "id": "R4-R3-F5",
+      "severity": "none",
+      "class": "tip-seeded-snapshot-probe",
+      "summary": "In an independent /tmp repository, the empty-index sequence `GIT_INDEX_FILE=<new> git add -A -- . ':(exclude).beads/issues.jsonl'; git write-tree` produced a tree with the tracked artifact absent. Repeating with an index outside the worktree and `read-tree <tip>` before the same excluded `add -A` retained `.beads/issues.jsonl` with the exact tip blob OID 4316c0d47c218f88d044ca46497754b3e70a7769. The resulting tip-to-T diff contained only the intended tracked deletion, untracked addition, and tracked modification; the artifact was absent from the diff, and the real index had zero cached changes. This independently confirms the corrected round-2 G1 protocol claim."
+    },
+    {
+      "id": "R4-R3-F6",
+      "severity": "none",
+      "class": "whole-plan-verdict",
+      "summary": "The round-2 changes do not regress R4's previously approved plan: the G1 snapshot correction is mechanically valid, chunk/section alignment remains intact, and the OQ-3 dissolution argument still follows from the repository's actual discriminator and derivation branches. Remaining choices such as exact helper structure and fixture implementation are appropriately delegated to the implementation beads and their own panels."
+    }
+  ]
+}

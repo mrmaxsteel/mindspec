@@ -13,6 +13,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -30,6 +32,19 @@ func SetSpecRunBDForTest(fn func(args ...string) ([]byte, error)) func() {
 	orig := specRunBDFn
 	specRunBDFn = fn
 	return func() { specRunBDFn = orig }
+}
+
+// specMergeMetadataFn wraps bead.MergeMetadata for testability (spec 128
+// Bead 7 — matches the established planMergeMetadataFn/implMergeMetadataFn/
+// adoptMergeMetadataFn convention).
+var specMergeMetadataFn = bead.MergeMetadata
+
+// SetSpecMergeMetadataForTest swaps specMergeMetadataFn for testing and
+// returns a restore function.
+func SetSpecMergeMetadataForTest(fn func(issueID string, updates map[string]interface{}) error) func() {
+	orig := specMergeMetadataFn
+	specMergeMetadataFn = fn
+	return func() { specMergeMetadataFn = orig }
 }
 
 // SpecResult holds the result of spec approval.
@@ -72,9 +87,16 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		if existingEpicID != "" {
 			// Epic already exists — skip creation (idempotent).
 			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
-			// Spec 080: ensure mindspec_phase is set for existing epics
-			if err := bead.MergeMetadata(existingEpicID, map[string]interface{}{"mindspec_phase": "plan"}); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not write phase metadata: %v", err))
+			// Spec 128 R3.6 (round-4 G2): see backfillExistingEpicPhase's
+			// doc comment for the chosen disposition and rationale.
+			// Final-review round 1 (R2/G3): the backfill error can chain a
+			// bd merge-write failure's raw stderr — wrap before
+			// DescribeLockFailure renders it (bdRenderedError preserves
+			// Unwrap, so the timeout classification inside is unchanged).
+			if msg, err := backfillExistingEpicPhase(root, existingEpicID); err != nil {
+				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(next.RenderBDError(err), fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
+			} else if msg != "" {
+				result.Warnings = append(result.Warnings, msg)
 			}
 		} else {
 			if err := phase.CheckSpecNumberCollision(specNum); err != nil {
@@ -85,7 +107,10 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
 			out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
 			if epicErr != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", epicErr))
+				// Final-review round 1 (R2/G3): epicErr carries
+				// wrapBDError'd raw bd stderr and this warning is printed
+				// verbatim by cmd/mindspec/spec.go — escape at the append.
+				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", next.RenderBDError(epicErr)))
 			} else {
 				var created struct {
 					ID string `json:"id"`
@@ -145,6 +170,78 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	}
 
 	return result, nil
+}
+
+// backfillExistingEpicPhase applies spec 128 R3.6's replay-safety
+// disposition for ApproveSpec's existing-epic path (round-4 G2, a
+// #248-class defect: the pre-128 write unconditionally set
+// mindspec_phase="plan", regressing a replayed `spec approve` against an
+// epic already at implement/review/done). Extracted to its own named
+// function — matching advancePhaseOnClaim/claimFailureError's
+// established pattern (cmd/mindspec/next.go) — so it is directly
+// unit-testable without exercising spec.md validation or executor
+// commits.
+//
+// Disposition: ABSENT-ONLY BACKFILL under the bead-1 R3.3 lock
+// (WithPhaseWriteLock's fn receives the fresh, under-lock stored value
+// AND its presence bit). Round-1 panel G4 (round-2 fix): the presence
+// bit is CONSUMED, not discarded — only present == false (a genuinely
+// absent mindspec_phase field) is a legitimate backfill target. present
+// == true with stored == "" is a DIFFERENT case (phaseReadOutcome's
+// contract, phaselock.go): the field exists but failed validation — a
+// present-but-invalid value. Writing "plan" over that would silently
+// discard whatever the corrupt/forward-incompatible value was, so it is
+// left untouched instead, with output distinct from BOTH a real backfill
+// and an ordinary same/later-value no-op. Any valid stored value
+// (plan/implement/review/done) is a later-or-same-value replay and is
+// likewise left untouched. The fail-closed refusal alternative is
+// explicitly NOT taken for any of these: a replay is a legitimate
+// idempotent re-run of `spec approve` against an epic that already
+// exists (the no-error path just above this call site), and refusing it
+// would break that existing idempotence contract.
+//
+// The returned message distinguishes all FOUR outcomes for the caller's
+// output (R3.6: "the output honestly distinguishes a mutation from a
+// no-op") — a genuine backfill, a present-but-invalid no-op, a
+// same-value no-op replay, and a later-phase-untouched no-op replay each
+// get their own text, and a replay that changed nothing never claims to
+// have set the phase. err is WithPhaseWriteLock's own error (lock
+// timeout / merge-write failure); message is "" when err is non-nil.
+func backfillExistingEpicPhase(root, epicID string) (message string, err error) {
+	err = phase.WithPhaseWriteLock(root, epicID, specMergeMetadataFn, func(stored string, present bool) (map[string]interface{}, error) {
+		if !present {
+			// Genuinely absent (phaseReadOutcome's contract, phaselock.go)
+			// — the ONLY legitimate backfill target. Round-1 panel G4: a
+			// present-but-invalid value (below) must NOT take this path,
+			// since writing "plan" over it would silently discard
+			// whatever the corrupt/forward-incompatible value was.
+			message = "phase backfilled: plan (stored phase was empty)"
+			return map[string]interface{}{"mindspec_phase": "plan"}, nil
+		}
+		if stored == "" {
+			// Present but INVALID (round-1 panel G4): the field exists
+			// but its value failed state.IsValidPhase — a corrupt write,
+			// or a phase value this build doesn't recognize yet. Leaving
+			// it untouched is the safe choice: we don't know what the
+			// intended value was, so overwriting it with "plan" would be
+			// a silent, potentially-destructive guess. The message is
+			// deliberately distinct from BOTH the backfill wording above
+			// and the ordinary no-op wording below, so this case is never
+			// conflated with either.
+			message = "spec approve replay: stored phase present but invalid — left untouched (no phase value was written; run `mindspec repair phase` to inspect)"
+			return nil, nil
+		}
+		if stored == "plan" {
+			message = `spec approve replay: stored phase already "plan" — nothing mutated`
+		} else {
+			message = fmt.Sprintf("spec approve replay: stored phase %q left untouched (spec approve never regresses lifecycle phase)", stored)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return message, nil
 }
 
 // updateSpecApproval reads a spec file and updates canonical frontmatter fields

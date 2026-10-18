@@ -573,6 +573,83 @@ func TestEnsureGitignoreEntry_ExistingFile(t *testing.T) {
 	}
 }
 
+// --- HasGitignoreEntry (spec 128 Bead 7 round-1 panel G1) ---
+
+func TestHasGitignoreEntry_AbsentFile(t *testing.T) {
+	root := t.TempDir()
+	if HasGitignoreEntry(root, ".worktrees") {
+		t.Error("expected false: no .gitignore exists yet")
+	}
+}
+
+func TestHasGitignoreEntry_PresentEntry(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureGitignoreEntry(root, ".worktrees"); err != nil {
+		t.Fatal(err)
+	}
+	if !HasGitignoreEntry(root, ".worktrees") {
+		t.Error("expected true: EnsureGitignoreEntry just wrote it")
+	}
+}
+
+func TestHasGitignoreEntry_AbsentEntryOtherContentPresent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if HasGitignoreEntry(root, ".worktrees") {
+		t.Error("expected false: .gitignore exists but lacks the entry")
+	}
+}
+
+// TestHasGitignoreEntry_MatchesEnsureGitignoreEntryWriteDecision pins the
+// contract CheckDirtyTreeProportional depends on (G1): HasGitignoreEntry
+// returning false must mean EnsureGitignoreEntry WILL write, and true must
+// mean it stays a no-op — the two functions' notion of "present" cannot
+// silently diverge.
+func TestHasGitignoreEntry_MatchesEnsureGitignoreEntryWriteDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		seed    string
+		entry   string
+		wantHas bool
+	}{
+		{"absent-file", "", ".worktrees", false},
+		{"present-bare", ".worktrees\n", ".worktrees", true},
+		{"present-slash", ".worktrees/\n", ".worktrees", true},
+		{"unrelated-content", "node_modules/\n", ".worktrees", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.seed != "" {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(tc.seed), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := HasGitignoreEntry(root, tc.entry)
+			if before != tc.wantHas {
+				t.Fatalf("HasGitignoreEntry = %v, want %v", before, tc.wantHas)
+			}
+			gitignorePath := filepath.Join(root, ".gitignore")
+			var beforeBytes []byte
+			if data, err := os.ReadFile(gitignorePath); err == nil {
+				beforeBytes = data
+			}
+			if err := EnsureGitignoreEntry(root, tc.entry); err != nil {
+				t.Fatal(err)
+			}
+			afterBytes, err := os.ReadFile(gitignorePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wroteSomething := string(beforeBytes) != string(afterBytes)
+			if wroteSomething == tc.wantHas {
+				t.Errorf("EnsureGitignoreEntry wrote=%v, but HasGitignoreEntry said present=%v (must be opposite: present -> no write, absent -> write)", wroteSomething, tc.wantHas)
+			}
+		})
+	}
+}
+
 // --- Tests for new helpers added in ARCH-9 ---
 
 // capturedCall records a single execCommand invocation made during a test.

@@ -1,0 +1,78 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.98,
+  "rationale": "Round 4's core marker defect is substantively fixed. The plan now builds C before any marker can name it; atomically advances bead ref and marker at A→C and C→D; leaves the index-only R stage idempotent; preserves marker==tip through a merge conflict so recovery enters spec 127's --resolve-merge machinery; checks landed-merge reconciliation before stale-marker handling; clears the marker on both terminal paths; and fail-closes a ref race with neither ref advanced. I independently reproduced both the successful two-ref transaction and wholesale abort on an expected-old mismatch. Thus kills after C, after D, during a preserved merge, after a landed merge, and after a genuinely foreign successor all have a buildable disposition. The other R5 ADR lenses remain sound: OQ-1(a) honestly reverses both load-bearing directions of ADR-0041 section 1 while leaving ADR-0037's staleness rule intact; ADR-0023's filesystem authority is confined to pre-epic drafts; and ADR-0025's amendment is confined to dirt entangleable by the worktree-creating next path. However, the plan document still gives contradictory instructions for ADR-0041: its ADR Fitness section says sections 2 and 3 are untouched, while the protocol and bead 6 require section 3 to gain the full M→R→S→G→T classification. It also says a resume continues from the first incomplete stage without pinning how durable state distinguishes marker==tip==C from marker==tip==D; the C/D parent topology makes the design buildable, but the discriminator must be stated in the protocol and ADR draft to make the claimed exact recovery contract falsifiable. These are localized plan-document corrections, not an architectural rejection, but they concern the precise ADR/recovery contract requested in the prior round and should be resolved before approval.",
+  "concrete_changes_required": [
+    "Make the ADR-0041 amendment scope internally consistent: replace plan.md's ADR Fitness statement that sections 2/3 are untouched with the exact disposition used by bead 6 — section 2's forward-only doctrine remains unchanged, while section 3 is amended to classify the full M→R→S→G→T marker recovery boundary.",
+    "Pin the durable stage re-derivation used by 'continue forward from the first incomplete stage': state how retry distinguishes C from D (for example, marker/tip equality proves tool ownership while the reviewed-A → C → D parent chain and current preserved/landed merge state identify the stage), and carry that discriminator into the ADR-0041 section 3 draft and its fixture expectations.",
+    "Correct bead 6 step 7's stale count label from 'all seven' to 'all eleven' so the listed interruption fixtures are unambiguous."
+  ],
+  "findings": [
+    {
+      "id": "R5-R3-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "resume-detection-reality",
+      "summary": "The post-A→C, pre-index-refresh retry remains reachable and is now part of a full ref-transition protocol.",
+      "evidence": "plan.md:209-216 builds C before the atomic {A→C, marker→C} transaction, makes R idempotent, then builds D and atomically advances {C→D, marker→D}; plan.md:221-229 runs marker recognition before the panel gate. Fixture (viii) at lines 908-913 pins the original interruption boundary and interval-edit preservation."
+    },
+    {
+      "id": "R5-R3-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "class": "adr-0041-boundary-and-kill-fixture",
+      "summary": "Bead 6 assigns the full recovery boundary and fixtures to ADR-0041 section 3, but the plan's ADR Fitness section simultaneously says section 3 is untouched.",
+      "evidence": "plan.md:230-231 and 864-880 require section 3 to gain the M→R→S→G→T classification, while plan.md:503-506 says sections 2/3 are untouched. Fixtures (viii)-(xi), lines 908-921, cover C, D, preserved-merge, and foreign-successor states, but the ADR amendment scope is not stated consistently."
+    },
+    {
+      "id": "R5-R3-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "loose-object-qualification",
+      "summary": "The refusal invariant remains accurately qualified rather than promising repository byte identity.",
+      "evidence": "plan.md:880-888 preserves the statement that a refused content gate leaves bead tip, tracker state, real index, and worktree unchanged while temp-index staging may leave gc-collectable unreachable loose objects."
+    },
+    {
+      "id": "R5-R4-NEW-1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "artifact-sync-resume-identity",
+      "summary": "Artifact sync no longer breaks marker identity: D and the marker advance atomically, so a kill after sync resumes with marker==tip==D.",
+      "evidence": "plan.md:214-220 defines D as a child of C and one transaction {C→D, marker→D}; fixture (ix), lines 914-916, requires plain re-run to resume at merge without re-paneling. A /tmp git lab reproduced that a start/prepare/commit transaction advances both refs and that a wrong expected-old aborts at prepare with both refs left at C."
+    },
+    {
+      "id": "R5-R4-NEW-2",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "class": "protocol-and-amendment-ordering",
+      "summary": "Commit-tree ordering, fail-closed marker creation, marker transitions, reconciliation-first ordering, terminal cleanup, and kill fixtures are fixed; exact stage re-derivation and a consistent ADR statement remain missing.",
+      "evidence": "plan.md:209-229 and 848-863 now give the correct C-before-marker order and atomic/fail-closed ref transitions. Yet line 226 only says 'first incomplete stage' without specifying how the durable C and D states are classified, and lines 503-506 contradict lines 874-879 about amending ADR-0041 section 3. The A→C→D parent chain makes classification implementable, so this is partial rather than missed."
+    },
+    {
+      "id": "R5-ADR-REGRESSION",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "class": "adr-amendment-scope-contradiction",
+      "summary": "The new round-4 section-3 protocol exposes a contradiction in the previously clean ADR-conformance summary.",
+      "evidence": "ADR Fitness at plan.md:496-506 describes only a section-1 amendment and says sections 2/3 are untouched; bead 6 at lines 864-880 explicitly mandates a section-3 amendment. ADR-0023, ADR-0025, and ADR-0037 remain correctly scoped at lines 507-523."
+    },
+    {
+      "id": "R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "Plan validation succeeds at reviewed commit 27294e84 with acknowledged advisories only.",
+      "evidence": "mindspec validate plan 128-lifecycle-verb-state-honesty exited 0 and reported only the three documented warnings: 10 beads, scope redundancy 0.09, and dependency depth 4. git diff 27294e84^ 27294e84 --check also completed cleanly."
+    },
+    {
+      "id": "R5-R5-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "low",
+      "class": "fixture-count-label",
+      "summary": "The expanded fixture list is mislabeled 'all seven' although it enumerates eleven legs.",
+      "evidence": "plan.md:894-921 says 'all seven' and then lists (i) through (xi). The legs themselves are present; only the count label is stale."
+    }
+  ]
+}

@@ -17,6 +17,10 @@ import (
 var RuntimeIgnoreEntries = []string{
 	".mindspec/session.json",
 	".mindspec/focus",
+	// spec 128 R3.3: the mindspec_phase write lock's dedicated lockfile
+	// (internal/phase/phaselock.go). No meaningful content of its own —
+	// the OS-level lock is the mutual-exclusion primitive.
+	".mindspec/phase.lock",
 }
 
 // gitignoreRuntimeHeader is the comment written above any entries

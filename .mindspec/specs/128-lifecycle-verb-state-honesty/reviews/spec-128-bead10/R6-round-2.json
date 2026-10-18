@@ -1,0 +1,49 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Round-2 re-review of commit 0a9932d8da09cdc91a1767d5737b668206a574e3 confirms that all four R6 round-1 docs-truth asks are resolved. The rewritten entanglement documentation now matches ComputeEntangleablePaths' two containment-gated conditional classes and the blocking-versus-notice behavior. The merge-safety retry guidance now distinguishes a plain retry from an override retry exactly as the sequential doc-sync and ADR-divergence decisions in materialize.go behave. The obsolete spec-119 artifact-materialization paragraph is explicitly replaced with the prospective-snapshot, gate-before-commit design recorded in ADR-0041 and implemented in internal/complete/materialize.go. The selection documentation now names positional --emit-only as the direct-fetch exception and quotes runEmitOnly's exact bypass disclosure. `make build` and the complete `make test` short suite passed in the bead worktree; docs validation against ae45fd7a8697b8790894412f233c977ca5e0f11a exited 0 with zero errors and only the acknowledged missing-source-globs warning. HEAD remained the reviewed SHA with empty staged and unstaged tracked diffs. No probe clone was created, so no probe-clone cleanup was required.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-B10-R2-1",
+      "severity": "INFO",
+      "classification": "RESOLVED",
+      "title": "Conditional entanglement documentation now matches landed code",
+      "location": ".mindspec/domains/workflow/architecture.md; .mindspec/domains/workflow/interfaces.md; .mindspec/domains/workflow/overview.md; .mindspec/domains/workflow/runbook.md",
+      "detail": "The former unconditionally-empty account is gone. The rewritten sites identify the entry-absent .gitignore class and the recording-enabled events.ndjson/manifest.json class, with containment gating. This matches internal/next/guard.go: ComputeEntangleablePaths applies containedRel against toplevelOf(cwd), checks !HasGitignoreEntry for .gitignore, gates recording paths on recording.IsEnabled, and CheckDirtyTreeProportional classifies intersecting dirt as blocking while returning unrelated dirt for the pinned IgnoredDirtNotice. Unit and real-git containment tests ran within the passing full short suite."
+    },
+    {
+      "id": "R6-B10-R2-2",
+      "severity": "INFO",
+      "classification": "RESOLVED",
+      "title": "Plain and override retry behavior is now distinguished honestly",
+      "location": "project-docs/user/guides/merge-safety.md",
+      "detail": "The guide no longer claims that an override retry must meet the same gate or message. It accurately says a plain retry re-evaluates the same unchanged content-gate class, while a non-empty --allow-doc-skew bypasses doc-sync and permits the sequentially later ADR-divergence evaluation; --override-adr likewise bypasses the ADR refusal decision. This is the exact ordering in internal/complete/materialize.go's runMaterialization and complete.go's handleADRGateOutcome. The retained guarantee is correctly narrowed to absence of a manufactured panel stale-SHA refusal."
+    },
+    {
+      "id": "R6-B10-R2-3",
+      "severity": "INFO",
+      "classification": "RESOLVED",
+      "title": "Stale spec-119 materialization account is explicitly superseded",
+      "location": ".mindspec/domains/workflow/architecture.md",
+      "detail": "The old commit-before-content-gates design is now labeled as replaced and is followed by the current prospective-snapshot account: doc-sync and ADR-divergence run before any complete-authored commit and a gate refusal leaves the bead tip at reviewed_head_sha. That account agrees with ADR-0041 section 1 and internal/complete/materialize.go, where SnapshotWorktreeTree and both content gates precede MaterializeStageCommit and marker/ref publication."
+    },
+    {
+      "id": "R6-B10-R2-4",
+      "severity": "INFO",
+      "classification": "RESOLVED",
+      "title": "Positional emit-only exception is documented exactly",
+      "location": ".mindspec/domains/workflow/architecture.md; .mindspec/domains/workflow/interfaces.md",
+      "detail": "The ReadySet parity claim is now scoped to non-positional default and --pick flows. The docs correctly state that positional --emit-only directly calls FetchBeadByID, performs no ready-set construction, readiness check, spec-title filtering, or exclusion accounting, and emits `emit-only: bead fetched by ID; readiness not checked.` In cmd/mindspec/next.go, runEmitOnly returns from this positional branch before BuildReadySet; TestNextSelection_PositionalEmitOnly_BypassesSpecFilter pins the same behavior and passed in the full short suite."
+    },
+    {
+      "id": "R6-B10-R2-V",
+      "severity": "INFO",
+      "classification": "VERIFIED",
+      "title": "Build, tests, docs validation, identity, and cleanliness verified",
+      "detail": "In the designated bead worktree, HEAD was 0a9932d8da09cdc91a1767d5737b668206a574e3. `make build` completed (with only a non-fatal sandbox denial for an external Go module stat-cache write), `make test` / `go test -short ./...` exited 0, and `./bin/mindspec validate docs --diff ae45fd7a8697b8790894412f233c977ca5e0f11a` exited 0 with no errors and the pre-existing missing-source-globs warning. `git status --short`, unstaged diff, and cached diff were empty afterward. No scratch probe clone was created."
+    }
+  ]
+}

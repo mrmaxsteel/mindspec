@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "AC-11's content and terminal-rendering legs work, the low-level wrapBDError correctly preserves *exec.ExitError through errors.As, and the cap is correct at its exact boundary: 20 logical LF/CRLF-delimited lines are retained without a marker, while line 21 is omitted and adds the truncation marker. Empty stderr passes through unchanged; CRLF leaves CR in the low-level text but QueryReady's per-line termsafe rendering escapes it, so no raw CR reaches that rendered path. However, both QueryReady error sites replaced their pre-existing %w with %s. That discards the entire underlying chain at the next layer: an empirical overlay probe confirmed errors.As(QueryReadyError, **exec.ExitError) is false. Thus the new low-level %w preservation is lost precisely where AC-11 adds safe rendering, and callers can no longer apply typed/classification logic such as IsUnsupportedFlagError to a QueryReady error. Whitespace-only stderr is also treated as diagnostic content and rewrites the error despite carrying no useful text. Build plus go test ./... -short passed, as did focused package and boundary probes; the bead worktree remained byte-identical and the /tmp probe was removed.",
+  "concrete_changes_required": [
+    "Preserve the error chain at QueryReady and QueryReadyForEpic while keeping the escaped Error() text. Use a small wrapper whose Error() returns renderBDError(err) and whose Unwrap() returns err, then wrap it with %w (or an equivalent chain-preserving design); do not interpolate the original error only with %s.",
+    "Add a regression test proving errors.As on errors returned by QueryReady and QueryReadyForEpic still reaches the underlying *exec.ExitError after the safe-render wrapper, and that bead.IsUnsupportedFlagError can classify an unknown-flag failure through that chain. Add a BeadExists case with non-empty stderr so the newly introduced wrap, rather than only the empty-stderr passthrough, is exercised.",
+    "Treat whitespace-only stderr as empty/passthrough (for example, test strings.TrimSpace(excerpt) before decorating) and pin empty, spaces/tabs-only, LF-only, and CRLF-only cases so content-free stderr does not add a spurious suffix."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "medium",
+      "class": "error-chain-regression",
+      "summary": "internal/next/beads.go changes both existing wrapping sites from %w to %s. Before this commit, QueryReady and QueryReadyForEpic errors unwrapped to the RunBD error; after it, the chain terminates at a new errors.errorString. A focused probe using a real *exec.ExitError observed errors.As == false. Safe presentation and typed causality are both achievable with an Error()+Unwrap() wrapper, so escaping does not justify losing the chain."
+    },
+    {
+      "id": "F2",
+      "severity": "low",
+      "class": "blank-stderr-boundary",
+      "summary": "wrapBDError passes through zero-length and newline-only stderr, but spaces/tabs/CRLF-only stderr produces a decorated error such as exit status 1 followed by a content-free suffix. The focused probe observed capStderrLines on spaces-tab-CRLF returning the spaces/tab/CR rather than empty. Normalize the blank case before deciding to wrap."
+    },
+    {
+      "id": "F3",
+      "severity": "none",
+      "class": "boundary-verified",
+      "summary": "The cap has no off-by-one defect: exactly 20 lines are returned with truncated=false; 21 returns the first 20 with truncated=true, and wrapBDError appends the marker only in the latter case. CRLF splits into the correct logical line count because splitting occurs on LF; retained CR bytes are subsequently escaped by renderBDError on the AC-11 next path."
+    },
+    {
+      "id": "F4",
+      "severity": "none",
+      "class": "low-level-chain-verified",
+      "summary": "wrapBDError itself uses %w correctly. Focused tests confirmed errors.As reaches *exec.ExitError and IsUnsupportedFlagError still succeeds through the new wrapper. Existing BeadExists behavior is therefore logically preserved, though its committed regression test only covers an empty-stderr ExitError and should exercise the non-empty wrapping branch explicitly."
+    },
+    {
+      "id": "F5",
+      "severity": "none",
+      "class": "scope-and-verification",
+      "summary": "Reviewed commit 2691189d changes only internal/bead/{bdcli.go,bdcli_test.go} and internal/next/{beads.go,beads_test.go}; the parallel bead-7 files internal/next/guard.go and cmd/mindspec/next.go are untouched. go build ./... and go test ./... -short completed successfully (with a non-fatal module stat-cache permission warning), focused package tests passed, and post-probe git status/diffs were clean at the reviewed SHA."
+    }
+  ]
+}

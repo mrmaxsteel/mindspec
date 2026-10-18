@@ -30,3 +30,16 @@ Execution **receives** instructions from the workflow layer via the `Executor` i
 ## Import Rule
 
 Workflow packages (`internal/approve/`, `internal/complete/`, `internal/next/`, `internal/cleanup/`, `internal/spec/`) MUST call `executor.Executor` methods. They MUST NOT import `internal/gitutil/` directly. This boundary is enforced by convention and checked by `mindspec doctor`.
+
+## Maintenance Notes
+
+- **2026-09-03 (spec 128 Bead 6, #186 gate-before-mutate reorder):**
+  `internal/gitutil/materialize.go` (new) plus eight paired `Executor`
+  methods implement a prospective-snapshot / write-ahead materialization
+  protocol so `mindspec complete`'s content gates can measure a bead
+  worktree's prospective content before any complete-authored commit
+  exists — closing the #186 false-panel-staleness wedge by construction.
+  `internal/bead/bdcli.go`'s `wrapBDError` also now folds a failed bd
+  invocation's captured stderr into the returned error (R6.4/AC-11's
+  content half). See `architecture.md` and `interfaces.md` for the full
+  surface; the calling reorder itself lives in the workflow domain.

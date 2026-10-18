@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Round-2 re-review of fix commit 44690044 (one commit atop 2691189d), codebase-pin lens. (1) FOUR CHAIN-REGRESSION TESTS RUN AND MUTATION-VERIFIED: TestBeadExists_NotFoundWithNonEmptyStderr, TestBdRenderedError_UnwrapExposesUnderlyingError, TestQueryReady_ErrorsAsReachesExitError, and TestFetchBeadAsOf_IsUnsupportedFlagErrorClassifiesThroughWrapper all PASS as committed, and the latter two drive the REAL chain (runBDFn bound to bead.RunBD, PATH-shimmed fake bd through exec.Command). They genuinely bite: mutating bdRenderedError.Unwrap to return nil made all three next-package chain tests fail; worktree then restored and verified byte-identical (git diff HEAD --quiet clean). The G1 fix is structurally right — bdRenderedError{Error()=per-line-termsafe-escaped text, Unwrap()=original err} embedded via %w restores the errors.As/Is chain the round-0 %s interpolation severed, while keeping the escaped rendering (round-1's TestQueryReady_AC11RenderingLeg still passes in the full suite). (2) STILL-NO-OVERLAP VERIFIED: git show --stat 44690044 lists exactly 5 files — internal/bead/{bdcli.go,bdcli_test.go} + internal/next/{beads.go,beads_test.go,ready_gate.go}. Intersection with bead 7's declared surface (cmd/mindspec/next.go, internal/next/guard.go, internal/approve/spec.go) remains byte-zero; ready_gate.go is not on bead 7's surface. (3) CONSUMERS RE-CHECKED for the G2 extension: cmd/mindspec/next.go:263 returns GateReadiness's error directly (print-only), cmd/mindspec/release.go:295 treats any FetchBeadByID error uniformly (no type inspection), and internal/complete's defaultVerifyCommitted's bead.IsUnsupportedFlagError(err, \"as-of\") classification — the one real chain consumer — is exactly what the new FetchBeadAsOf test pins end-to-end. (4) G4 whitespace passthrough: TestWrapBDError_WhitespaceOnlyStderrPassesThrough covers all four named cases (empty, spaces/tabs, LF-only, CRLF-only) through the real RunBD seam and asserts both the undecorated text AND direct errors.As passthrough; the TrimSpace guard sits before any decoration as asked. (5) G3 DEVIATION ACCEPTED AS SCOPED: leaving cmd/mindspec/next.go untouched is the correct parallel-track call (it is bead 7's active file), and the commit message's technical claim checks out — RecordReadinessOverride routes through bead.MergeMetadata -> tracedCombined, where CombinedOutput leaves ExitError.Stderr empty, so wrapBDError could not surface content on that leg today regardless; the describePhaseSyncFailure follow-up is properly recorded. Suites: fresh -short -count=1 full runs of both packages green (internal/bead 5.7s, internal/next 13.9s); targeted -race -count=1 on all new/changed tests green; go build ./... clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "blocking": false,
+      "title": "Carried from round 1: truncated wrap branch still has no errors.As-survival pin",
+      "detail": "wrapBDError's truncated return (the fmt.Errorf with the '... (stderr truncated at N lines)' marker) still lacks errors.As reachability coverage — TestRunBD_CapsLongStderr asserts content/cap/marker only, so a %w->%v flip in ONLY that branch would still escape the suite. Same advisory weight as round 1: adjacent identically-shaped branches make divergence unlikely; a one-line errors.As assertion inside TestRunBD_CapsLongStderr closes it whenever convenient."
+    },
+    {
+      "severity": "cosmetic",
+      "blocking": false,
+      "title": "Carried from round 1: writeFakeBD still uses os.Setenv instead of t.Setenv",
+      "detail": "Unchanged and still harmless today; t.Setenv would self-guard against a future t.Parallel addition in this package (guard_test.go already uses t.Parallel)."
+    }
+  ]
+}

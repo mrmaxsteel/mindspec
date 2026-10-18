@@ -1,0 +1,38 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R4 codex",
+  "confidence": 0.97,
+  "rationale": "The round-3 hook fix at reviewed commit 7cc6421a closes the previously identified branch-protection bypass. Both new internal/hook regressions pass: a .beads-present workspace with failed discovery and no session returns a non-nil ModeIndeterminate state, and the real Run(\"pre-commit\", ..., ReadState, true) path blocks on a protected branch. Two of the ten claimed no-short real-bd E2Es were spot-verified and pass. A full parallel `go test ./... -short -count=1` invocation did not finish green because internal/instruct and internal/validate each reached Go's 10-minute package timeout while waiting on bd subprocesses; however, the exact stalled tests passed promptly when rerun alone, and no assertion or hook failure was observed. Under the round-4 instruction to block only on spec-branch-corrupting defects, this suite-level bd contention is non-blocking. The bead worktree remained clean at the reviewed commit.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4R4-HOOK",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Round-3 ReadState hard block is cleared",
+      "detail": "`TestReadState_BeadsDirPresent_DerivationFailure_ReturnsNonNil` and `TestPreCommit_BeadsDirPresent_DerivationFailure_BlocksOnProtectedBranch` both passed. Together they verify the exact post-initialization failure route: .beads is present, discovery fails, no session exists, ReadState returns non-nil ModeIndeterminate, and the production pre-commit dispatch returns Block on the protected branch."
+    },
+    {
+      "id": "R4R4-E2E",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Two requested no-short E2E spot checks pass",
+      "detail": "Exactly two of the ten named real-bd tests were run: `TestBeadClarify_WritesRecord_SurvivesFreshBDShow` passed in 11.21s and `TestNextReadyGate_PositiveBead_ClaimsWithNoPromptNoRefusal` passed in 63.99s; the targeted cmd/mindspec command exited 0 in 75.476s."
+    },
+    {
+      "id": "R4R4-SHORT",
+      "classification": "NON_BLOCKING_ENVIRONMENTAL",
+      "severity": "low",
+      "title": "Parallel short-suite run encountered bd subprocess contention",
+      "detail": "`go test ./... -short -count=1` reported broad package success but exited non-zero after `internal/instruct` and `internal/validate` each hit the default 10-minute package timeout while blocked in bd discovery subprocesses. The precise stalled tests then passed in isolation under -short: `TestRender_NoDeprecatedApproveOrder` in 10.39s and `TestImpactedDomainsForwardOnlyReject_SpecApprove` in 50.69s. This does not reproduce as a deterministic assertion failure, does not touch the reviewed hook behavior, and is not evidence of spec-branch corruption."
+    },
+    {
+      "id": "R4R4-INTEGRITY",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "title": "Reviewed bead worktree remained byte-identical",
+      "detail": "Final checks showed HEAD 7cc6421a754a8c7d828297b940f32ae4d3fcddff, empty porcelain status, no unstaged tracked diff, and no staged diff. Test scratch used Go's automatically cleaned t.TempDir fixtures; no persistent probe clone was created."
+    }
+  ]
+}

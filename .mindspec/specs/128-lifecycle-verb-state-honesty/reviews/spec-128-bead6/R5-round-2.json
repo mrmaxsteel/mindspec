@@ -1,0 +1,51 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Independent re-derivation at reviewed commit ad08acf7 clears R5's round-1 hard block. The S-stage now compares currentTip to the exact immutable tree2 subsequently passed to MaterializeStageCommit and refuses every non-artifact path before D is built or published; the real-git second-snapshot race fixture proves the exploit is refused, the file survives on disk, and the tip stops at C. The resume discriminator is closed over exactly materialization and artifact-sync, with zero/duplicate/empty/unknown encodings routed through CAS-clear and normal gates. ADR-0041 sections 1 and 3(i) now match the delivered exact-tree ordering and retain the defensive post-D recheck. Focused tests passed; `go build ./... && go test ./... -short -count=1` passed; and `go test ./cmd/mindspec -count=1` passed in 560.784s. The bead worktree remained clean at ad08acf7.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R2-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Exact-tree2 delta refusal closes the classification-to-snapshot race",
+      "evidence": "internal/complete/materialize.go computes tree2, then ChangedFilesTree(currentTip, tree2), applies nonArtifactPaths to that exact delta, and returns sExitGenuineDirtRefusal before ReadStageMarker, MaterializeStageCommit, marker publication, or branch advance. Because D is built from the already-measured immutable tree2, a later worktree write cannot enter D and remains visible to the defensive S-exit check. TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD injects the round-1 exploit immediately before snapshot call 2 and passed, proving the raced file is absent from C/D, preserved as dirt, named by refusal, and the branch advances no farther than C. The shared S block covers both normal execution and materialization-stage resume."
+    },
+    {
+      "id": "R5-R2-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Stage discriminator is closed and duplicate trailers are conservatively ambiguous",
+      "evidence": "resolveMaterializationDiscriminator permits resume only when isKnownStage returns true for the closed set {materialization, artifact-sync}. ReadStageTrailer treats trailer cardinality separately from value validity: zero or more than one exact Mindspec-Stage line returns stage empty/present false; exactly one returns its trimmed value. ReadMaterializationMarker preserves marker presence while passing the empty stage onward, so both identical and conflicting duplicates, no trailer, and empty values take the foreign/corrupt CAS-clear path; a single unknown value is present at the reader layer but rejected by isKnownStage. No malformed encoding can reach the gate-skipping resume branch. The focused duplicate, malformed, empty-stage, and unknown-stage tests passed."
+    },
+    {
+      "id": "R5-R2-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "ADR wording matches the delivered safe S ordering",
+      "evidence": "ADR-0041 section 1 states that D's exact delta is classified after tree2 exists and before MaterializeStageCommit/publication, explicitly says this closes rather than narrows the race, and characterizes the post-D S-exit classification as defensive. Section 3(i) gives the same order. The positive anchors and red-if-old-sentence-present tests passed."
+    },
+    {
+      "id": "R5-R2-ASK-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Required race and error-injection regression pins are effective",
+      "evidence": "The real-git leg xxi injects at the exact second SnapshotWorktreeTree boundary and is red on the former behavior. Dedicated injected failures cover bead-tip RevParseRef, marker-parent oid^ resolution, and the S-stage pre-publish marker read; they assert propagation and that marker clearing, publication, or bead closure cannot proceed. All focused tests passed."
+    },
+    {
+      "id": "R5-R2-G5",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "The disclosed G5 S-stage adaptation is valid",
+      "evidence": "For a panel already registered at reviewed tip A, creating a non-elided M stage requires uncommitted non-artifact worktree content; panel.GateFacts filters only named artifacts and PanelGateDecision blocks any remaining UserDirt before materialization. Thus the literal live-panel-at-A plus M-stage-advance precondition is mutually exclusive. Leg xxii validly uses artifact-only dirt, kills the first/only D advance, then proves the stage-independent resumeStage != empty branch skips stale-SHA rechecking and converges with marker cleanup. Existing M-stage resume legs separately exercise the R+S resume mechanics without a panel. The impossibility and adaptation are explicitly recorded in leg xxii's test commentary and the panel brief; no additional M-stage/live-panel fixture is required."
+    },
+    {
+      "id": "R5-R2-QUALITY",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Verification and cleanliness",
+      "evidence": "Focused round-2 protocol, trailer, injection, G5, and ADR tests passed. `go build ./... && go test ./... -short -count=1` passed. `go test ./cmd/mindspec -count=1` passed in 560.784s. Final `git diff --exit-code` and porcelain status were clean at ad08acf7; no R5 probe scratch remained."
+    }
+  ]
+}

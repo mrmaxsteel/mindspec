@@ -1,0 +1,39 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.94,
+  "rationale": "OQ-2's ADR-0023 carve-out is narrow, bead 7's ADR-0025 amendment is directionally correct, and ADR-0037 should remain untouched under OQ-1(a). The plan also preserves one load-bearing half of ADR-0041 section 1: the panel gate remains before CommitAll, so reviewed_head_sha and dirty-tree facts are measured pre-mutation. But the proposed reversal does not yet preserve the other half as an enforced invariant. It says the pre-commit worktree measurement is identical to what CommitAll and the artifact-sync commit materialize, while CommitAll itself runs bd export and then git commit (including repository pre-commit hooks), and the plan defines neither an immutable prospective tree nor a post-measurement equality check. A normal ref-to-worktree git diff also does not by itself include untracked files that CommitAll later stages. Consequently a source/doc/ADR path can enter or change after the gates measure and before the commit lands, so the gates can miss just-committed work: exactly the load-bearing failure ADR-0041's old ordering prevented. Calling this measurement equivalence without a mechanism and red-on-revert tests is not yet an honest reversal.",
+  "concrete_changes_required": [
+    "Revise OQ-1(a), ADR Fitness, and bead 6 to define the exact prospective-content mechanism. It must include committed-tip delta, staged and unstaged changes, deletions, and untracked files, and it must guarantee that the source-relevant tree committed after the gates is the same tree they evaluated despite bd export, commit hooks, and intervening worktree changes. A temporary-index/tree-object snapshot committed from the measured tree is one admissible design; an equally strong mechanically checked design is acceptable.",
+    "Draft the ADR-0041 section-1 amendment as an explicit replacement of both load-bearing ordering statements: retain panel-before-CommitAll and its reviewed-SHA/dirty-tree rationale; replace doc-sync/ADR-divergence-after-materialization with prospective-snapshot-before-any-complete-authored-commit; state precisely how artifact-only normalization is treated and why the gates cannot vacuously miss content. Remove or qualify the current unsupported claim that the commits materialize exactly the measured content.",
+    "Extend bead 6's tests with red-on-revert cases for an untracked source/doc/ADR file and for content changing during the gate-to-commit interval (including a hook/export mutation boundary). The committed source-relevant tree must either equal the measured snapshot or the command must refuse before advancing the bead tip.",
+    "Keep the ADR-0025 amendment expressly limited to the worktree-creating `mindspec next` claim path: its entangleable tracked-path enumeration controls when that path blocks, while `approve` and other dirty-tree guards retain their existing semantics unless separately amended."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "class": "ADR-0041-reversal-incomplete",
+      "summary": "The plan preserves panel-before-commit but does not mechanically preserve doc/ADR coverage of the content eventually committed. Its measurement-equivalence premise is false or at least unproved across untracked files, bd export, pre-commit hooks, and gate-to-commit worktree changes. The proposed tests only assert unchanged tip on a doc-sync refusal and stale-SHA convergence; they do not prove measured-tree equals committed-tree."
+    },
+    {
+      "id": "F2",
+      "severity": "none",
+      "class": "ADR-0023-conformant",
+      "summary": "The draft-discovery exception is appropriately narrow: it requires the spec directory plus conventional spec branch, applies only while no lifecycle epic exists, propagates beads/discovery errors rather than treating them as absence, and restores beads-only authority from epic creation onward. It does not make spec.md or plan.md authoritative for post-approval lifecycle state."
+    },
+    {
+      "id": "F3",
+      "severity": "low",
+      "class": "ADR-0025-scope-clarity",
+      "summary": "Bead 7 correctly prices an ADR-0025 amendment and retains the explicit named-artifact model plus a pinned entangleable-path inventory. The amendment wording should explicitly specialize only the worktree-creating next-claim path; a generic rewrite of decision item 1 to all entangleable dirt could unintentionally relax approve and future guards beyond R5/AC-8."
+    },
+    {
+      "id": "F4",
+      "severity": "none",
+      "class": "ADR-0037-conformant",
+      "summary": "Leaving ADR-0037 untouched is correct for option (a): section 4 still compares the live bead ref to reviewed_head_sha without exemption, section 5 still evaluates pre-CommitAll dirt, the panel gate remains first, and no new Git/bd/subprocess work is moved into internal/panel. The caller-side prospective doc/ADR measurement is outside ADR-0037's decision matrix."
+    }
+  ]
+}

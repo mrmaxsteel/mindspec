@@ -1,6 +1,9 @@
 package resolve
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -156,6 +159,81 @@ func TestResolveSpecPrefix_NumericMatch(t *testing.T) {
 	}
 	if got != "077-execution-layer-interface" {
 		t.Errorf("ResolveSpecPrefix(\"077\") = %q, want %q", got, "077-execution-layer-interface")
+	}
+}
+
+// --- ResolveSpecPrefixProven (spec 128 R6.7/AC-15) ---
+
+// TestResolveSpecPrefixProven_ExistingEpic_PassesThrough pins that a
+// full-ID passthrough naming an epic-bearing spec is unaffected.
+func TestResolveSpecPrefixProven_ExistingEpic_PassesThrough(t *testing.T) {
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+
+	got, err := ResolveSpecPrefixProven(t.TempDir(), "077-execution-layer-interface")
+	if err != nil {
+		t.Fatalf("ResolveSpecPrefixProven() error: %v", err)
+	}
+	if got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefixProven() = %q, want %q", got, "077-execution-layer-interface")
+	}
+}
+
+// TestResolveSpecPrefixProven_ExistingDraft_PassesThrough pins AC-15(ii)'s
+// non-refusal half at the ResolveSpecPrefix layer: an existing on-disk
+// draft (no epic yet) is NOT reported as nonexistent here — its own
+// honest "no epic; not approved" refusal is a downstream epic-lookup
+// responsibility (internal/next's scopeResolutionRefusal).
+func TestResolveSpecPrefixProven_ExistingDraft_PassesThrough(t *testing.T) {
+	specID := "042-draft-fixture"
+	root := newDraftFixtureRoot(t, specID)
+	stubActiveEpics(t, nil, nil) // bd healthy, zero epics
+
+	got, err := ResolveSpecPrefixProven(root, specID)
+	if err != nil {
+		t.Fatalf("ResolveSpecPrefixProven() error for an existing draft: %v", err)
+	}
+	if got != specID {
+		t.Errorf("ResolveSpecPrefixProven() = %q, want %q", got, specID)
+	}
+}
+
+// TestResolveSpecPrefixProven_NonexistentFullID_Refuses pins AC-15(i)'s
+// core: a full-ID passthrough naming NO epic and NO on-disk draft refuses
+// here, before mindspec next would ever issue a ready query.
+func TestResolveSpecPrefixProven_NonexistentFullID_Refuses(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	runGitCmd(t, root, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitCmd(t, root, "add", "-A")
+	runGitCmd(t, root, "commit", "-m", "baseline")
+	stubActiveEpics(t, nil, nil) // bd healthy, zero epics
+
+	_, err := ResolveSpecPrefixProven(root, "999-does-not-exist")
+	if err == nil {
+		t.Fatal("expected an error for a full-ID spec with no epic and no on-disk draft")
+	}
+	if !strings.Contains(err.Error(), "999-does-not-exist") {
+		t.Errorf("expected the error to name the spec, got: %v", err)
+	}
+}
+
+// TestResolveSpecPrefixProven_NumericPrefixUnaffected pins that the
+// numeric-prefix branch's existing DiscoverActiveSpecsWithCache-backed
+// existence proof is untouched by the full-ID passthrough's new check.
+func TestResolveSpecPrefixProven_NumericPrefixUnaffected(t *testing.T) {
+	stubActiveSpecs(t, `[{"id":"epic-1","title":"[SPEC 077-execution-layer-interface]","status":"open","issue_type":"epic","metadata":{"spec_num":77,"spec_title":"execution-layer-interface"}}]`)
+
+	got, err := ResolveSpecPrefixProven(t.TempDir(), "077")
+	if err != nil {
+		t.Fatalf("ResolveSpecPrefixProven(\"077\") error: %v", err)
+	}
+	if got != "077-execution-layer-interface" {
+		t.Errorf("ResolveSpecPrefixProven(\"077\") = %q, want %q", got, "077-execution-layer-interface")
 	}
 }
 

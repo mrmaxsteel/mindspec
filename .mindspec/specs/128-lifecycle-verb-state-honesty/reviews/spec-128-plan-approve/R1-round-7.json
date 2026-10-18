@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.9,
+  "rationale": "Zero-ask-approver regression check of c15860ab, scoped to the two named surfaces. (1) TRAILER ENCODING — no settled-fact or requirement friction. The spec is silent on commit-message bytes; no gate, AC, or attestation binds C's or D's message (reviewed_head_sha binds the pre-materialization tip A, which predates both), so the pinned Mindspec-Stage trailer is free real estate. Reading it via spec 127's CommitMessageBody primitive is consumption, honoring the 127-consumed-not-modified non-goal. The trailer cannot widen the laundering surface: the discriminator only reads the trailer on the commit the MARKER points at, and the marker is published solely by the tool after every gate passes — a foreign trailer-bearing commit still lands in the foreign arm (delete + stale-SHA as at HEAD), so AC-7(i) and the cannot-launder boundary survive verbatim. Replacing the round-5 structural diff test with the encoding also removes the genuine ambiguity R6 found (a clean-tree C and a no-op D are diff-indistinguishable), which under the old design could have mis-routed a resume — this was the one defect class that could have corrupted bead 6's implementation, and it is now closed rather than papered over. (2) ELISION RULE — faithful, and I verified totality through the edge the plan does not spell out: with BOTH stages elided (tree-equal T and unchanged artifact) no commits and no marker exist, a kill before the merge leaves tip == reviewed SHA, and the plain re-run passes the panel gate normally and re-converges — total without a marker, consistent with the plan's 'a marker only ever points at a trailer-carrying commit' invariant and with HEAD's no-op-commit behavior that the elision deliberately matches. The stages-vs-commits reconciliation (R and S run exactly once each regardless; only their COMMITS are conditionally absent) preserves the round-6 S-exit protection on every path, and fixture (xvii)'s never-straight-to-the-merge assertion plus the round-6 G3 single-route rule extend that protection to all D-resumes. The per-ref CAS publication does not collide with any spec obligation — R3.3's lock covers mindspec_phase metadata writers only, the marker ref is not a phase write, and the recorded decoupling rationale (no lock-ordering edge between subsystems) is sound; the failed-publication refusal names the marker and never overwrites another invocation's evidence, which is ADR-0035-conformant and evidence-preserving. Bonus: the (viii-a)/(viii-b) fixture split resolves my round-6 info R1-6-1 exactly — the S-exit refusal's recovery is now pinned by an executable two-run outcome (refuse-and-preserve, then clear-and-converge), turning the goal-(b) hint-convergence obligation from a bead-time hope into a failing test. Nothing in the diff moves any surface in this lens's standing verified core (OQ resolutions, settled facts 1-6, (c)-only vacations, dead option-2 arms, trigger-2 discharge, 16-AC mapping). No bead-corrupting defect; no asks; APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-7-1",
+      "severity": "info",
+      "title": "Round-6 info R1-6-1 resolved by the (viii-a)/(viii-b) split",
+      "detail": "The S-exit refusal's recovery path is now executable-outcome-pinned: (viii-a) refuses pre-merge naming the edited path with the content preserved, (viii-b) proves a clean follow-up run converges to the landed merge. The no-self-worsening-hint discipline is enforced by test rather than left to the bead-6 implementer's wording."
+    },
+    {
+      "id": "R1-7-2",
+      "severity": "info",
+      "title": "Bead-6 implementation nit: sanitize duplicate Mindspec-Stage lines in the user's --commit-msg",
+      "detail": "C's message is the user-supplied --commit-msg plus the tool's trailer. If the supplied message itself contains a Mindspec-Stage: line (accidental or adversarial), a naive trailer reader could mis-classify the stage. The tool assembles the final message, so appending its trailer last and reading the last occurrence (or stripping pre-existing keys) closes it; the discriminator's marker-scoping already bounds the blast radius to the tool's own commits. Implementation detail for bead 6's trailer builder/reader — no plan change needed."
+    },
+    {
+      "id": "R1-7-3",
+      "severity": "info",
+      "title": "Both-stages-elided path verified total without a marker",
+      "detail": "Tree-equal T plus unchanged artifact builds no C, no D, and publishes no marker; interruption before the merge leaves tip at the reviewed SHA, and the plain re-run passes the panel gate as a normal run and converges. The plan's invariant sentence implies this but does not walk it; recorded here so the bead-6 fixture author knows the no-marker/no-commit path is covered by the normal-run legs, not the resume legs."
+    }
+  ]
+}

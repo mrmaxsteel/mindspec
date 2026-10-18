@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -108,12 +109,30 @@ func adoptSpecRunE(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	if result.Verified {
-		fmt.Fprintf(os.Stdout, "Spec %s adopted (landed evidence VERIFIED). Epic %s closed, mode: idle.\n", result.SpecID, result.EpicID)
-	} else {
-		fmt.Fprintf(os.Stdout, "Spec %s adopted via attestation (landing was NOT verified; trigger=%s). Epic %s closed, mode: idle.\n", result.SpecID, result.Trigger, result.EpicID)
-	}
+	adoptSpecTail(os.Stdout, os.Stderr, root, result, emitInstruct)
 	return nil
+}
+
+// adoptSpecTail is the production tail of `mindspec impl adopt` after a
+// successful AdoptSpec: the verified/attested result line, THEN the
+// instruct tail (spec 128 bead 5, round-1 panel G4 — impl adopt
+// transitions to idle exactly like impl approve/complete and was missing
+// this entirely). Extracted (matching completeTail/implApproveTail's
+// established spec-092-panel-R3-1/R3-2 pattern) so a test exercises the
+// REAL wiring — result-before-guidance ordering, and both the verified
+// and attested legs — rather than a simulation. The tail is a non-fatal
+// warning on failure, same as every other lifecycle verb's tail: it
+// never turns a successful adopt into a command failure.
+func adoptSpecTail(stdout, stderr io.Writer, root string, result *approve.AdoptResult, instructFn func(string) error) {
+	if result.Verified {
+		fmt.Fprintf(stdout, "Spec %s adopted (landed evidence VERIFIED). Epic %s closed, mode: idle.\n", result.SpecID, result.EpicID)
+	} else {
+		fmt.Fprintf(stdout, "Spec %s adopted via attestation (landing was NOT verified; trigger=%s). Epic %s closed, mode: idle.\n", result.SpecID, result.Trigger, result.EpicID)
+	}
+	fmt.Fprintln(stdout)
+	if err := instructFn(root); err != nil {
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
+	}
 }
 
 // approveImplRunE is shared between `impl approve` and `approve impl`.
@@ -295,7 +314,7 @@ func implApproveTail(stdout, stderr io.Writer, root, invocationCwd, specID strin
 	fmt.Fprintln(stdout)
 
 	if err := instructFn(root); err != nil {
-		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	// Spec 092 Req 4: when the shell's invocation directory was removed

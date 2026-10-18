@@ -1,0 +1,51 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Both R5 round-1 required changes are addressed in commit 99d75484. The lock read now fails closed on epic lookup/decode errors, distinguishes a genuinely absent phase from an invalid-but-present value, and exposes that distinction to migration; the associated tests independently demonstrate no merge on read failure or invalid-present metadata and no overwrite of a fresher locked write. The Windows LockFileEx loop now retries only ERROR_LOCK_VIOLATION and immediately closes/returns for other errors. The comparator remains the required total order with conservative unknown handling, migration's absence check runs under the lock, and forced backward repair both persists and prints the reason. The disclosed fixture ripple and raw-ID ratchet recounts are honest. Independent native, race, full-short, and Windows cross-build verification passed, and the bead worktree remained clean.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-R1-1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "Round-1 ask: make the under-lock epic read error-aware and presence-aware, prevent migration writes on fresh-read failure or invalid-present metadata, and cover the fresher-writer contention shape. readPhaseForLock now propagates Cache.FindEpic errors before callback/write and returns Stored plus Present so invalid-present is not collapsed into absence. EnsureMigrated backfills only when present is false. TestEnsureMigrated_ReadErrorPropagatesNoWrite, TestEnsureMigrated_InvalidButPresentPhaseNeverBackfilled, and TestEnsureMigrated_NeverOverwritesFresherLockedWrite cover the required behaviors against the real lock/merge seam. SanctionedDerivedSync also now propagates child-read errors, and repair derives with a fresh Cache inside the critical section."
+    },
+    {
+      "id": "R5-R1-2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "assessment": "Round-1 ask: retry only ERROR_LOCK_VIOLATION on Windows and immediately return other LockFileEx failures. phaselock_windows.go extracts the syscall.Errno, delegates to shouldRetryWindowsLockError, closes the retained os.File and returns the original LockFileEx error for every non-33 code, while only code 33 reaches the poll/deadline path. The unconstrained classification test covers 33, access denied, invalid handle, sharing violation, and zero; Windows amd64/386 test cross-compilation and Windows vet pass."
+    },
+    {
+      "id": "R5-order",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "IsBackwardMove implements spec < plan < implement < review < done. Equal and forward known-phase moves are allowed, backward known-phase moves are refused, and either unknown operand conservatively returns true; exhaustive order tests pass."
+    },
+    {
+      "id": "R5-windows-api",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "The Windows implementation retains the os.File/underlying handle for the full critical section, uses exclusive synchronous LockFileEx over the same zero-offset 64-bit range later passed to UnlockFileEx, and releases through that retained handle before Close. Go's Windows syscall.Open uses FILE_SHARE_READ|FILE_SHARE_WRITE and omits FILE_SHARE_DELETE, satisfying the stated share-mode requirement."
+    },
+    {
+      "id": "R5-migration-force",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "EnsureMigrated performs the decisive present/absent check inside WithPhaseWriteLock and no-ops after a fresher serialized phase write. Forced backward repair writes mindspec_phase_force_reason together with mindspec_phase under the lock and includes the same reason in its success output; unforced backward repair performs no merge and returns an ADR-0035-shaped refusal."
+    },
+    {
+      "id": "R5-ripple-ratchets",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "The added adopt and impl fixture stubs supply the bd-show path newly exercised by the fail-closed under-lock read; they preserve rather than weaken the production guarantee. The raw-ID-render ratchets changing repairPhaseRunE's fmt.Sprintf counts from epicID 5 to 1 and specID 3 to 1 match the resulting AST: the moved derivation errors now use idrender, leaving only the two validated-ID recovery-command renders. The lint suite passes."
+    },
+    {
+      "id": "R5-verification",
+      "classification": "VERIFIED",
+      "severity": "none",
+      "assessment": "At reviewed commit 99d7548467e80de84c3642aacc6fe39f98e1ab60: go build ./..., go test ./internal/phase/... ./cmd/mindspec/... -short -count=1, go test -race ./internal/phase/... -count=1, and go test ./... -short -count=1 passed. GOOS=windows GOARCH=amd64 and GOARCH=386 phase test cross-compilation plus Windows amd64 go vet passed. git diff --check passed; final git status was clean and no .mindspec/phase.lock remained in the bead worktree."
+    }
+  ]
+}

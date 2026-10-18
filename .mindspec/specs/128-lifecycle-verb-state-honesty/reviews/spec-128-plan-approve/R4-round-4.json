@@ -1,0 +1,39 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.96,
+  "rationale": "Round-4 zero-ask regression check against reviewed commit 6cdac6e5. My rounds 1-3 had no asks, so there are no prior asks to classify; re-derivation found no regression in the R4 empirical lens. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with exactly the three decomposition WARNs disclosed and answered in the plan (10-bead count, R=0.09 scope redundancy, dependency depth 4). The YAML frontmatter parses successfully; work_chunks IDs and bead-section IDs are both the positional sequence 1..10, and the dependency arrays match the sections (1: none; 2:1; 3:none; 4:2,3; 5:2,3; 6:1; 7:1; 8:2; 9:none; 10:4,5). OQ-3's dissolution claim holds mechanically against the current tree: DerivePhaseFromChildren returns plan for an all-open lifecycle set (derive.go:386-387) and implement when any lifecycle child is in_progress (:369-371), while the mismatch warning at :179-193 fires only when child-derived is non-empty and differs from stored. Thus the planned plan-approve write of plan agrees before the first lifecycle claim, the planned post-claim write of implement agrees afterward, and a non-lifecycle claim leaves both surfaces at plan; the complete-to-plan trigger-2 write is plan-over-plan. A /tmp git lab also verified marker==tip recognition, marker!=tip after a later tip advance, and ref deletion. The whole plan is buildable, honestly scoped, and maps the spec contract to independently reviewable beads. One minor wording inconsistency remains in bead 6's compressed arrow list, but the authoritative protocol paragraph gives the only implementable order and the kill fixture pins the intended mechanics, so it does not justify another plan-gate round.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-4-1",
+      "severity": "info",
+      "title": "Plan validation succeeds with only disclosed advisory warnings",
+      "detail": "The validator reports three WARNs and exits 0: decomposition-bead-count (10), decomposition-scope-redundancy (R=0.09), and decomposition-chain-depth (4). The plan's Decomposition Note explicitly prices all three; none is a validation error or an unacknowledged delivery risk."
+    },
+    {
+      "id": "R4-4-2",
+      "severity": "info",
+      "title": "work_chunks parses and positionally maps one-to-one to bead sections",
+      "detail": "Ruby/Psych parsed the frontmatter. Chunk IDs are 1,2,3,4,5,6,7,8,9,10 and the document's bead-section headings are the same ordered sequence. Dependency arrays agree with each section's Depends on declaration, including the 4/5 to 10 joins."
+    },
+    {
+      "id": "R4-4-3",
+      "severity": "info",
+      "title": "OQ-3 warning dissolution and trigger-2 discharge re-derived",
+      "detail": "Current derive.go returns plan for all-open lifecycle children and implement for any in-progress lifecycle child. Its warning predicate is childPhase != empty && childPhase != storedPhase. Under option 1, stored and derived are plan before the first lifecycle claim, implement immediately after that claim, and plan after sanctioned release; a non-lifecycle claim is excluded from lifecycle derivation and advances no stored value. In the complete-to-plan trigger-2 state, stored remains plan and NextMode is plan, so the write is not backward and the warning condition is false."
+    },
+    {
+      "id": "R4-4-4",
+      "severity": "minor",
+      "title": "Bead 6 compressed arrow list reverses commit-tree and marker creation",
+      "detail": "Plan lines 825-826 say marker-ref write -> commit-tree, but the marker value is C and C is created by commit-tree. A /tmp lab confirmed git update-ref refuses a nonexistent object and succeeds after commit-tree creates it. The governing protocol at lines 186-204 states the correct sequence: create C, write marker=C immediately before update-ref, then advance the branch and reset. Fixture (viii) also relies on that order. This is a localized restatement typo, not a design ambiguity or required gate change; fold it into the next plan-doc touch as commit-tree -> marker-ref write -> update-ref -> reset."
+    },
+    {
+      "id": "R4-4-5",
+      "severity": "info",
+      "title": "Marker-ref resume mechanics behave as designed in scratch git labs",
+      "detail": "A /tmp repository demonstrated marker present and equal to tip, marker stale after a separate tip advance, and successful marker deletion. A second lab showed that C must exist before refs/mindspec/materialized/<bead-id> can point to it. These mechanics support the plan's early equal-tip resume and stale-marker fallthrough design."
+    }
+  ]
+}

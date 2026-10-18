@@ -1,0 +1,31 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.97,
+  "rationale": "The ADR-0023 edit is correct under this lens: the stale :107/:108 statements are visibly struck, both annotations quote and point readers to the refined some-closed/some-open/no-in_progress -> implement rule rather than leaving either plan rule live, and the unchanged refined table retains the paired all-open -> plan rule. The bead-3 pre-epic draft-discovery amendment is byte-identical across 6f75235b^..6f75235b (both extracted sections SHA-256 82c9c5ae4e06f785eb29c7ac91736c035004fb0351693f4fb96c868cb9432e76). The selected OQ-3 option-1 plan-approve row, both complete->plan triggers, release's tail-less/redesign rows, and the terminal done/idle two-layer row otherwise preserve R1.3's values and carved semantics. However, the guide/test invent an additional spec-create carve-out not present in R1.3 or AC-2 and use the same context-discovery result as both derivation and tail input, despite the verbatim contract requiring every row's derivation surface to be status-aware and independently asserted unless a documented contract carve-out applies. The guide also contradicts the binding bead-4 carry-forward taxonomy by classifying advancePhaseOnClaim as forward-by-evidence instead of evidence-fresh forward-by-intent. Focused agreement tests and `go build ./... && go test ./... -short` passed; the reviewed bead worktree remained clean.",
+  "concrete_changes_required": [
+    "Reconcile the `spec create -> spec` row with the literal R1.3/AC-2 surface contract. Do not count one `ResolveContextFromDirWithCache` result as both an independent status-aware derivation and the tail input. Either add the required independent status-aware derivation assertion over the canonical fixture, or obtain an explicit approved contract amendment authorizing this no-epic carve-out; then make the guide and fixture state and test exactly that approved contract.",
+    "Change the guide's `advancePhaseOnClaim` taxonomy to the binding carry-forward wording and semantics: evidence-fresh forward-by-intent. Preserve the explanation that newly-added lifecycle work can legitimately move a review-stored epic to implement, while keeping `phase.SanctionedDerivedSync` as the only sanctioned backward writer."
+  ],
+  "findings": [
+    {
+      "id": "R5-F1",
+      "severity": "high",
+      "title": "Spec-create adds an uncontracted derivation carve-out",
+      "detail": "R1.3 and AC-2 require each row's derivation surface to be the status-aware DerivePhaseWithStatus-class surface over the fixture's epic+child state, with the carved contract used only for documented carve-outs. Guide lines 41 and 57-60 instead add a new spec-create carve-out: there is no epic and the alleged derivation fact is explicitly the same ResolveContextFromDirWithCache WorktreeSpec branch used to feed the tail. The fixture repeats that substitution at agreement_table_test.go:343-355 and labels the single context phase `derivation + tail input`. This is neither an independent third surface nor a carve-out authorized by R1.3/AC-2, so the implementation weakens the verbatim agreement contract while claiming every row is covered."
+    },
+    {
+      "id": "R5-F2",
+      "severity": "medium",
+      "title": "advancePhaseOnClaim taxonomy drifts from the binding carry-forward",
+      "detail": "The bead-4 carry-forward requires advancePhaseOnClaim to be counted as an evidence-fresh forward-by-intent writer. Guide lines 100-105 instead classify it in bold as forward-by-evidence. The surrounding explanation correctly identifies fresh newly-added lifecycle work and correctly preserves the exactly-one-sanctioned-backward-writer sentence, but the category label itself is the opposite of the required delivered wording and therefore leaves the promised taxonomy undelivered."
+    },
+    {
+      "id": "R5-F3",
+      "severity": "none",
+      "title": "ADR strike annotations and bead-3 amendment integrity verified",
+      "detail": "ADR-0023:107 strikes the stale mixed-closed/open plan statement and quotes the governing refined implement row; :108 strikes the blocked-mix plan statement, explains blocked is neither closed nor in_progress, and routes it to that same refined implement condition. The refined table remains intact with some-closed/some-open -> implement and all-open -> plan. A bounded extraction of the bead-3 OQ-2 pre-epic draft-discovery amendment hashes identically in the parent and reviewed commits: 82c9c5ae4e06f785eb29c7ac91736c035004fb0351693f4fb96c868cb9432e76."
+    }
+  ]
+}

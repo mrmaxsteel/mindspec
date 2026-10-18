@@ -1,0 +1,39 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "confidence": 0.9,
+  "rationale": "Author-of-record round 2 on fix commit 3c472ac9 (bead worktree, byte-identical before/after; go build clean; full `go test ./... -short` green; every new test also run individually and PASSing). All four of my round-1 asks are ADDRESSED, and I found no new issues in the fix commit's other legs. G1 (the flipped destructive guard, my R1-F1): ADDRESSED — the WorktreeSpec ModeSpec backfill is restored UNCONDITIONAL (`if ctx.Phase == \"\"`, the exact option (a) I proposed), matching WorktreeBead's ModeImplement pattern; the DerivationFailed field's 'additive, values unchanged' claim is now actually true for every arm; internal/cleanup's fail-closed refusal under a bd outage in a spec worktree is re-closed; and internal/phase/derivation_failed_test.go adds three direct derive-level pins (WorktreeBead lookup failure, WorktreeSpec health-probe failure asserting BOTH DerivationFailed=true AND Phase==ModeSpec with the guard's history in the comment, WorktreeMain discovery failure asserting Phase stays \"\") — none existed before. G2 (the rejected scope limitation, my R1-F2): ADDRESSED — and re the fix author's flag on my precedent characterization: accepted; the consolidated form of my ask was imprecise (next_ready_gate_test.go's fakes FORWARD to a real bd resolved via exec.LookPath — they are the PATH-shim MECHANISM precedent, not a canned-response precedent). My intent was always: hermetic, no real bd process, no out-of-scope files, no new exported test seams — and the delivered installFakeBD meets that intent EXACTLY and exceeds the precedent: a self-contained shell case-statement with no reference to any real bd, never forwarding (verified by reading the scripts: canned `ready`/`update`/`show` for next; canned `show`/`list`/`update`/`close`/`export` for adopt). TestVerbOutput_Next drives the real nextCmd.RunE claim path (asserting 'Claiming' precedes guidance AND 'State updated: mode=implement'); TestVerbOutput_ImplAdopt drives the real adoptSpecRunE attested path; the presence-only scope-limitation test is deleted; phase-routed calls stay Go-seamed like every other row. AC-14's letter is now met for all nine verbs. G6a (termsafe, my R1-F3): ADDRESSED — FormatResult routes IndeterminateReason through termsafe.Escape at the render sink with a comment citing the matching template classification, plus TestFormatResult_Indeterminate_EscapesHostileReason proving ANSI control bytes never reach stdout raw. G6b (comments, my R1-F4): ADDRESSED — withMockNewExecutor's comment now lists next and impl approve/adopt truthfully, the file header is rewritten for the all-nine reality, and root.go's newExecutorFn comment (unedited) became TRUE by delivery — the exact 'opposite direction' my round-1 ask permitted. New-issue re-derivation over the rest of the fix: G3's TestCompleteTail_SuccessBranch_RealEmitInstructAgreesWithResultNextMode replaces the stub-callback assertion with real-emitInstruct heading equality plus other-modes-absent (closing a hole I had accepted at round 1 — an improvement, no concern); G4's adoptSpecTail is a clean extraction on the established completeTail/implApproveTail pattern with the non-fatal-tail contract preserved, and the two lint raw-ID allowlist entries are honestly MOVED (same counts, same gate rationale extended with the move note, not weakened); G5's three arrival-point legs are sound — I re-verified G5.2's load-bearing claim that ModeIdle is reachable from no ResolveContextFromDirWithCache branch other than WorktreeMain (true: WorktreeSpec backfills ModeSpec, WorktreeBead ModeImplement), and I empirically tested the suspicious-looking `fmt.Sprintf(\"%03s\", specFlag)` zero-padding (Go does zero-pad strings under the 0 flag: '5'->'005' — correct, matching the active-spec prefix convention; concern dismissed, not filed). The BeadsDirMissing export is a production predicate made reusable, not a test seam, and its rename is applied consistently at all three derive.go sites. The round-1 disclosures A-C remain acceptable as classified; disclosure D is now moot — superseded by the delivered drives. Verdict: APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-R2-C1",
+      "severity": "NOTE",
+      "title": "Round-1 ask classification: G1 ADDRESSED",
+      "detail": "WorktreeSpec backfill unconditional (derive.go), matching my proposed option (a) verbatim; cleanup.go's `ctx.Phase != \"\"` destructive refusal fail-closed again; 'additive, values unchanged' now true for every arm; three new derive-level DerivationFailed pins in derivation_failed_test.go, one per reachable failure site, each also pinning the historical fallback VALUE."
+    },
+    {
+      "id": "R1-R2-C2",
+      "severity": "NOTE",
+      "title": "Round-1 ask classification: G2 ADDRESSED (precedent-characterization caveat accepted; delivered form verified to meet intent)",
+      "detail": "The fix author's flag is fair: next_ready_gate_test.go's fakes forward to a real bd (exec.LookPath) — they are precedent for the PATH-shim mechanism only, not for canned responses. The delivered installFakeBD is purely canned and never forwards (verified by reading both scripts — no real-bd reference exists), which is what my ask's intent required (hermetic, no real bd process, no out-of-scope seams). Both verbs' REAL RunE paths (nextCmd.RunE, adoptSpecRunE) now drive end-to-end with result-before-guidance asserted; both new tests run and PASS individually (0.27s/0.26s, not skipped); the presence-only test is gone. AC-14's letter is met for all nine verbs."
+    },
+    {
+      "id": "R1-R2-C3",
+      "severity": "NOTE",
+      "title": "Round-1 ask classification: G6 termsafe ADDRESSED",
+      "detail": "FormatResult's 'cannot determine mode' line now termsafe.Escape's IndeterminateReason at the sink; TestFormatResult_Indeterminate_EscapesHostileReason proves an ANSI/control-byte-bearing reason is quoted, never raw."
+    },
+    {
+      "id": "R1-R2-C4",
+      "severity": "NOTE",
+      "title": "Round-1 ask classification: G6 comment corrections ADDRESSED",
+      "detail": "withMockNewExecutor's comment now includes `next`; the file header describes the all-nine-driven reality including the PATH-fake mechanism honestly; root.go's newExecutorFn comment was made TRUE by delivering the drives rather than edited — the direction my round-1 ask explicitly allowed ('if change 2 lands, update in the opposite direction instead')."
+    },
+    {
+      "id": "R1-R2-OBS-1",
+      "severity": "NOTE",
+      "title": "New-issue re-derivation of the non-R1 fix legs: clean",
+      "detail": "G3's real-emitInstruct agreement test strengthens a round-1 acceptance of mine; G4's adoptSpecTail extraction follows the house tail pattern with the non-fatal-warning contract pinned, and the two moved lint allowlist entries carry the same counts and an extended (not weakened) gate rationale; G5's legs are sound — the 'ModeIdle reachable only from WorktreeMain' claim re-verified against derive.go, and `%03s` zero-padding verified empirically ('5'->'005'; suspicion dismissed). BeadsDirMissing's export is a disclosed production-predicate reuse. Full `-short` suite green twice-verified; worktree byte-identical at 3c472ac9."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 claude-sub",
+  "confidence": 0.9,
+  "rationale": "FAMILY SUBSTITUTION: still the Claude substitute in the R5 seat. I verified the round-2 ask's fix at a86d0bdd exactly as tasked — and in doing so found the SAME shadow-tag scenario still reproduces end-to-end through a second, unfixed leg, so I cannot confirm the standing APPROVE. What the fix delivers, verified: draftSpecStatusWithCache's tree probe now passes the fully qualified 'refs/heads/<branch>' to gitutil.FileExistsAtRef (internal/resolve/resolve.go:270, the sole non-test call site), which is precisely the ref BranchExistsIn confirmed — the probe-vs-precondition gap I audited in round 2 is closed by construction on the cat-file leg, and the new regression test (TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt) passes. BUT the commit's claim ('tag-shadow evasion' closed) is empirically false at the state-show surface: rebuilding the binary at a86d0bdd and running my /tmp fixture — main checkout, branch-only draft spec/055-branch-only (the real spec-create shape), a same-named tag pointing at main (a commit without the draft), healthy fake bd — `state show` still prints {\"mode\":\"idle\"} exit 0. Mechanism, proven directly: the ambient path discovers candidates via DiscoverDraftSpecsWithCache → gitutil.LocalBranchRefs → forEachRefShort's `git for-each-ref --format=%(refname:short) refs/heads` (internal/gitutil/gitops.go:1810-1817), and %(refname:short) DISAMBIGUATES under a same-named tag — with the tag present the branch is emitted as 'heads/spec/055-branch-only' (verified: same repo emits 'spec/055-branch-only' the moment the tag is deleted) — so strings.CutPrefix(b, workspace.SpecBranchPrefix) fails and the branch never enters the candidate set at all. The qualified cat-file probe is never reached; the draft silently reverts to idle. The new regression test misses this because it pins the wrong layer: it calls draftSpecStatusWithCache and ResolveModeWithCache DIRECTLY with the specID, bypassing enumeration — the layer that was actually vulnerable and is exercised by the ambient main-checkout path (G3's whole point, AC-1(iii)'s surface). A secondary honesty wrinkle falls out for free: under the shadow, `state show --spec 055-branch-only` finds the draft (direct probe, qualified) while bare `state show` says idle — the same binary disagrees with itself about the same repo depending on flag presence. Not a hard block: the failure needs an adversarially- or accidentally-named tag, the fix is narrow (enumerate full refnames), and the mechanism is now fully pinned with a red-on-revert-able repro.",
+  "concrete_changes_required": [
+    "Close the enumeration leg of the shadow-tag evasion: DiscoverDraftSpecsWithCache's branch candidates must come from FULLY QUALIFIED refnames, never %(refname:short) — e.g. a gitutil variant using --format=%(refname) under refs/heads (or refs/heads/spec/ directly) with the literal 'refs/heads/' prefix stripped before the workspace.SpecBranchPrefix cut. Repro to kill: branch-only draft + same-named tag at main → for-each-ref emits 'heads/spec/<id>', CutPrefix fails, `state show` prints {\"mode\":\"idle\"} exit 0 (reproduced at a86d0bdd).",
+    "Extend the shadow-tag regression to the layer that was vulnerable: a DiscoverDraftSpecsWithCache (or state.go-level ambient) fixture with the branch-only draft AND the same-named tag, asserting the draft is listed/rendered — the current test's direct draftSpecStatusWithCache/ResolveModeWithCache calls bypass candidate enumeration and stay green over the live repro."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "info",
+      "summary": "Round-2 ask, cat-file leg: ADDRESSED as specified — the sole FileExistsAtRef call site now probes 'refs/heads/<branch>', exactly the ref BranchExistsIn confirmed; the precondition I audited in round 2 is enforced by construction there, and the new unit test passes."
+    },
+    {
+      "id": "F2",
+      "severity": "major",
+      "summary": "Round-2 ask, end-to-end: PARTIAL — the identical shadow-tag scenario still reverts a branch-only draft to {\"mode\":\"idle\"} exit 0 from the main checkout at a86d0bdd, via the enumeration leg: %(refname:short) in LocalBranchRefs disambiguates the branch to 'heads/spec/<id>' when a same-named tag exists, so the SpecBranchPrefix CutPrefix drops it and the candidate set is empty before any qualified probe runs. Empirically reproduced (fixture + fake bd) and mechanism isolated (same repo emits the short name again once the tag is deleted). The regression test pins only the direct-probe layer and stays green over this."
+    },
+    {
+      "id": "F3",
+      "severity": "minor",
+      "summary": "Consequent self-disagreement under the shadow: `state show --spec <draft-id>` renders {\"mode\":\"spec\",...} (direct qualified probe) while bare `state show` renders idle for the same repo state — resolves itself once F2's enumeration fix lands; no separate change needed."
+    }
+  ]
+}

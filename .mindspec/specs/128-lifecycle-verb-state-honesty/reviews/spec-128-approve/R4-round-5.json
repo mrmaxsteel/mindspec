@@ -1,0 +1,44 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "At reviewed commit 3a321066f3c60916968b3bb8deba5ad8f44d6cee, the round-4 fixes introduce no regression in R4's empirical territory and the whole spec remains grounded, falsifiable, internally consistent within this lens, and honestly scoped. The required live probes still reproduce the documented defects: from the spec worktree, mindspec state show exits 0 with mode idle alongside activeSpec 128-lifecycle-verb-state-honesty under both normal and bd-unreachable PATHs; from the main checkout, the current environment and the deliberately bd-unreachable PATH both exit 0 with an empty mode, reproducing the discovery-failure serialization shape. Source inspection still proves that runEmitOnly does not receive --pick and selects items[0] absent a positional, positional emit-only uses FetchBeadByID and bypasses ready-set filtering, containsSpecID is strings.Contains(title, specID) on both ready-set paths, plan approval writes mindspec_phase=implement at internal/approve/plan.go:455, and internal/instruct contains no adopt guidance. The round-5 re-conditioning is also source-grounded: empty lifecycle subset derives plan at derive.go:366; some closed plus remaining non-closed/non-in-progress lifecycle children derives implement at :383; advanceState swallows FetchChildren failure at complete.go:1434 and therefore fabricates the plan fallback; DerivePhaseWithStatus is the status-aware surface at derive.go:166/:174 and a closed epic with a done marker derives done at :200-202, while idle is correctly described as global zero-open-epic discovery. The new R3.6/AC-16 accurately pins the existing-epic replay regression at cmd/mindspec/spec.go:76 without disturbing any R4 evidence. Validation exits 0 with the expected single no-epic lifecycle-binding warning. Open implementation choices remain explicitly chartered to plan stage and do not weaken the spec gate.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R5-F1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "round-4-regression-check",
+      "summary": "R4 approved round 4 with zero asks. A fresh regression audit of commit 3a321066 found no change to or contradiction in the R4 empirical claims."
+    },
+    {
+      "id": "R4-R5-F2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-live-state-probes",
+      "summary": "mindspec state show from the reviewed spec worktree returned mode idle with a non-empty activeSpec and specBranch, including with bd removed from PATH. From the main checkout, both the current normal environment and the reduced-PATH command returned an empty mode with exit 0, reproducing the documented discovery-failure shape rather than contradicting the stated bd-availability discriminator."
+    },
+    {
+      "id": "R4-R5-F3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-source-probes",
+      "summary": "The emit-only, filter, phase-write, and guidance claims reproduce: runEmitOnly lacks a pick parameter and defaults to items[0]; positional emit-only calls FetchBeadByID; containsSpecID is a title substring check used on both ready-set paths; plan.go:455 writes mindspec_phase=implement; and internal/instruct has no adopt match."
+    },
+    {
+      "id": "R4-R5-F4",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "round-5-derivation-grounding",
+      "summary": "The changed complete-row and terminal-row claims match source: derive.go:366 is the empty-lifecycle plan fallback, :383 is the some-closed implement branch, complete.go:1434 swallows the child-read error, and derive.go:166/:174/:200-202 supplies the status-aware done derivation. The global-discovery idle carve-out is therefore honest."
+    },
+    {
+      "id": "R4-R5-F5",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "mindspec validate spec 128-lifecycle-verb-state-honesty exited 0 and reported exactly one issue: [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one."
+    }
+  ]
+}

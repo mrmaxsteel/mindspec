@@ -9,28 +9,96 @@ import (
 )
 
 // SelectWork picks a work item from the list.
-// If exactly one item, it is returned directly (auto-claim).
-// If multiple, it prints a numbered list and returns the selected index.
-// The pick parameter selects a specific item (1-based); 0 means default to first.
+//
+// Total pick semantics (spec 128 R6.1/AC-9, round-1 G10): 0 means unset —
+// the OQ-5 default resolution (displayed row 1, bd ready's priority-first
+// order); a negative pick is rejected with an error rather than silently
+// ignored; any pick >= 1 indexes the DISPLAYED list (FormatWorkList's
+// numbering) REGARDLESS of how many items it has — including exactly one,
+// where an out-of-range pick (e.g. --pick 2 against a single-item list)
+// now errors instead of silently returning the sole item. The prior
+// single-item early return that bypassed pick validation is gone
+// (red-on-revert: it used to return items[0] for ANY pick value once
+// len(items)==1).
 func SelectWork(items []BeadInfo, pick int) (BeadInfo, error) {
 	if len(items) == 0 {
 		return BeadInfo{}, fmt.Errorf("no items to select from")
 	}
-
-	if len(items) == 1 {
+	if pick < 0 {
+		return BeadInfo{}, fmt.Errorf("pick %d is invalid: must be >= 0 (0 selects the default)", pick)
+	}
+	if pick == 0 {
+		// OQ-5 resolution: default to displayed row 1 — bd ready's
+		// priority-first order, preserved end-to-end (R6.2).
 		return items[0], nil
 	}
-
-	// Multiple items — validate pick or default to first
-	if pick > 0 {
-		if pick > len(items) {
-			return BeadInfo{}, fmt.Errorf("pick %d out of range (1-%d)", pick, len(items))
-		}
-		return items[pick-1], nil
+	if pick > len(items) {
+		return BeadInfo{}, fmt.Errorf("pick %d out of range (1-%d)", pick, len(items))
 	}
+	return items[pick-1], nil
+}
 
-	// Default: return first item
-	return items[0], nil
+// SelectNamedFromReadySet resolves a positional bead ID against a
+// spec-scoped ReadySet — the claim path's positional resolution (spec 128
+// R6.1). It defers to SelectWorkByName over the FILTERED (displayed) set
+// for the normal cases, but first checks whether name identifies an item
+// the spec-title filter DROPPED from the raw ready set (R6.3(b)/AC-10): a
+// positional bead ID that IS ready but was excluded by mindspec's spec
+// filter gets the honest exclusion-reason error instead of
+// SelectWorkByName's generic "not found or not ready" — a filtered-out
+// bead is a documented reason, not a mystery. An ambiguous match among
+// excluded raw items is deliberately NOT resolved here — SelectWorkByName's
+// own ambiguity/not-found message on the filtered set stays authoritative
+// rather than this function guessing which excluded bead the caller meant.
+func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
+	if rs.SpecFlag != "" && rs.ExcludedCount() > 0 {
+		if err, excluded := exclusionReasonForName(rs, name); excluded {
+			return BeadInfo{}, err
+		}
+	}
+	return SelectWorkByName(rs.Filtered, name)
+}
+
+// exclusionReasonForName reports whether name identifies (by exact ID or
+// suffix, matching SelectWorkByName's own resolution rules) EXACTLY ONE
+// item in rs.Raw that is not present in rs.Filtered — i.e. an item the
+// spec-title filter actually dropped (never a recomputation of the
+// filter itself; membership is checked against the real, already-computed
+// Filtered set).
+func exclusionReasonForName(rs ReadySet, name string) (error, bool) {
+	if name == "" {
+		return nil, false
+	}
+	kept := map[string]struct{}{}
+	for _, item := range rs.Filtered {
+		kept[item.ID] = struct{}{}
+	}
+	var match *BeadInfo
+	for i := range rs.Raw {
+		item := &rs.Raw[i]
+		if _, ok := kept[item.ID]; ok {
+			continue // present in the filtered set — not an exclusion case
+		}
+		if item.ID == name || strings.HasSuffix(item.ID, "-"+name) {
+			if match != nil {
+				return nil, false // ambiguous among excluded items — defer to SelectWorkByName
+			}
+			match = item
+		}
+	}
+	if match == nil {
+		return nil, false
+	}
+	// Final-review round 1 (R5/G4, superseding round-1 panel G3's
+	// termsafe treatment): the caller-supplied selector no longer
+	// appears inside a command-shaped example at all. ADR-0042's rule is
+	// that termsafe is IDENTITY on printable ASCII, so `x;evil` or
+	// `$(evil)` interpolated into a backtick-fenced `mindspec next ...`
+	// line survived byte-raw into copy-pasteable command text. The
+	// matched ID (idrender-gated) names the bead; the executable-shaped
+	// guidance carries NO dynamic operand.
+	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; drop the positional or re-run `mindspec next` without `--spec` to claim it outside this scope",
+		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag)), true
 }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched
@@ -71,25 +139,35 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 	// if more than one ready item suffix-matches, the short form is genuinely
 	// ambiguous and we error (telling the caller to qualify with the full ID)
 	// rather than silently claim an order-dependent arbitrary bead.
-	var match *BeadInfo
-	ambiguous := false
+	var matches []BeadInfo
 	for i := range items {
 		if strings.HasSuffix(items[i].ID, "-"+name) {
-			if match != nil {
-				ambiguous = true
-				break
-			}
-			match = &items[i]
+			matches = append(matches, items[i])
 		}
 	}
-	if ambiguous {
-		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set; qualify it with the full bead ID (e.g. `mindspec-%s`)", name, name)
+	if len(matches) > 1 {
+		// Final-review round 1 (R5/G4, superseding round-1 panel G3):
+		// the prior `e.g. \`mindspec-%s\`` example both hardcoded one
+		// project's issue prefix and interpolated the selector into an
+		// executable-looking span where termsafe is identity on
+		// printable shell metacharacters. Name the REAL candidates
+		// instead — each through idrender.Bead's validate-or-quote gate
+		// (bd IDs are agent-writable, ADR-0042) — and keep the free-text
+		// selector in a %q position only.
+		ids := make([]string, len(matches))
+		for i, m := range matches {
+			ids[i] = idrender.Bead(m.ID)
+		}
+		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))
 	}
-	if match != nil {
-		return *match, nil
+	if len(matches) == 1 {
+		return matches[0], nil
 	}
 
-	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); it cannot be claimed via `mindspec next %s`", name, name)
+	// Final-review round 1 (R5/G4): the executable-shaped guidance
+	// carries NO dynamic operand — the unresolvable selector appears
+	// only in the %q position.
+	return BeadInfo{}, fmt.Errorf("bead %q is not in the ready set (not found or not ready); run `mindspec next` with no positional to list claimable work", name)
 }
 
 // FormatWorkList returns a formatted numbered list of work items for display.

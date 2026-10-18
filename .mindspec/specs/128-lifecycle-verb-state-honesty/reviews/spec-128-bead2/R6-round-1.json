@@ -1,0 +1,82 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The build, full short suite, and targeted semantics-v2/route-248/sanction tests pass, but option 1 is not state-honest under failure or concurrency. The new next claim writer decides from a claim that occurred before its phase lock and then writes implement without re-reading child evidence under that lock. A release or complete can land fresher plan/review state before this delayed write, which then regresses it to implement. Independently, a lock or merge failure is warning-only, so next can report success with a lifecycle child in_progress while stored remains plan. These are direct stored-versus-derived disagreement states in the core behavior this bead is meant to establish, so the defect is a hard block despite the green suite.",
+  "concrete_changes_required": [
+    "Make the claim-path phase update derive from fresh child state inside the same WithPhaseWriteLock critical section as its write. It must write implement only while current evidence still derives implement, and it must never overwrite fresher plan, review, or done state produced by release/complete.",
+    "Add deterministic real-lock interleaving tests for delayed next versus release and delayed next versus complete, asserting the final stored phase equals the fresh child-derived phase and never regresses review/done to implement.",
+    "Define and enforce failure semantics for the required first-lifecycle-claim advance. A warning-only failed phase write cannot leave a successful next result with stored plan and derived implement; add lock-timeout and merge-failure tests over the real claim path.",
+    "Treat any present mindspec_phase_semantics marker as already discriminated, or explicitly reject unsupported values; never overwrite a future/non-v2 value with v2 or run the legacy rewrite over it. Add marker-present future-value and malformed-value fixtures.",
+    "Replace the non-lifecycle fixture with a canonical claimed shape (stored plan, lifecycle tasks all open, non-lifecycle child in_progress), assert zero phase advance, marker persistence, and stored==derived. Add an EnsurePhaseSemanticsV2-failure case for that path so a legacy mismatch cannot be silently preserved by the early return.",
+    "Stop discarding the new FindEpicBySpecID error in ApprovePlan's semantics-v2 preflight, or document and test a fail-safe contract that proves proceeding cannot skip required reconciliation."
+  ],
+  "findings": [
+    {
+      "id": "R6-1",
+      "severity": "hard_block",
+      "title": "Claim phase writer can overwrite fresher release/complete state",
+      "evidence": "cmd/mindspec/next.go:295 mutates the child claim, but advancePhaseOnClaim does not acquire the phase lock until line 532. Inside the lock, lines 533-536 inspect only stored phase and unconditionally write implement for every value other than implement; they do not freshly read children or check that the selected bead remains in_progress. Interleaving: claim child -> release sets it open and SanctionedDerivedSync writes plan -> delayed advance writes implement, leaving stored implement/derived plan. Likewise complete can close the bead and sync review before the delayed writer regresses review to implement. The existing TestAdvancePhaseOnClaim tests use static snapshots and cannot expose either interleaving."
+    },
+    {
+      "id": "R6-2",
+      "severity": "hard_block",
+      "title": "Required claim advance is best-effort and can permanently preserve disagreement",
+      "evidence": "cmd/mindspec/next.go:510-514 declares the writer best-effort, and lines 537-538 only warn on lock/read/merge failure. The command continues after the child was successfully claimed. Starting from native v2 plan/all-open, a failed phase write leaves a child in_progress (derived implement) with stored plan. This contradicts the pinned option-1 statement that the first lifecycle claim advances stored phase and leaves downstream bead-4 agreement fixtures unsound."
+    },
+    {
+      "id": "R6-3",
+      "severity": "major",
+      "title": "Marker-present contract is implemented as exact-v2-only and can downgrade future semantics",
+      "evidence": "internal/phase/semantics_v2.go:113-120 promises marker present means no-op, but lines 133-138 no-op only for the exact string v2. A present value such as v3 or a malformed value is treated as absent; lines 146-150 then overwrite it with v2 and can rewrite implement to plan. None of the six fixtures attacks a present non-v2 marker."
+    },
+    {
+      "id": "R6-4",
+      "severity": "major",
+      "title": "The non-lifecycle fixture does not model a claim and blesses disagreement",
+      "evidence": "internal/phase/semantics_v2_test.go:157-188 uses stored implement with one open bug and no lifecycle children. That shape derives plan, yet the test requires marker-only and never asserts stored==derived; the bug is not in_progress, so it does not exercise a claim. The canonical option-1 shape should start stored plan with open lifecycle work plus an in_progress non-lifecycle child and prove next performs no phase advance."
+    },
+    {
+      "id": "R6-5",
+      "severity": "moderate",
+      "title": "New preflight lookup error is discarded",
+      "evidence": "internal/approve/plan.go:310 gates EnsurePhaseSemanticsV2 on epicErr == nil and silently proceeds otherwise. This is the only new production read that discards an error outright. The under-lock epic and child reads in EnsurePhaseSemanticsV2 correctly propagate with zero write, and the read-side marker helper's FindEpic result is already memoized by the preceding successful stored-phase read, so no second new bead-1-class discarded-read defect was found there."
+    },
+    {
+      "id": "A",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable. Using phase.mergeMetadataFn matches EnsureMigrated and correctly separates the reconciliation writer from verb-specific phase seams. Fault injection remains available through SetMergeMetadataForTest, though caller-level failure tests should be added for the paths required above."
+    },
+    {
+      "id": "B",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable as fixture isolation. The no-op stubs prevent unrelated first-run marker writes from perturbing pre-existing assertions; dedicated semantics-v2 tests observe the writer. They do not, however, cover the concurrency and failure guarantees identified above."
+    },
+    {
+      "id": "C",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable and necessary: marker-present backward fixtures represent post-v2 states and prevent the one-shot translator from consuming the guard case. Coverage must additionally protect future/non-v2 marker values."
+    },
+    {
+      "id": "D",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable. The assertion still records CommitAll before the first planMergeMetadataFn phase write and now expects plan. The stale test name/comment wording should be cleaned up but does not weaken the ordering pin."
+    },
+    {
+      "id": "E",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable. git diff --check and the full lint suite pass; repair's new formatted text uses idrender, and derive.go's allowlist increase from 2 to 4 matches the two new raw epicID emission sites while the backward branch is wrapped. No evidence of a dishonest recount or generalized gate weakening."
+    },
+    {
+      "id": "F",
+      "severity": "accepted_deviation",
+      "assessment": "Acceptable. The pre-existing complete phase-sync writer is not substantively changed by this commit beyond the earlier EnsurePhaseSemanticsV2 call site; no additional deviation was found at that writer."
+    },
+    {
+      "id": "verification",
+      "severity": "info",
+      "assessment": "At artifact 798841b92459dc83359b5b7eac4b203f5c8f8594: go build ./... && go test ./... -short passed. Targeted TestEnsurePhaseSemanticsV2*, TestRoute248*, TestSanctionedDerivedSync*, TestAdvancePhaseOnClaim*, TestAC5viii*, and TestReleaseSyncPhase* passed. The bead worktree remained clean and no transient .mindspec/phase.lock remained."
+    }
+  ]
+}

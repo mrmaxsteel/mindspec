@@ -1,0 +1,32 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Both R4 round-1 asks are ADDRESSED at reviewed tip 0783a507c01604072159d09ba16bbef197f9e8f7. I rebuilt cmd/mindspec from that exact tip into the mandated scratch area (SHA-256 8caba8c2859debc7b3fc98c4914c383be3592a8c9803d7fc30cc26b97d74890c), ran the focused command-tail regression, ran the new real-executor end-to-end regression, and independently drove a fresh spec approval with the rebuilt binary in a disposable git/beads repository. The live success tail stated that approval artifacts were committed, omitted the former false manual-commit instruction, and named continuing planning as the sole next action. Independent post-state checks showed an empty `git status --porcelain`, HEAD subject `chore: approve spec 001-approve-tail-probe`, and `mindspec state show` reporting plan mode for that active spec. The designated scratch tree was deleted afterward; the reviewed checkout remained at the exact reviewed SHA with empty tracked and staged diffs.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-1-round-2",
+      "classification": "ADDRESSED",
+      "severity": "RESOLVED",
+      "title": "Spec-approve success tail now states the true durable result and next action",
+      "evidence": "A fresh `mindspec spec approve 001-approve-tail-probe --approved-by 'R4 codex'` using the rebuilt tip binary printed `Approval artifacts committed (spec worktree left clean; the clean-tree gates are already satisfied).` followed by `1. Continue planning for 001-approve-tail-probe.` It did not print `Commit approval artifacts before continuing`. Immediately afterward the spec worktree porcelain status was empty, its HEAD was the approval commit, and state show reported mode plan. The focused `TestSpecApprove_TailStatesCommittedResultNotFalseInstruction` also passed."
+    },
+    {
+      "id": "R4-2-round-2",
+      "classification": "ADDRESSED",
+      "severity": "RESOLVED",
+      "title": "A real-executor regression pins the approval commit and clean post-state",
+      "evidence": "`go test ./internal/approve -run '^TestApproveSpec_RealExecutorCommitsAndLeavesClean$' -count=1 -v` passed. The new test creates a fresh git repository and actual spec worktree, invokes ApproveSpec through MindspecExecutor, then independently asserts both a clean worktree and the presence of the approval commit. Together with the command-level output test, it covers all three requested legs: durable commit, clean tree, and absence of the false instruction."
+    }
+  ],
+  "empirical_observations": {
+    "reviewed_commit": "0783a507c01604072159d09ba16bbef197f9e8f7",
+    "build": "PASS: rebuilt ./cmd/mindspec at the reviewed tip entirely under the designated scratch tree; binary SHA-256 was 8caba8c2859debc7b3fc98c4914c383be3592a8c9803d7fc30cc26b97d74890c.",
+    "tail_regression": "PASS: TestSpecApprove_TailStatesCommittedResultNotFalseInstruction.",
+    "real_executor_e2e": "PASS: TestApproveSpec_RealExecutorCommitsAndLeavesClean.",
+    "fresh_cli_probe": "PASS: live rebuilt-binary approval output matched durable state: truthful committed-result text, planning next action, no stale commit instruction, clean spec worktree, approval commit present, plan state reported.",
+    "environment_note": "Native bd 1.1.0 again refused `bd worktree create` under the brief-mandated /private/tmp path with `BEADS_DIR points to unsafe location`. As in round 1, this occurred before approval and is environmental. I completed the disposable approval probe by creating the already-requested spec branch's git worktree directly; the approval itself used the rebuilt production CLI and real bd tracker operations.",
+    "cleanup": "PASS: the exact R4 scratch directory was deleted. Before this required verdict write, HEAD was still the reviewed SHA and both tracked and staged diffs were empty; only the pre-existing untracked final-review directory was reported."
+  }
+}

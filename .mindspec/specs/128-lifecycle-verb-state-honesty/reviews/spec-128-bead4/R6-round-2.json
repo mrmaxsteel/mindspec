@@ -1,0 +1,36 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Both R6 round-1 asks are addressed at reviewed commit f490fd26. The former row-name-only cross-pin has been replaced by a structural four-field record and parser: Row, State show, Instruct tail, and Derivation are compared cell-for-cell; each record is dispatched through a required executable fixture; and the carve-outs are represented by explicit no-epic/no-tail sentinels. Independent disposable-copy probes confirmed that changing complete-to-review's three mode cells makes the agreement suite fail, changing the forced-repair tail-less sentinel makes it fail, and adding a matching doc+record row without a fixture function makes both registry gates fail. Repair phase now has the two requested success rows: the marker-absent v2 reconciliation path exercises the real EnsurePhaseSemanticsV2 rewrite and proves the resulting already-consistent plan state, while the forced-backward row proves a genuine review-to-implement backward premise and asserts the forced post-state, including the recorded reason; both use the tail-less two-surface contract. The agreement suite and build pass. The broad repository suite's ordinary packages passed, but internal/harness failed solely because its live Claude Code runner reported 'Not logged in'; that environment-dependent failure is outside this bead and is not evidence of a spec-branch-corrupting defect. No reachable omitted success state or bead-5 tail-sequencing conflict was found in the reviewed change.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-R1-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "internal/phase/agreement_table_test.go:255-293,856-990; project-docs/user/guides/lifecycle-modes.md:13-67",
+      "summary": "The structural table-to-fixture contract now pins all contracted cells, carve-out identity, and executable fixture presence.",
+      "evidence": "parseAgreementTableRows reads row id, state-show, tail, and derivation cells; TestAgreementTable_DocRowsCrossPinFixtures compares them against agreementTableRows and checks rowFixtures; TestAgreementTable_Rows refuses any record lacking a fixture function. In /tmp at f490fd26, editing complete-to-review's state/tail/derivation cells from review to plan failed with a cell-difference diagnostic; editing forced repair's no-tail sentinel to implement failed with a tail-cell diagnostic; adding the same synthetic row to both the Markdown table and agreementTableRows without a rowFixtures entry failed in both tests.",
+      "impact": "The round-1 hard block is cleared: a row name alone cannot satisfy AC-2, and table-cell or carve-out drift is red."
+    },
+    {
+      "id": "R6-R1-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "project-docs/user/guides/lifecycle-modes.md:59-60,69-80; internal/phase/agreement_table_test.go:694-814",
+      "summary": "Repair phase's reachable v2 reconciliation/no-op and forced-backward successes are now table rows with tail-less fixtures.",
+      "evidence": "The v2 row begins marker-absent with stored implement and all lifecycle children open, invokes the real EnsurePhaseSemanticsV2 path, checks the plan rewrite plus v2 marker, then checks fresh stored and derived values are both plan before the two-surface assertion. The forced row derives implement from a closed+open child set, proves review-to-implement is backward through IsBackwardMove, constructs the forced result with mindspec_phase_force_reason, and checks derivation plus state-show against the row. Both rows carry the exact no-tail sentinel parsed by the structural contract.",
+      "impact": "The table's every-lifecycle-verb success claim now includes repair phase and truthfully applies its two-surface carve-out."
+    },
+    {
+      "id": "R6-R2-VERIFICATION",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "reviewed commit f490fd26da55306e986f005562190f405e77cbb5",
+      "summary": "Reviewed identity, focused tests, build, mutation probes, and worktree hygiene were verified.",
+      "evidence": "HEAD was exactly f490fd26da55306e986f005562190f405e77cbb5. make build and go test ./internal/phase -run AgreementTable -count=1 passed. The full go test ./... run passed ordinary packages but failed internal/harness because the external Claude Code runner was not logged in. All three /tmp probe clones were deleted. Final git status was empty and git diff --exit-code succeeded in the bead worktree.",
+      "impact": "No spec-branch-corrupting defect remains; the environmental live-agent harness failure does not change the bead verdict."
+    }
+  ]
+}

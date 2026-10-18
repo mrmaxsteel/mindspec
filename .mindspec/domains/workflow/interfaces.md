@@ -283,6 +283,55 @@ the empty `git merge bead/` fence with target-naming text, and never
 emits a `mindspec complete <bead>` recovery line for a panel that is not
 complete-gated.
 
+### Lifecycle verb state honesty (spec 128)
+
+**Draft/discovery honesty (`internal/resolve`, R1):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `IsDraftSpecWithCache(c, root, specID)` | Reports whether specID is an on-disk pre-epic draft (OQ-2) — shared by `ResolveModeWithCache`, `ResolveSpecPrefixProven`, and `internal/next`'s R6.7 scope refusal. |
+| `ResolveSpecPrefixProven(root, specID)` | `ResolveSpecPrefix`'s root-aware sibling: the full-hyphenated-ID passthrough branch now PROVES the ID names an epic-bearing or legitimate-draft spec (never a syntactically-valid-but-nonexistent one), consulting `IsDraftSpecWithCache` and `gitutil.FileExistsAtRef`. |
+
+**Indeterminate-mode rendering (`internal/instruct`, R2.3):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `BuildIndeterminateContext(WithCache)(root, reason)` | Builds a rendering context with `Mode = state.ModeIndeterminate` and `IndeterminateReason = reason`. |
+| `RenderIndeterminate(root, reason)` | Convenience wrapper external callers (`emitInstruct`, `completeTail`) use to render `templates/indeterminate.md` directly instead of falling back to `idle.md` for an undiscovered failure. |
+
+**Gate-before-mutate reorder / prospective-snapshot content gates (`internal/complete`, `internal/validate`, R4):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `complete.runMaterialization` (`materialize.go`) | Orchestrates the M/R/S/G/T staged sequence over the execution domain's eight `Executor` seam methods — no `internal/gitutil` import (ADR-0030). |
+| `validate.ValidateDocsSnapshot(root, base, treeOID, wtPath, exec)` | The doc-sync gate's tree-vs-tree leg: measures `base..T` (a candidate tree, not a committed ref) instead of a committed range; unchanged `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. |
+| `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate's equivalent tree-vs-tree leg — `ownerRef` is FORCED to the same `treeOID` so attribution and diffed content come from the identical candidate. |
+
+**Proportional claim guard (`internal/next/guard.go`, R5):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `ComputeEntangleablePaths(repoRoot, cwd, specID)` | Derives the worktree-creating claim path's entanglement set as two CONTAINMENT-gated conditional classes — an entry-absent `.gitignore` at the claim anchor, and (when recording is enabled) the target spec's `events.ndjson`/`manifest.json` — never unconditionally empty; dirt on either class still blocks. |
+| `EntangleableClaimPaths()` / `SetEntangleableClaimPathsForTest` | Test-injectable residual unioned on top of the two derived classes, keeping the block machinery exercised (AC-8(iii)) independent of which conditional classes are live in a given fixture. |
+| `CheckDirtyTreeProportional(repoRoot, cwd, specID) (blockingDirt, ignoredDirt []string, err error)` | Narrows the dirty-tree guard to the derived rule for the claim path only; every other caller (`spec approve`, `release`) is unaffected. |
+
+**Deterministic, honest bead selection (`internal/next`, R6):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `ReadySet{Filtered, Raw, SpecFlag}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | R6.1's ONE ready-set construction result — `Filtered` is the displayed/selectable list, `Raw` the pre-filter list (consulted only to name a true exclusion reason) — consumed identically by the claim path and the NON-positional `--emit-only` flows (default and `--pick N`) so `--pick N` names the same bead on both (AC-9). **Positional `--emit-only` never constructs one at all** (R6.3(a)) — it fetches by ID and prints the pinned bypass line `"emit-only: bead fetched by ID; readiness not checked."`, with no exclusion report. |
+| `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, epic-scoped otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
+| `SelectWork(items, pick)` (`select.go`) | Total pick semantics: `pick >= 1` always indexes the displayed list, even with exactly one item; `0` means unset; negative errors. |
+| `SelectNamedFromReadySet(rs, name)` | Positional resolution against a `ReadySet`: a filtered-out-but-ready bead gets the honest exclusion reason, never the generic "not found or not ready". |
+| `RenderBDError(err)` (`beads.go`) | Wraps a bd/lock-derived error so callers render it via `%v`/`%s` with every line escaped through `termsafe.Escape` (ADR-0042) — the rendering half of AC-11 (the execution domain's `wrapBDError` supplies the content half). |
+
+**Total verb classification (`cmd/mindspec`, R2.1/AC-14):**
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `newExecutorFn` (`root.go`) | Package-level `Executor`-constructing seam every verb's `RunE` composes with, letting `verb_output_test.go` drive real `RunE` functions against `executor.MockExecutor`. |
+| `mutatingVerbRows` / `mutatingVerbAliases` / `nonMutatingAllowlist` (`verb_output_test.go`) | The total-classification tables the cobra-tree walk checks every runnable command against — an unclassified new command, or one misclassified as mutating without a row, is red. |
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()`, `workspace.DetectWorktreeContext()` for locating state and worktrees

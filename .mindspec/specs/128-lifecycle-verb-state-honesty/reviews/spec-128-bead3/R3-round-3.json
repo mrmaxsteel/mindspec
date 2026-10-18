@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.9,
+  "rationale": "Round-3 minimal confirm at a86d0bdd. The qualified-ref fix PRESERVES and COMPLETES my round-2 G3 verification: the tree-probe loop is unchanged in position (still strictly after the BranchExistsIn confirmation and after the epic short-circuit), only the ref operand changed from the short branch name to \"refs/heads/<branch>\". This makes the precondition genuinely airtight rather than merely documented: BranchExistsIn verifies exactly `refs/heads/<name>` via rev-parse --verify --quiet (gitops.go:125), so the ref CONFIRMED and the ref PROBED are now byte-identical — the round-2 gap (git's ambiguous short-name resolution preferring refs/tags, letting a fetchable same-named tag shadow the confirmed branch and silently revert a branch-only draft to idle) is closed at its root, and a cat-file ExitError under this precondition can only mean path-absent, since a fully qualified ref bypasses short-name disambiguation entirely. The shadow-tag regression test reproduces the exact evasion (tag spec/<id> at main, draft only on the branch) and asserts both layers (draftSpecStatusWithCache and ResolveModeWithCache). rejectOptionLike accepts the qualified form (no leading dash); the error message now names the qualified ref, which is more precise. The only residual is a benign TOCTOU (branch deleted between confirm and probe reads as not-a-draft — honest, since the branch being gone means it genuinely is no longer a draft). Verified green at a86d0bdd: full internal/resolve and internal/gitutil packages including the new shadow-tag test; go build clean; bead worktree left byte-identical. Standing APPROVE confirmed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-3-1",
+      "severity": "info",
+      "title": "Round-3 confirm: qualified-ref probe verified — G3 verification preserved, precondition now exact",
+      "detail": "Diff is minimal and targeted: one ref-operand change inside draftSpecStatusWithCache's tree-probe loop (short branch name → refs/heads/<branch>) plus one red-on-revert regression test (TestDraftSpecStatusWithCache_BranchOnlyDraft_ShadowTagDoesNotHideIt). Ordering invariants from my round-2 verification are untouched: epic check first (memoized, free), BranchExistsIn second, os.Stat dir third, tree probe last and only post-branch-confirmation. The fix upgrades the round-2 precondition from 'caller confirmed the ref exists' to 'caller confirmed THIS EXACT qualified ref exists' — eliminating the tag-shadow class rather than patching one instance, since no short-name resolution occurs at all. FileExistsAtRef itself is unchanged (correctly — it is the call site's obligation, and the helper's doc comment already states the precondition)."
+    },
+    {
+      "id": "R3-3-2",
+      "severity": "minor",
+      "title": "CARRY-FORWARD (a) for bead 5, re-recorded from the terminal round: the planned indeterminate-form trigger cannot see in-worktree bd-failure fabrications",
+      "detail": "Unchanged through rounds 2-3 (derive.go correctly untouched): ResolveContextFromDirWithCache never returns a non-nil error and back-fills fabricated phases on bd failure inside worktrees (WorktreeBead error → ModeImplement, derive.go:601-605; WorktreeSpec error → ModeSpec, derive.go:617-619). Bead 5 step 1 keys its indeterminate form on 'context error or empty phase' — a trigger those paths can never produce, so as planned the fix would be vacuous for the in-worktree bd-failure class: emitInstruct would render fabricated implement/spec guidance while `state show` (this bead) correctly refuses. Bead 5 must either rewire emitInstruct to the error-propagating ResolveModeWithCache family or make derive.go stop swallowing errors. The tally should attach this note to bead 5's prompt."
+    },
+    {
+      "id": "R3-3-3",
+      "severity": "minor",
+      "title": "CARRY-FORWARD (b) for bead 5 / follow-up, re-recorded from the terminal round: standalone `mindspec instruct` windows remain unowned",
+      "detail": "Two windows in internal/instruct/run.go survive the bead, both pre-existing-shaped (not this bead's regressions): (i) main-checkout-with-draft — the resolveErr fallback (run.go:121-127) reads pctx.Phase=idle from the draft-blind WorktreeMain branch, so `mindspec instruct` (and the SessionStart hook) renders idle 'Available Actions' while `state show` says spec for the same repo state (ResolveTargetWithCache is not draft-aware); (ii) bd-partial-failure — the round-1 G4 fix routes modeErr to handleNoState, which renders the idle template, and its comment explicitly disclaims this call site as bead 5's tail territory. Bead 5's declared steps (instruct_tail.go, spec.go, internal/complete) do not include run.go, so neither window currently has an owner. Ask of the tally, unchanged from round 2: extend bead 5's scope in writing or file a follow-up bead so the standalone verb converges with the honest surfaces — otherwise the cross-verb disagreement becomes permanent."
+    }
+  ]
+}

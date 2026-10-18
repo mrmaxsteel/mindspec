@@ -52,9 +52,12 @@ type releaseDeps struct {
 	// cursor rewind / mindspec_phase cache sync. A "" active bead or any error
 	// leaves the cursor untouched.
 	activeBead func(beadID string) (active string, epicID string, ok bool)
-	// syncPhase writes the mindspec_phase metadata cache on the epic (Step 6.5,
-	// mirrors complete.go). Best-effort; an error is a warning, never fatal.
-	syncPhase func(epicID, mode string)
+	// syncPhase re-derives and writes the epic's child-derived mindspec_phase
+	// (Step 6.5) via the sanctioned redesign leg (phase.SanctionedDerivedSync,
+	// spec 128 Bead 2) — backward permitted, re-derived fresh inside its own
+	// lock critical section, never a value precomputed by the caller.
+	// Best-effort; an error is a warning, never fatal.
+	syncPhase func(epicID string)
 
 	stdout io.Writer
 	stderr io.Writer
@@ -110,6 +113,85 @@ next to recover) rather than an "open + stale-worktree" collision.
 	},
 }
 
+// releaseSyncPhase performs release's step-6.5 cursor-rewind phase-cache
+// sync. Spec 128 Bead 2 (OQ-3 option 1, the sanction boundary): this is
+// the ONE production caller of phase.SanctionedDerivedSync — the child-
+// derived phase is re-derived FRESH inside that function's own lock
+// critical section (never precomputed here and merely closed over, the
+// exact stale-target race the R3.3 lock exists to close), backward move
+// permitted, because release's own guard-routed internal caller is
+// re-deriving from the epic's own fresh evidence rather than asking a
+// human to override a guard against possibly-stale evidence (the
+// operator-facing `mindspec repair phase` guard is unaffected).
+//
+// Ahead of the sync itself, a v2 phase-semantics self-heal
+// (phase.EnsurePhaseSemanticsV2) runs first — the same one-shot
+// reconciliation `plan approve`/`impl approve`/`complete`/`next`'s claim
+// path run — so a legacy epic converges before the sanctioned sync
+// re-derives, rather than the sync racing a stale pre-v2 stored value.
+//
+// Both calls are best-effort writes: a failure never fails `release`
+// itself (the sync is a cache refresh, not the terminal mutation), but
+// round-1 panel G3 requires it be SURFACED, not silently discarded. The
+// two legs get DIFFERENT recovery treatment (round-1 panel G5/R3-G2 —
+// the pre-fix-round `mindspec release <bead-id>` recovery was a DEAD END
+// on BOTH legs: the bead is already open by the time a re-run happens,
+// so Step 6.5's own activeBead-cursor precondition is never met again):
+//   - EnsurePhaseSemanticsV2 failure: the self-heal is idempotent and its
+//     own effect (when it does anything at all) is a forward translation
+//     — `mindspec repair phase <spec-id>` genuinely converges (that verb
+//     runs the identical self-heal at its own entry), so it gets the
+//     SAME always-convergent treatment as next.go's advance-on-claim
+//     failure (describePhaseSyncFailure).
+//   - SanctionedDerivedSync failure: this IS the sanctioned BACKWARD
+//     write (AC-5(viii)'s own twin pins that the unforced OPERATOR guard
+//     REFUSES this exact backward state) — there is genuinely NO
+//     unforced copy-pastable fix. Recorded disposition: the recovery
+//     line names ONLY the safe inspection action (`bd show <epic-id>`,
+//     matching AC-5(iv)'s backward-branch convention and the house
+//     "never a --force on the greppable recovery line" rule this
+//     package's own dirty-tree refusal already follows), with the
+//     forcing escape named as a separately-labeled operator choice in
+//     the message body. A fuller fix (e.g. surfacing this state through
+//     the agreement-table/result-message work) is explicitly routed to
+//     beads 4/5, named here so it is not a silent dead end.
+//
+// Extracted to its own named, root-parameterized function (rather than
+// an inline closure capturing newReleaseDeps' root) so it is directly
+// unit-testable without exercising newReleaseDeps' full bd/git wiring.
+func releaseSyncPhase(root, epicID, specID string) {
+	recovery := nextPhaseAdvanceRecoveryCommand(specID)
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		fmt.Fprintln(os.Stderr, describePhaseSyncFailure(err, recovery))
+	}
+	if syncErr := phase.SanctionedDerivedSync(root, epicID); syncErr != nil {
+		fmt.Fprintln(os.Stderr, describeReleaseSyncFailure(syncErr, epicID, specID))
+	}
+}
+
+// describeReleaseSyncFailure renders a SanctionedDerivedSync failure —
+// see releaseSyncPhase's doc comment for the disposition this
+// implements (round-1 panel G5/R3-G2). specID may be empty (the same
+// "<spec-id>" placeholder convention as elsewhere).
+//
+// Final-review round 1 (R2/R5, G3): err can chain a fresh-cache
+// GetChildren -> `bd list` -> wrapBDError's raw stderr excerpt — escape
+// via next.RenderBDError at this render sink, exactly as the SAME
+// releaseSyncPhase's EnsurePhaseSemanticsV2 leg two lines above already
+// does (describePhaseSyncFailure); pre-fix these were adjacent
+// escaped/raw twins.
+func describeReleaseSyncFailure(err error, epicID, specID string) string {
+	specRef := "<spec-id>"
+	if specID != "" {
+		specRef = idrender.Spec(specID)
+	}
+	return fmt.Sprintf(
+		"could not sync phase metadata for epic %s: %v\n"+
+			"Operator choice — this is the sanctioned backward move (release), so no unforced automatic fix exists; force it only if intentional: mindspec repair phase %s --force-backward \"<reason>\".\n"+
+			"recovery: bd show %s",
+		idrender.Bead(epicID), next.RenderBDError(err), specRef, idrender.Bead(epicID))
+}
+
 // newReleaseDeps assembles the production seams for `mindspec release`.
 //
 // Removal routes through the CONCRETE *MindspecExecutor (ADR-0030): WorktreeOps
@@ -125,12 +207,16 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 	// The bead worktree is nested under its spec worktree. Resolving the spec
 	// worktree from the bead's epic mirrors how complete.go finds the bead
 	// worktree; the path is used only for the dirty-check (the executor's
-	// Remove resolves the worktree by name via bd).
+	// Remove resolves the worktree by name via bd). The same resolved specID
+	// is reused below for releaseSyncPhase's convergent recovery commands
+	// (spec 128 Bead 2 round-1 panel G5) — one lookup, two uses.
 	specWorktree := root
+	var resolvedSpecID string
 	if _, specID, ferr := phase.FindEpicForBead(beadID); ferr == nil && specID != "" {
 		// specID is D1-checked (phase.FindEpicForBead only returns a
 		// non-empty specID that already passed idvalidate.SpecID) — this
 		// waist call cannot fail.
+		resolvedSpecID = specID
 		if swt, swErr := workspace.SpecWorktreePath(root, cfg, specID); swErr == nil {
 			specWorktree = swt
 		}
@@ -148,11 +234,14 @@ func newReleaseDeps(root, beadID string) releaseDeps {
 		removeWorktree:   exec.RemoveBeadWorktreeAndRestore,
 		setOpen:          defaultSetOpen,
 		activeBead:       defaultActiveBead,
-		syncPhase: func(epicID, mode string) {
-			_ = bead.MergeMetadata(epicID, map[string]interface{}{"mindspec_phase": mode})
-		},
-		stdout: os.Stdout,
-		stderr: os.Stderr,
+		// Spec 128 Bead 2: routed through phase.SanctionedDerivedSync (the
+		// sanctioned redesign leg) — see releaseSyncPhase. Round-1 panel
+		// G3: a lock/write failure is best-effort (the cursor-rewind
+		// cache sync never fails `release` itself) but is no longer
+		// silently discarded.
+		syncPhase: func(epicID string) { releaseSyncPhase(root, epicID, resolvedSpecID) },
+		stdout:    os.Stdout,
+		stderr:    os.Stderr,
 	}
 }
 
@@ -309,13 +398,13 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 
 	// Step 6 + 6.5: the cursor is DERIVED from bd's single in_progress child
 	// (ADR-0023), so Step 5's set-open already self-rewinds the derived cursor.
-	// Only sync the mindspec_phase metadata cache (mirror complete.go step 6.5)
-	// when the released bead WAS the active one; a non-active release leaves the
-	// cursor untouched.
+	// Only sync the mindspec_phase metadata cache (the sanctioned redesign
+	// leg, spec 128 Bead 2) when the released bead WAS the active one; a
+	// non-active release leaves the cursor untouched. No value is
+	// precomputed here — deps.syncPhase re-derives fresh inside its own
+	// lock critical section (phase.SanctionedDerivedSync).
 	if haveCursor && epicID != "" && active == beadID {
-		if newMode, derr := phase.DerivePhase(epicID); derr == nil && newMode != "" {
-			deps.syncPhase(epicID, newMode)
-		}
+		deps.syncPhase(epicID)
 	}
 
 	fmt.Fprintf(deps.stdout, "Released bead %s.\nWorktree removed; bead returned to open (assignee cleared).\n", idrender.Bead(beadID))

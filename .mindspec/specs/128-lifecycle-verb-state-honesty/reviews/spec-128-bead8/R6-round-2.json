@@ -1,0 +1,32 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Both R6 round-1 asks are addressed at reviewed commit 8193ca97. Negative --pick validation now occurs at the shared RunE command boundary before selector conflict handling, positional dispatch, emit-only dispatch, scope resolution, guards, fetches, ready queries, or claims; the real-bd e2e exercises both claim and emit-only paths and confirms refusal with the bead left open. The selector-rendering choice is sound on its merits: SelectWorkByName deliberately accepts clean short suffix selectors that idrender.Bead would reject and quote, while termsafe.Escape preserves printable short forms byte-identically and whole-string quotes any selector containing newline, carriage return, ESC, other controls, non-ASCII, or invalid UTF-8, preventing raw control bytes and attacker-created output lines. The full-ID-only emit-only fetch wrapper correctly uses idrender.Bead. All four requested selector-rendering unit legs, the CLI hostile-ID e2e, both command-level negative-pick legs, the direct negative-pick unit leg, and the relevant build passed. No spec-branch-corrupting defect was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "classification": "ADDRESSED",
+      "severity": "NONE",
+      "acceptance_criteria": ["AC-9"],
+      "title": "Negative --pick is rejected at the shared command boundary on both paths",
+      "detail": "cmd/mindspec/next.go checks pick < 0 immediately after flag reads and before positional mutual-exclusion handling or either path's dispatch. TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects drove positional claim and positional --emit-only with --pick=-1; both exited non-zero, the emit-only bypass line was absent, and the bead remained open. TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds additionally drove non-positional claim and emit-only paths and proved the invalid flag cannot fall through to a no-work outcome. TestSelectWork_NegativePickRejected passed as defense in depth. --pick=0 remains the documented unset sentinel."
+    },
+    {
+      "id": "R6-F2",
+      "classification": "ADDRESSED",
+      "severity": "NONE",
+      "acceptance_criteria": ["AC-10"],
+      "title": "Selector rendering blocks forged lines without misclassifying valid short forms",
+      "detail": "exclusionReasonForName and both selector-bearing SelectWorkByName errors now render the free-form selector with termsafe.Escape; runEmitOnly's full-ID-only fetch-error wrapper uses idrender.Bead. The distinction is appropriate: clean suffix selectors such as qmq or bbbb are valid under SelectWorkByName's contract but fail the full bead-ID validator, so idrender.Bead would force-quote legitimate user input. termsafe.Escape returns printable ASCII unchanged, but on any rune outside ASCII 0x20..0x7e it applies strconv.Quote to the whole value; newline, CR, ESC, C0/C1, DEL, bidi controls, and invalid UTF-8 therefore cannot survive as raw terminal controls or create a standalone forged line. The four hostile/short-form unit legs and TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped all passed."
+    },
+    {
+      "id": "R6-GATES",
+      "classification": "VERIFIED",
+      "severity": "NONE",
+      "title": "Requested probes pass and the bead worktree remains byte-identical",
+      "detail": "At 8193ca9757be677ede5fa82b9e0b2507b0e09d36: the four named internal/next hostile-selector legs passed; the cmd/mindspec hostile-ID e2e passed; both real-bd negative-pick e2e regressions passed on claim and emit-only; the direct SelectWork negative-pick unit passed; go build ./cmd/mindspec completed successfully. git diff --check was clean, git diff --quiet succeeded, and git status --short was empty. No probe files or tracked-file edits were left in the bead worktree."
+    }
+  ]
+}

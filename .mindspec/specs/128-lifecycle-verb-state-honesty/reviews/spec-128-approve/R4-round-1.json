@@ -1,0 +1,30 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": 0.97,
+  "rationale": "Most named implementation claims reproduce exactly at reviewed commit 2b437081: the spec-worktree state output is the documented idle-plus-activeSpec contradiction; runEmitOnly receives no pick value and unconditionally selects items[0] when no positional ID is supplied; both claim and emit-only paths apply the title-substring containsSpecID filter; plan approval writes mindspec_phase=implement at plan.go:455; and internal/instruct contains no adopt guidance. However, the unqualified main-checkout live-evidence claim does not reproduce: both the installed CLI and a /tmp-built binary from the reviewed source print {\"mode\":\"\"} with exit 0, not {\"mode\":\"idle\"}. The source permits this by serializing ctx.Phase even when discovery failed and left it empty. The spec explicitly declares the empty-mode shape stale, while its requirements and ACs do not pin state show from the main checkout or prohibit an empty successful mode there. That leaves a reproduced state-honesty defect outside the falsifiability surface despite the Goal covering state show generally. Validation completed with exit 0 and one warning: '[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one'.",
+  "concrete_changes_required": [
+    "Correct the Background settled-fact/live-evidence text to report that unqualified `mindspec state show` from /Users/Max/replit/mindspec reproduces `{\"mode\": \"\"}` with exit 0 at the reviewed commit; distinguish this from `state show --spec 128-lifecycle-verb-state-honesty`, which reproduces idle plus activeSpec.",
+    "Extend R1 and the acceptance/validation surface with an explicit main-checkout fixture for a live no-epic draft and for discovery failure: `state show` must never exit 0 with an empty mode, and must render the chosen honest draft state or an explicit indeterminate/error result. Keep the existing spec-worktree idle-plus-activeSpec assertion as a separate case."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "class": "non-reproducing-live-evidence-and-acceptance-gap",
+      "summary": "The spec says the prior `{\"mode\":\"\"}` main-checkout shape was re-tested and did not reproduce, then claims unqualified main-checkout `state show` emits idle. Required hand reproduction contradicted both statements: from /Users/Max/replit/mindspec, the installed mindspec 0.14.0 binary prints `{\"mode\": \"\"}` and exits 0. A binary built into /tmp from reviewed source 2b437081 prints the same empty mode, ruling out installed-binary drift. By contrast, the spec worktree prints the claimed `{\"mode\":\"idle\",\"activeSpec\":\"128-lifecycle-verb-state-honesty\",...}`. `state show --spec 128-lifecycle-verb-state-honesty` from main also produces the idle-plus-activeSpec shape, suggesting the spec's asserted unqualified output was likely a targeted invocation or otherwise misrecorded. In source, state.go:65-77 serializes ctx.Phase without rejecting empty, while derive.go:588-597 can leave main-worktree Phase empty when active-spec discovery errors. R1.1 and AC-1 only pin the draft spec worktree; R2.3/AC-4 cover instruct tails rather than state show. Therefore the exact reproduced main-checkout dishonesty can survive all stated ACs."
+    },
+    {
+      "id": "F2",
+      "severity": "none",
+      "class": "requested-probes-verified",
+      "summary": "The remaining requested claims reproduce. next.go:47 reads --pick, but the emit-only dispatch at :73-75 calls runEmitOnly(specFlag,args) without it; runEmitOnly at :403-445 selects items[0] whenever no positional ID is present. The claim path at :178-186 and emit-only path at :431-438 both retain only items satisfying containsSpecID, whose implementation at :456-459 is strings.Contains(title,specID). internal/approve/plan.go:455 writes mindspec_phase=implement. `grep -rn adopt internal/instruct/` returns no matches."
+    },
+    {
+      "id": "F3",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "`mindspec validate spec 128-lifecycle-verb-state-honesty` from the reviewed worktree exited 0 and printed: `128-lifecycle-verb-state-honesty: 1 issue(s) found` followed by `[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one`. This is consistent with a draft spec gate and is not itself a blocking validation failure."
+    }
+  ]
+}

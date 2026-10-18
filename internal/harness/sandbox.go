@@ -92,7 +92,16 @@ enforcement:
 	// Initialize beads in sandbox mode (no auto-sync, no git hooks).
 	// Add .beads/ to .gitignore first — bd writes runtime files that would
 	// make the worktree appear dirty to mindspec complete's clean-tree check.
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n"), 0o644); err != nil {
+	// This literal REPLACES bootstrap.Run's own generated .gitignore above
+	// (which already carries .mindspec/phase.lock via
+	// gitutil.RuntimeIgnoreEntries) with this hand-rolled sandbox-specific
+	// list — so any runtime-file entry added there must be mirrored here
+	// too. .mindspec/phase.lock (spec 128 R3.3's write lock) is one such
+	// entry: without it, any lock-guarded verb this sandbox drives
+	// (plan/spec approve, next, complete, impl approve/adopt) leaves an
+	// untracked lock file that next's/complete's own dirty-tree guard then
+	// (correctly) flags as uncommitted user changes.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".beads/\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n.mindspec/phase.lock\n"), 0o644); err != nil {
 		t.Fatalf("writing .gitignore: %v", err)
 	}
 	mustRun(t, root, "git", "add", ".gitignore")

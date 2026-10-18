@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Against reviewed commit b98d06c202d6e56b471da5363289259362cd39bc, both of my round-5 asks are PARTIAL. The replacement of the two-ref transaction with marker-first, expected-old bead-ref advances correctly removes the documented per-ref installation hole: marker^ does encode the expected predecessor, tip==marker^ covers each write-ahead-only crash window, tip==marker covers an installed advance, and a distinct tip outside that pair is correctly treated as foreign. The nominal S path also now refreshes the real index to D and classifies genuine non-artifact dirt before any merge/removal path. But the promised total C-vs-D discriminator is not total: C is built even when T equals A, so C-vs-C^ can be empty, and D-vs-D^ can likewise be empty when the export is unchanged. An empty changed-path set is confined to the named artifact just as much for C as for D; requiring a non-empty diff merely moves the ambiguity to a no-op D. My /tmp Git lab produced consecutive C and D commits with distinct OIDs, correct first-parent predecessor encoding, and empty parent diffs for both. The plan can therefore misclassify C as D, skip R/S, and merge without artifact sync. Separately, the operative discriminator says D continues directly at merge, contradicting both the S-stage safety contract and fixtures (viii)/(ix), which require every recovered D to refresh the index and classify dirt before merge. Fixture (viii) is internally impossible as written: the same plain re-run both 'converges to a landed merge' and refuses pre-merge on the interval edit. Finally, marker publication is not pinned as compare-and-swap: concurrent completions can overwrite the per-bead marker before one expected-old bead-ref advance fails, stranding marker!=tip from tool-authored activity and defeating the advertised race recovery. These are focused changes, but they define the recovery state machine itself; leaving them to bead 6 would require implementation-time design choices rather than execution of an approved plan. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the three disclosed decomposition warnings.",
+  "concrete_changes_required": [
+    "Replace the artifact-confined parent-diff C/D discriminator with an unambiguous stage encoding that remains total when C and/or D have empty tree diffs. Preserve the single-OID marker and first-parent predecessor property if desired, but encode and verify stage kind independently (for example in canonical commit metadata/message), and add red-on-revert fixtures for empty C, empty D, and ordinary artifact-changing D.",
+    "Make marker publication itself race-safe: pin expected-old/CAS semantics for absent->C and C->D (or specify an equivalent per-bead serialization), state the cleanup/refusal result for a failed publication or failed bead-ref advance, and add a concurrent-publisher fixture proving one invocation cannot overwrite another invocation's recovery evidence.",
+    "Define one authoritative S-resume route: every tip==marker D state, including re-entry after a kill, must refresh the real index to D and run the genuine-dirt classifier before merge. Remove 'continue at the merge', align the protocol, bead steps, ADR draft, and fixtures, and split fixture (viii)'s outcomes so an interval-edit run refuses and preserves the worktree while a clean follow-up run can converge to a landed merge."
+  ],
+  "findings": [
+    {
+      "id": "R6-R5-ASK-1",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Write-ahead replacement fixes per-ref crash installation but does not yet define a total recovery machine",
+      "detail": "The core replacement is sound for its named single-process windows: C/D objects precede marker publication; marker^ is the expected predecessor; marker-only states can finish an expected-old advance; installed states satisfy tip==marker; and tip outside {marker, marker^} preserves the stale-SHA cannot-launder boundary. Fixtures (xii)/(xiii) cover those two windows on the files backend. Residuals are the ambiguous C/D kind test and the unguarded marker publication race, detailed below. Therefore the prior crash-atomicity ask is improved substantially but not fully addressed."
+    },
+    {
+      "id": "R6-R5-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Nominal S-stage refusal ordering is fixed, but recovered-D ordering remains contradictory",
+      "detail": "Plan lines 223-232 and bead-6 lines 879-883 put index-to-D and genuine-dirt refusal before merge on the nominal path. However lines 237-240 classify D and say 'continue at the merge', bypassing the S-exit contract, while fixtures (viii)/(ix) expressly resume at that contract. Fixture (viii) also promises both a landed merge and a pre-merge refusal for the same interval-edit re-run. The prior S-stage ask is therefore only partially addressed."
+    },
+    {
+      "id": "R6-R6-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Artifact-confined parent diff cannot distinguish C from D in allowed empty-diff states",
+      "detail": "C is an explicit commit-tree commit even when T equals predecessor A, so diff(C,C^) may be empty. D may also be an explicit commit with no tree change when the refreshed artifact already matches C. Both commits still have distinct OIDs and correct predecessor parents, but both changed-path sets are empty. Treating empty as artifact-confined labels C as D; treating empty as not-D labels a no-op D as C. The plan needs an explicit stage tag or another discriminator not derived solely from changed paths. Misclassifying C as D can skip index refresh/artifact synchronization and, under the stated direct-to-merge route, the dirt refusal too."
+    },
+    {
+      "id": "R6-R6-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Unconditional marker publication can clobber valid recovery evidence under concurrent completion",
+      "detail": "No complete-level per-bead lock was found in the grounded flow, and the plan specifies plain marker publication without an expected-old operand. Two invocations can both derive from A (or C), publish different candidate marker OIDs, then only one wins the expected-old bead-ref advance. The loser may already have overwritten the winner's marker, leaving tip outside {marker, marker^}; a subsequent run deletes the marker and stale-blocks even though the mismatch was tool-authored. CAS on the marker transition or explicit serialization is required to make the plan's 'expected-old race -> refusal + re-measure' claim buildable."
+    },
+    {
+      "id": "R6-R6-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Plan validator remains green with the disclosed decomposition advisories",
+      "detail": "`mindspec validate plan 128-lifecycle-verb-state-honesty` reported only decomposition-bead-count (10), scope redundancy R=0.09, and dependency chain depth 4. Those warnings are disclosed in the plan and are not the basis of this verdict."
+    }
+  ]
+}

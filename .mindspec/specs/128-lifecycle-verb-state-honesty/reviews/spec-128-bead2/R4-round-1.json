@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.98,
+  "rationale": "Commit 798841b9 passed the empirical review. The isolated build succeeded, go test -short ./... passed across every package, the AC-5(viii) twin passed both sanctioned-sync and operator-refusal legs, and all three #248 fixtures passed. A real /tmp scratch arc reproduced plan approval storing plan with no warning, first lifecycle claim storing implement, production release returning the released bead to open and the epic to plan through the sanctioned sync, and a warning-free post-release state show. A separate legacy epic emitted the replacement legacy notice, repair phase wrote plan plus the v2 marker, and the following state show was clean. Nothing required by the assigned probe failed to reproduce. The reviewed worktree remained clean at 798841b9 and contained no phase.lock.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "A",
+      "assessment": "ACCEPTABLE",
+      "detail": "EnsurePhaseSemanticsV2 using phase.mergeMetadataFn matches EnsureMigrated and SanctionedDerivedSync and prevents verb-specific seams from observing a distinct ahead-of-preflight writer. Fault injection remains available through phase.SetMergeMetadataForTest; TestApproveImpl_LifecycleClassificationErrorRefusesPreMutation and TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite both passed. The dedicated v2 fixtures directly observe marker and phase updates, so the hardcoded package seam does not materially weaken coverage."
+    },
+    {
+      "id": "B",
+      "assessment": "ACCEPTABLE",
+      "detail": "The ApprovePlan and harness no-op stubs isolate tests that do not own the new unconditional first-run marker write. They do not mask the writer's semantics because the dedicated EnsurePhaseSemanticsV2 fixtures passed and the real scratch plan-approval arc persisted mindspec_phase_semantics=v2."
+    },
+    {
+      "id": "C",
+      "assessment": "ACCEPTABLE",
+      "detail": "Pre-setting v2 markers keeps existing repair tests focused on their exactly-one-merge guard contracts and correctly constructs post-marker backward states. The marker-absent path is independently covered by the passing legacy notice/self-heal fixture and was reproduced end to end in the scratch epic."
+    },
+    {
+      "id": "D",
+      "assessment": "ACCEPTABLE",
+      "detail": "TestApprovePlan_CommitsBeforeWritingImplementPhase now detects the plan-valued metadata call and still asserts that the final CommitAll precedes that write. The targeted test passed, so the ordering invariant remains pinned despite the OQ-3 value change."
+    },
+    {
+      "id": "E",
+      "assessment": "ACCEPTABLE",
+      "detail": "The raw-ID allowlist increase from 2 to 4 is an honest recount: the legacy notice has two raw epicID arguments and the retained forward-disagreement warning has two; the backward branch routes both occurrences through idrender.Bead. TestRawIDRenderForbidden passed. The new repair diagnostic renders spec and epic IDs through idrender, so there is no unjustified ratchet weakening."
+    },
+    {
+      "id": "F",
+      "assessment": "ACCEPTABLE",
+      "detail": "The zero-context diff for internal/complete/complete.go shows only the seven-line EnsurePhaseSemanticsV2 call inserted before the phase read. The existing step-6.5 write at the formerly cited line 1366 is otherwise unchanged."
+    },
+    {
+      "id": "EMPIRICAL_TESTS",
+      "assessment": "GREEN",
+      "detail": "Passed: isolated go build; go test -short ./...; TestAC5viii_ReleasedAllOpenState_SanctionedSyncSucceedsOperatorGuardRefuses; TestRoute248_PlanApproveShaped; TestRoute248_ReleaseShaped; TestRoute248_ComplexTriggerTwo_PlanOverPlanNeverBackward; all EnsurePhaseSemanticsV2 fixtures; LegacyPhaseSignature table; exactly-one SanctionedDerivedSync caller fence; commit-before-write regression; repair phase tests; and raw-ID render ratchet."
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.72,
+  "rationale": "All three of my round-1 items are ADDRESSED by 747bf9b3, and the enlarged beads 2 and 6 remain acceptable single deliverables (assessment below). But the fix commit introduced two new decomposition defects, both concrete and both one-line fixes. NEW-1 (the material one): bead 1 step 1 now mandates a call-site-enumeration fence 'pinning exactly ONE production caller (cmd/mindspec/release.go, wired in bead 2)' — but the caller is wired in bead 2, so at bead 1's own gate the exported phase.SanctionedDerivedSync has ZERO production callers, and the cited house pattern genuinely asserts exactly-one (TestAdoptSpec_OnlyDirectProductionCallSiteIsItsCommandHandler, cmd/mindspec/impl_adopt_test.go:105-133, 'exactly one DIRECT call site'). As written, bead 1's mandated fence test is red at bead 1's own 'go test ./... -short green' verification gate, forcing bead 1's implementer to either ship a red test or silently deviate from the plan — the exact cross-bead improvisation the round-1 sanctioned-entry fix existed to prevent. NEW-2: bead 2's new step 7 wires EnsurePhaseSemanticsV2 at the three ahead-of-preflight sites including impl.go:277 (internal/approve/impl.go), but chunk 2's key_file_paths — freshly extended for semantics_v2.go — still omit internal/approve/impl.go: a recurrence of my round-1 item 1's exact defect class (key_file_paths seed the bead's file_paths bd metadata and impl-context surface via internal/approve/plan.go:602-623) introduced by the same commit that fixed it for chunk 1. Everything else re-verified clean: work_chunks depends_on still exactly matches all ten sections' Depends-on lines (1:[], 2:[1], 3:[], 4:[2,3], 5:[2,3], 6:[1], 7:[1], 8:[2], 9:[], 10:[4,5]); chunk 6's six new gitutil/executor entries match bead 6's rewritten steps 1-2; the corrected sharing-policy sentence now states the region-level policy actually applied instead of the falsified universal claim; bead 8 step 1 homes chunk 8's beads.go entry ('the shared ready-set construction lands beside QueryReady'), which under the newly stated policy is defensibly distinct-region from bead 9's error-wrapping edits at beads.go:38/54. Two one-sentence edits stand between this plan and approval.",
+  "concrete_changes_required": [
+    "Bead 1 step 1 / OQ-3 sanction-boundary paragraph: restate the fence's bead-1 shape so it is green at bead 1's own gate — bead 1's enumeration test asserts NO production caller outside the allowlist {cmd/mindspec/release.go} (zero callers passes), and bead 2 tightens it to exactly-one when it wires release.go (or, alternatively, move the fence test itself to bead 2 and say so). As written, 'pinning exactly ONE production caller' per the impl-adopt house pattern is unsatisfiable before bead 2 lands.",
+    "work_chunks id 2: add internal/approve/impl.go (bead 2 step 7 edits it — the EnsurePhaseSemanticsV2 invocation at the impl.go:277 ahead-of-preflight site; plan.go:300, complete.go:522, and next.go are already listed)."
+  ],
+  "findings": [
+    {
+      "id": "R3-R2-1",
+      "severity": "INFO",
+      "title": "Round-1 item 1 (chunk-1 key_file_paths): ADDRESSED",
+      "detail": "747bf9b3 adds the six writer files (internal/approve/plan.go, spec.go, impl.go, adopt.go, internal/complete/complete.go, cmd/mindspec/release.go) to chunk 1's key_file_paths, matching bead 1 step 3's lock-wrap list exactly. But see R3-R2-5: the same commit introduces the same omission class in chunk 2."
+    },
+    {
+      "id": "R3-R2-2",
+      "severity": "INFO",
+      "title": "Round-1 item 2 (sanctioned-entry seam): ADDRESSED",
+      "detail": "The entry is now a pinned, exported API — phase.SanctionedDerivedSync(root, epicID) — created in bead 1 beside the comparator, doc-commented as the only sanctioned backward write surface, with the caller explicitly assigned to bead 2 step 3 ('Bead 1 creates the API and the fence; bead 2 wires the caller'). The ownership ambiguity is gone. The fence's TIMING is the new defect (R3-R2-4)."
+    },
+    {
+      "id": "R3-R2-3",
+      "severity": "INFO",
+      "title": "Round-1 item 3 (sharing-policy sentence + bead-8 beads.go step): ADDRESSED",
+      "detail": "The Decomposition Note now states the policy actually applied — same-region overlap gets a serializing edge (8→2, 6→1), distinct-region overlap relies on the serial cycle's one-at-a-time merges — replacing the falsified only-where-serialized claim. Bead 8 step 1 now names what it puts in beads.go (the shared ready-set construction beside QueryReady), which is defensibly distinct-region from bead 9's error-wrapping at beads.go:38/54 under that stated policy."
+    },
+    {
+      "id": "R3-R2-4",
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: bead 1's exactly-one-caller fence is red at bead 1's own gate",
+      "detail": "Bead 1 step 1: the call-site enumeration test 'pinning exactly ONE production caller (cmd/mindspec/release.go, wired in bead 2)'. The cited house pattern (TestAdoptSpec_OnlyDirectProductionCallSiteIsItsCommandHandler, cmd/mindspec/impl_adopt_test.go) asserts exactly one direct call site. At bead 1's merge gate release.go is not yet wired (bead 2's step 3), so production callers = 0 and the mandated test fails bead 1's own 'go test ./... -short green' verification. The plan mandates a test that cannot pass in the bead that ships it — bead 1's implementer must deviate or ship red. Fix is one sentence: bead-1 fence = allowlist-subset (no caller outside {cmd/mindspec/release.go}), tightened to exactly-one in bead 2; or relocate the fence to bead 2."
+    },
+    {
+      "id": "R3-R2-5",
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: chunk 2's key_file_paths omit internal/approve/impl.go, an edit site bead 2's new step 7 names",
+      "detail": "Step 7 (EnsurePhaseSemanticsV2, added by 747bf9b3) is 'invoked from the same ahead-of-preflight call sites (impl.go:277, plan.go:300, complete.go:522) plus next's claim path'. impl.go:277 is internal/approve/impl.go. Chunk 2's key_file_paths gained semantics_v2.go/_test.go but not internal/approve/impl.go, while plan.go, complete.go, and next.go are all listed. Same defect class as round-1 item 1 (key_file_paths → file_paths bd metadata → impl-context and scope-advisory surfaces, internal/approve/plan.go:602-623), introduced by the fix commit itself."
+    },
+    {
+      "id": "R3-R2-6",
+      "severity": "INFO",
+      "title": "Enlarged beads 2 and 6 assessed: both still single coherent deliverables; neither warrants a split",
+      "detail": "Bead 6 (heaviest post-fix: two gitutil primitives, executor interface + real impl + mock, both gates' snapshot legs, complete.go flow rework, ADR-0041 amendment + test, AC-6/7(i) plus four failure-injection fixtures, cross-checkout test) is at the upper bound of single-PR reviewability but is ONE protocol whose central invariant (committed tree ≡ measured tree, by commit-tree construction) is only reviewable end-to-end — splitting the primitives into their own bead would land consumer-less code whose correctness-critical details (artifact exclusion pathspec, T:path input reads) cannot be judged against unit tests alone, weakening review rather than strengthening it. Bead 2's absorption of EnsurePhaseSemanticsV2 is correct placement: the legacy-signature definition (stored implement + all-open + never-claimed) is meaningful only relative to the option-1 value semantics the same bead ships, and the five migration fixtures share bead 2's fixture builder. Deps parity re-verified post-fix: frontmatter depends_on matches all ten bead sections exactly; chunk 6's new file entries match its rewritten steps; chunk 2's entries match step 7 except the impl.go omission (R3-R2-5)."
+    }
+  ]
+}

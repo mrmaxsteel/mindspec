@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Verified reviewed commit f3488f95. Its stat is confined to three disclosed files: two ADR Markdown documents and internal/complete/complete.go; full zero-context inspection of the Go diff shows comment-only changes, so the commit is prose-only and does not alter runtime behavior. Spot-checked the disclosed extra ADR-0041 correction: it now accurately describes reconcile as reading an already-landed committed range without CommitPaths and explains artifact exclusion through the content classifiers rather than a retired commit mechanism. The remaining rewordings consistently describe the prospective-snapshot/runMaterialization mechanism or explicitly mark CommitAll/CommitPaths as history. My prior APPROVE therefore stands.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R4-CONFINEMENT",
+      "classification": "PASS",
+      "severity": "NOTE",
+      "title": "Round-3 follow-up is prose-only",
+      "detail": "git show f3488f95 --stat reports only ADR-0037-panel-gate-enforced-contract.md, ADR-0041-gate-before-mutate.md, and internal/complete/complete.go. The complete.go additions and removals are all comment lines; the other changes are ADR prose."
+    },
+    {
+      "id": "R4-R4-SPOTCHECK",
+      "classification": "PASS",
+      "severity": "NOTE",
+      "title": "Disclosed extra correction is accurate",
+      "detail": "The ADR-0041 reconcile paragraph no longer attributes artifact normalization to CommitPaths. It accurately states that reconcile authors no commit and that the artifact remains unmeasured because it matches neither content classifier's prefixes."
+    },
+    {
+      "id": "R4-R4-STANDING",
+      "classification": "CONFIRMED",
+      "severity": "NOTE",
+      "title": "Standing approval remains valid",
+      "detail": "Commit f3488f95 changes documentation and comments only, so it does not disturb the implementation mechanism covered by R4's prior APPROVE verdict."
+    }
+  ]
+}

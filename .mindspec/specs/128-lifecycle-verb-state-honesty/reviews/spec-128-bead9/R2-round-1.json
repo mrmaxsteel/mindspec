@@ -1,0 +1,21 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens, all three assignments verified empirically at commit 2691189d. (1) REAL-CHAIN: the beads_test.go PATH-shim tests drive the full production chain with no seam shortcut. QueryReady -> runBDFn (test binds it to bead.RunBD, which is also the production default at internal/next/beads.go:30) -> RunBD -> tracedOutput -> execCommand = exec.Command (internal/bead/bdcli.go:27, untouched by the tests) -> real PATH lookup -> the fake-bd subprocess. Proof beyond code-reading: mutating renderBDError to a raw passthrough made TestQueryReady_AC11RenderingLeg fail with actual raw ESC/CR bytes (\\x1b[31m, \\r) from the spawned fake-bd subprocess present in err.Error() — those bytes can only arrive via a real exec through PATH. The bdcli_test.go tests use the execCommand seam (house pattern in that file), but the internal/next layer covers the un-seamed chain, which is what AC-11 names. (2) ERRORS.AS REGRESSION TESTS ARE REAL: IsUnsupportedFlagError (bdcli.go:115-122) does errors.As to *exec.ExitError then string-matches exitErr.Stderr, so a non-%w wrap severs it. Empirically flipped %w to %v in wrapBDError's non-truncated branch: TestIsUnsupportedFlagError_SurvivesTracedOutputWrapping failed exactly as designed ('expected IsUnsupportedFlagError to detect the unknown-flag failure...'). Restored; worktree verified byte-identical (git diff HEAD --quiet clean). (3) PARALLEL-TRACK NON-OVERLAP: git show --stat 2691189d lists exactly internal/bead/{bdcli.go,bdcli_test.go} + internal/next/{beads.go,beads_test.go}; intersection with bead 7's declared surface (cmd/mindspec/next.go, internal/next/guard.go, internal/approve/spec.go) is byte-zero. Export-contract interaction also checked: cmd/mindspec/next.go is the ONLY QueryReady/QueryReadyForEpic caller in the repo and it only fmt.Errorf-%w-wraps and prints — no errors.Is/As on those errors anywhere (the only errors.Is in next.go target phase.ErrNoEpicLineage/ErrPhaseLockTimeout), so the deliberate %w->%s chain-severing at the render boundary breaks no consumer; renderBDError is unexported so bead 7 cannot interact with it. PATH-shim concurrency is safe: the new tests are serial and Go never interleaves serial tests with the deferred t.Parallel tests in guard_test.go; a fresh -short -race -count=1 run of both packages passed (internal/bead 24.7s, internal/next 357.1s, exit 0). termsafe.Escape confirmed to leave printable-ASCII lines byte-identical and strconv.Quote any control-bearing line, matching the per-line DirtyTreeFailure-pattern claim. All 8 new tests pass as committed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "blocking": false,
+      "title": "Truncated wrap branch has no errors.As-survival coverage",
+      "detail": "wrapBDError has two %w-wrapping returns (truncated and non-truncated, internal/bead/bdcli.go). My mutation test proves the non-truncated branch's %w is pinned by TestIsUnsupportedFlagError_SurvivesTracedOutputWrapping, but a %w->%v flip in ONLY the truncated branch would escape the suite: TestRunBD_CapsLongStderr asserts content/cap/marker, not errors.As reachability. Advisory, not blocking — both branches are adjacent and identically shaped, so a divergent edit is unlikely; a one-line errors.As assertion inside TestRunBD_CapsLongStderr would close it."
+    },
+    {
+      "severity": "cosmetic",
+      "blocking": false,
+      "title": "writeFakeBD uses os.Setenv instead of t.Setenv",
+      "detail": "internal/next/beads_test.go's writeFakeBD manages PATH with os.Getenv/os.Setenv plus manual t.Cleanup. t.Setenv does the same in one line and self-guards by panicking if a future editor adds t.Parallel to one of these tests (the latent hazard here, since guard_test.go in the same package already uses t.Parallel). No behavioral issue today."
+    }
+  ]
+}

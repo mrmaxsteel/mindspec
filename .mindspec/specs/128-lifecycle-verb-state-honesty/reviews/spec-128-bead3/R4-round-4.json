@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 claude-sub",
+  "confidence": 0.9,
+  "rationale": "Empirical lens, round 4 at f6847729 (worktree HEAD verified, git status clean, left byte-identical). My round-3 enumeration-leg ask is ADDRESSED, verified end-to-end on the EXACT fixture that failed at a86d0bdd: the persistent /tmp repro (real spec-create shape — branch-only draft spec/130-branch-only-draft committed via a since-removed worktree, main working tree without the dir, plus the same-named shadow tag on main, still present) now renders {\"mode\":\"spec\",\"activeSpec\":\"130-branch-only-draft\"} exit 0 from ambient `state show` with the round-4 binary, while the round-3 binary run side-by-side on the identical fixture still fabricates bare {\"mode\":\"idle\"} — a clean differential proving the enumeration fix is what closed it. The fix is exactly what I asked for: new gitutil.LocalBranchNames using `%(refname:lstrip=2)` (which I verified in round 3 emits the true branch name under the shadow), DiscoverDraftSpecsWithCache switched to it, and regression tests AT THE LAYERS THAT WERE VULNERABLE — the new state-show-level ambient fixture (TestStateShow_AmbientMainCheckout_BranchOnlyDraft_ShadowTagDoesNotHideIt), the DiscoverDraftSpecsWithCache-level test, and a direct gitutil primitive test, all passing including under -race. The sibling-function disposition (rather than changing LocalBranchRefs in place) is sound: LocalBranchRefs sits in the Executor interface and has three other consumers this bead never re-tested, and my round-3 ask explicitly offered the scoped-helper option; the commit's sweep honestly discloses the one remaining %(refname:short) site (RemoteTrackingRefs, no draft-discovery exposure) to the orchestrator instead of silently patching it. Full regression sweep re-run at f6847729, all unchanged: --spec targeting under the shadow works; bd-dead under the shadow refuses non-zero; flag-blind repros refuse by name (--spec 999 exit 1); single draft ambient -> spec; G2 flaky-bd recovery -> plan; two drafts -> ambiguity exit 1. internal/resolve, cmd/mindspec (-short), internal/gitutil, internal/lint (new ratchet entry accepted) all green from the bead worktree. No new issues found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "ASK-R3-ENUM",
+      "classification": "ADDRESSED",
+      "summary": "Round-3 enumeration-leg ask fully fixed and pinned at the right layers. LocalBranchNames (%(refname:lstrip=2)) replaces the %(refname:short) enumeration in DiscoverDraftSpecsWithCache; my exact end-to-end repro (branch-only draft + same-named tag, ambient state show from main) now discovers the draft, verified with a side-by-side differential against the round-3 binary on the same fixture. Regression coverage now exists at all three levels I flagged as missing: gitutil primitive, DiscoverDraftSpecsWithCache, and the full state-show ambient path — commit message states each is red-on-revert against LocalBranchRefs, consistent with my round-3 root-cause isolation."
+    },
+    {
+      "id": "NOTE-SWEEP",
+      "severity": "info",
+      "summary": "The commit's disclosed sweep finding — gitutil.RemoteTrackingRefs still uses %(refname:short) and is reachable only from internal/layout's migrate-layout precondition scan — is a fair out-of-scope call for this bead (no draft-discovery path reads remote-tracking refs), but the same tag-shadow rename hazard applies there in principle; worth a follow-up bead so it is not lost. BranchExistsIn/FileExistsAtRef both operate on qualified refs/heads/ refs and are safe, re-confirmed by reading at f6847729."
+    },
+    {
+      "id": "STANDING",
+      "severity": "info",
+      "summary": "All standing verifications from rounds 1-3 re-confirmed at f6847729: flag propagation refusals by name, G2 warm-cache recovery to the epic's real phase, G3 branch-only discovery with and now WITHOUT and WITH a shadow tag, half-draft honest idle, bd-dead non-zero refusals, {\"mode\":\"\"} exit 0 still unconstructible. My round-2 F4 note (pre-existing ghost-worktree idle+activeSpec shape, routed to bead 5/follow-up) remains the only known residue and is unchanged by this commit."
+    }
+  ]
+}

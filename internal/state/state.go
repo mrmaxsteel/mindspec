@@ -18,6 +18,17 @@ const (
 	ModeDone      = "done"
 )
 
+// ModeIndeterminate is the spec 128 R2.3 tail-rendering sentinel: a
+// genuine discovery failure (bd/Dolt unreachable) or an unresolved
+// ambiguity (multiple active specs, no explicit target) that prevents
+// deriving a real mode. It is never persisted and never a valid
+// operating mode (deliberately excluded from ValidModes/IsValidMode,
+// the same way the pre-existing "ambiguous" literal is) — it exists
+// only so instruct-tail callers can select templates/indeterminate.md
+// instead of fabricating idle.md for a failure they never actually
+// observed.
+const ModeIndeterminate = "indeterminate"
+
 // ValidModes lists all valid mode values.
 var ValidModes = []string{ModeIdle, ModeSpec, ModePlan, ModeImplement, ModeReview}
 

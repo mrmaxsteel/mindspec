@@ -10,6 +10,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/instruct"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -158,8 +160,22 @@ func completeTail(stdout, stderr io.Writer, root, invocationCwd string, result *
 
 	// Instruct-tail: emit guidance for the new mode
 	fmt.Fprintln(stdout) // separator between summary and guidance
-	if err := instructFn(root); err != nil {
-		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", err)
+	if result.NextModeIndeterminate {
+		// AC-4b (spec 128 bead 5): route through the SAME indeterminate
+		// reason Run already resolved, never a fresh independent
+		// re-derivation via instructFn — that re-derivation could
+		// disagree with (or paper over) the exact failure the result
+		// summary just reported, since the step-6.5 phase-sync write was
+		// skipped on this path and stale metadata could otherwise answer
+		// a different, fabricated mode.
+		output, err := instruct.RenderIndeterminate(root, result.IndeterminateReason)
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
+		} else {
+			fmt.Fprint(stdout, output)
+		}
+	} else if err := instructFn(root); err != nil {
+		fmt.Fprintf(stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	emitCdBackNote(stdout, invocationCwd, root)

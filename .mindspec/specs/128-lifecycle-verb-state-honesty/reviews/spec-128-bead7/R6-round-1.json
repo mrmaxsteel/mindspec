@@ -1,0 +1,36 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The AC-16 replay write is non-regressing under the stated same-machine phase-lock guarantee, and the focused plus full short suites pass. AC-8 is nevertheless not satisfied: the claim path has a real tracked parent/spec-checkout write omitted from the supposedly exhaustive empty enumeration. DispatchBead calls gitutil.EnsureGitignoreEntry(anchorRoot, cfg.WorktreeRoot) after the proportional guard. When the worktree ignore entry is absent, this rewrites .gitignore. Because .gitignore dirt is currently classified as unrelated, a modified, renamed, deleted, or symlinked .gitignore does not block. In the symlink case os.ReadFile/os.WriteFile follow the link, so a claim can append the worktree rule to a target outside the checkout. This is an evidence-bearing user-data safety defect introduced by removing the old whole-tree block and must not be vote-overridden.",
+  "concrete_changes_required": [
+    "Make the R5.1 enumeration honest about DispatchBead's .gitignore write: either remove that write from the claim path or include .gitignore as entangleable and block before claiming whenever its current filesystem/index state could be touched.",
+    "Cover modified, deleted, renamed-away, and symlinked .gitignore cases with real claim-path tests; prove a refused claim leaves the checkout and any symlink target byte-identical.",
+    "Strengthen the anti-drift pin so it detects potential/attempted writes, not only residual git-status paths after a clean fixture claim. The current fixture already contains .worktrees/ and therefore cannot exercise EnsureGitignoreEntry's write branch.",
+    "Use an unambiguous porcelain representation/parser (prefer -z) and preserve both sides of rename records where either side can intersect an entangleable path; render notice entries with unambiguous boundaries so hostile printable filenames cannot masquerade as different paths."
+  ],
+  "findings": [
+    {
+      "id": "R6-F1",
+      "severity": "critical",
+      "title": "Empty entanglement enumeration omits the post-guard .gitignore write",
+      "evidence": "internal/executor/mindspec_executor.go:301-306 calls gitutil.EnsureGitignoreEntry(anchorRoot, cfg.WorktreeRoot) after cmd/mindspec/next.go's Step 1 guard. internal/gitutil/gitops.go:681-706 appends '# mindspec worktrees' and the configured worktree-root entry by rewriting anchorRoot/.gitignore when that entry is absent. internal/next/guard.go instead declares the complete set to be session.json, issues.jsonl, and the worktree directory, yielding an empty tracked set.",
+      "impact": "A dirty tracked .gitignore is entangled despite being announced as untouched. More severely, replacing .gitignore with a symlink and pointing it outside the checkout makes the post-guard helper follow and rewrite the external target. The former unconditional dirty-tree guard would have refused this state."
+    },
+    {
+      "id": "R6-F2",
+      "severity": "high",
+      "title": "The AC-8(ii) anti-drift test cannot detect the omitted write",
+      "evidence": "TestNextCmd_ClaimGuard_EnumerationPin snapshots only `git status --porcelain` before and after a clean claim in a harness-bootstrap repository. That baseline already carries the .worktrees ignore entry, so EnsureGitignoreEntry is a no-op. Residual status also cannot establish the complete set of paths attempted or rewritten and restored to their original bytes.",
+      "impact": "The test remains green while the explicit exhaustive enumeration is false, defeating AC-8(ii)'s red-on-future-write purpose."
+    },
+    {
+      "id": "R6-F3",
+      "severity": "medium",
+      "title": "Path parsing and comma joining make the operator notice spoofable",
+      "evidence": "parsePorcelain treats every textual ' -> ' substring as a rename separator and keeps only the suffix, although an ordinary printable filename may contain that substring. IgnoredDirtNotice then joins independently escaped but otherwise unquoted printable names with ', '. A filename containing ' -> ' is misnamed, and a filename containing ', ' can visually impersonate multiple dirty paths. termsafe.Escape correctly prevents control-byte and newline injection but does not disambiguate printable separators.",
+      "impact": "The binding notice can provide a false account of which unrelated dirt was ignored, and rename-away cases can evade future exact-path entanglement matching if .gitignore is added to the list without fixing the parser."
+    }
+  ]
+}

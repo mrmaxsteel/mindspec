@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R4 codex",
+  "verdict": "APPROVE",
+  "confidence": 0.99,
+  "rationale": "R4's sole round-2 concrete change is fully addressed at reviewed commit 9ac301ee. All three affected surfaces now invoke MindSpec successfully while removing bd from PATH: settled fact 6 and the live-evidence paragraph use `/Users/Max/.local/bin/mindspec` absolutely, and the validation proof uses `\"$(command -v mindspec)\"`, whose substitution resolves before `env` narrows PATH. Re-execution from the main checkout produced `{\"mode\": \"\"}` with exit 0 under the reduced PATH, while execution from the spec worktree produced `idle` with non-empty `activeSpec` under both normal and reduced PATH, exactly reproducing the defects the spec requires AC-1 to eliminate. The unchanged empirical source claims also reproduce: the emit-only call omits `pick` and defaults to `items[0]`; `containsSpecID` is a title substring filter on both ready-set paths; plan approval writes `mindspec_phase=implement`; and `internal/instruct/` has no `adopt` hit. `mindspec validate spec 128-lifecycle-verb-state-honesty` exited 0 with only the expected no-epic lifecycle-binding warning. No new R4-lens issue is gate-blocking for this spec document; its chartered plan-stage design choices remain explicitly open while their outcome invariants are pinned.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R2-CC1",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "summary": "The round-2 request to correct every bd-failure reproduction command is satisfied. At spec.md:36 and :40, `env PATH=/usr/bin:/bin /Users/Max/.local/bin/mindspec state show` now runs the stated binary while making bd unresolvable; hand execution from `/Users/Max/replit/mindspec` returned empty-mode JSON with exit 0. At spec.md:203, `env PATH=/usr/bin:/bin \"$(command -v mindspec)\" state show` is also executable because command substitution occurs before the reduced environment is applied, and it reproduced the same counterexample. The prior false bare-`mindspec` same-binary claim is gone."
+    },
+    {
+      "id": "R4-R3-F2",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-live-state-probes",
+      "summary": "At reviewed HEAD 9ac301ee, `mindspec state show` from the spec worktree returned mode `idle` together with activeSpec `128-lifecycle-verb-state-honesty` and its spec branch. The same command from the main checkout returned an empty mode because bd discovery failed in this sandbox; `bd show mindspec-aytt` independently failed opening the embedded Dolt LOCK. Reduced-PATH execution from the spec worktree still returned the idle-plus-activeSpec contradiction. These observations agree with the spec's stated mechanism and fixture split."
+    },
+    {
+      "id": "R4-R3-F3",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "required-source-probes",
+      "summary": "The requested source probes reproduce at 9ac301ee: `next` reads `--pick` but dispatches emit-only as `runEmitOnly(specFlag, args)`; `runEmitOnly` fetches a positional ID directly and otherwise selects `items[0]`; `containsSpecID` is `strings.Contains(title, specID)` and is applied on both non-positional ready-set paths; `internal/approve/plan.go` merge-writes `mindspec_phase: implement`; and searching `internal/instruct/` for `adopt` returns no matches."
+    },
+    {
+      "id": "R4-R3-F4",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "validation-output",
+      "summary": "`mindspec validate spec 128-lifecycle-verb-state-honesty` from the reviewed worktree exited 0 and reported exactly one warning: `[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one`."
+    }
+  ]
+}

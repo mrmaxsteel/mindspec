@@ -1,0 +1,33 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": "high",
+  "rationale": "Spot verification at reviewed commit 8193ca9757be677ede5fa82b9e0b2507b0e09d36 passed all three new G1 end-to-end tests and the selected G2 zero-side-effect regression. The G1 tests pin the exact default-selection line and displayed-row-1 behavior on both emit-only and claim paths, and pin the positional emit-only readiness/filter bypass. The G2 regression confirms a negative pick preempts positional dispatch on both paths without claiming the bead. The round-2 change is confined to the four disclosed next-selection files. The disclosed rendering judgment is technically appropriate: termsafe.Escape preserves legitimate printable short-form selectors while escaping control content, whereas runEmitOnly's full-ID-only argument is correctly rendered with idrender.Bead. No spec-branch-corrupting defect was found, and the bead worktree remained byte-identical at the reviewed commit after testing.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-R2-F1",
+      "severity": "none",
+      "title": "G1 end-to-end coverage passes",
+      "evidence": "TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1, TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1, and TestNextSelection_PositionalEmitOnly_BypassesSpecFilter all passed against 8193ca97."
+    },
+    {
+      "id": "R4-R2-F2",
+      "severity": "none",
+      "title": "G2 negative-pick regression passes",
+      "evidence": "TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects passed on both claim and emit-only legs; the focused four-test command completed PASS in 115.547s."
+    },
+    {
+      "id": "R4-R2-F3",
+      "severity": "none",
+      "title": "Rendering judgment and diff confinement are acceptable",
+      "evidence": "Inspection confirms selector-bearing SelectWorkByName and exclusion messages use termsafe.Escape so printable suffix selectors remain byte-identical and hostile controls are quoted; the positional emit-only fetch wrapper uses idrender.Bead at its full-ID-required site. The 7f4ad41b..8193ca97 diff changes only cmd/mindspec/next.go, cmd/mindspec/next_selection_test.go, internal/next/readyset_test.go, and internal/next/select.go."
+    },
+    {
+      "id": "R4-R2-F4",
+      "severity": "none",
+      "title": "Worktree integrity preserved",
+      "evidence": "Final HEAD was 8193ca9757be677ede5fa82b9e0b2507b0e09d36; git status was empty and both staged and unstaged diffs were empty after the focused test run. No custom probe clone was created."
+    }
+  ]
+}

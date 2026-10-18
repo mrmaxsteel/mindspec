@@ -1,0 +1,40 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Against reviewed commit c15860ab775e5aabf402985e2f070e5fc19ab91b, the publication-CAS ask is ADDRESSED and the single-S-resume-route ask is ADDRESSED. Per-ref CAS is the right-sized serialization: a /tmp files-backend Git lab verified that CREATE rejects a second absent-to-value writer without changing the winner's OID and that expected-old rejects a stale transition without changing the advanced OID. Rejecting reuse of bead 1's phase lock is sound because the marker ref is the contested resource, CAS serializes it directly, and no cross-subsystem lock-order edge is introduced. The explicit D re-entry path now consistently refreshes the real index to D, classifies genuine dirt, and only then merges; fixture (viii) is coherently split. The encoding ask is nevertheless only PARTIAL. Trailers make every existing C or D marker unambiguous, but the newly chosen empty-stage elision leaves the progress machine incomplete: an elided C followed by a real D requires absent-to-D publication although the plan pins only absent-to-C CREATE and C-to-D expected-old; an elided D leaves marker=C both before R/S and after the no-op S exit but before merge, so a crash in the latter window re-enters at R and repeats R/S despite the plan's 'exactly once, neither skipped nor looped' guarantee; if both commits elide, absence likewise cannot distinguish pre-stage from post-stage progress. Fixtures (xv) and (xvi) do not cover these boundaries: (xv) asserts re-entry without defining absent-to-D CAS, while (xvi) kills after A-to-C, not after the no-op S exit. This is a narrow but implementation-corrupting contradiction inside bead 6's recovery protocol, not further polish. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits successfully with only the three disclosed decomposition warnings.",
+  "concrete_changes_required": [
+    "Complete the elided-stage transition graph: explicitly define race-safe absent-to-D marker publication when C is elided, including its failed-publication refusal, and define the no-marker route when both C and D elide.",
+    "Resolve the post-no-op-S crash ambiguity. Either retain a trailer-bearing D checkpoint even when its tree equals its parent, or honestly specify idempotent R/S replay instead of exactly-once execution and prove that replay is safe. Add red-on-revert fixtures that kill after an elided D's S-exit and exercise the both-stages-elided case."
+  ],
+  "findings": [
+    {
+      "id": "R6-R6-ASK-ENCODING",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Trailers identify existing stage commits, but elision makes stage progress ambiguous",
+      "detail": "Plan lines 236-252 correctly replace the empty-diff discriminator with a pinned Mindspec-Stage trailer read from the commit object. That is total over markers which exist. It is not total over the staged recovery machine after lines 242-248 elide empty commits while promising R and S run exactly once. With D elided, marker=C denotes both the state immediately after C and the state after R plus a completed no-op S but before merge; the prescribed C route runs R then S in both states. With both commits elided there is no marker checkpoint at all. The encoding therefore fixes commit-kind ambiguity but does not encode all recovery progress claimed by the plan."
+    },
+    {
+      "id": "R6-R6-ASK-PUBLICATION-CAS",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Per-ref marker CAS is sound and phase-lock coupling is unnecessary",
+      "detail": "Lines 257-267 and bead-6 lines 876-890 pin CREATE for an absent marker, expected-old for the second marker transition, refusal on failed publication, preservation after failed bead-ref advance, and fixture (xiv)'s byte-identical winner. Empirical files-backend probing confirmed both stale writers fail without overwriting the winning ref. CAS directly serializes the marker and avoids an unrelated phase-lock ordering dependency. The absent-to-D edge introduced by C elision is a new transition-graph defect, not a defect in the selected CAS primitive."
+    },
+    {
+      "id": "R6-R6-ASK-S-RESUME",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "All represented D re-entry now uses one authoritative S-exit route",
+      "detail": "Lines 249-253, bead-6 lines 928-938, and fixtures (viii-a), (viii-b), (ix), and (xvii) agree that tip==marker D re-entry refreshes the index to D, runs the genuine-dirt classifier, and only then merges. The prior continue-at-the-merge shortcut and the contradictory single-run fixture outcome are gone."
+    },
+    {
+      "id": "R6-R7-NEW-ELISION-STATE-GRAPH",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Elision introduces an undefined CAS edge and indistinguishable crash states",
+      "detail": "Fixture (xv) allows C to elide and D to parent directly on A, making the marker transition absent-to-D. Yet the normative protocol and bead helper scope name only absent-to-C CREATE and C-to-D expected-old. Fixture (xvi) allows D to elide but tests interruption only after C advances; it does not kill after the no-op S exit, where marker=C causes R/S replay, contradicting exact-once. If C and D both elide, no durable marker distinguishes a fresh run from a post-S pre-merge crash. Bead 6 cannot implement all stated invariants without choosing new semantics."
+    }
+  ]
+}

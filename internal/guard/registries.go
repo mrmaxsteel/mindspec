@@ -371,6 +371,13 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
+		File:       "cmd/mindspec/repair.go",
+		Func:       "repairPhaseRunE",
+		Detail:     "arg2:unprovable",
+		Rationale:  "disclosed-residual (spec 128 R3.3, the backward-move guard's refusal): the same unprovable-specID/epicID residual as the arg1 entry above, now also reached by the second command-position Sprintf in the multi-command guard.NewFailure this bead adds (`\"bd show %s   (inspect the epic before forcing a backward move)\"`, `\"mindspec repair phase %s --force-backward ...\"`) — both idrender-rendered (idrender.Spec/idrender.Bead), same disclosed gap as arg1, not a new provenance class.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
 		File:       "internal/approve/impl.go",
 		Func:       "ApproveImpl",
 		Detail:     "arg1:unprovable",
@@ -529,6 +536,61 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Func:       "panelGate",
 		Detail:     "arg1:unprovable",
 		Rationale:  "idrender-rendered: this function's command-position Sprintf calls substitute idrender.Bead(beadID)/idrender-rendered locals, mirroring cmd/mindspec/panel.go's tallyExitAction sibling.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	// Spec 128 Bead 6: the six entries below are the prospective-snapshot
+	// protocol's own refusal constructors (internal/complete/materialize.go)
+	// — every one follows the SAME idrender-rendered shape already
+	// established throughout this file: the recovery-line command-position
+	// argument substitutes idrender.Bead(beadID), never a raw/free-form
+	// value.
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "resolveMaterializationDiscriminator",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s\", idrender.Bead(beadID)))` — the unfinished-write-ahead-advance refusal.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "runMaterialization",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: the no-worktree main-checkout refusal's recovery line substitutes idrender.Bead(beadID) twice (`mindspec next %s ...; then re-run mindspec complete %s`).",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "sExitGenuineDirtRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s   (commit or revert the named path(s), then re-run)\", idrender.Bead(beadID)))` — the S-exit genuine-dirt refusal.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "userDirtRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(msg, fmt.Sprintf(\"mindspec complete %s \\\"describe what you did\\\"\", idrender.Bead(beadID)))` — byte-identical shape to the pre-bead-6 in-line refusal this helper extracts.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "materializationRaceRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s   (re-run once the concurrent invocation, if any, has finished)\", idrender.Bead(beadID)))` — the marker/branch-advance CAS-race refusal.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "materializationResetRefusal",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s   (re-run — the write-ahead marker converges the retry)\", idrender.Bead(beadID)))` — the post-advance index-reset failure refusal.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/materialize.go",
+		Func:       "recordStageMarkerAttestation",
+		Detail:     "arg1:unprovable",
+		Rationale:  "idrender-rendered: `guard.NewFailure(..., fmt.Sprintf(\"mindspec complete %s   (re-run once bd metadata writes are healthy)\", idrender.Bead(beadID)))` — the final-review G1 marker-provenance attestation's pre-publish write-failure refusal, the same shape as its six bead-6 siblings above.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

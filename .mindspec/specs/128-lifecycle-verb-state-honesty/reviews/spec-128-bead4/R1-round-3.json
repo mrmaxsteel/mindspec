@@ -1,0 +1,14 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.9,
+  "rationale": "Author-of-record lens, round-3 confirm over 8abb8e06. My round-2 verdict was APPROVE with no asks, so this round I spot-checked the new commit for regressions under my lens and verified its claims are truthful in the delivered text. Scope is exactly the two round-2 ask groups and nothing else: two files (agreement_table_test.go, lifecycle-modes.md); ADR-0023 untouched, so my round-1 certifications of the :107/:108 strikes and the intact bead-3 amendment paragraph stand; the writer-taxonomy and legacy-shapes sections (my round-1/2 territory) are untouched by this diff, so both carry-forward discharges stand. The circularity fix is real, not narrated: all eight ordinary/terminal-row fixtures now seed stored phase from locally hardcoded state.Mode* literals (test lines 539-719), never row.derivation; assertChildDerivation (line 400) adds the stored-independent DerivePhaseFromChildren leg checked directly against the record; the single remaining v2Epic(..., row.derivation, ...) at line 709 is a writer-driven release row's post-state re-wire AFTER the written value is asserted, exactly as the file header discloses. The row-1 change follows the tally's ruling rather than the implementer's own authority — the self-authorized two-surface carve-out is withdrawn, the Derivation cell is spec, and its assertion drives the genuine resolve.DiscoverDraftSpecsWithCache (resolve.go:135, bead 3's enumerate-all discovery) on its own fresh Cache, sharing no call site with the tail's WorktreeSpec context path; the fixture even sanity-pins row.derivation == spec so the record cannot drift there. The round-2 spec-create disclosed-scope note (emitInstruct renders idle until bead 5's AC-3) survives verbatim in the new row note — honesty preserved, not traded away for the third surface. The rewritten guide-header enforcement claims now state exactly what the mechanism guarantees (table-alone and table+record tampers both fail) without overclaiming the three-way-tamper case, which the test file's own header discloses as the honest residual. go build green, TestAgreementTable_Rows + TestAgreementTable_DocRowsCrossPinFixtures pass at HEAD, worktree left byte-identical.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-4.7",
+      "severity": "resolved",
+      "summary": "Round-3 spot-check clean: circularity fix verified in code (hardcoded stored literals + assertChildDerivation leg; writer-driven rows unchanged and already independent); row-1 three-surface restoration matches the tally ruling and drives a genuinely independent DiscoverDraftSpecsWithCache call; guide enforcement claims corrected to the true mechanism with the residual disclosed in the test header; my round-1/2 certified sections (ADR strikes, bead-3 paragraph, writer taxonomy, legacy shapes) untouched; suite green, worktree clean."
+    }
+  ]
+}

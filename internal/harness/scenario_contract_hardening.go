@@ -729,7 +729,7 @@ func ScenarioPrecommitReexportComplete() Scenario {
 			// Track .beads/issues.jsonl (default sandbox .gitignore ignores
 			// .beads/ entirely, which would make the scenario pass today).
 			// Pattern from ScenarioBeadsArtifactPassthrough.
-			sandbox.WriteFile(".gitignore", ".beads/*\n!.beads/issues.jsonl\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n")
+			sandbox.WriteFile(".gitignore", ".beads/*\n!.beads/issues.jsonl\n.harness/\n.worktrees/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n.mindspec/phase.lock\n")
 
 			epicID = sandbox.CreateSpecEpic(specID)
 			beadID = sandbox.CreateBead("["+specID+"] Create reexport.go", "task", epicID)

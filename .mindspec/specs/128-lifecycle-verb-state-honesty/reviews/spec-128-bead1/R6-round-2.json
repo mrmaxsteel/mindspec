@@ -1,0 +1,67 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The two original round-1 hard-block drivers are gone on independent re-derivation: SanctionedDerivedSync now propagates child-read failure with no write, and `go build ./... && go test ./... -short` passes from the bead worktree without leaving a phase.lock anywhere. However, the same failed-discovery-to-successful-write defect remains in the other bead-1 derived writer: EnsureMigratedWithCache discards GetChildren errors and derives plan from nil, and it reuses a caller-supplied Cache inside the critical section so pre-lock cached children can be written after the child state changes. Scratch tests against an archive of reviewed commit 99d75484 reproduced both outcomes. This is an evidence-bearing hard block because AC-5(vii)'s legacy backfill can still manufacture or stale-write lifecycle state despite holding the lock. The sanctioned-sync production behavior is fixed but its required behavioral tests were not added; the contention tests still signal immediately before calling the acquisition path rather than proving acquisition was attempted; and the inventory walker honestly discloses, but still does not close, its helper-built-map blind spot.",
+  "concrete_changes_required": [
+    "Make EnsureMigratedWithCache derive from a fresh per-call Cache created inside the WithPhaseWriteLock callback, propagate GetChildren failures, and perform no metadata write on failure. Add tests for child-read failure/no-write and for a caller cache pre-warmed with child state that changes before lock acquisition.",
+    "Add the requested SanctionedDerivedSync behavioral tests to the repository: child-read failure returns the underlying error with zero merge writes, and success exercises the real phase lock plus merge seam.",
+    "Give the phaselock, migration-contention, and repair-contention tests an observable acquisition-attempt barrier inside the lock acquisition path. A channel closed immediately before calling WithPhaseWriteLock does not prove the goroutine reached acquisition, so the 150ms negative window can still pass with an unscheduled contender.",
+    "Make the AC-5(vi) inventory gate catch helper-built update maps reaching MergeMetadata-family calls outside WithPhaseWriteLock, or otherwise add a call/dataflow-anchored companion assertion that makes a new unlocked helper-built writer red, as the acceptance criterion requires."
+  ],
+  "findings": [
+    {
+      "classification": "PARTIAL",
+      "round_1_item": 1,
+      "severity": "major",
+      "title": "Sanctioned sync fails closed now, but the requested regression tests are absent",
+      "evidence": "internal/phase/sanctioned_sync.go now returns the GetChildren error from inside the lock callback before producing updates. Independent /tmp tests against commit 99d75484 confirmed child-read failure returns the underlying error with zero merge writes and success writes plan through the real lock/merge seam. But internal/phase/sanctioned_sync_test.go contains only the caller-inventory fence; `rg` finds no behavioral SanctionedDerivedSync test."
+    },
+    {
+      "classification": "ADDRESSED",
+      "round_1_item": 2,
+      "severity": "info",
+      "title": "Repair fixtures are hermetic and the required full short suite is green",
+      "evidence": "repairFindRootFn is fixture-scoped by the repair tests. From the bead worktree, `go build ./... && go test ./... -short` exited 0, including cmd/mindspec, internal/approve, internal/complete, internal/harness, internal/instruct, internal/lint, and internal/phase. A subsequent find under /Users/Max/replit/mindspec found no phase.lock; both the bead worktree and the shared-main phase.lock path were clean, and the bead branch ignores .mindspec/phase.lock."
+    },
+    {
+      "classification": "PARTIAL",
+      "round_1_item": 3,
+      "severity": "major",
+      "title": "Contention tests still lack a true acquisition-attempt barrier",
+      "evidence": "TestWithPhaseWriteLock_ExclusiveAcrossGoroutines and TestEnsureMigrated_NeverOverwritesFresherLockedWrite close their `attempting` channels immediately before invoking WithPhaseWriteLock/EnsureMigrated, then use a 150ms time.After window. The goroutine can be descheduled after closing the channel and until after the holder is released, so the test can still pass without the loser ever attempting acquisition while the lock is held. The repair contention test uses the same shape. `go test -race ./internal/phase/... -short -count=10` passed, but repetition does not prove the intended interleaving."
+    },
+    {
+      "classification": "PARTIAL",
+      "round_1_item": 4,
+      "severity": "major",
+      "title": "Inventory hardening is honest but remains weaker than AC-5(vi)",
+      "evidence": "writer_inventory_test.go now catches map-index assignments and file-local const keys and has red-on-evasion unit tests for those shapes. Its comment honestly discloses that helper-built maps passed opaquely to MergeMetadata-family calls remain invisible. Therefore a new unlocked `bead.MergeMetadata(id, buildPhaseUpdate())` writer is still green, contrary to AC-5(vi)'s requirement that introducing a new unlocked writer be red."
+    },
+    {
+      "classification": "ADDRESSED",
+      "round_1_item": 5,
+      "severity": "info",
+      "title": "The stray shared-main lockfile is gone",
+      "evidence": "A repository-wide find after the full suite returned no phase.lock, and `git -C /Users/Max/replit/mindspec status --short -- .mindspec/phase.lock` returned empty."
+    },
+    {
+      "classification": "NEW_ISSUE",
+      "severity": "blocker",
+      "title": "EnsureMigrated can fabricate plan on child-read failure and write stale cached children",
+      "evidence": "internal/phase/migrate.go uses `children, _ := c.GetChildren(epicID)` inside the lock callback and reuses the caller-supplied cache. In an independent /tmp test against commit 99d75484, a successful fresh epic read followed by a child-list error returned migrated=true and performed one merge write with mindspec_phase=plan. In a second test, pre-warming c.GetChildren with an open child, changing the backing fixture to closed before EnsureMigratedWithCache, and then invoking migration wrote plan instead of the fresh review value.",
+      "next_bead_impact": "EnsurePhaseSemanticsV2 and other bead-2 callers cannot safely compose with this cache-aware migration surface: the phase lock serializes writes but does not make a pre-lock cached derivation fresh, and discovery failure is still serialized into false state."
+    },
+    {
+      "severity": "info",
+      "title": "Changed callback signature is acceptable for bead 2",
+      "assessment": "The new func(stored string, present bool) (map[string]interface{}, error) shape cleanly distinguishes genuine absence from invalid-but-present metadata, preserves each caller's merge seam, and can atomically write phase plus the semantics-v2 marker. It does not itself force bead-2 redesign; the migration callback's use of its non-phase inputs is the defect."
+    },
+    {
+      "severity": "info",
+      "title": "Disclosed ripple and ratchet changes are honest",
+      "assessment": "The adopt and wrong-mode fixture additions only stub the newly fail-closed fresh epic read and do not weaken assertions; the full suite passes. The repairPhaseRunE raw-ID-render counts drop from 5 to 1 and 3 to 1 because the moved in-lock derivation errors now use idrender, leaving exactly the two raw recovery-command Sprintf sites described by the ratchet. The opaque-operand registry's arg2 entry accurately describes the same pre-existing unvalidated-specID residual as arg1 rather than claiming validation."
+    }
+  ]
+}

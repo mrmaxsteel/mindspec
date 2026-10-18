@@ -1,0 +1,54 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "R5 codex",
+  "confidence": 0.98,
+  "rationale": "Round 6 fixes the original empty-diff classification ambiguity for every C or D commit that exists: the main protocol and bead 6's ADR-0041 section 3 draft both pin Mindspec-Stage trailers, prohibit diff-based kind inference, and elide tree-equal C / unchanged-artifact D commits. The spec-127 CommitMessageBody primitive is real and sufficient to expose that trailer. The total-discriminator ask is nevertheless only partial because elision removes the durable checkpoint for the omitted stage. In the common C-present/D-elided case, the marker remains at trailer-kind C; a crash after S determines that D is a no-op but before merge re-enters as C and runs R then S again, contradicting G1's required 'R/S neither skipped nor looped' property. If both C and D elide, there is no marker at all and an equivalent crash cannot be distinguished from a fresh run. Fixture (xvi) kills only after A-to-C, not after the no-op-D determination, so it does not exercise this gap. The ADR draft carries the same unsupported 'total under empty stages' assertion rather than an exact recovery rule for an absent commit. A second buildability defect is that bead 6 assigns the state machine to internal/complete while assigning its commit-tree, update-ref, marker, reset, and CommitMessageBody operations to internal/gitutil; Accepted ADR-0030 and the pinned AST lint forbid internal/complete from importing gitutil, while the plan names only ChangedFilesTree as the new Executor seam. These are localized design corrections, and no regression was found in the other R5 ADR lenses, but both ambiguities would force bead 6 either to violate its stated recovery contract or violate an accepted architecture boundary.",
+  "concrete_changes_required": [
+    "Complete the elision recovery design in both the main protocol and the bead 6 ADR-0041 section 3 draft. Pin how progress past an omitted C or D is represented, or explicitly permit and specify idempotent replay instead of claiming R/S execute exactly once. Add a kill fixture after S has determined that D is a no-op (and cover the both-C-and-D-elided case) so re-entry behavior is falsifiable and consistent with the chosen rule.",
+    "Make bead 6 conform to ADR-0030 by routing every new Git read/mutation used by internal/complete through an explicitly named Executor seam (granular or high-level), with MindspecExecutor wrapping gitutil and MockExecutor updated; alternatively, move the Git-owned state machine into the execution layer. Do not require a direct internal/complete to internal/gitutil dependency or an unplanned boundary allowlist."
+  ],
+  "findings": [
+    {
+      "id": "R5-R6-TOTAL-DISCRIMINATOR",
+      "prior_ask": "Make the C/D discriminator total under empty diffs, pin empty-stage elision and recovery, keep R/S neither skipped nor looped, fixture empty C/no-op D/ordinary D, and carry the rule into the ADR-0041 section 3 draft.",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "class": "write-ahead-stage-elision",
+      "summary": "Trailers make every present stage commit unambiguous, but an elided stage has no durable completion checkpoint, so the promised exactly-once recovery rule remains false.",
+      "evidence": "At c15860ab, plan.md:237-249 pins Mindspec-Stage: materialization/artifact-sync and reads kind from the trailer, while plan.md:242-249 elides tree-equal C and unchanged D yet says R and S run exactly once and are neither looped nor skipped. Bead 6's ADR draft at plan.md:928-939 repeats trailer-based identity and says the discriminator is total under elided empty stages. But the staged flow at plan.md:904-914 changes the marker only when it publishes C or D and clears it only terminally. Therefore after C exists and S elides D, marker==tip==C; a crash before merge takes the documented C resume branch and repeats R/S. When both commits elide, no marker exists. Fixture (xvi), plan.md:999-1002, interrupts after A-to-C rather than after no-op D, so it cannot falsify this window."
+    },
+    {
+      "id": "R5-R6-COMMIT-MESSAGE-PRIMITIVE",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "repo-grounding",
+      "summary": "The claimed spec-127 CommitMessageBody primitive exists and returns the full commit message needed to parse the pinned trailer.",
+      "evidence": "internal/gitutil/gitops.go:907-924 defines CommitMessageBody using git log -1 --format=%B, rejects option-like refs, returns errors rather than folding them, and strips only Git's final newline. internal/gitutil/merge_marker_primitives_test.go:56-77 directly covers its full-message happy path and bad-ref failure."
+    },
+    {
+      "id": "R5-NEW-ADR0030-BOUNDARY",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "class": "accepted-adr-conformance",
+      "summary": "Bead 6's named ownership of the recovery state machine and its Git primitives is incompatible with the accepted Executor boundary.",
+      "evidence": "Plan.md:870-890 places snapshot/commit-tree/update-ref/marker/trailer-reader/reset primitives in internal/gitutil; plan.md:900-915 places the staged state machine in internal/complete and says the marker/advance helpers live in gitutil. Its executor step at plan.md:891-896 names only ChangedFilesTree plus tree-grounded reads. ADR-0030 Decision 1 forbids enforcement packages including internal/complete from importing internal/gitutil and requires Git I/O through Executor; internal/lint/boundary_test.go mechanically bans that import, and internal/complete/panel_advisory.go:94-101 documents the same constraint. Following the plan literally cannot pass the repository's boundary test."
+    },
+    {
+      "id": "R5-ADR-REGRESSION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "adr-conformance",
+      "summary": "The other assigned ADR resolutions remain conformant.",
+      "evidence": "Plan.md:540-553 still presents ADR-0041 section 1 as an explicit two-direction reversal while retaining panel-before-materialization and leaving ADR-0037 untouched; plan.md's OQ-2 and ADR Fitness language confines ADR-0023 filesystem discovery to the pre-epic draft interval; and the ADR-0025 amendment remains fenced to the worktree-creating next claim path. The round-6 diff changes none of those decisions."
+    },
+    {
+      "id": "R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "none",
+      "class": "plan-validation",
+      "summary": "The reviewed artifact is exactly commit c15860ab and validates with only the three acknowledged decomposition warnings.",
+      "evidence": "HEAD is c15860ab775e5aabf402985e2f070e5fc19ab91b; the working-tree plan hash matches git show c15860ab:plan.md. mindspec validate plan 128-lifecycle-verb-state-honesty exits 0 and reports only bead-count 10, scope-redundancy 0.09, and dependency-depth 4 warnings; git diff c15860ab^ c15860ab --check is clean."
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": 0.99,
+  "rationale": "Both prior-round R5 asks are addressed at reviewed commit 8193ca97. The negative-pick refusal is the first control-flow decision in next RunE after read-only flag retrieval: it precedes positional-selector conflict handling, cwd/root discovery, executor construction, emit-only dispatch, scope resolution, guards, ready-set construction, fetch, and claim. Thus every next-specific path rejects pick < 0 at one choke point. At the whole Cobra-command level, the root PersistentPreRunE necessarily precedes leaf RunE and can emit explicitly requested trace telemetry, but it performs no next selection/readiness/fetch/claim work and does not weaken the acceptance contract. The pick-zero decision is explicit and consistent: 0 is the unset sentinel, defaults to displayed item 1, is documented in the SelectWork contract and RunE comment, and appears in rendered `mindspec next --help`. Both requested CLI-level zero-side-effect regressions pass. No spec-branch-corrupting defect was found.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R5-B8-1-R2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/next.go:55-86",
+      "summary": "A single top-of-RunE negative-pick choke point now covers claim and emit-only before next-specific work.",
+      "evidence": "RunE retrieves registered flag values and immediately returns when pick < 0. The check is lexically and operationally before positional mutual exclusion, os.Getwd, workspace.FindRoot, newExecutor, emit-only dispatch, scope resolution, dirty/session/lifecycle guards, BuildReadySet, FetchBeadByID, SelectWork, and ClaimBead. Positional plus --pick=-1 therefore cannot reach either positional resolution path. The root PersistentPreRunE is generic opt-in tracing infrastructure, not a next selection side effect."
+    },
+    {
+      "id": "R5-B8-2-R2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "location": "cmd/mindspec/next.go:62-78,769; internal/next/select.go:11-38; cmd/mindspec/next_selection_test.go:455-523",
+      "summary": "The pick-zero policy is documented, and both requested zero-side-effect regressions pass.",
+      "evidence": "The flag help renders: `0 (default) means unset — defaults to item 1; negative values are rejected`; comments tie pick==0 to OQ-5's displayed-row-1 default, and SelectWork implements that rule. Focused execution passed TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects and TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds (go test ./cmd/mindspec, count=1): both claim and emit-only legs reject -1, the positional bypass line is absent, the bead remains open, and empty-ready handling cannot produce a successful no-work result."
+    },
+    {
+      "id": "R5-B8-V-R2",
+      "classification": "VERIFIED",
+      "severity": "info",
+      "location": "reviewed commit 8193ca9757be677ede5fa82b9e0b2507b0e09d36",
+      "summary": "Reviewed artifact identity and byte-identical bead worktree condition were verified.",
+      "evidence": "The bead worktree HEAD equals 8193ca9757be677ede5fa82b9e0b2507b0e09d36. Focused regressions and the rendered help probe passed. Final tracked and staged diffs in the bead worktree were empty."
+    }
+  ]
+}

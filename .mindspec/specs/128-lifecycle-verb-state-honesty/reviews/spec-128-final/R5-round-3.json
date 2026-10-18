@@ -1,0 +1,23 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "Commit a8ac1fc4 is confined to the eight advertised files and the six described round-2 residual fixes. The only substantive overlap with my round-2 review basis is the internal/complete metadata error-rendering family: its production seams now default to named wrappers that apply next.RenderBDError once while preserving Unwrap, and the added real-chain hostile-stderr test pins diagnostic preservation, control-byte and forged-recovery-line containment, and errors.As reachability to *exec.ExitError. This strengthens rather than disturbs my standing conclusions about hostile bd stderr containment and trusted recovery-line authority. The remaining changes are the described crash-window/trust-boundary documentation, function-anchored citations, bead attribution correction, and lifecycle-table wording correction; they do not alter the selector-safety or residual-warning bases of my round-2 approval.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "classification": "CONFIRMED",
+      "severity": "NONE",
+      "title": "Round-3 diff is confined to the six described residuals",
+      "detail": "git show a8ac1fc4 --stat reports exactly eight files, matching the round-3 addendum. Inspection of the patch found only the advertised metadata seam/test changes, crash-window and trust-boundary clarifications, citation repairs, bead attribution correction, and lifecycle-table wording correction.",
+      "evidence": "a8ac1fc4; eight-file diff listed in BRIEF.md ROUND 3 addendum"
+    },
+    {
+      "classification": "CONFIRMED",
+      "severity": "NONE",
+      "title": "R5 round-2 approval basis remains intact",
+      "detail": "The metadata seam wrappers route both GetMetadata and MergeMetadata failures through next.RenderBDError and retain chain classification through Unwrap. The new production-chain hostile fixture directly protects the relevant R5 safety properties. No round-3 edit weakens selector operand handling, recovery-line demotion, or WARN residual-artifact-dirt behavior.",
+      "evidence": "internal/complete/complete.go; internal/complete/materialize_attestation_test.go; unchanged round-2 selector and residual-warning implementation"
+    }
+  ]
+}

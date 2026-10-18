@@ -1,0 +1,37 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.97,
+  "rationale": "Both R4 round-1 asks are addressed at reviewed commit ad08acf7. I re-ran the exact real-git call-2 SnapshotWorktreeTree decorator race as leg xxi: Run refused, the injected race-file.txt remained uncommitted on disk, the branch tip stopped at C, the file was absent from that committed tip, and the surviving marker still named C/materialization. The exact-tree changedFromCurrent gate routes non-artifact paths through sExitGenuineDirtRefusal before MaterializeStageCommit/publication; that renderer includes the path list, and the focused named-path refusal test also passed. Thus deviation B's full re-snapshot is now safely coupled to the exact-delta refusal. The corrected ADR text and red-on-revert pins accurately describe classification before D with the post-D S-exit check defensive. Leg xxiii passed end-to-end: doc-sync refusal and plain retry both left tip exactly A and met the same gate, then --allow-doc-skew converged. Leg xxii and the independent M-stage c2 recovery fixture also passed. The full short suite passed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-F1",
+      "classification": "ADDRESSED",
+      "severity": "RESOLVED",
+      "title": "The classification-to-S-snapshot race is mechanically closed",
+      "detail": "Leg xxi re-ran the round-1 decorator recipe at ad08acf7 and passed: the write on SnapshotWorktreeTree call 2 caused refusal before D publication, race-file.txt was preserved as worktree dirt, no committed tip contained it, and the ref remained at C. Production computes ChangedFilesTree(currentTip, tree2), rejects every delta path outside .beads/issues.jsonl, and passes those names to sExitGenuineDirtRefusal before MaterializeStageCommit. This shared S block covers normal execution and resumeStage==materialization. Deviation B is acceptable with this guard."
+    },
+    {
+      "id": "R4-F2",
+      "classification": "ADDRESSED",
+      "severity": "RESOLVED",
+      "title": "ADR-0041 now states the delivered S-stage ordering",
+      "detail": "ADR-0041 sections 1 and 3(i) now say that the exact D delta is classified before D is built and that the later S-exit check is defensive. TestADR0041G1_DeliveredOrderingClosesRace and TestADR0041G1_OldCheckAfterDWordingGone both passed."
+    },
+    {
+      "id": "R4-G5",
+      "classification": "ADDRESSED",
+      "severity": "NOTE",
+      "title": "The disclosed S-stage live-panel adaptation is acceptable",
+      "detail": "The literal requested setup (panel registered at A plus user dirt already present for M) is blocked before materialization by panel GateDecision leg 7, so it cannot reach an M advance. Leg xxii validly tests the load-bearing proposition with artifact-only dirt: after the first and only S-stage advance moves the tip beyond reviewed A, the recognized marker causes the retry to skip the stale-SHA panel check and converge. M-stage marker/tip recovery is separately covered by the real-git c2 kill/retry fixture and the viii family, and the routing that skips the panel depends only on resumeStage being non-empty, not on which known stage supplied it. The test comment's unqualified statement that fresh user work and a live panel are mutually exclusive has timing exceptions: user dirt can arrive after the panel check, or a panel can be registered after a marker is created. Those states do not invalidate the adaptation because the M-specific recovery and stage-independent live-panel bypass are independently pinned; no additional blocking disposition is required."
+    },
+    {
+      "id": "R4-VERIFY",
+      "classification": "PASS",
+      "severity": "NOTE",
+      "title": "Focused and suite verification passed",
+      "detail": "Passed individually with -count=1: leg xxi, leg xxii, leg xxiii, TestFaultInjection_Complete_C2_MStageAdvance_KillThenConverge, both ADR G1 pins, discriminator/error-propagation tests, and the named-path S-exit refusal test. `go test ./... -short -count=1` also passed. git diff --check was clean."
+    }
+  ]
+}

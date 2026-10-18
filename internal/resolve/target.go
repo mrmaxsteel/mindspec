@@ -92,6 +92,61 @@ func ResolveSpecPrefixWithCache(c *phase.Cache, prefix string) (string, error) {
 	return "", fmt.Errorf("no spec found matching prefix %q", prefix)
 }
 
+// IsDraftSpecWithCache reports whether specID is an on-disk pre-epic
+// draft (OQ-2) — exported so callers outside this package (internal/next's
+// R6.7 scope-resolution refusal, spec 128 Bead 8) can draw the same
+// draft/nonexistent distinction ResolveSpecPrefixProven and
+// ResolveModeWithCache already use, without re-deriving draft detection a
+// second time.
+func IsDraftSpecWithCache(c *phase.Cache, root, specID string) (bool, error) {
+	isDraft, _, err := draftSpecStatusWithCache(c, root, specID)
+	return isDraft, err
+}
+
+// ResolveSpecPrefixProven is ResolveSpecPrefix's root-aware sibling used
+// by `mindspec next`'s explicit --spec scope resolution (spec 128 R6.7):
+// the full-ID (hyphenated) passthrough branch additionally PROVES the
+// resolved spec ID names an actual spec — an epic-bearing one, or a
+// legitimate on-disk pre-epic draft (spec create's committed spec
+// directory + branch, OQ-2) — rather than accepting any syntactically
+// valid hyphenated string unchecked. The numeric-prefix branch already
+// proves existence via DiscoverActiveSpecsWithCache and is untouched.
+//
+// A genuinely nonexistent spec ID refuses HERE, before mindspec next ever
+// issues a ready query, so the caller never reaches the (removed) silent
+// global `bd ready` fallback (AC-15(i)). An existing draft passes through
+// UNCHANGED — its own honest "no epic; not approved" refusal is produced
+// downstream, by the epic-lookup step that actually needs an epic
+// (AC-15(ii)); this function's own refusal is reserved for the
+// genuinely-nonexistent case so the two messages never collide.
+//
+// ResolveSpecPrefix/ResolveSpecPrefixWithCache themselves are UNCHANGED —
+// internal/complete's resolveSpecPrefixFn seam and cmd/mindspec/complete.go
+// keep today's syntax-only passthrough; this is a new, narrower entry
+// point for callers that both have a root AND need the existence
+// guarantee.
+func ResolveSpecPrefixProven(root, prefix string) (string, error) {
+	c := phase.NewCache()
+	resolved, err := ResolveSpecPrefixWithCache(c, prefix)
+	if err != nil {
+		return "", err
+	}
+	if !strings.Contains(prefix, "-") {
+		return resolved, nil // numeric branch already proved existence above
+	}
+	if epicID, epicErr := phase.FindEpicBySpecIDWithCache(c, resolved); epicErr == nil && epicID != "" {
+		return resolved, nil // has an epic
+	}
+	isDraft, _, draftErr := draftSpecStatusWithCache(c, root, resolved)
+	if draftErr != nil {
+		return "", draftErr
+	}
+	if isDraft {
+		return resolved, nil // exists as a draft — the honest no-epic refusal is the caller's epic-lookup step
+	}
+	return "", fmt.Errorf("no spec found matching %q; run `mindspec spec list` and re-run with a listed ID", prefix)
+}
+
 // ResolveTarget determines which spec to operate on.
 //
 // Resolution order:

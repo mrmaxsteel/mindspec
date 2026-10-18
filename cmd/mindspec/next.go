@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -22,6 +24,13 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
 )
+
+// nextPhaseMergeMetadataFn is the test seam for advancePhaseOnClaim's
+// Step 5.2 mindspec_phase write (spec 128 Bead 2), matching the house
+// per-package seam convention (planMergeMetadataFn, completeMergeMetadataFn,
+// repairMergeMetadataFn) so a test can observe/stub the write without
+// hitting a real bd invocation.
+var nextPhaseMergeMetadataFn = bead.MergeMetadata
 
 var nextCmd = &cobra.Command{
 	Use:   "next",
@@ -50,6 +59,25 @@ team lead spawns fresh agents per bead.`,
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
 		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
 
+		// Spec 128 Bead 8 round-1 panel G2: --pick < 0 is pure arg
+		// validation — checked IMMEDIATELY after flag parsing, before
+		// EVERYTHING else on either path (positional-vs-pick mutual
+		// exclusion, the --emit-only dispatch below, scope resolution,
+		// the dirty-tree guard, the ready query). This is the single
+		// shared entry point for both the claim path and --emit-only
+		// (runEmitOnly is only ever reached via the dispatch below), so
+		// one check here covers both: an invalid pick refuses with ZERO
+		// side effects — no bd call, no dirty-tree check, nothing
+		// claimed/fetched — rather than surfacing deep inside SelectWork
+		// after real work already ran. G4/R5's explicit decision, stated
+		// here rather than left implicit: --pick=0 is NOT invalid — it is
+		// the documented "unset" sentinel (OQ-5's default-to-row-1 path,
+		// SelectWork's own pick==0 branch); only a NEGATIVE value is
+		// rejected.
+		if pick < 0 {
+			return fmt.Errorf("pick %d is invalid: must be >= 0 (0 selects the default)", pick)
+		}
+
 		// Spec 101 R1 (mindspec-mfe0): a positional bead ID and --pick are
 		// mutually exclusive selectors — the positional names a specific bead,
 		// --pick is an index into the ready set, and they may disagree. Reject
@@ -72,12 +100,12 @@ team lead spawns fresh agents per bead.`,
 
 		// Emit-only mode: build and print primer without claiming or state changes
 		if emitOnly {
-			return runEmitOnly(specFlag, args)
+			return runEmitOnly(root, specFlag, pick, args)
 		}
 
 		// Step 0a: --spec prefix resolution (e.g., "079" → "079-location-agnostic-commands")
 		if specFlag != "" {
-			resolved, resolveErr := resolve.ResolveSpecPrefix(specFlag)
+			resolved, resolveErr := resolve.ResolveSpecPrefixProven(root, specFlag)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -109,26 +137,17 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Artifact-aware dirty-tree guard (ADR-0025).
-		// `.beads/issues.jsonl` is a build artifact co-managed by bd; dirt on
-		// that path alone is auto-handled via `bd export`. User-authored dirt
-		// still blocks — the guard's purpose is to protect user code.
-		userDirt, err := next.CheckDirtyTree(root, cwd)
-		if err != nil {
-			return fmt.Errorf("checking working tree: %w", err)
-		}
-		if len(userDirt) > 0 {
-			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
-			// worktree-context line and ends with a `recovery:` line. The
-			// old multi-line "Recovery steps: 1..3" stderr block advised
-			// `git restore .` — destructive over the HUMAN's dirt when the
-			// agent merely ran `next` from the wrong directory. The active
-			// worktree (when one exists) is the steer-to target; resolving
-			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, userDirt, guard.ActiveWorktreePath(root))
-		}
-
-		// Step 1.5: Resolve target spec if ambiguous
+		// Step 0d: Resolve target spec if ambiguous. MOVED ahead of the
+		// dirty-tree guard below (spec 128 Bead 7 round-1 panel fix): the
+		// guard's entanglement enumeration is per-spec-aware (it must know
+		// the target spec's recording paths, if any), so the target spec
+		// needs to be known BEFORE the guard runs whenever it is
+		// resolvable at all. This does not change behavior for --spec
+		// callers (specFlag is already set from Step 0a); for the no-flag
+		// path it means an ambiguous-target exit now happens before the
+		// dirty-tree check runs rather than after — a genuinely dirty tree
+		// AND an ambiguous target is vanishingly rare, and knowing which
+		// spec you're even targeting is the more fundamental question.
 		if specFlag == "" {
 			targetSpec, err := resolve.ResolveTarget(root, "")
 			if err != nil {
@@ -147,6 +166,37 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
+		// Step 1: Proportional claim guard (ADR-0025's clarifying
+		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
+		// build artifact co-managed by bd; dirt on that path alone is
+		// auto-handled via `bd export`. Of the remaining user dirt, only
+		// dirt ComputeEntangleablePaths names as a path THIS
+		// worktree-creating claim can itself write still blocks — round-1
+		// panel fix: that set is per-spec-aware (the target spec's
+		// recording paths, when recording is enabled) and conditional on
+		// .gitignore's current state, not unconditionally empty. Every
+		// other unrelated dirty file in the invoking checkout still does
+		// not block; it is named on stderr (Max's standing directive,
+		// 2026-09-02 — visibility without the block) and the claim
+		// proceeds.
+		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specFlag)
+		if err != nil {
+			return fmt.Errorf("checking working tree: %w", err)
+		}
+		if len(blockingDirt) > 0 {
+			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
+			// worktree-context line and ends with a `recovery:` line. The
+			// old multi-line "Recovery steps: 1..3" stderr block advised
+			// `git restore .` — destructive over the HUMAN's dirt when the
+			// agent merely ran `next` from the wrong directory. The active
+			// worktree (when one exists) is the steer-to target; resolving
+			// it costs bd calls only on this failure path.
+			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+		}
+		if len(ignoredDirt) > 0 {
+			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+		}
+
 		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
 		// without `mindspec complete` (bead branch still exists).
 		if specFlag != "" {
@@ -155,33 +205,20 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 2: Query ready work (scoped to spec's epic if available)
-		var items []next.BeadInfo
-		if specFlag != "" {
-			// Find epic via beads metadata query (ADR-0023).
-			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
-			if epicErr == nil && epicID != "" {
-				items, err = next.QueryReadyForEpic(epicID)
-			} else {
-				items, err = next.QueryReady()
-			}
-		} else {
-			items, err = next.QueryReady()
-		}
+		// Step 2/2.5: Construct the ready set — bd-ready query (global, or
+		// scoped to specFlag's epic) plus the spec-title filter, as ONE
+		// shared construction with --emit-only (R6.1/AC-9 parity, spec
+		// 128 Bead 8). BuildReadySet REFUSES rather than silently
+		// widening to the global, unscoped `bd ready` query when specFlag
+		// is set and its epic can't be resolved — the removed
+		// FindEpicBySpecID-fails fallback that used to live here (R6.7/
+		// AC-15) — and errors loudly rather than silently succeeding when
+		// the filter drops every returned item (R6.3(c)/AC-10b).
+		rs, err := next.BuildReadySet(root, specFlag)
 		if err != nil {
-			return fmt.Errorf("querying ready work: %w", err)
+			return err
 		}
-
-		// Step 2.5: Filter by target spec if specified
-		if specFlag != "" {
-			var filtered []next.BeadInfo
-			for _, item := range items {
-				if containsSpecID(item.Title, specFlag) {
-					filtered = append(filtered, item)
-				}
-			}
-			items = filtered
-		}
+		items := rs.Filtered
 
 		// Step 3: Handle no-work case — also check for in-progress bead with
 		// missing worktree (stale recovery). If a bead is in_progress but its
@@ -225,18 +262,21 @@ team lead spawns fresh agents per bead.`,
 		if len(args) > 0 {
 			named = args[0]
 		}
+		if notice := rs.ExclusionNotice(); notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+		}
 		if len(items) > 1 {
 			fmt.Printf("Ready work (%d items):\n", len(items))
 			fmt.Print(next.FormatWorkList(items))
 			fmt.Println()
 			if pick == 0 && named == "" {
-				fmt.Println("Defaulting to first item. Use --pick=N to select a specific item.")
+				fmt.Println("Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.")
 			}
 		}
 
 		var selected next.BeadInfo
 		if named != "" {
-			selected, err = next.SelectWorkByName(items, named)
+			selected, err = next.SelectNamedFromReadySet(rs, named)
 		} else {
 			selected, err = next.SelectWork(items, pick)
 		}
@@ -274,10 +314,7 @@ team lead spawns fresh agents per bead.`,
 			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
 				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
 			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
-				return guard.NewFailure(
-					fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(selected.ID), err),
-					"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
-				)
+				return readinessOverrideFailure(selected.ID, err)
 			}
 		}
 
@@ -292,9 +329,11 @@ team lead spawns fresh agents per bead.`,
 			// the rollback itself also fails, naming the orphaned key.
 			if len(gateResult.FailingSignals) > 0 {
 				if rbErr := next.RollbackReadinessOverride(selected.ID); rbErr != nil {
+					// Final-review round 1 (R5/G3): rbErr is bd-derived
+					// (metadata delete) — escape at this render sink.
 					fmt.Fprintf(os.Stderr,
 						"WARNING: claim failed AND rolling back the --allow-not-ready override marker on %s also failed: %v — an orphaned mindspec_readiness_override marker may remain; remove that metadata key before re-claiming or dispatching this bead\n",
-						idrender.Bead(selected.ID), rbErr)
+						idrender.Bead(selected.ID), next.RenderBDError(rbErr))
 				} else {
 					fmt.Fprintf(os.Stderr,
 						"note: rolled back the --allow-not-ready override marker on %s (claim failed — no override left behind)\n",
@@ -313,6 +352,13 @@ team lead spawns fresh agents per bead.`,
 			sess.BeadClaimedAt = time.Now().UTC().Format(time.RFC3339)
 			_ = state.WriteSessionFile(root, sess)
 		}
+
+		// Step 5.2: Spec 128 Bead 2 (OQ-3 option 1) — advance stored
+		// phase after a successful lifecycle claim. Extracted to its own
+		// named function (matching claimFailureError/
+		// warnWorktreeSetupFailure's established pattern) so it is
+		// directly unit-testable without exercising the full RunE flow.
+		advancePhaseOnClaim(root, selected)
 
 		// Step 5.5: Create or reuse worktree
 		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
@@ -363,14 +409,14 @@ team lead spawns fresh agents per bead.`,
 				// completion section may scroll out of small-context models.
 				fmt.Print(completionGuidance(selected.ID))
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", renderErr)
+				fmt.Fprintf(os.Stderr, "warning: could not render bead context: %v (falling back to generic guidance)\n", next.RenderBDError(renderErr))
 				if err := emitInstruct(root); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+					fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 				}
 			}
 		} else {
 			if err := emitInstruct(root); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+				fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 			}
 		}
 
@@ -399,63 +445,83 @@ func completionGuidance(beadID string) string {
 	return sb.String()
 }
 
-// runEmitOnly handles the --emit-only path: build and print primer without claiming.
-func runEmitOnly(specFlag string, args []string) error {
-	var selected next.BeadInfo
-
-	if len(args) > 0 {
-		// Explicit bead ID provided as positional argument
-		info, err := next.FetchBeadByID(args[0])
-		if err != nil {
-			return fmt.Errorf("fetching bead %s: %w", args[0], err)
+// runEmitOnly handles the --emit-only path: build and print primer without
+// claiming. specFlag is prefix-resolved and existence-proven identically
+// to the claim path (spec 128 R6.7) — refusing before any ready query
+// when an explicit --spec names no actual spec, rather than falling back
+// to the global, unscoped `bd ready` (the removed next.go:417-424
+// fallback).
+func runEmitOnly(root, specFlag string, pick int, args []string) error {
+	if specFlag != "" {
+		resolved, resolveErr := resolve.ResolveSpecPrefixProven(root, specFlag)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		selected = info
-	} else {
-		// Query ready work and pick the first item
-		var items []next.BeadInfo
-		var err error
-		if specFlag != "" {
-			epicID, epicErr := phase.FindEpicBySpecID(specFlag)
-			if epicErr == nil && epicID != "" {
-				items, err = next.QueryReadyForEpic(epicID)
-			} else {
-				items, err = next.QueryReady()
-			}
-		} else {
-			items, err = next.QueryReady()
-		}
-		if err != nil {
-			return fmt.Errorf("querying ready work: %w", err)
-		}
-
-		if specFlag != "" {
-			var filtered []next.BeadInfo
-			for _, item := range items {
-				if containsSpecID(item.Title, specFlag) {
-					filtered = append(filtered, item)
-				}
-			}
-			items = filtered
-		}
-
-		if len(items) == 0 {
-			return fmt.Errorf("no ready work found for --emit-only")
-		}
-		selected = items[0]
+		specFlag = resolved
 	}
 
+	if len(args) > 0 {
+		// Explicit bead ID provided as positional argument — R6.1's
+		// pinned preview semantics: fetch by ID directly, bypassing
+		// ready-set membership and the spec filter entirely (a preview
+		// needs no claimable bead), and SAY SO in the output rather than
+		// leaving the asymmetry with the claim path unstated.
+		info, err := next.FetchBeadByID(args[0])
+		if err != nil {
+			// round-1 panel G3 audit: args[0] is an ID-typed position on
+			// this path (FetchBeadByID does no short-form resolution —
+			// unlike the claim path's positional, it must already be the
+			// full bead ID or FetchBeadByID's own idvalidate.BeadID gate
+			// refuses first), so idrender.Bead — not termsafe.Escape — is
+			// the matching convention: a clean full ID renders
+			// byte-identical, a malformed/hostile one is force-quoted.
+			return fmt.Errorf("fetching bead %s: %w", idrender.Bead(args[0]), err)
+		}
+		fmt.Println("emit-only: bead fetched by ID; readiness not checked.")
+		return emitOnlyPrimer(info)
+	}
+
+	// Query ready work and select, via the SAME shared construction the
+	// claim path uses (R6.1/AC-9 parity).
+	rs, err := next.BuildReadySet(root, specFlag)
+	if err != nil {
+		return err
+	}
+	items := rs.Filtered
+	if len(items) == 0 {
+		return fmt.Errorf("no ready work found for --emit-only")
+	}
+
+	if notice := rs.ExclusionNotice(); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	if len(items) > 1 {
+		fmt.Printf("Ready work (%d items):\n", len(items))
+		fmt.Print(next.FormatWorkList(items))
+		fmt.Println()
+		if pick == 0 {
+			fmt.Println("Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.")
+		}
+	}
+
+	selected, err := next.SelectWork(items, pick)
+	if err != nil {
+		return fmt.Errorf("selecting work: %w", err)
+	}
+
+	return emitOnlyPrimer(selected)
+}
+
+// emitOnlyPrimer renders and prints the bead context primer for the
+// --emit-only path. Extracted so both the positional-bypass branch and
+// the ready-set-selection branch share one render call.
+func emitOnlyPrimer(selected next.BeadInfo) error {
 	rendered, err := contextpack.RenderBeadContext(selected.ID)
 	if err != nil {
 		return fmt.Errorf("rendering bead context: %w", err)
 	}
-
 	fmt.Print(rendered)
 	return nil
-}
-
-// containsSpecID checks if a bead title references the given spec ID.
-func containsSpecID(title, specID string) bool {
-	return strings.Contains(title, specID)
 }
 
 // formatClaimLine renders the "Claiming [<id>] <title> ..." line printed
@@ -479,12 +545,166 @@ func formatStateLine(mode, specID, beadID string) string {
 	return fmt.Sprintf("State updated: mode=%s, spec=%s, bead=%s\n", mode, idrender.Spec(specID), idrender.Bead(beadID))
 }
 
+// advancePhaseOnClaim implements Step 5.2 (spec 128 Bead 2, OQ-3
+// option 1): after a successful ClaimBead, self-heal any legacy v2
+// phase-semantics signature, then advance the epic's stored
+// mindspec_phase to `implement` under the R3.3 lock, but ONLY for a
+// LIFECYCLE (task-typed or untyped — the ADR-0023 discriminator) claim;
+// a non-lifecycle claim (e.g. a `bug` bead) advances nothing.
+// Forward-only: no-op when already `implement` — this is a NEW writer,
+// so it registers in the bead-1 writer-inventory test (writer_inventory_test.go)
+// by construction; the composite literal below must stay lexically
+// nested inside the phase.WithPhaseWriteLock call for that AST-walk
+// test to recognize it as guarded.
+//
+// Round-1 panel G1 (hard block — the core defect): the write is issued
+// AFTER ClaimBead already ran (Step 5), so it can be arbitrarily
+// "delayed" relative to the claim (worktree setup, agent scheduling).
+// By the time this fn finally runs INSIDE the lock, a concurrent
+// `release` or `complete` invocation may have ALREADY mutated the child
+// set — and, via its own guarded write, stored — out from under the
+// stale "we just claimed it, so implement is still correct" assumption
+// the pre-fix code made. The fn therefore re-derives the CURRENT child
+// state on a FRESH per-call Cache (never one built before the lock was
+// acquired — the same named hazard bead 1 was hard-blocked on twice)
+// and writes `implement` ONLY while that fresh evidence still agrees:
+// if release already returned the sole claimed bead to open (derived
+// plan) or complete already closed it (derived review, or implement
+// again if other lifecycle beads remain open), this write no-ops rather
+// than regressing that fresher state back to implement.
+//
+// Failure-semantics contract (round-1 panel G1.4): best-effort — a
+// failure here never fails `next` itself (the bead is already claimed
+// and the worktree not yet set up), so a genuine race remains POSSIBLE
+// (next's own claim advance losing a lock timeout or merge-write leaves
+// stored behind derived momentarily). What the contract GUARANTEES is
+// that the divergence is always FORWARD (derived implement, stored
+// whatever it was — plan in the common case) and NAMES A RECOVERY
+// COMMAND THAT ACTUALLY CONVERGES: `mindspec repair phase <spec-id>`,
+// never the dead-end `mindspec next <bead-id>` (the bead is already
+// in_progress, so a re-run can never re-select it — round-1 panel
+// G5/R3-G2). The forward direction means the unforced operator guard
+// permits that command unconditionally.
+//
+// A genuine epic-lineage lookup failure (as opposed to the bead simply
+// having no epic lineage at all, phase.ErrNoEpicLineage) is still
+// surfaced as a warning rather than silently discarded.
+func advancePhaseOnClaim(root string, selected next.BeadInfo) {
+	epicID, specID, epicErr := phase.FindEpicForBead(selected.ID)
+	if epicErr != nil {
+		if !errors.Is(epicErr, phase.ErrNoEpicLineage) {
+			// Final-review round 1 (R2/G3): epicErr chains
+			// FindEpicForBead -> wrapBDError's raw stderr excerpt —
+			// escape at this render sink like the function's other two
+			// failure legs (describePhaseSyncFailure / RenderBDError).
+			fmt.Fprintf(os.Stderr, "warning: could not resolve epic for bead %s: %v\n", idrender.Bead(selected.ID), next.RenderBDError(epicErr))
+		}
+		return
+	}
+	if epicID == "" {
+		return
+	}
+	recovery := nextPhaseAdvanceRecoveryCommand(specID)
+	if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", describePhaseSyncFailure(err, recovery))
+	}
+	if !phase.IsLifecycleIssueType(selected.IssueType) {
+		return
+	}
+	if lockErr := phase.WithPhaseWriteLock(root, epicID, nextPhaseMergeMetadataFn, func(stored string, _ bool) (map[string]interface{}, error) {
+		if stored == state.ModeImplement {
+			return nil, nil
+		}
+		// Fresh per-call Cache — never a Cache built before this call
+		// reached the lock.
+		freshCache := phase.NewCache()
+		children, cerr := freshCache.GetChildren(epicID)
+		if cerr != nil {
+			return nil, fmt.Errorf("advance-phase-on-claim: reading children of epic %s: %w", idrender.Bead(epicID), cerr)
+		}
+		if phase.DerivePhaseFromChildren(children) != state.ModeImplement {
+			// The fresh evidence no longer supports advancing to
+			// implement — a concurrent release/complete already moved
+			// stored to something else. NEVER overwrite fresher state.
+			return nil, nil
+		}
+		return map[string]interface{}{"mindspec_phase": state.ModeImplement}, nil
+	}); lockErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", describePhaseSyncFailure(lockErr, recovery))
+	}
+}
+
+// describePhaseSyncFailure renders advancePhaseOnClaim's best-effort
+// failures with the ALWAYS-convergent recovery command (round-1 panel
+// G1.4/G5): unlike phase.DescribeLockFailure's general contract (a
+// non-timeout failure gets no manufactured recovery line, because
+// "that belongs to whatever wrote the failing value" — its own doc
+// comment), this specific write's convergent fix is the SAME regardless
+// of failure shape (a lock timeout or a genuine merge-write error), so
+// the recovery line is appended unconditionally rather than only on the
+// timeout leg.
+//
+// The non-timeout leg's err can be bd/lock-derived (a merge-write failure
+// wrapping bd's own possibly-hostile stderr, or a children-read failure
+// via freshCache.GetChildren) — spec 128 Bead 8's folded-in ta30.9
+// render-leg follow-up: next.RenderBDError applies the SAME per-line
+// termsafe.Escape discipline bdRenderedError uses (ADR-0042) rather than
+// forking a second escaping path. The timeout leg is untouched —
+// ErrPhaseLockTimeout wraps only an internal lock-file path, never
+// agent-writable content.
+func describePhaseSyncFailure(err error, recovery string) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, phase.ErrPhaseLockTimeout) {
+		return phase.DescribeLockFailure(err, recovery)
+	}
+	return fmt.Sprintf("could not sync phase metadata: %v\nrecovery: %s", next.RenderBDError(err), recovery)
+}
+
+// nextPhaseAdvanceRecoveryCommand renders advancePhaseOnClaim's
+// convergent recovery (round-1 panel G1.4/G5): `mindspec repair phase
+// <spec-id>` when specID is known, else the documented "<spec-id>"
+// placeholder (specIDForEpicWithCache's own convention) for the rare
+// case a bead resolves to an epic without resolvable spec metadata.
+func nextPhaseAdvanceRecoveryCommand(specID string) string {
+	if specID == "" {
+		return "mindspec repair phase <spec-id>"
+	}
+	return fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID))
+}
+
+// readinessOverrideFailure builds the guard failure for a
+// RecordReadinessOverride write failure (Step 4.6). Extracted from the
+// RunE closure for direct unit-testability (spec 128 Bead 8's folded-in
+// ta30.9 render-leg follow-up): err is bd/lock-derived and MAY carry
+// hostile content (bd's own possibly-adversarial stderr, folded in by
+// bdcli.go's wrapBDError). RecordReadinessOverride already returns it
+// wrapped in bdRenderedError (internal/next/ready_gate.go:130, bead
+// mindspec-ta30.9 round-2 panel) — but this call site wraps it AGAIN via
+// next.RenderBDError before formatting, so the escaping guarantee lives
+// HERE, explicitly, rather than resting on an implicit fmt %v/error-
+// interface interaction with a detail of a different file that a future
+// refactor could silently break. Re-wrapping an already-escaped error is
+// a safe no-op (termsafe.Escape's output is plain printable ASCII, which
+// re-escapes byte-identical), so this is defense in depth, not a second
+// divergent escaping path.
+func readinessOverrideFailure(beadID string, err error) error {
+	return guard.NewFailure(
+		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(beadID), next.RenderBDError(err)),
+		"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+	)
+}
+
 // claimFailureError builds the spec 093 Req 3 claim-failure recovery
 // error for the `mindspec next` ClaimBead caller. Extracted from the
 // RunE closure so the wiring — the FULL recipe is returned, never the
 // pre-093 bare `fmt.Errorf("claiming bead: %w")` — is unit-testable
 // (next_recovery_test.go); reverting the call site to the bare wrap
-// fails TestClaimFailureError_FullRecipe.
+// fails TestClaimFailureError_FullRecipe. (Final-review round 1 G7:
+// re-attached — bead 8 inserted readinessOverrideFailure between this
+// comment and its function with no separating blank line, so godoc
+// attributed it to the wrong function.)
 func claimFailureError(root, specFlag string, selected next.BeadInfo, claimErr error) error {
 	return next.ClaimFailure(root, recoveryConfig(root),
 		selected.ID, recoverySpecSlug(root, specFlag, selected), claimErr)
@@ -555,7 +775,7 @@ func unmergedBeadError(o lifecycle.Orphan) error {
 }
 
 func init() {
-	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready")
+	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
 	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
 	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
 	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")

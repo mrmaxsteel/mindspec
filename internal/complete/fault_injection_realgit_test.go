@@ -13,6 +13,7 @@ package complete
 // after `bd close` / after the merge) for c2/c3 and c5 respectively.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,75 +42,40 @@ func (noopWorktreeOps) List() ([]bead.WorktreeListEntry, error) {
 	return nil, nil
 }
 
-// gitCommitAll runs `git add -A && git commit -q -m msg` for real in dir,
-// tolerating "nothing to commit" (a no-op success) so a decorator method
-// invoked when there is genuinely nothing new to stage does not spuriously
-// fail the fixture.
-func gitCommitAll(t *testing.T, dir, msg string) {
-	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "add", "-A")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add -A in %s: %v\n%s", dir, err, out)
-	}
-	cmd = exec.Command("git", "-C", dir, "commit", "-q", "-m", msg)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.invalid",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.invalid",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "nothing to commit") {
-		t.Fatalf("git commit in %s: %v\n%s", dir, err, out)
-	}
-}
-
-// gitCommitPaths runs `git add <paths...> && git commit -q -m msg` for real.
-func gitCommitPaths(t *testing.T, dir, msg string, paths []string) {
-	t.Helper()
-	args := append([]string{"-C", dir, "add"}, paths...)
-	cmd := exec.Command("git", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add %v in %s: %v\n%s", paths, dir, err, out)
-	}
-	cmd = exec.Command("git", "-C", dir, "commit", "-q", "-m", msg)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.invalid",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.invalid",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "nothing to commit") {
-		t.Fatalf("git commit in %s: %v\n%s", dir, err, out)
-	}
-}
-
 // killAfterExecutor is the mechanism-A decorator (ADR-0041 §3): it wraps a
-// REAL executor.MindspecExecutor and, for each of the three mutation seams
-// below, performs the REAL git mutation FIRST and only THEN — when the
-// corresponding kill* flag is set — forces a terminal error, faithfully
-// modeling "the process died right after this mutation landed" rather than
-// a mock that never mutates anything at all.
+// REAL executor.MindspecExecutor and, for each of the mutation seams
+// below, lets the REAL git mutation land FIRST and only THEN — when the
+// corresponding kill* flag/counter says so — forces a terminal error,
+// faithfully modeling "the process died right after this mutation landed"
+// rather than a mock that never mutates anything at all.
+//
+// Spec 128 Bead 6: killCommitAll/killCommitPaths (the pre-bead-6 porcelain
+// seams the prospective-snapshot reorder replaces) are superseded by
+// killAdvanceAfterCall, which targets AdvanceBranchExpectedOld — the ONE
+// seam where the bead branch's real ref moves for BOTH the M stage (the
+// user's own work) and the S stage (the artifact-sync commit) under the
+// new machinery. killAdvanceAfterCall selects which 1-indexed call to
+// kill after (1 = the M-stage advance to C, 2 = the S-stage advance to
+// D); 0 disables killing here entirely.
 type killAfterExecutor struct {
 	executor.Executor
 	t *testing.T
 
-	killCommitAll    bool
-	killCommitPaths  bool
 	killCompleteBead bool
+
+	killAdvanceAfterCall int
+	advanceCalls         int
 
 	completeBeadCalls int
 }
 
-func (e *killAfterExecutor) CommitAll(dir, msg string) error {
-	gitCommitAll(e.t, dir, msg)
-	if e.killCommitAll {
-		return fakeErr("fault-injection: kill after CommitAll's real commit landed")
+func (e *killAfterExecutor) AdvanceBranchExpectedOld(branch, newSHA, expectedOld string) error {
+	if err := e.Executor.AdvanceBranchExpectedOld(branch, newSHA, expectedOld); err != nil {
+		return err
 	}
-	return nil
-}
-
-func (e *killAfterExecutor) CommitPaths(dir, msg string, paths []string) error {
-	gitCommitPaths(e.t, dir, msg, paths)
-	if e.killCommitPaths {
-		return fakeErr("fault-injection: kill after CommitPaths' real commit landed")
+	e.advanceCalls++
+	if e.killAdvanceAfterCall != 0 && e.advanceCalls == e.killAdvanceAfterCall {
+		return fakeErr(fmt.Sprintf("fault-injection: kill after AdvanceBranchExpectedOld call #%d's real ref move landed", e.advanceCalls))
 	}
 	return nil
 }
@@ -199,6 +165,38 @@ func wireRealGitFaultSeams(t *testing.T, specID string) {
 	findLocalRootFn = func() (string, error) { return "", fakeErr("test: no local root") }
 	closeBeadFn = func(...string) error { return nil }
 	fakeBdOnPath(t)
+
+	// Final-review round 1 (R6 F1/G1): the write-ahead marker is only
+	// honored when the binary-side bd attestation
+	// (stageMarkerAttestationKey) names its OID, so every resume leg in
+	// this fixture matrix needs the metadata seam pair to genuinely
+	// ROUND-TRIP within one test — the PATH-fronted fake bd above accepts
+	// `bd update` but stores nothing, which would misclassify every
+	// legitimate resume as FOREIGN. An in-memory per-test store (the
+	// stubMergeBindingSeams shape from internal/executor) stands in for
+	// bd's metadata; saveAndRestore (already run by every caller) restores
+	// the production seams afterward. The forged-marker leg (xxiv) rides
+	// the same store: its forger writes no attestation, so the mismatch
+	// is real, not an artifact of a lobotomized read.
+	attest := map[string]map[string]interface{}{}
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		m := attest[id]
+		if m == nil {
+			m = map[string]interface{}{}
+			attest[id] = m
+		}
+		for k, v := range updates {
+			m[k] = v
+		}
+		return nil
+	}
+	completeGetMetadataFn = func(id string) (map[string]interface{}, error) {
+		out := map[string]interface{}{}
+		for k, v := range attest[id] {
+			out[k] = v
+		}
+		return out, nil
+	}
 }
 
 // fakeBdOnPath puts a fixture-local `bd` at the front of PATH for the
@@ -251,18 +249,19 @@ exit 0
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// --- c2: `--commit-msg` tracker auto-commit --------------------------------
+// --- c2: M-stage materialization (spec 128 Bead 6) -------------------------
 //
-// exec.CommitAll (complete.go step 2.5, invoked only when --commit-msg is
-// supplied) TERMINATES the run via `return nil, fmt.Errorf("auto-commit
-// failed: %w", err)` when it fails. Mechanism A: the decorator performs the
-// REAL commit in the bead worktree, then dies. Re-invocation (no
-// --commit-msg needed — the tree is already clean) converges to
-// completion: no panel is registered in this fixture, so the accepted
-// convergence outcome here is completion rather than the panel-staleness
-// refusal (both are AC-26-accepted; a registered-panel variant would hit
-// the staleness Warn/Block instead, per the plan's illustrative case).
-func TestFaultInjection_Complete_C2_CommitMsgAutoCommit_KillThenConverge(t *testing.T) {
+// Pre-bead-6 this was "the `--commit-msg` tracker auto-commit"
+// (exec.CommitAll); the prospective-snapshot reorder replaces that
+// porcelain call with the M-stage's commit-tree-built materialization
+// commit, published via the write-ahead marker and landed via
+// exec.AdvanceBranchExpectedOld — the ONE seam where the bead branch's
+// REAL ref moves. Mechanism A: the decorator lets that REAL ref move
+// land, then dies. Re-invocation resumes via the write-ahead marker
+// (the discriminator sees tip == the published marker) and converges —
+// no panel is registered in this fixture, so completion (not a
+// panel-staleness refusal) is the accepted convergence outcome here.
+func TestFaultInjection_Complete_C2_MStageAdvance_KillThenConverge(t *testing.T) {
 	saveAndRestore(t)
 	const specID, beadID = "921-fic2", "mindspec-119fic2.1"
 	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
@@ -273,37 +272,44 @@ func TestFaultInjection_Complete_C2_CommitMsgAutoCommit_KillThenConverge(t *test
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
 		return []bead.WorktreeListEntry{{Name: "worktree-" + beadID, Path: beadWtPath, Branch: beadBranch}}, nil
 	}
+	preKillTip := gateRevParse(t, root, beadBranch)
 
-	// An uncommitted change in the bead worktree for --commit-msg to pick up.
+	// An uncommitted change in the bead worktree for the M stage to pick up.
 	if err := os.WriteFile(filepath.Join(beadWtPath, "internal", "widget", "widget.go"),
 		[]byte("package widget\n\nfunc New() {}\n\nfunc More() {}\n"), 0o644); err != nil {
 		t.Fatalf("writing uncommitted change: %v", err)
 	}
 
 	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
-	ex := &killAfterExecutor{Executor: base, t: t, killCommitAll: true}
+	ex := &killAfterExecutor{Executor: base, t: t, killAdvanceAfterCall: 1}
 
-	// KILL: the real commit lands in the bead worktree, then the decorator
+	// KILL: the real M-stage ref move lands (bead/<id> now points at the
+	// commit-tree-built materialization commit C), then the decorator
 	// forces a terminal error.
 	_, err := Run(root, beadID, specID, "did more work", ex, CompleteOpts{})
 	if err == nil {
-		t.Fatal("expected c2 kill: the auto-commit failure must fail Run")
+		t.Fatal("expected c2 kill: the M-stage advance failure must fail Run")
 	}
-	if !strings.Contains(err.Error(), "auto-commit failed") {
-		t.Errorf("expected an auto-commit-failed error, got: %v", err)
+	if !strings.Contains(err.Error(), "materialization") {
+		t.Errorf("expected a materialization-race error, got: %v", err)
 	}
 	if ex.completeBeadCalls != 0 {
 		t.Errorf("expected ZERO CompleteBead calls before the c2 kill, got %d", ex.completeBeadCalls)
 	}
-	// The real commit landed: the bead worktree's tree is clean and its
-	// branch tip advanced past the pre-kill commit.
-	if status := gitStatusPorcelain(t, beadWtPath); status != "" {
-		t.Errorf("expected a clean bead worktree after the real commit landed, got dirty status:\n%s", status)
+	// The real ref move landed for real: the branch tip advanced past
+	// its pre-kill value, and the new tip's tree carries the work.
+	postKillTip := gateRevParse(t, root, beadBranch)
+	if postKillTip == preKillTip {
+		t.Error("expected the bead branch tip to have advanced past the pre-kill commit")
+	}
+	if !fileContainsAtRef(t, root, beadBranch, "internal/widget/widget.go", "func More()") {
+		t.Error("expected the M-stage commit's content to be present at the new bead branch tip")
 	}
 
-	// Re-invoke: no --commit-msg needed (already committed); the kill flag
-	// is cleared so the SAME decorator now lets the run proceed.
-	ex.killCommitAll = false
+	// Re-invoke: the write-ahead marker resumes the run past the panel
+	// gate and the content gates (already satisfied); the kill flag is
+	// cleared so the SAME decorator now lets the run proceed.
+	ex.killAdvanceAfterCall = 0
 	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("expected c2 re-invocation to converge to completion, got: %v", err)
@@ -321,15 +327,17 @@ func TestFaultInjection_Complete_C2_CommitMsgAutoCommit_KillThenConverge(t *test
 	}
 }
 
-// --- c3: artifact-sync commit ---------------------------------------------
+// --- c3: S-stage artifact-sync materialization (spec 128 Bead 6) -----------
 //
-// exec.CommitPaths (complete.go step 3, the pathspec-scoped artifact-dirt
-// follow-up commit) TERMINATES the run via `return nil, fmt.Errorf(
-// "committing beads artifact sync: %w", err)` when it fails. Mechanism A:
-// the SAME decorator, its CommitPaths method; the real commit of the
-// exact artifact pathspec lands, then dies. Re-invocation finds a clean
-// tree (the artifact dirt is gone) and converges to done.
-func TestFaultInjection_Complete_C3_ArtifactSyncCommit_KillThenConverge(t *testing.T) {
+// Pre-bead-6 this was "the pathspec-scoped artifact-sync commit"
+// (exec.CommitPaths); the reorder replaces it with the S-stage's
+// commit-tree-built artifact-sync commit, landed via the SAME
+// exec.AdvanceBranchExpectedOld seam c2 exercises. Here the M stage
+// elides (no non-artifact content differs from tip), so the artifact-
+// sync advance is call #1. Mechanism A: the decorator lets that REAL ref
+// move land, then dies. Re-invocation resumes via the write-ahead marker
+// and converges.
+func TestFaultInjection_Complete_C3_SStageAdvance_KillThenConverge(t *testing.T) {
 	saveAndRestore(t)
 	const specID, beadID = "922-fic3", "mindspec-119fic3.1"
 	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
@@ -340,10 +348,11 @@ func TestFaultInjection_Complete_C3_ArtifactSyncCommit_KillThenConverge(t *testi
 	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
 		return []bead.WorktreeListEntry{{Name: "worktree-" + beadID, Path: beadWtPath, Branch: beadBranch}}, nil
 	}
+	preKillTip := gateRevParse(t, root, beadBranch)
 
 	// Artifact dirt: an untracked .beads/issues.jsonl the complete-package
-	// seam (checkDirtyTreeFn) classifies as artifact-only, driving Run into
-	// the CommitPaths follow-up leg without needing a real `bd export`.
+	// seam (checkDirtyTreeFn) classifies as artifact-only, driving Run
+	// into the S-stage without needing a real `bd export`.
 	checkDirtyTreeFn = func(repoRoot, cwd string) (artifactDirt, userDirt []string, err error) {
 		return []string{".beads/issues.jsonl"}, nil, nil
 	}
@@ -355,30 +364,35 @@ func TestFaultInjection_Complete_C3_ArtifactSyncCommit_KillThenConverge(t *testi
 	}
 
 	base := &executor.MindspecExecutor{Root: root, WorktreeOps: noopWorktreeOps{}}
-	ex := &killAfterExecutor{Executor: base, t: t, killCommitPaths: true}
+	ex := &killAfterExecutor{Executor: base, t: t, killAdvanceAfterCall: 1}
 
-	// KILL: the real artifact-sync commit lands, then the decorator forces
-	// a terminal error.
+	// KILL: the real S-stage ref move lands, then the decorator forces a
+	// terminal error.
 	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
 	if err == nil {
-		t.Fatal("expected c3 kill: the artifact-sync commit failure must fail Run")
+		t.Fatal("expected c3 kill: the S-stage advance failure must fail Run")
 	}
-	if !strings.Contains(err.Error(), "committing beads artifact sync") {
-		t.Errorf("expected an artifact-sync-commit error, got: %v", err)
+	if !strings.Contains(err.Error(), "materialization") {
+		t.Errorf("expected a materialization-race error, got: %v", err)
 	}
 	if ex.completeBeadCalls != 0 {
 		t.Errorf("expected ZERO CompleteBead calls before the c3 kill, got %d", ex.completeBeadCalls)
 	}
-	if status := gitStatusPorcelain(t, beadWtPath); status != "" {
-		t.Errorf("expected a clean bead worktree after the real artifact-sync commit landed, got dirty status:\n%s", status)
+	postKillTip := gateRevParse(t, root, beadBranch)
+	if postKillTip == preKillTip {
+		t.Error("expected the bead branch tip to have advanced past the pre-kill commit")
+	}
+	if !fileContainsAtRef(t, root, beadBranch, ".beads/issues.jsonl", `"id":"x"`) {
+		t.Error("expected the S-stage commit's artifact content to be present at the new bead branch tip")
 	}
 
-	// Re-invoke: the tree is already clean (no more artifact dirt to sync);
-	// convergence to completion.
+	// Re-invoke: the write-ahead marker resumes past the panel/content
+	// gates; the kill flag is cleared so the SAME decorator now lets the
+	// run proceed.
 	checkDirtyTreeFn = func(repoRoot, cwd string) (artifactDirt, userDirt []string, err error) {
 		return nil, nil, nil
 	}
-	ex.killCommitPaths = false
+	ex.killAdvanceAfterCall = 0
 	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
 	if err != nil {
 		t.Fatalf("expected c3 re-invocation to converge to completion, got: %v", err)
@@ -518,4 +532,15 @@ func fileExistsAtRef(t *testing.T, dir, ref, path string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "cat-file", "-e", ref+":"+path)
 	return cmd.Run() == nil
+}
+
+// fileContainsAtRef reports whether path's content at ref contains want
+// (`git show <ref>:<path>`).
+func fileContainsAtRef(t *testing.T, dir, ref, path, want string) bool {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "show", ref+":"+path).Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), want)
 }

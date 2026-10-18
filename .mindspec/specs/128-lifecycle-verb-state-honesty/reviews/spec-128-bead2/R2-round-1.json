@@ -1,0 +1,63 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens, commit 798841b9. All five new test files exist and are substantive, and every touched package is fresh-green with -count=1 -short (internal/phase 1.0s, cmd/mindspec 66s, internal/approve 97s, internal/lint 0.9s, internal/harness 51s, internal/complete 69s; full ./... -short has zero failures). The #248 route fixtures construct both routes as state snapshots a real run would leave (route 1: post-plan-approve stored=plan/all-open then post-first-claim stored=implement/one-in_progress; route 2: claim then post-release stored=plan/all-open), each asserting stored==derived via DerivePhaseDetail AND zero stderr — and the production writes that produce those snapshots are independently pinned: plan.go:471 now writes state.ModePlan under the lock, advancePhaseOnClaim's write is observed through its dedicated nextPhaseMergeMetadataFn seam (4 fixtures incl. untyped-is-lifecycle and bug-advances-nothing), and the release chain is closed compositionally (TestReleaseCursorRewindOnlyWhenActive now unit-tests the ACTIVE leg through the recorder — previously untestable — releaseSyncPhase is the fence-pinned sole SanctionedDerivedSync caller, and TestAC5viii leg 1 proves that sync writes plan unforced on the released all-open state while leg 2 proves repair phase refuses the same state with zero merge calls). The sanctioned-sync tightening is genuinely exactly-one: a real AST walk over every non-test .go file under cmd/ and internal/ resolving by import-path identity (aliases, dot-imports, and same-package bare calls all handled), now asserting len(sites)==1 AND file==cmd/mindspec/release.go AND func==releaseSyncPhase — a second direct caller anywhere in either tree fails three assertions. Deviation E's recount is honest and mechanically enforced: the ratchet is exact-match in BOTH directions (diffSites flags STALE over-allowance, proven by its own fixture subtest), so lint-green means 4 is the true count; manual recount agrees (legacy notice: raw epicID + epicID inside specIDForEpicWithCache = 2; retained forward warning: same shape = 2; backward branch: both renders idrender.Bead-wrapped, pruned by the scanner = 0). B/C's stubs mask nothing: SetMergeMetadataForTest controls phase's internal mergeMetadataFn (migrate.go:15) — a separate seam from the planMergeMetadataFn/repairMergeMetadataFn/nextPhaseMergeMetadataFn recorders those tests actually assert on — and the marker-write CONTENT is asserted in the six semantics_v2 fixtures (including exactly-2-keys merge on the legacy rewrite and zero-call no-op when the marker is present). Deviation D's retarget keeps the ordering pin intact (commit-all index < first merge-metadata:*:plan index). Deviation A is the right call and loses no injection coverage the package seam does not still provide. Deviation F: complete.go's diff is the single 7-line hunk. Worktree left clean, no phase.lock residue.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R2-A",
+      "severity": "none",
+      "title": "Deviation A (hardcoded mergeMetadataFn seam) — acceptable, no coverage lost",
+      "detail": "EnsurePhaseSemanticsV2 writing via phase's own mergeMetadataFn exactly matches EnsureMigrated (migrate.go:88) and SanctionedDerivedSync (sanctioned_sync.go:53). Threading a caller seam would indeed make impl_test.go's 'implPhaseMetadataFn not called on preflight refusal' assertion observe an unrelated writer. Fault injection is preserved via SetMergeMetadataForTest — TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite proves read-failure propagation with zero writes through that same seam. What is lost (per-caller-scoped injection) has no current consumer."
+    },
+    {
+      "id": "R2-B",
+      "severity": "none",
+      "title": "Deviation B (18 no-op SetMergeMetadataForTest stubs) — masks no observed write",
+      "detail": "The stubs sit on phase's internal mergeMetadataFn seam, which is disjoint from every seam those tests assert on (planMergeMetadataFn recorders, callLog 'merge-metadata:' entries, repairMergeMetadataFn counters, nextPhaseMergeMetadataFn). Without the stubs the new unconditional first-run marker write would hit real bd from test fixtures — the stub is the correct containment, and the write's content is asserted where it belongs (semantics_v2_test.go, incl. len(updates)==2 on the legacy rewrite)."
+    },
+    {
+      "id": "R2-C",
+      "severity": "none",
+      "title": "Deviation C (pre-set v2 markers in repair fixtures) — correct fixture pinning",
+      "detail": "Matches plan round-3 G2's explicit instruction: guard/warning fixtures are built marker-PRESENT so the repair-entry self-heal no-ops and the condition under test survives to the guard; the marker-ABSENT legacy state is exclusively exercised by the dedicated legacy-notice + self-heal fixtures (derive_v2_test.go, semantics_v2_test.go). The exactly-one-merge-call contracts these fixtures pin remain live and fresh-green."
+    },
+    {
+      "id": "R2-D",
+      "severity": "none",
+      "title": "Deviation D (ordering test retargeted implement→plan) — invariant preserved",
+      "detail": "TestApprovePlan_CommitsBeforeWritingImplementPhase still computes lastCommit ('commit-all') and firstPhaseWrite (now 'merge-metadata:*:plan') indices and fails on firstPhaseWrite <= lastCommit — the commit-before-phase-write pin is byte-for-byte the same mechanism with only the pinned value changed by the bead's own OQ-3 semantics."
+    },
+    {
+      "id": "R2-E",
+      "severity": "none",
+      "title": "Deviation E (derive.go ratchet 2→4) — honest recount, mechanically enforced",
+      "detail": "The rawIDRender ratchet is exact-match both directions (TestRawIDRenderForbidden's fixture_deleted_allowlisted_site_flagged subtest proves over-allowance flags as STALE), so the fresh-green lint run proves 4 is the true count, not padding. Manual recount agrees: legacy notice = 2 raw epicID occurrences, retained forward warning = 2, backward branch = 0 (both renders idrender.Bead-wrapped, pruned). repair.go's new failure message is idrender.Spec/idrender.Bead-wrapped with no bump, as claimed. Net: the backward leg is STRICTER than the code it replaced."
+    },
+    {
+      "id": "R2-F",
+      "severity": "none",
+      "title": "Deviation F (complete.go untouched beyond the call) — confirmed",
+      "detail": "complete.go's diff is a single 7-line hunk adding the EnsurePhaseSemanticsV2 call at the step-1.5 guard; no other edits."
+    },
+    {
+      "id": "R2-1",
+      "severity": "minor",
+      "title": "complete.go guard reads a possibly-stale stored phase from the pre-reconciliation epicCache",
+      "detail": "complete.go step 1.5 runs EnsurePhaseSemanticsV2(root, epicID) and then reads phase.DerivePhaseWithCache(epicCache, epicID) on the epicCache built BEFORE the reconciliation write. If the legacy rewrite fired (marker-absent, stored implement, all lifecycle children open — reachable at complete only for a non-lifecycle child, since a lifecycle bead being completed is in_progress and defeats the signature), the guard evaluates the memoized pre-rewrite 'implement' (passes) where the fresh post-rewrite 'plan' would refuse. One-run-only leniency in a narrow legacy corner, self-corrects on the next invocation; no dishonest state is written. Suggest (non-blocking, bead 4+ or fix-round if one happens anyway): re-derive on a fresh cache when EnsurePhaseSemanticsV2 reports rewrote=true."
+    },
+    {
+      "id": "R2-2",
+      "severity": "minor",
+      "title": "Harness comment misstates where native epics get the v2 marker",
+      "detail": "internal/harness/lifecycle_scenario_test.go's new comment says the marker stamp 'lives in ApproveSpec's real epic-create call'. No production code stamps the marker at epic creation (grep: PhaseSemanticsV2MarkerKey appears only in semantics_v2.go), and no plan step assigns it there — natively-created epics get the marker lazily at their first EnsurePhaseSemanticsV2 caller (harmless: their state never matches the legacy signature at that point). Comment-only inaccuracy, but it asserts a production behavior that does not exist and could mislead beads 4/5. Reword to 'stamped lazily by the first EnsurePhaseSemanticsV2 caller'."
+    },
+    {
+      "id": "R2-3",
+      "severity": "info",
+      "title": "Fence residuals are the pre-existing, documented ones",
+      "detail": "The exactly-one fence walks cmd/ and internal/ only; the sole production Go file outside both is plugins/mindspec/embed.go (embed-only, no phase import). Indirect calls through function/method values remain review-caught, as the fence's own doc comment discloses — unchanged from the bead-1 adopt-fence precedent. No new escape introduced by the tightening."
+    }
+  ]
+}

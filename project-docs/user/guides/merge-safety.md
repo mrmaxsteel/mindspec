@@ -2,10 +2,72 @@
 
 Spec 127 changed what `mindspec` does when a lifecycle merge would
 destroy work, when it conflicts, and when a spec's content reached
-`main` outside the lifecycle entirely. This guide covers the three
-operator surfaces that shipped: the work-destruction preflight and its
-`--allow-net-deletion` override, the `--resolve-merge` conflict
-re-entry, and the `mindspec impl adopt` verb.
+`main` outside the lifecycle entirely. Spec 128 changed what happens when
+`mindspec complete`'s own content gates refuse. This guide covers the
+operator surfaces that shipped: the gate-refusal retry contract, the
+work-destruction preflight and its `--allow-net-deletion` override, the
+`--resolve-merge` conflict re-entry, and the `mindspec impl adopt` verb.
+See [lifecycle-modes.md](lifecycle-modes.md) for the per-verb mode
+agreement table these verbs' success states feed.
+
+## Gate-refused `mindspec complete` converges on a plain retry (spec 128)
+
+`mindspec complete`'s content gates (doc-sync, ADR-divergence) now run
+against a **prospective snapshot** of the bead worktree's content, taken
+after the panel gate but **before any `complete`-authored commit
+exists**. This closes the #186 wedge by construction rather than working
+around it: a refused run never advances the bead branch tip past the
+already-reviewed SHA, so the retry can never find a false
+panel-staleness block or masked dirt.
+
+- **A GATE-REFUSAL** — doc-sync or ADR-divergence rejects the prospective
+  content — leaves the bead branch tip **exactly** at `reviewed_head_sha`,
+  byte-identical to before the call. Two distinct retries follow from
+  here, and they are NOT interchangeable:
+
+  - **A plain re-run, no override** — after you've actually fixed the
+    doc skew or ADR divergence — re-evaluates the SAME content-gate class
+    that refused, against the same unchanged tip. It never manufactures a
+    false panel-staleness block, because the tip never moved. If the
+    underlying issue is genuinely fixed, this gate now passes; if it
+    isn't, the same gate refuses again with the same message.
+  - **A re-run WITH the override** (`--allow-doc-skew "<reason>"` /
+    `--override-adr "<reason>"`) **bypasses that gate class
+    unconditionally** — the reason is recorded, not evaluated as a fix —
+    and execution proceeds to whatever runs next. Doc-sync and
+    ADR-divergence run SEQUENTIALLY (doc-sync first): `--allow-doc-skew`
+    alone can still surface a fresh ADR-divergence refusal that never
+    ran before, and that is correctly a DIFFERENT gate refusing, not a
+    contradiction of the "tip never moved" guarantee above. Neither
+    override is "the whole recovery" on its own when both classes of
+    skew are present — passing both flags (or fixing one and overriding
+    the other) is what a fully-skewed worktree needs.
+
+  ```bash
+  mindspec complete <bead-id> "msg" --allow-doc-skew "<reason>"
+  mindspec complete <bead-id> "msg" --override-adr "<reason>"
+  ```
+
+  What IS guaranteed regardless of which retry you choose: no branch
+  surgery, no re-panel, no inspecting `reviewed_head_sha` by hand, and
+  the retry never fails at the panel stale-SHA gate — only ever at a
+  content gate (the same one, unchanged; or a later one, freshly
+  evaluated because an earlier one was overridden past).
+- **A POST-gate failure** — a bead→spec merge conflict, a `bd close`
+  failure, anything that happens AFTER a full gate pass has already
+  materialized the real commits — is a **different class**, unchanged by
+  this reorder: it is spec 127's preserved-merge and forward-reconcile
+  territory. See "Conflicted merges: preserved, never aborted" below for
+  the `--resolve-merge` recovery; a `bd close` failure's recovery is
+  named in its own refusal text. Do not reach for `--allow-doc-skew`/
+  `--override-adr` for a POST-gate failure — those overrides answer a
+  content-gate refusal, not a merge or close failure.
+
+The distinction matters operationally: a GATE-REFUSAL means nothing was
+committed on the bead branch at all (the retry is cheap and total); a
+POST-gate failure means the real commits already landed and a merge or
+close step is what's stuck (the recovery is scoped to that one step, per
+the sections below), never a full re-run from scratch.
 
 ## The work-destruction preflight (`--allow-net-deletion`)
 

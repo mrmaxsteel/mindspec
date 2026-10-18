@@ -1,0 +1,63 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The spec correctly identifies OQ-1(a) as a reversal of ADR-0041 and correctly preserves ADR-0037's no-general-warn-downgrade rule in prose, but it materially underprices OQ-1(b), overbroadens the tracker/artifact path class used by R4, and incorrectly says the R5.3 fallback needs no ADR-0025 amendment. The OQ-4 semantic resolution is correct, but its line citation is not.",
+  "concrete_changes_required": [
+    "Amend the ADR Touchpoints, OQ-1(b), R4.4, and Scope text so rollback is explicitly priced as a reversal/amendment of ADR-0041 section 1's 'Never a rollback' rule and section 2's forward-reconcile-only contract, or remove rollback as an admissible option.",
+    "For OQ-1(c), replace the `.beads/**` tracker-only exemption with an explicit, reviewed set of machine-generated tracker artifacts (at minimum distinguishing `.beads/issues.jsonl` from arbitrary `.beads/` paths), specify how tool authorship is proven rather than inferred from path alone, and add a negative AC showing a commit touching an unlisted or user-authored `.beads/` path still trips stale-SHA blocking.",
+    "Correct the ADR-0025 pricing for R5: use the ADR's exact named-artifact classification rather than claiming `.beads/**` is artifact-exempt, and state that R5.3's `--allow-dirty` bypass also requires an ADR-0025 amendment because it permits a claim despite user-authored dirt.",
+    "Correct every OQ-4 citation from ADR-0023 line 142 to the actual amended table row at line 140, and correct the same erroneous line reference in the review framing/BRIEF if that artifact is regenerated. Keep the editorial strike/supersession annotation itself; that resolution is substantively correct.",
+    "Make the ADR-0035 application internally consistent by requiring any retained phase-mismatch warning or indeterminate post-mutation guidance to end in a safe final `recovery:` line, and pin that in AC-4/AC-5; otherwise narrow the touchpoint's current claim that every new warning keeps such a line."
+  ],
+  "findings": [
+    {
+      "id": "R5-F1",
+      "severity": "high",
+      "location": "spec.md:85, spec.md:121, spec.md:209",
+      "summary": "OQ-1(b) is incorrectly characterized as leaving ADR-0041 section 1 intact.",
+      "evidence": "ADR-0041:103-105 makes 'Never a rollback' part of section 1's Reconcile phase; ADR-0041:144-153 makes forward reconciliation without rollback the section 2 contract; ADR-0041:372-380 expressly rejects rollback. The spec acknowledges that OQ-1(b) introduces the first rollback, yet says it keeps section 1 and R4.4 prices semantics but no ADR amendment.",
+      "impact": "A plan can select option (b) while falsely treating an accepted architectural reversal as conformance, bypassing the required ADR amendment gate. Option (a) is indeed a section-1 reversal; option (c) can leave ADR-0041 intact while amending ADR-0037; option (b) cannot leave ADR-0041 intact."
+    },
+    {
+      "id": "R5-F2",
+      "severity": "high",
+      "location": "spec.md:119, spec.md:185-186",
+      "summary": "R4.2 states the no-warn-downgrade constraint, but its exemption and ACs do not carry the promised narrowness.",
+      "evidence": "ADR-0037:335-346 requires stale reviewed_head_sha to block, and ADR-0037:590-593 rejects warning on mismatch. R4.2 requires 'tool-authored, tracker-paths-only' but equates tracker artifacts with `.beads/**`; AC-6 asserts only `.beads/**` path confinement, and AC-7 tests only a non-tracker commit. Neither AC proves tool authorship nor proves that an arbitrary/user-authored `.beads/` path remains blocking. ADR-0025:32-36 independently confirms the recognized artifact list is exact and explicitly not a glob.",
+      "impact": "Under option (c), a path-only implementation can silently turn the rejected general stale-SHA warning downgrade into a broad `.beads/` bypass."
+    },
+    {
+      "id": "R5-F3",
+      "severity": "high",
+      "location": "spec.md:87, spec.md:125, spec.md:127",
+      "summary": "The ADR-0025 conditional amendment is not priced correctly for either the path class or the R5.3 fallback.",
+      "evidence": "ADR-0025:32 says user-authored dirt still blocks, while ADR-0025:36 says the artifact list contains only `.beads/issues.jsonl` and is not a glob. R5.1 incorrectly calls `.beads/**` already artifact-exempt. R5.3 says no ADR amendment is needed if the whole-tree block remains, but adds `--allow-dirty`, which creates an explicit path where user-authored dirt does not block and therefore changes the same unqualified decision sentence.",
+      "impact": "The plan is licensed either to exempt paths ADR-0025 deliberately classifies as user dirt or to add a bypass while falsely claiming the accepted ADR remains unchanged."
+    },
+    {
+      "id": "R5-F4",
+      "severity": "medium",
+      "location": "spec.md:88, spec.md:105, spec.md:111, spec.md:183-184",
+      "summary": "The ADR-0035 touchpoint is stronger than the corresponding requirements and ACs.",
+      "evidence": "The touchpoint says every new refusal/warning keeps a copy-pastable final recovery line. R3.2 allows the mismatch warning to remain merely without the repair-phase recovery line, and AC-5 does not require a replacement final recovery line. R2.3 requires a resolving action for indeterminate post-state guidance, but AC-4 does not pin the ADR-0035 `recovery:` form. ADR-0035:39-53 strictly requires the form for guard failures, and ADR-0035:55-60 requires post-terminal cleanup warnings to carry recovery commands.",
+      "impact": "An implementation can satisfy the ACs while violating the spec's declared ADR application and leaving a post-mutation diagnostic without the machine-greppable recovery contract."
+    },
+    {
+      "id": "R5-F5",
+      "severity": "low",
+      "location": "spec.md:72, spec.md:84, spec.md:212; BRIEF.md ADR-conformance lens",
+      "summary": "OQ-4's editorial resolution is correct, but the amended-row citation is wrong.",
+      "evidence": "At commit 2b437081, ADR-0023:107 is the stale original 'some children closed, some open, none in_progress -> plan' row. The refined lifecycle-subset row 'some lifecycle closed + some open, none in_progress -> implement' is at ADR-0023:140; line 142 is blank. The amendment is governing, so striking or supersede-annotating line 107 is the correct editorial resolution.",
+      "impact": "The current citation sends reviewers and future maintainers to a blank line and the BRIEF repeats the same error, undermining the spec's citation-verification posture without changing the substantive resolution."
+    },
+    {
+      "id": "R5-F6",
+      "severity": "info",
+      "location": "spec.md:89",
+      "summary": "ADR-0042 is characterized accurately, with one implementation-time caution.",
+      "evidence": "ADR-0042:121-144 requires per-field termsafe escaping for free text and forced-safe idrender for ID-labeled positions. The spec states that split correctly. In particular, R6.4's surfaced bd stderr must remain per-line termsafe-rendered rather than copied as raw control-bearing text; the existing whole-tree lint and AC-13 can enforce the ID-render side.",
+      "impact": "No spec change is independently required beyond ensuring the existing ADR touchpoint remains reflected in plan tasks and tests."
+    }
+  ]
+}

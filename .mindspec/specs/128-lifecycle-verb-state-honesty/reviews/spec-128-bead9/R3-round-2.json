@@ -1,0 +1,43 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": 0.8,
+  "rationale": "Round-2 classification of my three round-1 asks against commit 44690044, each re-derived from the diff and the live tree. ASK 3 (chain-drop): FIXED, superseding my document-it ask with something strictly better — the new bdRenderedError type (internal/next/beads.go:82-90 region) carries Error()=per-line-escaped text and Unwrap()=the untouched underlying error, embedded via %w at QueryReady (beads.go:39), QueryReadyForEpic (beads.go:55), FetchBeadByID (beads.go:253), FetchBeadAsOf (beads.go:278). I verified the chain end-to-end: outer fmt.Errorf %w -> bdRenderedError.Unwrap -> wrapBDError's %w -> *exec.ExitError, and the regression tests are REAL — TestQueryReady_ErrorsAsReachesExitError and TestFetchBeadAsOf_IsUnsupportedFlagErrorClassifiesThroughWrapper drive a PATH-shimmed fake bd through the real RunBD chain and would both have failed against the round-0 %s code (errors.As finds nothing through a %s interpolation). Double-wrap is idempotent (escaped text is printable ASCII; re-escaping is byte-identical), so nesting is safe. ASK 1 (armed render legs): FIXED at all three sites I named — FetchBeadByID/FetchBeadAsOf plus GateReadiness (internal/next/ready_gate.go:72-78). Residual minor: no per-leg red-on-revert render test — deleting `&bdRenderedError{err: err}` at FetchBeadByID:253 or ready_gate.go:78 fails NO test (the chain tests pass with a plain %w; the escape property is pinned only at the bdRenderedError/renderBDError unit, not at these call sites). ASK 2 (deferral honesty): SPLIT. The describePhaseSyncFailure half is an HONEST deferral — acknowledged armed, genuinely blocked on cmd/mindspec/next.go (bead 7's file), follow-up bead mindspec-6gsy verified filed. The RecordReadinessOverride half FAILS VERIFICATION on both of its factual legs. (1) 'not-yet-armed via tracedCombined's discard' is wrong: bead.MergeMetadata (internal/bead/bdcli.go:322) calls GetMetadata FIRST — the tracedOutput read half — and returns 'bd metadata merge-read failed for %s: %w' (bdcli.go:333), which since round 0 folds bd's raw stderr. A hostile bd failing `bd show` at Step 4.6 puts control bytes into the %v at next.go:286 -> guard.NewFailure (which does not escape, internal/guard/recovery.go:71) -> cobra renders raw. RollbackReadinessOverride -> DeleteMetadataKeys has the identical armed read half (bdcli.go:389) rendered at the claim-failure warning. Only the merge-WRITE half goes through tracedCombined. (2) 'next.go is the concurrent bead's file' does not block THIS leg: RecordReadinessOverride and RollbackReadinessOverride live in internal/next/ready_gate.go:115/:136 — a file this very commit edited — so wrapping mergeMetadataFn/deleteMetadataKeysFn errors in bdRenderedError there was in-bounds this round. The filed follow-up (6gsy) encodes the same false premise ('once ta30.7 releases the file'). Reachability is narrow (--allow-not-ready with failing signals plus a selectively failing bd), so this is not a hard block, but an accepted-risk record whose refutation is factually wrong on both legs cannot stand as the disposition of a finding — the fix is ~2 lines in a file already open to this bead. Suites verified green after the fix commit: internal/bead ok 5.7s, internal/next ok 13.1s (-short, count=1).",
+  "concrete_changes_required": [
+    "Fix (preferred, in-bounds): wrap the metadata-seam errors in bdRenderedError inside internal/next/ready_gate.go — RecordReadinessOverride:115 (mergeMetadataFn's error) and RollbackReadinessOverride:136 (deleteMetadataKeysFn's error) — closing the ARMED merge-read/delete-read leg (bead.MergeMetadata/DeleteMetadataKeys call GetMetadata->tracedOutput first; their 'merge-read/delete-read failed' errors carry folded bd stderr TODAY) without touching bead 7's files. Alternatively, if the tally prefers deferral: the recorded rationale AND bead mindspec-6gsy's description must be corrected to state the truth — the leg is armed now via the GetMetadata read half (not unarmed via tracedCombined), and it is fixable in ready_gate.go without waiting for next.go; only describePhaseSyncFailure genuinely waits on ta30.7. A deferral may stand; a false refutation may not.",
+    "Minor: add one red-on-revert render assertion per new call site class — e.g. a PATH-shim test asserting FetchBeadByID's returned err.Error() contains no raw control byte (fake bd emitting \\x1b on stderr), and a GateReadiness unit test with a control-bearing evaluateReadinessFn error asserting the same. Today the chain tests pass even if the bdRenderedError wrapper is removed from those call sites (plain %w satisfies them), so the escape at beads.go:253/:278 and ready_gate.go:78 is unpinned."
+  ],
+  "findings": [
+    {
+      "id": "R3-r2-1",
+      "severity": "info",
+      "title": "Ask 3 (chain-drop) FIXED — superseded by bdRenderedError, verified better than the document-it ask",
+      "detail": "Error()=escaped text / Unwrap()=original, embedded via %w; errors.As reaches *exec.ExitError and bead.IsUnsupportedFlagError classifies through the wrapper, both pinned by PATH-shim tests through the real RunBD chain that would fail on the round-0 %s code. Double-escaping is idempotent, so nested bdRenderedError wraps (GateReadiness over a future wrapped inner error) are harmless."
+    },
+    {
+      "id": "R3-r2-2",
+      "severity": "info",
+      "title": "Ask 1 (armed legs) FIXED at all three named sites; G4 whitespace passthrough is a sound tightening",
+      "detail": "FetchBeadByID (internal/next/beads.go:253), FetchBeadAsOf (:278), GateReadiness (internal/next/ready_gate.go:78) all wrap through bdRenderedError. wrapBDError's TrimSpace passthrough (bdcli.go:487-492) returns the bare error for whitespace-only stderr and is tested including the errors.As-still-direct property."
+    },
+    {
+      "id": "R3-r2-3",
+      "severity": "major",
+      "title": "G3 deferral for RecordReadinessOverride rests on a false refutation — the leg IS armed today and IS fixable in-bounds",
+      "detail": "Verified per the team-lead's instruction: bead.MergeMetadata (internal/bead/bdcli.go:322) calls GetMetadata (tracedOutput — stderr-folded since round 0) BEFORE its tracedCombined write, returning 'bd metadata merge-read failed: %w' (bdcli.go:333); DeleteMetadataKeys mirrors this (bdcli.go:389). So RecordReadinessOverride's error can carry raw hostile stderr NOW, reaching the terminal unescaped via the %v at cmd/mindspec/next.go:286 into guard.NewFailure (no escaping, internal/guard/recovery.go:71) and via the rollback warning. The commit's 'tracedCombined discards output' claim describes only the write half. Additionally, the 'out of bounds' rationale fails for this leg: both override functions live in internal/next/ready_gate.go (:115/:136), a file this commit edited — a bdRenderedError wrap there needs no next.go change. Follow-up bead mindspec-6gsy (verified filed) propagates the same false premise. Narrow reachability (--allow-not-ready + selectively failing bd) keeps this below hard-block, but the disposition must be a real fix or a corrected, truthful deferral record — not this refutation."
+    },
+    {
+      "id": "R3-r2-4",
+      "severity": "minor",
+      "title": "New call-site escapes are not red-on-revert",
+      "detail": "No test asserts the RENDERED text of FetchBeadByID/FetchBeadAsOf/GateReadiness errors is control-free; the added tests pin the chain (which a plain %w also satisfies) and the escape only at the bdRenderedError unit. Removing the wrapper at any of the three call sites currently fails zero tests."
+    },
+    {
+      "id": "R3-r2-5",
+      "severity": "info",
+      "title": "describePhaseSyncFailure deferral judged HONEST; suites green",
+      "detail": "That half acknowledged the leg is armed, deferred on a genuine file-boundary conflict (cmd/mindspec/next.go is bead 7's), and filed mindspec-6gsy — verified present in bd. go test ./internal/bead ./internal/next -short -count=1: both ok (5.7s / 13.1s) at 44690044."
+    }
+  ]
+}

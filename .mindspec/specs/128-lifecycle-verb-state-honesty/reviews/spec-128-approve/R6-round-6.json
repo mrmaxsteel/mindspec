@@ -1,0 +1,34 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "The round-5 AC-16-legs ask is ADDRESSED at reviewed commit b7deb948. AC-16 now makes all requested replay boundaries executable: stored implement, review, and done remain unchanged with honest no-op/refusal output; stored plan is a same-value no-op whose output may not claim a backfill; and EMPTY retains the legitimate locked backfill-to-plan leg. The done variant is grounded in the shipped lookup rather than speculative: fetchAllEpics explicitly includes closed epics and TestFindEpicBySpecID_ClosedEpic proves they reach FindEpicBySpecID, while the existing approval path at spec.go:71-76 currently unconditionally writes plan, so the new later-state legs are red on revert. These additions align with R3.6's safe-replay dispositions and mutation-versus-no-op contract without prematurely selecting a plan-stage mechanism. The small round-5 repair also preserves the implement/review/empty legs and introduces no contradiction or new completeness blocker in the R6 lens. The document is grounded, falsifiable, internally consistent, and honestly scoped at the level required for the spec gate. Structural validation reports only the expected lifecycle-binding warning that this draft has no beads epic. bd show mindspec-aytt could not run because the sandbox denied the embedded Dolt LOCK, so no conclusion relies on that unavailable result.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-R6-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "AC-16 now pins the done and same-value replay boundaries",
+      "evidence": "The b7deb948 diff extends AC-16 at spec.md:201 with a stored-done variant requiring done to remain unchanged with honest no-op/refusal output, and a stored-plan same-value leg requiring output to identify no mutation and not claim a backfill. The prior implement, review, and EMPTY-backfill legs remain. This exactly closes R6's round-5 ask.",
+      "impact": "An implementation can no longer pass AC-16 by guarding only implement/review and empty: a reachable closed done epic and the ordinary plan-to-plan replay are independently acceptance-pinned."
+    },
+    {
+      "id": "R6-R6-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "The added replay legs are reachable and red on today's behavior",
+      "evidence": "internal/phase/cache.go:243-247 queries epics with status open,in_progress,closed; internal/phase/derive_test.go:647-667 proves FindEpicBySpecID returns a closed epic; internal/approve/spec.go:71-76 routes an existing epic to an unconditional mindspec_phase=plan write. R3.6 at spec.md:116 names implement, review, and done and requires every disposition to distinguish mutation from no-op.",
+      "impact": "The new acceptance surface tests real production reachability and fails against the regression it is intended to prevent rather than merely documenting desired behavior."
+    },
+    {
+      "id": "R6-R6-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "No new R6 completeness blocker arises from the round-5 repair",
+      "evidence": "git show b7deb948 limits the reviewed change to spec.md and retains the original AC-16 implement, review, and empty legs while adding the two requested boundary variants. git diff --check is clean. mindspec validate spec 128-lifecycle-verb-state-honesty reports one warning only: the draft has no beads epic and spec approve will create one.",
+      "impact": "Residual mechanism choices remain appropriately chartered to plan stage and do not prevent spec approval."
+    }
+  ]
+}

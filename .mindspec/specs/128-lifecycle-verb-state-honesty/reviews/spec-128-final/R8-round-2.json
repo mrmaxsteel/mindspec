@@ -1,0 +1,99 @@
+{
+  "reviewer_id": "R8 opus",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "round": 2,
+  "reviewed_commit": "0783a507",
+  "prior_round_disposition": "CONFIRMED — round-1 APPROVE stands, basis re-verified by execution at the new tip",
+  "lens": "Test-suite architecture — does the new in-memory metadata store keep the 23 prior bead-6 legs honest, and do the fix commits regress the round-1 basis?",
+  "rationale": "I re-verified my round-1 basis by execution rather than by inspection, and then attacked the specific thing the lead flagged: the in-memory attestation store added to wireRealGitFaultSeams. Both round-1 anti-drift probes still bite at 0783a507, and the three gate files themselves are byte-unchanged by the fix commits. On the new store, I ran the probe that actually answers 'does it keep the legs honest' in both directions: breaking the production attestation gate turns leg xxiv RED (the spoof repro genuinely detects the bypass), and lobotomizing the store's read half turns two legitimate resume legs RED (the store is load-bearing, not decoration). The store itself is a faithful model of bd metadata — per-key merge semantics, copy-on-read so callers cannot mutate it, fresh per test. The one honest nuance I found is that only 2 of roughly 10 resume legs are actually sensitive to the attestation path; the rest assert outcomes a fully-gated normal run also produces, so they would stay green if the attestation broke. That is a real narrowing of their discriminating power — but the fix commits already added the right compensating layer (internal/complete/materialize_attestation_test.go's five MockExecutor-level discriminator legs, which DO discriminate explicitly), so it is advisory, not a gap. On my standing findings: R8-4 (runtime) is NOT worsened — zero new harness.Sandbox builds and zero new -short skips, so all ~1000 new test lines run inside CI's existing -short -race. R8-2 (duplication with a correctness coupling) IS measurably worse and I am revising it upward. Nothing blocks the merge.",
+  "verification_performed": [
+    "PROBE A (does the spoof gate bite?): in a scratch copy at 0783a507, replaced the attestation comparison at internal/complete/materialize.go:223 (`if attested == oid`) with an unconditional accept. TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates went RED with 'the forged marker resumed past the content gates — the R6 F1 bypass is open' (bead6_fixture_legs_test.go:1692). R6's executed forgery is genuinely pinned, not merely described.",
+    "PROBE B (is the new store load-bearing, or does it make legs pass trivially?): lobotomized the store's READ half in wireRealGitFaultSeams to return an empty map — precisely the 'PATH-fronted fake bd accepts `bd update` but stores nothing' failure the store's own comment says it exists to prevent. TWO legs went RED: TestBead6Leg_viii_a_ResumeKillBeforeReset_IntervalEditRefuses and TestBead6Leg_xxii_ResumeAfterStageAdvanceDoesNotTripStaleSHA. The store is genuinely load-bearing for those legs' behavior; it is not a rubber stamp.",
+    "Store fidelity read: internal/complete/fault_injection_realgit_test.go:169-197 implements per-key MERGE semantics (not wholesale replace, matching bead.MergeMetadata), copy-on-read in the getter (callers cannot mutate the backing map), and a fresh `attest` map per wireRealGitFaultSeams call (per-test isolation). saveAndRestore, already called by every leg, restores the production seams. The forged leg rides the same store and its forger writes no attestation, so leg xxiv's mismatch is real rather than an artifact of a lobotomized read — I confirmed this by PROBE A rather than trusting the comment.",
+    "ROUND-1 BASIS RE-VERIFIED AT 0783a507: (a) added an unlocked `bead.MergeMetadata(id, map[string]interface{}{\"mindspec_phase\": \"plan\"})` writer to internal/complete — TestMindspecPhaseWritesAllLockGuarded went RED naming file, line and function; (b) registered a new runnable cobra command — TestVerbOutput_TotalCobraTreeClassification went RED with 'UNCLASSIFIED runnable command(s): [mindspec r8probe]'. Both AC-5(vi) and AC-14 gates still bite. The three gate files (writer_inventory_test.go, agreement_table_test.go, verb_output_test.go's AC-14 block) are absent from the fix commits' test diff, so my round-1 AC-2 non-circularity proof carries forward unchanged.",
+    "Suite health in my lane at the tip: `go test ./internal/complete -run 'TestBead6Leg|TestDiscriminator_|TestStageAttestationSeamDefaults'` green in 39.7s (24 real-git legs plus the 6 new attestation tests). `go test -race -short` green across all four packages the fix touched: internal/complete 70.9s, internal/next 7.0s, internal/phase 5.1s, internal/approve 37.4s.",
+    "Ratchet check (a weakened allowlist entry would be a real defect): the only lint-ratchet change is internal/lint/ratchet_argv_table_test.go's ClearMaterializationMarker entry, and it is a STRENGTHENING, not a registration. The old note claimed UpdateRefCAS's gating shape by analogy; R12/G8 found the function carried no gate of its own. The fix added the real gate for BOTH dynamic operands and rewrote the note to say so, explicitly flagging that the prior claim was 'provenance-trusted' rather than true. Entry count unchanged (one line modified, none added).",
+    "Every probe ran in a scratch copy under the session scratchpad; all probe files removed and no `R8 PROBE` residue remains. The spec worktree is untouched at 0783a507 — git status shows only the panel review dir."
+  ],
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R8-2",
+      "severity": "MODERATE",
+      "class": "duplication with a correctness coupling",
+      "status": "REVISED UPWARD — the trend is active, not static",
+      "title": "The fix commits added a FOURTH copy of the valid-spec-markdown fixture and a FOURTH fake-bd-on-PATH helper",
+      "detail": "My round-1 R8-2 flagged that unexported test helpers are being copied across package boundaries with nothing enforcing they stay in sync. The fix commits made this measurably worse rather than holding steady. internal/approve/spec_commit_e2e_test.go:41 adds `specE2EValidSpecMD`, a fourth hand-maintained spec.md fixture that must independently keep satisfying validate.ValidateSpec, joining internal/harness/lifecycle_scenario_test.go:289 `validSpecMD` and cmd/mindspec/verb_output_test.go:454 `validVerbFixtureSpecMD` (plus their plan.md counterparts). The same file at :28 adds `specE2EFakeBdOnPath`, whose own comment concedes it is 'the internal/complete fakeBdOnPath pattern' — making four distinct fake-bd-on-PATH helpers in the tree: internal/next/beads_test.go:29 `writeFakeBD`, internal/complete/fault_injection_realgit_test.go:231 `fakeBdOnPath`, internal/harness/r7_hostile_test.go:142 `writeFakeBD` (same name, different signature, different package), and now internal/approve's. Two same-named `writeFakeBD` helpers with different signatures in one tree is the specific shape that makes a future reader reach for the wrong one. The fix commits did NOT add a seventh git-runner or another repo-root walker (spec_commit_e2e_test.go correctly reuses the in-package `adoptGitRun`), so the discipline is partially holding — it is specifically the schema-coupled fixtures and the bd fakes that keep getting re-typed.",
+      "recommendation": "Unchanged from round 1, now with more urgency: a shared test-support package owning RepoRoot, RunGit, the schema-valid spec/plan fixture builders, the bd epic-registry stub, and ONE fake-bd-on-PATH helper taking a script body. Every spec that lands after this one pays the same tax otherwise.",
+      "blocking": false
+    },
+    {
+      "id": "R8-7",
+      "severity": "MINOR",
+      "class": "narrowed discriminating power (NEW this round)",
+      "status": "NEW — introduced by the G1 attestation gate, already largely compensated",
+      "title": "The attestation gate gives most bead-6 resume legs a second path to the same asserted outcome, so 8 of ~10 no longer prove a resume actually happened",
+      "detail": "This is the direct answer to 'does the store keep the 23 prior legs honest', and the honest answer is: mostly, but less than their names imply. Before G1, a present marker meant resume, so a leg asserting the post-resume outcome implicitly proved the resume path ran. G1 adds a second route to identical observable outcomes — an unattested marker is classified FOREIGN, cleared, and a fully-gated normal run proceeds, which for most legs converges on the same refusal or the same successful completion. My PROBE B measured exactly this: with the store's read lobotomized (every marker FOREIGN), only TestBead6Leg_viii_a and TestBead6Leg_xxii went red; the other resume legs stayed green. TestBead6Leg_ix_KillAfterSStageAdvance_ConvergesAndIntervalEditRefuses is the clearest example — its assertions (bead6_fixture_legs_test.go:702-721) are that the interval edit refuses naming interval-edit-ix.txt, then that a clean re-run converges with BeadClosed and correct ancestry. A normal fully-gated run produces all three, so the leg cannot distinguish 'resumed from the D marker' from 'treated the marker as foreign and re-ran everything'. That is not a defect in the fix — it is a side effect of correctly adding a fail-safe path — and it is already largely compensated: internal/complete/materialize_attestation_test.go adds five MockExecutor-level legs that DO discriminate explicitly (attested resumes AND is not cleared; unattested clears via CAS; mismatched clears; read failure propagates without clearing; the parent leg never calls AdvanceBranchExpectedOld for an unattested marker), plus TestStageAttestationSeamDefaults:204 pinning both seam defaults to the real bead functions so the gate cannot go hollow via a forgotten stub. That unit tier is the right place for this discrimination and is cheaper than the 40s real-git legs. I am recording the narrowing only so nobody later reads a green leg ix as evidence the resume path works.",
+      "recommendation": "Optional follow-up: give one or two of the real-git resume legs a resume-specific assertion — the markerAdvanceRaceExecutor already counts calls, so asserting that stage C was NOT recreated would restore the distinction cheaply. Alternatively add a one-line comment on leg ix noting that its outcome assertions are satisfied by both routes and that the discriminator itself is pinned in materialize_attestation_test.go.",
+      "blocking": false
+    },
+    {
+      "id": "R8-4",
+      "severity": "MINOR",
+      "class": "runtime cost trajectory",
+      "status": "NOT WORSENED — re-checked this round",
+      "title": "The ~1000 new test lines add no new sandbox builds and no new -short skips",
+      "detail": "Re-checked because the fix commits added seven new test files and I did not want my round-1 runtime finding to silently drift. The fix commits add ZERO `harness.NewSandbox` / `nextReadyGateSetupSandbox` / `buildMindspecBinary` call sites and ZERO new `testing.Short()` skip sites. So the ~60-70s-per-sandbox cost driver I quantified in round 1 is unchanged, and all of the new surface runs inside CI's existing `go test -short -race ./...` rather than landing in the -short-invisible tier. The new real-git work is cheap by comparison: the whole bead-6 leg suite plus the six new attestation tests runs in 39.7s. My round-1 recommendation (make the claim-guard sandbox shareable before adding more legs to that family) is unaffected and still stands as a follow-up.",
+      "recommendation": "No change. Carry the round-1 recommendation forward.",
+      "blocking": false
+    },
+    {
+      "id": "R8-1",
+      "severity": "MODERATE",
+      "class": "duplication",
+      "status": "UNCHANGED — no new git-runners or repo-root walkers added",
+      "title": "Six duplicated git-runners, three draft-fixture copies, and two same-package repo-root walkers remain",
+      "detail": "Re-checked at the tip: the fix commits added no new git-command runner and no new repo-root walker, so the round-1 inventory is unchanged. The two functionally different repo-root walkers still coexist inside internal/phase — `repoRootForTest` (agreement_table_test.go:1076, stops at the first go.mod) and `phasePkgTestRepoRoot` (sanctioned_sync_test.go:200, requires the mindspec module path) — and deleting the weaker one remains the cheapest single cleanup available.",
+      "recommendation": "Unchanged from round 1.",
+      "blocking": false
+    },
+    {
+      "id": "R8-3",
+      "severity": "MODERATE",
+      "class": "method durability",
+      "status": "UNCHANGED",
+      "title": "The no-short cmd/mindspec gate still lives only in orchestration prompts, not in CI, the Makefile, or AGENTS.md",
+      "detail": "Unchanged by the fix commits. Makefile:14 is still `go test -short ./...`, .github/workflows/ci.yml:65 still runs only `-short -race ./...`, and no `make test-full` target or nightly job was added. The mitigating news from this round is that none of the ~1000 new test lines landed in the -short-invisible tier, so the fix work itself is CI-covered; the standing gap is the pre-existing 34 skip sites (internal/harness's TestLLM_* scenarios and the eight TestNextCmd_ClaimGuard_* e2e tests) that nothing durable runs.",
+      "recommendation": "Unchanged from round 1.",
+      "blocking": false
+    },
+    {
+      "id": "R8-5",
+      "severity": "MINOR",
+      "class": "fragility / test isolation",
+      "status": "UNCHANGED",
+      "title": "captureStderr still restores os.Stderr without defer",
+      "detail": "internal/complete/complete_test.go:2063 and internal/approve/impl_test.go:1790-1801 still restore os.Stderr with a plain statement after fn() rather than via defer, so a t.Fatal inside fn (runtime.Goexit) would strand the global for the rest of the binary. Not touched by the fix commits. As in round 1 I am NOT claiming a regression — I saw the symptom once under heavy load and could never reproduce it. The correct shape remains in-tree at internal/phase/derive_recovery_test.go:38.",
+      "recommendation": "Unchanged from round 1: defer-based restore in both helpers, plus `-shuffle=on` in CI so order-dependent global leaks fail reproducibly.",
+      "blocking": false
+    },
+    {
+      "id": "R8-6",
+      "severity": "MINOR",
+      "class": "coverage gap at an inter-bead seam",
+      "status": "UNCHANGED",
+      "title": "The harness lifecycle scenarios still no-op the v2 marker write",
+      "detail": "internal/harness/lifecycle_scenario_test.go:127's `phase.SetMergeMetadataForTest` no-op is untouched by the fix commits, so the end-to-end lifecycle scenarios still do not exercise the real EnsurePhaseSemanticsV2 write at the ApprovePlan seam. Worth noting that the fix commits set a good precedent for exactly this: rather than no-opping the new attestation metadata seam, wireRealGitFaultSeams gave it a real in-memory store so the round-trip is genuine. The same treatment would close R8-6.",
+      "recommendation": "Unchanged from round 1 — and the new store in wireRealGitFaultSeams is the model to copy.",
+      "blocking": false
+    }
+  ],
+  "positive_observations": [
+    "The in-memory metadata store is the right fix, done the right way. Rather than stubbing the new attestation read to something permissive (which would have made every resume leg pass trivially), the fixer gave the seam pair a genuine read-your-writes store with correct merge semantics. PROBE B proves it is load-bearing, and PROBE A proves the forgery leg still bites — the two probes together are what distinguish a real fixture from a lobotomized one.",
+    "internal/complete/materialize_attestation_test.go is a textbook complement to an expensive e2e fixture: five MockExecutor-level legs isolating each discriminator branch that the real-git leg cannot separate, including the subtle ORDERING property that provenance is verified before AdvanceBranchExpectedOld (so a forgery can never pull the bead branch ref forward), and a read-failure leg asserting the marker is NOT cleared on a transient bd blip. The seam-default pointer pin at :204 stops the whole gate going hollow via a forgotten stub.",
+    "internal/next/scope_refusal_render_test.go drives the REAL wrapBDError chain through a PATH-fronted fake bd emitting genuinely hostile stderr, rather than asserting against a synthetic error string — the difference between testing the renderer and testing your own mock.",
+    "TestSelectorErrors_PrintableHostileNeverInCommandShape (internal/next/readyset_test.go:581) asserts in BOTH directions — the hostile selector must not appear in a command-shaped span AND must still appear quoted for diagnosis. That is a pin that cannot be satisfied by simply deleting the selector from the message, which is the usual way this class of fix goes wrong.",
+    "The ratchet argv-table change is a model correction: it replaced a note that claimed a sibling function's gating shape by analogy with a note describing a gate that now actually exists, and said plainly that the old claim was provenance-trusted rather than true. An audit table that catches its own false entries is working as designed."
+  ]
+}

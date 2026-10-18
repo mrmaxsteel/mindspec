@@ -1,0 +1,19 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.85,
+  "rationale": "Confirm-round regression check of b7deb948 in charter-fidelity territory: all four changed areas pass, each re-derived against the tree. (1) The third-trigger naming (R1.3's complete→plan leg now lists TWO surviving triggers; R2.3's message-inventory completed): I verified the new second trigger's mechanism — derive.go:347-352 excludes epics and non-lifecycle children from the lifecycle count, and internal/next/beads.go:102-104 skips only epic-typed items, so completing a claimable non-lifecycle child of an all-open-lifecycle epic really does land in the all-open branch (derive.go:387) — this refines the row's honesty without touching any pinned row value; settled fact 1's plan-approve row is untouched (the shared :387 branch citation is the same evidence, differently reached — no relitigation). (2) The extended ADR-0023 strike: I read both rows in the ADR — :107 ('some closed, some open, none in_progress → plan') and :108 ('some closed, some open, some blocked → plan') — and both are superseded by the same spec-095 amendment rule (:140, ≥1-closed-none-in_progress → implement; blocked is neither closed nor in_progress per derive.go:379-385, verified round 5). Extending the editorial strike to :108 applies OQ-4's already-approved resolution logic to a second instance of the same staleness; the governing amendment row is unchanged and the strike is propagated consistently across all five scoped sites (grep-verified). The added sentence that the delivered table may not coexist with a live contradicting ADR row is a split-integrity strengthening, not new scope — the ADR-0023 doc surface was already in scope. (3) AC-16's two new legs (done-variant, same-value no-op) are additive precision inside R3.6's already-approved boundary; no scope change. (4) New AC-4b pins R2.3's advanceState clause through complete's real result path, and its phase-sync non-fabrication clause names completeMergeMetadataFn at complete.go:1366 — the same site R3.3's writer inventory already enumerates, so the AC coheres with the lock architecture rather than adding a surface. Nothing chartered is dropped, no settled fact relitigated, no OQ narrowed, and the deferral boundaries are untouched. The document remains grounded, falsifiable, consistent, and honestly scoped.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "MINOR",
+      "title": "Regression check result: round-5 diff clean in charter-fidelity territory",
+      "detail": "All four changed areas verified at b7deb948 with the underlying code and ADR rows re-derived (derive.go:347-352/:387, beads.go:102-104, ADR-0023.md:107-108 vs :140, complete.go:1366/:1434): the trigger-inventory completion and the :108 strike extension are corrections in the already-established OQ-4/G1 resolution lines, recorded with their round provenance in place — the audit-trail transparency the charter's 127 method notes mandate. AC-16's completed leg set and AC-4b tighten falsifiability without moving any fence."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Persisting cosmetic residues (fifth restatement — for the approval-round tidy or an explicit tally refutation)",
+      "detail": "Still untouched, still non-blocking: (i) OQ-1's option (c) label reads 'exempt tool-authored tracker-only deltas' against R4.2's paths-only pin; (ii) the Impacted-Domains internal/complete parenthetical lacks the OQ-1(c) conditional its siblings carry. Also standing: the BRIEF-template's missing mandatory errors-in-brief report item (process, out of spec.md). Recording these each round keeps them dispositionable under the findings-never-dropped discipline without manufacturing a blocking severity they do not have."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Empirical review of artifact commit 66be65a790cf7236c7a4123c2af9dcd7a57f71b9 found no blocking or correctness defect in the R4 lens. `make build` succeeded; the focused frozen-contract guidance test passed; and the exact `./bin/mindspec validate docs --diff ae45fd7a8697b8790894412f233c977ca5e0f11a` command exited 0 with zero ERROR legs and only the brief's pre-existing missing-source-globs WARN. The AC-12 pin genuinely consults the registered Cobra tree: it resolves the live `impl adopt` command, derives the rendered invocation from `CommandPath()`, and looks up the registered `reason` flag, so a command move/rename or flag removal/rename goes red. Direct renders of both idle and review templates contain clear frozen-contract/new-spec guidance and the complete `mindspec impl adopt <spec-id> --reason \"<why ...>\"` form. The temporary render overlay was removed, and the bead worktree remained byte-clean at the reviewed commit.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-B10-F1",
+      "severity": "info",
+      "classification": "VERIFIED",
+      "title": "Build and focused AC-12 test pass",
+      "detail": "`make build` exited 0 and produced the binary. Go emitted a non-fatal module stat-cache permission warning for a path outside the worktree, but compilation completed successfully. `go test ./cmd/mindspec -run '^TestFrozenContractGuidance_ImplAdoptInvocationPinnedToCobraTree$' -count=1 -v` passed."
+    },
+    {
+      "id": "R4-B10-F2",
+      "severity": "info",
+      "classification": "VERIFIED",
+      "title": "The Cobra derivation is rename-red",
+      "detail": "The test calls `findCommandByPath(t, rootCmd, \"mindspec impl adopt\")`, derives the template needle from the returned command's `CommandPath()`, and derives the flag needle from `adoptCmd.Flags().Lookup(\"reason\").Name`. Renaming or moving the registered leaf makes command lookup or the canonical-path assertion fail; removing or renaming the registered flag makes flag lookup fail. The rendered-template assertions then consume those live-derived values."
+    },
+    {
+      "id": "R4-B10-F3",
+      "severity": "info",
+      "classification": "VERIFIED",
+      "title": "Docs validation has zero error legs",
+      "detail": "The exact required diff validation exited 0 and printed only `[WARN] missing-source-globs`; it printed no `[ERROR]` entries."
+    },
+    {
+      "id": "R4-B10-F4",
+      "severity": "info",
+      "classification": "VERIFIED",
+      "title": "Idle and review renders carry accurate guidance",
+      "detail": "A temporary Go test overlay rendered `instruct.Context` in idle and review modes through `instruct.Render`. Idle states that implementing a previously frozen contract still goes through a new spec; review forbids such new feature work in the current spec. Both render the named externally-merged exit as `mindspec impl adopt <spec-id> --reason \"<why the content already reached main outside the lifecycle>\"` and link merge-safety guidance."
+    },
+    {
+      "id": "R4-B10-F5",
+      "severity": "info",
+      "classification": "VERIFIED",
+      "title": "Reviewed worktree remained byte-identical",
+      "detail": "After all probes, HEAD remained 66be65a790cf7236c7a4123c2af9dcd7a57f71b9, `git status --short --branch` showed only the branch header, both staged and unstaged diffs were empty, and the temporary `/tmp/mindspec-r4-render` directory was removed."
+    }
+  ]
+}

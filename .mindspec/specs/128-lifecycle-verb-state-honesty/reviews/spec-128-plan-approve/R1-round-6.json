@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R1 claude",
+  "confidence": 0.88,
+  "rationale": "Zero-ask-approver regression check of b98d06c2 against the two named targets. (1) WRITE-AHEAD REDESIGN vs R4's convergence contract: FAITHFUL, and I verified the re-entry discriminator's totality myself across every window rather than trusting the fixture list. Marker publication still happens only after every gate passes, so a gate refusal precedes any marker or ref move — AC-6's tip-unchanged-on-refusal and same-gate-retry assertions are untouched. The three discriminator arms cover all reachable states: tip==marker (stage complete; kind identified structurally by the artifact-confined diff — sound, because C-vs-A deltas are gated content while D-vs-C is artifact-only by construction), tip==marker-parent (write-ahead unfinished; finishing the advance re-imposes only the tool's OWN already-gated commit — even in the adversarial variant where a foreign actor reset the tip back to marker-parent, what gets re-advanced is gated content, so nothing foreign is laundered), and tip outside both (foreign: marker deleted, stale-SHA evaluates as at HEAD — AC-7(i) preserved verbatim, fixture (xi)). The new kill legs (xii)/(xiii) pin exactly the two one-ref-installed windows the round-4 transaction claimed away; the evidence-grade honesty (authoritative git-update-ref(1) per-ref installation caveat, explicitly NOT a lab-reproduced crash, with the reason stated) matches this spec's own claims-with-stated-evidence method. The version-floor drop and explicit files-backend fixture pinning are contract-neutral strengthenings. (2) S-STAGE EXIT CONTRACT vs ADR-0035 and R4: FAITHFUL, and it CLOSES a real spec-127-class hazard the round-4 text carried: previously an uncommitted interval edit could ride into a merge whose terminal cleanup force-removes the bead worktree — silent user-work loss. Now genuine non-artifact dirt refuses pre-merge with a named-paths ADR-0035 refusal and the edit survives on disk (fixtures (viii)/(ix) revised to executable outcomes). I checked this new refusal cannot regress AC-6: in AC-6's fixture the doc-sync-failing change is snapshotted into T and committed at M, and the dirty tracker is artifact-classified — nothing genuine remains at S-exit, so the retry still converges through doc-sync as the AC demands. R4.3's no-surgery recovery posture also survives: the refusal's recovery is handle-the-named-dirt-then-re-run, never raw-git repointing. The ADR Fitness sentence now correctly says §2 unchanged / §3 amended, matching bead 6 step 5's actual disposition. Everything else in this lens's territory — the OQ resolutions, settled-fact conformance, (c)-only vacations, dead option-2 arms, trigger-2 discharge, and the 16-AC bead mapping — is byte-untouched by this diff and stands as verified across rounds 1-5. No asks; APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R1-6-1",
+      "severity": "info",
+      "title": "S-stage refusal's recovery line carries a bead-level goal-(b) obligation",
+      "detail": "The named-paths ADR-0035 refusal on genuine interval-edit dirt must hint a recovery whose execution converges — a bare 're-run mindspec complete' would loop on the same refusal while the dirt persists. Bead 6's implementer should word the final recovery line as commit-or-relocate-the-named-paths-then-re-run (the plan's 'named refusal or an explicitly safe recovery' phrasing already points there). Recorded so the bead-6 panel checks the line's execution, per the spec's own no-self-worsening-hint discipline; no plan change needed."
+    },
+    {
+      "id": "R1-6-2",
+      "severity": "info",
+      "title": "Discriminator totality verified, including the adversarial tip-reset edge",
+      "detail": "With marker D and a tip manually reset back to C (= marker-parent), the discriminator finishes the C->D advance — re-imposing the tool's own gated artifact-sync commit, not foreign content; the expected-old operand protects the advance itself against races. All other foreign shapes fall to the delete-plus-stale-SHA arm. The cannot-launder boundary claimed since round 3 holds under the write-ahead form; adjudicating whether the tip-reset edge deserves its own fixture leg is R6's call, not a fidelity gap."
+    },
+    {
+      "id": "R1-6-3",
+      "severity": "trivial",
+      "title": "Carried wording nit: 'reconcile path untouched' still coexists with the orphaned-marker clear",
+      "detail": "Round-5 finding R1-5-1, unconsolidated (I was zero-ask): bead 6 step 4 retains 'reconcile path untouched' while the early sequence and stage T clear 128's own marker on the reconcile completion path. Semantics of the 127 machinery remain unmodified — the non-goal is honored — but the clause could still confuse the bead-6 implementer for one read. Wording only."
+    }
+  ]
+}

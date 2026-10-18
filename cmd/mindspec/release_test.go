@@ -3,11 +3,137 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
+
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// everything written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = orig
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return buf.String()
+}
+
+// TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded is round-1 panel
+// G3: release's best-effort step-6.5 phase-cache sync must SURFACE a
+// lock-acquisition failure (never silently discard it, as the pre-round-1
+// `_ = phase.WithPhaseWriteLock(...)` did) — a real held lock forces a
+// genuine timeout (the wait is shrunk via phase.SetLockWaitForTest so the
+// test stays fast), and the surfaced text carries the full ADR-0035
+// treatment: names .mindspec/phase.lock and ends with a re-run recovery
+// line that never advises deletion.
+//
+// Spec 128 Bead 2: releaseSyncPhase now calls phase.EnsurePhaseSemanticsV2
+// FIRST (self-heal) then phase.SanctionedDerivedSync — both route through
+// the SAME WithPhaseWriteLock, so a real held lock times out BOTH calls.
+// Round-1 panel G5 (the fix round): the pre-fix-round `mindspec release
+// <bead-id>` recovery was a DEAD END on both legs (the bead is already
+// open, so a re-run's own activeBead-cursor precondition is never met
+// again) — this test now asserts the two legs' DIFFERENT, convergent
+// recovery treatments: the self-heal leg names the convergent
+// `mindspec repair phase <spec-id>`, and the sanctioned-sync leg names
+// the safe `bd show <epic-id>` inspection action (never the dead-end
+// bead-based command, never a bare deletion instruction).
+func TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded(t *testing.T) {
+	t.Cleanup(phase.SetLockWaitForTest(150*time.Millisecond, 10*time.Millisecond))
+	// Both WithPhaseWriteLock calls below (the holder's and
+	// releaseSyncPhase's) read the epic fresh under the lock — without
+	// stubbing these seams they would shell out to a REAL bd binary
+	// against a non-bd t.TempDir(), which can hang far longer than this
+	// test's bounded timeout window (the exact class of bug round-1
+	// panel G2 flagged elsewhere in this bead).
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	root := t.TempDir()
+
+	holderEntered := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	go func() {
+		_ = phase.WithPhaseWriteLock(root, "epic-1", func(string, map[string]interface{}) error { return nil }, func(string, bool) (map[string]interface{}, error) {
+			close(holderEntered)
+			<-releaseHolder
+			return nil, nil
+		})
+	}()
+	<-holderEntered
+	defer close(releaseHolder)
+
+	out := captureStderr(t, func() {
+		releaseSyncPhase(root, "epic-1", "010-test")
+	})
+
+	if !strings.Contains(out, phase.PhaseLockRelPath) {
+		t.Errorf("surfaced lock-timeout output must name the lock path: %q", out)
+	}
+	// Round-2 panel G3: the final line must be an actual copy-pastable
+	// COMMAND, not prose.
+	if !guard.HasFinalRecoveryLine(out) {
+		t.Errorf("surfaced lock-timeout output must end with a recovery: <command> line: %q", out)
+	}
+	if !strings.Contains(out, "recovery: mindspec repair phase 010-test") {
+		t.Errorf("self-heal leg's recovery must be the convergent repair-phase command: %q", out)
+	}
+	if !strings.Contains(out, "recovery: bd show epic-1") {
+		t.Errorf("sanctioned-sync leg's recovery must be the safe bd show inspection command: %q", out)
+	}
+	if strings.Contains(out, "recovery: mindspec release") {
+		t.Errorf("must NEVER emit the dead-end `mindspec release <bead-id>` recovery: %q", out)
+	}
+	if strings.Contains(strings.ToLower(out), "delete") || strings.Contains(strings.ToLower(out), "remove") {
+		t.Errorf("must never advise deleting/removing the lock file: %q", out)
+	}
+}
+
+// TestReleaseSyncPhase_WriteFailureSurfacedWithConvergentRecovery is
+// round-1 panel G1.4/G5's non-timeout leg: unlike phase.DescribeLockFailure's
+// GENERAL contract (a plain non-timeout failure gets no manufactured
+// recovery line, because "that belongs to whatever wrote the failing
+// value" — its own doc comment), releaseSyncPhase's TWO writers each
+// have a genuinely convergent (or honestly-dispositioned) fix regardless
+// of failure SHAPE, so both describePhaseSyncFailure and
+// describeReleaseSyncFailure append their recovery line unconditionally
+// — proven here with a REAL bd invocation against a non-bd root (bd
+// itself fails, a genuine non-timeout write failure), not a contended
+// lock.
+func TestReleaseSyncPhase_WriteFailureSurfacedWithConvergentRecovery(t *testing.T) {
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return []byte("[]"), nil }))
+	root := t.TempDir()
+
+	out := captureStderr(t, func() {
+		releaseSyncPhase(root, "epic-1", "010-test")
+	})
+	if out == "" {
+		t.Fatal("expected releaseSyncPhase to surface the real bd write failure, got no output")
+	}
+	if !strings.Contains(out, "recovery: mindspec repair phase 010-test") {
+		t.Errorf("self-heal leg's recovery must be the convergent repair-phase command even on a plain write failure: %q", out)
+	}
+	if !strings.Contains(out, "recovery: bd show epic-1") {
+		t.Errorf("sanctioned-sync leg's recovery must be the safe bd show inspection command even on a plain write failure: %q", out)
+	}
+	if strings.Contains(out, "recovery: mindspec release") {
+		t.Errorf("must NEVER emit the dead-end `mindspec release <bead-id>` recovery: %q", out)
+	}
+}
 
 // releaseRecorder captures the order of the two destructive steps (Remove the
 // worktree, set the bead open) so tests can assert remove-FIRST / set-open-LAST
@@ -25,7 +151,7 @@ type releaseRecorder struct {
 	active     string
 	epicID     string
 	haveCursor bool
-	phaseSyncs []string // "<epic>=<mode>"
+	phaseSyncs []string // epic IDs release synced (no value — the sync re-derives fresh)
 }
 
 func (r *releaseRecorder) deps() releaseDeps {
@@ -46,8 +172,8 @@ func (r *releaseRecorder) deps() releaseDeps {
 		activeBead: func(beadID string) (string, string, bool) {
 			return r.active, r.epicID, r.haveCursor
 		},
-		syncPhase: func(epicID, mode string) {
-			r.phaseSyncs = append(r.phaseSyncs, epicID+"="+mode)
+		syncPhase: func(epicID string) {
+			r.phaseSyncs = append(r.phaseSyncs, epicID)
 		},
 		stdout: &bytes.Buffer{},
 		stderr: &bytes.Buffer{},
@@ -192,16 +318,20 @@ func TestReleaseBeadStateSetOpen(t *testing.T) {
 
 // TestReleaseCursorRewindOnlyWhenActive: when the released bead IS the active
 // one, the mindspec_phase cache is synced; when it is NOT active, the cursor is
-// left untouched (no phase sync).
+// left untouched (no phase sync). Spec 128 Bead 2: runRelease no longer
+// precomputes a value via phase.DerivePhase before calling deps.syncPhase
+// (that was the stale-target read the R3.3 lock exists to close) — it just
+// calls deps.syncPhase(epicID) when active, so BOTH legs are now a pure
+// unit test through the recorder seam.
 func TestReleaseCursorRewindOnlyWhenActive(t *testing.T) {
 	// Released bead is the active one → phase sync fires.
 	rActive := &releaseRecorder{active: "mindspec-abc", epicID: "mindspec-epic", haveCursor: true}
-	// DerivePhase will be called against a real (absent) epic; to keep this a
-	// pure unit test, drive the active branch through a syncPhase recorder and
-	// a stubbed derive via the seam. Since runRelease calls phase.DerivePhase
-	// directly, we instead assert the NON-active path here (no sync) and let
-	// the active path be covered by the integration build.
-	_ = rActive
+	if err := runRelease(rActive.deps(), "mindspec-abc", false); err != nil {
+		t.Fatalf("runRelease (active): %v", err)
+	}
+	if len(rActive.phaseSyncs) != 1 || rActive.phaseSyncs[0] != "mindspec-epic" {
+		t.Errorf("releasing the active bead must sync the phase cursor for its epic; got %v", rActive.phaseSyncs)
+	}
 
 	// Released bead is NOT active → cursor untouched, no phase sync.
 	rIdle := &releaseRecorder{active: "", epicID: "mindspec-epic", haveCursor: true}

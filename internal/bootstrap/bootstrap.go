@@ -304,10 +304,12 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// starterGitignore ensures session.json and focus are gitignored in new projects.
+// starterGitignore ensures session.json, focus, and the phase write lock
+// (spec 128 R3.3) are gitignored in new projects.
 const starterGitignore = `# MindSpec local runtime files (not version-controlled)
 .mindspec/session.json
 .mindspec/focus
+.mindspec/phase.lock
 `
 
 // --- Starter file content ---

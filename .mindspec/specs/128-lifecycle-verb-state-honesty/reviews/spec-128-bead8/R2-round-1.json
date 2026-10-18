@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "R2 claude",
+  "verdict": "REQUEST_CHANGES",
+  "confidence": "high",
+  "rationale": "Codebase-pin lens, all claims verified by execution in the bead worktree at 7f4ad41b (left byte-identical). GREEN: (1) every new unit test passes — internal/next TestSelectWork_{SingleItemOutOfRangePickErrors,NegativePickRejected,PickZeroMeansUnset}, all TestBuildReadySet_* (incl. the three ScopeRefusal legs, which record runBDFn calls and prove no global `bd ready` is ever issued), all TestSelectNamedFromReadySet_*; internal/resolve TestResolveSpecPrefixProven_* (4/4); cmd/mindspec next_render_test 3/3. (2) The AC-15/AC-9/AC-10/AC-10b CLI legs are GENUINELY real-bd: nextReadyGateSetupSandbox hard-FAILS (t.Fatalf, no skip) when bd is absent, builds the real mindspec binary, and drives real `bd create/update --priority`; all 7 TestNextSelection_* pass in 220s including both scope-honesty legs (other spec's bead verified still `open` after refusal). (3) The b9 pin set is green at THIS commit: I ran all 15 tests bead 9 added (6 in internal/bead bdcli_test, 9 in internal/next beads_test/ready_gate_test) — all pass; b8's only touch of b9's test files is one purely additive test (TestRecordReadinessOverride_HostileFailureRendersEscaped), no modifications or deletions. (4) The removed single-item out-of-range bypass is NOT reachable via any other route: the old early return lived inside SelectWork itself; SelectWork now has exactly two callers (claim path next.go:262, runEmitOnly next.go:479), grep for len(items)==1 / items[0] on selection paths finds only bd-show JSON parsing (beads.go:468) and the intentional pick==0 default; -short suites and go build/vet green; tree clean. RED: one spec-mandated pinning test is missing — see concrete_changes_required. The spec's AC-10 final sentence and R6.3(a)'s round-2 G5 clause explicitly require a test driving positional --emit-only with --spec and a title-unreferenced ready bead, asserting the pinned bypass disclosure with no exclusion report; R6.1 likewise says 'a test pins both behaviors' for the positional asymmetry. No such test exists: grep for 'bead fetched by ID' across all *_test.go returns ZERO hits — the bypass line at next.go (runEmitOnly positional branch) can be deleted and the whole tree stays green, violating the repo's red-on-revert discipline for an explicitly AC-pinned surface.",
+  "concrete_changes_required": [
+    "Add the spec-mandated positional --emit-only pinning test (AC-10 last sentence / R6.3(a) round-2 G5 / R6.1): drive `mindspec next --spec <s> <bead-id> --emit-only` (or the equivalent seam-level test of runEmitOnly's positional branch) with a ready bead whose title does NOT reference <s>, and assert (a) the preview proceeds (primer emitted), (b) the exact pinned bypass line 'emit-only: bead fetched by ID; readiness not checked.' is printed, (c) NO exclusion notice is printed, and (d) no false readiness claim appears. Today the bypass line has zero test coverage — deleting it goes green."
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "title": "AC-10's positional --emit-only exception leg is unpinned (bypass line untested)",
+      "detail": "Spec AC-10: 'Positional --emit-only ... must print only the pinned readiness-bypass disclosure', and R6.3(a) round-2 G5 mandates the test verbatim ('a test drives positional --emit-only with --spec and a title-unreferenced ready bead and asserts the preview proceeds with the bypass line, with no exclusion report and no false readiness claim'); R6.1 adds 'a test pins both behaviors'. The implementation prints the line (runEmitOnly positional branch) but `grep -rn 'bead fetched by ID' --include='*_test.go'` finds nothing. The commit message claims 'AC-9/AC-10/AC-10b/AC-15 fixtures'; AC-10's exception leg is the one fixture not delivered."
+    },
+    {
+      "severity": "minor",
+      "title": "CLI AC-10 test exercises the AC-10b path, not SelectNamedFromReadySet",
+      "detail": "TestNextSelection_PositionalExcludedByFilter_NamesReason builds an epic with ONE bead (the excluded one), so BuildReadySet returns emptyAfterFilterError before SelectNamedFromReadySet/exclusionReasonForName ever runs — the assertions pass via the AC-10b message, which happens to contain the bead ID and 'excluded'. The genuine positional-exclusion path is covered only at unit level (TestSelectNamedFromReadySet_ExcludedPositionalNamesReason, which I ran green). A sharper CLI fixture: two beads, one kept + one excluded, positional-claim the excluded one. Non-blocking since the observable AC behavior is asserted and the unit leg pins the mechanism."
+    },
+    {
+      "severity": "minor",
+      "title": "ResolveSpecPrefixProven can emit a false 'no spec found' on a transiently-recovering bd (theoretical)",
+      "detail": "In target.go, when FindEpicBySpecIDWithCache fails (bd down), epicErr is discarded and flow falls to draftSpecStatusWithCache. The cache does NOT memoize errors, so its AllEpics re-fetches; if bd recovered in the interim on an epic-bearing spec, draftSpecStatus finds the epic, returns (false, nil), and Proven concludes 'no spec found matching' — a false nonexistence claim of exactly the class this spec targets. The common bd-down case IS honest (AllEpics guard errors both times), and the window is a sub-invocation transient flip, so this is advisory. beads.go's scopeResolutionRefusal handles the analogous case better by falling back to epicErr; Proven could do the same: if the initial epicErr is a genuine query failure (not the 'no epic found' sentinel), return it instead of the nonexistence message."
+    },
+    {
+      "severity": "info",
+      "title": "b9 pin verification detail",
+      "detail": "The BRIEF said 'seven tests'; bead 9's merge (5da8d918) actually added 15 test functions (6 in internal/bead/bdcli_test.go, 9 across internal/next/beads_test.go + ready_gate_test.go). I ran the full superset at 7f4ad41b — all 15 pass, so any seven-test subset is green. b8 did not modify or delete any of them."
+    }
+  ]
+}

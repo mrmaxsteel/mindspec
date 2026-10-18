@@ -1,0 +1,36 @@
+{
+  "reviewer_id": "R5 codex",
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "The integrated message set is mostly honest and internally aligned: the shared indeterminate summary/tail both say `cannot determine mode` and termsafe the reason; ignored dirt is explicitly a non-blocking `note:` with each path unconditionally quoted; default selection names displayed item 1 and bd-ready order; emit-only explicitly discloses its readiness bypass; exclusion notices consistently name the title/spec filter and idrender all ID-typed fields; and the panel artifact and bd JSON schemas are not changed by these message additions. Build succeeded, and `go test ./internal/bead ./internal/next ./internal/instruct ./internal/phase ./internal/resolve ./cmd/mindspec -short` passed. The required no-short `go test ./cmd/mindspec -timeout 30m` emitted no failure output but remained active in the known external-harness path and was stopped after an extended wait, so it is not represented as a pass. Two integrated ADR-0042 boundary defects remain: globally folded bd stderr reaches new non-next render sinks unsanitized, and selector text embedded in command-shaped suggestions uses termsafe even though ADR-0042 explicitly says termsafe is insufficient for printable shell metacharacters. A third, presentation-level inconsistency introduces the repository's only dotted+snake_case WARN subject on the same stream as established kebab-case WARN subjects.",
+  "concrete_changes_required": [
+    "Make the bd-stderr content/render split complete across every terminal sink affected by internal/bead.tracedOutput. At minimum cover stateDiscoveryFailure and returned resolve errors in cmd/mindspec/state.go, scopeResolutionRefusal in internal/next/beads.go, advancePhaseOnClaim/rollback warnings in cmd/mindspec/next.go, repair-phase failures in cmd/mindspec/repair.go, release sync failures in cmd/mindspec/release.go, and complete phase-sync/materialization warnings. Preserve errors.Is/errors.As while escaping each attacker-influenceable stderr line exactly once at the terminal boundary.",
+    "Add hostile-stderr tests that drive the real wrapBDError chain through each distinct renderer family, asserting no raw ESC/CR/control byte and no forged standalone recovery line survives; do not limit the pin to internal/next.RenderBDError.",
+    "Replace termsafe.Escape for positional selectors inside command-shaped `mindspec next ...` examples in internal/next/select.go with a shell-safe operand emitter or avoid printing an executable command. Add printable-hostile cases such as `x;evil`, `$(evil)`, whitespace, and `--help`, not only control-byte payloads.",
+    "Rename `WARN complete.residual_artifact_dirt` to the established unprefixed kebab-case WARN subject (for example `WARN residual-artifact-dirt`) and update its pinning assertion."
+  ],
+  "findings": [
+    {
+      "severity": "HIGH",
+      "title": "Global bd stderr folding outstrips the render-boundary sanitizer",
+      "detail": "internal/bead/bdcli.go:483-501 folds raw exec.ExitError.Stderr into err.Error(), and tracedOutput at lines 525-537 applies that globally to RunBD/ListJSON/GetMetadata callers. The comment correctly defers safety to terminal renderers, but only selected internal/next paths wrap with bdRenderedError/RenderBDError. New sinks render the resulting chain directly: cmd/mindspec/state.go:47-50 and 94-95; internal/next/beads.go:210-224; cmd/mindspec/next.go:331-334 and the epic-resolution warning; cmd/mindspec/repair.go:221-245 and 309-314; cmd/mindspec/release.go:176-185; and internal/complete's new phase/materialization warnings. A hostile bd stderr line containing ANSI, CR, or a forged newline/recovery line therefore becomes terminal text without per-line termsafe escaping. Existing AC-11 tests pass because they pin the sanitized next.QueryReady family, not the new global consumers created by changing tracedOutput itself.",
+      "evidence": "internal/bead/bdcli.go:454-501,520-537; cmd/mindspec/state.go:47-50,94-95; internal/next/beads.go:210-224; cmd/mindspec/next.go:331-334,613-629; cmd/mindspec/repair.go:221-245,309-314; cmd/mindspec/release.go:176-185; internal/complete/complete.go:1333-1338; hostile pins exist only in internal/next/beads_test.go:149+ and cmd/mindspec/next_render_test.go:18+.",
+      "recommendation": "Introduce one chain-preserving safe-render adapter usable by all terminal layers, audit every caller affected by tracedOutput's new stderr enrichment, and pin each distinct renderer family with a real wrapped exec.ExitError containing hostile multi-line stderr."
+    },
+    {
+      "severity": "HIGH",
+      "title": "Selector tests pin termsafe into executable examples despite ADR-0042's printable-metacharacter rule",
+      "detail": "internal/next/select.go:100-101,160,166 inserts caller-controlled `name` into backtick-fenced command-shaped `mindspec next ...` text via termsafe.Escape. ADR-0042's motivating rule explicitly states that termsafe is identity on printable ASCII, so values such as `x;evil`, `$(evil)`, whitespace-bearing selectors, and `--help` remain byte-raw and are unsafe or misleading if copied. The new tests at internal/next/readyset_test.go:442-543 assert only ESC/newline protection and clean byte identity; they omit the exact printable-hostile class ADR-0042 distinguishes. Their comment also claims bd-returned IDs are always clean, contradicting ADR-0042's empirical finding that bd IDs are agent-writable and ParseBeadsJSON/filterReadyItems does not validate IDs before constructing ReadySet.Raw.",
+      "evidence": ".mindspec/adr/ADR-0042-render-derivation-provenance.md Decision sections 1-3; internal/next/select.go:92-101,153-166; internal/next/readyset_test.go:442-543; internal/next/beads.go:308-347 (filterReadyItems admits non-empty ID text without idvalidate).",
+      "recommendation": "Treat command operands as executable operands: validate/promote a full ID or render with the repository's shell-safe operand facility. Expand tests to printable shell metacharacters and malformed bd-returned IDs, while preserving byte identity only for grammar-valid IDs/short selectors."
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Residual-artifact warning uses a one-off dotted and snake_case subject",
+      "detail": "internal/complete/materialize.go prints `WARN complete.residual_artifact_dirt`, while sibling warnings emitted by the same complete flow use unprefixed kebab-case subjects such as `bead-scope`, `cmd-docs`, `missing-source-globs`, and `adr-divergence-proposed`. The new warning can appear on the same stream, so the mismatch is user-visible rather than merely internal telemetry naming.",
+      "evidence": "internal/complete/materialize.go:431,433; internal/complete/bead_scope.go:121; internal/complete/complete.go:1588-1601; internal/complete/complete_test.go:2850 pins the divergent spelling.",
+      "recommendation": "Use the established WARN grammar, e.g. `WARN residual-artifact-dirt: ...`, and update the pin."
+    }
+  ]
+}

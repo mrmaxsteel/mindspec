@@ -20,6 +20,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -420,22 +421,40 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 	// itself is the fix. A crash before this write leaves nothing durable
 	// (fresh, safe to retry). A crash after it is resumed by the
 	// "interrupted" branch above, which re-issues close idempotently.
-	meta := map[string]interface{}{
-		"mindspec_phase":        "done",
-		"mindspec_done":         true,
-		"mindspec_adopt_reason": reason,
-		"mindspec_adopt_actor":  adoptActor(),
-		"mindspec_adopt_at":     time.Now().UTC().Format(time.RFC3339),
-		"mindspec_adopt_op":     "mindspec impl adopt",
-	}
-	if verified {
-		meta["mindspec_adopt_evidence"] = "verified"
-	} else {
-		meta["mindspec_adopt_evidence"] = "attested"
-		meta["mindspec_adopt_attest_trigger"] = string(trigger)
-	}
-	if err := adoptMergeMetadataFn(epicID, meta); err != nil {
-		return fmt.Errorf("recording adopt audit marker on epic %s: %w", idrender.Bead(epicID), err)
+	// Spec 128 R3.3: wrapped in the phase write lock (value unchanged in
+	// this bead) — the audit-metadata map is built INSIDE the closure so
+	// its mindspec_phase write executes inside the lock's critical
+	// section.
+	if err := phase.WithPhaseWriteLock(root, epicID, adoptMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
+		meta := map[string]interface{}{
+			"mindspec_phase":        "done",
+			"mindspec_done":         true,
+			"mindspec_adopt_reason": reason,
+			"mindspec_adopt_actor":  adoptActor(),
+			"mindspec_adopt_at":     time.Now().UTC().Format(time.RFC3339),
+			"mindspec_adopt_op":     "mindspec impl adopt",
+		}
+		if verified {
+			meta["mindspec_adopt_evidence"] = "verified"
+		} else {
+			meta["mindspec_adopt_evidence"] = "attested"
+			meta["mindspec_adopt_attest_trigger"] = string(trigger)
+		}
+		return meta, nil
+	}); err != nil {
+		// Round-2 panel G3: a lock TIMEOUT gets a copy-pastable re-run
+		// COMMAND, not prose — this error returns all the way up to
+		// adoptSpecRunE, which prints it raw with no recovery-line
+		// convention of its own, so the command must be baked in here.
+		// The reason is a PLACEHOLDER (<why>), matching this file's own
+		// established recovery-line convention elsewhere (never re-emit
+		// the agent-writable --reason value verbatim into a recovery
+		// line).
+		var recoverySuffix string
+		if errors.Is(err, phase.ErrPhaseLockTimeout) {
+			recoverySuffix = fmt.Sprintf("\nrecovery: mindspec impl adopt %s --reason \"<why>\"", idrender.Spec(specID))
+		}
+		return fmt.Errorf("recording adopt audit marker on epic %s: %w%s", idrender.Bead(epicID), err, recoverySuffix)
 	}
 
 	if _, err := adoptRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {

@@ -70,29 +70,102 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
    enumerated preflight refusals — see the artifact-materialization
    exception below.
 2. **Commit** — the mutation sequence proper, in two parts:
-   - **Artifact materialization** (`complete` only): the optional user
-     `CommitAll` (`--commit-msg`) and the pathspec-scoped beads-artifact
-     sync commit. These are *local, bead-branch-only, never-`main`*
-     commits that materialize the very tip the two content gates measure —
-     a property that is ENFORCED, not assumed: BOTH legs refuse (a
-     `guard.NewFailure` with the worktree-recreating `mindspec next`
-     recovery) when no bead worktree resolves, and a worktree-enumeration
-     failure propagates as a preflight error; neither leg ever falls back
-     to committing on the root/`main` checkout.
-     The **doc-sync** and **ADR-divergence** gates deliberately validate
-     the resulting committed bead tip *after* this subphase — their
-     `base..beadHead` range must include the just-committed user work —
-     so a doc/ADR refusal MAY land after those local commits. This is a
-     documented, forward-reconcilable exception to the byte-identical
-     preflight claim (like the migration exemption below): no tracker
-     close, bead→spec merge, branch/worktree deletion, epic close, or
-     `main` mutation has occurred; the worktree and its bead-branch
-     commits are retained; and re-running after repair converges. The
-     ordering is load-bearing in both directions: the panel gate must run
-     *before* `CommitAll` (committing advances the bead tip past
-     `reviewed_head_sha` and clears the dirt the panel decision measures),
-     and doc-sync/ADR-divergence must run *after* it (or they would
-     vacuously miss the work being completed).
+   - **Artifact materialization** (`complete` only) — **REVERSED by spec
+     128 Bead 6 (OQ-1(a)): gates now run BEFORE any complete-authored
+     commit, via a prospective-snapshot protocol.** The paragraph this
+     replaces described the ORIGINAL design — the optional user
+     `CommitAll` and the pathspec-scoped beads-artifact sync commit,
+     committed FIRST, with the doc-sync/ADR-divergence gates validating
+     the resulting committed tip AFTER. That ordering had a real cost: a
+     gate refusal landed AFTER those local commits, so a retry that fixed
+     the gate's complaint could still find the bead branch's tip already
+     advanced past `reviewed_head_sha` (a false panel-staleness block on
+     the very next run) or its dirt already cleared (masking what the
+     gate needed to see). Spec 128 Bead 6 closes this by construction
+     instead of documenting it as an accepted exception:
+
+     The **prospective-snapshot protocol**: after the panel gate, the
+     bead worktree's PROSPECTIVE content — tracked, untracked, and
+     deleted, exactly what `git add -A` would stage — is captured as an
+     immutable candidate tree `T` via a TEMPORARY index
+     (`gitutil.SnapshotWorktreeTree`): the temp index is seeded from the
+     worktree's own HEAD tip FIRST, then `add -A` stages over that seed
+     with the named-artifact set (today `.beads/issues.jsonl`) excluded.
+     Seeding is load-bearing: an unseeded temp index plus the exclusion
+     would leave the excluded, currently-tracked artifact ABSENT from
+     `T`, and a commit built from `T` would silently DELETE it from the
+     branch; seeded, the exclusion means "unchanged at tip" — the
+     artifact's tip blob survives in `T` untouched. The real index, refs,
+     and worktree are never touched by the snapshot — only unreferenced
+     loose objects are written. The doc-sync and ADR-divergence gates
+     then measure `base..T` — the SAME candidate tree, via a tree-capable
+     executor leg (`ChangedFilesTree`) and every OWNERSHIP/content read
+     anchored at `T` too (a bare tree OID is a valid ref for `git show`/
+     `git ls-tree`) — so attribution and diffed content come from the
+     identical candidate any eventual commit will contain. "Committed
+     tree ≡ measured tree" is thereby mechanical, not asserted.
+
+     Only on a FULL gate pass does materialization run, building the real
+     commit(s) FROM `T` itself via `git commit-tree` (plumbing — no
+     hooks): (M) the user's own work materializes as commit `C`
+     (`-p <tip>`), (R) the real index is refreshed to `C`
+     (`reset --quiet --mixed`, index-only — the worktree is untouched),
+     (S) the tracker artifact's refreshed blob materializes as commit `D`
+     (`-p C`, or directly on the tip if `C` elides). Empty stages elide
+     (a `T` equal to the tip's tree builds no `C`; an unchanged artifact
+     builds no `D`) rather than stamping a contentless commit onto every
+     ordinary completion. Because no complete-authored commit exists
+     before the gates run, a gate refusal now ALWAYS leaves the bead
+     branch tip at `reviewed_head_sha`, byte-identical to the pre-call
+     state for this subphase too — the retry meets the identical gate,
+     never a false panel-staleness block and never masked dirt.
+
+     **S's own interval-edit classification (round-1 panel fix, spec
+     128 Bead 6)**: `D`'s content is a SECOND, SEPARATE snapshot of the
+     worktree taken after `R`'s index refresh — a real window exists
+     between that snapshot and any earlier read of worktree state, into
+     which an external writer (an editor flush, a concurrent agent) can
+     land a GENUINE non-artifact edit. The delivered classification
+     closes this at the exact tree about to be committed, not at an
+     earlier, separate read: after computing `D`'s own delta from the
+     current tip (`ChangedFilesTree(currentTip, T')`, where `T'` is the
+     S-stage's own snapshot), the run REFUSES — named paths, before
+     `MaterializeStageCommit`/the marker publication for `D` — if that
+     delta contains ANY path outside the named-artifact set. Because the
+     check inspects the SAME data the commit is built from rather than a
+     prior read, the classification-to-snapshot race is closed by
+     construction, not narrowed: there is no window left in which a
+     swept edit could reach `D` undetected. The pre-existing post-`D`
+     S-exit dirt re-classification (§3(i)) still runs, but is now
+     DEFENSIVE only — a belt-and-suspenders re-confirmation that nothing
+     changed between the delta check and the merge, not the primary
+     enforcement point.
+     Reconcile mode (the landed-merge path, `beadHead` anchored at the
+     already-landed merge commit) is UNCHANGED — it keeps its own
+     `M^1..M` measurement over the committed range; no commits are
+     authored on that path at all (reconcile never runs `CommitPaths` or
+     any other commit-producing helper — its gates only ever READ an
+     already-landed range), so there is nothing for this protocol to
+     reorder there. Both content gates keep the artifact
+     (`.beads/issues.jsonl`) unmeasured as either source or documentation
+     in EVERY mode — reconcile's committed-range diff and this
+     protocol's prospective-snapshot diff alike — because it matches
+     neither classifier's path prefixes; only the sync stage's own
+     commit ever touches it.
+
+     **Honest scope**: this closes the GATE-REFUSAL class — no
+     complete-authored commit can precede a fallible content-gate
+     refusal. A POST-gate failure (a bead→spec merge conflict, a
+     `bd close` failure) still occurs after the materialization commits,
+     exactly as at HEAD; that residual is spec 127's preserved-merge and
+     forward-reconcile machinery (§3's staged-boundary classification,
+     below), out of THIS reorder's scope and stated, not papered over.
+     The panel-gate-before-materialization ordering is UNCHANGED and
+     remains load-bearing in the same direction as before: the panel gate
+     must still run before any complete-authored commit, or committing
+     would advance the bead tip past `reviewed_head_sha` (false-firing
+     staleness) and clear the dirt the panel decision measures
+     (false-clearing).
    - **Lifecycle-affecting mutation**: the ordered set of tracker/git/Dolt
      operations the verb exists to perform (`bd close`, a bead→spec merge,
      branch/worktree deletion, an epic close, `FinalizeEpic`'s multi-leg
@@ -166,13 +239,16 @@ operator's Ctrl-C — between two of its mutations, the recovery contract is:
   no-op; `isAlreadyRemovedErr`/`isAlreadyClosedErr` absorb re-removals and
   re-closes. Each of these is a DELIBERATE idempotency property of the
   underlying operation, not a hope.
-- **`complete`'s commits never target protected `main`.** The artifact-
-  sync leg is pathspec-scoped and refuses rather than commit onto a main
-  checkout (Spec 119 R3/AC-3/AC-4), and the user `--commit-msg` `CommitAll`
-  leg refuses identically when no bead worktree matches (it targets the
-  matched bead worktree ONLY — no root fallback) — a forward-reconcile
-  contract that can commit onto the wrong branch is not actually safe to
-  retry blindly.
+- **`complete`'s commits never target protected `main`.** Spec 128 Bead 6
+  (OQ-1(a)) replaced the pathspec-scoped artifact-sync commit and the
+  user `--commit-msg` `CommitAll` with the prospective-snapshot
+  protocol's commit-tree-built M/S-stage commits (§1, above); the
+  never-main property survives that reorder as an ENFORCED refusal, not
+  an assumption: `runMaterialization` refuses (rather than falling back
+  to the root/main checkout) whenever no bead worktree matches — it
+  targets the matched bead worktree ONLY (Spec 119 R3/AC-3/AC-4) — a
+  forward-reconcile contract that can commit onto the wrong branch is
+  not actually safe to retry blindly.
 - **A failure that cannot forward-reconcile is a refusal, not a silent
   partial state.** Every mutation whose failure cannot be absorbed by a
   bounded re-invocation (a durable-obligation marker write, a post-close
@@ -276,6 +352,121 @@ not testing that point at all — it launders an untested claim into a
 green checkmark. The classification above is the standing rule for every
 future mutation point this contract's phase 2 grows: classify it as one of
 these two, honestly, before writing its test.
+
+#### §3(i): The M→R→S→G→T staged-boundary classification (Spec 128 Bead 6)
+
+The prospective-snapshot protocol's own materialization sequence (§1's
+"Artifact materialization" bullet, above) is itself a mutation CHAIN with
+internal kill points, classified here as a single named staged boundary
+rather than five independent, ad-hoc mutation points:
+
+- **M** — build commit `C` (from `T`, `-p <tip>`).
+- **R** — refresh the real index to `C` (`reset --quiet --mixed`,
+  index-only; the worktree is untouched).
+- **S** — classify the exact delta about to be committed (any path
+  outside the named-artifact set REFUSES here, before `D` is ever
+  built — round-1 panel fix, above), then build commit `D` (`-p C`, or
+  `-p <tip>` when `C` elides), then the S-exit dirt contract as a
+  defensive re-check.
+- **G** — the bead→spec merge (unchanged — the pre-existing
+  preserved-merge/`--resolve-merge` machinery this protocol hands off
+  to, never reimplemented here).
+- **T** — terminal clear of the write-ahead marker (below), on both the
+  ordinary and the landed-merge-reconcile completion paths.
+
+**The write-ahead marker invariant**: before EITHER of `C`/`D`'s branch
+advances, the intended tip is durably published as a marker ref
+(`refs/mindspec/materialized/<bead-id>`) via per-ref compare-and-swap —
+`update-ref` CREATE semantics for the first publication of a run
+(absent→`C` or absent→`D` when `C` elides), the prior OID as the
+expected-old operand for `C`→`D` — deliberately NOT the phase-metadata
+lock spec 128 Bead 1 introduces elsewhere in `complete`: the two
+subsystems stay uncoupled, so no lock-ordering edge exists between them.
+The marker's single OID encodes BOTH the intended tip (its own value) and
+the expected predecessor (its own first parent, since every intended tip
+is built with `-p <predecessor>`), and the commit it names carries a
+pinned `Mindspec-Stage` trailer identifying which of `C`/`D` it is — read
+from that encoding, NEVER inferred from a tree diff (which is ambiguous
+when a stage's own content happens to be a no-op). A failed marker
+publication (an unexpected existing value: a concurrent invocation, or a
+leftover) REFUSES naming the marker — one invocation can never overwrite
+another's recovery evidence; a failed bead-ref advance leaves the
+already-published marker in place as write-ahead evidence for the next
+run's re-entry discriminator.
+
+**Marker provenance (spec 128 final-review amendment)**: the ref and the
+trailer are both authorable with ordinary repo git access — a
+hand-authored trailer-bearing commit plus `git update-ref` reproduces
+every structural property above, and the final review's adversary slot
+executed exactly that forgery to resume-skip the panel and content gates.
+Publication therefore pairs the marker with a binary-written bd-metadata
+**attestation** (`mindspec_stage_marker_oid`, recorded through the bead
+metadata seam immediately BEFORE each ref publish — mirroring the
+spec-127 landed-merge evidence pattern), and the discriminator honors a
+resume ONLY when the attestation names the observed marker OID exactly. A
+trailer-bearing marker WITHOUT the matching attestation is classified
+FOREIGN: cleared, then a normal fully-gated run. The attestation persists
+after completion as an audit record; each publication overwrites it. An
+attestation-read failure PROPAGATES (never mapped to "unattested", which
+would destroy genuine recovery evidence on a bd blip; never to
+"attested").
+
+**Honest trust boundary (final-review round 2, R12)**: the attestation
+NARROWS the forgery, it does not close it. bd metadata is written with
+ordinary `bd` CLI access — which every implementer agent in this
+project's own workflow holds by design — so an actor who forges the ref
+and trailer can also write the pairing attestation with one additional
+ordinary bd call. What the attestation actually buys: it defeats
+git-only forgery (the exact round-1 executed repro), it forces the
+forger to leave a durable, attributable write in the tracker's audit
+trail rather than only in reflog-able git refs, and it converts the
+premise from "a marker-shaped ref proves gates passed" to "the local
+operator environment's bd store corroborates the publication". The
+resume-skip-the-gates optimization therefore explicitly TRUSTS the local
+operator environment; it is not an adversarial-integrity control against
+a bd-capable actor. The escalation that would close it — when commit
+signing is enabled, require the marker commit's signature to verify
+against an operator-trusted key before honoring any resume (attested AND
+signature-verified) — is tracked as follow-up bead `mindspec-an8q`.
+
+**The re-entry discriminator**, evaluated before the panel gate on every
+non-reconcile run: absent marker → normal run (re-snapshot, re-gate,
+rebuild); tip == marker AND the attestation names the marker OID → the
+published stage COMPLETED (its kind read from the trailer) — resume at
+R+S (`C`) or the sole S-exit-then-merge route (`D`), skipping the
+re-snapshot, the content gates, AND the panel gate entirely, because the
+ATTESTED publication proves those already passed in the invocation that
+published it (never the marker's bare existence — see the provenance
+amendment above); tip == marker's own first parent AND the attestation
+matches → the write-ahead advance is UNFINISHED — finish it (expected-old
+= tip), then resume as above (the provenance check runs BEFORE the
+advance, so a forged marker can never pull the branch ref forward); an
+attestation mismatch on either leg → FOREIGN — clear the marker and
+proceed as a normal run; tip ∉ {marker, marker's parent} → FOREIGN — a
+genuinely different commit landed on the branch after materialization —
+delete the marker and proceed as a normal run, the stale-SHA panel gate
+evaluating exactly as it would with no marker at all (the cannot-launder
+boundary is retained). The execution contract this discriminator makes true is
+honestly **AT-LEAST-ONCE with per-operation idempotent replay** — NOT
+exactly-once, which is unprovable after a kill immediately following a
+no-op stage: R's index refresh is a pure state-function of (tip,
+worktree); S's dirt classification is a pure read plus refusal; the
+merge stage (G) carries the pre-existing preserved-merge/ancestry
+convergence machinery unmodified. "Not skipped" is guaranteed by
+routing — every path to the merge passes through R and the S-exit
+contract; "not looped" is bounded by convergence — each replay is a
+state-function of current, re-read state, never of the interrupted run's
+remembered intent.
+
+**The refusal guarantee, stated precisely**: a refused content gate
+leaves the bead ref/tip, tracker state, real index, and worktree
+unchanged, while UNREACHABLE LOOSE OBJECTS from the temp-index snapshot
+may exist (gc-collectable — the same accepted class as the pre-existing
+non-mutating merge preview's "unreferenced loose objects only"
+residual). No repository-byte-identical claim is made beyond that —
+the equality this protocol guarantees is the commit-tree construction
+itself ("committed tree ≡ measured tree" is mechanical, not asserted),
+not the total absence of any object ever written to the store.
 
 ### §4: The machine-owned finalize carrier (Spec 121 amendment)
 

@@ -1,0 +1,22 @@
+{
+  "reviewer_id": "R1 claude",
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "confidence": "high",
+  "rationale": "Round-3 re-derivation at e9acc634 (worktree verified clean at exactly that SHA before and after my checks). The delta is test-only (79 added lines in cmd/mindspec/next_selection_test.go, nothing else) and delivers my round-2 F6 residual in exactly the asked-for shape: a partial exclusion (1 title-unreferenced bead of 3 under the same epic — deliberately NOT the fully-excluded AC-10b case, which is separately covered), asserting the 'excluded by spec filter' notice is actually PRINTED while the claim/preview still succeeds on the remaining matching bead, on BOTH path families (claim + --emit-only), with the excluded bead asserted untouched (open) and the claim path additionally asserting row-1-of-the-FILTERED-list semantics survive the exclusion (bead1 in_progress). I did not take the implementer's red-on-revert claim on trust — I re-derived it by execution: (1) ran both tests at the commit — PASS (77.1s / 18.8s, real bd); (2) neutered BOTH ExclusionNotice print sites (cmd/mindspec/next.go:265 and :493, guard condition && false), reran — both tests FAIL, confirming each path family's wiring pin is live, not merely the content pin; (3) restored via git checkout, git status --porcelain empty, HEAD at e9acc634 — byte-identical. With this, every finding I raised across three rounds is closed with executed evidence: the OQ-5 default line is pinned byte-identical to the plan's wording with the rule proven (row-1 claim asserted), R6.3(a)'s positional --emit-only bypass test exists in the spec's specified shape, and AC-10's partial-exclusion print clause is now revert-red on both call sites. The author-of-record walk is complete: plan §Bead 8 steps 1-4 plus the folded-in ta30.9 render legs are delivered faithfully, disclosure A's unproven ResolveSpecPrefix is unreachable on every path that needed the proof, and disclosure B's ordering consequence stands recorded as accepted sequencing UX (round-1 F3, informational). No new findings from the round-3 delta.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F6-closed",
+      "severity": "resolved",
+      "title": "Round-2 F6 delivered and verified red-on-revert by my own execution, not by trust",
+      "evidence": "TestNextSelection_ClaimPath_PartialExclusionNoticePrinted and TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted both PASS at e9acc634; with both print-site guards neutered (next.go:265/:493 && false) both FAIL; file restored, worktree porcelain-clean at e9acc634. The claim-path fixture also proves the exclusion does not perturb selection (higher-priority matching bead claimed, excluded bead stays open)."
+    },
+    {
+      "id": "F3-standing",
+      "severity": "info",
+      "title": "Carried observation (accepted, no change requested): draft approve-first steer sequenced behind the dirty-tree guard",
+      "evidence": "Round-1 F3, unchanged and deliberately so per the binding grafted-not-reordered instruction: the nonexistent-spec refusal precedes all guards (step 0a), while a draft's 'run spec approve first' steer surfaces only after blocking dirt is cleared. Recorded for the final-review's seam sweep, not a bead-8 defect."
+    }
+  ]
+}

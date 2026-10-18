@@ -175,3 +175,102 @@ into a consuming repo. The rendering surface is single-homed in config:
 The framework never guesses these values (ADR-0036 ZFC): unset means
 omitted plus the workflow-domain doctor nudge and the `mindspec commands
 populate` prompt emitter — never an inferred `npm test`.
+
+## The `mindspec_phase` write lock, backward-move comparator, and sanctioned sync (spec 128 R3.3, Bead 1)
+
+Every writer of an epic's `mindspec_phase` metadata key — `spec approve`'s
+existing-epic backfill (`internal/approve/spec.go`'s
+`backfillExistingEpicPhase`), `plan approve` (`plan.go`'s step-4b
+`WithPhaseWriteLock` write), `next`'s claim-time advance
+(`cmd/mindspec/next.go`'s `advancePhaseOnClaim` — the bead-2 writer this
+spec itself added, classified forward-by-intent in lifecycle-modes.md's
+writer taxonomy), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
+`release`'s step-6.5 sync (`cmd/mindspec/release.go`), `impl approve`'s
+reconcile and done writes (`internal/approve/impl.go`), `impl adopt`'s done
+write (`internal/approve/adopt.go`), `mindspec repair phase`
+(`cmd/mindspec/repair.go`), `phase.EnsureMigrated`'s ADR-0034 backfill
+(`migrate.go`), and the one-shot v2 phase-semantics translation
+(`semantics_v2.go`'s `EnsurePhaseSemanticsV2`) — now executes inside
+`phase.WithPhaseWriteLock(root, epicID,
+mergeMetadata, fn)`: a repo-scoped, KERNEL-HELD lock at `.mindspec/phase.lock`
+(`PhaseLockRelPath`) that reads the stored phase, hands it to `fn`, performs
+`fn`'s returned conditional `MergeMetadata` write, and releases — so a
+concurrent writer can never land a stale value over a fresher one (AC-5(v)).
+Kernel-held on both platforms means a crashed holder's lock releases with its
+process: `flock(2) LOCK_EX` on unix (`phaselock_unix.go`), and on Windows
+(`phaselock_windows.go`) `LockFileEx` (an exclusive byte-range lock) on a
+RETAINED handle opened WITHOUT `FILE_SHARE_DELETE`, held for the whole
+critical section — the FILE is never the lock, so an empty or partial
+leftover lockfile never blocks acquisition. Acquisition is a bounded,
+poll-with-deadline wait (10s default); on timeout it returns
+`ErrPhaseLockTimeout`, and `DescribeLockFailure` renders the ADR-0035
+recovery text naming the lock path and a plain re-run — never a
+delete-the-lock instruction, since a live holder means the write is
+genuinely contended and a crashed holder has already released. A
+grep/seam-anchored anti-drift test (`writer_inventory_test.go`) asserts every
+`MergeMetadata` call site writing `mindspec_phase` executes inside the
+lock's critical section, so a new unlocked writer is red (AC-5(vi)); a
+companion legacy-migration contention test drives `EnsureMigrated`'s
+absent-check re-run against a fresher locked writer and asserts the locked
+value survives (AC-5(vii)).
+
+`order.go`'s `phaseRank`/`IsBackwardMove(from, to)` is the lifecycle total
+order (`spec < plan < implement < review < done`); a value outside the five
+named phases — including the empty string — is UNKNOWN and treated as
+INCOMPARABLE, which `IsBackwardMove` reports as backward. `mindspec repair
+phase` (`cmd/mindspec/repair.go`) is the one OPERATOR-facing consumer: it
+refuses a write that would move an epic's stored phase backward under this
+comparator unless `--force-backward "<reason>"` is passed, and a forced
+write's success line names the recorded reason.
+
+`sanctioned_sync.go`'s `SanctionedDerivedSync(root, epicID)` is the single
+SANCTIONED internal backward-write surface — distinct from the operator
+guard above: it re-derives an epic's child-derived phase and writes it
+INSIDE the lock's own critical section, backward permitted, no force flag,
+no recorded reason, because the caller is re-deriving from the epic's own
+FRESH children rather than asking a human to override a guard against
+possibly-stale evidence. Its production reachability is fenced by a
+call-site enumeration test pinning `cmd/mindspec/release.go`'s
+`releaseSyncPhase` as the ONLY direct caller (the `impl adopt` house
+pattern); a failed children read propagates as an error rather than
+deriving `plan` from an empty result — the exact "discovery failure
+rendered as a successful answer" class this spec exists to close,
+reproduced inside its own sanctioned-backward-write fix.
+
+`semantics_v2.go` performs a related but DISTINCT one-shot: `plan approve`
+now writes `plan` (not `implement`) as OQ-3's v2 semantics (`plan.go`'s
+sibling change). An epic whose stored phase was written `implement` under
+the OLD (pre-v2) semantics — at least one lifecycle child, every one still
+`open` — carries a value `LegacyPhaseSignature(stored, children)` detects as
+wrong under v2. `EnsurePhaseSemanticsV2(root, epicID)` rewrites it exactly
+once per epic, gated by the durable `mindspec_phase_semantics: "v2"` marker
+(`PhaseSemanticsV2MarkerKey`/`PhaseSemanticsV2Value`) so it can never re-fire
+— a TRANSLATION of an unchanged underlying fact into the new representation,
+not an ongoing backward move, and therefore does not route through
+`SanctionedDerivedSync`. `derive.go`'s `DerivePhaseWithStatus(WithCache)` —
+the status-aware surface every AC-2 agreement-table row's derivation leg
+uses — checks for this legacy signature before its general stored-vs-derived
+mismatch warning: an unmigrated legacy epic gets a "legacy phase semantics
+detected" notice naming `mindspec repair phase` (which itself runs
+`EnsurePhaseSemanticsV2` at its own entry, before the backward guard
+evaluates) instead of the general warning. That general warning is now
+DIRECTION-CONDITIONAL (spec 128 Bead 2): a FORWARD disagreement (derived
+phase ahead of stored) keeps the `mindspec repair phase <spec-id>` recovery
+line; a BACKWARD disagreement (derived is behind stored) never suggests that
+command — writing it would move the epic backward — and instead ends with
+an inspection-only `bd show <epic-id>` line, belt-and-suspenders alongside
+the R3.3 guard's own refusal of an unforced backward write.
+
+## The `state.ModeIndeterminate` sentinel (spec 128 R2.3)
+
+`internal/state`'s `ModeIndeterminate` (`"indeterminate"`) is a NEW mode
+constant, deliberately excluded from `ValidModes`/`IsValidMode` (the same
+way the pre-existing `"ambiguous"` literal is): it is never a real operating
+mode and never persisted. It exists purely so a workflow-domain instruct-tail
+caller that hits a genuine discovery failure (bd/Dolt unreachable) or an
+unresolved ambiguity (multiple active specs, no explicit target) can select
+`templates/indeterminate.md` by the same `ctx.Mode + ".md"` convention every
+other mode uses, instead of fabricating `idle.md` guidance for a failure it
+never actually observed. The workflow domain's `internal/instruct` and
+`internal/resolve` packages are this sentinel's only producers/consumers;
+core's role is limited to defining and excluding it from the valid-mode set.

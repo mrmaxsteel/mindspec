@@ -9,6 +9,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/spec"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -76,7 +77,7 @@ auto-numbered to <NNN>-<slug> as max(existing spec numbers)+1
 		}
 
 		if err := emitInstruct(root); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 		}
 
 		return nil
@@ -196,7 +197,7 @@ func approveSpecRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := bead.Preflight(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", err)
+		fmt.Fprintf(os.Stderr, "warning: Beads preflight failed: %v (bead creation and gate resolution may fail)\n", next.RenderBDError(err))
 	}
 
 	exec := newExecutor(root)
@@ -211,13 +212,19 @@ func approveSpecRunE(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 	fmt.Println()
+	// Final-review round 1 (R4/G5): ApproveSpec auto-commits the approval
+	// artifacts and hard-fails unless the spec worktree is verifiably
+	// clean afterward (approve/spec.go step 3c + IsTreeClean), so success
+	// here MEANS committed — the old "Commit approval artifacts before
+	// continuing" instruction described work the verb had already done.
+	fmt.Println("Approval artifacts committed (spec worktree left clean; the clean-tree gates are already satisfied).")
+	fmt.Println()
 	fmt.Println("Next steps:")
-	fmt.Println("  1. Commit approval artifacts before continuing (required for clean-tree gates).")
-	fmt.Printf("  2. Continue planning for %s.\n", specID)
+	fmt.Printf("  1. Continue planning for %s.\n", specID)
 	fmt.Println()
 
 	if err := emitInstruct(root); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 
 	return nil

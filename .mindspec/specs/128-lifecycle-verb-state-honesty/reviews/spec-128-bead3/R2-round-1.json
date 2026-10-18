@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R2 claude",
+  "confidence": 0.85,
+  "rationale": "Codebase-pin lens, all core claims verified empirically in the bead worktree at 7b6d83f1. (1) The 7 internal/resolve draft tests + 3 AC-1 legs are real and pass uncached (-count=1 -short, all 10 PASS). (2) Hermetic: every fixture root is t.TempDir()-based; bd is injected via the phase package's SetListJSONForTest/SetRunBDForTest seams with t.Cleanup restore (no PATH manipulation); git fixtures use a pinned -c user.email/user.name identity and LookPath-skip; resetStateShowFlags clears cobra --spec state between invocations; withTestChdir/captureStdout/runGitInDir are the existing house helpers. (3) Red-on-revert PROBED, not assumed: in a /tmp archive copy with resolve.go+state.go reverted to 7b6d83f1^, all three AC-1 legs fail with exactly the three 2026-09-01 capture shapes (idle-from-draft-worktree, exit-0-on-discovery-failure, bare-idle-for-main-draft); a second, surgical probe reverting only ResolveModeWithCache's draft/error hunk (keeping DiscoverDraftSpecs so the package compiles) fails precisely the two behavior-change unit tests while the unchanged-behavior test (NoEpicNoDraft->idle) stays green. (4) The two composition-allowlist entries are house-pattern-conformant (Count+Gate shape matching neighbors, waist + early-gate rationale; workspace.SpecDir/SpecBranch are the fail-closed (string,error) validators; DiscoverDraftSpecsWithCache idvalidate.SpecID-gates every enumerated dir name before the helper runs) and internal/lint passes uncached. (5) Full suite go test -short ./... green from the bead worktree; worktree left byte-identical (git status clean). Judgment call A assessed: satisfied on R1.2's letter (see finding A). Verdict is APPROVE; the findings below are dispositions/deferrals, not required changes for this bead.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "A",
+      "severity": "info",
+      "title": "Judgment call A: R1.2 satisfied via removal, not assertion — deviation is sound",
+      "detail": "R1.2's letter (spec.md:98) requires 'one derivation is authoritative and the other is either removed or asserted-consistent'. The delivered state.go REMOVES the ResolveContextFromDir call entirely (grep confirms zero ResolveContext references remain in cmd/mindspec/state.go): mode AND activeBead now derive from the single resolved specID through one phase.Cache (ResolveModeWithCache + FindEpicBySpecIDWithCache + FindActiveBeadForEpicWithCache). That is the 'removed' arm of R1.2, satisfied within the surface R1.2 names (state.go's composition). The implementer's regression argument checks out in code: ResolveTargetWithCache (internal/resolve/target.go:113-117) routes an explicit hyphenated --spec straight through ResolveSpecPrefixWithCache to the draft-aware ResolveModeWithCache, whereas phase.ResolveContextFromDirWithCache's WorktreeMain branch derives from global discovery with no --spec input — the plan-literal ctx.Phase substitution would have broken `state show --spec <id>` on multi-active states. The residual second derivation (ResolveContext, still live in instruct tails) is bead 5's declared territory; within this bead's surface there is now exactly one derivation. Deviation accepted on the merits.",
+      "location": "cmd/mindspec/state.go:135-151, internal/resolve/target.go:113-117"
+    },
+    {
+      "id": "R2-F1",
+      "severity": "minor",
+      "title": "R1.1's unconditional sentence still reachable on the explicit --spec path: idle rendered alongside non-empty activeSpec",
+      "detail": "R1.1 (spec.md:97) is unconditional: state show 'never reports \"mode\": \"idle\" together with a non-empty activeSpec'. The main path (state.go:158-163) still renders exactly that pairing when an explicitly supplied, valid-shaped --spec resolves (hyphenated IDs pass through ResolveSpecPrefixWithCache existence-unchecked, target.go:46-51) but ResolveModeWithCache returns ModeIdle — i.e. no epic AND not a draft (dir-without-branch, or wholly nonexistent). Reachable on the real repo today: `mindspec state show --spec 005-next` (pre-beads-era spec: dir present on main, spec branch pruned, no epic) emits {\"mode\":\"idle\",\"activeSpec\":\"005-next\",\"specBranch\":\"spec/005-next\"} exit 0. This shape is PRE-EXISTING (the pre-bead code rendered it identically), lies outside AC-1's three legs, and is arguably honest for an explicit query about an inactive spec — but it contradicts R1.1's letter, so it needs a recorded disposition rather than silence: either a not-found/inactive refusal (or distinct rendering) on the explicit-flag no-epic-no-draft path, or a documented carve-out (bead 4's per-verb table or the ADR amendment stating R1.1's sentence governs ambient derivation). Not blocking this bead: the plan's Bead 3 step 3 scoped 'draft + active epic states unchanged' and AC-1 is fully delivered; flagging for tally disposition / bead-4-or-follow-up ownership.",
+      "location": "cmd/mindspec/state.go:158-163, internal/resolve/target.go:46-51"
+    },
+    {
+      "id": "R2-F2",
+      "severity": "info",
+      "title": "ResolveModeWithCache return-contract change lands under instruct's error-ignoring call — bead 5's seam moved",
+      "detail": "ResolveModeWithCache now returns (\"\", err) where it previously returned (ModeIdle, err) on a DerivePhase failure, and propagates bd failures from the no-epic path that previously collapsed to (ModeIdle, nil). internal/instruct/run.go:134 ignores that error (`mode, _ :=`), so from a resolved-spec context with bd down, instruct's Focus.Mode becomes \"\" where it was previously a fabricated \"idle\". Empty is the LESS dishonest of the two and no test regresses (full suite green), but bead 5 (instruct-tail honesty, R2.3's indeterminate form) should know its input seam already changed shape under it. No change required in this bead.",
+      "location": "internal/instruct/run.go:134, internal/resolve/resolve.go:72-92"
+    },
+    {
+      "id": "R2-F3",
+      "severity": "nit",
+      "title": "Multi-draft branches uncovered",
+      "detail": "The len(drafts)>1 -> ErrAmbiguousTarget construction in state.go (the fallback's default arm) and DiscoverDraftSpecsWithCache's multi-draft sorted enumeration have no test; the 7+3 delivered tests cover single-draft, zero-draft, epic-suppression, and both failure-propagation paths only. AC-1 does not require the multi-draft leg and the ambiguity rendering itself is pre-existing machinery, so this is a suggestion for the bead-4/5 window or a cheap follow-up test, not a required change.",
+      "location": "cmd/mindspec/state.go:113-121, internal/resolve/resolve.go:126-134"
+    },
+    {
+      "id": "R2-F4",
+      "severity": "info",
+      "title": "Positive evidence: draftSpecStatusWithCache's tail cannot fabricate a draft from a failed read",
+      "detail": "Chased the one suspicious-looking arm: the tail's `if epicErr == nil && epicID != \"\" { not a draft }` treats epicErr != nil as draft-confirming — but by that point the direct c.AllEpics() health probe at the top of the helper has already succeeded on the SAME memoized cache (Cache.AllEpics memoizes only on success, cache.go:63-79, so FindEpicBySpecID consults the identical epic set in-process with no second bd call and no TOCTOU window), and an invalid specID fails closed earlier at workspace.SpecDir. The only reachable epicErr there is the genuine 'no epic found' no-match. BranchExistsIn is likewise worktree-correct (-C workdir) and error-splitting (exit 1 = absent; anything else = propagated error, gitops.go:121-135). The beads-1/2 hard-block class (mode fabricated from a failed read) has no instance I could construct in this diff.",
+      "location": "internal/resolve/resolve.go:167-200, internal/phase/cache.go:63-79, internal/gitutil/gitops.go:121-135"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "All four round-1 remediation groups are materially implemented: the zero-candidate health probe, beads-derived idle arrival, numeric/full/refusing draft target handling, and real next/impl-adopt AC-14 drives are present and green. Independent probes confirmed the three original gaps. Two adversarial honesty residues remain: mixed active/draft prefix ambiguity can be collapsed to the draft, and an unprotected checkout with a valid draft but no .beads can render idle. Neither path mutates, selects, merges, deletes, or otherwise corrupts a spec branch; under the round-2 instruction to block only on spec-branch-corrupting defects, they are non-blocking follow-up findings.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R6-R1-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Protected zero-candidate health probe",
+      "evidence": "handleIdleOrDraft now calls cache.AllEpics before rendering idle when draft discovery returns zero candidates and .beads exists. TestRun_ProtectedCheckout_ZeroDraftCandidates_BdDown_RendersIndeterminate passed. An independent compiled-binary probe on protected main with .beads, zero drafts, and bd absent rendered `MindSpec — Cannot Determine Mode`, not idle."
+    },
+    {
+      "id": "R6-R1-ASK-2",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Beads-derived Phase==idle is a draft arrival point",
+      "evidence": "RunWithOptions now routes ModeIdle through handleIdleOrDraft when .beads exists. The no-draft, one-draft, and multiple-draft tests all passed. An independent unprotected-checkout probe with healthy canned bd output and one draft branch rendered Spec Mode for that draft."
+    },
+    {
+      "id": "R6-R1-ASK-3",
+      "classification": "PARTIAL",
+      "severity": "non_blocking",
+      "title": "Explicit draft --spec forms work, but mixed active/draft ambiguity is fabricated",
+      "evidence": "The numeric-prefix, full-ID, nonexistent-target refusal, and two-draft ambiguity tests all passed; an independent `--spec 053` draft-only probe rendered the intended draft. A single active `053-*` plus a draft `053-*` correctly selected the active spec. However, with two active `053-*` specs plus one draft `053-*`, ResolveSpecPrefixWithCache returned its generic active-prefix ambiguity error, RunWithOptions entered resolveSpecFlagAgainstDrafts, and the command rendered the lone draft as Active Spec instead of preserving ambiguity. This is newly introduced target fabrication: `mindspec instruct --spec 053` printed Spec Mode for `053-draft-target` while `053-active-a` and `053-active-b` were both active matches.",
+      "follow_up": "Distinguish active-prefix ambiguity from no-active-match before consulting drafts, or resolve the union of active and draft matches and render ambiguity whenever the combined set is not singular. Add the mixed two-active/one-draft regression case."
+    },
+    {
+      "id": "R6-R1-ASK-4",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "AC-14 next and impl adopt execution drives",
+      "evidence": "TestVerbOutput_Next and TestVerbOutput_ImplAdopt now execute the real registered handler/tail paths using a purely canned PATH bd and the existing executor/phase seams, and assert result-before-guidance ordering. Both passed, as did TestVerbOutput_TotalCobraTreeClassification. The former presence-only scope-limitation test is gone."
+    },
+    {
+      "id": "R6-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "non_blocking",
+      "title": "BeadsDirMissing gate can still render idle over a valid draft in an unprotected checkout",
+      "evidence": "In the no-target fallback, pctx.Phase==idle is sent to handleIdleOrDraft only when !phase.BeadsDirMissing(mainRoot). An independent compiled-binary probe used an unprotected feature checkout with a committed `.mindspec/specs/054-draft-no-beads/spec.md` and local `spec/054-draft-no-beads` branch, but no .beads and no bd. `mindspec instruct` rendered `MindSpec — No Active Work`. Thus the gate correctly preserves idle for a truly empty uninitialized workspace, but it also hides a discoverable draft when tracker initialization/state is unavailable.",
+      "follow_up": "When .beads is absent, cheaply enumerate draft candidates first. Preserve idle only when no candidate exists; if a valid spec branch/spec file exists but its epic status cannot be checked, render indeterminate rather than idle."
+    },
+    {
+      "id": "R6-VERIFICATION",
+      "classification": "ADDRESSED",
+      "severity": "verification",
+      "title": "Build, suite, and hygiene",
+      "evidence": "At reviewed commit 3c472ac9dd16df96666539535918d1609e404c29, all eight new internal/instruct arrival tests passed; the targeted AC-14 tests passed; `go build -buildvcs=false ./...` passed; and `go test -buildvcs=false ./... -short` passed. The bead worktree was clean and byte-identical after review. All /tmp probe repositories and the temporary Go build cache were deleted."
+    }
+  ]
+}

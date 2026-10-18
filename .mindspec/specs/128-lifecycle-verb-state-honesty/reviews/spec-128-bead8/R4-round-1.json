@@ -1,0 +1,51 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.99,
+  "rationale": "Artifact 7f4ad41b2c16f551f2c583ede961cb29ff31bffc satisfies the empirical selection and scope-honesty lens. I built the binary in the bead worktree and exercised fresh real-bd repositories through the built mindspec CLI. With two independently ready beads at P1 and P3, the displayed order was P1 then P3; the no-pick claim printed the exact pinned default line and claimed displayed row 1. --pick=2 selected and claimed displayed row 2 on the claim path and emitted that same bead on --emit-only. --pick=5 returned 'out of range' on both paths for both two-item and single-item ready sets. A positional ready bead removed by the title filter refused with its bead ID and the true 'excluded by the spec filter' reason, without the false 'not found or not ready' text. Clean draft and nonexistent explicit scopes refused honestly: the draft steered to mindspec spec approve first, while the nonexistent ID was named as not found and never selected the unrelated globally-ready bead. Disclosure A is acceptable because both next entry paths call ResolveSpecPrefixProven before ready-set construction, BuildReadySet has no other production callers, and the original unproven resolver remains only on complete/other resolution paths outside this bead's proof requirement. Disclosure B has a real but non-blocking consequence: an entangleable dirty-tree refusal can precede and temporarily mask the draft approve-first steer; an isolated probe reproduced this, but the earlier refusal is truthful, safety-preserving, and follows the binding ordering. Focused CLI integration tests plus go test ./internal/next ./internal/resolve passed. The temporary overlay/cache were removed, and the bead worktree remained clean at the reviewed SHA.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R4-F1",
+      "severity": "none",
+      "title": "Default selection is displayed row 1 in real bd priority order",
+      "evidence": "A real-bd two-ready fixture displayed the P1 bead as row 1 and the P3 bead as row 2. A no-pick claim printed exactly 'Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.' and changed the row-1 bead to in_progress."
+    },
+    {
+      "id": "R4-F2",
+      "severity": "none",
+      "title": "Explicit pick semantics agree across claim and emit-only",
+      "evidence": "On a fresh two-item fixture, --pick=2 --emit-only rendered row 2 in the primer and --pick=2 claimed row 2. --pick=5 failed with 'pick 5 out of range (1-2)' on both paths; on a separate single-item fixture both paths failed with 'pick 5 out of range (1-1)'."
+    },
+    {
+      "id": "R4-F3",
+      "severity": "none",
+      "title": "Filter-excluded positional IDs receive the honest reason",
+      "evidence": "The real-bd positional claim test placed a title-unreferenced bead in the scoped raw ready set. The command exited nonzero naming the bead as ready but excluded by the spec filter and did not contain 'not found or not ready'."
+    },
+    {
+      "id": "R4-F4",
+      "severity": "none",
+      "title": "Draft and nonexistent scopes remain distinct",
+      "evidence": "An existing on-disk draft with no epic exited nonzero with the no-epic/not-approved recovery that says to run mindspec spec approve first. A nonexistent full spec ID exited nonzero naming that ID as not found, did not expose the unrelated globally-ready bead, and left that bead open."
+    },
+    {
+      "id": "R4-A",
+      "severity": "none",
+      "title": "Disclosure A: proven sibling covers every production next path that needs existence proof",
+      "evidence": "Both cmd/mindspec/next.go paths call ResolveSpecPrefixProven before BuildReadySet. Production grep found BuildReadySet only at those two sites. ResolveSpecPrefix remains reachable from complete.go and generic target resolution, but not from either explicit-scope next selection path governed by AC-15."
+    },
+    {
+      "id": "R4-B",
+      "severity": "info",
+      "title": "Disclosure B: claim guard can mask the draft steer until entangleable dirt is resolved",
+      "evidence": "In a real-bd draft fixture with a modified .gitignore that the prospective claim could write, mindspec next --spec <draft> stopped at the truthful uncommitted-user-changes guard and did not yet print the downstream no-epic/spec-approve steer. This ordering is the disclosed binding structure; it preserves user work and converges to the draft steer after the dirt is handled, so it is not a requested change."
+    },
+    {
+      "id": "R4-F5",
+      "severity": "none",
+      "title": "Build, focused suites, cleanup, and worktree integrity passed",
+      "evidence": "make build completed (with only the known non-fatal Go module stat-cache permission warning). The six focused real-bd CLI tests passed, custom no-pick/pick-2/pick-5 probes passed, and go test ./internal/next ./internal/resolve passed. Temporary /tmp source, overlay, and Go cache were deleted. Final HEAD was 7f4ad41b2c16f551f2c583ede961cb29ff31bffc with no staged, unstaged, or untracked changes."
+    }
+  ]
+}

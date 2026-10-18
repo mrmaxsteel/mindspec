@@ -1,0 +1,49 @@
+{
+  "reviewer_id": "R3 claude",
+  "verdict": "APPROVE",
+  "confidence": "high",
+  "rationale": "Contract-stability lens, commit 7f4ad41b. (1) Caller sweep: production callers of SelectWork are exactly cmd/mindspec/next.go:262 (claim) and :479 (emit-only) — both in-scope and knowingly affected by the new total-pick semantics; no third caller depends on the removed single-item bypass. QueryReady/QueryReadyForEpic are now called ONLY from BuildReadySet (internal/next/beads.go:149/:161) — grep confirms no other production call site, so AC-15's 'no global bd ready on the scoped path' holds by construction as claimed. SelectWorkByName is reached only via SelectNamedFromReadySet + its own definition. ResolveTarget is called from next.go only with specFlag=\"\" (line 133), so user --spec input never reaches the unproven prefix path in next. (2) Disclosure A: the unproven ResolveSpecPrefix's remaining callers are cmd/mindspec/complete.go:51 (feeds a best-effort auto-cd; a bogus full ID fails the SpecWorktreePath stat and degrades to root — pre-existing, harmless) and internal/complete's resolveSpecPrefixFn seam (comment at complete.go:137 documents the no-bd-call passthrough as deliberate). Neither path needed the existence proof; both legs of next (claim next.go:89, emit-only next.go:435) use Proven. Residual reachability: none found. (3) Two-functions-one-truth: Proven delegates ALL resolution to ResolveSpecPrefixWithCache and ALL draft detection to draftSpecStatusWithCache (the same single implementation bead 3's discovery and bead 5's ResolveModeWithCache use), so there is no forked resolution logic to drift — the only Proven-local logic is the existence proof itself. One latent coupling noted as a minor finding (F1). (4) Three-way discrimination: scopeResolutionRefusal's bd-failure/draft/nonexistent split mirrors ResolveModeWithCache's honesty pattern (AllEpics health probe before concluding anything; draft detection via the shared helper; failure never read as 'no epic'). It deliberately refuses (loud, actionable) rather than adopting ResolveModeWithCache's G2/F2a warm-cache retry on a transient first-call flake — a refusal, not a fabrication, so the honesty contract holds; noted as F5 (informational). Draft steer text ('exists but has no epic; run mindspec spec approve first') and Proven's pass-drafts-through division of labor are consistent: the two nonexistent-refusal messages cannot collide because Proven filters the nonexistent case before BuildReadySet runs. (5) Disclosure B: the ordering does NOT mask the refusal that matters — for a dirty tree + bogus --spec, ResolveSpecPrefixProven runs at Step 0a, BEFORE the freshness gate (0c), dirty guard (Step 1), and unmerged-bead guard (1.7), so the nonexistent-spec refusal surfaces first. Only the draft ('approve first') and TOCTOU-residual refusals sit behind the guard, and I verified the guard itself degrades gracefully for an epic-less spec (ComputeEntangleablePaths does no epic lookup; claimAnchorRoot stats the worktree and falls back to root), so the worst case is one extra round-trip for an operator with genuinely entangleable dirt AND a draft --spec — each intermediate refusal is itself genuine and actionable. Acceptable; the ordering is also structurally motivated (the guard is per-spec-aware and needs the resolved specFlag). Gates re-run in the bead worktree: go build ./... clean; go test -short internal/next (16.1s ok), internal/resolve (2.0s ok), cmd/mindspec (38.6s ok); worktree left byte-identical (git status clean).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "minor",
+      "blocking": false,
+      "title": "ResolveSpecPrefixProven's hyphen-keyed proof shortcut rests on an un-pinned non-local invariant",
+      "detail": "target.go:134's early return (`if !strings.Contains(prefix, \"-\") { return resolved, nil // numeric branch already proved existence }`) assumes every hyphen-less input that survives ResolveSpecPrefixWithCache came through the numeric DiscoverActiveSpecs proof branch. That is true today only because idvalidate's specIDPattern (ids.go:29) requires a hyphen, which makes WithCache's third branch (hyphen-less non-numeric input, target.go:54-61) always error before passthrough. specIDPattern has already been widened once (package doc: 'contract WIDENING'); a future widening that accepts a hyphen-less spec ID would silently open an unproven passthrough THROUGH Proven — exactly the two-functions-one-truth drift the design otherwise avoids by delegating. Suggested non-blocking hardening: a test pinning ResolveSpecPrefixProven(root, \"008b\")/(root, \"abc\") to an error (or key the shortcut on the actual branch taken rather than the input's hyphen). No current-behavior defect.",
+      "files": ["internal/resolve/target.go:128-136", "internal/idvalidate/ids.go:29"]
+    },
+    {
+      "id": "F2",
+      "severity": "minor",
+      "blocking": false,
+      "title": "A draft spec's NUMERIC prefix still gets the 'no spec found' answer the full-ID form was cured of",
+      "detail": "Prefix resolution proves existence against DiscoverActiveSpecsWithCache (epic-derived only — internal/phase/derive.go:514 filters ActiveEpics), so drafts are invisible to it. `mindspec next --spec 129` where 129-x is a committed pre-epic draft refuses 'no spec found matching prefix \"129\"', while `--spec 129-x` gets the honest 'exists but has no epic; run mindspec spec approve 129-x first' steer. Same spec, two honesty levels depending on input form — the false-adjacent 'doesn't exist' claim AC-15(ii) targets survives via the numeric spelling. Pre-existing behavior (not introduced or worsened by this bead) and defensible under R6.7's literal text ('a prefix matching nothing ... refuses'), but now that bead 3 made drafts first-class, DiscoverDraftSpecsWithCache could feed the prefix-match universe. Recommend a follow-up bead, not a change here.",
+      "files": ["internal/resolve/target.go:63-92", "internal/phase/derive.go:508-520"]
+    },
+    {
+      "id": "F3",
+      "severity": "minor",
+      "blocking": false,
+      "title": "AC-9 parity boundary: Step 0d spec auto-detection exists only on the claim path",
+      "detail": "With NO --spec and exactly one active spec, the claim path auto-scopes via ResolveTarget (next.go:132-148) before BuildReadySet, while runEmitOnly passes the raw empty specFlag and builds the GLOBAL set. If any ready non-epic bead exists outside that spec's epic, the two paths build different ReadySets and `--pick N` names different beads — the flagless spelling of the divergence AC-9 closes for the --spec spelling. Pre-existing asymmetry (old runEmitOnly had no auto-detect either, and didn't honor --pick at all — this bead is a strict parity improvement), and AC-9's validation proof pins only the --spec form; but AC-9's prose reads unqualified. Recommend either applying the Step 0d resolution in runEmitOnly or documenting the flagless asymmetry in the command help/runEmitOnly doc comment. Non-blocking.",
+      "files": ["cmd/mindspec/next.go:132-148", "cmd/mindspec/next.go:433-440"]
+    },
+    {
+      "id": "F4",
+      "severity": "nit",
+      "blocking": false,
+      "title": "Emit-only positional bypass line discloses the readiness bypass but not the spec-filter bypass",
+      "detail": "The R6.1 comment (next.go:443-448) says the positional preview bypasses 'ready-set membership and the spec filter entirely ... and SAY SO', but the printed line says only 'emit-only: bead fetched by ID; readiness not checked.' With `--emit-only --spec X <bead-outside-X>` the preview succeeds with no mention that the spec scope was not applied — while the claim path would refuse the same positional with the honest exclusion reason. Consistency nit across the two paths' positional stories; consider '...; readiness and --spec filter not checked.' (Noting Proven still validates the --spec value itself even on this branch, so a bogus scope does refuse.)",
+      "files": ["cmd/mindspec/next.go:442-453"]
+    },
+    {
+      "id": "F5",
+      "severity": "info",
+      "blocking": false,
+      "title": "scopeResolutionRefusal refuses (rather than retries) on a transient epic-lookup flake — honest, slightly stricter than ResolveModeWithCache",
+      "detail": "ResolveModeWithCache (resolve.go:82-89, round-1 G2/F2a) re-runs the epic lookup against the warm cache after confirming bd health, recovering from a transient first-call flake. scopeResolutionRefusal (beads.go:210-226) confirms bd health via AllEpics on a fresh cache but does not re-run FindEpicBySpecID: a transient flake for an epic-bearing spec yields 'resolving --spec X: <flake error>' (draftSpecStatusWithCache's epic-first check on the fresh cache returns not-draft, so the epicErr leg fires). That is a loud, retryable refusal — never a fabricated result or a silent widening — so the honesty contract holds; recording it so the asymmetry with bead 5's retry pattern is a known choice rather than drift.",
+      "files": ["internal/next/beads.go:193-226", "internal/resolve/resolve.go:82-106"]
+    }
+  ]
+}

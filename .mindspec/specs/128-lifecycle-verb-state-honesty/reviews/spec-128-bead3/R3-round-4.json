@@ -1,0 +1,33 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.9,
+  "rationale": "Round-4 final confirm at f6847729. The layered closure is COMPLETE under the contract lens — I independently swept for a third short-name-ambiguity path into draft discovery and found none. Draft discovery's git-ref touchpoints at this commit are exactly three, all now disambiguation-immune: (1) candidate enumeration via the new LocalBranchNames (`%(refname:lstrip=2)` — unconditional prefix strip, never subject to short-name disambiguation, byte-identical to `:short` in the ordinary case); (2) branch confirmation via BranchExistsIn (`rev-parse --verify --quiet refs/heads/<name>` — fully qualified, gitops.go:125); (3) the tree probe via FileExistsAtRef with the qualified `refs/heads/<branch>` (round-2 fix — and even a pathological tag literally named `refs/heads/spec/<id>` cannot shadow it, since gitrevisions resolution matches the exact `$GIT_DIR/refs/heads/...` ref before any `refs/tags/<name>` expansion). All other candidate/ID material in the path is git-free: dir-candidates come from os.ReadDir, and every rendered branch string (DraftSpec.SpecBranch, state.go's specBranch) is COMPOSED via workspace.SpecBranch from the validated specID, never parsed back out of git output — so no git-emitted string reaches output or comparison anywhere in the feature. My grep sweep confirms the commit's own sweep: the only remaining `%(refname:short)` sites are LocalBranchRefs (via forEachRefShort) and RemoteTrackingRefs, whose consumers (Executor interface, internal/layout/precondition.go, internal/lifecycle/finalize_orphans.go) all sit outside draft discovery. The sibling-function choice (LocalBranchNames rather than changing LocalBranchRefs in place) is exactly right under this lens: LocalBranchRefs is Executor-interface surface with three unreviewed consumers, and changing its output shape under them would have been the very class of undisclosed contract change this slot exists to catch — the commit both made and DOCUMENTED that call. Regression tests now sit at the layer that was actually vulnerable (DiscoverDraftSpecsWithCache-level and full ambient state-show-level, both with the shadow tag), plus the gitutil primitive test with an honest version-guarded control against LocalBranchRefs. Verified green at f6847729: internal/resolve, internal/gitutil (including the new LocalBranchNames test), and all StateShow tests including the new ambient shadow-tag pin; build clean; bead worktree left byte-identical. Standing APPROVE confirmed. Carry-forwards for bead 5 remain as recorded in R3-round-3.json (derive.go's in-worktree fabricating fallbacks vs bead 5's planned trigger; run.go's unowned standalone-instruct windows) — unchanged by this commit, which touches neither file.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "R3-4-1",
+      "severity": "info",
+      "title": "Layered tag-shadow closure verified complete — no third path from short-name ambiguity into draft discovery",
+      "detail": "Independent sweep at f6847729: enumeration (LocalBranchNames, lstrip=2), confirmation (BranchExistsIn, qualified rev-parse), and tree probe (FileExistsAtRef, qualified refs/heads ref) are the feature's only git-ref reads; dir candidates are os.ReadDir; all output branch strings are workspace.SpecBranch-composed from validated IDs, never parsed from git output. The only `%(refname:short)` survivors in the tree are LocalBranchRefs and RemoteTrackingRefs, both outside the draft path, as the commit's sweep reported. The new tests pin the previously-vulnerable enumeration layer end-to-end (ambient state show from main, branch-only draft + same-named tag → mode spec, red-on-revert against LocalBranchRefs)."
+    },
+    {
+      "id": "R3-4-2",
+      "severity": "info",
+      "title": "Sibling-function discipline is the correct contract call, and the commit documents it",
+      "detail": "LocalBranchRefs is part of the Executor interface (executor.go:201, MindspecExecutor/MockExecutor) and is consumed directly by internal/layout/precondition.go:158 and internal/lifecycle/finalize_orphans.go:38 — none reviewed or re-tested by this bead. Changing its output shape in place would have been an undisclosed behavior change to three consumers; the new sibling confines the fix to the one caller this bead owns. The lint argv-table entry for the new exec site is house-pattern (fixed-literal argv class, rationale named)."
+    },
+    {
+      "id": "R3-4-3",
+      "severity": "minor",
+      "title": "Same-class residue outside this bead, for the tally's follow-up ledger: LocalBranchRefs's other consumers inherit the disambiguation hazard",
+      "detail": "The commit's sweep honestly reported RemoteTrackingRefs (layout-only) as the out-of-scope `:short` survivor. Same class, one step further for the ledger: internal/lifecycle/finalize_orphans.go:38 and internal/layout/precondition.go:158 consume LocalBranchRefs's `%(refname:short)` output directly, so a same-named tag could equally make a spec/ or bead/ branch surface as 'heads/...' in THEIR scans (e.g. an orphan branch dropped from a finalize scan — a degraded scan, not a state fabrication, and pre-existing behavior untouched by this bead). Non-blocking here and correctly not silently patched; suggest the tally add a small follow-up audit item (or fold into an existing hygiene bead) so the class is closed tree-wide rather than only where spec 128 walked."
+    },
+    {
+      "id": "R3-4-4",
+      "severity": "info",
+      "title": "Carry-forwards for bead 5 stand as recorded in R3-round-3.json",
+      "detail": "f6847729 touches neither internal/phase/derive.go nor internal/instruct/run.go, so both terminal-round carry-forwards are unchanged: (a) derive.go's in-worktree bd-failure fallbacks (ModeImplement/ModeSpec) can never produce bead 5's planned 'context error or empty phase' trigger — bead 5 must rewire emitInstruct to the error-propagating derivation or de-swallow derive.go; (b) run.go's two standalone-instruct windows (main-with-draft renders idle while state show says spec; bd-failure routes to handleNoState's idle template) remain unowned — extend bead 5's scope in writing or file a follow-up bead. The tally inherits both from R3-round-3.json; this finding is a pointer, not a re-statement."
+    }
+  ]
+}

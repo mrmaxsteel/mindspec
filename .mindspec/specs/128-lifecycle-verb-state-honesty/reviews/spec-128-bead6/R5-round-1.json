@@ -1,0 +1,81 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": true,
+  "reviewer_id": "R5 codex",
+  "confidence": "high",
+  "rationale": "The tip-seeded snapshot, per-ref CAS primitives, valid-marker trailer round trip, and valid-stage elision graph are implemented and their focused tests pass. However, deviation B/C leaves a data-integrity TOCTOU window: after the pre-S dirt classification, D is built from an unrestricted full-worktree snapshot, so a non-artifact edit arriving between those operations is silently included in D; the post-reset defensive check can no longer see it. The stage reader/discriminator also accepts arbitrary non-empty Mindspec-Stage values and routes every value other than materialization as artifact-sync, allowing malformed marker evidence to skip panel/content gates. ADR-0041 section 3(i) still states the superseded build-D-then-check ordering rather than the delivered pre-D classification. Quality evidence: the focused protocol/ADR tests passed; `go build ./... && go test ./... -short -count=1` passed; and `go test ./internal/complete ./internal/gitutil ./internal/executor ./internal/validate ./cmd/mindspec -count=1` passed (cmd/mindspec 536.658s). The bead worktree remained clean and no R5 scratch paths remained.",
+  "concrete_changes_required": [
+    "Close the pre-S-classification-to-D-snapshot race. Prefer constructing D from currentTip with only the named artifact path refreshed, or at minimum reject an immutable tree2 whose delta from currentTip contains any non-artifact path before building/publishing D. Preserve the final S-exit recheck so edits arriving after tree2 remain named dirt.",
+    "Add a red-on-revert real-git fixture that injects a non-artifact edit immediately before the second SnapshotWorktreeTree call (after the pre-S classification) and proves the path is absent from D, survives on disk, and causes a named pre-merge refusal.",
+    "Make the Mindspec-Stage reader/discriminator closed over exactly `materialization` and `artifact-sync`. Missing, unknown, empty, or ambiguous/duplicate encodings must never produce a resume stage that skips gates; handle them as foreign/corrupt evidence with a safe normal-run/stale-SHA path or a named refusal. Add malformed and duplicate trailer tests.",
+    "Update ADR-0041 section 1 and section 3(i), plus pinning tests, to describe the actual safe S ordering and the load-bearing pre-D protection rather than only `build D, then the S-exit dirt contract`."
+  ],
+  "findings": [
+    {
+      "id": "R5-BLOCK-1",
+      "severity": "blocker",
+      "title": "Deviation B/C still permits an interval edit to be silently swept into D",
+      "evidence": "internal/complete/materialize.go:276-282 classifies dirt, then lines 292-300 take SnapshotWorktreeTree(wtPath, nil) and accept every changed path, and lines 305-317 build/publish/advance/reset D. A non-artifact mutation after line 282 but before/during line 292 is in tree2 and D. The defensive check at lines 336-349 runs only after reset, when that path is already committed and therefore no longer dirt.",
+      "impact": "Violates the core preserved-or-refused invariant and can silently commit user work that arrived in the interval. This invalidates the claim that the full D re-snapshot is safe because of deviation C."
+    },
+    {
+      "id": "R5-SCHEMA-2",
+      "severity": "high",
+      "title": "Mindspec-Stage is parsed as an open string and malformed values take the D-resume path",
+      "evidence": "internal/gitutil/materialize.go:166-178 returns any trimmed value following `Mindspec-Stage: `. internal/complete/materialize.go:82-95 regards every non-empty value as resumable when tip equals marker; runMaterialization at lines 248-264 handles `materialization` explicitly and sends every other value through the artifact-sync branch. complete.go:773-826 skips the panel gate for any non-empty resumeStage.",
+      "impact": "Malformed/corrupt/foreign marker evidence can be treated as proof that gates passed and route directly to S-exit/merge. The discriminator is not total over the reader's actual output domain, even though valid internally-built C/D markers and the empty-stage elision cases are covered."
+    },
+    {
+      "id": "R5-DOC-3",
+      "severity": "medium",
+      "title": "ADR section 3(i) documents the superseded S ordering",
+      "evidence": ".mindspec/adr/ADR-0041-gate-before-mutate.md:341-345 says S builds D and then runs the S-exit dirt contract; section 1 likewise describes a final classification after D. The delivered code's primary classification is before the D snapshot at internal/complete/materialize.go:267-292, with a defensive recheck after D.",
+      "impact": "The load-bearing correction in deviation C is not captured by the architecture decision record, and the current anchor-only ADR tests do not pin its ordering."
+    },
+    {
+      "id": "R5-DEVIATION-A",
+      "severity": "info",
+      "disposition": "acceptable",
+      "title": "Fixed stage subjects instead of preserving --commit-msg",
+      "evidence": "The frozen four-argument Executor seam produces fixed stage subjects while MaterializeStageCommit appends the exact `Mindspec-Stage: <stage>` encoding. Stage identity and recovery do not depend on the operator subject.",
+      "impact": "Cosmetic audit-trail loss only for this bead's acceptance surface. Preserving the operator text in a body/trailer could be a follow-up, but is not required to accept this bead."
+    },
+    {
+      "id": "R5-DEVIATION-B",
+      "severity": "blocker",
+      "disposition": "not acceptable as shipped",
+      "title": "Full D re-snapshot is not made safe by deviation C",
+      "evidence": "The check and unrestricted snapshot are not atomic, and tree2's changed-file list is tested only for non-emptiness rather than constrained to the named artifact set.",
+      "impact": "This coupling is the source of R5-BLOCK-1."
+    },
+    {
+      "id": "R5-DEVIATION-C",
+      "severity": "blocker",
+      "disposition": "directionally correct but incomplete",
+      "title": "Pre-D classification fixes the kill-window case but not the live race, and the ADR was not updated to match",
+      "evidence": "Fixtures viii-a and ix cover dirt already present on re-entry and pass. They do not inject dirt between the pre-S classification and the second snapshot. The final recheck cannot recover a path already included in D.",
+      "impact": "The disclosed correction preserves the invariant for the tested downtime cases, but not for all timing interleavings claimed by the protocol."
+    },
+    {
+      "id": "R5-CAS-4",
+      "severity": "info",
+      "disposition": "correct",
+      "title": "Marker and branch CAS semantics match the plan",
+      "evidence": "UpdateRefCAS maps empty expectedOld to the null OID for CREATE and passes non-empty expectedOld to three-operand update-ref. M publication uses empty expectedOld; C-to-D derives the existing marker OID; branch advances pass currentTip. Dedicated create-exists, expected-old-mismatch, and branch-mismatch tests passed."
+    },
+    {
+      "id": "R5-SNAPSHOT-5",
+      "severity": "info",
+      "disposition": "correct and genuinely pinned",
+      "title": "SnapshotWorktreeTree seeds from tip and the artifact-deletion regression test is a real red pin",
+      "evidence": "internal/gitutil/materialize.go resolves HEAD and executes read-tree tip before add -A with exclusions. TestSnapshotWorktreeTree_SeedingPreservesExcludedArtifact starts with a tracked artifact at the committed tip and requires both its path and exact blob in T while also checking tracked/untracked user changes. Removing the read-tree seed leaves the excluded artifact absent from the empty temporary index, so the test's presence assertion fails. The focused real-git test passed on the reviewed artifact."
+    },
+    {
+      "id": "R5-ELISION-6",
+      "severity": "info",
+      "disposition": "correct for valid stage encodings",
+      "title": "The empty-C, no-op-D, and both-elided transition cases are represented",
+      "evidence": "runMaterialization sets currentTip before C elision, uses CREATE when D is the first publication, retains C's marker when D elides, and publishes no marker when both stages elide. Fixture legs xv through xx passed. Totality over malformed reader output remains blocked by R5-SCHEMA-2."
+    }
+  ]
+}

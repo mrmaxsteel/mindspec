@@ -1,0 +1,75 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.99,
+  "rationale": "Against reviewed commit 27294e84bebf40212f59a3c5f9c98002e59fa8ec, five of my six round-4 findings are ADDRESSED and the central state-machine ask is PARTIAL. The corrected plan now builds C before referring to it, replaces the porcelain sync with a buildable artifact-only plumbing commit D, advances the marker on both nominal tip transitions, orders landed-merge reconciliation before stale-marker handling, clears the marker on both terminal paths, and removes both stale O_EXCL framings. However, its new load-bearing premise is false for Git's default files ref backend: `git update-ref --stdin` preparation is wholesale on an expected-old failure, but installing multiple refs is not crash-atomic. Git's own documentation says a reader may see a subset of the modifications, and Git's files-backend documentation states that multi-ref writes are not atomic. A kill during either nominal two-ref commit can therefore leave tip=C with no/C-old marker, or tip=D with marker=C (and the converse partial states). The plan's marker!=tip rule misclassifies these tool-authored partial installs as foreign, deletes the recovery evidence, and re-enters the stale-SHA gate. The author's and other reviewers' success/wrong-expected-old labs test only completed commit and prepare-abort paths, not this interruption window. A second residual compounds recovery: after C->D, the real index remains at C unless the R refresh is repeated; resuming directly toward merge can carry synthetic index dirt, while a genuine interval user edit cannot both remain uncommitted and survive the terminal forced worktree removal. Fixture (viii)'s promise of a landed merge with that edit preserved as ordinary dirt is therefore not executable as written. These are focused fixes, but they sit in the exact forward-reconcile and no-laundering mechanism that the plan gate must settle; they are not safely deferrable choices for bead 6 to invent. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the three documented decomposition warnings.",
+  "concrete_changes_required": [
+    "Replace the assumption that a two-ref `update-ref --stdin` transaction is crash-atomic with a crash-recoverable protocol for the default files ref backend. A marker-as-write-ahead design is one feasible shape: create C/D, durably publish a marker that encodes the intended new tip and expected predecessor, then advance the bead ref with expected-old; on re-entry, distinguish the legitimate partial states (marker=new while tip=expected predecessor, or both at new) from a genuinely foreign tip and finish forward. Any equivalent design must preserve the no-laundering boundary. Add kill/fault-injection fixtures DURING each A->C and C->D ref-install operation, not merely after it returns, covering every one-ref-installed ordering and proving plain re-run convergence without re-paneling while a true foreign tip still stale-blocks. Test the default files backend explicitly; document/test any Git-version floor if the chosen mechanism depends on one.",
+    "Complete the S-stage index and dirt contract. Refresh the real index to D after the artifact-only ref advance (or provide an equivalent clean-index invariant), then check for genuine non-artifact worktree changes before any merge path that can force-remove the bead worktree. Such edits must be preserved by a clean named refusal or another explicitly safe recovery; they cannot be both uncommitted and still present after successful terminal cleanup. Revise fixture (viii) and the post-S kill fixture to assert an executable outcome, including no silent loss of an interval edit."
+  ],
+  "findings": [
+    {
+      "id": "R6-R3-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Retained-handle LockFileEx design and O_EXCL sweep are now consistent",
+      "detail": "Both formerly stale plan framings now expressly say the journal contributes only the read-modify-write shape, not O_EXCL ownership. Bead 1 and the lock-home decision consistently specify flock on Unix and LockFileEx on a retained, non-delete-shared Windows handle, with bounded wait, owner-only release, process-death release, and leftover-file fixtures."
+    },
+    {
+      "id": "R6-R3-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Marker covers completed C and D transitions but not a kill inside the two-ref installation",
+      "detail": "The plan fixes the prior marker=C/tip=D nominal gap by advancing the marker with both A->C and C->D transitions, and the D plumbing shape is buildable. But `update-ref --stdin` is not a crash-atomic multi-ref store on Git's default files backend. The official update-ref contract warns that only individual refs are atomic and a subset may be observed; Git's own breaking-changes document states directly that multi-ref operations are not atomic with the files backend (https://git-scm.com/docs/git-update-ref.html and https://github.com/git/git/blob/master/Documentation/BreakingChanges.adoc). Thus a process death during commit can still strand marker!=tip or a missing marker after a tool-authored advance. The early rule then deletes evidence and stale-SHA blocks, reproducing the defect in a narrower window."
+    },
+    {
+      "id": "R6-R3-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "V2 fixture marker-state pinning remains sound",
+      "detail": "The round-4 fix does not regress the explicit marker-present construction for AC-5(ii), (iv), (v), and (viii), nor the marker-absent legacy notice/self-heal fixture. Existing-epic upgrade reconciliation remains one-shot, lock-protected, and discriminated by `mindspec_phase_semantics: v2`."
+    },
+    {
+      "id": "R6-R3-ASK-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Chunk 2 and caller-fence ownership remain honest",
+      "detail": "Bead 2 still owns repair.go's call-site behavior and the transition from bead 1's zero-caller fence to the exactly-one release caller. The round-4 change introduces no new file or sequencing mismatch in this area."
+    },
+    {
+      "id": "R6-R4-NEW-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Reconcile-before-stale-decision and both terminal cleanup paths are explicit",
+      "detail": "The protocol paragraph and bead 6 step 4 now require landed-merge reconciliation detection before marker/tip evaluation, clear an orphan there, and clear the marker after ordinary completion as well. This resolves the branch-missing orphan ordering asked for in round 4, subject to the separate intra-transaction partial-state defect."
+    },
+    {
+      "id": "R6-R4-NEW-2",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Commit-object/ref ordering contradiction is corrected",
+      "detail": "All operative plan surfaces now build C before any marker can name it, then perform the ref-install step; D is likewise built before its ref transition. The former marker-before-commit-tree bead instruction is gone."
+    },
+    {
+      "id": "R6-R5-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Git transaction evidence proves prepare atomicity, not crash atomicity",
+      "detail": "The cited lab establishes two useful but insufficient facts: success eventually moves both refs, and an expected-old mismatch aborts at prepare before either moves. It does not inject death after prepare while the files backend commits separate lockfiles. Git explicitly documents non-atomic multi-ref writes for that backend. Consequently `marker==tip after every tool step BY CONSTRUCTION` is true only after the subprocess returns successfully, not across the kill boundary the state machine exists to survive. The start/prepare/commit syntax itself is not a new-version blocker—it is documented in Git 2.27 and works in the local Git 2.51.2—but the plan should test whatever minimum it supports and must not infer stronger durability from syntax availability."
+    },
+    {
+      "id": "R6-R5-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Post-D index state and interval-edit preservation are not jointly executable",
+      "detail": "R occurs after C, but the staged sequence has no second mixed reset after D. Therefore HEAD/branch and marker can be D while the real index still represents C, making the artifact appear as synthetic index/worktree dirt. More importantly, fixture (viii) asks a plain re-run to land the merge while preserving a post-C interval edit as ordinary uncommitted dirt. `CompleteBead` ultimately removes the bead worktree through the force-removal path; an edit excluded from C/D is either refused and preserved (so the run does not land) or the run lands and cleanup removes it. Resume must clean the synthetic post-D index state, distinguish genuine user dirt, and refuse safely before destructive cleanup rather than bypassing the panel and losing the edit."
+    },
+    {
+      "id": "R6-R5-VALIDATION",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Plan validator remains green apart from disclosed advisories",
+      "detail": "`mindspec validate plan 128-lifecycle-verb-state-honesty` exited 0 and emitted exactly the documented warnings: 10-bead count, scope redundancy R=0.09, and dependency depth 4. None is the reason for this verdict."
+    }
+  ]
+}

@@ -145,6 +145,39 @@ func TestGateReadiness_EvaluationErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestGateReadiness_RenderingLegControlBytesEscaped is round-2 panel's
+// red-on-revert pin for GateReadiness's own render leg: a chain test
+// alone (errors.As reaching through) would stay green even if the
+// bdRenderedError wrapper were dropped from GateReadiness's evaluation-
+// error wrap (reverting to a bare %w of err). This directly swaps
+// evaluateReadinessFn to return a control-bearing error — as a real
+// EvaluateReadiness failure would when it reads bd transitively via
+// fetchBeadRecordReal -> bead.RunBD and bd's stderr carries hostile
+// bytes — and asserts the schema-error text survives while no raw
+// control byte reaches GateReadiness's rendered error.
+func TestGateReadiness_RenderingLegControlBytesEscaped(t *testing.T) {
+	orig := evaluateReadinessFn
+	t.Cleanup(func() { evaluateReadinessFn = orig })
+
+	evaluateReadinessFn = func(root, beadID string) (*readiness.Report, error) {
+		return nil, errors.New("bd show " + beadID +
+			" failed: exit status 1: Error 1105 (HY000): column \"depends_on_id\" could not be found\n" +
+			"noise\x1b[31mmore-noise\r")
+	}
+
+	_, err := GateReadiness("root", "mindspec-abc", false)
+	if err == nil {
+		t.Fatal("expected the evaluation error to propagate")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depends_on_id") {
+		t.Errorf("schema-error text must survive rendering, got: %q", msg)
+	}
+	if strings.ContainsAny(msg, "\x1b\r\x00") {
+		t.Errorf("a raw control byte reached GateReadiness's rendered error: %q", msg)
+	}
+}
+
 // TestRecordReadinessOverride_WritesMarkerViaMergeMetadata pins the
 // durable-marker write shape: RecordReadinessOverride calls
 // bead.MergeMetadata (via the mergeMetadataFn seam) with EXACTLY the
@@ -208,6 +241,38 @@ func TestRecordReadinessOverride_PropagatesWriteFailure(t *testing.T) {
 
 	if err := RecordReadinessOverride("mindspec-abcd.1", []string{"MF-1"}); err == nil {
 		t.Fatal("expected the MergeMetadata failure to propagate, got nil")
+	}
+}
+
+// TestRecordReadinessOverride_HostileFailureRendersEscaped pins spec 128
+// Bead 8's folded-in ta30.9 render-leg follow-up (verified live in this
+// worktree rather than assumed): RecordReadinessOverride already wraps a
+// MergeMetadata failure in bdRenderedError (ready_gate.go:130), so any
+// caller formatting the returned error via %v/%s — e.g.
+// cmd/mindspec/next.go's readinessOverrideFailure — gets the SAME
+// per-line termsafe.Escape treatment bd-ready failures get (ADR-0042),
+// with no second escaping path required at the call site. A hostile
+// control byte (ESC) in the underlying failure text must never survive
+// raw into err.Error().
+func TestRecordReadinessOverride_HostileFailureRendersEscaped(t *testing.T) {
+	orig := mergeMetadataFn
+	t.Cleanup(func() { mergeMetadataFn = orig })
+
+	hostile := "bd metadata merge-write failed\x1b[31mFORGED\x1b[0m"
+	mergeMetadataFn = func(issueID string, updates map[string]interface{}) error {
+		return errors.New(hostile)
+	}
+
+	err := RecordReadinessOverride("mindspec-abcd.1", []string{"MF-1"})
+	if err == nil {
+		t.Fatal("expected the MergeMetadata failure to propagate")
+	}
+	rendered := err.Error()
+	if strings.ContainsRune(rendered, 0x1b) {
+		t.Errorf("raw ESC byte survived into RecordReadinessOverride's rendered error: %q", rendered)
+	}
+	if !strings.Contains(rendered, "FORGED") {
+		t.Errorf("expected the underlying hostile text to survive (quoted, not raw) into the rendered error, got: %q", rendered)
 	}
 }
 

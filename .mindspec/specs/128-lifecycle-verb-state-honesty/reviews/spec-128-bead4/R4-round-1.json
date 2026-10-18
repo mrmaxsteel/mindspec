@@ -1,0 +1,41 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 claude-sub",
+  "confidence": "high",
+  "rationale": "Empirical lens, all probes run against commit 6f75235b. The suite is green (11 row fixtures + cross-pin, fresh -count=1 runs of internal/phase, internal/resolve, internal/instruct all pass; go build ./... and go vet clean; bead worktree left byte-identical at the reviewed SHA). The anti-drift property is real for the ROW SET: in a /tmp copy, renaming a row identifier went red in BOTH directions, deleting a doc row went red, deleting an ID from agreementTableRowIDs went red, and deleting the marker comments hit the explicit zero-rows fatal. Two rows were hand-walked end-to-end with the real binary in scratch fixtures: (1) a pre-epic draft (spec dir + spec/<id> branch, real git worktree, real bd tracker) — `mindspec state show` prints mode `spec` and `mindspec instruct` renders the Spec Mode template (my first idle render was my own fixture sitting on protected `main`, which renders idle by design); (2) release drove the REAL production step-6.5 sync: with a closed sibling and stored contrived to `review`, releasing the active bead wrote `implement` over `review` (the sanctioned backward write, unforced), and on the all-open shape it wrote `plan` over `implement` with `state show` agreeing — TRUE two-surface agreement, release printing no instruct tail, exactly as rows 9/10 claim. Every checkable code-fact in the guide verified: state.go:159 composes from ResolveModeWithCache; derive.go:166/:174 are the DerivePhaseWithStatus class; derive.go:413 all-closed → review (so bare child-derivation cannot express terminal rows, as the guide says); repair.go:93 has --force-backward exactly as the recovery line names it; advancePhaseOnClaim (next.go:542) genuinely writes implement over a review-stored epic only when fresh child evidence re-derives implement — the forward-by-evidence claim is accurate; release.go:167 is the sole production SanctionedDerivedSync caller; plan-approve step 4b preserves a present-but-invalid stored value because IsBackwardMove (order.go:39) returns true for unknown phases; the ADR-0023 diff is exactly the :107/:108 strikes plus the guide cross-reference. ONE probe failed, and it is the one my lens defines: editing one table row in the guide — specifically falsifying the spec-approve row's State-show cell from `plan` to `implement` while leaving the row identifier intact — leaves the ENTIRE suite green. The cross-pin parses only the Row column, so per-surface cells and Notes can silently drift from both the fixtures and code. That contradicts AC-2's closing clause ('Editing the table without the fixture (or vice versa) is red'), and the guide's own enforcement sentence (lifecycle-modes.md:17-18) overstates what the test enforces — a state-honesty spec shipping a not-quite-true sentence about its own enforcement. Bounded, cheap to fix, so REQUEST_CHANGES without hard_block. Mitigation acknowledged: the row's headline mode is embedded in the pinned identifier (e.g. 'spec approve → plan'), so the most load-bearing fact IS protected; the gap is the three per-surface cells.",
+  "concrete_changes_required": [
+    "Extend the doc/fixture cross-pin so falsifying a per-surface cell is red: have parseAgreementTableRows (or a sibling parser) also extract each data row's State-show / Instruct-tail / Derivation cells, and assert them against a per-row expected-surfaces map registered beside agreementTableRowIDs (the same mode values the row fixtures already assert; the carve-out cells — the spec-create row's '*(no epic — see below)*' derivation cell, the release rows' '*(none — see below)*' tail cells, and the terminal row's split `idle`/`idle`/`done` — asserted as their literal carved values). Empirical acceptance: re-running my Probe D (sed the spec-approve row's State-show cell from `plan` to `implement`, row identifier untouched) must fail the suite. Alternatively, if the tally rules a cell-level pin out of AC-2's intended scope, the guide's own enforcement sentence at project-docs/user/guides/lifecycle-modes.md:17-18 must be narrowed to claim only what the test enforces (row-set + markers), so the guide does not overstate its own anti-drift property — but the test extension is the AC-2-conformant fix."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "title": "Cross-pin protects only the row-identifier set — falsified per-surface cells stay green",
+      "evidence": "In a /tmp copy at 6f75235b: `sed` the spec-approve row's State-show cell `plan`→`implement` (row ID untouched) → `go test ./internal/phase/ -run AgreementTable -short` PASSES (ok, 2.5s). AC-2's closing clause and lifecycle-modes.md:17-18 both promise red on table edits without fixture edits; the R4 lens probe ('edit one table row — the suite must go red') fails in this form. Row-identifier edits, row add/remove, fixture-list edits, and marker deletion all correctly go red (probes A/B/C/E)."
+    },
+    {
+      "id": "F2",
+      "severity": "info",
+      "title": "Anti-drift red-on-edit verified for row set, both directions, plus zero-rows guard",
+      "evidence": "Probe A (rename doc row ID): red with both missing-from-doc and missing-from-fixtures messages. Probe B (delete doc row): red. Probe C (delete agreementTableRowIDs entry): red. Probe E (delete marker comments): red via the explicit 'parsed zero rows' fatal at agreement_table_test.go:640."
+    },
+    {
+      "id": "F3",
+      "severity": "info",
+      "title": "End-to-end hand-walks pass with the real binary (rows 1, 9, 10)",
+      "evidence": "Scratch repos with real git worktrees + real bd trackers. Row 1: pre-epic draft → `state show` prints mode `spec`, `instruct` renders Spec Mode. Row 9: sibling closed, stored contrived to `review`, release of the active bead → production SanctionedDerivedSync wrote `implement` over `review`; `state show` = implement. Row 10: all-open → sync wrote `plan` over `implement` unforced (the sanctioned backward write); `state show` = plan. Release printed no instruct tail in any walk (R2.1 tail-less confirmed live)."
+    },
+    {
+      "id": "F4",
+      "severity": "info",
+      "title": "All checkable guide code-facts verified against the tree",
+      "evidence": "state.go:159 (ResolveModeWithCache feeds printed mode); derive.go:166/:174 (DerivePhaseWithStatus class); derive.go:413 (all-closed → review, grounding the guide's bare-derivation caveat); repair.go:93 (--force-backward flag matches the guide's recovery command verbatim); next.go:542 advancePhaseOnClaim writes implement over review ONLY when a fresh under-lock child re-derivation says implement (guide's forward-by-evidence sentence is accurate, not aspirational); release.go:167 is the single production SanctionedDerivedSync caller; approve/plan.go step 4b + order.go:39 (unknown stored → IsBackwardMove true → no-op) substantiates the preserve-invalid-stored legacy shape; ADR-0023 diff is exactly the :107/:108 supersede-strikes + guide cross-reference, bead-3's amendment paragraph untouched; merge-safety.md link target exists."
+    },
+    {
+      "id": "F5",
+      "severity": "info",
+      "title": "Observation for the adversary lens: non-active release skips the sync by design",
+      "evidence": "Releasing a bead that is NOT the single in_progress child (my initially mis-fixtured walk) succeeds but skips step 6.5 (runRelease gates on active == beadID), leaving a stale stored value; `state show` then emits the direction-conditional backward warning with an inspection-only recovery (`bd show <epic>`), never the backward write. Consistent with the guide's warning story; not a verb-success canonical state, so no table row is owed — noted so R6 can weigh it."
+    }
+  ]
+}

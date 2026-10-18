@@ -1,0 +1,51 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "R3 claude",
+  "confidence": 0.88,
+  "rationale": "Round 2, contract-stability lens. Re-derived the fix commit 542992b4 end-to-end in the bead worktree: go build + go test -short -count=1 across internal/phase, internal/approve, internal/complete, cmd/mindspec, internal/lint — all PASS; worktree left byte-identical, no stray phase.lock. My two actionable round-1 findings are ADDRESSED (G1 via the hard-block fix group; G2 via consolidation G5) and my G3 residual is properly recorded (G6). Dissolution-window re-trace under the new never-regress semantics: the invariant is now stronger than round 1's — every previously-open race CONVERGES. (a) plan-approve step 4b (plan.go:513-515) no-ops via `present && IsBackwardMove(stored, ModePlan)` on WithPhaseWriteLock's own fresh read, so an interleaved claim's implement stands and stored==derived (claimed child derives implement); the non-interleaved path writes plan==derived. (b) advancePhaseOnClaim's fn now re-derives children on a fresh in-lock Cache and writes implement ONLY while fresh evidence says implement — the delayed-advance-vs-release and delayed-advance-vs-complete real-lock interleave tests prove plan and review are never regressed, and in every no-op branch stored already equals derived. (c) The failure contract is now test-pinned, not just asserted: lock-timeout and merge-failure over the REAL advancePhaseOnClaim path leave a FORWARD-only disagreement and print `recovery: mindspec repair phase <spec-id>` — which the unforced operator guard permits, so the recovery line genuinely converges. (d) Release's two legs verified: self-heal failure gets the same always-convergent repair-phase treatment; sanctioned-sync failure gets `recovery: bd show <epic-id>` as the FINAL greppable line with the --force-backward escape named only in the labeled operator-choice body line — both legs' texts pinned in release_test.go for timeout AND plain-write-failure shapes. (e) Presence-only marker discrimination (write side EnsurePhaseSemanticsV2 and read side hasV2MarkerWithCache changed TOGETHER, staying consistent) kills the future-generation downgrade without opening any notice re-trigger: any present value short-circuits both the rewrite and the legacy notice. (f) LegacyPhaseSignature's positive all-open check means a blocked/custom-status epic is no longer misclassified legacy — it now falls to the generic direction-conditional warning, which is the correct honest treatment for a genuinely ambiguous state. The loop-airtightness and trigger-2 conclusions from round 1 are unchanged by the fix (the notice branch, repair-entry heal ordering, and completeSyncPhase value semantics were not touched except for G6's doc recording). Two info-grade observations recorded below (N1/N2), both conservative-direction and non-blocking. APPROVE.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "id": "G1-classification",
+      "severity": "accept",
+      "classification": "ADDRESSED",
+      "title": "R3-G1 (step-4b ignores stored / stale-decision race) — ADDRESSED, re-derived",
+      "detail": "plan.go:513-515 implements exactly the asked guard: fn now takes (stored, present) and no-ops via the documented refused-backward-move leg whenever the fresh in-lock stored value is ahead of plan. TestApprovePlan_Step4bRefusesBackwardOverFresherClaim pins it (asserts NO merge call writing :plan when stored is implement). Re-derivation of both race outcomes: interleaved-claim-first -> step 4b no-ops, stored=implement==derived (in_progress child); step-4b-first -> claim's advance writes implement over plan with fresh derivation agreeing. Both orders now END in stored==derived — the race is not merely tolerated, it converges. The companion fresh-derive in advancePhaseOnClaim (R6's convergent hard-block ask) is also sound: implement is written only while a fresh in-lock children read derives implement, children-read errors propagate with no write, and the two real-lock interleave tests prove release's plan and complete's review are never regressed."
+    },
+    {
+      "id": "G2-classification",
+      "severity": "accept",
+      "classification": "ADDRESSED",
+      "title": "R3-G2 (dead-end recovery commands) — ADDRESSED; the split treatment is the correct disposition",
+      "detail": "Judged the split explicitly, as asked. (1) next's advance legs (EnsurePhaseSemanticsV2 failure, lock timeout, merge failure) all route through describePhaseSyncFailure with `mindspec repair phase <spec-id>` — convergent because the residual disagreement is provably forward-only and the unforced guard permits forward repair; the deliberate departure from phase.DescribeLockFailure's no-recovery-on-non-timeout contract is documented at the function and is right here, since the convergent fix is identical regardless of failure shape. Test-pinned for both timeout and merge-failure shapes. (2) release's self-heal leg shares the same treatment — correct, since repair-phase's entry runs the identical idempotent self-heal. (3) release's sanctioned-sync leg gets `recovery: bd show <epic-id>` as the final line with the --force-backward command named only in a separately-labeled operator-choice body line. This is the honest disposition, matching my own round-1 derivation: AC-5(viii)'s twin pins the unforced operator guard to REFUSE this exact backward state, so NO unforced copy-pastable fix exists — a repair-phase recovery line here would be a lie (it refuses), and putting --force-backward on the greppable line would hand agents a reflexively-pasted force, violating the dirty-tree-refusal house convention. The recovery line stays last (ADR-0035 final-line shape preserved), and the fuller surfacing is explicitly routed to beads 4/5 in the doc comment, so it is a named residual, not a silent dead end. Both legs' exact texts are asserted in release_test.go. The incidental ratchet allowlist entry is honest: the raw epicID at the releaseSyncPhase call site is an argument-passing hop and describeReleaseSyncFailure idrender.Bead-wraps it in both of its own renders (verified in code)."
+    },
+    {
+      "id": "G3-classification",
+      "severity": "accept",
+      "classification": "ADDRESSED",
+      "title": "R3-G3 (lexical-not-semantic sanction fence) — recorded as specified (G6)",
+      "detail": "Verified the completeSyncPhase doc comment (complete.go, above the function): it names the exact residue state I derived (marker present, stored=implement, all lifecycle open — reachable only post-surfaced-failure), states honestly that the AST fence is lexical, notes the write is corrective-converging, and routes both remediation options (stored-aware no-op-on-backward guard, or honest agreement-table wording) to beads 4/5. That is precisely the accepted-residual recording my finding asked for; the value semantics were correctly left untouched this bead."
+    },
+    {
+      "id": "window-retrace",
+      "severity": "accept",
+      "classification": "ADDRESSED",
+      "title": "Dissolution window re-trace under never-regress semantics: invariant strengthened",
+      "detail": "Full re-trace at 542992b4: every rest state of plan-approve -> first-claim -> release has stored==derived, and additionally every closed race interleaving now CONVERGES to stored==derived (round 1 merely left recoverable divergences). Failure legs remain forward-only with genuinely convergent recovery lines, now proven by tests over the real code paths rather than asserted in comments. The legacy-notice loop and trigger-2 plan-over-plan conclusions from my round-1 review carry forward unchanged — the fix touched neither the notice branch's logic nor completeSyncPhase's value, and the presence-only marker change tightens (not loosens) the notice's one-shot property on both the read and write sides simultaneously."
+    },
+    {
+      "id": "N1",
+      "severity": "info",
+      "classification": "NEW_ISSUE",
+      "title": "New-bead-after-review claim writes implement over review — evidence-fresh, converging, same class as the recorded G6 residual",
+      "detail": "advancePhaseOnClaim's guard is 'fresh derivation == implement', not 'not backward': claiming a newly-added lifecycle bead on a stored=review epic (the post-review fix-bead workflow) derives implement (in_progress child) and writes implement over review — backward in the ADR-0023 order, outside the fenced surface. This is the RIGHT behavior (review was stale the moment the new bead appeared; the write lands stored==derived and prevents the backward `bd show` warning a no-op would have created), and it is the same semantically-backward-but-evidence-fresh class the G6 doc comment already records for completeSyncPhase. Non-blocking; suggest beads 4/5's agreement-table wording count this writer alongside completeSyncPhase when naming the lexical fence's honest scope."
+    },
+    {
+      "id": "N2",
+      "severity": "info",
+      "classification": "NEW_ISSUE",
+      "title": "Step 4b now preserves a present-but-invalid stored phase instead of overwriting it",
+      "detail": "readPhaseForLock reports a garbage mindspec_phase as Present=true/Stored=\"\"; IsBackwardMove(\"\", plan) is true by the comparator's deliberate incomparable-means-backward conservatism, so step 4b no-ops and the garbage value survives plan approve (pre-fix it was overwritten with plan as a side effect). Consequence is benign: derive.go treats invalid stored as absent and falls through to pure child derivation (plan for the all-open set), so no warning fires and `mindspec repair phase` can heal it; the conservative direction is the guard-correct one. Info only — no change requested; if beads 4/5 surface stored-vs-derived agreement rows, present-but-invalid is a row shape worth rendering distinctly."
+    }
+  ]
+}

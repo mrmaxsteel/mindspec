@@ -1,0 +1,71 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": "high",
+  "rationale": "Round 2 materially improves the filter-empty, verb-inventory, pick-boundary, and tracker-path surfaces, but it does not yet close the adversarial seams. The proposed repair-phase re-derive remains non-atomic with the metadata write: a concurrent completion can advance stored phase to review after the last derivation, then repair can overwrite it with stale implement. The filter-loudness requirement is internally impossible for positional --emit-only as currently specified because that path is simultaneously required to bypass the ready query and title filter. The broad paths-only panel exemption deliberately leaves independent post-review tracker commits exempt and is made unconditional by AC-7 even though two of OQ-1's three mechanisms require no exemption. A further uncovered selection defect remains: an explicit full --spec whose epic lookup errors falls back to global bd ready rather than refusing the failed scope resolution. `mindspec validate spec 128-lifecycle-verb-state-honesty` reported only the expected lifecycle-binding warning that the draft has no beads epic.",
+  "concrete_changes_required": [
+    "Make R6.1, R6.3, AC-10, and AC-10b coherent for positional --emit-only. Either it participates in the raw-ready/filter construction and reports exclusions, or it remains a readiness-bypassing preview and the every-path filter claims explicitly exclude that combination while pinning its honest bypass message. Add a test for positional --emit-only with --spec and a title-unreferenced ready bead.",
+    "Close the actual last-read-to-MergeMetadata repair race. Test a concurrent complete that advances stored phase to review after repair's final derivation but before its metadata write; repair must not overwrite review with stale implement. Price a real conditional write, serialization primitive, or another mechanism that makes this invariant hold rather than merely narrowing the race window.",
+    "Make the panel-staleness ACs conditional on the selected OQ-1 mechanism. Under reorder or rollback, an independent named-artifact-only commit must not become exempt merely because AC-7(iii) says so. If paths-only exemption is selected, explicitly adjudicate the review-integrity cost of exempting any actor's post-review tracker-state commit rather than presenting it as required under all three options.",
+    "For an explicit --spec, require epic lookup failure or absence to refuse with the real scope-resolution error; never fall back to global bd ready. Pin this on claim and emit-only paths, including a full spec ID (which ResolveSpecPrefix currently passes through without proving existence).",
+    "Add an acceptance assertion that forced backward repair's success output itself names the recorded reason, matching R2.1/R3.3 rather than testing only that the reason is stored."
+  ],
+  "findings": [
+    {
+      "id": "R6-R1-1",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Filter-empty loudness was added, but positional emit-only makes the every-path contract contradictory",
+      "evidence": "R6.3 at spec.md:134 and AC-10 at :190 require exclusions to be reported on default, --pick, positional, and --emit-only paths. R6.1 at :132 simultaneously preserves positional --emit-only as FetchBeadByID with readiness not checked; current runEmitOnly at cmd/mindspec/next.go:403-412 performs no ready query or title filter in that branch. AC-10b covers only unpositioned claim and emit-only invocations.",
+      "impact": "An implementation cannot satisfy both requirements for positional --emit-only, and the exact selector/path seam from the round-1 ask remains unpinned."
+    },
+    {
+      "id": "R6-R1-2",
+      "classification": "PARTIAL",
+      "severity": "medium",
+      "title": "Release is covered, but forced repair output is not acceptance-pinned",
+      "evidence": "R1.3 at spec.md:99 adds release-to-plan and release-to-implement rows. R2.1 at :104 and R3.3 at :113 require forced repair's result line to name its recorded reason, but AC-5(iii) at :185 asserts only that the reason is recorded and AC-14 at :195 pins only a generic repaired/consistent result line.",
+      "impact": "The implementation can store the force reason while omitting it from the user-visible success result and still satisfy the stated ACs."
+    },
+    {
+      "id": "R6-R1-3",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Re-derive-before-write narrows but does not close the repair TOCTOU",
+      "evidence": "R3.3 at spec.md:113 explicitly rejects CAS and guarantees only a fresh derivation before the write. AC-5(v) at :185 injects a flip between the initial derivation and the write decision, not after the final derivation. complete advances and syncs stored phase at internal/complete/complete.go:1355-1367. If repair last derives implement, concurrent complete then syncs review, and repair subsequently MergeMetadata-writes stale implement, stored phase moves backward despite the guard.",
+      "impact": "The command can still perform precisely the stale backward lifecycle write the round-1 ask required it to prevent. The fix report's claim that the harmful direction is closed is false for completion racing after the final read."
+    },
+    {
+      "id": "R6-R1-4",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Named paths are narrow, but provenance was deliberately dropped and AC-7 forces the exemption under every OQ-1 arm",
+      "evidence": "R4.2 at spec.md:120 correctly narrows the artifact set to .beads/issues.jsonl but expressly exempts any actor. AC-7(iii) at :187 unconditionally requires that exemption. OQ-1 at :214 still leaves reorder and rollback live; those mechanisms do not require or imply a broad staleness exemption, despite the claim that R4's ACs hold under all three arms.",
+      "impact": "An independent tracker-state commit after review can bypass exact-SHA staleness, and choosing a mechanism that avoids this relaxation is made incompatible with the unconditional AC."
+    },
+    {
+      "id": "R6-R1-5",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Pick boundary behavior is total and acceptance-pinned",
+      "evidence": "R6.1 at spec.md:132 defines singleton out-of-range, zero-as-unset, and negative rejection semantics. AC-9 at :189 pins all three on claim and emit-only paths, including the current singleton early-return counterexample in internal/next/select.go:20-22.",
+      "impact": "No remaining round-1 pick-boundary change is required."
+    },
+    {
+      "id": "R6-N1",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "Explicit spec scoping silently degrades to the global ready set",
+      "evidence": "On the claim path, cmd/mindspec/next.go:158-170 calls FindEpicBySpecID but falls back to QueryReady whenever lookup errors or returns no epic; runEmitOnly repeats the fallback at :417-428. ResolveSpecPrefix passes any syntactically valid hyphenated full ID through without establishing existence (internal/resolve/target.go:49-56). The title filter then becomes the only scope boundary.",
+      "impact": "A failed or absent epic lookup can select or preview a globally-ready bead based only on title text, hiding the true lifecycle-discovery failure and violating deterministic spec-scoped selection."
+    },
+    {
+      "id": "R6-N2",
+      "classification": "NEW_ISSUE",
+      "severity": "high",
+      "title": "The OQ-1 option set and unconditional AC-7 are mutually inconsistent",
+      "evidence": "R4.2 at spec.md:120 says the paths-only exemption applies only if OQ-1(c) is chosen, while AC-7 at :187 mandates the exemption without that condition and OQ-1 at :214 says ACs hold under reorder, rollback, or exemption.",
+      "impact": "The plan cannot select OQ-1(a) or (b) faithfully without either failing AC-7 or introducing an unnecessary review-integrity relaxation."
+    }
+  ]
+}

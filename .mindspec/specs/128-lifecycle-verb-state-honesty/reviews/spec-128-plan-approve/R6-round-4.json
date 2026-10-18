@@ -1,0 +1,54 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R6 codex",
+  "confidence": 0.98,
+  "rationale": "Three of my four round-3 asks are ADDRESSED. The Windows design now uses an OS-owned LockFileEx byte-range lock on a retained handle, so there is no delete/takeover race or identity-publication crash window; the v2 fixtures explicitly carry the marker before repair entry; and chunk 2 now includes repair.go with the exactly-one-caller tightening assigned to bead 2. The resume ask is only PARTIAL. The new ref proves materialization commit C, but the plan then deliberately creates a separate tracker-sync commit D before the bead-to-spec merge. At that point marker=C while tip=D. A crash after sync, a merge conflict, or any other retry from the sync-to-merge interval is classified as a stale marker, deleted, and sent through the unchanged panel gate, which rejects D as stale against reviewed A. Existing merged-unclosed reconciliation cannot help because before a successful CompleteBead cleanup the bead worktree and branch still exist. This falsifies the plan's claim that the whole update-ref -> index refresh -> sync -> merge boundary has marker-driven forward resume, and can also block spec 127's preserved-merge/--resolve-merge recovery. The fix is focused and buildable, but it is load-bearing recovery design in the defect family of spec 128, not an implementation-detail choice that a bead should invent after plan approval. `mindspec validate plan 128-lifecycle-verb-state-honesty` exits 0 with only the three already-dispositioned decomposition warnings.",
+  "concrete_changes_required": [
+    "Complete the materialization-marker state machine across every planned tip transition, not only A->C. In particular, make the C->tracker-sync-D transition durably/atomically recognizable as tool-authored (for example by constructing D with plumbing and transactionally advancing the bead ref plus marker, or an equivalently fail-closed protocol), so an interruption after artifact sync or during a preserved merge resumes before the panel gate instead of deleting the marker and stale-SHA blocking. Pin failure-injection fixtures after the sync commit and after a merge conflict is preserved; plain re-run/--resolve-merge must converge without re-paneling or laundering a foreign tip.",
+    "Specify terminal ordering and cleanup for the marker: landed-merge reconciliation must be detected before any marker-vs-missing-tip stale decision, and successful ordinary or reconcile completion must clear an orphaned materialization ref. Align bead 6's contradictory sequence with the feasible order commit-tree C -> marker(C) -> expected-old update-ref (the current bead step says marker-ref write before commit-tree), and remove the stale O_EXCL-Windows lead-in now that LockFileEx replaces it."
+  ],
+  "findings": [
+    {
+      "id": "R6-R3-ASK-1",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Retained-handle LockFileEx supplies atomic Windows ownership",
+      "detail": "The operative design replaces compare/delete entirely: contenders retain open handles and contend on one exclusive byte-range lock; the OS owns exclusivity, UnlockFileEx plus CloseHandle is owner-only release, and process death releases the lock. A leftover empty or partial file is inert because file existence is not ownership. The barrier exclusivity, crashed-holder, timeout, and leftover-file fixtures cover the requested failure classes. The phrase 'O_EXCL windows' at plan lines 551-553 is stale contradictory prose, not the operative mechanism, and should be removed as part of the requested cleanup."
+    },
+    {
+      "id": "R6-R3-ASK-2",
+      "classification": "PARTIAL",
+      "severity": "high",
+      "title": "Resume marker covers C but not the subsequent tracker-sync tip D",
+      "detail": "The pre-panel marker==tip branch correctly repairs the specifically pinned interruption after update-ref(C) and before mixed reset. It does not cover the rest of the boundary the plan claims to cover. The artifact is excluded from T and intentionally committed later by CommitPaths, creating D with parent C before CompleteBead runs. After that commit marker=C and tip=D, so the plan's own marker!=tip rule deletes the only resume evidence and the unchanged panel stale-SHA gate rejects D against reviewed A. This occurs on a normal tool-authored path and blocks retries after a post-sync crash or preserved merge conflict. The existing reconcile branch only engages after worktree/branch cleanup, so it cannot rescue this pre-cleanup trace."
+    },
+    {
+      "id": "R6-R3-ASK-3",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "V2 fixture marker state is pinned before repair entry",
+      "detail": "AC-5(ii), (iv), (v), and (viii) are now explicitly marker-PRESENT and constructed by post-marker means. EnsurePhaseSemanticsV2 therefore no-ops before the repair guard, preserving the intended backward state; marker-ABSENT implement/all-open is reserved for the legacy notice/self-heal fixture, and the notice is correctly classified as a replacement. On complete retries, EnsurePhaseSemanticsV2 runs ahead of the resume/panel region, but the first attempt has already installed the v2 marker, so subsequent resume attempts see an idempotent no-op rather than a second phase rewrite."
+    },
+    {
+      "id": "R6-R3-ASK-4",
+      "classification": "ADDRESSED",
+      "severity": "info",
+      "title": "Chunk 2 scope and caller-fence ownership are honest",
+      "detail": "work_chunks id 2 now includes cmd/mindspec/repair.go, bead 2 step 3 owns tightening the sanctioned-derived-sync inventory from its bead-1 zero-caller form to exactly one production caller, and the recorded full sweep also found and added chunk 1's .gitignore edit."
+    },
+    {
+      "id": "R6-R4-NEW-1",
+      "classification": "NEW_ISSUE",
+      "severity": "medium",
+      "title": "Marker cleanup after merge cleanup is underspecified",
+      "detail": "CompleteBead merges, writes landed binding, removes the worktree, and deletes the bead branch before returning. A crash after that cleanup but before complete.Run clears the materialization ref leaves a marker whose corresponding bead tip no longer exists. The plan says reconcile mode is untouched, but does not say reconcile detection precedes marker comparison or that reconcile success clears this orphan ref. This need not become a new architecture: ordering the existing landed-merge reconciliation first and making terminal cleanup idempotent closes it."
+    },
+    {
+      "id": "R6-R4-NEW-2",
+      "classification": "NEW_ISSUE",
+      "severity": "minor",
+      "title": "Bead-level materialization ordering is internally impossible as written",
+      "detail": "The mechanism section correctly creates C with commit-tree before writing marker=C immediately before update-ref, but bead 6 step 4 lists marker-ref write -> commit-tree -> update-ref. A ref cannot be meaningfully installed at C before C has been created. The bead instruction should match the mechanism section so implementation has one executable sequence."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "R4 codex",
+  "confidence": 0.96,
+  "rationale": "The integrated lifecycle completed successfully and the principal state-honesty surfaces agreed at every successful transition: idle after tracker initialization; spec after spec create; plan after spec approve and plan approve; implement after next; and review after the final complete. The unrelated-dirt claim behavior was especially clear and correct. However, the empirical drive exposed a user-facing honesty defect in spec approve: immediately after it auto-committed the approval artifacts and left a clean worktree, its success output said that committing those artifacts was still required. That is a false post-state instruction in the exact lifecycle surface this spec claims to make truthful, so the whole-spec contract is not yet complete.",
+  "concrete_changes_required": [
+    "Change the spec-approve success tail so it does not instruct the operator to commit approval artifacts after the command has already auto-committed them. State the actual result (for example, that approval artifacts were committed) and the truthful next action (continue planning).",
+    "Add an end-to-end or command-level regression assertion that a successful fresh spec approve leaves a clean worktree with the approval commit present and does not emit the false 'Commit approval artifacts before continuing' instruction."
+  ],
+  "findings": [
+    {
+      "id": "R4-1",
+      "severity": "MAJOR",
+      "title": "spec approve emits a false required post-approval action",
+      "evidence": "In the disposable lifecycle repo, `mindspec spec approve 001-lifecycle-probe` printed `Spec 001-lifecycle-probe approved.` and then `1. Commit approval artifacts before continuing (required for clean-tree gates).` Immediately afterward, `git status --short` was empty and `git log --oneline` showed `4a5fba5 chore: approve spec 001-lifecycle-probe`; `mindspec state show` correctly reported mode plan. The stale text is unconditional at cmd/mindspec/spec.go:215. Thus durable state and mode are correct, but the operator guidance falsely describes required work that the verb already performed.",
+      "contract": "The spec's goal and R2 require lifecycle verbs to tell the truth about what changed and to emit guidance for the actual post-state. A success tail that says an already-completed commit is still required is not truthful post-state guidance."
+    }
+  ],
+  "empirical_observations": {
+    "reviewed_commit": "8eaeb05e6615b351aae2e1e2353f59f93a1867ae",
+    "build": "PASS: built cmd/mindspec from the reviewed worktree into the designated scratch directory with GOCACHE and GOTMPDIR redirected there; no reviewed-tree artifact was created.",
+    "init": "PASS/HONEST: init listed the additive files it created and recommended doctor. Before bd initialization, state show failed nonzero with the real no-database cause and a recovery hint rather than serializing idle; after bd init, state show returned idle.",
+    "spec_create": "PASS on the continued drive: output named the auto-numbered ID, initialized spec path, worktree, branch, safe cd command, and spec-mode guidance; state show returned mode spec with matching activeSpec and specBranch. Native bd 1.1.0 worktree creation under the mandated /private/tmp root first refused BEADS_DIR as unsafe; MindSpec surfaced that cause, but the failed attempt left a spec branch and .gitignore edit. A scratch-local bd worktree shim was used solely to bypass that known temp-path incompatibility and continue the MindSpec lifecycle.",
+    "grill": "Skipped as directed; no CLI grill verb exists in this build.",
+    "spec_approve": "STATE PASS, OUTPUT FAIL: approval succeeded, auto-committed, and state show agreed on plan mode, but the next-step text incorrectly required committing the already-committed artifacts.",
+    "plan_approve": "PASS/HONEST: reported the approved plan and exactly one created implementation bead (repo-swq.1); state show remained plan, matching the agreement-table carve-out.",
+    "next": "PASS/HONEST: with unrelated untracked operator-notes.txt present, emitted `note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): \"operator-notes.txt\"`, claimed repo-swq.1, named the worktree and safe cd target, and reported implement state. state show and bd both agreed: active bead repo-swq.1, status in_progress, stored epic phase implement.",
+    "complete": "PASS/HONEST: after the bead commit, complete passed its gates, printed the pre-existing missing-source-globs warning, then `Bead repo-swq.1 closed.`, `Worktree removed.`, and `All beads complete. Mode: review`. Independent checks confirmed state show review, bead closed, epic stored phase review, landed merge metadata present, README merged, and bead worktree absent.",
+    "tests": "`go test ./... -short` passed every package except internal/bead TestWorktreeCreate_SharesMainDB; `go test ./cmd/mindspec -timeout 30m` failed four real-worktree expectations. All five failures arose under the mandated /private/tmp tree and match bd 1.1.0's `BEADS_DIR points to unsafe location` incompatibility observed directly; cmd/mindspec passed in the short run and internal/complete passed. These are recorded as constrained-environment failures, not claimed green and not attributed to the reviewed change.",
+    "cleanup": "The exact R4 scratch directory was deleted. The reviewed checkout remained at the reviewed SHA with empty tracked and staged diffs; only the pre-existing untracked final-review directory was present before this required verdict file was added."
+  }
+}
