@@ -1,1 +1,29 @@
 merge_strategy: pr
+
+# Review panels for this repo (operator decision 2026-10-18: keep the larger panels).
+# Pass rule: every finding is fixed, refuted with evidence or deferred; never out-voted.
+panel:
+  approve_threshold: "n-1"
+  gates:
+    spec_approve:
+      reviewers:
+        - {family: claude, model: claude-fable-5-1, count: 3}
+        - {family: claude, model: claude-opus-5-5, count: 3}
+        - {family: codex, model: gpt-6.1-sol, count: 3}
+    plan_approve:
+      reviewers:
+        - {family: claude, model: claude-fable-5-1, count: 3}
+        - {family: claude, model: claude-opus-5-5, count: 3}
+        - {family: codex, model: gpt-6.1-sol, count: 3}
+    bead:
+      reviewers:
+        - {family: claude, model: claude-opus-5-5, count: 3}
+        - {family: claude, model: claude-sonnet-5-5, count: 3}
+        - {family: claude, model: claude-fable-5-1, count: 1}
+        - {family: codex, model: gpt-6.1-sol, count: 1}
+    final_review:
+      reviewers:
+        - {family: claude, model: claude-fable-5-1, count: 3}
+        - {family: claude, model: claude-opus-5-5, count: 3}
+        - {family: claude, model: claude-sonnet-5-5, count: 3}
+        - {family: codex, model: gpt-6.1-sol, count: 3}
