@@ -8,6 +8,13 @@
 - **Superseded-by**: n/a
 - **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (gate MECHANICS — this ADR is reviewer CONDUCT, the skill-layer judgment the gate mechanism does not encode), [ADR-0040](ADR-0040-orchestration-layering-ratchet.md) (conduct is L4 skill-layer doctrine; the binary contributes mechanism only), [ADR-0043](ADR-0043-panel-disposition-telemetry-store.md) (the findings-never-out-voted doctrine this ADR makes reviewer-facing)
 
+> **Amended by [ADR-0045](ADR-0045-binary-owns-sequence-and-rules.md) (2026-10-18, spec 129)** —
+> placement only. The conduct doctrine below is unchanged and this ADR stays
+> its normative home. The role-local conduct fragments that the five panel
+> skills carry move into the binary-owned `panel brief` template when that
+> template ships (ADR-0045 Decision 3); until then they are staged content
+> under ADR-0045 Decision 5.
+
 ---
 
 ## Context

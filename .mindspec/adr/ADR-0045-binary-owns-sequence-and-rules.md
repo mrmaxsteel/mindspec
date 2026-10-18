@@ -5,10 +5,12 @@
 - **Domain(s)**: core, workflow
 - **Deciders**: Max
 - **Supersedes**: n/a
-- **Amends**: [ADR-0040](ADR-0040-orchestration-layering-ratchet.md) §1 (the L4 definition)
-- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md), [ADR-0041](ADR-0041-gate-before-mutate.md), [ADR-0044](ADR-0044-panel-review-conduct.md)
+- **Amends**: [ADR-0040](ADR-0040-orchestration-layering-ratchet.md) §1 (the L4 definition, the default answer to "where does this rule live?", and the open-ended staging ratchet); [ADR-0044](ADR-0044-panel-review-conduct.md) (where reviewer-conduct text is placed)
+- **Related**: [ADR-0032](ADR-0032-adr-semantic-gates.md), [ADR-0037](ADR-0037-panel-gate-enforced-contract.md), [ADR-0041](ADR-0041-gate-before-mutate.md)
 
 *Written in ASD-STE100 Simplified Technical English.*
+
+**Status note.** `Accepted` records the direction that the operator decided (Deciders). When this ADR was added (spec 129), no step of the Implementation order had shipped. Spec 129 moves only one rule: the override-coverage rule moves from the `ms-bead-impl` skill into `mindspec bead ready-check`. ADR-0032 (tri-state amendment) makes an `Accepted` ADR count as coverage at impl approve. Thus this ADR sets a limit: a bead can cite ADR-0045 in `adr_citations` only for a rule that the bead itself moves out of a skill into a gate, a config key or a binary template. It cannot cite ADR-0045 for code that this ADR does not yet govern.
 
 ---
 
@@ -39,6 +41,7 @@ This causes these problems:
 3. **The binary owns the judgement prompts.** A judgement prompt is a prompt for work that needs a model, for example: grill a spec, review with a lens, draft a plan, implement a bead. The binary keeps each prompt as a versioned template. A verb renders it with the current state (for example `bead prompt`, `panel brief`). The binary also validates the output contract of each prompt through `submit`.
    - A repository can override a template. It puts the override in `.mindspec/prompts/`, and config declares it.
    - `doctor` reports each override that is older than the shipped template.
+   - *Relation to ADR-0040 §3.* §3 puts agent integration at the artifact and CLI contract, "never at the prompt-format level". This decision agrees with §3. A CLI verb renders each template, so a harness still integrates through the CLI. The binary owns the prompt content. It does not own a harness prompt format.
 4. **A skill contains only harness mechanics:** how this harness starts an agent, waits, and returns a result through `submit`. A skill does not contain:
    - a command sequence;
    - a rule ("must", "never", "only after");
@@ -46,8 +49,12 @@ This causes these problems:
    - rationale or history.
 
    Put a command sequence in `next-action`. Put a rule in a gate or in config. Put a judgement prompt in a binary template. Put rationale in an ADR or in the docs.
-5. **Staging is temporary.** A new rule can start in a skill (ADR-0040 §1). It must show the ID of its target gate or config key, and a removal date. `doctor` reports a staged rule that is past its date.
+5. **Staging is temporary.** A new rule can start in a skill (ADR-0040 §1). It must show the ID of its target gate or config key, and a removal date. `doctor` reports a staged rule that is past its date. This replaces two parts of ADR-0040 §1. The first is the open-ended staging area. The second is the default answer "start it at L4 if its correctness depends on judgment". Judgement now goes into a binary template (Decision 3), and a rule never goes into a skill.
 6. **A skill is a stub that loads one canonical source.** `mindspec setup` installs stubs, not full copies. `doctor` reports a skill that differs from the canonical source.
+
+### Relation to ADR-0044
+
+ADR-0044 calls reviewer conduct "L4 skill-layer doctrine". It puts role-local conduct fragments in the five panel skills. This ADR changes only where that text is placed, not what it says. When the binary-owned `panel brief` template ships (Decision 3), the conduct fragments move into that template, and the skills cite nothing. Until then, the fragments in the skills are staged content under Decision 5. ADR-0044 stays the normative home of the conduct itself.
 
 ## Consequences
 
@@ -66,13 +73,13 @@ This causes these problems:
 
 ## Implementation order
 
-1. Write the rule table. Give each rule an ID, a scope, a prohibition, a replacement, and `enforced_by`.
+1. Write the rule table. Give each rule an ID, a scope, a prohibition, a replacement, and `enforced_by` (spec 130).
 2. Move each rule that a skill states into a gate or config key (specs 129–133).
 3. Move the judgement prompts into binary templates. Add the renderers and the override path (specs 130, 131 and 133).
 4. Add `next-action` (spec 133).
-5. Make `instruct` render from the rule table and `next-action`.
-6. Change `setup` to install stubs. Add the `doctor` drift checks for stubs and overrides.
-7. Delete the sequences, rules, prompts and rationale from the skills. Keep only the harness adapters.
+5. Make `instruct` render from the rule table and `next-action` (unassigned).
+6. Change `setup` to install stubs. Add the `doctor` drift checks for stubs and overrides (unassigned).
+7. Delete the sequences, rules, prompts and rationale from the skills. Keep only the harness adapters (unassigned).
 
 ## Verification (2026-10-18, `main` at `e2325e36`)
 
@@ -83,4 +90,5 @@ The Context claims above were checked against the tree when this ADR was added b
 - *Follow-up bead*: `ms-bead-cycle` says a dissenting verdict's changes may be "filed as a follow-up bead before merge"; the gate's unresolved-verdict leg does not accept that as resolution.
 - *Drift*: the installed `.claude/skills/ms-bead-cycle/SKILL.md` was last changed 2026-07-07; `plugins/mindspec/skills/ms-bead-cycle/SKILL.md` on 2026-07-24; the two files differ.
 - *History machinery*: `internal/setup/skills.go`'s `previouslyShippedSkills` matches installed skills against byte-exact embedded `historical_skills/` snapshots (not content hashes — the wording above was corrected accordingly).
+- *Conflicts stated (spec-129 round-1 panel)*: ADR-0044's Related line says that conduct "is L4 skill-layer doctrine", and its Context says that it "ships as skill/ADR text". Decision 4 forbids rules and rationale in skills. The reconciliation is in "Relation to ADR-0044" above. ADR-0040 §1 holds the default answer "start it at L4" and an open-ended staging area. Decision 5 replaces both. The Amends line names them, and ADR-0040 §1 carries a back-pointer.
 - *Not yet in the tree*: `next-action`, `submit`, `bead prompt`, `panel brief`, `.mindspec/prompts/`, and the rule table. The Implementation order above is the plan for them; none is claimed as shipped.

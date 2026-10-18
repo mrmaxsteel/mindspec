@@ -109,6 +109,14 @@ judgment; move it to L2 the moment it is a checkable fact about a run
 (a count, a threshold, an enum, a boolean); move it to L1 the moment violating
 it must be structurally impossible rather than merely discouraged.
 
+> **Amended by [ADR-0045](ADR-0045-binary-owns-sequence-and-rules.md) (2026-10-18, spec 129):**
+> the L4 definition, the "start it at L4" default answer above, and the
+> open-ended staging area. Under ADR-0045 a skill holds harness mechanics
+> only: judgement prompts become binary-owned templates (its Decision 3),
+> and a rule staged in a skill must name its target gate or config key and
+> a removal date (its Decision 5). The ratchet direction and L1–L3 are
+> unchanged.
+
 ### 2. Precedent chain — already-shipped evidence
 
 This layering is a codification because the ratchet has already fired three
