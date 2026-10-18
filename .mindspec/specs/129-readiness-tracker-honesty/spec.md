@@ -18,7 +18,7 @@ After this spec, the verbs that decide *what work is ready* tell the truth about
   - On an empty result it prints the spec's derived lifecycle state, so no caller can mistake "nothing ready" for "done".
 - (b) no bd `ready`/`list` call the binary makes a decision on can be truncated by a bd row cap, and a truncation bd announces is an error, never a silent short read;
 - (c) `mindspec next` claims a bead only if it is a plan bead of its lineage spec. It dispatches every claim into that lineage spec, and never cuts from `HEAD`. It refuses before any mutation when a scoped or resolved spec disagrees with the lineage spec;
-- (d) MF-3 holds a closed dependency to the landed-merge test only when the dependency belongs to the same spec by a tracker fact; it finds a correctly named landing that is reachable from the spec-branch tip but off its first-parent chain (GH #239); a stale or non-matching panel registration never vetoes a correct corroboration, in `FindLandedMerge` or in `reattest`; and it prints what is actually true for a contradiction or a revert. GH #232 is closed on its real mechanism (Background D.5), not by a remote-aware feature;
+- (d) MF-3 holds a closed dependency to the landed-merge test only when the dependency belongs to the same spec by a tracker fact; a correctly named landing that is reachable from the spec-branch tip but off its first-parent chain (GH #239) is found and NAMED, and MF-3 fails loudly with the one audited command (`mindspec reattest`) that can accept it. The automatic path never passes it, so #239 is fixed as loud, named and recoverable, not as an automatic pass; a stale or non-matching panel registration never vetoes a correct corroboration, in `FindLandedMerge` or in `reattest`; and it prints what is actually true for a contradiction or a revert. GH #232 is closed on its real mechanism (Background D.5), not by a remote-aware feature;
 - (e) the MF-2 token resolver recognises the same claim forms on both sides, bead text and spec text;
 - (f) `--allow-not-ready` is scoped to named failing signals, needs an evidence file on every claim, and `mindspec bead ready-check` reads a validated override marker back, so the override log can be audited against the currently failing set and the override rule has one home (the binary, not `ms-bead-impl`'s prose);
 - (g) ADR-0045 ("The binary owns sequence and rules; skills are harness adapters") lands, with its conflicts with ADR-0040 and ADR-0044 stated, so specs 130–133 can cite it.
@@ -31,8 +31,8 @@ Spec 128 (`128-lifecycle-verb-state-honesty`, merged 2026-10-18, PR #257) deferr
 
 The cluster is split as follows. Every inherited issue has one named home:
 
-- **Spec 129 (this spec):** six code requirements, R1–R6 (#255, the row caps, the claim/dispatch spec-consistency guard, #239 and #232, MF-2 symmetry, the override), estimated at **7–10 beads** at plan time. R7 (ADR-0045) is a document that lands with this spec's commit. The ADR-0041 "Amendment (Spec 129)" is a document that lands with the R4 and R6 beads.
-- **Spec 129b (part 2):** five deliverables:
+- **Spec 129 (this spec):** six code requirements, R1–R6 (#255, the row caps, the claim/dispatch spec-consistency guard, #239 and #232, MF-2 symmetry, the override). #239 is fixed as loud, named, and recoverable by one audited `mindspec reattest`, not as an automatic pass (R4.2), estimated at **7–10 beads** at plan time. R7 (ADR-0045) is a document that lands with this spec's commit. The ADR-0041 "Amendment (Spec 129)" is a document that lands with the R4 and R6 beads.
+- **The follow-on spec (part 2; the next free plain number, never a lettered ID — Background K):** five deliverables:
   - G (#234);
   - H (#244);
   - #250 (the same family as #244: a multi-step terminal mutation with no intermediate stop);
@@ -40,7 +40,7 @@ The cluster is split as follows. Every inherited issue has one named home:
   - phase-lineage unification (removing `FindEpicForBead`'s title fallback and tightening `beadIndex`).
 - **Spec 130:** the S0 rule table (ADR-0045 Implementation order step 1), #233's review-to-landing binding (see D.5), and the rest of #251. #251 is the work that reached the spec tip inside another bead's branch with no merge naming it. R4.2 covers only the sub-shape described there.
 
-Relief valve: if the plan gate judges 129 over-compressed, R6 (override UX) splits out as 129c. R6 is coupled to R1–R5 only through the readiness report. R4 does not split cleanly, because R4.1 shares the plan-bead helper with R1.1.
+Relief valve: if the plan gate judges 129 over-compressed, R6 (override UX) splits out as a further plain-numbered spec. R6 is coupled to R1–R5 only through the readiness report. R4 does not split cleanly, because R4.1 shares the plan-bead helper with R1.1.
 
 ### Settled facts inherited from spec 128 (binding)
 
@@ -63,7 +63,11 @@ Round 2 reproduced the shape against a scratch bd 1.1.0 database:
 - **Lineage.** The real `phase.FindEpicForBead("pr-1rs.4")` returns `epic=pr-1rs spec=129-probe`, through the title fallback. A sibling `pr-1rs.5` with a neutral title returns `ErrNoEpicLineage`.
 - **Edge-based exclusion.** bd 1.1.0 still lists both under `bd ready --parent pr-1rs` because of the ID prefix. A bd that reads `--parent` from edges only, or a title that names `[129]` but not the full spec ID (so `containsSpecID` misses it), drops the reporter's bead.
 
-The fix therefore must not rest on `--parent` or on the title substring (R1.1).
+The fix therefore must not rest on `--parent` or on the title substring (R1.1). On bd 1.1.0 at `e2325e36`, the reporter shape with a FULL-spec-ID title is already selected today: prefix `--parent`, plus a title that passes `containsSpecID`. The real-bd Validation Proof is therefore green today, and R1.1 hardens against the two variants that fail:
+- an edge-only `--parent`;
+- a short `[NNN]` title tag, which `FindEpicForBead`'s `Sscanf("%d")` resolves and `containsSpecID` drops.
+
+AC-1 pins both variants red-on-revert.
 
 On the claim path, the `len(items) == 0` branch in `RunE` runs BEFORE the positional/`--pick` selector is consulted: `mindspec next <id> --spec X` and `--pick 3` on an empty scoped set print "No ready work found." and exit 0, with the selector ignored. On `--emit-only` the same emptiness exits 1. A positional there goes to `next.FetchBeadByID` (pinned 128 R6.1 preview semantics). `ReadySet.ExclusionNotice` renders a count without IDs. The empty-set text is the same sentence whether every bead is closed or every open bead is blocked. The ambiguity menu at `cmd/mindspec/next.go` still prints `mindspec next --spec=<number>` after listing spec IDs, and `--spec=1` is rejected (#239 § Minor; still live).
 
@@ -97,7 +101,15 @@ Round 2 found the limit of that fallback: `gitutil.MergeInto` writes `Merge bead
 - Y lands, and X's later round never lands.
 - Registrations are `{A, B}`.
 
-Under the round-1 text, the fallback admitted that merge and the panel set confirmed it on `A`, which gave a false MF-3 PASS. R4.2 now requires the fallback path to be confirmed by a datum other than the panel.
+Under the round-1 text, the fallback admitted that merge and the panel set confirmed it on `A`, which gave a false MF-3 PASS.
+
+Round 3 found two more false PASSes, each with the panel excluded:
+- the surviving `bead/X` branch reset to the stale tip `A`, which corroborates as (b);
+- an agent-written binding naming the X→Y merge, which corroborates as (d).
+
+A third reviewer built a fixture where same-second-parent grouping across independent sibling merges made an empty merge the content anchor, masking the revert of a real landing.
+
+Three rounds, three new holes. The undirected form is a set that the mechanism cannot enumerate. So R4.2 no longer confirms automatically on the fallback path at all: it finds and names the candidate, and `reattest`, the audited path with its own refusals, is the only way to accept one.
 3. *Stale panel corroboration.* `lifecycle.reviewedHeadSHAForBead` returns the FIRST non-empty `reviewed_head_sha` in `panel.ForBead(panel.Scan(roots…))` order (sorted by directory). `FindLandedMerge` returns an exact-equality contradiction for that SHA BEFORE the surviving-tip and landed-binding legs run. `ReattestLandedMerge` refuses with `ReattestStatePanelContradiction` on the same value. REPRODUCED.
 4. *Misleading message.* `ErrLandedMergeNoCandidate` wraps `ErrLandedMergeNotFound`, and so do the contradiction and revert returns. `evaluateMF3` tests only `*LandedMergeNoEvidence` and the broad sentinel, so a contradiction or a revert prints the zero-candidate sentence "no landed merge into … names bead/X".
 5. *#232's real mechanism.* #232's failing dependency is bead 1 of the **same** spec, merged by `mindspec complete` after one panel round, so cause 1 cannot apply, and cause 3 (two rounds) is not its shape. Its companion #233 shows the mechanism: `mindspec complete` lands a commit that no panel can have reviewed, so the merge's second parent `D` differs from the single registration's `reviewed_head_sha = B`. From there:
@@ -125,6 +137,14 @@ The tracked `.beads/issues.jsonl` already holds legacy `{signals, overridden}` m
 - each manifest that lists itself.
 
 A rule table there needs an ownership claim first.
+
+**K. Spec numbering: no lettered IDs.** `idvalidate`'s spec-ID pattern allows one trailing letter (`129b-…`), but lineage breaks on such an ID:
+- `internal/approve/spec.go`'s `parseSpecID` runs `strconv.Atoi` on the text before the first hyphen, so the epic gets `spec_num: 0`.
+- `phase.FindEpicForBeadWithCache` then skips that parent epic (`num > 0` is required). Its title fallback `fmt.Sscanf("129b-…", "%d")` yields 129 and matches this spec's epic.
+
+So a lettered successor's beads would resolve by lineage to spec 129. The panel proved this in round 3, and it is filed as **mindspec-wtjr**, a known defect that this spec does not fix. Successor specs therefore take the next free plain number.
+
+Related, as measured by two panel slots: when two epics carry the same spec number, the epic chosen is nondeterministic across lookups, and the newest epic wins. That direction is fail-safe for selection, because members must resolve to the epic `--spec` resolved, and anything else is named N2. It is recorded with mindspec-wtjr for the follow-on spec.
 
 ### Corrections (draft claims the round-1 panel or re-verification proved wrong)
 
@@ -155,7 +175,7 @@ A rule table there needs an ownership claim first.
   - `internal/instruct/**`: `templates/implement.md`, R1.4's L3 rule.
   - `internal/setup/**`: rewrite of `readiness_skill_pin_test.go`'s override-coverage pins, under the skill-refresh protocol.
   - `cmd/mindspec/**`: `next.go` flag shape, emptiness output and menu text; `bead_ready.go` marker read-back; `bead_clarify.go` text.
-  - `plugins/mindspec/skills/ms-bead-impl/SKILL.md`: the override-coverage prose is **removed** and replaced by "run `mindspec bead ready-check`; proceed on exit 0". This deletes a rule from a skill, as ADR-0045 §4 requires. No rule is added to any skill.
+  - `plugins/mindspec/skills/ms-bead-impl/SKILL.md`: the override-coverage prose (a rule) is **removed**, and its logic moves into `bead ready-check`. The one remaining line, "run `mindspec bead ready-check`; proceed on exit 0", is marked as a staged rule under ADR-0045 Decision 5's transition clause, with target `next-action` (spec 133) (R6.5).
   - `.claude/skills/ms-bead-impl/SKILL.md` (installed copy): it is a stale July copy with no override prose (0 matches), so it is **refreshed** from the plugin source, not edited.
   - `internal/setup/historical_skills/**` (fenced): no existing snapshot is edited. Only the protocol's new snapshot of the replaced plugin text is added.
   - `plugins/mindspec/skills/ms-bead-cycle/SKILL.md`: the bare-form wording, if the plan's grep finds one (R6.5).
@@ -170,16 +190,18 @@ Documentation surfaces touched are not Impacted-Domains entries. They are claime
 ## ADR Touchpoints
 
 - [ADR-0041](../../adr/ADR-0041-gate-before-mutate.md) — **AMENDED** by a new § "Amendment (Spec 129)". It is appended (not an in-place rewrite), follows the Spec-125 precedent, is cross-referenced from item (c), and is finalized by the bead that lands the citing code. AC-18 pins it. It covers three things:
-  - **(i) Reachable-landing fallback (R4.2).** The Spec-125 text binds landed-ness to "a two-parent first-parent merge", and §2(ii) reads revert-awareness over "the first-parent chain SINCE the candidate merge". The amendment admits a fallback candidate for the MF-3 read and for `reattest` only. A fallback candidate is a two-parent merge reachable from the tip whose subject names `bead/<id>` as the merged SOURCE.
-    - **Target.** The target is checkable only for the explicit `… into <target>` forms; those are admitted only when `<target>` is the spec branch. `gitutil.MergeInto`'s `Merge bead/<id>` encodes no target.
-    - **Defence for the undirected form.** It is not subject pinning. It is reachability from the tip, plus an exact (b) surviving-tip or (d) landed-binding corroboration, plus the net-effect test at the tip. On the fallback path **a panel registration alone never confirms**.
-    - **Residual, stated.** A `Merge bead/<id>` made into another branch whose history later reaches this tip is identified when (b) or (d) corroborates it, because its content is then present at the tip.
-    - **Revert-awareness.** It is the same net-effect test at the tip, of which the candidate is an ancestor.
-    - **CLOSE decisions.** `complete`'s merged-unclosed reconcile keeps the first-parent scan.
+  - **(i) Reachable-landing fallback (R4.2): a finder, not an identifier.** The Spec-125 text binds landed-ness to "a two-parent first-parent merge", and §2(ii) reads revert-awareness over "the first-parent chain SINCE the candidate merge".
+    - **What it may do.** The amendment lets a fallback scan FIND and NAME a reachable, source-named merge when the first-parent scan finds none.
+    - **What it never does.** No automatic path treats such a candidate as landed. It returns a typed off-first-parent result, and MF-3 fails with `mindspec reattest <id>`.
+    - **Target.** It can be checked only for the explicit `… into <spec-branch>` forms. `gitutil.MergeInto`'s `Merge bead/<id>` encodes none.
+    - **Acceptance.** Only the operator-invoked, audited `reattest` may accept a fallback candidate. It requires exactly one owned candidate, with no tie-break and no grouping. It refuses when any registered `reviewed_head_sha` is not an ancestor of the tip. It always records its audit.
+    - **Read-back.** The persisted, reattest-audited binding naming the candidate is the only thing later automatic reads accept. Its residual (agent-writable audit metadata) is stated.
+    - **Earlier rules superseded.** The round-2 corroboration and tie-break rules for the fallback path are withdrawn. They departed from FIX-2b and from Spec 125's "fail-closed on every ambiguity", and they are moot here.
+    - **CLOSE decisions.** `complete`'s merged-unclosed reconcile keeps the first-parent scan only.
   - **(ii) Non-equal panel datum (R4.3).** Item (c) already reads "a registered panel's `reviewed_head_sha` equal to an exact match's second parent". The amendment makes the non-equal case explicit for `FindLandedMerge` and `reattest`: a registration whose SHA does not equal the second parent is NON-CORROBORATING. It neither confirms nor contradicts.
     - This reaches the CLOSE paths, and it is safe. A stale SHA used to contradict. Now an exact tip, binding or panel match confirms, which is the evidence class Spec 125 already admits; otherwise the result is still a refusal (`*LandedMergeNoEvidence`), never a close.
     - A contradictory landed binding still vetoes automatic identification. Only an explicit `reattest` may replace it, with the scan-derived identity, after its own checks pass, and with the prior pair audited.
-  - **(iii) Fourth-verb clause (R6).** `--allow-not-ready` becomes signal-scoped and needs an evidence file on every claim that records an override. It refuses when a non-named signal fails, and coverage is bound to a fingerprint of the signal's complete failure set. An existing marker never authorizes a claim.
+  - **(iii) Fourth-verb clause (R6).** `--allow-not-ready` becomes signal-scoped and needs an evidence file on every claim that records an override. It refuses when a non-named signal fails, and coverage is bound to per-record digests of the signal's complete failure set (growth uncovers; shrinkage stays covered). A named signal carrying an `indeterminate` record cannot be overridden. An existing marker never authorizes a claim.
 - [ADR-0035](../../adr/ADR-0035-agent-error-contract.md) — APPLIED. Every new refusal ends with a `recovery:` line:
   - R1.3's selector refusals use `recovery: mindspec next --spec <spec-id>`.
   - R1.2's near-misses use `bd update <id> --parent <epic-id>` only for N1: a plan-form bead with no parent whose lineage does not resolve. That is the one recovery shown to yield a claimable bead. Otherwise they get the inspection-first `bd show <id> --json` (Spec-127 amendment item 2; never a reparent over a parent the agent did not name).
@@ -206,34 +228,56 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 
 ### R1 — Spec-scoped selection honesty (#255)
 
-1. **One claim predicate: the plan bead.** A bead is a **plan bead of spec S** (epic E) iff two things hold:
-   - (a) its ID has the plan-bead form `<E>.<N>` (N ≥ 1, one segment). This is one exported helper in `internal/bead` (working name `bead.PlanBeadIndex(epicID, id) (n int, ok bool)`), shared with R1.8 and R4.1.
-   - (b) its lineage resolves to E. If the row's `parent` is E, lineage holds by the parent edge, with no extra call. Otherwise `phase.FindEpicForBead(id)` must return E. This is the same function, unchanged, that `readiness.EvaluateReadiness` and `complete` use, so a missing parent edge with a `[NNN]`-tagged title qualifies.
+1. **One claim predicate: the plan bead.** A bead is a **plan bead of spec S** (epic E) iff all three of the following hold:
+   - (a) its ID has the plan-bead form `<E>.<N>` (N ≥ 1, one segment). This is checked by one exported helper in `internal/bead` (working name `bead.PlanBeadIndex(epicID, id) (n int, ok bool)`), shared with R1.8 and R4.1;
+   - (b) `phase.FindEpicForBead(id)`, which is unchanged and is the resolver `readiness.EvaluateReadiness` and `complete` use, returns E. This is checked for every plan-form row. There is no parent-E shortcut, so a bead with parent E and a conflicting epic dependency that `FindEpicForBead` resolves first is excluded and named (N2c), never selected and then refused;
+   - (c) N is mapped by `plan.md`, by a `## Bead N` section or a `work_chunks` id N. This is MF-1's own mapping (`extractBeadSectionRaw`, `ParsePlanFrontmatter`), and `plan.md` is read once per scoped call.
 
-   For `next --spec S`:
-   - **One bd call.** The scoped set comes from ONE uncapped global `bd ready -n 0 --json` call. It does not use `bd ready --parent`, whose edge-or-prefix semantics differ by bd version (Background A), and it does not use the title substring.
-   - **Members.** A row is a member iff it is not an epic, is open, and is a plan bead of S. Members keep bd's returned order, so `--pick N` parity holds by construction.
-   - **Extra cost.** One `bd show` per plan-form row whose `parent` is not E. These are rare by construction.
-   - **Read errors.** A real lineage read error refuses the whole command, fail-closed (`could not resolve the lineage of <id>`). It never silently drops the row.
+   bd mints `<E>.<N>` for every `bd create --parent E` whatever its type, so ID form plus lineage alone cannot tell a plan-approve bead from a follow-up. This repository has such follow-ups, e.g. `mindspec-cter.8` and `mindspec-jfgj.4`, both type bug and outside their plans' bead ranges.
 
-   `issue_type` is not a membership input, because #255's own bead was a `bug`. Neither the title nor `metadata.spec_id` is a membership input. The honest limit: `readiness.beadIndex` accepts any trailing `.<N>`, so readiness also evaluates a `<other>.<N>` bead whose title-fallback lineage is S. `next` does not select it (N3). Tightening `beadIndex` is 129b's phase-lineage unification.
-2. **Near-misses are named, on every scoped call.** A **near-miss** is a non-epic, non-member row of the same global set that has any of these links to S:
+   The scoped set:
+   - It comes from ONE uncapped global `bd ready -n 0 --json`. It does not use `bd ready --parent`, whose edge-or-prefix semantics differ between bd versions (Background A), and it does not use the title substring.
+   - A row is a **member** iff it is not an epic, is open, and is a plan bead of S. Members keep bd's returned order, so `--pick N` parity holds by construction.
+   - Extra cost: one `bd show` per plan-form row for (b), with the epic list cached in `phase.Cache`, plus one `plan.md` read.
+   - A real lineage read error, or an unreadable `plan.md`, refuses the whole command fail-closed (`could not resolve the lineage of <id>` / `could not read plan.md for <S>`). It never silently drops a row.
+
+   `issue_type` is not a membership input: #255's own bead was a `bug`, and a mapped plan bead of any type is selectable. Neither the title nor `metadata.spec_id` is a membership input. *Rejected alternative:* keeping unmapped `<E>.<N>` children as members and default-picking lifecycle members first. MF-1 refuses every unmapped bead, so such a member could never be claimed without an override. Listing it as selectable would be the dishonesty R1 removes.
+
+   The honest limit: `readiness.beadIndex` accepts any trailing `.<N>`, so readiness also evaluates a `<other>.<N>` bead whose title-fallback lineage is S. `next` does not select that bead (N3). Tightening `beadIndex` is the follow-on spec's phase-lineage unification.
+2. **Near-misses are named, on every scoped call.** A **near-miss** is a non-epic, non-member row of the same global set with any of these links to S:
    - a plan-bead-form ID for E;
    - row `parent` E;
    - a title containing the spec ID;
    - row `metadata.spec_id` equal to S.
 
-   Each is printed by ID with its true reason and one recovery line:
-   - **(N1)** Plan-bead form, no `parent`, and `FindEpicForBead` returns `ErrNoEpicLineage`. Message: `bead <id> has the plan-bead form for epic <E> but no lineage (no parent edge and no spec tag in its title)`. Recovery: `recovery: bd update <id> --parent <E>`. This is the one class whose recovery is shown to make the bead claimable (AC-2).
-   - **(N2)** Plan-bead form, but lineage resolves to another epic E2, or the row's parent is a bead P that the agent did not name. Message: `… but its lineage resolves to <E2>` or `… but its parent is <P>`. Recovery: `recovery: bd show <id> --json`.
-   - **(N3)** Any other link. Message: `bead <id> is bd-ready and linked to spec <S> by <parent edge | title | metadata.spec_id>, but it is not a plan bead (no <E>.<N> ID with lineage <E>); mindspec next claims only plan beads`. Recovery: `recovery: bd show <id> --json`. This is non-mechanical: the honest paths are to fold the work into a plan bead or to work the bead outside `mindspec next`. The sentence is true on every `next` path, because R1.8 applies the same predicate to every claim.
+   Each near-miss is printed by ID with its true reason and one recovery line:
+   - **(N1)** Plan-bead form, N mapped, no `parent`, and `FindEpicForBead` returns `ErrNoEpicLineage`:
+     - message: `bead <id> has the plan-bead form for epic <E> and plan.md maps Bead <N>, but it has no lineage (no parent edge and no spec tag in its title)`;
+     - recovery: `bd update <id> --parent <E>`, shown to make the bead claimable (AC-2).
+   - **(N2a)** Plan-bead form, the row's `parent` is a bead P the agent did not name:
+     - message: `… but its parent is <P>`;
+     - recovery: `bd show <id> --json`. A named parent is never overwritten.
+   - **(N2b)** Plan-bead form, N mapped, no `parent`, and `FindEpicForBead` resolved another epic E2 through the TITLE fallback:
+     - message: `… but its lineage resolves to <E2> by title number <NNN>`;
+     - recovery: `bd update <id> --parent <E>`. This is safe, because no parent is overwritten. In `FindEpicForBeadWithCache` a dependency on an epic wins over the title, so this one edit also corrects readiness and `complete`.
+   - **(N2c)** Plan-bead form, `FindEpicForBead` resolved another epic E2 through an epic DEPENDENCY (including a parent-E row whose conflicting epic dependency is returned first):
+     - message: `… but its lineage resolves to <E2> through its dependency on epic <E2>`;
+     - recovery: `bd show <id> --json`.
+   - **(N4)** Plan-bead form, with lineage E or none, but N is NOT mapped by `plan.md`:
+     - message: `bead <id> is a follow-up child of epic <E> that plan.md does not map (no Bead <N>); readiness would fail MF-1, so mindspec next does not select it`;
+     - recovery: `bd show <id> --json`.
+     - No "makes it claimable" recovery is offered. The deliberate route is the scoped override (`--allow-not-ready=MF-1 --evidence …`, R6) by positional, or working the bead outside `mindspec next`.
+   - **(N3)** Any other link:
+     - message: `bead <id> is bd-ready and linked to spec <S> by <parent edge | title | metadata.spec_id>, but it is not a plan bead (no <E>.<N> ID with lineage <E>); mindspec next claims only plan beads`;
+     - recovery: `bd show <id> --json`. This is non-mechanical.
+     - The sentence holds on every `next` path, because R1.8 applies the same predicate to every claim.
 
-   Near-misses never change selection, and they are printed whether the member set is empty or not. A near-miss is **blocking** if it is N1, N2, or an N3 whose row `parent` is E and whose type is lifecycle (`phase.IsLifecycleIssueType`). Every other near-miss is **informational**: title-only or metadata-only N3, and non-lifecycle children such as a follow-up `bug` under E. Informational near-misses print the same lines and never change the exit code.
+   Near-misses never change selection, are never default-picked, and are printed whether the member set is empty or not. A near-miss is **blocking** if it is N1, N2a, N2b, N2c, or an N3 whose row `parent` is E and whose type is lifecycle (`phase.IsLifecycleIssueType`). It is **informational** if it is N4 (a follow-up child), a title-only N3, a metadata-only N3, or a reparented non-lifecycle child. Informational near-misses print the same lines and never change the exit code.
 3. **A selector `next` cannot honour is refused, not ignored.** On the claim path, with `--spec`:
    - **Empty member set, positional ID.** Exit non-zero with `no ready plan bead for spec <S>; positional <id> cannot be claimed from an empty ready set`.
    - **Empty member set, `--pick N`.** Exit non-zero with `--pick <N> is out of range: 0 items`.
    - Both of these end with `recovery: mindspec next --spec <S>`.
-   - **Near-miss positional.** Whether the member set is empty or not, this refuses with its R1.2 sentence.
+   - **Near-miss positional.** Whether the member set is empty or not, this refuses with its R1.2 sentence. The exception is N4: an N4 positional is passed to `GateReadiness`, which refuses it NOT-READY on MF-1. A scoped, evidenced `--allow-not-ready=MF-1` (R6) can then claim it deliberately.
    - **Positional in the global ready set, but neither member nor near-miss.** This is a plan bead of another spec or an unrelated task. Refuse with `bead <id> is bd-ready but is not linked to spec <S>`, adding `(parent: <P>)` when its row carries a parent, and `recovery: mindspec next --spec <S>`.
    - **Positional absent from the global ready set.** Keep today's "not found or not ready".
 
@@ -245,7 +289,7 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    4. ONE line keyed on the **tally**. The tally is used because `DerivePhaseFromChildren` maps two different tallies to `plan`. The arms:
       - all lifecycle children closed → `recovery: mindspec impl approve <S>`;
       - an in-progress child → today's worktree-recovery branch, unchanged. This is the one empty-set arm that mutates (`EnsureWorktree`), and it runs after the lines above;
-      - ≥1 open lifecycle child and none in progress → `<n> open lifecycle bead(s), none bd-ready` and `recovery: bd blocked --parent <E>`. The child-derived phase here is `implement` if any child is closed and `plan` if none is;
+      - ≥1 open lifecycle child and none in progress → `<n> open lifecycle bead(s), none selectable (any that are bd-ready but unmapped or unlinked are named above)` and `recovery: bd blocked --parent <E>`. The child-derived phase here is `implement` if any child is closed and `plan` if none is;
       - zero lifecycle children → `recovery: mindspec plan approve <S>`.
 
    When the child-derived phase is ahead of the stored phase, the existing forward-reconcile `recovery: mindspec repair phase <S>` is added. Exit codes:
@@ -265,6 +309,9 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    - (a) It refuses unless `bead.PlanBeadIndex(E_T, id)` holds: `bead <id> is not a plan bead of spec <T> (no <E_T>.<N> ID); mindspec next claims only plan beads`, with `recovery: bd show <id> --json`.
    - (b) If `--spec S` was given, or the unscoped path resolved a target spec S (`resolve.ResolveTarget`), it refuses when S ≠ T: `bead <id> resolves to spec <T> by lineage but is being claimed for spec <S>; nothing was claimed`, with `recovery: bd show <id> --json`.
    - (c) **The dispatch spec is T**, passed to `EnsureWorktree`, `DispatchBead` and recording. When the unscoped path resolved no spec, `specFlag` is empty today and `DispatchBead` cuts the bead branch from `HEAD`. Under this rule the bead branch is instead cut from `spec/<T>`, never from `HEAD`.
+   - (d) Before any mutation, `spec/<T>` must resolve (`gitutil.RevParseRef`, through `internal/lifecycle` or `cmd`, never from `internal/validate`). Otherwise it refuses: `spec branch spec/<T> for bead <id> does not exist (finalized and deleted, or never created); nothing was claimed`, with `recovery: mindspec state show`. This prevents the claimed-but-homeless state that a later `CreateBranch` failure would leave (ADR-0041).
+
+   **Behaviour change, deliberate.** Some beads that today reach `GateReadiness` are now refused by (a): a lineage-resolved bead that is not of the form `<E_T>.<N>`, such as a reparented non-dotted bug, or a `<other>.<N>` with a `[NNN]`-tagged title. A bug bead with no epic lineage at all is already refused today: `EvaluateReadiness` returns `ErrNoEpicLineage` as an error (`internal/validate/readiness/readiness.go`), whatever `advancePhaseOnClaim`'s comment in `cmd/mindspec/next.go` suggests. That comment is corrected under R6.5's doc surfaces. For such beads the alternatives are to work them outside mindspec (`bd update <id> --claim` and a manual branch), or to fold the work into a plan bead.
 
    For R1.1 members, (a) and (b) hold by construction, so these checks are the guard for the unscoped path and for beads with conflicting epic dependencies.
 
@@ -302,30 +349,51 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    - Any read or parse error → MF-3 FAIL `could not determine whether <D> belongs to spec <S>: <escaped error>`, with `recovery: bd show <D> --json`. It is never the not-applicable PASS.
    - A metadata-only or non-plan member held to the test and failing it adds `<D> is linked to spec <S> by <disjunct> but is not a plan bead; if its work never landed as bead/<D>, override deliberately` and the scoped override line (R6).
    - A non-closed dependency of either kind fails as today.
-2. **Reachable-landing fallback, scoped to the MF-3 and `reattest` callers.** Candidate generation keeps the first-parent scan as primary, unchanged. A fallback scan runs only when the primary scan nominates **zero** owned two-parent candidates. It uses a new `gitutil` primitive (`git log --merges --topo-order <spec-branch>`, newest-first in topological order; `--topo-order` defines newest and oldest) and considers every merge reachable from the tip.
-   - **Admitted subjects.** The fallback admits a two-parent merge only when its subject names `bead/<id>` as the merged SOURCE, in exactly one of three forms:
-     - `Merge bead/<id>` — `gitutil.MergeInto`'s form, which is **undirected**: the subject names no target;
-     - `Merge branch 'bead/<id>' into <spec-branch>`;
-     - `Merge bead/<id> into <spec-branch>`.
+2. **Reachable-landing fallback: it finds and names a candidate, and never auto-confirms.** Candidate generation keeps the first-parent scan as primary, unchanged. A fallback scan runs only when the primary scan nominates **zero** owned two-parent candidates. It uses a new `gitutil` primitive: `git log --merges --topo-order <spec-branch>`, newest-first in topological order, over every merge reachable from the tip.
 
-     The two `into` forms are admitted only with this spec branch as `<target>`. mindspec writes `Merge <source> into <target>` only through `gitutil.MergeBranch`, for spec→main finalize, never for a bead, so the third form is defensive.
-   - **Excluded:**
-     - a merge INTO `bead/<id>` (a refresh from the spec branch);
-     - an explicit `… into <other branch>` (positive evidence it was not a landing here);
-     - any unrecognised format (the G2-2 any-token fallback in `parseMergeSubjectBeadBranch` does not apply on the fallback path).
-   - **No target guarantee for the undirected form.** `Merge bead/<id>` proves nothing about where it was made. The fallback's defence for that form is reachability from the tip, plus the confirmation rule below, plus the net-effect test at the tip. The residual is stated: a `Merge bead/<id>` made into another branch whose history later reaches this tip is identified when (b) or (d) corroborates it, because its content is then at the tip.
-   - **Confirmation rule on the fallback path.** A fallback candidate is confirmed ONLY by an exact (b) surviving-tip or (d) landed-binding datum. The panel set (R4.3) never confirms a fallback candidate on its own; a panel-only match returns `*LandedMergeNoEvidence`, so the operator-vouched `mindspec reattest` stays the exit. The binding is the strongest datum here, because the executor writes it only at its own spec-branch merge.
-   - **Ambiguity on the fallback path.** Owned candidates whose second parents differ are resolved iff exactly one second-parent group is exactly corroborated by (b), or by a (d) binding that names a member of that group, and no (b)/(d) datum contradicts that group. Otherwise the FIX-2b `*LandedMergeNoEvidence` ambiguity is returned, as today. `reattest` applies the same rule. The primary path's FIX-2b rule is unchanged.
-   - **#251 boundary.** The fallback covers only the #251 sub-shape where a prerequisite reached the tip inside another bead's branch through an admitted, short-form `Merge bead/<id>`, confirmed by (b) or (d). The long form `Merge branch 'bead/X' into bead/Y` is excluded, because it positively names a non-spec target. Work that reached the tip by branch-from, cherry-pick or rebase, with no merge naming it (#251's literal report), is still not nominable and stays with spec 130.
-   - **Unchanged machinery.** Same-second-parent grouping, the corroboration legs and the oldest-anchored revert/reapply test run unchanged. The `SubsumptionConflict` rationale becomes "M is an ancestor of the tip", which is true for both scans. The `FirstParentMerges` and `ErrLandedMergeNoCandidate` doc contracts are updated with the same wording.
-   - **`reattest` on a fallback candidate** writes the binding only after its own checks. Its output adds `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target — confirm it landed this bead's work before vouching`. It also lists any registered `reviewed_head_sha` that is not an ancestor of the tip (`later reviewed work for <id> is not in <spec-branch>'s history: <sha>`) as an operator warning. The warning does not refuse.
+   **Admitted subjects.** The merge must have two parents, and its subject must name `bead/<id>` as the merged SOURCE, in one of these forms:
+   - `Merge bead/<id>`: `gitutil.MergeInto`'s form, which is **undirected** (it names no target);
+   - `Merge branch 'bead/<id>' into <spec-branch>`;
+   - `Merge bead/<id> into <spec-branch>`.
 
-   Callers, and what changes for each. This table covers R4.2. R4.3's set semantics live inside `FindLandedMerge` and so reach every caller below (see R4.3):
+   The last two are admitted only when `<target>` is this spec branch. mindspec writes `Merge <source> into <target>` only through `gitutil.MergeBranch`, for the spec→main finalize, so the last form is defensive.
+
+   **Excluded:** a merge INTO `bead/<id>` (a refresh), an explicit `… into <other branch>`, and an unrecognised format. The G2-2 any-token fallback in `parseMergeSubjectBeadBranch` does not apply.
+
+   **The automatic paths never accept a fallback candidate.** `lifecycle.FindLandedMergeReachable`, the MF-3 read, never returns an identified merge for one, whatever the panel set, the surviving tip or the binding says. It returns a typed `*LandedMergeOffFirstParent`, which:
+   - wraps `ErrLandedMergeNotFound`, and never `ErrLandedMergeNoCandidate`;
+   - names the bead, the spec branch, every admitted candidate's merge SHA and second parent, and the exact recovery `mindspec reattest <id>`.
+
+   MF-3 FAILS with that result. Three consecutive panel rounds each found a new automatic false PASS here:
+   - (round 2) the panel set alone;
+   - (round 3) a surviving branch reset to a stale round tip, or an agent-written binding naming a merge into a sibling bead branch;
+   - (round 3) same-second-parent grouping that let an empty sibling merge's anchor mask the revert of a real landing.
+
+   The undirected subject cannot be made safe by enumerating corroborations. #239 is therefore fixed as **loud, named, and recoverable by one audited command**, not as an automatic pass.
+
+   **The one way a fallback candidate becomes landed** is the persisted outcome of an operator-vouched `mindspec reattest`. An off-first-parent candidate is identified on later automatic reads iff two things hold:
+   - the bead's landed binding names exactly that merge SHA and second parent;
+   - the binding carries a `reattest` audit record (`mindspec_landed_reattest_*`) whose scanned branch is this spec branch.
+
+   A binding without that audit record never confirms a fallback candidate, and that includes a merge-time executor binding. The residual is stated: the audit record is agent-writable bd metadata, exported into the tracked JSONL. Forging it is a deliberate metadata forge that can be detected by inspection, the same class that ADR-0037 §8 and the Spec-125 amendment already accept for reattest bindings.
+
+   **`reattest` on a fallback candidate** is the audited acceptance path. It runs every Spec-125 check, plus three more:
+   - (i) **Exactly one owned candidate.** Two or more admitted fallback candidates refuse (`ReattestStateAmbiguous`), even if they share a second parent, because independent sibling merges are not a re-merge chain. There is no tie-break and no grouping on the fallback path, so the empty-anchor revert mask cannot arise.
+   - (ii) **No unreached review.** If any registered `reviewed_head_sha` for the bead is not an ancestor of the spec tip, it refuses with a new state `ReattestStateUnlandedReview` (`reviewed work <sha> for <id> is not in <spec-branch>'s history`). This rule is scoped to fallback candidates. On the primary path a rebased-away review round is normal, and refusing there would create an ADR-0041 §2(i) deadlock.
+   - (iii) **The audit is always recorded** on acceptance, even when the binding values already match. Otherwise a merge-time binding would leave no audit for the automatic path to read back.
+
+   Its output also states `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target` before the write. A refusal writes nothing.
+
+   **#251 boundary.** A prerequisite that reached the tip inside another bead's branch through an admitted short-form `Merge bead/<id>` is nominated and becomes recoverable by `reattest`, subject to (i)–(iii). The long form `Merge branch 'bead/X' into bead/Y` names a non-spec target, so it is excluded. Branch-from, cherry-pick or rebase arrivals (#251's literal report) stay with spec 130.
+
+   **Doc contracts.** The `SubsumptionConflict` rationale becomes "M is an ancestor of the tip". The `FirstParentMerges` and `ErrLandedMergeNoCandidate` doc contracts are updated to match.
+
+   Callers, and what changes for each. This table covers R4.2. R4.3's set semantics live inside `FindLandedMerge`, so they reach every caller below (see R4.3).
 
    | Caller | Change |
    |---|---|
-   | MF-3 (`readiness.findLandedMergeFn`) | gains the fallback (working name `lifecycle.FindLandedMergeReachable`) |
-   | `lifecycle.ReattestLandedMerge` | nominates through the same fallback, so `ready-check`'s `mindspec reattest` recovery can write the binding MF-3 asks for |
+   | MF-3 (`readiness.findLandedMergeFn`) | gains the fallback as a FINDER only (`lifecycle.FindLandedMergeReachable` → `*LandedMergeOffFirstParent`, or identified only via a reattest-audited binding) |
+   | `lifecycle.ReattestLandedMerge` | nominates through the same fallback, with the three added refusals above |
    | `lifecycle.MergedUnclosed` → `complete`'s merged-unclosed reconcile (CLOSES beads, cleans branches) and `stale_open.go` | **unchanged**, first-parent only (an ADR-0041 §2(ii) CLOSE decision) |
    | `orphan_hints.go` `findLandedMergeFn` | unchanged |
    | `approve/plan.go` `planFindLandedMergeFn` | unchanged |
@@ -350,11 +418,18 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    No CLOSE decision is ever taken on evidence Spec 125 did not admit. `TestFindLandedMerge_ReviewedHeadSHAContradicts`, `TestReattest_PanelShaContradictionRefuses` and the two `…HostilePanelSHAEscapedInRefusal` tests are rewritten to the non-corroborating outcome, keeping the escaping assertion where a SHA is still rendered.
 4. **Messages say what is true.** `evaluateMF3` discriminates, in this order:
    1. `*LandedMergeNoEvidence` → unchanged; recovery `mindspec reattest <D>`.
+   1b. `*LandedMergeOffFirstParent` (R4.2) → `a merge <sha> naming bead/<D> is reachable from <spec-branch>'s tip but off its first-parent chain; automatic identification never accepts it`, with `recovery: mindspec reattest <D>`.
    2. `errors.Is(err, lifecycle.ErrLandedMergeNoCandidate)` → the ONLY arm allowed to say no landing exists. It reads `no two-parent merge reachable from <spec-branch>'s tip lands bead/<D> (first-parent scan, then the reachable-landing fallback)`, followed by today's two-possibility wording.
    3. A corroboration contradiction → `a merge landing bead/<D> exists (<sha>) but <datum> contradicts its second parent <sha>`.
    4. A revert shape → `merge <sha> landing bead/<D> was reverted or cleanly removed after landing`.
 
    Each arm ends with its own recovery: inspection first, and never `mindspec complete` for a bead whose merge exists. The `ErrLandedMergeNoCandidate` doc comment is updated to the same predicate.
+
+   **Aggregated failures (R6.2) keep spec 124 R1's one `recovery:` line per failing signal.** `Signal.Detail` lists EVERY failing dependency with its class and its own recovery text. `Signal.Recovery`, the one line `RecoveryCommands` consumes, is that of the highest-precedence record, in this order:
+
+   `indeterminate` > `not-closed` > `no-candidate` > `off-first-parent` > `no-evidence` > `contradiction` > `reverted`
+
+   An infrastructure failure is fixed first, unfinished work before uncorroborated work, and inspection before any repair. Within one class the order is by dependency ID.
 5. **#232, closed on its mechanism.** For the D.5 shape (one registration `{B}`, merge second parent `D ≠ B`):
    - with a merge-time binding present, MF-3 PASSES via (d);
    - with no binding and no surviving branch, MF-3 reports `*LandedMergeNoEvidence` naming the candidate (never the zero-candidate sentence), and `mindspec reattest` then writes the binding on datum (a), after which MF-3 PASSES.
@@ -387,12 +462,13 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    - When nothing fails and a scoped flag is given, the claim proceeds as a normal claim. It prints the per-signal "named but passing" note, writes no marker, and does not require `--evidence`.
    - If any other signal fails, it refuses with the standard NOT-READY report plus `recovery: mindspec next <bead-id> --allow-not-ready=<all currently failing ids> --evidence <path-to-justification>`. The bead ID is idrender-gated, the IDs come from the closed set, and the placeholder is literal and non-mechanical.
    - A named signal that passes prints `MF-x named but passing — not recorded`.
+   - **Indeterminate failures.** If a NAMED failing signal's failure set contains an `indeterminate` record (R6.2), the scoped override refuses before any mutation with `<MF-x> cannot be overridden: <record> could not be evaluated; fix the read first`. Claiming anyway would leave a bead whose `ready-check` can never pass.
    - The BARE flag, and the space-separated `--allow-not-ready MF-3` that cobra's `NoOptDefVal` parses as bare-plus-positional, always refuse before positional resolution. `MF-3` is never treated as a bead ID. The recovery is the scoped line above, or `recovery: mindspec next <bead-id>` when nothing fails.
    - `--allow-not-ready=all` is NOT admitted (OQ-5).
 2. **Fresh evidence on every claim; an existing marker never authorizes one.** A scoped override that records ≥1 signal REQUIRES `--evidence <path>`: a readable regular file of 1 byte to 64 KiB, read before any mutation. A missing `--evidence` then refuses before any mutation. `RecordReadinessOverride` REPLACES the marker (never unions it) with schema v2:
 
    ```
-   {schema: 2, signals: [failing ∩ named], fingerprints: {<id>: <FailureFingerprint(signal)>}, overridden: <RFC-3339>, evidence: {path, sha256, bytes}}
+   {schema: 2, signals: [failing ∩ named], fingerprints: {<id>: [sha256(record), …]}, overridden: <RFC-3339>, evidence: {path, sha256, bytes}}
    ```
 
    **The fingerprint covers a signal's complete failure set** (this prices a `readiness` API change):
@@ -400,9 +476,15 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
      - MF-1: one record per missing structural element.
      - MF-2: one per dangling token.
      - MF-3: one per failing dependency, `<dep-id>:<class>[:<candidate-sha>]`. MF-3 therefore evaluates every closed member dependency, at one landed-merge evaluation each, where it used to stop at the first failure.
-     - MF-4: one per blocking token or checklist item, `<kind>:<sha256 of the normalised line>`.
-   - Records carry no free-form error text, timestamps or bd stderr. They are deduplicated and sorted.
-   - `readiness.FailureFingerprint(Signal)` = sha256 of the sorted records joined by `\n`. It is ONE function used by both the writer (`RecordReadinessOverride`'s caller) and the reader (`ready-check`).
+     - MF-4: one per blocking OCCURRENCE, `<kind>:<source>:<section>:<k>:<sha256 of the normalised line>`, where:
+       - `<kind>` is `token` or `checklist`;
+       - `<source>` is `description` or `plan`;
+       - `<section>` is the plan heading path, or `-` for the description;
+       - `<k>` is the 1-based occurrence index among identical `(kind, source, section, hash)` tuples.
+
+       So two standalone `TBD`s in different places, or a repeated checklist item, stay distinct records. Multiplicity is retained and nothing is collapsed.
+   - Records carry no free-form error text, timestamps or bd stderr. They are sorted, and the identity rules above keep them unique.
+   - `readiness.FailureRecordDigests(Signal) []string` returns the sorted sha256 of each record. It is ONE function used by both the writer (`RecordReadinessOverride`'s caller) and the reader (`ready-check`).
    - An MF-3 record of class `indeterminate` (a membership or landed-merge read error) is **never coverable**: an override never covers an infrastructure failure.
    - `Detail` stays the human text, and may list every failure.
 
@@ -411,7 +493,7 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    - With an existing marker covering MF-2 and MF-3, a new request naming only MF-3 while both fail still refuses.
    - The marker is read in `cmd/mindspec` and passed into the report as data. `readiness.EvaluateReadiness` never reads it (spec 124 AC-12, `internal/complete/readiness_isolation_test.go`).
 3. **One validity contract, fail-closed.** A shared validator in `internal/bead` (beside the marker constants) classifies a marker as VALID, LEGACY or MALFORMED:
-   - VALID: schema 2; `signals` a non-empty, duplicate-free subset of the closed set; exactly one 64-hex `fingerprints` entry per signal; `overridden` RFC-3339; `evidence.sha256` 64-hex; `evidence.bytes` in [1, 65536]; `evidence.path` non-empty.
+   - VALID: schema 2; `signals` a non-empty, duplicate-free subset of the closed set; for each signal, one `fingerprints` entry that is a non-empty, sorted, duplicate-free list of 64-hex digests; `overridden` RFC-3339; `evidence.sha256` 64-hex; `evidence.bytes` in [1, 65536]; `evidence.path` non-empty.
    - LEGACY: no `schema` key, `{signals, overridden}` only. This is today's writer, and such markers are already in the tracked JSONL.
    - MALFORMED: anything else.
    - A metadata read error is an error, never "no marker".
@@ -420,9 +502,9 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 4. **`ready-check` honours only VALID markers, as the dispatch-ingress answer.** `mindspec bead ready-check <id>` reads the marker. A failing signal X is COVERED iff three things hold:
    - the marker is VALID;
    - X is in `signals`;
-   - `fingerprints[X]` equals `FailureFingerprint` of X's current failure set.
+   - every digest in `FailureRecordDigests` of X's CURRENT failure set is in `fingerprints[X]`.
 
-   So an override recorded while dependency A failed does not cover A+B, and an MF-4 override for one blocker does not cover a second blocker. Rendering:
+   **Growth uncovers; shrinkage stays covered.** An override recorded while dependency A failed does not cover A+B, and an MF-4 override for one blocker does not cover a second blocker. When the set shrinks from A+B to A (B landed), the override still covers it, because every remaining failure was vouched for. Rendering:
    - covered → `MF-x: OVERRIDDEN (recorded <ts>; evidence <sha256-prefix> <escaped path>)`;
    - recorded but now passing → `MF-x: PASS (override recorded but no longer needed)`;
    - LEGACY → `override marker is legacy (no evidence) — not honoured`;
@@ -432,13 +514,21 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 
    **Re-recording for a claimed bead.** `mindspec next` cannot re-select an in-progress bead, so the LEGACY, MALFORMED and uncovered arms end with two recovery lines:
    - `recovery: mindspec release <bead-id>` (removes the worktree, keeps the bead branch, returns the bead to open);
-   - `recovery: mindspec next <bead-id> --allow-not-ready=<uncovered ids> --evidence <path-to-justification>`.
+   - `recovery: mindspec next <bead-id> --allow-not-ready=<all currently failing ids> --evidence <path-to-justification>`.
+
+   Two related lines also appear:
+   - The diagnostic line before them names the UNCOVERED signals (`uncovered: MF-2`).
+   - The re-claim names ALL currently failing signals, covered or not, because the old marker grants nothing and is replaced, never unioned (R6.1/R6.2). An explicit re-claim naming only the uncovered signals refuses under R6.1.
 
    The re-claim reuses the surviving bead branch. This exit code replaces `ms-bead-impl`'s prose comparison (R6.5). It is never claim authority: only R6.2's fresh flag and evidence can authorize a claim.
-5. **One home: guidance follows, the skill copy goes.** `plugins/mindspec/skills/ms-bead-impl/SKILL.md`'s override-coverage paragraph is replaced by one harness line: run `mindspec bead ready-check <id>`, proceed on exit 0, otherwise stop and surface its report. The installed `.claude/skills/` copy is refreshed. `internal/setup/readiness_skill_pin_test.go`'s `TestMsBeadImplSkill_OverrideCoverage{CheckShipped,MutationProbe}` are rewritten to pin the new line, under the skill-refresh protocol (the replaced text is snapshotted for existing installs). The bare/all-or-nothing wording is replaced by the scoped form in:
+5. **One home: guidance follows, the skill copy goes.** `plugins/mindspec/skills/ms-bead-impl/SKILL.md`'s override-coverage paragraph is replaced by one line: run `mindspec bead ready-check <id>`, proceed on exit 0, otherwise stop and surface its report. That line is a conditional sequence, so it is marked as a **staged rule** under ADR-0045 Decision 5's transition clause:
+   - its target is `next-action` (ADR-0045 step 4, spec 133);
+   - its removal date is assigned in the rule table when step 1 lands (spec 130), which is when Decision 5's date duty begins.
+
+   The rule itself (coverage) has moved into the binary, and only the call remains staged. The installed `.claude/skills/` copy is refreshed. `internal/setup/readiness_skill_pin_test.go`'s `TestMsBeadImplSkill_OverrideCoverage{CheckShipped,MutationProbe}` are rewritten to pin the new line, under the skill-refresh protocol (the replaced text is snapshotted for existing installs). The bare/all-or-nothing wording is replaced by the scoped form in:
    - `cmd/mindspec/bead_clarify.go`;
    - `internal/next/ready_gate.go`'s NOT-READY recovery string;
-   - `cmd/mindspec/next.go`'s record-failure recovery and flag help;
+   - `cmd/mindspec/next.go`'s record-failure recovery and flag help, and `advancePhaseOnClaim`'s comment about non-lifecycle claims (R1.8);
    - `.mindspec/core/USAGE.md` (two places);
    - `.mindspec/core/WORKFLOW-STATE-MACHINE.md`;
    - `.mindspec/domains/workflow/{architecture,interfaces,runbook}.md`;
@@ -486,21 +576,21 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 - Everything under Non-Goals.
 - `internal/panel` (gate and registry untouched).
 - `internal/phase` (consumed, not changed).
-- `internal/approve/impl.go` and `internal/executor` behaviour (129b).
+- `internal/approve/impl.go` and `internal/executor` behaviour (the follow-on spec).
 
 ## Non-Goals
 
-Deferred to **spec 129b (readiness-tracker-honesty, part 2)**. The diagnosis is already reproduced and recorded here, so 129b need not re-derive it:
+Deferred to **the follow-on spec** (readiness-tracker-honesty, part 2). It takes the next free plain spec number, not a lettered ID; see Background K. The diagnosis is already reproduced and recorded here, so the follow-on spec need not re-derive it:
 
 - **G — OWNERSHIP.yaml read from the wrong ref (#234).** `validate.CheckADRDivergence` is called from `complete.runCommittedRangeGate` with `ownerRef = beadHead`, and `CheckADRDivergenceSnapshot` forces `ownerRef` to the bead worktree's candidate tree `T`. The impl-approve backstop passes the spec-branch tip. A claim committed on the spec branch after the bead branched is invisible on both per-bead legs. Fix shape: a path is owned if a manifest claims it at the bead tree OR at the spec-branch tip.
 - **H — `impl approve` closes the epic before finalizing (#244).** `approve.ApproveImpl` runs `bd close <epic>` and `mindspec_phase=done` BEFORE `exec.FinalizeEpic`. Any FinalizeEpic failure leaves a CLOSED epic and an unmerged spec: push (`gitutil.PushBranch`), `guardMergeLayout`, `preflightMergeDestruction`, or a direct-path merge conflict. A plain reorder is not available: `FinalizeEpic`'s `commitWithExport(specWtPath, …)` must export the JSONL with the epic already closed (the wu7t carrier). Fix shape:
   - hoist the refusal checks and a `git push --dry-run` auth probe ahead of the close;
   - turn any post-close failure into a guard failure naming "epic closed, spec unmerged", with the resume command.
 
-  The re-run tolerance was traced, not run; 129b must run it.
-- **#250 — no verification window between merging a bead and closing it** (`mindspec complete`). This is #244's family: a multi-step terminal mutation with no intermediate stop, at the bead level. The issue records that the reconcile path already converges an out-of-band merge. 129b decides between a merge-only/verify seam and documenting the out-of-band route.
-- **I — dead config key.** `merge_strategy` (`internal/config.Config.MergeStrategy`) is read only by `config show`. `MindspecExecutor.FinalizeEpic` decides PR versus direct merge by `gitutil.HasRemote()`. 129b either honours the key or removes it.
-- **Phase-lineage unification.** 129 adopts `phase.FindEpicForBead`'s lineage, including its `[NNN]` title fallback, unchanged, as the selection lineage (R1.1). So #255's reported shape is selected, and `next` and `ready-check` agree for every `<E>.<N>` bead. They still differ for a `<other>.<N>` bead with title-fallback lineage: readiness evaluates it, while `next` names it (N3) and R1.8 refuses to claim it. 129b removes the title fallback, tightens `beadIndex`, and migrates any bead that depended on them.
+  The re-run tolerance was traced, not run; the follow-on spec must run it.
+- **#250 — no verification window between merging a bead and closing it** (`mindspec complete`). This is #244's family: a multi-step terminal mutation with no intermediate stop, at the bead level. The issue records that the reconcile path already converges an out-of-band merge. the follow-on spec decides between a merge-only/verify seam and documenting the out-of-band route.
+- **I — dead config key.** `merge_strategy` (`internal/config.Config.MergeStrategy`) is read only by `config show`. `MindspecExecutor.FinalizeEpic` decides PR versus direct merge by `gitutil.HasRemote()`. the follow-on spec either honours the key or removes it.
+- **Phase-lineage unification.** 129 adopts `phase.FindEpicForBead`'s lineage, including its `[NNN]` title fallback, unchanged, as the selection lineage (R1.1). So #255's reported shape is selected, and `next` and `ready-check` agree for every `<E>.<N>` bead. They still differ for a `<other>.<N>` bead with title-fallback lineage: readiness evaluates it, while `next` names it (N3) and R1.8 refuses to claim it. the follow-on spec removes the title fallback, tightens `beadIndex`, and migrates any bead that depended on them.
 
 Deferred to **spec 130**:
 - the S0 rule table (ADR-0045 step 1);
@@ -521,11 +611,20 @@ Also not goals:
 
 ## Acceptance Criteria
 
-- [ ] **AC-1 (R1.1, R1.2)**: Fixture: a fake bd that honours `-n` and the default cap. Ready rows carry `parent`/`metadata` when set, and `bd show` and the epic list are served for `FindEpicForBead`. Epic E for spec S (`spec_num` set) has the following beads:
+- [ ] **AC-1 (R1.1, R1.2)**: Fixture: a fake bd that honours `-n` and the default cap.
+  - Its `--parent` is **edge-only**, which is the reporter's apparent bd.
+  - Ready rows carry `parent`/`metadata` when set.
+  - `bd show` and the epic list are served for `FindEpicForBead`.
+
+  Epic E for spec S (`spec_num` = NNN) has a `plan.md` that maps Beads 1–6. The beads are:
   - A: `<E>.1`, parent E, title neutral.
-  - G: `<E>.2`, no parent, title `[S] …`. This is #255's reporter shape.
-  - D: `<E>.3`, no parent, title neutral.
-  - P: `<E>.4`, lineage resolving to another epic E2.
+  - G: `<E>.2`, no parent, title `[S] …` (#255's reporter shape).
+  - G′: `<E>.3`, no parent, title `[NNN] …` (numeric tag only).
+  - D: `<E>.4`, no parent, title neutral.
+  - P: `<E>.5`, parent another bead.
+  - Q: `<E>.6`, no parent, title `[MMM] …` naming another spec's number.
+  - O: `<E>.7`, parent E, type bug, with plan.md mapping no Bead 7 (a follow-up).
+  - X: `<E>.8`, parent E, with a conflicting epic dependency on E2 that `bd show` returns first.
   - R: non-plan-form, parent E, type task.
   - F: non-plan-form, parent E, type bug.
   - M: `metadata.spec_id=S`, no parent, title neutral.
@@ -533,18 +632,22 @@ Also not goals:
   - The global set also includes E's own epic row.
 
   Expected:
-  - `next.BuildReadySet` returns members {A, G} in bd order.
-  - Near-misses are D (N1), P (N2), R (N3, blocking), and F, M, T (N3, informational). The epic row is in neither list.
-  - `mindspec next --spec S --emit-only --pick 2` emits G, and the claim path with `--pick 2` claims G with no override. Readiness resolves G by title-fallback lineage, unchanged.
-  - The output contains every near-miss ID.
+  - `next.BuildReadySet` returns members {A, G, G′} in bd order.
+  - Blocking near-misses: D (N1), P (N2a), Q (N2b), X (N2c) and R (N3).
+  - Informational near-misses: O (N4: never selected, no `bd update` recovery), F, M and T (N3).
+  - The epic row is in neither list.
+  - `--emit-only --pick 2` emits G; the claim path claims G and G′ with no override.
   - No `bd ready --parent` call is issued (argv seam).
 
-  Tests: `TestBuildReadySet_PlanBeadPredicate`, `TestNext_ScopedSelection_ReporterShapeClaimable`, `TestNext_ScopedSelection_NamesNearMisses`. Red-on-revert: today G is excluded on an edge-only `--parent` bd, or when its title lacks the full spec ID; A is excluded by the title filter; and T is returned through its title.
-- [ ] **AC-2 (R1.2 N1 recovery is real; #255 shape on real bd)**: A hermetic test (fake bd, no `t.Skip`; spec 124's bd-less rule) uses the row and `bd show` shapes measured on bd 1.1.0 (Background A, C). It runs in two steps:
-  - Before the update: D is classed N1, with the `bd update <id> --parent <E>` line.
-  - After it: D's row carries `parent: E`, and `bd show` carries the `parent-child` edge to the epic. D is then a member, `phase.FindEpicForBead` resolves E, and `readiness.EvaluateReadiness` reaches its signals with no lineage or index error.
+  Tests: `TestBuildReadySet_PlanBeadPredicate`, `TestNext_ScopedSelection_ReporterShapesClaimable`, `TestNext_ScopedSelection_NamesNearMisses`, `TestNext_FollowUpChildIsN4`.
 
-  (`TestNearMissN1_RecoveryYieldsClaimable`.) The real-bd run of both the reporter shape and the N1 sequence is a Validation Proof.
+  Red-on-revert: today, against the edge-only fake, G and G′ are excluded (no edge). G′ is also excluded by the full-ID title filter. A is excluded by the title filter. O is selected and then refused by MF-1. X is selected and then fails readiness on lineage E2.
+- [ ] **AC-2 (R1.2 recoveries are real)**: A hermetic test (fake bd, no `t.Skip`; spec 124's bd-less rule) uses the row and `bd show` shapes measured on bd 1.1.0 (Background A, C). It checks three recoveries:
+  - **D (N1).** Before the update, D is classed N1 with the `bd update <id> --parent <E>` line. After it, D's row carries `parent: E` and `bd show` carries the `parent-child` edge, so D is a member, `phase.FindEpicForBead` resolves E, and `readiness.EvaluateReadiness` reaches its signals.
+  - **Q (N2b).** The same update makes the epic dependency win over the title number. Q becomes a member, and `FindEpicForBead` resolves E, not the title-matched E2.
+  - **O (N4).** No `bd update --parent` line is offered for O.
+
+  Tests: `TestNearMissN1_RecoveryYieldsClaimable`, `TestNearMissN2b_ReparentCorrectsLineage`, `TestNearMissN4_NoClaimableRecovery`. The real-bd run of the reporter shape and of the N1 sequence is a Validation Proof.
 - [ ] **AC-3 (R1.3)**: The claim path, with the selector-specific sentences above:
   - With an empty member set, `mindspec next <id> --spec S` and `mindspec next --spec S --pick 1` each exit non-zero, name the selector, and end with a line matching `^recovery: mindspec next --spec `.
   - A near-miss positional gets its R1.2 sentence on both an empty and a NON-empty member set.
@@ -555,12 +658,17 @@ Also not goals:
 - [ ] **AC-4 (R1.4)**: Four fixtures with an empty member set, no selector and no near-miss, each with an explicit STORED phase:
   - (i) Stored `implement`, all lifecycle children closed: `stored phase: implement; child-derived phase: review`, `recovery: mindspec impl approve S` and `recovery: mindspec repair phase S`.
   - (ii) Stored `implement`, one child in_progress with a missing worktree: the tally and phase lines print BEFORE the worktree-recovery output.
-  - (iii-a) Stored `implement`, one child closed and the rest open and blocked: `child-derived phase: implement`, `<n> open lifecycle bead(s), none bd-ready` and `recovery: bd blocked --parent <E>`.
+  - (iii-a) Stored `implement`, one child closed and the rest open and blocked: `child-derived phase: implement`, `<n> open lifecycle bead(s), none selectable` and `recovery: bd blocked --parent <E>`.
   - (iii-b) Stored `implement`, every child open and blocked, none closed: `child-derived phase: plan`, with the same blocked line, never `plan approve`.
   - (iv) Stored `plan`, zero lifecycle children: `recovery: mindspec plan approve S`.
 
   Each output contains the tally and the verbatim sentence, and exits 0 except where the arm mutates. Further fixtures:
-  - (v) Stored `review`, all children closed, plus one informational near-miss: a follow-up `bug` child of E, and a global bead whose title contains S. It exits **0** and still names both.
+  - (v) Stored `review`, all children closed. Three informational near-misses are present:
+    - an N4 follow-up bug `<E>.<K+1>` with parent E and no plan mapping (it is non-lifecycle, so it is not in the tally);
+    - a reparented non-plan-form bug child;
+    - a global bead whose title contains S.
+
+    It exits **0** and still names all three.
   - (vi) The same, plus one blocking near-miss (a detached plan-form bead): it exits non-zero with the same lines.
   - A failing child read (seam) renders the indeterminate form with no tally and exits non-zero.
 
@@ -569,10 +677,12 @@ Also not goals:
 - [ ] **AC-6 (R1.8)**: Before any mutation, with bd, branch and worktree byte-identical afterwards (spec 124's AC-4 audit shape):
   - (a) A bead whose lineage resolves to spec T while it is claimed with `--spec S` refuses, naming both specs.
   - (b) On the unscoped path, a resolved target spec ≠ T refuses likewise.
-  - (c) On the unscoped path with NO resolved spec, the claim dispatches into T: the argv seam on `EnsureWorktree`/`DispatchBead` records spec ID T, and the bead branch's base is `spec/<T>`, never `HEAD`.
-  - (d) A bead whose lineage resolves to T but whose ID is not `<E_T>.<N>` refuses with the "not a plan bead" sentence on both scoped and unscoped paths.
+  - (c) On the unscoped path with NO resolved spec, the claim dispatches into T. The argv seam on `EnsureWorktree`/`DispatchBead` records spec ID T, and the bead branch's base is `spec/<T>`, never `HEAD`.
+  - (d) A bead whose lineage resolves to T but whose ID is not `<E_T>.<N>` refuses with the "not a plan bead" sentence on both scoped and unscoped paths. Examples: a reparented non-dotted `bug`, and a `<other>.<N>` with a `[NNN]` title.
+  - (e) When `spec/<T>` does not resolve, the claim refuses naming T, and `ClaimBead` is never called (seam).
+  - (f) A bug bead with no epic lineage refuses through `EvaluateReadiness`'s lineage error, which is today's behaviour, pinned so that it stays deliberate.
 
-  Tests: `TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`. Red-on-revert: today (a) validates T and dispatches into S, and (c) cuts from `HEAD`.
+  Tests: `TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`, `TestGateReadiness_MissingSpecBranchRefuses`, `TestNext_NoLineageBugRefuses`. Red-on-revert: today (a) validates T and dispatches into S, (c) cuts from `HEAD`, and (e) claims and then fails at `CreateBranch`.
 - [ ] **AC-7 (R2.1–R2.2)**: Argument-recording seams assert `-n 0` at every site in R2.1:
   - `TestQueryReady_Uncapped`, `TestResolveActiveBead_Uncapped`;
   - `TestOrphans_ListUncapped`, `TestStaleOpen_ListUncapped`, `TestHygiene_ListUncapped`;
@@ -591,19 +701,33 @@ Also not goals:
   - (g) the parent read errors through the seam → FAIL "could not determine whether…", never PASS.
 
   Red-on-revert: today (a), (b) and (f) FAIL.
-- [ ] **AC-11 (R4.2)**: Real-git fixtures extending `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`). Every leg asserts both `FindLandedMergeReachable` and `ReattestLandedMerge` unless it says otherwise. "#239 topology" means: spec/S's content reaches `main` through a sibling branch's PR merge, and spec/S is fast-forwarded to `main`, so earlier landings become reachable only through a second parent.
-  - (i) X lands on spec/S by its own `Merge bead/X` (first-parent at that time), then the #239 topology. Surviving tip = second parent. Identified (red today: `ErrLandedMergeNoCandidate` / `ReattestStateNoOwnedMerge`).
-  - (ii) As (i), with X first refreshed by `Merge branch 'spec/S' into bead/X`. Still identified, not refused as ambiguous: the refresh is excluded as a merge INTO `bead/X`.
-  - (iii) X ALSO merged into sibling bead Y by `Merge branch 'bead/X' into bead/Y` before X's own `Merge bead/X` landing on spec/S, then Y's own landing, then the #239 topology. X is identified from its own landing and Y from Y's. The long-form X→Y merge is excluded (explicit non-spec target), so it neither identifies X nor creates a FIX-2b ambiguity.
-  - (iii-neg) X's ONLY path to the tip is that long-form X→Y merge inside Y's landing: X is NOT identified (`ErrLandedMergeNoCandidate`) and is not credited through Y. This is the #251 boundary.
-  - (iv) A refresh followed by a FIRST-parent landing is identified by the primary scan, unchanged.
-  - (v) A correctly named merge on a branch NOT reachable from the tip is not a candidate.
-  - (vi) `MergedUnclosed` for fixture (i) returns "not this state", so `complete`'s reconcile ignores the fallback.
-  - (vii) **O3's false PASS.** X's round-1 tip A is merged into `bead/Y` with the exact short subject `Merge bead/X`; Y lands; X's later round B never lands; `bead/X` is deleted; there is no binding for X; registrations are {A, B}. `FindLandedMergeReachable` returns `*LandedMergeNoEvidence`, and MF-3 does NOT pass. Red against the round-1 text, where the panel confirmed on A. `reattest` on the same fixture nominates the merge and renders both the target-unknown caveat and the `later reviewed work … not in <spec-branch>'s history: B` warning.
-  - (viii) **Short form X→Y with X's branch surviving.** X's surviving tip equals the second parent of a `Merge bead/X` made into Y, and Y alone reaches spec/S. X is identified via (b), the bounded reachability residual stated in R4.2.
-  - (ix) **Short form X(old tip A)→Y, then X(new tip B)→spec/S, then the #239 topology.** Two owned candidates with second parents A and B. With `bead/X` surviving at B, or a binding naming the X→spec/S merge, the B group is identified and not refused as ambiguous. With neither, the result is FIX-2b `*LandedMergeNoEvidence`.
+- [ ] **AC-11 (R4.2)**: Real-git fixtures extending `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`). The "#239 topology" is: spec/S's content reaches `main` through a sibling branch's PR merge, and then spec/S is fast-forwarded to `main`, so earlier landings become reachable only through a second parent.
+  - (i) **#239 recoverable, not auto-passed.** X lands on spec/S by its own `Merge bead/X`, then the #239 topology follows; the surviving tip equals the second parent.
+    - `FindLandedMergeReachable` returns `*LandedMergeOffFirstParent` naming the merge SHA, even with the tip corroborating.
+    - MF-3 FAILS with the off-first-parent sentence and `recovery: mindspec reattest X`. It is never the zero-candidate sentence (red today).
+    - `ReattestLandedMerge` then PASSES: it writes the binding and the audit (red today: `ReattestStateNoOwnedMerge`).
+    - MF-3 then PASSES via the reattest-audited binding.
+  - (ii) **Refresh.** As (i), with X first refreshed by `Merge branch 'spec/S' into bead/X`. The refresh is excluded, so there is still exactly one candidate, and the outcome is the same as (i).
+  - (iii) **Long-form sibling merge.** X is merged into bead/Y by `Merge branch 'bead/X' into bead/Y` before X's own landing on spec/S, then Y lands, then the #239 topology follows. The long-form merge is excluded, so X's only candidate is its own landing, as in (i).
+  - (iii-neg) **No path except through Y.** X's ONLY path to the tip is that long-form merge. The result is `ErrLandedMergeNoCandidate`, and `reattest` refuses with `NoOwnedMerge` (the #251 boundary).
+  - (iv) **Primary path unchanged.** A refresh followed by a FIRST-parent landing is identified automatically by the primary scan.
+  - (v) **Unreachable merge.** A correctly named merge on a branch NOT reachable from the tip is not a candidate.
+  - (vi) **No closing on a fallback candidate.** `MergedUnclosed` for fixture (i), before reattest, returns "not this state", so `complete` closes nothing.
+  - (vii) **O3 round 2.** X's round-1 tip A is merged into bead/Y as `Merge bead/X`; Y lands; X's round B never lands; bead/X is deleted; registrations are {A, B}.
+    - MF-3 FAILS naming the candidate.
+    - `reattest` REFUSES with `ReattestStateUnlandedReview` naming B, and writes nothing (F2r3.4 answered).
+  - (viii) **O3 round 3, variant 1.** As (vii), with bead/X surviving but reset to A. MF-3 FAILS naming the candidate, and `reattest` REFUSES (`UnlandedReview`, B), writing nothing.
+  - (ix) **O3 round 3, variant 2.** As (vii), plus an agent-written binding without reattest audit keys that names the X→Y merge. MF-3 FAILS: a binding without the audit never confirms a fallback candidate. `reattest` REFUSES (`UnlandedReview`), writing nothing.
+  - (x) **G3 round 3 (empty-sibling anchor masking a reverted landing).** This is the fixture from G3's `repo/internal/lifecycle/g3_round3_probe_test.go`: two admitted fallback candidates.
+    - MF-3 FAILS naming both.
+    - `reattest` REFUSES with `ReattestStateAmbiguous` and writes nothing.
+  - (xi) **Merge-time binding, no audit.** A merge-time executor binding with no reattest audit names the (i) candidate. MF-3 FAILS with the reattest recovery. `reattest` records the audit even though the binding values are unchanged, and MF-3 then PASSES.
 
-  Background D.2 records the round-1 and round-2 evidence. Tests: `TestFindLandedMergeReachable_{OffFirstParent,RefreshedThenOff,LongFormSiblingExcluded,OnlyViaSibling,FirstParentRefresh,Unreachable,PanelOnlyNeverConfirms,ShortFormSurvivingTip,AmbiguityResolvedByTip}`, `TestReattest_NominatesSameCandidateAsFind`, `TestReattest_FallbackCaveatRendered`, `TestMergedUnclosed_IgnoresFallback`.
+  Background D.2 records the round-1 to round-3 evidence. Tests:
+  - `TestFindLandedMergeReachable_{OffFirstParentNamesOnly,RefreshedThenOff,LongFormSiblingExcluded,OnlyViaSibling,FirstParentRefresh,Unreachable}`;
+  - `TestReadiness_MF3_OffFirstParentFailsWithReattest`;
+  - `TestReattest_Fallback{Accepts239Shape,RefusesUnlandedReview,RefusesResetStaleTip,RefusesForgedBinding,RefusesMultipleCandidates,RecordsAuditOnNoOp}`;
+  - `TestMergedUnclosed_IgnoresFallback`.
 - [ ] **AC-12 (R4.3, R4.5)**: Registrations via `registerLandedPanel`, extended with a slug parameter:
   - (i) Dirs `<X>` with `reviewed_head_sha = A` (stale) and `<X>-r2` with `B` = the second parent: `FindLandedMerge` CONFIRMS (primary path). Red today: the lexically first `A` contradicts.
   - (ii) Registrations {A} and surviving tip = B: confirms via the tip leg, and the panel leg is non-corroborating.
@@ -612,7 +736,7 @@ Also not goals:
   - (v) The same with no binding and no branch: `*LandedMergeNoEvidence` naming the candidate. `ReattestLandedMerge` then writes the binding, with a corroboration string recording the panel as non-corroborating, and MF-3 PASSES. Red today: `ReattestStatePanelContradiction`.
   - (vi) The spec branch locally ahead of its remote-tracking ref: MF-3 PASS. This is a regression guard, green today.
   - (vii) **CLOSE paths.** `MergedUnclosed` with {stale A} and surviving tip = second parent identifies the landing. With {A} alone and no tip or binding, it returns the `*LandedMergeNoEvidence` error and never "merged-unclosed", so `complete` closes nothing.
-  - (viii) **Binding veto and audited repair.** A contradictory binding plus a non-corroborating panel set {A}, on a fallback candidate: `FindLandedMergeReachable` refuses (binding contradiction). `ReattestLandedMerge` writes the scan-derived identity and records the prior pair in the audit. A reattest that refuses (e.g. reverted) writes nothing. `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` stay green.
+  - (viii) **Binding veto and audited repair.** A primary-path candidate has a contradictory binding and a non-corroborating panel set {A}. `FindLandedMerge` refuses (binding contradiction). `ReattestLandedMerge` writes the scan-derived identity and records the prior pair in the audit. On a fallback candidate, the same repair happens only when R4.2's three reattest refusals pass. A reattest that refuses (reverted, `UnlandedReview`, ambiguous) writes nothing. `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` stay green.
 
   Tests: `TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestReadiness_MF3_CompleteWrapperShape`, `TestReadiness_MF3_LocalAheadOfRemotePasses`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`.
 - [ ] **AC-13 (R4.4)**: `TestReadiness_MF3ErrorArmDiscrimination` gains four legs:
@@ -620,6 +744,7 @@ Also not goals:
   - a binding contradiction → the "a merge landing bead/<id> exists (<sha>) but … contradicts" sentence, and NOT the zero-candidate one;
   - a revert shape → "was reverted or cleanly removed";
   - each ends with its own recovery line, and none recommends `mindspec complete` for the existing-merge arms.
+  - **Precedence.** A two-class MF-3 failure (dependency A not closed, dependency B `no-candidate`) renders both records in `Detail`, and exactly ONE `recovery:` line, A's `mindspec complete A`. `indeterminate` plus anything else gives the indeterminate recovery (`TestReadiness_MF3AggregatedPrecedence`).
 - [ ] **AC-14 (R5)**: `TestMF2_FormSymmetry` passes over the full table. `TestReadiness_MF2AllClasses` gains the six R5.2 legs. Red-on-revert: legs 1, 4 and 6 fail today.
 - [ ] **AC-15 (R6.1)**: Each leg below is a separate fixture or invocation:
   - MF-3 failing only: `--allow-not-ready=MF-3 --evidence <f>` claims and records `signals: [MF-3]`.
@@ -629,34 +754,46 @@ Also not goals:
   - `--allow-not-ready=MF-9` refuses before any mutation.
   - A missing `--evidence` refuses before any mutation when a signal would be recorded.
   - Nothing failing with `--allow-not-ready=MF-3` and no `--evidence`: a normal claim, the "named but passing" note, and no marker written.
+  - MF-3 failing with an `indeterminate` record (a membership read error) and `--allow-not-ready=MF-3 --evidence <f>`: refuses before any mutation with "cannot be overridden … fix the read first".
 
-  (`TestGateReadiness_ScopedOverride`, `TestNext_BareAllowNotReady_Refuses`, `TestNext_AllowNotReadySpaceSeparated_Refuses`, `TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker`.)
-- [ ] **AC-16 (R6.2, fingerprint and scope widening)**: Seven legs:
-  - **Named-but-passing never widens.** Request `MF-2,MF-3` while only MF-3 fails. The stored marker holds only `MF-3`, with its `fingerprints` entry and `evidence.{path,sha256,bytes}`, and no `text` key. Then make MF-2 fail: `ready-check` exits non-zero naming MF-2, and an UNFLAGGED re-claim refuses.
-  - **A then A+B (MF-3).** Record an override while dependency A fails MF-3. Keep A unchanged and add a newly failing dependency B: `ready-check` refuses with MF-3 uncovered until a fresh override with evidence is recorded.
-  - **The MF-4 analogue.** Keep the first blocker and add a second blocking line: MF-4 uncovered.
+  (`TestGateReadiness_ScopedOverride`, `TestNext_BareAllowNotReady_Refuses`, `TestNext_AllowNotReadySpaceSeparated_Refuses`, `TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker`, `TestGateReadiness_IndeterminateNotOverridable`.)
+- [ ] **AC-16 (R6.2, record digests and scope widening)**: Ten legs:
+  - **Named-but-passing never widens.** Request `MF-2,MF-3` while only MF-3 fails.
+    - The stored marker holds only `MF-3`, with its digest list and `evidence.{path,sha256,bytes}`, and no `text` key.
+    - Then make MF-2 fail: `ready-check` exits non-zero naming MF-2, and an UNFLAGGED re-claim refuses.
+  - **Growth (MF-3).** Record an override while dependency A fails. Keep A and add a newly failing B: MF-3 is uncovered until a fresh override is recorded.
+  - **Shrinkage (MF-3).** Record an override for A+B, then land B: MF-3 stays covered (A's digest was recorded).
+  - **MF-4 growth.** Keep the first blocker and add a second: uncovered.
+  - **MF-4 multiplicity.** Override a standalone `TBD` in the bd description, then add a second standalone `TBD` in a different plan design section: uncovered, because the source and section differ.
+  - **Checklist boundary.** A repeated identical checklist item in the same section gets occurrence index k=2: uncovered.
   - **Explicit narrower request.** An existing marker covers MF-2 and MF-3, both fail, and a new request names only MF-3: it refuses, and the marker is unchanged.
   - **Size limit.** A 64 KiB + 1 evidence file refuses with zero metadata writes (seam).
-  - **Determinism.** Two consecutive `EvaluateReadiness` runs on an unchanged fixture give byte-identical `FailureFingerprint`s for every signal.
-  - **Writer/reader agreement.** Over an MF-4 failure whose line contains a control byte, the writer's fingerprint equals the reader's (the raw, pre-render records are hashed).
+  - **Determinism.** Two consecutive `EvaluateReadiness` runs on an unchanged fixture give byte-identical digest lists for every signal.
+  - **Writer/reader agreement.** Over an MF-4 failure whose line contains a control byte, the writer's digests equal the reader's (raw, pre-render records).
 
-  Tests: `TestOverride_NoScopeWidening`, `TestOverride_NewFailureInSameSignalUncovered`, `TestOverride_MF4SecondBlockerUncovered`, `TestOverride_ExplicitNarrowerRequestRefuses`, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestFailureFingerprint_Deterministic`, `TestFailureFingerprint_WriterReaderAgree`. Red-on-revert: the A-then-A+B leg, against the round-1 first-Detail digest.
+  Tests: `TestOverride_NoScopeWidening`, `TestOverride_GrowthUncovered`, `TestOverride_ShrinkageStaysCovered`, `TestOverride_MF4SecondBlockerUncovered`, `TestOverride_MF4OccurrenceIdentity`, `TestOverride_ExplicitNarrowerRequestRefuses`, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestFailureRecordDigests_Deterministic`, `TestFailureRecordDigests_WriterReaderAgree`. Red-on-revert: the growth and MF-4-multiplicity legs, against the round-2 single-fingerprint design.
 - [ ] **AC-17 (R6.3, R6.4)**: `ready-check` with MF-3 failing:
   - with a VALID marker for MF-3 and a matching fingerprint: exit 0, `MF-3: OVERRIDDEN (…)`;
   - with MF-2 also failing: non-zero, naming MF-2;
   - with MF-3's failing dependency changed: non-zero, MF-3 uncovered;
   - with MF-3 now passing: the "no longer needed" note;
   - with an `indeterminate` MF-3 record: never covered;
-  - with a LEGACY marker: non-zero, the legacy note, and the two-line `mindspec release <id>` / `mindspec next <id> --allow-not-ready=… --evidence <path-to-justification>` recovery;
+  - with a LEGACY marker: non-zero, the legacy note, and the two-line `mindspec release <id>` / `mindspec next <id> --allow-not-ready=<all currently failing ids> --evidence <path-to-justification>` recovery;
+  - **mixed coverage:**
+    - MF-2 fails and is validly covered, and MF-3 newly fails uncovered. `ready-check` names `uncovered: MF-3`, and its re-claim line names `--allow-not-ready=MF-2,MF-3`.
+    - `release`, then the fresh re-claim with MF-2,MF-3 and new evidence, succeeds and REPLACES the marker.
+    - An explicit MF-3-only re-claim refuses without mutation.
+    - The same holds where MF-3 stays covered and MF-4 becomes uncovered (re-claim MF-3,MF-4).
+    - The same holds where a signal's coverage was lost through a grown digest list while another signal stays covered;
   - with MALFORMED markers (unknown ID, duplicate ID, missing fingerprint, bad timestamp, non-hex sha256, `bytes` = 0): non-zero, the malformed note;
   - with a metadata read error: refuses non-zero.
 
-  After `release` and the re-claim, the bead's surviving branch is reused. `EvaluateReadiness` does not read the marker, and the isolation test stays green. Tests: `TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`. Red-on-revert: the first case exits non-zero today.
+  After `release` and the re-claim, the bead's surviving branch is reused. `EvaluateReadiness` does not read the marker, and the isolation test stays green. Tests: `TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`, `TestReadyCheck_MixedCoverageRecoveryNamesAllFailing`. Red-on-revert: the first case exits non-zero today.
 - [ ] **AC-18 (R6.5, R7, ADR-0041)**:
   - `ms-bead-impl/SKILL.md` contains no `mindspec_readiness_override` subset comparison and contains the `ready-check` exit-code line; the rewritten pin tests pass.
   - `.mindspec/adr/ADR-0045-…md` exists with `Status: Accepted`, the Status fence, Amends ADR-0040 §1 and ADR-0044, step 1 → spec 130, and Decision 5's transition clause (pre-existing skill content grandfathered until step 7).
   - ADR-0040 and ADR-0044 carry the back-pointer; `mindspec adr list` includes ADR-0045.
-  - ADR-0041 contains § "Amendment (Spec 129)" naming the fallback-scoped callers, the undirected-subject residual, the no-panel-only confirmation rule on the fallback path, the non-corroborating panel datum and its reach into the CLOSE paths, the binding veto versus audited repair, and the scoped, fingerprint-bound fourth-verb override (a text-pin test in the R4 or R6 bead).
+  - ADR-0041 contains § "Amendment (Spec 129)" naming the fallback-scoped callers, the finder-only rule (no automatic acceptance of a fallback candidate), reattest's three added refusals and the reattest-audited read-back with its residual, the undirected-subject target gap, the non-corroborating panel datum and its reach into the CLOSE paths, the binding veto versus audited repair, and the scoped, fingerprint-bound fourth-verb override (a text-pin test in the R4 or R6 bead).
   - `mindspec validate spec 129-readiness-tracker-honesty` resolves every touchpoint link.
 - [ ] **AC-19 (method)**: `go build ./... && go test ./... -short` is green. `internal/harness` and `internal/instruct` tests run under `-short` only (128 settled fact 3). `go test ./internal/lint/...` is green, including `TestBDRowCapWaist` and the ADR-0030 boundary lint (no new `os/exec` or `gitutil` import in `internal/validate/readiness`).
 
@@ -669,11 +806,12 @@ Also not goals:
   - M: `metadata.spec_id` only;
   - T: title only.
 
-  `mindspec next --spec <S> --emit-only` lists A and G, and names D, M and T with their reasons. Then `bd update <D> --parent <E>` followed by the same command lists A, G and D (AC-1, AC-2).
+  `mindspec next --spec <S> --emit-only` lists A and G, and names D, M and T with their reasons. Then `bd update <D> --parent <E>` followed by the same command lists A, G and D (AC-1, AC-2). On bd 1.1.0 the G leg of this proof is green today too (prefix `--parent` and a full-ID title). The red-on-revert evidence for G is AC-1's edge-only fake and its numeric-tag G′.
 - `mindspec next <T> --spec <S>`: exits non-zero with T's N3 sentence (AC-3).
 - All-closed fixture with stored `implement`: `mindspec next --spec <S>` prints `child-derived phase: review` and `recovery: mindspec impl approve <S>` (AC-4).
 - This repo: `bd ready --json 2>&1 >/dev/null` prints the truncation notice. After R2, `mindspec next --emit-only` lists every ready bead (AC-7).
-- `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_NominatesSameCandidateAsFind|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet'` is green (AC-11, AC-12).
+- `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet'` is green (AC-11, AC-12).
+- On a #239-shaped fixture, `mindspec bead ready-check <dependent>` prints MF-3 FAIL naming the off-first-parent merge with `recovery: mindspec reattest <dep>`. After that command, it passes (AC-11 (i)).
 - `go test ./internal/validate/readiness/ -run 'TestReadiness_MF3|TestMF2_FormSymmetry'` is green (AC-10, AC-12, AC-13, AC-14).
 - With MF-3 failing: `mindspec next <bead> --allow-not-ready=MF-3 --evidence ./why.md` claims, and `mindspec bead ready-check <bead>` then exits 0 with `MF-3: OVERRIDDEN`. Changing the failing dependency makes `ready-check` exit non-zero. The bare `--allow-not-ready` refuses with the scoped line (AC-15–AC-17).
 - `mindspec adr list | grep ADR-0045` and `mindspec validate spec 129-readiness-tracker-honesty` → 0 errors (AC-18).
@@ -685,40 +823,49 @@ Every question below is either resolved with its rationale or EXPLICITLY DEFERRE
 
 - [x] **OQ-1 (scope split) — RESOLVED.**
   - 129 = R1–R6 (estimate: 7–10 beads) + R7 (doc, this commit) + the ADR-0041 amendment (with the R4/R6 beads).
-  - 129b = five deliverables: G (#234), H (#244), #250, I (`merge_strategy`), and phase-lineage unification.
+  - the follow-on spec (next plain number) = five deliverables: G (#234), H (#244), #250, I (`merge_strategy`), and phase-lineage unification.
   - 130 = the S0 rule table (pure policy, a different review centre, an unowned path that first needs an OWNERSHIP claim), #233's review-to-landing binding, and the rest of #251.
 
-  Re-opens if the plan gate judges 129 over-compressed: R6 then splits out as 129c.
+  Re-opens if the plan gate judges 129 over-compressed: R6 then splits out as a further plain-numbered spec.
 - [x] **OQ-2 (title filter) — RESOLVED.** The title is never a membership input. `containsSpecID` survives only as R1.2's near-miss linkage test, and R1.7 lists the spec-128 tests that are rewritten.
 - [x] **OQ-3 (can the panel leg ever confirm after spec 128 Bead 6?) — EXPLICITLY DEFERRED to the plan stage.** The plan must run the fixture: the panel reviews `B`, `complete` materialises its landing commit, then the merge. It records whether the second parent equals `B` on a clean worktree.
   - If it never does, R4.3's non-corroborating semantics are exactly right, AC-12 (iv)/(v) is the normal path, and the ADR-0041 amendment says so.
   - If it does, AC-12 (i) is the leg's live proof.
 
   Either way #233's binding question stays spec 130's. This re-opens R4.3's wording, never its rule.
-- [x] **OQ-4 (one discovery for identify AND nominate) — RESOLVED.** `ReattestLandedMerge` nominates through the same first-parent-then-reachable-fallback generator as MF-3 (AC-11 (i)). The executor's write-time `gitutil.ExactSecondParentMerges` stays first-parent by requirement (R4.2's table), because the merge it binds was just made and is the first-parent tip.
+- [x] **OQ-4 (one discovery for identify AND nominate) — RESOLVED.** `ReattestLandedMerge` nominates through the same first-parent-then-reachable-fallback generator as MF-3. On the fallback path MF-3 only names the candidate, and reattest alone accepts it, under its three added refusals (R4.2, AC-11). The executor's write-time `gitutil.ExactSecondParentMerges` stays first-parent by requirement (R4.2's table), because the merge it binds was just made and is the first-parent tip.
 - [x] **OQ-5 (bare `--allow-not-ready`) — RESOLVED: refuse.** `--allow-not-ready=all` is NOT admitted. It would restore the all-or-nothing form R6 removes, and the refusal's recovery line already names the complete failing set. The cobra shape (a `String` flag with `NoOptDefVal`) is a plan decision, bound by AC-15's space-separated leg.
 - [x] **OQ-6 (index dotted sub-numbers `R6.3`?) — RESOLVED: no.** Base resolution is symmetric today. Sub-number indexing would be a new claim form that turns existing dotted citations into potential dangling claims. Re-opens if a later spec wants sub-number-exact MF-2.
 - [x] **OQ-7 (exit code of an empty-set result) — RESOLVED.**
-  - No selector and no BLOCKING near-miss → exit 0 (HC-4: the read evaluation completed). Informational near-misses (title-only, metadata-only, non-lifecycle children) are printed and do not change the exit code. Otherwise one permanently ready follow-up bead, whose title names the spec, would fail every scoped `next` forever.
+  - No selector and no BLOCKING near-miss → exit 0 (HC-4: the read evaluation completed). Informational near-misses are printed and do not change the exit code. They are: N4 follow-up children of E that `plan.md` does not map (bd mints `<E>.<N>` for them whatever their type), title-only or metadata-only N3, and reparented non-lifecycle children. Such beads are by design never selectable, so failing on them would make every scoped `next` fail for as long as one follow-up stays open.
   - ≥1 blocking near-miss (N1, N2, or a lifecycle-type N3 under E) → non-zero (128's loud-empty class).
   - A selector supplied → non-zero.
   - A failed child read → non-zero.
 - [x] **OQ-8 (why not surface stderr on success in `tracedOutput` globally?) — RESOLVED: scope it to the waist.** Only in the row-set waist does a notice have a defined meaning (truncation) and a defined response (an error).
-- [x] **OQ-9 (membership design) — RESOLVED: plan bead by lineage (round 2), with Option W still rejected.**
-  - **Round 1 (Option N)** selected `<E>.<N>` rows whose `parent` was E. Round 2 showed that this left #255's own bead unclaimable: it has a dotted ID, no parent edge, and title-fallback lineage, and it passes `ready-check`. That made round 1's claim "exactly the set readiness can evaluate" false.
-  - **R1.1 now selects** a `<E>.<N>` bead whose lineage, through the UNCHANGED `phase.FindEpicForBead`, resolves to E. This is the same resolution `readiness` and `complete` already use, so no core change is needed.
-  - **Evidence** (scratch bd 1.1.0, Background A): the reporter shape `pr-1rs.4` resolves `epic=pr-1rs spec=129-probe`, and the neutral-title sibling returns `ErrNoEpicLineage` (class N1, repairable by the AC-2 recovery).
-  - **Both #255 defects are fixed for that shape.** The bead is selected and claimable without an override, and a bead that is still excluded is named, never reported as "no work".
-  - **The remaining honest limit.** `readiness.beadIndex` accepts any trailing `.<N>`, so readiness also evaluates `<other>.<N>` beads whose title-fallback lineage is S. `next` names them as N3, and R1.8 refuses to claim them. Tightening `beadIndex` and removing the title fallback is 129b's phase-lineage unification.
-  - **Option W** (descendant-OR-`metadata.spec_id` membership everywhere) stays rejected. It needs a metadata leg in `phase.FindEpicForBead` (core), a non-dotted MF-1 mapping that no rule defines, and a conflict-precedence rule, all for beads no shipped flow creates.
-  - **MF-3's dependency membership stays wider** (plan-form OR spec_id OR parent), because holding more dependencies to the landed test is the fail-closed direction.
+- [x] **OQ-9 (membership design) — RESOLVED: a plan bead = plan-form ID + lineage E + a plan mapping (round 3). Option W is still rejected.**
+  - **Round 1 (Option N)** selected `<E>.<N>` rows with parent E. That left #255's edge-less, title-lineage bead unclaimable.
+  - **Round 2** selected by lineage through the UNCHANGED `phase.FindEpicForBead`. Evidence (scratch bd 1.1.0, Background A): `pr-1rs.4` resolves `epic=pr-1rs`; a neutral-title sibling gives `ErrNoEpicLineage`.
+  - **Round 3** added MF-1's own mapping, because bd mints `<E>.<N>` for EVERY child created under the epic. Examples: `mindspec-cter.8` and `mindspec-jfgj.4`, both bugs outside their plans. Round 3 also removed the parent-E shortcut, so selection agrees with the resolver on conflicting epic dependencies.
+  - **What this gives.** The member set equals the beads that `GateReadiness` can pass on MF-1 and lineage, for `<E>.<N>` IDs.
+  - **#255.**
+    - Defect 1 (zero instead of naming) is fixed for every shape.
+    - Defect 2 (the exclusion) is fixed for the reporter's shape, including on an edge-only bd and with a numeric-only tag. On bd 1.1.0 with a full-ID title that shape was already selected at `e2325e36`, so R1.1 is a hardening there.
+  - **Rejected alternative.** Keeping unmapped children as members and default-picking lifecycle members first. MF-1 refuses unmapped beads, so they could never be claimed without an override.
+  - **Honest limit.** `readiness.beadIndex` also evaluates `<other>.<N>` beads by suffix. `next` names them (N3), and R1.8 refuses to claim them. The follow-on spec tightens it.
+  - **Option W** (descendant-OR-`metadata.spec_id` everywhere) stays rejected. It needs core changes and an undefined non-dotted mapping.
+  - **MF-3's dependency membership stays wider** (the fail-closed direction).
 
-  Re-opens if planning finds a shipped flow that creates spec beads without the plan-bead form.
+  Re-opens if planning finds a shipped flow that creates plan beads without the plan-bead form or a plan mapping.
 
-### Grill record (self-answered, headless — 2026-10-18; revised after rounds 1 and 2)
+### Grill record (self-answered, headless — 2026-10-18; revised after rounds 1–3)
+
+- [x] grill (round 3): can the fallback ever pass MF-3 automatically? → No (orchestrator ruling). Three rounds found three different false PASSes. It finds and names; `reattest` accepts after refusing unreached reviews, multiple candidates and missing audits (R4.2).
+- [x] grill (round 3): is every `<E>.<N>` with lineage E a plan bead? → No: bd mints that ID for follow-up bugs too. A plan mapping is now required, and unmapped children are N4, informational (R1.1, R1.2).
+- [x] grill (round 3): may successors use lettered IDs? → No: `parseSpecID` gives `spec_num 0` and the title fallback resolves 129 (mindspec-wtjr). Plain numbers only (Background K).
+- [x] grill (round 3): does an override fingerprint over the whole set churn when failures shrink? → It did. Per-record digests now let shrinkage stay covered while growth uncovers (R6.4).
 
 - [x] grill (round 2): is #255's reported bead claimable? → In round 1, no: it was an N1/N3 near-miss. Now yes: R1.1 selects by lineage, and the reporter shape was resolved on a real scratch bd (OQ-9).
-- [x] grill (round 2): does the fallback's `Merge bead/<id>` form pin a target? → No: it names none, and a reviewer probe built a false PASS. Fixed: on the fallback path the panel never confirms on its own, (b) or (d) is required, and the residual is stated (R4.2, AC-11 (vii)).
+- [x] grill (round 2): does the fallback's `Merge bead/<id>` form pin a target? → No: it names none, and a reviewer probe built a false PASS. Fixed: on the fallback path the panel never confirms on its own, (b) or (d) is required, and the residual is stated (R4.2, AC-11 (vii)). (Superseded in round 3: the fallback no longer confirms automatically at all.)
 - [x] grill (round 2): does an override fingerprint over the first Detail widen coverage? → Yes: A then A+B stayed covered. Fixed: the fingerprint is over the complete sorted failure records (R6.2, AC-16).
 - [x] grill (round 2): can an unscoped claim be cut from `HEAD`? → Yes, today. Fixed: the lineage spec is the dispatch spec (R1.8 (c), AC-6 (c)).
 
@@ -729,7 +876,7 @@ Every question below is either resolved with its rationale or EXPLICITLY DEFERRE
 - [x] grill: does removing the panel veto reintroduce ancestor-tolerant confirmation? → No. The set confirms only on exact equality; the tip and binding contradictions remain.
 - [x] grill: does R6 open a gate on a forged marker? → No gate reads the marker for claim authority (fresh flag and evidence on every claim). `ready-check`'s dispatch answer is no weaker than today's skill prose, and it is stricter: a VALID schema plus a per-signal fingerprint of the complete failure set are required.
 - [x] grill: does the evidence leak into git? → Its path, sha256 and byte count do (the tracked JSONL); its text is never stored.
-- [x] grill: "A re-run of impl approve tolerates the half-done state" — traced or run? → Traced. Recorded as 129b's obligation to run it.
+- [x] grill: "A re-run of impl approve tolerates the half-done state" — traced or run? → Traced. Recorded as the follow-on spec's obligation to run it.
 - [x] grill: does ADR-0045 hold against the tree? → Its Context claims are verified by file. It conflicted with ADR-0044 and understated its ADR-0040 amendment; both are now stated. `Accepted` is fenced per ADR-0032.
 
 ## Approval
