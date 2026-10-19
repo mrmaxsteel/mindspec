@@ -271,7 +271,7 @@ func TestReattestReportedLinesReachOutput(t *testing.T) {
 			if want := provenance + "\n" + advisory + "\n"; stdout.String() != want {
 				t.Fatalf("reported lines must reach the command output before the engine returns: got %q, want %q", stdout.String(), want)
 			}
-			return &lifecycle.ReattestResult{BeadID: beadID, SpecBranch: specBranch, MergeSHA: "abc123", SecondParent: "def456", Wrote: true}, nil
+			return &lifecycle.ReattestResult{BeadID: beadID, SpecBranch: specBranch, MergeSHA: "abc123", SecondParent: "def456", Wrote: true, Lines: []string{provenance, advisory}}, nil
 		},
 		actor:  "tester",
 		stdout: &stdout,
@@ -280,8 +280,12 @@ func TestReattestReportedLinesReachOutput(t *testing.T) {
 	if err := runReattest(deps, t.TempDir(), "mindspec-x1", ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(stdout.String(), provenance+"\n"+advisory+"\nRe-attested landed-binding") {
-		t.Fatalf("reported lines must precede the success output: %q", stdout.String())
+	want := provenance + "\n" + advisory + "\n" +
+		"Re-attested landed-binding for bead mindspec-x1 on spec/129-test:\n" +
+		"  merge         abc123\n  second parent def456\n  corroboration \n" +
+		"Audit recorded in bd metadata (mindspec_landed_reattest_*): inspect with `bd show mindspec-x1 --json`.\n"
+	if stdout.String() != want {
+		t.Fatalf("reported lines must appear exactly once before the success output: got %q, want %q", stdout.String(), want)
 	}
 }
 

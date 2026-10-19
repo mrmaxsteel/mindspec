@@ -187,6 +187,23 @@ func TestReattest_FallbackRewritesWhenBindingDriftsFromValidAudit(t *testing.T) 
 	}
 }
 
+// Spec 129 R4.2: second-parent binding drift cannot converge on a valid audit.
+func TestReattest_FallbackRewritesWhenBindingSecondParentDrifts(t *testing.T) {
+	f := newFallbackFixture(t)
+	meta := acceptFallback(t, f)
+	meta["mindspec_landed_second_parent"] = strings.Repeat("c", 40)
+
+	requireOffFirstParent(t, f, 1)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 {
+		t.Fatalf("drifted second-parent binding must be rewritten: %+v %v writes=%v", res, err, *writes)
+	}
+	if !auditMatches((*writes)[0].updates, fallbackSpec, f.merge, f.second) {
+		t.Fatalf("rewrite did not restore a valid matching tuple: %+v", (*writes)[0].updates)
+	}
+}
+
 // Spec 129 R4.2 F4: partially superseded content is not a reverted landing.
 func TestReattest_FallbackAcceptedThenEvolvedStaysIdentified(t *testing.T) {
 	dir, run := initLandedRepo(t, "129-test")
@@ -219,6 +236,38 @@ func TestReattest_FallbackAcceptedThenEvolvedStaysIdentified(t *testing.T) {
 	var refusal *ReattestRefusal
 	if errors.As(err, &refusal) || err != nil || res == nil {
 		t.Fatalf("evolved fallback landing refused: %+v %v writes=%v", res, err, *writes)
+	}
+}
+
+// Spec 129 R4.2 F4: content edited in place is a landed-then-evolved landing.
+func TestReattest_FallbackAcceptedThenConflictEvolvedStaysIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "129-test")
+	run("checkout", "-b", "bead/"+fallbackBead)
+	writeFallbackFile(t, dir, "surface-a.txt", "alpha payload\n")
+	run("add", ".")
+	run("commit", "-m", "work bead-one")
+	run("checkout", fallbackSpec)
+	run("merge", "--no-ff", "-m", "Merge bead/"+fallbackBead, "bead/"+fallbackBead)
+	f := fallbackFixture{dir: dir, run: run, merge: revParseIn(t, dir, "HEAD"), second: revParseIn(t, dir, "bead/"+fallbackBead)}
+	carry239(t, f)
+	acceptFallback(t, f)
+
+	if err := os.WriteFile(filepath.Join(dir, "surface-a.txt"), []byte("alpha payload, edited later by honest work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "evolve surface-a in place")
+
+	outcome, err := gitutil.ContentSubsumedOutcome(dir, f.merge+"^1", f.merge, fallbackSpec)
+	if err != nil || outcome != gitutil.SubsumptionConflict {
+		t.Fatalf("shape precondition: want SubsumptionConflict, got %v %v", outcome, err)
+	}
+	requireReadBack(t, f)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	var refusal *ReattestRefusal
+	if errors.As(err, &refusal) || err != nil || res == nil {
+		t.Fatalf("conflict-evolved fallback landing refused: %+v %v writes=%v", res, err, *writes)
 	}
 }
 
