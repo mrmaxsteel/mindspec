@@ -109,7 +109,7 @@ func (rs ReadySet) ExclusionNotice() string {
 
 func containsSpecID(title, specID string) bool { return strings.Contains(title, specID) }
 
-var findEpicForBeadFn = phase.FindEpicForBeadWithCacheProvenance
+var findEpicForBeadFn = phase.FindEpicForBeadWithCache
 
 // BuildReadySet classifies one uncapped global ready set with the same lineage
 // resolver and positional plan mapping that readiness uses.
@@ -140,24 +140,34 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 		n, form := bead.PlanBeadIndex(rs.EpicID, item.ID)
 		info := lineageInfo{}
 		if form {
-			info.epic, info.spec, info.dependency, err = findEpicForBeadFn(rs.Cache, item.ID)
+			info.epic, info.spec, err = findEpicForBeadFn(rs.Cache, item.ID)
 			if err != nil && !errors.Is(err, phase.ErrNoEpicLineage) {
-				return rs, fmt.Errorf("could not resolve the lineage of %s: %w", idrender.Bead(item.ID), RenderBDError(err))
+				return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(err), idrender.Bead(item.ID))
 			}
 			info.none = errors.Is(err, phase.ErrNoEpicLineage)
 			if item.Parent != "" {
 				parent, parentErr := rs.Cache.FindEpic(item.Parent)
 				if parentErr != nil {
-					return rs, fmt.Errorf("could not resolve the lineage of %s: %w", idrender.Bead(item.ID), RenderBDError(parentErr))
+					return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(parentErr), idrender.Bead(item.ID))
 				}
 				info.nonEpicParent = parent == nil || !strings.EqualFold(parent.IssueType, "epic")
 			}
-			info.dependency = info.dependency && info.epic != rs.EpicID
+			if info.epic != "" && info.epic != rs.EpicID {
+				info.dependency, err = hasEpicDependency(item.ID, info.epic)
+				if err != nil {
+					return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(err), idrender.Bead(item.ID))
+				}
+			}
+			// A named parent that supplied no lineage still needs inspection;
+			// title fallback must never justify overwriting that parent.
+			if item.Parent != "" && item.Parent != rs.EpicID && !info.dependency && info.epic != rs.EpicID {
+				info.nonEpicParent = true
+			}
 			if !info.nonEpicParent && !info.dependency {
 				if !loaded {
 					plan, absent, rs.PlanNotice, err = readPlanForSpec(root, specFlag)
 					if err != nil {
-						return rs, fmt.Errorf("could not read plan.md for %s: %w", idrender.Spec(specFlag), RenderBDError(err))
+						return rs, fmt.Errorf("could not read plan.md for %s: %w\nrecovery: mindspec validate plan %s", idrender.Spec(specFlag), RenderBDError(err), idrender.Spec(specFlag))
 					}
 					loaded = true
 				}
@@ -167,8 +177,7 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 					info.mapped, info.why = readiness.PlanMapsBead(plan, n)
 				}
 			}
-			status := strings.TrimSpace(item.Status)
-			if !info.nonEpicParent && info.epic == rs.EpicID && info.mapped && (status == "" || strings.EqualFold(status, "open")) {
+			if isReadyPlanMember(item, rs.EpicID, info) {
 				rs.Filtered = append(rs.Filtered, item)
 				continue
 			}
@@ -181,6 +190,12 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 		return rs, emptyAfterFilterError(rs)
 	}
 	return rs, nil
+}
+
+// isReadyPlanMember applies the member predicate after plan-form validation.
+func isReadyPlanMember(item BeadInfo, epic string, info lineageInfo) bool {
+	status := strings.TrimSpace(item.Status)
+	return !info.nonEpicParent && info.epic == epic && info.mapped && (status == "" || strings.EqualFold(status, "open"))
 }
 
 // EmptyAfterFilterError is loud emptiness, with a valid set whose derived state

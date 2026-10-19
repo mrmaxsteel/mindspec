@@ -148,7 +148,7 @@ func newNearMissFixture(t *testing.T, duplicate bool) *nearMissFixture {
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Reset seams explicitly; tests exercise the production resolver and shared cache.
 	oldReady, oldRun, oldFind := readyJSONFn, runBDFn, findEpicForBeadFn
-	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicForBeadWithCacheProvenance
+	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicForBeadWithCache
 	t.Cleanup(func() { readyJSONFn, runBDFn, findEpicForBeadFn = oldReady, oldRun, oldFind })
 	t.Cleanup(phase.SetRunBDForTest(bead.RunBD))
 	t.Cleanup(phase.SetListJSONForTest(bead.ListJSON))
@@ -266,6 +266,27 @@ func TestNearMissN2a_NeverReparentRecovery(t *testing.T) {
 				t.Fatalf("parent recovery: %+v", m)
 			}
 		})
+	}
+}
+
+func TestNearMissN2a_NamedEpicParentWithoutMetadata(t *testing.T) {
+	f := newNearMissFixture(t, false)
+	f.epics = append(f.epics, phase.EpicInfo{ID: "plain-epic", IssueType: "epic", Status: "open"})
+	f.rows = []BeadInfo{
+		f.row("epic-129.4", "neutral", "plain-epic", "task"),
+		f.row("epic-129.7", "[777] Q2", "plain-epic", "task"),
+	}
+	f.save(t)
+	rs, err := BuildReadySet(f.root, "129-fixture")
+	if err == nil || len(rs.Filtered) != 0 || len(rs.NearMisses) != 2 {
+		t.Fatalf("named parents must remain blocking near-misses: %+v %v", rs, err)
+	}
+	for _, row := range f.rows {
+		m := missByID(t, rs, row.ID)
+		want := fmt.Sprintf("bead %s has the plan-bead form for epic epic-129, but its parent is plain-epic\nrecovery: bd show %s --json", row.ID, row.ID)
+		if m.Class != "N2a" || !m.Blocking || m.String() != want || strings.Contains(m.String(), "bd update") || strings.Contains(m.String(), "no parent edge") {
+			t.Errorf("named parent must use inspection-only recovery: %s", m.String())
+		}
 	}
 }
 func TestExclusionNotice_NamesIDs(t *testing.T) {

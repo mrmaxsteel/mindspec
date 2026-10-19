@@ -112,20 +112,30 @@ func TestNext_NearMissPositional_Refuses(t *testing.T) {
 	}
 }
 func TestNext_UnlinkedReadyPositional_Refuses(t *testing.T) {
-	f := newNextHonestyFixture(t)
-	f.rows = append(f.rows, nextHonestyRow("epic-777.1", "other", "epic-777", "task", "open"))
-	f.write(t)
-	before := f.audit(t)
-	_, err := f.run(t, "--spec", "129-fixture", "epic-777.1")
-	if err == nil {
-		t.Fatal("unlinked ready bead claimed")
-	}
-	requireText(t, err.Error(), "bead epic-777.1 is bd-ready but is not linked to spec 129-fixture (parent: epic-777)")
-	if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
-		t.Fatalf("unlinked recovery: %v", err)
-	}
-	if f.audit(t) != before {
-		t.Fatal("unlinked refusal mutated")
+	for _, tc := range []struct{ id, parent string }{{"epic-777.1", "epic-777"}, {"other-1", ""}} {
+		t.Run(tc.id, func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = append(f.rows, nextHonestyRow(tc.id, "other", tc.parent, "task", "open"))
+			f.write(t)
+			before := f.audit(t)
+			_, err := f.run(t, "--spec", "129-fixture", tc.id)
+			if err == nil {
+				t.Fatal("unlinked ready bead claimed")
+			}
+			want := "bead " + tc.id + " is bd-ready but is not linked to spec 129-fixture"
+			if tc.parent != "" {
+				want += " (parent: " + tc.parent + ")"
+			} else if strings.Contains(err.Error(), "(parent:") {
+				t.Fatalf("parentless refusal invents a parent: %v", err)
+			}
+			requireText(t, err.Error(), want+"\nrecovery: mindspec next --spec 129-fixture")
+			if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
+				t.Fatalf("unlinked recovery: %v", err)
+			}
+			if f.audit(t) != before {
+				t.Fatal("unlinked refusal mutated")
+			}
+		})
 	}
 }
 func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {

@@ -779,7 +779,7 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 	// PhaseDetail's legacy API represents a failed read with an empty Derived;
 	// explicitly preflight both reads so an infrastructure failure cannot look empty.
 	if _, err := rs.Cache.FindEpic(rs.EpicID); err != nil {
-		return fmt.Errorf("stored phase: indeterminate: %w", next.RenderBDError(err))
+		return fmt.Errorf("stored phase: indeterminate: %w\nrecovery: mindspec state show", next.RenderBDError(err))
 	}
 	detail, err := phase.DerivePhaseDetailWithCache(rs.Cache, rs.EpicID)
 	if err != nil {

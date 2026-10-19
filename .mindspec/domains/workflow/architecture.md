@@ -1336,7 +1336,7 @@ Positional emit-only still fetches by ID and prints
 
 Without a selector, an empty scoped set prints the lifecycle child tally,
 stored and child-derived phase, and the emptiness rule before acting:
-an empty ready set is not evidence the spec is complete; the derived phase above is
+`an empty ready set is not evidence the spec is complete; the derived phase above is`.
 All closed children point to impl approval; an in-progress child uses
 worktree recovery; open children point to `bd blocked --parent <E>`; zero
 lifecycle children point to plan approval. A derived phase ahead of stored

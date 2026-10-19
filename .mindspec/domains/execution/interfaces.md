@@ -36,7 +36,7 @@ architecture doc.)
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
-Low-level git operations used only by `MindspecExecutor`:
+Low-level git operations used by `MindspecExecutor`; `internal/next` also consumes `FileAtRefTyped` for committed plan mapping:
 
 | Function | Purpose |
 |:---------|:--------|

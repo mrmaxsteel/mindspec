@@ -34,12 +34,6 @@ import (
 type Cache struct {
 	mu sync.Mutex
 
-	// LineageDependency records dependency-edge provenance for callers of
-	// FindEpicForBeadWithCacheProvenance. It is not a bead-result cache;
-	// each resolver call still reads the bead, and refreshes this entry.
-	// Access is guarded by mu; callers should use the resolver's return value.
-	LineageDependency map[string]bool
-
 	// Whole-list memoization.
 	epicsAll       []EpicInfo
 	epicsAllLoaded bool

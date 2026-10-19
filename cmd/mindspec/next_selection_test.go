@@ -678,6 +678,7 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 	}{
 		{"i", "implement", "review", []string{"closed"}, "recovery: mindspec impl approve 129-fixture"},
 		{"ii", "implement", "implement", []string{"in_progress"}, "Recovering..."},
+		{"ii-b", "implement", "implement", []string{"in_progress", "open"}, "Recovering..."},
 		{"iii-a", "implement", "implement", []string{"closed", "open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
 		{"iii-b", "implement", "plan", []string{"open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
 		{"iv", "plan", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
@@ -702,7 +703,7 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 			restore := next.SetPlanProbeForTest(func(string, string, string) ([]byte, error) { reads++; return nil, errors.New("unexpected plan read") })
 			defer restore()
 			recovered := 0
-			if tc.name == "ii" {
+			if tc.name == "ii" || tc.name == "ii-b" {
 				nextEnsureWorktreeFn = func(root, id, spec string, exec executor.Executor) (string, error) {
 					recovered++
 					expectedRoot, err := filepath.EvalSymlinks(f.root)
@@ -760,7 +761,10 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 					t.Fatal("open children sent to plan approve")
 				}
 			}
-			if tc.name == "ii" {
+			if tc.name == "ii" || tc.name == "ii-b" {
+				if strings.Contains(out, "recovery: bd blocked --parent epic-129") {
+					t.Fatal("in-progress recovery must outrank open-child recovery")
+				}
 				if recovered != 1 {
 					t.Fatalf("expected one worktree recovery, got %d", recovered)
 				}
@@ -854,6 +858,49 @@ func TestNext_EmptyScoped_UnresolvedActiveBead(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestNext_EmptyScoped_EmitOnlyInProgress(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = nil
+	f.children = []map[string]interface{}{nextHonestyRow("epic-129.1", "active", "epic-129", "task", "in_progress")}
+	f.epics[0]["metadata"].(map[string]interface{})["mindspec_phase"] = "implement"
+	f.write(t)
+	old := nextResolveActiveBeadFn
+	calls := 0
+	nextResolveActiveBeadFn = func(string, string) (string, error) { calls++; return "epic-129.1", nil }
+	t.Cleanup(func() { nextResolveActiveBeadFn = old })
+	nextEnsureWorktreeFn = func(string, string, string, executor.Executor) (string, error) {
+		t.Fatal("emit-only triggered worktree mutation")
+		return "", nil
+	}
+	before := f.audit(t)
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only")
+	if err != nil {
+		t.Fatalf("emit-only empty state: %v %s", err, out)
+	}
+	requireText(t, out, "lifecycle children: 0 closed / 1 in_progress / 0 open", "recovery: mindspec next --spec 129-fixture")
+	if calls != 0 || f.audit(t) != before {
+		t.Fatalf("emit-only mutated state or resolved active bead: calls=%d", calls)
+	}
+}
+
+func TestNext_EmptyScoped_StoredPhaseReadFailure(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = nil
+	f.children = []map[string]interface{}{}
+	f.write(t)
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "show" && args[1] == "epic-129" {
+			return nil, os.ErrPermission
+		}
+		t.Fatalf("unexpected stored-phase read: %v", args)
+		return nil, nil
+	}))
+	err := handleEmptyScoped(f.root, next.ReadySet{EpicID: "epic-129", SpecFlag: "129-fixture", Cache: phase.NewCache()}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "stored phase: indeterminate: ") || !errors.Is(err, os.ErrPermission) || !strings.HasSuffix(err.Error(), "\nrecovery: mindspec state show") {
+		t.Fatalf("stored-phase refusal recovery: %v", err)
 	}
 }
 func TestNextMenu_PrintsSpecIDForm(t *testing.T) {

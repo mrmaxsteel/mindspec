@@ -1,9 +1,11 @@
 package next
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -25,6 +27,37 @@ type NearMiss struct {
 }
 
 func (m NearMiss) String() string { return m.Message + "\n" + strings.Join(m.Recoveries, "\n") }
+
+// hasEpicDependency distinguishes dependency resolution from the title fallback.
+// FindEpicForBead deliberately exposes only the resolved identity, so the
+// ambiguous foreign-epic case inspects the dependency list rather than guessing.
+func hasEpicDependency(id, epic string) (bool, error) {
+	if err := idvalidate.BeadID(id); err != nil {
+		return false, err
+	}
+	out, err := runBDFn("show", id, "--json")
+	if err != nil {
+		return false, err
+	}
+	var rows []struct {
+		Dependencies []struct {
+			ID        string
+			IssueType string `json:"issue_type"`
+		}
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return false, fmt.Errorf("bead %s disappeared during lineage read", idrender.Bead(id))
+	}
+	for _, dep := range rows[0].Dependencies {
+		if dep.ID == epic && strings.EqualFold(dep.IssueType, "epic") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 func classifyNearMiss(item BeadInfo, epic, spec string, n int, form bool, l lineageInfo) (NearMiss, bool) {
 	// A mapped row with this lineage is a plan bead even if a ready

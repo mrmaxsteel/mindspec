@@ -674,8 +674,14 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 		t.Fatalf("ready calls=%d epic lists=%d (one shared cache required)", readyCalls, epicLists)
 	}
 	for _, row := range f.rows {
-		if _, form := bead.PlanBeadIndex("epic-129", row.ID); form && shows[row.ID] != 1 {
-			t.Errorf("bd show %s called %d times; want one per plan-form row", row.ID, shows[row.ID])
+		if _, form := bead.PlanBeadIndex("epic-129", row.ID); form {
+			count := 1
+			if want[row.ID] == "N2b" || want[row.ID] == "N2c" {
+				count = 2 // Resolver read plus foreign-lineage provenance read.
+			}
+			if shows[row.ID] != count {
+				t.Errorf("bd show %s called %d times; want %d for class %s", row.ID, shows[row.ID], count, want[row.ID])
+			}
 		}
 	}
 	// Positional heading 8 is labelled 12; it still maps bead .8.
@@ -758,6 +764,9 @@ func TestBuildReadySet_LineageReadErrorRefuses(t *testing.T) {
 			rs, err := BuildReadySet(f.root, "129-fixture")
 			if err == nil || !strings.Contains(err.Error(), "could not resolve the lineage of epic-129.5") || len(rs.NearMisses) != 0 {
 				t.Fatalf("lineage error: %v; near-misses: %+v", err, rs.NearMisses)
+			}
+			if !strings.HasSuffix(err.Error(), "\nrecovery: bd show epic-129.5 --json") {
+				t.Fatalf("lineage refusal recovery: %v", err)
 			}
 		})
 	}
@@ -845,6 +854,9 @@ func TestBuildReadySet_PlanReadErrorRefuses(t *testing.T) {
 	_, err := BuildReadySet(f.root, "129-fixture")
 	if err == nil || !strings.Contains(err.Error(), "could not read plan.md for 129-fixture") || !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("checkout read failure: %v", err)
+	}
+	if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec validate plan 129-fixture") {
+		t.Fatalf("plan refusal recovery: %v", err)
 	}
 }
 
@@ -947,8 +959,9 @@ func TestWorkflowSelectionDocs_Contracts(t *testing.T) {
 		path string
 		want []string
 	}{
-		{"architecture.md", []string{"scopeResolutionRefusal", "R6.7/AC-15", "never widens to global unscoped", "on both ready-set paths", "SelectWork", "even with exactly one item", "negative pick errors", "bdRenderedError", "RenderBDError", "wrapBDError", "nextPhaseMergeMetadataFn", "R3.3 lock", "Struck without implementation", "#146 #2(a)", "#146 #3"}},
+		{"architecture.md", []string{"scopeResolutionRefusal", "R6.7/AC-15", "never widens to global unscoped", "on both ready-set paths", "SelectWork", "even with exactly one item", "negative pick errors", "bdRenderedError", "RenderBDError", "wrapBDError", "nextPhaseMergeMetadataFn", "R3.3 lock", "Struck without implementation", "#146 #2(a)", "#146 #3", "`an empty ready set is not evidence the spec is complete; the derived phase above is`."}},
 		{"interfaces.md", []string{"ReadySet{Filtered, Raw, SpecFlag, EpicID, NearMisses, PlanNotice, Cache}", "for positional resolution", "NearMiss{Bead, Class, Message, Recoveries, Blocking, Lineage, NoLineage}", "EmptyAfterFilterError", "ReadySet.HasBlockingNearMisses()"}},
+		{"../execution/interfaces.md", []string{"Low-level git operations used by `MindspecExecutor`; `internal/next` also consumes `FileAtRefTyped` for committed plan mapping:"}},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("../../.mindspec/domains/workflow", tc.path))
@@ -956,6 +969,9 @@ func TestWorkflowSelectionDocs_Contracts(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(data)
+			if tc.path == "interfaces.md" && strings.Contains(text, "FindEpicForBeadWithCacheProvenance") {
+				t.Error("workflow interfaces must consume the unchanged phase resolver")
+			}
 			if tc.path == "architecture.md" {
 				start := strings.Index(text, "### R6 — Deterministic, honest bead selection")
 				end := strings.Index(text[start:], "### R7 —")
