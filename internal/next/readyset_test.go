@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // runGitCmdForNext runs git with args in dir, with a pinned test identity
@@ -27,6 +29,14 @@ func runGitCmdForNext(t *testing.T, dir string, args ...string) {
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// Acceptance fixtures fail closed when a required executable is missing.
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatal("git is required for readiness acceptance tests")
 	}
 }
 
@@ -566,6 +576,8 @@ func TestSelectorErrors_PrintableHostileNeverInCommandShape(t *testing.T) {
 
 func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 	f := newNearMissFixture(t, false)
+	// Preserve priority order even when it differs from lexical ID order.
+	f.rows[0], f.rows[2] = f.rows[2], f.rows[0]
 	// Establish the fake's adverse behaviour before testing the production waist.
 	original := f.rows
 	for len(f.rows) < 101 {
@@ -611,7 +623,7 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.1", "epic-129.2", "epic-129.3"}) {
+	if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.3", "epic-129.2", "epic-129.1"}) {
 		t.Fatalf("members: %v", ids(rs.Filtered))
 	}
 	want := map[string]string{"epic-129.4": "N1", "epic-129.5": "N2a", "epic-129.7": "N2b", "epic-129.8": "N2c", "epic-129.12": "N2c", "nonplan-r": "N3", "epic-129.9": "N4", "epic-129.10": "N4", "epic-129.11": "N4", "nonplan-f": "N3", "nonplan-m": "N3", "nonplan-t": "N3"}
@@ -630,6 +642,7 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	readyCalls, epicLists := 0, 0
+	shows := map[string]int{}
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 		var args []string
 		if err := json.Unmarshal([]byte(line), &args); err != nil {
@@ -637,9 +650,21 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 		}
 		if args[0] == "ready" {
 			readyCalls++
-			if strings.Contains(line, "--parent") || !strings.Contains(line, `"0"`) {
+			uncapped := false
+			for i, arg := range args {
+				if arg == "--parent" || strings.HasPrefix(arg, "--parent=") {
+					t.Fatalf("scoped ready: %v", args)
+				}
+				if arg == "-n" && i+1 < len(args) && args[i+1] == "0" {
+					uncapped = true
+				}
+			}
+			if !uncapped {
 				t.Fatalf("scoped/capped ready: %s", line)
 			}
+		}
+		if args[0] == "show" {
+			shows[args[1]]++
 		}
 		if args[0] == "list" && strings.Contains(line, "--type=epic") {
 			epicLists++
@@ -647,6 +672,11 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 	}
 	if readyCalls != 1 || epicLists != 1 {
 		t.Fatalf("ready calls=%d epic lists=%d (one shared cache required)", readyCalls, epicLists)
+	}
+	for _, row := range f.rows {
+		if _, form := bead.PlanBeadIndex("epic-129", row.ID); form && shows[row.ID] != 1 {
+			t.Errorf("bd show %s called %d times; want one per plan-form row", row.ID, shows[row.ID])
+		}
 	}
 	// Positional heading 8 is labelled 12; it still maps bead .8.
 	f.deps = map[string][]map[string]string{}
@@ -719,12 +749,17 @@ func TestBuildReadySet_PlanReadOnlyWhenNeeded(t *testing.T) {
 }
 
 func TestBuildReadySet_LineageReadErrorRefuses(t *testing.T) {
-	f := newNearMissFixture(t, false)
-	f.failShow = "epic-129.1"
-	f.save(t)
-	_, err := BuildReadySet(f.root, "129-fixture")
-	if err == nil || !strings.Contains(err.Error(), "could not resolve the lineage of epic-129.1") {
-		t.Fatalf("lineage error: %v", err)
+	for _, fail := range []string{"epic-129.5", "other-parent"} {
+		t.Run(fail, func(t *testing.T) {
+			f := newNearMissFixture(t, false)
+			f.rows = []BeadInfo{f.row("epic-129.5", "[129-fixture] P", "other-parent", "task")}
+			f.failShow = fail
+			f.save(t)
+			rs, err := BuildReadySet(f.root, "129-fixture")
+			if err == nil || !strings.Contains(err.Error(), "could not resolve the lineage of epic-129.5") || len(rs.NearMisses) != 0 {
+				t.Fatalf("lineage error: %v; near-misses: %+v", err, rs.NearMisses)
+			}
+		})
 	}
 }
 
@@ -743,7 +778,7 @@ func TestBuildReadySet_FencedHeading(t *testing.T) {
 }
 
 func TestBuildReadySet_PlanSources(t *testing.T) {
-	for _, source := range []string{"branch-only", "stale-checkout", "blob-absent"} {
+	for _, source := range []string{"branch-only", "stale-checkout", "blob-absent", "identical"} {
 		t.Run(source, func(t *testing.T) {
 			f := newNearMissFixture(t, false)
 			planPath := filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md")
@@ -758,7 +793,7 @@ func TestBuildReadySet_PlanSources(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "stale-checkout":
-				if err := os.WriteFile(planPath, []byte(fixturePlan(2, 1, 2)), 0644); err != nil {
+				if err := os.WriteFile(planPath, []byte(fixturePlan(7, 1, 2, 3, 4, 5, 6, 7, 10)), 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -776,6 +811,17 @@ func TestBuildReadySet_PlanSources(t *testing.T) {
 			}
 			if (rs.PlanNotice != "") != (source == "stale-checkout") {
 				t.Fatalf("%s notice: %q", source, rs.PlanNotice)
+			}
+			if source == "stale-checkout" {
+				// The missing eighth section changes mapping even though X's
+				// dependency makes its main-fixture classification mapping-free.
+				f.rows = []BeadInfo{f.row("epic-129.8", "neutral", "epic-129", "task")}
+				f.deps = map[string][]map[string]string{}
+				f.save(t)
+				rs, err = BuildReadySet(f.root, "129-fixture")
+				if err != nil || !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.8"}) {
+					t.Fatalf("one-section-stale checkout replaced committed mapping: members=%v err=%v", ids(rs.Filtered), err)
+				}
 			}
 		})
 	}
@@ -799,5 +845,128 @@ func TestBuildReadySet_PlanReadErrorRefuses(t *testing.T) {
 	_, err := BuildReadySet(f.root, "129-fixture")
 	if err == nil || !strings.Contains(err.Error(), "could not read plan.md for 129-fixture") || !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("checkout read failure: %v", err)
+	}
+}
+
+func TestBuildReadySet_PlanSourcesWithSpecWorktree(t *testing.T) {
+	for _, tier := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+		t.Run(tier, func(t *testing.T) {
+			f := newNearMissFixture(t, false)
+			f.rows = []BeadInfo{f.row("epic-129.3", "neutral", "epic-129", "task")}
+			f.save(t)
+			// Commit only this layout tier's plan on the spec branch.
+			planPath := filepath.Join(f.root, tier, "129-fixture", "plan.md")
+			if err := os.MkdirAll(filepath.Dir(planPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(planPath, []byte(fixturePlan(3, 1, 2, 3)), 0644); err != nil {
+				t.Fatal(err)
+			}
+			runGitCmdForNext(t, f.root, "add", filepath.ToSlash(filepath.Join(tier, "129-fixture", "plan.md")))
+			runGitCmdForNext(t, f.root, "commit", "-m", "spec plan")
+			runGitCmdForNext(t, f.root, "branch", "spec/129-fixture")
+			name, err := workspace.SpecWorktreeName("129-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wtRoot := filepath.Join(f.root, ".worktrees", name)
+			// A real worktree ensures SpecDir chooses its copy over the root.
+			runGitCmdForNext(t, f.root, "worktree", "add", wtRoot, "spec/129-fixture")
+			localDir, err := workspace.SpecDir(f.root, "129-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Legacy is not a worktree tier in SpecDir; its checkout is at root.
+			if tier != "docs/specs" && !strings.HasPrefix(localDir, wtRoot+string(filepath.Separator)) {
+				t.Fatalf("fixture did not select spec worktree: %s", localDir)
+			}
+			if err := os.WriteFile(filepath.Join(localDir, "plan.md"), []byte(fixturePlan(2, 1, 2)), 0644); err != nil {
+				t.Fatal(err)
+			}
+			rs, err := BuildReadySet(f.root, "129-fixture")
+			if err != nil || !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.3"}) {
+				t.Fatalf("committed mapping not used: members=%v error=%v", ids(rs.Filtered), err)
+			}
+			if rs.PlanNotice != "plan.md in this checkout differs from spec/129-fixture; mapping used: spec/129-fixture" {
+				t.Fatalf("missing divergence notice: %q", rs.PlanNotice)
+			}
+		})
+	}
+}
+
+func TestBuildReadySet_Status(t *testing.T) {
+	for _, status := range []string{"", "open", "in_progress", "closed", "blocked"} {
+		t.Run("status="+status, func(t *testing.T) {
+			f := newNearMissFixture(t, false)
+			row := f.row("epic-129.1", "neutral", "epic-129", "task")
+			row.Status = status
+			// Simulate even a misbehaving ready producer; membership must stay honest.
+			old := readyJSONFn
+			readyJSONFn = func(...string) ([]byte, error) { return json.Marshal([]BeadInfo{row}) }
+			t.Cleanup(func() { readyJSONFn = old })
+			f.rows = []BeadInfo{row}
+			f.save(t)
+			rs, err := BuildReadySet(f.root, "129-fixture")
+			want := 0
+			if status == "" || status == "open" {
+				want = 1
+			}
+			if err != nil || len(rs.Filtered) != want || len(rs.NearMisses) != 0 {
+				t.Fatalf("status %q: members=%v near-misses=%v err=%v", status, ids(rs.Filtered), rs.NearMisses, err)
+			}
+		})
+	}
+}
+
+func TestClassifyNearMiss_NoFalseN3(t *testing.T) {
+	for _, parent := range []string{"", "epic-129"} {
+		row := BeadInfo{ID: "epic-129.1", Parent: parent, Status: "in_progress", IssueType: "task"}
+		if miss, linked := classifyNearMiss(row, "epic-129", "129-fixture", 1, true, lineageInfo{epic: "epic-129", mapped: true}); linked {
+			t.Fatalf("mapped lineage-E row misreported as non-plan: %s", miss.String())
+		}
+	}
+	// A defensive N3 fallback must also refuse an empty link, even when
+	// called independently with no recognized lineage result.
+	row := BeadInfo{ID: "epic-129.1", Status: "in_progress"}
+	if miss, linked := classifyNearMiss(row, "epic-129", "129-fixture", 1, true, lineageInfo{mapped: true}); linked {
+		t.Fatalf("N3 rendered an empty link: %s", miss.String())
+	}
+}
+
+func TestSelectNamedFromReadySet_Ambiguous(t *testing.T) {
+	rs := ReadySet{SpecFlag: "129-fixture", EpicID: "epic-129", Raw: []BeadInfo{{ID: "one-shared"}, {ID: "two-shared"}}}
+	_, want := SelectWorkByName(rs.Raw, "shared")
+	_, got := SelectNamedFromReadySet(rs, "shared")
+	if got == nil || got.Error() != want.Error() || !strings.Contains(got.Error(), "ambiguous") {
+		t.Fatalf("ambiguity masked: got %v; want %v", got, want)
+	}
+}
+
+func TestWorkflowSelectionDocs_Contracts(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"architecture.md", []string{"scopeResolutionRefusal", "R6.7/AC-15", "never widens to global unscoped", "on both ready-set paths", "SelectWork", "even with exactly one item", "negative pick errors", "bdRenderedError", "RenderBDError", "wrapBDError", "nextPhaseMergeMetadataFn", "R3.3 lock", "Struck without implementation", "#146 #2(a)", "#146 #3"}},
+		{"interfaces.md", []string{"ReadySet{Filtered, Raw, SpecFlag, EpicID, NearMisses, PlanNotice, Cache}", "for positional resolution", "NearMiss{Bead, Class, Message, Recoveries, Blocking, Lineage, NoLineage}", "EmptyAfterFilterError", "ReadySet.HasBlockingNearMisses()"}},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("../../.mindspec/domains/workflow", tc.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(data)
+			if tc.path == "architecture.md" {
+				start := strings.Index(text, "### R6 — Deterministic, honest bead selection")
+				end := strings.Index(text[start:], "### R7 —")
+				text = text[start : start+end]
+			}
+			text = strings.Join(strings.Fields(text), " ")
+			for _, contract := range tc.want {
+				if !strings.Contains(text, contract) {
+					t.Errorf("workflow %s omits contract %q", tc.path, contract)
+				}
+			}
+		})
 	}
 }

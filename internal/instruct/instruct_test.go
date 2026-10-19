@@ -412,7 +412,7 @@ func TestRenderJSON_ExcludesBeadsContext(t *testing.T) {
 }
 
 func TestImplementTemplate_EmptinessRule(t *testing.T) {
-	const sentence = "an empty ready set is not evidence the spec is complete; the derived phase above is"
+	const sentence = "an empty ready set is not evidence the spec is complete; use the child-derived lifecycle phase to determine completion"
 	data, err := templateFS.ReadFile("templates/implement.md")
 	if err != nil {
 		t.Fatal(err)

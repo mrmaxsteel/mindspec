@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -563,18 +564,33 @@ func TestNext_EmitOnlyReadsPlanFromSpecBranch(t *testing.T) {
 	}
 }
 func TestNext_PlanDivergenceNotice(t *testing.T) {
-	f := newNextHonestyFixture(t)
-	honestyGit(t, f.root, "branch", "spec/129-fixture")
-	if err := os.WriteFile(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), []byte(nextHonestyPlan(1)), 0644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=3")
-	if err != nil {
-		t.Fatalf("%v %s", err, out)
-	}
-	requireText(t, out, "**Bead**: epic-129.3", "plan.md in this checkout differs from spec/129-fixture; mapping used: spec/129-fixture")
-	if strings.Count(out, "plan.md in this checkout differs") != 1 {
-		t.Fatal("divergence printed more than once")
+	for _, source := range []string{"checkout", "spec-worktree"} {
+		t.Run(source, func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			honestyGit(t, f.root, "branch", "spec/129-fixture")
+			if source == "spec-worktree" {
+				name, err := workspace.SpecWorktreeName("129-fixture")
+				if err != nil {
+					t.Fatal(err)
+				}
+				honestyGit(t, f.root, "worktree", "add", filepath.Join(f.root, ".worktrees", name), "spec/129-fixture")
+			}
+			dir, err := workspace.SpecDir(f.root, "129-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "plan.md"), []byte(nextHonestyPlan(2)), 0644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=3")
+			if err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			requireText(t, out, "**Bead**: epic-129.3", "plan.md in this checkout differs from spec/129-fixture; mapping used: spec/129-fixture")
+			if strings.Count(out, "plan.md in this checkout differs") != 1 {
+				t.Fatal("divergence printed more than once")
+			}
+		})
 	}
 }
 func TestNext_PlanBlobAbsentUsesCheckout(t *testing.T) {
@@ -665,6 +681,8 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 		{"iii-a", "implement", "implement", []string{"closed", "open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
 		{"iii-b", "implement", "plan", []string{"open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
 		{"iv", "plan", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
+		{"no-stored", "", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
+		{"invalid-stored", "unknown", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newNextHonestyFixture(t)
@@ -714,7 +732,12 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 				}
 			}
 			tally := fmt.Sprintf("lifecycle children: %d closed / %d in_progress / %d open", closed, progress, open)
-			phaseLine := fmt.Sprintf("stored phase: %s; child-derived phase: %s", tc.stored, tc.derived)
+			displayedStored := tc.stored
+			if tc.name == "invalid-stored" {
+				// PhaseDetail sanitizes unrecognized stored values to absent.
+				displayedStored = ""
+			}
+			phaseLine := fmt.Sprintf("stored phase: %s; child-derived phase: %s", displayedStored, tc.derived)
 			sentence := "an empty ready set is not evidence the spec is complete; the derived phase above is"
 			requireText(t, out, tally+"\n"+phaseLine+"\n"+sentence, tc.arm)
 			if strings.Index(out, sentence) > strings.Index(out, tc.arm) {
@@ -725,6 +748,11 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 			}
 			if tc.name == "i" {
 				requireText(t, out, "recovery: mindspec repair phase 129-fixture")
+				if strings.Index(out, tc.arm) > strings.Index(out, "recovery: mindspec repair phase") {
+					t.Fatal("phase repair must follow the tally arm")
+				}
+			} else if strings.Contains(out, "recovery: mindspec repair phase") {
+				t.Fatalf("unexpected phase repair for stored=%q derived=%q: %s", tc.stored, tc.derived, out)
 			}
 			if strings.HasPrefix(tc.name, "iii") {
 				requireText(t, out, "recovery: bd blocked --parent epic-129")
@@ -761,6 +789,9 @@ func TestNext_EmptyScoped_InformationalNearMissExitsZero(t *testing.T) {
 				t.Fatalf("blocking=%t err=%v %s", blocking, err, out)
 			}
 			requireText(t, out, "bead epic-129.4", "bead nonplan-f", "bead nonplan-t", "lifecycle children: 1 closed / 0 in_progress / 0 open", "stored phase: review; child-derived phase: review", "recovery: mindspec impl approve 129-fixture")
+			if strings.Contains(out, "recovery: mindspec repair phase") {
+				t.Fatalf("equal phases must not offer phase repair: %s", out)
+			}
 		})
 	}
 }
@@ -776,6 +807,53 @@ func TestNext_EmptyScoped_ChildReadFailure(t *testing.T) {
 	requireText(t, err.Error(), "child-derived phase: indeterminate", "child read failed")
 	if strings.Contains(out, "lifecycle children:") {
 		t.Fatalf("failure printed fabricated tally: %s", out)
+	}
+	if strings.Contains(out, "recovery: mindspec repair phase") {
+		t.Fatalf("indeterminate phase must not offer phase repair: %s", out)
+	}
+}
+
+func TestNext_EmptyScoped_UnresolvedActiveBead(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		for _, blocking := range []bool{false, true} {
+			t.Run(fmt.Sprintf("error=%t/blocking=%t", fail, blocking), func(t *testing.T) {
+				f := newNextHonestyFixture(t)
+				f.rows = nil
+				if blocking {
+					f.rows = []map[string]interface{}{nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open")}
+				}
+				f.children = []map[string]interface{}{nextHonestyRow("epic-129.1", "active", "epic-129", "task", "in_progress")}
+				f.epics[0]["metadata"].(map[string]interface{})["mindspec_phase"] = "implement"
+				f.write(t)
+				old := nextResolveActiveBeadFn
+				calls := 0
+				nextResolveActiveBeadFn = func(root, spec string) (string, error) {
+					calls++
+					if spec != "129-fixture" {
+						t.Fatalf("wrong spec %q", spec)
+					}
+					if fail {
+						return "", errors.New("active bead lookup failed")
+					}
+					return "", nil
+				}
+				t.Cleanup(func() { nextResolveActiveBeadFn = old })
+				nextEnsureWorktreeFn = func(string, string, string, executor.Executor) (string, error) {
+					t.Fatal("unresolved bead triggered worktree mutation")
+					return "", nil
+				}
+				before := f.audit(t)
+				out, err := f.run(t, "--spec", "129-fixture")
+				if (err != nil) != blocking || calls != 1 {
+					t.Fatalf("active lookup altered exit status: calls=%d err=%v output=%s", calls, err, out)
+				}
+				const recovery = "recovery: bd list --parent epic-129 --status=in_progress"
+				requireText(t, out, "lifecycle children: 0 closed / 1 in_progress / 0 open", "stored phase: implement; child-derived phase: implement", recovery)
+				if strings.Index(out, recovery) < strings.Index(out, "child-derived phase:") || strings.Contains(out, "active bead lookup failed") || f.audit(t) != before {
+					t.Fatalf("unresolved recovery ordering or side effect: %s", out)
+				}
+			})
+		}
 	}
 }
 func TestNextMenu_PrintsSpecIDForm(t *testing.T) {

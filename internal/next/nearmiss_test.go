@@ -94,6 +94,7 @@ func fixturePlan(headings int, chunks ...int) string {
 }
 func newNearMissFixture(t *testing.T, duplicate bool) *nearMissFixture {
 	t.Helper()
+	requireGit(t)
 	root := newBareGitRoot(t)
 	dir := filepath.Join(root, ".mindspec", "specs", "129-fixture")
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -147,7 +148,7 @@ func newNearMissFixture(t *testing.T, duplicate bool) *nearMissFixture {
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Reset seams explicitly; tests exercise the production resolver and shared cache.
 	oldReady, oldRun, oldFind := readyJSONFn, runBDFn, findEpicForBeadFn
-	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicForBeadWithCache
+	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicForBeadWithCacheProvenance
 	t.Cleanup(func() { readyJSONFn, runBDFn, findEpicForBeadFn = oldReady, oldRun, oldFind })
 	t.Cleanup(phase.SetRunBDForTest(bead.RunBD))
 	t.Cleanup(phase.SetListJSONForTest(bead.ListJSON))

@@ -29,6 +29,13 @@ func TestFileAtRefTyped(t *testing.T) {
 	git("add", "plan.md")
 	git("commit", "-m", "fixture")
 	git("branch", "spec/129-fixture")
+	// Git resolves an ambiguous short ref to the tag before the head.
+	if err := os.WriteFile(filepath.Join(root, "plan.md"), []byte("tag plan\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "plan.md")
+	git("commit", "-m", "different tag content")
+	git("tag", "spec/129-fixture")
 	for _, tc := range []struct {
 		name, ref, path string
 		want            error
@@ -45,6 +52,22 @@ func TestFileAtRefTyped(t *testing.T) {
 			}
 		})
 	}
+	t.Run("absent path with stderr warning", func(t *testing.T) {
+		old := execCommand
+		t.Cleanup(func() { execCommand = old })
+		execCommand = func(name string, args ...string) *exec.Cmd {
+			for _, arg := range args {
+				if arg == "ls-tree" {
+					return exec.Command("sh", "-c", "echo harmless-warning >&2")
+				}
+			}
+			return exec.Command(name, args...)
+		}
+		data, err := FileAtRefTyped(root, "spec/129-fixture", "absent.md")
+		if !errors.Is(err, ErrPathNotAtRef) || len(data) != 0 {
+			t.Fatalf("stderr warning mistaken for a path: %q %v", data, err)
+		}
+	})
 	for _, stage := range []string{"rev-parse", "ls-tree", "show"} {
 		t.Run("failure/"+stage, func(t *testing.T) {
 			old := execCommand

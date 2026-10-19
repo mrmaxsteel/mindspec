@@ -27,11 +27,16 @@ func readPlanForSpec(root, specID string) (content string, absent bool, notice s
 		return "", false, "", err
 	}
 	path := filepath.Join(dir, "plan.md")
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return "", false, "", err
+	// Blob paths belong to the git tree, independently of which worktree
+	// SpecDir selected for the checkout read. Match workspace's layout tiers.
+	var committed []byte
+	var probeErr error
+	for _, tier := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+		committed, probeErr = fileAtRefTypedFn(root, branch, tier+"/"+specID+"/plan.md")
+		if !errors.Is(probeErr, gitutil.ErrPathNotAtRef) {
+			break
+		}
 	}
-	committed, probeErr := fileAtRefTypedFn(root, branch, filepath.ToSlash(rel))
 	if probeErr != nil && !errors.Is(probeErr, gitutil.ErrRefAbsent) && !errors.Is(probeErr, gitutil.ErrPathNotAtRef) {
 		return "", false, "", probeErr
 	}

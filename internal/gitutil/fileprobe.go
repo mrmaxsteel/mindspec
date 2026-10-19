@@ -29,14 +29,14 @@ func FileAtRefTyped(workdir, ref, path string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("probing branch %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
-	out, err = execCommand("git", "-C", workdir, "ls-tree", ref, "--", path).CombinedOutput()
+	out, err = execCommand("git", "-C", workdir, "ls-tree", "refs/heads/"+ref, "--", path).Output()
 	if err != nil {
 		return nil, fmt.Errorf("probing path %s at %s: %w: %s", path, ref, err, strings.TrimSpace(string(out)))
 	}
 	if len(out) == 0 {
 		return nil, ErrPathNotAtRef
 	}
-	out, err = execCommand("git", "-C", workdir, "show", ref+":"+path).Output()
+	out, err = execCommand("git", "-C", workdir, "show", "refs/heads/"+ref+":"+path).Output()
 	if err != nil {
 		return nil, fmt.Errorf("reading %s:%s: %w", ref, path, err)
 	}

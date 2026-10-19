@@ -1,11 +1,9 @@
 package next
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -28,38 +26,12 @@ type NearMiss struct {
 
 func (m NearMiss) String() string { return m.Message + "\n" + strings.Join(m.Recoveries, "\n") }
 
-// hasEpicDependency distinguishes dependency resolution from the title fallback.
-// FindEpicForBead deliberately exposes only the resolved identity, so the
-// ambiguous foreign-epic case inspects the dependency list rather than guessing.
-func hasEpicDependency(id, epic string) (bool, error) {
-	if err := idvalidate.BeadID(id); err != nil {
-		return false, err
-	}
-	out, err := runBDFn("show", id, "--json")
-	if err != nil {
-		return false, err
-	}
-	var rows []struct {
-		Dependencies []struct {
-			ID        string
-			IssueType string `json:"issue_type"`
-		}
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		return false, err
-	}
-	if len(rows) == 0 {
-		return false, fmt.Errorf("bead %s disappeared during lineage read", idrender.Bead(id))
-	}
-	for _, dep := range rows[0].Dependencies {
-		if dep.ID == epic && strings.EqualFold(dep.IssueType, "epic") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func classifyNearMiss(item BeadInfo, epic, spec string, n int, form bool, l lineageInfo) (NearMiss, bool) {
+	// A mapped row with this lineage is a plan bead even if a ready
+	// producer unexpectedly reports it in a non-open status.
+	if form && !l.nonEpicParent && l.epic == epic && l.mapped {
+		return NearMiss{}, false
+	}
 	id, e, s := idrender.Bead(item.ID), idrender.Bead(epic), idrender.Spec(spec)
 	link := ""
 	switch {
@@ -104,6 +76,9 @@ func classifyNearMiss(item BeadInfo, epic, spec string, n int, form bool, l line
 		m.Message = prefix + "it has no lineage (no parent edge and no spec tag in its title)"
 		m.Recoveries = []string{fmt.Sprintf("recovery: bd update %s --parent %s", id, e)}
 	default:
+		if link == "" {
+			return NearMiss{}, false
+		}
 		m.Class = "N3"
 		m.Blocking = item.Parent == epic && phase.IsLifecycleIssueType(item.IssueType)
 		m.Message = fmt.Sprintf("bead %s is bd-ready and linked to spec %s by %s, but it is not a plan bead (no %s.<N> ID with lineage %s); mindspec next claims only plan beads", id, s, link, e, e)

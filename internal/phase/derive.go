@@ -988,6 +988,13 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 					if specErr != nil {
 						return dep.ID, "", specErr
 					}
+					if c != nil {
+						c.mu.Lock()
+						if c.LineageDependency != nil {
+							c.LineageDependency[beadID] = true
+						}
+						c.mu.Unlock()
+					}
 					return dep.ID, specID, nil
 				}
 			}
@@ -1025,6 +1032,26 @@ func FindEpicForBeadWithCache(c *Cache, beadID string) (epicID, specID string, e
 	}
 
 	return "", "", fmt.Errorf("no epic found for bead %s: %w", beadID, ErrNoEpicLineage)
+}
+
+// FindEpicForBeadWithCacheProvenance returns the same lineage and errors as
+// FindEpicForBeadWithCache, plus whether the resolver used an epic dependency
+// rather than the title fallback. It reuses that resolver's single bead show.
+func FindEpicForBeadWithCacheProvenance(c *Cache, beadID string) (epicID, specID string, dependency bool, err error) {
+	if c == nil {
+		c = NewCache()
+	}
+	c.mu.Lock()
+	if c.LineageDependency == nil {
+		c.LineageDependency = make(map[string]bool)
+	}
+	delete(c.LineageDependency, beadID)
+	c.mu.Unlock()
+	epicID, specID, err = FindEpicForBeadWithCache(c, beadID)
+	c.mu.Lock()
+	dependency = c.LineageDependency[beadID]
+	c.mu.Unlock()
+	return
 }
 
 // FindActiveBeadForEpicWithCache returns the ID of an in_progress bead under the

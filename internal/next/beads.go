@@ -109,7 +109,7 @@ func (rs ReadySet) ExclusionNotice() string {
 
 func containsSpecID(title, specID string) bool { return strings.Contains(title, specID) }
 
-var findEpicForBeadFn = phase.FindEpicForBeadWithCache
+var findEpicForBeadFn = phase.FindEpicForBeadWithCacheProvenance
 
 // BuildReadySet classifies one uncapped global ready set with the same lineage
 // resolver and positional plan mapping that readiness uses.
@@ -140,7 +140,7 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 		n, form := bead.PlanBeadIndex(rs.EpicID, item.ID)
 		info := lineageInfo{}
 		if form {
-			info.epic, info.spec, err = findEpicForBeadFn(rs.Cache, item.ID)
+			info.epic, info.spec, info.dependency, err = findEpicForBeadFn(rs.Cache, item.ID)
 			if err != nil && !errors.Is(err, phase.ErrNoEpicLineage) {
 				return rs, fmt.Errorf("could not resolve the lineage of %s: %w", idrender.Bead(item.ID), RenderBDError(err))
 			}
@@ -152,12 +152,7 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 				}
 				info.nonEpicParent = parent == nil || !strings.EqualFold(parent.IssueType, "epic")
 			}
-			if info.epic != "" && info.epic != rs.EpicID {
-				info.dependency, err = hasEpicDependency(item.ID, info.epic)
-				if err != nil {
-					return rs, fmt.Errorf("could not resolve the lineage of %s: %w", idrender.Bead(item.ID), RenderBDError(err))
-				}
-			}
+			info.dependency = info.dependency && info.epic != rs.EpicID
 			if !info.nonEpicParent && !info.dependency {
 				if !loaded {
 					plan, absent, rs.PlanNotice, err = readPlanForSpec(root, specFlag)
@@ -172,7 +167,8 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 					info.mapped, info.why = readiness.PlanMapsBead(plan, n)
 				}
 			}
-			if !info.nonEpicParent && info.epic == rs.EpicID && info.mapped && strings.EqualFold(strings.TrimSpace(item.Status), "open") {
+			status := strings.TrimSpace(item.Status)
+			if !info.nonEpicParent && info.epic == rs.EpicID && info.mapped && (status == "" || strings.EqualFold(status, "open")) {
 				rs.Filtered = append(rs.Filtered, item)
 				continue
 			}

@@ -1282,6 +1282,26 @@ narrows the guard to this rule for the claim path only.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
+`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` provide R6.1's one
+shared ready-set construction. The claim path and non-positional
+`--emit-only` (default and `--pick N`) consume it identically: the displayed
+list preserves bd's priority-respecting returned order, so the same N names
+the same bead and exclusions are reported identically (AC-9/R6.3).
+`select.go`'s `SelectWork` makes pick semantics total: `--pick N` (N ≥ 1)
+always indexes the displayed list, even with exactly one item; `--pick 0`
+means unset, and a negative pick errors. `SelectNamedFromReadySet` gives a
+ready but excluded positional claim its true exclusion reason rather than
+"not found or not ready" (R6.3(b)/AC-10).
+
+`BuildReadySet`'s `scopeResolutionRefusal` (R6.7/AC-15) refuses an explicit
+`--spec` whose epic cannot be resolved, on both ready-set paths. It names
+whether discovery failed, an on-disk draft has no epic yet, or the spec
+does not exist, and never widens to global unscoped `bd ready`.
+Positional `--emit-only` is the documented R6.3(a) exception: it never
+constructs a ready set, checks readiness, filters membership, or reports
+exclusions. It fetches directly with `next.FetchBeadByID` and prints the
+pinned bypass disclosure below, making no claim about readiness.
+
 Scoped selection uses one uncapped global `bd ready -n 0 --json` result.
 A selectable member is an open non-epic whose ID is exactly `<E>.<N>`
 (N ≥ 1, one segment), whose unchanged `phase.FindEpicForBead` resolver
@@ -1308,7 +1328,7 @@ epic parent; other-number N2b first calls for inspection and makes that
 edit conditional on ownership.
 
 Selectors are checked before empty-set handling. A positional near-miss
-gets its reason even when no members exist. A lineage-resolved N4 can
+gets its reason even when no members exist. An N4 with lineage E can
 reach the readiness gate deliberately; a no-lineage N4 refuses before the
 gate. An unlinked globally ready positional names that fact and its parent.
 Positional emit-only still fetches by ID and prints
@@ -1323,6 +1343,19 @@ lifecycle children point to plan approval. A derived phase ahead of stored
 also names phase repair. Blocking near-misses return non-zero after this
 report; informational ones do not. A failed child read reports
 indeterminate and never fabricates a tally.
+
+`internal/next/beads.go`'s `bdRenderedError`/`RenderBDError` and
+`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together deliver
+AC-11: captured bd stderr survives in mindspec's errors, escaped per line
+with `termsafe.Escape` before terminal rendering, so hostile stderr cannot
+forge terminal control sequences. The claim path's `mindspec_phase`
+writer in `cmd/mindspec/next.go` uses `nextPhaseMergeMetadataFn` under the
+R3.3 lock, re-deriving fresh child state with
+`phase.DerivePhaseFromChildren` before advancing.
+
+Struck without implementation, with rationale recorded in the spec:
+#146 #2(a)'s prose `Depends on` parser (`work_chunks` → `bd dep add`
+already covers it) and #146 #3's doctor suggestions (shipped pre-128).
 
 ### R7 — Frozen-contract / externally-merged guidance and AC-14's total verb classification
 

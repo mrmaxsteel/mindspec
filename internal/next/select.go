@@ -1,6 +1,7 @@
 package next
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -43,8 +44,15 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 	if rs.SpecFlag == "" {
 		return SelectWorkByName(rs.Filtered, name)
 	}
+	if rs.EpicID != "" && name == rs.EpicID {
+		return BeadInfo{}, fmt.Errorf("bead %s is the epic of spec %s, not a bead to claim\nrecovery: mindspec next --spec %s", idrender.Bead(rs.EpicID), idrender.Spec(rs.SpecFlag), idrender.Spec(rs.SpecFlag))
+	}
 	item, err := SelectWorkByName(rs.Raw, name)
 	if err != nil {
+		var ambiguous *ambiguousBeadNameError
+		if errors.As(err, &ambiguous) {
+			return BeadInfo{}, err
+		}
 		if len(rs.Filtered) == 0 {
 			return BeadInfo{}, fmt.Errorf("no ready plan bead for spec %s; positional %s cannot be claimed from an empty ready set\nrecovery: mindspec next --spec %s", idrender.Spec(rs.SpecFlag), idrender.Bead(name), idrender.Spec(rs.SpecFlag))
 		}
@@ -75,6 +83,8 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 	}
 	return BeadInfo{}, fmt.Errorf("bead %s is bd-ready but is not linked to spec %s%s\nrecovery: mindspec next --spec %s", idrender.Bead(item.ID), idrender.Spec(rs.SpecFlag), parent, idrender.Spec(rs.SpecFlag))
 }
+
+type ambiguousBeadNameError struct{ error }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched
 // ready `items` slice. It is the claim-path counterpart to SelectWork for when
@@ -133,7 +143,7 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 		for i, m := range matches {
 			ids[i] = idrender.Bead(m.ID)
 		}
-		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))
+		return BeadInfo{}, &ambiguousBeadNameError{fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))}
 	}
 	if len(matches) == 1 {
 		return matches[0], nil

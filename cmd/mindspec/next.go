@@ -34,6 +34,7 @@ import (
 var nextPhaseMergeMetadataFn = bead.MergeMetadata
 var nextGateReadinessFn = next.GateReadiness
 var nextEnsureWorktreeFn = next.EnsureWorktree
+var nextResolveActiveBeadFn = next.ResolveActiveBead
 
 var nextCmd = &cobra.Command{
 	Use:   "next",
@@ -801,18 +802,11 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 	fmt.Printf("lifecycle children: %d closed / %d in_progress / %d open\n", closed, progress, open)
 	fmt.Printf("stored phase: %s; child-derived phase: %s\n", detail.Stored, detail.Derived)
 	fmt.Println("an empty ready set is not evidence the spec is complete; the derived phase above is")
-	rank := map[string]int{"": 0, "spec": 1, "plan": 2, "implement": 3, "review": 4, "done": 5}
-	if rank[detail.Derived] > rank[detail.Stored] {
-		defer fmt.Printf("recovery: mindspec repair phase %s\n", idrender.Spec(rs.SpecFlag))
-	}
 	switch {
 	case progress > 0:
 		if exec != nil {
-			activeBead, err := next.ResolveActiveBead(root, rs.SpecFlag)
-			if err != nil {
-				return err
-			}
-			if activeBead != "" {
+			activeBead, err := nextResolveActiveBeadFn(root, rs.SpecFlag)
+			if err == nil && activeBead != "" {
 				fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", idrender.Bead(activeBead))
 				wtPath, err := nextEnsureWorktreeFn(root, activeBead, rs.SpecFlag, exec)
 				if err != nil {
@@ -824,6 +818,8 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 				if reportRecovered != nil {
 					reportRecovered(activeBead)
 				}
+			} else {
+				fmt.Printf("recovery: bd list --parent %s --status=in_progress\n", idrender.Bead(rs.EpicID))
 			}
 		} else {
 			fmt.Printf("recovery: mindspec next --spec %s\n", idrender.Spec(rs.SpecFlag))
@@ -835,6 +831,9 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 		fmt.Printf("recovery: mindspec impl approve %s\n", idrender.Spec(rs.SpecFlag))
 	default:
 		fmt.Printf("recovery: mindspec plan approve %s\n", idrender.Spec(rs.SpecFlag))
+	}
+	if detail.Stored != "" && detail.Derived != "" && detail.Stored != detail.Derived && !phase.IsBackwardMove(detail.Stored, detail.Derived) {
+		fmt.Printf("recovery: mindspec repair phase %s\n", idrender.Spec(rs.SpecFlag))
 	}
 	if rs.HasBlockingNearMisses() {
 		return fmt.Errorf("no ready plan bead for spec %s; blocking near-misses are named above", idrender.Spec(rs.SpecFlag))

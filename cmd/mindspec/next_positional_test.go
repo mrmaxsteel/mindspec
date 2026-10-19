@@ -178,3 +178,47 @@ func TestNext_N4WithLineageReachesMF1(t *testing.T) {
 		t.Fatal("NOT-READY refusal mutated")
 	}
 }
+
+func TestNext_N4ForeignLineagePositionalRefuses(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.epics = append(f.epics, map[string]interface{}{"id": "epic-777", "title": "[SPEC 777] other", "status": "open", "issue_type": "epic", "metadata": map[string]interface{}{"spec_num": 777, "spec_title": "other", "mindspec_phase": "plan"}})
+	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "[777] foreign follow-up", "", "task", "open"))
+	f.write(t)
+	old := nextGateReadinessFn
+	calls := 0
+	nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+		calls++
+		return nil, errors.New("gate should never be reached")
+	}
+	t.Cleanup(func() { nextGateReadinessFn = old })
+	before := f.audit(t)
+	_, err := f.run(t, "--spec", "129-fixture", "epic-129.4", "--allow-not-ready")
+	if calls != 0 || f.audit(t) != before {
+		t.Fatalf("foreign-lineage N4 reached gate (%d) or mutated", calls)
+	}
+	if err == nil {
+		t.Fatal("foreign-lineage N4 selected")
+	}
+	requireText(t, err.Error(), "bead epic-129.4 is a follow-up child of epic epic-129 that plan.md does not map", "recovery: bd show epic-129.4 --json")
+}
+
+func TestNext_EpicPositionalRefuses(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, f.epics[0])
+	f.write(t)
+	old := nextGateReadinessFn
+	nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+		t.Fatal("epic reached readiness gate")
+		return nil, nil
+	}
+	t.Cleanup(func() { nextGateReadinessFn = old })
+	before := f.audit(t)
+	_, err := f.run(t, "--spec", "129-fixture", "epic-129")
+	if err == nil {
+		t.Fatal("epic positional claimed")
+	}
+	requireText(t, err.Error(), "bead epic-129 is the epic of spec 129-fixture, not a bead to claim")
+	if f.audit(t) != before {
+		t.Fatal("epic refusal mutated")
+	}
+}
