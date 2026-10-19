@@ -42,6 +42,8 @@ const BareOverride = "__bare_allow_not_ready__"
 
 // GateOptions describes fresh claim authority. Stored markers grant none.
 type GateOptions struct {
+	// BareFlag is a syntax refusal; readiness is read only to render recovery.
+	BareFlag     bool
 	ScopeSpec    string
 	NamedSignals []string
 	FlagGiven    bool
@@ -104,11 +106,45 @@ func nonPlanDiagnostic(beadID, specID, epicID string) string {
 // GateReadiness is the read-only preflight before marker, claim, branch or
 // worktree mutation (ADR-0041; spec 129 R1.8/R6). Evidence is read here too.
 func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
+	recovery := []string{fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))}
+	if opts.BareFlag {
+		message := "--allow-not-ready requires =<ids>; the bare and space-separated forms are not supported"
+		if beadID == "" || strings.HasPrefix(beadID, "MF-") {
+			signals := "<ids>"
+			if beadID != "" {
+				signals = termsafe.Escape(beadID)
+			}
+			recovery = []string{"mindspec next <bead-id> --allow-not-ready=" + signals + " --evidence <path-to-justification>"}
+		} else {
+			// The syntax refusal is settled. Read readiness solely for
+			// recovery; claim prerequisites cannot change this refusal.
+			report, err := evaluateReadinessFn(root, beadID)
+			if err != nil {
+				message += "\n" + termsafe.Escape(err.Error())
+				recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+			} else if report.AllPass() {
+				recovery = []string{fmt.Sprintf("mindspec next %s", idrender.Bead(beadID))}
+			} else {
+				message += "\n" + readiness.Render(report)
+				recovery = append([]string{}, report.RecoveryCommands()...)
+				recovery = append(recovery, fmt.Sprintf("mindspec bead ready-check %s   (the standalone per-signal report)", idrender.Bead(beadID)))
+				if indeterminate := IndeterminateReadiness(report); len(indeterminate) > 0 {
+					message += "\n" + strings.Join(indeterminate, "\n")
+				} else {
+					var ids []string
+					for _, signal := range report.FailingSignals() {
+						ids = append(ids, signal.ID)
+					}
+					recovery = append(recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(ids, ",")))
+				}
+			}
+		}
+		return nil, guard.NewFailure(message, recovery...)
+	}
 	namedIDs, err := ParseReadinessSignals(strings.Join(opts.NamedSignals, ","), opts.FlagGiven)
 	if err != nil {
 		return nil, err
 	}
-	recovery := []string{fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))}
 	report, err := evaluateReadinessFn(root, beadID)
 	if err != nil {
 		var nonPlan *readiness.NonPlanFormError
@@ -129,7 +165,10 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 		return nil, err
 	}
 	if _, err := gitutil.RevParseRef(root, "refs/heads/"+branch); err != nil {
-		return nil, guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", branch, idrender.Bead(beadID)), "mindspec state show")
+		if errors.Is(err, gitutil.ErrRefNotFound) {
+			return nil, guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", branch, idrender.Bead(beadID)), "mindspec state show")
+		}
+		return nil, guard.NewFailure(fmt.Sprintf("could not resolve spec branch %s for bead %s: %s; nothing was claimed", branch, idrender.Bead(beadID), termsafe.Escape(err.Error())), "git status   (repair the local git checkout, then retry)")
 	}
 	result := &GateResult{SpecID: report.SpecID, Fingerprints: map[string][]string{}}
 	named := map[string]bool{}

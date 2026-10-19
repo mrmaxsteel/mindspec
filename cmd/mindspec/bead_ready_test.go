@@ -918,6 +918,38 @@ func TestReadyCheck_ReadinessDocContracts(t *testing.T) {
 			for _, phrase := range tc.phrases {
 				requireText(t, string(data), phrase)
 			}
+			if filepath.Base(tc.path) == "USAGE.md" {
+				var readinessStep, flagRow, readyRows []string
+				for _, line := range strings.Split(string(data), "\n") {
+					if strings.HasPrefix(line, "4. **Readiness gate (before any mutation)**") {
+						readinessStep = append(readinessStep, line)
+					}
+					// Parse command-table rows, inspecting only the command cell.
+					cells := strings.Split(line, "|")
+					if len(cells) < 4 || strings.TrimSpace(cells[0]) != "" {
+						continue
+					}
+					command := strings.Trim(strings.TrimSpace(cells[1]), "`")
+					if strings.HasPrefix(command, "mindspec bead ready-check ") {
+						readyRows = append(readyRows, line)
+					}
+					if strings.HasPrefix(command, "mindspec next --allow-not-ready") {
+						flagRow = append(flagRow, line)
+					}
+				}
+				if len(readyRows) != 1 {
+					t.Fatalf("expected exactly one ready-check command row, got %d: %v", len(readyRows), readyRows)
+				}
+				requireText(t, readyRows[0], "exit 0 when every signal passes or is covered by a validated schema-v2 marker", "growth uncovers, shrinkage stays covered")
+				for site, lines := range map[string][]string{"Phase-5 readiness instruction": readinessStep, "quick-reference flag row": flagRow} {
+					if len(lines) != 1 {
+						t.Fatalf("expected one %s, got %v", site, lines)
+					}
+					if !strings.Contains(lines[0], "--allow-not-ready=<ids> --evidence <path>") {
+						t.Fatalf("%s lost scoped flag wording: %s", site, lines[0])
+					}
+				}
+			}
 		})
 	}
 }

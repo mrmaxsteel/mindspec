@@ -335,7 +335,6 @@ Work is not complete until changes are committed.
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
 | `mindspec bead ready-check <id>` | Read-only readiness check; exit 0 when every signal passes or is covered by a validated schema-v2 marker; growth uncovers, shrinkage stays covered |
 | `mindspec next --allow-not-ready=<ids> --evidence <path>` | Claim with fresh evidence for all named failures; replaces the schema-v2 marker with their complete failure digests |
-| `mindspec bead ready-check <bead-id>` | Read-only MF-1..MF-4 readiness report for a bead (exit 0 = all pass) |
 | `mindspec bead clarify <bead-id> --file <record.json>` | Record the one-per-bead grounded clarification for a NOT-READY bead, then re-dispatch |
 | `mindspec complete` | Close current bead and advance |
 | `mindspec repair phase <spec-id>` | Reconcile a stale `mindspec_phase` metadata cache with the bead-derived phase |

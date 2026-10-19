@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -156,13 +160,7 @@ func (f *nextHonestyFixture) run(t *testing.T, args ...string) (string, error) {
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = out, out
 	cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE, SilenceErrors: true, SilenceUsage: true}
-	cmd.Flags().Int("pick", 0, "")
-	cmd.Flags().String("spec", "", "")
-	cmd.Flags().Bool("force", false, "")
-	cmd.Flags().Bool("emit-only", false, "")
-	cmd.Flags().String("allow-not-ready", "", "")
-	cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
-	cmd.Flags().String("evidence", "", "")
+	registerNextFlags(cmd)
 	cmd.SetArgs(args)
 	runErr := cmd.Execute()
 	os.Stdout, os.Stderr = oldOut, oldErr
@@ -287,13 +285,7 @@ esac
 		os.Stdout = f
 		// Fresh flags keep the real CLI RunE independent of other CLI tests.
 		cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE}
-		cmd.Flags().Int("pick", 0, "")
-		cmd.Flags().String("spec", "", "")
-		cmd.Flags().Bool("force", false, "")
-		cmd.Flags().Bool("emit-only", false, "")
-		cmd.Flags().String("allow-not-ready", "", "")
-		cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
-		cmd.Flags().String("evidence", "", "")
+		registerNextFlags(cmd)
 		cmd.SetArgs([]string{"--emit-only", fmt.Sprintf("--pick=%d", pick)})
 		err = cmd.Execute()
 		os.Stdout = orig
@@ -922,5 +914,40 @@ func TestNextMenu_PrintsSpecIDForm(t *testing.T) {
 	requireText(t, out, "129-fixture", "777-other", "mindspec next --spec=<spec-id>")
 	if strings.Contains(out, "--spec=<number>") {
 		t.Fatal("numeric menu placeholder survived")
+	}
+}
+
+// Both fixture constructors must consume the production pflag definitions.
+func TestNextSelection_UsesProductionFlagRegistration(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("missing source location")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), source, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run", "TestNext_101ReadyBeads_AllVisible"} {
+		calls := 0
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != name {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				id, ok := call.Fun.(*ast.Ident)
+				if ok && id.Name == "registerNextFlags" {
+					calls++
+				}
+				return true
+			})
+		}
+		if calls != 1 {
+			t.Fatalf("fixture %s must call registerNextFlags exactly once; got %d", name, calls)
+		}
 	}
 }

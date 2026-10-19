@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 )
 
@@ -401,15 +402,11 @@ func assertGateRefusal(t *testing.T, root string, fx *readiness.Fixture, id stri
 	}
 }
 func TestGateReadiness_LineageSpecMismatchRefuses(t *testing.T) {
-	for _, path := range []string{"explicit", "resolved-unscoped"} {
-		t.Run(path, func(t *testing.T) {
-			root, fx := gateFixture(t)
-			assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{ScopeSpec: "997-other"}, "bead "+fx.BeadID+" resolves to spec "+fx.SpecID+" by lineage but is being claimed for spec 997-other; nothing was claimed", "recovery: bd show "+fx.BeadID+" --json")
-		})
-	}
+	root, fx := gateFixture(t)
+	assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{ScopeSpec: "997-other"}, "bead "+fx.BeadID+" resolves to spec "+fx.SpecID+" by lineage but is being claimed for spec 997-other; nothing was claimed", "recovery: bd show "+fx.BeadID+" --json")
 }
 func TestGateReadiness_NonPlanBeadRefuses(t *testing.T) {
-	for _, id := range []string{"mindspec-bug", "other-epic.1"} {
+	for _, id := range []string{"mindspec-bug"} {
 		for _, scoped := range []bool{false, true} {
 			t.Run(id+fmtBool(scoped), func(t *testing.T) {
 				root, fx := gateFixture(t)
@@ -437,6 +434,52 @@ func TestGateReadiness_MissingSpecBranchRefuses(t *testing.T) {
 	gateGit(t, root, "branch", "-D", "spec/"+fx.SpecID)
 	assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{}, "spec branch spec/"+fx.SpecID+" for bead "+fx.BeadID+" does not exist (finalized and deleted, or never created); nothing was claimed", "recovery: mindspec state show")
 }
+func TestGateReadiness_SpecBranchInfrastructureFailureRefuses(t *testing.T) {
+	for _, failure := range []string{"exit-128", "exec-error-with-control-byte"} {
+		t.Run(failure, func(t *testing.T) {
+			root, fx := gateFixture(t)
+			gateReport(t, reportWithFailures())
+			writes := denyWrites(t)
+			before := gateAudit(t, root, fx.Store)
+			bin := filepath.Join(t.TempDir(), "bin\ncontrol")
+			if err := os.MkdirAll(bin, 0755); err != nil {
+				t.Fatal(err)
+			}
+			script := "#!/bin/sh\nexit 128\n"
+			if failure == "exec-error-with-control-byte" {
+				script = "#!/absent-interpreter\n"
+			}
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			oldPath := os.Getenv("PATH")
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+oldPath)
+			result, err := GateReadiness(root, fx.BeadID, GateOptions{})
+			t.Setenv("PATH", oldPath)
+			if err == nil || result != nil {
+				t.Fatalf("expected infrastructure refusal, got %+v %v", result, err)
+			}
+			for _, want := range []string{"could not resolve spec branch spec/" + fx.SpecID + " for bead " + fx.BeadID, "nothing was claimed", "recovery: git status   (repair the local git checkout, then retry)"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("missing %q: %v", want, err)
+				}
+			}
+			if failure == "exit-128" && !strings.Contains(err.Error(), "exit status 128") {
+				t.Fatalf("lost git failure diagnosis: %v", err)
+			}
+			if failure == "exec-error-with-control-byte" && (!strings.Contains(err.Error(), `bin\ncontrol/git`) || strings.Contains(err.Error(), "bin\ncontrol/git")) {
+				t.Fatalf("git exec error was not escaped: %v", err)
+			}
+			if strings.Contains(err.Error(), "does not exist (finalized") {
+				t.Fatalf("git failure misdiagnosed as missing branch: %v", err)
+			}
+			if *writes != 0 || gateAudit(t, root, fx.Store) != before {
+				t.Fatal("infrastructure refusal mutated tracker, refs, worktrees or files")
+			}
+		})
+	}
+}
+
 func reportWithFailures(ids ...string) *readiness.Report {
 	r := &readiness.Report{BeadID: "mindspec-posb.1", EpicID: "mindspec-posb", SpecID: "998-fixture-positive"}
 	for _, id := range []string{"MF-1", "MF-2", "MF-3", "MF-4"} {
@@ -537,10 +580,28 @@ func TestGateReadiness_IndeterminateNotOverridable(t *testing.T) {
 				rec.Dependencies = []readiness.FakeDependency{{ID: dep, Status: "closed"}}
 				fx.Store.Records[fx.BeadID] = rec
 			}
-			t.Cleanup(fx.Store.Install())
-			// A local, deliberately failing metadata reader arms the real landed finder.
+			// Membership uses the real dependency reader and local bd script;
+			// landed-merge uses in-memory records and the real landed finder.
 			bin := t.TempDir()
-			if err := os.WriteFile(filepath.Join(bin, "bd"), []byte("#!/bin/sh\\nprintf '%s\\n' 'local metadata read failure' >&2\\nexit 1\\n"), 0755); err != nil {
+			script := "#!/bin/sh\nprintf '%s\\n' 'local metadata read failure' >&2\nexit 1\n"
+			if origin == "membership-read" {
+				t.Cleanup(phase.SetRunBDForTest(bead.RunBD))
+				t.Cleanup(phase.SetListJSONForTest(bead.ListJSON))
+				epic := map[string]interface{}{"id": "mindspec-posb", "title": "[SPEC 998] fixture-positive", "issue_type": "epic", "status": "open", "metadata": map[string]interface{}{"spec_num": 998, "spec_title": "fixture-positive"}}
+				main := map[string]interface{}{"id": fx.BeadID, "title": "[998] fixture", "parent": "mindspec-posb", "description": fx.Store.Records[fx.BeadID].Description, "dependencies": []map[string]string{{"id": dep, "status": "closed", "dependency_type": "blocks"}, {"id": "mindspec-posb", "issue_type": "epic", "dependency_type": "parent-child"}}}
+				epicJSON, err := json.Marshal([]interface{}{epic})
+				if err != nil {
+					t.Fatal(err)
+				}
+				mainJSON, err := json.Marshal([]interface{}{main})
+				if err != nil {
+					t.Fatal(err)
+				}
+				script = "#!/bin/sh\ncase \"$1:$2\" in\nshow:" + fx.BeadID + ") cat <<'MAIN'\n" + string(mainJSON) + "\nMAIN\nexit 0;;\nshow:mindspec-posb|list:*) cat <<'EPIC'\n" + string(epicJSON) + "\nEPIC\nexit 0;;\nesac\nprintf '%s\\n' 'local metadata read failure' >&2\nexit 1\n"
+			} else {
+				t.Cleanup(fx.Store.Install())
+			}
+			if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0755); err != nil {
 				t.Fatal(err)
 			}
 			if origin == "landed-merge-read" {
@@ -560,6 +621,9 @@ func TestGateReadiness_IndeterminateNotOverridable(t *testing.T) {
 			}
 			if !reflect.DeepEqual(report.Signals[2].Failures, []string{dep + ":indeterminate"}) {
 				t.Fatalf("fixture did not arm %s: %+v", origin, report.Signals[2])
+			}
+			if origin == "membership-read" && !strings.Contains(report.Signals[2].Detail, "local metadata read failure") {
+				t.Fatalf("fake metadata script did not supply the indeterminate detail: %s", report.Signals[2].Detail)
 			}
 			assertGateRefusal(t, root, fx, fx.BeadID, allOverrideOptions(t), "MF-3 cannot be overridden: "+dep+":indeterminate could not be evaluated; fix the read first")
 			_, err = GateReadiness(root, fx.BeadID, allOverrideOptions(t))

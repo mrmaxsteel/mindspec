@@ -6,7 +6,13 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
+	"github.com/mrmaxsteel/mindspec/internal/resolve"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"os"
@@ -497,14 +503,47 @@ func assertScopedNoMutation(t *testing.T, f *nextHonestyFixture, before string, 
 	}
 }
 func TestNext_BareAllowNotReady_Refuses(t *testing.T) {
-	f := newScopedNextFixture(t)
-	before := f.audit(t)
-	_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready")
-	if err == nil {
-		t.Fatal("bare flag accepted")
+	for _, leg := range []string{"MF2-and-MF3", "nothing-failing", "nothing-failing-missing-branch", "indeterminate", "selection"} {
+		t.Run(leg, func(t *testing.T) {
+			f := newScopedNextFixture(t)
+			args := []string{"epic-129.1", "--allow-not-ready"}
+			want := "recovery: mindspec next epic-129.1"
+			switch leg {
+			case "nothing-failing-missing-branch":
+				honestyGit(t, f.root, "branch", "-D", "spec/129-fixture")
+			case "MF2-and-MF3":
+				f.rows[0]["description"] = "AC-999"
+				f.rows = append(f.rows, nextHonestyRow("epic-129.2", "dependency", "epic-129", "task", "open"))
+				f.deps["epic-129.1"] = []map[string]string{{"id": "epic-129.2", "status": "open", "dependency_type": "blocks"}}
+				f.write(t)
+				want += " --allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>"
+			case "indeterminate":
+				f.deps["epic-129.1"] = []map[string]string{{"id": "external-dep", "status": "closed", "dependency_type": "blocks"}}
+				f.write(t)
+				want = "recovery: mindspec bead ready-check epic-129.1   (the standalone per-signal report)"
+			case "selection":
+				args = []string{"--allow-not-ready"}
+				want = "recovery: mindspec next <bead-id> --allow-not-ready=<ids> --evidence <path-to-justification>"
+			}
+			before := f.audit(t)
+			_, err := runScopedNext(t, f, args...)
+			if err == nil {
+				t.Fatal("bare flag accepted")
+			}
+			requireText(t, err.Error(), "requires =<ids>")
+			lines := strings.Split(err.Error(), "\n")
+			if got := lines[len(lines)-1]; got != want {
+				t.Fatalf("final recovery = %q, want %q", got, want)
+			}
+			if leg == "indeterminate" {
+				requireText(t, err.Error(), "MF-3 cannot be overridden", "fix the read first")
+				if strings.Contains(err.Error(), "--allow-not-ready=") {
+					t.Fatal("indeterminate refusal suggested an override")
+				}
+			}
+			assertScopedNoMutation(t, f, before, false)
+		})
 	}
-	requireText(t, err.Error(), "requires =<ids>", "--allow-not-ready=<ids> --evidence <path-to-justification>")
-	assertScopedNoMutation(t, f, before, false)
 }
 func TestNext_AllowNotReadySpaceSeparated_Refuses(t *testing.T) {
 	f := newScopedNextFixture(t)
@@ -514,6 +553,10 @@ func TestNext_AllowNotReadySpaceSeparated_Refuses(t *testing.T) {
 		t.Fatal("space-separated flag accepted")
 	}
 	requireText(t, err.Error(), "requires =<ids>")
+	want := "recovery: mindspec next <bead-id> --allow-not-ready=MF-3 --evidence <path-to-justification>"
+	if !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("missing user's scoped signal recovery: %v", err)
+	}
 	assertScopedNoMutation(t, f, before, false)
 	raw, err := os.ReadFile(f.path + ".argv")
 	if err != nil && !os.IsNotExist(err) {
@@ -590,6 +633,136 @@ func TestNext_MissingSpecBranchNeverClaims(t *testing.T) {
 	requireText(t, err.Error(), "spec branch spec/129-fixture", "nothing was claimed")
 	assertScopedNoMutation(t, f, before, false)
 }
+func TestNext_UnscopedLineageRecordingDirtRefuses(t *testing.T) {
+	for _, file := range []string{"manifest.json", "events.ndjson"} {
+		t.Run(file, func(t *testing.T) {
+			f := newScopedNextFixture(t)
+			f.epics[0]["status"] = "closed"
+			f.write(t)
+			if err := os.WriteFile(filepath.Join(f.root, ".mindspec/config.yaml"), []byte("recording:\n  enabled: true\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := recording.StartRecording(f.root, "129-fixture"); err != nil {
+				t.Fatal(err)
+			}
+			honestyGit(t, f.root, "add", ".")
+			honestyGit(t, f.root, "commit", "-m", "recording fixture")
+			manifest, err := recording.ManifestPath(f.root, "129-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(filepath.Dir(manifest), file)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if file == "manifest.json" {
+				var m map[string]interface{}
+				if err := json.Unmarshal(data, &m); err != nil {
+					t.Fatal(err)
+				}
+				m["operator_note"] = "uncommitted user annotation"
+				data, err = json.Marshal(m)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				data = append(data, []byte("{\"operator_note\":\"uncommitted user annotation\"}\n")...)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if target, err := resolve.ResolveTarget(f.root, ""); err == nil || target != "" {
+				t.Fatalf("fixture resolved target %q: %v", target, err)
+			}
+			before := f.audit(t)
+			out, runErr := runScopedNext(t, f, "epic-129.1")
+			if runErr == nil {
+				t.Errorf("unscoped claim accepted protected dirty recording file: %s", out)
+			} else {
+				requireText(t, runErr.Error(), "uncommitted user changes", file)
+			}
+			if strings.Contains(out, "unrelated dirty path") {
+				t.Errorf("protected path called unrelated: %s", out)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(data) {
+				t.Error("user recording bytes changed across refusal")
+			}
+			assertScopedNoMutation(t, f, before, false)
+		})
+	}
+}
+
+func TestNext_UnscopedResolvedLineageMismatchRefuses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	// The resolver and selection see S. A read-only tracker response changes
+	// at the gate boundary, modelling lineage drift since the selection read.
+	for _, file := range []string{"spec.md", "plan.md"} {
+		data, err := os.ReadFile(filepath.Join(f.root, ".mindspec/specs/129-fixture", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(f.root, ".mindspec/specs/130-lineage")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	honestyGit(t, f.root, "add", ".")
+	honestyGit(t, f.root, "commit", "-m", "second lineage spec")
+	honestyGit(t, f.root, "branch", "spec/130-lineage")
+	path := filepath.Join(f.root, "bd")
+	script, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script = []byte(strings.Replace(string(script), `d=json.load(open(p))`, `d=json.load(open(p))
+if os.environ.get("SCOPED_LINEAGE_CHANGED"):
+ d["epics"][0]["title"]="[SPEC 130] lineage"
+ d["epics"][0]["metadata"].update(spec_num=130,spec_title="lineage")`, 1))
+	if err := os.WriteFile(path, script, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := resolve.ResolveTarget(f.root, ""); err != nil || target != "129-fixture" {
+		t.Fatalf("resolver = %q, %v", target, err)
+	}
+	old := nextGateReadinessFn
+	t.Cleanup(func() { nextGateReadinessFn = old })
+	reached := false
+	nextGateReadinessFn = func(root, id string, opts next.GateOptions) (*next.GateResult, error) {
+		reached = true
+		t.Setenv("SCOPED_LINEAGE_CHANGED", "1")
+		return next.GateReadiness(root, id, opts)
+	}
+	before := f.audit(t)
+	_, err = runScopedNext(t, f, "epic-129.1")
+	if !reached || err == nil {
+		t.Fatalf("resolved-scope mismatch did not refuse at the gate: reached=%v err=%v", reached, err)
+	}
+	requireText(t, err.Error(), "bead epic-129.1 resolves to spec 130-lineage by lineage but is being claimed for spec 129-fixture; nothing was claimed")
+	assertScopedNoMutation(t, f, before, false)
+}
+
+func TestNext_ForeignDottedTitleRefuses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "", "task", "open")}
+	f.epics[0]["status"] = "closed"
+	f.write(t)
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "other-epic.1")
+	if err == nil {
+		t.Fatal("foreign dotted bead claimed")
+	}
+	requireText(t, err.Error(), "bead other-epic.1 is not a plan bead of spec 129-fixture (no epic-129.<N> ID); mindspec next claims only plan beads")
+	assertScopedNoMutation(t, f, before, false)
+}
+
 func TestNext_UnscopedDispatchesIntoLineageSpec(t *testing.T) {
 	f := newScopedNextFixture(t)
 	// A closed epic has no active target; lineage can still resolve it.
@@ -642,6 +815,10 @@ func TestNext_UnscopedDispatchesIntoLineageSpec(t *testing.T) {
 	requireText(t, out, "129-fixture")
 }
 func TestNext_ReattestRecoveryScopedFormParses(t *testing.T) {
+	sourcePath, err := filepath.Abs("reattest.go")
+	if err != nil {
+		t.Fatal(err)
+	}
 	f := newScopedNextFixture(t)
 	reached := false
 	old := nextGateReadinessFn
@@ -657,9 +834,37 @@ func TestNext_ReattestRecoveryScopedFormParses(t *testing.T) {
 		}
 		return nil, sentinel
 	}
-	// Exact flag form emitted at reattest.go:275; concrete ID/path substituted.
+	// Read the actual recovery literal so production wording drift is tested.
+	source, err := parser.ParseFile(token.NewFileSet(), sourcePath, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forms []string
+	ast.Inspect(source, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(value, "mindspec next <dependent>") {
+			forms = append(forms, value)
+		}
+		return true
+	})
+	if len(forms) != 1 {
+		t.Fatalf("expected one dependent recovery literal, got %v", forms)
+	}
+	form := strings.ReplaceAll(forms[0], "<dependent>", "epic-129.1")
+	form = strings.ReplaceAll(form, "<path-to-justification>", nextEvidenceFile(t))
+	args := strings.Fields(form)
+	if len(args) < 3 || args[0] != "mindspec" || args[1] != "next" {
+		t.Fatalf("unexpected recovery form: %q", form)
+	}
 	before := f.audit(t)
-	_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-3", "--evidence", nextEvidenceFile(t))
+	_, err = runScopedNext(t, f, args[2:]...)
 	if !reached || err != sentinel {
 		t.Fatalf("recovery did not reach GateReadiness: %v reached %v", err, reached)
 	}

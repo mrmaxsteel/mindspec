@@ -66,6 +66,9 @@ team lead spawns fresh agents per bead.`,
 		flagGiven := cmd.Flags().Changed("allow-not-ready")
 		namedSignals, parseErr := next.ParseReadinessSignals(allowNotReady, flagGiven)
 		if parseErr != nil {
+			if flagGiven && (allowNotReady == next.BareOverride || allowNotReady == "") {
+				return bareReadinessRefusal(args)
+			}
 			return parseErr
 		}
 
@@ -176,35 +179,27 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Proportional claim guard (ADR-0025's clarifying
-		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
-		// build artifact co-managed by bd; dirt on that path alone is
-		// auto-handled via `bd export`. Of the remaining user dirt, only
-		// dirt ComputeEntangleablePaths names as a path THIS
-		// worktree-creating claim can itself write still blocks — round-1
-		// panel fix: that set is per-spec-aware (the target spec's
-		// recording paths, when recording is enabled) and conditional on
-		// .gitignore's current state, not unconditionally empty. Every
-		// other unrelated dirty file in the invoking checkout still does
-		// not block; it is named on stderr (Max's standing directive,
-		// 2026-09-02 — visibility without the block) and the claim
-		// proceeds.
-		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specFlag)
-		if err != nil {
-			return fmt.Errorf("checking working tree: %w", err)
+		// Guard a known scope before any recovery worktree can be created.
+		// With no resolved scope, defer until the readiness gate supplies T:
+		// its recording paths must never be reported as unrelated dirt.
+		checkClaimDirt := func(specID string) error {
+			blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specID)
+			if err != nil {
+				return fmt.Errorf("checking working tree: %w", err)
+			}
+			if len(blockingDirt) > 0 {
+				return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+			}
+			if len(ignoredDirt) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+			}
+			return nil
 		}
-		if len(blockingDirt) > 0 {
-			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
-			// worktree-context line and ends with a `recovery:` line. The
-			// old multi-line "Recovery steps: 1..3" stderr block advised
-			// `git restore .` — destructive over the HUMAN's dirt when the
-			// agent merely ran `next` from the wrong directory. The active
-			// worktree (when one exists) is the steer-to target; resolving
-			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
-		}
-		if len(ignoredDirt) > 0 {
-			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+		guardedSpec := specFlag
+		if guardedSpec != "" {
+			if err := checkClaimDirt(guardedSpec); err != nil {
+				return err
+			}
 		}
 
 		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
@@ -221,6 +216,13 @@ team lead spawns fresh agents per bead.`,
 		rs, err := next.BuildReadySet(root, specFlag)
 		var emptyErr *next.EmptyAfterFilterError
 		if err != nil && !errors.As(err, &emptyErr) {
+			// A failed query cannot proceed to a claim. Preserve dirt
+			// visibility on this early exit even when no target was learned.
+			if guardedSpec == "" {
+				if dirtErr := checkClaimDirt(""); dirtErr != nil {
+					return dirtErr
+				}
+			}
 			return err
 		}
 		items := rs.Filtered
@@ -282,6 +284,11 @@ team lead spawns fresh agents per bead.`,
 
 		// Lineage is the dispatch and recording spec, including unscoped claims.
 		specFlag = gateResult.SpecID
+		if specFlag != guardedSpec {
+			if err := checkClaimDirt(specFlag); err != nil {
+				return err
+			}
+		}
 		for _, note := range gateResult.Notes {
 			fmt.Fprintln(os.Stderr, note)
 		}
@@ -412,6 +419,29 @@ team lead spawns fresh agents per bead.`,
 
 		return nil
 	},
+}
+
+// bareReadinessRefusal decides the syntax refusal before resolving any bead.
+// A real positional ID then gets a read-only preflight solely for recovery;
+// a space-separated signal token never enters selection or readiness.
+func bareReadinessRefusal(args []string) error {
+	beadID := ""
+	if len(args) > 0 {
+		beadID = args[0]
+	}
+	root := ""
+	if beadID != "" && !strings.HasPrefix(beadID, "MF-") {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		root, err = workspace.FindRoot(cwd)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := next.GateReadiness(root, beadID, next.GateOptions{BareFlag: true})
+	return err
 }
 
 // completionGuidance renders the "When done" tail appended to the bead

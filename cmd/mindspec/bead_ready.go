@@ -58,10 +58,11 @@ uncovered signals and the release/re-claim recovery.`,
 			return err
 		}
 
+		inspectRecovery := fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))
 		marker, validity, err := readyCheckReadMarkerFn(beadID)
 		if err != nil {
 			return guard.NewFailure(fmt.Sprintf("could not read readiness override metadata for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())),
-				fmt.Sprintf("bd show %s --json", idrender.Bead(beadID)))
+				inspectRecovery)
 		}
 		coverage := readiness.ApplyOverride(report, marker, validity)
 		if len(coverage.Uncovered) == 0 {
@@ -75,7 +76,7 @@ uncovered signals and the release/re-claim recovery.`,
 		}
 		info, err := readyCheckBeadFn(beadID)
 		if err != nil {
-			return guard.NewFailure(fmt.Sprintf("could not read claim status for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), fmt.Sprintf("bd show %s --json", idrender.Bead(beadID)))
+			return guard.NewFailure(fmt.Sprintf("could not read claim status for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), inspectRecovery)
 		}
 		if strings.EqualFold(info.Status, "in_progress") {
 			commands = append(commands, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)))
