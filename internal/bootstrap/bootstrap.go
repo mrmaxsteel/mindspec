@@ -235,6 +235,11 @@ func Run(root string, dryRun bool) (*Result, error) {
 		if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
 			return nil, fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
 		}
+		if err := gitutil.EnsureGitignoreEntriesWithHeader(root,
+			"# MindSpec panel reviews (local, not version-controlled; spec 129 R8)",
+			gitutil.ReviewIgnoreEntries...); err != nil {
+			return nil, fmt.Errorf("ensuring .gitignore review entries: %w", err)
+		}
 	}
 
 	return r, nil

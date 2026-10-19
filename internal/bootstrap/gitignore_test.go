@@ -1,12 +1,135 @@
 package bootstrap
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
+	for _, emptyGitignore := range []bool{false, true} {
+		name := "absent-gitignore"
+		if emptyGitignore {
+			name = "empty-gitignore"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := reviewBootstrapRepo(t)
+			// With no file, starterGitignore already supplies the runtime
+			// block. An empty file exercises the order of both ensure calls.
+			if emptyGitignore {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			data := assertReviewsIgnored(t, root)
+			runtimeHeader := strings.Index(string(data), "# MindSpec local runtime files (not version-controlled)")
+			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)")
+			if runtimeHeader < 0 || reviewHeader < 0 || runtimeHeader >= reviewHeader {
+				t.Fatalf("runtime header must precede review header:\n%s", data)
+			}
+		})
+	}
+}
+
+func TestBootstrap_ReviewsIgnoredExistingGitignore(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	seed := "# project rules\nnode_modules/\n*.log\n"
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := assertReviewsIgnored(t, root); !strings.HasPrefix(string(got), seed) {
+		t.Fatalf("existing .gitignore bytes changed:\n%s", got)
+	}
+}
+
+func TestBootstrap_ReviewsIgnoredIdempotent(t *testing.T) {
+	for _, seed := range []string{"", "# existing\n*.log\n"} {
+		t.Run(seed, func(t *testing.T) {
+			root := reviewBootstrapRepo(t)
+			if seed != "" {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(seed), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			first := assertReviewsIgnored(t, root)
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			if second := assertReviewsIgnored(t, root); !bytes.Equal(first, second) {
+				t.Fatalf("second init changed .gitignore:\nbefore:\n%s\nafter:\n%s", first, second)
+			}
+		})
+	}
+}
+
+func reviewBootstrapRepo(t *testing.T) string {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	return root
+}
+
+func assertReviewsIgnored(t *testing.T, root string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(data), "\n")
+	header := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"
+	want := header + "\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
+	if !strings.Contains(string(data), want) {
+		t.Errorf("missing literal review entries under their header:\n%s", data)
+	}
+	for _, comment := range []string{header, "# MindSpec local runtime files (not version-controlled)"} {
+		count := 0
+		for _, line := range lines {
+			if line == comment {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected one %q header, got %d:\n%s", comment, count, data)
+		}
+	}
+	for _, path := range []string{
+		".mindspec/specs/001-x/reviews/a/panel.json",
+		".mindspec/reviews/a/panel.json",
+		"src/reviews/x.go",
+	} {
+		cmd := exec.Command("git", "check-ignore", "-q", "--", path)
+		cmd.Dir = root
+		err := cmd.Run()
+		if path != "src/reviews/x.go" {
+			if err != nil {
+				t.Errorf("review %s must be ignored: %v", path, err)
+			}
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				t.Errorf("project source %s must not be ignored; got %v", path, err)
+			}
+		}
+	}
+	return data
+}
 
 // TestRun_GitignoreAppendsRuntimeEntries pins spec 123 AC-5 (R4a): a repo
 // with a pre-existing, unrelated .gitignore gets exactly the two runtime

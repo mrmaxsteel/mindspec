@@ -495,6 +495,14 @@ the starter `AGENTS.md` content is config-sourced (see consumer identity
 below); a config load failure fails init loudly rather than scaffolding
 from a half-read config.
 
+After the runtime ensure, `init` ensures `.mindspec/specs/*/reviews/**`
+and `.mindspec/reviews/**` under the panel-review header (spec 129 R8).
+These anchored patterns keep optional local panel artifacts out of automatic
+commits without ignoring a project's `src/reviews/`. The review list is
+separate from the runtime list: already-tracked reviews remain tracked and
+are not runtime-file findings. Both ensures preserve existing bytes and
+are skipped during dry-run.
+
 ### `domain add` converges from every partial state (#207)
 
 `internal/domain/scaffold.go` replaced the dir-exists refusal with a

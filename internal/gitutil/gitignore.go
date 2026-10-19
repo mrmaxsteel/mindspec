@@ -23,6 +23,16 @@ var RuntimeIgnoreEntries = []string{
 	".mindspec/phase.lock",
 }
 
+// ReviewIgnoreEntries keep panel reviews, an optional local helper, out of git
+// by default (spec 129 R8). They are separate from RuntimeIgnoreEntries because
+// doctor's runtime-file check reports tracked runtime entries; this repo's
+// already-tracked reviews stay tracked. The /** form, unlike a directory form,
+// leaves R8.4 option (B)'s later negation lines effective.
+var ReviewIgnoreEntries = []string{
+	".mindspec/specs/*/reviews/**",
+	".mindspec/reviews/**",
+}
+
 // gitignoreRuntimeHeader is the comment written above any entries
 // EnsureGitignoreEntries appends, so a human reading .gitignore later
 // understands why the lines are there.
@@ -47,6 +57,12 @@ const gitignoreRuntimeHeader = "# MindSpec local runtime files (not version-cont
 // header) and is not reused here — a runtime FILE entry must not gain a
 // trailing slash.
 func EnsureGitignoreEntries(root string, entries ...string) error {
+	return EnsureGitignoreEntriesWithHeader(root, gitignoreRuntimeHeader, entries...)
+}
+
+// EnsureGitignoreEntriesWithHeader applies EnsureGitignoreEntries' append and
+// ignore-check semantics, using header above any appended entries.
+func EnsureGitignoreEntriesWithHeader(root, header string, entries ...string) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -125,7 +141,7 @@ func EnsureGitignoreEntries(root string, entries ...string) error {
 	if len(content) > 0 {
 		b.WriteString("\n")
 	}
-	b.WriteString(gitignoreRuntimeHeader)
+	b.WriteString(header)
 	b.WriteString("\n")
 	for _, e := range toAppend {
 		b.WriteString(e)
