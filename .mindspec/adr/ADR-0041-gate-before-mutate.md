@@ -781,7 +781,7 @@ failure-record digests, RFC-3339 timestamp, and evidence path/sha256/bytes,
 never evidence text. Marker-write failure refuses; claim failure rolls
 the marker back. Existing markers never authorize a claim, even after release.
 
-`mindspec bead ready-check` honours only VALID markers whose recorded
+`mindspec bead ready-check` honors only VALID markers whose recorded
 digest sets cover every current failure record. Growth uncovers;
 shrinkage stays covered. LEGACY and MALFORMED markers grant nothing.
 Re-recording a claimed bead requires release and a fresh scoped re-claim

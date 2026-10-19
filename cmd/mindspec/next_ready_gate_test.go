@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
+	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -503,12 +505,21 @@ func assertScopedNoMutation(t *testing.T, f *nextHonestyFixture, before string, 
 	}
 }
 func TestNext_BareAllowNotReady_Refuses(t *testing.T) {
-	for _, leg := range []string{"MF2-and-MF3", "nothing-failing", "nothing-failing-missing-branch", "indeterminate", "selection"} {
+	for _, leg := range []string{"MF2-and-MF3", "nothing-failing", "nothing-failing-missing-branch", "foreign-dotted", "indeterminate", "selection"} {
 		t.Run(leg, func(t *testing.T) {
 			f := newScopedNextFixture(t)
 			args := []string{"epic-129.1", "--allow-not-ready"}
 			want := "recovery: mindspec next epic-129.1"
 			switch leg {
+			case "foreign-dotted":
+				f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "", "task", "open")}
+				f.write(t)
+				args[0] = "other-epic.1"
+				want = "recovery: mindspec bead ready-check other-epic.1"
+				report, err := readiness.EvaluateReadiness(f.root, args[0])
+				if err != nil || !report.AllPass() {
+					t.Fatalf("foreign fixture must pass every signal: %+v %v", report, err)
+				}
 			case "nothing-failing-missing-branch":
 				honestyGit(t, f.root, "branch", "-D", "spec/129-fixture")
 			case "MF2-and-MF3":
@@ -546,28 +557,45 @@ func TestNext_BareAllowNotReady_Refuses(t *testing.T) {
 	}
 }
 func TestNext_AllowNotReadySpaceSeparated_Refuses(t *testing.T) {
-	f := newScopedNextFixture(t)
-	before := f.audit(t)
-	_, err := runScopedNext(t, f, "--allow-not-ready", "MF-3")
-	if err == nil {
-		t.Fatal("space-separated flag accepted")
-	}
-	requireText(t, err.Error(), "requires =<ids>")
-	want := "recovery: mindspec next <bead-id> --allow-not-ready=MF-3 --evidence <path-to-justification>"
-	if !strings.HasSuffix(err.Error(), want) {
-		t.Fatalf("missing user's scoped signal recovery: %v", err)
-	}
-	assertScopedNoMutation(t, f, before, false)
-	raw, err := os.ReadFile(f.path + ".argv")
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "\"MF-3\"") {
-		t.Fatalf("MF-3 looked up as a bead: %s", raw)
+	for _, tc := range []struct{ token, signals string }{
+		{"MF-3", "MF-3"},
+		{"mf-3", "MF-3"},
+		{"MF-4,MF-2,MF-4", "MF-2,MF-4"},
+		{"MF-9", "<ids>"},
+		{"MF-3;rm -rf ~", "<ids>"},
+	} {
+		t.Run(tc.token, func(t *testing.T) {
+			if strings.Contains(tc.token, ";") && len(guard.FindFloorMatches(tc.token)) == 0 {
+				t.Fatal("destructive-token fixture did not fire the floor detector")
+			}
+			f := newScopedNextFixture(t)
+			before := f.audit(t)
+			_, err := runScopedNext(t, f, "--allow-not-ready", tc.token)
+			if err == nil {
+				t.Fatal("space-separated flag accepted")
+			}
+			requireText(t, err.Error(), "requires =<ids>")
+			want := "recovery: mindspec next <bead-id> --allow-not-ready=" + tc.signals + " --evidence <path-to-justification>"
+			lines := strings.Split(err.Error(), "\n")
+			if got := lines[len(lines)-1]; got != want {
+				t.Errorf("final recovery = %q, want %q", got, want)
+			}
+			if matches := guard.FindFloorMatches(err.Error()); len(matches) != 0 {
+				t.Errorf("bare refusal contains destructive floor matches: %+v", matches)
+			}
+			assertScopedNoMutation(t, f, before, false)
+			raw, err := os.ReadFile(f.path + ".argv")
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if len(raw) != 0 {
+				t.Fatalf("signal token triggered tracker lookup: %s", raw)
+			}
+		})
 	}
 }
 func TestNext_InvalidScopedSignalRefuses(t *testing.T) {
-	for _, value := range []string{"MF-9", "all"} {
+	for _, value := range []string{"MF-9", "all", ""} {
 		t.Run(value, func(t *testing.T) {
 			f := newScopedNextFixture(t)
 			before := f.audit(t)
@@ -575,7 +603,60 @@ func TestNext_InvalidScopedSignalRefuses(t *testing.T) {
 			if err == nil {
 				t.Fatal("invalid signal accepted")
 			}
-			requireText(t, err.Error(), "unknown readiness signal "+value)
+			want := "unknown readiness signal " + value
+			last := "recovery: mindspec bead ready-check epic-129.1"
+			if value == "" {
+				want = "requires =<ids>"
+				last = "recovery: mindspec next epic-129.1 --allow-not-ready=<ids> --evidence <path-to-justification>"
+			}
+			requireText(t, err.Error(), want)
+			lines := strings.Split(err.Error(), "\n")
+			if got := lines[len(lines)-1]; got != last {
+				t.Fatalf("final recovery = %q, want %q", got, last)
+			}
+			assertScopedNoMutation(t, f, before, false)
+		})
+	}
+}
+
+func TestNext_UnscopedEmptySetShowsIgnoredDirt(t *testing.T) {
+	for _, blocking := range []bool{false, true} {
+		t.Run(fmt.Sprint(blocking), func(t *testing.T) {
+			f := newScopedNextFixture(t)
+			f.rows = nil
+			f.epics[0]["status"] = "closed"
+			f.write(t)
+			if target, err := resolve.ResolveTarget(f.root, ""); err == nil || target != "" {
+				t.Fatalf("fixture resolved target %q: %v", target, err)
+			}
+			path := filepath.Join(f.root, "unrelated.txt")
+			if err := os.WriteFile(path, []byte("operator dirt"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if blocking {
+				file := filepath.Join(f.root, ".gitignore")
+				data, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, append(data, []byte("operator-note\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			blocked, ignored, err := next.CheckDirtyTreeProportional(f.root, f.root, "")
+			if err != nil || len(ignored) == 0 || (blocking && len(blocked) == 0) {
+				t.Fatalf("dirt fixture not armed: blocking=%v ignored=%v err=%v", blocked, ignored, err)
+			}
+			before := f.audit(t)
+			out, err := runScopedNext(t, f)
+			if err != nil {
+				t.Fatalf("empty-set dirt must never block: %v", err)
+			}
+			requireText(t, out, "No ready work found.", next.IgnoredDirtNotice([]string{"unrelated.txt"}))
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != "operator dirt" {
+				t.Fatalf("unrelated dirt changed: %q %v", data, err)
+			}
 			assertScopedNoMutation(t, f, before, false)
 		})
 	}

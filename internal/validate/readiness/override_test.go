@@ -48,8 +48,8 @@ func TestApplyOverride(t *testing.T) {
 		{"shrinkage", overrideReport(a), overrideReport(a, b), bead.MarkerValid, []string{"MF-3"}, nil, "MF-3: OVERRIDDEN"},
 		{"passing", overrideReport(), overrideReport(a), bead.MarkerValid, nil, nil, "MF-3: PASS (override recorded but no longer needed)"},
 		{"indeterminate", overrideReport(indeterminate), overrideReport(indeterminate), bead.MarkerValid, nil, []string{"MF-3"}, "MF-3: FAIL"},
-		{"legacy", overrideReport(a), overrideReport(a), bead.MarkerLegacy, nil, []string{"MF-3"}, "override marker is legacy (no evidence) — not honoured"},
-		{"malformed", overrideReport(a), overrideReport(a), bead.MarkerMalformed, nil, []string{"MF-3"}, "override marker is malformed — not honoured"},
+		{"legacy", overrideReport(a), overrideReport(a), bead.MarkerLegacy, nil, []string{"MF-3"}, "override marker is legacy (no evidence) — not honored"},
+		{"malformed", overrideReport(a), overrideReport(a), bead.MarkerMalformed, nil, []string{"MF-3"}, "override marker is malformed — not honored"},
 		{"absent", overrideReport(a), overrideReport(a), bead.MarkerAbsent, nil, []string{"MF-3"}, "MF-3: FAIL"},
 	}
 	for _, tt := range tests {

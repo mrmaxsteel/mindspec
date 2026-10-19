@@ -40,6 +40,11 @@ var (
 // BareOverride is pflag's sentinel for a flag without an equals-bound value.
 const BareOverride = "__bare_allow_not_ready__"
 
+// IsReadinessSignalToken separates space-separated signal tokens from bead IDs.
+func IsReadinessSignalToken(value string) bool {
+	return strings.HasPrefix(strings.ToUpper(value), "MF-")
+}
+
 // GateOptions describes fresh claim authority. Stored markers grant none.
 type GateOptions struct {
 	// BareFlag is a syntax refusal; readiness is read only to render recovery.
@@ -103,16 +108,20 @@ func nonPlanDiagnostic(beadID, specID, epicID string) string {
 	return fmt.Sprintf("bead %s is not a plan bead of spec %s (no %s.<N> ID); mindspec next claims only plan beads", idrender.Bead(beadID), idrender.Spec(specID), idrender.Bead(epicID))
 }
 
+func missingSpecBranchFailure(branch, beadID string) error {
+	return guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", termsafe.Escape(branch), idrender.Bead(beadID)), "mindspec state show")
+}
+
 // GateReadiness is the read-only preflight before marker, claim, branch or
 // worktree mutation (ADR-0041; spec 129 R1.8/R6). Evidence is read here too.
 func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 	recovery := []string{fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))}
 	if opts.BareFlag {
 		message := "--allow-not-ready requires =<ids>; the bare and space-separated forms are not supported"
-		if beadID == "" || strings.HasPrefix(beadID, "MF-") {
+		if beadID == "" || IsReadinessSignalToken(beadID) {
 			signals := "<ids>"
-			if beadID != "" {
-				signals = termsafe.Escape(beadID)
+			if ids, err := ParseReadinessSignals(strings.ToUpper(beadID), true); err == nil {
+				signals = strings.Join(ids, ",")
 			}
 			recovery = []string{"mindspec next <bead-id> --allow-not-ready=" + signals + " --evidence <path-to-justification>"}
 		} else {
@@ -124,6 +133,9 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 				recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
 			} else if report.AllPass() {
 				recovery = []string{fmt.Sprintf("mindspec next %s", idrender.Bead(beadID))}
+				if _, ok := bead.PlanBeadIndex(report.EpicID, beadID); !ok {
+					recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+				}
 			} else {
 				message += "\n" + readiness.Render(report)
 				recovery = append([]string{}, report.RecoveryCommands()...)
@@ -143,7 +155,15 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 	}
 	namedIDs, err := ParseReadinessSignals(strings.Join(opts.NamedSignals, ","), opts.FlagGiven)
 	if err != nil {
-		return nil, err
+		if beadID == "" || IsReadinessSignalToken(beadID) {
+			return nil, err
+		}
+		message := strings.SplitN(err.Error(), "\n"+guard.RecoveryPrefix, 2)[0]
+		recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+		if strings.Join(opts.NamedSignals, ",") == "" {
+			recovery = append(recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=<ids> --evidence <path-to-justification>", idrender.Bead(beadID)))
+		}
+		return nil, guard.NewFailure(message, recovery...)
 	}
 	report, err := evaluateReadinessFn(root, beadID)
 	if err != nil {
@@ -166,7 +186,7 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 	}
 	if _, err := gitutil.RevParseRef(root, "refs/heads/"+branch); err != nil {
 		if errors.Is(err, gitutil.ErrRefNotFound) {
-			return nil, guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", branch, idrender.Bead(beadID)), "mindspec state show")
+			return nil, missingSpecBranchFailure(branch, beadID)
 		}
 		return nil, guard.NewFailure(fmt.Sprintf("could not resolve spec branch %s for bead %s: %s; nothing was claimed", branch, idrender.Bead(beadID), termsafe.Escape(err.Error())), "git status   (repair the local git checkout, then retry)")
 	}

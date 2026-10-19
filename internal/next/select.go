@@ -39,7 +39,7 @@ func SelectWork(items []BeadInfo, pick int) (BeadInfo, error) {
 	return items[pick-1], nil
 }
 
-// SelectNamedFromReadySet honours scoped positional intent before empty-set handling.
+// SelectNamedFromReadySet honors scoped positional intent before empty-set handling.
 func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 	if rs.SpecFlag == "" {
 		return SelectWorkByName(rs.Filtered, name)

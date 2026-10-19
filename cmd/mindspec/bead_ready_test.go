@@ -131,7 +131,7 @@ func runReadyOverride(t *testing.T, r *readiness.Report, raw any, readErr error,
 	return out, err
 }
 
-func TestReadyCheck_HonoursValidMarkerOnly(t *testing.T) {
+func TestReadyCheck_HonorsValidMarkerOnly(t *testing.T) {
 	a := readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureNoCandidate, "")
 	b := readiness.DependencyFailureRecord("mindspec-fixture.3", readiness.FailureNoCandidate, "")
 	indeterminate := readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureIndeterminate, "")
@@ -216,7 +216,7 @@ func TestReadyCheck_HonoursValidMarkerOnly(t *testing.T) {
 				}
 				tt.edit(raw)
 				out, err := runReadyOverride(t, r, raw, nil)
-				for _, want := range []string{"override marker is malformed — not honoured", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+				for _, want := range []string{"override marker is malformed — not honored", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
 					if err == nil || !strings.Contains(out, want) {
 						t.Fatalf("malformed marker missing %q:\n%s (%v)", want, out, err)
 					}
@@ -229,7 +229,7 @@ func TestReadyCheck_HonoursValidMarkerOnly(t *testing.T) {
 func TestReadyCheck_LegacyRecoveryReleasesThenReclaims(t *testing.T) {
 	r := readyOverrideReport(readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureNoCandidate, ""))
 	out, err := runReadyOverride(t, r, map[string]any{"signals": []string{"MF-3"}, "overridden": "2026-10-19T00:00:00Z"}, nil)
-	for _, want := range []string{"override marker is legacy (no evidence) — not honoured", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+	for _, want := range []string{"override marker is legacy (no evidence) — not honored", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
 		if err == nil || !strings.Contains(out, want) {
 			t.Fatalf("legacy marker missing %q:\n%s (%v)", want, out, err)
 		}
@@ -696,7 +696,7 @@ func TestReadyCheck_MF4FailureSetThroughCommand(t *testing.T) {
 			m := readyOverrideMarker(t, initial)
 			out, err := runReadyOverride(t, initial, m, nil)
 			if err != nil {
-				t.Fatalf("initial override not honoured: %v %s", err, out)
+				t.Fatalf("initial override not honored: %v %s", err, out)
 			}
 			requireText(t, out, "MF-4: OVERRIDDEN")
 			switch mode {
@@ -874,7 +874,7 @@ func TestReadyCheck_ReleaseFreshReclaimReplacesMarker(t *testing.T) {
 			}
 			out, err = runBeadReadyCheck(t, id)
 			if err != nil {
-				t.Fatalf("fresh marker not honoured: %v %s", err, out)
+				t.Fatalf("fresh marker not honored: %v %s", err, out)
 			}
 			for _, signal := range replacement.Signals {
 				requireText(t, out, signal+": OVERRIDDEN")

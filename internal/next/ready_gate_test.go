@@ -434,6 +434,14 @@ func TestGateReadiness_MissingSpecBranchRefuses(t *testing.T) {
 	gateGit(t, root, "branch", "-D", "spec/"+fx.SpecID)
 	assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{}, "spec branch spec/"+fx.SpecID+" for bead "+fx.BeadID+" does not exist (finalized and deleted, or never created); nothing was claimed", "recovery: mindspec state show")
 }
+
+func TestGateReadiness_MissingSpecBranchEscapes(t *testing.T) {
+	got := missingSpecBranchFailure("spec/998-fixture\n\x1b[31m", "mindspec-posb.1").Error()
+	want := "spec branch \"spec/998-fixture\\n\\x1b[31m\" for bead mindspec-posb.1 does not exist (finalized and deleted, or never created); nothing was claimed\nrecovery: mindspec state show"
+	if got != want {
+		t.Fatalf("missing-branch refusal = %q, want %q", got, want)
+	}
+}
 func TestGateReadiness_SpecBranchInfrastructureFailureRefuses(t *testing.T) {
 	for _, failure := range []string{"exit-128", "exec-error-with-control-byte"} {
 		t.Run(failure, func(t *testing.T) {
@@ -513,6 +521,7 @@ func TestGateReadiness_ScopedOverride(t *testing.T) {
 		{"subset-refusal", []string{"MF-2", "MF-3"}, []string{"MF-3"}, false, "--allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>"},
 		{"unknown", []string{"MF-3"}, []string{"MF-9"}, false, "unknown readiness signal MF-9"},
 		{"all", []string{"MF-3"}, []string{"all"}, false, "unknown readiness signal all"},
+		{"empty", []string{"MF-3"}, nil, false, "requires =<ids>"},
 		{"missing-evidence", []string{"MF-3"}, []string{"MF-3"}, true, "missing --evidence"},
 		{"passing-note-on-refusal", []string{"MF-2"}, []string{"MF-3"}, false, "MF-3 named but passing — not recorded"},
 		{"passing", nil, []string{"MF-3"}, true, ""},
@@ -529,6 +538,16 @@ func TestGateReadiness_ScopedOverride(t *testing.T) {
 			if tc.want != "" {
 				assertGateRefusal(t, root, fx, fx.BeadID, opts, tc.want)
 				_, err := GateReadiness(root, fx.BeadID, opts)
+				if tc.name == "unknown" || tc.name == "all" || tc.name == "empty" {
+					last := "recovery: mindspec bead ready-check " + fx.BeadID
+					if tc.name == "empty" {
+						last = "recovery: mindspec next " + fx.BeadID + " --allow-not-ready=<ids> --evidence <path-to-justification>"
+					}
+					lines := strings.Split(err.Error(), "\n")
+					if got := lines[len(lines)-1]; got != last {
+						t.Fatalf("final signal recovery = %q, want %q", got, last)
+					}
+				}
 				if tc.name == "subset-refusal" {
 					lines := strings.Split(err.Error(), "\n")
 					last := lines[len(lines)-1]
@@ -625,10 +644,20 @@ func TestGateReadiness_IndeterminateNotOverridable(t *testing.T) {
 			if origin == "membership-read" && !strings.Contains(report.Signals[2].Detail, "local metadata read failure") {
 				t.Fatalf("fake metadata script did not supply the indeterminate detail: %s", report.Signals[2].Detail)
 			}
-			assertGateRefusal(t, root, fx, fx.BeadID, allOverrideOptions(t), "MF-3 cannot be overridden: "+dep+":indeterminate could not be evaluated; fix the read first")
-			_, err = GateReadiness(root, fx.BeadID, allOverrideOptions(t))
-			if strings.Contains(err.Error(), "--allow-not-ready=") {
-				t.Fatal("indeterminate refusal offered impossible override")
+			for _, authority := range []string{"all-named", "unflagged", "subset"} {
+				t.Run(authority, func(t *testing.T) {
+					opts := allOverrideOptions(t)
+					if authority == "unflagged" {
+						opts = GateOptions{}
+					} else if authority == "subset" {
+						opts.NamedSignals = []string{"MF-2"}
+					}
+					assertGateRefusal(t, root, fx, fx.BeadID, opts, "MF-3 cannot be overridden: "+dep+":indeterminate could not be evaluated; fix the read first")
+					_, err := GateReadiness(root, fx.BeadID, opts)
+					if strings.Contains(err.Error(), "--allow-not-ready=") {
+						t.Fatal("indeterminate refusal offered impossible override")
+					}
+				})
 			}
 		})
 	}
@@ -701,7 +730,7 @@ func TestOverride_GrowthUncovered(t *testing.T) {
 	}
 	m = captureOverride(t, fx.BeadID, got)
 	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); len(c.Uncovered) != 0 {
-		t.Fatalf("fresh override not honoured: %+v", c)
+		t.Fatalf("fresh override not honored: %+v", c)
 	}
 }
 func TestOverride_ShrinkageStaysCovered(t *testing.T) {

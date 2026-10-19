@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The fake honours the default cap and edge-only --parent; all tracker state is local.
+// The fake honors the default cap and edge-only --parent; all tracker state is local.
 const nextHonestyFakeBD = `#!/usr/bin/env python3
 import json, os, sys
 p=os.environ["HONEST_TRACKER"]

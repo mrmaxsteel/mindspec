@@ -64,10 +64,17 @@ team lead spawns fresh agents per bead.`,
 		allowNotReady, _ := cmd.Flags().GetString("allow-not-ready")
 		evidencePath, _ := cmd.Flags().GetString("evidence")
 		flagGiven := cmd.Flags().Changed("allow-not-ready")
+		beadID := ""
+		if len(args) > 0 {
+			beadID = args[0]
+		}
 		namedSignals, parseErr := next.ParseReadinessSignals(allowNotReady, flagGiven)
 		if parseErr != nil {
-			if flagGiven && (allowNotReady == next.BareOverride || allowNotReady == "") {
+			if flagGiven && allowNotReady == next.BareOverride {
 				return bareReadinessRefusal(args)
+			}
+			if beadID != "" && !next.IsReadinessSignalToken(beadID) {
+				_, parseErr = next.GateReadiness("", beadID, next.GateOptions{FlagGiven: true, NamedSignals: []string{allowNotReady}})
 			}
 			return parseErr
 		}
@@ -256,6 +263,9 @@ team lead spawns fresh agents per bead.`,
 					fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, activeBead))
 				})
 			}
+			if _, ignored, err := next.CheckDirtyTreeProportional(root, cwd, ""); err == nil && len(ignored) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignored))
+			}
 			fmt.Println("No ready work found.")
 			fmt.Println()
 			fmt.Println("Next steps:")
@@ -430,7 +440,7 @@ func bareReadinessRefusal(args []string) error {
 		beadID = args[0]
 	}
 	root := ""
-	if beadID != "" && !strings.HasPrefix(beadID, "MF-") {
+	if beadID != "" && !next.IsReadinessSignalToken(beadID) {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
