@@ -1,10 +1,13 @@
 package readiness
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -29,6 +32,214 @@ func gitBranches(t *testing.T, root string) string {
 		t.Fatalf("git branch --list: %v: %s", err, out)
 	}
 	return string(out)
+}
+
+func TestPlanMapsBead_AndPositional(t *testing.T) {
+	var plan strings.Builder
+	plan.WriteString("---\nwork_chunks:\n")
+	for _, n := range []int{1, 2, 3, 4, 5, 6, 7, 8, 10} {
+		fmt.Fprintf(&plan, "  - id: %d\n    key_file_paths: [real.go]\n", n)
+	}
+	plan.WriteString("---\n")
+	for _, n := range []int{1, 2, 3, 4, 5, 6, 7, 12} {
+		fmt.Fprintf(&plan, "## Bead %d: heading\n**Acceptance Criteria**\n- concrete outcome\n", n)
+	}
+	base := plan.String()
+	for _, tc := range []struct {
+		n      int
+		mapped bool
+		why    string
+	}{
+		{1, true, ""}, {8, true, ""}, {9, false, "plan.md declares 8 ## Bead sections"},
+		{10, false, "plan.md declares 8 ## Bead sections"}, {12, false, "plan.md declares 8 ## Bead sections"},
+		{0, false, "plan.md declares 8 ## Bead sections"}, {-1, false, "plan.md declares 8 ## Bead sections"},
+	} {
+		mapped, why := PlanMapsBead(base, tc.n)
+		if mapped != tc.mapped || why != tc.why {
+			t.Errorf("N=%d: (%v,%q), want (%v,%q)", tc.n, mapped, why, tc.mapped, tc.why)
+		}
+	}
+	section, found := extractBeadSectionRaw(base, 8)
+	if !found || !strings.HasPrefix(section, "## Bead 12:") {
+		t.Fatalf("eighth section=%q found=%v", section, found)
+	}
+	if s := evaluateMF1(base, 8); !s.Pass {
+		t.Fatalf("MF-1 must share positional mapping: %+v", s)
+	}
+	fenced := base + "```markdown\n## Bead 99: fenced heading\n```\n"
+	if _, found := extractBeadSectionRaw(fenced, 9); !found {
+		t.Fatal("extractor did not count fenced heading")
+	}
+	if mapped, why := PlanMapsBead(fenced, 9); mapped || why != "no work_chunks id 9" {
+		t.Fatalf("fenced N=9: (%v,%q)", mapped, why)
+	}
+	withChunk9 := strings.Replace(fenced, "work_chunks:\n", "work_chunks:\n  - id: 9\n", 1)
+	if mapped, why := PlanMapsBead(withChunk9, 9); !mapped || why != "" {
+		t.Fatalf("fenced mapped N=9: (%v,%q)", mapped, why)
+	}
+	if mapped, why := PlanMapsBead(fenced, 10); mapped || why != "plan.md declares 9 ## Bead sections" {
+		t.Fatalf("chunk-only N=10: (%v,%q)", mapped, why)
+	}
+	sectionOnly := strings.Replace(base, "  - id: 8\n    key_file_paths: [real.go]\n", "", 1)
+	if mapped, why := PlanMapsBead(sectionOnly, 8); mapped || why != "no work_chunks id 8" {
+		t.Fatalf("section-only N=8: (%v,%q)", mapped, why)
+	}
+	if s := evaluateMF1(sectionOnly, 8); !reflect.DeepEqual(s.Failures, []string{"chunk-missing:8"}) {
+		t.Fatalf("half-mapping MF-1=%+v", s)
+	}
+	if mapped, why := PlanMapsBead("---\nwork_chunks: [\n---\n## Bead 1: malformed\n", 1); mapped || why != "invalid plan.md frontmatter" {
+		t.Fatalf("malformed mapping=(%v,%q)", mapped, why)
+	}
+}
+
+func TestReadiness_MF1AggregatesAllFailures(t *testing.T) {
+	plan := "---\nwork_chunks:\n  - id: 1\n    key_file_paths: [path/to/file.go, ' ', path/to/file.go]\n---\n## Bead 1: incomplete\n**Acceptance Criteria**\n- <Specific, measurable criterion for this bead>\n"
+	s := evaluateMF1(plan, 1)
+	want := []string{"ac-entry-missing:1", "key-file-paths-blank:1", "key-file-paths-placeholder:1"}
+	if s.Pass || !reflect.DeepEqual(s.Failures, want) {
+		t.Fatalf("MF-1 failures=%v Pass=%v, want %v", s.Failures, s.Pass, want)
+	}
+	for _, fragment := range []string{"Acceptance Criteria block has no entry", "scaffold placeholder", "no non-blank concrete path"} {
+		if !strings.Contains(s.Detail, fragment) {
+			t.Errorf("detail %q missing %q", s.Detail, fragment)
+		}
+	}
+	if strings.Contains(s.Recovery, "\n") || !strings.Contains(s.Recovery, "replace the placeholder with a concrete, measurable criterion") {
+		t.Fatalf("one first recovery expected: %q", s.Recovery)
+	}
+	for _, tc := range []struct {
+		plan    string
+		records []string
+	}{
+		{"---\nwork_chunks: []\n---\n", []string{"chunk-missing:1", "section-missing:1"}},
+		{"---\nwork_chunks:\n  - id: 1\n    key_file_paths: []\n---\n## Bead 1: empty\n", []string{"ac-entry-missing:1", "key-file-paths-empty:1"}},
+	} {
+		got := evaluateMF1(tc.plan, 1)
+		if got.Pass || !reflect.DeepEqual(got.Failures, tc.records) {
+			t.Errorf("aggregate=%+v, want %v", got, tc.records)
+		}
+	}
+	for _, tc := range []struct {
+		name, paths string
+		pass        bool
+	}{
+		{"concrete-with-blank", "[real.go, '']", true},
+		{"all-blank", "['', ' ']", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := "---\nwork_chunks:\n  - id: 1\n    key_file_paths: " + tc.paths + "\n---\n## Bead 1: paths\n**Acceptance Criteria**\n- A concrete outcome is verified.\n"
+			got := evaluateMF1(plan, 1)
+			if got.Pass != tc.pass {
+				t.Fatalf("paths %s: Pass=%v, want %v; failures=%v detail=%q", tc.paths, got.Pass, tc.pass, got.Failures, got.Detail)
+			}
+			if tc.pass {
+				if len(got.Failures) != 0 || got.Detail != "" || got.Recovery != "" {
+					t.Fatalf("concrete path must pass without failures: %+v", got)
+				}
+			} else if !reflect.DeepEqual(got.Failures, []string{"key-file-paths-blank:1"}) || got.Detail != "work_chunks[1].key_file_paths has no non-blank concrete path element" {
+				t.Fatalf("all-blank paths must retain FX-3 record and detail: %+v", got)
+			}
+		})
+	}
+}
+
+func TestReadiness_MF4AggregatesAllOccurrences(t *testing.T) {
+	description := "TBD\nTBD\nOPEN QUESTION\n"
+	plan := "## Bead 1: blockers\n### First\nTBD\nTBD\n**Blocking Questions**\n- [ ] decide\n- [ ] decide\n### Second\nTBD\n```\nTBD\n**Blocking Questions**\n- [ ] ignored\n```\n`TBD`\n"
+	s := evaluateMF4(description, plan)
+	var want []string
+	add := func(kind, source, section, line string, k int) {
+		want = append(want, fmt.Sprintf("%s:%s:%s:%d:%x", kind, source, section, k, sha256.Sum256([]byte(line))))
+	}
+	for _, k := range []int{1, 2} {
+		add("token", "description", "-", "TBD", k)
+		add("token", "plan", "## Bead 1: blockers / ### First", "TBD", k)
+		add("checklist", "plan", "## Bead 1: blockers / ### First", "- [ ] decide", k)
+	}
+	add("token", "description", "-", "OPEN QUESTION", 1)
+	add("token", "plan", "## Bead 1: blockers / ### Second", "TBD", 1)
+	want = sortedUnique(want)
+	if s.Pass || !reflect.DeepEqual(s.Failures, want) {
+		t.Fatalf("MF-4 failures=%v, want %v", s.Failures, want)
+	}
+	if strings.Count(s.Detail, "unchecked item under a blocking-region header:") != 2 || !strings.Contains(s.Detail, "OPEN QUESTION") {
+		t.Fatalf("detail omitted occurrences: %q", s.Detail)
+	}
+	if s.Recovery == "" || strings.Contains(s.Recovery, "\n") {
+		t.Fatalf("expected one recovery: %q", s.Recovery)
+	}
+	if got := evaluateMF4("TBD TBD", ""); len(got.Failures) != 2 {
+		t.Fatalf("same-line multiplicity lost: %v", got.Failures)
+	}
+	t.Run("description-checklist-passes", func(t *testing.T) {
+		if got := evaluateMF4("**Open Questions**\n- [ ] decide\n", ""); !got.Pass || len(got.Failures) != 0 {
+			t.Fatalf("description-only checklist must pass MF-4: %+v", got)
+		}
+	})
+	t.Run("region-termination", func(t *testing.T) {
+		for _, heading := range []string{"#### Sub", "# Top", "##### Sub", "###### Sub"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "## Bead 1: blockers\n**Blocking Questions**\n"+heading+"\n- [ ] decide\n")
+				if got.Pass || len(got.Failures) != 1 || !strings.HasPrefix(got.Failures[0], "checklist:plan:") {
+					t.Fatalf("heading %q must keep blocking region open: %+v", heading, got)
+				}
+			})
+		}
+		for _, heading := range []string{"## End", "### End", "  ## End", "\t### End", "**Verification**"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "**Blocking Questions**\n"+heading+"\n- [ ] routine\n")
+				if !got.Pass || len(got.Failures) != 0 {
+					t.Fatalf("trimmed heading %q must end blocking region: %+v", heading, got)
+				}
+			})
+		}
+	})
+	t.Run("line-normalisation", func(t *testing.T) {
+		for _, line := range []string{"  TBD  decide  ", "\tTBD\tdecide\t"} {
+			got := evaluateMF4(line, "")
+			want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD decide")))}
+			if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+				t.Errorf("normalised occurrence for %q=%v, want %v", line, got.Failures, want)
+			}
+		}
+	})
+	t.Run("description-heading", func(t *testing.T) {
+		got := evaluateMF4("## heading\nTBD\n", "")
+		want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD")))}
+		if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+			t.Fatalf("description heading must retain section '-': %v, want %v", got.Failures, want)
+		}
+	})
+	if got := evaluateMF4("TBD", "## Bead 1: blockers\nTBD\n"); len(got.Failures) != 2 {
+		t.Fatalf("source identity lost: %v", got.Failures)
+	}
+}
+
+func TestEvaluateReadiness_NonPlanFormErrorCarriesLineage(t *testing.T) {
+	store := NewFakeBDStore()
+	cases := []struct{ id, message string }{
+		{"mindspec-plain", "bead mindspec-plain has no dotted epic-child index (expected <epic>.<N>)"},
+		{"mindspec-plain.0", "bead mindspec-plain.0 has an invalid epic-child index"},
+		{"mindspec-plain.99999999999999999999999999", "bead mindspec-plain.99999999999999999999999999 has an invalid epic-child index"},
+	}
+	for _, tc := range cases {
+		store.Lineage[tc.id] = FakeLineage{EpicID: "mindspec-owner", SpecID: "129-owner"}
+	}
+	t.Cleanup(store.Install())
+	for _, tc := range cases {
+		id := tc.id
+		report, err := EvaluateReadiness(t.TempDir(), id) // No plan or bd record exists.
+		var typed *NonPlanFormError
+		if report != nil || !errors.As(err, &typed) {
+			t.Fatalf("%s: report=%v err=%T %v, want NonPlanFormError before file reads", id, report, err, err)
+		}
+		if typed.BeadID != id || typed.EpicID != "mindspec-owner" || typed.SpecID != "129-owner" {
+			t.Fatalf("lineage lost: %+v", typed)
+		}
+		if typed.Error() != tc.message {
+			t.Fatalf("diagnostic changed: %q, want literal %q", typed.Error(), tc.message)
+		}
+	}
 }
 
 // --- AC-1: negative fixture refused with evidence ---
@@ -348,6 +559,12 @@ func TestReadiness_MF2AllClasses(t *testing.T) {
 		{"direct sub-letter (no parens) AC-9i dangles against bare AC-9 only", "This bead claims AC-9i directly.", "- [ ] AC-9 — some criterion.", false},
 		{"sub-letter parenthetical R5(b) resolves exact", "This bead claims R5(b).", "- [ ] R5b — some criterion.", true},
 		{"sub-letter parenthetical R5(b) fails against bare spec token (lenient-impl trap)", "This bead claims R5(b).", "- [ ] R5 — some criterion.", false},
+		{"R5.2 leg 1 parenthetical matches parenthetical", "R9(a)", "R9(a)", true},
+		{"R5.2 leg 2 parenthetical matches appended", "R3(c)", "R3c", true},
+		{"R5.2 leg 3 hyphenless claim resolves", "AC9", "AC-9", true},
+		{"R5.2 leg 4 hyphenless spec resolves", "AC-9", "AC9", true},
+		{"R5.2 leg 5 sibling stays dangling", "R9(b)", "R9(a)", false},
+		{"R5.2 leg 6 hyphenless claim dangles", "AC9", "AC-8", false},
 	}
 
 	for i, tc := range cases {
@@ -411,6 +628,18 @@ Unit tests.
 			}
 			if mf2.Pass != tc.wantPass {
 				t.Errorf("MF-2 Pass=%v, want %v: detail=%q", mf2.Pass, tc.wantPass, mf2.Detail)
+			}
+			if strings.HasPrefix(tc.name, "R5.2") && !tc.wantPass {
+				wantRecord := "dangling:R9b"
+				if strings.Contains(tc.name, "leg 6") {
+					wantRecord = "dangling:AC-9"
+				}
+				if !reflect.DeepEqual(mf2.Failures, []string{wantRecord}) || !strings.Contains(mf2.Detail, tc.claimText) {
+					t.Errorf("dangling claim %q: failures=%v detail=%q", tc.claimText, mf2.Failures, mf2.Detail)
+				}
+			}
+			if report.EpicID != epicID || report.SpecID != specID {
+				t.Errorf("report lineage=(%q,%q), want (%q,%q)", report.EpicID, report.SpecID, epicID, specID)
 			}
 		})
 	}

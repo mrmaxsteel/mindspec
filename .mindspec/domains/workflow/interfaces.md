@@ -75,6 +75,21 @@ const (
 // resolution is lineage-authoritative (bead -> epic -> spec), never cwd.
 func EvaluateReadiness(root, beadID string) (*Report, error)
 
+// PlanMapsBead requires both the Nth positional "## Bead " heading
+// (including headings inside fences) and a work_chunks id N.
+func PlanMapsBead(planContent string, n int) (mapped bool, why string)
+
+// Report carries lineage EpicID and SpecID from the resolver, never cwd.
+// NonPlanFormError carries BeadID, EpicID and SpecID when lineage resolves
+// but the bead has no usable dotted index; Error preserves the diagnostic.
+type NonPlanFormError struct { BeadID, EpicID, SpecID string }
+
+// Signal.Failures contains sorted, unique raw failure records; human
+// Detail and terminal escaping do not participate in record identity.
+func FailureRecordDigests(s Signal) []string // sorted lowercase SHA-256
+func DependencyFailureRecord(depID, class, candidateSHA string) string
+func IsIndeterminateRecord(rec string) bool
+
 // Report always carries exactly four signals, ordered MF-1..MF-4.
 func (r *Report) AllPass() bool
 func (r *Report) FailingSignals() []Signal
@@ -85,6 +100,27 @@ func (r *Report) RecoveryCommands() []string // one recovery line per FAIL
 // Agent-influenced detail text passes through termsafe.Escape here.
 func Render(r *Report) string
 ```
+
+Failure records (spec 129 R6.2) have these grammars:
+
+| Signal | Raw record |
+|:-------|:-----------|
+| MF-1 | `<key>:<n>`, where key is `section-missing`, `ac-entry-missing`, `chunk-missing`, `key-file-paths-empty`, `key-file-paths-placeholder` or `key-file-paths-blank` |
+| MF-2 | `dangling:<normalized-token>`; `AC9` normalizes to `AC-9`, parenthetical sub-letters to appended letters, Roman enumerators and dotted sub-numbers to the base |
+| MF-3 | `<dep-id>:<class>[:<candidate-sha>]`; classes are `indeterminate`, `not-closed`, `no-candidate`, `off-first-parent`, `no-evidence`, `contradiction`, `reverted` |
+| MF-4 | `<kind>:<source>:<section>:<k>:<sha256-of-normalized-line>` |
+
+MF-1, MF-2 and MF-4 aggregate all failures. MF-4's kind is `token` or
+`checklist`; source is `description` or `plan`. Section is the ATX heading
+path joined with ` / ` (including heading markers), or `-` for descriptions
+and unheaded text. Line normalization trims and collapses whitespace;
+other raw bytes remain. The 1-based occurrence index `k` distinguishes
+identical `(kind, source, section, hash)` tuples, including multiple tokens
+on one line. Failure records contain no free-form errors or timestamps.
+`FailureRecordDigests` is the shared writer/reader fingerprint function;
+it hashes records before rendering. An MF-3 `indeterminate` record cannot
+be covered by an override. The constructors expose the shared MF-3
+grammar for the dependency evaluator.
 
 The gate-before-mutate wiring lives in `internal/next/ready_gate.go`:
 

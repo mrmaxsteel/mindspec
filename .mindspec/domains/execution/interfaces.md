@@ -155,6 +155,11 @@ hostile-adjacent.
 
 ## Readiness advisory metadata (`internal/bead`, spec 124)
 
+`bead.PlanBeadIndex(epicID, id string) (n int, ok bool)` (`planbead.go`,
+spec 129) is the shared form predicate: exactly `<epicID>.<N>`, one
+positive decimal segment with no leading zero. It checks form; workflow
+callers separately verify lineage and positional plan mapping.
+
 `internal/bead` names the two dedicated bd metadata keys spec 124's
 readiness gate writes — advisory audit annotations only (ADR-0023: bd/
 Dolt stays the single lifecycle-state authority; these are never

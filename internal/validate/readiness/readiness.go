@@ -118,7 +118,7 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 		return nil, fmt.Errorf("invalid bead id %s: %w", idrender.Bead(beadID), err)
 	}
 
-	_, specID, err := findEpicForBeadFn(beadID)
+	epicID, specID, err := findEpicForBeadFn(beadID)
 	if err != nil {
 		return nil, fmt.Errorf("resolving owning spec for %s: %w", idrender.Bead(beadID), err)
 	}
@@ -128,7 +128,7 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 
 	n, err := beadIndex(beadID)
 	if err != nil {
-		return nil, err
+		return nil, &NonPlanFormError{BeadID: beadID, EpicID: epicID, SpecID: specID}
 	}
 
 	specDir, err := workspace.SpecDir(root, specID)
@@ -145,7 +145,7 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 		return nil, fmt.Errorf("reading spec.md for spec %s: %w", idrender.Spec(specID), err)
 	}
 
-	fm, err := validate.ParsePlanFrontmatter(string(planContent))
+	_, err = validate.ParsePlanFrontmatter(string(planContent))
 	if err != nil {
 		return nil, fmt.Errorf("parsing plan frontmatter for spec %s: %w", idrender.Spec(specID), err)
 	}
@@ -155,20 +155,12 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 		return nil, fmt.Errorf("reading bd record for %s: %w", idrender.Bead(beadID), err)
 	}
 
-	sectionRaw, sectionFound := extractBeadSectionRaw(string(planContent), n)
-
-	var chunk *validate.WorkChunk
-	for i := range fm.WorkChunks {
-		if fm.WorkChunks[i].ID == n {
-			chunk = &fm.WorkChunks[i]
-			break
-		}
-	}
+	sectionRaw, _ := extractBeadSectionRaw(string(planContent), n)
 
 	ownSpecNum := leadingSpecNumber(specID)
 
-	report := &Report{BeadID: beadID}
-	report.Signals = append(report.Signals, evaluateMF1(sectionRaw, sectionFound, chunk, n))
+	report := &Report{BeadID: beadID, EpicID: epicID, SpecID: specID}
+	report.Signals = append(report.Signals, evaluateMF1(string(planContent), n))
 	report.Signals = append(report.Signals, evaluateMF2(rec.Description, sectionRaw, string(specContent), ownSpecNum))
 	report.Signals = append(report.Signals, evaluateMF3(root, specID, rec.Dependencies))
 	report.Signals = append(report.Signals, evaluateMF4(rec.Description, sectionRaw))
@@ -179,6 +171,27 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 // "mindspec-8nhe.1") — the bead's N, mapped positionally to
 // work_chunks[N-1] / the Nth "## Bead" section (spec 097 R3).
 var beadIndexRe = regexp.MustCompile(`\.([0-9]+)$`)
+
+// NonPlanFormError carries resolved lineage when a bead has no usable dotted
+// index. It preserves beadIndex's diagnostic; claim callers can use the typed
+// lineage before attempting any plan/file lookup (spec 129 R1.8).
+type NonPlanFormError struct {
+	// BeadID is the bead whose dotted index could not be parsed.
+	BeadID string
+	// EpicID is its resolved lineage epic.
+	EpicID string
+	// SpecID is its resolved lineage spec.
+	SpecID string
+}
+
+// Error returns the existing dotted-index diagnostic byte for byte.
+func (e *NonPlanFormError) Error() string {
+	_, err := beadIndex(e.BeadID)
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("bead %s has no dotted epic-child index (expected <epic>.<N>)", idrender.Bead(e.BeadID))
+}
 
 func beadIndex(beadID string) (int, error) {
 	m := beadIndexRe.FindStringSubmatch(beadID)
@@ -210,67 +223,93 @@ func leadingSpecNumber(specID string) int {
 const scaffoldACPlaceholder = "<Specific, measurable criterion for this bead>"
 const scaffoldKeyFilePathPlaceholder = "path/to/file.go"
 
-func evaluateMF1(sectionRaw string, sectionFound bool, chunk *validate.WorkChunk, n int) Signal {
-	if !sectionFound {
-		return Signal{
-			ID:       SignalPlanSection,
-			Pass:     false,
-			Detail:   fmt.Sprintf("plan.md has no \"## Bead %d\" section", n),
-			Recovery: fmt.Sprintf("add a \"## Bead %d\" section to plan.md with a concrete Acceptance Criteria entry", n),
-		}
-	}
-	acEntries, _ := extractNamedBlock(sectionRaw, "**Acceptance Criteria**")
-	if !hasConcreteACEntry(acEntries) {
-		return Signal{
-			ID:       SignalPlanSection,
-			Pass:     false,
-			Detail:   fmt.Sprintf("\"## Bead %d\"'s Acceptance Criteria block has no entry beyond the scaffold placeholder %q", n, scaffoldACPlaceholder),
-			Recovery: fmt.Sprintf("edit plan.md's \"## Bead %d\" Acceptance Criteria block: replace the placeholder with a concrete, measurable criterion", n),
-		}
-	}
-	if chunk == nil {
-		return Signal{
-			ID:       SignalPlanSection,
-			Pass:     false,
-			Detail:   fmt.Sprintf("plan.md frontmatter has no work_chunks entry with id: %d", n),
-			Recovery: fmt.Sprintf("add a work_chunks entry with id: %d and non-empty key_file_paths to plan.md's frontmatter", n),
-		}
-	}
-	if len(chunk.KeyFilePaths) == 0 {
-		return Signal{
-			ID:       SignalPlanSection,
-			Pass:     false,
-			Detail:   fmt.Sprintf("work_chunks[%d].key_file_paths is empty", n),
-			Recovery: fmt.Sprintf("declare the files this bead touches in work_chunks id: %d's key_file_paths", n),
-		}
-	}
-	hasConcretePath := false
-	for _, p := range chunk.KeyFilePaths {
-		t := strings.TrimSpace(p)
-		if t == scaffoldKeyFilePathPlaceholder {
-			return Signal{
-				ID:       SignalPlanSection,
-				Pass:     false,
-				Detail:   fmt.Sprintf("work_chunks[%d].key_file_paths still carries the scaffold placeholder %q", n, scaffoldKeyFilePathPlaceholder),
-				Recovery: fmt.Sprintf("replace the placeholder path in work_chunks id: %d's key_file_paths with real file paths", n),
+// PlanMapsBead reports whether the Nth positional Bead heading and a
+// work_chunks id N both exist. Like extractBeadSectionRaw it counts every
+// line beginning "## Bead ", even inside a fence, ignoring printed numbers.
+// Content checks (ACs and paths) do not affect mapping. Invalid frontmatter
+// maps nothing; callers that need read-error classification parse it first.
+func PlanMapsBead(planContent string, n int) (mapped bool, why string) {
+	if _, found := extractBeadSectionRaw(planContent, n); !found {
+		count := 0
+		for _, line := range strings.Split(planContent, "\n") {
+			if strings.HasPrefix(line, "## Bead ") {
+				count++
 			}
 		}
-		if t != "" {
-			hasConcretePath = true
+		return false, fmt.Sprintf("plan.md declares %d ## Bead sections", count)
+	}
+	fm, err := validate.ParsePlanFrontmatter(planContent)
+	if err != nil {
+		return false, "invalid plan.md frontmatter"
+	}
+	for _, chunk := range fm.WorkChunks {
+		if chunk.ID == n {
+			return true, ""
 		}
 	}
-	// FX-3: a non-empty slice whose elements are all blank/whitespace
-	// ("", "  ") is NOT a concrete files-in-scope declaration — it must
-	// FAIL exactly like an empty slice would.
-	if !hasConcretePath {
-		return Signal{
-			ID:       SignalPlanSection,
-			Pass:     false,
-			Detail:   fmt.Sprintf("work_chunks[%d].key_file_paths has no non-blank concrete path element", n),
-			Recovery: fmt.Sprintf("declare the files this bead touches in work_chunks id: %d's key_file_paths (blank entries do not count)", n),
+	return false, fmt.Sprintf("no work_chunks id %d", n)
+}
+
+func evaluateMF1(planContent string, n int) Signal {
+	mapped, _ := PlanMapsBead(planContent, n)
+	sectionRaw, sectionFound := extractBeadSectionRaw(planContent, n)
+	fm, _ := validate.ParsePlanFrontmatter(planContent) // EvaluateReadiness validated it.
+	var chunk *validate.WorkChunk
+	if fm != nil {
+		for i := range fm.WorkChunks {
+			if fm.WorkChunks[i].ID == n {
+				chunk = &fm.WorkChunks[i]
+				break
+			}
 		}
 	}
-	return Signal{ID: SignalPlanSection, Pass: true}
+	s := Signal{ID: SignalPlanSection, Pass: true}
+	var details []string
+	add := func(key, detail, recovery string) {
+		s.Pass = false
+		s.Failures = append(s.Failures, fmt.Sprintf("%s:%d", key, n))
+		details = append(details, detail)
+		if s.Recovery == "" {
+			s.Recovery = recovery
+		}
+	}
+	if !mapped && !sectionFound {
+		add("section-missing", fmt.Sprintf(`plan.md has no "## Bead %d" section`, n),
+			fmt.Sprintf(`add a "## Bead %d" section to plan.md with a concrete Acceptance Criteria entry`, n))
+	}
+	acEntries, _ := extractNamedBlock(sectionRaw, "**Acceptance Criteria**")
+	if sectionFound && !hasConcreteACEntry(acEntries) {
+		add("ac-entry-missing", fmt.Sprintf(`"## Bead %d"'s Acceptance Criteria block has no entry beyond the scaffold placeholder %q`, n, scaffoldACPlaceholder),
+			fmt.Sprintf(`edit plan.md's "## Bead %d" Acceptance Criteria block: replace the placeholder with a concrete, measurable criterion`, n))
+	}
+	if !mapped && chunk == nil {
+		add("chunk-missing", fmt.Sprintf("plan.md frontmatter has no work_chunks entry with id: %d", n),
+			fmt.Sprintf("add a work_chunks entry with id: %d and non-empty key_file_paths to plan.md's frontmatter", n))
+	}
+	if chunk != nil && len(chunk.KeyFilePaths) == 0 {
+		add("key-file-paths-empty", fmt.Sprintf("work_chunks[%d].key_file_paths is empty", n),
+			fmt.Sprintf("declare the files this bead touches in work_chunks id: %d's key_file_paths", n))
+	}
+	if chunk != nil {
+		hasPlaceholder, hasBlank, hasConcrete := false, false, false
+		for _, p := range chunk.KeyFilePaths {
+			t := strings.TrimSpace(p)
+			hasPlaceholder = hasPlaceholder || t == scaffoldKeyFilePathPlaceholder
+			hasBlank = hasBlank || t == ""
+			hasConcrete = hasConcrete || (t != "" && t != scaffoldKeyFilePathPlaceholder)
+		}
+		if hasPlaceholder {
+			add("key-file-paths-placeholder", fmt.Sprintf("work_chunks[%d].key_file_paths still carries the scaffold placeholder %q", n, scaffoldKeyFilePathPlaceholder),
+				fmt.Sprintf("replace the placeholder path in work_chunks id: %d's key_file_paths with real file paths", n))
+		}
+		if hasBlank && !hasConcrete {
+			add("key-file-paths-blank", fmt.Sprintf("work_chunks[%d].key_file_paths has no non-blank concrete path element", n),
+				fmt.Sprintf("declare the files this bead touches in work_chunks id: %d's key_file_paths (blank entries do not count)", n))
+		}
+	}
+	s.Failures = sortedUnique(s.Failures)
+	s.Detail = strings.Join(details, "; ")
+	return s
 }
 
 var boldHeaderRe = regexp.MustCompile(`^\*\*[^*]+\*\*$`)
@@ -359,26 +398,28 @@ func hasConcreteACEntry(entries []string) bool {
 
 // --- MF-2: claimed Rs/ACs resolve, by an exact rule (spec 124 R2 MF-2) ---
 
-// claimTokenRe matches an R<n> or AC-<n> base token, plus an optional
-// directly-appended single lowercase sub-letter (e.g. "R5a", "AC-2b").
-// A following parenthetical ("R5(b)", "AC-9(i)") is detected separately
-// (extractLineClaims) since regexp (RE2) has no lookahead.
-var claimTokenRe = regexp.MustCompile(`\b(R|AC-)([0-9]+)([a-z])?\b`)
+// claimTokenRe nominates a base, with an optional appended letter. Both
+// bead harvesting and spec indexing use extractLineClaims and claimForms.
+var claimTokenRe = regexp.MustCompile(`\b(R|AC-?)([0-9]+)([a-z])?\b`)
+
+// claimForms is the shared form table, ordered most specific first. AC<n>
+// normalizes to AC-<n> before these suffix rules. Dotted sub-numbers (R6.3)
+// deliberately resolve at base granularity on both sides (spec 129 OQ-6).
+var claimForms = []struct {
+	name      string
+	suffix    *regexp.Regexp
+	subLetter bool
+}{
+	{"Roman parenthetical degrades to base", regexp.MustCompile(`^\((x{0,3}(?:ix|iv|v?i{0,3}))\)`), false},
+	{"parenthetical sub-letter", regexp.MustCompile(`^\(([a-z])\)`), true},
+	{"appended sub-letter", regexp.MustCompile(`^([a-z])\b`), true},
+	{"bare base (including dotted sub-number)", regexp.MustCompile(`^`), false},
+}
 
 // foreignSpecRe matches a "spec <digits>" / "Spec <digits>" citation —
 // MF-2's foreign-citation exclusion: a token on a line naming a DIFFERENT
 // spec number is a citation, never a claim.
 var foreignSpecRe = regexp.MustCompile(`(?i)\bspec\s+([0-9]+)\b`)
-
-// romanEnumeratorRe matches the lowercase-Roman-numeral clause-enumerator
-// sequence built ONLY from i/v/x (i, ii, iii, iv, v, vi, vii, viii, ix, x,
-// and further compositions) — the FORM the spec pins as always a clause
-// enumerator, never a sub-letter, even when the same single letter (e.g.
-// "d", "c", "l", "m") would also be a technically-valid Roman numeral
-// symbol: those are explicitly classified as sub-letters by the spec, so
-// this pattern deliberately excludes them (the closed i/v/x set is the
-// FORM the spec names, not "is this string Roman-numeral-valid").
-var romanEnumeratorRe = regexp.MustCompile(`^x{0,3}(?:ix|iv|v?i{0,3})$`)
 
 type claimToken struct {
 	base        string
@@ -390,26 +431,6 @@ type claimToken struct {
 	// adjacency input for the foreign-citation SPAN exclusion below.
 	start int
 	end   int
-}
-
-// classifyParenthetical classifies a parenthetical's content by FORM (spec
-// 124 plan preamble rule 3, plan-gate F2-1/G2-ENUMERATOR-COLLISION):
-// a lowercase-Roman-numeral-sequence content is a clause ENUMERATOR
-// (isEnumerator=true, degrades to the base token); a single non-Roman
-// alphabetic letter is a SUB-LETTER (subLetter=that letter); anything else
-// is unrecognized (recognized=false — the caller falls back to treating
-// the token as a plain base claim, parenthetical ignored).
-func classifyParenthetical(content string) (isEnumerator bool, subLetter string, recognized bool) {
-	if content == "" {
-		return false, "", false
-	}
-	if romanEnumeratorRe.MatchString(content) {
-		return true, "", true
-	}
-	if len(content) == 1 && content[0] >= 'a' && content[0] <= 'z' {
-		return false, content, true
-	}
-	return false, "", false
 }
 
 // harvestClaims extracts the bead's OWN claimed R<n>/AC-<n> tokens from
@@ -517,33 +538,27 @@ func extractLineClaims(line string) []claimToken {
 	var out []claimToken
 	for _, m := range claimTokenRe.FindAllStringSubmatchIndex(line, -1) {
 		prefix := line[m[2]:m[3]]
-		numStr := line[m[4]:m[5]]
-		base := prefix + numStr
-		letter := ""
-		if m[6] >= 0 {
-			letter = line[m[6]:m[7]]
+		if prefix == "AC" {
+			prefix = "AC-"
 		}
-		raw := line[m[0]:m[1]]
-		end := m[1]
-		if letter == "" && end < len(line) && line[end] == '(' {
-			closeIdx := strings.IndexByte(line[end:], ')')
-			if closeIdx > 0 {
-				content := line[end+1 : end+closeIdx]
-				if isEnumerator, subLetter, recognized := classifyParenthetical(content); recognized {
-					raw = line[m[0] : end+closeIdx+1]
-					if isEnumerator {
-						out = append(out, claimToken{base: base, raw: raw, start: m[0], end: end + closeIdx + 1})
-					} else {
-						out = append(out, claimToken{base: base, letter: subLetter, subLettered: true, raw: raw, start: m[0], end: end + closeIdx + 1})
-					}
-					continue
-				}
+		base := prefix + line[m[4]:m[5]]
+		for _, form := range claimForms {
+			match := form.suffix.FindStringSubmatchIndex(line[m[5]:])
+			if match == nil {
+				continue
 			}
-		}
-		if letter != "" {
-			out = append(out, claimToken{base: base, letter: letter, subLettered: true, raw: raw, start: m[0], end: m[1]})
-		} else {
-			out = append(out, claimToken{base: base, raw: raw, start: m[0], end: m[1]})
+			// An empty () is not a Roman enumerator.
+			if len(match) > 2 && match[2] == match[3] {
+				continue
+			}
+			end := m[5] + match[1]
+			c := claimToken{base: base, raw: line[m[0]:end], start: m[0], end: end}
+			if form.subLetter {
+				c.letter = line[m[5]+match[2] : m[5]+match[3]]
+				c.subLettered = true
+			}
+			out = append(out, c)
+			break
 		}
 	}
 	return out
@@ -558,12 +573,10 @@ func extractLineClaims(line string) []claimToken {
 func extractSpecTokens(specContent string) (bases map[string]bool, exact map[string]bool) {
 	bases = map[string]bool{}
 	exact = map[string]bool{}
-	for _, m := range claimTokenRe.FindAllStringSubmatch(specContent, -1) {
-		prefix, numStr, letter := m[1], m[2], m[3]
-		base := prefix + numStr
-		bases[base] = true
-		if letter != "" {
-			exact[base+letter] = true
+	for _, c := range extractLineClaims(specContent) {
+		bases[c.base] = true
+		if c.subLettered {
+			exact[c.base+c.letter] = true
 		}
 	}
 	return bases, exact
@@ -593,13 +606,16 @@ func evaluateMF2(description, sectionRaw, specContent string, ownSpecNum int) Si
 	}
 	if len(dangling) > 0 {
 		names := make([]string, 0, len(dangling))
+		var failures []string
 		for _, d := range dangling {
 			names = append(names, d.raw)
+			failures = append(failures, "dangling:"+d.base+d.letter)
 		}
 		sort.Strings(names)
 		joined := strings.Join(names, ", ")
 		return Signal{
 			ID:       SignalTokens,
+			Failures: sortedUnique(failures),
 			Pass:     false,
 			Detail:   fmt.Sprintf("claimed token(s) do not resolve in spec.md: %s", joined),
 			Recovery: fmt.Sprintf("resolve the dangling claim(s) %s against spec.md, or remove them from the bead's plan section / bd description", joined),
@@ -781,84 +797,110 @@ func blankPreservingNewlines(match string) string {
 var tbdTokenRe = regexp.MustCompile(`(?i)\bTBD\b`)
 var openQuestionRe = regexp.MustCompile(`(?i)\bOPEN QUESTION\b`)
 
-// findBlockingToken finds the first line (outside code spans/fences) in
-// text carrying a genuine TBD/OPEN QUESTION marker, returning that ORIGINAL
-// (unstripped) line as evidence — so a hostile byte sequence sitting on
-// the same line (e.g. embedded in a bd description) flows into the
-// Signal's Detail exactly as written, to be escaped once at Render time
-// (spec 124 AC-8), rather than being silently dropped by only naming the
-// bare token.
-func findBlockingToken(text string) (bool, string) {
-	stripped := stripCodeSpans(text)
-	strippedLines := strings.Split(stripped, "\n")
-	origLines := strings.Split(text, "\n")
-	for i, l := range strippedLines {
-		if tbdTokenRe.MatchString(l) || openQuestionRe.MatchString(l) {
-			orig := l
-			if i < len(origLines) {
-				orig = origLines[i]
-			}
-			return true, strings.TrimSpace(orig)
-		}
-	}
-	return false, ""
+// blockingOccurrence preserves the original line for rendering and the
+// heading path for canonical MF-4 identity.
+type blockingOccurrence struct {
+	line    string
+	section string
 }
 
 var blockingHeaderRe = regexp.MustCompile(`^\*\*(Blocking Questions|Open Questions|Blocked on)\*\*$`)
 var uncheckedItemRe = regexp.MustCompile(`^-\s*\[\s?\]`)
+var headingRe = regexp.MustCompile(`^(#{1,6}) (.+)$`)
 
-// findBlockingChecklistItem finds an unchecked "- [ ]" item under a
-// designated blocking-region header inside sectionRaw. Both the header
-// detection and the item scan run over the code-span-stripped text (so a
-// header/marker named only inside a code span never opens/extends a
-// blocking region); the returned evidence snippet is read back from the
-// ORIGINAL (unstripped) line so any code-span content elsewhere on that
-// same line still renders faithfully.
-func findBlockingChecklistItem(sectionRaw string) (bool, string) {
-	stripped := stripCodeSpans(sectionRaw)
-	strippedLines := strings.Split(stripped, "\n")
-	origLines := strings.Split(sectionRaw, "\n")
+// findBlockingOccurrences scans every token or designated-region checklist
+// occurrence outside code spans. Repeated tokens on one line stay distinct.
+func findBlockingOccurrences(text string, checklist bool) []blockingOccurrence {
+	strippedLines := strings.Split(stripCodeSpans(text), "\n")
+	origLines := strings.Split(text, "\n")
+	type heading struct {
+		level int
+		text  string
+	}
+	var headings []heading
+	var out []blockingOccurrence
 	inBlock := false
-	for i, l := range strippedLines {
-		trimmed := strings.TrimSpace(l)
-		if blockingHeaderRe.MatchString(trimmed) {
-			inBlock = true
-			continue
+	for i, line := range strippedLines {
+		trimmed := strings.TrimSpace(line)
+		if m := headingRe.FindStringSubmatch(line); m != nil {
+			level := len(m[1])
+			for len(headings) > 0 && headings[len(headings)-1].level >= level {
+				headings = headings[:len(headings)-1]
+			}
+			headings = append(headings, heading{level, strings.TrimSpace(origLines[i])})
 		}
-		if inBlock {
-			if boldHeaderRe.MatchString(trimmed) || strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
-				inBlock = false
+		var path []string
+		for _, h := range headings {
+			path = append(path, h.text)
+		}
+		section := strings.Join(path, " / ")
+		if section == "" {
+			section = "-"
+		}
+		count := 0
+		if checklist {
+			if blockingHeaderRe.MatchString(trimmed) {
+				inBlock = true
 				continue
 			}
-			if uncheckedItemRe.MatchString(trimmed) {
-				orig := ""
-				if i < len(origLines) {
-					orig = strings.TrimSpace(origLines[i])
-				}
-				return true, orig
+			if boldHeaderRe.MatchString(trimmed) || strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
+				inBlock = false
 			}
+			if inBlock && uncheckedItemRe.MatchString(trimmed) {
+				count = 1
+			}
+		} else {
+			count = len(tbdTokenRe.FindAllStringIndex(line, -1)) + len(openQuestionRe.FindAllStringIndex(line, -1))
+		}
+		for j := 0; j < count; j++ {
+			out = append(out, blockingOccurrence{strings.TrimSpace(origLines[i]), section})
 		}
 	}
-	return false, ""
+	return out
+}
+
+func findBlockingTokens(text string) []blockingOccurrence {
+	return findBlockingOccurrences(text, false)
+}
+
+func findBlockingChecklistItems(text string) []blockingOccurrence {
+	return findBlockingOccurrences(text, true)
 }
 
 func evaluateMF4(description, sectionRaw string) Signal {
-	combined := description + "\n" + sectionRaw
-	if found, line := findBlockingToken(combined); found {
-		return Signal{
-			ID:       SignalBlocking,
-			Pass:     false,
-			Detail:   fmt.Sprintf("a genuine blocking marker appears in the bead's plan section / bd description: %s", line),
-			Recovery: "resolve the TBD/OPEN QUESTION marker (or remove it) in the bead's plan section / bd description",
+	s := Signal{ID: SignalBlocking, Pass: true}
+	counts := map[string]int{}
+	var details []string
+	for _, source := range []struct{ name, text string }{{"description", description}, {"plan", sectionRaw}} {
+		for _, kind := range []struct {
+			name string
+			scan func(string) []blockingOccurrence
+		}{{"token", findBlockingTokens}, {"checklist", findBlockingChecklistItems}} {
+			if kind.name == "checklist" && source.name != "plan" {
+				continue
+			}
+			for _, occurrence := range kind.scan(source.text) {
+				section := occurrence.section
+				if source.name == "description" {
+					section = "-"
+				}
+				s.Failures = append(s.Failures, occurrenceRecord(kind.name, source.name, section, occurrence.line, counts))
+				if kind.name == "token" {
+					details = append(details, fmt.Sprintf("a genuine blocking marker appears in the bead's plan section / bd description: %s", occurrence.line))
+					if s.Recovery == "" {
+						s.Recovery = "resolve the TBD/OPEN QUESTION marker (or remove it) in the bead's plan section / bd description"
+					}
+				} else {
+					details = append(details, fmt.Sprintf("an unchecked item under a blocking-region header: %s", occurrence.line))
+					if s.Recovery == "" {
+						s.Recovery = "resolve (check off, or remove) the unchecked item under the blocking-region header, then re-run"
+					}
+				}
+			}
 		}
 	}
-	if found, item := findBlockingChecklistItem(sectionRaw); found {
-		return Signal{
-			ID:       SignalBlocking,
-			Pass:     false,
-			Detail:   fmt.Sprintf("an unchecked item under a blocking-region header: %s", item),
-			Recovery: "resolve (check off, or remove) the unchecked item under the blocking-region header, then re-run",
-		}
-	}
-	return Signal{ID: SignalBlocking, Pass: true}
+	s.Failures = sortedUnique(s.Failures)
+	s.Pass = len(s.Failures) == 0
+	s.Detail = strings.Join(details, "; ")
+	return s
 }
