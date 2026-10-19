@@ -8,6 +8,7 @@ adr_citations:
   - ADR-0030
   - ADR-0035
   - ADR-0037
+  - ADR-0039
   - ADR-0040
   - ADR-0041
   - ADR-0042
@@ -109,12 +110,22 @@ work_chunks:
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/domains/workflow/runbook.md
       - .mindspec/domains/execution/interfaces.md
+  - id: 8
+    depends_on: []
+    key_file_paths:
+      - internal/gitutil/gitignore.go
+      - internal/gitutil/gitignore_test.go
+      - internal/gitutil/reviews_ignore_test.go
+      - internal/bootstrap/bootstrap.go
+      - internal/bootstrap/gitignore_test.go
+      - internal/complete/panel_gate_untracked_test.go
+      - .gitignore
 ---
 # Plan: 129-readiness-tracker-honesty
 
 *Citation scope: every code anchor below names a symbol, file or template. Each was checked against `spec/129-readiness-tracker-honesty` at `7bae2664`, by inspection (read, not executed) unless a line says "run". No line numbers are cited.*
 
-This plan decomposes spec 129 R1–R7, exactly as approved, into **seven beads**. The longest dependency chain is **three beads**. R7 (ADR-0045 and its ADR-0040/ADR-0044 back-pointers) already landed with the spec commit `7bae2664` (checked: `.mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md` carries `- **Status**: Accepted`; ADR-0040 and ADR-0044 each carry `> **Amended by [ADR-0045](…)`). No bead re-authors it; Bead 6 re-verifies it under AC-18.
+This plan decomposes spec 129 R1–R8, as amended on 2026-10-19 (F2 retired; R8 added), into **eight beads**. The longest dependency chain is **three beads**. R7 (ADR-0045 and its ADR-0040/ADR-0044 back-pointers) already landed with the spec commit `7bae2664` (checked: `.mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md` carries `- **Status**: Accepted`; ADR-0040 and ADR-0044 each carry `> **Amended by [ADR-0045](…)`). No bead re-authors it; Bead 6 re-verifies it under AC-18.
 
 ## Plan-level choices
 
@@ -123,19 +134,21 @@ This plan decomposes spec 129 R1–R7, exactly as approved, into **seven beads**
 | Bead | Title (short) | Requirements | depends_on | Longest chain ending here |
 |---|---|---|---|---|
 | 1 | bd row-cap waist + linkage pins | R2, R3 | — | 1 |
-| 2 | Landed-merge truth in `internal/lifecycle` | R4.2, R4.3, ADR-0041 amendment parts (i)–(ii) | — | 1 |
+| 2 | Landed-merge truth in `internal/lifecycle` | R4.2 (F1, F3, F4, F5; advisory registrations), R4.3, ADR-0041 amendment parts (i)–(ii) | — | 1 |
 | 3 | Readiness foundation: plan-bead helpers, MF-2 forms, failure records | R1.1 helpers, R5, R6.2 records (MF-1/2/4), R1.8 lineage return | — | 1 |
 | 4 | MF-3 membership, message arms, aggregation | R4.1, R4.4, R4.5 | 2, 3 | 2 |
 | 5 | Spec-scoped selection honesty | R1.1–R1.7 | 1, 3 | 2 |
 | 6 | Validated override marker + `ready-check` read-back + skill move | R6.3, R6.4, R6.5 (skills) | 3 | 2 |
 | 7 | Claim guard + scoped `--allow-not-ready` + doc sweep | R1.8, R6.1, R6.2 (writer), R6.5 (docs), ADR-0041 amendment part (iii) | 4, 5, 6 | 3 |
+| 8 | Review artifacts out of git by default | R8.1–R8.3 | — | 1 |
 
-Chains (counted by beads on the path): 2→4→7, 3→4→7, 1→5→7, 3→5→7, 3→6→7. Each is 3. Nothing is longer.
+Chains (counted by beads on the path): 2→4→7, 3→4→7, 1→5→7, 3→5→7, 3→6→7, each 3; Bead 8 stands alone, 1. Nothing is longer.
 
-**Why seven beads, not 3–5.** `mindspec instruct` prefers 3–5 beads and asks for a justification above 6. The spec itself (OQ-1) estimates 9–12 beads. The dispatch brief bounds this plan to 5–8 with a chain of at most 3. Seven is the smallest count that keeps each bead under one review centre:
+**Why eight beads, not 3–5.** `mindspec instruct` prefers 3–5 beads and asks for a justification above 6. The spec itself (OQ-1) estimates 9–12 beads. The dispatch brief bounds this plan to 5–8 with a chain of at most 3. Eight is the smallest count that keeps each bead under one review centre:
 - Bead 2 (lifecycle) and Bead 4 (readiness) cannot merge: Bead 2 alone carries most of AC-11's real-git fixtures.
 - Bead 6 (reader) and Bead 7 (writer) split so the chain stays at 3. R6's two halves meet only through the marker schema (Bead 6) and the digest function (Bead 3).
 - R1.8 rides in Bead 7, not Bead 5. Both R1.8 and R6.1 change `next.GateReadiness`'s signature, so one bead changes it once.
+- R8 (Bead 8) shares no file and no review centre with R1–R6: it is init and `.gitignore` text plus untracked-file tests. Folding it into Bead 1 would put a `core`-owned file and the `workflow` bootstrap into the row-cap bead's review.
 
 **R6 relief valve.** Not fired. R6 is two beads (6, 7). If the plan gate still judges 129 over-compressed, Beads 6 and 7 split out cleanly as a further plain-numbered spec. Bead 7's R1.8 part would then move to Bead 5, and Bead 5 would gain `ready_gate.go`.
 
@@ -149,10 +162,11 @@ These files are edited by more than one bead. Every pair below is ordered by a d
 | `internal/validate/readiness/readiness.go` | 3 → 4 | 4 depends on 3 |
 | `cmd/mindspec/next.go` | 5 → 7 | 7 depends on 5 |
 | `.mindspec/adr/ADR-0041-gate-before-mutate.md`, `internal/validate/adr0041_spec129_amendment_test.go` | 2 → 7 | 7 depends on 4, which depends on 2 |
-| `internal/gitutil/` | 2 edits `gitops.go`; 5 adds the new file `fileprobe.go` | disjoint files |
+| `internal/gitutil/` | 2 edits `gitops.go`; 5 adds the new file `fileprobe.go`; 8 edits `gitignore.go` and adds `reviews_ignore_test.go` | disjoint files |
+| `internal/complete/` | 1 edits `complete.go`; 8 adds `panel_gate_untracked_test.go` | disjoint files |
 | `internal/bead/` | 1 edits `bdcli.go`/`hygiene.go`; 3 adds `planbead.go`; 6 edits `readiness.go` and adds `override_marker.go` | disjoint files |
 
-Beads 2, 3 and 1 are mutually parallel. Beads 4, 5 and 6 are mutually parallel. Bead 6 adds new files in `internal/validate/readiness/` (`override.go`) and does not edit `readiness.go`, so it never conflicts with Bead 4.
+Beads 1, 2, 3 and 8 are mutually parallel. Beads 4, 5 and 6 are mutually parallel. Bead 6 adds new files in `internal/validate/readiness/` (`override.go`) and does not edit `readiness.go`, so it never conflicts with Bead 4.
 
 ### OQ-3 (can the panel leg confirm after spec 128 Bead 6?) — decision
 
@@ -189,71 +203,33 @@ Raising the floor is the fail-closed direction: an older bd gets a doctor warnin
   - X′ with `parent: E2`.
 
   The first leg's comment records "realisability on real bd unverified (plan gap 3)". AC-1's expected outcome (X is N2c, never a member) is asserted on both.
-- **`mindspec panel create`'s default round.** Checked: `panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")` in `cmd/mindspec/panel.go`. F2 does not depend on it (R4.2). AC-11 (x-c) shape 2 and (xv) use round 1 for the new slug, matching this default.
+- **`mindspec panel create`'s default round.** Checked: `panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")` in `cmd/mindspec/panel.go`. No check depends on it (R4.2). AC-11 (xv) uses round 1 for the new slug, matching this default.
 
 ## Resolutions of spec round-7 notes (mindspec-haw6)
 
-Each carrier item is tagged **precision-only** (spec behaviour unchanged; the plan only pins mechanics or ordering) or **needs spec amendment** (the safer behaviour differs from the approved text; the bead keeps the spec-as-written behaviour until the spec is amended).
+The 2026-10-19 spec amendment retired F2, which changes three of the four carrier items.
 
-### O2/O3 — short all-hex and ref-like `reviewed_head_sha` values → **needs spec amendment**
+### O2/O3 — short all-hex and ref-like `reviewed_head_sha` values → **moot**
 
-**Finding.** R4.2 F2 class (b) defines a placeholder by exclusion: text that has no leading `-`, none of `^ ~ : @{ ..`, whitespace or a control byte, and is not a well-formed object ID. `wellFormedGitObjectID` (`internal/lifecycle/landed.go`) admits 7–64 hex characters only. So, as written, these values are class (b), skipped and reported:
-- a 4–6-character all-hex value such as `abc12`;
-- ref-like text such as `bead/x`.
+The finding was that class (b) skips values such as `abc12` or `bead/x` that can name unlanded commits, which was fail-OPEN on F2. With F2 retired, no registration refuses anything, so a skip cannot open a gate. The values R4.3 admits as set members are unchanged: only a `wellFormedGitObjectID` (7–64 hex) is a member, and the set confirms only on exact string equality with the second parent, so `abc12` and `bead/x` can never confirm. Bead 2 keeps the classifier only as R4.3's argv hygiene.
 
-Both can name real, possibly unlanded commits: git resolves an abbreviated SHA of 4 or more characters, and any branch name. Skipping them is therefore fail-OPEN on F2. The spec's own premise for class (b), "a placeholder cannot name unlanded work", does not hold for them.
+### O2 — scan the spec worktree's `reviews/` when run elsewhere → **moot**
 
-**Recommended resolution (fail closed, labelled as what it is).** Classify both as class (d) MALFORMED:
-- (1) any value of 4–6 characters consisting only of `[0-9a-fA-F]`;
-- (2) any value containing `/`, or equal to `HEAD`/`FETCH_HEAD`/`ORIG_HEAD`/`MERGE_HEAD`.
+The cross-worktree scan existed to make F2 stricter outside the spec worktree. Registrations are now advisory, and AC-11 (x-w) pins that both checkouts write the same binding and tuple. Bead 2 scans `workspace.FindRoot(cwd)` and its spec dir and names both roots in the advisory output.
 
-F2 then fails closed with `registration <dir> carries a malformed reviewed_head_sha (abbreviated or ref-like; not a full object ID); F2 fails closed`. The real placeholder `"design-review-no-code"` stays class (b).
+### O1 — `git cat-file -e` exits 128 for a garbage-collected object and for a git failure → **typed probe not needed**
 
-**Why an amendment is needed.** Class (b) is spec text, AC-11 (x-p) pins it, and this changes which values skip. Per the dispatch SAFETY rule, **Bead 2 implements the spec as written**. It does make the change a one-table edit:
-- the value classifier is one ordered table in `internal/lifecycle/fallback.go`;
-- `TestReviewedSHAClass_Table` pins today's classification of `abc12` and `bead/x` as class (b), each with a comment citing this section.
-
-Residual if not amended: a value that an agent writes as a short SHA or a ref name is skipped and reported, never evaluated. The skip report (`… non-SHA reviewed_head_sha placeholder; not a code review; skipped`) makes it visible. It sits within the panel-edit reach the spec's R4.2 Residual already names (a forge that can write `reviews/*/panel.json` can also delete the registration). Reported to the orchestrator for a decision before plan approval.
-
-### O2 — scan the spec worktree's `reviews/` when run elsewhere → **needs spec amendment** (not adopted)
-
-Scanning the spec worktree's `reviews/` from a bead worktree or main checkout would make F2 stricter outside the spec worktree. But AC-11 (x-w) pins the opposite outcome: run from a bead worktree without `reviews/`, the claim is not refused by F2, and the output names the scanned roots and advises running from the spec worktree. That is a behaviour change against an approved AC.
-
-**Bead 2 keeps advise-only, as written:**
-- `panel.Scan` roots are `workspace.FindRoot(cwd)` and its spec dir;
-- the visibility line names the absolute roots;
-- the advice line is `run reattest and ready-check from the spec worktree`.
-
-Recorded for the follow-on discussion.
-
-### O1 — `git cat-file -e` exits 128 for a garbage-collected object and for a git failure → **precision-only**
-
-R4.2 F2 requires two outcomes:
-- a class-(c) SHA that does not resolve to a commit locally is "OUTSIDE the tip by definition" and refuses as `ReattestStateUnlandedReview`, "never reported as an F5 infrastructure error";
-- F5 requires a real read error to be an error.
-
-`git cat-file -e` cannot tell the two apart (the existing `gitutil.FileExistsAtRef` doc comment records that `cat-file -e` exits 128 for absent and malformed alike).
-
-**Resolution: a typed probe, keeping exactly the spec's semantics.** Bead 2 adds `gitutil.CommitObjectState(workdir, sha string) (CommitObjectPresent | CommitObjectAbsent, error)`:
-- It runs `git cat-file --batch-check=%(objecttype)` with `<sha>^{commit}` written to **stdin**, never argv. The SHA is already class (c), and stdin keeps it off the argv ratchet.
-- Exit 0 with output `commit` → present.
-- Exit 0 with output `<input> missing` (git's batch-check form for an absent object or a failed peel) → absent → F2 UnlandedReview.
-- Non-zero exit, a spawn failure, or any other output → a typed error → F5, fail closed, rendered as `could not probe object <sha>: <escaped error>`, never as an unlanded review.
-
-Bead 2's real-git test runs three legs:
-- a missing object;
-- a present commit;
-- a broken repository (`GIT_DIR` pointed at an empty directory, via the seam) that must yield the error, not "absent".
-
-The probe precedes `merge-base --is-ancestor` exactly where the spec places `cat-file -e`. Only the mechanism changes; the classification and texts are the spec's.
+The typed probe `gitutil.CommitObjectState` existed to separate F2's "absent, so unlanded, refuse" from F5's "read error, refuse". After the amendment no check probes a reviewed SHA: F1 and F4 work on scan-found merges, F3 compares a branch tip by equality, and R4.3's set is string equality. The only remaining git operand is the advisory ancestry probe (`merge-base --is-ancestor`); exit 1 prints "outside", and any other outcome, including a missing object, prints `(not determinable locally)` and refuses nothing. Bead 2 does not add `CommitObjectState`.
 
 ### F2 — AC-1's fifth fixture is listed above the fourth → **precision-only**
 
-An ordering note only. Bead 5 implements and names them in numeric order:
+An ordering note only, unrelated to the retired check of the same label. Bead 5 implements and names them in numeric order:
 - fourth: stale checkout, divergence notice (`TestNext_PlanDivergenceNotice`);
 - fifth: blob absent, checkout used, probe failure refuses (`TestNext_PlanBlobAbsentUsesCheckout`, `TestNext_PlanProbeFailureRefuses`).
 
-No behaviour depends on the order.
+### R8.4 — review retention after finalize → **needs operator decision**
+
+Spec OQ-11 lists the options: (A) accept the loss; (B) keep `dispositions.jsonl` tracked with a `**`-plus-negation pattern; (C) finalize copies `reviews/` into the main checkout before removing the worktree. Bead 8 implements R8.1–R8.3, which hold under every option, and writes no retention code.
 
 ## ADR Fitness
 
@@ -265,7 +241,8 @@ No behaviour depends on the order.
   - Bead 1's waist lives in `internal/bead`.
   - `TestBoundary*` in `internal/lint/boundary_test.go` stays green.
 - **ADR-0035** — APPLIED: every new refusal ends with a `recovery:` line. New emitted commands are registered wherever the `internal/guard` recovery-convention lint requires.
-- **ADR-0037** — RESPECTED: `internal/panel` is untouched. F2 and R6.3 validate agent-writable data by shape only and claim no authentication (§8).
+- **ADR-0037** — RESPECTED: `internal/panel` is untouched. R4.3's classifier and R6.3 validate agent-writable data by shape only and claim no authentication (§8). Bead 8 changes only whether registrations are tracked; every gate keeps reading them from the filesystem.
+- **ADR-0039** — RESPECTED (Bead 8): §4's co-located `reviews/` location and the gate scan are unchanged. Bead 8 ignores that location in `.gitignore` (a `core`-owned file) and through `mindspec init` (`internal/bootstrap`, `workflow`), and moves nothing.
 - **ADR-0040** — APPLIED (Beads 5, 6): R1.4's rule sentence lands at L3 (`internal/instruct/templates/implement.md`). R6's coverage rule ratchets from L4 (`ms-bead-impl` prose) to L1 (`bead ready-check`), and the L4 copy is deleted.
 - **ADR-0041** — AMENDED by a new appended § "Amendment (Spec 129)", following the Spec-125 precedent:
   - parts (i) (reachable-landing fallback is a finder, not an identifier) and (ii) (non-equal panel datum is non-corroborating) land with Bead 2;
@@ -275,7 +252,7 @@ No behaviour depends on the order.
   - IDs render via `idrender.Bead`/`idrender.Spec`;
   - bd stderr (Bead 1's truncation error) and the evidence path (Beads 6, 7) render via `termsafe.Escape`;
   - recovery lines carry only idrender-gated IDs, closed-set signal IDs and literal placeholders (`<path-to-justification>`);
-  - F2 classifies every `reviewed_head_sha` before any git call, so only class (c) becomes a git operand.
+  - Bead 2 classifies every `reviewed_head_sha` before any git call, so only class (c) becomes a git operand, and every advisory line is termsafe-escaped.
 - **ADR-0045** — CITED BY BEAD 6 ONLY, under its Status fence: Bead 6 moves the override-coverage rule out of the `ms-bead-impl` skill into `mindspec bead ready-check`, which is the one move ADR-0045 lets spec 129 cite. No other bead cites it as coverage.
 
 No ADR is superseded. No new ADR is needed beyond ADR-0045, which has already landed.
@@ -340,54 +317,53 @@ None.
 ## Bead 2: Landed-merge truth in internal/lifecycle (reachable fallback, panel-SHA set, audited reattest)
 
 **Steps**
-1. In `internal/gitutil/gitops.go`, beside `FirstParentMerges`, add two primitives:
+1. In `internal/gitutil/gitops.go`, beside `FirstParentMerges`, add one primitive:
    - **`ReachableMerges(workdir, ref string) ([]MergeCommit, error)`**: `git log --merges --topo-order` over `ref`, newest first. Each entry carries the SHA, both parents and the subject, in the same shape `FirstParentMerges` returns. Use `RejectOptionLike` on `ref`.
-   - **`CommitObjectState`**: the O1 typed probe exactly as specified in "Resolutions of spec round-7 notes": batch-check on stdin; `commit` → present; `missing` → absent; anything else → a typed error.
 
-   Update the `FirstParentMerges` doc contract to name its first-parent-only scope and point to `ReachableMerges`. Classify both new exec sites in `internal/lint/ratchet_argv_table_test.go`.
+   Update the `FirstParentMerges` doc contract to name its first-parent-only scope and point to `ReachableMerges`. Classify the new exec site in `internal/lint/ratchet_argv_table_test.go`. No `CommitObjectState` probe is added (round-7 resolutions, O1).
 2. Add `internal/lifecycle/fallback.go`:
-   - **The `reviewed_head_sha` value classifier.** One ordered table, R4.2 F2's classes:
+   - **The `reviewed_head_sha` value classifier** (R4.3's argv hygiene). One ordered table:
      - (a) empty → skip;
-     - (d) option-like or revision-expression → malformed, fail closed;
-     - (c) `wellFormedGitObjectID` → evaluate;
-     - (b) everything else → placeholder, skip and report.
+     - (d) option-like or revision-expression → malformed, non-corroborating;
+     - (c) `wellFormedGitObjectID` → set member;
+     - (b) everything else → placeholder, skip.
 
-     Keep `abc12`/`bead/x` in class (b) per the round-7 resolution, pinned by `TestReviewedSHAClass_Table`. Classification happens before any git call.
+     Pinned by `TestReviewedSHAClass_Table`. Classification happens before any git call, and no class refuses.
    - **The fallback subject matcher.** It admits only two-parent merges whose subject names `bead/<id>` as SOURCE in one of these forms:
      - `Merge bead/<id>`;
      - `Merge branch 'bead/<id>' into <spec-branch>`;
      - `Merge bead/<id> into <spec-branch>`.
 
      The last two are admitted only when `<target>` equals this spec branch. It excludes a merge INTO `bead/<id>`, any `into <other>` form and unrecognised formats. `parseMergeSubjectBeadBranch`'s G2-2 any-token fallback is not used here.
-   - **The checks F1–F5**, each returning a typed refusal:
+   - **The checks F1, F3, F4 and F5** (labels kept; F2 is retired), each returning a typed refusal:
      - F1: exactly one admitted candidate, else the new `ReattestStateMultipleFallbackCandidates` (`"multiple-fallback-candidates"`).
-     - F2: over every registration `panel.ForBead` returns, abandoned ones included. Classify each SHA. For class (c), use `CommitObjectState`, then `IsAncestor` against the tip; absent or not an ancestor → `ReattestStateUnlandedReview`. No round comparison. The refusal names each outside-tip registration's directory, round and SHA, plus the visibility line `no unlanded review registration found in <root>, <spec-dir>` or its refusal form, and the advice `run reattest and ready-check from the spec worktree`.
      - F3: the Spec-125 surviving-tip contradiction.
      - F4: the Spec-125 `R5(d)` net-effect/revert test anchored on the single candidate at the current tip.
      - F5: any read error is an error.
+   - **The advisory registration report** (reattest only, never read-back). Over every registration `panel.ForBead` returns in `workspace.FindRoot(cwd)` and its spec dir: for each class-(c) SHA, `IsAncestor` against the tip; exit 1 → `advisory: registration <dir> (round <r>) reviewed <sha>, which is outside <spec-branch>'s tip history`; any other non-zero outcome → the same line with `(not determinable locally)`. A class-(d) value → `advisory: registration <dir> carries a malformed reviewed_head_sha; ignored`. Then once `advisory: panel roots scanned: <root>, <spec-dir>`. Every value is termsafe-escaped. It returns lines and a count, never an error that refuses.
 3. In `internal/lifecycle/landed.go`, make three changes:
    - **R4.3.** Replace `reviewedHeadSHAForBead`'s first-non-empty return with a set of class-(c) SHAs across all registrations. In `FindLandedMerge`, the set CONFIRMS iff it contains the candidate's exact second parent; otherwise it is non-corroborating and never pre-empts the tip (b) or binding (d) legs. A (b) or (d) exact contradiction still contradicts.
    - **R4.2.** Add `FindLandedMergeReachable(root, specBranch, beadID string) (*LandedMerge, error)`. It runs the unchanged first-parent scan first, and runs the `ReachableMerges` fallback only when that scan nominates zero owned two-parent candidates. On the fallback it identifies a merge ONLY through the read-back:
      - a VALID audit (`op == reattestOp`, `at` RFC-3339, non-empty `actor`, `scanned_branch` equal to this spec branch, both SHA keys well-formed);
      - audit tuple == current binding pair == the single scan-derived candidate;
-     - F1–F5 pass now.
+     - F1, F3, F4 and F5 pass now; no registration is read.
 
      Otherwise it returns the new `*LandedMergeOffFirstParent`, which wraps `ErrLandedMergeNotFound` (never `ErrLandedMergeNoCandidate`) and names the bead, the spec branch, each admitted candidate's merge SHA and second parent, and `mindspec reattest <id>`.
    - **Unchanged.** `FindLandedMerge` itself, and therefore `MergedUnclosed`, `orphan_hints.go`, `planFindLandedMergeFn`, `adoptFindLandedMergeFn` and the executor paths, keep the first-parent scan only. Update the `ErrLandedMergeNoCandidate` and `SubsumptionConflict` doc contracts per R4.2/R4.4.
 4. In `internal/lifecycle/reattest.go`:
    - Nominate through the same first-parent-then-fallback generator.
-   - On a fallback candidate, run every Spec-125 check, then F1–F5. Print `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target` and the F2 visibility line before writing.
-   - Write the binding plus `mindspec_landed_reattest_merge_sha`, `mindspec_landed_reattest_second_parent` and `mindspec_landed_reattest_scanned_branch` in ONE `reattestBindingFn` (`bead.MergeMetadata`) call. On a fallback, the `mindspec_landed_reattest_corroboration` value is `off-first-parent fallback; F1–F5 passed; panel roots scanned: <roots>; registrations checked: <n>`.
-   - Convergent no-op ONLY when the stored audit is VALID and its tuple equals both the binding and the candidate; otherwise re-run F1–F5 and write a VALID record.
+   - On a fallback candidate, run every Spec-125 check, then F1, F3, F4 and F5. Print `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target` and the advisory lines before writing. No advisory changes the exit code or the writes.
+   - Write the binding plus `mindspec_landed_reattest_merge_sha`, `mindspec_landed_reattest_second_parent` and `mindspec_landed_reattest_scanned_branch` in ONE `reattestBindingFn` (`bead.MergeMetadata`) call. On a fallback, the `mindspec_landed_reattest_corroboration` value is `off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>`.
+   - Convergent no-op ONLY when the stored audit is VALID and its tuple equals both the binding and the candidate; otherwise re-run F1, F3, F4 and F5 and write a VALID record.
    - Datum (c) uses the R4.3 set: non-corroborating values are recorded in the corroboration string and never refuse. `ReattestStatePanelContradiction` is no longer produced by a non-matching set.
    - A refusal writes nothing.
    - Surface the new states and lines in `cmd/mindspec/reattest.go`.
 5. Append § "Amendment (Spec 129)" to `.mindspec/adr/ADR-0041-gate-before-mutate.md` with parts (i) and (ii), covering every AC-18 element they own:
    - the fallback-scoped callers and the finder-only rule;
-   - F1–F5 with each one's provenance (F1/F3/F4 git; F2 untracked, agent-writable panel files), F2's no-round-comparison rule, the abandoned and malformed-SHA handling, and its per-checkout visibility limit;
+   - F1, F3, F4 and F5 (all git-derived), and F2's retirement with registrations as advisory output only;
    - the audited tuple, its validity contract and the validity-qualified no-op, and the fallback-provenance corroboration string;
    - q9ea's exclusion from the fallback exits;
-   - the metadata-forge and panel-edit residuals, and the read-back conditions with the bounded-reach residual;
+   - the metadata-forge residual with its bounded new reach, and the read-back conditions;
    - the undirected-subject target gap;
    - the non-corroborating panel datum and its reach into the CLOSE paths, using the OQ-3 wording chosen above;
    - binding veto versus audited repair.
@@ -396,24 +372,27 @@ None.
 6. Write the lifecycle tests named in AC-11 and in AC-12's lifecycle legs, reusing and extending `initLandedRepo`/`mergeBead`/`mergeBeadDefaultSubject`. Write panel registrations as separate dirs with explicit `round`.
    - **Rewrite to the non-corroborating outcome:** `TestFindLandedMerge_ReviewedHeadSHAContradicts`, `TestReattest_PanelShaContradictionRefuses` and the two `…HostilePanelSHAEscapedInRefusal` tests. Keep the escaping assertion where a SHA is still rendered.
    - **Must stay green unchanged:** `TestReattest_ContradictoryBindingOverwrittenAudited`, `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` and `TestReattest_HappyPathFleetState`'s `Wrote=false` leg.
+   - **AC-21's lifecycle leg:** `TestReviewedHeadSHASet_UntrackedIgnored` writes the registration under a `.gitignore`d `reviews/` dir, never `git add`s it, and asserts the set contains its SHA.
 
 **Verification**
-- [ ] `go test ./internal/gitutil/... -run 'TestReachableMerges|TestCommitObjectState'` passes, including the broken-repo leg returning an error, not "absent"
-- [ ] `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestReadBack_|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet|TestMergedUnclosed_PanelSet|TestReattest_RepairsContradictoryBindingOnFallback|TestReviewedSHAClass_Table'` passes (the spec's Validation Proof command, widened)
+- [ ] `go test ./internal/gitutil/... -run TestReachableMerges` passes
+- [ ] `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestReadBack_|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet|TestMergedUnclosed_PanelSet|TestReattest_RepairsContradictoryBindingOnFallback|TestReviewedSHAClass_Table|TestReviewedHeadSHASet_UntrackedIgnored'` passes (the spec's Validation Proof command, widened)
 - [ ] `go test ./internal/lifecycle/... ./cmd/mindspec/... -run 'TestReattest'` passes, with `TestReattest_HappyPathFleetState`, `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` unchanged
 - [ ] `go test ./internal/validate/... -run TestADR0041_Spec129Amendment` passes
-- [ ] `go test ./internal/lint/...` passes (the argv ratchet classifies both new exec sites)
+- [ ] `go test ./internal/lint/...` passes (the argv ratchet classifies the new exec site)
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
 - AC-11 lifecycle legs:
   - acceptance legs i, i-r, i-m, i-a, i-c, ii, iii, iii-neg, iv, v, vi;
-  - refusal legs vii, viii, ix, ix-f, ix-g, x, vii-a, vii-s, x-c, x-a, x-m, x-e, x-p, x-g, x-w;
+  - refusal legs ix and x;
+  - advisory legs vii, vii-a, ix-f, x-m, x-e, x-p, x-g, x-w;
   - read-back legs xi–xvi.
 
-  Each passes as `TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*` and `TestMergedUnclosed_IgnoresFallback`. A garbage-collected SHA refuses as `UnlandedReview`, and a broken repository is an F5 error. A refusal writes nothing (seam on `reattestBindingFn`).
+  Each passes as `TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*` and `TestMergedUnclosed_IgnoresFallback`. Every advisory leg asserts the same exit code and writes as the fixture without the registration. A garbage-collected SHA prints `(not determinable locally)`. A refusal writes nothing (seam on `reattestBindingFn`).
 - AC-12 lifecycle legs i, ii, iii, vii and viii pass (`TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`). Leg v's reattest half passes with a corroboration string recording the panel as non-corroborating.
 - AC-18 (ADR-0041 parts i–ii): the amendment text pin passes.
+- AC-21 (lifecycle leg): `TestReviewedHeadSHASet_UntrackedIgnored` passes.
 
 **Depends on**
 None.
@@ -736,9 +715,40 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
 **Depends on**
 Bead 4 (MF-3 records, including `indeterminate`), Bead 5 (`cmd/mindspec/next.go` selection rewrite) and Bead 6 (marker schema v2 builder, validator, `ready-check` coverage).
 
+## Bead 8: Review artifacts out of git by default
+
+**Steps**
+1. In `internal/gitutil/gitignore.go`, beside `RuntimeIgnoreEntries`, add `ReviewIgnoreEntries = []string{".mindspec/specs/*/reviews/", ".mindspec/reviews/"}` with a doc comment: panel reviews are an optional local helper (spec 129 R8); the list is separate from `RuntimeIgnoreEntries` because doctor's runtime-file check reports tracked runtime entries, and this repo tracks review files that R8 leaves tracked. Add `TestReviewIgnoreEntries_NotRuntimeEntries` to `gitignore_test.go`: the two lists share no entry.
+2. In `internal/bootstrap/bootstrap.go`, after `bootstrap.Run`'s existing `gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...)` call, call it again with `gitutil.ReviewIgnoreEntries...`, honouring `dryRun` exactly as the runtime call does. Leave `starterGitignore` unchanged. Add to `internal/bootstrap/gitignore_test.go`:
+   - `TestBootstrap_ReviewsIgnoredGreenfield`: a fresh temp repo gets both lines;
+   - `TestBootstrap_ReviewsIgnoredExistingGitignore`: a pre-existing `.gitignore` keeps its lines and gains both;
+   - `TestBootstrap_ReviewsIgnoredIdempotent`: a second `Run` leaves `.gitignore` byte-identical;
+   - in each, `git check-ignore -q` reports `.mindspec/specs/001-x/reviews/a/panel.json` and `.mindspec/reviews/a/panel.json` ignored, and `src/reviews/x.go` not ignored.
+3. Add `internal/gitutil/reviews_ignore_test.go` (real git in `t.TempDir()`, identity via `-c` flags or env, never `~/.gitconfig`), with the entries written to `.gitignore` and an untracked `panel.json` under a spec review dir:
+   - `TestCommitAll_SkipsIgnoredReviews`: after `gitutil.CommitAll`, `git ls-files` does not list it and `git status --porcelain` is empty;
+   - `TestSnapshotWorktreeTree_SkipsIgnoredReviews`: the tree from `gitutil.SnapshotWorktreeTree` does not contain it.
+4. Add `internal/complete/panel_gate_untracked_test.go` with `TestPanelGate_UntrackedIgnoredRegistration`: the same registration, tracked in one fixture and untracked-ignored in the other, gives the same `panelGate` decision through `panelGateRoots`. Reuse the fixtures in `panel_gate_layout_test.go`.
+5. Add the two lines to this repository's `.gitignore`, next to the existing `**/reviews/*/dispositions.lock` entry, with a comment citing spec 129 R8 and stating that already-tracked review files stay tracked. Do not run `git rm --cached` on anything. Correct that block's comment that `dispositions.jsonl` "IS version-controlled" to say it is version-controlled only where already tracked, pending R8.4.
+6. No commit-path code changes (spec R8.2). No retention code (R8.4 needs operator decision).
+
+**Verification**
+- [ ] `go test ./internal/gitutil/... -run 'TestReviewIgnoreEntries_NotRuntimeEntries|TestCommitAll_SkipsIgnoredReviews|TestSnapshotWorktreeTree_SkipsIgnoredReviews'` passes
+- [ ] `go test ./internal/bootstrap/... -run 'TestBootstrap_ReviewsIgnored'` passes
+- [ ] `go test ./internal/complete/... -run TestPanelGate_UntrackedIgnoredRegistration` passes
+- [ ] `go test ./internal/doctor/... ./internal/setup/...` passes unchanged (no new tracked-runtime finding; setup's list is untouched)
+- [ ] `git check-ignore -v .mindspec/specs/129-readiness-tracker-honesty/reviews/x/panel.json` (run in the bead worktree) names the new `.gitignore` line
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+
+**Acceptance Criteria**
+- AC-20: init adds both entries on a greenfield and an existing `.gitignore`, idempotently; the anchored patterns ignore both review locations and not `src/reviews/`; the two lists are disjoint; this repo's `.gitignore` carries both lines.
+- AC-21 (commit and gate legs): `CommitAll` and `SnapshotWorktreeTree` leave the untracked review out, `git status --porcelain` is empty, and the panel gate decides the same on an untracked-ignored registration.
+
+**Depends on**
+None.
+
 ## Provenance
 
-Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness-tracker-honesty/spec.md`, which printed 19 lines (AC-1 … AC-19), and `grep -cE` with the same pattern, which printed `19`.
+Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness-tracker-honesty/spec.md`, which printed 21 lines (AC-1 … AC-21), and `grep -cE` with the same pattern, which printed `21`.
 
 | Acceptance Criterion | Verified By |
 |---------------------|-------------|
@@ -752,7 +762,7 @@ Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness
 | AC-8 (R2.3 lint and truncation error) | Bead 1 verification (`TestBDRowCapWaist` with self-test, `TestReadyJSON_TruncationNoticeIsError`) |
 | AC-9 (R3.2 linkage pins) | Bead 1 verification (`TestPlanApprove_BeadsCarrySpecID`, `TestSpecApprove_EpicHasNoSpecID`) |
 | AC-10 (R4.1 membership) | Bead 4 verification (`TestReadiness_MF3Variants` legs a–g) |
-| AC-11 (R4.2 reachable fallback, F1–F5, audited reattest, read-back) | Bead 2 verification (`TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*`, `TestMergedUnclosed_IgnoresFallback`); Bead 4 verification (`TestReadiness_MF3_OffFirstParentFailsWithExits`) |
+| AC-11 (R4.2 reachable fallback, F1/F3/F4/F5, advisory registrations, audited reattest, read-back) | Bead 2 verification (`TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*`, `TestMergedUnclosed_IgnoresFallback`); Bead 4 verification (`TestReadiness_MF3_OffFirstParentFailsWithExits`) |
 | AC-12 (R4.3 panel-SHA set, R4.5 #232 shape) | Bead 2 verification (`TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`); Bead 4 verification (`TestReadiness_MF3_CompleteWrapperShape`, `TestReadiness_MF3_LocalAheadOfRemotePasses`, leg v's MF-3 half) |
 | AC-13 (R4.4 message arms and precedence) | Bead 4 verification (`TestReadiness_MF3ErrorArmDiscrimination`, `TestReadiness_MF3AggregatedPrecedence`) |
 | AC-14 (R5 form symmetry) | Bead 3 verification (`TestMF2_FormSymmetry`, `TestReadiness_MF2AllClasses`) |
@@ -761,3 +771,5 @@ Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness
 | AC-17 (R6.3, R6.4 validated read-back) | Bead 6 verification (`TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`, `TestReadyCheck_MixedCoverageRecoveryNamesAllFailing`); Bead 7 verification (end-to-end release and re-claim legs) |
 | AC-18 (R6.5, R7, ADR-0041 amendment) | Bead 6 verification (skill line and staged-rule marker pins, `mindspec adr list` showing ADR-0045, back-pointers); Bead 2 verification (ADR-0041 parts i–ii text pin); Bead 7 verification (ADR-0041 part iii text pin, `mindspec validate spec 129-readiness-tracker-honesty`) |
 | AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Bead 7 runs the whole-suite gate last |
+| AC-20 (R8.1 init ignores reviews) | Bead 8 verification (`TestBootstrap_ReviewsIgnored{Greenfield,ExistingGitignore,Idempotent}`, `TestReviewIgnoreEntries_NotRuntimeEntries`, the repo `.gitignore` check-ignore line) |
+| AC-21 (R8.2, R8.3 no auto-commit; gates read untracked) | Bead 8 verification (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`, `TestPanelGate_UntrackedIgnoredRegistration`); Bead 2 verification (`TestReviewedHeadSHASet_UntrackedIgnored`) |
