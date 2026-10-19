@@ -158,9 +158,16 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{
 		File:       "cmd/mindspec/bead_ready.go",
 		Func:       "beadReadyCheckCmd",
-		Detail:     "variadic-spread:",
-		Rationale:  "the canonical example this spec's own R5c text names: readiness.Report.RecoveryCommands() builds its return slice from the runtime-resolved set of FAILING readiness signals (internal/validate/readiness/report.go:93-99) — no static fold can prove its contents, because which signals fail, and what each one's Recovery text says, is a property of the bead being checked, not of this source file.",
-		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RuntimeInventoryAgainstFloor enumerates every readiness signal's registered Recovery template (internal/validate/readiness's own signal catalog) and asserts NONE matches a reviewed floor family — the runtime string inventory this operand can ever actually produce, checked against the classifier.",
+		Detail:     "arg1:unprovable",
+		Rationale:  "the metadata-read refusal renders bd show %s --json with idrender.Bead(beadID), after the explicit bead-ID ingress gate; the substituted ID makes the recovery operand non-literal.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_ReadyCheckRecoveryOperands pins the real template and idrender operand, verifies forced quoting and terminal escaping for malformed IDs, and checks valid-ID renderings against the destructive floor.",
+	},
+	{
+		File:       "cmd/mindspec/bead_ready.go",
+		Func:       "beadReadyCheckCmd",
+		Detail:     "variadic-spread:commands",
+		Rationale:  "readiness.Report.RecoveryCommands() supplies the runtime-resolved failing-signal recoveries; commands appends release and scoped re-claim templates using idrender.Bead(beadID) and the closed MF signal set before the variadic spread.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_RuntimeInventoryAgainstFloor covers the readiness Recovery catalog; TestOpaqueOperandRegistry_ReadyCheckRecoveryOperands pins and checks the appended release/re-claim templates and their idrender operand.",
 	},
 	{
 		// Bead 6 (spec 127 R5(d)): RENAMED from "arg3:unprovable" — the

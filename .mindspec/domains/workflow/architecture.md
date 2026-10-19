@@ -883,10 +883,11 @@ A passing floor adds no interactive step and no extra output.
 
 `/ms-bead-impl`'s dispatch ingress runs `mindspec bead ready-check`
 FIRST on EVERY dispatch path (fresh Phase A, supplied `prompt-path`,
-or the manual-claim fallback): FAIL without an override marker stops
-before any prompt is staged; FAIL with the `mindspec_readiness_override`
-marker proceeds with a warning (a force-claimed bead gets a coherent
-path instead of dead-ending). The staged prompt's Phase 0 has the
+or the manual-claim fallback). Override coverage is decided by
+`bead ready-check` in the binary, using a validated schema-v2 marker and
+the current failure-record digests. The skill proceeds on exit 0;
+otherwise it stops and surfaces the report before staging a prompt.
+The staged prompt's Phase 0 has the
 subagent judge five semantic signals — SR-1 implementable without
 inventing behavior, SR-2 ACs decidable, SR-3 named helpers actually
 exist, SR-4 no contradiction with spec/sibling landed work, SR-5 no

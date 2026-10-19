@@ -7,13 +7,19 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 	"github.com/spf13/cobra"
 )
+
+var readyCheckEvaluateFn = readiness.EvaluateReadiness
+var readyCheckReadMarkerFn = bead.ReadOverrideMarker
 
 var beadReadyCheckCmd = &cobra.Command{
 	Use:   "ready-check <bead-id>",
@@ -24,8 +30,9 @@ tokens resolve in spec.md; its declared dependencies are closed AND
 landed-merged; and it carries no genuine blocking marker.
 
 This is a pure read: no bd write, no git write, no file write on any
-path. Exit 0 when all four signals pass; on any FAIL, exit non-zero
-with one recovery: line per failing signal.`,
+path. Exit 0 when all four signals pass or every failure is covered by a
+validated schema-v2 override marker. Otherwise exit non-zero, naming the
+uncovered signals and the release/re-claim recovery.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		beadID := args[0]
@@ -44,17 +51,27 @@ with one recovery: line per failing signal.`,
 			return err
 		}
 
-		report, err := readiness.EvaluateReadiness(root, beadID)
+		report, err := readyCheckEvaluateFn(root, beadID)
 		if err != nil {
 			return err
 		}
 
-		msg := readiness.Render(report)
-		if report.AllPass() {
-			fmt.Println(msg)
+		marker, validity, err := readyCheckReadMarkerFn(beadID)
+		if err != nil {
+			return guard.NewFailure(fmt.Sprintf("could not read readiness override metadata for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())),
+				fmt.Sprintf("bd show %s --json", idrender.Bead(beadID)))
+		}
+		coverage := readiness.ApplyOverride(report, marker, validity)
+		if len(coverage.Uncovered) == 0 {
+			fmt.Println(coverage.Message)
 			return nil
 		}
-		return guard.NewFailure(msg, report.RecoveryCommands()...)
+		msg := coverage.Message + "\nuncovered: " + strings.Join(coverage.Uncovered, ",")
+		commands := report.RecoveryCommands()
+		commands = append(commands,
+			fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)),
+			fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(coverage.Failing, ",")))
+		return guard.NewFailure(msg, commands...)
 	},
 }
 
