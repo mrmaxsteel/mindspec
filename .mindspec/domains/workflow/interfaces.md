@@ -383,7 +383,7 @@ complete-gated.
 | `mindspec instruct` | Emit mode-appropriate operating guidance |
 | `mindspec next` | Discover, claim, and start next bead — evaluates the mechanical readiness floor gate-before-mutate: a NOT-READY refusal claims nothing, creates no branch/worktree (spec 124 R3, ADR-0041 fourth-verb preflight leg) |
 | `mindspec next --allow-not-ready` | Proceed past a failing readiness floor deliberately — warns naming every failing signal and records the durable `mindspec_readiness_override` marker BEFORE claiming, fail-closed (spec 124 R3/AC-4); orthogonal to `--force` (session-freshness only) |
-| `mindspec bead ready-check <id>` | Read-only per-signal readiness report (MF-1..MF-4); exit 0 when all pass, else one `recovery:` line per failing signal (spec 124 R1) |
+| `mindspec bead ready-check <id>` | Read-only MF-1..MF-4 report with validated schema-v2 override coverage (spec 129 R6.4). Exit 0 iff all signals pass or all current failures are covered; indeterminate records never cover. Reports OVERRIDDEN, no-longer-needed, legacy or malformed markers. Otherwise exits non-zero naming uncovered signals and release/re-claim recovery with ALL currently failing IDs. Metadata read errors refuse. |
 | `mindspec bead clarify <id> --file <record.json>` | Write the append-only readiness-attempt record for a NOT-READY bead — original ordinal-keyed report + span-grounded clarifications; refuses a second write per bead, the categorical R8 cap (spec 124 R8) |
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |

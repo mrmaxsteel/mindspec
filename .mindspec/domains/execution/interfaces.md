@@ -168,9 +168,26 @@ the spec 124 R8e/AC-12 layer boundary holds by construction):
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `MetaKeyReadinessOverride` (`"mindspec_readiness_override"`) | Durable `--allow-not-ready` override marker written by `mindspec next` (workflow domain) via `MergeMetadata`: the bypassed MF signal IDs + a UTC timestamp. |
+| `MetaKeyReadinessOverride` (`"mindspec_readiness_override"`) | Advisory schema-v2 marker: `{schema: 2, signals, fingerprints, overridden, evidence: {path, sha256, bytes}}`. Signals name the deliberately bypassed MF failures; fingerprints are sorted, unique SHA-256 digests of their canonical failure records. Evidence stores its path, hash and byte count, never its text. |
 | `MetaKeyReadinessAttempt` (`"mindspec_readiness_attempt"`) | The append-only readiness-attempt record written by `mindspec bead clarify`: the original ordinal-keyed NOT-READY report plus span-grounded clarification entries. |
 | `WriteAttemptRecord(beadID, AttemptRecord)` (`clarify.go`) | The ONLY writer of the attempt key — exactly one `MergeMetadata` write per bead, ever. Refuses fail-closed (zero write) on: a malformed bead ID; an EXISTING attempt record (the categorical, restart-proof R8d cap); an empty report or non-positive/duplicate ordinals; a clarification citing an ordinal absent from the report; an empty `span` (presence check only — whether the span SUPPORTS the answer is the re-dispatched Phase-0 subagent's judgment, never verified here). No update/finalize API exists (R8e derive-don't-write): the terminal READY/escalated disposition is derived from the re-dispatch outcome. |
+
+`ParseOverrideMarker(raw any) (OverrideMarker, MarkerValidity)` validates
+the closed schema: non-empty unique MF-1..MF-4 signals, exactly one non-empty
+sorted unique 64-hex fingerprint list per signal, RFC-3339 `overridden`,
+non-empty evidence path, 64-hex evidence hash, and 1..65536 evidence bytes.
+Unknown keys or inconsistent fields are MALFORMED. The prior
+`{signals, overridden}` shape without a schema is LEGACY; neither grants
+coverage. `ReadOverrideMarker` uses `GetMetadata`, distinguishing a missing
+key from a metadata read error. `NewOverrideMarkerV2` builds and validates
+writer input with this same contract. Marker integrity is shape and
+self-consistency only; metadata is agent-writable and unauthenticated.
+
+`readiness.ApplyOverride` consumes marker data supplied by the command;
+`EvaluateReadiness` never reads it. Current failure digests must be a subset
+of recorded fingerprints, and indeterminate records never cover. Growth
+uncovers and shrinkage stays covered. This read-back authorizes dispatch
+ingress only; a claim still requires fresh scoped flags and evidence.
 
 `AttemptRecord` is `{report: [{ordinal, signal, reason}], clarifications:
 [{ordinal, reason, answer, span}]}` — the record carries the FULL

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/harness"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 )
@@ -38,6 +42,196 @@ func runBeadReadyCheck(t *testing.T, beadID string) (stdout string, err error) {
 	})
 }
 
+func installAbsentReadinessMarker(t *testing.T) {
+	t.Helper()
+	old := readyCheckReadMarkerFn
+	t.Cleanup(func() { readyCheckReadMarkerFn = old })
+	readyCheckReadMarkerFn = func(string) (bead.OverrideMarker, bead.MarkerValidity, error) {
+		return bead.OverrideMarker{}, bead.MarkerAbsent, nil
+	}
+}
+
+func readyOverrideReport(records ...string) *readiness.Report {
+	return &readiness.Report{BeadID: "mindspec-fixture.2", Signals: []readiness.Signal{
+		{ID: "MF-1", Pass: true}, {ID: "MF-2", Pass: true},
+		{ID: "MF-3", Pass: len(records) == 0, Failures: records, Detail: "dependency failed", Recovery: "bd show mindspec-fixture.1 --json"},
+		{ID: "MF-4", Pass: true},
+	}}
+}
+
+func readyOverrideMarker(t *testing.T, r *readiness.Report) bead.OverrideMarker {
+	t.Helper()
+	var ids []string
+	fps := map[string][]string{}
+	for _, s := range r.FailingSignals() {
+		ids = append(ids, s.ID)
+		fps[s.ID] = readiness.FailureRecordDigests(s)
+	}
+	m, err := bead.NewOverrideMarkerV2(ids, fps, bead.OverrideEvidence{Path: "/tmp/justification", SHA256: strings.Repeat("a", 64), Bytes: 8}, time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// Invokes the command's own RunE with pure read seams, never a live tracker.
+func runReadyOverride(t *testing.T, r *readiness.Report, raw any, readErr error) (string, error) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+	oldEval, oldRead := readyCheckEvaluateFn, readyCheckReadMarkerFn
+	t.Cleanup(func() { readyCheckEvaluateFn, readyCheckReadMarkerFn = oldEval, oldRead })
+	readyCheckEvaluateFn = func(gotRoot, gotID string) (*readiness.Report, error) {
+		if gotRoot != canonicalRoot || gotID != r.BeadID {
+			t.Fatalf("evaluate(%q,%q)", gotRoot, gotID)
+		}
+		return r, nil
+	}
+	readyCheckReadMarkerFn = func(gotID string) (bead.OverrideMarker, bead.MarkerValidity, error) {
+		if gotID != r.BeadID {
+			t.Fatalf("read marker(%q)", gotID)
+		}
+		if readErr != nil {
+			return bead.OverrideMarker{}, bead.MarkerAbsent, readErr
+		}
+		if raw == nil {
+			return bead.OverrideMarker{}, bead.MarkerAbsent, nil
+		}
+		m, v := bead.ParseOverrideMarker(raw)
+		return m, v, nil
+	}
+	out, err := runBeadReadyCheck(t, r.BeadID)
+	if err != nil {
+		out += err.Error()
+	}
+	return out, err
+}
+
+func TestReadyCheck_HonoursValidMarkerOnly(t *testing.T) {
+	a := readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureNoCandidate, "")
+	b := readiness.DependencyFailureRecord("mindspec-fixture.3", readiness.FailureNoCandidate, "")
+	indeterminate := readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureIndeterminate, "")
+	t.Run("valid-matching", func(t *testing.T) {
+		r := readyOverrideReport(a)
+		out, err := runReadyOverride(t, r, readyOverrideMarker(t, r), nil)
+		want := "MF-3: OVERRIDDEN (recorded 2026-10-19T00:00:00Z; evidence aaaaaaaaaaaa /tmp/justification)"
+		if err != nil || !strings.Contains(out, want) {
+			t.Fatalf("matching marker must exit 0 with %q; err=%v\n%s", want, err, out)
+		}
+	})
+	t.Run("MF-2-also-failing", func(t *testing.T) {
+		r := readyOverrideReport(a)
+		m := readyOverrideMarker(t, r)
+		r.Signals[1] = readiness.Signal{ID: "MF-2", Failures: []string{"dangling:R999"}, Detail: "R999 unresolved", Recovery: "bd show mindspec-fixture.2 --json"}
+		out, err := runReadyOverride(t, r, m, nil)
+		if err == nil || !strings.Contains(out, "uncovered: MF-2\n") || !strings.Contains(out, "MF-3: OVERRIDDEN") {
+			t.Fatalf("MF-2 must refuse:\n%s (%v)", out, err)
+		}
+	})
+	t.Run("changed-dependency", func(t *testing.T) {
+		out, err := runReadyOverride(t, readyOverrideReport(b), readyOverrideMarker(t, readyOverrideReport(a)), nil)
+		if err == nil || !strings.Contains(out, "uncovered: MF-3") {
+			t.Fatalf("changed dependency covered:\n%s (%v)", out, err)
+		}
+	})
+	t.Run("now-passing", func(t *testing.T) {
+		out, err := runReadyOverride(t, readyOverrideReport(), readyOverrideMarker(t, readyOverrideReport(a)), nil)
+		if err != nil || !strings.Contains(out, "MF-3: PASS (override recorded but no longer needed)") {
+			t.Fatalf("passing override note:\n%s (%v)", out, err)
+		}
+	})
+	t.Run("indeterminate", func(t *testing.T) {
+		r := readyOverrideReport(indeterminate)
+		out, err := runReadyOverride(t, r, readyOverrideMarker(t, r), nil)
+		if err == nil || !strings.Contains(out, "uncovered: MF-3") || strings.Contains(out, "OVERRIDDEN") {
+			t.Fatalf("indeterminate covered:\n%s (%v)", out, err)
+		}
+	})
+	t.Run("metadata-read-error", func(t *testing.T) {
+		out, err := runReadyOverride(t, readyOverrideReport(), nil, errors.New("tracker read failed\n\x1b[31m"))
+		if err == nil || !strings.Contains(out, "could not read readiness override metadata") || !strings.Contains(out, `tracker read failed\n\x1b[31m`) || strings.ContainsRune(out, '\x1b') {
+			t.Fatalf("metadata read must refuse and escape:\n%s (%v)", out, err)
+		}
+	})
+	t.Run("malformed", func(t *testing.T) {
+		cases := []struct {
+			name string
+			edit func(map[string]any)
+		}{
+			{"wrong-schema", func(m map[string]any) { m["schema"] = 1 }},
+			{"empty-signals", func(m map[string]any) { m["signals"] = []string{} }},
+			{"unknown-signal", func(m map[string]any) { m["signals"] = []string{"MF-5"} }},
+			{"duplicate-signal", func(m map[string]any) { m["signals"] = []string{"MF-3", "MF-3"} }},
+			{"missing-fingerprints", func(m map[string]any) { delete(m, "fingerprints") }},
+			{"extra-fingerprint-signal", func(m map[string]any) { m["fingerprints"].(map[string]any)["MF-2"] = []string{strings.Repeat("a", 64)} }},
+			{"empty-fingerprints", func(m map[string]any) { m["fingerprints"].(map[string]any)["MF-3"] = []string{} }},
+			{"nonhex-fingerprint", func(m map[string]any) { m["fingerprints"].(map[string]any)["MF-3"] = []string{strings.Repeat("g", 64)} }},
+			{"duplicate-fingerprints", func(m map[string]any) {
+				m["fingerprints"].(map[string]any)["MF-3"] = []string{strings.Repeat("a", 64), strings.Repeat("a", 64)}
+			}},
+			{"unsorted-fingerprints", func(m map[string]any) {
+				m["fingerprints"].(map[string]any)["MF-3"] = []string{strings.Repeat("b", 64), strings.Repeat("a", 64)}
+			}},
+			{"unknown-extra-key", func(m map[string]any) { m["extra"] = true }},
+			{"invalid-time", func(m map[string]any) { m["overridden"] = "yesterday" }},
+			{"empty-evidence-path", func(m map[string]any) { m["evidence"].(map[string]any)["path"] = "" }},
+			{"invalid-evidence-sha", func(m map[string]any) { m["evidence"].(map[string]any)["sha256"] = "short" }},
+			{"zero-evidence-bytes", func(m map[string]any) { m["evidence"].(map[string]any)["bytes"] = 0 }},
+			{"too-many-evidence-bytes", func(m map[string]any) { m["evidence"].(map[string]any)["bytes"] = 65537 }},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				r := readyOverrideReport(a)
+				data, err := json.Marshal(readyOverrideMarker(t, r))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var raw map[string]any
+				if err := json.Unmarshal(data, &raw); err != nil {
+					t.Fatal(err)
+				}
+				tt.edit(raw)
+				out, err := runReadyOverride(t, r, raw, nil)
+				for _, want := range []string{"override marker is malformed — not honoured", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+					if err == nil || !strings.Contains(out, want) {
+						t.Fatalf("malformed marker missing %q:\n%s (%v)", want, out, err)
+					}
+				}
+			})
+		}
+	})
+}
+
+func TestReadyCheck_LegacyRecoveryReleasesThenReclaims(t *testing.T) {
+	r := readyOverrideReport(readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureNoCandidate, ""))
+	out, err := runReadyOverride(t, r, map[string]any{"signals": []string{"MF-3"}, "overridden": "2026-10-19T00:00:00Z"}, nil)
+	for _, want := range []string{"override marker is legacy (no evidence) — not honoured", "uncovered: MF-3", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+		if err == nil || !strings.Contains(out, want) {
+			t.Fatalf("legacy marker missing %q:\n%s (%v)", want, out, err)
+		}
+	}
+}
+
+func TestReadyCheck_MixedCoverageRecoveryNamesAllFailing(t *testing.T) {
+	r := readyOverrideReport(readiness.DependencyFailureRecord("mindspec-fixture.1", readiness.FailureNoCandidate, ""))
+	r.Signals[1] = readiness.Signal{ID: "MF-2", Failures: []string{"dangling:R999"}, Detail: "R999 unresolved", Recovery: "bd show mindspec-fixture.2 --json"}
+	m := readyOverrideMarker(t, r)
+	r.Signals[2].Failures = []string{readiness.DependencyFailureRecord("mindspec-fixture.3", readiness.FailureNoCandidate, "")}
+	out, err := runReadyOverride(t, r, m, nil)
+	for _, want := range []string{"MF-2: OVERRIDDEN", "uncovered: MF-3\n", "recovery: mindspec release mindspec-fixture.2\nrecovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>"} {
+		if err == nil || !strings.Contains(out, want) {
+			t.Fatalf("mixed coverage missing %q:\n%s (%v)", want, out, err)
+		}
+	}
+}
+
 func gitPorcelainCmd(t *testing.T, root string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput()
@@ -59,6 +253,7 @@ func gitBranchesCmd(t *testing.T, root string) string {
 // TestBeadReadyCheck_NegativeFixture pins AC-1: the negative fixture exits
 // non-zero with a FAIL line (+ recovery) for each of MF-1..MF-4.
 func TestBeadReadyCheck_NegativeFixture(t *testing.T) {
+	installAbsentReadinessMarker(t)
 	root := t.TempDir()
 	fx, err := readiness.BuildNegativeFixture(root)
 	if err != nil {
@@ -87,6 +282,7 @@ func TestBeadReadyCheck_NegativeFixture(t *testing.T) {
 // 0, is idempotent, and performs no mutation (git status/branches
 // byte-identical before/after two consecutive invocations).
 func TestBeadReadyCheck_PositiveFixture(t *testing.T) {
+	installAbsentReadinessMarker(t)
 	root := t.TempDir()
 	fx, err := readiness.BuildPositiveFixture(root)
 	if err != nil {
@@ -165,6 +361,7 @@ func TestBeadReadyCheck_MalformedBeadID(t *testing.T) {
 // the rendered report only in its termsafe-escaped (quoted) form — never
 // as raw control bytes that could forge extra terminal lines.
 func TestBeadReadyCheck_HostileDescriptionEscaped(t *testing.T) {
+	installAbsentReadinessMarker(t)
 	root := t.TempDir()
 	const specID = "994-fixture-hostile"
 	const beadID = "mindspec-hostile.1"
