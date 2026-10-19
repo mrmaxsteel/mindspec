@@ -348,13 +348,9 @@ func TestReattest_PanelShaContradictionRefuses(t *testing.T) {
 	}
 
 	writes := installReattestRecorder(t)
-	_, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
-	var refusal *ReattestRefusal
-	if !errors.As(err, &refusal) || refusal.State != ReattestStatePanelContradiction {
-		t.Fatalf("expected %s refusal, got %v", ReattestStatePanelContradiction, err)
-	}
-	if len(*writes) != 0 {
-		t.Errorf("panel-contradicted candidate attested (%d writes)", len(*writes))
+	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	if err != nil || len(*writes) != 1 || !strings.Contains(res.Corroboration, "panel set non-corroborating") {
+		t.Fatalf("stale panel must permit datum (a), recording non-corroboration: result=%+v err=%v writes=%d", res, err, len(*writes))
 	}
 
 	// The agreeing panel corroborates and is named as datum (c).
@@ -364,7 +360,7 @@ func TestReattest_PanelShaContradictionRefuses(t *testing.T) {
 			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: secondParent},
 		}}
 	}
-	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	res, err = ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
 	if err != nil {
 		t.Fatalf("agreeing panel must corroborate: %v", err)
 	}
@@ -612,19 +608,12 @@ func TestReattest_HostilePanelSHAEscapedInRefusal(t *testing.T) {
 	}
 
 	writes := installReattestRecorder(t)
-	_, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
-	var refusal *ReattestRefusal
-	if !errors.As(err, &refusal) || refusal.State != ReattestStatePanelContradiction {
-		t.Fatalf("expected %s refusal, got %v", ReattestStatePanelContradiction, err)
+	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	if err != nil || len(*writes) != 1 {
+		t.Fatalf("malformed panel must not refuse: result=%+v err=%v writes=%d", res, err, len(*writes))
 	}
-	if strings.ContainsAny(refusal.Detail, "\x1b\x07") {
-		t.Errorf("the refusal Detail renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", refusal.Detail)
-	}
-	if strings.ContainsAny(err.Error(), "\x1b\x07") {
-		t.Errorf("the refusal error renders raw control bytes: %q", err.Error())
-	}
-	if len(*writes) != 0 {
-		t.Errorf("panel-contradicted candidate attested (%d writes)", len(*writes))
+	if strings.ContainsAny(res.Corroboration, "\x1b\x07") {
+		t.Errorf("corroboration contains raw hostile bytes: %q", res.Corroboration)
 	}
 }
 

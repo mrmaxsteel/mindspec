@@ -952,9 +952,12 @@ sufficient:
   bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
   (panel `reviewed_head_sha`, surviving branch tip, binding second
   parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
-  every corroboration is now exact-equality only, and a non-equal datum
-  is a fail-closed contradiction (AC-2b/AC-2c/AC-2d), never a softened
-  confirm. With no exact-and-owned match the function REFUSES rather
+  every corroboration is exact-equality only. A surviving-tip or binding
+  mismatch is a fail-closed contradiction. Panel evidence is a SET of
+  all well-formed SHAs across registrations: an exact member confirms;
+  a non-matching set is non-corroborating and never vetoes another leg.
+  Empty, placeholder and malformed values never reach git. With no
+  exact-and-owned match the function REFUSES rather
   than picking the newest ancestor-consistent merge.
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
@@ -1031,9 +1034,10 @@ merge/second-parent pair (AC-8), no bypass flag, no `--all` fleet mode
 (mass mutation stays a scripted sequence of explicit per-bead
 invocations), and `doctor` never writes through it. Fail-closed on
 every ambiguity: no owned exact merge → refuse to the audited ADR-0035
-`mindspec-q9ea` human attested-restore exit BY NAME; owned candidates
+`mindspec-q9ea` human attested-restore exit BY NAME; owned primary candidates
 with different second parents → ambiguity refusal; a contradicting
-surviving tip or panel SHA → refusal; a REVERTED classification (the
+surviving tip → refusal; a non-matching panel set is recorded as
+non-corroborating and never refuses; a REVERTED classification (the
 same R3 discrimination, M₁-anchored) → refusal — re-attesting reverted
 content would forge landed evidence. Every write carries the
 `mindspec_landed_reattest_*` audit keys in the same metadata call as
@@ -1053,6 +1057,51 @@ substitute, and the branch actually scanned is recorded in the audit
 either way. The verb registered its `reattest` token in
 core-owned `internal/redact.CommandTokens` (the standing new-top-level-
 command rule — see the core domain interfaces doc).
+
+### Reachable fallback and audited read-back (spec 129)
+
+`FindLandedMergeReachable` and reattest scan all reachable merges only
+when the first-parent scan nominates zero owned two-parent candidates.
+The fallback admits `Merge bead/<id>` and the two explicit
+`Merge [branch ']<bead-branch>[' ] into <spec-branch>` source forms;
+refreshes, explicit targets other than this spec and unrecognized formats
+are excluded. The short subject is undirected: a merge into a sibling
+bead can be nominated. A fallback is a finder result, never an automatic
+confirmation by a panel, tip or binding alone. `LandedMergeOffFirstParent`
+names every candidate and `mindspec reattest <id>`. Close paths, including
+`MergedUnclosed`, retain first-parent scope.
+
+Reattest checks F1 (exactly one candidate, even when second parents
+agree), F3 (no contradictory surviving tip), F4 (current net effect and
+revert discrimination anchored on that single merge), and F5 (read errors
+are errors). F2 is retired: registrations produce advisory output only.
+An outside-history review names the directory, round and SHA; missing
+objects say `(not determinable locally)`. The invoking checkout and spec
+directory roots are always printed. A refusal writes nothing. Fallback
+exits exclude q9ea; the dependent can deliberately use
+`mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>`.
+
+The single binding write also records the audit merge SHA, second parent
+and scanned branch, with actor, RFC-3339 time and operation
+`mindspec reattest`. Corroboration records
+`off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>`.
+A no-op requires a VALID audit and equality of audit tuple, binding pair
+and scan-derived candidate. Missing/malformed/stale audits are rewritten
+explicitly, even when the binding already agrees.
+
+Automatic read-back checks that same validity and tuple equality and
+re-runs F1/F3/F4/F5 at the current tip; it reads no registration. Invalid
+audits or multiple candidates return `LandedMergeOffFirstParent`;
+surviving-tip contradictions return `ErrLandedMergeContradiction`;
+reverts return `ErrLandedMergeReverted`; read errors remain plain errors.
+The typed sentinels wrap `ErrLandedMergeNotFound`, while only a scan
+with no candidates returns `ErrLandedMergeNoCandidate`.
+
+A contradictory binding vetoes automatic identification. Explicit
+reattest can repair it after the independent git checks, recording the
+prior pair. A forged full audit and binding can accept only a candidate
+reattest itself would accept, including the undirected sibling topology.
+That bounded new reach is visible in tracked JSONL metadata history.
 
 ## Lifecycle verb state honesty (spec 128)
 

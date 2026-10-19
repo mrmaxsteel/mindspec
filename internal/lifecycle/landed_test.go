@@ -348,8 +348,8 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 	}
 
 	_, err = FindLandedMerge(dir, "spec/119-test", "bead-one")
-	if !errors.Is(err, ErrLandedMergeNotFound) {
-		t.Fatalf("expected ErrLandedMergeNotFound on contradiction, got %v", err)
+	if err != nil {
+		t.Fatalf("non-corroborating panel must not veto the surviving tip, got %v", err)
 	}
 }
 
@@ -469,8 +469,8 @@ func TestReviewedHeadSHAForBead_MalformedSpecBranchProceedsRootOnly(t *testing.T
 		return nil
 	}
 
-	_, found := reviewedHeadSHAForBead("/repo", "spec/x;evil", "mindspec-x.1")
-	if found {
+	set := reviewedHeadSHAForBead("/repo", "spec/x;evil", "mindspec-x.1")
+	if len(set) != 0 {
 		t.Error("expected no corroboration available for a malformed spec branch")
 	}
 	if len(gotRoots) != 1 || gotRoots[0] != "/repo" {
@@ -1898,11 +1898,8 @@ func TestFindLandedMerge_HostilePanelSHAEscapedInRefusal(t *testing.T) {
 	}
 
 	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
-	if !errors.Is(err, ErrLandedMergeNotFound) {
-		t.Fatalf("a contradicting panel SHA must refuse, got %v", err)
-	}
-	if strings.ContainsAny(err.Error(), "\x1b\x07") {
-		t.Errorf("the refusal renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", err.Error())
+	if err != nil {
+		t.Fatalf("malformed panel is non-corroborating; tip confirms: %v", err)
 	}
 }
 

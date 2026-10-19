@@ -23,6 +23,23 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
+func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
+	for _, state := range []string{lifecycle.ReattestStateMultipleFallbackCandidates, lifecycle.ReattestStateTipContradiction, lifecycle.ReattestStateReverted} {
+		t.Run(state, func(t *testing.T) {
+			err := reattestRefusalFailure("bead-one", "bead/bead-one", "spec/129-test", &lifecycle.ReattestRefusal{State: state, Fallback: true, Detail: "candidate refused"})
+			text := err.Error()
+			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order spec/129-test", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("refusal %q missing %q", text, want)
+				}
+			}
+			if strings.Contains(text, "q9ea") || strings.Contains(text, "git branch") {
+				t.Fatalf("fallback offered ineffective attested-restore: %s", text)
+			}
+		})
+	}
+}
+
 // TestReattestFlagSurfaceNoBypass is AC-8's flag-surface assertion: the
 // verb's ENTIRE local flag set is exactly {--spec-branch} — scoping
 // input only. There is no bypass flag of any kind, no --all/fleet flag,

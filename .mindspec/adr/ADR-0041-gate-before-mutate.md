@@ -630,7 +630,8 @@ above):
   which bead;
 - **(b)** a surviving bead-branch tip that the exact match EQUALS;
 - **(c)** a registered panel's `reviewed_head_sha` equal to an exact
-  match's second parent;
+  match's second parent (set semantics and non-corroborating values are
+  governed by Amendment (Spec 129), part (ii));
 - **(d)** an existing binding git-corroborated to an exact merge;
 - **(e)** the ADR-0035 `mindspec-q9ea` human attested-restore marker —
   admitted ONLY as an explicitly-blessed, audited exit for the
@@ -650,3 +651,113 @@ The recovery is honestly scoped: re-attestation recovers exactly the
 git-corroborable (exact-second-parent) subset of merged beads and
 refuses the rest to the audited exit rather than guessing; it does not
 claim fleet-wide recovery of the merged-bead history.
+
+## Amendment (Spec 129)
+
+### (i) Reachable fallback and audited read-back
+
+`lifecycle.FindLandedMergeReachable` (the MF-3 reader) and
+`lifecycle.ReattestLandedMerge` use the first-parent scan as primary.
+Only zero owned two-parent candidates permits the reachable fallback:
+`git log --merges --topo-order <spec-branch>`. The fallback admits only
+source-named `Merge bead/<id>`, `Merge branch 'bead/<id>' into <spec-branch>`
+and `Merge bead/<id> into <spec-branch>`. Explicit non-spec targets,
+refreshes into a bead branch, and unrecognized subjects are excluded.
+The undirected-subject target gap remains: `Merge bead/<id>` names no
+target, so a merge into a sibling bead can be nominated.
+
+The fallback is finder-only: no automatic acceptance of a fallback
+candidate from a panel, surviving tip or binding alone. It returns
+`LandedMergeOffFirstParent`, naming every candidate and
+`mindspec reattest <id>`. Only the matching audited read-back below can
+identify it. `MergedUnclosed`, `complete`'s reconcile, `stale_open`,
+`orphan_hints`, plan approval and lattice adoption stay first-parent only;
+the executor's merge-time binding and merge-resumption scans do too.
+
+F1, F3, F4 and F5 are all git-derived safety checks:
+
+- **F1:** exactly one admitted candidate; multiple candidates refuse as
+  `multiple-fallback-candidates`, even with the same second parent. There
+  is no grouping or tie-break that can let an empty sibling mask a revert.
+- **F3:** a surviving bead tip must equal the candidate's second parent.
+- **F4:** the candidate's net effect is checked at the CURRENT tip, with
+  the Spec-125 revert/clean-full-removal discrimination anchored on that
+  single merge. An accepted-then-reverted landing fails again.
+- **F5:** any git or metadata read error is a plain error, never an
+  absence result or a positive identification; a refusal writes nothing.
+
+F2 is retired. Registrations are advisory output only, scanned in the
+invoking checkout and its spec directory. Outside-history and locally
+indeterminable SHAs name their registration and round; absent objects say
+`(not determinable locally)`. Malformed revision expressions never reach
+git. Empty and placeholder SHAs are skipped. Advisories change neither
+exit status nor the binding and audit tuple; their count and scanned
+roots are recorded as provenance. They are not read by automatic read-back.
+
+Acceptance writes the binding and audited tuple in ONE `MergeMetadata`
+call: `mindspec_landed_reattest_merge_sha`,
+`mindspec_landed_reattest_second_parent`, and
+`mindspec_landed_reattest_scanned_branch`, alongside the existing audit
+keys. The fallback-provenance corroboration string is:
+
+```
+off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>
+```
+
+The validity contract requires `op == "mindspec reattest"`, RFC-3339 `at`,
+non-empty `actor`, `scanned_branch` equal to the scanned spec branch, and
+both SHA keys well-formed git object IDs. Absent or MALFORMED audits grant
+nothing. A validity-qualified no-op requires a VALID audit whose tuple
+equals both the binding and the single scan-derived candidate. Otherwise
+explicit reattest rechecks safety and writes a valid record even when the
+binding values are unchanged. Automatic read-back requires that same
+three-way tuple equality AND F1, F3, F4 and F5 at read time. A later
+executor binding rewrite leaves a stale audit that confirms nothing.
+
+Read-back returns a plain error for F5, `LandedMergeOffFirstParent` for
+multiple candidates or an invalid/mismatched audit,
+`ErrLandedMergeContradiction` for a surviving-tip contradiction, and
+`ErrLandedMergeReverted` for a revert. Both sentinels wrap
+`ErrLandedMergeNotFound`; the off-first-parent error never wraps
+`ErrLandedMergeNoCandidate`.
+
+q9ea attested-restore is excluded from fallback exits: restoring the tip
+can satisfy only F3 and cannot change the other refusal facts. The audited
+forward exit for the dependent is
+`mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>`.
+
+**Metadata-forge residual and bounded new reach.** The binding and audit
+are agent-writable metadata, exported to tracked JSONL; one metadata
+update can forge them together. F1, F3 and F4 are re-derived from git on
+every read, so the forge gains only a candidate that reattest itself
+would accept: a real, reachable, source-named, single, non-reverted merge
+with no contradicting surviving tip. This includes an undirected
+off-first-parent merge into a sibling bead with a later unlanded review
+round. Spec 125 refused that topology: this is NEW REACH, bounded as
+stated, and the forge remains visible in JSONL history.
+
+### (ii) Non-corroborating panel datum and binding veto
+
+Datum (c) is the SET of all well-formed `reviewed_head_sha` values across
+registrations. An exact second-parent match confirms; a non-matching set
+is non-corroborating, never a contradiction or a veto. Empty, placeholder
+and malformed values are non-corroborating and never git operands.
+Reattest records a non-matching set as non-corroborating and can proceed
+on datum (a). The set alone never confirms an ancestor or a fallback.
+
+These semantics reach the CLOSE paths through `FindLandedMerge`:
+`MergedUnclosed`, `complete`'s reconcile and `stale_open`, as well as
+plan approval, adoption and orphan hints. They introduce no CLOSE
+evidence Spec 125 did not admit: an exact tip, binding or panel match
+confirms; a non-matching set alone yields `LandedMergeNoEvidence`, which
+`MergedUnclosed` propagates as an error and never a close. On the normal
+completion path, complete lands a commit no panel reviewed (OQ-3), so
+the panel leg is normally non-corroborating; binding review to landing
+belongs to the panel substrate.
+
+**Binding veto versus audited repair:** a contradictory surviving tip or
+landed binding still vetoes automatic identification regardless of panel
+matches. Only explicit reattest may replace a contradictory binding with
+the independently scan-derived exact identity, after ownership,
+ambiguity, surviving-tip and revert checks (and F1/F3/F4/F5 on fallback).
+The prior pair is recorded in the audit; a refusal writes nothing.
