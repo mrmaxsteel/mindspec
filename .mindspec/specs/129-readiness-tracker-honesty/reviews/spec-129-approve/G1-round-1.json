@@ -1,0 +1,50 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "G1 gpt-6.1-sol",
+  "confidence": 0.98,
+  "rationale": "Reviewed the full BRIEF, spec and new ADR at 7a4900643c5b567d6074070264ce166c57209f74. The six requested empirical checks substantiate the central diagnosis, but the spec has two membership/readiness integration gaps, a contradictory AC, and demonstrably false bd capability claims. These require spec corrections before planning. All mutations and fixtures were confined to the supplied scratch directory; the source worktree was not modified. Evidence is retained in probes.log, cli-probes.log, bd-real-probes.json, validation.json, fake-bd.log and the scratch clone probe tests. The source tracker count could not be independently measured because opening its embedded Dolt database requires a prohibited LOCK write; no claim is made to have verified the live 106-row count.",
+  "concrete_changes_required": [
+    "Define a status-independent spec-membership check for R4.1, distinct from the ready-set enumeration in R1.1. It must recognize closed descendants and closed metadata.spec_id-only members without title inference, and propagate lookup failures rather than classifying them as non-members. Extend AC-9 with closed metadata-only same-spec and other-spec dependencies and a lookup-failure case; require a same-spec closed dependency without a landed merge to fail MF-3.",
+    "Explicitly require readiness owning-spec resolution to support R1.1 metadata-only members with arbitrary titles and no epic dependency, so selecting such a member can actually reach the claim path. Reconcile this with the existing lineage-only EvaluateReadiness/findEpicForBeadFn path and its title fallback. Extend AC-1 with an end-to-end claim of a metadata-only member whose title contains neither a spec number nor spec ID, with otherwise valid readiness inputs and no override.",
+    "Resolve AC-1 versus R1.2: either remove the expectation that C is returned as a near-miss when A and B are selectable, and test C in an empty-member fixture, or change the requirement and cost statement to permit the global near-miss scan on non-empty sets. The test and requirement must specify the same behavior.",
+    "Correct Background C, Corrections C, R3.1 and the grill record: bd 1.1.0 supports bd list --spec and exposes the native spec_id in bd show --json. Preserve metadata.spec_id if desired, but justify it using the already-written plan metadata and ready-filter capability rather than the disproved list/show claims."
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "title": "R4.1 reuses ready-only membership to classify closed dependencies",
+      "detail": "R1.1 defines SpecMembers through two bd ready queries, while R4.1 requires determining membership of a CLOSED dependency per that predicate. Real bd 1.1.0 scratch probe: a bead with metadata.spec_id=129-probe is returned by ready while open; after closing it, ready --metadata-field spec_id=129-probe -n 0 returns [], whereas list --metadata-field spec_id=129-probe --all -n 0 still returns the closed member. Reusing the specified ready set makes every closed dependency a non-member and can bypass the landed-merge requirement. The proposed existing findEpicForBeadFn lineage also cannot supply the metadata-only disjunct. Define all-status membership and pin closed linked-only cases. Evidence: bd-real-probes.json and internal/phase/derive.go FindEpicForBeadWithCache."
+    },
+    {
+      "severity": "high",
+      "title": "Metadata-only selection is not connected to readiness owning-spec resolution",
+      "detail": "R1.1 says a metadata-only member is selectable whatever its title says, and AC-1 requires claiming B with no parent. A fake-bd probe with metadata.spec_id present, no parent and title \"ordinary task title\" produces GateReadiness error \"evaluating readiness for probe-outside: resolving owning spec for probe-outside: no epic found for bead probe-outside: no epic lineage\". EvaluateReadiness resolves ownership through findEpicForBeadFn; the existing phase resolver ignores metadata.spec_id and falls back to title parsing. Fixing only selection therefore leaves this explicitly supported member unclaimable. The spec must state the ownership-resolution integration and test the title-independent end-to-end claim. Evidence: TestG1MetadataOnlyReadiness in probes.log."
+    },
+    {
+      "severity": "medium",
+      "title": "AC-1 requires a near-miss result forbidden by the common-path rule",
+      "detail": "AC-1 requires SpecMembers to return {A,B} and C as the sole near-miss in the same non-empty fixture. R1.2 explicitly restricts the global title near-miss scan to an EMPTY member set and says it never runs on the common path. C belongs to neither scoped query, so the specified non-empty path has no way to discover it. An implementation cannot satisfy both requirements as written."
+    },
+    {
+      "severity": "medium",
+      "title": "Native bd spec-linkage filter and JSON exposure claims are false",
+      "detail": "Against installed bd 1.1.0 (8e4e59d39), scratch bd create \"native spec link\" --spec-id 129-probe --json succeeds; bd list --spec 129-probe -n 0 --json returns that bead; bd show <id> --json includes \"spec_id\":\"129-probe\". This disproves the spec's repeated assertions that the native field is not list-filterable and is absent from show JSON. Independently, ready --metadata-field spec_id=129-probe -n 0 and list --metadata-field both correctly select the separate metadata-linked bead. The chosen metadata datum remains viable, but its stated comparison with the alternative must be factual. Evidence: bd-real-probes.json."
+    },
+    {
+      "severity": "info",
+      "title": "Requested baseline defects reproduced at the reviewed commit",
+      "detail": "All G1 probe tests pass as assertions of current defects. Fake bd: global ready contains probe-outside but scoped BuildReadySet has raw=0, filtered=0, notice=\"\"; CLI positional and --pick 3 on that empty scoped set exit 0 with \"No ready work found.\", while positional --emit-only resolves the same bead with its bypass disclosure. Fake success stderr \"Showing 100 of 106 ready issues...\" is discarded: QueryReady parses 100 rows with nil error. Real throwaway git: a named merge passes identification on the first-parent chain, then remains reachable after sibling integration but returns ErrLandedMergeNoCandidate off that chain. Real panel files: stale reviews/probe-one sorts before matching reviews/probe-one-r2 and vetoes the matching surviving tip; removing the stale registration restores success. MF-2: R9(a) against spec R9(a) fails as dangling, and AC9 harvests zero claims. Real scratch bd confirms ready --metadata-field works. These are evidence for the proposed fixes, not requests to implement code at this spec gate. Evidence: probes.log and cli-probes.log."
+    },
+    {
+      "severity": "info",
+      "title": "Spec validation exits zero with one lifecycle-binding warning",
+      "detail": "Ran the binary built from reviewed commit 7a490064 in the read-only source worktree: mindspec validate spec 129-readiness-tracker-honesty. Exit code: 0. Stdout exactly: \"129-readiness-tracker-honesty: 1 issue(s) found\\n\\n  [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one\\n\". Stderr empty. No validation errors were reported. Evidence: validation.json."
+    },
+    {
+      "severity": "info",
+      "title": "Errors in this BRIEF",
+      "detail": "The scaffold still contains unfilled Summary/Files/Acceptance Criteria/Prior-Round/Lens TODO sections before the completed duplicate sections. Its panel header requests a verdict beside BRIEF, while the direct task requires scratch/G1/verdict.json; its conduct paragraph suggests git worktree add, which would write registration metadata into the read-only source repository, while the direct task supplies an independent clone. Followed the direct task: independent scratch clone and verdict.json at the exact requested scratch path. No other BRIEF-specific factual error was established; the false bd claims above are in the reviewed spec, not asserted independently by the BRIEF."
+    }
+  ]
+}

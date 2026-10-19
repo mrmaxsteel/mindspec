@@ -1,0 +1,42 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.82,
+  "rationale": "All three of my round-4 asks are addressed. The read-back now requires audit tuple == binding pair == the single scan-derived candidate AND re-runs F1-F5 at read time. The forged full tuple on my stale-round shape (AC-11 ix-f) therefore FAILs, because F2 re-runs and the later round B is unlanded. The residual is restated as a new, bounded reach (a forge skips only the operator's vouch). F2's visibility limit is printed. Mapping is the shared readiness.PlanMapsBead (positional '## Bead' heading AND work_chunks id N), and positional matches extractBeadSectionRaw's existing count-based behaviour. I emulated F2's round rule against a real-git build of my stale-round shape (A merged into bead/Y, B unlanded):\n- {1:A,2:B}: REFUSE (UnlandedReview).\n- The repo's actual practice, one registration updated in place, so {2:B}: FAIL-CLOSED (no anchor).\n- Rebased round {1:A,2:B'}: REFUSE.\n- Tie: FAIL-CLOSED.\n- Round 2 invisible, {1:A}: ACCEPT, which is the stated visibility residual.\nThe equal-or-ancestor anchor is sound. A later round can masquerade as an anchor only by reviewing a commit at or below the second parent, which means it reviewed nothing the landing lacks. And #233's tree-identical complete commit needs the ancestor case. One soft spot remains: round numbers are compared ACROSS registration directories. A misnumbered set {3:A, 2:B} ACCEPTs the stale landing, and per-round slugs (the D.3 '<bead>' / '<bead>-r2' shape) need not share a numbering. Asking for cross-directory comparisons to fail closed; this is not blocking.",
+  "concrete_changes_required": [
+    "R4.2 F2: compare `round` values only between registrations in the SAME panel directory (one slug). When a non-ancestor-of-tip registration and the highest anchor come from DIFFERENT directories, fail closed (refuse with the F2 exits) rather than order them by their independently numbered `round` fields. Add an AC leg: anchor registration in dir '<X>' with round 3 at A, and a non-ancestor registration in dir '<X>-r2' with round 2 at B. reattest refuses, and so does the read-back. Emulated today: the rule as written ACCEPTs."
+  ],
+  "findings": [
+    {
+      "severity": "MINOR",
+      "title": "F2 orders rounds across independently numbered registrations",
+      "detail": "panel.Panel.Round is per registration directory. This repo's practice is one registration per bead, updated in place (59 tracked panel.json files, each one dir per bead, round 1-5). But the spec's own D.3 diagnosis cites per-round slugs ('<bead>' and '<bead>-r2'), whose rounds need not form one sequence. Real-git emulation of F2 on the stale-round shape: {3:A, 2:B} (A the anchor, B unlanded and not an ancestor of the tip) gives ACCEPT. Same-directory or tie cases are fine: {1:A,2:B} REFUSE, {1:A,1:B} FAIL-CLOSED."
+    },
+    {
+      "severity": "INFO",
+      "title": "Equal-or-ancestor anchor admits no later-round masquerade",
+      "detail": "For a registration to anchor, its reviewed SHA must be the second parent or an ancestor of it, so its reviewed content is entirely inside the landing. A genuinely later round reviews a descendant of the anchor (B \u228b A) or a rebased line (B'). Neither is an ancestor of the second parent, so it can never anchor, and F2 refuses it when it is unlanded and higher-numbered. In the single-registration practice, a later B overwrites A, there is no anchor, and F2 fails closed. Equal-only would fail closed on every #233-shaped normal bead (complete's tree-identical commit D after reviewed B), so ancestor is required. Ancestor anchoring does not detect unreviewed commits landed after the last review, but that is the panel gate's job (ADR-0037), not MF-3 landedness."
+    },
+    {
+      "severity": "INFO",
+      "title": "Forged full tuple now fails; residual honestly bounded",
+      "detail": "Read-back = VALID audit, tuple == binding == single candidate, and F1-F5 re-run (single candidate, round rule, surviving-tip contradiction, net effect at the CURRENT tip, fail-closed reads). A metadata forge therefore reaches only what reattest itself would accept, and the spec says so as a new bounded reach (line 437). Its strength rests on F2 seeing the later registration, and the visibility caveat is printed. The re-run also means later-added registrations or reverts flip MF-3 back to FAIL: fail-closed, and the right direction."
+    },
+    {
+      "severity": "INFO",
+      "title": "Probes re-run",
+      "detail": "Round-2/3 probe shapes (refresh plus off-first-parent landing, reverted, octopus, stale-round sibling, stale tip reset, forged binding) each admit exactly 0 or 1 fallback candidate (unchanged from round 4). Under the finder-only rule none pass automatically. F2 decides the stale-round class as tabulated in the rationale. The emulation was shell plus real git under /private/tmp/claude-503/-Users-Max-replit-mindspec/d05dec1f-1671-4cbd-8202-e55ee47cdf39/scratchpad/p129s/r5/O3/ (since removed)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-4 ask status",
+      "detail": "O3r4.1 (read-back re-derives refusals; correct 'same class'): ADDRESSED. Audited tuple plus F1-F5 re-run at read time; residual restated as a new, bounded reach. O3r4.2 (visibility limit of the unreached-review check): ADDRESSED. 'no later unlanded review registration found in <roots>' is printed, and the limit is stated in F2. O3r4.3 (AND mapping): ADDRESSED. readiness.PlanMapsBead is the positional section AND work_chunks id N, shared with evaluateMF1; a half-mapped N is N4. NEW_ISSUE: cross-directory round ordering (MINOR above)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "None found. The Round-5 description of (A), (B) and (C) matches spec R4.2 F1-F5 and R1.1(c). The note that older round sections still say '129b' is accurate and self-disclosed."
+    }
+  ]
+}

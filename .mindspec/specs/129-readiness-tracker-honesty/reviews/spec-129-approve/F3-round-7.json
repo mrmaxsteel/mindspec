@@ -1,0 +1,25 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "F3 claude-fable-5-1",
+  "confidence": 0.85,
+  "rationale": "All four of my round-6 asks are confirmed fixed at e7388f71, and the diff from 8b3a5535 introduces no defect in my lens. Skip-and-report for class-(b) placeholders opens no new false PASS: a placeholder never becomes a git operand, it is reported in the output, and the only way an attacker uses it is to rewrite a later unlanded registration's SHA into a placeholder — which is the panel-file-edit reach the residual already states and AC-11 (ix-g) pins (deletion and rewrite are the same reach). Failing closed on placeholders would instead refuse the one legitimate shape in the repo forever (`.mindspec/reviews/6ou2-fix-zfc/panel.json`, bead_id mindspec-6ou2, `reviewed_head_sha: \"design-review-no-code\"`, the only non-hex value among all tracked bead registrations) with no sanctioned recovery. The class boundaries are sound: anything option-like or carrying revision-expression characters is (d) and fails closed, so a bare `HEAD`, `main`, or a 39-hex string is a skipped placeholder rather than an operand. The plan-blob probe now distinguishes absent from failed with a typed error, and the fifth fixture pins the checkout fallback without a spurious divergence notice.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-6 ask status",
+      "detail": "F3r6.1 (F2 visibility is per checkout) — ADDRESSED: 'Visibility is per CHECKOUT' names the invoking checkout's roots, the untracked-`reviews/` cause, the worktree asymmetry, the absolute roots in the output and the run-from-spec-worktree advice; AC-11 (x-w) pins both results. F3r6.2 (gc'd SHA as outside-tip) — ADDRESSED: a class-(c) SHA that does not resolve (`git cat-file -e <sha>^{commit}` before `merge-base`) is outside the tip by definition and refuses as `UnlandedReview`, never as F5; AC-11 (x-g). F3r6.3 (empty SHA) — ADDRESSED: class (a) is skipped exactly as `reviewedHeadSHAForBead` skips it today, with the `panel create --target` same-write rationale; AC-11 (x-e); R4.3 applies the same classes. F3r6.4 (amend-after-panel) — ADDRESSED: 'The one normal-looking refusal' names the shape, states it is outside the documented flow, names the dependent's override as the sanctioned exit and says deleting or editing the registration is deliberately not offered; AC-11 (vii-a). All four CONFIRMED."
+    },
+    {
+      "severity": "INFO",
+      "title": "Regression check of git diff 8b3a5535 e7388f71 (adversary lens)",
+      "detail": "Value classes: (a) empty skipped, (b) placeholder skipped and reported, (c) well-formed evaluated, (d) option-like or revision-expression fails closed. No false PASS is opened: only (c) reaches git; rewriting a later unlanded registration's SHA into a placeholder is the already-stated panel-edit reach (equivalent to deleting the registration), it is reported rather than silent, and it leaves the same no-JSONL-trace residual that (ix-g) pins. Verified the motivating example live: `.mindspec/reviews/6ou2-fix-zfc/panel.json` is `{bead_id: mindspec-6ou2, round: 1, reviewed_head_sha: \"design-review-no-code\"}` and is the only non-hex `reviewed_head_sha` among all tracked bead-targeted registrations; the repo's only `-rN` directory is `prerelease-r2`, which the spec correctly notes has no bead_id. Class (d)'s character list covers `^ ~ : @{ .. whitespace control` and a leading `-`, so `HEAD~1`, `main^`, `a..b` and `--output=…` fail closed while bare words become skipped placeholders — a safe partition because a bare word can never resolve to a commit through `merge-base` since it never gets there. Plan source: 'exists AND carries the blob' plus the typed `ErrPathNotAtRef` probe (`rev-parse --verify`, `ls-tree`, then the blob read) correctly separates absence from failure; the fifth fixture (branch without a committed plan.md → checkout used, no divergence notice; probe failure → refuse) closes the gap the previous wording left. Residual wording: 'same forge mechanism as Spec-125 item (c), new and bounded reach' is now consistent between the touchpoint and R4.2. Repo-convention re-derivation recipe is reproducible (I re-ran it: zero `-r[0-9]+` directories among bead registrations). Nothing in the diff weakens F1, F3 or F4, the audited tuple, the read-back conditions, or the override fingerprint."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) Header line 12 still instructs `<your-slot>-round-7.json` beside this BRIEF while line 66 corrects it; as noted in round 6, the fix is in `renderBriefHeader` (internal/panel/create.go), which emits that line from the round number. (2) Otherwise none found: the round-6 tally (9/9 APPROVE, 10 minor asks), the fix commit and the seven-item change list match the diff and the consolidation."
+    }
+  ]
+}

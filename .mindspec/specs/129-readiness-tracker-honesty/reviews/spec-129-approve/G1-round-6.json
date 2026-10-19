@@ -1,0 +1,45 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "G1 gpt-6.1-sol",
+  "confidence": 0.96,
+  "rationale": "Reviewed 8b3a5535fcd7297031d8a434ec7a1f26eee77887 as a spec-document gate, the full BRIEF, my round-5 verdict, consolidated-round-5.md, the round-6 diff, resulting requirements and ACs, ADR-0045/back-pointers, and relevant production code. Both of my round-5 asks are ADDRESSED. Fresh scratch-only probes reproduce all six baseline claims and support the revised F2 and lazy-read contracts. Normal review/fix/completion descendants satisfy F2; the prior cross-directory round-order attack now refuses independently of round. The separate-directory rebased-review refusal and panel-edit residual are explicit limitations. No new blocking defect found in the G1 lens. Spec validation exits 0 with one lifecycle-binding warning. Future predicates are explicitly probed as specification emulations, not claimed as shipped functionality. Source remained read-only; the clone, builds, databases, fixtures and logs are under the assigned scratch directory. GitHub API access failed.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-5 ask status",
+      "detail": "G1r5.1 ADDRESSED. R4.2 F2 (spec.md:413-425) no longer infers chronology from panel-local rounds: every visible outside-tip reviewed SHA refuses, including abandoned registrations, and malformed SHAs fail before ancestry. AC-11(x-c), (vii-s), (xv) pin refusal at acceptance and read-back despite a VALID matching audit and make round changes irrelevant; AC-18 carries the ADR amendment. Fresh real-git/panel.Create/Scan probes repeat old-panel round 5 at landed A plus later new-panel at outside-tip B: rounds 1, 6 and missing all refuse under the revised predicate. G1r5.2 ADDRESSED. R1.1(c):255 now triggers the plan read for no-lineage and other-epic title-lineage plan-form rows. AC-1 adds standalone N1/N4 and N2b/N4 pairs. The production parser/extractor again distinguish section+chunk from section-only, and the read is now permitted for both inputs. Evidence: f2-probes.log, all-probes.log, and scratch-only g1_round6_*_probe_test.go files."
+    },
+    {
+      "severity": "info",
+      "title": "Round-6 normal-bead and #239 recovery probes",
+      "detail": "Fresh real git builds reviewed B, a post-panel fix F, then materialization C and artifact-sync D using production gitutil.MaterializeStageCommit, the primitive complete uses. Both stages use changed trees, so no tree-identity assumption is made. D lands as the second parent of Merge bead/probe-x, then #239 sibling/main integration moves that landing off first-parent. The reachable scan contains exactly one owned candidate; the branch is absent; production ContentSubsumedOutcome is Landed and RevertShape is false. Revised F2 passes registrations at D, B or F: one-round, fix-after-panel and #233 completion-descendant cases remain eligible for the specified audited reattest recovery. Current production still returns ErrLandedMergeNoCandidate / ReattestStateNoOwnedMerge, as expected before implementation. Another real panel.Create probe overwrites rewritten-away round-1 A with landed round-2 B in one directory; Scan returns only B and F2 passes. Retaining A in a separate directory refuses despite a genuine landing. R4.2:419-421 expressly documents that conservative limit and the scoped MF-3 override exit. Evidence: f2-probes.log; repo/internal/lifecycle/g1_round6_f2_probe_test.go. F2 and the future acceptance/read-back consequences are specification-predicate emulations, not an executed future fallback or audit writer."
+    },
+    {
+      "severity": "info",
+      "title": "Panel-edit residual and SHA boundary reproduced",
+      "detail": "An abandoned outside-tip registration still refuses under the revised predicate. Deleting it makes F2 pass, confirming the documented panel-edit reach. An option-like reviewed_head_sha is rejected by the production wellFormedGitObjectID gate before any ancestry invocation (zero git calls). The text now distinguishes git-derived F1/F3/F4 from untracked agent-writable F2; AC-11(ix-g) and AC-18 pin the residual. A matching forged tuple cannot bypass a still-visible outside-tip registration because acceptance and read-back run the same F2 rule. Evidence: f2-probes.log."
+    },
+    {
+      "severity": "info",
+      "title": "Six baseline claims reproduced at the reviewed commit",
+      "detail": "Fresh fake bd on PATH: global QueryReady returns detached probe-epic.1, but current BuildReadySet's edge-only --parent call returns raw=0, filtered=0, notice=\"\". A successful Showing 100 of 106 stderr notice is discarded and QueryReady returns 100 rows with nil error. Fresh real git: the first-parent control identifies the landing; #239 topology leaves it reachable but FindLandedMerge returns ErrLandedMergeNoCandidate. Real a-stale and z-match registrations reproduce the lex-first contradiction despite an exact surviving tip; removing a-stale restores the control. MF-2 R9(a) versus identical spec text fails as dangling, and AC9 harvests zero claims. Fresh embedded bd 1.1.0 (8e4e59d39): ready --metadata-field spec_id=129-probe -n 0 returns the detached dotted child and metadata-only task; ready --parent preserves the detached child by prefix; ready -n 1 returns one of four rows and emits its notice at exit 0. Background A correctly distinguishes the edge-only fake from bd 1.1.0. The historical live-tracker 106 count was not re-measured. Evidence: baseline-probes.log, all-probes.log, bd-real-probes.json, bd-probes.log, bd-ids.json."
+    },
+    {
+      "severity": "info",
+      "title": "Plan mapping and source boundary",
+      "detail": "The revised lazy trigger admits the read needed for detached-only section+chunk (N1, blocking) versus section-only (N4, informational); AC-1 also pins the other-epic title-fallback pair. Fresh assertions over production ParsePlanFrontmatter/extractBeadSectionRaw verify those structural inputs and positional counting of a ## Bead line inside a fence. Selection's new preference for the committed spec/<S> plan is expressly qualified: EvaluateReadiness can still read different checkout content, the divergence notice must disclose it, and OQ-10 assigns source alignment to planning. This is an explicit boundary, not a claim of already implemented source unification. Evidence: all-probes.log; repo/internal/validate/readiness/g1_round6_baseline_probe_test.go."
+    },
+    {
+      "severity": "info",
+      "title": "Spec validation output",
+      "detail": "Built the reviewed commit in the independent scratch clone and ran that binary as mindspec validate spec 129-readiness-tracker-honesty in the source worktree. Exit 0. Stdout exactly: \"129-readiness-tracker-honesty: 1 issue(s) found\\n\\n  [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one\\n\". Stderr empty. All fresh G1 probe tests pass in internal/next, internal/lifecycle and internal/validate/readiness. No full implementation suite is claimed for this document gate. Evidence: validation.json and all-probes.log. gh issue view 239 failed with error connecting to api.github.com; live issue bodies were not independently retrieved this round."
+    },
+    {
+      "severity": "info",
+      "title": "Errors in this BRIEF",
+      "detail": "The historical Round-2 arithmetic still says 95 asks with 91 fixed and 2 refuted. consolidated-round-1.md has 95 coverage rows: 93 FIXED dispositions (including two with refuted premises) and 2 REFUTED. Reviewer conduct also suggests git worktree add although that writes source administrative metadata, conflicting with read-only review; I followed the user's independent-clone instruction. The Round-6 registration inventory needs a scope qualifier: the current main checkout has 59 spec-local reviews/* registrations with zero per-round -rN slugs, but all .mindspec panel files total 64 and include .mindspec/reviews/prerelease-r2/panel.json. Thus the 59/zero statement describes the spec-local inventory, not every panel directory. This does not change the normative rule or its documented separate-directory refusal. No further current briefing errors found."
+    }
+  ]
+}

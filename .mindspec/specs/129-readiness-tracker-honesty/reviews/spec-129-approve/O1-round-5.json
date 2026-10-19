@@ -1,0 +1,36 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "O1 claude-opus-5-5",
+  "confidence": 0.82,
+  "rationale": "Both of my round-4 asks are addressed. Plan mapping is now the AND of a positional section and a work_chunks id, through one shared PlanMapsBead, and the jfgj.4 and cter.8 examples are correct. Every new grounding claim I was asked to check holds against the tree. panel.json is a full-struct overwrite with round and SHA co-bumped, so separate rounds exist only as separate dirs. extractBeadSectionRaw is positional. TestReattest_HappyPathFleetState and its Wrote=false leg exist. MergeMetadata is read-merge-write and both binding writers use it. The reattest op and at constants back the audit shape check. The one inaccuracy is rationale-only: #233's 'tree-identical' second parent describes the issue's older binary; at e2325e36 complete's S-stage adds a JSONL-sync commit. The ancestor-based anchor rule is correct regardless.",
+  "concrete_changes_required": [
+    "R4.2 F2 'Anchors' and AC-12(iv): replace 'complete adds a tree-identical commit after review' with wording that does not assume tree identity. At e2325e36 complete's M/S stages may add a materialization commit and a .beads/issues.jsonl sync commit; #233 observed a tree-identical wrapper on an older binary. The ancestor-based rule is unchanged."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-4 ask status",
+      "detail": "Re-read from disk at 7404845f. O1r4.1 (AND mapping, one helper): ADDRESSED. R1.1(c) now requires BOTH at least N '## Bead ' headings AND a work_chunks id N, through one shared readiness.PlanMapsBead called by selection and evaluateMF1. A half-mapped N is N4, and content-level MF-1 failures stay NOT-READY. AC-1's H (chunk 10, no 10th section) pins the half-mapped leg. O1r4.2 (jfgj.4 example): ADDRESSED. mindspec-cter.8 is now the out-of-range example (093's plan has 7 sections), and mindspec-jfgj.4 is the counter-example for 'type is not a membership input'. I verified it is 073's mapped '## Bead 4' (plan.md:69), typed bug. Round-4 nits: ADDRESSED. There is a new ReattestStateMultipleFallbackCandidates, and ReattestStateAmbiguous is unchanged. TestReattest_HappyPathFleetState's no-op leg is named as staying green."
+    },
+    {
+      "severity": "INFO",
+      "title": "New claims verified at 7404845f",
+      "detail": "(1) panel.json round is bumped in place. internal/panel/create.go: Create writes panel.json as a full-struct overwrite and never reads the existing file; panel.go:46-48 documents that Round and ReviewedHeadSHA co-bump in the same write; ms-panel-run SKILL.md:67 says the same. A single registration dir therefore holds only its latest round's SHA, and multiple rounds are visible to F2 only as separate dirs (the documented '-r2' slug convention, SKILL.md:28). AC-11's 'separate registration dirs, each with an explicit round' matches. (2) extractBeadSectionRaw is positional (readiness.go:281-310): it counts '## Bead ' headings and captures the Nth, ignoring the written number, exactly as R1.1(c) and AC-1's 1\u20137,12 fixture state. (3) TestReattest_HappyPathFleetState exists (reattest_test.go:93), with a re-run leg asserting Wrote=false and no extra writes. (4) bead.MergeMetadata (bdcli.go:322-349) is read-merge-write (GetMetadata, overlay updates, one bd update --metadata), and both the executor binding writer (mindspec_executor.go:1616 mergeBindingFn) and reattest (reattest.go:93 reattestBindingFn) use it. So an executor rewrite leaves prior mindspec_landed_reattest_* keys in place, as the stale-audit argument assumes. (5) reattestOp is the constant \"mindspec reattest\" (reattest.go:112), 'at' is written as RFC-3339 (:360), and the scanned_branch key exists, so the VALID-audit shape check has real anchors. (6) gitutil already has a 'git show <ref>:<path>' read (gitops.go:734), and internal/next already imports gitutil (guard.go). The lazy spec-branch plan.md read is therefore not a new boundary crossing."
+    },
+    {
+      "severity": "MINOR",
+      "title": "The #233 second parent is described as a 'tree-identical' commit; that matches the issue's older binary, not necessarily e2325e36",
+      "detail": "GH #233 observed a tree-identical wrapper commit ('impl(<id>): <summary>' with no diff from its parent) on the binary it was filed against. At e2325e36, mindspec complete runs spec 128 Bead 6's M/S staged protocol (internal/complete/materialize.go). The S(ync) stage commits the .beads/issues.jsonl export (stageArtifactSync), so the second parent can be one or more commits after the reviewed head that are NOT tree-identical. The executor's msg auto-commit (mindspec_executor.go:369) is a further possible commit. F2's anchor rule is 'reviewed_head_sha equals or is an ancestor of the second parent', so it is correct either way and does not depend on tree identity. Only the rationale text (R4.2 F2 'Anchors', AC-12(iv)) overstates it. Reword it to 'complete adds one or more commits after review (#233 saw a tree-identical wrapper; the current M/S stages may add a materialization commit and a JSONL-sync commit)', and keep OQ-3's plan-stage measurement as the place this is pinned."
+    },
+    {
+      "severity": "INFO",
+      "title": "Attack on the anchor/round rule: no masquerade found; the round-default tie is fail-closed but worth naming",
+      "detail": "Can a later unlanded round masquerade as an anchor? An anchor needs reviewed_head_sha equal to or an ancestor of the candidate's second parent. A later round's SHA C is an ancestor of the second parent only if the landed history contains C, in which case C landed and is legitimately an anchor. Without forging panel.json (agent-writable, inside ADR-0037 \u00a78's stated boundary), C cannot pass as an ancestor of the second parent while being unlanded. One operational edge: ms-panel-run's 'round' input defaults to 1 (SKILL.md:30), so an orchestrator that uses the '-r2' separate-slug convention but omits --round produces two dirs both at round 1. If one of them is a non-ancestor of the tip, F2 sees a tie and fails closed. That is safe, and the exits are named (scoped override, attested restore). But it is a plausible honest-operator refusal, and the F2 refusal text could say 'registrations <dirs> share round <n>' so the fix (re-register with explicit rounds) is obvious. Optional."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "None found. The Round-5 section's descriptions of (A) the audited tuple, (B) the round rule, and (C) PlanMapsBead match the diff. Its note that older round sections still say '129b' is accurate."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "G3 gpt-6.1-sol",
+  "confidence": 0.95,
+  "rationale": "Reviewed 8b3a5535fcd7297031d8a434ec7a1f26eee77887, the complete BRIEF including Round 6, my Round-5 verdict, consolidated-round-5.md, the Round-6 spec diff, R4/R6 and their ACs, ADR-0041/0045, and relevant existing git, panel and reattest code. All three of my Round-5 required changes are addressed. F2 no longer gives rounds or anchors acceptance authority, and the no-op now requires a VALID audit. Real-git contract probes using the shipped panel writer/scanner support the normal-completion and conservative-refusal claims. The five existing reattest safeguard tests passed. The remaining panel-edit and metadata-forge reach is expressly acknowledged and pinned, rather than represented as prevented. I found no new false PASS or override widening beyond that stated trust boundary. This is approval of the spec contract, not certification of the future fallback or schema-v2 implementation. All mutations were confined to the assigned scratch directory.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-5 ask status",
+      "detail": "G3r5.1 ADDRESSED: spec.md:414-425 replaces the cross-directory numeric-round comparison with refusal for every visible outside-tip reviewed SHA, abandoned registrations included. Rounds are diagnostic data only. AC-11(x-c), (xv) require refusal at fresh acceptance and read-back despite a genuine VALID matching audit; varying the new panel's round cannot change the result. G3r5.2 ADDRESSED: :422 removes anchors entirely, so adding an abandoned common-ancestor registration cannot neutralise an outside-tip review. AC-11(x-a) pins refusal with and without that ancestor, and (i-c) preserves the actual completion-descendant positive without assuming tree identity. No global filtering of abandoned registrations is proposed. G3r5.3 ADDRESSED: :443 requires a VALID audit as well as tuple equality for the fallback no-op; malformed matching-tuple audits must be regenerated after F1-F5. AC-11(i-m) pins refusal, explicit repair, successful read-back and subsequent Wrote=false; the existing primary-path no-op remains explicitly preserved. AC-18 carries these contracts into the eventual ADR-0041 amendment. The amendment is an implementation deliverable, not falsely claimed to exist already."
+    },
+    {
+      "severity": "info",
+      "title": "Normal completion and the conservative rebased-review boundary",
+      "detail": "TestG3R6NormalCompletionF2Contract builds three real off-first-parent histories: one review at the landing's second parent, a reviewed commit followed by an artifact-sync completion commit, and a reviewed commit followed by a fix and completion commit. In all three, the literal F2 predicate passes because the reviewed SHA remains in the spec tip's ancestry. The fixture verifies that the landing is reachable but absent from the tip's first-parent merge log. TestG3R6RebasedReviewF2Contract uses the shipped panel.Create twice on the same directory: overwriting an old outside-tip SHA with the landed review passes; retaining the old SHA in a second directory refuses. Therefore a genuine completed bead CAN still be refused under the documented per-round-slug/rebased-history pattern. R4.2 now states that boundary explicitly and supplies the dependent's scoped MF-3 override exit. It is conservative and no longer disguises independent counters as proof of supersession. The ordinary #239 and #233-descendant shapes remain recoverable under the written reattest contract and AC-11(i)/(i-c). These are real-git probes of the new predicate, not executions of an implemented fallback reattest."
+    },
+    {
+      "severity": "info",
+      "title": "Stale, abandoned and forged registration attacks",
+      "detail": "TestG3R6CrossDirectoryAndAbandonedF2Contract creates landed A in an old slug at round 5 and genuinely later unlanded B in a new slug. The written F2 refuses for B at rounds 1, 6 and zero; adding an abandoned high-round common ancestor does not change refusal, and abandoning B itself also does not change it. A malformed option-like SHA is rejected before the model invokes git. Removing B's registration makes F2 pass, confirming the expressly documented residual. R4.2:445-448 still requires VALID audit tuple == binding == independently scanned single candidate and re-runs every safety check at read time. Thus stale audits, an authentic audit followed by a new outside-tip registration, or metadata forgery alone cannot bypass the new F2. Panel deletion/SHA rewriting plus a forged tuple can still admit an undirected sibling merge; :453-456 and AC-11(ix-g) state that NEW bounded reach and the absence of a JSONL trace for the panel edit. This remains an agent-writable anti-footgun boundary, not authentication. I request no new signing or panel substrate."
+    },
+    {
+      "severity": "info",
+      "title": "Scoped override remains bounded by the written failure identities",
+      "detail": "R6's gate and read-back rules are unchanged by this round. A fresh claim requires the explicit current failing-signal superset and fresh evidence, never an existing marker; named-but-passing signals are omitted from the replacement marker. Automatic dispatch coverage requires a VALID schema-v2 marker and subset inclusion of every current per-record digest. Added dependencies, changed failure classes/candidate identities and extra MF-4 occurrences therefore uncover; shrinkage remains covered. Indeterminate failures are never coverable, including by a shape-valid forged marker. R6.1-4 and AC-15-17 retain the explicit-narrower-request, growth, multiplicity, legacy/malformed, mixed-coverage and fresh-reclaim cases. The marker remains forgeable as declared, and its evidence digest is an audit annotation, not proof that the justification is true. I found no new widening within the specified failure-record identities. This is a review of the future schema-v2 contract, not a claim that today's reader implements it."
+    },
+    {
+      "severity": "info",
+      "title": "Verification and limits",
+      "detail": "Scratch clone repo is detached at the reviewed full SHA. Probe source: repo/internal/lifecycle/g3_round6_probe_test.go; output: probe-results.txt. Three new contract test functions passed, including the three normal-completion subtests. The shipped panel.Create, Scan and ForBead execute in those probes; the new F2 predicate is explicitly modelled because the fallback does not yet exist. Five existing tests also passed unchanged: TestReattest_HappyPathFleetState, TestReattest_ContradictoryBindingOverwrittenAudited, TestReattest_RevertedRefuses, TestReattest_MaskedRevertOldestAnchored and TestReattest_StaleOlderRemergeBindingRewrittenToNewest. go run ./cmd/mindspec validate spec 129-readiness-tracker-honesty exited 0 and printed only '[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one' (validate-results.txt). No complete fallback-reader, schema-v2 implementation, full test-suite or bd mutation run is claimed. Probe repositories, caches and logs stayed under the assigned scratch path; the source worktree was not modified."
+    },
+    {
+      "severity": "low",
+      "title": "Errors in this BRIEF",
+      "detail": "No material error found in the current Round-6 description. Two historical/instructional defects remain: line 86 says the TODO/comment grep finds only the two header markers, but that sentence itself contains TODO(skill) and is a third match, verified fresh from disk. The reviewer-conduct bullet suggests git worktree add against the read-only source, which would write source git administration; I followed the user's explicit --no-hardlinks scratch-clone instruction instead. The header's beside-BRIEF verdict location is explicitly overridden later in the BRIEF and by the user. These observations do not require changes to the spec under review."
+    }
+  ]
+}

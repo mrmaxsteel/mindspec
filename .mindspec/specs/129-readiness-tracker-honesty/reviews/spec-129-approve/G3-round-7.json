@@ -1,0 +1,23 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "G3 gpt-6.1-sol",
+  "confidence": 0.96,
+  "rationale": "Regression-reviewed git diff 8b3a5535 e7388f71 against the resulting R4 and R6 contracts. No defect introduced in the MF-3/override adversary lens. Well-formed outside-tip registrations still veto fallback acceptance and audited read-back regardless of round or abandonment; absent commit objects explicitly refuse. Empty and placeholder values cannot corroborate a merge. Rewriting a real review into either remains within the already documented agent-writable panel-edit residual. Per-checkout visibility is now explicit and pinned rather than represented as global assurance. R6 is unchanged: fresh scoped authority, complete failure-set fingerprints, marker replacement, and indeterminate refusal remain intact.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "title": "R4 regression check",
+      "status": "PASS",
+      "detail": "The diff does not restore round/anchor authority, let an abandoned ancestor neutralize an outside-tip SHA, or let a stale audit bypass F1-F5. Placeholder skipping does not create corroborating evidence or remove any independent git-derived check. The panel-edit and checkout-visibility limits remain expressly acknowledged and covered by AC-11. Malformed option-like/revision-expression values fail closed in F2 and never reach git."
+    },
+    {
+      "title": "R6 regression check",
+      "status": "PASS",
+      "detail": "No R6 changes occur in this diff. The clarified MF-3 recovery still names only the dependent's scoped override with evidence; it grants neither flagless claim authority nor coverage for a new signal or enlarged failure set."
+    },
+    {
+      "title": "Errors in this BRIEF",
+      "detail": "none found"
+    }
+  ]
+}

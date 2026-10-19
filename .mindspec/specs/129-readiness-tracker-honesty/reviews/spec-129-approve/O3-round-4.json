@@ -1,0 +1,44 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.8,
+  "rationale": "The finder-only fallback is the simplest sound fix for #239's off-first-parent shape. No automatic path accepts a fallback candidate; MF-3 fails loudly, naming the merge and `mindspec reattest`, and only the operator-invoked reattest accepts it, under three added refusals. Re-running my round-2 and round-3 probes at a593792a, every shape admits exactly one fallback candidate: off-first-parent landing with refresh, the reverted landing, the stale-round sibling merge, the stale tip reset, and the forged binding (the octopus admits 0). Under the finder-only rule none of them can pass automatically, and the reattest refusal (ii) UnlandedReview is what stops my stale-round variants. MF-1-mapped membership is the simplest correct fix for the follow-up-bug case. It reuses the mapping MF-1 already applies, costs one plan.md read, and is consistent with plan approve's bd-minted E.1..E.k order. Three precision gaps remain, none blocking. (1) The forged-audit residual is stated but misclassed as 'the same class' Spec 125 accepts. Pre-129, a forged binding could confirm only a subject-owned FIRST-PARENT merge on the spec branch. Post-129, a forged reattest-audit plus binding confirms an undirected off-first-parent merge, including a sibling-bead merge of a stale round, which FAILs today. The cheap fix is for the automatic read-back to re-derive reattest's deterministic refusals (i) and (ii) from git and the panel scan instead of trusting the audit alone. (2) Refusal (ii) sees only registrations in the scanned roots, and an unlanded round's panel.json may live only on the unlanded bead branch. (3) Membership mapping 'a ## Bead N section OR a work_chunks id N' is weaker than MF-1, which requires both.",
+  "concrete_changes_required": [
+    "R4.2 read-back: on every automatic read of a reattest-audited binding for a fallback candidate, re-evaluate reattest's deterministic refusals (i) 'exactly one admitted candidate' and (ii) 'no registered reviewed_head_sha outside the tip's history' from git and the panel scan. Treat the audit keys only as the record that an operator vouched, not as a substitute for those checks. Then a forged mindspec_landed_reattest_* record can skip the vouching but not the safety checks. If you decline, correct the residual sentence: a forged audit reaches a candidate class (an undirected off-first-parent merge, e.g. into a sibling bead) that a forged binding could not reach pre-129, so it is not 'the same class' Spec 125 accepted. It is a new, stated reach that FAILs today.",
+    "R4.2 refusal (ii): state its visibility limit. It sees only registrations panel.Scan finds in the scanned roots (repo root plus the spec dir in the current tree). A review round committed only on an unlanded bead branch (the exact stale-round shape) may be invisible, and reattest then accepts on the operator's vouching alone. Its output should say 'no unreached review registration found in <roots>', not imply none exists.",
+    "R1.1(c): require the mapping MF-1 actually needs, at minimum the '## Bead N' section (MF-1's first check), or both section and work_chunk. Do not accept 'section OR work_chunks id'. A row mapped only by a work_chunk is otherwise a selectable member that MF-1 refuses on every claim, which is the selectable-but-unclaimable dishonesty line 244 rejects."
+  ],
+  "findings": [
+    {
+      "severity": "MINOR",
+      "title": "Forged reattest audit reaches a candidate class pre-129 forgery could not",
+      "detail": "Pre-129, FindLandedMerge nominates only first-parent subject-owned merges, so a forged binding can at most confirm a real landing on the spec branch. Post-129, the automatic read-back accepts an off-first-parent undirected 'Merge bead/X' candidate iff the binding names it AND carries mindspec_landed_reattest_* keys whose scanned branch matches. Both are agent-writable bd metadata, exported to the tracked JSONL. In my stale-round shape (X's round-1 tip A merged into bead/Y, B never lands), a forged binding plus audit gives an automatic MF-3 PASS where today gives ErrLandedMergeNoCandidate. The residual is stated (spec line 378) and is detectable by inspection, but it is called 'the same class', which it is not. Re-deriving refusals (i) and (ii) at read time closes it at no new datum cost."
+    },
+    {
+      "severity": "MINOR",
+      "title": "UnlandedReview guard depends on registration visibility",
+      "detail": "reviewedHeadSHAForBead scans the repo root and workspace.SpecDir(root, spec), i.e. registrations present in the CURRENT tree. panel.json files are git-tracked (59 under .mindspec/specs/*/reviews/ on this branch). A round committed only on bead/X, which never landed and was deleted, is invisible, and refusal (ii) passes vacuously. Probe re-run: each of my shapes admits exactly 1 fallback candidate, so refusal (i) never fires, and (ii) is the only guard for the stale-round class."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Membership mapping is weaker than MF-1's",
+      "detail": "R1.1(c) accepts '## Bead N section OR work_chunks id N'. evaluateMF1 fails on a missing section first, then on a missing chunk. A section-less, chunk-only row is selectable and then refused NOT-READY on MF-1."
+    },
+    {
+      "severity": "INFO",
+      "title": "Finder-only fallback and MF-1-mapped membership are the simplest correct designs",
+      "detail": "Finder-only removes the enumerate-the-corroborations treadmill (three rounds, three false PASSes) by never auto-accepting, and keeps #239 loud, named and one-command recoverable. MF-1-mapped membership matches how plan approve mints IDs (bd auto-numbers E.1..E.k in plan order; internal/approve/plan.go's create argv carries no explicit ID), so mapping by N is the same invariant MF-1's beadIndex already relies on. Scoping UnlandedReview to fallback candidates is correct: on the primary path a rebased-away round is normal, and a global refusal would deadlock reattest (ADR-0041 \u00a72(i))."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-3 ask status",
+      "detail": "O3r3.1 (plan mapping in membership): PARTIAL. Added, but as 'section OR work_chunk', weaker than MF-1 (MINOR above). O3r3.2 (reconcile R1.2/AC-4(v) follow-up child): ADDRESSED (N4 informational; AC-1 O; AC-4(v) not in the tally). O3r3.3 (N1 recovery only for mapped N): ADDRESSED (N1/N2b require N mapped; N4 offers no bd update). O3r3.4 (refuse the stale-round fallback): ADDRESSED by stronger means: finder-only automatic paths plus reattest ReattestStateUnlandedReview; AC-11 (vii)-(ix). NEW_ISSUE: the guard's registration-visibility limit (MINOR above). O3r3.5 (correct the binding-strength sentence): ADDRESSED (agent-writable, written by executor and reattest; residual stated). NEW_ISSUE: the residual is misclassed as 'the same class' (MINOR above)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "None material. The Round-4 summary of Ruling 1 ('later automatic reads accept a fallback candidate only through a reattest-audited binding') matches spec R4.2. One wording gap: the BRIEF and spec both present the audited read-back as closing the forge question, while the spec's own residual concedes the audit keys are agent-writable."
+    }
+  ]
+}

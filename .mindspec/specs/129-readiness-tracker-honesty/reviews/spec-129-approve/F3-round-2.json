@@ -1,0 +1,68 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "F3 claude-fable-5-1",
+  "confidence": 0.8,
+  "rationale": "All fourteen of my round-1 asks are addressed at cb272d50 (one with a refuted premise that I re-verified: ready rows DO carry parent and metadata when set). The narrowed plan-bead selection still fixes #255 (every dropped bead is a member or a named near-miss, and the plan-form+parent set is exactly what readiness, MF-1 and complete can evaluate; the N1 recovery is real on bd 1.1.0, re-verified). The design is sound; what remains is two stated guarantees that are false as written and need a sentence each, plus five smaller completeness gaps. (1) R1.8 / Goal (c) promise that `next` never validates one spec and dispatches into another, but on the unscoped path with no resolvable spec (`specFlag == \"\"`) `DispatchBead` branches the bead from HEAD, and R1.8 as written has no claim-spec to compare against there. (2) R4.2 says the fallback excludes 'a merge into another bead or spec branch', but `gitutil.MergeInto`'s subject `Merge bead/<id>` carries no target, so for that form the direction pin is source-only; the exclusion claim would be recorded falsely in the ADR-0041 amendment. Neither needs a redesign.",
+  "concrete_changes_required": [
+    "R1.8 / Goal (c): define the unscoped case where no target spec resolves (`specFlag == \"\"` after `resolve.ResolveTarget` fails non-ambiguously). Today `EnsureWorktree(root, id, \"\", exec)` → `DispatchBead` sets `baseBranch = \"HEAD\"` (internal/executor/mindspec_executor.go) — the bead branch is cut from whatever the invoking checkout has checked out. Require: for a lifecycle bead, the lineage-resolved spec that `EvaluateReadiness` returns BECOMES the dispatch spec (passed to `EnsureWorktree`/recording), or the claim refuses naming HEAD; add an AC-6 leg for it. Without this, Goal (c)'s 'never dispatches into another spec' is not a guarantee.",
+    "R4.2 fallback direction pin: state honestly that the `Merge bead/<id>` form (gitutil.MergeInto) carries no target, so for that form the fallback pins only the SOURCE; only the `Merge branch 'bead/<id>' into <spec-branch>` form pins both. Replace the bullet 'excludes a merge into another bead or spec branch' with the true statement, decide the outcome for a `Merge bead/X` made into another branch that is later reachable from the spec tip (content reachable, second parent = X's tip, corroborated — identify, or not?), pin it with an AC-11 fixture, and carry the same wording into the ADR-0041 Amendment (Spec 129) item (i) and the `ErrLandedMergeNoCandidate` doc.",
+    "R1.4 exit code: the ≥1-near-miss → non-zero rule now covers title- and metadata-linked rows from the GLOBAL ready set, so one permanently bd-ready follow-up bead whose title contains the full spec ID (this repo has such a title today: '…mindspec-098-spectoidle-coverage…') makes every empty-set `next --spec S` exit non-zero forever, including for a spec whose child-derived phase is `review`. Restrict the non-zero exit to descendant-set near-misses (N1, N2, descendant-N3), make title/metadata near-misses informational on stderr, and add an AC leg: a review-phase spec with only a title near-miss exits 0 and still names it.",
+    "R1.3: define the sentence for a positional that IS in the global ready set but is neither a member nor a near-miss (a plan bead of another spec, or an unrelated task). As written it falls into neither 'near-miss sentence' nor 'absent from the global ready set', and today's 'not found or not ready' would be false (it is ready). Suggested: `bead <id> is bd-ready but is not linked to spec <S>` plus, when its row carries `parent`, `(parent: <P>)`.",
+    "R6.4 recovery for an in-progress bead: the LEGACY arm's recovery ('re-record with --allow-not-ready=<ids> --evidence …') and the uncovered-signal exit name no verb, and `mindspec next` cannot re-select an in_progress bead. State the path: `mindspec release <id>` (removes the worktree, keeps the branch, returns the bead to open) then `mindspec next <id> --allow-not-ready=<ids> --evidence <path-to-justification>`, and pin that the re-claim reuses the surviving bead branch (AC-17 leg).",
+    "R6.4 digest input: 'sha256 of the signal's rendered Detail' is ambiguous because `readiness.Render` escapes. Specify the raw `Signal.Detail` string (pre-render), produced by one shared function used by both the writer (`RecordReadinessOverride`) and the reader (`ready-check`), and pin writer/reader agreement with a test over a Detail containing a control byte.",
+    "R4.1 (ii): record what was measured — `bd show --json` dependency entries carry `metadata` and a `parent` key that is null even when the dependency has a parent (verified: a plan bead with parent E shows `parent: null` in the dependent's entry). Say explicitly that (iii) must not short-circuit on that null, so the implementer does not read it as 'parent none'."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-1 ask status",
+      "detail": "F3.1 (metadata-only members un-claimable) — ADDRESSED: Option N narrows selection to plan beads; M-class rows are N3 near-misses (R1.1/R1.2, OQ-9). F3.2 (reparent recovery dead-ends) — ADDRESSED: N1 only for plan-form rows; re-verified on bd 1.1.0 that `bd dep remove` leaves a dotted child in `bd ready --parent E` with no parent, and `bd update --parent E` restores `parent: E` plus the parent-child epic edge `FindEpicForBead` reads; the ID stays dotted. F3.3 (conflicting linkage) — ADDRESSED by tree-only membership plus R1.8, with a NEW_ISSUE on R1.8's unscoped/HEAD case (ask 1). F3.4 (R4.1 title fallback / fail-open) — ADDRESSED: three-disjunct, title-free, read-error → FAIL (R4.1, AC-10 d/f/g). F3.5 (R4.2 consumer blast radius) — ADDRESSED: consumer table, fallback scoped to MF-3 and reattest, AC-11 (vi); NEW_ISSUE on the direction-pin claim (ask 2). F3.6 (ms-bead-impl prose) — ADDRESSED: R6.5 removes it, pins rewritten. F3.7 (tally universe / 'all blocked') — ADDRESSED: child list is now the whole member set; 'none bd-ready' wording; `bd blocked --parent` verified. F3.8 (epic row) — ADDRESSED: stripped explicitly; no epic spec_id. F3.9 (ready rows lack parent/metadata) — PREMISE REFUTED, verified: in a fresh bd 1.1.0 db, rows print `parent` when set and `metadata` when set (omit-when-empty); my round-1 measurement was on rows that had neither. The cost ask is nonetheless satisfied (two `bd ready` calls, no per-bead show). F3.10 (AC-10 fast-forward fixture) — ADDRESSED: AC-11 (i) is the #239 topology (spec content reaches main via a sibling PR merge, spec fast-forwarded to main). F3.11 (R2.3 explicit -n / lint scope) — ADDRESSED: waist has no cap escape, call-site lint, each literal dispositioned, `list` honestly has no notice guard. F3.12 (bare flag with nothing failing; release; marker staleness) — ADDRESSED: `recovery: mindspec next <bead-id>` when nothing fails; release disposition stated; per-signal detail digest; no flagless re-claim. F3.13 (settled fact 1 vs removed title filter) — ADDRESSED: R1.7 names the rewritten 128 tests. F3.14 (marker read outside engine) — ADDRESSED: R6.2 last bullet, AC-17."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R1.8's guarantee has a hole on the unscoped path: the bead branch is cut from HEAD",
+      "detail": "`cmd/mindspec/next.go` leaves `specFlag == \"\"` when `resolve.ResolveTarget` fails non-ambiguously ('Non-ambiguous errors are OK — next will query all ready work'). `EnsureWorktree(root, id, \"\", exec)` → `MindspecExecutor.DispatchBead` sets `baseBranch = \"HEAD\"` when specID is empty. R1.8 says GateReadiness receives '--spec, or the unscoped path's resolved spec' and that the guard 'holds by construction for R1.1 members' — but in this branch there is no resolved spec to compare against, and the dispatch target is the invoking checkout's HEAD (main, or another spec's worktree). Goal (c) states the opposite as a guarantee. Fix: when specFlag is empty, the lineage spec becomes the dispatch spec, or the claim refuses."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.2's 'direction-pinned' fallback is source-only for the `Merge bead/<id>` form",
+      "detail": "`gitutil.MergeInto` produces `Merge bead/<id>` with no target in the subject (landed.go's parseMergeSubjectBeadBranch documents both forms). The spec says the fallback 'excludes … a merge into another bead or spec branch'; that is only enforceable for the `Merge branch 'bead/<id>' into <spec-branch>` form. A `Merge bead/X` made by mindspec into the wrong spec branch (exactly the mis-dispatch class R1.8 says exists today) and later reachable from spec/S's tip is admitted by the fallback, corroborated by X's surviving tip or binding, and passes the net-effect test. Whether that should identify is a defensible call either way (the content is reachable), but the claim as written is false and would be copied into the ADR-0041 amendment. State it, decide it, and pin it."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Global-set near-misses now drive the empty-set exit code",
+      "detail": "R1.4 exits non-zero when ≥1 near-miss exists, and R1.2 draws near-misses from the global `bd ready -n 0` by title or metadata.spec_id. A long-lived follow-up bug bead whose title contains the full spec ID (live example in this repo: a ready bead titled '[098 follow-up] mindspec-098-spectoidle-coverage: …') makes `next --spec 098-spectoidle-coverage` non-zero on every empty result, for as long as that bead stays open — an orchestrator loop reads that as a tool failure even when the child-derived phase is `review`. The 128 loud-empty class was scoped to the descendant set; extending it to title matches over the whole tracker couples one spec's exit code to unrelated beads' prose."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.3 leaves one positional class undefined",
+      "detail": "A positional that is present in the global ready set but neither a member nor a near-miss (another spec's plan bead, or an unlinked task) matches none of R1.3's bullets; the residual 'not found or not ready' is false for it."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6.4's LEGACY/uncovered recovery names no verb reachable from an in-progress bead",
+      "detail": "`mindspec next` cannot re-select an in_progress bead, so 're-record with --allow-not-ready=<ids> --evidence …' is not pasteable as written (ADR-0035). `cmd/mindspec/release.go` removes the worktree and returns the bead to open (branch kept), after which `next <id> --allow-not-ready=… --evidence …` re-claims and `DispatchBead` reuses the surviving branch — that path should be the stated recovery, with an AC."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Detail-digest input is ambiguous (rendered vs raw)",
+      "detail": "R6.2/R6.4 say 'sha256 of the signal's rendered Detail'. `readiness.Render` applies termsafe escaping; if the writer hashes raw `Signal.Detail` and the reader hashes the rendered line (or vice versa) every control-bearing Detail is permanently uncovered. One shared function over the raw Detail, pinned by a test with a control byte."
+    },
+    {
+      "severity": "MINOR",
+      "title": "bd show dependency entries carry a null `parent` even when the dependency has one",
+      "detail": "Measured on bd 1.1.0: for dependent X blocked by plan bead A (parent E), X's `bd show --json` dependency entry for A is `{issue_type: task, status: open, dependency_type: blocks, metadata: {spec_id: …}, parent: null}`. Background C says entries carry metadata 'but not its parent' — accurate in substance, but the key is present and null, so R4.1 (iii) must be specified to ignore it and do the `bd show <D>` read."
+    },
+    {
+      "severity": "INFO",
+      "title": "Verified at cb272d50 (no change needed)",
+      "detail": "Ready rows: `parent`/`metadata` omit-when-empty (lab); detached `<E>.N` still in `bd ready --parent E` with no parent, reparent restores parent + parent-child epic edge, ID unchanged (lab); `bd show` dependency entries carry `metadata` (lab); `phase.DerivePhaseDetail` exists (internal/phase/derive.go); plan-approve titles are `[<spec-id>] <heading>` so R1.1 members are title-independent as claimed; #255 is fixed under Option N for every bead shape (member if plan-form+parent, else N1/N2/N3 named, never 'No ready work found'); AC-11 (i)'s topology is a genuine off-first-parent landing; ADR-0041 is correctly NOT edited in this commit (the amendment lands with R4/R6 per the spec). No worktree was created; the only scratch was a throwaway bd database under the r2/F3 scratch dir, removed."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) The panel header at the top of the BRIEF still says to write `<your-slot>-round-2.json` beside this BRIEF (line 12); the corrected rule (line 66: scratch path, orchestrator copies) is further down, so the header still contradicts the conduct section — the header should be regenerated, not only overridden below. (2) The round-1 TODO(skill) placeholder sections are still present above the real sections. (3) The Round 2 section's summary says the consolidation reports '0 deferred to this spec' — correct, but the consolidation also introduces three new deferrals (phase-lineage unification → 129b, #233 → 130, S0 → 130) that no reviewer asked for; the BRIEF should point reviewers at those as new scope decisions to check (F1's lens). Otherwise none found: cb272d50 is the fix commit, and the design-change list (a)–(e) matches the spec text."
+    }
+  ]
+}

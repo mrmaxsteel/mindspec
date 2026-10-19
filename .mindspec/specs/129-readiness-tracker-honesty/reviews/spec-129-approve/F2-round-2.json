@@ -1,0 +1,68 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "F2 claude-fable-5-1",
+  "confidence": 0.8,
+  "rationale": "Round 2, lens: AC falsifiability and internal consistency, re-derived against cb272d50. Of my 20 round-1 asks, 18 are ADDRESSED and 2 were REFUTED on a premise I re-verified myself: registerLandedPanel exists at internal/validate/readiness/fixtures.go:189 (my grep was restricted to *_test.go), and in a throwaway bd 1.1.0 database a ready row with a parent and metadata carries both fields (pr-nnb.1 parent=pr-nnb metadata={spec_id:s}), so they are omit-when-empty and the live repo (106 ready rows, none parented) could not discriminate. The new design is internally far tighter: one plan-bead predicate, DerivePhaseDetail with stored and child-derived printed separately, the fallback scoped and priced in ADR-0041, the #232 fixture red today, the fake-bd cap, no evidence text in the JSONL. What remains is one consistency defect I would not ship as-is and a handful of pins: R1.4 makes every empty scoped `next` exit non-zero whenever ANY near-miss exists, including non-lifecycle follow-up children (bug/feature under the epic, which phase derivation deliberately excludes) and any bead anywhere whose title contains the spec ID — a permanent, by-design, non-repairable state rendered as a failure, contradicting OQ-7's own HC-4 criterion. R6.1's 'non-empty subset' proceed rule contradicts its 'named but passing — not recorded' note for the nothing-failing case. R1.4 says the recovery line is keyed on the child-derived phase but two tallies map to 'plan'; AC-11 (iii) and R4.2's target claim for the `Merge bead/<id>` form are under-specified. All are text-level fixes.",
+  "concrete_changes_required": [
+    "R1.4 / OQ-7 / AC-4 fifth fixture: do not exit non-zero for every near-miss. A non-lifecycle near-miss (issue_type bug/feature/chore, the follow-up children phase.classifyChild excludes from derivation) and a title-only N3 hit are by-design non-selectable and non-repairable, so under HC-4 the read evaluation completed and the result is honest at exit 0 with the near-misses named. Reserve non-zero for N1/N2 (plan-form beads with a missing or foreign parent) and for N3 near-misses of lifecycle type under E. State the rule in R1.4 and OQ-7 and split the AC-4 fifth fixture into the two cases.",
+    "R6.1: reconcile 'GateReadiness proceeds iff the currently failing set is a NON-EMPTY subset of the named set' with 'A named signal that passes prints MF-x named but passing — not recorded'. Decide the nothing-failing-with-scoped-flag case (recommend: proceed as a normal claim, print the note, write no marker, and do not require --evidence when nothing is recorded) and add that leg to AC-15.",
+    "R1.4: the four arms are keyed on the child TALLY, not on the child-derived phase alone — DerivePhaseFromChildren maps both 'zero lifecycle children' and 'all lifecycle children open, none claimed' to `plan`. Say 'keyed on the tally' and make AC-4 (iii) state whether any child is closed, so the expected `child-derived phase:` value (`implement` vs `plan`) is pinned.",
+    "AC-11 (iii): state the full topology — which merge names bead/X (its own `Merge bead/X` landing, and where it sits relative to the first-parent chain) and that `Merge branch 'bead/X' into bead/Y` is NOT nominated for X — so 'both X and Y are identified' is falsifiable. As written, R4.2 excludes 'a merge into another bead branch', so X cannot be identified from that merge.",
+    "R4.2 and ADR-0041 Amendment (Spec 129) item (i): for the `Merge bead/<id>` subject form the target branch is not in the subject, so 'with the spec branch as its target' cannot be checked on that form. State that the guarantee for that form is reachability from the tip + exact corroboration + the net-effect test, not target identity, and name the residual (a bead landed on another spec branch whose history later reaches this tip is admitted).",
+    "R1.8: state the case where no spec is resolved on the unscoped path (ResolveTarget's non-ambiguous error leaves specFlag empty and BuildReadySet goes global): is the lineage-equality check skipped, or is the lineage spec then the dispatch spec? Pin it in AC-6.",
+    "AC-17: add a determinism leg — two consecutive EvaluateReadiness runs on an unchanged fixture produce byte-identical per-signal Detail digests — because coverage under R6.4 is `details[X] == sha256(current rendered Detail)` and a Detail that embeds anything non-deterministic would silently un-cover every override."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-1 ask status",
+      "detail": "F2.1 (R1.4 derivation) ADDRESSED — R1.4 uses phase.DerivePhaseDetail, prints stored and child-derived, keys recovery on child-derived, adds `repair phase` on forward disagreement; AC-4 fixtures carry explicit stored phases; the author's correction that SanctionedDerivedSync/repair phase can write `review` is accurate (internal/phase/sanctioned_sync.go) and does not change the conclusion. F2.2 (nothing mutated vs recovery) ADDRESSED — the in-progress arm is stated to mutate and the tally prints first; HC-4 exception stated. F2.3 (two universes) ADDRESSED by narrowing — members are plan beads with parent == E, which are in phase.Cache's child list by construction. F2.4 (predicate domain) ADDRESSED — bead.PlanBeadIndex in internal/bead; R4.1 is status-independent with fail-closed read errors; AC-10 (d)/(g) added; settled fact 3 now records the import direction. F2.5 (R4.2 amends ADR-0041) ADDRESSED — Amendment (Spec 129) item (i). F2.6 (AC-10 fixture + either/or) ADDRESSED — AC-11 (i) is #239's sibling-PR-then-fast-forward topology, which is off first-parent (I re-derived it: after spec/S fast-forwards to main's PR merge P, M_X is reachable only via P^2); OQ-4 resolved and TestReattest_NominatesSameCandidateAsFind pinned without a rationale escape. F2.7 (#232) ADDRESSED — D.5 drops cause 1, AC-12 (iv)/(v) are red today (I re-checked landed.go: the reviewed_head_sha contradiction at the panel leg precedes tip and binding legs, and evaluateMF3's broad-sentinel arm prints the zero-candidate sentence); leg (vi) is labelled green-today. F2.8 (fake bd cap) ADDRESSED — AC-7. F2.9 (non-empty-set positional) ADDRESSED — R1.3 bullet 4, AC-3 bullet 2, from the global ready rows. F2.10 (parent/metadata) premise REFUTED and VERIFIED by me in a scratch bd 1.1.0 database; the cost residue (two bd ready calls, no per-hit show) is applied. F2.11 (settled fact 1 vs removal) ADDRESSED — R1.7 names the rewritten tests; containsSpecID survives as the near-miss title test. F2.12 (cap escape) ADDRESSED — no escape; lint leg reworded by call site. F2.13 (registerLandedPanel) REFUTED and VERIFIED — fixtures.go:189, non-test file; slug residue applied in AC-12/In Scope. F2.14 (AC-13 red legs) ADDRESSED — legs 1, 4, 6 (now AC-14). F2.15 (mixed-leg rule) ADDRESSED — (b)/(d) contradictions still contradict, panel never vetoes. F2.16 (dynamic operands) ADDRESSED — literal `--evidence <path-to-justification>` placeholder; ADR-0042 touchpoint states the rule. F2.17 (ADR-0025) ADDRESSED — no text stored; consequence stated. F2.18 (ready-check exit contract) ADDRESSED — dispatch-ingress answer, never claim authority, no flagless re-claim. F2.19 (bd blocked) ADDRESSED — pinned. F2.20 (=all) ADDRESSED — not admitted. Totals: 18 ADDRESSED, 2 REFUTED (accepted), 0 PARTIAL, 0 MISSED."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R1.4's near-miss exit code makes a permanent by-design state a permanent failure, against OQ-7's own HC-4 criterion",
+      "detail": "R1.4/OQ-7: '≥1 near-miss: exit non-zero (the 128 R6.3(c) loud-empty class)'. 128's loud class fired when the scoped raw set contained a bead the title filter hid — a possibly-wrong exclusion. R1.2's near-miss set is wider: it includes every non-member row under E of ANY issue type and every row in the global ready set whose title contains the spec ID or whose metadata.spec_id equals S. phase.classifyChild treats bug/feature/chore children as non-lifecycle and excludes them from derivation precisely because follow-ups are filed under epics (the spec-095 note in derive.go); the live ready set has 38 bugs and 12 features. A review-phase spec with one open follow-up bug under E therefore prints `child-derived phase: review` and `recovery: mindspec impl approve S` and exits non-zero on every `mindspec next --spec S`, with an N3 recovery the spec itself calls non-mechanical. OQ-7's bullet 1 says exit 0 because 'the read evaluation completed' — that is equally true here. Orchestrators (autopilot) read this exit code."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6.1's 'non-empty subset' proceed rule contradicts the 'named but passing' note",
+      "detail": "'GateReadiness proceeds iff the currently failing set is a non-empty SUBSET of the named set' refuses when nothing fails, while 'A named signal that passes prints MF-x named but passing — not recorded' implies the claim proceeds with a note. AC-15 has no leg for a scoped flag with nothing failing, and whether --evidence is required when no marker will be written is unstated."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.4 says 'keyed on the child-derived phase' but two tallies share the phase `plan`",
+      "detail": "DerivePhaseFromChildren returns `plan` for zero lifecycle children AND for all-open-none-claimed. R1.4's arms are therefore keyed on the tally; the wording should say so. AC-4 (iii) ('children open and blocked', stored implement) does not say whether any child is closed, so the expected `child-derived phase:` value is not pinned."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-11 (iii) does not say which merge identifies X",
+      "detail": "R4.2's fallback admits only `Merge bead/<id>` or `Merge branch 'bead/<id>' into <spec-branch>` and excludes a merge into another bead branch. In (iii) the only merge named is `Merge branch 'bead/X' into bead/Y`, which the fallback must NOT nominate for X. For 'both X and Y are identified' to be falsifiable the fixture must state X's own landing merge and its position relative to the first-parent chain."
+    },
+    {
+      "severity": "MINOR",
+      "title": "The target-branch claim for the `Merge bead/<id>` form is unverifiable",
+      "detail": "R4.2 and ADR-0041 Amendment (Spec 129) item (i) say the fallback admits a merge 'whose subject names bead/<id> as its SOURCE, with the spec branch as its target'. gitutil.MergeInto's subject is `Merge <source>` (gitops.go) with no target, so for that form the fallback can check reachability, corroboration and net effect, but not target identity. A bead landed on another spec branch whose history later reaches this tip is admitted; that may be acceptable (the work is in the tree) but the text overclaims."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.8 does not state the no-resolved-spec case",
+      "detail": "cmd/mindspec/next.go: when ResolveTarget returns a non-ambiguous error, specFlag stays empty and BuildReadySet goes global. R1.8 passes GateReadiness '--spec, or the unscoped path's resolved spec'; in this branch there is none. Say whether the lineage check is skipped or the lineage spec becomes the dispatch spec, and pin it in AC-6."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Coverage by Detail digest needs a determinism pin",
+      "detail": "R6.4: covered iff details[X] == sha256(X's current rendered Detail). Nothing in AC-17 asserts that the Detail string is stable across evaluations of an unchanged fixture; a Detail that ever embeds a path, timestamp or unordered list would silently un-cover every override."
+    },
+    {
+      "severity": "INFO",
+      "title": "Verified against cb272d50 / live tools (no change needed)",
+      "detail": "registerLandedPanel at internal/validate/readiness/fixtures.go:189 writes one registration under slug `fixture-<dep>` (so the slug extension is the right residue). Scratch bd 1.1.0: `bd ready --json -n 0` row for a parented, metadata-bearing child carries `parent` and `metadata`; rows without them omit both; the open epic row appears in the global ready set; `bd ready --parent E` and `--metadata-field spec_id=s` both return the child. gitutil.MergeInto's subject is `Merge <sourceBranch>`. classifyChild: '' and 'task' are lifecycle; bug/feature/chore are non-lifecycle. SanctionedDerivedSync exists (internal/phase/sanctioned_sync.go). ADR-0040 §1 and ADR-0044 carry the back-pointer blockquotes; ADR-0045's Amends line, Status note, Relation sections and step assignments match R7. mindspec adr list shows ADR-0045 Accepted; validate spec reports only the lifecycle-binding WARN. I did not re-measure the Background-B claim that `bd list --json` is uncapped by default; R2 is sound either way because every list site gets `-n 0`."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Errors in this BRIEF",
+      "detail": "Round-2 section: none found of substance. The verdict-location rule is now stated correctly (scratch path). One small inaccuracy inherited by the Round-2 summary: '(a) ... lineage-spec ≠ claim-spec refuses before mutation (R1.8)' is true only when a spec was resolved; the spec itself leaves the no-resolved-spec branch unstated (see the R1.8 finding). The round-1 TODO(skill) placeholder sections remain above the real content."
+    }
+  ]
+}

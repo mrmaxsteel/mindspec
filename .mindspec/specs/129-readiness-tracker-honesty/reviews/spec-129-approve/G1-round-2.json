@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "G1 gpt-6.1-sol",
+  "confidence": 0.97,
+  "rationale": "Reviewed cb272d508cfe1ef85582e9cea6c085bb196bbc63, the full round-2 BRIEF, my round-1 verdict, the revised spec and ADR-0045, and the consolidation. All four of my round-1 asks are addressed, including the deliberate narrowing to structural plan beads. All six required baseline probes were re-derived at this commit. Two new spec gaps remain: AC-11(iii) requires identification of a sibling-target merge that R4.2 excludes, and R6 fingerprints only the first rendered MF-3 failure while promising protection against different failures. Scratch-only probes demonstrate both. These are spec changes requested before planning, not demands for implementation at this gate. The candidate-generator emulation otherwise identifies the off-first-parent landing and preserves refusal for missing corroboration and reverted work. Validation exits 0 with one lifecycle-binding warning. GitHub issue retrieval was unavailable; the live source tracker count of 106 was not independently re-measured. All writes were confined to the assigned scratch workspace.",
+  "concrete_changes_required": [
+    "Reconcile R4.2 with AC-11(iii). A topology where X is merged only into bead/Y with subject \"Merge branch 'bead/X' into bead/Y\", then Y lands on spec/S, produces zero admitted candidates for X under the specified fallback. State whether this topology is intentionally refused or supported. If refused, change the AC to pin that result and, if the intended positive fixture includes a separate direct X-to-spec landing, explicitly require it. If supported, define and justify the additional admissible evidence and update the ADR amendment rather than requiring an implementation to violate R4.2's target exclusion.",
+    "Make R6's failure fingerprint cover the complete relevant failure set within a signal, rather than only the current first-error Detail. For MF-3, explicitly require evaluation/aggregation (or a separately defined complete failure fingerprint) for all dependencies, with deterministic ordering, before coverage is decided. Add an AC that records an MF-3 override for failing dependency A, retains A unchanged, adds a new failing dependency B after claim, and requires ready-check to refuse as uncovered. The current AC that replaces the failing dependency does not catch this widening."
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-1 ask status",
+      "detail": "G1.1 ADDRESSED: R4.1 now defines status-independent, title-free membership using plan ID, dependency metadata, or a parent read, with read/parse failures failing closed. AC-10(d)/(g) pin metadata-only membership and lookup failure, and (b) pins cross-spec exclusion. Real bd 1.1.0 re-probe confirms a closed dependency entry retains metadata.spec_id and status while ready excludes that closed row. G1.2 ADDRESSED by an explicit scope change: R1.1 and OQ-9 reject metadata-only selection, R1.2 names it as N3, and AC-1 no longer claims it; AC-2 pins the repairable detached plan-form case. Real bd confirms detach preserves the dotted ID and descendant result but omits parent, and reparent restores parent and the epic dependency. G1.3 ADDRESSED: R1.2 now performs the global near-miss scan on every scoped call, explicitly costs two ready calls, and AC-1 expects near-misses alongside A. G1.4 ADDRESSED: Background C, Corrections, R3.1 and the grill now acknowledge native list --spec prefix matching and show JSON exposure. Real scratch bd independently confirms both. NEW_ISSUE findings below arise from the revised design, not unfinished original asks."
+    },
+    {
+      "severity": "medium",
+      "title": "AC-11(iii) contradicts the fallback target predicate",
+      "detail": "R4.2 admits only exact \"Merge bead/<id>\" or \"Merge branch 'bead/<id>' into <spec-branch>\" subjects and expressly excludes a merge into another bead. AC-11(iii) nevertheless requires both X and Y to identify when X merges into sibling Y before landing. A real-git scratch fixture creates X and Y, merges X into Y with the exact AC subject, and lands Y on spec/129-probe. Y identifies under the existing primary scan. Emulating precisely the new generator through firstParentMergesFn yields zero X candidates and ErrLandedMergeNoCandidate. The X merge is reachable through Y's second-parent ancestry but explicitly inadmissible. This AC needs a different expected result or an explicit additional direct X-to-spec landing. Evidence: round2-design-probes.log, TestG1R2SiblingOnlyLandingExcluded in repo/internal/lifecycle/g1_round2_probe_test.go. Only candidate generation is emulated; production corroboration/content logic is used unchanged."
+    },
+    {
+      "severity": "medium",
+      "title": "First-error Detail hashing can silently widen an override within MF-3",
+      "detail": "R6.4 says an override recorded for one failure never covers a different failure under the same signal ID, but its coverage test hashes only the signal's rendered Detail. evaluateMF3 currently returns inside its dependency loop at the first failing dependency, and no requirement changes that behavior. Probe: deps=[A(open)] and deps=[A(open),B(open)] produce byte-identical Detail \"dependency probe-a is not closed in bd (status=open)\". Thus the new hash also remains identical; a schema-valid marker for the A-only report covers MF-3 after adding failing B, so the specified ready-check exits 0 and the replacement skill dispatches. Fresh claim evidence does not prevent a new dependency added between claim and dispatch. AC-17 only changes the reported failing dependency, so it misses the retained-A-plus-new-B case. Evidence: round2-design-probes.log, TestG1R2DetailDigestHidesAdditionalDependency in repo/internal/validate/readiness/g1_probe_test.go."
+    },
+    {
+      "severity": "info",
+      "title": "Six baseline probes reproduced; fallback retains tested safety checks",
+      "detail": "At cb272d50: fake bd returns a globally ready metadata-linked bead but BuildReadySet has raw=0, filtered=0 and empty exclusion notice; positional and --pick 3 on that scoped empty set exit 0 with \"No ready work found.\", while positional --emit-only resolves it with the bypass disclosure. A fake successful stderr cap notice is discarded and QueryReady parses 100 rows with nil error. A real named merge is identified on the first-parent chain, then remains reachable after sibling integration but returns ErrLandedMergeNoCandidate off that chain. Real stale and matching panel registrations sort lexically with the stale one first; the stale registration vetoes the correct surviving tip until removed. R9(a) against identical spec text fails dangling, and AC9 harvests zero claims. Real bd 1.1.0 ready --metadata-field selects the metadata-linked rows. The R4.2 candidate-generator emulation identifies the normal off-first-parent fixture, returns LandedMergeNoEvidence when independent corroboration is removed, and refuses after a real revert. Evidence: probes.log, cli-probes.json, fake-bd.log, bd-real-probes.json and round2-design-probes.log."
+    },
+    {
+      "severity": "info",
+      "title": "Both relevant round-1 refutations verified",
+      "detail": "registerLandedPanel exists in the non-test file internal/validate/readiness/fixtures.go and writes one fixed fixture slug, so its proposed slug extension is grounded. In a new real throwaway bd 1.1.0 database, a parented metadata-linked plan child carries both parent and metadata in ready JSON; after detaching, parent is omitted but metadata remains. A metadata-only task carries metadata and no parent. The refutation of the missing-field premise is therefore correct. bd show for a dependent task also exposes its closed dependency's metadata, supporting R4.1's status-independent metadata leg. Evidence: bd-real-probes.json."
+    },
+    {
+      "severity": "info",
+      "title": "Spec validation output",
+      "detail": "Built the binary from the scratch clone at cb272d50 and ran mindspec validate spec 129-readiness-tracker-honesty in the read-only source worktree, as authorized. Exit 0. Stdout exactly: \"129-readiness-tracker-honesty: 1 issue(s) found\\n\\n  [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one\\n\". Stderr empty. Evidence: validation.json."
+    },
+    {
+      "severity": "info",
+      "title": "Errors in this BRIEF",
+      "detail": "The Summary still instructs git show 7a490064, and binding conduct still suggests git worktree add at 7a490064; Round 2 and the direct task correctly specify cb272d50 and an independent clone. A worktree registration would also write source git metadata, so I followed the direct clone instruction. Acceptance criteria says 18 ACs, but the revised spec has AC-1 through AC-19. Round 2 says 95 asks with 91 fixed and 2 refuted (only 93); independently counting the consolidation coverage rows gives 95 rows: 93 FIXED and 2 REFUTED. The verdict-location override resolves the header's beside-BRIEF instruction, so it caused no remaining location ambiguity. The round-1 scaffold TODO duplication is no longer present."
+    }
+  ]
+}

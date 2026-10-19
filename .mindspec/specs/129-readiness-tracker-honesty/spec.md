@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-10-19T07:48:35Z"
+approved_by: user
+status: Approved
 ---
 # Spec 129-readiness-tracker-honesty: Readiness and tracker honesty — plan-bead selection, bd row caps, MF-2/MF-3 truth, scoped overrides (spec-128 follow-on, part 1 of 2)
 
@@ -1072,7 +1072,7 @@ Every question below is either resolved with its rationale or EXPLICITLY DEFERRE
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-10-19
+- **Notes**: Approved via mindspec approve spec

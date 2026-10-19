@@ -1,0 +1,10 @@
+{
+  "bead_id": null,
+  "spec": "129-readiness-tracker-honesty",
+  "target": "spec/129-readiness-tracker-honesty",
+  "round": 7,
+  "expected_reviewers": 9,
+  "reviewed_head_sha": "e7388f71d9325b95ed463169df2a9fc3043234f1",
+  "approve_threshold": "n-1",
+  "gate": "spec_approve"
+}
