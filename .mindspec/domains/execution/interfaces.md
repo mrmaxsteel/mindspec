@@ -36,10 +36,11 @@ architecture doc.)
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
-Low-level git operations used only by `MindspecExecutor`:
+Low-level git operations used by `MindspecExecutor`; `internal/next` also consumes `FileAtRefTyped` for committed plan mapping:
 
 | Function | Purpose |
 |:---------|:--------|
+| `FileAtRefTyped(workdir, ref, path)` | Probes a local branch then its tree path before reading the blob; returns `ErrRefAbsent` or `ErrPathNotAtRef` only for proven absence. Other git failures propagate. Also consumed by `internal/next` for committed-plan selection. |
 | `BranchExists(name)` | Check if a branch exists |
 | `CreateBranch(name, from)` | Create a branch from a ref |
 | `DeleteBranch(name)` | Delete a local branch |

@@ -1305,51 +1305,80 @@ narrows the guard to this rule for the claim path only.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
-`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` are R6.1's ONE
-shared ready-set construction: the `bd ready` query plus the spec-title
-filter, preserving `bd ready`'s own returned (priority-respecting) order
-end-to-end with no post-query reordering. For the NON-positional flows —
-the default (no pick, no positional arg) and `--pick N` — the claim path
-and `--emit-only` consume the SAME constructed `ReadySet` identically, so
-`--pick N` always names the same bead on both for the same N (AC-9) and a
-filter drop is reported the same way on both (R6.3). **The positional
-`--emit-only` combination is the one documented exception (R6.3(a)):** it
-never calls `BuildReadySet` at all — no ready-set construction, no
-readiness check, no spec-title filter, no exclusion accounting — and
-instead fetches the named bead directly by ID (`next.FetchBeadByID`) and
-prints the pinned bypass line verbatim, `"emit-only: bead fetched by ID;
-readiness not checked."`, with no exclusion report and no readiness
-claim. (Positional CLAIM, by contrast, still resolves against the ready
-set via `SelectNamedFromReadySet`, below — only emit-only's positional
-form bypasses it.) `select.go`'s `SelectWork` makes pick semantics TOTAL:
-`--pick N` (N≥1) always indexes the displayed list, even with exactly one
-item — the prior single-item early return that bypassed pick validation
-is gone (red-on-revert); `--pick 0` means unset, and a negative pick
-errors rather than being silently ignored. `SelectNamedFromReadySet`
-gives a positional bead ID (on the CLAIM path) that IS ready but excluded
-by the spec-title filter an honest exclusion-reason error instead of the
-generic "not found or not ready" (R6.3(b)/AC-10). `BuildReadySet`'s
-`scopeResolutionRefusal` (R6.7/AC-15) refuses an
-explicit `--spec` whose epic resolution fails — genuine discovery failure,
-legitimate on-disk draft, or a truly nonexistent spec — naming the real
-cause, on BOTH paths, and NEVER falls back to the global unscoped `bd
-ready` query the pre-128 code silently substituted.
+`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` provide R6.1's one
+shared ready-set construction. The claim path and non-positional
+`--emit-only` (default and `--pick N`) consume it identically: the displayed
+list preserves bd's priority-respecting returned order, so the same N names
+the same bead and exclusions are reported identically (AC-9/R6.3).
+`select.go`'s `SelectWork` makes pick semantics total: `--pick N` (N ≥ 1)
+always indexes the displayed list, even with exactly one item; `--pick 0`
+means unset, and a negative pick errors. `SelectNamedFromReadySet` gives a
+ready but excluded positional claim its true exclusion reason rather than
+"not found or not ready" (R6.3(b)/AC-10).
+
+`BuildReadySet`'s `scopeResolutionRefusal` (R6.7/AC-15) refuses an explicit
+`--spec` whose epic cannot be resolved, on both ready-set paths. It names
+whether discovery failed, an on-disk draft has no epic yet, or the spec
+does not exist, and never widens to global unscoped `bd ready`.
+Positional `--emit-only` is the documented R6.3(a) exception: it never
+constructs a ready set, checks readiness, filters membership, or reports
+exclusions. It fetches directly with `next.FetchBeadByID` and prints the
+pinned bypass disclosure below, making no claim about readiness.
+
+Scoped selection uses one uncapped global `bd ready -n 0 --json` result.
+A selectable member is an open non-epic whose ID is exactly `<E>.<N>`
+(N ≥ 1, one segment), whose unchanged `phase.FindEpicForBead` resolver
+returns E, and whose positional heading AND `work_chunks` entry N exist.
+`bead.PlanBeadIndex` and `readiness.PlanMapsBead` are the shared predicates.
+Issue type, title and metadata are not membership inputs. Members keep bd's
+returned order; claim and non-positional emit-only use the same set.
+
+Mapping reads the committed `spec/<S>` plan when present, otherwise the
+invoking checkout's plan. Typed ref/path absence permits fallback; other
+read or frontmatter errors refuse. A differing checkout plan produces one
+source notice. The read is lazy: only plan-form rows not already N2a/N2c
+need mapping. Readiness still reads the checkout, as the notice discloses.
+
+Every linked non-member is named by ID with its reason and recovery.
+Classification order is N2a (non-epic parent), N2c (foreign epic dependency),
+N4 (unmapped follow-up), N2b (foreign title lineage), N1 (mapped but no
+lineage), N3 (parent/title/metadata link without the plan-bead predicate).
+N1, N2a, N2b, N2c and lifecycle parent-edge N3 rows block an empty-set
+success. N4, non-lifecycle parent-edge N3, title-only and metadata-only N3
+rows are informational. Recoveries never overwrite a named parent.
+A detached mapped N1, or same-number N2b, can recover by adding the intended
+epic parent; other-number N2b first calls for inspection and makes that
+edit conditional on ownership.
+
+Selectors are checked before empty-set handling. A positional near-miss
+gets its reason even when no members exist. An N4 with lineage E can
+reach the readiness gate deliberately; a no-lineage N4 refuses before the
+gate. An unlinked globally ready positional names that fact and its parent.
+Positional emit-only still fetches by ID and prints
+`emit-only: bead fetched by ID; readiness not checked.`
+
+Without a selector, an empty scoped set prints the lifecycle child tally,
+stored and child-derived phase, and the emptiness rule before acting:
+`an empty ready set is not evidence the spec is complete; the derived phase above is`.
+All closed children point to impl approval; an in-progress child uses
+worktree recovery; open children point to `bd blocked --parent <E>`; zero
+lifecycle children point to plan approval. A derived phase ahead of stored
+also names phase repair. Blocking near-misses return non-zero after this
+report; informational ones do not. A failed child read reports
+indeterminate and never fabricates a tally.
 
 `internal/next/beads.go`'s `bdRenderedError`/`RenderBDError` and
-`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together
-deliver AC-11: bd's captured stderr now survives into mindspec's own error
-text (content half, execution domain), escaped per-line via
-`termsafe.Escape` before reaching any terminal-facing message (rendering
-half, this domain) — so a hostile/control-bearing bd stderr line cannot
-forge terminal control sequences. `cmd/mindspec/next.go` also gained a new
-`mindspec_phase` writer under the R3.3 lock (`nextPhaseMergeMetadataFn`,
-line ~608): the claim path's own phase advance, exported via
-`phase.DerivePhaseFromChildren` for this exact caller.
+`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together deliver
+AC-11: captured bd stderr survives in mindspec's errors, escaped per line
+with `termsafe.Escape` before terminal rendering, so hostile stderr cannot
+forge terminal control sequences. The claim path's `mindspec_phase`
+writer in `cmd/mindspec/next.go` uses `nextPhaseMergeMetadataFn` under the
+R3.3 lock, re-deriving fresh child state with
+`phase.DerivePhaseFromChildren` before advancing.
 
-Struck without implementation, with rationale recorded in the spec (not
-re-litigated here): #146 #2(a)'s prose `Depends on` parser (the
-`work_chunks`→`bd dep add` mechanism already covers it) and #146 #3's
-doctor suggestions (already shipped pre-128).
+Struck without implementation, with rationale recorded in the spec:
+#146 #2(a)'s prose `Depends on` parser (`work_chunks` → `bd dep add`
+already covers it) and #146 #3's doctor suggestions (shipped pre-128).
 
 ### R7 — Frozen-contract / externally-merged guidance and AC-14's total verb classification
 

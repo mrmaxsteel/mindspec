@@ -285,3 +285,33 @@ func TestResolveActiveBead_Uncapped(t *testing.T) {
 	}
 	check("list")
 }
+
+// Exercise the parser's status filter directly, without BuildReadySet's
+// separate membership check masking a regression here.
+func TestFilterReadyItems_Status(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"", true}, {"open", true}, {" OPEN ", true}, {"closed", false}, {"in_progress", false}, {"blocked", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			got := filterReadyItems([]BeadInfo{{ID: "bead-1", Status: tc.status, IssueType: "task"}})
+			if (len(got) == 1) != tc.want {
+				t.Fatalf("status %q: got %v, want included=%t", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadyPlanMember_Status(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"", true}, {"open", true}, {" OPEN ", true}, {"closed", false}, {"in_progress", false}, {"blocked", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			got := isReadyPlanMember(BeadInfo{ID: "epic-129.1", Status: tc.status}, "epic-129", lineageInfo{epic: "epic-129", mapped: true})
+			if got != tc.want {
+				t.Fatalf("member status %q: got %t, want %t", tc.status, got, tc.want)
+			}
+		})
+	}
+}
