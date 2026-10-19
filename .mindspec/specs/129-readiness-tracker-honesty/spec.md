@@ -21,7 +21,8 @@ After this spec, the verbs that decide *what work is ready* tell the truth about
 - (d) MF-3 holds a closed dependency to the landed-merge test only when the dependency belongs to the same spec by a tracker fact; a correctly named landing that is reachable from the spec-branch tip but off its first-parent chain (GH #239) is found and NAMED, and MF-3 fails loudly with the one audited command (`mindspec reattest`) that can accept it. The automatic path never passes it, so #239 is fixed as loud, named and recoverable, not as an automatic pass; a stale or non-matching panel registration never vetoes a correct corroboration, in `FindLandedMerge` or in `reattest`; and it prints what is actually true for a contradiction or a revert. GH #232 is closed on its real mechanism (Background D.5), not by a remote-aware feature;
 - (e) the MF-2 token resolver recognises the same claim forms on both sides, bead text and spec text;
 - (f) `--allow-not-ready` is scoped to named failing signals, needs an evidence file on every claim, and `mindspec bead ready-check` reads a validated override marker back, so the override log can be audited against the currently failing set and the override rule has one home (the binary, not `ms-bead-impl`'s prose);
-- (g) ADR-0045 ("The binary owns sequence and rules; skills are harness adapters") lands, with its conflicts with ADR-0040 and ADR-0044 stated, so specs 130–133 can cite it.
+- (g) ADR-0045 ("The binary owns sequence and rules; skills are harness adapters") lands, with its conflicts with ADR-0040 and ADR-0044 stated, so specs 130–133 can cite it;
+- (h) panel review artifacts (`reviews/`) are an optional local helper, never a hard blocker: no review registration refuses `reattest` or the MF-3 read-back (R4.2), `mindspec init` gitignores the review directories, and no auto-committing verb commits them by default (R8).
 
 ## Background
 
@@ -31,7 +32,7 @@ Spec 128 (`128-lifecycle-verb-state-honesty`, merged 2026-10-18, PR #257) deferr
 
 The cluster is split as follows. Every inherited issue has one named home:
 
-- **Spec 129 (this spec):** six code requirements, R1–R6 (#255, the row caps, the claim/dispatch spec-consistency guard, #239 and #232, MF-2 symmetry, the override). #239 is fixed as loud, named, and recoverable by one audited `mindspec reattest`, not as an automatic pass (R4.2), estimated at **9–12 beads** at plan time; the R6 relief-valve split is expected. R7 (ADR-0045) is a document that lands with this spec's commit. The ADR-0041 "Amendment (Spec 129)" is a document that lands with the R4 and R6 beads.
+- **Spec 129 (this spec):** six code requirements, R1–R6 (#255, the row caps, the claim/dispatch spec-consistency guard, #239 and #232, MF-2 symmetry, the override), plus R8 (review artifacts out of git by default, operator decision 2026-10-19). #239 is fixed as loud, named, and recoverable by one audited `mindspec reattest`, not as an automatic pass (R4.2), estimated at **9–12 beads** at plan time; the R6 relief-valve split is expected. R7 (ADR-0045) is a document that lands with this spec's commit. The ADR-0041 "Amendment (Spec 129)" is a document that lands with the R4 and R6 beads.
 - **The follow-on spec (part 2; the next free plain number, never a lettered ID — Background K):** five deliverables:
   - G (#234);
   - H (#244);
@@ -109,7 +110,7 @@ Round 3 found two more false PASSes, each with the panel excluded:
 
 A third reviewer built a fixture where same-second-parent grouping across independent sibling merges made an empty merge the content anchor, masking the revert of a real landing.
 
-Three rounds, three new holes. The undirected form is a set that the mechanism cannot enumerate. So R4.2 no longer confirms automatically on the fallback path at all: it finds and names the candidate, and `reattest`, the audited path with its own refusals, is the only way to accept one.
+Three rounds, three new holes. The undirected form is a set that the mechanism cannot enumerate. So R4.2 no longer confirms automatically on the fallback path at all: it finds and names the candidate, and `reattest`, the audited path with its own git-derived refusals, is the only way to accept one.
 3. *Stale panel corroboration.* `lifecycle.reviewedHeadSHAForBead` returns the FIRST non-empty `reviewed_head_sha` in `panel.ForBead(panel.Scan(roots…))` order (sorted by directory). `FindLandedMerge` returns an exact-equality contradiction for that SHA BEFORE the surviving-tip and landed-binding legs run. `ReattestLandedMerge` refuses with `ReattestStatePanelContradiction` on the same value. REPRODUCED.
 4. *Misleading message.* `ErrLandedMergeNoCandidate` wraps `ErrLandedMergeNotFound`, and so do the contradiction and revert returns. `evaluateMF3` tests only `*LandedMergeNoEvidence` and the broad sentinel, so a contradiction or a revert prints the zero-candidate sentence "no landed merge into … names bead/X".
 5. *#232's real mechanism.* #232's failing dependency is bead 1 of the **same** spec, merged by `mindspec complete` after one panel round, so cause 1 cannot apply, and cause 3 (two rounds) is not its shape. Its companion #233 shows the mechanism: `mindspec complete` lands a commit that no panel can have reviewed, so the merge's second parent `D` differs from the single registration's `reviewed_head_sha = B`. From there:
@@ -146,6 +147,13 @@ So a lettered successor's beads would resolve by lineage to spec 129. The panel 
 
 Related, as measured by two panel slots: when two epics carry the same spec number, the epic chosen is nondeterministic across lookups, and the newest epic wins. That direction is fail-safe for selection, because members must resolve to the epic `--spec` resolved, and anything else is named N2. It is recorded with mindspec-wtjr for the follow-on spec.
 
+**L. Review artifacts in git (verified 2026-10-19 on `spec/129-readiness-tracker-honesty`).**
+- `git ls-files | grep -c '/reviews/'` → 1538. This spec's own `reviews/` (72 files) was committed by `mindspec spec approve`'s auto-commit at `7bae2664`.
+- `.gitignore` ignores only `**/reviews/*/dispositions.lock`. `bootstrap.starterGitignore` and `gitutil.RuntimeIgnoreEntries` name no review path.
+- Every auto-commit stages with `git add -A` (`gitutil.CommitAll`; `gitutil.SnapshotWorktreeTree`'s `add -A -- .`) or an explicit pathspec (`gitutil.CommitPaths`). In a scratch repo, `git add -A` skips an ignored untracked `reviews/` file, `git status --porcelain` stays empty, and `git worktree remove` deletes ignored files with the worktree.
+- `panelDirFor` (`cmd/mindspec/panel.go`) writes `<spec-dir>/reviews/<slug>` (flat) or `.mindspec/reviews/<slug>` (ad hoc), and `workspace.SpecDir` resolves the spec WORKTREE first.
+- The lane kit's `.agents/lane/lane-rules.md` already states "`reviews/` is never committed".
+
 ### Corrections (draft claims the round-1 panel or re-verification proved wrong)
 
 - *bd's spec-id field "not filterable, not in `bd show --json`"* — wrong: `bd list --spec` filters it by prefix, and `bd show --json` exposes it. It is still not adopted (R3).
@@ -172,6 +180,7 @@ Related, as measured by two panel slots: when two epics carry the same spec numb
   - `internal/approve/**`: R3.2 pin test only, with no production change.
   - `internal/complete/**`: R2's `-n 0` on the post-close ready lookup.
   - `internal/lint/**`: R2.3's call-site row-cap lint.
+  - `internal/bootstrap/**`: R8.1, where `mindspec init` writes the review ignore entries.
   - `internal/instruct/**`: `templates/implement.md`, R1.4's L3 rule.
   - `internal/setup/**`: rewrite of `readiness_skill_pin_test.go`'s override-coverage pins, under the skill-refresh protocol.
   - `cmd/mindspec/**`: `next.go` flag shape, emptiness output and menu text; `bead_ready.go` marker read-back; `bead_clarify.go` text.
@@ -182,8 +191,8 @@ Related, as measured by two panel slots: when two epics carry the same spec numb
   - `internal/bead/clarify.go` and `internal/bead/bdcli.go` doc comments (not edited): the operator-reset analogy and `RemoveMetadataKeys`'s claim-failure note name the flag, not its bare form, and stay true under R6.
 - **execution**:
   - `internal/bead/**`: R2's row-set waist (`ListJSON` and a new `ReadyJSON`); the shared plan-bead ID helper; R6's marker schema v2 constants and its validator in `readiness.go`.
-  - `internal/gitutil/**`: R4.2's topo-ordered reachable-merge primitive beside `FirstParentMerges`.
-- **core**: NOT impacted. `internal/phase` is consumed, not changed: `DerivePhaseDetail`, `Cache`'s child list, `IsLifecycleIssueType` and `FindEpicForBead` are read as they are. `phase.Cache`'s three `bead.ListJSON(…, "-n", "0")` calls keep working unchanged, because the R2.2 waist tolerates an explicit `-n 0`. The rejected Option W would have changed `FindEpicForBead`; see OQ-9.
+  - `internal/gitutil/**`: R4.2's topo-ordered reachable-merge primitive beside `FirstParentMerges`; R8's review ignore-entry list.
+- **core**: `.gitignore` only, for R8's two entries. `internal/phase` is consumed, not changed: `DerivePhaseDetail`, `Cache`'s child list, `IsLifecycleIssueType` and `FindEpicForBead` are read as they are. `phase.Cache`'s three `bead.ListJSON(…, "-n", "0")` calls keep working unchanged, because the R2.2 waist tolerates an explicit `-n 0`. The rejected Option W would have changed `FindEpicForBead`; see OQ-9.
 
 Documentation surfaces touched are not Impacted-Domains entries. They are claimed by no OWNERSHIP.yaml and are governed by the ADR-0031 doc-sync gate. `.mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md` is new and lands with this spec's commit, together with the "Amended by ADR-0045" back-pointers in ADR-0040 §1 and ADR-0044. ADR-0041's new § "Amendment (Spec 129)" lands with the R4 and R6 beads. R6.5's surfaces are `.mindspec/core/USAGE.md`, `.mindspec/core/WORKFLOW-STATE-MACHINE.md`, `.mindspec/domains/workflow/{architecture,interfaces,runbook}.md`, and `.mindspec/domains/execution/interfaces.md` (the marker schema row).
 
@@ -194,19 +203,9 @@ Documentation surfaces touched are not Impacted-Domains entries. They are claime
     - **What it may do.** The amendment lets a fallback scan FIND and NAME a reachable, source-named merge when the first-parent scan finds none.
     - **What it never does.** No automatic path treats such a candidate as landed. It returns a typed off-first-parent result, and MF-3 fails with `mindspec reattest <id>`.
     - **Target.** It can be checked only for the explicit `… into <spec-branch>` forms. `gitutil.MergeInto`'s `Merge bead/<id>` encodes none.
-    - **Acceptance.** Only the operator-invoked, audited `reattest` may accept a fallback candidate, after the fallback safety checks F1–F5:
-      - (F1) exactly one admitted candidate;
-      - (F2) no visible registration whose well-formed `reviewed_head_sha` is outside the tip's history. Rounds are never compared across or within directories. An abandoned outside-tip registration still refuses, and a malformed SHA fails closed. F2 is derived from agent-writable, untracked `reviews/*/panel.json`, and its visibility limit is stated;
-      - (F3) the surviving-tip contradiction;
-      - (F4) the net-effect/revert test at the current tip;
-      - (F5) read errors fail closed.
-
-      It records an audited tuple: scanned branch, accepted merge SHA, accepted second parent.
-    - **Read-back.** A later automatic read accepts the candidate only when a VALID audit's tuple equals the current binding pair and the scan-derived candidate, AND F1–F5 pass again at read time. A stale audit left in place by a later `MergeMetadata` binding rewrite therefore grants nothing.
-    - **Residual.**
-      - Only F1, F3 and F4 are git-derived.
-      - A metadata-only forge can reach only a candidate that reattest itself would accept.
-      - A forge that also deletes or rewrites a panel registration defeats F2 and leaves no JSONL trace. It then reaches any single, reachable, non-reverted fallback merge whose surviving tip, if any, matches. It uses the same forge MECHANISM as Spec-125 item (c), but its REACH is new and bounded, and AC-11 (ix-g) pins it. F2's value classes and per-checkout visibility are stated.
+    - **Acceptance.** Only the operator-invoked, audited `reattest` may accept a fallback candidate, after the git-derived fallback safety checks: (F1) exactly one admitted candidate; (F3) the surviving-tip contradiction; (F4) the net-effect/revert test at the current tip; (F5) read errors fail closed. F2 (a refusal on a visible unlanded review registration) is retired by operator decision: review registrations are advisory output and never refuse. reattest records an audited tuple: scanned branch, accepted merge SHA, accepted second parent.
+    - **Read-back.** A later automatic read accepts the candidate only when a VALID audit's tuple equals the current binding pair and the scan-derived candidate, AND F1, F3, F4 and F5 pass again at read time. A stale audit left in place by a later `MergeMetadata` binding rewrite therefore grants nothing.
+    - **Residual.** A metadata-only forge reaches only a candidate that reattest itself would accept, including one with a later unlanded review round. That reach (an undirected off-first-parent merge) is new and bounded, and AC-11 (ix-f) pins it.
     - **Exits.** The fallback's exit is the dependent's scoped override. q9ea is not a fallback exit.
     - **Earlier rules superseded.** The round-2 corroboration and tie-break rules for the fallback path are withdrawn. They departed from FIX-2b and from Spec 125's "fail-closed on every ambiguity", and they are moot here.
     - **CLOSE decisions.** `complete`'s merged-unclosed reconcile keeps the first-parent scan only.
@@ -224,7 +223,8 @@ Documentation surfaces touched are not Impacted-Domains entries. They are claime
 - [ADR-0042](../../adr/ADR-0042-render-derivation-provenance.md) — APPLIED. IDs render via `idrender.Bead`/`idrender.Spec`; bd stderr (R2.3) and the evidence path (R6) via `termsafe.Escape`. **No dynamic operand appears in command-shaped text.** Recovery lines carry only idrender-gated IDs, closed-set signal IDs, and literal placeholders, following the `internal/next/select.go` final-review R5/G4 rule. The operator's evidence path is never interpolated into a recovery line.
 - [ADR-0025](../../adr/ADR-0025-jsonl-as-build-artifact.md) — RESPECTED, with the consequence stated: the R6 marker is bd metadata, so it IS exported into the git-tracked `.beads/issues.jsonl` and pushed. For that reason the marker stores the evidence file's path, sha256 and byte count, **never its text**. The rendered path is the only operator-supplied string that reaches git, so R6.5's guidance recommends a repository-relative path.
 - [ADR-0030](../../adr/ADR-0030-executor-boundary.md) — APPLIED. `internal/validate/readiness` stays inside the boundary: R4.1's membership reads go through `internal/bead`, and its landed-merge read through `internal/lifecycle`. R4.2's primitive lands in `internal/gitutil`. The R2 waist stays in `internal/bead`.
-- [ADR-0037](../../adr/ADR-0037-panel-gate-enforced-contract.md) — RESPECTED. `internal/panel` is untouched. Agent-writable data (panel.json, bd metadata) stays inside §8's anti-footgun boundary. No step here claims to authenticate it; R6 validates its shape only.
+- [ADR-0037](../../adr/ADR-0037-panel-gate-enforced-contract.md) — RESPECTED. `internal/panel` is untouched. Agent-writable data (panel.json, bd metadata) stays inside §8's anti-footgun boundary. No step here claims to authenticate it; R6 validates its shape only. R8 changes only whether review files are tracked: registration, rounds, threshold, staleness, dirty-tree and fail-open/closed semantics are untouched, and every gate reads registrations from the filesystem.
+- [ADR-0039](../../adr/ADR-0039-flat-layout-v2.md) — RESPECTED. §4's co-located location (`.mindspec/specs/<id>/reviews/<panel-slug>/`) and its layout-aware gate scan are unchanged. R8 ignores that location; it moves nothing.
 - [ADR-0040](../../adr/ADR-0040-orchestration-layering-ratchet.md) — APPLIED, and amended by ADR-0045:
   - R1.4's rule sits at L3 (`templates/implement.md`).
   - R6 ratchets `ms-bead-impl`'s override-coverage rule from L4 into L1 (`bead ready-check`) and deletes the L4 copy.
@@ -411,36 +411,13 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 
    The undirected subject cannot be made safe by enumerating corroborations. #239 is therefore fixed as **loud, named, and recoverable by one audited command**, not as an automatic pass.
 
-   **Fallback safety checks (F).** Both `reattest` (acceptance) and every automatic read-back (below) run these checks. None of them reads bd metadata. Their provenance differs:
-   - F1, F3 and F4 are derived from git.
-   - F2 is derived from the panel registrations in `reviews/*/panel.json`. These are agent-writable files (ADR-0037 §8), not git-tracked during the spec's life, with an operator-supplied `round`.
-
-   Every check refuses fail-closed:
+   **Fallback safety checks (F).** Both `reattest` (acceptance) and every automatic read-back (below) run F1, F3, F4 and F5. All four are derived from git; none reads bd metadata or a panel registration. F2 (a refusal on a visible unlanded review registration) is retired by operator decision (grill record, 2026-10-19), and the remaining labels are not renumbered. Every check refuses fail-closed:
    - **(F1) Exactly one admitted fallback candidate.** Two or more refuse, even if they share a second parent, because independent sibling merges are not a re-merge chain. There is no grouping and no tie-break, so an empty sibling merge can never become the content anchor that masks a revert. The refusal state is a NEW `ReattestStateMultipleFallbackCandidates` (`"multiple-fallback-candidates"`). `ReattestStateAmbiguous` (`"ambiguous-owned-second-parents"`) keeps its primary-path meaning, so no existing value changes.
-   - **(F2) No visible unlanded review.** F2 runs over every registration that `panel.ForBead` finds for the bead, abandoned ones included.
-     - **Value classes (provenance gate, ADR-0042).** Each `reviewed_head_sha` is classified BEFORE any git call. Only class (c) ever becomes a git operand. R4.3's set uses the same classes: only (c) can corroborate, and the others are non-corroborating.
-       - (a) **Empty** → no review recorded. It is SKIPPED, exactly as R4.3 and today's `reviewedHeadSHAForBead` skip it: `panel create --target` sets the SHA in the same write as the round, so empty means no fan-out happened.
-       - (b) **Non-SHA placeholder** → SKIPPED and REPORTED (`registration <dir> carries a non-SHA reviewed_head_sha placeholder; not a code review; skipped`). A placeholder is text that does not start with `-`, has no revision-expression characters, and is not a well-formed object ID. The real example is `.mindspec/reviews/6ou2-fix-zfc/panel.json`'s `"design-review-no-code"`, a bead registration for a design panel. A placeholder cannot name unlanded work.
-       - (c) **Well-formed object ID** (`wellFormedGitObjectID`, `internal/lifecycle/landed.go`) → evaluated.
-       - (d) **Option-like** (a leading `-`) or **revision-expression** text (containing `^`, `~`, `:`, `@{`, `..`, whitespace or a control byte) → MALFORMED, and F2 fails closed.
-     - **Refuse** (`ReattestStateUnlandedReview`) iff any class-(c) `reviewed_head_sha` is NOT an ancestor of the spec tip. A class-(c) SHA that does not resolve to a commit in the local repository (a round rebased away and then garbage-collected, checked with `git cat-file -e <sha>^{commit}` before `merge-base`) is OUTSIDE the tip by definition. It refuses with the same text and exit; it is never reported as an F5 infrastructure error.
-     - **The one normal-looking refusal.** A reviewed commit that was amended or rebased after its panel, with no re-panel, leaves the registration's SHA outside the tip while the bead's content landed. That is outside the documented flow: `ms-bead-fix` adds a commit, and the guardrails forbid rewriting a reviewed branch. The sanctioned exit is the dependent's `--allow-not-ready=MF-3 --evidence`. Deleting or editing the registration is deliberately NOT offered as a recovery, because that is the panel-edit reach the residual names.
-     - **Rounds are never compared** (orchestrator ruling 5). panel.json's `round` is a counter local to one registration directory: a new slug starts at 1, and nothing orders rounds across directories. One directory holds ONE record, because `/ms-panel-run` bumps `round` and `reviewed_head_sha` in place, in the same write. So there is no within-directory pair to compare, and any outside-tip registration in any directory fails closed. The refusal names each such registration's directory, round and SHA, and lists the exits below.
-     - **Repo convention, for BEAD registrations** (those with a non-null `bead_id`, the only ones `panel.ForBead` returns). There is one directory per panel, with the round bumped in place, and no per-round `-rN` directory exists among them. To re-derive it at any commit, list `git ls-files '*panel.json'`, keep the files whose `bead_id` is non-null, and check each parent directory's name against `-r[0-9]+$`. At `8b3a5535` that yields no matches. The repo's one `-r2` directory, `prerelease-r2`, has no `bead_id`.
-       - Under this convention, a review round rebased away before a later round landed has been overwritten, so only the landed round remains, and F2 passes.
-       - O3's attack leaves `{round 2: B}` with B outside the tip, so F2 refuses.
-       - The per-round slug pattern that `ms-panel-run` also documents (`<slug>-r2`) keeps the old directory. A `-r2` directory whose predecessor holds a rebased-away SHA therefore refuses (fail closed, with the exits). The plan verifies `mindspec panel create`'s default `round`, and F2 no longer depends on it.
-     - **No anchor authority.** A registration that is the second parent, or an ancestor of it, grants nothing; it only fails to refuse. An abandoned registration cannot "raise an anchor", because anchors no longer exist, and a forged high-round registration cannot neutralise a later one. This is stronger than the optional "anchor on the bead side" tightening, which is therefore not adopted separately.
-     - **#233's shape.** A registration whose SHA is an ancestor of the second parent is in the tip's history, so it passes. In #233's shape, `complete`'s own later commits (a wrapper commit on an older binary; materialization or `.beads/issues.jsonl` sync commits on the current one) sit between the reviewed SHA and the second parent. No tree identity is assumed.
-     - **An abandoned registration outside the tip still refuses.** Its reviewed SHA is unlanded reviewed work, and the scan cannot order it.
-     - **Visibility is per CHECKOUT, stated in the output.**
-       - F2 sees only the registrations that `panel.Scan` finds in the roots of the INVOKING checkout: `workspace.FindRoot(cwd)` and its spec dir.
-       - `reviews/*/panel.json` is untracked during the spec's life, so a registration exists only in the worktree where `ms-panel-run` wrote it, normally the spec worktree. The same bead can therefore refuse from the spec worktree and pass from a bead worktree or a main checkout that has no `reviews/`.
-       - A review registered only on an unlanded bead branch is also invisible.
-       - The output names the absolute roots actually scanned (`no unlanded review registration found in <root>, <spec-dir>`), never claims that none exists, and recommends `run reattest and ready-check from the spec worktree`.
    - **(F3) Spec-125 surviving-tip contradiction.** A surviving bead branch whose tip is not the candidate's second parent refuses.
    - **(F4) Revert/net-effect at the CURRENT tip.** This is the Spec-125 R5(d) test anchored on the single candidate, run at read time. A landing accepted earlier and reverted since therefore fails again with the reverted sentence.
    - **(F5)** Read errors in any of the above are errors, never a pass.
+
+   **Registrations are advisory.** On a fallback candidate, `reattest` scans `panel.ForBead` in the invoking checkout's roots (`workspace.FindRoot(cwd)` and the spec dir, as R4.3 does). For each class-(c) `reviewed_head_sha` (R4.3) that is not an ancestor of the tip it prints `advisory: registration <dir> (round <r>) reviewed <sha>, which is outside <spec-branch>'s tip history`, then once `advisory: panel roots scanned: <root>, <spec-dir>`. An absent object or a failed ancestry probe prints `(not determinable locally)` in place of the verdict. A malformed value prints `advisory: registration <dir> carries a malformed reviewed_head_sha; ignored` and never reaches git. Every rendered value is termsafe-escaped. No advisory changes the exit code or what is written. So the O3 shape (AC-11 (vii)) is ACCEPTED, with the advisory.
 
    **Exits when a check refuses.** The one audited forward exit that can actually change the outcome (ADR-0041 §2(i)) is for the dependent bead: `recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>` (R6). The q9ea attested-restore is NOT listed here. Restoring `bead/<id>` at the second parent satisfies only F3, and the fallback never identifies from a tip, so it changes no fallback refusal. It stays on the primary-path `*LandedMergeNoEvidence` arm, where it works. MF-3's off-first-parent message (R4.4 arm 1b) lists the override as the second exit, after `mindspec reattest`.
 
@@ -452,27 +429,26 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    It writes them in the same `MergeMetadata` call as the binding. On a fallback acceptance, `mindspec_landed_reattest_corroboration` records the provenance, so an inspector of the JSONL history can tell a fallback acceptance from a primary-path one without re-running git:
 
    ```
-   off-first-parent fallback; F1–F5 passed; panel roots scanned: <roots>; registrations checked: <n>
+   off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>
    ```
 
-   **Convergent no-op.** The re-run is a no-op ONLY when the stored audit is VALID (the validity contract below) AND the audit tuple equals both the binding and the candidate. If the audit is absent, MALFORMED (for example a missing `op`, `at` or `actor`), or its tuple differs, reattest re-runs F1–F5 and writes a valid record, even when the binding values are unchanged.
+   **Convergent no-op.** The re-run is a no-op ONLY when the stored audit is VALID (the validity contract below) AND the audit tuple equals both the binding and the candidate. If the audit is absent, MALFORMED (for example a missing `op`, `at` or `actor`), or its tuple differs, reattest re-runs F1, F3, F4 and F5 and writes a valid record, even when the binding values are unchanged.
 
    **Read-back.** An automatic read identifies an off-first-parent candidate iff ALL of the following hold:
    - the audit record is VALID: `op` equals reattest's op constant (`"mindspec reattest"`); `at` parses as RFC-3339; `actor` is non-empty; `scanned_branch` equals this spec branch; and both SHA keys are well-formed git object IDs. Anything else is MALFORMED and grants nothing;
    - audit tuple == current binding pair == the single scan-derived candidate (merge SHA and second parent);
-   - F1–F5 all pass at read time.
+   - F1, F3, F4 and F5 all pass at read time; no registration is read.
 
    **Why a stale audit can never confirm.** The executor's merge-time write and reattest's write both go through `bead.MergeMetadata` (read-merge-write). A later executor rewrite of the binding therefore leaves an earlier audit in place. That stale audit names a different pair than the binding, so it confirms nothing. No executor change is needed.
 
    **Residual, stated honestly.**
    - **What a forge needs.** The audit and binding are agent-writable bd metadata, exported into the tracked JSONL, and one `bd update --metadata` call can write all of them.
-   - **What a metadata-only forge gains.** F1, F3 and F4 are re-derived from git on every read. F2 is re-derived from the panel files. So a forge of the binding and audit alone can make MF-3 accept only a candidate that `reattest` itself would accept: a real, reachable, source-named, single, non-reverted fallback merge, with no visible unlanded review and no contradicting surviving tip. That forge is visible in the tracked JSONL history.
-   - **What a forge that also edits the panel files gains.** Deleting, or rewriting the SHA of, a later unlanded registration defeats F2. That edit leaves no JSONL trace, because `reviews/` is untracked during the spec's life. Such a forge reaches ANY single, reachable, source-named, non-reverted fallback merge whose surviving tip, if there is one, equals its second parent. That includes AC-11 (vii)'s O3 shape. It uses the SAME FORGE MECHANISM as Spec-125 item (c): agent-writable panel data, detectable only by inspecting the registration directories. F1, F3 and F4 are unaffected by it.
-   - **NEW REACH, stated as such.** The reach is an undirected off-first-parent merge, for example one made into a sibling bead branch. Spec 125 fails such a merge today. So the forge MECHANISM is the same as Spec-125 item (c), but the REACH is new and bounded. AC-11 (ix-g) pins it as documented, so a later change that claims F2 closes it goes red.
+   - **What a forge gains.** F1, F3 and F4 are re-derived from git on every read, so a forge of the binding and audit can make MF-3 accept only a candidate that `reattest` itself would accept: a real, reachable, source-named, single, non-reverted fallback merge with no contradicting surviving tip. That includes AC-11 (vii)'s O3 shape. The forge is visible in the tracked JSONL history, and panel files play no part in it.
+   - **NEW REACH, stated as such.** The reach is an undirected off-first-parent merge, for example one made into a sibling bead branch. Spec 125 fails such a merge today. The reach is new and bounded, and AC-11 (ix-f) pins it as documented.
 
-   **`reattest` on a fallback candidate** runs every Spec-125 check, then F1–F5, then writes the binding and the audited tuple. Before the write, its output states `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target` and the F2 visibility line. A refusal writes nothing. These checks are scoped to FALLBACK candidates. On the primary path a rebased-away review round in a separate directory is possible, and the primary path's reattest is unchanged.
+   **`reattest` on a fallback candidate** runs every Spec-125 check, then F1, F3, F4 and F5, then writes the binding and the audited tuple. Before the write, its output states `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target`, followed by the advisory lines. A refusal writes nothing. These checks are scoped to FALLBACK candidates; the primary path's reattest is unchanged.
 
-   **#251 boundary.** A prerequisite that reached the tip inside another bead's branch through an admitted short-form `Merge bead/<id>` is nominated and becomes recoverable by `reattest`, subject to F1–F5. The long form `Merge branch 'bead/X' into bead/Y` names a non-spec target, so it is excluded. Branch-from, cherry-pick or rebase arrivals (#251's literal report) stay with spec 130.
+   **#251 boundary.** A prerequisite that reached the tip inside another bead's branch through an admitted short-form `Merge bead/<id>` is nominated and becomes recoverable by `reattest`, subject to F1, F3, F4 and F5. The long form `Merge branch 'bead/X' into bead/Y` names a non-spec target, so it is excluded. Branch-from, cherry-pick or rebase arrivals (#251's literal report) stay with spec 130.
 
    **Doc contracts.** The `SubsumptionConflict` rationale becomes "M is an ancestor of the tip". The `FirstParentMerges` and `ErrLandedMergeNoCandidate` doc contracts are updated to match.
 
@@ -481,14 +457,14 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    | Caller | Change |
    |---|---|
    | MF-3 (`readiness.findLandedMergeFn`) | gains the fallback as a FINDER only (`lifecycle.FindLandedMergeReachable` → `*LandedMergeOffFirstParent`, or identified only via a reattest-audited binding) |
-   | `lifecycle.ReattestLandedMerge` | nominates through the same fallback; accepts only after F1–F5, and writes the audited tuple |
+   | `lifecycle.ReattestLandedMerge` | nominates through the same fallback; accepts only after F1, F3, F4 and F5, and writes the audited tuple |
    | `lifecycle.MergedUnclosed` → `complete`'s merged-unclosed reconcile (CLOSES beads, cleans branches) and `stale_open.go` | **unchanged**, first-parent only (an ADR-0041 §2(ii) CLOSE decision) |
    | `orphan_hints.go` `findLandedMergeFn` | unchanged |
    | `approve/plan.go` `planFindLandedMergeFn` | unchanged |
    | `approve/adopt_lattice.go` `adoptFindLandedMergeFn` | unchanged |
    | `executor` binding write (`gitutil.ExactSecondParentMerges`) | unchanged: the merge was just made by `gitutil.MergeInto` and is the first-parent tip by construction |
    | `executor/merge_resumption.go` (`FirstParentMerges(HEAD)`) | unchanged |
-3. **Panel-leg set semantics, in both functions.** `reviewedHeadSHAForBead` becomes a SET: every class-(c), well-formed `reviewed_head_sha` (R4.2 F2's value classes) across all registrations `panel.ForBead` returns. Empty values, placeholders and malformed values are non-corroborating and never git operands. In `FindLandedMerge` and in `ReattestLandedMerge`'s datum (c):
+3. **Panel-leg set semantics, in both functions.** `reviewedHeadSHAForBead` becomes a SET: every class-(c) `reviewed_head_sha` across all registrations `panel.ForBead` returns. The value classes are: (a) empty, skipped; (b) placeholder (for example `"design-review-no-code"` in `.mindspec/reviews/6ou2-fix-zfc/panel.json`), skipped; (c) a `wellFormedGitObjectID`, a set member; (d) option-like or a revision expression (`^`, `~`, `:`, `@{`, `..`, whitespace, a control byte), malformed. Classes (a), (b) and (d) are non-corroborating, never git operands, and refuse nothing. In `FindLandedMerge` and in `ReattestLandedMerge`'s datum (c):
    - the set CONFIRMS iff it contains the candidate's exact second parent;
    - a non-empty set that does not contain it is NON-CORROBORATING: it neither confirms, nor contradicts, nor pre-empts another leg;
    - in `reattest` it is recorded in the audit `corroboration` string as non-corroborating, and reattest proceeds on its other data (at minimum (a)) instead of refusing.
@@ -647,6 +623,20 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    The dated Verification note cites the files that ground each Context claim. "Amended by ADR-0045" back-pointer blockquotes are added to ADR-0040 §1 and to ADR-0044 in the same commit.
 2. The S0 rule table (`.mindspec/policy/rules.yaml`) is not delivered here. Its home is spec 130 (OQ-1).
 
+### R8 — Review artifacts stay out of git by default
+
+Panel reviews are an optional local helper (operator decision, 2026-10-19). The lane rules already state "`reviews/` is never committed" (`.agents/lane/lane-rules.md`); R8 makes the binary agree.
+
+1. **`mindspec init` ignores the review directories.** A new list `gitutil.ReviewIgnoreEntries` holds exactly two patterns, `.mindspec/specs/*/reviews/` and `.mindspec/reviews/`. `bootstrap.Run` passes it to `gitutil.EnsureGitignoreEntries` after the runtime entries. The patterns are anchored to the paths `panelDirFor` writes (flat layout, which is what init creates). A bare `**/reviews/` is rejected because it would hide a consumer project's own `src/reviews/`. The list is SEPARATE from `gitutil.RuntimeIgnoreEntries`: doctor's runtime-file check reports every tracked runtime entry, and this repo tracks 1538 review files. A second `mindspec init` leaves `.gitignore` byte-identical (exact-line presence, then `git check-ignore`). This repo's `.gitignore` gains the same two lines.
+2. **No auto-committing verb commits reviews by default.** The verbs that commit on the operator's behalf, enumerated by `grep -rn -e 'CommitAll' -e 'commitWithExport' -e 'CommitPaths' -e '"add", "-A"' --include='*.go' internal cmd | grep -v _test.go`, are: `spec create`, `spec approve`, `plan approve`, the executor's `commitWithExport` (bead and finalize commits), `complete`'s materialization (`gitutil.SnapshotWorktreeTree`), `adopt` (explicit `.beads/issues.jsonl`) and the legacy layout mover (an already-staged `git mv`). Each stages with `git add -A` or an explicit path, so the ignore entry is the whole mechanism and no commit path changes. A review file that is already tracked stays tracked, and its edits are still committed; untracking is out of scope.
+3. **Every gate that reads reviews works on untracked files.** Every consumer reads the filesystem, and none reads a review path from a ref or blob: `complete`'s `panelGate` (via `panelGateRoots`), `impl approve`'s advisory slot line, `lifecycle.reviewedHeadSHAForBead`, `instruct`'s panel state, `config show`, the disposition store and `panel disposition query`. `validate`'s `isCoLocatedReview` matches diff paths, and an untracked file is never in a diff.
+4. **Retention after finalize: needs operator decision.** An ignored review lives only in the spec worktree, and finalize's worktree removal deletes it. Afterwards the panel datum for a later `reattest`, the spec-117 `dispositions.jsonl` telemetry and `panel disposition query` from `main` see nothing. The options are:
+   - (A) accept the loss, since reviews are advisory;
+   - (B) keep `dispositions.jsonl` tracked, with the patterns `.mindspec/specs/*/reviews/**` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl` (git cannot re-include a file under an excluded directory);
+   - (C) finalize copies `reviews/` to an untracked location in the main checkout before removing the worktree.
+
+   R8.1–R8.3 hold under any option. Until the operator decides, the plan implements R8.1–R8.3 only.
+
 ## Scope
 
 ### In Scope
@@ -668,6 +658,7 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 - `plugins/mindspec/skills/ms-bead-impl/SKILL.md`, its `.claude/skills/` copy, `internal/setup/readiness_skill_pin_test.go` and the skill-refresh snapshot; `ms-bead-cycle/SKILL.md` if needed (R6.5)
 - R6.5's `.mindspec/core/**` and `.mindspec/domains/**` doc surfaces
 - `.mindspec/adr/ADR-0045-…md` (new), the ADR-0040 §1 and ADR-0044 back-pointers (this commit), `.mindspec/adr/ADR-0041-gate-before-mutate.md` (Amendment (Spec 129), with the R4 and R6 beads)
+- `internal/gitutil/gitignore.go` (`ReviewIgnoreEntries`), `internal/bootstrap/bootstrap.go`, and this repo's `.gitignore` (two lines) (R8)
 
 ### Out of Scope
 
@@ -675,6 +666,9 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
 - `internal/panel` (gate and registry untouched).
 - `internal/phase` (consumed, not changed).
 - `internal/approve/impl.go` and `internal/executor` behaviour (the follow-on spec).
+- Untracking the 1538 already-tracked review files, and a `doctor`/upgrade nudge to do so: a named follow-on, filed at plan time.
+- `mindspec setup`'s ignore list, and the legacy root `review/` pattern (R8 covers what init creates).
+- R8.4's retention mechanism, pending the operator decision.
 
 ## Non-Goals
 
@@ -841,8 +835,8 @@ Also not goals:
   Red-on-revert: today (a), (b) and (f) FAIL.
 - [ ] **AC-11 (R4.2)**: Real-git fixtures extending `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`).
   - **The "#239 topology":** spec/S's content reaches `main` through a sibling branch's PR merge, and then spec/S is fast-forwarded to `main`, so earlier landings become reachable only through a second parent.
-  - **"Refuses":** writes nothing; MF-3 names the candidate; the recovery lists `reattest`, then the dependent's `--allow-not-ready=MF-3 --evidence <path-to-justification>`, and never q9ea. For F2, the refusal also names each outside-tip registration's directory, round and SHA, and prints the visibility line.
-  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`.
+  - **"Refuses":** writes nothing; MF-3 names the candidate; the recovery lists `reattest`, then the dependent's `--allow-not-ready=MF-3 --evidence <path-to-justification>`, and never q9ea.
+  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`. In every leg they are advisory: they change printed lines, never the exit code or the writes.
 
   *Acceptance and its exits*
   - (i) **#239 recoverable, not auto-passed.** X lands on spec/S by its own `Merge bead/X`, then the #239 topology follows. Registration: `{round 1: B}`, where B is the second parent.
@@ -851,7 +845,7 @@ Also not goals:
     - `ReattestLandedMerge` PASSES and writes the binding plus the audited tuple (red today: `NoOwnedMerge`).
     - MF-3 then PASSES via the read-back.
   - (i-r) **Same-tuple re-run.** A re-run of reattest is a no-op (`Wrote=false`), and MF-3 stays PASS.
-  - (i-m) **Malformed audit, same tuple.** The binding, the candidate and the stored audit tuple all agree, but `op`/`at`/`actor` is missing. MF-3 FAILS (the audit is MALFORMED). An explicit reattest re-runs F1–F5 and writes a VALID record. MF-3 then PASSES, and a further reattest is `Wrote=false`.
+  - (i-m) **Malformed audit, same tuple.** The binding, the candidate and the stored audit tuple all agree, but `op`/`at`/`actor` is missing. MF-3 FAILS (the audit is MALFORMED). An explicit reattest re-runs F1, F3, F4 and F5 and writes a VALID record. MF-3 then PASSES, and a further reattest is `Wrote=false`.
   - (i-a) **Single-directory rebased round, the repo convention.** As (i), but the one registration dir holds `{round 2: B}`: round 1's SHA A was overwritten in place, and B is the second parent. reattest PASSES, and MF-3 then PASSES.
   - (i-c) **#233 completion descendant.** One registration `{B}`, where the second parent D is a descendant of B through `complete`'s later commits (materialization or JSONL sync, no tree identity assumed). reattest PASSES.
   - (ii) **Refresh.** As (i), with X first refreshed by `Merge branch 'spec/S' into bead/X`. The refresh is excluded, so the outcome is the same as (i).
@@ -862,11 +856,7 @@ Also not goals:
   - (vi) **No closing.** `MergedUnclosed` for fixture (i), before reattest, returns "not this state".
 
   *Refusals at acceptance*
-  - (vii) **O3 round 2: a LATER unlanded round.** X's round-1 tip A is merged into bead/Y as `Merge bead/X`; Y lands; X's round B never lands; bead/X is deleted. Registrations: `{round 1: A, round 2: B}`. reattest REFUSES with `UnlandedReview`, naming B, and the visibility line.
-  - (viii) **Stale tip reset.** As (vii), with bead/X surviving but reset to A. It REFUSES (`UnlandedReview`).
-  - (ix) **Forged binding without an audit.** As (vii), plus a binding without audit keys that names the X→Y merge. MF-3 FAILS, and reattest REFUSES.
-  - (ix-g) **Documented panel-edit reach.** Take the (ix-f) fixture and delete the round-2 registration dir as well. MF-3 PASSES via the forged tuple. This is pinned as the stated bounded reach (R4.2 Residual), so a future change claiming that F2 closes it goes red.
-  - (ix-f) **Full forged audit.** As (vii), plus a binding AND a complete, well-formed forged audited tuple, both written by one `bd update --metadata`, naming the X→Y merge. MF-3 still FAILS, because the read-back re-runs F2 and B is later and unlanded.
+  - (ix) **Forged binding without an audit.** As (vii), plus a binding without audit keys that names the X→Y merge. MF-3 FAILS, and an explicit reattest is required before it passes.
   - (x) **Empty-sibling anchor masking a reverted landing.** The topology:
     - X commits content C.
     - Branch bead/Y, cut from spec/S, independently commits identical content, then merges bead/X as `Merge bead/X`. That merge is empty, and its second parent is X's tip.
@@ -875,20 +865,16 @@ Also not goals:
     - bead/Y merges spec/S, spec/S fast-forwards to bead/Y, and spec/S is then carried through `main` and fast-forwarded again.
     - So two admitted fallback candidates share one second parent, and grouping would anchor the content check on the empty sibling merge.
     - Expected: MF-3 FAILS naming both. reattest REFUSES `MultipleFallbackCandidates` and writes nothing.
-  - (vii-a) **Amended after the panel.** The reviewed commit B is amended to B′ with no re-panel, and B′ lands. Registration `{B}`, with B outside the tip. reattest REFUSES (`UnlandedReview`). The recovery names the dependent's `--allow-not-ready=MF-3 --evidence` and does NOT suggest deleting the registration.
-  - (vii-s) **O3's attack in the single-directory convention.** One registration dir `{round 2: B}` (A overwritten), B outside the tip, bead/X deleted. MF-3 FAILS, and reattest REFUSES (`UnlandedReview`, naming the directory, round 2 and B).
-  - (x-c) **Cross-directory rounds** (O3, G1, G2, G3):
-    - Shape 1: dir `<X>` holds round 3 at A (landed) and dir `<X>-r2` holds round 2 at B (outside the tip).
-    - Shape 2: an old slug holds round 5 at landed A and a genuinely later new slug holds its default round 1 at unlanded B, with bead/X absent or reset to A.
 
-    For both, fresh reattest REFUSES and writes nothing. The read-back REFUSES even with an already genuine, VALID, matching audited tuple. Changing only the new panel's `round` (to 1, 6 or missing) does not change the refusal.
-  - (x-a) **Abandoned registration** (G3). Registrations: an exact landed A at round 1, outside-tip B at round 2, and an ABANDONED round-3 registration at a common ancestor C whose tree omits A's work. It REFUSES with and without C, in reattest and in read-back.
-  - (x-m) **Malformed reviewed SHA.** A registration whose `reviewed_head_sha` is option-like (`--output=/tmp/x`) or a revision expression (`HEAD~1`, `main^`, `a..b`) makes F2 fail closed. No git process receives it (argv seam).
-  - (x-e) **Empty SHA.** A registration with an empty `reviewed_head_sha` is skipped. F2 and R4.3 behave as if it were absent.
-  - (x-p) **Placeholder.** A bead registration with `reviewed_head_sha: "design-review-no-code"` (the 6ou2 shape) is skipped and reported, and the result is decided by the other registrations alone. No git process receives it.
-  - (x-g) **Garbage-collected SHA.** A well-formed SHA whose object is absent locally refuses as `UnlandedReview`, not as an F5 error.
-  - (x-w) **Per-checkout visibility.** The registration that makes F2 refuse exists only in the spec worktree's untracked `reviews/`. Run from the spec worktree, reattest REFUSES. Run from a bead worktree without `reviews/`, it is not refused by F2, and the output names the scanned roots and the run-from-spec-worktree advice. Both results are pinned, as is the documented visibility limit.
-
+  *Registrations are advisory* (each leg: same exit code and same writes as the fixture without the registration)
+  - (vii) **O3 shape: a later unlanded round.** X's round-1 tip A is merged into bead/Y as `Merge bead/X`; Y lands; X's round B never lands; bead/X is deleted, or survives reset to A. Registrations: `{round 1: A, round 2: B}`. reattest ACCEPTS, writes the binding and audited tuple, and prints the advisory line naming the directory, round 2 and B, then the scanned-roots line. With the registrations removed, the binding and tuple are byte-identical.
+  - (vii-a) **Amended after the panel.** The reviewed commit B is amended to B′ with no re-panel, and B′ lands. Registration `{B}`, with B outside the tip. reattest ACCEPTS with the advisory line naming B.
+  - (ix-f) **Full forged audit, the stated residual.** As (vii) before any reattest, plus a binding AND a complete, well-formed forged audited tuple, both written by one `bd update --metadata`, naming the X→Y merge. MF-3 PASSES. This pins R4.2's bounded NEW REACH as documented.
+  - (x-m) **Malformed reviewed SHA.** A registration whose `reviewed_head_sha` is option-like (`--output=/tmp/x`) or a revision expression (`HEAD~1`, `main^`, `a..b`) prints the malformed advisory. No git process receives it (argv seam), and the outcome is unchanged.
+  - (x-e) **Empty SHA.** A registration with an empty `reviewed_head_sha` is skipped, with no advisory line.
+  - (x-p) **Placeholder.** A registration with `reviewed_head_sha: "design-review-no-code"` (the 6ou2 shape) is skipped. No git process receives it.
+  - (x-g) **Garbage-collected SHA.** A well-formed SHA whose object is absent locally prints its advisory with `(not determinable locally)`, and is not an F5 error.
+  - (x-w) **Per-checkout visibility.** The registration exists only in the spec worktree's untracked `reviews/`. Run from the spec worktree and from a bead worktree without `reviews/`, reattest writes the same binding and tuple; only the advisory lines differ, and both name their scanned roots.
 
   *Read-back stays bound*
   - (xi) **Merge-time binding, no audit.** A merge-time executor binding with no audit names the (i) candidate. MF-3 FAILS with the reattest recovery. reattest writes the audited tuple even though the binding values are unchanged. MF-3 then PASSES.
@@ -897,7 +883,7 @@ Also not goals:
     - With both M1 and M2 admitted, a fresh reattest REFUSES `MultipleFallbackCandidates` and writes nothing.
   - (xiii) **Malformed audits:** wrong `op`, non-RFC-3339 `at`, empty actor, a `scanned_branch` naming another spec, or a missing or non-hex SHA key. Each grants nothing, and MF-3 FAILS.
   - (xiv) **Accepted, then reverted.** Accept (i) through reattest, then revert X's landing on spec/S. MF-3 FAILS with the reverted sentence (F4 at read time).
-  - (xv) **Accepted, then a later review.** Accept (i), then add a new registration dir at its default `{round 1: B′}`, outside the tip's history, with bead/X absent or reset. MF-3 FAILS (F2 at read time), and a fresh reattest REFUSES and writes nothing.
+  - (xv) **Accepted, then a later review.** Accept (i), then add a new registration dir at its default `{round 1: B′}`, outside the tip's history. MF-3 stays PASS, because the read-back reads no registration.
   - (xvi) **Accepted, then a second candidate.** Accept (i), then a second admitted `Merge bead/X` becomes reachable. MF-3 FAILS (F1 at read time).
 
   *Primary path*
@@ -906,8 +892,8 @@ Also not goals:
   Tests:
   - `TestFindLandedMergeReachable_{OffFirstParentNamesOnly,RefreshedThenOff,LongFormSiblingExcluded,OnlyViaSibling,FirstParentRefresh,Unreachable}`;
   - `TestReadiness_MF3_OffFirstParentFailsWithExits`;
-  - `TestReattest_Fallback{Accepts239Shape,AcceptsSingleDirRebasedRound,Accepts233Descendant,SameTupleNoOp,MalformedSameTupleRewrites,RefusesLaterUnlandedRound,RefusesSingleDirNoAnchor,RefusesCrossDirectoryRounds,RefusesWithAbandonedAncestor,RefusesMalformedReviewedSHA,SkipsEmptySHA,SkipsPlaceholderSHA,RefusesGarbageCollectedSHA,PerCheckoutVisibility,RefusesAmendedAfterPanel,RefusesResetStaleTip,RefusesMultipleCandidates,RecordsAuditOnNoOp}`;
-  - `TestReadBack_{ForgedBindingNoAudit,FullForgedAuditStillRunsF2,PanelEditReachDocumented,CrossDirectoryRefusesDespiteValidAudit,StaleAuditAfterExecutorRewrite,MalformedAudit,AcceptedThenReverted,AcceptedThenLaterReview,AcceptedThenSecondCandidate}`;
+  - `TestReattest_Fallback{Accepts239Shape,AcceptsSingleDirRebasedRound,Accepts233Descendant,SameTupleNoOp,MalformedSameTupleRewrites,AcceptsLaterUnlandedRoundWithAdvisory,AcceptsAmendedAfterPanelWithAdvisory,MalformedReviewedSHANeverGitOperand,SkipsEmptyAndPlaceholderSHA,GarbageCollectedSHAAdvisory,VisibilityChangesAdvisoryOnly,RefusesMultipleCandidates,RecordsAuditOnNoOp}`;
+  - `TestReadBack_{ForgedBindingNoAudit,FullForgedAuditResidual,StaleAuditAfterExecutorRewrite,MalformedAudit,AcceptedThenReverted,AcceptedThenLaterReviewStaysPass,AcceptedThenSecondCandidate}`;
   - `TestMergedUnclosed_IgnoresFallback`.
 - [ ] **AC-12 (R4.3, R4.5)**: Registrations via `registerLandedPanel`, extended with a slug parameter:
   - (i) Dirs `<X>` with `reviewed_head_sha = A` (stale) and `<X>-r2` with `B` = the second parent: `FindLandedMerge` CONFIRMS (primary path). Red today: the lexically first `A` contradicts.
@@ -917,7 +903,7 @@ Also not goals:
   - (v) The same with no binding and no branch: `*LandedMergeNoEvidence` naming the candidate. `ReattestLandedMerge` then writes the binding, with a corroboration string recording the panel as non-corroborating, and MF-3 PASSES. Red today: `ReattestStatePanelContradiction`.
   - (vi) The spec branch locally ahead of its remote-tracking ref: MF-3 PASS. This is a regression guard, green today.
   - (vii) **CLOSE paths.** `MergedUnclosed` with {stale A} and surviving tip = second parent identifies the landing. With {A} alone and no tip or binding, it returns the `*LandedMergeNoEvidence` error and never "merged-unclosed", so `complete` closes nothing.
-  - (viii) **Binding veto and audited repair.** A primary-path candidate has a contradictory binding and a non-corroborating panel set {A}. `FindLandedMerge` refuses (binding contradiction). `ReattestLandedMerge` writes the scan-derived identity and records the prior pair in the audit. On a fallback candidate, the same repair happens only when R4.2's three reattest refusals pass. A reattest that refuses (reverted, `UnlandedReview`, ambiguous) writes nothing. `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` stay green.
+  - (viii) **Binding veto and audited repair.** A primary-path candidate has a contradictory binding and a non-corroborating panel set {A}. `FindLandedMerge` refuses (binding contradiction). `ReattestLandedMerge` writes the scan-derived identity and records the prior pair in the audit. On a fallback candidate, the same repair happens only when R4.2's reattest checks (F1, F3, F4, F5) pass. A reattest that refuses (reverted, ambiguous, multiple candidates) writes nothing. `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` stay green.
 
   Tests: `TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestReadiness_MF3_CompleteWrapperShape`, `TestReadiness_MF3_LocalAheadOfRemotePasses`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`.
 - [ ] **AC-13 (R4.4)**: `TestReadiness_MF3ErrorArmDiscrimination` gains four legs:
@@ -974,9 +960,11 @@ Also not goals:
   - `ms-bead-impl/SKILL.md` contains no `mindspec_readiness_override` subset comparison. It contains the `ready-check` exit-code line immediately preceded by the staged-rule marker naming `target=next-action` (spec 133) and a `remove-by=` date. The rewritten pin tests pass, and they assert the marker.
   - `.mindspec/adr/ADR-0045-…md` exists with `Status: Accepted`, the Status fence, Amends ADR-0040 §1 and ADR-0044, step 1 → spec 130, and Decision 5's transition clause (pre-existing skill content grandfathered until step 7).
   - ADR-0040 and ADR-0044 carry the back-pointer; `mindspec adr list` includes ADR-0045.
-  - ADR-0041 contains § "Amendment (Spec 129)" naming the fallback-scoped callers, the finder-only rule (no automatic acceptance of a fallback candidate), the fallback safety checks F1–F5, with each one's provenance (F1/F3/F4 git, F2 untracked agent-writable panel files), F2's no-round-comparison rule, the abandoned and malformed-SHA handling and its visibility limit, the audited tuple, its validity contract and the validity-qualified no-op, the fallback-provenance corroboration string, q9ea's exclusion from the fallback exits, the metadata-forge and panel-edit residuals, the read-back conditions with the bounded-reach residual, the undirected-subject target gap, the non-corroborating panel datum and its reach into the CLOSE paths, the binding veto versus audited repair, and the scoped, fingerprint-bound fourth-verb override (a text-pin test in the R4 or R6 bead).
+  - ADR-0041 contains § "Amendment (Spec 129)" naming the fallback-scoped callers, the finder-only rule (no automatic acceptance of a fallback candidate), the fallback safety checks F1, F3, F4 and F5 (all git-derived), F2's retirement with registrations as advisory output only, the audited tuple, its validity contract and the validity-qualified no-op, the fallback-provenance corroboration string, q9ea's exclusion from the fallback exits, the metadata-forge residual with its bounded new reach, the read-back conditions, the undirected-subject target gap, the non-corroborating panel datum and its reach into the CLOSE paths, the binding veto versus audited repair, and the scoped, fingerprint-bound fourth-verb override (a text-pin test in the R4 or R6 bead).
   - `mindspec validate spec 129-readiness-tracker-honesty` resolves every touchpoint link.
 - [ ] **AC-19 (method)**: `go build ./... && go test ./... -short` is green. `internal/harness` and `internal/instruct` tests run under `-short` only (128 settled fact 3). `go test ./internal/lint/...` is green, including `TestBDRowCapWaist` and the ADR-0030 boundary lint (no new `os/exec` or `gitutil` import in `internal/validate/readiness`).
+- [ ] **AC-20 (R8.1)**: In a temp repo, a fresh `bootstrap.Run` and a run over an existing `.gitignore` both leave `.mindspec/specs/*/reviews/` and `.mindspec/reviews/` in it, and a second run leaves it byte-identical. `git check-ignore` reports `.mindspec/specs/<id>/reviews/<slug>/panel.json` and `.mindspec/reviews/<slug>/panel.json` ignored, and `src/reviews/x.go` not ignored. `ReviewIgnoreEntries` shares no entry with `RuntimeIgnoreEntries`, so doctor reports no tracked review file. Tests: `TestBootstrap_ReviewsIgnored{Greenfield,ExistingGitignore,Idempotent}`, `TestReviewIgnoreEntries_NotRuntimeEntries`. This repo's `.gitignore` contains both lines.
+- [ ] **AC-21 (R8.2, R8.3)**: With the entries present and an untracked `panel.json` under a review dir, `gitutil.CommitAll` and `gitutil.SnapshotWorktreeTree` leave it out of the commit or tree, and `git status --porcelain` is empty (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`). `complete`'s panel gate decides the same with the registration untracked and ignored as with it tracked (`TestPanelGate_UntrackedIgnoredRegistration`), and `reviewedHeadSHAForBead` reads it (`TestReviewedHeadSHASet_UntrackedIgnored`).
 
 ## Validation Proofs
 
@@ -997,13 +985,14 @@ Also not goals:
 - With MF-3 failing: `mindspec next <bead> --allow-not-ready=MF-3 --evidence ./why.md` claims, and `mindspec bead ready-check <bead>` then exits 0 with `MF-3: OVERRIDDEN`. Changing the failing dependency makes `ready-check` exit non-zero. The bare `--allow-not-ready` refuses with the scoped line (AC-15–AC-17).
 - `mindspec adr list | grep ADR-0045` and `mindspec validate spec 129-readiness-tracker-honesty` → 0 errors (AC-18).
 - `go build ./... && go test ./... -short` is green (AC-19).
+- `mindspec init` in a scratch repo under `/tmp`, then `git check-ignore -v .mindspec/specs/001-x/reviews/a/panel.json` names the new entry, and `git status --porcelain` stays empty after a review dir is written (AC-20, AC-21).
 
 ## Open Questions
 
 Every question below is either resolved with its rationale or EXPLICITLY DEFERRED to the plan stage with its re-open condition.
 
 - [x] **OQ-1 (scope split) — RESOLVED.**
-  - 129 = R1–R6 (estimate: **9–12 beads** — R1 2–3, R4 3, R6 2–3, R2/R3/R5 2–3 together; the plan gate should EXPECT the R6 relief-valve split to fire) + R7 (doc, this commit) + the ADR-0041 amendment (with the R4/R6 beads).
+  - 129 = R1–R6 (estimate: **9–12 beads** — R1 2–3, R4 3, R6 2–3, R2/R3/R5 2–3 together; the plan gate should EXPECT the R6 relief-valve split to fire) + R7 (doc, this commit) + the ADR-0041 amendment (with the R4/R6 beads) + R8 (reviews out of git, added 2026-10-19).
   - the follow-on spec (next plain number) = five deliverables: G (#234), H (#244), #250, I (`merge_strategy`), and phase-lineage unification.
   - 130 = the S0 rule table (pure policy, a different review centre, an unowned path that first needs an OWNERSHIP claim), #233's review-to-landing binding, and the rest of #251.
 
@@ -1014,7 +1003,7 @@ Every question below is either resolved with its rationale or EXPLICITLY DEFERRE
   - If it does, AC-12 (i) is the leg's live proof.
 
   Either way #233's binding question stays spec 130's. This re-opens R4.3's wording, never its rule.
-- [x] **OQ-4 (one discovery for identify AND nominate) — RESOLVED.** `ReattestLandedMerge` nominates through the same first-parent-then-reachable-fallback generator as MF-3. On the fallback path MF-3 only names the candidate until reattest accepts it under F1–F5. Later reads accept it only through the matching audited tuple, with F1–F5 re-run (R4.2, AC-11). The executor's write-time `gitutil.ExactSecondParentMerges` stays first-parent by requirement (R4.2's table), because the merge it binds was just made and is the first-parent tip.
+- [x] **OQ-4 (one discovery for identify AND nominate) — RESOLVED.** `ReattestLandedMerge` nominates through the same first-parent-then-reachable-fallback generator as MF-3. On the fallback path MF-3 only names the candidate until reattest accepts it under F1, F3, F4 and F5. Later reads accept it only through the matching audited tuple, with those checks re-run (R4.2, AC-11). The executor's write-time `gitutil.ExactSecondParentMerges` stays first-parent by requirement (R4.2's table), because the merge it binds was just made and is the first-parent tip.
 - [x] **OQ-5 (bare `--allow-not-ready`) — RESOLVED: refuse.** `--allow-not-ready=all` is NOT admitted. It would restore the all-or-nothing form R6 removes, and the refusal's recovery line already names the complete failing set. The cobra shape (a `String` flag with `NoOptDefVal`) is a plan decision, bound by AC-15's space-separated leg.
 - [x] **OQ-6 (index dotted sub-numbers `R6.3`?) — RESOLVED: no.** Base resolution is symmetric today. Sub-number indexing would be a new claim form that turns existing dotted citations into potential dangling claims. Re-opens if a later spec wants sub-number-exact MF-2.
 - [x] **OQ-7 (exit code of an empty-set result) — RESOLVED.**
@@ -1038,15 +1027,19 @@ Every question below is either resolved with its rationale or EXPLICITLY DEFERRE
 
   Re-opens if planning finds a shipped flow that creates plan beads without the plan-bead form or a plan mapping.
 
+- [x] **OQ-11 (review retention after finalize) — EXPLICITLY DEFERRED to the operator: needs operator decision.** R8.4's options (A), (B) and (C). The plan implements R8.1–R8.3, which hold under every option. It re-opens when the operator picks an option.
 - [x] **OQ-10 (which plan.md does readiness read?) — EXPLICITLY DEFERRED to the plan stage.** Selection prefers the committed `spec/<S>` blob and prints a divergence notice. `EvaluateReadiness` still reads the invoking checkout. The plan decides whether readiness also reads `spec/<S>`, which would make selection and readiness equal by construction, or keeps the notice as the honest boundary. It re-opens if the plan finds a shipped flow that edits `plan.md` in a bead worktree before committing it.
 
-### Grill record (self-answered, headless — 2026-10-18; revised after rounds 1–5)
+### Grill record (self-answered, headless — 2026-10-18; revised after rounds 1–5 and the 2026-10-19 operator decision)
+
+- [x] grill (operator, 2026-10-19): should a review registration refuse `reattest` or the read-back (F2)? → No: "yes drop F2". Reviews are an optional helper, not a hard blocker. Registrations are advisory output, and AC-11 (vii)'s O3 shape is accepted with an advisory. The F2 entries below are kept as history.
+- [x] grill (operator, 2026-10-19): should `reviews/` be committed? → No by default: `mindspec init` gitignores it and no auto-commit verb stages it (R8). Untracking existing files is a follow-on.
 
 - [x] grill (round 5): can panel `round` order reviews across directories? → No (orchestrator ruling 5): it is a per-directory counter. F2 now refuses on ANY visible outside-tip registration and never compares rounds, because one directory holds one record under the in-place bump.
 - [x] grill (round 5): is F2 git-derived? → No: it reads untracked, agent-writable panel files. The residual names the panel-edit reach, and AC-11 (ix-g) pins it.
 - [x] grill (round 5): is q9ea a fallback exit? → No: restoring the branch satisfies only F3. It is dropped from the fallback exits.
 
-- [x] grill (round 4): does the reattest audit bind to what it vouched for? → It did not: no merge-SHA key existed, and `MergeMetadata` kept stale audits alive. There is now an audited tuple equal to the binding and the candidate, and every read-back re-runs F1–F5 (R4.2).
+- [x] grill (round 4): does the reattest audit bind to what it vouched for? → It did not: no merge-SHA key existed, and `MergeMetadata` kept stale audits alive. There is now an audited tuple equal to the binding and the candidate, and every read-back re-runs the fallback checks (R4.2).
 - [x] grill (round 4): does the unreached-review refusal dead-end a genuine landing with a rebased-away round? → It did. F2 now refuses only a LATER-round non-ancestor, using panel.json `round`, fails closed on a tie or a missing round, and names the remaining exits. (Superseded in round 5: rounds are never compared, and see the round-5 entry.)
 - [x] grill (round 4): is "mapped" MF-1's precondition? → Now yes: `PlanMapsBead` = positional section AND chunk, shared with `evaluateMF1`.
 
