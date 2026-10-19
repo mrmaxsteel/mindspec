@@ -138,6 +138,9 @@ work_chunks:
       - internal/next/evidence_test.go
       - cmd/mindspec/next.go
       - cmd/mindspec/next_ready_gate_test.go
+      - cmd/mindspec/next_claim_guard_containment_test.go
+      - cmd/mindspec/verb_output_test.go
+      - cmd/mindspec/ceremony_guard_test.go
       - cmd/mindspec/bead_ready_test.go
       - cmd/mindspec/bead_clarify.go
       - internal/lint/ratchet_composition_allowlist_test.go
@@ -269,6 +272,7 @@ Raising the floor is the fail-closed direction: an older bd gets a doctor warnin
   - X′ with `parent: E2`.
 
   The first leg's comment records "realisability on real bd unverified (plan gap 3)". AC-1's expected outcome (X is N2c, never a member) is asserted on both.
+- **AC-1 bead Q (duplicate epic E′).** Not realisable in AC-1's single fixture with the real resolver: the title fallback returns the first epic with a matching number, so E′ listed newest-first also captures G and G′. Bead 5 puts Q and E′ in a fixture of their own (§ Bead 5 Acceptance Criteria); this is a recorded deviation from AC-1's wording, not a behaviour change.
 - **`mindspec panel create`'s default round.** Checked: `panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")` in `cmd/mindspec/panel.go`. No check depends on it (R4.2). AC-11 (xv) uses round 1 for the new slug, matching this default.
 
 ## Resolutions of spec round-7 notes (mindspec-haw6)
@@ -698,6 +702,7 @@ Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, `ErrLandedMerg
   - no `bd ready --parent` argv is recorded.
 
   The second to fifth fixtures and the lazy-trigger and fenced-heading fixtures behave as AC-1 states. The red-on-revert legs are recorded.
+- AC-1 is realised as TWO fake-tracker fixtures (a recorded deviation from AC-1's single-fixture wording, for the PR's Decisions): the main fixture holds every row above except Q, and no E′; the Q fixture holds E, E′ and Q and pins Q as N2b same-number with its `bd update <id> --parent <E>` recovery. Both use the real `phase.FindEpicForBead` and one shared `phase.Cache`; no per-row resolver is faked. Reason: the real title fallback (`FindEpicForBeadWithCache`) returns the first epic in the list whose number matches, so with E′ listed newest-first it would also resolve G and G′ (parentless, same title number) to E′, and AC-1's members {A, G, G′} and Q → E′ cannot both hold in one tracker. No behaviour changes.
 - AC-2: the four near-miss recovery tests and `TestNearMissN2a_NeverReparentRecovery` pass hermetically. After the fake applies `bd update <D> --parent <E>`, D is a member and `readiness.EvaluateReadiness` reaches its signals.
 - AC-3 (all legs except the scoped-override claim of an N4 positional, which is Bead 7's): selector refusals end with `^recovery: mindspec next --spec `, and the no-lineage N4 positional never reaches `GateReadiness` (byte-identical audit).
 - AC-4: fixtures i, ii, iii-a, iii-b, iv, v and vi, plus the failing-child-read leg, print the specified lines and exit codes. Fixture iv records zero plan reads.
@@ -793,6 +798,14 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
    - **Nothing failing:** a normal claim, with no marker and no `--evidence` required.
    - **A non-named failing signal:** the NOT-READY report plus `recovery: mindspec next <bead-id> --allow-not-ready=<all currently failing ids> --evidence <path-to-justification>`. The bead ID is idrender-gated, the IDs are closed-set and the placeholder is literal.
    - **A named failing signal with an indeterminate record:** `<MF-x> cannot be overridden: <record> could not be evaluated; fix the read first`.
+
+   Migrate the existing tests that use the Boolean flag, which the bare-form refusal and the String flag break. Each migration passes `--allow-not-ready=MF-1,MF-2,MF-3,MF-4 --evidence <path>`, where `<path>` is a 1-byte-or-more file under `t.TempDir()`, outside the sandbox repository, so no porcelain or audit assertion sees it. Naming a passing signal only prints the "named but passing" note, so each fixture's outcome is unchanged:
+   - `cmd/mindspec/next_ready_gate_test.go`: `TestNextReadyGate_AllowNotReady_ClaimsAndRecordsDurableMarker`, `TestNextReadyGate_AllowNotReady_MarkerWriteFailsClosed` and `TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker` (each `sb.Run("mindspec", "next", beadID, "--allow-not-ready")`); the first also asserts the marker is schema v2;
+   - `cmd/mindspec/next_claim_guard_containment_test.go`: `TestNextCmd_ClaimGuard_EnumerationPin_CustomWorktreeRootRecording`'s bare `--allow-not-ready` claim;
+   - `cmd/mindspec/verb_output_test.go`: `TestVerbOutput_Next`'s `nextCmd.Flags().Set("allow-not-ready", "true")` becomes `Set("allow-not-ready", "MF-1,MF-2,MF-3,MF-4")` plus `Set("evidence", <path>)`; its cleanup resets both flags to their empty defaults;
+   - `cmd/mindspec/ceremony_guard_test.go`: `TestCeremonyNonInflation_NextFlags`'s baseline gains `--evidence` and nothing else; the exact-set `assertSetEqual` guard stays.
+
+   Read and left unchanged (by inspection): `cmd/mindspec/adr0041_amendment_test.go` pins the substring `--allow-not-ready` in ADR-0041, which part (iii) only appends to; `internal/next/ready_gate_test.go:63` pins the same substring in the refusal, which the scoped recovery still contains (the file is already this bead's for the `GateReadiness` signature change); `internal/complete/readiness_isolation_test.go` names the flag in a comment only; `internal/setup/readiness_skill_pin_test.go` pins the substring in the skill text, which Bead 6's scoped wording keeps.
 4. Add `internal/next/evidence.go`, read before any mutation:
    - `--evidence` must be a readable regular file of 1 byte to 64 KiB;
    - a missing `--evidence` when at least one signal would be recorded refuses;
@@ -828,6 +841,7 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
 **Verification**
 - [ ] `go test ./internal/next/ -run 'TestGateReadiness_|TestRecordReadinessOverride|TestOverride_|TestAllowNotReady_' -count=1` passes
 - [ ] `go test ./cmd/mindspec/ -run 'TestNext_UnscopedDispatchesIntoLineageSpec|TestNext_NoLineageBugRefuses|TestNext_BareAllowNotReady_Refuses|TestNext_AllowNotReadySpaceSeparated_Refuses|TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker|TestNext_N4PositionalOverridesMF1|TestReadyCheck_' -count=1` passes
+- [ ] `go test ./cmd/mindspec/ -run 'TestNextReadyGate_AllowNotReady_|TestNextCmd_ClaimGuard_EnumerationPin_CustomWorktreeRootRecording|TestVerbOutput_Next|TestCeremonyNonInflation_NextFlags|TestADR0041FourthVerbClause_AllowNotReadyVsForce' -count=1` passes (the migrated Boolean-flag fixtures and the unchanged ADR pin)
 - [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes with parts (i)–(iii)
 - [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes; `go test ./internal/lint/... -count=1` passes (the argv ratchet, the composition allowlist and the guard recovery-convention lint cover the new sites and recovery lines)
 - [ ] `mindspec validate spec 129-readiness-tracker-honesty` (run) reports 0 errors
@@ -851,6 +865,7 @@ Bead 4 (MF-3 records, including `indeterminate`), Bead 5 (`cmd/mindspec/next.go`
 2. In `internal/bootstrap/bootstrap.go`, after `bootstrap.Run`'s existing `gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...)` call, call `gitutil.EnsureGitignoreEntriesWithHeader` with the review header and `gitutil.ReviewIgnoreEntries...`, honouring `dryRun` exactly as the runtime call does. Leave `starterGitignore` unchanged. Add to `internal/bootstrap/gitignore_test.go`:
    - `TestBootstrap_ReviewsIgnoredGreenfield`: a fresh temp repo gets both lines, under the review header; the runtime header appears exactly once;
    - `TestBootstrap_ReviewsIgnoredExistingGitignore`: a pre-existing `.gitignore` keeps its lines and gains both;
+   - both tests assert the literal lines `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` verbatim in the resulting `.gitignore` (AC-20's wording), so a directory-form constant is red;
    - `TestBootstrap_ReviewsIgnoredIdempotent`: a second `Run` leaves `.gitignore` byte-identical;
    - in each, `git check-ignore -q` reports `.mindspec/specs/001-x/reviews/a/panel.json` and `.mindspec/reviews/a/panel.json` ignored, and `src/reviews/x.go` not ignored.
 3. Add `internal/gitutil/reviews_ignore_test.go` (real git in `t.TempDir()`, identity via `-c` flags or env, never `~/.gitconfig`), with the entries written to `.gitignore` and an untracked `panel.json` under a spec review dir:
@@ -900,6 +915,6 @@ Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness
 | AC-16 (R6.2 record digests, no widening) | Bead 3 verification (`TestFailureRecordDigests_Deterministic`, `TestFailureRecordDigests_WriterReaderAgree`); Bead 3 verification (`TestReadiness_MF1AggregatesAllFailures`, `TestReadiness_MF4AggregatesAllOccurrences`); Bead 7 verification (`TestOverride_*`, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestAllowNotReady_EvidenceDirectoryRefuses`, `TestAllowNotReady_EvidenceEmptyRefuses`) |
 | AC-17 (R6.3, R6.4 validated read-back) | Bead 6 verification (`TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`, `TestReadyCheck_MixedCoverageRecoveryNamesAllFailing`); Bead 7 verification (end-to-end release and re-claim legs) |
 | AC-18 (R6.5, R7, ADR-0041 amendment) | Bead 6 verification (skill line and staged-rule marker pins, `mindspec adr list` showing ADR-0045, back-pointers); Bead 2 verification (ADR-0041 parts i–ii text pin); Bead 7 verification (ADR-0041 part iii text pin, `mindspec validate spec 129-readiness-tracker-honesty`) |
-| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Beads 3 and 4 record the readiness import grep in place of a boundary lint (§ ADR Fitness, ADR-0030); Bead 7 runs the whole-suite gate last |
+| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Beads 3, 4 and 6 record the readiness import grep in place of a boundary lint (§ ADR Fitness, ADR-0030); Bead 7 runs the whole-suite gate last |
 | AC-20 (R8.1 init ignores reviews) | Bead 8 verification (`TestBootstrap_ReviewsIgnored{Greenfield,ExistingGitignore,Idempotent}`, `TestReviewIgnoreEntries_NotRuntimeEntries`, the repo `.gitignore` check-ignore line) |
 | AC-21 (R8.2, R8.3 no auto-commit; gates read untracked) | Bead 8 verification (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`, `TestPanelGate_UntrackedIgnoredRegistration` with its non-vacuous Block assertions); Bead 2 verification (`TestReviewedHeadSHASet_UntrackedIgnored`) |
