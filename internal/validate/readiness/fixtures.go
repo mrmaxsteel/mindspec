@@ -22,11 +22,13 @@ import (
 type FakeDependency struct {
 	ID     string
 	Status string
+	SpecID string
 }
 
 // FakeBeadRecord is an in-memory stand-in for a bead's bd record.
 type FakeBeadRecord struct {
 	Description  string
+	Parent       string
 	Dependencies []FakeDependency
 	// Metadata mirrors the metadata field a real `bd show` also returns.
 	// EvaluateReadiness's mechanical signals NEVER read this field back —
@@ -116,9 +118,9 @@ func (s *FakeBDStore) Install() (restore func()) {
 		if !ok {
 			return nil, fmt.Errorf("fake bd store: no record recorded for %s", beadID)
 		}
-		rec := &beadRecord{Description: r.Description}
+		rec := &beadRecord{Description: r.Description, Parent: r.Parent}
 		for _, d := range r.Dependencies {
-			rec.Dependencies = append(rec.Dependencies, dependencyEdge{ID: d.ID, Status: d.Status})
+			rec.Dependencies = append(rec.Dependencies, dependencyEdge{ID: d.ID, Status: d.Status, SpecID: d.SpecID})
 		}
 		return rec, nil
 	}
@@ -136,7 +138,7 @@ func (s *FakeBDStore) Install() (restore func()) {
 			if s.LandedDeps[beadID] {
 				return &lifecycle.LandedMerge{SHA: "faked", FirstParent: "faked", SecondParent: "faked"}, nil
 			}
-			return nil, fmt.Errorf("%s: %w", beadID, lifecycle.ErrLandedMergeNotFound)
+			return nil, fmt.Errorf("%s: %w", beadID, lifecycle.ErrLandedMergeNoCandidate)
 		}
 	}
 	return func() {
@@ -186,8 +188,8 @@ func gitOutput(root string, args ...string) (string, error) {
 // surviving branch tip; fixtures use the panel leg specifically because
 // it requires no bd process at all, keeping MF-3's git-real fixtures
 // (see landed_test.go's own hermetic TestMain) genuinely bd-less.
-func registerLandedPanel(root, depID, target, headSHA string) error {
-	dir := filepath.Join(root, "review", "fixture-"+strings.NewReplacer(".", "-", "/", "-").Replace(depID))
+func registerLandedPanel(root, slug, depID, target, headSHA string) error {
+	dir := filepath.Join(root, "review", slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -265,7 +267,7 @@ func mergeDependency(root, specBranch, depID string, deleteBranch bool) error {
 	// no OTHER corroboration available without a real bd process, so
 	// every fixture merge registers this panel leg unconditionally
 	// (harmless — and idempotent evidence — when the branch also survives).
-	if err := registerLandedPanel(root, depID, specBranch, tipSHA); err != nil {
+	if err := registerLandedPanel(root, "fixture-"+strings.NewReplacer(".", "-", "/", "-").Replace(depID), depID, specBranch, tipSHA); err != nil {
 		return err
 	}
 	if deleteBranch {
@@ -395,7 +397,7 @@ func BuildNegativeFixture(root string) (*Fixture, error) {
 	store.Records[negativeBeadID] = FakeBeadRecord{
 		Description: "Negative fixture bead for spec 124 AC-1 pinning.",
 		Dependencies: []FakeDependency{
-			{ID: negativeDepBeadID, Status: "closed"},
+			{ID: negativeDepBeadID, Status: "closed", SpecID: negativeSpecID},
 		},
 	}
 	return &Fixture{SpecID: negativeSpecID, BeadID: negativeBeadID, DepBeadID: negativeDepBeadID, Store: store}, nil
@@ -486,7 +488,7 @@ func BuildPositiveFixture(root string) (*Fixture, error) {
 	store.Records[positiveBeadID] = FakeBeadRecord{
 		Description: "Positive fixture bead for spec 124 AC-2 pinning — modeled on spec 123 Bead 1.",
 		Dependencies: []FakeDependency{
-			{ID: positiveDepBeadID, Status: "closed"},
+			{ID: positiveDepBeadID, Status: "closed", SpecID: positiveSpecID},
 		},
 	}
 	return &Fixture{SpecID: positiveSpecID, BeadID: positiveBeadID, DepBeadID: positiveDepBeadID, Store: store}, nil

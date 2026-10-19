@@ -34,6 +34,39 @@ func gitBranches(t *testing.T, root string) string {
 	return string(out)
 }
 
+// Trace only this test's git reads; all setup writes happen before install.
+func traceMF3Git(t *testing.T) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "git.calls")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MF3_GIT_LOG\"\nexec \"$MF3_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MF3_REAL_GIT", realGit)
+	t.Setenv("MF3_GIT_LOG", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func assertMF3NoOriginRead(t *testing.T, log string) {
+	t.Helper()
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "log --first-parent") {
+		t.Fatalf("trace did not observe the known first-parent scan: %s", calls)
+	}
+	if strings.Contains(string(calls), "origin/") {
+		t.Fatalf("MF-3 must use local refs only: %s", calls)
+	}
+}
+
 func TestPlanMapsBead_AndPositional(t *testing.T) {
 	var plan strings.Builder
 	plan.WriteString("---\nwork_chunks:\n")
@@ -271,7 +304,7 @@ func TestReadiness_NegativeFixtureAllFail(t *testing.T) {
 		// conservatively (final-review r2 G2-R2-MF3-ANONYMOUS): no landed
 		// merge NAMES the dep's bead branch — never merged, or anonymous
 		// merge subject.
-		SignalDependencies: "no landed merge",
+		SignalDependencies: "no two-parent merge reachable",
 		SignalBlocking:     "blocking",
 	}
 	for _, s := range report.Signals {
@@ -394,7 +427,7 @@ func runSanitizedCase(t *testing.T, root, tag, specMD, planMD string, wantAllPas
 
 // --- AC-3: MF-3 landed-merge predicate, all four variants ---
 
-func TestReadiness_MF3Variants(t *testing.T) {
+func TestReadiness_MF3Variants_Existing(t *testing.T) {
 	const specID = "996-fixture-mf3"
 	const epicID = "mindspec-mf3b"
 
@@ -476,7 +509,7 @@ func TestReadiness_MF3Variants(t *testing.T) {
 			store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specIDCase}
 			store.Records[beadID] = FakeBeadRecord{
 				Description:  "MF-3 variant fixture.",
-				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat}},
+				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat, SpecID: specIDCase}},
 			}
 			restore := store.Install()
 			t.Cleanup(restore)
@@ -883,7 +916,7 @@ func TestReadiness_MF3_MetadataCorroboratedLandedPath_BdLess(t *testing.T) {
 	store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 	store.Records[beadID] = FakeBeadRecord{
 		Description:  "MF-3 seam fixture.",
-		Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+		Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 	}
 	store.LandedDeps = map[string]bool{depID: true}
 	restore := store.Install()
@@ -1017,27 +1050,9 @@ func TestReadiness_FX3_AllBlankKeyFilePathsFails(t *testing.T) {
 	}
 }
 
-// TestReadiness_MF3ErrorArmDiscrimination (final-review r2 F2-1 /
-// G2-R2-MF3): evaluateMF3's TWO FindLandedMerge refusal arms are
-// operational ROUTING, not cosmetics — each must emit its own truthful
-// state description and recovery verb:
-//
-//   - *lifecycle.LandedMergeNoEvidence (corroboration unavailable: a
-//     candidate merge exists, no admissible datum confirms it) → the
-//     dependency is already complete, so the recovery is `mindspec
-//     reattest <dep>` (the spec-125 verb that git-corroborates the merge
-//     and writes the missing landed binding) — NEVER `mindspec complete`.
-//   - plain ErrLandedMergeNotFound (no candidate merge names the bead) →
-//     the genuine closed-but-unmerged 2u0u split keeps `mindspec complete
-//     <dep>` as its recovery, stated conservatively (an anonymous-subject
-//     merge also lands here and is named as the other possibility).
-//
-// RED-on-revert: LandedMergeNoEvidence unwraps to ErrLandedMergeNotFound,
-// so deleting the errors.As arm silently reroutes the NoEvidence state
-// through the NotFound arm — still FAIL, but with the actively WRONG
-// `mindspec complete` recovery for an already-merged dependency. The
-// recovery-text assertions below turn that regression (and a collapse to
-// false-PASS) red.
+// Preserve the consumer-facing NoEvidence and NoCandidate routing checks.
+// The precise sentinel classes and unclassified NotFound errors are pinned
+// by TestReadiness_MF3ErrorArmDiscrimination_PreciseClasses in mf3_test.go.
 func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 	t.Run("i NoEvidence arm: corroboration-unavailable routes to reattest", func(t *testing.T) {
 		root := t.TempDir()
@@ -1051,7 +1066,7 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NoEvidence-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
 		store.NoEvidenceDeps = map[string]bool{depID: true}
 		restore := store.Install()
@@ -1088,10 +1103,9 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NotFound-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
-		// The dep is listed FALSE so the seam is installed but reports the
-		// plain ErrLandedMergeNotFound sentinel (no candidate merge).
+		// The dep is listed FALSE so the seam reports NoCandidate.
 		store.LandedDeps = map[string]bool{depID: false}
 		restore := store.Install()
 		t.Cleanup(restore)
