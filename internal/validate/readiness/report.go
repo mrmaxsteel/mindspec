@@ -38,6 +38,10 @@ type Signal struct {
 	ID string
 	// Pass reports whether this signal passed.
 	Pass bool
+	// Failures is the sorted, unique set of canonical raw failure records.
+	// Occurrence indices preserve MF-4 multiplicity. Records are independent
+	// of human Detail and terminal escaping (spec 129 R6.2).
+	Failures []string
 	// Detail is the evidence text: for a FAIL, the offending or missing
 	// element plus its evidence path (spec 124 R1); empty or a short
 	// confirmation for a PASS. Detail is agent-influenced (it quotes bead
@@ -59,6 +63,10 @@ type Report struct {
 	// BeadID is the evaluated bead's ID (already idvalidate-clean by the
 	// time EvaluateReadiness constructs a Report).
 	BeadID string
+	// EpicID is the epic resolved from the bead's authoritative lineage.
+	EpicID string
+	// SpecID is the spec resolved from the bead's authoritative lineage.
+	SpecID string
 	// Signals is always exactly four entries, ordered MF-1, MF-2, MF-3,
 	// MF-4 — AllPass/FailingSignals/Render all rely on this invariant.
 	Signals []Signal
