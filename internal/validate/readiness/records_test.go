@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func TestFailureRecordDigests_Deterministic(t *testing.T) {
@@ -40,6 +42,9 @@ func TestFailureRecordDigests_Deterministic(t *testing.T) {
 		}
 		sort.Strings(expected)
 		digests := FailureRecordDigests(a)
+		if len(digests) >= 3 && !sort.StringsAreSorted(digests) {
+			t.Fatalf("%s digests are not sorted: %v", a.ID, digests)
+		}
 		if len(digests) != len(expected) {
 			t.Fatalf("%s digest count=%d, want %d", a.ID, len(digests), len(expected))
 		}
@@ -55,15 +60,23 @@ func TestFailureRecordDigests_Deterministic(t *testing.T) {
 		}
 	}
 	// Digest sorting is independent of the incoming record order and Detail.
-	input := Signal{Failures: []string{"z", "a"}, Detail: "human detail"}
+	aDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("a")))
+	zDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("z")))
+	if !("a" < "z" && aDigest > zDigest) {
+		t.Fatalf("fixture must reverse record/digest order: a=%s z=%s", aDigest, zDigest)
+	}
+	input := Signal{Failures: []string{"a", "z"}, Detail: "human detail"}
 	before := append([]string(nil), input.Failures...)
-	want := []string{fmt.Sprintf("%x", sha256.Sum256([]byte("a"))), fmt.Sprintf("%x", sha256.Sum256([]byte("z")))}
-	sort.Strings(want)
+	want := []string{zDigest, aDigest}
 	if got := FailureRecordDigests(input); !reflect.DeepEqual(got, want) {
 		t.Fatalf("digest sort=%v, want %v", got, want)
 	}
 	if !reflect.DeepEqual(input.Failures, before) {
 		t.Fatal("digesting mutated raw records")
+	}
+	three := FailureRecordDigests(Signal{Failures: []string{"a", "b", "z"}})
+	if len(three) != 3 || !sort.StringsAreSorted(three) {
+		t.Fatalf("three-record digests must be sorted: %v", three)
 	}
 }
 
@@ -111,6 +124,30 @@ func TestFailureRecordDigests_WriterReaderAgree(t *testing.T) {
 	if !reflect.DeepEqual(writerSignal.Failures, []string{rawRecord}) {
 		t.Fatal("rendering mutated failure identity")
 	}
+	t.Run("raw-control-record", func(t *testing.T) {
+		raw := DependencyFailureRecord("mindspec-dep\x1b.1", FailureNotClosed, "")
+		if raw != "mindspec-dep\x1b.1:not-closed" {
+			t.Fatalf("constructor changed raw record: %q", raw)
+		}
+		writer := Signal{ID: SignalDependencies, Failures: []string{raw}}
+		encoded, err := json.Marshal(writer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reader Signal
+		if err := json.Unmarshal(encoded, &reader); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))}
+		escapedDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(termsafe.Escape(raw))))
+		if want[0] == escapedDigest {
+			t.Fatal("raw and escaped digest fixture must differ")
+		}
+		writerDigests, readerDigests := FailureRecordDigests(writer), FailureRecordDigests(reader)
+		if !reflect.DeepEqual(writerDigests, want) || !reflect.DeepEqual(readerDigests, want) {
+			t.Fatalf("control-byte digests writer=%v reader=%v, want raw=%v (escaped=%s)", writerDigests, readerDigests, want, escapedDigest)
+		}
+	})
 }
 
 func TestMF3FailureRecords(t *testing.T) {

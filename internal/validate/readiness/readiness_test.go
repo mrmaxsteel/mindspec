@@ -119,6 +119,28 @@ func TestReadiness_MF1AggregatesAllFailures(t *testing.T) {
 			t.Errorf("aggregate=%+v, want %v", got, tc.records)
 		}
 	}
+	for _, tc := range []struct {
+		name, paths string
+		pass        bool
+	}{
+		{"concrete-with-blank", "[real.go, '']", true},
+		{"all-blank", "['', ' ']", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := "---\nwork_chunks:\n  - id: 1\n    key_file_paths: " + tc.paths + "\n---\n## Bead 1: paths\n**Acceptance Criteria**\n- A concrete outcome is verified.\n"
+			got := evaluateMF1(plan, 1)
+			if got.Pass != tc.pass {
+				t.Fatalf("paths %s: Pass=%v, want %v; failures=%v detail=%q", tc.paths, got.Pass, tc.pass, got.Failures, got.Detail)
+			}
+			if tc.pass {
+				if len(got.Failures) != 0 || got.Detail != "" || got.Recovery != "" {
+					t.Fatalf("concrete path must pass without failures: %+v", got)
+				}
+			} else if !reflect.DeepEqual(got.Failures, []string{"key-file-paths-blank:1"}) || got.Detail != "work_chunks[1].key_file_paths has no non-blank concrete path element" {
+				t.Fatalf("all-blank paths must retain FX-3 record and detail: %+v", got)
+			}
+		})
+	}
 }
 
 func TestReadiness_MF4AggregatesAllOccurrences(t *testing.T) {
@@ -149,9 +171,45 @@ func TestReadiness_MF4AggregatesAllOccurrences(t *testing.T) {
 	if got := evaluateMF4("TBD TBD", ""); len(got.Failures) != 2 {
 		t.Fatalf("same-line multiplicity lost: %v", got.Failures)
 	}
-	if got := evaluateMF4("**Open Questions**\n- [ ] decide\n- [ ] decide\n", ""); len(got.Failures) != 2 || !strings.HasPrefix(got.Failures[0], "checklist:description:-:") {
-		t.Fatalf("description occurrences lost: %v", got.Failures)
-	}
+	t.Run("description-checklist-passes", func(t *testing.T) {
+		if got := evaluateMF4("**Open Questions**\n- [ ] decide\n", ""); !got.Pass || len(got.Failures) != 0 {
+			t.Fatalf("description-only checklist must pass MF-4: %+v", got)
+		}
+	})
+	t.Run("region-termination", func(t *testing.T) {
+		for _, heading := range []string{"#### Sub", "# Top", "##### Sub", "###### Sub"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "## Bead 1: blockers\n**Blocking Questions**\n"+heading+"\n- [ ] decide\n")
+				if got.Pass || len(got.Failures) != 1 || !strings.HasPrefix(got.Failures[0], "checklist:plan:") {
+					t.Fatalf("heading %q must keep blocking region open: %+v", heading, got)
+				}
+			})
+		}
+		for _, heading := range []string{"## End", "### End", "  ## End", "\t### End", "**Verification**"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "**Blocking Questions**\n"+heading+"\n- [ ] routine\n")
+				if !got.Pass || len(got.Failures) != 0 {
+					t.Fatalf("trimmed heading %q must end blocking region: %+v", heading, got)
+				}
+			})
+		}
+	})
+	t.Run("line-normalisation", func(t *testing.T) {
+		for _, line := range []string{"  TBD  decide  ", "\tTBD\tdecide\t"} {
+			got := evaluateMF4(line, "")
+			want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD decide")))}
+			if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+				t.Errorf("normalised occurrence for %q=%v, want %v", line, got.Failures, want)
+			}
+		}
+	})
+	t.Run("description-heading", func(t *testing.T) {
+		got := evaluateMF4("## heading\nTBD\n", "")
+		want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD")))}
+		if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+			t.Fatalf("description heading must retain section '-': %v, want %v", got.Failures, want)
+		}
+	})
 	if got := evaluateMF4("TBD", "## Bead 1: blockers\nTBD\n"); len(got.Failures) != 2 {
 		t.Fatalf("source identity lost: %v", got.Failures)
 	}
@@ -159,11 +217,17 @@ func TestReadiness_MF4AggregatesAllOccurrences(t *testing.T) {
 
 func TestEvaluateReadiness_NonPlanFormErrorCarriesLineage(t *testing.T) {
 	store := NewFakeBDStore()
-	for _, id := range []string{"mindspec-plain", "mindspec-plain.0", "mindspec-plain.99999999999999999999999999"} {
-		store.Lineage[id] = FakeLineage{EpicID: "mindspec-owner", SpecID: "129-owner"}
+	cases := []struct{ id, message string }{
+		{"mindspec-plain", "bead mindspec-plain has no dotted epic-child index (expected <epic>.<N>)"},
+		{"mindspec-plain.0", "bead mindspec-plain.0 has an invalid epic-child index"},
+		{"mindspec-plain.99999999999999999999999999", "bead mindspec-plain.99999999999999999999999999 has an invalid epic-child index"},
+	}
+	for _, tc := range cases {
+		store.Lineage[tc.id] = FakeLineage{EpicID: "mindspec-owner", SpecID: "129-owner"}
 	}
 	t.Cleanup(store.Install())
-	for id := range store.Lineage {
+	for _, tc := range cases {
+		id := tc.id
 		report, err := EvaluateReadiness(t.TempDir(), id) // No plan or bd record exists.
 		var typed *NonPlanFormError
 		if report != nil || !errors.As(err, &typed) {
@@ -172,9 +236,8 @@ func TestEvaluateReadiness_NonPlanFormErrorCarriesLineage(t *testing.T) {
 		if typed.BeadID != id || typed.EpicID != "mindspec-owner" || typed.SpecID != "129-owner" {
 			t.Fatalf("lineage lost: %+v", typed)
 		}
-		_, old := beadIndex(id)
-		if typed.Error() != old.Error() {
-			t.Fatalf("diagnostic changed: %q vs %q", typed.Error(), old.Error())
+		if typed.Error() != tc.message {
+			t.Fatalf("diagnostic changed: %q, want literal %q", typed.Error(), tc.message)
 		}
 	}
 }

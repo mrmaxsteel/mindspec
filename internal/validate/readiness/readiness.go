@@ -302,12 +302,8 @@ func evaluateMF1(planContent string, n int) Signal {
 			add("key-file-paths-placeholder", fmt.Sprintf("work_chunks[%d].key_file_paths still carries the scaffold placeholder %q", n, scaffoldKeyFilePathPlaceholder),
 				fmt.Sprintf("replace the placeholder path in work_chunks id: %d's key_file_paths with real file paths", n))
 		}
-		if hasBlank {
-			detail := fmt.Sprintf("work_chunks[%d].key_file_paths has no non-blank concrete path element", n)
-			if hasConcrete {
-				detail = fmt.Sprintf("work_chunks[%d].key_file_paths carries a blank path element", n)
-			}
-			add("key-file-paths-blank", detail,
+		if hasBlank && !hasConcrete {
+			add("key-file-paths-blank", fmt.Sprintf("work_chunks[%d].key_file_paths has no non-blank concrete path element", n),
 				fmt.Sprintf("declare the files this bead touches in work_chunks id: %d's key_file_paths (blank entries do not count)", n))
 		}
 	}
@@ -847,7 +843,7 @@ func findBlockingOccurrences(text string, checklist bool) []blockingOccurrence {
 				inBlock = true
 				continue
 			}
-			if boldHeaderRe.MatchString(trimmed) || headingRe.MatchString(line) {
+			if boldHeaderRe.MatchString(trimmed) || strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
 				inBlock = false
 			}
 			if inBlock && uncheckedItemRe.MatchString(trimmed) {
@@ -880,6 +876,9 @@ func evaluateMF4(description, sectionRaw string) Signal {
 			name string
 			scan func(string) []blockingOccurrence
 		}{{"token", findBlockingTokens}, {"checklist", findBlockingChecklistItems}} {
+			if kind.name == "checklist" && source.name != "plan" {
+				continue
+			}
 			for _, occurrence := range kind.scan(source.text) {
 				section := occurrence.section
 				if source.name == "description" {
