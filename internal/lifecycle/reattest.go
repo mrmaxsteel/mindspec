@@ -4,7 +4,8 @@
 // never accepted. Primary candidates retain Spec-125 ambiguity and revert
 // checks. With zero primary candidates the source-named reachable fallback
 // requires F1/F3/F4/F5; registrations are advisory only. Every read failure
-// refuses before writing. A no-op requires a valid matching audit tuple.
+// refuses before writing. A fallback no-op requires a valid matching audit
+// tuple; a primary no-op requires the binding to match the newest owned merge.
 package lifecycle
 
 import (
@@ -57,8 +58,8 @@ var ErrReattestRefused = errors.New("reattest refused: no git-corroborated exact
 
 // ReattestRefusal states — the closed set of fail-closed reasons.
 const (
-	// ReattestStateNoOwnedMerge: no two-parent first-parent merge on the
-	// scanned branch names this bead (truly-bare, or only an anonymous/
+	// ReattestStateNoOwnedMerge: no first-parent or admitted reachable
+	// two-parent merge on the scanned branch names this bead (truly-bare, or only an anonymous/
 	// decoy/descendant merge exists). Forward exit: the audited ADR-0035
 	// mindspec-q9ea human attested-restore.
 	ReattestStateNoOwnedMerge = "no-owned-exact-merge"
@@ -103,8 +104,9 @@ func (e *ReattestRefusal) Unwrap() error { return ErrReattestRefused }
 
 // ReattestResult reports what the derivation established and whether a
 // write happened. Wrote == false is the convergent no-op: the existing
-// binding and VALID audit already match the derived identity, so NOTHING
-// was written (byte-identical metadata, no audit churn).
+// binding already matches the derived identity (and, on the fallback,
+// a VALID audit matches too), so NOTHING was written (byte-identical
+// metadata, no audit churn).
 type ReattestResult struct {
 	BeadID     string
 	SpecBranch string
@@ -186,7 +188,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 	if len(candidates) == 0 {
 		return nil, &ReattestRefusal{
 			BeadID: beadID, SpecBranch: specBranch, State: ReattestStateNoOwnedMerge,
-			Detail: fmt.Sprintf("no two-parent first-parent merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited ADR-0035 mindspec-q9ea human attested-restore", specBranch, beadBranch),
+			Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited ADR-0035 mindspec-q9ea human attested-restore", specBranch, beadBranch),
 		}
 	}
 
@@ -313,7 +315,10 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 			}
 		}
 	}
-	if auditMatches(meta, specBranch, newest.SHA, secondParent) {
+	// Spec-125 FIX-3 is unchanged on the primary path. Only a fallback
+	// candidate needs the Spec-129 audited tuple before it can converge.
+	if (!fallback && priorMerge == newest.SHA && priorSecond == secondParent) ||
+		(fallback && auditMatches(meta, specBranch, newest.SHA, secondParent)) {
 		return &ReattestResult{
 			BeadID: beadID, SpecBranch: specBranch,
 			MergeSHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent,

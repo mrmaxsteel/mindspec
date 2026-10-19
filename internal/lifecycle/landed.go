@@ -118,10 +118,10 @@ type LandedMergeNoEvidence struct {
 func (e *LandedMergeNoEvidence) Error() string {
 	if e.ConflictingSecondParent != "" {
 		return fmt.Sprintf("%s: %s on %s (owned merges disagree on the landed tip — candidate merge %s's second parent %s vs another owned merge's second parent %s — refusing to pick one)",
-			ErrLandedMergeNotFound, e.BeadID, e.SpecBranch, e.MergeSHA, e.SecondParent, e.ConflictingSecondParent)
+			ErrLandedMergeNotFound, termsafe.Escape(e.BeadID), termsafe.Escape(e.SpecBranch), termsafe.Escape(e.MergeSHA), termsafe.Escape(e.SecondParent), termsafe.Escape(e.ConflictingSecondParent))
 	}
 	return fmt.Sprintf("%s: %s on %s (candidate merge %s, second parent %s — no admissible datum confirms it)",
-		ErrLandedMergeNotFound, e.BeadID, e.SpecBranch, e.MergeSHA, e.SecondParent)
+		ErrLandedMergeNotFound, termsafe.Escape(e.BeadID), termsafe.Escape(e.SpecBranch), termsafe.Escape(e.MergeSHA), termsafe.Escape(e.SecondParent))
 }
 
 // Unwrap makes errors.Is(err, ErrLandedMergeNotFound) succeed for a
@@ -652,7 +652,7 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			MergeSHA: newest.SHA, SecondParent: secondParent,
 		}
 		if len(reviewed) > 0 {
-			return nil, fmt.Errorf("%w: %s on %s (panel set non-corroborating)", noEvidence, beadID, specBranch)
+			return nil, fmt.Errorf("%w (panel set non-corroborating)", noEvidence)
 		}
 		return nil, noEvidence
 	}
@@ -749,7 +749,9 @@ func reviewedHeadSHAForBead(root, specBranch, beadID string) map[string]struct{}
 		if r.Err != nil {
 			continue
 		}
-		if sha := r.Panel.ReviewedHeadSHA; classifyReviewedSHA(sha) == reviewedSHAObjectID {
+		// Primary corroboration retains the panel reader's whitespace
+		// normalization. Fallback advisories classify the raw value instead.
+		if sha := strings.TrimSpace(r.Panel.ReviewedHeadSHA); classifyReviewedSHA(sha) == reviewedSHAObjectID {
 			set[sha] = struct{}{}
 		}
 	}

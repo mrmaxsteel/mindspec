@@ -10,9 +10,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 const fallbackSpec = "spec/129-test"
@@ -295,7 +297,32 @@ func TestReadBack_ForgedBindingNoAudit(t *testing.T) {
 }
 
 func TestReattest_FallbackRecordsAuditOnNoOp(t *testing.T) {
-	TestReadBack_ForgedBindingNoAudit(t)
+	f := siblingFallbackFixture(t)
+	meta := map[string]interface{}{
+		"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second,
+	}
+	stubBindingRead(t, meta)
+	requireOffFirstParent(t, f, 1)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 {
+		t.Fatalf("binding without audit must write exactly once: %+v %v writes=%v", res, err, *writes)
+	}
+	w := (*writes)[0]
+	if w.beadID != fallbackBead || w.updates["mindspec_landed_merge_sha"] != meta["mindspec_landed_merge_sha"] ||
+		w.updates["mindspec_landed_second_parent"] != meta["mindspec_landed_second_parent"] {
+		t.Fatalf("audit write changed the existing binding: %+v", w)
+	}
+	if !auditMatches(w.updates, fallbackSpec, f.merge, f.second) ||
+		w.updates[reattestKeyPriorMerge] != f.merge || w.updates[reattestKeyPriorSecond] != f.second {
+		t.Fatalf("missing audited tuple or prior pair: %+v", w.updates)
+	}
+	stubBindingRead(t, w.updates)
+	requireReadBack(t, f)
+	res, err = ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || res.Wrote || len(*writes) != 1 {
+		t.Fatalf("audited sibling landing did not converge: %+v %v writes=%v", res, err, *writes)
+	}
 }
 
 func TestReadBack_FullForgedAuditResidual(t *testing.T) {
@@ -714,7 +741,7 @@ func TestReadBack_StaleAuditAfterExecutorRewrite(t *testing.T) {
 }
 
 func TestFindLandedMerge_PanelSet(t *testing.T) {
-	for _, leg := range []string{"matching-second-round", "stale-with-tip", "stale-with-moved-tip", "stale-alone", "stale-with-binding"} {
+	for _, leg := range []string{"matching-second-round", "whitespace-padded-second", "stale-with-tip", "stale-with-moved-tip", "stale-alone", "stale-with-binding", "stale-with-contradictory-binding", "exact-with-contradictory-binding"} {
 		t.Run(leg, func(t *testing.T) {
 			dir, run := initLandedRepo(t, "129-test")
 			mergeBead(t, run, dir, fallbackBead, fallbackSpec)
@@ -725,6 +752,16 @@ func TestFindLandedMerge_PanelSet(t *testing.T) {
 			case "matching-second-round":
 				registerFallbackPanel(t, dir, "z-second", f.second, 2)
 				run("branch", "-D", "bead/"+fallbackBead)
+			case "whitespace-padded-second":
+				registerFallbackPanel(t, dir, "z-second", " "+f.second, 2)
+				run("branch", "-D", "bead/"+fallbackBead)
+				set := reviewedHeadSHAForBead(dir, fallbackSpec, fallbackBead)
+				if _, ok := set[f.second]; !ok {
+					t.Fatalf("set builder did not trim the padded second parent: %v", set)
+				}
+				if _, ok := set[" "+f.second]; ok {
+					t.Fatal("set builder retained whitespace in its key")
+				}
 			case "stale-with-moved-tip":
 				moveSurvivingTip(t, f)
 			case "stale-alone":
@@ -732,9 +769,19 @@ func TestFindLandedMerge_PanelSet(t *testing.T) {
 			case "stale-with-binding":
 				run("branch", "-D", "bead/"+fallbackBead)
 				stubBindingRead(t, map[string]interface{}{"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second})
+			case "stale-with-contradictory-binding", "exact-with-contradictory-binding":
+				run("branch", "-D", "bead/"+fallbackBead)
+				stubBindingRead(t, map[string]interface{}{"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": stale})
+				if leg == "exact-with-contradictory-binding" {
+					registerFallbackPanel(t, dir, "z-second", f.second, 2)
+				}
 			}
 			got, err := FindLandedMerge(dir, fallbackSpec, fallbackBead)
 			switch leg {
+			case "stale-with-contradictory-binding", "exact-with-contradictory-binding":
+				if got != nil || !errors.Is(err, ErrLandedMergeContradiction) || !strings.Contains(err.Error(), "landed-binding") {
+					t.Fatalf("panel set pre-empted landed-binding veto: %+v %v", got, err)
+				}
 			case "stale-with-moved-tip":
 				if !errors.Is(err, ErrLandedMergeContradiction) || !strings.Contains(err.Error(), "surviving branch") {
 					t.Fatalf("wrong contradiction datum: %v", err)
@@ -798,5 +845,208 @@ func TestReattest_RepairsContradictoryBindingOnFallback(t *testing.T) {
 	meta := acceptFallback(t, f)
 	if meta[reattestKeyPriorMerge] != prior || meta[reattestKeyPriorSecond] != prior {
 		t.Fatalf("prior binding not audited: %+v", meta)
+	}
+}
+
+func TestFindLandedMergeReachable_PrimaryNonIdentificationNeverFallsBack(t *testing.T) {
+	for _, contradiction := range []bool{false, true} {
+		t.Run(fmt.Sprintf("binding-contradiction=%v", contradiction), func(t *testing.T) {
+			dir, run := initLandedRepo(t, "129-test")
+			mergeBead(t, run, dir, fallbackBead, fallbackSpec)
+			merge := revParseIn(t, dir, "HEAD")
+			second := revParseIn(t, dir, merge+"^2")
+			run("branch", "-D", "bead/"+fallbackBead)
+			if contradiction {
+				stubBindingRead(t, map[string]interface{}{
+					"mindspec_landed_merge_sha":     merge,
+					"mindspec_landed_second_parent": revParseIn(t, dir, second+"^1"),
+				})
+			}
+			check := func(got *LandedMerge, err error) {
+				t.Helper()
+				var no *LandedMergeNoEvidence
+				var off *LandedMergeOffFirstParent
+				if got != nil || errors.As(err, &off) {
+					t.Fatalf("primary result replaced with fallback: %+v %v", got, err)
+				}
+				if contradiction {
+					if !errors.Is(err, ErrLandedMergeContradiction) || !strings.Contains(err.Error(), "landed-binding") {
+						t.Fatalf("lost primary binding contradiction: %v", err)
+					}
+				} else if !errors.As(err, &no) || no.MergeSHA != merge || no.SecondParent != second {
+					t.Fatalf("lost primary NoEvidence candidate: %v", err)
+				}
+			}
+			check(FindLandedMerge(dir, fallbackSpec, fallbackBead))
+			old := reachableMergesFn
+			t.Cleanup(func() { reachableMergesFn = old })
+			reachableMergesFn = func(string, string) ([]gitutil.MergeCommit, error) {
+				t.Fatal("fallback ran despite primary non-identification")
+				return nil, nil
+			}
+			check(FindLandedMergeReachable(dir, fallbackSpec, fallbackBead))
+		})
+	}
+}
+
+func TestFindLandedMergeReachable_SubjectMatcherRejectsOtherTargetsAndPrefixes(t *testing.T) {
+	for _, tc := range []struct{ bead, subject string }{
+		{fallbackBead, "Merge bead/" + fallbackBead + " into bead/other"},
+		{fallbackBead, "Merge bead/" + fallbackBead + " into spec/other-spec"},
+		{fallbackBead, "Merge bead/" + fallbackBead + ".10"},
+		{fallbackBead, "Merge bead/" + fallbackBead + "-x"},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".10"},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".1-x"},
+	} {
+		t.Run(tc.subject+"/for="+tc.bead, func(t *testing.T) {
+			f := siblingFallbackFixture(t)
+			// Reuse a real reachable two-parent merge. Its subject is the
+			// only varied datum; matching binding/audit must not admit it.
+			m := gitutil.MergeCommit{SHA: f.merge, Parents: []string{revParseIn(t, f.dir, f.merge+"^1"), f.second}, Subject: tc.subject}
+			oldPrimary, oldReachable := firstParentMergesFn, reachableMergesFn
+			t.Cleanup(func() { firstParentMergesFn, reachableMergesFn = oldPrimary, oldReachable })
+			firstParentMergesFn = func(string, string) ([]gitutil.MergeCommit, error) { return nil, nil }
+			reachableMergesFn = func(string, string) ([]gitutil.MergeCommit, error) { return []gitutil.MergeCommit{m}, nil }
+			stubBindingRead(t, map[string]interface{}{
+				"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second,
+				reattestKeyMerge: f.merge, reattestKeySecond: f.second,
+				reattestKeyScannedBranch: fallbackSpec, reattestKeyOp: reattestOp,
+				reattestKeyActor: "test-actor", reattestKeyAt: "2026-10-19T00:00:00Z",
+			})
+			candidates, err := reachableCandidates(f.dir, fallbackSpec, "bead/"+tc.bead)
+			if err != nil || len(candidates) != 0 {
+				t.Errorf("subject matcher admitted %q for %s: %+v %v", tc.subject, tc.bead, candidates, err)
+			}
+			got, err := FindLandedMergeReachable(f.dir, fallbackSpec, tc.bead)
+			if got != nil || !errors.Is(err, ErrLandedMergeNoCandidate) {
+				t.Errorf("finder admitted excluded subject: %+v %v", got, err)
+			}
+			writes := installReattestRecorder(t)
+			res, err := ReattestLandedMerge(f.dir, fallbackSpec, tc.bead, "test-actor")
+			var refusal *ReattestRefusal
+			if res != nil || !errors.As(err, &refusal) || refusal.State != ReattestStateNoOwnedMerge || len(*writes) != 0 {
+				t.Fatalf("reattest admitted excluded subject: %+v %v writes=%v", res, err, *writes)
+			}
+		})
+	}
+}
+
+func TestReattest_FallbackAdvisoryEscapesDirectoriesAndRoots(t *testing.T) {
+	for _, malformed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("malformed=%v", malformed), func(t *testing.T) {
+			f := siblingFallbackFixture(t)
+			sha := outsideReviewedCommit(t, f)
+			if malformed {
+				sha = "bad\x1b[2J\x07\u009b31m"
+			}
+			root := filepath.Join(t.TempDir(), "root\x1b\x07\u009b31m")
+			f.run("worktree", "add", "--detach", root, fallbackSpec)
+			dir := registerFallbackPanel(t, root, "panel\x1b[2J\x07\u009b31m", sha, 2)
+			lines, count, roots := advisoryRegistrationReport(root, fallbackSpec, fallbackBead)
+			wantCount := 1
+			want := "advisory: registration " + termsafe.Escape(dir) + " (round 2) reviewed " + sha + ", which is outside " + fallbackSpec + "'s tip history"
+			if malformed {
+				wantCount = 0
+				want = "advisory: registration " + termsafe.Escape(dir) + " carries a malformed reviewed_head_sha; ignored"
+			}
+			if count != wantCount || len(lines) != 2 || lines[0] != want || !strings.Contains(roots, termsafe.Escape(root)) {
+				t.Errorf("advisory content/count: lines=%q count=%d roots=%q", lines, count, roots)
+			}
+			assertSafe := func(origin string, values []string) {
+				t.Helper()
+				for _, line := range values {
+					if strings.ContainsFunc(line, unicode.IsControl) {
+						t.Errorf("%s contains raw control byte: %q", origin, line)
+					}
+				}
+			}
+			assertSafe("returned advisory", append(lines, roots))
+			writes := installReattestRecorder(t)
+			var emitted []string
+			res, err := ReattestLandedMerge(root, fallbackSpec, fallbackBead, "test-actor", func(line string) {
+				if len(*writes) != 0 {
+					t.Fatal("report callback ran after the write")
+				}
+				emitted = append(emitted, line)
+			})
+			if err != nil || res == nil || !res.Wrote || len(*writes) != 1 {
+				t.Fatalf("hostile path changed acceptance: %+v %v writes=%v", res, err, *writes)
+			}
+			if !reflect.DeepEqual(res.Lines, emitted) || len(emitted) != 3 || emitted[1] != want {
+				t.Errorf("returned/callback reports differ or lost registration: result=%q callback=%q", res.Lines, emitted)
+			}
+			assertSafe("returned reattest", res.Lines)
+			assertSafe("reports callback", emitted)
+		})
+	}
+}
+
+func TestFindLandedMerge_PanelSetNonCorroboratingDiagnostic(t *testing.T) {
+	const branch = "spec/129-test\x1b[2J\x07\u009b31m"
+	const merge = "merge\x1b[2J\x07"
+	const second = "second\x1b[2J\x07"
+	oldPrimary, oldTip, oldPanel := firstParentMergesFn, landedRevParseRefFn, landedPanelScanFn
+	t.Cleanup(func() { firstParentMergesFn, landedRevParseRefFn, landedPanelScanFn = oldPrimary, oldTip, oldPanel })
+	firstParentMergesFn = func(string, string) ([]gitutil.MergeCommit, error) {
+		return []gitutil.MergeCommit{{SHA: merge, Parents: []string{"first", second}, Subject: "Merge bead/" + fallbackBead}}, nil
+	}
+	landedRevParseRefFn = func(string, string) (string, error) { return "", gitutil.ErrRefNotFound }
+	id := fallbackBead
+	landedPanelScanFn = func(...string) []panel.Registration {
+		return []panel.Registration{{Panel: panel.Panel{BeadID: &id, ReviewedHeadSHA: strings.Repeat("a", 40)}}}
+	}
+	got, err := FindLandedMerge(t.TempDir(), branch, fallbackBead)
+	var no *LandedMergeNoEvidence
+	if got != nil || !errors.As(err, &no) {
+		t.Fatalf("lost non-corroborating NoEvidence: %+v %v", got, err)
+	}
+	message := err.Error()
+	for _, value := range []string{fallbackBead, branch, merge, second} {
+		if strings.Count(message, termsafe.Escape(value)) != 1 {
+			t.Errorf("diagnostic must render %q escaped exactly once: %q", value, message)
+		}
+	}
+	if strings.ContainsFunc(message, unicode.IsControl) || !strings.Contains(message, "panel set non-corroborating") {
+		t.Errorf("unsafe or incomplete non-corroboration diagnostic: %q", message)
+	}
+}
+
+func TestReadBack_StaleAuditSingleCandidate(t *testing.T) {
+	f := siblingFallbackFixture(t)
+	meta := acceptFallback(t, f)
+	// Model the executor replacing only the binding pair. Keep M1's valid
+	// audit, but make M2 the ONLY scan candidate so F1 cannot mask equality.
+	// Replace the spec history in this throwaway repo, leaving M1 reachable
+	// only from the old sibling branch, outside the scanned spec tip.
+	f.run("checkout", "-b", "replacement", f.merge+"^1")
+	f.run("merge", "--no-ff", "-m", "Merge bead/"+fallbackBead+" into "+fallbackSpec, "bead/"+fallbackBead)
+	m2 := fallbackFixture{f.dir, f.run, revParseIn(t, f.dir, "HEAD"), f.second}
+	f.run("branch", "-f", fallbackSpec, m2.merge)
+	f.run("checkout", fallbackSpec)
+	carry239(t, m2)
+	meta["mindspec_landed_merge_sha"] = m2.merge
+	meta["mindspec_landed_second_parent"] = m2.second
+	if meta[reattestKeyMerge] == m2.merge {
+		t.Fatal("fixture must carry different M1 and M2 audit tuples")
+	}
+	candidates, err := reachableCandidates(m2.dir, fallbackSpec, "bead/"+fallbackBead)
+	if err != nil || len(candidates) != 1 || candidates[0].SHA != m2.merge {
+		t.Fatalf("stale-audit fixture must pass F1: %+v %v", candidates, err)
+	}
+	// Show all validity and candidate/binding checks succeed with just the
+	// audit pair replaced. The real read must reject the retained M1 pair.
+	fresh := make(map[string]interface{}, len(meta))
+	for k, v := range meta {
+		fresh[k] = v
+	}
+	fresh[reattestKeyMerge], fresh[reattestKeySecond] = m2.merge, m2.second
+	if !auditMatches(fresh, fallbackSpec, m2.merge, m2.second) {
+		t.Fatal("fixture has a failure beyond the stale audit pair")
+	}
+	requireOffFirstParent(t, m2, 1)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(m2.dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 || !auditMatches((*writes)[0].updates, fallbackSpec, m2.merge, m2.second) {
+		t.Fatalf("single stale audit was not repaired: %+v %v writes=%v", res, err, *writes)
 	}
 }
