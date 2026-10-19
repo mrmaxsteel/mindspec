@@ -1,14 +1,18 @@
 package readiness
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 // gitPorcelain returns `git status --porcelain` output for root — the
@@ -29,6 +33,247 @@ func gitBranches(t *testing.T, root string) string {
 		t.Fatalf("git branch --list: %v: %s", err, out)
 	}
 	return string(out)
+}
+
+// Trace only this test's git reads; all setup writes happen before install.
+func traceMF3Git(t *testing.T) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "git.calls")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MF3_GIT_LOG\"\nexec \"$MF3_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MF3_REAL_GIT", realGit)
+	t.Setenv("MF3_GIT_LOG", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func assertMF3NoOriginRead(t *testing.T, log string) {
+	t.Helper()
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "log --first-parent") {
+		t.Fatalf("trace did not observe the known first-parent scan: %s", calls)
+	}
+	if strings.Contains(string(calls), "origin/") {
+		t.Fatalf("MF-3 must use local refs only: %s", calls)
+	}
+}
+
+func TestPlanMapsBead_AndPositional(t *testing.T) {
+	var plan strings.Builder
+	plan.WriteString("---\nwork_chunks:\n")
+	for _, n := range []int{1, 2, 3, 4, 5, 6, 7, 8, 10} {
+		fmt.Fprintf(&plan, "  - id: %d\n    key_file_paths: [real.go]\n", n)
+	}
+	plan.WriteString("---\n")
+	for _, n := range []int{1, 2, 3, 4, 5, 6, 7, 12} {
+		fmt.Fprintf(&plan, "## Bead %d: heading\n**Acceptance Criteria**\n- concrete outcome\n", n)
+	}
+	base := plan.String()
+	for _, tc := range []struct {
+		n      int
+		mapped bool
+		why    string
+	}{
+		{1, true, ""}, {8, true, ""}, {9, false, "plan.md declares 8 ## Bead sections"},
+		{10, false, "plan.md declares 8 ## Bead sections"}, {12, false, "plan.md declares 8 ## Bead sections"},
+		{0, false, "plan.md declares 8 ## Bead sections"}, {-1, false, "plan.md declares 8 ## Bead sections"},
+	} {
+		mapped, why := PlanMapsBead(base, tc.n)
+		if mapped != tc.mapped || why != tc.why {
+			t.Errorf("N=%d: (%v,%q), want (%v,%q)", tc.n, mapped, why, tc.mapped, tc.why)
+		}
+	}
+	section, found := extractBeadSectionRaw(base, 8)
+	if !found || !strings.HasPrefix(section, "## Bead 12:") {
+		t.Fatalf("eighth section=%q found=%v", section, found)
+	}
+	if s := evaluateMF1(base, 8); !s.Pass {
+		t.Fatalf("MF-1 must share positional mapping: %+v", s)
+	}
+	fenced := base + "```markdown\n## Bead 99: fenced heading\n```\n"
+	if _, found := extractBeadSectionRaw(fenced, 9); !found {
+		t.Fatal("extractor did not count fenced heading")
+	}
+	if mapped, why := PlanMapsBead(fenced, 9); mapped || why != "no work_chunks id 9" {
+		t.Fatalf("fenced N=9: (%v,%q)", mapped, why)
+	}
+	withChunk9 := strings.Replace(fenced, "work_chunks:\n", "work_chunks:\n  - id: 9\n", 1)
+	if mapped, why := PlanMapsBead(withChunk9, 9); !mapped || why != "" {
+		t.Fatalf("fenced mapped N=9: (%v,%q)", mapped, why)
+	}
+	if mapped, why := PlanMapsBead(fenced, 10); mapped || why != "plan.md declares 9 ## Bead sections" {
+		t.Fatalf("chunk-only N=10: (%v,%q)", mapped, why)
+	}
+	sectionOnly := strings.Replace(base, "  - id: 8\n    key_file_paths: [real.go]\n", "", 1)
+	if mapped, why := PlanMapsBead(sectionOnly, 8); mapped || why != "no work_chunks id 8" {
+		t.Fatalf("section-only N=8: (%v,%q)", mapped, why)
+	}
+	if s := evaluateMF1(sectionOnly, 8); !reflect.DeepEqual(s.Failures, []string{"chunk-missing:8"}) {
+		t.Fatalf("half-mapping MF-1=%+v", s)
+	}
+	if mapped, why := PlanMapsBead("---\nwork_chunks: [\n---\n## Bead 1: malformed\n", 1); mapped || why != "invalid plan.md frontmatter" {
+		t.Fatalf("malformed mapping=(%v,%q)", mapped, why)
+	}
+}
+
+func TestReadiness_MF1AggregatesAllFailures(t *testing.T) {
+	plan := "---\nwork_chunks:\n  - id: 1\n    key_file_paths: [path/to/file.go, ' ', path/to/file.go]\n---\n## Bead 1: incomplete\n**Acceptance Criteria**\n- <Specific, measurable criterion for this bead>\n"
+	s := evaluateMF1(plan, 1)
+	want := []string{"ac-entry-missing:1", "key-file-paths-blank:1", "key-file-paths-placeholder:1"}
+	if s.Pass || !reflect.DeepEqual(s.Failures, want) {
+		t.Fatalf("MF-1 failures=%v Pass=%v, want %v", s.Failures, s.Pass, want)
+	}
+	for _, fragment := range []string{"Acceptance Criteria block has no entry", "scaffold placeholder", "no non-blank concrete path"} {
+		if !strings.Contains(s.Detail, fragment) {
+			t.Errorf("detail %q missing %q", s.Detail, fragment)
+		}
+	}
+	if strings.Contains(s.Recovery, "\n") || !strings.Contains(s.Recovery, "replace the placeholder with a concrete, measurable criterion") {
+		t.Fatalf("one first recovery expected: %q", s.Recovery)
+	}
+	for _, tc := range []struct {
+		plan    string
+		records []string
+	}{
+		{"---\nwork_chunks: []\n---\n", []string{"chunk-missing:1", "section-missing:1"}},
+		{"---\nwork_chunks:\n  - id: 1\n    key_file_paths: []\n---\n## Bead 1: empty\n", []string{"ac-entry-missing:1", "key-file-paths-empty:1"}},
+	} {
+		got := evaluateMF1(tc.plan, 1)
+		if got.Pass || !reflect.DeepEqual(got.Failures, tc.records) {
+			t.Errorf("aggregate=%+v, want %v", got, tc.records)
+		}
+	}
+	for _, tc := range []struct {
+		name, paths string
+		pass        bool
+	}{
+		{"concrete-with-blank", "[real.go, '']", true},
+		{"all-blank", "['', ' ']", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := "---\nwork_chunks:\n  - id: 1\n    key_file_paths: " + tc.paths + "\n---\n## Bead 1: paths\n**Acceptance Criteria**\n- A concrete outcome is verified.\n"
+			got := evaluateMF1(plan, 1)
+			if got.Pass != tc.pass {
+				t.Fatalf("paths %s: Pass=%v, want %v; failures=%v detail=%q", tc.paths, got.Pass, tc.pass, got.Failures, got.Detail)
+			}
+			if tc.pass {
+				if len(got.Failures) != 0 || got.Detail != "" || got.Recovery != "" {
+					t.Fatalf("concrete path must pass without failures: %+v", got)
+				}
+			} else if !reflect.DeepEqual(got.Failures, []string{"key-file-paths-blank:1"}) || got.Detail != "work_chunks[1].key_file_paths has no non-blank concrete path element" {
+				t.Fatalf("all-blank paths must retain FX-3 record and detail: %+v", got)
+			}
+		})
+	}
+}
+
+func TestReadiness_MF4AggregatesAllOccurrences(t *testing.T) {
+	description := "TBD\nTBD\nOPEN QUESTION\n"
+	plan := "## Bead 1: blockers\n### First\nTBD\nTBD\n**Blocking Questions**\n- [ ] decide\n- [ ] decide\n### Second\nTBD\n```\nTBD\n**Blocking Questions**\n- [ ] ignored\n```\n`TBD`\n"
+	s := evaluateMF4(description, plan)
+	var want []string
+	add := func(kind, source, section, line string, k int) {
+		want = append(want, fmt.Sprintf("%s:%s:%s:%d:%x", kind, source, section, k, sha256.Sum256([]byte(line))))
+	}
+	for _, k := range []int{1, 2} {
+		add("token", "description", "-", "TBD", k)
+		add("token", "plan", "## Bead 1: blockers / ### First", "TBD", k)
+		add("checklist", "plan", "## Bead 1: blockers / ### First", "- [ ] decide", k)
+	}
+	add("token", "description", "-", "OPEN QUESTION", 1)
+	add("token", "plan", "## Bead 1: blockers / ### Second", "TBD", 1)
+	want = sortedUnique(want)
+	if s.Pass || !reflect.DeepEqual(s.Failures, want) {
+		t.Fatalf("MF-4 failures=%v, want %v", s.Failures, want)
+	}
+	if strings.Count(s.Detail, "unchecked item under a blocking-region header:") != 2 || !strings.Contains(s.Detail, "OPEN QUESTION") {
+		t.Fatalf("detail omitted occurrences: %q", s.Detail)
+	}
+	if s.Recovery == "" || strings.Contains(s.Recovery, "\n") {
+		t.Fatalf("expected one recovery: %q", s.Recovery)
+	}
+	if got := evaluateMF4("TBD TBD", ""); len(got.Failures) != 2 {
+		t.Fatalf("same-line multiplicity lost: %v", got.Failures)
+	}
+	t.Run("description-checklist-passes", func(t *testing.T) {
+		if got := evaluateMF4("**Open Questions**\n- [ ] decide\n", ""); !got.Pass || len(got.Failures) != 0 {
+			t.Fatalf("description-only checklist must pass MF-4: %+v", got)
+		}
+	})
+	t.Run("region-termination", func(t *testing.T) {
+		for _, heading := range []string{"#### Sub", "# Top", "##### Sub", "###### Sub"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "## Bead 1: blockers\n**Blocking Questions**\n"+heading+"\n- [ ] decide\n")
+				if got.Pass || len(got.Failures) != 1 || !strings.HasPrefix(got.Failures[0], "checklist:plan:") {
+					t.Fatalf("heading %q must keep blocking region open: %+v", heading, got)
+				}
+			})
+		}
+		for _, heading := range []string{"## End", "### End", "  ## End", "\t### End", "**Verification**"} {
+			t.Run(heading, func(t *testing.T) {
+				got := evaluateMF4("", "**Blocking Questions**\n"+heading+"\n- [ ] routine\n")
+				if !got.Pass || len(got.Failures) != 0 {
+					t.Fatalf("trimmed heading %q must end blocking region: %+v", heading, got)
+				}
+			})
+		}
+	})
+	t.Run("line-normalisation", func(t *testing.T) {
+		for _, line := range []string{"  TBD  decide  ", "\tTBD\tdecide\t"} {
+			got := evaluateMF4(line, "")
+			want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD decide")))}
+			if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+				t.Errorf("normalised occurrence for %q=%v, want %v", line, got.Failures, want)
+			}
+		}
+	})
+	t.Run("description-heading", func(t *testing.T) {
+		got := evaluateMF4("## heading\nTBD\n", "")
+		want := []string{fmt.Sprintf("token:description:-:1:%x", sha256.Sum256([]byte("TBD")))}
+		if got.Pass || !reflect.DeepEqual(got.Failures, want) {
+			t.Fatalf("description heading must retain section '-': %v, want %v", got.Failures, want)
+		}
+	})
+	if got := evaluateMF4("TBD", "## Bead 1: blockers\nTBD\n"); len(got.Failures) != 2 {
+		t.Fatalf("source identity lost: %v", got.Failures)
+	}
+}
+
+func TestEvaluateReadiness_NonPlanFormErrorCarriesLineage(t *testing.T) {
+	store := NewFakeBDStore()
+	cases := []struct{ id, message string }{
+		{"mindspec-plain", "bead mindspec-plain has no dotted epic-child index (expected <epic>.<N>)"},
+		{"mindspec-plain.0", "bead mindspec-plain.0 has an invalid epic-child index"},
+		{"mindspec-plain.99999999999999999999999999", "bead mindspec-plain.99999999999999999999999999 has an invalid epic-child index"},
+	}
+	for _, tc := range cases {
+		store.Lineage[tc.id] = FakeLineage{EpicID: "mindspec-owner", SpecID: "129-owner"}
+	}
+	t.Cleanup(store.Install())
+	for _, tc := range cases {
+		id := tc.id
+		report, err := EvaluateReadiness(t.TempDir(), id) // No plan or bd record exists.
+		var typed *NonPlanFormError
+		if report != nil || !errors.As(err, &typed) {
+			t.Fatalf("%s: report=%v err=%T %v, want NonPlanFormError before file reads", id, report, err, err)
+		}
+		if typed.BeadID != id || typed.EpicID != "mindspec-owner" || typed.SpecID != "129-owner" {
+			t.Fatalf("lineage lost: %+v", typed)
+		}
+		if typed.Error() != tc.message {
+			t.Fatalf("diagnostic changed: %q, want literal %q", typed.Error(), tc.message)
+		}
+	}
 }
 
 // --- AC-1: negative fixture refused with evidence ---
@@ -60,7 +305,7 @@ func TestReadiness_NegativeFixtureAllFail(t *testing.T) {
 		// conservatively (final-review r2 G2-R2-MF3-ANONYMOUS): no landed
 		// merge NAMES the dep's bead branch — never merged, or anonymous
 		// merge subject.
-		SignalDependencies: "no landed merge",
+		SignalDependencies: "no two-parent merge reachable",
 		SignalBlocking:     "blocking",
 	}
 	for _, s := range report.Signals {
@@ -183,7 +428,7 @@ func runSanitizedCase(t *testing.T, root, tag, specMD, planMD string, wantAllPas
 
 // --- AC-3: MF-3 landed-merge predicate, all four variants ---
 
-func TestReadiness_MF3Variants(t *testing.T) {
+func TestReadiness_MF3Variants_Existing(t *testing.T) {
 	const specID = "996-fixture-mf3"
 	const epicID = "mindspec-mf3b"
 
@@ -265,7 +510,7 @@ func TestReadiness_MF3Variants(t *testing.T) {
 			store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specIDCase}
 			store.Records[beadID] = FakeBeadRecord{
 				Description:  "MF-3 variant fixture.",
-				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat}},
+				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat, SpecID: specIDCase}},
 			}
 			restore := store.Install()
 			t.Cleanup(restore)
@@ -348,6 +593,12 @@ func TestReadiness_MF2AllClasses(t *testing.T) {
 		{"direct sub-letter (no parens) AC-9i dangles against bare AC-9 only", "This bead claims AC-9i directly.", "- [ ] AC-9 — some criterion.", false},
 		{"sub-letter parenthetical R5(b) resolves exact", "This bead claims R5(b).", "- [ ] R5b — some criterion.", true},
 		{"sub-letter parenthetical R5(b) fails against bare spec token (lenient-impl trap)", "This bead claims R5(b).", "- [ ] R5 — some criterion.", false},
+		{"R5.2 leg 1 parenthetical matches parenthetical", "R9(a)", "R9(a)", true},
+		{"R5.2 leg 2 parenthetical matches appended", "R3(c)", "R3c", true},
+		{"R5.2 leg 3 hyphenless claim resolves", "AC9", "AC-9", true},
+		{"R5.2 leg 4 hyphenless spec resolves", "AC-9", "AC9", true},
+		{"R5.2 leg 5 sibling stays dangling", "R9(b)", "R9(a)", false},
+		{"R5.2 leg 6 hyphenless claim dangles", "AC9", "AC-8", false},
 	}
 
 	for i, tc := range cases {
@@ -411,6 +662,18 @@ Unit tests.
 			}
 			if mf2.Pass != tc.wantPass {
 				t.Errorf("MF-2 Pass=%v, want %v: detail=%q", mf2.Pass, tc.wantPass, mf2.Detail)
+			}
+			if strings.HasPrefix(tc.name, "R5.2") && !tc.wantPass {
+				wantRecord := "dangling:R9b"
+				if strings.Contains(tc.name, "leg 6") {
+					wantRecord = "dangling:AC-9"
+				}
+				if !reflect.DeepEqual(mf2.Failures, []string{wantRecord}) || !strings.Contains(mf2.Detail, tc.claimText) {
+					t.Errorf("dangling claim %q: failures=%v detail=%q", tc.claimText, mf2.Failures, mf2.Detail)
+				}
+			}
+			if report.EpicID != epicID || report.SpecID != specID {
+				t.Errorf("report lineage=(%q,%q), want (%q,%q)", report.EpicID, report.SpecID, epicID, specID)
 			}
 		})
 	}
@@ -654,7 +917,7 @@ func TestReadiness_MF3_MetadataCorroboratedLandedPath_BdLess(t *testing.T) {
 	store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 	store.Records[beadID] = FakeBeadRecord{
 		Description:  "MF-3 seam fixture.",
-		Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+		Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 	}
 	store.LandedDeps = map[string]bool{depID: true}
 	restore := store.Install()
@@ -788,27 +1051,9 @@ func TestReadiness_FX3_AllBlankKeyFilePathsFails(t *testing.T) {
 	}
 }
 
-// TestReadiness_MF3ErrorArmDiscrimination (final-review r2 F2-1 /
-// G2-R2-MF3): evaluateMF3's TWO FindLandedMerge refusal arms are
-// operational ROUTING, not cosmetics — each must emit its own truthful
-// state description and recovery verb:
-//
-//   - *lifecycle.LandedMergeNoEvidence (corroboration unavailable: a
-//     candidate merge exists, no admissible datum confirms it) → the
-//     dependency is already complete, so the recovery is `mindspec
-//     reattest <dep>` (the spec-125 verb that git-corroborates the merge
-//     and writes the missing landed binding) — NEVER `mindspec complete`.
-//   - plain ErrLandedMergeNotFound (no candidate merge names the bead) →
-//     the genuine closed-but-unmerged 2u0u split keeps `mindspec complete
-//     <dep>` as its recovery, stated conservatively (an anonymous-subject
-//     merge also lands here and is named as the other possibility).
-//
-// RED-on-revert: LandedMergeNoEvidence unwraps to ErrLandedMergeNotFound,
-// so deleting the errors.As arm silently reroutes the NoEvidence state
-// through the NotFound arm — still FAIL, but with the actively WRONG
-// `mindspec complete` recovery for an already-merged dependency. The
-// recovery-text assertions below turn that regression (and a collapse to
-// false-PASS) red.
+// Preserve the consumer-facing NoEvidence and NoCandidate routing checks.
+// The precise sentinel classes and unclassified NotFound errors are pinned
+// by the table-driven subtests of TestReadiness_MF3ErrorArmDiscrimination.
 func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 	t.Run("i NoEvidence arm: corroboration-unavailable routes to reattest", func(t *testing.T) {
 		root := t.TempDir()
@@ -822,7 +1067,7 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NoEvidence-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
 		store.NoEvidenceDeps = map[string]bool{depID: true}
 		restore := store.Install()
@@ -859,10 +1104,9 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NotFound-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
-		// The dep is listed FALSE so the seam is installed but reports the
-		// plain ErrLandedMergeNotFound sentinel (no candidate merge).
+		// The dep is listed FALSE so the seam reports NoCandidate.
 		store.LandedDeps = map[string]bool{depID: false}
 		restore := store.Install()
 		t.Cleanup(restore)
@@ -885,6 +1129,56 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 			t.Errorf("NotFound Detail must state the anonymous-subject possibility conservatively (G2-R2-MF3-ANONYMOUS), got %q", mf3.Detail)
 		}
 	})
+	const merge = "1111111111111111111111111111111111111111"
+	const second = "2222222222222222222222222222222222222222"
+	for _, tc := range []struct {
+		name, class, want, recovery string
+		err                         error
+	}{
+		{"no candidate", FailureNoCandidate, "no two-parent merge reachable from spec/996-errors's tip lands bead/owner-epic.2", "mindspec complete owner-epic.2", lifecycle.ErrLandedMergeNoCandidate},
+		{"contradiction", FailureContradiction, "a merge landing bead/owner-epic.2 exists (" + merge + ") but", "bd show owner-epic.2 --json", fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)", lifecycle.ErrLandedMergeContradiction, "owner-epic.2", "spec/996-errors", strings.Repeat("3", 40), second, merge, second)},
+		{"reverted", FailureReverted, "merge " + merge + " landing bead/owner-epic.2 was reverted or cleanly removed after landing", "bd show owner-epic.2 --json", fmt.Errorf("%w: merge %s was reverted", lifecycle.ErrLandedMergeReverted, merge)},
+		{"no evidence", FailureNoEvidence, "no admissible datum corroborates it", "mindspec reattest owner-epic.2", &lifecycle.LandedMergeNoEvidence{MergeSHA: merge, SecondParent: second}},
+		{"plain F5 error", FailureIndeterminate, "could not evaluate landed-merge state: read failed", "investigate the landed-merge evaluation failure", errors.New("read failed\x1b[31m")},
+		{"bare NotFound is indeterminate", FailureIndeterminate, "could not evaluate landed-merge state:", "investigate the landed-merge evaluation failure", fmt.Errorf("%w: unclassified read", lifecycle.ErrLandedMergeNotFound)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := findLandedMergeFn
+			t.Cleanup(func() { findLandedMergeFn = orig })
+			findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) { return nil, tc.err }
+			deps := []dependencyEdge{{ID: "owner-epic.2", Status: "closed"}}
+			r := &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: "996-errors"}
+			s := evaluateMF3("", r, mf3PlanMD(r.SpecID), deps)
+			candidate := ""
+			if tc.class == FailureNoEvidence || tc.class == FailureContradiction || tc.class == FailureReverted {
+				candidate = merge
+			}
+			if s.Pass || !strings.Contains(s.Detail, tc.want) || !strings.Contains(s.Recovery, tc.recovery) || !reflect.DeepEqual(s.Failures, []string{DependencyFailureRecord("owner-epic.2", tc.class, candidate)}) {
+				t.Fatalf("wrong error arm: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Detail, "no two-parent merge reachable") {
+				t.Fatalf("existing merge/read error misreported: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Recovery, "mindspec complete") {
+				t.Fatalf("wrong recovery: %+v", s)
+			}
+			if tc.class == FailureIndeterminate {
+				if !IsIndeterminateRecord(s.Failures[0]) {
+					t.Fatalf("must be uncoverable: %+v", s)
+				}
+				rendered := Render(&Report{BeadID: r.BeadID, Signals: []Signal{s}})
+				if strings.ContainsRune(rendered, '\x1b') {
+					t.Fatalf("unescaped read error: %q", rendered)
+				}
+				deps = append(deps, dependencyEdge{ID: "task-a", Status: "open"})
+				combined := evaluateMF3("", r, "", deps)
+				if len(combined.Failures) != 2 || combined.Recovery != s.Recovery {
+					t.Fatalf("read failure must outrank not-closed: %+v", combined)
+				}
+			}
+		})
+	}
+
 }
 
 // TestReadiness_DescriptionLegDefectsRefuse (final-review r2 F2-3): the bd

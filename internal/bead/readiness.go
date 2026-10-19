@@ -21,12 +21,8 @@
 //     record: the original ordinal-keyed NOT-READY report plus the
 //     span-grounded clarification entries.
 //
-// Neither key is ever read by internal/validate/readiness's mechanical
-// signals (MF-1..MF-4): the layer boundary (spec 124 R8e / AC-12) holds by
-// construction because the engine's bd reads never consult these keys at
-// all, not because of a runtime check. internal/bead itself never reads or
-// interprets the values under these keys — it only names them so every
-// writer/reader across the three beads shares one literal definition.
+// Neither key is read by EvaluateReadiness's mechanical signals. Schema-v2
+// override validation and read-back live beside these keys (spec 129 R6).
 package bead
 
 const (
@@ -35,6 +31,15 @@ const (
 	// were bypassed at claim time, plus a UTC timestamp. Advisory only
 	// (ADR-0023) — never consulted by any mechanical signal.
 	MetaKeyReadinessOverride = "mindspec_readiness_override"
+
+	OverrideFieldSchema         = "schema"
+	OverrideFieldSignals        = "signals"
+	OverrideFieldFingerprints   = "fingerprints"
+	OverrideFieldOverridden     = "overridden"
+	OverrideFieldEvidence       = "evidence"
+	OverrideEvidenceFieldPath   = "path"
+	OverrideEvidenceFieldSHA256 = "sha256"
+	OverrideEvidenceFieldBytes  = "bytes"
 
 	// MetaKeyReadinessAttempt is the bd metadata key naming the append-only
 	// readiness-attempt record: the original NOT-READY report (ordinal,

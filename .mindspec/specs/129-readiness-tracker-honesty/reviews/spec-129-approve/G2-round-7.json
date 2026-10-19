@@ -1,0 +1,39 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "G2 gpt-6.1-sol",
+  "confidence": 0.95,
+  "rationale": "Regression-checked git diff 8b3a5535 e7388f71 against the resulting spec and relevant lifecycle/panel primitives. The diff introduces no defect in the G2 trust-boundary lens. SHA value classes prevent hostile operands and keep placeholders non-corroborating; absent commit objects still refuse. The clarified checkout-local panel visibility and panel-edit residual accurately describe existing unauthenticated evidence. The typed plan-source probe explicitly distinguishes absence from failures. This approves the specification, not an implementation of its proposed behavior.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-6 ask status",
+      "detail": "No G2 round-6 required changes or minor asks need confirmation. The prior G2 verdict approved and had an empty concrete_changes_required array. Its implementation caution about preserving raw panel scan errors remains covered by F5 and is not weakened by this diff."
+    },
+    {
+      "severity": "INFO",
+      "title": "SHA classification does not add corroboration authority",
+      "detail": "R4.2 F2 classifies values before git calls, and R4.3 admits only well-formed object IDs into its corroborating set. Empty and placeholder values cannot confirm a primary-path candidate; option-like and revision-expression values refuse F2 without reaching git. A well-formed but locally absent commit refuses as UnlandedReview. Rewriting an outside-tip SHA to an empty value or placeholder can bypass F2, but requires the same panel-file write authority that already permits deleting the registration or replacing its SHA with a landed SHA. This stays within the expressly accepted panel-edit residual, rather than granting new authority to a bd-metadata-only forge. F1, F3, F4, tuple equality and read-time checks remain mandatory."
+    },
+    {
+      "severity": "INFO",
+      "title": "Visibility and forge reach are stated accurately",
+      "detail": "The invoking-checkout limitation is now explicit and pinned by AC-11(x-w), including the differing result when untracked registrations are absent from another worktree. This does not change the previously checkout-local scan. Audit metadata and panel files remain agent-writable, and a git-history author can fabricate a source-naming merge subject; the spec does not elevate them to authenticated operator intent. The revised residual correctly distinguishes the existing forge mechanism from its new bounded off-first-parent reach. AC-11(vii-a) retains refusal after an unreviewed amend and offers a scoped override rather than panel deletion."
+    },
+    {
+      "severity": "INFO",
+      "title": "Plan-source fallback remains fail-closed on errors",
+      "detail": "The new helper contract permits checkout fallback only for a missing branch or missing path. Non-zero ls-tree failures and other git errors refuse. AC-1 adds both an absent-blob fixture and a probe-failure fixture, preventing an infrastructure failure from silently changing the mapping source. No selection, evidence-file or scoped-override authority is widened elsewhere in the diff."
+    },
+    {
+      "severity": "INFO",
+      "title": "Verification scope",
+      "detail": "Read BRIEF.md including the G2 lens and Round 7 confirm duty, the complete specified diff, the resulting R4 requirements, the prior G2 round-6 verdict, repository AGENTS.md and relevant lifecycle/panel source. HEAD resolves to e7388f71d9325b95ed463169df2a9fc3043234f1. This is a short specification regression review; no implementation tests or lifecycle mutations were run. Only this verdict was written, in the authorized scratch directory."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "No new material error found in the Round 7 confirm instructions. Two historical caveats remain: the older round-6 unqualified registration-count statement excludes non-spec panels (already corrected in the reviewed spec), and the generic git worktree add probe example would write administrative state into the read-only source repository. Neither was relied on or executed. The verdict-location override correctly resolves the header destination conflict."
+    }
+  ]
+}

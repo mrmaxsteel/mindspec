@@ -1,0 +1,48 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "G3 gpt-6.1-sol",
+  "confidence": 0.95,
+  "rationale": "Reviewed a593792a5795a19639deba83bff6970566d91032, the full BRIEF, G3's round-3 verdict, consolidated-round-3.md, the revised specification and relevant implementation/ADRs. All four of my round-3 asks are addressed. The new audited read-back nevertheless permits genuine audits to survive newly unlanded reviews and replacement binding identities. These are stale-state footguns without audit forgery. Three scratch Go probes, fifteen existing lifecycle safeguard tests, and four override-contract checks pass. The read-back is unimplemented: probes use real git and the shipped reattest audit writer, then model the explicit written iff, rather than claim a shipped implementation exploit. Structural validation exits 0 with only the no-beads-epic warning. The source repository was not modified.",
+  "concrete_changes_required": [
+    "Amend R4.2's read-back iff, its ADR-0041 amendment contract and AC-11 so an audit supplies corroboration but never bypasses current fallback safety checks. In particular, read-back must refuse when any currently registered reviewed_head_sha lies outside the current spec tip, even if the binding/audit previously passed. Explicitly preserve current ownership, exact pair consistency, surviving-tip contradiction, ambiguity and revert/read-error checks. Add a real-git AC: accept and audit M/A; subsequently register reviewed B outside the tip with the bead branch absent or reset to A; automatic MF-3 must refuse and fresh reattest must refuse without writing. Also pin post-audit revert and additional-candidate cases. This requirement stays scoped to fallback reads, not primary-path reattest.",
+    "Bind the reattest audit to the exact merge/second-parent pair it actually vouched for, independently of the mutable current landed-binding keys. Require audit identity, current binding identity and scan-derived candidate to agree on read-back. Structured audited-after identity fields are one solution; reject a stale audit after a normal binding replacement without requiring executor changes or authenticating metadata. Extend AC-11 with an authentic audit for M1 followed by the executor's ordinary MergeMetadata update to binding M2, then an off-first-parent M2: MF-3 must require fresh reattest of M2. Include malformed/incomplete audit refusal and preserve same-pair no-op audit recovery."
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-3 ask status",
+      "detail": "G3r3.1 ADDRESSED: R4.2 requires exactly one fallback candidate without grouping or tie-break; AC-11(x) refuses the empty-sibling/reverted-real-landing fixture and writes nothing. G3r3.2 ADDRESSED: R6.2 records MF-4 kind/source/section/occurrence/hash, retaining multiplicity; AC-16 pins description-versus-plan TBD and repeated checklist items. G3r3.3 ADDRESSED: R6.4 and AC-17 name all currently failing signals in fresh-claim recovery, including covered-MF-3/new-MF-4. G3r3.4 ADDRESSED: R1.1(b) removes the parent-E shortcut and uses the unchanged resolver for every plan-form row; AC-1 X pins conflicting epic dependency exclusion as N2c. The audit read-back findings below are new issues in the replacement design."
+    },
+    {
+      "severity": "high",
+      "title": "NEW_ISSUE: genuine audit bypasses later unreached-review refusal on read-back",
+      "detail": "spec.md:374-378 identifies a fallback candidate iff its binding matches and an audit names this scanned branch. The no-unreached-review rule at :382 applies only when reattest runs. TestG3R4GenuineAuditDoesNotNoticeNewUnlandedReview creates real landing M/A, obtains a genuine audit from ReattestLandedMerge, moves M off first-parent through a real main-side carrier, then creates and registers unlanded reviewed B with no surviving bead branch. Real git confirms B is outside the tip. No audit or binding is edited, yet both written read-back conditions still hold; fresh fallback reattest must refuse exactly this state. An audit made on the primary path is also currently indistinguishable from one that ran the additional fallback checks. This reopens the stale-round false PASS by sequencing review after audit. AC-11 tests immediate read-back, not subsequent evidence/history changes. Probe: repo/internal/lifecycle/g3_round4_probe_test.go; output: probe-results.txt. This is a contract counterexample, not execution of the unshipped reader."
+    },
+    {
+      "severity": "high",
+      "title": "NEW_ISSUE: old audit authorizes a different merge-time binding",
+      "detail": "The same read-back iff checks the current binding pair and audit's scanned branch but never requires the audit to attest that pair. Existing reattest.go:356-365 stores the derived identity in the current binding and human corroboration text, without a separately validated structured after-pair. MindspecExecutor.ensureLandedBinding at mindspec_executor.go:1771-1776 updates only merge_sha, second_parent and landed_at through MergeMetadata; bdcli.go:322-345 preserves unrelated metadata, including old reattest keys. TestG3R4GenuineAuditSurvivesReplacementBinding obtains a real audit for M1, rebuilds spec history with real landing M2, applies that exact ordinary executor update, and moves M2 off first-parent. Git verifies M1 is no longer reachable and M2 is reachable, excluding multiple-candidate ambiguity. Authentic corroboration still names M1, but both written conditions accept M2 without a reattest of M2. This defeats the merge-time-binding-without-audit refusal: M2 inherits M1's audit. The metadata update is modeled from the actual executor writer; no audit is forged. Probe and output are in the same scratch files."
+    },
+    {
+      "severity": "info",
+      "title": "Deliberate audit forgery is an explicitly accepted residual",
+      "detail": "An agent able to write bd metadata can fabricate every reattest audit key and a pair naming an admitted real merge. Shape validation cannot distinguish that from the writer's record. R4.2 states this residual, Non-Goals excludes authentication, and ADR-0037 section 8 prohibits introducing signing or external state to fix perceived forgeability. I request neither authentication nor a hard block for that accepted residual. The required changes concern reuse of genuine audits without forging their fields. A stale/abandoned registration alone still cannot confirm a fallback candidate; primary-path exact panel corroboration retains the accepted Spec-125 evidence class."
+    },
+    {
+      "severity": "info",
+      "title": "R6 and N4 adversarial checks",
+      "detail": "override-contract-probe.py models the new digest/subset contract and passes four checks: description TBD plus plan TBD uncovers; repeated identical checklist item uncovers through k=2; shrinkage stays covered; mixed recovery names all failing signals. Named-but-passing signals are not stored, and old markers never authorize claims. These are contract checks, not tests of unimplemented schema-v2 code. Membership now uses the actual lineage resolver for every plan-form row plus MF-1's mapping; the parent shortcut is gone. The N4 positional exception cannot override lineage/dispatch consistency. TestG3R4N4NoLineageCannotOverrideMF1 exercises the real GateReadiness with the broader existing allow=true and confirms a no-lineage N4-shaped ID fails before MF-1. The deliberate MF-1 override route is therefore applicable only once lineage resolves. No new cross-spec claim authority was found."
+    },
+    {
+      "severity": "info",
+      "title": "Verification and limits",
+      "detail": "Scratch clone is detached at the reviewed commit. Fifteen selected existing lifecycle tests passed, covering real/anonymous/other-bead forged bindings, inconsistent pairs, ancestor-only panels, competing second parents, revert/reapply, oldest-anchor masked reverts, audited repair and stale-binding replacement. Three new Go probes passed (probe-results.txt); four R6 contract checks passed (override-results.txt). go run ./cmd/mindspec validate spec 129-readiness-tracker-honesty exited 0 with one WARN lifecycle-binding: spec has no beads epic (validate-results.txt). No full implementation suite is claimed. All probe files, git mutations, cache and temporary repositories are under the assigned scratch directory."
+    },
+    {
+      "severity": "low",
+      "title": "Errors in this BRIEF",
+      "detail": "The current F1 lens still asks about a 129-versus-129b boundary although Round 4 forbids lettered successor IDs. The O3 lens still describes epic-descendants union metadata.spec_id selection, superseded by plan-form plus unchanged lineage plus MF-1 mapping. Round 3's literal assertion that its grep matches only two header markers is false because its own line 86 contains TODO(skill). The reviewer-conduct worktree suggestion would update the read-only source repository's git administration; I followed the user's explicit scratch-clone instruction instead. The header verdict destination is explicitly overridden correctly; this verdict is written only to the requested scratch/verdict.json."
+    }
+  ]
+}

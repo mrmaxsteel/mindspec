@@ -1,0 +1,87 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "reviewer_id": "O1 claude-opus-5-5",
+  "confidence": 0.85,
+  "rationale": "Most of Background reproduces against the tree. Four load-bearing grounding claims are wrong in ways that change the design. (1) findEpicForBeadFn is title-fallback lineage, not R1.1's predicate, and it does not read spec_id, so R4.1 contradicts itself and AC-1's claim of a spec_id-only bead dies at GateReadiness unless internal/phase (out of scope, core domain) changes. (2) reattest's nominator is firstParentMergesFn in reattest.go, not ExactSecondParentMerges, and reattest keeps contradiction semantics on the panel datum, so R4.3 creates a MF-3\u2192reattest dead end. (3) R4.2's 'downstream unchanged' conflicts with ADR-0041 \u00a72(ii)'s first-parent net-effect definition and the SubsumptionConflict rationale. (4) A shipped skill already does the override-marker subset comparison, and the bare-flag guidance lives in more places than OQ-5 claims. Live bd also does not apply list's 50 cap to --json. Also: AC-13's red-on-revert legs are misnamed.",
+  "concrete_changes_required": [
+    "R4.1: drop 'resolved through findEpicForBeadFn, never by title' or make it true. Define same-spec membership for MF-3 as R1.1's predicate (descendant OR metadata.spec_id), and say how it is evaluated inside the ADR-0030 boundary.",
+    "R1.1 / AC-1: either extend phase.FindEpicForBead (internal/phase, core domain) to resolve lineage via metadata.spec_id, with core added to Impacted Domains, a requirement and an AC, or remove AC-1's claim-path leg for the spec_id-only bead. Today GateReadiness\u2192EvaluateReadiness refuses it (ErrNoEpicLineage), and complete.Run would too. Also address descendant (bd --parent) vs direct-parent (FindEpicForBead) depth.",
+    "R4.2 / OQ-4: correct the nominator. ReattestLandedMerge (internal/lifecycle/reattest.go) uses firstParentMergesFn; ExactSecondParentMerges is the executor write site only. Add reattest.go to In Scope.",
+    "R4.3: apply the set semantics to reattest's datum (c) too. Today it refuses with ReattestStatePanelContradiction on a non-equal reviewed_head_sha, which would turn AC-11's third leg (NoEvidence \u2192 'mindspec reattest') into an unclearable loop. Add an AC-11 leg showing reattest succeeds, or refuses with a non-panel reason, for registrations {A} plus a git-corroborated candidate.",
+    "R4.2: remove 'everything downstream runs unchanged', or justify it against ADR-0041 \u00a72(ii) ('first-parent chain SINCE the candidate merge') and landed.go's SubsumptionConflict rationale ('M is in the tip's first-parent history'). Price an ADR-0041 amendment for R4.2. Address merges naming bead/X into a different target that become reachable through a later merge (the subject's target is not checked).",
+    "ADR Touchpoints: quote ADR-0041 item (c) exactly ('a registered panel's reviewed_head_sha equal to an exact match's second parent'). It never said 'first registered'. Restate the amendment as an explicit non-equality \u2192 non-corroborating rule.",
+    "Background F / R6.3 / OQ-5 / R6.4: acknowledge that plugins/mindspec/skills/ms-bead-impl/SKILL.md already does the marker subset comparison. Move it into ready-check and update that skill (plus its installed .claude copy) to rely on ready-check's exit code. Keep R6.2's marker 'signals' key compatible. Correct OQ-5 and extend In Scope to cover the bare-form mentions in .mindspec/core/USAGE.md, .mindspec/core/WORKFLOW-STATE-MACHINE.md, ms-bead-cycle/SKILL.md, ms-bead-impl/SKILL.md and next.go's flag help. Note that autonomy.md has no current mention.",
+    "Background B / R2.3: correct the bd list claim. bd 1.1.0 returned 805 rows for 'bd list --json --status=closed' without -n, and an explicit --limit caps silently with no stderr notice. State that R2.3's notice detection guards only ready, or add a list-side guard.",
+    "AC-13: fix the red-on-revert legs (first and fourth fail today, not first and third). Make the AC9 leg red-on-revert by also asserting that AC9 is harvested as a claim (bead AC9 against a spec without AC-9 must dangle as 'AC9').",
+    "R2.3: give a disposition for adopt_lattice.go:286, internal/harness/asserts.go:419, internal/harness/scenario_spec_lifecycle.go:674, and the redact.go \"list\" literal under the lint.",
+    "AC-11: registerLandedPanel does not exist. Mark it as a new helper.",
+    "Background J: correct the list of ownership roots (minor)."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "R4.1 says membership comes from findEpicForBeadFn 'never by title', but that function falls back to the title",
+      "detail": "readiness.findEpicForBeadFn = phase.FindEpicForBead (internal/phase/derive.go FindEpicForBeadWithCache). It resolves (1) a DIRECT dependency whose issue_type is epic, then (2) FALLS BACK to parsing '[NNN]' out of the bead TITLE and matching epic spec_num via AllEpics. It never reads metadata.spec_id. So R4.1's 'a member per R1.1's predicate, resolved through the existing findEpicForBeadFn lineage, never by title' contradicts itself: that lineage is not R1.1's predicate (descendant OR metadata.spec_id) and it IS title-based on the fallback leg. It is also direct-parent only, while bd ready --parent means 'descendants' (bd ready --help), so a grandchild is a member under R1.1 but not under findEpicForBead's first leg."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "AC-1's claim of a spec_id-only bead B cannot succeed without changing internal/phase, which the spec puts out of scope",
+      "detail": "cmd/mindspec/next.go runs next.GateReadiness after selection. That calls readiness.EvaluateReadiness, which calls findEpicForBeadFn(B) and refuses with 'has no discoverable owning spec lineage' (ErrNoEpicLineage) when B has no parent epic and its title carries no '[NNN]'. complete.Run resolves lineage through the same FindEpicForBead. So AC-1's 'the claim path with --pick 2 claims B' is red by construction unless FindEpicForBead learns metadata.spec_id. That function lives in internal/phase, owned by the core domain. The spec lists 'internal/phase derivation' as Out of Scope and core is not in Impacted Domains. Either scope the phase change (add core to Impacted Domains, plus an R and an AC for lineage via spec_id) or narrow AC-1's claim leg."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "reattest's nominator is misidentified, and R4.3 leaves reattest in a dead end",
+      "detail": "R4.2 and OQ-4 call ExactSecondParentMerges 'the merge-time binding writer and reattest's nominator'. In the tree, ExactSecondParentMerges is consumed only by internal/executor/mindspec_executor.go (the binding write). lifecycle.ReattestLandedMerge (internal/lifecycle/reattest.go) calls firstParentMergesFn directly, the same package var FindLandedMerge uses. reattest also calls reviewedHeadSHAForBead as its datum (c) and REFUSES with ReattestStatePanelContradiction when the value differs from the second parent. After R4.3, AC-11's third leg (registrations {A}, no tip, no binding) makes MF-3 return *LandedMergeNoEvidence with the recovery 'mindspec reattest'. reattest then refuses on the stale A, because it still uses contradiction semantics. That is an unclearable loop of the kind ADR-0041 \u00a72(i) forbids. R4.3 must cover reattest's datum (c) with the same set semantics (or state why not), AC-11 needs a reattest leg, and R4.2/OQ-4 must name reattest.go correctly."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.2 says 'everything downstream runs unchanged', but the downstream logic and ADR-0041 \u00a72(ii) assume a first-parent candidate",
+      "detail": "ADR-0041 \u00a72(ii) defines revert/reapply awareness 'BY NET EFFECT: the first-parent chain SINCE the candidate merge'. FindLandedMerge's SubsumptionConflict-as-identified rationale (landed.go) says explicitly 'M is in the tip's first-parent history, so this means later honest work EVOLVED/superseded M's content'. When a candidate is off the first-parent chain, neither premise holds as written, and the anchoring of merge-tree(base=M1^1, ours=tip, theirs=M1) needs fresh analysis. The full-reachability scan also admits a 'Merge bead/X' commit made into a different target (for example main, or another spec branch) that later became reachable through a merge. parseMergeSubjectBeadBranch checks only the bead token, not the merge target. The spec prices an ADR-0041 amendment for R4.3 but not for R4.2, which is the change that actually alters ADR-0041 \u00a72(ii)'s stated basis."
+    },
+    {
+      "severity": "MINOR",
+      "title": "The R4.3 amendment misquotes ADR-0041 item (c)",
+      "detail": "ADR Touchpoints says item (c) is redefined 'from \"the first registered reviewed_head_sha\"'. ADR-0041 \u00a7 Amendment (Spec 125) item (c) actually reads 'a registered panel's reviewed_head_sha equal to an exact match's second parent'. It says nothing about 'first', and the ADR text is already compatible with set semantics. The first-registration veto is code behaviour (reviewedHeadSHAForBead's early return plus spec 125 R5/AC-2c contradiction handling in landed.go and reattest.go), not ADR text. Re-describe the amendment as making the non-equality semantics explicit (non-corroborating rather than contradicting), and quote the ADR text exactly."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Background F and OQ-5 are false about who reads the override marker and where the bare flag is documented",
+      "detail": "Background F says nothing compares the recorded signals with the currently failing set. plugins/mindspec/skills/ms-bead-impl/SKILL.md (the dispatch-ingress ready-check step) already instructs exactly that: read mindspec_readiness_override, compare its 'signals' array against the fresh ready-check failing set, and dispatch only if it is a subset. internal/bead/readiness.go's doc comment also names this 'R4 dispatch ingress re-check'. R6.3 therefore MOVES an existing skill-layer rule into the binary, which is good under ADR-0045. The spec must say so, update ms-bead-impl (and the installed .claude copy) to use ready-check's new exit code instead of a parallel prose comparison, and keep the 'signals' key shape backward-compatible in R6.2's new marker. OQ-5's claim that 'cmd/mindspec/bead_clarify.go's guidance is the only in-repo mention' is false. The bare form also appears in .mindspec/core/USAGE.md:336, .mindspec/core/WORKFLOW-STATE-MACHINE.md:97, plugins/mindspec/skills/ms-bead-cycle/SKILL.md:96, ms-bead-impl/SKILL.md:32, and next.go's flag help text. project-docs/user/guides/autonomy.md currently has NO readiness or --allow-not-ready mention, so R6.4 would be adding text there, not removing it. In Scope lists none of these surfaces."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Live, bd 1.1.0 does not apply bd list's documented 50-row cap to --json, and a capped list prints no notice",
+      "detail": "Probed in this repo with bd 1.1.0 (8e4e59d39). 'bd list --json --status=closed' with no -n returned 805 rows. 'bd list --json --status=open' returned 109. Only an explicit '--limit 50' capped the output (to 50), and it printed NOTHING on stderr. 'bd ready --json' does cap at 100 with the stderr notice 'Showing 100 of 106 ready issues...' (reproduced: 100 rows capped, 106 with -n 0). So Background B's 'bd list defaults to 50 ... an epic with more than 50 closed children can miss orphans' is not supported live. The list sites are defence-in-depth, not reproduced defects. R2.3's success-path notice detection only guards ready: a future list cap would truncate silently. Correct Background B, and state R2.3's guard limit honestly (or add a count cross-check for list)."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-13's red-on-revert statement names the wrong legs, and its third leg passes vacuously today",
+      "detail": "Probed evaluateMF2 at 7a490064. Leg 1 (bead R9(a) vs spec R9(a)) FAILS today. Leg 2 (bead R3(c) vs spec R3c) PASSES. Leg 3 (bead AC9 vs spec AC-9) PASSES today, because AC9 is never harvested as a claim, so nothing dangles. Leg 4 (bead AC-9 vs spec AC9) FAILS today. Leg 5 (R9(b) vs R9(a)) FAILS, as intended. The spec says 'the first and third legs fail today'; the correct pair is the first and fourth. Leg 3 is not red-on-revert as written. Add an assertion that AC9 is harvested as a claim, for example bead AC9 against a spec with no AC-9 must report dangling 'AC9'."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R2.3's lint scope leaves known literal sites unaddressed",
+      "detail": "The lint fails on any bd argv literal beginning \"ready\" or \"list\" outside internal/bead that lacks the marker. Today that also includes three sites. internal/approve/adopt_lattice.go:286 (adoptListBDFn(\"list\",...,\"-n\",\"0\",...)) is already uncapped but sits outside the waist; the spec lists it as 'already passing -n 0' without saying whether it migrates or gets a marker. internal/harness/asserts.go:419 and internal/harness/scenario_spec_lifecycle.go:674 are non-test files with uncapped sandbox.runBD(\"list\",...) calls. There is also a \"list\" literal at internal/redact/redact.go:175 that the lint must not misclassify. Enumerate each one's disposition."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-11 cites a fixture helper that does not exist",
+      "detail": "'Fixture via registerLandedPanel': no such function exists anywhere in the tree (grep over all *_test.go). initLandedRepo and mergeBead exist in internal/lifecycle/landed_test.go. Mark registerLandedPanel as a new helper, or name an existing one."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Background J's list of ownership roots is imprecise",
+      "detail": "Other claimed roots are .agents/skills/**, scripts/bd-jsonl-merge-driver.sh, .golangci.yml and .github/workflows/ci.yml. '.claude/**' is really three subtrees (skills, workflows, agents). Only three OWNERSHIP files claim themselves; context-system's does not. The conclusion still holds: .mindspec/policy/ is unowned."
+    },
+    {
+      "severity": "INFO",
+      "title": "Claims verified against 7a490064",
+      "detail": "Verified true: BuildReadySet/QueryReadyForEpic use 'bd ready --parent'; ExclusionNotice is count-only; the RunE empty-set branch prints 'No ready work found.' and exits 0 before the selector is consulted; --emit-only empty exits 1 and its positional uses FetchBeadByID; tracedOutput uses cmd.Output(); the cap-site enumeration is complete for ready/list (plus the harness sites above); phase.Cache x3, adopt_lattice and queryExistingChildren pass -n 0; the epic create metadata lacks spec_id while buildBeadMetadata writes it; nothing in Go reads metadata.spec_id for selection; bd 1.1.0 has --metadata-field on ready/list (probed live; it works), --spec-id on create, and blocked --parent; filterReadyItems drops epics, so R3.1's spec_id on the epic does not leak it into the metadata-field ready query; fetchBeadRecordReal collects every blocks edge and evaluateMF3 holds each closed one to FindLandedMerge; FindLandedMerge is first-parent only; reviewedHeadSHAForBead returns the first non-empty SHA in panel.Scan order (sorted by Dir), and the panel-contradiction return precedes the tip and binding legs; evaluateMF3 tests errors.Is(ErrLandedMergeNotFound), which swallows contradiction and revert; ErrLandedMergeNoCandidate exists and wraps it; there is no origin/ or remote read on the MF-3 path; claimTokenRe, extractLineClaims/classifyParenthetical and extractSpecTokens behave as stated; GateReadiness takes a bool, the flag is a Bool, and the marker keys are signals and overridden; there is no Go reader of the marker; ADR-0044 is the last ADR before 0045; .mindspec/policy is absent; bdVersionFloor is 1.0.4; enforcementPkgs includes internal/validate; ADR-0045's Verification bullets (N-1 line, lowest-numbered vs lowest-depth, follow-up bead, 2026-07-07 vs 2026-07-24 dates, files differ, historical_skills) all check out."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) Files in scope omits the two files where findings land: internal/lifecycle/reattest.go (the real reattest nominator and its panel datum) and internal/phase/derive.go (FindEpicForBead, the lineage MF-3 and the claim gate use). (2) The header says to write '<your-slot>-round-1.json beside this BRIEF', which conflicts with the dispatch prompt's scratch path; I followed the prompt. (3) The skill-header TODO(skill) placeholders (Summary, Files, ACs, Prior-Round Asks, Lens) are left unfilled, and '## Summary' appears twice. (4) The O2 lens asks whether R4.3's ADR-0041 amendment is 'correctly priced' but does not flag that R4.2 may be the unpriced ADR-0041 change."
+    }
+  ]
+}

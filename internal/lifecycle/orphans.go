@@ -38,7 +38,7 @@ var (
 		if err := idvalidate.BeadID(epicID); err != nil {
 			return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 		}
-		out, err := bead.RunBD("list", "--parent", epicID, "--status=closed", "--json")
+		out, err := bead.ListJSON("--parent", epicID, "--status=closed")
 		if err != nil {
 			return nil, err
 		}

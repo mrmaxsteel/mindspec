@@ -1,6 +1,7 @@
 package next
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,68 +39,52 @@ func SelectWork(items []BeadInfo, pick int) (BeadInfo, error) {
 	return items[pick-1], nil
 }
 
-// SelectNamedFromReadySet resolves a positional bead ID against a
-// spec-scoped ReadySet — the claim path's positional resolution (spec 128
-// R6.1). It defers to SelectWorkByName over the FILTERED (displayed) set
-// for the normal cases, but first checks whether name identifies an item
-// the spec-title filter DROPPED from the raw ready set (R6.3(b)/AC-10): a
-// positional bead ID that IS ready but was excluded by mindspec's spec
-// filter gets the honest exclusion-reason error instead of
-// SelectWorkByName's generic "not found or not ready" — a filtered-out
-// bead is a documented reason, not a mystery. An ambiguous match among
-// excluded raw items is deliberately NOT resolved here — SelectWorkByName's
-// own ambiguity/not-found message on the filtered set stays authoritative
-// rather than this function guessing which excluded bead the caller meant.
+// SelectNamedFromReadySet honors scoped positional intent before empty-set handling.
 func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
-	if rs.SpecFlag != "" && rs.ExcludedCount() > 0 {
-		if err, excluded := exclusionReasonForName(rs, name); excluded {
+	if rs.SpecFlag == "" {
+		return SelectWorkByName(rs.Filtered, name)
+	}
+	if rs.EpicID != "" && name == rs.EpicID {
+		return BeadInfo{}, fmt.Errorf("bead %s is the epic of spec %s, not a bead to claim\nrecovery: mindspec next --spec %s", idrender.Bead(rs.EpicID), idrender.Spec(rs.SpecFlag), idrender.Spec(rs.SpecFlag))
+	}
+	item, err := SelectWorkByName(rs.Raw, name)
+	if err != nil {
+		var ambiguous *ambiguousBeadNameError
+		if errors.As(err, &ambiguous) {
 			return BeadInfo{}, err
 		}
+		if len(rs.Filtered) == 0 {
+			return BeadInfo{}, fmt.Errorf("no ready plan bead for spec %s; positional %s cannot be claimed from an empty ready set\nrecovery: mindspec next --spec %s", idrender.Spec(rs.SpecFlag), idrender.Bead(name), idrender.Spec(rs.SpecFlag))
+		}
+		return BeadInfo{}, err
 	}
-	return SelectWorkByName(rs.Filtered, name)
+	for _, kept := range rs.Filtered {
+		if kept.ID == item.ID {
+			return item, nil
+		}
+	}
+	for _, miss := range rs.NearMisses {
+		if miss.Bead.ID != item.ID {
+			continue
+		}
+		if miss.Class == "N4" {
+			if miss.NoLineage {
+				return BeadInfo{}, fmt.Errorf("bead %s has no lineage, so readiness cannot evaluate it; no readiness override applies\nrecovery: bd show %s --json", idrender.Bead(item.ID), idrender.Bead(item.ID))
+			}
+			if miss.Lineage == rs.EpicID {
+				return item, nil
+			}
+		}
+		return BeadInfo{}, fmt.Errorf("%s", miss.String())
+	}
+	parent := ""
+	if item.Parent != "" {
+		parent = " (parent: " + idrender.Bead(item.Parent) + ")"
+	}
+	return BeadInfo{}, fmt.Errorf("bead %s is bd-ready but is not linked to spec %s%s\nrecovery: mindspec next --spec %s", idrender.Bead(item.ID), idrender.Spec(rs.SpecFlag), parent, idrender.Spec(rs.SpecFlag))
 }
 
-// exclusionReasonForName reports whether name identifies (by exact ID or
-// suffix, matching SelectWorkByName's own resolution rules) EXACTLY ONE
-// item in rs.Raw that is not present in rs.Filtered — i.e. an item the
-// spec-title filter actually dropped (never a recomputation of the
-// filter itself; membership is checked against the real, already-computed
-// Filtered set).
-func exclusionReasonForName(rs ReadySet, name string) (error, bool) {
-	if name == "" {
-		return nil, false
-	}
-	kept := map[string]struct{}{}
-	for _, item := range rs.Filtered {
-		kept[item.ID] = struct{}{}
-	}
-	var match *BeadInfo
-	for i := range rs.Raw {
-		item := &rs.Raw[i]
-		if _, ok := kept[item.ID]; ok {
-			continue // present in the filtered set — not an exclusion case
-		}
-		if item.ID == name || strings.HasSuffix(item.ID, "-"+name) {
-			if match != nil {
-				return nil, false // ambiguous among excluded items — defer to SelectWorkByName
-			}
-			match = item
-		}
-	}
-	if match == nil {
-		return nil, false
-	}
-	// Final-review round 1 (R5/G4, superseding round-1 panel G3's
-	// termsafe treatment): the caller-supplied selector no longer
-	// appears inside a command-shaped example at all. ADR-0042's rule is
-	// that termsafe is IDENTITY on printable ASCII, so `x;evil` or
-	// `$(evil)` interpolated into a backtick-fenced `mindspec next ...`
-	// line survived byte-raw into copy-pasteable command text. The
-	// matched ID (idrender-gated) names the bead; the executable-shaped
-	// guidance carries NO dynamic operand.
-	return fmt.Errorf("bead %s is ready but excluded by the spec filter: title does not reference spec %s; drop the positional or re-run `mindspec next` without `--spec` to claim it outside this scope",
-		idrender.Bead(match.ID), idrender.Spec(rs.SpecFlag)), true
-}
+type ambiguousBeadNameError struct{ error }
 
 // SelectWorkByName selects the bead named by `name` from the already-fetched
 // ready `items` slice. It is the claim-path counterpart to SelectWork for when
@@ -158,7 +143,7 @@ func SelectWorkByName(items []BeadInfo, name string) (BeadInfo, error) {
 		for i, m := range matches {
 			ids[i] = idrender.Bead(m.ID)
 		}
-		return BeadInfo{}, fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))
+		return BeadInfo{}, &ambiguousBeadNameError{fmt.Errorf("bead name %q is ambiguous across the ready set (matches %s); qualify it with the full bead ID", name, strings.Join(ids, ", "))}
 	}
 	if len(matches) == 1 {
 		return matches[0], nil

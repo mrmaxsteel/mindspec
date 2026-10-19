@@ -21,6 +21,8 @@ package setup
 // and the clarify-vs---allow-not-ready distinction.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,11 +65,8 @@ func TestMsBeadImplSkill_IngressPrecedesPhaseAAndNamesBothPaths(t *testing.T) {
 	if !strings.Contains(content, "manual") {
 		t.Error("expected the ingress section to name the manual-fallback dispatch flow")
 	}
-	if !strings.Contains(content, "mindspec_readiness_override") {
-		t.Error("expected the override-marker name in the shipped SKILL.md")
-	}
-	if !strings.Contains(content, "proceed") || !strings.Contains(content, "warning") {
-		t.Error("expected the override-honoring proceed-with-warning rule in the shipped SKILL.md")
+	if !mutationProbeOverrideCoveragePresent(content) {
+		t.Error("expected the ready-check exit-code adapter in the shipped SKILL.md")
 	}
 }
 
@@ -238,46 +237,68 @@ func TestMsSpecAutopilotSkill_AcceptedNotReadyHaltRow(t *testing.T) {
 
 // --- Final-review r1 G1/G3-OVERRIDE-COVERAGE: stale-override coverage ---
 
-// mutationProbeOverrideCoveragePresent isolates the override-coverage
-// requirement (final-review r1 G1-STALE-OVERRIDE-COVERAGE /
-// G3-OVERRIDE-COVERAGE / O1-1): the ingress must compare the FRESH
-// ready-check's currently-failing signals against the marker's recorded
-// `signals` set, proceed ONLY on full coverage, and STOP (re-gate) on
-// any uncovered new failure.
+const readinessStagedRule = "<!-- staged-rule: target=next-action (ADR-0045 step 4, spec 133); remove-by=2027-06-30 (provisional; the spec-130 rule table may revise it) -->"
+const readinessExitCodeRule = "Run `mindspec bead ready-check <id>`; proceed on exit 0; otherwise stop and surface its report."
+
+// Coverage belongs to the binary; the harness adapter obeys its exit code.
+// ADR-0045 requires the new conditional sequence to carry a staged marker.
 func mutationProbeOverrideCoveragePresent(content string) bool {
-	return strings.Contains(content, "ONLY if EVERY currently-failing signal is present in that recorded set") &&
-		strings.Contains(content, "PRESENCE alone is NOT authority to dispatch") &&
-		strings.Contains(content, "naming each uncovered signal")
+	return strings.Contains(content, readinessStagedRule+"\n"+readinessExitCodeRule) &&
+		!strings.Contains(content, "mindspec_readiness_override") &&
+		!strings.Contains(content, "EVERY currently-failing signal is present in that recorded set")
 }
 
-// TestMsBeadImplSkill_OverrideCoverageCheckShipped pins that a stale
-// override marker cannot bypass NEW failing signals: dispatch on the
-// FAIL-with-marker branch requires the marker's recorded signal set to
-// COVER every currently-failing signal from the fresh ready-check, and
-// an uncovered failure re-blocks (NOT READY routing).
 func TestMsBeadImplSkill_OverrideCoverageCheckShipped(t *testing.T) {
 	content := readinessSkillFile(t, "ms-bead-impl")
 	if !mutationProbeOverrideCoveragePresent(content) {
-		t.Error("expected the shipped ms-bead-impl ingress to require override-marker COVERAGE of every currently-failing signal (stale marker must not bypass new failures)")
-	}
-	if !strings.Contains(content, "STOP and treat this exactly like the FAIL-no-override branch") {
-		t.Error("expected the uncovered-signal outcome to re-gate via the FAIL-no-override branch (NOT READY routing)")
+		t.Error("expected the staged ready-check exit-code line, immediately after its marker, with no skill-side override comparison")
 	}
 }
 
-// TestMsBeadImplSkill_OverrideCoverageMutationProbe proves the coverage
-// pin is not vacuous: stripping the coverage comparison out of a copy of
-// the shipped content turns the SAME predicate red.
 func TestMsBeadImplSkill_OverrideCoverageMutationProbe(t *testing.T) {
 	content := readinessSkillFile(t, "ms-bead-impl")
 	if !mutationProbeOverrideCoveragePresent(content) {
-		t.Fatal("precondition failed: the shipped content must carry the override-coverage rule")
+		t.Fatal("precondition failed: the shipped content must carry the staged exit-code adapter")
 	}
-	// Simulate the pre-fix regression: proceed on marker PRESENCE alone.
-	mutated := strings.Replace(content,
-		"ONLY if EVERY currently-failing signal is present in that recorded set", "when the marker is present", 1)
-	if mutationProbeOverrideCoveragePresent(mutated) {
-		t.Fatal("mutation probe failed: dropping the coverage comparison should turn the pin red")
+	for name, mutated := range map[string]string{
+		"exit code":      strings.Replace(content, "proceed on exit 0", "proceed regardless of exit code", 1),
+		"marker":         strings.Replace(content, readinessStagedRule, "", 1),
+		"adjacency":      strings.Replace(content, readinessStagedRule+"\n", readinessStagedRule+"\n\n", 1),
+		"old comparison": content + "\nCompare mindspec_readiness_override signals against the current failing set.\n",
+	} {
+		if mutationProbeOverrideCoveragePresent(mutated) {
+			t.Errorf("mutation %s should turn the shipped pin red", name)
+		}
+	}
+}
+
+func TestMsBeadImplSkill_OverrideCoverageRefresh(t *testing.T) {
+	for _, name := range []string{"ms-bead-impl", "ms-bead-cycle"} {
+		t.Run(name, func(t *testing.T) {
+			prior, err := historicalSkillsFS.ReadFile("historical_skills/" + name + ".pre129.md")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "ms-bead-impl" && !strings.Contains(string(prior), "ONLY if EVERY currently-failing signal is present in that recorded set") {
+				t.Fatal("snapshot lacks replaced comparison")
+			}
+			if name == "ms-bead-cycle" && !strings.Contains(string(prior), "`mindspec next --allow-not-ready`") {
+				t.Fatal("snapshot lacks replaced bare flag")
+			}
+			dir := t.TempDir()
+			if err := writeSkill(filepath.Join(dir, name, "SKILL.md"), string(prior)); err != nil {
+				t.Fatal(err)
+			}
+			wanted := readinessSkillFile(t, name)
+			var result Result
+			if err := installSkills(dir, "skills", map[string]string{name: wanted}, false, &result); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md"))
+			if err != nil || string(got) != wanted || len(result.Refreshed) != 1 {
+				t.Fatalf("refresh result: %+v, err=%v", result, err)
+			}
+		})
 	}
 }
 

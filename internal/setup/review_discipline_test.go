@@ -324,6 +324,20 @@ func acTenResolveLocator(content, locator string) (line int, diag string, ok boo
 // TestReviewDiscipline_AC10NegativeLocatorMismatch).
 var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 	{
+		surface: "ms-bead-impl",
+		locator: readinessStagedRule,
+		matched: "spec 133",
+		count:   1,
+		reason:  "spec 129 R6.5 staged-rule marker: mandated target spec in the verbatim marker line",
+	},
+	{
+		surface: "ms-bead-impl",
+		locator: readinessStagedRule,
+		matched: "spec-130",
+		count:   1,
+		reason:  "spec 129 R6.5 staged-rule marker: mandated rule-table spec in the verbatim marker line",
+	},
+	{
 		surface: "ms-panel-run",
 		locator: "panel-slug` (required)",
 		matched: "spec-050",
@@ -537,6 +551,24 @@ func ac10Surfaces() map[string]string {
 		surfaces[name] = content
 	}
 	return surfaces
+}
+
+func TestReviewDiscipline_AC10StagedRuleMarkerOnly(t *testing.T) {
+	for _, token := range []string{"spec 133", "spec-130"} {
+		t.Run(token, func(t *testing.T) {
+			surfaces := ac10Surfaces()
+			if problems := acTenValidate(acTenScanSurfaces(surfaces), reviewDisciplineAC10Allowlist, surfaces); len(problems) != 0 {
+				t.Fatalf("shipped marker must be allowed: %v", problems)
+			}
+			content := surfaces["ms-bead-impl"] + "\nUnrelated " + token + " reference elsewhere in this skill.\n"
+			surfaces["ms-bead-impl"] = content
+			problems := acTenValidate(acTenScanSurfaces(surfaces), reviewDisciplineAC10Allowlist, surfaces)
+			want := fmt.Sprintf("AC-10 scan: unallowlisted hit in ms-bead-impl at line %d: %s", acTenLineOf(content, strings.LastIndex(content, token)), token)
+			if len(problems) != 1 || problems[0] != want {
+				t.Fatalf("unrelated reference must fail only at its own line: got %v, want %q", problems, want)
+			}
+		})
+	}
 }
 
 // TestReviewDiscipline_AC10ScanPlusAllowlist is the [CI] guard for AC-10: it

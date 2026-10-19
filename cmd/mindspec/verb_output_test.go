@@ -778,15 +778,23 @@ func TestVerbOutput_Next(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n\n## Requirements\n\n1. R1\n"), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\n---\n\n# Plan\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\nwork_chunks:\n  - id: 1\n---\n\n# Plan\n\n## Bead 1: Fixture\n"), 0o644); err != nil {
 		t.Fatalf("write plan.md: %v", err)
 	}
 	runGitInDir(t, root, "add", "-A")
 	runGitInDir(t, root, "commit", "-q", "-m", "add spec/plan fixture")
-	if err := nextCmd.Flags().Set("allow-not-ready", "true"); err != nil {
+	if err := nextCmd.Flags().Set("allow-not-ready", "MF-1,MF-2,MF-3,MF-4"); err != nil {
 		t.Fatalf("set --allow-not-ready: %v", err)
 	}
-	t.Cleanup(func() { _ = nextCmd.Flags().Set("allow-not-ready", "false") })
+	if err := nextCmd.Flags().Set("evidence", nextEvidenceFile(t)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = nextCmd.Flags().Set("allow-not-ready", "")
+		_ = nextCmd.Flags().Set("evidence", "")
+		nextCmd.Flags().Lookup("allow-not-ready").Changed = false
+	})
+	runGitInDir(t, root, "branch", "spec/"+specID)
 
 	installFakeBD(t, "#!/bin/sh\n"+
 		"case \"$1\" in\n"+

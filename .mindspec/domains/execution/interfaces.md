@@ -36,10 +36,11 @@ architecture doc.)
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
-Low-level git operations used only by `MindspecExecutor`:
+Low-level git operations used by `MindspecExecutor`; `internal/next` also consumes `FileAtRefTyped` for committed plan mapping:
 
 | Function | Purpose |
 |:---------|:--------|
+| `FileAtRefTyped(workdir, ref, path)` | Probes a local branch then its tree path before reading the blob; returns `ErrRefAbsent` or `ErrPathNotAtRef` only for proven absence. Other git failures propagate. Also consumed by `internal/next` for committed-plan selection. |
 | `BranchExists(name)` | Check if a branch exists |
 | `CreateBranch(name, from)` | Create a branch from a ref |
 | `DeleteBranch(name)` | Delete a local branch |
@@ -61,6 +62,7 @@ cannot drift:
 | Function | Purpose |
 |:---------|:--------|
 | `ExactSecondParentMerges(workdir, branch, tip)` | `branch`'s two-parent first-parent merges whose second parent EQUALS `tip` exactly, newest-first. The ONE exact-match landed-ness primitive: octopus merges and ancestor-consistent-but-not-equal candidates are excluded, never guessed at. `tip` is option-reject gated before reaching any git argv. |
+| `ReachableMerges(workdir, ref)` | Every merge reachable from `ref`, newest-first in topological order (`git log --merges --topo-order`), with SHA, full parents and subject. Includes merges off the first-parent chain. Rejects option-like refs. Lifecycle uses it only after zero owned primary candidates; the primitive itself grants no landing or close decision (spec 129). |
 | `RevertShape(workdir, mergeSHA, target)` | Reverse un-apply no-op test — `merge-tree(base=M, ours=target tip, theirs=M^1)` with rename/copy detection DISABLED (`-c merge.renames=false`). True iff the un-apply is a clean no-op whose tree equals the tip's (the tip carries none of M's content at its original paths — a true `git revert M`, or its content-indistinguishable clean-full-removal residual). Requires a >=2-parent merge; any infra failure propagates as `(false, err)` — undetermined is never a classification. Consulted only under `ContentSubsumedOutcome`'s `SubsumptionCleanDivergence` arm; the forward (rename-detecting) legs are untouched. |
 
 ### Gitignore Ensure (`internal/gitutil/gitignore.go`, spec 123 R4)
@@ -72,6 +74,8 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | Symbol | Purpose |
 |:-------|:--------|
 | `RuntimeIgnoreEntries` | The single canonical list of MindSpec local runtime files that must never be tracked (`.mindspec/session.json`, `.mindspec/focus` — ADR-0015). Bootstrap, setup, and doctor all consume THIS var, so the writer sides and the doctor detection side cannot drift. |
+| `ReviewIgnoreEntries` | Optional local panel artifacts: `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` (spec 129 R8). Separate from runtime entries so already-tracked reviews do not become doctor runtime-file findings. The `/**` form permits later negations for retention. |
+| `EnsureGitignoreEntriesWithHeader(root, header, entries...)` | The same append and ignore-check semantics as `EnsureGitignoreEntries`, with a caller-supplied header. Bootstrap uses `# MindSpec panel reviews (local, not version-controlled; spec 129 R8)` for reviews; `EnsureGitignoreEntries` delegates with the runtime header. |
 | `EnsureGitignoreEntries(root, entries...)` | Entry-granular, negation-aware `.gitignore` ensure (final review G1): guarantees each entry is ACTUALLY ignored by git, not merely present as a line. Existing bytes are never reordered or rewritten; entries needing a fresh line are appended under a shared header comment; creates the file if absent. An entry needs a fresh line when its exact line is absent (delimiter-stripped comparison only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence), OR when the line IS present but `git check-ignore` reports the path un-ignored anyway — a LATER negation rule (`!entry`) defeats it under git's last-match-wins ordering, so the plain entry is RE-APPENDED (a harmless duplicate line) to make the last match the ignore rule again. So the same entry can legitimately appear more than once, and a converged call still shells out to `git check-ignore` per line-present entry before concluding nothing needs writing (no write happens in that case). On an indeterminate git verdict (no repository / exit status outside {0,1}, e.g. 128) it falls back to line-presence alone rather than force a spurious re-append. Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
 
 ### Merge-safety primitives (spec 127, `internal/gitutil`)
@@ -130,6 +134,8 @@ nothing-to-materialize (both stages elide) path unchanged.
 
 ### bd stderr passthrough content (spec 128 R6.4/AC-11, `internal/bead/bdcli.go`)
 
+`ReadyJSON` also captures stderr on success. A `Showing N of M` notice refuses the read with `bd truncated the ready set (<escaped notice>) although mindspec requested no cap`, followed by `recovery: bd ready -n 0 --json`. Benign stderr leaves the JSON rows intact (spec 129 R2).
+
 | Symbol | Purpose |
 |:-------|:--------|
 | `wrapBDError(err)` | Decorates a failed bd invocation so its captured `exec.ExitError.Stderr` becomes part of the returned error's rendered text (previously discarded by every `%w`-wrapping caller — a stale-binary schema error surfaced as a bare "exit status 1"). |
@@ -155,6 +161,11 @@ hostile-adjacent.
 
 ## Readiness advisory metadata (`internal/bead`, spec 124)
 
+`bead.PlanBeadIndex(epicID, id string) (n int, ok bool)` (`planbead.go`,
+spec 129) is the shared form predicate: exactly `<epicID>.<N>`, one
+positive decimal segment with no leading zero. It checks form; workflow
+callers separately verify lineage and positional plan mapping.
+
 `internal/bead` names the two dedicated bd metadata keys spec 124's
 readiness gate writes — advisory audit annotations only (ADR-0023: bd/
 Dolt stays the single lifecycle-state authority; these are never
@@ -163,9 +174,26 @@ the spec 124 R8e/AC-12 layer boundary holds by construction):
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `MetaKeyReadinessOverride` (`"mindspec_readiness_override"`) | Durable `--allow-not-ready` override marker written by `mindspec next` (workflow domain) via `MergeMetadata`: the bypassed MF signal IDs + a UTC timestamp. |
+| `MetaKeyReadinessOverride` (`"mindspec_readiness_override"`) | Advisory schema-v2 marker: `{schema: 2, signals, fingerprints, overridden, evidence: {path, sha256, bytes}}`. Signals name the deliberately bypassed MF failures; fingerprints are sorted, unique SHA-256 digests of their canonical failure records. Evidence stores its path, hash and byte count, never its text; prefer a repository-relative evidence path. |
 | `MetaKeyReadinessAttempt` (`"mindspec_readiness_attempt"`) | The append-only readiness-attempt record written by `mindspec bead clarify`: the original ordinal-keyed NOT-READY report plus span-grounded clarification entries. |
 | `WriteAttemptRecord(beadID, AttemptRecord)` (`clarify.go`) | The ONLY writer of the attempt key — exactly one `MergeMetadata` write per bead, ever. Refuses fail-closed (zero write) on: a malformed bead ID; an EXISTING attempt record (the categorical, restart-proof R8d cap); an empty report or non-positive/duplicate ordinals; a clarification citing an ordinal absent from the report; an empty `span` (presence check only — whether the span SUPPORTS the answer is the re-dispatched Phase-0 subagent's judgment, never verified here). No update/finalize API exists (R8e derive-don't-write): the terminal READY/escalated disposition is derived from the re-dispatch outcome. |
+
+`ParseOverrideMarker(raw any) (OverrideMarker, MarkerValidity)` validates
+the closed schema: non-empty unique MF-1..MF-4 signals, exactly one non-empty
+sorted unique 64-hex fingerprint list per signal, RFC-3339 `overridden`,
+non-empty evidence path, 64-hex evidence hash, and 1..65536 evidence bytes.
+Unknown keys or inconsistent fields are MALFORMED. The prior
+`{signals, overridden}` shape without a schema is LEGACY; neither grants
+coverage. `ReadOverrideMarker` uses `GetMetadata`, distinguishing a missing
+key from a metadata read error. `NewOverrideMarkerV2` builds and validates
+writer input with this same contract. Marker integrity is shape and
+self-consistency only; metadata is agent-writable and unauthenticated.
+
+`readiness.ApplyOverride` consumes marker data supplied by the command;
+`EvaluateReadiness` never reads it. Current failure digests must be a subset
+of recorded fingerprints, and indeterminate records never cover. Growth
+uncovers and shrinkage stays covered. This read-back authorizes dispatch
+ingress only; a claim still requires fresh scoped flags and evidence.
 
 `AttemptRecord` is `{report: [{ordinal, signal, reason}], clarifications:
 [{ordinal, reason, answer, span}]}` — the record carries the FULL

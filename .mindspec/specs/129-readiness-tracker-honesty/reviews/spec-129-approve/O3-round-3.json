@@ -1,0 +1,46 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.8,
+  "rationale": "The new fallback confirmation rule closes my round-2 false PASS. I re-ran the probe at 4c46cf64 with an emulated R4.2 seam: the panel-only case gives *LandedMergeNoEvidence, and a surviving tip advanced to B contradicts. The two-group ambiguity rule is sound by inspection. It resolves only when exactly one group is (b)/(d)-corroborated and uncontradicted, so two corroborated groups, or a (d) naming the other group, refuse. Lineage-based selection is the right, simplest way to make #255's reporter shape claimable. It has one structural gap that bd itself creates. bd mints the hierarchical ID <E>.<N> for ANY child created with --parent E (verified round 2: a scratch child got pz-jcb.1). So a follow-up bug filed under the epic has the plan-bead form and lineage E, and is a MEMBER under R1.1 because issue_type is not an input. That contradicts R1.2 and AC-4(v), which classify 'a follow-up bug child of E' as an informational near-miss. This repo has the shape: mindspec-cter.8 is a bug under epic cter, ID .8, while spec 093's plan has 7 '## Bead' sections. bd show reports no parent and no dependencies, so FindEpicForBead returns ErrNoEpicLineage and it is classified N1 (blocking, exit non-zero), whose recovery 'bd update --parent E' is advertised as making it claimable. It would then be default-selected by priority and fail MF-1 ('no ## Bead 8'), stalling `next --spec` even with ready plan beads. Fix: membership also requires N to map to a plan.md bead section or work_chunk (MF-1's own mapping). Residuals on the fallback, both reproduced: a branch reset to the stale round tip A, or a bd-metadata binding naming the X\u2192Y merge, still PASS MF-3 while the reviewed round-2 fix B is absent from the tip. The spec's claim that the binding is strong 'because the executor writes it only at its own spec-branch merge' is not true of agent-writable metadata that reattest also writes. Reattest already computes a cheap guard that closes both.",
+  "concrete_changes_required": [
+    "R1.1: a plan bead of S must also have its N mapped by plan.md (a '## Bead N' section or work_chunks id N, which is MF-1's own mapping, read once per scoped call). An <E>.<N> child with no plan mapping is a non-plan child: an informational N3 ('follow-up child of E, not in plan.md'), never a member, never N1. bd auto-mints <E>.<N> for every `bd create --parent E`, so ID form plus lineage alone cannot distinguish plan-approve beads from follow-up bugs. Repo evidence: mindspec-cter.8 (bug, under cter, spec 093 plan has Beads 1-7).",
+    "R1.2 / AC-4(v): reconcile the 'follow-up bug child of E is an informational near-miss' fixture with R1.1. As written, a follow-up bug created by `bd create --parent E` is a member (ID E.N, parent E), not a near-miss. After the change above, pin both cases: a follow-up E.(k+1) child with parent E (informational, never selected, exit 0), and an unmapped E.(k+1) child with no lineage (informational, not N1, so no 'bd update --parent' recovery is offered).",
+    "R1.2 N1: offer the 'bd update <id> --parent <E>' recovery (and the 'makes it claimable' claim) only when N maps to a plan bead section. Otherwise the recovery turns a follow-up bug into a member that MF-1 refuses on every claim.",
+    "R4.2 fallback: on the fallback path only, refuse automatic identification (*LandedMergeNoEvidence) when any registered reviewed_head_sha for the bead is NOT an ancestor of the spec tip. This is the same set reattest already lists as 'later reviewed work ... not in <spec-branch>'s history', promoted from a reattest warning to an automatic-path veto. It closes the two reproduced residuals: the bead branch reset to the stale round tip A, and a bd-metadata binding naming the X\u2192Y 'Merge bead/X' merge. Both PASS today with B's reviewed fix absent from the tip. Add an AC leg for each.",
+    "R4.2 text: correct 'The binding is the strongest datum here, because the executor writes it only at its own spec-branch merge'. The binding is agent-writable bd metadata, and `mindspec reattest` writes it too (R4.2's own reattest row). State the metadata-forge residual for the undirected form, or close it with the ask above."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "bd's auto-minted <E>.<N> child IDs make follow-up bugs 'plan beads'",
+      "detail": "In bd 1.1.0, `bd create --parent E` mints <E>.<N> (scratch proof in round 2: pz-jcb.1). R1.1 = plan form + lineage E, with issue_type explicitly not an input, so any follow-up child under the epic is a member and is default-selectable by priority (SelectWork picks items[0]). The readiness gate then refuses it on MF-1 ('plan.md has no \"## Bead N\" section'), and `next --spec S` stalls on it while real plan beads are ready. Repo instance: mindspec-cter.8 (issue_type bug, under epic mindspec-cter per `bd list --parent`, while .mindspec/specs/093-skills-thin-down/plan.md has 7 '## Bead' sections). Its bd show has parent None and no dependencies, so FindEpicForBead gives ErrNoEpicLineage and R1.2 classifies it N1: BLOCKING (exit non-zero), with a recovery advertised as making it claimable. This contradicts R1.2's and AC-4(v)'s own classification of follow-up bug children as informational."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Fallback residual: stale surviving tip and metadata binding still PASS a stale-round landing",
+      "detail": "Probe at 4c46cf64 (emulated R4.2 seam; X's round-1 tip A is merged into bead/Y as 'Merge bead/proj-x', X advances to round-2 fix B, Y lands). (1) bead/proj-x reset to A gives identified (nil err). (2) bead/proj-x deleted plus a bd-metadata binding {merge: the X\u2192Y merge, second_parent: A} gives identified; the spec tip's x.txt is 'x1'. The spec states residual (1) on content-at-tip grounds, but in both cases the registered reviewed B is not in the tip's history. The spec's argument for (d)'s strength assumes only the executor writes it. Probe source: /private/tmp/claude-503/-Users-Max-replit-mindspec/d05dec1f-1671-4cbd-8202-e55ee47cdf39/scratchpad/p129s/r3/O3/o3r3probe_test.go.txt"
+    },
+    {
+      "severity": "INFO",
+      "title": "New confirmation and ambiguity rules hold",
+      "detail": "Panel leg excluded, no tip and no binding on the fallback candidate: *LandedMergeNoEvidence ('no admissible datum confirms it'). Surviving tip at B: surviving-branch contradiction. Two second-parent groups, both corroborated, or one corroborated with a (d) naming the other: not 'exactly one uncorroborated-free group', so FIX-2b refuses (by inspection of R4.2's rule text). The long-form 'into bead/Y' and refresh merges stay excluded."
+    },
+    {
+      "severity": "INFO",
+      "title": "Lineage-based selection is the simplest fix for #255",
+      "detail": "Using the unchanged FindEpicForBead lineage plus the plan form makes #255's reporter bead (dotted ID, title-tag lineage, ready-check PASS) claimable from one global ready call. Scoped next, unscoped next (R1.8(a)) and ready-check then agree on the predicate. Choosing the parent edge alone would have been simpler but leaves #255 unfixed. The one missing input is plan mapping (the MAJOR above), which MF-1 already reads."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-2 ask status",
+      "detail": "O3r2.1 (panel set cannot confirm a fallback candidate, plus AC): ADDRESSED. Verified by probe; AC-11 (vii)-(ix) added. The stale-tip and metadata-binding variants are a NEW_ISSUE (MINOR above). O3r2.2 (undirected-form text plus reattest rendering): ADDRESSED (R4.2 'undirected', 'no target guarantee', reattest caveat line). Accompanying justification of (d) is inaccurate: NEW_ISSUE, folded into the MINOR. O3r2.3 (N3 true on every path): ADDRESSED via R1.8(a) on every claim. The predicate it now relies on has the bd auto-ID gap: NEW_ISSUE (MAJOR above)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "One overclaim: 'O3's false PASS is reproduced and closed'. The panel-only form is closed. The same shape with a surviving branch reset to the stale tip, or with a bd-metadata binding, still PASSES (reproduced). Otherwise none found. The TODO-placeholder refutation is correct (I noted the placeholders fixed in round 2), and the verdict-location rule is clear."
+    }
+  ]
+}

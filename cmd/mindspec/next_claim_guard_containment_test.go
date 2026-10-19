@@ -43,78 +43,47 @@ import (
 // what claimAnchorRoot would have said, and irrespective of the
 // decoy custom-root spec worktree SpecDir's probe never even looks at.
 func TestNextCmd_ClaimGuard_EnumerationPin_CustomWorktreeRootRecording(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-
-	specID := "981-claim-guard-custom-worktree-root"
+	f := newScopedNextFixture(t)
+	const specID = "129-fixture"
 	const customRoot = "custom-trees"
-
-	sb.WriteFile(".mindspec/config.yaml", "worktree_root: "+customRoot+"\nrecording:\n  enabled: true\n")
-	// The sandbox's default .gitignore hardcodes `.worktrees/` — swap in
-	// the custom root's entry so the .gitignore class stays quiescent
-	// and this fixture isolates G2's recording divergence.
-	sb.WriteFile(".gitignore", ".beads/\n.harness/\n"+customRoot+"/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n.mindspec/phase.lock\n")
-	// Seed the manifest where SpecDir's hardcoded-.worktrees probe
-	// ACTUALLY resolves it under this config (its flat-default fallback
-	// at repoRoot) — matching R3's finding precisely, not where a
-	// naive reading of "custom worktree_root" might suggest.
-	sb.WriteFile(".mindspec/specs/"+specID+"/recording/manifest.json",
-		`{"spec_id":"`+specID+`","started_at":"2026-01-01T00:00:00Z","status":"recording","phases":[{"phase":"implement","started_at":"2026-01-01T00:00:00Z"}]}`+"\n")
-	// The spec 124 readiness gate reads plan.md to EVALUATE readiness at
-	// all (a missing plan.md is a hard evaluation error, not a
-	// bypassable failed signal — --allow-not-ready below only bypasses
-	// FAILED signals). Seed a minimal plan at the SAME repoRoot-relative
-	// location SpecDir resolves under this config, so the claim reaches
-	// the entanglement guard rather than erroring out beforehand; this
-	// bead's specific readiness signals are irrelevant to what's under
-	// test, hence --allow-not-ready rather than a fully valid plan.
-	sb.WriteFile(".mindspec/specs/"+specID+"/spec.md", nextReadyGatePositiveSpecMD)
-	sb.WriteFile(".mindspec/specs/"+specID+"/plan.md", strings.ReplaceAll(nextReadyGatePositivePlanMD, "995-readiness-gate-positive", specID))
-	sb.Commit("setup: custom worktree_root + recording enabled + seeded manifest")
-	// config.Load's process-wide cache (see EnumerationPin_RecordingEnabled's
-	// comment) must be reset so this TEST PROCESS's own
-	// next.ComputeEntangleablePaths call below sees the fresh config.
+	write := func(path, text string) {
+		target := filepath.Join(f.root, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".mindspec/config.yaml", "worktree_root: "+customRoot+"\nrecording:\n  enabled: true\n")
+	write(".gitignore", "tracker*\nbd\ncaptured-*\n"+customRoot+"/\n.mindspec/session.json\n.mindspec/focus\n.mindspec/current-spec.json\n.mindspec/phase.lock\n")
+	write(".mindspec/specs/"+specID+"/recording/manifest.json", `{"spec_id":"129-fixture","started_at":"2026-01-01T00:00:00Z","status":"recording","phases":[{"phase":"implement","started_at":"2026-01-01T00:00:00Z"}]}`+"\n")
+	honestyGit(t, f.root, "add", ".")
+	honestyGit(t, f.root, "commit", "-m", "custom root recording fixture")
 	config.ResetCache()
-
-	epicID := sb.CreateSpecEpic(specID)
-	beadID := sb.CreateBead("[SPEC "+specID+"] Bead 1: custom worktree_root fixture", "task", epicID)
-
-	// The decoy: a spec worktree genuinely PRESENT at the custom root.
-	// claimAnchorRoot (cfg-aware) would find it for .gitignore purposes;
-	// SpecDir's hardcoded probe never does, for recording purposes —
-	// the exact divergence this fixture pins.
-	specBranch := "spec/" + specID
-	if out, err := sb.Run("git", "branch", specBranch); err != nil {
-		t.Fatalf("git branch %s: %v\n%s", specBranch, err, out)
+	t.Cleanup(config.ResetCache)
+	honestyGit(t, f.root, "worktree", "add", customRoot+"/worktree-spec-"+specID, "spec/"+specID)
+	// The anchor's own ignore entry is present, isolating recording writes.
+	if err := os.WriteFile(filepath.Join(f.root, customRoot, "worktree-spec-"+specID, ".gitignore"), []byte(customRoot+"/\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	specWtRel := customRoot + "/worktree-spec-" + specID
-	if out, err := sb.Run("git", "worktree", "add", specWtRel, specBranch); err != nil {
-		t.Fatalf("git worktree add: %v\n%s", out, err)
+	if got := honestyGit(t, f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("fixture must be clean: %s", got)
 	}
-
-	if before := dirtyPorcelainPaths(t, sb); len(before) != 0 {
-		t.Fatalf("fixture sanity: sandbox root must be CLEAN before the claim, got: %v", before)
-	}
-
-	// Predict BEFORE the claim runs (same discipline as the
-	// GitignoreEntryAbsent pin — the write itself would change what a
-	// post-claim prediction reads). The claim is invoked FROM sb.Root
-	// (repoRoot), NOT the decoy custom worktree — exactly R3's finding's
-	// shape.
-	want := next.ComputeEntangleablePaths(sb.Root, sb.Root, specID)
+	want := next.ComputeEntangleablePaths(f.root, f.root, specID)
 	if len(want) != 2 {
-		t.Fatalf("fixture sanity: expected exactly 2 predicted recording paths, got %v — G2 regression (the pre-dirty manifest at repoRoot would be silently waved through as ignoredDirt)", want)
+		t.Fatalf("expected exactly two recording paths: %v", want)
 	}
-
-	// This bead has no plan-approve-derived readiness signals (no
-	// acceptance criteria, no work_chunks) since plan approve was
-	// bypassed — --allow-not-ready proceeds past that gate, which is
-	// orthogonal to the entanglement mechanism under test here.
-	out, err := sb.Run("mindspec", "next", beadID, "--allow-not-ready")
+	out, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-1,MF-2,MF-3,MF-4", "--evidence", nextEvidenceFile(t))
 	if err != nil {
-		t.Fatalf("expected the claim to succeed, got: %v\n%s", err, out)
+		t.Fatalf("claim: %v %s", err, out)
 	}
-
-	got := dirtyPorcelainPaths(t, sb)
+	var got []string
+	for _, line := range strings.Split(strings.TrimRight(honestyGit(t, f.root, "status", "--porcelain"), "\r\n"), "\n") {
+		if len(line) >= 3 {
+			got = append(got, line[3:])
+		}
+	}
 	assertPathsMatchEnumeration(t, got, want)
 }
 

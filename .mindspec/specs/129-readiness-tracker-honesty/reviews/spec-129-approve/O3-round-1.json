@@ -1,0 +1,84 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.85,
+  "rationale": "Three of the four mechanisms are close to the simplest fix for the reproduced cause (descendant-union-spec_id membership, the panel SHA set, signal-scoped override). The fourth, R4.2's full-history candidate scan, is unsound as written. The spec says everything downstream 'runs unchanged', but widening the shared firstParentMergesFn seam to all reachable merges makes the existing subject parser's conservative bead/ fallback nominate merges INTO a bead branch ('Merge branch spec/S into bead/X', a routine refresh). Those merges then trip FIX-2b's different-second-parent ambiguity refusal. I reproduced this on a real-git fixture: first-parent scan today identifies the landing, the R4.2 scan returns *LandedMergeNoEvidence (owned merges disagree). The shape is in #239's own reporter log (05b9383 into bead/v7dg.4) and in this repo's history (63cd5cc8, 9ab6a456). So R4.2 swaps one MF-3 false negative for another and also changes reattest, complete reconcile, stale-open and orphan hints, which share the seam. Secondary design gaps: R4.1 and R1.1 use two different membership predicates (FindEpicForBead has a title fallback and ignores metadata.spec_id); OQ-4's premise is wrong; the evidence text lands in the tracked .beads/issues.jsonl; the re-claim subset rule makes a persistent marker standing authorization; the bare-flag recovery line omits the required --evidence.",
+  "concrete_changes_required": [
+    "R4.2: define candidate admissibility for the reachable-merge scan instead of claiming 'everything downstream runs unchanged'. At minimum, a merge whose subject names bead/<id> only as the merge TARGET ('... into bead/<id>') and a merge whose target is another bead branch ('Merge branch bead/X into bead/Y') must not be landing candidates for bead/<id>. Otherwise the FIX-2b different-second-parent ambiguity refusal fires on every bead refreshed from its spec branch (reproduced: first-parent today = identified; full-history = *LandedMergeNoEvidence 'owned merges disagree'). Alternatively, keep first-parent primary and fall back to the reachable scan only on zero candidates, with the same target exclusion. State which, and why it is the simplest sound option.",
+    "AC-10: add real-git legs that pin the above: (i) bead X refreshed by 'Merge branch spec/S into bead/X' then landed, so FindLandedMerge still identifies it and does not refuse as ambiguous; (ii) X merged into sibling bead Y ('Merge branch bead/X into bead/Y') before X lands on the spec branch, so X's own landing is identified, not refused; (iii) #239's reporter topology (a bead-refresh merge plus a main-side PR merge above an off-first-parent landing) PASSES MF-3 for both v7dg.3-shaped and v7dg.4-shaped beads.",
+    "R4.2: pin the scan order (e.g. git log --topo-order). Without --first-parent, the default date order does not define the 'newest' and 'oldest' same-second-parent merges that AC-2e's revert/reapply anchoring depends on.",
+    "R4.2 / Impacted: enumerate every consumer of lifecycle.firstParentMergesFn and FindLandedMerge (ReattestLandedMerge, MergedUnclosed via stale_open and complete's reconcile, orphan_hints' work-destruction evidence, approve plan/adopt_lattice provenance). State the behaviour change for each, or scope the wider scan to the MF-3 read only.",
+    "OQ-4: correct the premise. ReattestLandedMerge nominates via lifecycle's own firstParentMergesFn (reattest.go), not gitutil.ExactSecondParentMerges, which is used only by the executor's write-time binding. Swapping that one seam moves FindLandedMerge and reattest together. The consistency leg is satisfied by construction, but reattest's ReattestStateAmbiguous refusal then inherits the refresh-merge regression above.",
+    "R4.1: make it use R1.1's predicate literally (epic descendant OR metadata.spec_id), not 'findEpicForBeadFn lineage'. phase.FindEpicForBeadWithCache resolves a direct-parent epic and then falls back to a title '[NNN]' parse, and never reads metadata.spec_id. As written, a closed spec_id-only member (selectable under R1.1) is waved through MF-3 as 'not applicable', while a title-tagged non-member plain task is still held to the landed-merge test, which is #239 cause 1 surviving. The spec's own 'never by title' claim is false for that function.",
+    "R1.1: pin the union order explicitly (e.g. descendant results in bd order, then spec_id-only results in bd order). 'bd's returned order preserved' is undefined across two independently sorted queries, and --pick N parity depends on it.",
+    "R1.1: state what happens to a bead whose metadata.spec_id names S but whose parent epic belongs to another spec T. It is currently a member of both and could be claimed and dispatched off the wrong spec branch. Recommend: a conflicting parent epic excludes spec_id membership and is reported as a near-miss.",
+    "R6.2 / ADR-0025 touchpoint: .beads/issues.jsonl is git-tracked, so evidence.text (up to 4 KiB of file content) stored in bd metadata will be exported and committed. The touchpoint's 'never committed as an artifact' is false. Either store only {path, sha256, bytes} or state plainly that evidence text is committed to history, and price that.",
+    "R6.3: the re-claim subset rule turns a never-cleared marker into standing authorization. Only RollbackReadinessOverride deletes it; release does not. Coverage is checked at signal-ID granularity, so an MF-3 override recorded for dependency A silently covers a later MF-3 failure on dependency B. Either record per-signal failing detail (or a digest) and cover only an identical-or-subset detail set, or require a fresh flag on re-claim.",
+    "R6.1 / AC-14: the bare-flag and other-signal refusals' recovery line must include --evidence <path>. Otherwise pasting it refuses again under R6.2. Mark it as a deliberately non-mechanical recovery line, because the operator must author the evidence. Also update the binary's own existing bare-form recovery strings (internal/next/ready_gate.go's NOT-READY recovery 're-run ... with --allow-not-ready'; cmd/mindspec/next.go's record-failure recovery) under R6.4, not only bead_clarify.go and autonomy.md.",
+    "R6.1 / OQ-5: if the String+NoOptDefVal shape is chosen, add an AC that `mindspec next --allow-not-ready MF-3` (space-separated) is refused as the bare form and that 'MF-3' is never resolved as a positional bead ID.",
+    "R6.3 / Impacted: plugins/mindspec/skills/ms-bead-impl/SKILL.md already restates the marker subset rule in prose. Once ready-check exits 0 iff every failing signal is covered, that prose should defer to the ready-check exit code (ADR-0045 single home). Add it to Impacted Domains instead of leaving two homes for the rule."
+  ],
+  "findings": [
+    {
+      "severity": "BLOCKING",
+      "title": "R4.2 full-history scan regresses beads refreshed from their spec branch",
+      "detail": "parseMergeSubjectBeadBranch's G2-2 fallback nominates any bead/ token, including the target in 'Merge branch 'spec/S' into bead/X'. On a first-parent scan such merges are never visible. On the reachable scan R4.2 prescribes, they become owned candidates whose second parent is the spec tip, so FindLandedMerge's FIX-2b check returns *LandedMergeNoEvidence (ConflictingSecondParent). Probe (real git, internal/lifecycle, seam swapped to `git log --merges`): first-parent err=<nil>; full-history err='owned merges disagree on the landed tip ... refusing to pick one'. The reporter's #239 log shows exactly this shape (05b9383 Merge branch 'spec/008-...' into bead/autonomous-agents-v7dg.4). This repo's history has it too: 63cd5cc8 'Merge spec/093-skills-thin-down into bead/mindspec-cter.5' and 9ab6a456 'Merge branch 'bead/mindspec-eo0u.2' into bead/mindspec-eo0u.3', and full-history grouping gives cter.5 and eo0u.2 two distinct second parents each. Probe source: /private/tmp/claude-503/-Users-Max-replit-mindspec/d05dec1f-1671-4cbd-8202-e55ee47cdf39/scratchpad/p129s/O3/o3probe_test.go.txt"
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.2 changes a shared seam and does not price its other consumers",
+      "detail": "lifecycle.firstParentMergesFn feeds FindLandedMerge and ReattestLandedMerge. FindLandedMerge feeds MergedUnclosed (stale_open, complete reconcile and its M^1..M gate range), orphan_hints work-destruction evidence, and approve provenance. The spec says only that 'everything downstream runs unchanged'. Ordering is also unpinned: without --first-parent, git log date order is not a topological 'newest/oldest'."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "OQ-4 premise is wrong",
+      "detail": "reattest.go calls firstParentMergesFn directly. ExactSecondParentMerges is used only by internal/executor (write-time binding). The consistency question is real but resolves differently than the spec describes."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R1.1 and R4.1 use different membership predicates",
+      "detail": "R1.1: descendant \u222a metadata.spec_id. R4.1: 'findEpicForBeadFn lineage, never by title', but phase.FindEpicForBeadWithCache uses a direct-parent epic plus a title '[NNN]' fallback and ignores metadata.spec_id. This contradicts R1.1's 'one membership predicate'. It is fail-open for spec_id-only members and keeps #239 cause 1 for title-tagged tasks."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Evidence text would be committed via the tracked issues.jsonl",
+      "detail": "`git ls-files .beads` lists .beads/issues.jsonl, so bd metadata (including the 4 KiB evidence.text) reaches git history. The ADR-0025 touchpoint says the opposite."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Re-claim subset rule turns a persistent marker into standing authorization",
+      "detail": "Only RollbackReadinessOverride deletes mindspec_readiness_override. Coverage by signal ID alone lets an old override silently cover a new, different failure under the same signal."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Scoped-override recovery line omits the required --evidence",
+      "detail": "R6.1's filled-in line plus R6.2's mandatory --evidence makes the pasted recovery refuse again. The existing binary recovery strings (ready_gate.go, next.go) still name the bare form and are not in R6.4's list."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Union order and cross-spec spec_id conflict unspecified",
+      "detail": "Two independently sorted bd queries have no single 'bd order'. A bead with spec_id=S under spec T's epic is a member of both. bd ready --json carries neither parent nor metadata (checked, bd 1.1.0), so a single-query client-side filter is not available. The two-call design is otherwise justified."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Near-miss scan only on the empty-set path",
+      "detail": "With a non-empty member set, a title-referencing non-member stays silently absent (#255 defect 2 on a partially populated spec). One global `bd ready -n 0` call is cheap. Either always compute near-misses or record why the empty set is the only case that matters."
+    },
+    {
+      "severity": "INFO",
+      "title": "Cost of the reachable-merge scan is not a concern at this scale",
+      "detail": "On this repo: 2492 commits and 474 merges; `git log --merges` over full history takes 22ms vs 8ms first-parent. Soundness, not cost, is the issue with R4.2."
+    },
+    {
+      "severity": "INFO",
+      "title": "Panel SHA set (R4.3) is sound and simplest",
+      "detail": "Order-independent set membership with exact equality removes the path-sort veto without reintroducing ancestor tolerance. Demoting the panel leg to non-corroborating is correct because the binding and surviving-tip legs keep their contradiction semantics."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) The BRIEF still carries the unfilled template block: a first '## Summary' and empty 'Files in Scope', 'Acceptance Criteria', 'Prior-Round Asks' and 'Lens' sections with TODO(skill) markers, duplicated by the filled sections below them. (2) The registration header tells reviewers to write '<your-slot>-round-1.json' beside the BRIEF, while the dispatch prompt specifies a scratch-path verdict.json. These are conflicting output instructions; I followed the prompt. (3) The O3 lens describes 'the full-history candidate scan with ancestry filter', but the spec specifies no separate ancestry filter. Reachability comes from git log itself, and the missing filter is target-position admissibility, not ancestry."
+    }
+  ]
+}

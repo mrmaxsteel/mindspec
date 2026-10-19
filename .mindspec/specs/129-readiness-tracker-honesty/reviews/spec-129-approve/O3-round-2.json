@@ -1,0 +1,54 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.8,
+  "rationale": "cb272d50 fixes the round-1 BLOCKING regression. Keeping first-parent primary, running the reachable fallback only on zero candidates, and admitting only exact subjects handled every probe I ran against the new design: off-first-parent landing with a refresh merge, reverted landing, octopus, and the issue topology. The remaining hole is in the 'direction pin'. gitutil.MergeInto's own form, 'Merge bead/<id>', names no target, so the fallback cannot tell a landing on the spec branch from a hand-typed `-m \"Merge bead/X\"` merge into a sibling bead branch. Combined with R4.3's panel SHA set, this produces a new false PASS that FAILs today. A stale round-1 tip A is merged into bead/Y, Y lands, the round-2 fix B never lands, and the X branch is deleted. The fallback admits the Y-side merge and the panel set {A,B} confirms it on A, so MF-3 PASSES while B's content is absent from the tip (probe: today ErrLandedMergeNoCandidate, R4.2 identified, tip x.txt=x1). The simplest fix: on the fallback path the panel set alone may not confirm; it needs leg (b) or (d), and is otherwise *LandedMergeNoEvidence for reattest. Plan-bead narrowing is a sound, simpler predicate and fixes #255's dangerous defect (a silent zero) through always-on near-miss naming. It deliberately does not make #255's bead claimable, and the spec says so (line 396, 129b). But N3's 'mindspec next claims only plan beads' is not true of the unscoped path, which R1.8 only lineage-checks.",
+  "concrete_changes_required": [
+    "R4.2/R4.3: on the reachable-fallback path, the panel reviewed_head_sha set must not confirm a candidate by itself. Require leg (b) surviving tip or leg (d) landed binding (the binding is written only by the executor's spec-branch merge). A panel-only match on a fallback candidate returns *LandedMergeNoEvidence, so the operator-vouched `mindspec reattest` stays the exit. Add an AC leg: X's stale round tip merged into sibling bead/Y with subject exactly 'Merge bead/X'; Y lands; X's later round never lands; X's branch is deleted; registrations {A,B}. MF-3 must not PASS (red against the R4.2 text as written).",
+    "R4.2 text: correct 'bead/<id> is the SOURCE in both ... excludes a merge into another bead or spec branch'. For the exact 'Merge bead/<id>' form the target is NOT verifiable from the subject, so that exclusion holds only for git's default 'Merge branch ... into <target>' form. State that the undirected form's target rests on the corroboration legs (per the ask above) and on the git-history threat boundary. Also say what reattest renders when it nominates such a candidate, since the target is unknown.",
+    "R1.2 N3: either scope the sentence to `mindspec next --spec` or apply bead.PlanBeadIndex membership in GateReadiness for every claim, so scoped next, unscoped next and ready-check share one claim predicate. Today R1.8 compares only lineage spec equality, so the unscoped path can still claim a bead the scoped path names as 'not a plan bead; mindspec next claims only plan beads'."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "Reachable fallback plus panel set reintroduces a false PASS (undirected 'Merge bead/<id>' subject)",
+      "detail": "Probe at cb272d50 (real git; seam emulating R4.2: first-parent, then a --topo-order reachable scan admitting only 'Merge bead/<id>' or \"Merge branch 'bead/<id>' into <spec>\"). Setup: X round-1 tip A is merged into bead/Y with -m 'Merge bead/proj-x'. X gets round-2 fix B. Y lands with 'Merge bead/proj-y'. bead/proj-x is deleted. Panel registrations are {A (dir proj-x), B (dir proj-x-r2)}. Today: ErrLandedMergeNoCandidate (MF-3 FAIL). R4.2: identified (nil err), and the spec tip's x.txt is 'x1', so B's fix is absent. Under R4.3's set semantics this confirms on any registered round, not just the lex-first one. Probe source: /private/tmp/claude-503/-Users-Max-replit-mindspec/d05dec1f-1671-4cbd-8202-e55ee47cdf39/scratchpad/p129s/r2/O3/o3r2probe_test.go.txt"
+    },
+    {
+      "severity": "INFO",
+      "title": "Fallback probes that held",
+      "detail": "Off-first-parent landing reached by fast-forwarding the spec branch to a main-side PR merge, with a prior 'Merge branch spec/S into bead/X' refresh: today NoCandidate, R4.2 identifies exactly 1 admitted candidate. The same with the landing reverted on the spec branch: R4.2 refuses with the revert-shape error. An octopus with subject 'Merge bead/X': 0 admitted. A bead merged into a sibling SPEC branch under mindspec's own merges cannot occur, because gitutil.MergeInto's only callers (mindspec_executor.go) target the spec worktree. A hand-made one is the case in the MAJOR above."
+    },
+    {
+      "severity": "MINOR",
+      "title": "N3 'mindspec next claims only plan beads' is false for the unscoped path",
+      "detail": "R1.1's predicate applies only to BuildReadySet with --spec. R1.8 checks only that the lineage spec matches the claim spec. A non-plan bead whose lineage resolves (title fallback or epic dependency) can still be claimed unscoped, subject to MF-1's beadIndex. Line 396 defers lineage unification to 129b, but the near-miss sentence asserts more than the binary will enforce."
+    },
+    {
+      "severity": "INFO",
+      "title": "Plan-bead narrowing is the simplest fix for #255's dangerous defect",
+      "detail": "Single-source order (bd ready --parent) gives --pick parity by construction, and near-misses are named on every call (two bd calls). It removes the union-order and cross-spec-conflict questions. It does not make #255's reported bead claimable; the spec says so and defers to 129b. That is a defensible scope line, because the 'silent zero read as done' defect is fixed."
+    },
+    {
+      "severity": "INFO",
+      "title": "Detail-digest coverage is fail-closed but wording-brittle",
+      "detail": "A coverage key of sha256(rendered Detail) means any change to message text (R4.4 itself rewrites MF-3 wording) uncovers an existing override. The direction is safe (ready-check goes non-zero and a fresh override is needed). Worth one sentence so it is not later 'fixed' into a fuzzier match."
+    },
+    {
+      "severity": "INFO",
+      "title": "Refutation check (ready rows carry parent/metadata)",
+      "detail": "Confirmed in a scratch bd 1.1.0 database: a child created with --parent and --metadata shows 'parent' and 'metadata' in `bd ready -n 0 --json`. My round-1 INFO ('bd ready --json carries neither parent nor metadata') generalised from rows that had neither. The refutation is correct."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-1 ask status",
+      "detail": "O3.1 R4.2 admissibility: PARTIAL. git-default forms are pinned; the 'Merge bead/<id>' form is undirected, which raises a NEW_ISSUE (the MAJOR above). O3.2 AC-10 refresh/sibling/topology legs: ADDRESSED (AC-11 (i)-(iv)). O3.3 --topo-order: ADDRESSED. O3.4 consumer enumeration: ADDRESSED (caller table; MergedUnclosed, orphan_hints, approve and executor unchanged). O3.5 OQ-4 premise: ADDRESSED (reattest shares the generator). O3.6 R4.1 predicate: ADDRESSED (plan-index \u2228 spec_id \u2228 parent, never title, read errors fail closed). O3.7 union order: ADDRESSED (no union). O3.8 cross-spec conflict: ADDRESSED (R1.8 refusal). O3.9 evidence text committed: ADDRESSED (text not stored). O3.10 standing authorization: ADDRESSED (no flagless re-claim, plus per-signal detail digest). O3.11 recovery includes --evidence, and the binary strings are updated: ADDRESSED. O3.12 space-separated --allow-not-ready AC: ADDRESSED (AC-15). O3.13 ms-bead-impl single home: ADDRESSED (R6.5)."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Errors in this BRIEF",
+      "detail": "Round-2 bullet (b) calls the fallback 'direction-pinned'. That holds only for git's default 'Merge branch ... into <target>' form; MergeInto's 'Merge bead/<id>' form carries no target, so the direction cannot be pinned from the subject (see the MAJOR). The round-1 template-placeholder and verdict-location issues are fixed (0 TODO(skill) markers; the scratch-path rule is stated)."
+    }
+  ]
+}

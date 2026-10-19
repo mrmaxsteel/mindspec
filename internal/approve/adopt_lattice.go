@@ -160,6 +160,7 @@ var (
 	adoptBranchExistsFn        = lifecycle.BranchExistsIn
 	adoptFindLandedMergeFn     = lifecycle.FindLandedMerge
 	adoptListBDFn              = bead.RunBD
+	adoptListJSONFn            = bead.ListJSON
 )
 
 // adoptEpicBead is one bd list --parent result at bead.AllStatuses
@@ -283,7 +284,7 @@ func listEpicBeads(root, epicID string) ([]adoptEpicBead, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolving epic %s's full status set: %w", idrender.Bead(epicID), err)
 	}
-	out, err := adoptListBDFn("list", "--parent", epicID, "--status="+strings.Join(statuses, ","), "-n", "0", "--json")
+	out, err := adoptListJSONFn("--parent", epicID, "--status="+strings.Join(statuses, ","))
 	if err != nil {
 		return nil, fmt.Errorf("bd list --parent %s failed: %w", idrender.Bead(epicID), err)
 	}

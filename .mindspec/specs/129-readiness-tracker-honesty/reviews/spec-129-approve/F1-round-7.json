@@ -1,0 +1,25 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "F1 claude-fable-5-1",
+  "confidence": 0.9,
+  "rationale": "Lens: scope, split and count honesty, round 7 confirm at e7388f71 (spec.md only, +32/−11). My round-6 ask is ADDRESSED and re-derived: the unreproducible '48 at round ≥ 2 and zero -r2' sentence is replaced by a scoped claim about BEAD registrations plus a recipe; running that recipe at e7388f71 gives zero `-rN` directories among 41 bead registrations, and the one repo `-r2` directory (`prerelease-r2`) has no `bead_id`, exactly as the spec now says. The 8b3a5535..e7388f71 diff introduces no scope, split or count change: no deliverable moves, the estimate and the three-way split stand, and every addition is a precision of existing mechanisms inside files already In Scope (reviewed_head_sha value classes applied identically to F2 and R4.3, a gc'd SHA counted as outside-tip rather than an F5 error, per-checkout F2 visibility with the scanned roots printed, the amend-after-panel refusal with its exit, a typed ErrPathNotAtRef probe so blob absence is distinguished from git failure, and residual wording that separates the forge mechanism from the new reach). The new factual example (`.mindspec/reviews/6ou2-fix-zfc/panel.json`, `reviewed_head_sha: \"design-review-no-code\"`, bead `mindspec-6ou2`) verifies against the tree. No defect introduced; APPROVE with no asks.",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-6 ask status",
+      "detail": "F1r6.1 (repo-convention counts must be re-derivable and scoped to bead registrations) — ADDRESSED. R4.2 F2 'Repo convention, for BEAD registrations (those with a non-null bead_id, the only ones panel.ForBead returns)' now gives the recipe: 'list git ls-files '*panel.json', keep the files whose bead_id is non-null, and check each parent directory's name against -r[0-9]+$. At 8b3a5535 that yields no matches. The repo's one -r2 directory, prerelease-r2, has no bead_id.' Re-derived at e7388f71 over `git ls-tree -r main`-equivalent listing of the reviewed commit: 41 bead registrations, zero whose parent directory matches `-r[0-9]+$`; `prerelease-r2/panel.json` has `bead_id` absent. The unreproducible numbers are gone. Net: 1 ADDRESSED, 0 PARTIAL, 0 MISSED, 0 NEW_ISSUE."
+    },
+    {
+      "severity": "INFO",
+      "title": "Regression check 8b3a5535..e7388f71 in this lens — clean, no defect introduced",
+      "detail": "Scope and split: unchanged — 129 = R1–R6 at 9–12 beads with the R6 split expected, plus R7 and the ADR-0041 amendment; the follow-on spec's five deliverables and 130's three are untouched; no inherited issue is re-homed and nothing is dropped. Every change is a precision of an existing mechanism in files already In Scope: (1) reviewed_head_sha value classes (a) empty skipped, (b) placeholder skipped and reported, (c) well-formed evaluated, (d) option-like/revision-expression fails closed — applied the same way in F2 and R4.3's set, so the two readers cannot disagree; (2) a class-(c) SHA with no local object counts as outside-tip (`git cat-file -e <sha>^{commit}` before `merge-base`), which is the fail-closed direction and keeps F5 for genuine infrastructure errors; (3) per-checkout visibility stated with the absolute scanned roots printed and the run-from-spec-worktree advice, which turns the round-6 vacuity-on-a-fresh-clone observation into a documented, pinned limit (AC-11 x-w); (4) the amend-after-panel case named as the one normal-looking refusal, with the sanctioned exit and an explicit refusal to offer registration editing as a recovery (AC-11 vii-a) — consistent with my round-6 answer that only a rewritten reviewed commit can put a landed bead's registration outside the tip; (5) the plan-blob read now uses rev-parse → ls-tree → blob so absence falls through to the checkout and only failure refuses (AC-1 fifth fixture); (6) the residual wording distinguishes MECHANISM (same as item (c)) from REACH (new and bounded), which is the precise form of the point I raised in round 5. The new `gitutil` helper (`ErrPathNotAtRef`) lands in internal/gitutil, already In Scope and under the execution manifest. The 6ou2 example verifies: `bead_id mindspec-6ou2`, `reviewed_head_sha 'design-review-no-code'`, round 1."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(a) § Round 7 is accurate: round 6 was 9/9 APPROVE with 10 minor asks, the fix commit is spec.md only (verified: 1 file), and each listed change appears in the diff. (b) The panel header still says to write `<your-slot>-round-7.json` beside the BRIEF; the § Verdict location override redirects correctly — template skew, followed the override. Otherwise none found."
+    }
+  ]
+}

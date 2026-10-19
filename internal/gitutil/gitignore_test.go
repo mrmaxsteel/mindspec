@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func TestReviewIgnoreEntries_NotRuntimeEntries(t *testing.T) {
+	for _, review := range ReviewIgnoreEntries {
+		for _, runtime := range RuntimeIgnoreEntries {
+			if review == runtime {
+				t.Errorf("review entry %q must not be a runtime entry", review)
+			}
+		}
+	}
+}
+
 // TestEnsureGitignoreEntries_New writes both runtime entries into a fresh
 // (absent) .gitignore.
 func TestEnsureGitignoreEntries_New(t *testing.T) {

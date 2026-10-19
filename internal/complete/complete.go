@@ -34,6 +34,7 @@ var (
 	closeBeadFn     = bead.Close
 	worktreeListFn  = bead.WorktreeList
 	runBDFn         = bead.RunBD
+	readyJSONFn     = bead.ReadyJSON
 	resolveTargetFn = resolve.ResolveTarget
 	findLocalRootFn = defaultFindLocalRoot
 	fetchBeadByIDFn = next.FetchBeadByID
@@ -359,6 +360,9 @@ type Result struct {
 	// IndeterminateReason is the human-readable cause when
 	// NextModeIndeterminate is true.
 	IndeterminateReason string
+	// postCloseReadyFailed limits the spec-129 recovery line to the ready
+	// lookup; earlier indeterminate paths retain their existing rendering.
+	postCloseReadyFailed bool
 }
 
 func defaultFindLocalRoot() (string, error) {
@@ -1314,6 +1318,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// the already-resolved (not derived-from-the-failed-read) spec.
 		result.NextModeIndeterminate = true
 		result.IndeterminateReason = advanceErr.Error()
+		var readyErr *postCloseReadyError
+		result.postCloseReadyFailed = errors.As(advanceErr, &readyErr)
 		result.NextSpec = specID
 		return result, nil
 	}
@@ -1409,7 +1415,12 @@ func FormatResult(r *Result) string {
 		// panel G6, matching the identical classification
 		// ratchet_template_test.go assigns the tail template's own
 		// {{termsafe .IndeterminateReason}} interpolation (ADR-0042).
-		fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason))
+		if r.postCloseReadyFailed {
+			sb.WriteString(guard.FormatFailure("cannot determine mode: "+termsafe.Escape(r.IndeterminateReason), "mindspec doctor"))
+			sb.WriteByte('\n')
+		} else {
+			fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason))
+		}
 		return sb.String()
 	}
 	switch r.NextMode {
@@ -1472,7 +1483,8 @@ func FormatResult(r *Result) string {
 // DerivePhaseFromChildren would derive as `plan` — a discovery failure
 // serialized as a fabricated mode. Run maps a non-nil err to
 // Result.NextModeIndeterminate; mode/nextBead are meaningless ("", "")
-// whenever err is non-nil and callers MUST check err first.
+// whenever err is non-nil and callers MUST check err first. A failed ready
+// read (including a truncation notice) follows the same indeterminate path.
 func advanceState(epicID string) (mode, nextBead string, err error) {
 	if epicID == "" {
 		return state.ModeIdle, "", nil
@@ -1489,11 +1501,13 @@ func advanceState(epicID string) (mode, nextBead string, err error) {
 		// `bd ready --parent` argv build directly — validate BEFORE any
 		// bd spawn.
 		if idvalidate.BeadID(epicID) == nil {
-			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
-				var ready []bead.BeadInfo
-				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-					return state.ModeImplement, ready[0].ID, nil
-				}
+			out, rerr := readyJSONFn("--parent", epicID)
+			if rerr != nil {
+				return "", "", &postCloseReadyError{epicID: epicID, cause: rerr}
+			}
+			var ready []bead.BeadInfo
+			if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+				return state.ModeImplement, ready[0].ID, nil
 			}
 		}
 		// Implement phase without a ready bead: we're between beads (next one
@@ -1505,6 +1519,19 @@ func advanceState(epicID string) (mode, nextBead string, err error) {
 
 	return derivedPhase, "", nil
 }
+
+// postCloseReadyError identifies the spec-129 failure without classifying
+// agent-writable diagnostic text. Unwrap preserves the underlying bd error.
+type postCloseReadyError struct {
+	epicID string
+	cause  error
+}
+
+func (e *postCloseReadyError) Error() string {
+	return fmt.Sprintf("reading post-close ready set for epic %s: %s", idrender.Bead(e.epicID), e.cause)
+}
+
+func (e *postCloseReadyError) Unwrap() error { return e.cause }
 
 // buildSkewMetadata returns a metadata map with the override reason,
 // an RFC3339-UTC timestamp, and a best-effort actor identity, keyed by

@@ -1,0 +1,100 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "F3 claude-fable-5-1",
+  "confidence": 0.82,
+  "rationale": "The diagnosis is sound and the seven deliverables are real, but the spec's new membership predicate (R1.1: descendant OR metadata.spec_id) is wider than every downstream verb can handle. A metadata-only or reparented member is selectable by `next` yet cannot pass GateReadiness (EvaluateReadiness resolves the owning spec through phase.FindEpicForBead's parent-edge/title lineage and beadIndex requires a dotted <epic>.<N> ID — verified in code and in a throwaway bd 1.1.0 database: `bd update --parent` reparents and `bd ready --parent` then includes the bead, but its ID stays non-dotted), and `complete` falls back to cwd-derived spec resolution for it. AC-1's claim leg is therefore unreachable in the real binary, and the R1.2 recovery line produces a dead-end bead. R4.1 delegates membership to the same lineage function, which has a title fallback the requirement forbids and no metadata leg (fail-open for metadata-linked closed dependencies). R4.2 widens FindLandedMerge's candidate set for complete's reconcile path and impl-approve's provenance without naming them. R6.3 moves the override subset rule into the binary but R6.4 leaves the identical rule in ms-bead-impl's SKILL.md (pinned by setup tests) — the ADR-0045 problem reproduced by the spec that lands ADR-0045. Each is fixable in the document; none needs a redesign.",
+  "concrete_changes_required": [
+    "R1.1/AC-1: state how a metadata-only member (no parent, non-dotted ID) passes readiness and completion, or narrow membership. Either (a) bring `phase.FindEpicForBead` (add the metadata.spec_id leg) and `readiness.beadIndex`/MF-1's plan-section mapping for non-dotted members into scope (today both are listed as out of scope / unchanged), with an end-to-end AC that bead B passes `GateReadiness` and that `complete` resolves B's spec by lineage (never the cwd fallback); or (b) make metadata-only beads NAMED near-misses (R1.2 sentence + recovery) rather than members, and keep the descendant disjunct as the only selectable one. Verified: `EvaluateReadiness` returns an error (not a NOT-READY) for a bead with no parent-edge/title lineage or no dotted index, so `--allow-not-ready` cannot bypass it.",
+    "R1.2 recovery line: `bd update <id> --parent <epic>` reparents (verified live on bd 1.1.0: parent set, parent-child edge added, `bd ready --parent` includes it) but leaves the ID non-dotted, so the reparented bead then fails `beadIndex` inside EvaluateReadiness. Either make MF-1's N-mapping accept non-dotted members (and say how N is derived) or have the recovery sentence state that a reparented bead needs a plan `## Bead N` mapping and name the honest alternative (`mindspec plan approve` re-mint / adopt-lattice).",
+    "R1.1 conflict rule: define the case where a bead is a descendant of epic E1 but carries metadata.spec_id=S2 (or vice versa). Today the union makes it a member of BOTH; `next --spec S2` would DispatchBead from spec/S2 while `complete` resolves S1 by lineage and merges into spec/S1. Require: conflicting linkage → member of neither, named in the output with a recovery that fixes one datum; add an AC.",
+    "R4.1: do not delegate dependency membership to `findEpicForBeadFn` unchanged — `phase.FindEpicForBeadWithCache` has a `[NNN]` TITLE fallback (contradicts 'never by title') and no metadata.spec_id leg (a metadata-only closed dependency would be classed non-member and PASS without a landed merge — fail-open relative to R1.1). Specify that R4.1 uses exactly R1.1's predicate (descendant OR metadata.spec_id, no title), and that a membership-lookup ERROR renders MF-3 FAIL 'could not determine whether <dep> belongs to spec <S>' with a recovery line (fail closed), with an AC leg for each.",
+    "R4.2 blast radius: `FindLandedMerge` is consumed by `complete` (via `lifecycle.MergedUnclosed`, the skip-merge/branch-cleanup reconcile decision), `internal/approve` (evaluateChildProvenance at impl approve), `reattest` and MF-3. Enumerate the consumers, state the intended behaviour change for each (in particular: may `complete` now treat a bead as landed because a `Merge bead/<id>` landed on another branch that was later merged into the spec branch?), add an AC for complete's reconcile path, and change the predicate wording everywhere (`ErrLandedMergeNoCandidate` doc, R4.4's sentence, the ADR-0041 amendment) from 'merge into <spec-branch>' to 'two-parent merge reachable from the spec-branch tip'.",
+    "R6.4: add `plugins/mindspec/skills/ms-bead-impl/SKILL.md` (the Phase-0 ingress text that today instructs the agent to run `bd show`, read `mindspec_readiness_override.signals` and apply the subset rule itself) and the pins in `internal/setup/readiness_skill_pin_test.go` to the R6 surface. After R6.3 the skill must call `mindspec bead ready-check` and trust its exit code; leaving the L4 copy is the skills-contradict-the-binary case ADR-0045 §Context names.",
+    "R1.4: the tally and derived phase are computed over the epic's CHILD list, so metadata-only members (if R1.1 keeps them) are invisible to the completion signal; state the member-set the tally uses and make it the same set R1.1 selects from. Replace 'all <n> open beads are blocked' with a sentence that is true for every non-ready reason bd ready excludes (in_progress, blocked, deferred, hooked) or derive it from `bd ready --explain`/`bd blocked --parent` output.",
+    "R1.1/R3.1: `bd ready --metadata-field spec_id=<S>` returns the EPIC row itself once R3.1 writes spec_id on the epic (verified live: the epic appears in both `bd ready` and the metadata-field query). `filterReadyItems` strips epics on today's path; require `SpecMembers` and every new consumer (near-miss scan, tally) to strip issue_type=epic explicitly and pin it.",
+    "R1.2 cost claim: `bd ready --json` rows carry no `parent` or `metadata` field (live field list: comment_count, created_at, created_by, dependency_count, dependent_count, description, id, issue_type, owner, priority, status, title, updated_at), so the `(parent: <id or none>)` datum and R1.3's membership sentence for a positional each need a `bd show` per near-miss. Correct 'one extra bd call' to 1 + k and say whether the near-miss list is capped.",
+    "AC-10 second fixture: a PR merge of the bead into the spec branch followed by a local fast-forward leaves the merge commit ON the first-parent chain (it becomes the tip; its first parent is the old spec tip), so that fixture passes today and is not red-on-revert. Define it as the #239 shape: the spec branch is merged INTO a sibling branch (the merge's first parent is on the sibling side), then the spec branch is fast-forwarded or PR-merged to the sibling's tip.",
+    "R2.3: (a) the truncation-notice-is-error rule must apply only when the waist itself appended `-n 0`; an explicit caller `-n N` legitimately makes bd print 'Showing N of M'. (b) Define the lint's detection as call-site based (first argument of `bead.RunBD`/`RunBDCombined`/`tracedOutput`/their seams and `exec.Command(\"bd\", ...)`), not 'any argv literal' — otherwise `internal/redact/redact.go`'s `\"list\"` map key, `internal/harness/asserts.go` and `scenario_spec_lifecycle.go`'s `sandbox.runBD(\"list\", ...)`, and `approve/adopt_lattice.go`'s direct `bead.RunBD(\"list\", ..., \"-n\", \"0\")` all trip it; disposition each (migrate to the waist or allowlist with reason).",
+    "R6.1 boundary states: define the bare flag when NO signal fails (the filled-in recovery line would be `--allow-not-ready=` with nothing after it) — proceed with a 'flag unnecessary' note or refuse with 'drop the flag'. R6.3 re-claim: `mindspec release` neither reads nor clears `mindspec_readiness_override` (no reference in cmd/mindspec/release.go), so the marker persists across release/re-claim indefinitely; state release's disposition, make the re-claim print the OVERRIDDEN notice with the recorded evidence sha256 prefix, and consider requiring the recorded failing set to EQUAL (not merely cover) the current failing set or binding the marker to the bead branch head at record time.",
+    "Settled fact 1 declares `emptyAfterFilterError` (128 R6.3(c)/AC-10b) binding while R1.1 removes the title filter that produces it. List the spec-128 tests R1 retires or rewrites (AC-10b, AC-9 parity, the exclusion-notice tests) so the plan does not inherit a contradiction.",
+    "R6.3 layer boundary: spec 124 AC-12 and `internal/complete/readiness_isolation_test.go` pin that the engine's signals never read the override key. State explicitly that the marker is read in cmd/next and passed into `Report`/`AllPassOrOverridden` as data (never read by `EvaluateReadiness`), so the isolation contract stays true."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "Metadata-only members are selectable but cannot be claimed or completed (R1.1, R1.2, AC-1)",
+      "detail": "R1.1 makes a bead with metadata.spec_id=S and no parent a member; AC-1 says the claim path claims it. But `next.GateReadiness` -> `readiness.EvaluateReadiness` resolves the owning spec via `findEpicForBeadFn` = `phase.FindEpicForBead` (parent-child dependency edge, then a `[NNN]` title fallback) and then calls `beadIndex`, which requires a dotted `<epic>.<N>` ID. For bead B both return a hard error (not a NOT-READY signal), so `next` refuses with 'evaluating readiness for B: ...' and `--allow-not-ready` cannot bypass it. `complete` for such a bead takes the ErrNoEpicLineage branch and falls back to cwd-derived spec resolution (internal/complete/complete.go, the zty3 wrong-spec class). Live probe in a throwaway bd 1.1.0 db: a bead created without `--parent` gets a non-dotted ID (`lab-2vh`); `bd update <id> --parent <epic>` sets parent + parent-child edge and `bd ready --parent <epic>` then includes it, but the ID stays non-dotted (`lab-8qu`) — so R1.2's recovery line produces a bead that `next` will select and `GateReadiness` will error on. `internal/phase` is listed Out of Scope ('consumed by R1.4, not changed'). The requirement quietly needs out-of-scope machinery, or must be narrowed."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Conflicting linkage (descendant of E1, metadata.spec_id=S2) is undefined and can merge into the wrong spec branch",
+      "detail": "The union predicate makes such a bead a member of both specs. `next --spec S2` passes specID=S2 to `EnsureWorktree`/`DispatchBead`, branching bead/X from spec/S2; `complete` resolves the spec by lineage (`findEpicForBeadFn` -> E1 -> S1) and merges bead/X into spec/S1, carrying spec/S2's history with it. The spec defines no precedence or refusal for disagreeing facts."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.1 delegates membership to a function with a title fallback and no metadata leg; lookup-error disposition missing",
+      "detail": "R4.1 says 'a member per R1.1's predicate, resolved through the existing findEpicForBeadFn lineage — never by title'. `phase.FindEpicForBeadWithCache` (internal/phase/derive.go) falls back to parsing `[NNN]` from the bead TITLE and matching an epic by number — so a title-tagged, unlinked closed dependency is classed a member by title, and a metadata-only closed dependency (a member per R1.1) returns ErrNoEpicLineage and is classed a non-member, PASSING MF-3 without a landed merge. Nothing says what a bd lookup error does (today's default arm would render 'could not evaluate landed-merge state'; the new membership check needs its own fail-closed arm)."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.2 widens FindLandedMerge for every consumer, not just MF-3",
+      "detail": "`lifecycle.FindLandedMerge` is consumed by `lifecycle.MergedUnclosed` -> `internal/complete` (the reconcile path that decides to SKIP merge plumbing and clean up the bead branch), by `internal/approve`'s child-provenance evaluation at impl approve, by reattest, and by MF-3. Switching candidate generation from first-parent merges ON the spec branch to all two-parent merges REACHABLE from its tip changes what 'landed' means for all of them: a `Merge bead/X` that landed on another branch later merged into the spec branch now identifies. The spec discusses only MF-3 and reattest (OQ-4), keeps the 'into <spec-branch>' sentence in R4.4, and does not price the change in `ErrLandedMergeNoCandidate`'s documented contract or in complete's destructive-licensing boundary (spec 127 bead-5 RULING 1)."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R6.3 moves the override subset rule into the binary but R6.4 leaves the L4 copy in ms-bead-impl",
+      "detail": "`plugins/mindspec/skills/ms-bead-impl/SKILL.md` (Phase-0 ingress) instructs the agent to run `bd show`, read `mindspec_readiness_override.signals`, compare it against the fresh ready-check report and apply the subset rule itself; `internal/setup/readiness_skill_pin_test.go` pins that text. R6.4 names only `bead_clarify.go` and `autonomy.md`. After R6.3, `ready-check`'s exit code IS that rule; keeping the prose copy is exactly the 'skills contradict the binary / a rule has two homes' problem the ADR-0045 this spec lands is written against."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.4 completion signal is computed over epic children only, and 'all open beads are blocked' can be false",
+      "detail": "The tally and `DerivePhaseWithStatus` run over the epic's child list, so any metadata-only member is invisible to the derived phase (a spec could print `review` / `mindspec impl approve` with an open metadata-linked bead). `bd ready --help` excludes in_progress, blocked, deferred and hooked issues, so 'none ready' does not imply 'all blocked'."
+    },
+    {
+      "severity": "MINOR",
+      "title": "The epic itself is returned by `bd ready` and by the metadata-field query",
+      "detail": "Verified in the throwaway db: `bd ready` lists the open epic, and after writing spec_id on the epic (R3.1) `bd ready --metadata-field spec_id=<S>` returns the epic row. `next.filterReadyItems` strips epics today; the spec must require `SpecMembers`, the near-miss scan and the tally to strip issue_type=epic explicitly."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.2 'one extra bd call' is wrong: ready rows carry no parent/metadata",
+      "detail": "Live `bd ready --json` row fields on this repo: comment_count, created_at, created_by, dependency_count, dependent_count, description, id, issue_type, owner, priority, status, title, updated_at. The `(parent: <id or none>)` datum and the R1.3 positional membership sentence each need a `bd show` per near-miss (`bd show --json` returns an object carrying `parent` and `metadata`). Cost is 1 + k calls; say whether k is capped."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-10's 'PR-merge-then-fast-forward' fixture is not a first-parent miss",
+      "detail": "A merge commit of bead/X into the spec branch (on GitHub or locally) followed by a fast-forward of the local spec branch makes that merge the tip; its first parent is the previous spec tip, so `git log --first-parent --merges` finds it today and the test is not red-on-revert. The #239 topology is: spec branch merged INTO a sibling branch (`00ea707`-style, first parent on the sibling side), then the spec branch fast-forwarded/PR-merged to the sibling's tip, putting the bead merge on the second-parent side."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R2.3 detection and lint are under-specified",
+      "detail": "(a) With an explicit caller `-n N`, bd prints 'Showing N of M' legitimately; the waist must only error when it appended `-n 0` itself. (b) 'Any bd argv literal beginning \"ready\"/\"list\"' matches `internal/redact/redact.go`'s `\"list\": {}` map key, `internal/harness/asserts.go:419` and `scenario_spec_lifecycle.go:674`'s `sandbox.runBD(\"list\", ...)` (non-_test files), and `approve/adopt_lattice.go:286`'s direct `bead.RunBD(\"list\", ..., \"-n\", \"0\", \"--json\")` which already passes `-n 0` but does not route through the waist. Define detection by call site and disposition each."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6 boundary states: bare flag with nothing failing; marker persistence across `release`",
+      "detail": "The bare-flag refusal's filled-in recovery line is empty when no signal fails. `cmd/mindspec/release.go` has no reference to the override key, so a marker written at one claim persists through release and re-claim; R6.3's subset rule then re-authorises MF-x failing for a different reason than when the evidence was recorded. State release's disposition and the re-claim notice; consider equality (not subset) or binding the marker to the bead branch head."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Settled fact 1 vs R1.1: emptyAfterFilterError is declared binding and then made unreachable",
+      "detail": "Removing `containsSpecID` as a membership input removes the only producer of 128 R6.3(c)/AC-10b's loud error. The spec should list the 128 tests R1 retires or rewrites so the plan does not inherit the contradiction."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6.3 should state the marker is read outside the engine",
+      "detail": "Spec 124 AC-12 and `internal/complete/readiness_isolation_test.go` pin that `internal/validate/readiness`'s signals never read the override key; R6.3 lists `report.go` for `AllPassOrOverridden`. Say the marker is read in cmd/next and passed in as data."
+    },
+    {
+      "severity": "INFO",
+      "title": "Verified claims (no change needed)",
+      "detail": "`bd ready --parent <epic>` returns descendants at depth 2 (verified); `bd ready --metadata-field spec_id=<S>` filters on nested JSON metadata (verified); `bd blocked --parent` exists (verified); FirstParentMerges/ExactSecondParentMerges are first-parent as described; `panel.ForBead`/`reviewedHeadSHAForBead` first-non-empty behaviour matches Background D.3; `mindspec validate spec 129-readiness-tracker-honesty` → 1 WARN (lifecycle-binding: no beads epic), expected for a draft. No worktree was added for this review; the only scratch was a throwaway bd database under the F3 scratch dir."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) The BRIEF carries two sets of section headings: the unfilled `TODO(skill)` placeholders (Summary / Files in Scope / Acceptance Criteria / Prior-Round Asks / Lens) above the real Summary / Files in scope / Acceptance criteria / Lenses sections. (2) The panel header says to write `<your-slot>-round-1.json` beside the BRIEF, while the dispatch prompt says to write `verdict.json` under the slot's scratch dir and treats the repo as read-only; the two instructions conflict — this verdict follows the prompt. (3) Otherwise none found: the 18-AC count, the reviewed commit, the grounding file list and the issue numbers are correct."
+    }
+  ]
+}

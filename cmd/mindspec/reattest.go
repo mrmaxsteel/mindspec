@@ -56,6 +56,13 @@ and writes ONLY the scan-derived SHAs, together with an inspectable
 audit record (actor, before/after values, timestamp, operation,
 corroborating datum, scanned branch) in bd metadata.
 
+With zero owned first-parent candidates, a reachable, source-named
+fallback is available. It requires exactly one candidate, no contradicting
+surviving tip, and content not reverted at the current tip; read errors
+refuse. Registrations are advisory only. Acceptance writes an audited
+tuple, checked again with git safety on subsequent reads. Fallback
+refusals offer the dependent's evidenced MF-3 override, never q9ea.
+
 Fail-closed: with no owned exact merge it REFUSES (no guess, no write)
 to the audited ADR-0035 q9ea human attested-restore exit. There is no
 bypass flag, and no way to assert a merge/second-parent pair — an
@@ -118,7 +125,7 @@ type reattestDeps struct {
 	// (FIX-1).
 	deriveSpecBranch func(beadID string) (string, error)
 	// reattest is the derivation engine (lifecycle.ReattestLandedMerge).
-	reattest func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error)
+	reattest func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error)
 	// actor is the audit acting-identity value (user@host via argv0).
 	actor  string
 	stdout io.Writer
@@ -231,7 +238,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 		)
 	}
 
-	res, err := deps.reattest(root, scanned, beadID, deps.actor)
+	res, err := deps.reattest(root, scanned, beadID, deps.actor, func(line string) { fmt.Fprintln(deps.stdout, line) })
 	if err != nil {
 		var refusal *lifecycle.ReattestRefusal
 		if errors.As(err, &refusal) {
@@ -261,6 +268,13 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 // an ADR-0035 guard failure with a genuine forward exit (§2(i): never a
 // bare re-invocation that cannot change the refused fact).
 func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle.ReattestRefusal) error {
+	if r.Fallback || r.State == lifecycle.ReattestStateMultipleFallbackCandidates {
+		return guard.NewFailure(
+			fmt.Sprintf("cannot re-attest bead %s: %s\nF1, F3, F4 and F5 must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
+			fmt.Sprintf("git log --merges --topo-order %s   (inspect the reachable candidates)", scanned),
+			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
+		)
+	}
 	inspect := fmt.Sprintf("git log --first-parent --merges %s   (inspect the candidate merges before any recovery)", scanned)
 	switch r.State {
 	case lifecycle.ReattestStateNoOwnedMerge:

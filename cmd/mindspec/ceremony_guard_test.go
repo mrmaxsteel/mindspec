@@ -206,7 +206,7 @@ func TestCeremonyNonInflation_BeadSubcommands(t *testing.T) {
 // this guard red, exactly the AC-9(i) mechanism.
 func TestCeremonyNonInflation_NextFlags(t *testing.T) {
 	got := commandFlagSet(resolveCommand(t, "next"))
-	want := setOf("--pick", "--spec", "--force", "--emit-only", "--help", "--trace", "--allow-not-ready")
+	want := setOf("--pick", "--spec", "--force", "--emit-only", "--help", "--trace", "--allow-not-ready", "--evidence")
 	assertSetEqual(t, "mindspec next", got, want)
 }
 

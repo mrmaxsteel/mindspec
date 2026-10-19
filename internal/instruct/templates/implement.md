@@ -108,3 +108,5 @@ When the bead is done:
 2. Implement the bead's scope
 3. Run `mindspec complete <bead-id> "describe what you did"` to finish
 {{- end}}
+
+When `mindspec next --spec <S>` finds no ready plan bead it prints `an empty ready set is not evidence the spec is complete; the derived phase above is`; trust the `child-derived phase:` line printed above it.

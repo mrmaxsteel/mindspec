@@ -1,0 +1,47 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "O1 claude-opus-5-5",
+  "confidence": 0.8,
+  "rationale": "Both of my round-3 asks are addressed. The edge-only fake plus the numeric-tag G\u2032 make AC-1 genuinely red today. The MF-3 recovery precedence keeps spec 124 R1's one recovery line per signal and gains an AC leg. The new grounding claims verify: GateReadiness refuses a no-lineage bead before advancePhaseOnClaim; the reattest audit keys, including scanned_branch, and the state constants exist; Background K's lettered-ID lineage break holds; and wtjr is filed. Two minor issues remain. R1.1(c)'s OR-mapping (section OR work_chunks) is weaker than MF-1, which needs both, so a half-mapped bead would be selectable but always MF-1-fail, the exact dishonesty R1.1 rejects. And the jfgj.4 example is a mapped plan bead, not an out-of-range follow-up.",
+  "concrete_changes_required": [
+    "R1.1(c): define 'N mapped' as BOTH a `## Bead N` section AND a work_chunks id N (MF-1's structural requirements in evaluateMF1), and classify a half-mapped N as N4 or its own named class. Share or export the extractBeadSectionRaw/work_chunks lookup so selection and MF-1 use one function.",
+    "R1.1: replace or re-purpose the mindspec-jfgj.4 example. It is 073's mapped `## Bead 4` (type bug), not an out-of-range follow-up; mindspec-cter.8 is correctly out of range."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-3 ask status",
+      "detail": "Re-read from disk at a593792a. O1r3.1 (AC-1 red-on-revert): ADDRESSED. AC-1's fake bd's --parent is now edge-only, and G\u2032 (`<E>.3`, numeric `[NNN]` tag only) is added. G\u2032 is red today under BOTH bd semantics: an edge-only --parent drops it, and on a prefix --parent `containsSpecID` drops the short tag. Meanwhile FindEpicForBead's Sscanf(\"%d\") resolves it. Background A and the Validation Proof now state that the full-ID reporter shape is selected and green today on bd 1.1.0. O1r3.2 (aggregated MF-3 recovery): ADDRESSED. The precedence is indeterminate > not-closed > no-candidate > off-first-parent > no-evidence > contradiction > reverted, with exactly one `recovery:` line per signal (spec 124 R1 and RecoveryCommands are preserved), every record listed in Detail, and an AC-13 two-class leg (TestReadiness_MF3AggregatedPrecedence)."
+    },
+    {
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: R1.1(c) maps N by a `## Bead N` section OR a work_chunks id, but MF-1 needs BOTH",
+      "detail": "EvaluateReadiness (internal/validate/readiness/readiness.go) gets sectionFound from extractBeadSectionRaw and chunk from fm.WorkChunks (id == n). evaluateMF1 FAILS when !sectionFound OR when chunk == nil, and also on a placeholder AC or placeholder/blank key_file_paths. A bead whose N has a `## Bead N` section but no work_chunks entry, or the reverse, is therefore a MEMBER under R1.1(c) but fails MF-1 on every claim. That is exactly the selectable-but-unclaimable state that R1.1's own 'Rejected alternative' paragraph calls dishonest ('MF-1 refuses every unmapped bead, so such a member could never be claimed without an override'). Make (c) the conjunction (section AND chunk present), which is the structural part of MF-1's mapping, and classify a half-mapped N as N4 (or its own class). Content-level MF-1 failures, such as a placeholder AC, stay ordinary NOT-READY for a member. Note also that extractBeadSectionRaw is unexported in internal/validate/readiness. next may import readiness (ready_gate.go already does), but the helper must be exported, or shared, so that selection and MF-1 cannot drift."
+    },
+    {
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: mindspec-jfgj.4 is a plan bead, not an out-of-range follow-up",
+      "detail": "R1.1 cites `mindspec-cter.8` and `mindspec-jfgj.4` as follow-ups 'both type bug and outside their plans' bead ranges'. The cter.8 claim is true: 093's plan.md has `## Bead 1`\u2013`## Bead 7`. jfgj.4 is not: it is titled '[073-llm-test-coverage] Fix UnmergedBeadGuard setup failure', and .mindspec/specs/073-llm-test-coverage/plan.md:69 is '## Bead 4: Fix UnmergedBeadGuard setup failure'. It is a MAPPED plan bead whose type is bug. That shape actually supports R1.1's 'issue_type is not a membership input' point. Replace it with a real out-of-range example, or cite it for the type point instead. Side note: 073's plan.md has no work_chunks frontmatter, so under the OR-mapping it is mapped; under MF-1 it would fail on the missing chunk. That is the previous finding in miniature."
+    },
+    {
+      "severity": "INFO",
+      "title": "Partial refutation of F3r3.4 verified: a no-lineage bead is already refused before advancePhaseOnClaim",
+      "detail": "cmd/mindspec/next.go calls next.GateReadiness at :294 and returns its error before ClaimBead; advancePhaseOnClaim runs at :361. GateReadiness (internal/next/ready_gate.go:68-75) returns an error, not a report, when evaluateReadinessFn errors. EvaluateReadiness returns 'resolving owning spec for <id>' on any findEpicForBeadFn error, including ErrNoEpicLineage. So a no-lineage bug bead is refused today even with --allow-not-ready, because the bool path is only reached with a report. advancePhaseOnClaim's ErrNoEpicLineage no-op branch (next.go:592-603) is unreachable from next's claim path, and its comment ('a non-lifecycle claim (e.g. a bug bead) advances nothing') is about issue type, not lineage. The reviser's claim and the R6.5 comment correction are correct."
+    },
+    {
+      "severity": "INFO",
+      "title": "Reattest states and the audit read-back are grounded; the residual is honestly stated",
+      "detail": "reattest.go defines the audit keys mindspec_landed_reattest_{actor,at,op,corroboration,prior_merge_sha,prior_second_parent,scanned_branch} (:100-106), so the read-back's 'scanned branch is this spec branch' has a real key. It also defines ReattestStateNoOwnedMerge/Ambiguous/TipContradiction/PanelContradiction/Reverted (:126-142). ReattestStateUnlandedReview is correctly called new. Two nits. (1) ReattestStateAmbiguous's value is 'ambiguous-owned-second-parents', but R4.2(i) reuses it for two or more fallback candidates that SHARE a second parent. Either rename it, add a fallback-specific state, or note that the state string's wording no longer matches. (2) R4.2(iii)'s 'always record the audit, even when the binding values already match' departs from today's spec-125 byte-identical convergent no-op (reattest.go:60-62, 164-165, 331-335). The spec scopes it to fallback candidates, which is right, but it should name the existing no-op test that stays green on the primary path. Forgery: the scanned_branch key is ordinary agent-writable metadata ('bd update --metadata', exported into the JSONL), so a forged audit plus binding passes the read-back. The spec states this residual as the ADR-0037 \u00a78 / Spec-125 accepted class, and that is accurate: it is no weaker than today's binding-forge class."
+    },
+    {
+      "severity": "INFO",
+      "title": "Other new claims verified",
+      "detail": "Background K holds. approve/spec.go parseSpecID uses Atoi before the hyphen; FindEpicForBeadWithCache requires num > 0 on the dependency leg; the title fallback Sscanf(\"%d\") of '129b-\u2026' gives 129. mindspec-wtjr exists (open bug, 'Lettered spec IDs (e.g. 129b) break epic lineage'). Duplicate spec_num epics exist in this tracker (fixture epics), as recorded. In FindEpicForBeadWithCache an epic dependency is iterated before the title fallback, so N2b's 'bd update --parent' fix also corrects readiness, as claimed. gitutil.RevParseRef and phase.IsLifecycleIssueType exist."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "None found in the refreshed Summary or the Round-4 section. They match the diff: spec.md only, the finder-only fallback, plan-mapped membership, plain-numbered successor, and override recovery naming all failing signals."
+    }
+  ]
+}

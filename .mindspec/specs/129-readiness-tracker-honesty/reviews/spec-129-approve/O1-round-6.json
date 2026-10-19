@@ -1,0 +1,42 @@
+{
+  "verdict": "APPROVE",
+  "reviewer_id": "O1 claude-opus-5-5",
+  "confidence": 0.82,
+  "rationale": "My round-5 ask is addressed: no tree identity is assumed anywhere. The new grounding claims hold. wellFormedGitObjectID is a 7\u201364-hex gate. extractBeadSectionRaw (and so PlanMapsBead) counts fenced '## Bead ' lines. The corroboration string is a distinguishable provenance record. reviews/ is untracked until finalize. The bead-panel convention on main is in-place bumps with no -r dirs. On the Round-6 question, F2 refuses no normal bead shape that I could construct, and #239 still recovers through reattest. Two minor asks remain. A real shipped bead registration (6ou2-fix-zfc, 'design-review-no-code') would make F2 fail closed forever for that bead; split option-like values from placeholders, or name the case. And gitutil.FileAtRef cannot distinguish an absent plan.md on spec/<S> from a git failure, which the absence-vs-error rule needs.",
+  "concrete_changes_required": [
+    "R4.2 F2 / AC-11 (x-m): handle non-hex placeholder reviewed_head_sha values. Origin/main has the bead registration .mindspec/reviews/6ou2-fix-zfc/panel.json with 'design-review-no-code'. Either skip-and-report non-SHA placeholders while failing closed only on option-like or revision-expression text, or keep fail-closed and name this design-panel case and its exit. Add an AC leg with that exact shape.",
+    "R1.1(c) Source/Absence: specify how 'plan.md absent on spec/<S>' is distinguished from a git failure. gitutil.FileAtRef wraps every 'git show ref:path' failure identically. Name a ref check plus a path-existence probe (or a typed not-found variant) so that 'absence \u2192 N4, other errors refuse' is implementable."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-5 ask status",
+      "detail": "O1r5.1 (#233 wording): ADDRESSED, re-read at 8b3a5535. R4.2 F2's '#233's shape' bullet, AC-11 (i-c) and AC-12 (iv) now say that complete's later commits are 'a wrapper commit on an older binary; materialization or .beads/issues.jsonl sync commits on the current one', and that 'No tree identity is assumed'. The ancestor test is unchanged."
+    },
+    {
+      "severity": "MINOR",
+      "title": "NEW_ISSUE: a real shipped bead registration carries a non-SHA reviewed_head_sha, so F2's malformed-fails-closed rule refuses that bead",
+      "detail": "On origin/main, .mindspec/reviews/6ou2-fix-zfc/panel.json is a BEAD registration (bead_id mindspec-6ou2, round 1, not abandoned) whose reviewed_head_sha is the placeholder \"design-review-no-code\". It is a design panel with no code. That is 1 of the 41 bead registrations on main, and the other 40 are well-formed hex. It sits under the repo root's .mindspec/reviews/, which is a scanned root. Under R4.2 F2 ('a malformed SHA fails closed') and AC-11 (x-m), any bead that ever had such a design-panel registration can never pass F2 on the fallback path, so reattest refuses it permanently. The only exit is the dependent's scoped override. The behaviour is fail-closed, so it is safe, but it is a refusal of a NORMAL bead under an existing practice. The security reason for failing closed is also weak for this case: a value that is not a git object ID cannot name unlanded reviewed work, and hiding a real registration already requires the panel-edit forge the residual concedes. Recommendation: split 'malformed' into (1) option-like or revision-expression text (anything starting with '-', or containing '.', '~', '^', ':', '@'), which fails closed and is never a git operand; and (2) a non-hex placeholder, which is reported in the F2 output ('registration <dir> has no reviewable SHA (<escaped value>) \u2014 ignored') and skipped. Alternatively, keep fail-closed and name the design-panel case and its exit explicitly. Either way, add an AC leg with the 'design-review-no-code' shape."
+    },
+    {
+      "severity": "MINOR",
+      "title": "The spec/<S> plan-blob read needs a primitive that can tell 'path absent' from a git failure; gitutil.FileAtRef cannot",
+      "detail": "R1.1(c) Source/Absence: use spec/<S>:<path> when spec/<S> exists; if plan.md is absent in both places, nothing is mapped (N4, informational); any other read error refuses fail-closed. The existing primitive, gitutil.FileAtRef (gitops.go:725-739), runs 'git show <ref>:<path>' through cmd.Output() and wraps every failure identically ('git show %s:%s: %w'). A missing path, a missing ref and a real git or IO failure are therefore indistinguishable without parsing stderr. Either name the discrimination (RevParseRef for the ref, then a path-existence probe such as 'git cat-file -e <ref>:<path>' or ls-tree before the show, with any other non-zero exit treated as an error), or state that the plan adds a FileAtRef variant that returns a typed not-found. Otherwise the 'absence is informational, other errors refuse' rule cannot be implemented as written."
+    },
+    {
+      "severity": "INFO",
+      "title": "New claims verified at 8b3a5535",
+      "detail": "(1) The wellFormedGitObjectID gate exists (internal/lifecycle/landed.go:215-227). It accepts only 7\u201364 hex characters, so an option-like or revision-expression value can never become a git operand, as F2's provenance gate requires. Note that abbreviated SHAs (\u22657) pass. An ambiguous abbreviation makes 'merge-base --is-ancestor' error, which F5 turns into fail-closed, so this is fine. (2) PlanMapsBead and fenced lines: extractBeadSectionRaw (readiness.go:281-310) counts every line with prefix '## Bead ' and does no fence stripping, so 'counts EXACTLY as extractBeadSectionRaw, including one inside a fenced code block' is accurate. (3) The corroboration string: reattestKeyCorroboration exists. Today's string is built as '(a) git-derived exact-second-parent merge \u2026 ; (b) surviving branch tip \u2026 ; (c) panel reviewed_head_sha \u2026' (reattest.go:257-288), so the new 'off-first-parent fallback; F1\u2013F5 passed; panel roots scanned: \u2026; registrations checked: <n>' prefix is a distinguishable provenance marker, as claimed. (4) 'reviews/ is untracked during the spec's life' holds: in this spec's worktree, .mindspec/specs/129-\u2026/reviews/ is '??' (untracked). Spec 128's bead panel.json files reached main only through finalize's 'chore: commit remaining spec artifacts' (a858da12). So a pre-finalize edit leaves no JSONL or git trace, as the residual says. (5) The repo convention holds for BEAD panels on origin/main: 41 bead registrations (round 1: 9; round 2: 21; round 3: 5; round 4: 4; round 5: 2), zero bead '-r*' dirs, round bumped in place (panel.Create full overwrite, verified in round 5)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Normal-bead check (the Round-6 duty)",
+      "detail": "Apart from the design-panel placeholder above, I found no normal shape that F2 refuses. Each of these passes, because the reviewed SHA is in the tip's history: one review round then complete (the reviewed SHA B is an ancestor of the second parent through complete's M/S commits); a fix round after the panel (re-panel bumps the same dir in place to the fix SHA, and that SHA lands); and a hand-audited follow-up commit after review (#233's 36f49ef shape, where B is still an ancestor). #239 recovery still works: the bead's landing, and so its reviewed SHA, stays reachable from the fast-forwarded tip, F2 passes, and reattest accepts (AC-11 (i)). F2 applies only to FALLBACK candidates, so primary-path beads are unaffected."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) 'zero -r* directories' is slightly overstated: origin/main has one, .mindspec/reviews/prerelease-r2/panel.json. It is a NON-bead registration (bead_id null, reviewed_head_sha '159:a5ea5b6f,160:21181776'), so panel.ForBead never returns it and the conclusion holds for bead panels. (2) The counts differ from my measurement: the BRIEF says 59 registrations on main and the spec says '48 registrations at round \u2265 2'. I count 78 panel.json on origin/main, of which 41 are bead registrations and 32 bead registrations are at round \u2265 2. The likely cause is a different ref or filter; no conclusion changes."
+    }
+  ]
+}

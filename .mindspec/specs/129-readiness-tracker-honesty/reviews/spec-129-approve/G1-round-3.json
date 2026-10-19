@@ -1,0 +1,47 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "G1 gpt-6.1-sol",
+  "confidence": 0.96,
+  "rationale": "Reviewed 4c46cf64e873b1c6a34ae7688da2737cc7365994, the complete BRIEF (including a fresh final reread), my round-2 verdict, consolidated-round-2.md, the complete revised spec and ADR-0045, and relevant production code. Both of my round-2 asks are ADDRESSED. All six baseline claims were reproduced with fresh scratch-only probes. The new selection rule supports the detached reporter shape, and the fallback policy closes the reproduced panel-only false PASS while retaining the explicitly accepted surviving-tip residual. The complete failure-set fingerprint addresses my prior widening finding. One new spec inconsistency remains in the added release/reclaim recovery: naming only uncovered signals cannot authorize a fresh claim when another still-failing signal was already covered. This is a narrow specification correction before planning, not a demand that implementation already exist at this gate. Validation exits 0 with one lifecycle-binding warning. GitHub API access was unavailable. All fixtures and writes were confined to the assigned scratch directory; the source worktree was not modified.",
+  "concrete_changes_required": [
+    "Change R6.4's release/reclaim recovery from --allow-not-ready=<uncovered ids> to --allow-not-ready=<all currently failing ids>, consistently with R6.1 and the fresh-evidence/no-marker-claim-authority rule. Add an AC-17 mixed-coverage leg: MF-2 remains failing and validly covered, MF-3 becomes uncovered, ready-check emits release plus a re-claim naming MF-2,MF-3, and following those code paths with fresh evidence succeeds and replaces the marker. Keep the uncovered-only list in the diagnostic if useful, but do not use it as the fresh claim's requested scope."
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "title": "Round-2 ask status",
+      "detail": "G1r2.1 ADDRESSED: R4.2 expressly excludes an explicit non-spec target; AC-11(iii) now requires X's own separate landing, and (iii-neg) requires NoCandidate for long-form X-to-Y-only ancestry. A fresh real-git fixture plus the specified candidate-generator emulation returns zero candidates for the negative topology, consistent with the rewritten AC. G1r2.2 ADDRESSED: R6.2 now prices Signal.Failures and aggregation in all four evaluators, including evaluation of every closed member dependency, and defines one shared raw-record FailureFingerprint. AC-16 adds retained-A-plus-new-B, the MF-4 analogue, determinism and writer/reader agreement. Fresh production probing still demonstrates identical first-Detail output for A and A+B; the revised complete-record policy produces different hashes and order-independent results. NEW_ISSUE: the added R6.4 recovery has the mixed-coverage defect below. Evidence: probes.log, fingerprint-policy.json, round3-selection-and-recovery.log."
+    },
+    {
+      "severity": "medium",
+      "title": "R6.4 recovery omits signals that a fresh claim must name",
+      "detail": "spec.md:435 requires recovery: mindspec next <bead-id> --allow-not-ready=<uncovered ids> --evidence <path-to-justification>. Consider MF-2 and MF-3 both failing, with a VALID matching marker covering only MF-2. ready-check correctly reports MF-3 uncovered and emits a re-claim naming only MF-3. After release, R6.1 must refuse that re-claim because MF-2 is still failing and unnamed. R6.2 explicitly forbids using the old marker as claim authority and replaces rather than unions markers. Consequently the newly specified recovery cannot perform the intended re-recording without another refusal and corrected command. TestG1R3RecoveryScopeMismatch produces real failing MF-2/MF-3 signals and models the two normative set rules: failing={MF-2,MF-3}, covered={MF-2}, emitted request={MF-3}, freshClaimAllowed=false. This is a spec-policy probe; the future scoped implementation is not represented as shipped. Evidence: repo/internal/validate/readiness/g1_probe_test.go and round3-selection-and-recovery.log."
+    },
+    {
+      "severity": "info",
+      "title": "Six baseline claims reproduced at the reviewed commit",
+      "detail": "Fake bd on PATH: QueryReady sees globally ready probe-outside while scoped BuildReadySet returns raw=0/filtered=0 with an empty exclusion notice under an edge-filtering --parent fixture; a successful stderr cap notice is discarded and QueryReady returns 100 rows with nil error. Real git: a named merge identifies on the first-parent control, remains reachable after sibling integration, and then returns ErrLandedMergeNoCandidate; two real panel.json registrations sort stale-first, the stale SHA vetoes the correct surviving tip, and removing it restores identification. MF-2: R9(a) against identical spec text reports dangling, while AC9 harvests zero claims. Real bd 1.1.0: ready --metadata-field spec_id=129-probe returns the metadata-only task and parented metadata-linked child; -n 1 returns one row and emits Showing 1 of 4 ready issues on stderr at success. Evidence: probes.log, fake-bd.log, bd-real-probes.json. The historical source tracker count of 106 was not re-measured."
+    },
+    {
+      "severity": "info",
+      "title": "New selection rule survives the probed lineage adversaries",
+      "detail": "In a new embedded scratch bd database, detached bug g1r3-0bp.1 has no dependency edges and the unchanged production FindEpicForBead resolves it to g1r3-0bp / 131-selection-probe. Its neutral-title detached sibling returns ErrNoEpicLineage. Real bd still includes detached dotted children in ready --parent via the ID prefix, confirming that the fake parent-drop fixture is an edge-only behavior rather than bd 1.1.0's exact behavior. Additional production-lineage probes show a foreign epic dependency wins over a misleading local title, a foreign dotted prefix can resolve through the local title fallback, and metadata alone supplies no lineage. R1.1's resolved-lineage/prefix checks and R1.8's fresh prefix/scope guard reject those claim paths; the explicitly stated parent-row shortcut can require that final guard when dependencies conflict. Dispatching into T closes the previously documented unscoped HEAD case. No additional required change found. Evidence: selection-bd.json, selection-ids.json, repo/internal/phase/g1_round3_probe_test.go, round3-selection-and-recovery.log."
+    },
+    {
+      "severity": "info",
+      "title": "Fallback panel-only false PASS reproduced and excluded by the new policy",
+      "detail": "A new real-git fixture merges X's A into Y using Merge bead/probe-x, lands Y, moves the spec history off first-parent, leaves later reviewed B unlanded, deletes X's branch, and supplies registrations {A,B}. Candidate-generator emulation with production corroboration/content checks reproduces the former false PASS on A. Withholding panel confirmation on the fallback path, as R4.2 now requires, yields LandedMergeNoEvidence. Restoring X's exact tip A identifies the expressly accepted short-form X-to-Y residual; restoring unlanded B refuses by tip contradiction. A contradictory binding still vetoes a matching tip. The normal off-first-parent positive, no-corroboration refusal, and real-revert refusal also pass. These are policy/seam emulations, not end-to-end tests of an implementation that this spec has yet to deliver. Evidence: round3-fallback.log, probes.log, repo/internal/lifecycle/g1_round3_probe_test.go."
+    },
+    {
+      "severity": "info",
+      "title": "Spec validation output",
+      "detail": "Built the reviewed commit in the scratch clone and ran the resulting binary with mindspec validate spec 129-readiness-tracker-honesty in the read-only source worktree, as authorized. Exit 0. Stdout exactly: '129-readiness-tracker-honesty: 1 issue(s) found\\n\\n  [WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one\\n'. Stderr empty. Evidence: validation.json."
+    },
+    {
+      "severity": "info",
+      "title": "Errors in this BRIEF",
+      "detail": "The final fresh BRIEF still says 18 ACs although spec.md has AC-1 through AC-19. Its Round-2 history says 95 asks with 91 fixed and 2 refuted (only 93); the round-1 coverage table has 95 rows with 93 FIXED dispositions and 2 REFUTED. O3's lens still describes descendant-union-metadata selection, which R1.1/OQ-9 explicitly reject. The suggested git worktree add would register metadata in the read-only source repository; the direct user instruction to clone resolves this and was followed. The Summary's stale git-show instruction was corrected during this review and is no longer an error on the final reread. No scaffold TODO placeholders remain; G1's own round-2 verdict already said they were absent. BRIEF-only editorial observations are not additional spec change requests."
+    }
+  ]
+}

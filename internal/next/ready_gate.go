@@ -12,13 +12,18 @@ package next
 // RollbackReadinessOverride so a lost claim leaves no orphaned override).
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Package-level function variables for testability (the same
@@ -32,101 +37,215 @@ var (
 	deleteMetadataKeysFn = bead.DeleteMetadataKeys
 )
 
-// GateResult is GateReadiness's outcome when the gate does not refuse.
-type GateResult struct {
-	// FailingSignals lists the MF-x signal IDs (e.g. "MF-2") that failed
-	// evaluation, in signal order. Empty when the floor fully passed;
-	// non-empty ONLY when the caller passed allowNotReady=true and the
-	// gate is proceeding past a refusal the operator deliberately
-	// bypassed.
-	FailingSignals []string
+// BareOverride is pflag's sentinel for a flag without an equals-bound value.
+const BareOverride = "__bare_allow_not_ready__"
+
+// IsReadinessSignalToken separates space-separated signal tokens from bead IDs.
+func IsReadinessSignalToken(value string) bool {
+	return strings.HasPrefix(strings.ToUpper(value), "MF-") && !strings.Contains(value, ".")
 }
 
-// GateReadiness evaluates spec 124's mechanical readiness floor
-// (internal/validate/readiness.EvaluateReadiness, Bead 1's MF-1..MF-4
-// engine) for beadID against root. Callers MUST invoke this immediately
-// after bead selection and BEFORE any lifecycle mutation (no
-// bd update --claim, no bead/<id> branch, no worktree) — the ADR-0041
-// "preflight-leg-only addition" this function's call site cites.
-//
-// On a failing floor with allowNotReady=false, it returns a nil result and
-// a guard-shaped refusal error: the SAME per-signal rendering
-// `mindspec bead ready-check` prints (readiness.Render — ADR-0040
-// no-restate, never re-implemented here) plus every failing signal's own
-// recovery line, plus the two escape hatches R3 names (the standalone
-// `bead ready-check` report, and re-running with `--allow-not-ready`).
-//
-// On a failing floor with allowNotReady=true, it returns a nil error and a
-// GateResult naming every failing signal — the caller emits the R3
-// stderr warning and calls RecordReadinessOverride with this same list
-// BEFORE invoking ClaimBead (marker-before-claim, fail-closed).
-//
-// On a passing floor it returns a nil error and an empty GateResult — no
-// interactive step, no output beyond the caller's existing claim lines
-// (R3: "adds no interactive step and no output beyond a single OK line").
-func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error) {
+// GateOptions describes fresh claim authority. Stored markers grant none.
+type GateOptions struct {
+	// BareFlag is a syntax refusal; readiness is read only to render recovery.
+	BareFlag     bool
+	ScopeSpec    string
+	NamedSignals []string
+	FlagGiven    bool
+	EvidencePath string
+}
+
+// ParseReadinessSignals accepts only the closed MF-1..MF-4 vocabulary.
+// Bare and space-separated forms refuse before any positional resolution.
+func ParseReadinessSignals(value string, given bool) ([]string, error) {
+	if !given {
+		return nil, nil
+	}
+	if value == BareOverride || value == "" {
+		return nil, guard.NewFailure("--allow-not-ready requires =<ids>; the bare and space-separated forms are not supported",
+			"mindspec bead ready-check <bead-id>", "mindspec next <bead-id> --allow-not-ready=<ids> --evidence <path-to-justification>")
+	}
+	seen := map[string]bool{}
+	for _, id := range strings.Split(value, ",") {
+		if id != "MF-1" && id != "MF-2" && id != "MF-3" && id != "MF-4" {
+			return nil, guard.NewFailure(fmt.Sprintf("unknown readiness signal %s; expected MF-1,MF-2,MF-3,MF-4", termsafe.Escape(id)), "mindspec bead ready-check <bead-id>")
+		}
+		seen[id] = true
+	}
+	var ids []string
+	for _, id := range []string{"MF-1", "MF-2", "MF-3", "MF-4"} {
+		if seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// GateResult carries lineage-derived dispatch and the exact vouched failure set.
+type GateResult struct {
+	SpecID         string
+	FailingSignals []string
+	Fingerprints   map[string][]string
+	Evidence       bead.OverrideEvidence
+	Notes          []string
+}
+
+// IndeterminateReadiness names read failures no scoped override can cover.
+// Readers use the same refusal instead of suggesting an unusable re-claim.
+func IndeterminateReadiness(report *readiness.Report) []string {
+	var lines []string
+	for _, s := range report.FailingSignals() {
+		for _, record := range s.Failures {
+			if readiness.IsIndeterminateRecord(record) {
+				lines = append(lines, fmt.Sprintf("%s cannot be overridden: %s could not be evaluated; fix the read first", s.ID, termsafe.Escape(record)))
+			}
+		}
+	}
+	return lines
+}
+
+func nonPlanDiagnostic(beadID, specID, epicID string) string {
+	return fmt.Sprintf("bead %s is not a plan bead of spec %s (no %s.<N> ID); mindspec next claims only plan beads", idrender.Bead(beadID), idrender.Spec(specID), idrender.Bead(epicID))
+}
+
+func missingSpecBranchFailure(branch, beadID string) error {
+	return guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", termsafe.Escape(branch), idrender.Bead(beadID)), "mindspec state show")
+}
+
+func specBranchInfrastructureFailure(branch, beadID string, err error) error {
+	return guard.NewFailure(fmt.Sprintf("could not resolve spec branch %s for bead %s: %s; nothing was claimed", termsafe.Escape(branch), idrender.Bead(beadID), termsafe.Escape(err.Error())), "git status   (repair the local git checkout, then retry)")
+}
+
+// GateReadiness is the read-only preflight before marker, claim, branch or
+// worktree mutation (ADR-0041; spec 129 R1.8/R6). Evidence is read here too.
+func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
+	recovery := []string{fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))}
+	if opts.BareFlag {
+		message := "--allow-not-ready requires =<ids>; the bare and space-separated forms are not supported"
+		if beadID == "" || IsReadinessSignalToken(beadID) {
+			signals := "<ids>"
+			if ids, err := ParseReadinessSignals(strings.ToUpper(beadID), true); err == nil {
+				signals = strings.Join(ids, ",")
+			}
+			recovery = []string{"mindspec next <bead-id> --allow-not-ready=" + signals + " --evidence <path-to-justification>"}
+		} else {
+			// The syntax refusal is settled. Read readiness solely for
+			// recovery; claim prerequisites cannot change this refusal.
+			report, err := evaluateReadinessFn(root, beadID)
+			if err != nil {
+				message += "\n" + termsafe.Escape(err.Error())
+				recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+			} else if report.AllPass() {
+				recovery = []string{fmt.Sprintf("mindspec next %s", idrender.Bead(beadID))}
+				if _, ok := bead.PlanBeadIndex(report.EpicID, beadID); !ok {
+					recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+				}
+			} else {
+				message += "\n" + readiness.Render(report)
+				recovery = append([]string{}, report.RecoveryCommands()...)
+				recovery = append(recovery, fmt.Sprintf("mindspec bead ready-check %s   (the standalone per-signal report)", idrender.Bead(beadID)))
+				if indeterminate := IndeterminateReadiness(report); len(indeterminate) > 0 {
+					message += "\n" + strings.Join(indeterminate, "\n")
+				} else {
+					var ids []string
+					for _, signal := range report.FailingSignals() {
+						ids = append(ids, signal.ID)
+					}
+					recovery = append(recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(ids, ",")))
+				}
+			}
+		}
+		return nil, guard.NewFailure(message, recovery...)
+	}
+	namedIDs, err := ParseReadinessSignals(strings.Join(opts.NamedSignals, ","), opts.FlagGiven)
+	if err != nil {
+		if beadID == "" || IsReadinessSignalToken(beadID) {
+			return nil, err
+		}
+		message := strings.SplitN(err.Error(), "\n"+guard.RecoveryPrefix, 2)[0]
+		recovery = []string{fmt.Sprintf("mindspec bead ready-check %s", idrender.Bead(beadID))}
+		if strings.Join(opts.NamedSignals, ",") == "" {
+			recovery = append(recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=<ids> --evidence <path-to-justification>", idrender.Bead(beadID)))
+		}
+		return nil, guard.NewFailure(message, recovery...)
+	}
 	report, err := evaluateReadinessFn(root, beadID)
 	if err != nil {
-		// bd mindspec-ta30.9 round-1 panel G2: EvaluateReadiness reads bd
-		// transitively (fetchBeadRecordReal -> bead.RunBD), so its error
-		// can carry bd's own stderr text; wrap it through bdRenderedError
-		// (beads.go) so that text is escaped at THIS render boundary too,
-		// with the chain (errors.As/Is) preserved unchanged.
+		var nonPlan *readiness.NonPlanFormError
+		if errors.As(err, &nonPlan) {
+			return nil, guard.NewFailure(nonPlanDiagnostic(beadID, nonPlan.SpecID, nonPlan.EpicID), recovery...)
+		}
 		return nil, fmt.Errorf("evaluating readiness for %s: %w", idrender.Bead(beadID), &bdRenderedError{err: err})
 	}
-
+	if _, ok := bead.PlanBeadIndex(report.EpicID, beadID); !ok {
+		return nil, guard.NewFailure(nonPlanDiagnostic(beadID, report.SpecID, report.EpicID), recovery...)
+	}
+	if opts.ScopeSpec != "" && opts.ScopeSpec != report.SpecID {
+		return nil, guard.NewFailure(fmt.Sprintf("bead %s resolves to spec %s by lineage but is being claimed for spec %s; nothing was claimed", idrender.Bead(beadID), idrender.Spec(report.SpecID), idrender.Spec(opts.ScopeSpec)),
+			recovery...)
+	}
+	branch, err := workspace.SpecBranch(report.SpecID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := gitutil.RevParseRef(root, "refs/heads/"+branch); err != nil {
+		if errors.Is(err, gitutil.ErrRefNotFound) {
+			return nil, missingSpecBranchFailure(branch, beadID)
+		}
+		return nil, specBranchInfrastructureFailure(branch, beadID, err)
+	}
+	result := &GateResult{SpecID: report.SpecID, Fingerprints: map[string][]string{}}
+	named := map[string]bool{}
+	for _, id := range namedIDs {
+		named[id] = true
+	}
+	for _, s := range report.Signals {
+		if s.Pass && named[s.ID] {
+			result.Notes = append(result.Notes, s.ID+" named but passing — not recorded")
+		}
+	}
 	if report.AllPass() {
-		return &GateResult{}, nil
+		return result, nil
 	}
-
-	failing := report.FailingSignals()
-	ids := make([]string, 0, len(failing))
-	for _, s := range failing {
+	var ids []string
+	allNamed := true
+	for _, s := range report.FailingSignals() {
 		ids = append(ids, s.ID)
+		if !named[s.ID] {
+			allNamed = false
+		}
+		result.Fingerprints[s.ID] = readiness.FailureRecordDigests(s)
 	}
-
-	if allowNotReady {
-		return &GateResult{FailingSignals: ids}, nil
+	message := readiness.Render(report)
+	if len(result.Notes) > 0 {
+		message += "\n" + strings.Join(result.Notes, "\n")
 	}
-
-	recovery := append([]string{}, report.RecoveryCommands()...)
-	recovery = append(recovery,
-		fmt.Sprintf("mindspec bead ready-check %s   (the standalone per-signal report)", idrender.Bead(beadID)),
-		"re-run this exact `mindspec next` invocation with --allow-not-ready to claim deliberately despite the failing signal(s) above",
-	)
-	return nil, guard.NewFailure(readiness.Render(report), recovery...)
+	recovery = append([]string{}, report.RecoveryCommands()...)
+	recovery = append(recovery, fmt.Sprintf("mindspec bead ready-check %s   (the standalone per-signal report)", idrender.Bead(beadID)))
+	if indeterminate := IndeterminateReadiness(report); len(indeterminate) > 0 {
+		return nil, guard.NewFailure(message+"\n"+strings.Join(indeterminate, "\n"), recovery...)
+	}
+	recovery = append(recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(ids, ",")))
+	if !allNamed {
+		return nil, guard.NewFailure(message, recovery...)
+	}
+	evidence, err := ReadOverrideEvidence(opts.EvidencePath)
+	if err != nil {
+		recovery = recovery[len(recovery)-1:]
+		return nil, guard.NewFailure(err.Error(), recovery...)
+	}
+	result.FailingSignals, result.Evidence = ids, evidence
+	return result, nil
 }
 
-// RecordReadinessOverride writes the durable `--allow-not-ready` override
-// marker (spec 124 R3 / AC-4) naming the bypassed mechanical signals plus
-// a UTC timestamp, via the existing bead.MergeMetadata helper (no bd
-// schema change, ADR-0023-advisory) under bead.MetaKeyReadinessOverride.
-//
-// AC-4 makes the marker a GUARANTEE, not best-effort: `--allow-not-ready`
-// success ⟹ (marker durably written AND bead claimed). Callers MUST
-// therefore invoke this on the override-proceed path BEFORE ClaimBead and
-// FAIL-CLOSED on its error — refusing the whole command (nothing claimed,
-// no worktree) rather than claiming without the durable marker. Writing
-// advisory metadata to the not-yet-claimed bead is safe: the bead exists
-// in bd regardless of claim status, and a plain refusal (no
-// --allow-not-ready) never reaches this call, so AC-4's
-// refusal-zero-mutation audit stays intact. This function itself never
-// swallows the write error — it returns it for the caller to fail on.
-func RecordReadinessOverride(beadID string, signals []string) error {
-	if err := mergeMetadataFn(beadID, map[string]interface{}{
-		bead.MetaKeyReadinessOverride: map[string]interface{}{
-			"signals":    signals,
-			"overridden": time.Now().UTC().Format(time.RFC3339),
-		},
-	}); err != nil {
-		// bd mindspec-ta30.9 round-2 panel: bead.MergeMetadata's
-		// read-merge-write reads via GetMetadata -> tracedOutput FIRST, so
-		// a merge-READ failure can carry bd's own (possibly hostile)
-		// stderr text already folded in by bdcli.go's wrapBDError. This
-		// leg is ARMED, not hypothetical — wrap through bdRenderedError so
-		// that text is escaped once a caller (cmd/mindspec/next.go's %v
-		// render into guard.NewFailure) puts it on the terminal, while
-		// leaving the chain (errors.As/Is) intact unchanged.
+// RecordReadinessOverride replaces the marker before ClaimBead, fail-closed.
+// Writer and reader share FailureRecordDigests over every raw failure record.
+func RecordReadinessOverride(beadID string, result *GateResult) error {
+	marker, err := bead.NewOverrideMarkerV2(result.FailingSignals, result.Fingerprints, result.Evidence, time.Now())
+	if err != nil {
+		return err
+	}
+	if err := mergeMetadataFn(beadID, map[string]interface{}{bead.MetaKeyReadinessOverride: marker}); err != nil {
 		return &bdRenderedError{err: err}
 	}
 	return nil

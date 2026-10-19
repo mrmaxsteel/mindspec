@@ -1,0 +1,3 @@
+package probe
+import "os/exec"
+func probe() { exec.Command("bd", "ready", "--json") }

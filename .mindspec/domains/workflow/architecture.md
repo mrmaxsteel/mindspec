@@ -15,6 +15,8 @@ Each mode gates:
 
 ### Beads as Substrate (ADR-0023)
 
+Every decision-bearing `bd ready` and `bd list` read goes through the `internal/bead` JSON waist (`ReadyJSON` and `ListJSON`), which enforces `-n 0`. `TestBDRowCapWaist` guards against direct row reads outside that waist (spec 129 R2).
+
 Beads is both the single state store and the **contract between the planning and execution layers**. Each bead is a self-contained work packet that encapsulates requirements, context (impacted domains, ADR citations), dependencies, and acceptance criteria. A fresh agent picking up a bead doesn't need session history — the bead carries everything it needs.
 
 This is what makes execution pluggable: any orchestrator that can read beads can dispatch work. The planning layer writes beads; the execution engine reads them.
@@ -493,6 +495,14 @@ the starter `AGENTS.md` content is config-sourced (see consumer identity
 below); a config load failure fails init loudly rather than scaffolding
 from a half-read config.
 
+After the runtime ensure, `init` ensures `.mindspec/specs/*/reviews/**`
+and `.mindspec/reviews/**` under the panel-review header (spec 129 R8).
+These anchored patterns keep optional local panel artifacts out of automatic
+commits without ignoring a project's `src/reviews/`. The review list is
+separate from the runtime list: already-tracked reviews remain tracked and
+are not runtime-file findings. Both ensures preserve existing bytes and
+are skipped during dry-run.
+
 ### `domain add` converges from every partial state (#207)
 
 `internal/domain/scaffold.go` replaced the dir-exists refusal with a
@@ -822,11 +832,34 @@ exactly four signals in stable order:
   closed i/v/x set is the FORM the spec pins, so `(d)`/`(c)` classify as
   sub-letters even though they are Roman-numeral-valid symbols.
 - **MF-3 — dependencies landed, not just closed.** Every `blocks`
-  dependency edge must be `closed` in bd AND positively landed-merged
-  into the spec branch via `internal/lifecycle.FindLandedMerge` — three
-  distinct refusals: not closed; closed but no landed merge found; a
-  candidate merge exists but no admissible datum corroborates it
-  (`LandedMergeNoEvidence`).
+  dependency must be `closed` in bd. A closed dependency belongs to the
+  lineage spec when its ID has that epic's plan-bead form, its embedded
+  `metadata.spec_id` equals the spec, or its own record's parent equals
+  the epic. The parent read runs only when the first two checks are
+  negative; the embedded dependency's parent and title are not inputs.
+  A non-member passes on closed status with a not-applicable explanation.
+  Members require `lifecycle.FindLandedMergeReachable`: first-parent
+  identification, then a reachable fallback that needs an audited
+  reattest and current git safety checks before automatic read-back can
+  identify it. A non-matching panel registration never vetoes a binding.
+  Each failure names its dependency and class: `not-closed`,
+  `no-candidate`, `off-first-parent`, `no-evidence`, `contradiction`, or
+  `reverted`. Membership and landed-merge read errors are `indeterminate`,
+  never a not-applicable pass or evidence that no merge exists. Linked
+  non-plan-form members and unmapped follow-ups carry deliberate scoped
+  override hints. Off-first-parent failures offer reattest, then the
+  dependent's scoped override if reattest refuses.
+
+  MF-3 evaluates every dependency and records every failure as
+  `<dep-id>:<class>[:<candidate-sha>]`, sorted independently of display.
+  A malformed dependency ID is recorded as
+  `malformed-<12-hex digest>:indeterminate`, with the raw ID kept only in
+  the escaped Detail.
+  Detail includes each failure and its recovery text. The one signal
+  recovery follows precedence `indeterminate` > `not-closed` >
+  `no-candidate` > `off-first-parent` > `no-evidence` > `contradiction` >
+  `reverted`, then dependency ID. Indeterminate records cannot be
+  overridden. An existing merge never gets a `mindspec complete` recovery.
 - **MF-4 — no genuine blocking marker.** A `TBD`/`OPEN QUESTION` marker
   or an unchecked `- [ ]` item under a blocking-region header in the
   bead's plan section or bd description fails; markers inside code
@@ -835,7 +868,7 @@ exactly four signals in stable order:
 Owning-spec resolution is LINEAGE-authoritative (bead → epic → spec via
 `phase.FindEpicForBead`), never cwd-derived. The engine lives in the
 sub-package `internal/validate/readiness` — NOT `internal/validate`
-itself — because it consumes `lifecycle.FindLandedMerge` and placing it
+itself — because it consumes `lifecycle.FindLandedMergeReachable` and placing it
 in `internal/validate` would close the `lifecycle[test] → validate →
 lifecycle` import cycle. Its COMPLETE bd read-set is routed through
 injectable func-var seams so the unit tests are hermetic with `bd`
@@ -847,7 +880,7 @@ sites (ADR-0040 no-restate); every bead/plan-derived byte in it passes
 through `termsafe.Escape`, and each FAILing signal carries exactly one
 operator-authored `recovery:` line.
 
-### `mindspec next`: gate-before-mutate + `--allow-not-ready`
+### `mindspec next`: gate-before-mutate + `--allow-not-ready=<ids> --evidence <path>`
 
 `mindspec next` adopts ADR-0041's **preflight leg only** (the ADR's
 fourth-verb clause — a scope-deferral, not a certification of `next`'s
@@ -857,26 +890,40 @@ non-zero leaving bd status, git branches, and worktrees byte-identical
 to their pre-call state — no claim, no `bead/<id>` branch, no worktree.
 The refusal renders the same `readiness.Render` report plus each failing
 signal's recovery line and the two escape hatches: the standalone
-`bead ready-check` report, and re-running with `--allow-not-ready`.
+`bead ready-check` report, and re-running with `--allow-not-ready=<ids> --evidence <path>`.
 
-`--allow-not-ready` is the deliberate, RECORDED bypass: it proceeds past
-a failing floor, warns on stderr naming every failing signal, and writes
-a durable override marker (`mindspec_readiness_override`: the bypassed
-signal IDs + a UTC timestamp) via `bead.MergeMetadata` BEFORE the claim,
-FAIL-CLOSED — a marker-write failure refuses the whole command with
-nothing claimed, so `--allow-not-ready` success guarantees (marker
-durably written AND bead claimed). It is orthogonal to the pre-existing
-`--force` (session-freshness only), which gains no readiness authority.
-A passing floor adds no interactive step and no extra output.
+`--allow-not-ready=<ids> --evidence <path>` names a subset of MF-1..MF-4.
+Every current failure must be named and determinate. Fresh readable regular
+file evidence (1 byte to 64 KiB) is required whenever failures are recorded.
+The schema-v2 marker replaces the previous marker before ClaimBead,
+fail-closed: signals, complete sorted failure-record digests, UTC timestamp,
+and evidence path, sha256 and bytes, never evidence text. Prefer a
+repository-relative evidence path. A marker write failure refuses with
+nothing claimed; claim failure rolls the marker back. Passing named signals
+are noted and not recorded; an entirely passing floor requires no evidence.
+Stored markers never authorize a claim, including after release.
+`--force` remains session-freshness only.
+
+`mindspec bead ready-check <id>` covers a failure only with a VALID v2
+marker naming its signal and every current digest. Growth uncovers;
+shrinkage stays covered. Re-recording a claimed bead requires release and a
+fresh scoped re-claim naming all failing signals. Indeterminate reads refuse
+with the read-first diagnostic and no unusable override hint.
+
+Every claim checks the lineage epic's plan-bead ID form, refuses any scope
+spec mismatch, and proves that the lineage spec branch exists before
+mutation. The lineage spec is the dispatch and recording spec; unscoped
+claims cut from `spec/<T>`, never HEAD.
 
 ### The semantic Phase 0 + NOT-READY routing (skill layer)
 
 `/ms-bead-impl`'s dispatch ingress runs `mindspec bead ready-check`
 FIRST on EVERY dispatch path (fresh Phase A, supplied `prompt-path`,
-or the manual-claim fallback): FAIL without an override marker stops
-before any prompt is staged; FAIL with the `mindspec_readiness_override`
-marker proceeds with a warning (a force-claimed bead gets a coherent
-path instead of dead-ending). The staged prompt's Phase 0 has the
+or the manual-claim fallback). Override coverage is decided by
+`bead ready-check` in the binary, using a validated schema-v2 marker and
+the current failure-record digests. The skill proceeds on exit 0;
+otherwise it stops and surfaces the report before staging a prompt.
+The staged prompt's Phase 0 has the
 subagent judge five semantic signals — SR-1 implementable without
 inventing behavior, SR-2 ACs decidable, SR-3 named helpers actually
 exist, SR-4 no contradiction with spec/sibling landed work, SR-5 no
@@ -914,7 +961,7 @@ ungrounded or non-resolving clarification is re-reported NOT READY.
 Both metadata keys are ADVISORY (ADR-0023: bd/Dolt stays the lifecycle
 authority) and are NEVER read by any mechanical signal — the layer
 boundary (AC-12) holds by construction, so a clarification can never
-flip a mechanical PASS/FAIL, and `--allow-not-ready` never touches the
+flip a mechanical PASS/FAIL, and `--allow-not-ready=<ids> --evidence <path>` never touches the
 semantic review. The two levers are not interchangeable.
 
 ## Landed-merge attestation integrity (spec 125, ADR-0041 §2(ii) amendment)
@@ -952,9 +999,12 @@ sufficient:
   bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
   (panel `reviewed_head_sha`, surviving branch tip, binding second
   parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
-  every corroboration is now exact-equality only, and a non-equal datum
-  is a fail-closed contradiction (AC-2b/AC-2c/AC-2d), never a softened
-  confirm. With no exact-and-owned match the function REFUSES rather
+  every corroboration is exact-equality only. A surviving-tip or binding
+  mismatch is a fail-closed contradiction. Panel evidence is a SET of
+  all well-formed SHAs across registrations: an exact member confirms;
+  a non-matching set is non-corroborating and never vetoes another leg.
+  Empty, placeholder and malformed values never reach git. With no
+  exact-and-owned match the function REFUSES rather
   than picking the newest ancestor-consistent merge.
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
@@ -1031,9 +1081,10 @@ merge/second-parent pair (AC-8), no bypass flag, no `--all` fleet mode
 (mass mutation stays a scripted sequence of explicit per-bead
 invocations), and `doctor` never writes through it. Fail-closed on
 every ambiguity: no owned exact merge → refuse to the audited ADR-0035
-`mindspec-q9ea` human attested-restore exit BY NAME; owned candidates
+`mindspec-q9ea` human attested-restore exit BY NAME; owned primary candidates
 with different second parents → ambiguity refusal; a contradicting
-surviving tip or panel SHA → refusal; a REVERTED classification (the
+surviving tip → refusal; a non-matching panel set is recorded as
+non-corroborating and never refuses; a REVERTED classification (the
 same R3 discrimination, M₁-anchored) → refusal — re-attesting reverted
 content would forge landed evidence. Every write carries the
 `mindspec_landed_reattest_*` audit keys in the same metadata call as
@@ -1053,6 +1104,51 @@ substitute, and the branch actually scanned is recorded in the audit
 either way. The verb registered its `reattest` token in
 core-owned `internal/redact.CommandTokens` (the standing new-top-level-
 command rule — see the core domain interfaces doc).
+
+### Reachable fallback and audited read-back (spec 129)
+
+`FindLandedMergeReachable` and reattest scan all reachable merges only
+when the first-parent scan nominates zero owned two-parent candidates.
+The fallback admits `Merge bead/<id>` and the two explicit
+`Merge [branch ']<bead-branch>[' ] into <spec-branch>` source forms;
+refreshes, explicit targets other than this spec and unrecognized formats
+are excluded. The short subject is undirected: a merge into a sibling
+bead can be nominated. A fallback is a finder result, never an automatic
+confirmation by a panel, tip or binding alone. `LandedMergeOffFirstParent`
+names every candidate and `mindspec reattest <id>`. Close paths, including
+`MergedUnclosed`, retain first-parent scope.
+
+Reattest checks F1 (exactly one candidate, even when second parents
+agree), F3 (no contradictory surviving tip), F4 (current net effect and
+revert discrimination anchored on that single merge), and F5 (read errors
+are errors). F2 is retired: registrations produce advisory output only.
+An outside-history review names the directory, round and SHA; missing
+objects say `(not determinable locally)`. The invoking checkout and spec
+directory roots are always printed. A refusal writes nothing. Fallback
+exits exclude q9ea; the dependent can deliberately use
+`mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>`.
+
+The single binding write also records the audit merge SHA, second parent
+and scanned branch, with actor, RFC-3339 time and operation
+`mindspec reattest`. Corroboration records
+`off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>`.
+A no-op requires a VALID audit and equality of audit tuple, binding pair
+and scan-derived candidate. Missing/malformed/stale audits are rewritten
+explicitly, even when the binding already agrees.
+
+Automatic read-back checks that same validity and tuple equality and
+re-runs F1/F3/F4/F5 at the current tip; it reads no registration. Invalid
+audits or multiple candidates return `LandedMergeOffFirstParent`;
+surviving-tip contradictions return `ErrLandedMergeContradiction`;
+reverts return `ErrLandedMergeReverted`; read errors remain plain errors.
+The typed sentinels wrap `ErrLandedMergeNotFound`, while only a scan
+with no candidates returns `ErrLandedMergeNoCandidate`.
+
+A contradictory binding vetoes automatic identification. Explicit
+reattest can repair it after the independent git checks, recording the
+prior pair. A forged full audit and binding can accept only a candidate
+reattest itself would accept, including the undirected sibling topology.
+That bounded new reach is visible in tracked JSONL metadata history.
 
 ## Lifecycle verb state honesty (spec 128)
 
@@ -1222,51 +1318,80 @@ narrows the guard to this rule for the claim path only.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
-`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` are R6.1's ONE
-shared ready-set construction: the `bd ready` query plus the spec-title
-filter, preserving `bd ready`'s own returned (priority-respecting) order
-end-to-end with no post-query reordering. For the NON-positional flows —
-the default (no pick, no positional arg) and `--pick N` — the claim path
-and `--emit-only` consume the SAME constructed `ReadySet` identically, so
-`--pick N` always names the same bead on both for the same N (AC-9) and a
-filter drop is reported the same way on both (R6.3). **The positional
-`--emit-only` combination is the one documented exception (R6.3(a)):** it
-never calls `BuildReadySet` at all — no ready-set construction, no
-readiness check, no spec-title filter, no exclusion accounting — and
-instead fetches the named bead directly by ID (`next.FetchBeadByID`) and
-prints the pinned bypass line verbatim, `"emit-only: bead fetched by ID;
-readiness not checked."`, with no exclusion report and no readiness
-claim. (Positional CLAIM, by contrast, still resolves against the ready
-set via `SelectNamedFromReadySet`, below — only emit-only's positional
-form bypasses it.) `select.go`'s `SelectWork` makes pick semantics TOTAL:
-`--pick N` (N≥1) always indexes the displayed list, even with exactly one
-item — the prior single-item early return that bypassed pick validation
-is gone (red-on-revert); `--pick 0` means unset, and a negative pick
-errors rather than being silently ignored. `SelectNamedFromReadySet`
-gives a positional bead ID (on the CLAIM path) that IS ready but excluded
-by the spec-title filter an honest exclusion-reason error instead of the
-generic "not found or not ready" (R6.3(b)/AC-10). `BuildReadySet`'s
-`scopeResolutionRefusal` (R6.7/AC-15) refuses an
-explicit `--spec` whose epic resolution fails — genuine discovery failure,
-legitimate on-disk draft, or a truly nonexistent spec — naming the real
-cause, on BOTH paths, and NEVER falls back to the global unscoped `bd
-ready` query the pre-128 code silently substituted.
+`internal/next/beads.go`'s `ReadySet`/`BuildReadySet` provide R6.1's one
+shared ready-set construction. The claim path and non-positional
+`--emit-only` (default and `--pick N`) consume it identically: the displayed
+list preserves bd's priority-respecting returned order, so the same N names
+the same bead and exclusions are reported identically (AC-9/R6.3).
+`select.go`'s `SelectWork` makes pick semantics total: `--pick N` (N ≥ 1)
+always indexes the displayed list, even with exactly one item; `--pick 0`
+means unset, and a negative pick errors. `SelectNamedFromReadySet` gives a
+ready but excluded positional claim its true exclusion reason rather than
+"not found or not ready" (R6.3(b)/AC-10).
+
+`BuildReadySet`'s `scopeResolutionRefusal` (R6.7/AC-15) refuses an explicit
+`--spec` whose epic cannot be resolved, on both ready-set paths. It names
+whether discovery failed, an on-disk draft has no epic yet, or the spec
+does not exist, and never widens to global unscoped `bd ready`.
+Positional `--emit-only` is the documented R6.3(a) exception: it never
+constructs a ready set, checks readiness, filters membership, or reports
+exclusions. It fetches directly with `next.FetchBeadByID` and prints the
+pinned bypass disclosure below, making no claim about readiness.
+
+Scoped selection uses one uncapped global `bd ready -n 0 --json` result.
+A selectable member is an open non-epic whose ID is exactly `<E>.<N>`
+(N ≥ 1, one segment), whose unchanged `phase.FindEpicForBead` resolver
+returns E, and whose positional heading AND `work_chunks` entry N exist.
+`bead.PlanBeadIndex` and `readiness.PlanMapsBead` are the shared predicates.
+Issue type, title and metadata are not membership inputs. Members keep bd's
+returned order; claim and non-positional emit-only use the same set.
+
+Mapping reads the committed `spec/<S>` plan when present, otherwise the
+invoking checkout's plan. Typed ref/path absence permits fallback; other
+read or frontmatter errors refuse. A differing checkout plan produces one
+source notice. The read is lazy: only plan-form rows not already N2a/N2c
+need mapping. Readiness still reads the checkout, as the notice discloses.
+
+Every linked non-member is named by ID with its reason and recovery.
+Classification order is N2a (non-epic parent), N2c (foreign epic dependency),
+N4 (unmapped follow-up), N2b (foreign title lineage), N1 (mapped but no
+lineage), N3 (parent/title/metadata link without the plan-bead predicate).
+N1, N2a, N2b, N2c and lifecycle parent-edge N3 rows block an empty-set
+success. N4, non-lifecycle parent-edge N3, title-only and metadata-only N3
+rows are informational. Recoveries never overwrite a named parent.
+A detached mapped N1, or same-number N2b, can recover by adding the intended
+epic parent; other-number N2b first calls for inspection and makes that
+edit conditional on ownership.
+
+Selectors are checked before empty-set handling. A positional near-miss
+gets its reason even when no members exist. An N4 with lineage E can
+reach the readiness gate deliberately; a no-lineage N4 refuses before the
+gate. An unlinked globally ready positional names that fact and its parent.
+Positional emit-only still fetches by ID and prints
+`emit-only: bead fetched by ID; readiness not checked.`
+
+Without a selector, an empty scoped set prints the lifecycle child tally,
+stored and child-derived phase, and the emptiness rule before acting:
+`an empty ready set is not evidence the spec is complete; the derived phase above is`.
+All closed children point to impl approval; an in-progress child uses
+worktree recovery; open children point to `bd blocked --parent <E>`; zero
+lifecycle children point to plan approval. A derived phase ahead of stored
+also names phase repair. Blocking near-misses return non-zero after this
+report; informational ones do not. A failed child read reports
+indeterminate and never fabricates a tally.
 
 `internal/next/beads.go`'s `bdRenderedError`/`RenderBDError` and
-`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together
-deliver AC-11: bd's captured stderr now survives into mindspec's own error
-text (content half, execution domain), escaped per-line via
-`termsafe.Escape` before reaching any terminal-facing message (rendering
-half, this domain) — so a hostile/control-bearing bd stderr line cannot
-forge terminal control sequences. `cmd/mindspec/next.go` also gained a new
-`mindspec_phase` writer under the R3.3 lock (`nextPhaseMergeMetadataFn`,
-line ~608): the claim path's own phase advance, exported via
-`phase.DerivePhaseFromChildren` for this exact caller.
+`internal/bead/bdcli.go`'s `wrapBDError` (execution domain) together deliver
+AC-11: captured bd stderr survives in mindspec's errors, escaped per line
+with `termsafe.Escape` before terminal rendering, so hostile stderr cannot
+forge terminal control sequences. The claim path's `mindspec_phase`
+writer in `cmd/mindspec/next.go` uses `nextPhaseMergeMetadataFn` under the
+R3.3 lock, re-deriving fresh child state with
+`phase.DerivePhaseFromChildren` before advancing.
 
-Struck without implementation, with rationale recorded in the spec (not
-re-litigated here): #146 #2(a)'s prose `Depends on` parser (the
-`work_chunks`→`bd dep add` mechanism already covers it) and #146 #3's
-doctor suggestions (already shipped pre-128).
+Struck without implementation, with rationale recorded in the spec:
+#146 #2(a)'s prose `Depends on` parser (`work_chunks` → `bd dep add`
+already covers it) and #146 #3's doctor suggestions (shipped pre-128).
 
 ### R7 — Frozen-contract / externally-merged guidance and AC-14's total verb classification
 

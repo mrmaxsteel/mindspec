@@ -1,0 +1,141 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "F2 claude-fable-5-1",
+  "confidence": 0.85,
+  "rationale": "Lens: AC falsifiability and internal consistency. The diagnosis is sound and most ACs are runnable and red-on-revert (verified against 7a490064: the len(items)==0 branch precedes the selector in cmd/mindspec/next.go; bd 1.1.0 prints 'Showing 100 of 106' on stderr at exit 0 and tracedOutput discards it; --metadata-field spec_id=<id> filters live; panel.Scan sorts by Dir; ErrLandedMergeNoCandidate wraps ErrLandedMergeNotFound and evaluateMF3 tests the broad sentinel first; extractSpecTokens never indexes R9(a)/AC9). But R1.4 is built on a derivation that does not do what the spec says: phase.DerivePhaseWithStatus TRUSTS the stored mindspec_phase (children are only a consistency check) and no non-test code ever writes 'review', so the all-closed fixture in AC-4 cannot produce 'review' from that call, and the child table maps 'all open, none claimed' to 'plan', making R1.4's 'plan -> mindspec plan approve' recovery false for a plan-approved spec whose beads are all blocked. R1.1's member universe (descendants UNION metadata.spec_id) is not the universe R1.4's tally or R4.1's dependency test use, so the spec contradicts itself about who belongs to a spec. R4.2 amends ADR-0041's Spec-125 text ('a two-parent first-parent merge') but only R4.3 is priced. AC-10's fast-forward fixture as written is on the first-parent chain (not red-on-revert) and its consistency leg is an either/or; AC-6's end-to-end leg and AC-11's #232 leg are green today. #232's dependency is the same spec's bead 1, so the spec's 'cause 1 or cause 3' disposition is half wrong and the closure rests on an unreproduced cause. None of this is an evidence-bearing halt; all are spec-text fixes.",
+  "concrete_changes_required": [
+    "R1.4/AC-4: do not cite DerivePhaseWithStatus-class as the source of the printed phase. Use phase.DerivePhaseDetail (stored vs child-derived), print BOTH, key the single recovery line on the child-DERIVED phase, and emit the existing forward-reconcile 'recovery: mindspec repair phase <spec-id>' when they disagree. Split the 'plan' arm into zero-lifecycle-children (-> plan approve) versus children-exist-all-open (-> the blocked recovery), matching internal/complete/complete.go's R2.3 distinction. Restate AC-4's three fixtures with explicit stored-phase values so each is red-on-revert against the stored-trusting derivation.",
+    "R1.4 + ADR-0035 touchpoint: the 'implement with an in-progress bead' arm invokes the existing worktree-recovery branch, which CREATES a worktree. Either state that this arm mutates (and HC-4's 'mutates nothing' applies to the other arms only) or run the R1.4 tally/phase output before the recovery and say so; pin the ordering in AC-4 fixture 2.",
+    "One member universe: R1.1 makes a metadata.spec_id-linked non-descendant (bead B in AC-1) a member, but R1.4's tally is 'the child list of the epic' (phase.Cache uses bd list --parent = direct children) and R4.1 resolves membership 'through findEpicForBeadFn lineage'. With B open and blocked, R1.4 would print derived phase 'review' and 'recovery: mindspec impl approve' — the exact dishonesty the requirement targets. Either tally over descendants UNION `bd list --metadata-field spec_id=<S> -n 0` (all statuses) and use the same predicate in R4.1, or drop the linkage disjunct from membership (descendant-only, with R1.2's `bd update --parent` as the repair). State the decision once and apply it to R1.1, R1.4, R4.1 and AC-1/AC-4/AC-9.",
+    "Predicate domain: R1.1 defines membership for bd-READY beads via next.SpecMembers; R4.1 applies 'a member per R1.1's predicate' to CLOSED dependencies and R1.3 to arbitrary positionals; internal/validate/readiness cannot import internal/next (internal/next/ready_gate.go imports readiness). Define an ID-level predicate (any status: parent lineage OR metadata.spec_id) in a package both can import, with SpecMembers = ready INTERSECT predicate, and add an AC-9 leg: a closed non-descendant dependency that carries metadata.spec_id=<S> is still held to the landed-merge test.",
+    "ADR Touchpoints: R4.2 changes ADR-0041 § Amendment (Spec 125)'s landed-ness definition ('a two-parent first-parent merge whose second parent EQUALS the bead's landed tip') to any reachable two-parent merge. Price that amendment alongside R4.3's, and list it in In Scope for ADR-0041.",
+    "AC-10: specify a fixture that is provably off the first-parent chain. As written, 'PR-merge-then-fast-forward' of the spec branch to the merge commit puts the merge ON the first-parent chain (git log --first-parent --merges includes the tip), so TestFindLandedMerge_FastForwardedPRMerge is not red-on-revert. Use #239's shape (bead/X merged into a sibling branch that is later merged into spec, so M_X is reachable only via a second parent). Remove the 'or the plan records the OQ-4 rationale' disjunct from the consistency leg: pin OQ-4's default (reattest nominates via the ancestry primitive) as the AC and state the write-site first-parent exception as a requirement sentence, not an AC escape hatch.",
+    "R4.5/AC-11 leg 4 and Background D: #232's failing dependency is the same spec's bead 1 (08z.2 blocked on 08z.1), so cause 1 (non-spec dependency) cannot explain it; only cause 3 (stale lex-first registration) or an unidentified cause can. Say so, and make the #232 regression fixture reproduce the issue's shape (same-spec first bead merged via complete, two registrations sorted stale-first, local ahead of remote) so it is RED today via the lex-first contradiction; the 'local ahead of remote PASSES' leg is green at 7a490064 and proves nothing on its own.",
+    "AC-6: TestNext_101ReadyBeads_AllVisible is not red-on-revert with a fake bd that returns 101 rows regardless of argv. Require the fake bd to apply bd's default cap (100 for ready, 50 for list) unless `-n 0`/`--limit 0` is present in argv, so the end-to-end leg fails on revert.",
+    "R1.3: the second sentence ('a positional that IS bd-ready but is not a member gets R1.2's membership sentence') is unpinned for a NON-empty member set and its only stated mechanism (R1.2's near-miss scan) is restricted to the empty-set path. Name the mechanism (bd show <id> --json, which carries parent and metadata) and add an AC-3 leg for the non-empty-set case.",
+    "R1.2: `bd ready --json` carries neither `parent` nor `metadata` (verified live on bd 1.1.0: 13 keys, no parent); the near-miss scan must use `bd list --status=open -n 0 --json` (which carries both) or a bd show per hit. Correct the 'one extra bd call' claim accordingly.",
+    "Settled fact 1 vs R1.1: removing the title filter deletes 128's emptyAfterFilterError (AC-10b) and exclusionReasonForName (AC-10) mechanisms that the spec labels 'binding — not relitigated'. State which spec-128 tests are superseded by which 129 ACs, and reconcile OQ-2's 'containsSpecID is deleted' option with R1.2, which still needs a title-reference test.",
+    "R2.2/R2.3: the waist's 'unless the caller passes an explicit -n/--limit' escape contradicts R2.3's truncation error text ('mindspec never requests a cap') — a caller passing -n 5 would trip it. Remove the escape or suppress the notice check when the caller requested a cap; and reword the lint leg 'any waist invocation that would reach bd without -n', which is vacuous if the waist appends -n 0 by construction.",
+    "AC-11: `registerLandedPanel` does not exist in internal/lifecycle/landed_test.go (the existing tests stub `landedPanelScanFn`). Mark it a working name or cite the seam.",
+    "AC-13: the fourth leg (bead `AC-9` vs spec `AC9`) is ALSO red today (extractSpecTokens never indexes hyphenless AC9); the red-on-revert note names only legs 1 and 3. Correct it.",
+    "R4.3: state the decision rule when the legs disagree (tip contradicts while binding confirms, or vice versa). 'All three legs are evaluated before any contradiction is returned' is not a rule; recommend: any exact (b)/(d) contradiction still contradicts, naming the datum; the panel set never vetoes.",
+    "R6.1 recovery line: 'this exact invocation with --allow-not-ready=<ids>' would interpolate the operator's --evidence <path> and the raw positional into command-shaped text, which the ADR-0042 house rule in internal/next/select.go (final-review R5/G4: no dynamic operand in executable-shaped guidance) forbids. Render only closed-set/validated operands (signal IDs, idrender-gated bead and spec IDs) and elide or quote the evidence path.",
+    "ADR-0025 touchpoint: 'stored in bd metadata, never committed as an artifact' is false — bd metadata is exported into the committed .beads/issues.jsonl (spec 128 R5.1 auto-exports it on claim). Correct the wording and note that up to 4 KiB of evidence text per override lands in the JSONL.",
+    "R6.3: changing `bead ready-check`'s exit contract to 0-with-OVERRIDDEN turns the 'standalone per-signal report' into a pass on a bd-writable marker for any consumer gating on its exit code. State explicitly that OVERRIDDEN exit 0 is informational and that GateReadiness's evidence requirement remains the only authority (settled fact 2), or keep ready-check's exit non-zero and add the OVERRIDDEN annotation only.",
+    "R1.4: pin the blocked recovery to `bd blocked --parent <epic-id>` (verified: bd 1.1.0 `bd blocked --parent` filters to descendants) and drop the '(or the bd invocation the plan verifies exists)' hedge so AC-4's string is fixed.",
+    "OQ-5: if `--allow-not-ready=all` is admissible, say it still records only the actually failing set and still requires --evidence; otherwise it reintroduces the all-or-nothing form R6.1's own rationale rejects."
+  ],
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "title": "R1.4's derived-phase line is keyed to a derivation that trusts the stored phase and never yields 'review'",
+      "detail": "internal/phase/derive.go DerivePhaseWithStatusWithCache returns the stored mindspec_phase whenever one is present and only WARNS on child disagreement; grep of internal/ and cmd/ finds no non-test writer of state.ModeReview. After a claim the stored phase is 'implement', so an all-closed spec derives 'implement' from this call, and AC-4 fixture 1 ('derived phase review') cannot go green unless the fixture omits the stored phase, in which case it is not red-on-revert against the real path. Separately, DerivePhaseFromChildren maps 'all lifecycle children open, none claimed' to 'plan', so R1.4's 'plan -> recovery: mindspec plan approve' is a false recovery for a plan-approved spec whose beads are all blocked. The spec names ADR-0023's single state authority but then mis-describes its table."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R1.4 says 'nothing mutated' while routing one arm to the worktree-creating recovery branch",
+      "detail": "cmd/mindspec/next.go Step 3 calls next.EnsureWorktree for an in_progress bead with a missing worktree — a mutation. R1.4 '(exit 0, nothing mutated)' and the ADR-0035 HC-4 touchpoint both claim zero mutation for the no-selector empty-set result, while R1.4's implement-in-progress arm is 'the existing worktree-recovery branch (unchanged)'. AC-4 fixture 2 also leaves the ordering (tally/phase output before or after recovery?) unspecified."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "Two member universes: selection (descendants UNION spec_id) vs tally/MF-3 (epic children only)",
+      "detail": "R1.1 admits a metadata.spec_id-linked non-descendant (AC-1's bead B). R1.4's tally is over 'an UNCAPPED child list of the epic' via the state-show derivation (phase.Cache.fetchChildren -> bd list --parent, which bd documents as direct children, unlike bd ready --parent = descendants). R4.1 resolves membership 'through findEpicForBeadFn lineage', i.e. the parent disjunct only. With B open and blocked and all descendants closed, R1.4 prints 'review' and 'recovery: mindspec impl approve' — emptiness becoming completion evidence, the requirement's own stated failure. The spec must choose one universe and apply it in R1.1, R1.4, R4.1 and the ACs."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R1.1's predicate is defined over bd-ready beads but applied to closed dependencies and arbitrary positionals, across an import boundary that forbids it",
+      "detail": "next.SpecMembers(root, specID) returns ready members. R4.1 holds CLOSED dependencies to 'a member per R1.1's predicate'; R1.3 applies it to a positional outside the ready set. internal/next/ready_gate.go imports internal/validate/readiness, so readiness cannot import next. The spec needs an ID-level, status-agnostic predicate in a shared package, and AC-9 lacks the leg where a closed non-descendant dependency carries metadata.spec_id=<S>."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "R4.2 amends ADR-0041's Spec-125 amendment but only R4.3 is priced",
+      "detail": ".mindspec/adr/ADR-0041-gate-before-mutate.md § Amendment (Spec 125) defines landed-ness as 'a two-parent first-parent merge whose second parent EQUALS the bead's landed tip'. R4.2 widens candidates to every reachable two-parent merge. ADR Touchpoints says 'AMENDED by R4.3' only; In Scope lists ADR-0041 '(R4.3 amendment)' only."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "AC-10's fast-forward fixture is on the first-parent chain, and its consistency leg is an either/or",
+      "detail": "If the spec branch fast-forwards to a PR merge commit M (first parent = old spec tip, second = bead/X), M is the tip and is returned by git log --first-parent --merges; the test passes at 7a490064 and is not red-on-revert. The #239 shape (c27f59d reachable through a sibling-branch merge) is the right fixture. 'TestReattest_NominatesSameCandidateAsFind ... or the plan records the OQ-4 rationale with a test pinning that recorded difference' lets the AC be satisfied by documentation; an AC with a documented-exception disjunct is not falsifiable."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "#232's disposition names a cause that cannot apply, and its regression leg is green today",
+      "detail": "gh issue 232: bead 08z.2's dependency is 08z.1, bead 1 of the SAME spec, merged by mindspec complete under a correct subject. Cause 1 (non-spec dependency) therefore cannot explain it; the spec's 'fits cause 1 or cause 3' is half wrong and the closure rests on cause 3 being reproduced in the issue's shape, which no AC does. AC-11 leg 4 (local ahead of remote PASSES) passes at 7a490064 by the spec's own admission and so does not guard anything."
+    },
+    {
+      "severity": "MAJOR",
+      "title": "AC-6's end-to-end leg is not red-on-revert",
+      "detail": "A fake bd that returns 101 rows regardless of argv makes TestNext_101ReadyBeads_AllVisible pass with or without -n 0. The argv seam tests carry the real assertion; the end-to-end leg must have the fake honour bd's default cap unless -n 0 is present."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.3's non-member positional sentence has no mechanism or AC outside the empty-set path",
+      "detail": "R1.2's near-miss scan 'runs only on the empty-set path'; R1.3's second sentence is not so restricted; AC-3 tests only the empty set. bd show <id> --json carries parent and metadata and is the obvious mechanism; name it and pin it."
+    },
+    {
+      "severity": "MINOR",
+      "title": "bd ready --json carries no parent or metadata field",
+      "detail": "Verified live on bd 1.1.0 (bd ready --json -n 0: 13 keys, none of them parent/metadata; bd list --json carries both). R1.2's '(parent: <parent-id or none>)' and its 'one extra bd call' sizing need bd list --status=open -n 0 or a per-hit bd show."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Settled fact 1 is declared binding and then its mechanism is removed",
+      "detail": "R1.1 removes containsSpecID as a membership input, which retires emptyAfterFilterError (128 AC-10b) and exclusionReasonForName (128 AC-10) and the tests pinning them. The spec should say which 128 tests are superseded by which 129 ACs. OQ-2's 'deleted' option also conflicts with R1.2, which still needs a title-reference test to find near-misses."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R2.2's explicit-cap escape contradicts R2.3's truncation error",
+      "detail": "A caller passing -n 5 through the waist would get bd's 'Showing 5 of N' notice and R2.3's 'mindspec never requests a cap' error. Also the lint leg 'any waist invocation that would reach bd without -n' cannot be red if the waist appends -n 0 by construction."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-11 cites a non-existent fixture helper",
+      "detail": "registerLandedPanel is not in internal/lifecycle/landed_test.go; the existing tests (TestFindLandedMerge_ReviewedHeadSHACorroborates) stub landedPanelScanFn."
+    },
+    {
+      "severity": "MINOR",
+      "title": "AC-13's red-on-revert note under-counts",
+      "detail": "extractSpecTokens runs only claimTokenRe (\\b(R|AC-)([0-9]+)([a-z])?\\b), so spec-side AC9 is never indexed and the fourth leg (bead AC-9 vs spec AC9) is also red today, not just legs 1 and 3."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R4.3 leaves the mixed-leg outcome undefined",
+      "detail": "After removing the panel veto, the spec says all three legs are evaluated before any contradiction is returned but not what happens when (b) contradicts and (d) confirms, or vice versa. AC-11 covers only panel-vs-tip."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6.1's filled-in recovery line interpolates operator-supplied operands into command-shaped text",
+      "detail": "'this exact invocation' includes --evidence <path> and the raw positional. internal/next/select.go's final-review R5/G4 note records the house rule: executable-shaped guidance carries no dynamic operand because termsafe is identity on printable ASCII. The ADR-0042 touchpoint does not address this."
+    },
+    {
+      "severity": "MINOR",
+      "title": "ADR-0025 touchpoint misstates where the evidence text ends up",
+      "detail": "bd metadata is exported into the committed .beads/issues.jsonl (spec 128 R5.1 auto-exports on claim), so the evidence text IS committed, via the build artifact. 'never committed as an artifact' is wrong as written."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R6.3 silently changes ready-check from a floor report to a marker-honouring pass",
+      "detail": "cmd/mindspec/bead_ready.go today exits non-zero on any FAIL; R6.3 makes it exit 0 when every failing signal is covered by a bd-writable marker. The spec should state that this is informational and that GateReadiness's evidence requirement remains the only claim authority, so settled fact 2 is not weakened by the back door. Flagged for G2's trust-boundary lens as well."
+    },
+    {
+      "severity": "MINOR",
+      "title": "R1.4's blocked recovery string is hedged",
+      "detail": "'bd blocked --parent <epic-id> (or the bd invocation the plan verifies exists)': bd 1.1.0's bd blocked --parent exists and filters to descendants; pin it so AC-4's string is fixed."
+    },
+    {
+      "severity": "MINOR",
+      "title": "OQ-5 admits an alternative that reopens the all-or-nothing hole",
+      "detail": "'--allow-not-ready=all' as an admissible spelling is the behaviour R6.1's own rationale rejects unless it still records only the actually failing set and requires evidence; say so."
+    },
+    {
+      "severity": "INFO",
+      "title": "Verified claims (no change needed)",
+      "detail": "Reviewed commit is HEAD of the worktree. next.go's len(items)==0 branch precedes SelectNamedFromReadySet/SelectWork; --emit-only positional prints 'emit-only: bead fetched by ID; readiness not checked.' and the empty emit-only set errors 'no ready work found for --emit-only'. bd 1.1.0: bd ready --json exits 0 with 100 rows and 'Showing 100 of 106 ready issues' on stderr; tracedOutput uses cmd.Output(). --metadata-field spec_id=128-lifecycle-verb-state-honesty returns the 128 beads (with --status=closed). approve/spec.go epic metadata is {spec_num, spec_title, mindspec_phase}; plan.go writes spec_id. panel.Scan sorts by Dir; reviewed_head_sha contradiction (landed.go) precedes tip and binding legs. ErrLandedMergeNoCandidate wraps ErrLandedMergeNotFound; evaluateMF3 tests errors.Is(ErrLandedMergeNotFound) before NoCandidate. mindspec adr list shows ADR-0045 Accepted; mindspec validate spec 129-readiness-tracker-honesty reports only the expected lifecycle-binding WARN. Test names TestReadiness_MF3Variants, TestReadiness_MF2AllClasses, TestReadiness_MF3ErrorArmDiscrimination, initLandedRepo, mergeBead exist. internal/lint/** and internal/instruct/** are owned by workflow; internal/bead/** and internal/gitutil/** by execution, matching Impacted Domains."
+    },
+    {
+      "severity": "MINOR",
+      "title": "Errors in this BRIEF",
+      "detail": "(1) The generated panel header tells reviewers to write '<your-slot>-round-1.json beside this BRIEF', inside a repo the conduct section and the dispatch prompt declare READ-ONLY; a reviewer following the header would violate the conduct rule. The scratch verdict.json path in the prompt was followed. (2) The BRIEF contains two Summary, Files-in-Scope, Acceptance-Criteria and Lens sections — the first set are unfilled 'TODO(skill)' template placeholders left above the real content. (3) The Summary says #232 is 'dispositioned as the same causes' — per gh issue 232 the dependency is the same spec's bead 1, so only cause 3 of the spec's list can apply (see the #232 finding). Otherwise none found: reviewed commit, AC count (18), file list and lens table are accurate."
+    }
+  ]
+}

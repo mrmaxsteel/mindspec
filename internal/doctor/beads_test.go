@@ -6,7 +6,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
+
+func TestBDVersionFloor_MatchesListJSONDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	// Non-JSON output exercises bead.minBdVersionMsg through its public
+	// consumer, without exporting a production constant or invoking real bd.
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte("#!/bin/sh\nprintf 'legacy text output\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := bead.ListJSON()
+	want := "bd list --json returned non-JSON output (your bd may be older than the supported floor " + bdVersionFloor + "). " +
+		"Run `mindspec doctor` and upgrade with `brew upgrade beads`."
+	if err == nil || err.Error() != want || out != nil {
+		t.Fatalf("ListJSON diagnostic must match doctor floor %s: got %q, %v; want %q", bdVersionFloor, out, err, want)
+	}
+}
 
 // findCheck returns the first Check with a given Name, or nil.
 func findCheck(r *Report, name string) *Check {
@@ -393,8 +411,8 @@ func TestCompareSemver(t *testing.T) {
 }
 
 func TestCheckBdVersionFloor_BelowFloor(t *testing.T) {
-	// 1.0.3 is server-mode bd — below the 1.0.4 embedded-mode floor.
-	path := stubBd(t, "bd version 1.0.3 (Homebrew)")
+	// 1.0.4 predates the row/argv contract measured at 1.1.0.
+	path := stubBd(t, "bd version 1.0.4 (Homebrew)")
 	t.Setenv("PATH", path)
 	root := beadsRoot(t, false)
 
@@ -405,13 +423,13 @@ func TestCheckBdVersionFloor_BelowFloor(t *testing.T) {
 	if c == nil || c.Status != Warn {
 		t.Fatalf("got %+v, want Warn", c)
 	}
-	if !strings.Contains(c.Message, "1.0.3") {
+	if !strings.Contains(c.Message, "1.0.4") {
 		t.Errorf("message should include actual version; got %q", c.Message)
 	}
 }
 
 func TestCheckBdVersionFloor_AtOrAbove(t *testing.T) {
-	path := stubBd(t, "bd version 1.0.4 (Homebrew)")
+	path := stubBd(t, "bd version 1.1.0 (Homebrew)")
 	t.Setenv("PATH", path)
 	root := beadsRoot(t, false)
 

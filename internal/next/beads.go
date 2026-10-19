@@ -2,6 +2,7 @@ package next
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,18 +15,21 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 )
 
 // BeadInfo represents a work item from Beads.
 type BeadInfo struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	Priority  int    `json:"priority"`
-	IssueType string `json:"issue_type"`
-	Owner     string `json:"owner"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Parent    string                 `json:"parent"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	ID        string                 `json:"id"`
+	Title     string                 `json:"title"`
+	Status    string                 `json:"status"`
+	Priority  int                    `json:"priority"`
+	IssueType string                 `json:"issue_type"`
+	Owner     string                 `json:"owner"`
+	CreatedAt string                 `json:"created_at"`
+	UpdatedAt string                 `json:"updated_at"`
 }
 
 // Package-level function variables for testability.
@@ -33,11 +37,12 @@ var (
 	runBDFn     = bead.RunBD
 	runBDCombFn = bead.RunBDCombined
 	listJSONFn  = bead.ListJSON
+	readyJSONFn = bead.ReadyJSON
 )
 
 // QueryReady discovers ready work via global bd ready.
 func QueryReady() ([]BeadInfo, error) {
-	out, err := runBDFn("ready", "--json")
+	out, err := readyJSONFn()
 	if err != nil {
 		return nil, fmt.Errorf("bd ready failed: %w", &bdRenderedError{err: err})
 	}
@@ -53,7 +58,7 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	if err := idvalidate.BeadID(epicID); err != nil {
 		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
-	out, err := runBDFn("ready", "--parent", epicID, "--json")
+	out, err := readyJSONFn("--parent", epicID)
 	if err != nil {
 		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, &bdRenderedError{err: err})
 	}
@@ -77,119 +82,138 @@ func RenderBDError(err error) error {
 	return &bdRenderedError{err: err}
 }
 
-// ReadySet is spec 128 R6.1's ONE ready-set construction result — the
-// bd-ready query plus the spec-title filter, and the exclusion accounting
-// the filter drops — consumed IDENTICALLY by the claim path
-// (cmd/mindspec/next.go's RunE) and the --emit-only path (runEmitOnly), so
-// `--pick N` always names the same bead on both for the same N (AC-9
-// parity) and a filter drop is reported the same way on both (R6.3).
+// ReadySet holds the global tracker rows and the ordered selectable plan beads.
 type ReadySet struct {
-	// Filtered is the DISPLAYED/selectable list, in bd ready's returned
-	// order (R6.2, preserved end-to-end) — the spec-title filter already
-	// applied. Callers select from THIS list, never Raw.
-	Filtered []BeadInfo
-	// Raw is the pre-filter list bd ready / bd ready --parent returned.
-	// Never displayed or selected from directly — SelectNamedFromReadySet
-	// consults it ONLY to name the true exclusion reason for a positional
-	// ID the filter dropped (R6.3(b)/AC-10).
-	Raw []BeadInfo
-	// SpecFlag is the scope this set was constructed for; "" means
-	// unscoped (no filter was applied — Raw and Filtered are the same
-	// slice).
-	SpecFlag string
+	Filtered   []BeadInfo
+	Raw        []BeadInfo
+	SpecFlag   string
+	EpicID     string
+	NearMisses []NearMiss
+	PlanNotice string
+	Cache      *phase.Cache
 }
 
-// ExcludedCount reports how many raw items the spec-title filter dropped.
-func (rs ReadySet) ExcludedCount() int {
-	return len(rs.Raw) - len(rs.Filtered)
-}
+func (rs ReadySet) ExcludedCount() int { return len(rs.NearMisses) }
 
-// ExclusionNotice renders the R6.3(a) loud-drop line for a partial filter
-// exclusion, or "" when the filter dropped nothing (including the
-// unscoped case, where ExcludedCount is always 0). The caller decides
-// where to print it — this function performs no I/O.
+// ExclusionNotice names every near-miss, its reason, and its recovery.
 func (rs ReadySet) ExclusionNotice() string {
-	n := rs.ExcludedCount()
-	if n == 0 {
-		return ""
+	var lines []string
+	if rs.PlanNotice != "" {
+		lines = append(lines, rs.PlanNotice)
 	}
-	return fmt.Sprintf("%d ready bead(s) excluded by spec filter: title does not reference spec %s", n, idrender.Spec(rs.SpecFlag))
+	for _, miss := range rs.NearMisses {
+		lines = append(lines, miss.String())
+	}
+	return strings.Join(lines, "\n")
 }
 
-// containsSpecID checks if a bead title references the given spec ID —
-// the step-2.5 filter both the claim and --emit-only paths apply when a
-// spec scope is given.
-func containsSpecID(title, specID string) bool {
-	return strings.Contains(title, specID)
-}
+func containsSpecID(title, specID string) bool { return strings.Contains(title, specID) }
 
-// BuildReadySet performs spec 128 R6.1's shared ready-set construction:
-// the bd-ready query (global when specFlag is "", scoped to specFlag's
-// epic otherwise) plus the spec-title filter — the SAME construction the
-// claim path and the --emit-only path both build selection over, so
-// `--pick N` names the same bead on either path for the same N (AC-9).
-//
-// R6.7 scope honesty (round-2 G8): when specFlag != "" and its epic can't
-// be resolved — no epic (including a legitimate on-disk draft, which gets
-// its own "spec exists but has no epic" refusal) or a genuine bd/discovery
-// error — this REFUSES rather than silently widening to the global,
-// unscoped `bd ready` query (the removed next.go:166-171/:417-424
-// fallback). QueryReady (the global query) is NEVER called in that
-// branch — AC-15's "no global bd ready query is issued" assertion holds
-// by construction, not by convention. An operator who scoped a command to
-// a spec must never receive another spec's bead because the scope
-// silently widened.
-//
-// R6.3(c): a non-empty raw ready set that the spec-title filter reduces
-// to EMPTY is a loud error naming the exclusions here — never a silent
-// success the caller could mistake for "No ready work found" (AC-10b). A
-// genuinely empty raw set (bd ready itself returned nothing) is NOT an
-// error — ReadySet.Filtered is simply empty, and the caller's existing
-// "No ready work found" handling applies.
+var findEpicForBeadFn = phase.FindEpicForBeadWithCache
+
+// BuildReadySet classifies one uncapped global ready set with the same lineage
+// resolver and positional plan mapping that readiness uses.
 func BuildReadySet(root, specFlag string) (ReadySet, error) {
-	if specFlag == "" {
-		items, err := QueryReady()
-		if err != nil {
-			return ReadySet{}, err
+	rs := ReadySet{SpecFlag: specFlag, Cache: phase.NewCache()}
+	if specFlag != "" {
+		epic, err := rs.Cache.FindEpicBySpecID(specFlag)
+		if err != nil || epic == "" {
+			return rs, scopeResolutionRefusal(root, specFlag, err)
 		}
-		return ReadySet{Filtered: items, Raw: items}, nil
+		rs.EpicID = epic
 	}
-
-	epicID, epicErr := phase.FindEpicBySpecID(specFlag)
-	if epicErr != nil || epicID == "" {
-		return ReadySet{}, scopeResolutionRefusal(root, specFlag, epicErr)
-	}
-
-	raw, err := QueryReadyForEpic(epicID)
+	raw, err := QueryReady()
 	if err != nil {
-		return ReadySet{}, err
+		return rs, err
 	}
-
-	var filtered []BeadInfo
+	rs.Raw = raw
+	if specFlag == "" {
+		rs.Filtered = raw
+		return rs, nil
+	}
+	var plan string
+	var loaded, absent bool
 	for _, item := range raw {
-		if containsSpecID(item.Title, specFlag) {
-			filtered = append(filtered, item)
+		if strings.EqualFold(strings.TrimSpace(item.IssueType), "epic") {
+			continue
+		}
+		n, form := bead.PlanBeadIndex(rs.EpicID, item.ID)
+		info := lineageInfo{}
+		if form {
+			info.epic, info.spec, err = findEpicForBeadFn(rs.Cache, item.ID)
+			if err != nil && !errors.Is(err, phase.ErrNoEpicLineage) {
+				return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(err), idrender.Bead(item.ID))
+			}
+			info.none = errors.Is(err, phase.ErrNoEpicLineage)
+			if item.Parent != "" {
+				parent, parentErr := rs.Cache.FindEpic(item.Parent)
+				if parentErr != nil {
+					return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(parentErr), idrender.Bead(item.ID))
+				}
+				info.nonEpicParent = parent == nil || !strings.EqualFold(parent.IssueType, "epic")
+			}
+			if info.epic != "" && info.epic != rs.EpicID {
+				info.dependency, err = hasEpicDependency(item.ID, info.epic)
+				if err != nil {
+					return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(err), idrender.Bead(item.ID))
+				}
+			}
+			// A named parent that supplied no lineage still needs inspection;
+			// title fallback must never justify overwriting that parent.
+			if item.Parent != "" && item.Parent != rs.EpicID && !info.dependency && info.epic != rs.EpicID {
+				info.nonEpicParent = true
+			}
+			if !info.nonEpicParent && !info.dependency {
+				if !loaded {
+					plan, absent, rs.PlanNotice, err = readPlanForSpec(root, specFlag)
+					if err != nil {
+						return rs, fmt.Errorf("could not read plan.md for %s: %w\nrecovery: mindspec validate plan %s", idrender.Spec(specFlag), RenderBDError(err), idrender.Spec(specFlag))
+					}
+					loaded = true
+				}
+				if absent {
+					info.why = "no plan.md exists yet for " + idrender.Spec(specFlag)
+				} else {
+					info.mapped, info.why = readiness.PlanMapsBead(plan, n)
+				}
+			}
+			if isReadyPlanMember(item, rs.EpicID, info) {
+				rs.Filtered = append(rs.Filtered, item)
+				continue
+			}
+		}
+		if miss, linked := classifyNearMiss(item, rs.EpicID, specFlag, n, form, info); linked {
+			rs.NearMisses = append(rs.NearMisses, miss)
 		}
 	}
-
-	if len(filtered) == 0 && len(raw) > 0 {
-		return ReadySet{}, emptyAfterFilterError(raw, specFlag)
+	if len(rs.Filtered) == 0 && rs.HasBlockingNearMisses() {
+		return rs, emptyAfterFilterError(rs)
 	}
-
-	return ReadySet{Filtered: filtered, Raw: raw, SpecFlag: specFlag}, nil
+	return rs, nil
 }
 
-// emptyAfterFilterError renders R6.3(c)'s loud empty-after-filter error
-// (AC-10b): the string "No ready work found" must never appear for this
-// case, so this is a distinct, non-empty-set error naming every excluded
-// bead and the reason — never the empty-set success path.
-func emptyAfterFilterError(raw []BeadInfo, specFlag string) error {
-	ids := make([]string, 0, len(raw))
-	for _, item := range raw {
-		ids = append(ids, idrender.Bead(item.ID))
+// isReadyPlanMember applies the member predicate after plan-form validation.
+func isReadyPlanMember(item BeadInfo, epic string, info lineageInfo) bool {
+	status := strings.TrimSpace(item.Status)
+	return !info.nonEpicParent && info.epic == epic && info.mapped && (status == "" || strings.EqualFold(status, "open"))
+}
+
+// EmptyAfterFilterError is loud emptiness, with a valid set whose derived state
+// the command must still display before returning the refusal.
+type EmptyAfterFilterError struct{ notice string }
+
+func (e *EmptyAfterFilterError) Error() string { return e.notice }
+func emptyAfterFilterError(rs ReadySet) error {
+	return &EmptyAfterFilterError{notice: rs.ExclusionNotice()}
+}
+
+func (rs ReadySet) HasBlockingNearMisses() bool {
+	for _, miss := range rs.NearMisses {
+		if miss.Blocking {
+			return true
+		}
 	}
-	return fmt.Errorf("%d ready bead(s) excluded by spec filter: title does not reference spec %s (%s)",
-		len(raw), idrender.Spec(specFlag), strings.Join(ids, ", "))
+	return false
 }
 
 // scopeResolutionRefusal builds the R6.7 explicit-scope refusal for a

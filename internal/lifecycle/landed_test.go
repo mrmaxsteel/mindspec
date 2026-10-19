@@ -8,10 +8,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // TestMain installs a hermetic, always-unavailable default for
@@ -310,15 +312,13 @@ func TestFindLandedMerge_ReviewedHeadSHACorroborates(t *testing.T) {
 	}
 }
 
-// TestFindLandedMerge_ReviewedHeadSHAContradicts: a registered panel whose
-// reviewed_head_sha is neither equal to nor an ancestor of the merge's
-// second parent CONTRADICTS the match — not a positive identification.
-func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
+// A non-matching reviewed SHA cannot veto the exact surviving branch tip.
+func TestFindLandedMerge_ReviewedHeadSHANonCorroborating(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
 	// A second, UNRELATED branch/commit — neither ancestor nor descendant
-	// of bead/bead-one's tip — stands in for a contradicting reviewed_head_sha.
+	// of bead/bead-one's tip — stands in for a non-corroborating reviewed_head_sha.
 	run("checkout", "main")
 	run("checkout", "-b", "unrelated")
 	os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("x\n"), 0644)
@@ -348,8 +348,8 @@ func TestFindLandedMerge_ReviewedHeadSHAContradicts(t *testing.T) {
 	}
 
 	_, err = FindLandedMerge(dir, "spec/119-test", "bead-one")
-	if !errors.Is(err, ErrLandedMergeNotFound) {
-		t.Fatalf("expected ErrLandedMergeNotFound on contradiction, got %v", err)
+	if err != nil {
+		t.Fatalf("non-corroborating panel must not veto the surviving tip, got %v", err)
 	}
 }
 
@@ -469,8 +469,8 @@ func TestReviewedHeadSHAForBead_MalformedSpecBranchProceedsRootOnly(t *testing.T
 		return nil
 	}
 
-	_, found := reviewedHeadSHAForBead("/repo", "spec/x;evil", "mindspec-x.1")
-	if found {
+	set := reviewedHeadSHAForBead("/repo", "spec/x;evil", "mindspec-x.1")
+	if len(set) != 0 {
 		t.Error("expected no corroboration available for a malformed spec branch")
 	}
 	if len(gotRoots) != 1 || gotRoots[0] != "/repo" {
@@ -1876,13 +1876,8 @@ func TestFindLandedMerge_AmbiguousOwnedSecondParentsRefuses(t *testing.T) {
 	}
 }
 
-// TestFindLandedMerge_HostilePanelSHAEscapedInRefusal is the spec 125
-// final-review FIX-5 pin for the landed.go site: reviewed_head_sha comes
-// from the AGENT-WRITABLE panel.json, and the panel-contradiction refusal
-// interpolates it into an error that reaches terminal output — a
-// control-byte/ANSI value must be rendered escaped (like the sibling
-// binding-contradiction branch), never raw.
-func TestFindLandedMerge_HostilePanelSHAEscapedInRefusal(t *testing.T) {
+// A hostile reviewed SHA is excluded from the set; the surviving tip confirms.
+func TestFindLandedMerge_HostilePanelSHANonCorroborating(t *testing.T) {
 	dir, run := initLandedRepo(t, "119-test")
 	mergeBead(t, run, dir, "bead-one", "spec/119-test")
 
@@ -1896,13 +1891,42 @@ func TestFindLandedMerge_HostilePanelSHAEscapedInRefusal(t *testing.T) {
 			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: hostile},
 		}}
 	}
+	if set := reviewedHeadSHAForBead(dir, "spec/119-test", beadID); len(set) != 0 {
+		t.Fatalf("hostile SHA entered the reviewed set: %v", set)
+	}
 
 	_, err := FindLandedMerge(dir, "spec/119-test", "bead-one")
-	if !errors.Is(err, ErrLandedMergeNotFound) {
-		t.Fatalf("a contradicting panel SHA must refuse, got %v", err)
+	if err != nil {
+		t.Fatalf("malformed panel is non-corroborating; tip confirms: %v", err)
 	}
-	if strings.ContainsAny(err.Error(), "\x1b\x07") {
-		t.Errorf("the refusal renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", err.Error())
+}
+
+func TestLandedMergeNoEvidence_EscapesValues(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		name := "single-candidate"
+		if conflict {
+			name = "conflicting-second-parent"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := &LandedMergeNoEvidence{
+				BeadID: "bead\x1b[2J", SpecBranch: "spec\x07", MergeSHA: "merge\u009b",
+				SecondParent: "second\n",
+			}
+			values := []string{e.BeadID, e.SpecBranch, e.MergeSHA, e.SecondParent}
+			if conflict {
+				e.ConflictingSecondParent = "other\r"
+				values = append(values, e.ConflictingSecondParent)
+			}
+			message := e.Error()
+			if strings.ContainsFunc(message, unicode.IsControl) {
+				t.Errorf("NoEvidence contains raw controls: %q", message)
+			}
+			for _, value := range values {
+				if strings.Count(message, termsafe.Escape(value)) != 1 {
+					t.Errorf("NoEvidence must escape %q exactly once: %q", value, message)
+				}
+			}
+		})
 	}
 }
 

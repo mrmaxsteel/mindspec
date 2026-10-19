@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVE",
+  "hard_block": false,
+  "reviewer_id": "O3 claude-opus-5-5",
+  "confidence": 0.85,
+  "rationale": "My round-5 ask is addressed by the stronger Ruling 5: F2 never compares rounds and refuses on ANY visible, well-formed reviewed_head_sha outside the tip's history. I re-ran a real-git shell emulation of the new rule:\n- O3 stale-round {1:A,2:B}: REFUSE.\n- Repo-convention single registration {2:B}: REFUSE.\n- Round-5 cross-directory misnumbering {3:A,2:B}: REFUSE (closed).\n- Round 2 invisible {1:A}: PASS, which is the stated visibility residual.\n- Genuine #239 bead (reviewed at Z, complete adds a sync commit, --no-ff merge, spec fast-forwarded to a main-side PR merge) with {Z}: PASS, so reattest still recovers it.\nNormal beads are not refused. Every normal flow leaves the final reviewed SHA in the tip's history: one round; a round bumped in place over earlier rounds; complete-landed with materialisation or JSONL commits after review; fix commits after the last panel, which descend from it. And F2 applies only to fallback candidates, never to the primary path. Only histories that rewrite the reviewed SHA away AFTER its registration refuse: a rebase or amend after the final review, a stale untracked registration under the root review/ dir, or a kept '-r2' predecessor. Those are fail-closed, the refusal names directory, round and SHA, and the --allow-not-ready=MF-3 --evidence exit is named. The residual (F2 rests on untracked, agent-writable panel.json that a deliberate forge can delete or rewrite) is stated exactly and pinned (AC-11 ix-g, AC-18).",
+  "concrete_changes_required": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Normal beads pass F2; genuine #239 recovers",
+      "detail": "F2 is scoped to fallback candidates (reattest and read-back of an off-first-parent candidate). For a normal bead, the in-place-bumped registration holds the final reviewed SHA. complete and fix commits descend from it, and the bead merges --no-ff, so that SHA is an ancestor of the tip and F2 passes. Emulated: a #239-shaped bead reviewed at Z, plus a post-review JSONL-sync commit, merged, then the spec fast-forwarded to a main-side PR merge: PASS."
+    },
+    {
+      "severity": "INFO",
+      "title": "Fail-closed cases that are not attacks",
+      "detail": "F2 refuses when a registered reviewed SHA was rewritten away after registration: a rebase or amend after the final review, a kept '<slug>-r2' predecessor directory holding a rebased-away SHA, or a leftover untracked registration under the repo-root review/ dir (git-excluded here via .git/info/exclude). Abandoned registrations also refuse by design. All of these name directory, round and SHA, and point to the dependent's scoped --allow-not-ready=MF-3 --evidence exit, so none deadlocks. Plain deletion of a stale untracked file is indistinguishable from the stated forge class; the spec states that honestly."
+    },
+    {
+      "severity": "INFO",
+      "title": "Round-5 ask status",
+      "detail": "O3r5.1 (no cross-directory round comparison; fail closed): ADDRESSED, more strongly than asked. Rounds are never compared, any outside-tip registration refuses, and anchors grant nothing. My {3:A in <X>, 2:B in <X>-r2} shape now REFUSES (AC-11 x-c shape 1)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "None found. The Round-6 summary of Ruling 5, the residual sentence and the repo convention (one directory per panel, round bumped in place) match spec R4.2 F2 and the tracked registrations I inspected in round 5 (one panel.json per bead, rounds 1-5, no -r directories)."
+    }
+  ]
+}

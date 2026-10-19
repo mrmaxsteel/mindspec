@@ -50,9 +50,9 @@ func writeFakeBD(t *testing.T, script string) {
 // (internal/next/beads.go:38,54 before this bead, per plan.md's LIVE
 // residue #3).
 func TestQueryReady_AC11ContentLeg(t *testing.T) {
-	origRunBD := runBDFn
-	t.Cleanup(func() { runBDFn = origRunBD })
-	runBDFn = bead.RunBD
+	origRunBD := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRunBD })
+	readyJSONFn = bead.ReadyJSON
 
 	writeFakeBD(t, `echo 'Error 1105 (HY000): column "depends_on_id" could not be found' >&2
 exit 1`)
@@ -70,9 +70,9 @@ exit 1`)
 // sibling for the epic-scoped query path (the other half of plan.md's
 // LIVE residue #3 citation).
 func TestQueryReadyForEpic_AC11ContentLeg(t *testing.T) {
-	origRunBD := runBDFn
-	t.Cleanup(func() { runBDFn = origRunBD })
-	runBDFn = bead.RunBD
+	origRunBD := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRunBD })
+	readyJSONFn = bead.ReadyJSON
 
 	writeFakeBD(t, `echo 'Error 1105 (HY000): column "depends_on_id" could not be found' >&2
 exit 1`)
@@ -95,9 +95,9 @@ exit 1`)
 // stderr-carrying error) passes the content leg above while failing this
 // one, which is the whole point of asserting them separately.
 func TestQueryReady_AC11RenderingLeg(t *testing.T) {
-	origRunBD := runBDFn
-	t.Cleanup(func() { runBDFn = origRunBD })
-	runBDFn = bead.RunBD
+	origRunBD := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRunBD })
+	readyJSONFn = bead.ReadyJSON
 
 	writeFakeBD(t, `printf 'Error 1105 (HY000): column "depends_on_id" could not be found\n' >&2
 printf 'noise\033[31mmore-noise\r\n' >&2
@@ -195,9 +195,9 @@ func TestBdRenderedError_UnwrapExposesUnderlyingError(t *testing.T) {
 // error — the round-0 regression G1 caught: %s-interpolating
 // renderBDError into the wrapping fmt.Errorf severed the chain entirely.
 func TestQueryReady_ErrorsAsReachesExitError(t *testing.T) {
-	origRunBD := runBDFn
-	t.Cleanup(func() { runBDFn = origRunBD })
-	runBDFn = bead.RunBD
+	origRunBD := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRunBD })
+	readyJSONFn = bead.ReadyJSON
 
 	writeFakeBD(t, `echo 'Error 1105 (HY000): column "depends_on_id" could not be found' >&2
 exit 1`)
@@ -232,5 +232,86 @@ exit 1`)
 	}
 	if !bead.IsUnsupportedFlagError(err, "as-of") {
 		t.Errorf("expected IsUnsupportedFlagError to classify through the bdRenderedError wrapper, got: %v", err)
+	}
+}
+
+// recordRowcapBD observes the final process argv, after the bead waist.
+func recordRowcapBD(t *testing.T) func(string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ROWCAP_ARGV\"\nprintf '[]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROWCAP_ARGV", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func(verb string) {
+		t.Helper()
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		caps := 0
+		for i, a := range args {
+			if a == "-n" {
+				if i+1 == len(args) || args[i+1] != "0" {
+					t.Fatalf("bad cap: %q", args)
+				}
+				caps++
+			}
+		}
+		if len(args) == 0 || args[0] != verb || caps != 1 {
+			t.Fatalf("expected %s and exactly one -n 0, got %q", verb, args)
+		}
+	}
+}
+
+func TestQueryReady_Uncapped(t *testing.T) {
+	check := recordRowcapBD(t)
+	for _, query := range []func() ([]BeadInfo, error){QueryReady, func() ([]BeadInfo, error) { return QueryReadyForEpic("epic-129") }} {
+		if _, err := query(); err != nil {
+			t.Fatal(err)
+		}
+		check("ready")
+	}
+}
+func TestResolveActiveBead_Uncapped(t *testing.T) {
+	stubEpicForSpec(t, 129, "fixture", "epic-129")
+	check := recordRowcapBD(t)
+	if _, err := ResolveActiveBead(t.TempDir(), "129-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	check("list")
+}
+
+// Exercise the parser's status filter directly, without BuildReadySet's
+// separate membership check masking a regression here.
+func TestFilterReadyItems_Status(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"", true}, {"open", true}, {" OPEN ", true}, {"closed", false}, {"in_progress", false}, {"blocked", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			got := filterReadyItems([]BeadInfo{{ID: "bead-1", Status: tc.status, IssueType: "task"}})
+			if (len(got) == 1) != tc.want {
+				t.Fatalf("status %q: got %v, want included=%t", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadyPlanMember_Status(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		want   bool
+	}{{"", true}, {"open", true}, {" OPEN ", true}, {"closed", false}, {"in_progress", false}, {"blocked", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			got := isReadyPlanMember(BeadInfo{ID: "epic-129.1", Status: tc.status}, "epic-129", lineageInfo{epic: "epic-129", mapped: true})
+			if got != tc.want {
+				t.Fatalf("member status %q: got %t, want %t", tc.status, got, tc.want)
+			}
+		})
 	}
 }

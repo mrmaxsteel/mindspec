@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
@@ -31,6 +32,9 @@ import (
 // repairMergeMetadataFn) so a test can observe/stub the write without
 // hitting a real bd invocation.
 var nextPhaseMergeMetadataFn = bead.MergeMetadata
+var nextGateReadinessFn = next.GateReadiness
+var nextEnsureWorktreeFn = next.EnsureWorktree
+var nextResolveActiveBeadFn = next.ResolveActiveBead
 
 var nextCmd = &cobra.Command{
 	Use:   "next",
@@ -57,7 +61,23 @@ team lead spawns fresh agents per bead.`,
 		specFlag, _ := cmd.Flags().GetString("spec")
 		force, _ := cmd.Flags().GetBool("force")
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
-		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
+		allowNotReady, _ := cmd.Flags().GetString("allow-not-ready")
+		evidencePath, _ := cmd.Flags().GetString("evidence")
+		flagGiven := cmd.Flags().Changed("allow-not-ready")
+		beadID := ""
+		if len(args) > 0 {
+			beadID = args[0]
+		}
+		namedSignals, parseErr := next.ParseReadinessSignals(allowNotReady, flagGiven)
+		if parseErr != nil {
+			if flagGiven && allowNotReady == next.BareOverride {
+				return bareReadinessRefusal(args)
+			}
+			if beadID != "" && !next.IsReadinessSignalToken(beadID) {
+				_, parseErr = next.GateReadiness("", beadID, next.GateOptions{FlagGiven: true, NamedSignals: []string{allowNotReady}})
+			}
+			return parseErr
+		}
 
 		// Spec 128 Bead 8 round-1 panel G2: --pick < 0 is pure arg
 		// validation — checked IMMEDIATELY after flag parsing, before
@@ -157,8 +177,8 @@ team lead spawns fresh agents per bead.`,
 						fmt.Fprintf(os.Stderr, "  %d. %s  (phase: %s)\n", i+1, idrender.Spec(s.SpecID), s.Mode)
 					}
 					fmt.Fprintf(os.Stderr, "\nAsk the user which spec to work on, then re-run:\n")
-					fmt.Fprintf(os.Stderr, "  mindspec next --spec=<number>\n")
-					os.Exit(1)
+					fmt.Fprintln(os.Stderr, nextSpecMenuCommand)
+					return fmt.Errorf("select an active spec")
 				}
 				// Non-ambiguous errors are OK — next will query all ready work
 			} else {
@@ -166,35 +186,27 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Proportional claim guard (ADR-0025's clarifying
-		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
-		// build artifact co-managed by bd; dirt on that path alone is
-		// auto-handled via `bd export`. Of the remaining user dirt, only
-		// dirt ComputeEntangleablePaths names as a path THIS
-		// worktree-creating claim can itself write still blocks — round-1
-		// panel fix: that set is per-spec-aware (the target spec's
-		// recording paths, when recording is enabled) and conditional on
-		// .gitignore's current state, not unconditionally empty. Every
-		// other unrelated dirty file in the invoking checkout still does
-		// not block; it is named on stderr (Max's standing directive,
-		// 2026-09-02 — visibility without the block) and the claim
-		// proceeds.
-		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specFlag)
-		if err != nil {
-			return fmt.Errorf("checking working tree: %w", err)
+		// Guard a known scope before any recovery worktree can be created.
+		// With no resolved scope, defer until the readiness gate supplies T:
+		// its recording paths must never be reported as unrelated dirt.
+		checkClaimDirt := func(specID string) error {
+			blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specID)
+			if err != nil {
+				return fmt.Errorf("checking working tree: %w", err)
+			}
+			if len(blockingDirt) > 0 {
+				return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+			}
+			if len(ignoredDirt) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+			}
+			return nil
 		}
-		if len(blockingDirt) > 0 {
-			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
-			// worktree-context line and ends with a `recovery:` line. The
-			// old multi-line "Recovery steps: 1..3" stderr block advised
-			// `git restore .` — destructive over the HUMAN's dirt when the
-			// agent merely ran `next` from the wrong directory. The active
-			// worktree (when one exists) is the steer-to target; resolving
-			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
-		}
-		if len(ignoredDirt) > 0 {
-			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+		guardedSpec := specFlag
+		if guardedSpec != "" {
+			if err := checkClaimDirt(guardedSpec); err != nil {
+				return err
+			}
 		}
 
 		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
@@ -205,59 +217,22 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 2/2.5: Construct the ready set — bd-ready query (global, or
-		// scoped to specFlag's epic) plus the spec-title filter, as ONE
-		// shared construction with --emit-only (R6.1/AC-9 parity, spec
-		// 128 Bead 8). BuildReadySet REFUSES rather than silently
-		// widening to the global, unscoped `bd ready` query when specFlag
-		// is set and its epic can't be resolved — the removed
-		// FindEpicBySpecID-fails fallback that used to live here (R6.7/
-		// AC-15) — and errors loudly rather than silently succeeding when
-		// the filter drops every returned item (R6.3(c)/AC-10b).
+		// One global ready query, scoped by plan-bead form, lineage and mapping.
+		// Loud emptiness still carries a valid set for the derived-state report.
+
 		rs, err := next.BuildReadySet(root, specFlag)
-		if err != nil {
+		var emptyErr *next.EmptyAfterFilterError
+		if err != nil && !errors.As(err, &emptyErr) {
+			// A failed query cannot proceed to a claim. Preserve dirt
+			// visibility on this early exit even when no target was learned.
+			if guardedSpec == "" {
+				if dirtErr := checkClaimDirt(""); dirtErr != nil {
+					return dirtErr
+				}
+			}
 			return err
 		}
 		items := rs.Filtered
-
-		// Step 3: Handle no-work case — also check for in-progress bead with
-		// missing worktree (stale recovery). If a bead is in_progress but its
-		// worktree was deleted, recreate the worktree so the agent can resume.
-		if len(items) == 0 {
-			if specFlag != "" {
-				activeBead, resolveErr := next.ResolveActiveBead(root, specFlag)
-				if resolveErr == nil && activeBead != "" {
-					fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", idrender.Bead(activeBead))
-					wtPath, wtErr := next.EnsureWorktree(root, activeBead, specFlag, exec)
-					if wtErr != nil {
-						return fmt.Errorf("recovering worktree for in-progress bead %s: %w", idrender.Bead(activeBead), wtErr)
-					}
-					if wtPath != "" {
-						fmt.Printf("Worktree recovered: %s\n", wtPath)
-						fmt.Printf("  %s\n", containment.EmitCd(wtPath))
-					}
-					resolved := next.ResolveMode(root, next.BeadInfo{ID: activeBead, Title: "[" + specFlag + "] recovered"})
-					resolved.SpecID = specFlag
-					fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, activeBead))
-					return nil
-				}
-			}
-			fmt.Println("No ready work found.")
-			if specFlag != "" {
-				fmt.Printf("(filtered to spec: %s)\n", idrender.Spec(specFlag))
-			}
-			fmt.Println()
-			fmt.Println("Next steps:")
-			fmt.Println("  - Create a new spec: mindspec spec create <slug>")
-			fmt.Println("  - Check blocked items: bd blocked")
-			fmt.Println("  - List all open work: bd list --status=open")
-			return nil
-		}
-
-		// Step 4: Display and select. Spec 101 R1 (mindspec-mfe0): when a
-		// positional bead ID is given it names the SPECIFIC bead the caller
-		// intends — resolve it from the already-fetched ready set (claim that
-		// bead or error), never fall through to items[0]/"Defaulting to first".
 		named := ""
 		if len(args) > 0 {
 			named = args[0]
@@ -265,6 +240,7 @@ team lead spawns fresh agents per bead.`,
 		if notice := rs.ExclusionNotice(); notice != "" {
 			fmt.Fprintln(os.Stderr, notice)
 		}
+
 		if len(items) > 1 {
 			fmt.Printf("Ready work (%d items):\n", len(items))
 			fmt.Print(next.FormatWorkList(items))
@@ -273,10 +249,30 @@ team lead spawns fresh agents per bead.`,
 				fmt.Println("Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item.")
 			}
 		}
-
+		// A selector is a request, even when the displayed set is empty.
 		var selected next.BeadInfo
 		if named != "" {
 			selected, err = next.SelectNamedFromReadySet(rs, named)
+		} else if len(items) == 0 && pick > 0 && specFlag != "" {
+			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, idrender.Spec(specFlag))
+		} else if len(items) == 0 {
+			if specFlag != "" {
+				return handleEmptyScoped(root, rs, exec, func(activeBead string) {
+					resolved := next.ResolveMode(root, next.BeadInfo{ID: activeBead, Title: "[" + specFlag + "] recovered"})
+					resolved.SpecID = specFlag
+					fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, activeBead))
+				})
+			}
+			if _, ignored, err := next.CheckDirtyTreeProportional(root, cwd, ""); err == nil && len(ignored) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignored))
+			}
+			fmt.Println("No ready work found.")
+			fmt.Println()
+			fmt.Println("Next steps:")
+			fmt.Println("  - Create a new spec: mindspec spec create <slug>")
+			fmt.Println("  - Check blocked items: bd blocked")
+			fmt.Println("  - List all open work: bd list --status=open")
+			return nil
 		} else {
 			selected, err = next.SelectWork(items, pick)
 		}
@@ -291,9 +287,20 @@ team lead spawns fresh agents per bead.`,
 		// selection and BEFORE any claim/branch/worktree mutation below,
 		// so a NOT-READY refusal leaves bd state, branches, and worktrees
 		// byte-identical to their pre-call state (AC-4).
-		gateResult, gateErr := next.GateReadiness(root, selected.ID, allowNotReady)
+		gateResult, gateErr := nextGateReadinessFn(root, selected.ID, next.GateOptions{ScopeSpec: specFlag, NamedSignals: namedSignals, FlagGiven: flagGiven, EvidencePath: evidencePath})
 		if gateErr != nil {
 			return gateErr
+		}
+
+		// Lineage is the dispatch and recording spec, including unscoped claims.
+		specFlag = gateResult.SpecID
+		if specFlag != guardedSpec {
+			if err := checkClaimDirt(specFlag); err != nil {
+				return err
+			}
+		}
+		for _, note := range gateResult.Notes {
+			fmt.Fprintln(os.Stderr, note)
 		}
 
 		// Step 4.6: On the --allow-not-ready proceed path, write the
@@ -313,7 +320,7 @@ team lead spawns fresh agents per bead.`,
 		if len(gateResult.FailingSignals) > 0 {
 			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
 				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
-			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
+			if err := next.RecordReadinessOverride(selected.ID, gateResult); err != nil {
 				return readinessOverrideFailure(selected.ID, err)
 			}
 		}
@@ -361,7 +368,7 @@ team lead spawns fresh agents per bead.`,
 		advancePhaseOnClaim(root, selected)
 
 		// Step 5.5: Create or reuse worktree
-		wtPath, wtErr := next.EnsureWorktree(root, selected.ID, specFlag, exec)
+		wtPath, wtErr := nextEnsureWorktreeFn(root, selected.ID, specFlag, exec)
 		if wtErr != nil {
 			// Spec 093 Req 4: warn-and-continue is preserved (zero
 			// behavior change), but the message now carries the concrete
@@ -424,6 +431,29 @@ team lead spawns fresh agents per bead.`,
 	},
 }
 
+// bareReadinessRefusal decides the syntax refusal before resolving any bead.
+// A real positional ID then gets a read-only preflight solely for recovery;
+// a space-separated signal token never enters selection or readiness.
+func bareReadinessRefusal(args []string) error {
+	beadID := ""
+	if len(args) > 0 {
+		beadID = args[0]
+	}
+	root := ""
+	if beadID != "" && !next.IsReadinessSignalToken(beadID) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		root, err = workspace.FindRoot(cwd)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := next.GateReadiness(root, beadID, next.GateOptions{BareFlag: true})
+	return err
+}
+
 // completionGuidance renders the "When done" tail appended to the bead
 // context. Spec 092 Req 5 (mindspec-qxsy / mindspec-tjat): the guidance
 // is location-agnostic — it must NOT instruct agents to `cd` into the
@@ -484,16 +514,22 @@ func runEmitOnly(root, specFlag string, pick int, args []string) error {
 	// Query ready work and select, via the SAME shared construction the
 	// claim path uses (R6.1/AC-9 parity).
 	rs, err := next.BuildReadySet(root, specFlag)
-	if err != nil {
+	var emptyErr *next.EmptyAfterFilterError
+	if err != nil && !errors.As(err, &emptyErr) {
 		return err
+	}
+	if notice := rs.ExclusionNotice(); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 	items := rs.Filtered
 	if len(items) == 0 {
+		if specFlag != "" && pick > 0 {
+			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, idrender.Spec(specFlag))
+		}
+		if specFlag != "" {
+			return handleEmptyScoped(root, rs, nil, nil)
+		}
 		return fmt.Errorf("no ready work found for --emit-only")
-	}
-
-	if notice := rs.ExclusionNotice(); notice != "" {
-		fmt.Fprintln(os.Stderr, notice)
 	}
 	if len(items) > 1 {
 		fmt.Printf("Ready work (%d items):\n", len(items))
@@ -550,7 +586,8 @@ func formatStateLine(mode, specID, beadID string) string {
 // phase-semantics signature, then advance the epic's stored
 // mindspec_phase to `implement` under the R3.3 lock, but ONLY for a
 // LIFECYCLE (task-typed or untyped — the ADR-0023 discriminator) claim;
-// a non-lifecycle claim (e.g. a `bug` bead) advances nothing.
+// a non-lifecycle plan-bead claim (e.g. a `bug` bead) advances nothing.
+// A bug with no epic lineage is refused earlier by EvaluateReadiness.
 // Forward-only: no-op when already `implement` — this is a NEW writer,
 // so it registers in the bead-1 writer-inventory test (writer_inventory_test.go)
 // by construction; the composite literal below must stay lexically
@@ -692,7 +729,7 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 func readinessOverrideFailure(beadID string, err error) error {
 	return guard.NewFailure(
 		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(beadID), next.RenderBDError(err)),
-		"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+		"re-run this exact `mindspec next` invocation with --allow-not-ready=<ids> --evidence <path-to-justification> once bd metadata writes are healthy",
 	)
 }
 
@@ -774,10 +811,91 @@ func unmergedBeadError(o lifecycle.Orphan) error {
 	return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", safeBeadID, safeBeadID)
 }
 
-func init() {
-	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
-	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
-	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
-	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
-	nextCmd.Flags().Bool("allow-not-ready", false, "Proceed past a failing readiness floor (spec 124); records a durable override marker naming the bypassed signals")
+func init() { registerNextFlags(nextCmd) }
+
+// registerNextFlags is shared with command fixtures so they parse the exact
+// production flag types and NoOptDefVal behavior.
+func registerNextFlags(cmd *cobra.Command) {
+	cmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
+	cmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
+	cmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
+	cmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
+	cmd.Flags().String("allow-not-ready", "", "Override named readiness signals: --allow-not-ready=MF-1,MF-2,MF-3,MF-4; requires --evidence when recording failures")
+	cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
+	cmd.Flags().String("evidence", "", "Readable justification file (1 byte to 64 KiB); stores only path, sha256 and size")
+}
+
+// nextSpecMenuCommand names the literal form accepted under the listed spec IDs.
+const nextSpecMenuCommand = "  mindspec next --spec=<spec-id>"
+
+// handleEmptyScoped reports the child-derived state even for loud emptiness.
+// A nil executor is the emit-only path and cannot recover a worktree.
+func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, reportRecovered func(string)) error {
+	children, err := rs.Cache.GetChildren(rs.EpicID)
+	if err != nil {
+		return fmt.Errorf("child-derived phase: indeterminate (could not read children of %s: %v)\nrecovery: mindspec state show", idrender.Bead(rs.EpicID), next.RenderBDError(err))
+	}
+	// PhaseDetail's legacy API represents a failed read with an empty Derived;
+	// explicitly preflight both reads so an infrastructure failure cannot look empty.
+	if _, err := rs.Cache.FindEpic(rs.EpicID); err != nil {
+		return fmt.Errorf("stored phase: indeterminate: %w\nrecovery: mindspec state show", next.RenderBDError(err))
+	}
+	detail, err := phase.DerivePhaseDetailWithCache(rs.Cache, rs.EpicID)
+	if err != nil {
+		return err
+	}
+	closed, progress, open := 0, 0, 0
+	for _, child := range children {
+		if !phase.IsLifecycleIssueType(child.IssueType) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(child.Status)) {
+		case "closed":
+			closed++
+		case "in_progress":
+			progress++
+		default:
+			open++
+		}
+	}
+	fmt.Printf("lifecycle children: %d closed / %d in_progress / %d open\n", closed, progress, open)
+	fmt.Printf("stored phase: %s; child-derived phase: %s\n", detail.Stored, detail.Derived)
+	fmt.Println("an empty ready set is not evidence the spec is complete; the derived phase above is")
+	switch {
+	case progress > 0:
+		if exec != nil {
+			activeBead, err := nextResolveActiveBeadFn(root, rs.SpecFlag)
+			if err == nil && activeBead != "" {
+				fmt.Printf("No ready work, but bead %s is in-progress with missing worktree. Recovering...\n", idrender.Bead(activeBead))
+				wtPath, err := nextEnsureWorktreeFn(root, activeBead, rs.SpecFlag, exec)
+				if err != nil {
+					return fmt.Errorf("recovering worktree for in-progress bead %s: %w", idrender.Bead(activeBead), err)
+				}
+				if wtPath != "" {
+					fmt.Printf("Worktree recovered: %s\n  %s\n", wtPath, containment.EmitCd(wtPath))
+				}
+				if reportRecovered != nil {
+					reportRecovered(activeBead)
+				}
+			} else {
+				fmt.Printf("recovery: bd list --parent %s --status=in_progress\n", idrender.Bead(rs.EpicID))
+			}
+		} else {
+			fmt.Printf("recovery: mindspec next --spec %s\n", idrender.Spec(rs.SpecFlag))
+		}
+	case open > 0:
+		fmt.Printf("%d open lifecycle bead(s), none selectable (any that are bd-ready but unmapped or unlinked are named above)\n", open)
+		fmt.Printf("recovery: bd blocked --parent %s\n", idrender.Bead(rs.EpicID))
+	case closed > 0:
+		fmt.Printf("recovery: mindspec impl approve %s\n", idrender.Spec(rs.SpecFlag))
+	default:
+		fmt.Printf("recovery: mindspec plan approve %s\n", idrender.Spec(rs.SpecFlag))
+	}
+	if detail.Stored != "" && detail.Derived != "" && detail.Stored != detail.Derived && !phase.IsBackwardMove(detail.Stored, detail.Derived) {
+		fmt.Printf("recovery: mindspec repair phase %s\n", idrender.Spec(rs.SpecFlag))
+	}
+	if rs.HasBlockingNearMisses() {
+		return fmt.Errorf("no ready plan bead for spec %s; blocking near-misses are named above", idrender.Spec(rs.SpecFlag))
+	}
+	return nil
 }

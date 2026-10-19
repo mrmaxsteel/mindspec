@@ -13,9 +13,13 @@
 # (internal/panel/disposition_store.go). It serializes concurrent
 # `mindspec panel disposition append`/`check` invocations on
 # <spec-dir>/reviews/<panel>/dispositions.lock and is never the durable
-# data file (dispositions.jsonl, which IS version-controlled); it is a
+# data file (dispositions.jsonl, version-controlled only where already tracked; see spec 129 R8); it is a
 # local runtime artifact, not part of the telemetry the store records.
 **/reviews/*/dispositions.lock
+
+# spec 129 R8: panel reviews are a local helper, not version-controlled (already-tracked files stay tracked; dispositions.jsonl retention pending R8.4)
+.mindspec/specs/*/reviews/**
+.mindspec/reviews/**
 
 # Beads runtime artifacts are handled by .beads/.gitignore
 # This rule catches any stray runtime files outside .beads/

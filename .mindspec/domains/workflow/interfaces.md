@@ -75,6 +75,21 @@ const (
 // resolution is lineage-authoritative (bead -> epic -> spec), never cwd.
 func EvaluateReadiness(root, beadID string) (*Report, error)
 
+// PlanMapsBead requires both the Nth positional "## Bead " heading
+// (including headings inside fences) and a work_chunks id N.
+func PlanMapsBead(planContent string, n int) (mapped bool, why string)
+
+// Report carries lineage EpicID and SpecID from the resolver, never cwd.
+// NonPlanFormError carries BeadID, EpicID and SpecID when lineage resolves
+// but the bead has no usable dotted index; Error preserves the diagnostic.
+type NonPlanFormError struct { BeadID, EpicID, SpecID string }
+
+// Signal.Failures contains sorted, unique raw failure records; human
+// Detail and terminal escaping do not participate in record identity.
+func FailureRecordDigests(s Signal) []string // sorted lowercase SHA-256
+func DependencyFailureRecord(depID, class, candidateSHA string) string
+func IsIndeterminateRecord(rec string) bool
+
 // Report always carries exactly four signals, ordered MF-1..MF-4.
 func (r *Report) AllPass() bool
 func (r *Report) FailingSignals() []Signal
@@ -86,23 +101,41 @@ func (r *Report) RecoveryCommands() []string // one recovery line per FAIL
 func Render(r *Report) string
 ```
 
+Failure records (spec 129 R6.2) have these grammars:
+
+| Signal | Raw record |
+|:-------|:-----------|
+| MF-1 | `<key>:<n>`, where key is `section-missing`, `ac-entry-missing`, `chunk-missing`, `key-file-paths-empty`, `key-file-paths-placeholder` or `key-file-paths-blank` |
+| MF-2 | `dangling:<normalized-token>`; `AC9` normalizes to `AC-9`, parenthetical sub-letters to appended letters, Roman enumerators and dotted sub-numbers to the base |
+| MF-3 | `<dep-id>:<class>[:<candidate-sha>]`; classes are `indeterminate`, `not-closed`, `no-candidate`, `off-first-parent`, `no-evidence`, `contradiction`, `reverted` |
+| MF-4 | `<kind>:<source>:<section>:<k>:<sha256-of-normalized-line>` |
+
+MF-1, MF-2 and MF-4 aggregate all failures. MF-4's kind is `token` or
+`checklist`; source is `description` or `plan`. Section is the ATX heading
+path joined with ` / ` (including heading markers), or `-` for descriptions
+and unheaded text. Line normalization trims and collapses whitespace;
+other raw bytes remain. The 1-based occurrence index `k` distinguishes
+identical `(kind, source, section, hash)` tuples, including multiple tokens
+on one line. Failure records contain no free-form errors or timestamps.
+`FailureRecordDigests` is the shared writer/reader fingerprint function;
+it hashes records before rendering. An MF-3 `indeterminate` record cannot
+be covered by an override. The constructors expose the shared MF-3
+grammar for the dependency evaluator.
+
 The gate-before-mutate wiring lives in `internal/next/ready_gate.go`:
 
 ```go
 package next
 
-// GateReadiness runs after bead selection and BEFORE any claim/branch/
-// worktree mutation (ADR-0041 fourth-verb preflight leg). On a failing
-// floor: allowNotReady=false returns a guard refusal (zero mutation);
-// allowNotReady=true returns the failing signal IDs for the caller's
-// stderr warning + override marker.
-func GateReadiness(root, beadID string, allowNotReady bool) (*GateResult, error)
+// GateReadiness checks plan-bead form, lineage/scope agreement and the
+// lineage spec branch before any mutation. Scoped failures require fresh
+// evidence; indeterminate reads refuse. GateResult.SpecID is the dispatch spec.
+func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error)
 
-// RecordReadinessOverride writes the durable --allow-not-ready marker
-// (bead metadata key "mindspec_readiness_override": bypassed signal IDs
-// + UTC timestamp). Called BEFORE ClaimBead, fail-closed — a marker-write
-// failure refuses the whole `next` invocation with nothing claimed.
-func RecordReadinessOverride(beadID string, signals []string) error
+// RecordReadinessOverride replaces the schema-v2 marker before ClaimBead,
+// fail-closed: signals, complete sorted failure-record digests, UTC timestamp,
+// evidence path/sha256/bytes (never text).
+func RecordReadinessOverride(beadID string, result *GateResult) error
 ```
 
 ### Panel Artifact Schema (Spec 110 Bead 1, ADR-0040 portability contract)
@@ -319,10 +352,13 @@ complete-gated.
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `ReadySet{Filtered, Raw, SpecFlag}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | R6.1's ONE ready-set construction result — `Filtered` is the displayed/selectable list, `Raw` the pre-filter list (consulted only to name a true exclusion reason) — consumed identically by the claim path and the NON-positional `--emit-only` flows (default and `--pick N`) so `--pick N` names the same bead on both (AC-9). **Positional `--emit-only` never constructs one at all** (R6.3(a)) — it fetches by ID and prints the pinned bypass line `"emit-only: bead fetched by ID; readiness not checked."`, with no exclusion report. |
-| `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, epic-scoped otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
+| `ReadySet{Filtered, Raw, SpecFlag, EpicID, NearMisses, PlanNotice, Cache}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | One construction shared by claims and non-positional emit-only. `Filtered` preserves the selectable bd order; `Raw` retains global ready rows for positional resolution. `SpecFlag`/`EpicID` identify the scope, `NearMisses` explains exclusions, `PlanNotice` discloses source divergence, and the per-invocation `Cache` shares phase reads. Positional emit-only fetches by ID without constructing a set and prints `emit-only: bead fetched by ID; readiness not checked.` |
+| `NearMiss{Bead, Class, Message, Recoveries, Blocking, Lineage, NoLineage}` (`nearmiss.go`) | A linked non-member with its N1–N4 classification, true reason and recovery. `String()` renders the diagnostic; lineage fields govern positional N4 handling. |
+| `EmptyAfterFilterError` (`beads.go`) | Typed blocking emptiness: the returned set is still valid for printing derived lifecycle state before refusing. |
+| `ReadySet.HasBlockingNearMisses()` (`beads.go`) | Reports whether the near-misses make an empty scoped result non-zero; informational near-misses alone do not. |
+| `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, filtered by the plan-bead predicate otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
 | `SelectWork(items, pick)` (`select.go`) | Total pick semantics: `pick >= 1` always indexes the displayed list, even with exactly one item; `0` means unset; negative errors. |
-| `SelectNamedFromReadySet(rs, name)` | Positional resolution against a `ReadySet`: a filtered-out-but-ready bead gets the honest exclusion reason, never the generic "not found or not ready". |
+| `SelectNamedFromReadySet(rs, name)` | Resolves scoped selectors before empty-set handling: near-misses name their reason, unlinked ready rows name their parent, no-lineage N4 refuses before readiness, and lineage-E N4 reaches MF-1. Empty positional and pick refusals end with `recovery: mindspec next --spec <S>`. |
 | `RenderBDError(err)` (`beads.go`) | Wraps a bd/lock-derived error so callers render it via `%v`/`%s` with every line escaped through `termsafe.Escape` (ADR-0042) — the rendering half of AC-11 (the execution domain's `wrapBDError` supplies the content half). |
 
 **Total verb classification (`cmd/mindspec`, R2.1/AC-14):**
@@ -346,8 +382,8 @@ complete-gated.
 | `mindspec state show` | Display current state |
 | `mindspec instruct` | Emit mode-appropriate operating guidance |
 | `mindspec next` | Discover, claim, and start next bead — evaluates the mechanical readiness floor gate-before-mutate: a NOT-READY refusal claims nothing, creates no branch/worktree (spec 124 R3, ADR-0041 fourth-verb preflight leg) |
-| `mindspec next --allow-not-ready` | Proceed past a failing readiness floor deliberately — warns naming every failing signal and records the durable `mindspec_readiness_override` marker BEFORE claiming, fail-closed (spec 124 R3/AC-4); orthogonal to `--force` (session-freshness only) |
-| `mindspec bead ready-check <id>` | Read-only per-signal readiness report (MF-1..MF-4); exit 0 when all pass, else one `recovery:` line per failing signal (spec 124 R1) |
+| `mindspec next --allow-not-ready=<ids> --evidence <path>` | Proceed only when every failing signal is named and determinate, with fresh evidence — warns naming each failure and replaces the schema-v2 failure-digest `mindspec_readiness_override` marker BEFORE claiming, fail-closed (spec 124 R3/AC-4); orthogonal to `--force` (session-freshness only) |
+| `mindspec bead ready-check <id>` | Read-only MF-1..MF-4 report with validated schema-v2 override coverage (spec 129 R6.4). Exit 0 iff all signals pass or all current failures are covered; indeterminate records never cover. Reports OVERRIDDEN, no-longer-needed, legacy or malformed markers. Otherwise exits non-zero naming uncovered signals and release/re-claim recovery with ALL currently failing IDs. Metadata read errors refuse. |
 | `mindspec bead clarify <id> --file <record.json>` | Write the append-only readiness-attempt record for a NOT-READY bead — original ordinal-keyed report + span-grounded clarifications; refuses a second write per bead, the categorical R8 cap (spec 124 R8) |
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
@@ -362,7 +398,7 @@ complete-gated.
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create an ADR with a slugged filename `ADR-NNNN-<slug>.md` derived from the title (or `--slug` override); every surface reports/accepts the canonical `ADR-NNNN` ID (spec 123 R5) |
 | `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc panel WITHOUT `--spec` at `.mindspec/reviews/<slug>/` (flat layout) — talliable via `panel tally`, never scanned by `mindspec complete`'s gate (spec 123 R8, ADR-0037 scope) |
 | `mindspec domain add <name>` | Scaffold a domain AND converge from any partial state: backfills missing standard files and the context-map entry; refuses "already exists" only when fully scaffolded and mapped (spec 123 R2) |
-| `mindspec reattest <bead-id> [--spec-branch spec/<id>]` | Explicit, operator-invoked, git-corroborated re-attest of an already-merged bead's landed-binding — derives the SHAs from an independent exact-second-parent scan (never operator-asserted; no bypass, no `--all`), fail-closed on ambiguity/anonymous-subject/reverted content, audited via `mindspec_landed_reattest_*` metadata; `--spec-branch` is scoping-only, consulted only when the epic linkage is underivable (spec 125 R4, ADR-0041 §2(ii) amendment) |
+| `mindspec reattest <bead-id> [--spec-branch spec/<id>]` | Explicit audited landed-binding recovery. Derives identity from first-parent merges, then a source-named reachable fallback only on zero primary candidates. Fallback requires F1/F3/F4/F5; registrations are advisory. Writes binding and valid audited tuple atomically. On the fallback, no-op only when valid audit, binding and candidate agree. On the primary path, no-op when the binding equals the newest owned merge. Non-matching panel sets never veto; contradictory bindings are repaired with prior values audited. No bypass, SHA assertion or `--all`. `--spec-branch` scopes only cleanly absent lineage (ADR-0041 amendments, specs 125/129). |
 
 ## Agent Skills
 

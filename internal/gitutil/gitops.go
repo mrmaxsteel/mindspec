@@ -801,8 +801,8 @@ func IsAncestor(workdir, ancestor, descendant string) (bool, error) {
 	return false, fmt.Errorf("checking ancestry %s..%s: %w", ancestor, descendant, err)
 }
 
-// MergeCommit describes one first-parent merge commit as returned by
-// FirstParentMerges: its own SHA, its full parent-SHA list (in the order
+// MergeCommit describes one merge returned by FirstParentMerges or
+// ReachableMerges: its own SHA, its full parent-SHA list (in the order
 // git records them — Parents[0] is the first-parent chain member,
 // Parents[1] is the merged-in side for a plain two-parent merge), and its
 // commit subject line.
@@ -813,7 +813,9 @@ type MergeCommit struct {
 }
 
 // FirstParentMerges lists ref's first-parent merge commits in workdir,
-// newest-first, each with its full parent list and subject line. It is the
+// newest-first, each with its full parent list and subject line. This scope
+// excludes merges reached only through another parent; ReachableMerges
+// includes those merges. It is the
 // git-I/O primitive behind the landed-merge-commit-identity predicate
 // (internal/lifecycle.FindLandedMerge, Spec 119 R4): every in-binary
 // bead->spec merge is gitutil.MergeInto's deterministic
@@ -849,6 +851,28 @@ func FirstParentMerges(workdir, ref string) ([]MergeCommit, error) {
 			Parents: strings.Fields(fields[1]),
 			Subject: fields[2],
 		})
+	}
+	return merges, nil
+}
+
+// ReachableMerges lists every merge reachable from ref, newest-first in
+// topological order, including merges outside ref's first-parent chain.
+// Each entry has the same full parent list and subject as FirstParentMerges.
+func ReachableMerges(workdir, ref string) ([]MergeCommit, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "log", "--merges", "--topo-order", "--format=%H%x1f%P%x1f%s", ref)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("log --merges --topo-order %s: %w", ref, err)
+	}
+	var merges []MergeCommit
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		fields := strings.SplitN(line, "\x1f", 3)
+		if len(fields) == 3 {
+			merges = append(merges, MergeCommit{SHA: fields[0], Parents: strings.Fields(fields[1]), Subject: fields[2]})
+		}
 	}
 	return merges, nil
 }
@@ -1755,7 +1779,8 @@ func CleanForcePaths(workdir string, paths []string) error {
 	return nil
 }
 
-// CommitPaths stages the given repo-relative paths (`git add -- <paths...>`)
+// CommitPaths stages the given repo-relative paths (using `git add -u` for
+// tracked paths, ordinary `git add` for untracked non-ignored paths)
 // and commits ONLY them with msg (`git commit -m <msg> --no-verify --
 // <paths...>`) in workdir — a git "partial commit": staging other paths
 // FIRST (whether by an earlier step of the same caller, or by anything
@@ -1787,10 +1812,12 @@ func CommitPaths(workdir, msg string, paths []string) error {
 				return err
 			}
 		}
-		addArgs := append([]string{"add", "--"}, paths...)
-		addCmd := execCommand("git", gitArgs(workdir, addArgs...)...)
-		if out, err := addCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git add: %s", strings.TrimSpace(string(out)))
+		run := func(args ...string) ([]byte, error) {
+			cmd := execCommand("git", gitArgs(workdir, args...)...)
+			return cmd.Output()
+		}
+		if err := stageExplicitPaths(paths, run); err != nil {
+			return err
 		}
 		// Nothing staged AT THESE PATHS -> nothing to commit (idempotent
 		// resume reaches here) — scoped so unrelated staged content

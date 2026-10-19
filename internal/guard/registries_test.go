@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
@@ -333,6 +335,89 @@ func recoveryTemplate(expr ast.Expr) (string, bool) {
 		return recoveryTemplate(e.Args[0])
 	}
 	return "", false
+}
+
+// Check the real ready-check recovery templates and their ID renderer,
+// including the metadata-read refusal and the appended release/re-claim.
+func TestOpaqueOperandRegistry_ReadyCheckRecoveryOperands(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join(repoRootFromGuardTestDir(t), "cmd/mindspec/bead_ready.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := funcOrVarDeclByName(file, "beadReadyCheckCmd")
+	if target == nil {
+		t.Fatal("ready-check command not found")
+	}
+	wanted := map[string]int{
+		"bd show %s --json":   0,
+		"mindspec release %s": 0,
+		"mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>": 0,
+	}
+	ast.Inspect(target, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		tmpl, ok := recoveryTemplate(call)
+		if !ok {
+			return true
+		}
+		if _, ok := wanted[tmpl]; !ok {
+			return true
+		}
+		wanted[tmpl]++
+		if len(call.Args) < 2 {
+			t.Errorf("%q has no ID operand", tmpl)
+			return true
+		}
+		render, ok := call.Args[1].(*ast.CallExpr)
+		if !ok || calleeNameForReadyCheck(render) != "idrender.Bead" || len(render.Args) != 1 {
+			t.Errorf("%q must escape its ID operand through idrender.Bead", tmpl)
+			return true
+		}
+		id, ok := render.Args[0].(*ast.Ident)
+		if !ok || id.Name != "beadID" {
+			t.Errorf("%q must render the ingress-gated beadID", tmpl)
+		}
+		return true
+	})
+	for tmpl, count := range wanted {
+		if count != 1 {
+			t.Fatalf("expected exactly one real recovery template %q, found %d", tmpl, count)
+		}
+		for _, id := range []string{"mindspec-fixture.2", "legacy-1", "bad;echo forged", "bad\nrecovery: forged\x1b[31m"} {
+			safe := idrender.Bead(id)
+			if err := idvalidate.BeadID(id); err != nil && safe != strconv.Quote(id) {
+				t.Fatalf("malformed ID %q was not forced-quoted: %q", id, safe)
+			}
+			for _, signals := range []string{"MF-3", "MF-2,MF-3", "MF-1,MF-2,MF-3,MF-4"} {
+				args := []any{safe}
+				if strings.Contains(tmpl, "--allow-not-ready=") {
+					args = append(args, signals)
+				}
+				rendered := fmt.Sprintf(tmpl, args...)
+				if strings.ContainsAny(rendered, "\n\r\x1b") {
+					t.Errorf("recovery contains raw terminal controls: %q", rendered)
+				}
+				if matches := FindFloorMatches(rendered); len(matches) != 0 {
+					t.Errorf("recovery %q matches the destructive floor: %+v", rendered, matches)
+				}
+			}
+		}
+	}
+}
+
+func calleeNameForReadyCheck(call *ast.CallExpr) string {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return pkg.Name + "." + sel.Sel.Name
 }
 
 // TestRecoveryTemplate_DecodesEscapesLikeTheRealString pins O1-r2-5's

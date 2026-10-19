@@ -1,0 +1,42 @@
+{
+  "verdict": "REQUEST_CHANGES",
+  "hard_block": false,
+  "reviewer_id": "G2 gpt-6.1-sol",
+  "confidence": 0.95,
+  "rationale": "My round-2 binding-veto/audited-repair ask is addressed in R4.3, the planned ADR-0041 amendment, and AC-12(viii). The revised selection guard, non-panel fallback confirmation, and complete-failure-set fingerprint preserve the stated anti-footgun trust boundary. Ten existing lifecycle trust tests passed; scratch-only real-git fallback emulation and five lineage cases also passed. One newly identified R6 recovery contradiction remains: ready-check tells a partial-coverage caller to re-claim naming only uncovered signals, although every fresh claim must name every currently failing signal and cannot inherit old marker coverage. Fix that command and pin the partial-coverage recovery. This is a spec-document review at 4c46cf64, not a claim that the planned implementation exists. The source repository was not modified.",
+  "concrete_changes_required": [
+    "Change spec.md R6.4 line 435 from --allow-not-ready=<uncovered ids> to --allow-not-ready=<all currently failing ids> for the release/re-claim recovery. Preserve R6.1/R6.2: an existing marker grants no claim authority and every fresh claim names all failing signals with fresh evidence. Extend AC-17 with a VALID marker still covering MF-3 while a new MF-2 failure is uncovered: ready-check refuses naming MF-2, its recovery names MF-2,MF-3, release plus a fresh evidenced re-claim succeeds and replaces the marker, while an explicit MF-2-only re-claim refuses without mutation. Also exercise partial coverage caused by a changed fingerprint when another signal remains covered."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Round-2 ask status",
+      "detail": "G2r2.1 — ADDRESSED. R4.3 explicitly limits the contradictory-binding veto to automatic FindLandedMerge/FindLandedMergeReachable and permits only explicit ReattestLandedMerge to replace it with an independently scan-derived identity after ownership, ambiguity, surviving-tip and revert checks, recording the prior pair and writing nothing on refusal. ADR Touchpoints item (ii) repeats the distinction. AC-12(viii) adds the requested non-corroborating panel plus fallback repair case and preserves TestReattest_ContradictoryBindingOverwrittenAudited and TestReattest_StaleOlderRemergeBindingRewrittenToNewest; both existing tests passed here. No prior G2 ask is PARTIAL or MISSED. The R6 recovery finding is NEW_ISSUE, newly identified in this review; its uncovered-ids wording was already present in cb272d50, so I am not attributing that defect to the round-3 edit."
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Partial override coverage emits a re-claim command that the fresh-claim gate must refuse",
+      "detail": "spec.md:433–435 requires the uncovered arm to emit release, then next --allow-not-ready=<uncovered ids>. Let current failures be {MF-2, MF-3} and a VALID marker still cover MF-3 exactly. ready-check correctly reports only MF-2 uncovered, so the required recovery names only MF-2. After release, MF-3 still fails. R6.1 (:386) requires the full failing set to be a subset of the named set, and R6.2 (:392,410–411) forbids using the existing marker to authorize the re-claim. The suggested command therefore refuses, even with valid fresh evidence. Honouring the suggested command by inheriting MF-3 coverage would instead violate the explicit trust boundary. The same problem occurs when one signal fingerprint changes while a different failing signal remains covered. Emit all currently failing IDs, as the R6.1 refusal already does (:388), and test this mixed covered/uncovered state. override-contract-probe.json records a literal set-model reproduction; no future production implementation is claimed."
+    },
+    {
+      "severity": "INFO",
+      "title": "Selection and fallback trust-boundary attacks",
+      "detail": "The actual unchanged phase.FindEpicForBead was exercised in five scratch-clone cases (selection-probe.log): metadata alone provides no lineage; the reporter title-fallback shape resolves correctly; a different-spec title on an E-prefixed bead resolves to the other epic; a foreign-prefix bead can resolve by title to S; and a ready row with parent E can resolve to another epic when another epic dependency is first. Applying the literal proposed R1.8 predicate refuses the last three incompatible scoped claims. Thus the independent claim-time lineage/spec check remains essential; row.parent is only the selection shortcut. The scratch-only TestG2R3FallbackTrustProbe uses a real off-first-parent landing and the existing candidate seam, withholding panel confirmation as R4.2 requires: absent tip/binding gives NoEvidence; an inconsistent binding pair vetoes identification; explicit reattest independently writes the exact identity with the prior pair audited; a correct pair identifies; and a real revert causes both identification and reattest refusal with no additional write (fallback-probe.log). This is focused emulation, not complete testing of the future parser, ambiguity implementation, or panel-set audit rendering. Ten existing lifecycle trust tests passed, including wrong-second-parent subjects, nonexistent/other-bead/anonymous-merge bindings, pair inconsistency, oldest-anchored revert checks, and audited repair (existing-trust-tests.log)."
+    },
+    {
+      "severity": "INFO",
+      "title": "Forgeability and fingerprint limits remain explicit",
+      "detail": "Any bd writer can alter metadata.spec_id, landed bindings and override markers; a repository writer can add or abandon panel registrations and author arbitrary evidence justification; a git-history writer can spoof merge subjects. Neither an evidence sha256 nor an exact git-consistent binding authenticates who wrote it. In particular, R4.2 calling the binding the strongest datum describes its normal executor provenance, not an enforced exclusive writer. The spec explicitly accepts these limits under ADR-0037, while retaining a subject-owned real two-parent merge, exact equality, contradiction checks and net-effect checks. The fallback no longer lets a panel-only match confirm; the undirected-subject residual is stated and pinned by AC-11(vii)–(ix). The literal sorted/deduplicated fingerprint model changes for A versus A+B, and R6 requires all evaluators to collect all failures, one shared raw-record hash function, and an unoverrideable indeterminate MF-3 class. These hashes bind a declared failure set, not evidence truth or human approval. No additional authentication machinery is requested."
+    },
+    {
+      "severity": "INFO",
+      "title": "Spec validation",
+      "detail": "Built the reviewed scratch clone and ran mindspec validate spec 129-readiness-tracker-honesty with a read-only fake bd returning empty row sets, avoiding any live tracker access. Exit 0; output: \"129-readiness-tracker-honesty: 1 issue(s) found\" and \"[WARN] lifecycle-binding: spec has no beads epic; run spec approve to create one\" (spec-validation.log). This checks document validation with no epic fixture, not the live tracker binding. All mutation fixtures and review-only test files were confined to the authorized scratch directory."
+    },
+    {
+      "severity": "INFO",
+      "title": "Errors in this BRIEF",
+      "detail": "The Summary still says to review both artifacts with git show 7a490064, although the header and Round 3 correctly pin 4c46cf64. The Acceptance criteria paragraph says 18 ACs; the reviewed spec has AC-1 through AC-19. The O3 lens still describes selection as epic descendants union metadata.spec_id, whereas R1.1/R3 now select plan-form plus unchanged lineage and use metadata only for near-misses and MF-3 membership. The generic conduct example uses git worktree add against the source repository, which would write source .git worktree metadata despite the read-only instruction; I followed the user-provided no-hardlinks scratch-clone instruction instead. The header destination is explicitly overridden by Verdict location and the user prompt. A fresh read found no TODO(skill) placeholder claim to substantiate; G2-round-2.json itself did not allege such placeholders. These are administrative discrepancies, not additional spec change requests."
+    }
+  ]
+}
