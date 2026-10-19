@@ -634,7 +634,7 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			// constrains them to hex, but render them escaped anyway so
 			// this message can never carry a raw hostile value.
 			return nil, fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)",
-				ErrLandedMergeContradiction, beadID, specBranch, termsafe.Escape(binding.mergeSHA), termsafe.Escape(binding.secondParent), newest.SHA, secondParent)
+				ErrLandedMergeContradiction, termsafe.Escape(beadID), termsafe.Escape(specBranch), termsafe.Escape(binding.mergeSHA), termsafe.Escape(binding.secondParent), newest.SHA, secondParent)
 		case bindingNamesGroupMember, binding.secondParent == secondParent:
 			// Every present key agrees with the same real merge (a
 			// single-key binding confirms on its one present key — the
@@ -749,9 +749,7 @@ func reviewedHeadSHAForBead(root, specBranch, beadID string) map[string]struct{}
 		if r.Err != nil {
 			continue
 		}
-		// Primary corroboration retains the panel reader's whitespace
-		// normalization. Fallback advisories classify the raw value instead.
-		if sha := strings.TrimSpace(r.Panel.ReviewedHeadSHA); classifyReviewedSHA(sha) == reviewedSHAObjectID {
+		if sha := r.Panel.ReviewedHeadSHA; classifyReviewedSHA(sha) == reviewedSHAObjectID {
 			set[sha] = struct{}{}
 		}
 	}

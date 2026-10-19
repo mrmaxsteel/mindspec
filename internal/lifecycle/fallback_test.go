@@ -144,6 +144,21 @@ func TestReattest_FallbackAccepts239Shape(t *testing.T) {
 	acceptFallback(t, f)
 }
 
+func TestReattest_FallbackAcceptsDefaultMergeSubject(t *testing.T) {
+	dir, run := initLandedRepo(t, "129-test")
+	mergeBeadDefaultSubject(t, run, dir, fallbackBead, fallbackSpec)
+	f := fallbackFixture{dir, run, revParseIn(t, dir, "HEAD"), revParseIn(t, dir, "bead/"+fallbackBead)}
+	carry239(t, f)
+	requireOffFirstParent(t, f, 1)
+	got, err := FindLandedMergeReachable(dir, fallbackSpec, fallbackBead)
+	var off *LandedMergeOffFirstParent
+	if got != nil || !errors.As(err, &off) || len(off.Candidates) != 1 || off.Candidates[0].SHA != f.merge || off.Candidates[0].Parents[1] != f.second {
+		t.Fatalf("default subject lost scan-derived candidate: %+v %v", got, err)
+	}
+	// Pins one atomic binding+audit write and the successful audited read-back.
+	acceptFallback(t, f)
+}
+
 func TestReattest_FallbackSameTupleNoOp(t *testing.T) {
 	f := newFallbackFixture(t)
 	acceptFallback(t, f)
@@ -289,14 +304,16 @@ func TestMergedUnclosed_IgnoresFallback(t *testing.T) {
 	}
 }
 
-func TestReadBack_ForgedBindingNoAudit(t *testing.T) {
+// AC-11 (xi): the executor's merge-time binding names the #239 landing.
+func TestReattest_FallbackRecordsAuditOnNoOp(t *testing.T) {
 	f := newFallbackFixture(t)
 	stubBindingRead(t, map[string]interface{}{"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second})
 	requireOffFirstParent(t, f, 1)
 	acceptFallback(t, f)
 }
 
-func TestReattest_FallbackRecordsAuditOnNoOp(t *testing.T) {
+// AC-11 (ix): a forged binding names the short-form X-to-Y sibling merge.
+func TestReadBack_ForgedBindingNoAudit(t *testing.T) {
 	f := siblingFallbackFixture(t)
 	meta := map[string]interface{}{
 		"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second,
@@ -366,6 +383,9 @@ func TestReadBack_AcceptedThenReverted(t *testing.T) {
 	var refusal *ReattestRefusal
 	if !errors.As(err, &refusal) || refusal.State != ReattestStateReverted || len(*writes) != 0 {
 		t.Fatalf("reverted reattest: %v writes=%v", err, *writes)
+	}
+	if !refusal.Fallback {
+		t.Fatal("reverted fallback refusal must set Fallback=true")
 	}
 }
 
@@ -756,8 +776,8 @@ func TestFindLandedMerge_PanelSet(t *testing.T) {
 				registerFallbackPanel(t, dir, "z-second", " "+f.second, 2)
 				run("branch", "-D", "bead/"+fallbackBead)
 				set := reviewedHeadSHAForBead(dir, fallbackSpec, fallbackBead)
-				if _, ok := set[f.second]; !ok {
-					t.Fatalf("set builder did not trim the padded second parent: %v", set)
+				if _, ok := set[f.second]; ok {
+					t.Errorf("set builder admitted a whitespace-padded second parent: %v", set)
 				}
 				if _, ok := set[" "+f.second]; ok {
 					t.Fatal("set builder retained whitespace in its key")
@@ -786,9 +806,9 @@ func TestFindLandedMerge_PanelSet(t *testing.T) {
 				if !errors.Is(err, ErrLandedMergeContradiction) || !strings.Contains(err.Error(), "surviving branch") {
 					t.Fatalf("wrong contradiction datum: %v", err)
 				}
-			case "stale-alone":
+			case "stale-alone", "whitespace-padded-second":
 				var no *LandedMergeNoEvidence
-				if !errors.As(err, &no) || no.MergeSHA != f.merge {
+				if got != nil || !errors.As(err, &no) || no.MergeSHA != f.merge {
 					t.Fatalf("nonmatching set confirmed/lost candidate: %+v %v", got, err)
 				}
 			default:
@@ -816,6 +836,40 @@ func TestReattest_PanelSetNonCorroborating(t *testing.T) {
 	got, err := FindLandedMerge(dir, fallbackSpec, fallbackBead)
 	if err != nil || got.SHA != merge {
 		t.Fatalf("repaired binding did not confirm: %+v %v", got, err)
+	}
+}
+
+func TestReattest_PanelSetRepairsContradictoryPrimaryBinding(t *testing.T) {
+	dir, run := initLandedRepo(t, "129-test")
+	mergeBead(t, run, dir, fallbackBead, fallbackSpec)
+	merge := revParseIn(t, dir, "HEAD")
+	second := revParseIn(t, dir, "bead/"+fallbackBead)
+	registerFallbackPanel(t, dir, "stale", revParseIn(t, dir, second+"^1"), 1)
+	run("branch", "-D", "bead/"+fallbackBead)
+	priorMerge, priorSecond := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	stubBindingRead(t, map[string]interface{}{
+		"mindspec_landed_merge_sha": priorMerge, "mindspec_landed_second_parent": priorSecond,
+	})
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 {
+		t.Fatalf("primary repair must write exactly once without refusal: %+v %v writes=%v", res, err, *writes)
+	}
+	w := (*writes)[0]
+	if w.beadID != fallbackBead || !auditMatches(w.updates, fallbackSpec, merge, second) {
+		t.Fatalf("repair did not write scan-derived binding and valid audit together: %+v", w)
+	}
+	if w.updates[reattestKeyPriorMerge] != priorMerge || w.updates[reattestKeyPriorSecond] != priorSecond {
+		t.Fatalf("contradictory prior pair not audited: %+v", w.updates)
+	}
+	corroboration, _ := w.updates[reattestKeyCorroboration].(string)
+	if !strings.Contains(corroboration, "(c) panel set non-corroborating") || corroboration != res.Corroboration {
+		t.Fatalf("audit lost non-corroborating panel provenance: %+v", w.updates)
+	}
+	stubBindingRead(t, w.updates)
+	got, err := FindLandedMerge(dir, fallbackSpec, fallbackBead)
+	if err != nil || got == nil || got.SHA != merge || got.SecondParent != second {
+		t.Fatalf("primary repaired binding read-back: %+v %v", got, err)
 	}
 }
 
@@ -890,19 +944,28 @@ func TestFindLandedMergeReachable_PrimaryNonIdentificationNeverFallsBack(t *test
 }
 
 func TestFindLandedMergeReachable_SubjectMatcherRejectsOtherTargetsAndPrefixes(t *testing.T) {
-	for _, tc := range []struct{ bead, subject string }{
-		{fallbackBead, "Merge bead/" + fallbackBead + " into bead/other"},
-		{fallbackBead, "Merge bead/" + fallbackBead + " into spec/other-spec"},
-		{fallbackBead, "Merge bead/" + fallbackBead + ".10"},
-		{fallbackBead, "Merge bead/" + fallbackBead + "-x"},
-		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".10"},
-		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".1-x"},
+	for _, tc := range []struct {
+		bead, subject string
+		octopus       bool
+	}{
+		{fallbackBead, "Merge bead/" + fallbackBead + " into bead/other", false},
+		{fallbackBead, "Merge bead/" + fallbackBead + " into spec/other-spec", false},
+		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "' into spec/other-spec", false},
+		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "'", false},
+		{fallbackBead, "Merge bead/" + fallbackBead, true},
+		{fallbackBead, "Merge bead/" + fallbackBead + ".10", false},
+		{fallbackBead, "Merge bead/" + fallbackBead + "-x", false},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".10", false},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".1-x", false},
 	} {
 		t.Run(tc.subject+"/for="+tc.bead, func(t *testing.T) {
 			f := siblingFallbackFixture(t)
-			// Reuse a real reachable two-parent merge. Its subject is the
-			// only varied datum; matching binding/audit must not admit it.
+			// Reuse a real reachable merge through the scan seam, varying
+			// its subject or parent count. A matching audit grants nothing.
 			m := gitutil.MergeCommit{SHA: f.merge, Parents: []string{revParseIn(t, f.dir, f.merge+"^1"), f.second}, Subject: tc.subject}
+			if tc.octopus {
+				m.Parents = append(m.Parents, strings.Repeat("e", 40))
+			}
 			oldPrimary, oldReachable := firstParentMergesFn, reachableMergesFn
 			t.Cleanup(func() { firstParentMergesFn, reachableMergesFn = oldPrimary, oldReachable })
 			firstParentMergesFn = func(string, string) ([]gitutil.MergeCommit, error) { return nil, nil }
@@ -928,6 +991,28 @@ func TestFindLandedMergeReachable_SubjectMatcherRejectsOtherTargetsAndPrefixes(t
 				t.Fatalf("reattest admitted excluded subject: %+v %v writes=%v", res, err, *writes)
 			}
 		})
+	}
+}
+
+func TestFindLandedMerge_BindingContradictionEscapesBranch(t *testing.T) {
+	const branch = "spec/129-test\x1b[2J\x07\u009b31m"
+	merge, second := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	oldPrimary, oldTip := firstParentMergesFn, landedRevParseRefFn
+	t.Cleanup(func() { firstParentMergesFn, landedRevParseRefFn = oldPrimary, oldTip })
+	firstParentMergesFn = func(string, string) ([]gitutil.MergeCommit, error) {
+		return []gitutil.MergeCommit{{SHA: merge, Parents: []string{"first", second}, Subject: "Merge bead/" + fallbackBead}}, nil
+	}
+	landedRevParseRefFn = func(string, string) (string, error) { return "", gitutil.ErrRefNotFound }
+	stubBindingRead(t, map[string]interface{}{
+		"mindspec_landed_merge_sha": strings.Repeat("c", 40), "mindspec_landed_second_parent": strings.Repeat("d", 40),
+	})
+	got, err := FindLandedMerge(t.TempDir(), branch, fallbackBead)
+	if got != nil || !errors.Is(err, ErrLandedMergeContradiction) || !strings.Contains(err.Error(), "landed-binding") {
+		t.Fatalf("lost binding contradiction: %+v %v", got, err)
+	}
+	message := err.Error()
+	if strings.ContainsFunc(message, unicode.IsControl) || !strings.Contains(message, termsafe.Escape(branch)) || !strings.Contains(message, termsafe.Escape(fallbackBead)) {
+		t.Errorf("binding contradiction contains unsafe or missing ID/branch: %q", message)
 	}
 }
 
