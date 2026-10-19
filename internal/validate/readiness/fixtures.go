@@ -58,7 +58,7 @@ type FakeBDStore struct {
 	// LandedDeps, when non-empty, ALSO fakes MF-3's landed-merge decision
 	// (FX-1): Install swaps findLandedMergeFn so a dep listed here (value
 	// true) reports a positive landed merge and any OTHER dep reports
-	// ErrLandedMergeNotFound — consulting neither git NOR the transitive
+	// ErrLandedMergeNoCandidate — consulting neither git NOR the transitive
 	// bd read (lifecycle.FindLandedMerge -> bead.GetMetadata) the real
 	// function performs. When LandedDeps AND NoEvidenceDeps are both
 	// empty/nil, Install leaves findLandedMergeFn at its real default so
@@ -74,7 +74,7 @@ type FakeBDStore struct {
 	// evaluateMF3's errors.As arm (Detail: "no admissible datum
 	// corroborates it", Recovery: `mindspec reattest`) without a real git
 	// history, pinning the arm discrimination against the plain
-	// ErrLandedMergeNotFound arm's `mindspec complete` recovery.
+	// ErrLandedMergeNoCandidate arm's `mindspec complete` recovery.
 	NoEvidenceDeps map[string]bool
 }
 

@@ -198,6 +198,84 @@ func TestReadiness_MF3_MalformedMembershipMetadata(t *testing.T) {
 	}
 }
 
+func TestReadiness_MF3_EmptyDiagnosticIdentity(t *testing.T) {
+	const dep = "owner-epic.2"
+	for _, tc := range []struct {
+		class, want string
+		err         error
+	}{
+		{FailureReverted, "a merge landing bead/" + dep + " was reverted or cleanly removed after landing", lifecycle.ErrLandedMergeReverted},
+		{FailureContradiction, "a merge landing bead/" + dep + " exists but a corroborating datum contradicts its second parent (", lifecycle.ErrLandedMergeContradiction},
+	} {
+		t.Run(tc.class, func(t *testing.T) {
+			orig := findLandedMergeFn
+			t.Cleanup(func() { findLandedMergeFn = orig })
+			findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) {
+				return nil, fmt.Errorf("%w: diagnostic without git IDs", tc.err)
+			}
+			s := evaluateMF3("", &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: "996-errors"}, "", []dependencyEdge{{ID: dep, Status: "closed"}})
+			if s.Pass || !reflect.DeepEqual(s.Failures, []string{dep + ":" + tc.class}) || !strings.Contains(s.Detail, tc.want) || strings.Contains(s.Detail, "  ") || strings.Contains(s.Detail, "()") {
+				t.Fatalf("unknown diagnostic identity must omit empty SHA slots and keep its class: %+v; want %q", s, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadiness_MF3_LinkedIndeterminateNoOverride(t *testing.T) {
+	const spec = "996-errors"
+	orig := findLandedMergeFn
+	t.Cleanup(func() { findLandedMergeFn = orig })
+	findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) {
+		return nil, errors.New("read failed")
+	}
+	r := &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: spec}
+	s := evaluateMF3("", r, "", []dependencyEdge{{ID: "plain-task", SpecID: spec, Status: "closed"}})
+	if s.Pass || !reflect.DeepEqual(s.Failures, []string{"plain-task:indeterminate"}) || !strings.Contains(s.Detail, "could not evaluate landed-merge state: read failed") {
+		t.Fatalf("linked read failure must stay indeterminate: %+v", s)
+	}
+	if strings.Contains(s.Detail, "override deliberately") || strings.Contains(s.Detail, dependencyOverride(r.BeadID)) {
+		t.Fatalf("indeterminate linked dependency must not advertise an override: %+v", s)
+	}
+}
+
+func TestReadiness_MF3_LinkedOffFirstParentSingleOverride(t *testing.T) {
+	root, branch, dep, current, merge, _ := mf3GitFixture(t, true, false, false)
+	_, err := findLandedMergeFn(root, branch, dep)
+	var off *lifecycle.LandedMergeOffFirstParent
+	if !errors.As(err, &off) {
+		t.Fatalf("fixture must supply a real off-first-parent diagnostic: %v", err)
+	}
+	orig := findLandedMergeFn
+	t.Cleanup(func() { findLandedMergeFn = orig })
+	// Reuse the real scan's candidate for a metadata-linked, non-plan ID.
+	findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) { return nil, off }
+	r := &Report{BeadID: current, EpicID: "owner-epic", SpecID: "996-real-mf3"}
+	s := evaluateMF3(root, r, "", []dependencyEdge{{ID: "plain-task", SpecID: r.SpecID, Status: "closed"}})
+	if s.Pass || !reflect.DeepEqual(s.Failures, []string{"plain-task:off-first-parent:" + merge}) || !strings.Contains(s.Detail, "linked to spec "+r.SpecID+" by metadata.spec_id but does not have the plan-bead form") || s.Recovery != "mindspec reattest plain-task" {
+		t.Fatalf("metadata-linked dependency must reach the off-first-parent hint: %+v", s)
+	}
+	if strings.Count(s.Detail, dependencyOverride(current)) != 1 {
+		t.Fatalf("linked off-first-parent dependency needs a single override line: %+v", s)
+	}
+	if !strings.Contains(s.Detail, "\nrecovery (if reattest refuses): "+dependencyOverride(current)) {
+		t.Fatalf("linked hint must preserve the existing off-first-parent override exit: %+v", s)
+	}
+}
+
+func TestReadiness_MF3_InvalidSpecBranchIndeterminate(t *testing.T) {
+	orig := findLandedMergeFn
+	t.Cleanup(func() { findLandedMergeFn = orig })
+	calls := 0
+	findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) {
+		calls++
+		return &lifecycle.LandedMerge{}, nil
+	}
+	s := evaluateMF3("", &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: "bad id"}, "", []dependencyEdge{{ID: "owner-epic.2", Status: "closed"}})
+	if s.Pass || !reflect.DeepEqual(s.Failures, []string{"owner-epic.2:indeterminate"}) || !strings.Contains(s.Detail, "could not resolve the spec branch") || calls != 0 {
+		t.Fatalf("invalid spec branch must record an indeterminate failure before the finder: %+v; finder calls=%d", s, calls)
+	}
+}
+
 // A real-git #239 topology: the original spec reaches main through the
 // second parent of a PR merge, then the spec fast-forwards to main.
 func mf3GitFixture(t *testing.T, offFirstParent, wrapper, binding bool) (root, branch, dep, current, merge, second string) {

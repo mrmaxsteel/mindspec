@@ -1053,7 +1053,7 @@ func TestReadiness_FX3_AllBlankKeyFilePathsFails(t *testing.T) {
 
 // Preserve the consumer-facing NoEvidence and NoCandidate routing checks.
 // The precise sentinel classes and unclassified NotFound errors are pinned
-// by TestReadiness_MF3ErrorArmDiscrimination_PreciseClasses in mf3_test.go.
+// by the table-driven subtests of TestReadiness_MF3ErrorArmDiscrimination.
 func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 	t.Run("i NoEvidence arm: corroboration-unavailable routes to reattest", func(t *testing.T) {
 		root := t.TempDir()

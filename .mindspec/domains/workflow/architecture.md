@@ -852,6 +852,9 @@ exactly four signals in stable order:
 
   MF-3 evaluates every dependency and records every failure as
   `<dep-id>:<class>[:<candidate-sha>]`, sorted independently of display.
+  A malformed dependency ID is recorded as
+  `malformed-<12-hex digest>:indeterminate`, with the raw ID kept only in
+  the escaped Detail.
   Detail includes each failure and its recovery text. The one signal
   recovery follows precedence `indeterminate` > `not-closed` >
   `no-candidate` > `off-first-parent` > `no-evidence` > `contradiction` >

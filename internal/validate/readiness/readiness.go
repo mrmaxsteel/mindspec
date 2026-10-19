@@ -744,12 +744,19 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 			if merge != "" {
 				identity = " (" + merge + ")"
 			}
-			f.detail = fmt.Sprintf("a merge landing bead/%s exists%s but %s contradicts its second parent %s (%v)", dep.ID, identity, landedContradictionDatum(lmErr, dep.ID), second, lmErr)
+			if second != "" {
+				second = " " + second
+			}
+			f.detail = fmt.Sprintf("a merge landing bead/%s exists%s but %s contradicts its second parent%s (%v)", dep.ID, identity, landedContradictionDatum(lmErr, dep.ID), second, lmErr)
 			f.recovery = inspection
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeReverted):
 			f.class = FailureReverted
 			f.candidate, _ = landedDiagnosticIdentity(lmErr)
-			f.detail = fmt.Sprintf("merge %s landing bead/%s was reverted or cleanly removed after landing (%v)", f.candidate, dep.ID, lmErr)
+			identity := "a merge"
+			if f.candidate != "" {
+				identity = "merge " + f.candidate
+			}
+			f.detail = fmt.Sprintf("%s landing bead/%s was reverted or cleanly removed after landing (%v)", identity, dep.ID, lmErr)
 			f.recovery = inspection
 		default:
 			f.class = FailureIndeterminate
