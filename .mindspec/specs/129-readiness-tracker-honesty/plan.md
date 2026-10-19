@@ -20,16 +20,31 @@ work_chunks:
       - internal/bead/bdcli.go
       - internal/bead/bdcli_test.go
       - internal/bead/hygiene.go
+      - internal/bead/hygiene_test.go
       - internal/next/beads.go
       - internal/next/beads_test.go
+      - internal/next/next_test.go
+      - internal/next/readyset_test.go
       - internal/lifecycle/orphans.go
+      - internal/lifecycle/orphans_test.go
       - internal/lifecycle/stale_open.go
+      - internal/lifecycle/stale_open_test.go
       - internal/complete/complete.go
+      - internal/complete/complete_test.go
       - internal/approve/adopt_lattice.go
+      - internal/approve/adopt_lattice_test.go
       - internal/approve/plan_test.go
       - internal/approve/spec_test.go
       - internal/doctor/beads.go
+      - internal/doctor/beads_test.go
       - internal/lint/rowcap_test.go
+      - internal/lint/testdata/rowcap_direct.go.txt
+      - internal/lint/testdata/rowcap_funcvar.go.txt
+      - internal/lint/testdata/rowcap_execbd.go.txt
+      - internal/lint/ratchet_argv_table_test.go
+      - cmd/mindspec/next_selection_test.go
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/execution/interfaces.md
   - id: 2
     depends_on: []
     key_file_paths:
@@ -42,9 +57,15 @@ work_chunks:
       - internal/lifecycle/reattest.go
       - internal/lifecycle/reattest_test.go
       - cmd/mindspec/reattest.go
+      - cmd/mindspec/reattest_test.go
       - internal/lint/ratchet_argv_table_test.go
+      - internal/lint/ratchet_composition_allowlist_test.go
       - .mindspec/adr/ADR-0041-gate-before-mutate.md
       - internal/validate/adr0041_spec129_amendment_test.go
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/workflow/interfaces.md
+      - .mindspec/domains/workflow/runbook.md
+      - .mindspec/domains/execution/interfaces.md
   - id: 3
     depends_on: []
     key_file_paths:
@@ -56,6 +77,8 @@ work_chunks:
       - internal/validate/readiness/records_test.go
       - internal/validate/readiness/mf2_forms_test.go
       - internal/validate/readiness/readiness_test.go
+      - .mindspec/domains/workflow/interfaces.md
+      - .mindspec/domains/execution/interfaces.md
   - id: 4
     depends_on: [2, 3]
     key_file_paths:
@@ -64,8 +87,9 @@ work_chunks:
       - internal/validate/readiness/fixtures.go
       - internal/validate/readiness/readiness_test.go
       - internal/validate/readiness/mf3_test.go
+      - .mindspec/domains/workflow/architecture.md
   - id: 5
-    depends_on: [1, 3]
+    depends_on: [1, 2, 3]
     key_file_paths:
       - internal/next/beads.go
       - internal/next/select.go
@@ -73,11 +97,19 @@ work_chunks:
       - internal/next/planread.go
       - internal/next/nearmiss_test.go
       - internal/next/beads_test.go
+      - internal/next/readyset_test.go
       - internal/gitutil/fileprobe.go
       - internal/gitutil/fileprobe_test.go
       - cmd/mindspec/next.go
-      - cmd/mindspec/next_test.go
+      - cmd/mindspec/next_selection_test.go
+      - cmd/mindspec/next_positional_test.go
       - internal/instruct/templates/implement.md
+      - internal/instruct/instruct_test.go
+      - internal/lint/ratchet_argv_table_test.go
+      - internal/lint/ratchet_composition_allowlist_test.go
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/workflow/interfaces.md
+      - .mindspec/domains/execution/interfaces.md
   - id: 6
     depends_on: [3]
     key_file_paths:
@@ -93,15 +125,22 @@ work_chunks:
       - .claude/skills/ms-bead-impl/SKILL.md
       - internal/setup/readiness_skill_pin_test.go
       - internal/setup/skills.go
+      - internal/setup/historical_skills
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/workflow/interfaces.md
+      - .mindspec/domains/execution/interfaces.md
   - id: 7
     depends_on: [4, 5, 6]
     key_file_paths:
       - internal/next/ready_gate.go
       - internal/next/ready_gate_test.go
       - internal/next/evidence.go
+      - internal/next/evidence_test.go
       - cmd/mindspec/next.go
-      - cmd/mindspec/next_test.go
+      - cmd/mindspec/next_ready_gate_test.go
+      - cmd/mindspec/bead_ready_test.go
       - cmd/mindspec/bead_clarify.go
+      - internal/lint/ratchet_composition_allowlist_test.go
       - .mindspec/adr/ADR-0041-gate-before-mutate.md
       - internal/validate/adr0041_spec129_amendment_test.go
       - .mindspec/core/USAGE.md
@@ -119,11 +158,12 @@ work_chunks:
       - internal/bootstrap/bootstrap.go
       - internal/bootstrap/gitignore_test.go
       - internal/complete/panel_gate_untracked_test.go
-      - .gitignore
+      - .mindspec/domains/workflow/architecture.md
+      - .mindspec/domains/execution/interfaces.md
 ---
 # Plan: 129-readiness-tracker-honesty
 
-*Citation scope: every code anchor below names a symbol, file or template. Each was checked against `spec/129-readiness-tracker-honesty` at `7bae2664`, by inspection (read, not executed) unless a line says "run". No line numbers are cited.*
+*Citation scope: every code anchor below names a symbol, file or template. Each was checked against `spec/129-readiness-tracker-honesty` at `7bae2664`, and the plan-fix round 1 anchors at `eeab6c4b`, by inspection (read, not executed) unless a line says "run". No line numbers are cited. A test marked NEW does not exist yet; every other test named in a run line exists at `eeab6c4b`.*
 
 This plan decomposes spec 129 R1–R8, as amended on 2026-10-19 (F2 retired; R8 added), into **eight beads**. The longest dependency chain is **three beads**. R7 (ADR-0045 and its ADR-0040/ADR-0044 back-pointers) already landed with the spec commit `7bae2664` (checked: `.mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md` carries `- **Status**: Accepted`; ADR-0040 and ADR-0044 each carry `> **Amended by [ADR-0045](…)`). No bead re-authors it; Bead 6 re-verifies it under AC-18.
 
@@ -137,12 +177,12 @@ This plan decomposes spec 129 R1–R8, as amended on 2026-10-19 (F2 retired; R8 
 | 2 | Landed-merge truth in `internal/lifecycle` | R4.2 (F1, F3, F4, F5; advisory registrations), R4.3, ADR-0041 amendment parts (i)–(ii) | — | 1 |
 | 3 | Readiness foundation: plan-bead helpers, MF-2 forms, failure records | R1.1 helpers, R5, R6.2 records (MF-1/2/4), R1.8 lineage return | — | 1 |
 | 4 | MF-3 membership, message arms, aggregation | R4.1, R4.4, R4.5 | 2, 3 | 2 |
-| 5 | Spec-scoped selection honesty | R1.1–R1.7 | 1, 3 | 2 |
+| 5 | Spec-scoped selection honesty | R1.1–R1.7 | 1, 2, 3 | 2 |
 | 6 | Validated override marker + `ready-check` read-back + skill move | R6.3, R6.4, R6.5 (skills) | 3 | 2 |
 | 7 | Claim guard + scoped `--allow-not-ready` + doc sweep | R1.8, R6.1, R6.2 (writer), R6.5 (docs), ADR-0041 amendment part (iii) | 4, 5, 6 | 3 |
 | 8 | Review artifacts out of git by default | R8.1–R8.3 | — | 1 |
 
-Chains (counted by beads on the path): 2→4→7, 3→4→7, 1→5→7, 3→5→7, 3→6→7, each 3; Bead 8 stands alone, 1. Nothing is longer.
+Chains (counted by beads on the path): 2→4→7, 3→4→7, 1→5→7, 2→5→7, 3→5→7, 3→6→7, each 3; Bead 8 stands alone, 1. Nothing is longer.
 
 **Why eight beads, not 3–5.** `mindspec instruct` prefers 3–5 beads and asks for a justification above 6. The spec itself (OQ-1) estimates 9–12 beads. The dispatch brief bounds this plan to 5–8 with a chain of at most 3. Eight is the smallest count that keeps each bead under one review centre:
 - Bead 2 (lifecycle) and Bead 4 (readiness) cannot merge: Bead 2 alone carries most of AC-11's real-git fixtures.
@@ -154,19 +194,45 @@ Chains (counted by beads on the path): 2→4→7, 3→4→7, 1→5→7, 3→5→
 
 ### Shared files and serialisation
 
-These files are edited by more than one bead. Every pair below is ordered by a dependency edge, so no two parallel beads edit the same file.
+These files are edited by more than one bead. Each pair is safe for one of three reasons: a dependency edge orders it, the beads edit disjoint files, or (for one pair, stated below) a row-only merge discipline keeps the edits apart.
 
-| File | Beads (in order) | Ordered by |
+| File | Beads (in order) | Safe by |
 |---|---|---|
-| `internal/next/beads.go` | 1 → 5 | 5 depends on 1 |
-| `internal/validate/readiness/readiness.go` | 3 → 4 | 4 depends on 3 |
-| `cmd/mindspec/next.go` | 5 → 7 | 7 depends on 5 |
-| `.mindspec/adr/ADR-0041-gate-before-mutate.md`, `internal/validate/adr0041_spec129_amendment_test.go` | 2 → 7 | 7 depends on 4, which depends on 2 |
+| `internal/next/beads.go` | 1 → 5 | edge: 5 depends on 1 |
+| `cmd/mindspec/next_selection_test.go`, `internal/next/readyset_test.go`, `internal/next/beads_test.go` | 1 → 5 | edge: 5 depends on 1 |
+| `internal/validate/readiness/readiness.go`, `internal/validate/readiness/readiness_test.go` | 3 → 4 | edge: 4 depends on 3 |
+| `cmd/mindspec/next.go` | 5 → 7 | edge: 7 depends on 5 |
+| `cmd/mindspec/bead_ready_test.go` | 6 → 7 | edge: 7 depends on 6 |
+| `.mindspec/adr/ADR-0041-gate-before-mutate.md`, `internal/validate/adr0041_spec129_amendment_test.go` | 2 → 7 | edge: 7 depends on 4, which depends on 2 |
+| `internal/lint/ratchet_argv_table_test.go` | 1 and 2, then 5 | 5 depends on 1 and on 2; **1 and 2 run in parallel under the row-only discipline below** |
+| `internal/lint/ratchet_composition_allowlist_test.go` | 2 → 5 → 7 | edges: 5 depends on 2, 7 depends on 5 |
+| `.mindspec/domains/workflow/architecture.md` | 1, 2 and 8 in parallel; then 4, 5 and 6 in parallel; then 7 | disjoint sections (§ Doc ownership below); 7 depends on 4, 5 and 6 |
+| `.mindspec/domains/workflow/interfaces.md` | 2 and 3 in parallel; then 5 and 6; then 7 | disjoint sections; 7 depends on 5 and 6 |
+| `.mindspec/domains/workflow/runbook.md` | 2 → 7 | edge (transitive, via 4) |
+| `.mindspec/domains/execution/interfaces.md` | 1, 2, 3 and 8 in parallel; then 5 and 6; then 7 | disjoint sections; 3 → 6 → 7 are ordered on the shared "Readiness advisory metadata" section |
 | `internal/gitutil/` | 2 edits `gitops.go`; 5 adds the new file `fileprobe.go`; 8 edits `gitignore.go` and adds `reviews_ignore_test.go` | disjoint files |
-| `internal/complete/` | 1 edits `complete.go`; 8 adds `panel_gate_untracked_test.go` | disjoint files |
+| `internal/complete/` | 1 edits `complete.go` and `complete_test.go`; 8 adds `panel_gate_untracked_test.go` | disjoint files |
 | `internal/bead/` | 1 edits `bdcli.go`/`hygiene.go`; 3 adds `planbead.go`; 6 edits `readiness.go` and adds `override_marker.go` | disjoint files |
 
 Beads 1, 2, 3 and 8 are mutually parallel. Beads 4, 5 and 6 are mutually parallel. Bead 6 adds new files in `internal/validate/readiness/` (`override.go`) and does not edit `readiness.go`, so it never conflicts with Bead 4.
+
+**The argv-table discipline (Beads 1 and 2).** An edge 1 → 2 or 2 → 1 would make the longest chain four beads (1→2→4→7), so the pair stays parallel and its edits are kept apart instead:
+- each bead makes only the row inserts and renames its steps list, in location-disjoint hunks: Bead 1 inserts beside the `internal/bead/bdcli.go` exec rows and renames rows in the call block; Bead 2 inserts one row directly after the `internal/gitutil/gitops.go FirstParentMerges` exec row;
+- no bead realigns either block: every new key is at most 70 characters, shorter than the gofmt value column of both the exec block and the call block, so `gofmt` changes no other line;
+- after each bead merges into the spec branch, the orchestrator runs `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` on the spec branch. A red result blocks the next dispatch.
+
+**Doc ownership (doc-sync).** `mindspec complete` runs the per-bead doc-sync check, so each bead edits the domain-doc sections its own code changes make false. No bead plans `--allow-doc-skew`. Owners by section:
+
+| Bead | Section(s) it owns |
+|---|---|
+| 1 | workflow `architecture.md` § "Beads as Substrate (ADR-0023)"; execution `interfaces.md` § "bd stderr passthrough content" |
+| 2 | workflow `architecture.md` § "Landed-merge attestation integrity (spec 125, …)", including its `FindLandedMerge` (R5) and `mindspec reattest` (R4) subsections; workflow `interfaces.md`'s `mindspec reattest` CLI row; workflow `runbook.md` § "Missing or stale landed-binding on a merged bead (spec 125)"; execution `interfaces.md` § "Landed-merge identity primitives" (a `ReachableMerges` row after the `ExactSecondParentMerges` row) |
+| 3 | workflow `interfaces.md` § "Readiness Engine"; execution `interfaces.md` § "Readiness advisory metadata" (`PlanBeadIndex`) |
+| 4 | workflow `architecture.md` § "The mechanical floor (MF-1..MF-4)" |
+| 5 | workflow `architecture.md` § "R6 — Deterministic, honest bead selection"; workflow `interfaces.md` § "Lifecycle verb state honesty (spec 128)"; execution `interfaces.md` § "GitUtil Helpers" (a `FileAtRefTyped` row) |
+| 6 | workflow `architecture.md` § "The semantic Phase 0 + NOT-READY routing (skill layer)"; workflow `interfaces.md`'s `mindspec bead ready-check` row; execution `interfaces.md` § "Readiness advisory metadata" (schema v2) |
+| 7 | workflow `architecture.md` § "`mindspec next`: gate-before-mutate + `--allow-not-ready`"; workflow `interfaces.md`'s `mindspec next --allow-not-ready` row; workflow `runbook.md` § "Triage a NOT-READY bead"; execution `interfaces.md`'s `MetaKeyReadinessOverride` marker row |
+| 8 | workflow `architecture.md` § "`init` scaffolds a first-run-complete workspace"; execution `interfaces.md` § "Gitignore Ensure" (a `ReviewIgnoreEntries` row and a header-helper row) |
 
 ### OQ-3 (can the panel leg confirm after spec 128 Bead 6?) — decision
 
@@ -229,7 +295,7 @@ An ordering note only, unrelated to the retired check of the same label. Bead 5 
 
 ### R8.4 — review retention after finalize → **needs operator decision**
 
-Spec OQ-11 lists the options: (A) accept the loss; (B) keep `dispositions.jsonl` tracked with a `**`-plus-negation pattern; (C) finalize copies `reviews/` into the main checkout before removing the worktree. Bead 8 implements R8.1–R8.3, which hold under every option, and writes no retention code.
+Spec OQ-11 lists the options: (A) accept the loss; (B) keep `dispositions.jsonl` tracked with three lines, `.mindspec/specs/*/reviews/**`, `!.mindspec/specs/*/reviews/*/` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl`, reached by appending only; (C) finalize copies `reviews/` into the main checkout before removing the worktree. R8.1–R8.3 hold under any option: (B) appends its two negation lines after R8.1's `/**` entries, and AC-20 is unchanged. Bead 8 implements R8.1–R8.3 and writes no retention code.
 
 ## ADR Fitness
 
@@ -239,7 +305,7 @@ Spec OQ-11 lists the options: (A) accept the loss; (B) keep `dispositions.jsonl`
   - `internal/validate/readiness` imports neither `os/exec` nor `internal/gitutil`. Bead 4's membership reads go through `internal/bead`, and its landed-merge read through `internal/lifecycle`.
   - Bead 2's reachable-merge primitive and Bead 5's plan-blob probe live in `internal/gitutil`.
   - Bead 1's waist lives in `internal/bead`.
-  - `TestBoundary*` in `internal/lint/boundary_test.go` stays green.
+  - No lint scans `internal/validate/readiness`: `internal/lint/boundary_test.go`'s only test, `TestEnforcementHasNoGitLeaks`, reads the top-level directories of its enforcement packages and skips subpackages. Beads 3 and 4 therefore run `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) and record its output in the commit body. At `eeab6c4b` it prints exactly two lines, the existing `os/exec` imports of `fixtures.go` (the real-git test fixture) and `readiness_test.go`; a bead adds no line to that output.
 - **ADR-0035** — APPLIED: every new refusal ends with a `recovery:` line. New emitted commands are registered wherever the `internal/guard` recovery-convention lint requires.
 - **ADR-0037** — RESPECTED: `internal/panel` is untouched. R4.3's classifier and R6.3 validate agent-writable data by shape only and claim no authentication (§8). Bead 8 changes only whether registrations are tracked; every gate keeps reading them from the filesystem.
 - **ADR-0039** — RESPECTED (Bead 8): §4's co-located `reviews/` location and the gate scan are unchanged. Bead 8 ignores that location in `.gitignore` (a `core`-owned file) and through `mindspec init` (`internal/bootstrap`, `workflow`), and moves nothing.
@@ -264,50 +330,70 @@ No ADR is superseded. No new ADR is needed beyond ADR-0045, which has already la
 - **Real git where git is the subject.** Beads 2 and 4 extend `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`) and `initGitRepo`/`mergeDependency` (`internal/validate/readiness/fixtures.go`). Fixture repos set author/committer identity through env or `-c` flags, so git-identity-less CI passes. No fixture reads `~/.gitconfig`.
 - **Argument-recording seams** pin every bd and git argv that a requirement names (`-n 0`, no `--parent` on the scoped ready read, SHA classes never reaching git).
 - **Red-on-revert.** Each AC names its legs that fail today. Each implementer runs those legs against the pre-change code once (for example with `git stash`-free scratch copies, or by reasoning from the named red behaviour) and records the result in the commit body as "red-on-revert: run" or "red-on-revert: by inspection".
-- **Lint and format.** `go test ./internal/lint/...` covers the ADR-0030 boundary, the argv ratchet `TestArgvIDOperandGated` (every new git or bd exec site is classified in `ratchet_argv_table_test.go`) and Bead 1's `TestBDRowCapWaist`. `gofmt -l .` must print nothing; doc comments stay plain ASCII.
+- **Lint and format.** `go test ./internal/lint/...` covers the argv ratchet `TestArgvIDOperandGated` (every git or bd exec site and every wrapper caller is a row in `ratchet_argv_table_test.go`), the composition allowlist `TestWorkspaceCompositionCallSiteAllowlist` (every `workspace.*` helper call is a row in `ratchet_composition_allowlist_test.go`) and Bead 1's `TestBDRowCapWaist`. It does NOT cover the ADR-0030 boundary for `internal/validate/readiness` (§ ADR Fitness, ADR-0030). `gofmt -l .` must print nothing; doc comments stay plain ASCII.
+- **Run lines are not vacuous.** Every `-run` alternative names a test that exists at this plan's commit or that a step adds (marked NEW). Each implementer runs each targeted line once with `-v` and confirms every named test prints `--- PASS`. Run lines take the form `go test ./<pkg>/ -run '<regex>' -count=1`.
+- **Domain docs per bead.** Each bead edits the domain-doc sections it owns (§ Shared files, Doc ownership). No bead plans `--allow-doc-skew`.
 - **Package scope.** `internal/harness` and `internal/instruct` tests run with `-short` only. The whole suite gate is `go build ./... && go test ./... -short` (AC-19).
 
 ## Bead 1: bd row-cap waist, row-cap lint and linkage pins
 
 **Steps**
 1. In `internal/bead/bdcli.go`, make `ListJSON(args ...string)` the `list` waist and add `ReadyJSON(args ...string) ([]byte, error)` as the `ready` waist (R2.2):
-   - both append `-n 0` unless the caller already passed exactly `"-n", "0"` or `"--limit", "0"`, which is tolerated and never duplicated;
-   - any other `-n`/`--limit` value (including `--limit=5` and `-n5` spellings) returns an error before bd is spawned;
+   - both append `-n 0` unless the caller already passed exactly the separate-token pair `"-n", "0"` or `"--limit", "0"`, which is tolerated and never duplicated;
+   - every other cap spelling returns an error before bd is spawned: `-n 5`, `-n5`, `-n=5`, `--limit 5`, `--limit=5`, and the joined zero forms `-n0`, `-n=0` and `--limit=0`. Only the separate-token pairs are tolerated. By grep (run): `grep -rn -e '"-n0"' -e '"-n=' -e '"--limit=' internal cmd`, filtered to non-test files, printed nothing, so no caller passes a joined form today;
+   - the waist's `-n 0` applies to every R2.1 caller on every bd version. The waist has no version branch; only `doctor` warns below the floor (step 4);
    - `ReadyJSON` captures stderr separately on success (a dedicated exec path inside `internal/bead`; `tracedOutput`'s `cmd.Output()` discards it). If stderr contains bd's `Showing <N> of <M>` notice, it returns `bd truncated the ready set (<termsafe.Escape(notice)>) although mindspec requested no cap` with an ADR-0035 `recovery:` line (for example `recovery: bd ready -n 0 --json` to inspect).
 2. Route every R2.1 site through the waist:
-   - `next.QueryReady` and `next.QueryReadyForEpic` (`internal/next/beads.go`) use `bead.ReadyJSON`;
+   - `next.QueryReady` and `next.QueryReadyForEpic` (`internal/next/beads.go`) call a new seam `readyJSONFn = bead.ReadyJSON`; `runBDFn` stays for the `show` reads;
    - `next.ResolveActiveBead`'s `listJSONFn("--parent", epicID, "--status=in_progress")` gets the waist's `-n 0`;
-   - `lifecycle`'s `listClosedBeadsFn` (`orphans.go`) and `listOpenBeadsFn` (`stale_open.go`);
+   - `lifecycle`'s `listClosedBeadsFn` (`orphans.go`) and `listOpenBeadsFn` (`stale_open.go`) call `bead.ListJSON` instead of `bead.RunBD`;
    - `bead/hygiene.go`'s two `ListJSON("--status=open")` calls (`AuditWorkset`, `FixHygiene`);
-   - `complete.go`'s post-close `runBDFn("ready", "--parent", epicID, "--json")` moves to the `ReadyJSON` waist through a seam;
-   - `approve/adopt_lattice.go`'s `adoptListBDFn("list", …, "-n", "0", …)` migrates to `bead.ListJSON`.
+   - `complete.go`'s post-close `runBDFn("ready", "--parent", epicID, "--json")` in `advanceState` moves to a new seam `readyJSONFn = bead.ReadyJSON` in `internal/complete`;
+   - `approve/adopt_lattice.go`'s `adoptListBDFn("list", …, "-n", "0", …)` in `listEpicBeads` moves to a new seam `adoptListJSONFn = bead.ListJSON`; `adoptListBDFn` stays for `adopt.go`'s `show` read.
 
-   Keep each site's existing func-var seam so tests can record argv.
+   Every site keeps a func-var seam so tests can record argv. Tests that stub a migrated call move to the new seam: `internal/complete/complete_test.go`, `internal/next/next_test.go`, `internal/next/readyset_test.go` and `internal/next/beads_test.go`.
+
+   **Argv ratchet rows** (`internal/lint/ratchet_argv_table_test.go`, row-only per § Shared files):
+   - ADD the exec row `"internal/bead/bdcli.go ReadyJSON exec-bd execCommand"`, `dispCallerAudited`/`opClassCallerForwarded`, noting the `ready` waist. If the stderr-capturing exec lives in a helper, the exec row takes the helper's name and `ReadyJSON` gets a `call <helper>` row instead;
+   - RENAME `internal/next/beads.go QueryReady call runBDFn`, `internal/next/beads.go QueryReadyForEpic call runBDFn` and `internal/complete/complete.go advanceState call runBDFn` to `… call readyJSONFn`, keeping disposition, class and note;
+   - RENAME `internal/lifecycle/orphans.go listClosedBeadsFn call bead.RunBD` and `internal/lifecycle/stale_open.go listOpenBeadsFn call bead.RunBD` to `… call bead.ListJSON`;
+   - RENAME `internal/approve/adopt_lattice.go listEpicBeads call adoptListBDFn` to `… call adoptListJSONFn`.
+
+   `TestArgvIDOperandGated` reports any row this list missed as UNCLASSIFIED or STALE.
 3. Add `internal/lint/rowcap_test.go` with `TestBDRowCapWaist` (R2.3):
-   - It walks non-test Go sources and flags a call whose callee is `bead.RunBD`, `bead.RunBDCombined`, `exec.Command` with first argument `"bd"`, or a package-level func var initialised to one of those, when its first bd argument is the literal `"ready"` or `"list"`.
+   - It walks non-test Go sources and flags a call whose first bd argument is the literal `"ready"` or `"list"` when its callee is `bead.RunBD`, `bead.RunBDCombined`, `exec.Command` with first argument `"bd"`, or a package-level func var initialised to one of those. A func var is resolved by its initialiser, as the argv ratchet resolves aliases.
    - It exempts `internal/bead` and any call carrying a `// rowcap-allowlisted: <reason>` comment on the call line or the line above.
-   - Add that marker to `internal/doctor/beads.go`'s schema-drift probe (rows unread).
-   - A self-test feeds an injected non-test source from `internal/lint/testdata/` containing an unmarked `bead.RunBD("list", …)` and asserts red. It also asserts green for the doctor marker, `internal/redact/redact.go`'s `"list"` map key and `internal/harness`'s `sandbox.runBD(...)` method calls.
-4. Decide R2.4 per the plan-level choice: raise `bdVersionFloor` to `"1.1.0"` with a doc comment citing spec 129 Background B and C, unless all three facts are shown at 1.0.4 from bd's 1.0.4 source or changelog (then keep `1.0.4` and cite that evidence). Update any doctor test that pins the floor string.
+   - `internal/doctor/beads.go`'s `checkBdSchemaDrift` (`exec.Command("bd", "list", "--json")`) is out of R2's scope: it reads the exit status and matches the drift regex over the output text, and never reads rows. It gets `// rowcap-allowlisted: schema-drift probe reads exit status and output text only; rows unread`.
+   - The self-test feeds three injected non-test sources (NEW) and asserts each red: `internal/lint/testdata/rowcap_direct.go.txt` (an unmarked `bead.RunBD("list", …)`), `rowcap_funcvar.go.txt` (`var runBDFn = bead.RunBD`, then an unmarked `runBDFn("ready", …)`) and `rowcap_execbd.go.txt` (an unmarked `exec.Command("bd", "ready", …)`). It asserts green on a marked call, on `internal/redact/redact.go`'s `"list"` map key and on `internal/harness`'s `sandbox.runBD(...)` method calls.
+4. Decide R2.4 per the plan-level choice: raise `bdVersionFloor` to `"1.1.0"` with a doc comment citing spec 129 Background B and C, unless all three facts are shown at 1.0.4 from bd's 1.0.4 source or changelog (then keep `1.0.4` and cite that evidence). On a raise, update every copy of the floor in this bead: `internal/bead/bdcli.go`'s `minBdVersionMsg` (commented to stay in sync with `doctor.bdVersionFloor`), the `>= 1.0.4` in the bdcli doc comment, and the doctor message's `(v1.0.4)`. Update `TestCheckBdVersionFloor_BelowFloor` and `TestCheckBdVersionFloor_AtOrAbove` in `internal/doctor/beads_test.go`.
 5. Add the R3.2 pins:
    - `TestPlanApprove_BeadsCarrySpecID` in `internal/approve/plan_test.go`: every `planRunBDFn`-recorded `bd create` argv for a bead carries `--metadata` JSON whose `spec_id` equals the spec ID and passes `idvalidate.SpecID`;
    - `TestSpecApprove_EpicHasNoSpecID` in `internal/approve/spec_test.go`: `specRunBDFn`'s epic argv carries no `spec_id`.
 
    No production change.
-6. Add the AC-7 seam tests and the end-to-end cap test: `TestQueryReady_Uncapped`, `TestResolveActiveBead_Uncapped`, `TestOrphans_ListUncapped`, `TestStaleOpen_ListUncapped`, `TestHygiene_ListUncapped`, `TestComplete_PostCloseReady_Uncapped`, `TestAdoptLattice_ListViaWaist`, `TestListJSON_ToleratesExplicitNZero`, `TestListJSON_RejectsCap`, `TestReadyJSON_TruncationNoticeIsError`, and `TestNext_101ReadyBeads_AllVisible`. The last test drives `next --emit-only` against the capping fake with 101 ready rows: 101 items listed, and `--pick 101` emits the last.
+6. Add the AC-7 seam tests and the end-to-end cap test, all NEW, in these files:
+   - `internal/next/beads_test.go`: `TestQueryReady_Uncapped`, `TestResolveActiveBead_Uncapped`;
+   - `internal/lifecycle/orphans_test.go`: `TestOrphans_ListUncapped`; `internal/lifecycle/stale_open_test.go`: `TestStaleOpen_ListUncapped`;
+   - `internal/bead/hygiene_test.go`: `TestHygiene_ListUncapped`;
+   - `internal/complete/complete_test.go`: `TestComplete_PostCloseReady_Uncapped`;
+   - `internal/approve/adopt_lattice_test.go`: `TestAdoptLattice_ListViaWaist`;
+   - `internal/bead/bdcli_test.go`: `TestListJSON_ToleratesExplicitNZero`; `TestListJSON_RejectsCap`, with one leg per rejected spelling in step 1, each asserting no bd spawn; `TestReadyJSON_TruncationNoticeIsError`; and `TestReadyJSON_BenignStderrIsNotError`, where the fake bd writes `warning: …` to stderr and valid JSON to stdout and exits 0, and `ReadyJSON` returns the rows with no error;
+   - `cmd/mindspec/next_selection_test.go`: `TestNext_101ReadyBeads_AllVisible`, which drives `next --emit-only` against the capping fake with 101 ready rows: 101 items listed, and `--pick 101` emits the last.
+7. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "Beads as Substrate (ADR-0023)", state that every decision-bearing `bd ready`/`bd list` read goes through the `internal/bead` waist with `-n 0` and that `TestBDRowCapWaist` guards it; in execution `interfaces.md` § "bd stderr passthrough content", add `ReadyJSON`'s truncation-notice error.
 
 **Verification**
-- [ ] `go test ./internal/bead/... -run 'TestListJSON_|TestReadyJSON_|TestHygiene_ListUncapped'` passes
-- [ ] `go test ./internal/next/... -run 'TestQueryReady_Uncapped|TestResolveActiveBead_Uncapped|TestNext_101ReadyBeads_AllVisible'` passes (place the 101-row test in `cmd/mindspec` instead if `--emit-only` is only reachable there; then run it with `go test ./cmd/mindspec/... -run TestNext_101ReadyBeads_AllVisible`)
-- [ ] `go test ./internal/lifecycle/... -run 'TestOrphans_ListUncapped|TestStaleOpen_ListUncapped'` and `go test ./internal/complete/... -run TestComplete_PostCloseReady_Uncapped` pass
-- [ ] `go test ./internal/approve/... -run 'TestAdoptLattice_ListViaWaist|TestPlanApprove_BeadsCarrySpecID|TestSpecApprove_EpicHasNoSpecID'` passes
-- [ ] `go test ./internal/lint/...` passes, including `TestBDRowCapWaist` and its injected-file self-test
-- [ ] `go test ./internal/phase/... ./internal/doctor/...` passes unchanged except any floor-string pin, which proves `phase.Cache`'s explicit `-n 0` is tolerated
+- [ ] `go test ./internal/bead/ -run 'TestListJSON_|TestReadyJSON_|TestHygiene_ListUncapped' -count=1` passes
+- [ ] `go test ./internal/next/ -run 'TestQueryReady_Uncapped|TestResolveActiveBead_Uncapped' -count=1` passes
+- [ ] `go test ./cmd/mindspec/ -run 'TestNext_101ReadyBeads_AllVisible' -count=1` passes
+- [ ] `go test ./internal/lifecycle/ -run 'TestOrphans_ListUncapped|TestStaleOpen_ListUncapped' -count=1` and `go test ./internal/complete/ -run 'TestComplete_PostCloseReady_Uncapped' -count=1` pass
+- [ ] `go test ./internal/approve/ -run 'TestAdoptLattice_ListViaWaist|TestPlanApprove_BeadsCarrySpecID|TestSpecApprove_EpicHasNoSpecID' -count=1` passes
+- [ ] `go test ./internal/lint/ -run 'TestBDRowCapWaist|TestArgvIDOperandGated' -count=1` passes, including the three injected-file legs
+- [ ] `go test ./internal/doctor/ -run 'TestCheckBdVersionFloor_' -count=1` passes; `go test ./internal/phase/... ./internal/doctor/... -count=1` passes, which proves `phase.Cache`'s explicit `-n 0` is tolerated
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-7: every R2.1 site's recorded argv carries exactly one `-n 0`; `-n 5` errors with no bd spawn; with 101 ready rows the emit-only list has 101 items (red-on-revert: 100 today).
-- AC-8: `TestBDRowCapWaist` is red on the injected unmarked `bead.RunBD("list", …)` and green on the doctor marker, the redact map key and harness `sandbox.runBD`. A stderr `Showing 100 of 106 ready issues…` at exit 0 makes `ReadyJSON` return the escaped truncation error with a `recovery:` line.
+- AC-7: every R2.1 site's recorded argv carries exactly one `-n 0`; every rejected spelling in step 1 errors with no bd spawn; with 101 ready rows the emit-only list has 101 items (red-on-revert: 100 today).
+- AC-8: `TestBDRowCapWaist` is red on each of the three injected fixtures (direct call, func-var alias, `exec.Command("bd", …)`), so the lint provably resolves package-level func vars initialised to `bead.RunBD`/`bead.RunBDCombined`. It is green on a marked call, the doctor marker, the redact map key and harness `sandbox.runBD`. A stderr `Showing 100 of 106 ready issues…` at exit 0 makes `ReadyJSON` return the escaped truncation error with a `recovery:` line; benign stderr at exit 0 returns the rows (`TestReadyJSON_BenignStderrIsNotError`).
 - AC-9: both linkage pins pass with no production change.
 - R2.4: the floor decision is made in code with its evidence comment.
 
@@ -320,7 +406,7 @@ None.
 1. In `internal/gitutil/gitops.go`, beside `FirstParentMerges`, add one primitive:
    - **`ReachableMerges(workdir, ref string) ([]MergeCommit, error)`**: `git log --merges --topo-order` over `ref`, newest first. Each entry carries the SHA, both parents and the subject, in the same shape `FirstParentMerges` returns. Use `RejectOptionLike` on `ref`.
 
-   Update the `FirstParentMerges` doc contract to name its first-parent-only scope and point to `ReachableMerges`. Classify the new exec site in `internal/lint/ratchet_argv_table_test.go`. No `CommitObjectState` probe is added (round-7 resolutions, O1).
+   Update the `FirstParentMerges` doc contract to name its first-parent-only scope and point to `ReachableMerges`. Argv ratchet (row-only per § Shared files): add exactly the exec row `"internal/gitutil/gitops.go ReachableMerges exec-git execCommand"` directly after the `FirstParentMerges` exec row, with the same disposition, class and note shape. No call row changes, because the gitutil helpers are gated and their callers are not rows. No `CommitObjectState` probe is added (round-7 resolutions, O1). `TestReachableMerges` in `reachable_merges_test.go` is NEW.
 2. Add `internal/lifecycle/fallback.go`:
    - **The `reviewed_head_sha` value classifier** (R4.3's argv hygiene). One ordered table:
      - (a) empty → skip;
@@ -339,17 +425,26 @@ None.
      - F1: exactly one admitted candidate, else the new `ReattestStateMultipleFallbackCandidates` (`"multiple-fallback-candidates"`).
      - F3: the Spec-125 surviving-tip contradiction.
      - F4: the Spec-125 `R5(d)` net-effect/revert test anchored on the single candidate at the current tip.
-     - F5: any read error is an error.
-   - **The advisory registration report** (reattest only, never read-back). Over every registration `panel.ForBead` returns in `workspace.FindRoot(cwd)` and its spec dir: for each class-(c) SHA, `IsAncestor` against the tip; exit 1 → `advisory: registration <dir> (round <r>) reviewed <sha>, which is outside <spec-branch>'s tip history`; any other non-zero outcome → the same line with `(not determinable locally)`. A class-(d) value → `advisory: registration <dir> carries a malformed reviewed_head_sha; ignored`. Then once `advisory: panel roots scanned: <root>, <spec-dir>`. Every value is termsafe-escaped. It returns lines and a count, never an error that refuses.
+     - F5: any git or bd metadata read error is a plain error: reattest refuses non-zero and writes nothing.
+   - **The advisory registration report** (`advisoryRegistrationReport`; reattest only, never read-back). Over every registration `panel.ForBead` returns in `workspace.FindRoot(cwd)` and its spec dir: for each class-(c) SHA, `IsAncestor` against the tip; exit 1 → `advisory: registration <dir> (round <r>) reviewed <sha>, which is outside <spec-branch>'s tip history`; any other non-zero outcome → the same line with `(not determinable locally)`. A class-(d) value → `advisory: registration <dir> carries a malformed reviewed_head_sha; ignored`. Then once `advisory: panel roots scanned: <root>, <spec-dir>`. Every value is termsafe-escaped. It returns lines and a count, never an error that refuses. The count is the corroboration string's `<n>` (step 4): the class-(c) values not confirmed as ancestors of the tip, that is, outside plus not determinable. A registration whose `panel.json` cannot be read or parsed (`Registration.Err` set) is never returned by `panel.ForBead`, which cannot attribute it to a bead, so it prints no line and is not counted.
 3. In `internal/lifecycle/landed.go`, make three changes:
    - **R4.3.** Replace `reviewedHeadSHAForBead`'s first-non-empty return with a set of class-(c) SHAs across all registrations. In `FindLandedMerge`, the set CONFIRMS iff it contains the candidate's exact second parent; otherwise it is non-corroborating and never pre-empts the tip (b) or binding (d) legs. A (b) or (d) exact contradiction still contradicts.
-   - **R4.2.** Add `FindLandedMergeReachable(root, specBranch, beadID string) (*LandedMerge, error)`. It runs the unchanged first-parent scan first, and runs the `ReachableMerges` fallback only when that scan nominates zero owned two-parent candidates. On the fallback it identifies a merge ONLY through the read-back:
+   - **R4.2.** Add `FindLandedMergeReachable(root, specBranch, beadID string) (*LandedMerge, error)`. It runs the unchanged first-parent scan first, and runs the `ReachableMerges` fallback only when that scan nominates zero owned two-parent candidates. On the fallback it identifies a merge ONLY through the read-back. The read-back reads the binding and the audit through `landedBindingMetadataFn`, using a variant of `landedBindingForBead` that returns the read error (today's reader folds a metadata-read failure into "no binding"). It identifies the merge iff:
      - a VALID audit (`op == reattestOp`, `at` RFC-3339, non-empty `actor`, `scanned_branch` equal to this spec branch, both SHA keys well-formed);
      - audit tuple == current binding pair == the single scan-derived candidate;
      - F1, F3, F4 and F5 pass now; no registration is read.
 
-     Otherwise it returns the new `*LandedMergeOffFirstParent`, which wraps `ErrLandedMergeNotFound` (never `ErrLandedMergeNoCandidate`) and names the bead, the spec branch, each admitted candidate's merge SHA and second parent, and `mindspec reattest <id>`.
+     When it does not identify the merge, the outcome is fixed per failing check:
+     - (a) any git read error or bd metadata read error (F5) → a PLAIN error: never `*LandedMergeOffFirstParent`, and never wrapping `ErrLandedMergeNotFound`;
+     - (b) F1, two or more admitted candidates → `*LandedMergeOffFirstParent` naming every candidate;
+     - (c) F4, the candidate was reverted or cleanly removed at the current tip → `ErrLandedMergeReverted`;
+     - (d) F3, a surviving-tip contradiction → `ErrLandedMergeContradiction`;
+     - (e) the audit is absent or MALFORMED, or its tuple differs from the binding or the candidate → `*LandedMergeOffFirstParent`.
+
+     `*LandedMergeOffFirstParent` wraps `ErrLandedMergeNotFound` (never `ErrLandedMergeNoCandidate`) and names the bead, the spec branch, each admitted candidate's merge SHA and second parent, and `mindspec reattest <id>`.
+   - **Typed sentinels.** Export `ErrLandedMergeContradiction` and `ErrLandedMergeReverted`, each wrapping `ErrLandedMergeNotFound`, and return them at the existing contradiction and revert sites in `landed.go`. Callers that test `errors.Is(err, ErrLandedMergeNotFound)` see no change. Bead 4 discriminates on them.
    - **Unchanged.** `FindLandedMerge` itself, and therefore `MergedUnclosed`, `orphan_hints.go`, `planFindLandedMergeFn`, `adoptFindLandedMergeFn` and the executor paths, keep the first-parent scan only. Update the `ErrLandedMergeNoCandidate` and `SubsumptionConflict` doc contracts per R4.2/R4.4.
+   - **Composition allowlist** (`internal/lint/ratchet_composition_allowlist_test.go`): add one row per new `workspace.*` call, exactly as made, with the existing waist Gate text: `"internal/lifecycle/landed.go FindLandedMergeReachable workspace.BeadBranch"` and `"internal/lifecycle/fallback.go advisoryRegistrationReport workspace.SpecDir"`. Keep the `internal/lifecycle/landed.go reviewedHeadSHAForBead workspace.SpecDir` row, adjusting its Count if the set rewrite changes the number of calls. `TestWorkspaceCompositionCallSiteAllowlist` reports a missed or STALE row.
 4. In `internal/lifecycle/reattest.go`:
    - Nominate through the same first-parent-then-fallback generator.
    - On a fallback candidate, run every Spec-125 check, then F1, F3, F4 and F5. Print `candidate <sha> reached <spec-branch>'s tip off the first-parent chain; its subject names no target` and the advisory lines before writing. No advisory changes the exit code or the writes.
@@ -371,15 +466,24 @@ None.
    Cross-reference it from item (c). Add `internal/validate/adr0041_spec129_amendment_test.go` pinning those phrases (part (iii) is added by Bead 7).
 6. Write the lifecycle tests named in AC-11 and in AC-12's lifecycle legs, reusing and extending `initLandedRepo`/`mergeBead`/`mergeBeadDefaultSubject`. Write panel registrations as separate dirs with explicit `round`.
    - **Rewrite to the non-corroborating outcome:** `TestFindLandedMerge_ReviewedHeadSHAContradicts`, `TestReattest_PanelShaContradictionRefuses` and the two `…HostilePanelSHAEscapedInRefusal` tests. Keep the escaping assertion where a SHA is still rendered.
-   - **Must stay green unchanged:** `TestReattest_ContradictoryBindingOverwrittenAudited`, `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` and `TestReattest_HappyPathFleetState`'s `Wrote=false` leg.
+   - **Must stay green:** `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest`, unchanged. `TestReattest_HappyPathFleetState` keeps every existing assertion and may add assertions for the new audit keys. Its re-run stays a no-op (`Wrote=false`) because `stubBindingRead` replays the keys the first run wrote.
+   - **F3, F5 and read-back legs (all NEW):**
+     - `TestReattest_FallbackRefusesSurvivingTipContradiction` (F3 at acceptance; nothing written);
+     - `TestReattest_FallbackGitReadErrorRefuses` (F5 at acceptance: a seam-injected error from the reachable-merges read; non-zero, nothing written);
+     - `TestReadBack_SurvivingTipMovedFails` (F3 at read-back → `ErrLandedMergeContradiction`);
+     - `TestReadBack_AcceptedThenReverted` (AC-11 xiv's lifecycle half: accepted through reattest, then reverted → `ErrLandedMergeReverted`);
+     - `TestReadBack_GitReadErrorIsPlainError` and `TestReadBack_MetadataReadErrorIsPlainError` (neither result satisfies `errors.Is(err, ErrLandedMergeNotFound)` or `errors.As` to `*LandedMergeOffFirstParent`);
+     - `TestLandedMerge_TypedSentinelsWrapNotFound`.
+   - **AC-11 leg ix** (forged binding without an audit; an explicit reattest then accepts) is tested as a read-back leg (`TestReadBack_ForgedBindingWithoutAudit`), because its MF-3 outcome comes from the read-back.
+7. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "Landed-merge attestation integrity", including its `FindLandedMerge` (R5) and `mindspec reattest` (R4) subsections, describe the reachable fallback, the R4.3 set, F1/F3/F4/F5, the read-back outcomes and the typed sentinels; update workflow `interfaces.md`'s `mindspec reattest` CLI row and workflow `runbook.md` § "Missing or stale landed-binding on a merged bead (spec 125)" for the off-first-parent case; add a `ReachableMerges` row to execution `interfaces.md` § "Landed-merge identity primitives", after the `ExactSecondParentMerges` row.
    - **AC-21's lifecycle leg:** `TestReviewedHeadSHASet_UntrackedIgnored` writes the registration under a `.gitignore`d `reviews/` dir, never `git add`s it, and asserts the set contains its SHA.
 
 **Verification**
-- [ ] `go test ./internal/gitutil/... -run TestReachableMerges` passes
-- [ ] `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestReadBack_|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet|TestMergedUnclosed_PanelSet|TestReattest_RepairsContradictoryBindingOnFallback|TestReviewedSHAClass_Table|TestReviewedHeadSHASet_UntrackedIgnored'` passes (the spec's Validation Proof command, widened)
-- [ ] `go test ./internal/lifecycle/... ./cmd/mindspec/... -run 'TestReattest'` passes, with `TestReattest_HappyPathFleetState`, `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` unchanged
-- [ ] `go test ./internal/validate/... -run TestADR0041_Spec129Amendment` passes
-- [ ] `go test ./internal/lint/...` passes (the argv ratchet classifies the new exec site)
+- [ ] `go test ./internal/gitutil/ -run 'TestReachableMerges' -count=1` passes
+- [ ] `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestReadBack_|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet|TestMergedUnclosed_PanelSet|TestReattest_RepairsContradictoryBindingOnFallback|TestReviewedSHAClass_Table|TestReviewedHeadSHASet_UntrackedIgnored|TestLandedMerge_TypedSentinelsWrapNotFound' -count=1` passes (the spec's Validation Proof command, widened)
+- [ ] `go test ./internal/lifecycle/ ./cmd/mindspec/ -run 'TestReattest' -count=1` passes, with `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` unchanged and `TestReattest_HappyPathFleetState`'s existing assertions kept
+- [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes (NEW test file)
+- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes (the new exec row and the new composition rows)
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
@@ -390,6 +494,7 @@ None.
   - read-back legs xi–xvi.
 
   Each passes as `TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*` and `TestMergedUnclosed_IgnoresFallback`. Every advisory leg asserts the same exit code and writes as the fixture without the registration. A garbage-collected SHA prints `(not determinable locally)`. A refusal writes nothing (seam on `reattestBindingFn`).
+- AC-11 F3 and F5: pinned at acceptance (`TestReattest_FallbackRefusesSurvivingTipContradiction`, `TestReattest_FallbackGitReadErrorRefuses`) and at read-back (`TestReadBack_SurvivingTipMovedFails`, `TestReadBack_GitReadErrorIsPlainError`, `TestReadBack_MetadataReadErrorIsPlainError`). Leg xiv's lifecycle half is `TestReadBack_AcceptedThenReverted`; its MF-3 sentence is Bead 4's.
 - AC-12 lifecycle legs i, ii, iii, vii and viii pass (`TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`). Leg v's reattest half passes with a corroboration string recording the panel as non-corroborating.
 - AC-18 (ADR-0041 parts i–ii): the amendment text pin passes.
 - AC-21 (lifecycle leg): `TestReviewedHeadSHASet_UntrackedIgnored` passes.
@@ -415,7 +520,7 @@ None.
    - bare base;
    - hyphenless `AC9`, normalised to `AC-9` and harvested as a claim.
 
-   Dotted sub-numbers keep resolving at base on both sides; a comment on the table says so (OQ-6). Add `TestMF2_FormSymmetry` (every form through both sides; each harvested key is producible by the indexer from the same text). `TestReadiness_MF2AllClasses` gains the six R5.2 legs.
+   Dotted sub-numbers keep resolving at base on both sides; a comment on the table says so (OQ-6). Add `TestMF2_FormSymmetry` (NEW, `mf2_forms_test.go`): each table row states its expected key set, and the test asserts set EQUALITY on the bead side and on the spec side, plus a non-empty harvest. Rows include `R9a` and `R9(a)` → {R9a}; `AC-2b` and `AC-2(b)` → {AC-2b}; `R5(ii)` → {R5}; `R9` → {R9}; `AC9` and `AC-9` → {AC-9}; `R6.3` → {R6}. `TestReadiness_MF2AllClasses` gains the six R5.2 legs.
 4. Add `Failures []string` to `readiness.Signal` in `report.go`, and add `internal/validate/readiness/records.go`:
    - **Record grammars** (R6.2), raw and pre-render, with no free-form error text, timestamps or bd stderr:
      - MF-1: one stable key per existing `evaluateMF1` failure branch (for example `section-missing:<n>`, `ac-entry-missing:<n>`, `chunk-missing:<n>`, `key-file-paths-empty:<n>`, `key-file-paths-placeholder:<n>`, `key-file-paths-blank:<n>`);
@@ -427,20 +532,26 @@ None.
    - `Detail` stays human text and may list every failure.
    - `Recovery` keeps spec 124 R1's one line per signal.
    - `findBlockingToken`/`findBlockingChecklistItem` become all-occurrence scanners feeding MF-4 records.
-6. Give `readiness.Report` the lineage `EvaluateReadiness` already resolves: `EpicID` and `SpecID` fields filled from `findEpicForBeadFn`. This is the R1.8 groundwork Bead 7 consumes; no caller changes here. Add `TestFailureRecordDigests_Deterministic` (two runs on an unchanged fixture are byte-identical for every signal) and `TestFailureRecordDigests_WriterReaderAgree` (an MF-4 line containing a control byte gives equal digests from the raw records on both paths).
+   - Add to `readiness_test.go` `TestReadiness_MF1AggregatesAllFailures` (NEW: a missing AC entry, a placeholder and a blank `key_file_paths` give three records) and `TestReadiness_MF4AggregatesAllOccurrences` (NEW: two identical blocking lines give records with k=1 and k=2).
+6. Give `readiness.Report` the lineage `EvaluateReadiness` already resolves: `EpicID` and `SpecID` fields filled from `findEpicForBeadFn`. This is the R1.8 groundwork Bead 7 consumes; no caller changes here.
+   - Add the exported `*NonPlanFormError{BeadID, EpicID, SpecID}`. When the lineage resolves but `beadIndex` fails (no `<epic>.<N>` index), `EvaluateReadiness` returns it, with an `Error()` byte-identical to today's message, so callers that print the error see no change. Bead 7 uses it to refuse a lineage-resolved non-plan bead with R1.8(a)'s sentence before any index or file check. Add `TestEvaluateReadiness_NonPlanFormErrorCarriesLineage` (NEW).
+   - Add to `records_test.go` (NEW) `TestFailureRecordDigests_Deterministic` (two runs on an unchanged fixture are byte-identical for every signal) and `TestFailureRecordDigests_WriterReaderAgree` (an MF-4 line containing a control byte gives equal digests from the raw records on both paths).
+7. Domain docs (§ Shared files, Doc ownership): in workflow `interfaces.md` § "Readiness Engine", add `Signal.Failures`, the record grammars, `FailureRecordDigests`, `PlanMapsBead`, `NonPlanFormError` and `Report.EpicID`/`SpecID`; in execution `interfaces.md` § "Readiness advisory metadata", add `bead.PlanBeadIndex`.
 
 **Verification**
-- [ ] `go test ./internal/bead/... -run TestPlanBeadIndex` passes
-- [ ] `go test ./internal/validate/readiness/ -run 'TestPlanMapsBead_AndPositional|TestMF2_FormSymmetry|TestReadiness_MF2AllClasses|TestFailureRecordDigests_|TestReadiness_MF1|TestReadiness_MF4'` passes
-- [ ] `go test ./internal/complete/... -run Isolation` passes (readiness still never reads the override marker)
-- [ ] `go test ./internal/lint/...` passes (no new `os/exec`/`gitutil` import in `internal/validate/readiness`)
+- [ ] `go test ./internal/bead/ -run 'TestPlanBeadIndex' -count=1` passes
+- [ ] `go test ./internal/validate/readiness/ -run 'TestPlanMapsBead_AndPositional|TestMF2_FormSymmetry|TestReadiness_MF2AllClasses|TestFailureRecordDigests_|TestReadiness_MF1AggregatesAllFailures|TestReadiness_MF4AggregatesAllOccurrences|TestEvaluateReadiness_NonPlanFormErrorCarriesLineage' -count=1` passes
+- [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes (readiness still never reads the override marker)
+- [ ] `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) prints only the two existing `os/exec` lines (`fixtures.go`, `readiness_test.go`); the output is recorded in the commit body (§ ADR Fitness, ADR-0030)
+- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes unchanged
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
 - AC-14: `TestMF2_FormSymmetry` passes over the full table; `TestReadiness_MF2AllClasses`' six R5.2 legs pass; legs 1, 4 and 6 are recorded red-on-revert.
 - AC-1 (helper part): `TestPlanMapsBead_AndPositional` passes, including the positional heading-12 mapping and the fenced-heading count.
 - AC-16 (digest part): `TestFailureRecordDigests_Deterministic` and `TestFailureRecordDigests_WriterReaderAgree` pass.
-- `bead.PlanBeadIndex`, `readiness.PlanMapsBead`, `Signal.Failures`, `FailureRecordDigests`, the MF-3 record constructors and `Report.EpicID`/`SpecID` exist with doc comments, for Beads 4–7 (R1.1, R6.2).
+- R6.2 aggregation: `TestReadiness_MF1AggregatesAllFailures` and `TestReadiness_MF4AggregatesAllOccurrences` pass.
+- `bead.PlanBeadIndex`, `readiness.PlanMapsBead`, `Signal.Failures`, `FailureRecordDigests`, the MF-3 record constructors, `NonPlanFormError` and `Report.EpicID`/`SpecID` exist with doc comments, for Beads 4–7 (R1.1, R1.8, R6.2); `TestEvaluateReadiness_NonPlanFormErrorCarriesLineage` passes.
 
 **Depends on**
 None.
@@ -448,15 +559,15 @@ None.
 ## Bead 4: MF-3 membership, message arms and aggregated failures
 
 **Steps**
-1. Extend `fetchBeadRecordReal` and `dependencyEdge` to keep each `blocks` dependency's `metadata.spec_id`, which the bead's own `bd show --json` already returns. Add a seam `fetchDependencyParentFn` that runs one `bd show <D> --json` through `internal/bead` and returns D's `parent`. Never read the dependency entry's own `parent` key: it is null even when D has a parent (Background C).
-2. Implement R4.1 membership in `evaluateMF3`, in a new `internal/validate/readiness/mf3.go`. A closed `blocks` dependency D is held to the landed-merge test iff any of these holds:
+1. Extend `fetchBeadRecordReal` and `dependencyEdge` to keep each `blocks` dependency's `metadata.spec_id`, which the bead's own `bd show --json` already returns. Add a seam `fetchDependencyParentFn` that wraps `fetchBeadRecordFn` (one `bd show <D> --json`, already routed through `internal/bead`) and returns D's `parent`; `beadRecord` and `FakeBeadRecord` gain a `parent` field. This adds no exec site, so no argv row. Never read the dependency entry's own `parent` key: it is null even when D has a parent (Background C).
+2. Implement R4.1 membership in `evaluateMF3`, which stays in `readiness.go`, so its composition row `readiness.go evaluateMF3 workspace.SpecBranch` is unchanged. The new `internal/validate/readiness/mf3.go` holds pure helpers only. A closed `blocks` dependency D is held to the landed-merge test iff any of these holds:
    - (i) `bead.PlanBeadIndex(report.EpicID, D)`;
    - (ii) its `spec_id` equals S;
    - (iii) its parent read equals E, run only when (i) and (ii) are both negative.
 
    Outcomes:
    - All negative from successful reads → PASS with `dependency <D>: closed; not a bead of spec <S> — landed-merge test not applicable`.
-   - Any read or parse error → an `indeterminate` record with `could not determine whether <D> belongs to spec <S>: <escaped error>` and `recovery: bd show <D> --json`.
+   - Any membership read or parse error → an `indeterminate` record with `could not determine whether <D> belongs to spec <S>: <escaped error>` and `recovery: bd show <D> --json`.
    - Held only by (ii) or (iii): add the "linked to spec <S> by <metadata.spec_id | parent edge> but does not have the plan-bead form" hint plus the scoped override line.
    - Plan-form but unmapped (`PlanMapsBead` false): add the follow-up hint.
    - A non-closed dependency fails as `not-closed`, as today.
@@ -465,9 +576,10 @@ None.
    - `*LandedMergeOffFirstParent` → arm 1b's sentence, with `Recovery` = `mindspec reattest <D>`. The second exit, `recovery (if reattest refuses): mindspec next <this bead> --allow-not-ready=MF-3 --evidence <path-to-justification>`, goes on a Detail line. No q9ea line;
    - `errors.Is(err, lifecycle.ErrLandedMergeNoCandidate)` → `no two-parent merge reachable from <spec-branch>'s tip lands bead/<D> (first-parent scan, then the reachable-landing fallback)` plus today's two-possibility wording;
    - a corroboration contradiction → `a merge landing bead/<D> exists (<sha>) but <datum> contradicts its second parent <sha>`;
-   - a revert shape → `merge <sha> landing bead/<D> was reverted or cleanly removed after landing`.
+   - a revert shape → `merge <sha> landing bead/<D> was reverted or cleanly removed after landing`;
+   - any other error, including the read-back's plain F5 errors → an `indeterminate` record, Detail `could not evaluate landed-merge state: <escaped error>`, keeping today's recovery line for an unclassified landed-merge error. It is never overridable (`IsIndeterminateRecord` is true) and is never classed `off-first-parent` or `no-evidence`.
 
-   Each arm ends with its own inspection-first recovery. None recommends `mindspec complete` for a bead whose merge exists. Distinguish contradiction from revert by typed errors or sentinels exported from `internal/lifecycle`, not by string matching. If Bead 2 did not export them, add `ErrLandedMergeContradiction`/`ErrLandedMergeReverted` wrappers in `landed.go` that keep the `ErrLandedMergeNotFound` chain.
+   Each arm ends with its own inspection-first recovery. None recommends `mindspec complete` for a bead whose merge exists. Distinguish contradiction from revert by Bead 2's exported `ErrLandedMergeContradiction` and `ErrLandedMergeReverted`, checked with `errors.Is` before the bare `ErrLandedMergeNotFound` arm, never by string matching. This bead does not edit `internal/lifecycle`.
 4. Aggregate MF-3 across EVERY closed member dependency, one landed-merge evaluation each:
    - `Failures` holds one record per failing dependency, built with Bead 3's constructors;
    - `Detail` lists every failing dependency with its class and its own recovery text;
@@ -478,26 +590,30 @@ None.
    - `TestReadiness_MF3_CompleteWrapperShape` (AC-12 leg iv);
    - AC-12 leg v's MF-3 half;
    - `TestReadiness_MF3_LocalAheadOfRemotePasses` (leg vi, labelled green today);
-   - `TestReadiness_MF3ErrorArmDiscrimination`'s four new legs;
-   - `TestReadiness_MF3AggregatedPrecedence`.
+   - `TestReadiness_MF3ErrorArmDiscrimination`'s four new legs, plus a fifth: a plain error gives an `indeterminate` record, `IsIndeterminateRecord` is true, it is never `off-first-parent` or `no-evidence`, and it outranks `not-closed`;
+   - `TestReadiness_MF3AggregatedPrecedence`;
+   - `TestReadiness_MF3_RevertedAfterReattest` (NEW, AC-11 xiv's MF-3 half: accepted through reattest, then reverted; MF-3 FAILS with the reverted sentence);
+   - `TestReadiness_MF3_ParentReadOnlyWhenNeeded` (NEW, `mf3_test.go`): counts `fetchDependencyParentFn` calls, 0 when (i) or (ii) holds and 1 when both are negative.
 6. Make no change to `next`, `cmd` or the override marker in this bead.
+7. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "The mechanical floor (MF-1..MF-4)", describe MF-3's membership rule, its message arms (including `indeterminate`) and the aggregated records.
 
 **Verification**
-- [ ] `go test ./internal/validate/readiness/ -run 'TestReadiness_MF3|TestMF2_FormSymmetry'` passes (the spec's Validation Proof command)
-- [ ] `go test ./internal/validate/readiness/... ./internal/next/... ./cmd/mindspec/...` passes (callers of `registerLandedPanel` and `EvaluateReadiness` stay green)
-- [ ] `go test ./internal/complete/... -run Isolation` passes
-- [ ] `go test ./internal/lint/...` passes (no `os/exec`/`gitutil` import added to `internal/validate/readiness`)
+- [ ] `go test ./internal/validate/readiness/ -run 'TestReadiness_MF3|TestMF2_FormSymmetry' -count=1` passes (the spec's Validation Proof command; `TestReadiness_MF3` matches the existing `TestReadiness_MF3Variants` and `TestReadiness_MF3ErrorArmDiscrimination` and every NEW MF-3 test above)
+- [ ] `go test ./internal/validate/readiness/... ./internal/next/... ./cmd/mindspec/... -count=1` passes (callers of `registerLandedPanel` and `EvaluateReadiness` stay green)
+- [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes
+- [ ] `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) prints only the two existing `os/exec` lines (`fixtures.go`, `readiness_test.go`); the output is recorded in the commit body
+- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes unchanged (no new exec site or `workspace.*` call)
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-10: legs a–g pass; a, b and f are recorded red-on-revert; leg g is a FAIL "could not determine whether…", never PASS.
-- AC-11 (MF-3 legs): leg i's MF-3 FAILS with arm 1b, never the zero-candidate sentence, and PASSES after reattest via read-back.
+- AC-10: legs a–g pass; a, b and f are recorded red-on-revert; leg g is a FAIL "could not determine whether…", never PASS. (iii)'s parent read runs only when (i) and (ii) are negative (`TestReadiness_MF3_ParentReadOnlyWhenNeeded`).
+- AC-11 (MF-3 legs): leg i's MF-3 FAILS with arm 1b, never the zero-candidate sentence, and PASSES after reattest via read-back. Leg xiv's MF-3 half FAILS with the reverted sentence (`TestReadiness_MF3_RevertedAfterReattest`).
 - AC-12 (MF-3 legs iv, v, vi): iv passes via the binding; v reports `*LandedMergeNoEvidence` naming the candidate, then PASSES after reattest; vi passes.
-- AC-13: the four arm legs and the aggregated-precedence test pass; a two-class failure shows both records and exactly one `recovery:` line (`mindspec complete A`).
+- AC-13: the four arm legs, the fifth (`indeterminate`) leg and the aggregated-precedence test pass; a two-class failure shows both records and exactly one `recovery:` line (`mindspec complete A`).
 - R4.5 (#232 shape) is closed by AC-12 leg iv/v as above, with no `origin/` ref read.
 
 **Depends on**
-Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, the R4.3 set) and Bead 3 (`PlanBeadIndex`, `PlanMapsBead`, `Report.EpicID`/`SpecID`, the MF-3 record constructors).
+Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, `ErrLandedMergeContradiction`, `ErrLandedMergeReverted`, the R4.3 set) and Bead 3 (`PlanBeadIndex`, `PlanMapsBead`, `Report.EpicID`/`SpecID`, the MF-3 record constructors).
 
 ## Bead 5: Spec-scoped selection honesty in mindspec next
 
@@ -507,11 +623,12 @@ Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, the R4.3 set) 
    - then `git ls-tree <ref> -- <path>`: empty output → `ErrPathNotAtRef`; non-zero exit → an error;
    - then the blob read.
 
-   Any other failure is a plain error. Classify the exec sites in the argv ratchet. Add `internal/next/planread.go`:
+   Any other failure is a plain error. Use `RejectOptionLike` on `ref` and `path`. Argv ratchet: ADD the exec row `"internal/gitutil/fileprobe.go FileAtRefTyped exec-git execCommand"` with Count equal to its spawns (3) and the same disposition and class as the `FirstParentMerges` row. If step 2 deletes `QueryReadyForEpic`, delete its call row in the same commit (the ratchet reports it STALE otherwise). `TestFileAtRefTyped` in `fileprobe_test.go` is NEW. Add `internal/next/planread.go`:
    - it reads `plan.md` for spec S LAZILY: from `spec/<S>` via the probe, falling back to `workspace.SpecDir(root, S)/plan.md` only on `ErrRefAbsent`/`ErrPathNotAtRef`;
    - absent in both places → "no plan" (every plan-form row becomes N4 `no plan.md exists yet for <S>`);
    - any other error refuses with `could not read plan.md for <S>`;
-   - when both exist and differ, print once `plan.md in this checkout differs from spec/<S>; mapping used: spec/<S>`.
+   - when both exist and differ, print once `plan.md in this checkout differs from spec/<S>; mapping used: spec/<S>`;
+   - composition allowlist: ADD `"internal/next/planread.go readPlanForSpec workspace.SpecBranch"` and `"internal/next/planread.go readPlanForSpec workspace.SpecDir"` with the waist Gate text, one row per call made.
 2. Rewrite `next.BuildReadySet`'s scoped branch over ONE `bead.ReadyJSON` global read (no `--parent`, no title filter):
    - a row is a **member** iff it is not an epic, is open, `bead.PlanBeadIndex(E, id)` holds, `phase.FindEpicForBead(id)` returns E (via a `findEpicForBeadFn` seam, with `phase.Cache` for the epic list), and `readiness.PlanMapsBead` maps N;
    - members keep bd's order;
@@ -551,20 +668,23 @@ Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, the R4.3 set) 
    - non-zero with one or more blocking near-misses;
    - non-zero with the indeterminate form and no tally when the child read fails.
 
-   Fix the ambiguity menu to print `mindspec next --spec=<spec-id>` (R1.6). Add the sentence once to `internal/instruct/templates/implement.md`, pinned by `TestImplementTemplate_EmptinessRule` in `internal/instruct`.
+   Fix the ambiguity menu to print `mindspec next --spec=<spec-id>` (R1.6). Add the sentence once to `internal/instruct/templates/implement.md`, pinned by `TestImplementTemplate_EmptinessRule` (NEW) in `internal/instruct/instruct_test.go`.
 6. Rewrite the spec-128 tests named in R1.7 over the new predicate:
    - `TestBuildReadySet_ScopedFiltersByTitle_ExclusionAccounted`;
    - `TestBuildReadySet_EmptyAfterFilter_LoudError`;
    - `TestNextSelection_{ClaimPath,EmitOnlyPath}_PartialExclusionNoticePrinted` gain the ID assertion.
 
-   Add the AC-1 to AC-5 tests. The AC-1 fixture includes both X legs (plan gap 3) and the fourth and fifth fixtures in numeric order. Keep Bead 1's `TestNext_101ReadyBeads_AllVisible` green.
+   Add the AC-1 to AC-5 tests. The AC-1 fixture includes both X legs (plan gap 3) and the fourth and fifth fixtures in numeric order. Keep Bead 1's `TestNext_101ReadyBeads_AllVisible` green. Add `TestNearMissN2a_NeverReparentRecovery` (NEW): a plan-form row whose parent edge points to another epic gets N2a's `… but its parent is <P>` message and `recovery: bd show <id> --json`, and no output line is `bd update <id> --parent …`.
+
+   Test files: `TestBuildReadySet_*` in `internal/next/readyset_test.go`; `TestNearMissN*` and `TestExclusionNotice_NamesIDs` in `internal/next/nearmiss_test.go` (NEW); `TestNext_SelectorOnEmptySet_Refuses`, `TestNext_NearMissPositional_Refuses`, `TestNext_UnlinkedReadyPositional_Refuses` and `TestNext_N4NoLineagePositionalRefuses` in `cmd/mindspec/next_positional_test.go`; `TestNextSelection_*`, `TestNextMenu_PrintsSpecIDForm` and the other `TestNext_*` in `cmd/mindspec/next_selection_test.go`. Every `TestNext_*`, `TestNearMissN*`, `TestExclusionNotice_*` and `TestNextMenu_*` named here is NEW.
+7. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "R6 — Deterministic, honest bead selection", describe the plan-bead predicate, the near-miss classes and the derived-state emptiness output; in workflow `interfaces.md` § "Lifecycle verb state honesty (spec 128)", the selector refusals; in execution `interfaces.md` § "GitUtil Helpers", a `FileAtRefTyped` row.
 
 **Verification**
-- [ ] `go test ./internal/gitutil/... -run TestFileAtRefTyped` passes (ref absent, path absent, present, and a seam-injected git failure)
-- [ ] `go test ./internal/next/... -run 'TestBuildReadySet_|TestNextSelection_|TestNearMiss|TestExclusionNotice_NamesIDs'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestNext_ScopedSelection_|TestNext_EmitOnlyReadsPlanFromSpecBranch|TestNext_PlanDivergenceNotice|TestNext_PlanBlobAbsentUsesCheckout|TestNext_PlanProbeFailureRefuses|TestNext_LazyPlanReadForNoLineageRow|TestNext_NoPlanYetAllN4|TestNext_SelectorOnEmptySet_Refuses|TestNext_NearMissPositional_Refuses|TestNext_UnlinkedReadyPositional_Refuses|TestNext_N4NoLineagePositionalRefuses|TestNext_EmptyScoped_|TestNextMenu_PrintsSpecIDForm|TestNext_101ReadyBeads_AllVisible'` passes (move any test that lives in `internal/next` there; the names are binding, the package is not)
-- [ ] `go test ./internal/instruct/... -short -run TestImplementTemplate_EmptinessRule` passes
-- [ ] `go test ./internal/lint/...` passes; `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `go test ./internal/gitutil/ -run 'TestFileAtRefTyped' -count=1` passes (ref absent, path absent, present, and a seam-injected git failure)
+- [ ] `go test ./internal/next/ -run 'TestBuildReadySet_|TestNearMissN|TestExclusionNotice_NamesIDs' -count=1` passes
+- [ ] `go test ./cmd/mindspec/ -run 'TestNextSelection_|TestNext_ScopedSelection_|TestNext_EmitOnlyReadsPlanFromSpecBranch|TestNext_PlanDivergenceNotice|TestNext_PlanBlobAbsentUsesCheckout|TestNext_PlanProbeFailureRefuses|TestNext_LazyPlanReadForNoLineageRow|TestNext_NoPlanYetAllN4|TestNext_SelectorOnEmptySet_Refuses|TestNext_NearMissPositional_Refuses|TestNext_UnlinkedReadyPositional_Refuses|TestNext_N4NoLineagePositionalRefuses|TestNext_EmptyScoped_|TestNextMenu_PrintsSpecIDForm|TestNext_101ReadyBeads_AllVisible' -count=1` passes
+- [ ] `go test ./internal/instruct/ -short -run 'TestImplementTemplate_EmptinessRule' -count=1` passes
+- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist|TestBDRowCapWaist' -count=1` passes; `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
 - AC-1: on the edge-only, capping fake:
@@ -576,13 +696,13 @@ Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, the R4.3 set) 
   - no `bd ready --parent` argv is recorded.
 
   The second to fifth fixtures and the lazy-trigger and fenced-heading fixtures behave as AC-1 states. The red-on-revert legs are recorded.
-- AC-2: the four near-miss recovery tests pass hermetically. After the fake applies `bd update <D> --parent <E>`, D is a member and `readiness.EvaluateReadiness` reaches its signals.
+- AC-2: the four near-miss recovery tests and `TestNearMissN2a_NeverReparentRecovery` pass hermetically. After the fake applies `bd update <D> --parent <E>`, D is a member and `readiness.EvaluateReadiness` reaches its signals.
 - AC-3 (all legs except the scoped-override claim of an N4 positional, which is Bead 7's): selector refusals end with `^recovery: mindspec next --spec `, and the no-lineage N4 positional never reaches `GateReadiness` (byte-identical audit).
 - AC-4: fixtures i, ii, iii-a, iii-b, iv, v and vi, plus the failing-child-read leg, print the specified lines and exit codes. Fixture iv records zero plan reads.
 - AC-5: `TestExclusionNotice_NamesIDs` and `TestNextMenu_PrintsSpecIDForm` pass, and the R1.7 rewritten tests pass.
 
 **Depends on**
-Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`) and Bead 3 (`bead.PlanBeadIndex`, `readiness.PlanMapsBead`).
+Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`, the argv-table rows it adds), Bead 2 (the argv-table and composition-allowlist rows it adds; the edge serialises those tables) and Bead 3 (`bead.PlanBeadIndex`, `readiness.PlanMapsBead`).
 
 ## Bead 6: Validated override marker, ready-check read-back, and the skill rule move
 
@@ -592,7 +712,7 @@ Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`) and Bead 3 (`bead.PlanBe
    - **LEGACY:** no `schema` key; only `signals` and `overridden`.
    - **MALFORMED:** anything else.
 
-   Add a reader `ReadOverrideMarker(beadID string)` over `GetMetadata` that returns an error on a metadata read failure, never "no marker". Also add the writer-side builder `NewOverrideMarkerV2(signals, fingerprints, evidence, now)` that Bead 7 calls, so writer and validator share one schema definition. Test it in `override_marker_test.go` (`TestOverrideMarker_Validity`, covering every MALFORMED case AC-17 lists).
+   Add a reader `ReadOverrideMarker(beadID string)` over `GetMetadata` that returns an error on a metadata read failure, never "no marker". Also add the writer-side builder `NewOverrideMarkerV2(signals, fingerprints, evidence, now)` that Bead 7 calls, so writer and validator share one schema definition. Test it in `override_marker_test.go` (`TestOverrideMarker_Validity`, NEW), covering every MALFORMED case AC-17 lists plus these shapes, each MALFORMED: duplicate fingerprints, an unsorted fingerprint list, an unknown extra key, `evidence.bytes` 0 and `evidence.bytes` 65537.
 2. Add `internal/validate/readiness/override.go` with `ApplyOverride(report *Report, marker OverrideMarker, validity MarkerValidity) CoverageResult`. The marker is DATA passed in; `EvaluateReadiness` never reads it.
    - A failing signal X is covered iff the marker is VALID, X is in `signals`, every digest in `FailureRecordDigests` of X's current `Failures` is in `fingerprints[X]`, and no current record is indeterminate (`IsIndeterminateRecord`).
    - Growth uncovers; shrinkage stays covered.
@@ -616,14 +736,15 @@ Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`) and Bead 3 (`bead.PlanBe
    - refresh `.claude/skills/ms-bead-impl/SKILL.md` from the plugin source, not by hand.
 
    Rewrite `TestMsBeadImplSkill_OverrideCoverageCheckShipped` and `TestMsBeadImplSkill_OverrideCoverageMutationProbe` in `internal/setup/readiness_skill_pin_test.go` to pin the new line and the staged-rule marker, and to assert the absence of the `mindspec_readiness_override` subset comparison.
-6. Re-verify R7 for AC-18 (no edit): run `mindspec adr list` and confirm ADR-0045 is listed; confirm ADR-0045's `Status: Accepted`, its Status fence, Amends ADR-0040 §1 and ADR-0044, step 1 → spec 130 and Decision 5's transition clause; confirm the ADR-0040 and ADR-0044 back-pointers. Record the outputs in the commit body.
+6. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "The semantic Phase 0 + NOT-READY routing (skill layer)", state that override coverage is decided by `bead ready-check`; update workflow `interfaces.md`'s `mindspec bead ready-check` row (validated marker, coverage, exit codes); in execution `interfaces.md` § "Readiness advisory metadata", describe marker schema v2 and `ParseOverrideMarker`.
+7. Re-verify R7 for AC-18 (no edit): run `mindspec adr list` and confirm ADR-0045 is listed; confirm ADR-0045's `Status: Accepted`, its Status fence, Amends ADR-0040 §1 and ADR-0044, step 1 → spec 130 and Decision 5's transition clause; confirm the ADR-0040 and ADR-0044 back-pointers. Record the outputs in the commit body.
 
 **Verification**
-- [ ] `go test ./internal/bead/... -run TestOverrideMarker_Validity` passes
-- [ ] `go test ./internal/validate/readiness/ -run TestApplyOverride` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestReadyCheck_HonoursValidMarkerOnly|TestReadyCheck_LegacyRecoveryReleasesThenReclaims|TestReadyCheck_MixedCoverageRecoveryNamesAllFailing'` passes
-- [ ] `go test ./internal/setup/... -run 'TestMsBeadImplSkill_OverrideCoverage'` passes, and the skill-refresh tests in `internal/setup` stay green
-- [ ] `go test ./internal/complete/... -run Isolation` passes
+- [ ] `go test ./internal/bead/ -run 'TestOverrideMarker_Validity' -count=1` passes
+- [ ] `go test ./internal/validate/readiness/ -run 'TestApplyOverride' -count=1` passes (NEW, `override_test.go`)
+- [ ] `go test ./cmd/mindspec/ -run 'TestReadyCheck_HonoursValidMarkerOnly|TestReadyCheck_LegacyRecoveryReleasesThenReclaims|TestReadyCheck_MixedCoverageRecoveryNamesAllFailing' -count=1` passes (NEW, `bead_ready_test.go`)
+- [ ] `go test ./internal/setup/ -run 'TestMsBeadImplSkill_OverrideCoverage' -count=1` passes, and `go test ./internal/setup/... -count=1` stays green (skill refresh)
+- [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes
 - [ ] `mindspec adr list` (run) lists ADR-0045
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
@@ -636,7 +757,7 @@ Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`) and Bead 3 (`bead.PlanBe
   - an `indeterminate` record → never covered;
   - LEGACY → the legacy note plus the two-line release/re-claim recovery;
   - mixed coverage → `uncovered: MF-3` with a re-claim naming `MF-2,MF-3`;
-  - each MALFORMED case → the malformed note;
+  - each MALFORMED case, including duplicate or unsorted fingerprints, an unknown extra key and `evidence.bytes` 0 or 65537 → the malformed note;
   - a metadata read error → non-zero.
 
   The first case is recorded red-on-revert.
@@ -654,7 +775,9 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
    - (b) a scope spec S ≠ T refuses with `bead <id> resolves to spec <T> by lineage but is being claimed for spec <S>; nothing was claimed`;
    - (d) `spec/<T>` must resolve through `gitutil.RevParseRef` (called from `internal/next` or `cmd`, never `internal/validate`), else `spec branch spec/<T> for bead <id> does not exist (finalized and deleted, or never created); nothing was claimed` with `recovery: mindspec state show`.
 
-   `GateResult` returns T as the dispatch spec.
+   Before these checks, `GateReadiness` tests the evaluator's error with `errors.As(err, &nonPlan)` for `*readiness.NonPlanFormError` (Bead 3). On a match it renders R1.8(a)'s sentence with `recovery: bd show <id> --json`, using the error's `SpecID` and `EpicID` as T and E_T, so a lineage-resolved non-plan bead is refused with the R1.8 diagnostic and never with the evaluator's generic index error. The no-lineage refusal and the infrastructure-error refusal keep their current text.
+
+   `GateResult` returns T as the dispatch spec. If `GateReadiness` calls a `workspace.*` helper for `spec/<T>`, add the composition row `"internal/next/ready_gate.go GateReadiness workspace.SpecBranch"` (one row per call made).
 2. In `cmd/mindspec/next.go`, apply (c): pass T to `next.EnsureWorktree` (and so to `DispatchBead`) and to recording, never an empty spec, so the bead branch is cut from `spec/<T>` and never from `HEAD`. Correct `advancePhaseOnClaim`'s comment about non-lifecycle claims: a bug bead with no epic lineage is refused by `EvaluateReadiness`'s lineage error.
 3. Re-register `--allow-not-ready` as a String flag with a `NoOptDefVal` sentinel, and add `--evidence`. Parse and refuse before positional resolution:
    - the bare form, and the space-separated `--allow-not-ready MF-3` that cobra parses as bare plus positional: `MF-3` is never looked up as a bead;
@@ -689,26 +812,28 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
 
    Use `grep -rn 'allow-not-ready' .mindspec/core .mindspec/domains cmd internal/next` (run unpiped) to find every site. Leave `internal/bead/clarify.go` and `internal/bead/bdcli.go` doc comments alone (spec Impacted Domains). Append ADR-0041 amendment part (iii) and extend `internal/validate/adr0041_spec129_amendment_test.go` to pin it.
 6. Add the tests:
-   - AC-6: `TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`, `TestGateReadiness_MissingSpecBranchRefuses`, `TestNext_NoLineageBugRefuses`;
-   - AC-15: `TestGateReadiness_ScopedOverride`, `TestNext_BareAllowNotReady_Refuses`, `TestNext_AllowNotReadySpaceSeparated_Refuses`, `TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker`, `TestGateReadiness_IndeterminateNotOverridable`;
-   - AC-16: the `TestOverride_*` legs and `TestAllowNotReady_EvidenceTooLargeRefuses`;
+   - AC-6: `TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`, `TestGateReadiness_MissingSpecBranchRefuses`, `TestNext_NoLineageBugRefuses`. `TestGateReadiness_NonPlanBeadRefuses` drives the REAL `readiness.EvaluateReadiness` through `readiness.FakeBDStore`, with lineage resolving `mindspec-bug` to spec T, on both the scoped and the unscoped path, and asserts R1.8(a)'s sentence and a byte-identical audit;
+   - AC-15: `TestGateReadiness_ScopedOverride`, `TestNext_BareAllowNotReady_Refuses`, `TestNext_AllowNotReadySpaceSeparated_Refuses`, `TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker`, `TestGateReadiness_IndeterminateNotOverridable` (covering both a membership read error and a landed-merge read error as the `indeterminate` origin);
+   - AC-16: the `TestOverride_*` legs, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestAllowNotReady_EvidenceDirectoryRefuses` and `TestAllowNotReady_EvidenceEmptyRefuses`;
    - AC-3: `TestNext_N4PositionalOverridesMF1`;
    - AC-17: the end-to-end re-claim legs (`release`, then a fresh MF-2,MF-3 re-claim that REPLACES the marker; an explicit MF-3-only re-claim refuses without mutation; the MF-3/MF-4 and grown-digest variants).
 
    Every refusal leg asserts a byte-identical bd, branch and worktree audit (spec 124 AC-4 shape) and zero `mergeMetadataFn` calls.
 
+   Test files (every test named in this step is NEW): `TestGateReadiness_*`, `TestRecordReadinessOverride*` and `TestOverride_*` in `internal/next/ready_gate_test.go`; `TestAllowNotReady_*` in `internal/next/evidence_test.go` (NEW); `TestNext_*` in `cmd/mindspec/next_ready_gate_test.go`; the AC-17 re-claim legs (`TestReadyCheck_*`) in `cmd/mindspec/bead_ready_test.go`.
+
 **Verification**
-- [ ] `go test ./internal/next/... -run 'TestGateReadiness_|TestRecordReadinessOverride|TestOverride_|TestAllowNotReady_'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestNext_UnscopedDispatchesIntoLineageSpec|TestNext_NoLineageBugRefuses|TestNext_BareAllowNotReady_Refuses|TestNext_AllowNotReadySpaceSeparated_Refuses|TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker|TestNext_N4PositionalOverridesMF1|TestReadyCheck_'` passes (the names are binding; place each in the package that reaches its code)
-- [ ] `go test ./internal/validate/... -run TestADR0041_Spec129Amendment` passes with parts (i)–(iii)
-- [ ] `go test ./internal/complete/... -run Isolation` passes; `go test ./internal/lint/...` passes (the argv ratchet and the guard recovery-convention lint cover the new recovery lines)
+- [ ] `go test ./internal/next/ -run 'TestGateReadiness_|TestRecordReadinessOverride|TestOverride_|TestAllowNotReady_' -count=1` passes
+- [ ] `go test ./cmd/mindspec/ -run 'TestNext_UnscopedDispatchesIntoLineageSpec|TestNext_NoLineageBugRefuses|TestNext_BareAllowNotReady_Refuses|TestNext_AllowNotReadySpaceSeparated_Refuses|TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker|TestNext_N4PositionalOverridesMF1|TestReadyCheck_' -count=1` passes
+- [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes with parts (i)–(iii)
+- [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes; `go test ./internal/lint/... -count=1` passes (the argv ratchet, the composition allowlist and the guard recovery-convention lint cover the new sites and recovery lines)
 - [ ] `mindspec validate spec 129-readiness-tracker-honesty` (run) reports 0 errors
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes, with `internal/harness` and `internal/instruct` under `-short`
 
 **Acceptance Criteria**
 - AC-6: legs a–f pass, each refusing before any mutation with a byte-identical audit. The unscoped claim with no resolved spec dispatches into T, cut from `spec/<T>`. The missing spec branch refuses with `ClaimBead` never called. Red-on-revert is recorded.
 - AC-15: all eight legs pass. The MF-2+MF-3 refusal's last `recovery:` line contains `--allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>` and no operator path.
-- AC-16: all ten legs pass across Beads 3 and 7. The growth and MF-4-multiplicity legs are recorded red-on-revert against the single-fingerprint design.
+- AC-16: all ten legs pass across Beads 3 and 7, plus the directory and empty-file evidence legs. The growth and MF-4-multiplicity legs are recorded red-on-revert against the single-fingerprint design.
 - AC-3 (scoped-override leg): `mindspec next <O> --spec S --allow-not-ready=MF-1 --evidence <f>` claims O and records `signals: [MF-1]`.
 - AC-17 (re-claim legs) pass. AC-18 (ADR-0041 part iii) passes. AC-19: `go build ./... && go test ./... -short` and `go test ./internal/lint/...` are green.
 
@@ -718,30 +843,32 @@ Bead 4 (MF-3 records, including `indeterminate`), Bead 5 (`cmd/mindspec/next.go`
 ## Bead 8: Review artifacts out of git by default
 
 **Steps**
-1. In `internal/gitutil/gitignore.go`, beside `RuntimeIgnoreEntries`, add `ReviewIgnoreEntries = []string{".mindspec/specs/*/reviews/", ".mindspec/reviews/"}` with a doc comment: panel reviews are an optional local helper (spec 129 R8); the list is separate from `RuntimeIgnoreEntries` because doctor's runtime-file check reports tracked runtime entries, and this repo tracks review files that R8 leaves tracked. Add `TestReviewIgnoreEntries_NotRuntimeEntries` to `gitignore_test.go`: the two lists share no entry.
-2. In `internal/bootstrap/bootstrap.go`, after `bootstrap.Run`'s existing `gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...)` call, call it again with `gitutil.ReviewIgnoreEntries...`, honouring `dryRun` exactly as the runtime call does. Leave `starterGitignore` unchanged. Add to `internal/bootstrap/gitignore_test.go`:
-   - `TestBootstrap_ReviewsIgnoredGreenfield`: a fresh temp repo gets both lines;
+1. In `internal/gitutil/gitignore.go`, beside `RuntimeIgnoreEntries`, add `ReviewIgnoreEntries = []string{".mindspec/specs/*/reviews/**", ".mindspec/reviews/**"}` with a doc comment: panel reviews are an optional local helper (spec 129 R8); the list is separate from `RuntimeIgnoreEntries` because doctor's runtime-file check reports tracked runtime entries, and this repo tracks review files that R8 leaves tracked. The `/**` form, unlike a directory form, leaves R8.4 option (B)'s later negation lines effective. Add `TestReviewIgnoreEntries_NotRuntimeEntries` to `gitignore_test.go`: the two lists share no entry.
+   Add a sibling helper `EnsureGitignoreEntriesWithHeader(root, header string, entries ...string) error`, with `EnsureGitignoreEntries` delegating to it with the runtime header. The review block's header is `# MindSpec panel reviews (local, not version-controlled; spec 129 R8)`, so on a greenfield init the review entries are never filed under a second copy of the runtime-files header.
+2. In `internal/bootstrap/bootstrap.go`, after `bootstrap.Run`'s existing `gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...)` call, call `gitutil.EnsureGitignoreEntriesWithHeader` with the review header and `gitutil.ReviewIgnoreEntries...`, honouring `dryRun` exactly as the runtime call does. Leave `starterGitignore` unchanged. Add to `internal/bootstrap/gitignore_test.go`:
+   - `TestBootstrap_ReviewsIgnoredGreenfield`: a fresh temp repo gets both lines, under the review header; the runtime header appears exactly once;
    - `TestBootstrap_ReviewsIgnoredExistingGitignore`: a pre-existing `.gitignore` keeps its lines and gains both;
    - `TestBootstrap_ReviewsIgnoredIdempotent`: a second `Run` leaves `.gitignore` byte-identical;
    - in each, `git check-ignore -q` reports `.mindspec/specs/001-x/reviews/a/panel.json` and `.mindspec/reviews/a/panel.json` ignored, and `src/reviews/x.go` not ignored.
 3. Add `internal/gitutil/reviews_ignore_test.go` (real git in `t.TempDir()`, identity via `-c` flags or env, never `~/.gitconfig`), with the entries written to `.gitignore` and an untracked `panel.json` under a spec review dir:
    - `TestCommitAll_SkipsIgnoredReviews`: after `gitutil.CommitAll`, `git ls-files` does not list it and `git status --porcelain` is empty;
    - `TestSnapshotWorktreeTree_SkipsIgnoredReviews`: the tree from `gitutil.SnapshotWorktreeTree` does not contain it.
-4. Add `internal/complete/panel_gate_untracked_test.go` with `TestPanelGate_UntrackedIgnoredRegistration`: the same registration, tracked in one fixture and untracked-ignored in the other, gives the same `panelGate` decision through `panelGateRoots`. Reuse the fixtures in `panel_gate_layout_test.go`.
-5. Add the two lines to this repository's `.gitignore`, next to the existing `**/reviews/*/dispositions.lock` entry, with a comment citing spec 129 R8 and stating that already-tracked review files stay tracked. Do not run `git rm --cached` on anything. Correct that block's comment that `dispositions.jsonl` "IS version-controlled" to say it is version-controlled only where already tracked, pending R8.4.
+4. Add `internal/complete/panel_gate_untracked_test.go` with `TestPanelGate_UntrackedIgnoredRegistration`: the same sub-threshold registration, tracked in one fixture and untracked-ignored in the other, gives the same `panelGate` decision through `panelGateRoots`. Each fixture asserts a non-nil matched registration and a registration-driven Block whose message contains `APPROVE`, so neither can pass by failing open on "no panel". The untracked fixture also asserts that `git ls-files --error-unmatch <panel.json>` fails and `git check-ignore -q <panel.json>` succeeds. Reuse `setupPanelGateRepo` (`panel_gate_e2e_test.go`) and the fixtures in `panel_gate_layout_test.go`.
+5. This repository's `.gitignore` already carries both `/**` lines, after the `**/reviews/*/dispositions.lock` entry, with a comment citing spec 129 R8, and the corrected `dispositions.jsonl` comment. They landed with the plan-fix commit so that the plan-approve auto-commit does not commit this spec's own panel directories. Bead 8 edits no `.gitignore`. `mindspec init` must be idempotent over those lines: running `bootstrap.Run` on this repository leaves `.gitignore` byte-identical. Do not run `git rm --cached` on anything.
 6. No commit-path code changes (spec R8.2). No retention code (R8.4 needs operator decision).
+7. Domain docs (§ Shared files, Doc ownership): in workflow `architecture.md` § "`init` scaffolds a first-run-complete workspace", add the review ignore entries; in execution `interfaces.md` § "Gitignore Ensure", add a `ReviewIgnoreEntries` row and an `EnsureGitignoreEntriesWithHeader` row.
 
 **Verification**
-- [ ] `go test ./internal/gitutil/... -run 'TestReviewIgnoreEntries_NotRuntimeEntries|TestCommitAll_SkipsIgnoredReviews|TestSnapshotWorktreeTree_SkipsIgnoredReviews'` passes
-- [ ] `go test ./internal/bootstrap/... -run 'TestBootstrap_ReviewsIgnored'` passes
-- [ ] `go test ./internal/complete/... -run TestPanelGate_UntrackedIgnoredRegistration` passes
-- [ ] `go test ./internal/doctor/... ./internal/setup/...` passes unchanged (no new tracked-runtime finding; setup's list is untouched)
-- [ ] `git check-ignore -v .mindspec/specs/129-readiness-tracker-honesty/reviews/x/panel.json` (run in the bead worktree) names the new `.gitignore` line
+- [ ] `go test ./internal/gitutil/ -run 'TestReviewIgnoreEntries_NotRuntimeEntries|TestCommitAll_SkipsIgnoredReviews|TestSnapshotWorktreeTree_SkipsIgnoredReviews' -count=1` passes (NEW tests)
+- [ ] `go test ./internal/bootstrap/ -run 'TestBootstrap_ReviewsIgnored' -count=1` passes (NEW tests)
+- [ ] `go test ./internal/complete/ -run 'TestPanelGate_UntrackedIgnoredRegistration' -count=1` passes (NEW test)
+- [ ] `go test ./internal/doctor/... ./internal/setup/... -count=1` passes unchanged (no new tracked-runtime finding; setup's list is untouched)
+- [ ] `git check-ignore -v .mindspec/specs/129-readiness-tracker-honesty/reviews/x/panel.json` (run in the bead worktree) names the `.mindspec/specs/*/reviews/**` line
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-20: init adds both entries on a greenfield and an existing `.gitignore`, idempotently; the anchored patterns ignore both review locations and not `src/reviews/`; the two lists are disjoint; this repo's `.gitignore` carries both lines.
-- AC-21 (commit and gate legs): `CommitAll` and `SnapshotWorktreeTree` leave the untracked review out, `git status --porcelain` is empty, and the panel gate decides the same on an untracked-ignored registration.
+- AC-20: init adds both `/**` entries on a greenfield and an existing `.gitignore`, idempotently, under the review header; the anchored patterns ignore both review locations and not `src/reviews/`; the two lists are disjoint; this repo's `.gitignore` carries both lines.
+- AC-21 (commit and gate legs): `CommitAll` and `SnapshotWorktreeTree` leave the untracked review out, `git status --porcelain` is empty, and the panel gate makes the same registration-driven Block on an untracked-ignored registration as on a tracked one.
 
 **Depends on**
 None.
@@ -753,23 +880,23 @@ Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness
 | Acceptance Criterion | Verified By |
 |---------------------|-------------|
 | AC-1 (R1.1, R1.2 selection fixtures) | Bead 5 verification (`TestBuildReadySet_PlanBeadPredicate`, `TestNext_ScopedSelection_*`, `TestNext_EmitOnlyReadsPlanFromSpecBranch`, `TestNext_PlanDivergenceNotice`, `TestNext_PlanBlobAbsentUsesCheckout`, `TestNext_PlanProbeFailureRefuses`, `TestNext_LazyPlanReadForNoLineageRow`, `TestNext_NoPlanYetAllN4`); Bead 3 verification (`TestPlanMapsBead_AndPositional`) |
-| AC-2 (R1.2 recoveries are real) | Bead 5 verification (`TestNearMissN1_RecoveryYieldsClaimable`, `TestNearMissN2b_SameNumberReparentCorrectsLineage`, `TestNearMissN2b_OtherNumberInspectsFirst`, `TestNearMissN4_NoClaimableRecovery`); the real-bd reporter-shape run is a spec Validation Proof run by the orchestrator |
+| AC-2 (R1.2 recoveries are real) | Bead 5 verification (`TestNearMissN2a_NeverReparentRecovery`, `TestNearMissN1_RecoveryYieldsClaimable`, `TestNearMissN2b_SameNumberReparentCorrectsLineage`, `TestNearMissN2b_OtherNumberInspectsFirst`, `TestNearMissN4_NoClaimableRecovery`); the real-bd reporter-shape run is a spec Validation Proof run by the orchestrator |
 | AC-3 (R1.3 selector refusals) | Bead 5 verification (`TestNext_SelectorOnEmptySet_Refuses`, `TestNext_NearMissPositional_Refuses`, `TestNext_UnlinkedReadyPositional_Refuses`, `TestNext_N4NoLineagePositionalRefuses`); Bead 7 verification (`TestNext_N4PositionalOverridesMF1`) |
-| AC-4 (R1.4 derived-state emptiness) | Bead 5 verification (`TestNext_EmptyScoped_DerivedState`, `TestNext_EmptyScoped_InformationalNearMissExitsZero`, `TestImplementTemplate_EmptinessRule`) |
+| AC-4 (R1.4 derived-state emptiness) | Bead 5 verification (`TestNext_EmptyScoped_DerivedState`, `TestNext_EmptyScoped_InformationalNearMissExitsZero`, `TestImplementTemplate_EmptinessRule` in `internal/instruct`) |
 | AC-5 (R1.5–R1.7) | Bead 5 verification (`TestExclusionNotice_NamesIDs`, `TestNextMenu_PrintsSpecIDForm`, rewritten spec-128 tests) |
-| AC-6 (R1.8 claim guard and dispatch spec) | Bead 7 verification (`TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`, `TestGateReadiness_MissingSpecBranchRefuses`, `TestNext_NoLineageBugRefuses`) |
+| AC-6 (R1.8 claim guard and dispatch spec) | Bead 3 verification (`TestEvaluateReadiness_NonPlanFormErrorCarriesLineage`); Bead 7 verification (`TestGateReadiness_LineageSpecMismatchRefuses`, `TestNext_UnscopedDispatchesIntoLineageSpec`, `TestGateReadiness_NonPlanBeadRefuses`, `TestGateReadiness_MissingSpecBranchRefuses`, `TestNext_NoLineageBugRefuses`) |
 | AC-7 (R2.1–R2.2 `-n 0` everywhere) | Bead 1 verification (seven site tests, two waist tests, `TestNext_101ReadyBeads_AllVisible`); Bead 5 keeps the 101-row test green |
-| AC-8 (R2.3 lint and truncation error) | Bead 1 verification (`TestBDRowCapWaist` with self-test, `TestReadyJSON_TruncationNoticeIsError`) |
+| AC-8 (R2.3 lint and truncation error) | Bead 1 verification (`TestBDRowCapWaist` with its three injected fixtures: direct, func-var alias, `exec.Command("bd", …)`; `TestReadyJSON_TruncationNoticeIsError`; `TestReadyJSON_BenignStderrIsNotError`) |
 | AC-9 (R3.2 linkage pins) | Bead 1 verification (`TestPlanApprove_BeadsCarrySpecID`, `TestSpecApprove_EpicHasNoSpecID`) |
-| AC-10 (R4.1 membership) | Bead 4 verification (`TestReadiness_MF3Variants` legs a–g) |
-| AC-11 (R4.2 reachable fallback, F1/F3/F4/F5, advisory registrations, audited reattest, read-back) | Bead 2 verification (`TestFindLandedMergeReachable_*`, `TestReattest_Fallback*`, `TestReadBack_*`, `TestMergedUnclosed_IgnoresFallback`); Bead 4 verification (`TestReadiness_MF3_OffFirstParentFailsWithExits`) |
+| AC-10 (R4.1 membership) | Bead 4 verification (`TestReadiness_MF3Variants` legs a–g, `TestReadiness_MF3_ParentReadOnlyWhenNeeded`) |
+| AC-11 (R4.2 reachable fallback, F1/F3/F4/F5, advisory registrations, audited reattest, read-back) | Bead 2 verification (`TestFindLandedMergeReachable_*`, `TestReattest_Fallback*` including `TestReattest_FallbackRefusesSurvivingTipContradiction` and `TestReattest_FallbackGitReadErrorRefuses`, `TestReadBack_*` including `TestReadBack_AcceptedThenReverted`, `TestMergedUnclosed_IgnoresFallback`, `TestLandedMerge_TypedSentinelsWrapNotFound`); Bead 4 verification (`TestReadiness_MF3_OffFirstParentFailsWithExits`, `TestReadiness_MF3_RevertedAfterReattest`) |
 | AC-12 (R4.3 panel-SHA set, R4.5 #232 shape) | Bead 2 verification (`TestFindLandedMerge_PanelSet*`, `TestReattest_PanelSetNonCorroborating`, `TestMergedUnclosed_PanelSet`, `TestReattest_RepairsContradictoryBindingOnFallback`); Bead 4 verification (`TestReadiness_MF3_CompleteWrapperShape`, `TestReadiness_MF3_LocalAheadOfRemotePasses`, leg v's MF-3 half) |
-| AC-13 (R4.4 message arms and precedence) | Bead 4 verification (`TestReadiness_MF3ErrorArmDiscrimination`, `TestReadiness_MF3AggregatedPrecedence`) |
+| AC-13 (R4.4 message arms and precedence) | Bead 4 verification (`TestReadiness_MF3ErrorArmDiscrimination` including the `indeterminate` leg, `TestReadiness_MF3AggregatedPrecedence`) |
 | AC-14 (R5 form symmetry) | Bead 3 verification (`TestMF2_FormSymmetry`, `TestReadiness_MF2AllClasses`) |
 | AC-15 (R6.1 scoped flag) | Bead 7 verification (`TestGateReadiness_ScopedOverride`, `TestNext_BareAllowNotReady_Refuses`, `TestNext_AllowNotReadySpaceSeparated_Refuses`, `TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker`, `TestGateReadiness_IndeterminateNotOverridable`) |
-| AC-16 (R6.2 record digests, no widening) | Bead 3 verification (`TestFailureRecordDigests_Deterministic`, `TestFailureRecordDigests_WriterReaderAgree`); Bead 7 verification (`TestOverride_*`, `TestAllowNotReady_EvidenceTooLargeRefuses`) |
+| AC-16 (R6.2 record digests, no widening) | Bead 3 verification (`TestFailureRecordDigests_Deterministic`, `TestFailureRecordDigests_WriterReaderAgree`); Bead 3 verification (`TestReadiness_MF1AggregatesAllFailures`, `TestReadiness_MF4AggregatesAllOccurrences`); Bead 7 verification (`TestOverride_*`, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestAllowNotReady_EvidenceDirectoryRefuses`, `TestAllowNotReady_EvidenceEmptyRefuses`) |
 | AC-17 (R6.3, R6.4 validated read-back) | Bead 6 verification (`TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`, `TestReadyCheck_MixedCoverageRecoveryNamesAllFailing`); Bead 7 verification (end-to-end release and re-claim legs) |
 | AC-18 (R6.5, R7, ADR-0041 amendment) | Bead 6 verification (skill line and staged-rule marker pins, `mindspec adr list` showing ADR-0045, back-pointers); Bead 2 verification (ADR-0041 parts i–ii text pin); Bead 7 verification (ADR-0041 part iii text pin, `mindspec validate spec 129-readiness-tracker-honesty`) |
-| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Bead 7 runs the whole-suite gate last |
+| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Beads 3 and 4 record the readiness import grep in place of a boundary lint (§ ADR Fitness, ADR-0030); Bead 7 runs the whole-suite gate last |
 | AC-20 (R8.1 init ignores reviews) | Bead 8 verification (`TestBootstrap_ReviewsIgnored{Greenfield,ExistingGitignore,Idempotent}`, `TestReviewIgnoreEntries_NotRuntimeEntries`, the repo `.gitignore` check-ignore line) |
-| AC-21 (R8.2, R8.3 no auto-commit; gates read untracked) | Bead 8 verification (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`, `TestPanelGate_UntrackedIgnoredRegistration`); Bead 2 verification (`TestReviewedHeadSHASet_UntrackedIgnored`) |
+| AC-21 (R8.2, R8.3 no auto-commit; gates read untracked) | Bead 8 verification (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`, `TestPanelGate_UntrackedIgnoredRegistration` with its non-vacuous Block assertions); Bead 2 verification (`TestReviewedHeadSHASet_UntrackedIgnored`) |
