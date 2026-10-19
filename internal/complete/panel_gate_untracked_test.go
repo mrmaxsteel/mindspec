@@ -11,6 +11,16 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
+func TestPanelGate_UntrackedIgnoredRegistrationRestoresSkipEnvFn(t *testing.T) {
+	orig := panelSkipEnvFn
+	t.Cleanup(func() { panelSkipEnvFn = orig })
+	panelSkipEnvFn = func() bool { return true }
+	t.Run("registration", TestPanelGate_UntrackedIgnoredRegistration)
+	if !panelSkipEnvFn() {
+		t.Fatal("registration test leaked its panelSkipEnvFn override after cleanup")
+	}
+}
+
 func TestPanelGate_UntrackedIgnoredRegistration(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -58,6 +68,8 @@ func TestPanelGate_UntrackedIgnoredRegistration(t *testing.T) {
 			if err != nil || len(status) != 0 {
 				t.Fatalf("fixture must have a clean status: %v\n%s", err, status)
 			}
+			orig := panelSkipEnvFn
+			t.Cleanup(func() { panelSkipEnvFn = orig })
 			panelSkipEnvFn = func() bool { return false }
 			reg, err := panelGate(beadID, panelGateRoots(root, "", specID), "", true, nil)
 			if reg == nil || reg.Panel.BeadID == nil || *reg.Panel.BeadID != beadID {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 // runGit runs git in repo with a deterministic identity and returns trimmed
@@ -530,6 +531,35 @@ func newFullMoveRepo(t *testing.T) (string, *executor.MindspecExecutor) {
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-m", "initial fixture")
 	return root, executor.NewMindspecExecutor(root)
+}
+
+func TestMover_TrackedIgnoredReviewRewrite(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root, exec := newFullMoveRepo(t)
+	writeRepoFile(t, root, ".gitignore", strings.Join(gitutil.ReviewIgnoreEntries, "\n")+"\n")
+	writeRepoFile(t, root, "review/zzz-custom/summary.md", "# Summary\n[v](verdict.md)\n[adr](/.mindspec/docs/adr/ADR-0001.md)\n")
+	runGit(t, root, "add", ".gitignore", "review/zzz-custom/summary.md")
+	runGit(t, root, "commit", "-m", "ignore review destinations and add legacy link")
+	const review = ".mindspec/specs/106-layout-flatten/reviews/zzz-custom/summary.md"
+	const untracked = ".mindspec/reviews/local/panel.json"
+	writeRepoFile(t, root, untracked, "{}\n")
+	if err := NewMover(exec, root, "run-ignored-review").Run(); err != nil {
+		t.Fatalf("Run with tracked ignored review: %v", err)
+	}
+	runGit(t, root, "ls-files", "--error-unmatch", "--", review)
+	if got := runGit(t, root, "show", "HEAD:"+review); !strings.Contains(got, "[adr](/.mindspec/adr/ADR-0001.md)") || strings.Contains(got, ".mindspec/docs/") {
+		t.Fatalf("tracked review rewrite was not committed: %s", got)
+	}
+	if got := runGit(t, root, "ls-files", "--", untracked); got != "" {
+		t.Fatalf("migration tracked an untracked ignored review: %s", got)
+	}
+	mustExist(t, root, untracked)
+	if got := runGit(t, root, "status", "--porcelain", "--", review); got != "" {
+		t.Fatalf("review rewrite left uncommitted changes: %s", got)
+	}
 }
 
 // TestMover_DogfoodAndReviewMoves is the R6 blocker test: the dogfood eviction

@@ -11,11 +11,31 @@ import (
 )
 
 func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
-	root := reviewBootstrapRepo(t)
-	if _, err := Run(root, false); err != nil {
-		t.Fatal(err)
+	for _, emptyGitignore := range []bool{false, true} {
+		name := "absent-gitignore"
+		if emptyGitignore {
+			name = "empty-gitignore"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := reviewBootstrapRepo(t)
+			// With no file, starterGitignore already supplies the runtime
+			// block. An empty file exercises the order of both ensure calls.
+			if emptyGitignore {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			data := assertReviewsIgnored(t, root)
+			runtimeHeader := strings.Index(string(data), "# MindSpec local runtime files (not version-controlled)")
+			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)")
+			if runtimeHeader < 0 || reviewHeader < 0 || runtimeHeader >= reviewHeader {
+				t.Fatalf("runtime header must precede review header:\n%s", data)
+			}
+		})
 	}
-	assertReviewsIgnored(t, root)
 }
 
 func TestBootstrap_ReviewsIgnoredExistingGitignore(t *testing.T) {

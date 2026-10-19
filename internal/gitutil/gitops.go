@@ -1755,7 +1755,8 @@ func CleanForcePaths(workdir string, paths []string) error {
 	return nil
 }
 
-// CommitPaths stages the given repo-relative paths (`git add -- <paths...>`)
+// CommitPaths stages the given repo-relative paths (using `git add -u` for
+// tracked paths, ordinary `git add` for untracked non-ignored paths)
 // and commits ONLY them with msg (`git commit -m <msg> --no-verify --
 // <paths...>`) in workdir — a git "partial commit": staging other paths
 // FIRST (whether by an earlier step of the same caller, or by anything
@@ -1787,10 +1788,12 @@ func CommitPaths(workdir, msg string, paths []string) error {
 				return err
 			}
 		}
-		addArgs := append([]string{"add", "--"}, paths...)
-		addCmd := execCommand("git", gitArgs(workdir, addArgs...)...)
-		if out, err := addCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git add: %s", strings.TrimSpace(string(out)))
+		run := func(args ...string) ([]byte, error) {
+			cmd := execCommand("git", gitArgs(workdir, args...)...)
+			return cmd.CombinedOutput()
+		}
+		if err := stageExplicitPaths(paths, run); err != nil {
+			return err
 		}
 		// Nothing staged AT THESE PATHS -> nothing to commit (idempotent
 		// resume reaches here) — scoped so unrelated staged content
