@@ -443,6 +443,13 @@ func TestGateReadiness_MissingSpecBranchEscapes(t *testing.T) {
 	}
 }
 func TestGateReadiness_SpecBranchInfrastructureFailureRefuses(t *testing.T) {
+	t.Run("branch-escape", func(t *testing.T) {
+		got := specBranchInfrastructureFailure("spec/998-fixture\n\x1b[31m", "mindspec-posb.1", errors.New("git unavailable")).Error()
+		want := "could not resolve spec branch \"spec/998-fixture\\n\\x1b[31m\" for bead mindspec-posb.1: git unavailable; nothing was claimed\nrecovery: git status   (repair the local git checkout, then retry)"
+		if got != want {
+			t.Fatalf("infrastructure branch refusal = %q, want %q", got, want)
+		}
+	})
 	for _, failure := range []string{"exit-128", "exec-error-with-control-byte"} {
 		t.Run(failure, func(t *testing.T) {
 			root, fx := gateFixture(t)
@@ -852,5 +859,25 @@ func TestOverride_WriterReaderAgreeRawMF4(t *testing.T) {
 	}
 	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); len(c.Uncovered) != 0 {
 		t.Fatal(c)
+	}
+}
+
+func TestIsReadinessSignalToken(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"MF-9", true},
+		{"mf-3", true},
+		{"MF-3;rm -rf ~", true},
+		{"mf-abc.1", false},
+		{"epic-129", false},
+		{"", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			if got := IsReadinessSignalToken(tc.value); got != tc.want {
+				t.Fatalf("IsReadinessSignalToken(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
 	}
 }

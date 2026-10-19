@@ -42,7 +42,7 @@ const BareOverride = "__bare_allow_not_ready__"
 
 // IsReadinessSignalToken separates space-separated signal tokens from bead IDs.
 func IsReadinessSignalToken(value string) bool {
-	return strings.HasPrefix(strings.ToUpper(value), "MF-")
+	return strings.HasPrefix(strings.ToUpper(value), "MF-") && !strings.Contains(value, ".")
 }
 
 // GateOptions describes fresh claim authority. Stored markers grant none.
@@ -110,6 +110,10 @@ func nonPlanDiagnostic(beadID, specID, epicID string) string {
 
 func missingSpecBranchFailure(branch, beadID string) error {
 	return guard.NewFailure(fmt.Sprintf("spec branch %s for bead %s does not exist (finalized and deleted, or never created); nothing was claimed", termsafe.Escape(branch), idrender.Bead(beadID)), "mindspec state show")
+}
+
+func specBranchInfrastructureFailure(branch, beadID string, err error) error {
+	return guard.NewFailure(fmt.Sprintf("could not resolve spec branch %s for bead %s: %s; nothing was claimed", termsafe.Escape(branch), idrender.Bead(beadID), termsafe.Escape(err.Error())), "git status   (repair the local git checkout, then retry)")
 }
 
 // GateReadiness is the read-only preflight before marker, claim, branch or
@@ -188,7 +192,7 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error) {
 		if errors.Is(err, gitutil.ErrRefNotFound) {
 			return nil, missingSpecBranchFailure(branch, beadID)
 		}
-		return nil, guard.NewFailure(fmt.Sprintf("could not resolve spec branch %s for bead %s: %s; nothing was claimed", branch, idrender.Bead(beadID), termsafe.Escape(err.Error())), "git status   (repair the local git checkout, then retry)")
+		return nil, specBranchInfrastructureFailure(branch, beadID, err)
 	}
 	result := &GateResult{SpecID: report.SpecID, Fingerprints: map[string][]string{}}
 	named := map[string]bool{}

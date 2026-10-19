@@ -615,6 +615,13 @@ func TestNext_InvalidScopedSignalRefuses(t *testing.T) {
 				t.Fatalf("final recovery = %q, want %q", got, last)
 			}
 			assertScopedNoMutation(t, f, before, false)
+			raw, err := os.ReadFile(f.path + ".argv")
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if len(raw) != 0 {
+				t.Fatalf("invalid signal triggered tracker lookup: %s", raw)
+			}
 		})
 	}
 }
@@ -1011,4 +1018,40 @@ func scopedTrackerUpdates(t *testing.T, f *nextHonestyFixture) int {
 		}
 	}
 	return n
+}
+
+func TestNext_BareAllowNotReady_DottedMFBeadRecovery(t *testing.T) {
+	f := newScopedNextFixture(t)
+	f.rows = []map[string]interface{}{nextHonestyRow("mf-abc.1", "[129] dotted bead", "", "task", "open")}
+	f.write(t)
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "--allow-not-ready", "mf-abc.1")
+	if err == nil {
+		t.Fatal("bare flag accepted")
+	}
+	lines := strings.Split(err.Error(), "\n")
+	if got, want := lines[len(lines)-1], "recovery: mindspec bead ready-check mf-abc.1"; got != want {
+		t.Errorf("dotted bead recovery = %q, want %q", got, want)
+	}
+	if strings.Contains(err.Error(), "--allow-not-ready=mf-abc.1") {
+		t.Error("bead ID echoed as signal authority")
+	}
+	assertScopedNoMutation(t, f, before, false)
+	raw, err := os.ReadFile(f.path + ".argv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookedUp := false
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var args []string
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatal(err)
+		}
+		if reflect.DeepEqual(args, []string{"show", "mf-abc.1", "--json"}) {
+			lookedUp = true
+		}
+	}
+	if !lookedUp {
+		t.Fatalf("dotted bead did not receive read-only recovery lookup: %s", raw)
+	}
 }
