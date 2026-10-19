@@ -201,6 +201,14 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 }
 
 func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
+	fakeDir := t.TempDir()
+	logPath := filepath.Join(fakeDir, "bd.log")
+	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BD_INVOCATIONS\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BD_INVOCATIONS", logPath)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Cleanup(phase.SetRunBDForTest(func(...string) ([]byte, error) { return nil, nil }))
 	root := t.TempDir()
 	const specID = "129-linkage"
 	dir := filepath.Join(root, ".mindspec", "specs", specID)
@@ -245,6 +253,9 @@ func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
 	}))
 	if _, err := ApproveSpec(root, specID, "fixture", &executor.MockExecutor{}); err != nil {
 		t.Fatal(err)
+	}
+	if log, err := os.ReadFile(logPath); !os.IsNotExist(err) {
+		t.Fatalf("approval pin must not invoke external bd: log=%q, err=%v", log, err)
 	}
 	if creates != 1 {
 		t.Fatalf("expected one checked epic create, got %d", creates)

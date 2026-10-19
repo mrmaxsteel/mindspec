@@ -1410,7 +1410,8 @@ func FormatResult(r *Result) string {
 		// panel G6, matching the identical classification
 		// ratchet_template_test.go assigns the tail template's own
 		// {{termsafe .IndeterminateReason}} interpolation (ADR-0042).
-		fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason))
+		sb.WriteString(guard.FormatFailure("cannot determine mode: "+termsafe.Escape(r.IndeterminateReason), "mindspec doctor"))
+		sb.WriteByte('\n')
 		return sb.String()
 	}
 	switch r.NextMode {
@@ -1473,7 +1474,8 @@ func FormatResult(r *Result) string {
 // DerivePhaseFromChildren would derive as `plan` — a discovery failure
 // serialized as a fabricated mode. Run maps a non-nil err to
 // Result.NextModeIndeterminate; mode/nextBead are meaningless ("", "")
-// whenever err is non-nil and callers MUST check err first.
+// whenever err is non-nil and callers MUST check err first. A failed ready
+// read (including a truncation notice) follows the same indeterminate path.
 func advanceState(epicID string) (mode, nextBead string, err error) {
 	if epicID == "" {
 		return state.ModeIdle, "", nil
@@ -1490,11 +1492,13 @@ func advanceState(epicID string) (mode, nextBead string, err error) {
 		// `bd ready --parent` argv build directly — validate BEFORE any
 		// bd spawn.
 		if idvalidate.BeadID(epicID) == nil {
-			if out, rerr := readyJSONFn("--parent", epicID); rerr == nil {
-				var ready []bead.BeadInfo
-				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
-					return state.ModeImplement, ready[0].ID, nil
-				}
+			out, rerr := readyJSONFn("--parent", epicID)
+			if rerr != nil {
+				return "", "", fmt.Errorf("reading post-close ready set for epic %s: %w", idrender.Bead(epicID), rerr)
+			}
+			var ready []bead.BeadInfo
+			if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
+				return state.ModeImplement, ready[0].ID, nil
 			}
 		}
 		// Implement phase without a ready bead: we're between beads (next one

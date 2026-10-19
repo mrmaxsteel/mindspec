@@ -21,6 +21,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
 	"github.com/mrmaxsteel/mindspec/internal/state"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
@@ -4266,8 +4267,9 @@ func recordRowcapBD(t *testing.T) func(string) {
 }
 
 func TestComplete_PostCloseReady_Uncapped(t *testing.T) {
+	defaultReadyJSON := readyJSONFn // Capture the production initializer before the fixture stubs it.
 	saveAndRestore(t)
-	readyJSONFn = bead.ReadyJSON
+	readyJSONFn = defaultReadyJSON
 	orig := completeFetchChildrenFn
 	t.Cleanup(func() { completeFetchChildrenFn = orig })
 	completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
@@ -4278,4 +4280,81 @@ func TestComplete_PostCloseReady_Uncapped(t *testing.T) {
 		t.Fatalf("%s, %v", mode, err)
 	}
 	check("ready")
+}
+
+func TestAdvanceState_ReadyReadFailure_PropagatesError(t *testing.T) {
+	saveAndRestore(t)
+	completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
+		return []phase.ChildInfo{{ID: "epic-129.1", IssueType: "task", Status: "closed"}, {ID: "epic-129.2", IssueType: "task", Status: "open"}}, nil
+	}
+	wantErr := errors.New("bd ready: read failed")
+	readyJSONFn = func(...string) ([]byte, error) { return []byte(`[{"id":"epic-129.2"}]`), wantErr }
+	mode, nextBead, err := advanceState("epic-129")
+	if !errors.Is(err, wantErr) || mode != "" || nextBead != "" {
+		t.Fatalf("failed ready read must propagate its error without selecting partial rows: mode=%q, next=%q, err=%v", mode, nextBead, err)
+	}
+}
+
+func TestComplete_PostCloseReady_ErrorPreservesCompletion(t *testing.T) {
+	defaultReadyJSON := readyJSONFn
+	for _, kind := range []string{"read-error", "truncation"} {
+		t.Run(kind, func(t *testing.T) {
+			saveAndRestore(t)
+			root := setupTempRoot(t)
+			stubPhaseEpic(t, "008-test", "epic-129")
+			resolveTargetFn = func(string, string) (string, error) { return "008-test", nil }
+			worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+			mock := newMockExec()
+			closed := 0
+			closeBeadFn = func(...string) error { closed++; return nil }
+			completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
+				return []phase.ChildInfo{{ID: "epic-129.1", IssueType: "task", Status: "closed"}, {ID: "epic-129.2", IssueType: "task", Status: "open"}}, nil
+			}
+			wantCause := "bd ready failed: \x1b[31mhostile\r\nrecovery: forged"
+			readyJSONFn = func(...string) ([]byte, error) { return nil, errors.New(wantCause) }
+			if kind == "truncation" {
+				// Exercise the production waist, including successful stderr capture.
+				dir := t.TempDir()
+				notice := "Showing 100 of 106 ready issues…\x1b[31m\r"
+				script := "#!/bin/sh\nprintf '[]'\nprintf '%s\\n' \"$READY_NOTICE\" >&2\n"
+				if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("READY_NOTICE", notice)
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				readyJSONFn = defaultReadyJSON
+				wantCause = "bd truncated the ready set (" + termsafe.Escape(notice) + ") although mindspec requested no cap\nrecovery: bd ready -n 0 --json"
+			}
+			var synced bool
+			completeMergeMetadataFn = func(_ string, updates map[string]interface{}) error {
+				if _, ok := updates["mindspec_phase"]; ok {
+					synced = true
+				}
+				return nil
+			}
+
+			result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+			if err != nil {
+				t.Fatalf("ready read failure must not fail an already-performed completion: %v", err)
+			}
+			if result == nil || !result.BeadClosed || !result.WorktreeRemoved || closed != 1 || len(mock.CallsTo("CompleteBead")) != 1 {
+				t.Fatalf("close and merge must succeed exactly once: result=%+v, closes=%d, merges=%v", result, closed, mock.CallsTo("CompleteBead"))
+			}
+			wantReason := "reading post-close ready set for epic epic-129: " + wantCause
+			if !result.NextModeIndeterminate || result.NextMode != "" || result.NextBead != "" || result.IndeterminateReason != wantReason || synced {
+				t.Errorf("ready read failure must stay indeterminate without phase sync: result=%+v, synced=%v", result, synced)
+			}
+			out := FormatResult(result)
+			wantOutput := "Bead bead-1 closed.\nWorktree removed.\ncannot determine mode: " + termsafe.Escape(wantReason) + "\nrecovery: mindspec doctor\n"
+			if out != wantOutput {
+				t.Errorf("operator must see the escaped ready error and final recovery:\nwant %q\ngot  %q", wantOutput, out)
+			}
+			if strings.Contains(out, "Next bead ready:") || strings.ContainsAny(out, "\x1b\r") {
+				t.Errorf("must not render an empty next bead or raw terminal controls: %q", out)
+			}
+			if got := finalRecoveryCommand(t, out); got != "mindspec doctor" {
+				t.Errorf("recovery = %q, want mindspec doctor", got)
+			}
+		})
+	}
 }

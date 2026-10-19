@@ -16,7 +16,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
@@ -768,7 +767,7 @@ func TestAdoptLattice_ListViaWaist(t *testing.T) {
 	calls := 0
 	adoptListJSONFn = func(args ...string) ([]byte, error) {
 		calls++
-		return bead.ListJSON(args...)
+		return orig(args...)
 	}
 	check := recordRowcapBD(t)
 	if _, err := listEpicBeads(t.TempDir(), "epic-129"); err != nil {

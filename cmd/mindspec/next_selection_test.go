@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -660,7 +661,7 @@ case "$1" in
  ready)
   previous=''; unlimited=no
   for arg in "$@"; do
-   if [ "$previous" = '-n' ] && [ "$arg" = '0' ]; then unlimited=yes; fi
+   if { [ "$previous" = '-n' ] || [ "$previous" = '--limit' ]; } && [ "$arg" = '0' ]; then unlimited=yes; fi
    previous="$arg"
   done
   if [ "$unlimited" = yes ]; then cat "$ROWCAP_FIXTURE/all"; else cat "$ROWCAP_FIXTURE/capped"; fi
@@ -673,6 +674,25 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("ROWCAP_FIXTURE", dir)
+	// Pin the fake's cap semantics independently of the production waist's spelling.
+	for _, limit := range [][]string{nil, {"-n", "0"}, {"--limit", "0"}} {
+		args := append([]string{"ready"}, limit...)
+		raw, err := exec.Command(filepath.Join(dir, "bd"), args...).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []map[string]interface{}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		want := 101
+		if limit == nil {
+			want = 100
+		}
+		if len(got) != want {
+			t.Fatalf("capping fake with %q returned %d rows, want %d", args, len(got), want)
+		}
+	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for _, pick := range []int{0, 101} {
 		// A file avoids pipe-buffer deadlocks while the 101-item menu is written.

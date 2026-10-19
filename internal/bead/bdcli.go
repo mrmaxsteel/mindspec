@@ -289,7 +289,7 @@ const minBdVersionMsg = "1.1.0"
 // emits non-JSON output (older versions where --json was ignored), this returns
 // a structured error directing the user to upgrade — no human-output scraping.
 func ListJSON(args ...string) ([]byte, error) {
-	args, err := uncappedArgs(args)
+	args, err := uncappedArgs("list", args)
 	if err != nil {
 		return nil, err
 	}
@@ -317,19 +317,19 @@ func ListJSON(args ...string) ([]byte, error) {
 
 // uncappedArgs admits only separate-token zero limits. Rejecting duplicate
 // limits also prevents a later flag from overriding the uncapped request.
-func uncappedArgs(args []string) ([]string, error) {
+func uncappedArgs(verb string, args []string) ([]string, error) {
 	out := append([]string(nil), args...)
 	seen := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "-n" || a == "--limit" {
 			if seen || i+1 == len(args) || args[i+1] != "0" {
-				return nil, fmt.Errorf("bd row reads require a single separate-token -n 0 or --limit 0; slice rows client-side")
+				return nil, fmt.Errorf("bd row reads require a single separate-token -n 0 or --limit 0; slice rows client-side\nrecovery: bd %s -n 0 --json", verb)
 			}
 			seen = true
 			i++
 		} else if strings.HasPrefix(a, "-n") || strings.HasPrefix(a, "--limit=") {
-			return nil, fmt.Errorf("bd row reads require a separate-token -n 0 or --limit 0; slice rows client-side")
+			return nil, fmt.Errorf("bd row reads require a separate-token -n 0 or --limit 0; slice rows client-side\nrecovery: bd %s -n 0 --json", verb)
 		}
 	}
 	if !seen {
@@ -343,7 +343,7 @@ var readyTruncationNotice = regexp.MustCompile(`Showing [0-9]+ of [0-9]+`)
 // ReadyJSON runs an uncapped bd ready JSON read. Successful stderr is kept
 // separate so a bd build ignoring the no-cap request cannot silently truncate.
 func ReadyJSON(args ...string) ([]byte, error) {
-	args, err := uncappedArgs(args)
+	args, err := uncappedArgs("ready", args)
 	if err != nil {
 		return nil, err
 	}

@@ -1149,6 +1149,12 @@ func TestListJSON_RejectsCap(t *testing.T) {
 				execCommand = func(string, ...string) *exec.Cmd { calls++; return exec.Command("echo", "[]") }
 				if _, err := waist.fn(args...); err == nil {
 					t.Error("expected cap refusal")
+				} else {
+					want := "recovery: bd " + waist.name + " -n 0 --json"
+					lines := strings.Split(err.Error(), "\n")
+					if lines[len(lines)-1] != want || strings.Count(err.Error(), "recovery:") != 1 {
+						t.Errorf("cap refusal must end with exactly one corrected call %q: %q", want, err)
+					}
 				}
 				if calls != 0 {
 					t.Fatalf("refused cap spawned bd %d times", calls)
