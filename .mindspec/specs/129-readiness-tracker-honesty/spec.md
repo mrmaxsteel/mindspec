@@ -149,7 +149,7 @@ Related, as measured by two panel slots: when two epics carry the same spec numb
 
 **L. Review artifacts in git (verified 2026-10-19 on `spec/129-readiness-tracker-honesty`).**
 - `git ls-files | grep -c '/reviews/'` → 1538. This spec's own `reviews/` (72 files) was committed by `mindspec spec approve`'s auto-commit at `7bae2664`.
-- `.gitignore` ignores only `**/reviews/*/dispositions.lock`. `bootstrap.starterGitignore` and `gitutil.RuntimeIgnoreEntries` name no review path.
+- At `7bae2664`, `.gitignore` ignores only `**/reviews/*/dispositions.lock`. `bootstrap.starterGitignore` and `gitutil.RuntimeIgnoreEntries` name no review path.
 - Every auto-commit stages with `git add -A` (`gitutil.CommitAll`; `gitutil.SnapshotWorktreeTree`'s `add -A -- .`) or an explicit pathspec (`gitutil.CommitPaths`). In a scratch repo, `git add -A` skips an ignored untracked `reviews/` file, `git status --porcelain` stays empty, and `git worktree remove` deletes ignored files with the worktree.
 - `panelDirFor` (`cmd/mindspec/panel.go`) writes `<spec-dir>/reviews/<slug>` (flat) or `.mindspec/reviews/<slug>` (ad hoc), and `workspace.SpecDir` resolves the spec WORKTREE first.
 - The operator's lane kit (an untracked local kit, not in this repository) already states "`reviews/` is never committed".
