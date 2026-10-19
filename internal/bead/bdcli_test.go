@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -1083,5 +1085,99 @@ func TestDeleteMetadataKeys_MalformedBeadID(t *testing.T) {
 		if err := DeleteMetadataKeys(id, MetaKeyReadinessOverride); err == nil {
 			t.Errorf("DeleteMetadataKeys(%q): expected a refusal", id)
 		}
+	}
+}
+
+func assertZeroCap(t *testing.T, args []string) {
+	t.Helper()
+	caps := 0
+	for i, a := range args {
+		if a == "-n" || a == "--limit" {
+			caps++
+			if i+1 == len(args) || args[i+1] != "0" {
+				t.Fatalf("bad cap %q", args)
+			}
+		}
+	}
+	if caps != 1 {
+		t.Fatalf("expected exactly one zero cap, got %q", args)
+	}
+}
+func TestListJSON_ToleratesExplicitNZero(t *testing.T) {
+	for _, waist := range []struct {
+		name string
+		fn   func(...string) ([]byte, error)
+	}{{"list", ListJSON}, {"ready", ReadyJSON}} {
+		for _, args := range [][]string{nil, {"-n", "0"}, {"--limit", "0"}} {
+			t.Run(waist.name+strings.Join(args, "_"), func(t *testing.T) {
+				orig := execCommand
+				t.Cleanup(func() { execCommand = orig })
+				calls := 0
+				execCommand = func(name string, got ...string) *exec.Cmd {
+					calls++
+					assertZeroCap(t, got)
+					want := append([]string{waist.name}, args...)
+					if len(args) == 0 {
+						want = append(want, "-n", "0")
+					}
+					want = append(want, "--json")
+					if name != "bd" || !reflect.DeepEqual(got, want) {
+						t.Fatalf("got %s %q, want %q", name, got, want)
+					}
+					return exec.Command("echo", "[]")
+				}
+				if _, err := waist.fn(args...); err != nil {
+					t.Fatal(err)
+				}
+				if calls != 1 {
+					t.Fatalf("calls=%d", calls)
+				}
+			})
+		}
+	}
+}
+func TestListJSON_RejectsCap(t *testing.T) {
+	for _, waist := range []struct {
+		name string
+		fn   func(...string) ([]byte, error)
+	}{{"list", ListJSON}, {"ready", ReadyJSON}} {
+		for _, args := range [][]string{{"-n", "5"}, {"-n5"}, {"-n=5"}, {"--limit", "5"}, {"--limit=5"}, {"-n0"}, {"-n=0"}, {"--limit=0"}, {"-n"}, {"--limit"}, {"-n", "0", "--limit", "0"}, {"-n", "0", "-n", "5"}} {
+			t.Run(waist.name+strings.Join(args, "_"), func(t *testing.T) {
+				orig := execCommand
+				t.Cleanup(func() { execCommand = orig })
+				calls := 0
+				execCommand = func(string, ...string) *exec.Cmd { calls++; return exec.Command("echo", "[]") }
+				if _, err := waist.fn(args...); err == nil {
+					t.Error("expected cap refusal")
+				}
+				if calls != 0 {
+					t.Fatalf("refused cap spawned bd %d times", calls)
+				}
+			})
+		}
+	}
+}
+func TestReadyJSON_TruncationNoticeIsError(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	notice := "Showing 100 of 106 ready issues…\x1b[31m\r"
+	execCommand = func(string, ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf '[]'; printf '%s\n' "$1" >&2`, "fake-bd", notice)
+	}
+	out, err := ReadyJSON()
+	want := "bd truncated the ready set (" + termsafe.Escape(notice) + ") although mindspec requested no cap\nrecovery: bd ready -n 0 --json"
+	if err == nil || err.Error() != want || out != nil {
+		t.Fatalf("got %q, %v; want %q", out, err, want)
+	}
+}
+func TestReadyJSON_BenignStderrIsNotError(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(string, ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf '[{"id":"epic-129.1"}]'; printf 'warning: benign diagnostic\n' >&2`)
+	}
+	out, err := ReadyJSON()
+	if err != nil || string(out) != `[{"id":"epic-129.1"}]` {
+		t.Fatalf("got %q, %v", out, err)
 	}
 }

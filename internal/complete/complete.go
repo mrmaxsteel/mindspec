@@ -34,6 +34,7 @@ var (
 	closeBeadFn     = bead.Close
 	worktreeListFn  = bead.WorktreeList
 	runBDFn         = bead.RunBD
+	readyJSONFn     = bead.ReadyJSON
 	resolveTargetFn = resolve.ResolveTarget
 	findLocalRootFn = defaultFindLocalRoot
 	fetchBeadByIDFn = next.FetchBeadByID
@@ -1489,7 +1490,7 @@ func advanceState(epicID string) (mode, nextBead string, err error) {
 		// `bd ready --parent` argv build directly — validate BEFORE any
 		// bd spawn.
 		if idvalidate.BeadID(epicID) == nil {
-			if out, rerr := runBDFn("ready", "--parent", epicID, "--json"); rerr == nil {
+			if out, rerr := readyJSONFn("--parent", epicID); rerr == nil {
 				var ready []bead.BeadInfo
 				if json.Unmarshal(out, &ready) == nil && len(ready) > 0 {
 					return state.ModeImplement, ready[0].ID, nil

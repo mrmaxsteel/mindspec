@@ -37,7 +37,7 @@ var listOpenBeadsFn = func(epicID string) ([]bead.BeadInfo, error) {
 	if err := idvalidate.BeadID(epicID); err != nil {
 		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
-	out, err := bead.RunBD("list", "--parent", epicID, "--status=open,in_progress", "--json")
+	out, err := bead.ListJSON("--parent", epicID, "--status=open,in_progress")
 	if err != nil {
 		return nil, err
 	}

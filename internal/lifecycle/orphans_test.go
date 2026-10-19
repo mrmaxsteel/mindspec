@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -428,4 +430,45 @@ func TestIsBeadSelfOrphaned_EpicLookupErrorPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the epic-lookup error to propagate")
 	}
+}
+
+// recordRowcapBD observes the final process argv, after the bead waist.
+func recordRowcapBD(t *testing.T) func(string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ROWCAP_ARGV\"\nprintf '[]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROWCAP_ARGV", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func(verb string) {
+		t.Helper()
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		caps := 0
+		for i, a := range args {
+			if a == "-n" {
+				if i+1 == len(args) || args[i+1] != "0" {
+					t.Fatalf("bad cap: %q", args)
+				}
+				caps++
+			}
+		}
+		if len(args) == 0 || args[0] != verb || caps != 1 {
+			t.Fatalf("expected %s and exactly one -n 0, got %q", verb, args)
+		}
+	}
+}
+
+func TestOrphans_ListUncapped(t *testing.T) {
+	check := recordRowcapBD(t)
+	if _, err := listClosedBeadsFn("epic-129"); err != nil {
+		t.Fatal(err)
+	}
+	check("list")
 }

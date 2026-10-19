@@ -86,6 +86,8 @@ func saveAndRestore(t *testing.T) {
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
+	origReadyJSON := readyJSONFn
+	readyJSONFn = func(...string) ([]byte, error) { return []byte("[]"), nil }
 	origResolveTarget := resolveTargetFn
 	origFindLocalRoot := findLocalRootFn
 	origFetchBeadByID := fetchBeadByIDFn
@@ -117,6 +119,7 @@ func saveAndRestore(t *testing.T) {
 		closeBeadFn = origClose
 		worktreeListFn = origWtList
 		runBDFn = origRunBD
+		readyJSONFn = origReadyJSON
 		resolveTargetFn = origResolveTarget
 		findLocalRootFn = origFindLocalRoot
 		fetchBeadByIDFn = origFetchBeadByID
@@ -444,8 +447,8 @@ func TestRun_HappyPath(t *testing.T) {
 		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done"}},
 		"open":   {{ID: "bead-2", Title: "[IMPL 008-test.2] Next chunk"}},
 	})
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			items := []bead.BeadInfo{
 				{ID: "bead-2", Title: "[IMPL 008-test.2] Next chunk"},
 			}
@@ -1158,8 +1161,8 @@ func TestAdvanceState_NextReady(t *testing.T) {
 		"open":   {{ID: "next-bead", Title: "[IMPL 001-test-spec.2] Next"}},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			return json.Marshal([]bead.BeadInfo{
 				{ID: "next-bead", Title: "[IMPL 001-test-spec.2] Next"},
 			})
@@ -1191,8 +1194,8 @@ func TestAdvanceState_BlockedChildren(t *testing.T) {
 		"open": {{ID: "blocked-bead", Title: "[001-test-spec] Bead 3: Blocked"}},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			return json.Marshal([]bead.BeadInfo{})
 		}
 		return nil, fmt.Errorf("unexpected")
@@ -1225,7 +1228,7 @@ func TestAdvanceState_AllDone(t *testing.T) {
 		},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
+	readyJSONFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
@@ -1260,8 +1263,8 @@ func TestAdvanceState_InProgressBeadHoldsImplementPhase(t *testing.T) {
 	})
 
 	// No ready beads (the in_progress one is already claimed; nothing unblocked).
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			return json.Marshal([]bead.BeadInfo{})
 		}
 		return nil, fmt.Errorf("unexpected")
@@ -1298,8 +1301,8 @@ func TestAdvanceState_CustomResolvedStatusHoldsPhase(t *testing.T) {
 		"resolved": {{ID: "gate-1", Title: "[GATE] pending resolution"}},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			return json.Marshal([]bead.BeadInfo{})
 		}
 		return nil, fmt.Errorf("unexpected")
@@ -1332,7 +1335,7 @@ func TestAdvanceState_UndeclaredCustomStatusIsNotIterated(t *testing.T) {
 		"undeclared": {{ID: "mystery", Title: "[???] Undeclared status"}},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
+	readyJSONFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]bead.BeadInfo{})
 	}
 
@@ -1493,8 +1496,8 @@ func TestRun_AdvancesToImplementWhenNextBeadReady(t *testing.T) {
 		"open":   {{ID: "bead-2", Title: "[IMPL 008-test.2] Next"}},
 	})
 
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "--parent" {
 			items := []bead.BeadInfo{
 				{ID: "bead-2", Title: "[IMPL 008-test.2] Next"},
 			}
@@ -4227,4 +4230,52 @@ func TestResolveBeadWorktree_GatesListedBranch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordRowcapBD observes the final process argv, after the bead waist.
+func recordRowcapBD(t *testing.T) func(string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ROWCAP_ARGV\"\nprintf '[]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROWCAP_ARGV", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func(verb string) {
+		t.Helper()
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		caps := 0
+		for i, a := range args {
+			if a == "-n" {
+				if i+1 == len(args) || args[i+1] != "0" {
+					t.Fatalf("bad cap: %q", args)
+				}
+				caps++
+			}
+		}
+		if len(args) == 0 || args[0] != verb || caps != 1 {
+			t.Fatalf("expected %s and exactly one -n 0, got %q", verb, args)
+		}
+	}
+}
+
+func TestComplete_PostCloseReady_Uncapped(t *testing.T) {
+	saveAndRestore(t)
+	readyJSONFn = bead.ReadyJSON
+	orig := completeFetchChildrenFn
+	t.Cleanup(func() { completeFetchChildrenFn = orig })
+	completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
+		return []phase.ChildInfo{{ID: "epic-129.1", IssueType: "task", Status: "closed"}, {ID: "epic-129.2", IssueType: "task", Status: "open"}}, nil
+	}
+	check := recordRowcapBD(t)
+	if mode, _, err := advanceState("epic-129"); err != nil || mode != state.ModeImplement {
+		t.Fatalf("%s, %v", mode, err)
+	}
+	check("ready")
 }

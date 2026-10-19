@@ -124,10 +124,10 @@ func TestSelectWork_PickZeroMeansUnset(t *testing.T) {
 // --- BuildReadySet: unscoped construction (specFlag == "") ---
 
 func TestBuildReadySet_Unscoped(t *testing.T) {
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) == 0 {
 			items := []BeadInfo{{ID: "a", Title: "First", Status: "open"}, {ID: "b", Title: "Second", Status: "open"}}
 			return json.Marshal(items)
 		}
@@ -173,10 +173,10 @@ func TestBuildReadySet_ScopedFiltersByTitle_ExclusionAccounted(t *testing.T) {
 	specID := "042-fixture"
 	stubEpicForSpec(t, 42, "fixture", "epic-1")
 
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "--parent" {
 			items := []BeadInfo{
 				{ID: "epic-1.1", Title: "[042-fixture] A", Status: "open"},
 				{ID: "epic-1.2", Title: "[042-fixture] B", Status: "open"},
@@ -214,10 +214,10 @@ func TestBuildReadySet_EmptyAfterFilter_LoudError(t *testing.T) {
 	specID := "042-fixture"
 	stubEpicForSpec(t, 42, "fixture", "epic-1")
 
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "--parent" {
 			items := []BeadInfo{
 				{ID: "epic-1.1", Title: "unrelated title one", Status: "open"},
 				{ID: "epic-1.2", Title: "unrelated title two", Status: "open"},
@@ -250,9 +250,9 @@ func TestBuildReadySet_GenuinelyEmptyRawSet_NoErrorNoExclusion(t *testing.T) {
 	specID := "042-fixture"
 	stubEpicForSpec(t, 42, "fixture", "epic-1")
 
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
 		return []byte("[]"), nil
 	}
 
@@ -281,12 +281,10 @@ func TestBuildReadySet_ScopeRefusal_GenuineQueryError(t *testing.T) {
 	}))
 
 	globalReadyCalled := false
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
-			globalReadyCalled = true
-		}
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		globalReadyCalled = true
 		return []byte("[]"), nil
 	}
 
@@ -313,12 +311,10 @@ func TestBuildReadySet_ScopeRefusal_NonexistentSpec(t *testing.T) {
 	}))
 
 	globalReadyCalled := false
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
-			globalReadyCalled = true
-		}
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		globalReadyCalled = true
 		return []byte("[]"), nil
 	}
 
@@ -349,12 +345,10 @@ func TestBuildReadySet_ScopeRefusal_ExistingDraft(t *testing.T) {
 	}))
 
 	globalReadyCalled := false
-	origRun := runBDFn
-	t.Cleanup(func() { runBDFn = origRun })
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "ready" {
-			globalReadyCalled = true
-		}
+	origRun := readyJSONFn
+	t.Cleanup(func() { readyJSONFn = origRun })
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		globalReadyCalled = true
 		return []byte("[]"), nil
 	}
 

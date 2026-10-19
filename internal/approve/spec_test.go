@@ -1,6 +1,9 @@
 package approve
 
 import (
+	"encoding/json"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,5 +197,56 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 	const guidanceSentence = "cite the Accepted ADRs whose Domain(s) cover"
 	if !strings.Contains(frontmatter, guidanceSentence) {
 		t.Errorf("expected the adr_citations remedy-guidance sentence %q within the frontmatter region, got frontmatter:\n%s", guidanceSentence, frontmatter)
+	}
+}
+
+func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
+	root := t.TempDir()
+	const specID = "129-linkage"
+	dir := filepath.Join(root, ".mindspec", "specs", specID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specE2EValidSpecMD(specID)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { return []byte(`[]`), nil }))
+	creates := 0
+	t.Cleanup(SetSpecRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "create" {
+			creates++
+			var meta map[string]interface{}
+			found := false
+			epic := false
+			for i, a := range args {
+				if a == "--type=epic" {
+					epic = true
+				}
+				if a == "--metadata" && i+1 < len(args) {
+					found = true
+					if err := json.Unmarshal([]byte(args[i+1]), &meta); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if !epic || !found || meta["spec_num"] != float64(129) {
+				t.Fatalf("expected epic metadata, got %q", args)
+			}
+			if _, ok := meta["spec_id"]; ok {
+				t.Fatalf("epic must not carry spec_id: %q", args)
+			}
+			return []byte(`{"id":"epic-129"}`), nil
+		}
+		if len(args) == 2 && args[0] == "dolt" && args[1] == "push" {
+			return nil, nil
+		}
+		t.Fatalf("unexpected call %q", args)
+		return nil, nil
+	}))
+	if _, err := ApproveSpec(root, specID, "fixture", &executor.MockExecutor{}); err != nil {
+		t.Fatal(err)
+	}
+	if creates != 1 {
+		t.Fatalf("expected one checked epic create, got %d", creates)
 	}
 }

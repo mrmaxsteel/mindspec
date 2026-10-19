@@ -191,3 +191,11 @@ func writeAndCommit(t *testing.T, run func(args ...string), dir, name, msg strin
 	run("add", ".")
 	run("commit", "-m", msg)
 }
+
+func TestStaleOpen_ListUncapped(t *testing.T) {
+	check := recordRowcapBD(t)
+	if _, err := listOpenBeadsFn("epic-129"); err != nil {
+		t.Fatal(err)
+	}
+	check("list")
+}

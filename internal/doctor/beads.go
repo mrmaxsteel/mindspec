@@ -143,9 +143,11 @@ func isRuntimeArtifact(filename string) bool {
 // `bd list --json` may emit non-JSON, which bead.ListJSON rejects rather
 // than fall back to scraping). v1.0.4 ships embedded Dolt mode — mindspec
 // (including the test harness) assumes embedded mode and no longer carries
-// server-mode plumbing, so the floor is 1.0.4. Keep bead.minBdVersionMsg
-// in sync.
-const bdVersionFloor = "1.0.4"
+// server-mode plumbing. Spec 129 Background B and C measured unlimited
+// -n 0 and ready JSON parent/metadata fields at 1.1.0; those three facts
+// are not established at 1.0.4, so 1.1.0 is the supported floor.
+// Keep bead.minBdVersionMsg in sync.
+const bdVersionFloor = "1.1.0"
 
 // checkBeadsConfigDrift reports missing or drifted mindspec-required keys in
 // .beads/config.yaml. When a drift exists, a FixFunc is attached that calls
@@ -304,7 +306,7 @@ func checkBdVersionFloor(r *Report, root string) {
 			Name:   "bd version floor",
 			Status: Warn,
 			Message: fmt.Sprintf("bd %s is below minimum %s — mindspec relies on worktree redirect fixes "+
-				"(v1.0.2) and embedded Dolt mode (v1.0.4); upgrade with `brew upgrade beads`", ver, bdVersionFloor),
+				"(v1.0.2), embedded Dolt mode, and uncapped ready JSON with parent/metadata (v1.1.0); upgrade with `brew upgrade beads`", ver, bdVersionFloor),
 		})
 		return
 	}
@@ -357,6 +359,7 @@ func checkBdSchemaDrift(r *Report, root string) {
 
 	// `bd list --json` reads issues (touching the schema) without mutating
 	// anything; it's the same path bead.ListJSON relies on.
+	// rowcap-allowlisted: schema-drift probe reads exit status and output text only; rows unread
 	cmd := exec.Command("bd", "list", "--json")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()

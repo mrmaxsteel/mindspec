@@ -7,17 +7,20 @@
 package bead
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/trace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -278,13 +281,18 @@ func WorktreeRemove(name string) error {
 
 // minBdVersionMsg is the bd version mentioned in ListJSON's non-JSON error.
 // Keep in sync with doctor.bdVersionFloor — bead must not import doctor (cycle).
-const minBdVersionMsg = "1.0.4"
+const minBdVersionMsg = "1.1.0"
 
-// ListJSON runs `bd list <args> --json` and returns valid JSON bytes (a JSON array).
-// Requires `bd` >= 1.0.4 (the floor enforced by `mindspec doctor`). When `bd`
+// ListJSON runs `bd list <args> -n 0 --json` without a row cap and returns
+// valid JSON bytes. An explicit separate-token zero limit is not duplicated.
+// Requires `bd` >= 1.1.0 (the floor enforced by `mindspec doctor`). When `bd`
 // emits non-JSON output (older versions where --json was ignored), this returns
 // a structured error directing the user to upgrade — no human-output scraping.
 func ListJSON(args ...string) ([]byte, error) {
+	args, err := uncappedArgs(args)
+	if err != nil {
+		return nil, err
+	}
 	fullArgs := append(append([]string{"list"}, args...), "--json")
 	out, err := tracedOutput("list", fullArgs)
 	if err != nil {
@@ -305,6 +313,64 @@ func ListJSON(args ...string) ([]byte, error) {
 
 	return nil, fmt.Errorf("bd list --json returned non-JSON output (your bd may be older than the supported floor %s). "+
 		"Run `mindspec doctor` and upgrade with `brew upgrade beads`.", minBdVersionMsg)
+}
+
+// uncappedArgs admits only separate-token zero limits. Rejecting duplicate
+// limits also prevents a later flag from overriding the uncapped request.
+func uncappedArgs(args []string) ([]string, error) {
+	out := append([]string(nil), args...)
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "-n" || a == "--limit" {
+			if seen || i+1 == len(args) || args[i+1] != "0" {
+				return nil, fmt.Errorf("bd row reads require a single separate-token -n 0 or --limit 0; slice rows client-side")
+			}
+			seen = true
+			i++
+		} else if strings.HasPrefix(a, "-n") || strings.HasPrefix(a, "--limit=") {
+			return nil, fmt.Errorf("bd row reads require a separate-token -n 0 or --limit 0; slice rows client-side")
+		}
+	}
+	if !seen {
+		out = append(out, "-n", "0")
+	}
+	return out, nil
+}
+
+var readyTruncationNotice = regexp.MustCompile(`Showing [0-9]+ of [0-9]+`)
+
+// ReadyJSON runs an uncapped bd ready JSON read. Successful stderr is kept
+// separate so a bd build ignoring the no-cap request cannot silently truncate.
+func ReadyJSON(args ...string) ([]byte, error) {
+	args, err := uncappedArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	fullArgs := append(append([]string{"ready"}, args...), "--json")
+	start := time.Now()
+	cmd := execCommand("bd", fullArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	trace.Emit(trace.NewEvent("bead.cli").WithDuration(time.Since(start)).WithData(map[string]any{
+		"op": "ready", "args": fullArgs, "ok": err == nil,
+	}))
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitErr.Stderr = stderr.Bytes()
+		}
+		return out, wrapBDError(err)
+	}
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if readyTruncationNotice.MatchString(line) {
+			// ADR-0035's recovery format is literal here: guard imports phase,
+			// which imports bead, so this boundary cannot import guard.
+			return nil, fmt.Errorf("bd truncated the ready set (%s) although mindspec requested no cap\nrecovery: bd ready -n 0 --json", termsafe.Escape(line))
+		}
+	}
+	return out, nil
 }
 
 // MergeMetadata reads an issue's existing metadata, merges in the given key-value

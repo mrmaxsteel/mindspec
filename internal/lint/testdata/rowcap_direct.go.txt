@@ -1,0 +1,3 @@
+package probe
+import "github.com/mrmaxsteel/mindspec/internal/bead"
+func probe() { bead.RunBD("list", "--json") }
