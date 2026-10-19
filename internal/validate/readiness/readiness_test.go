@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 // gitPorcelain returns `git status --porcelain` output for root — the
@@ -32,6 +33,39 @@ func gitBranches(t *testing.T, root string) string {
 		t.Fatalf("git branch --list: %v: %s", err, out)
 	}
 	return string(out)
+}
+
+// Trace only this test's git reads; all setup writes happen before install.
+func traceMF3Git(t *testing.T) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "git.calls")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MF3_GIT_LOG\"\nexec \"$MF3_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MF3_REAL_GIT", realGit)
+	t.Setenv("MF3_GIT_LOG", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func assertMF3NoOriginRead(t *testing.T, log string) {
+	t.Helper()
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "log --first-parent") {
+		t.Fatalf("trace did not observe the known first-parent scan: %s", calls)
+	}
+	if strings.Contains(string(calls), "origin/") {
+		t.Fatalf("MF-3 must use local refs only: %s", calls)
+	}
 }
 
 func TestPlanMapsBead_AndPositional(t *testing.T) {
@@ -271,7 +305,7 @@ func TestReadiness_NegativeFixtureAllFail(t *testing.T) {
 		// conservatively (final-review r2 G2-R2-MF3-ANONYMOUS): no landed
 		// merge NAMES the dep's bead branch — never merged, or anonymous
 		// merge subject.
-		SignalDependencies: "no landed merge",
+		SignalDependencies: "no two-parent merge reachable",
 		SignalBlocking:     "blocking",
 	}
 	for _, s := range report.Signals {
@@ -394,7 +428,7 @@ func runSanitizedCase(t *testing.T, root, tag, specMD, planMD string, wantAllPas
 
 // --- AC-3: MF-3 landed-merge predicate, all four variants ---
 
-func TestReadiness_MF3Variants(t *testing.T) {
+func TestReadiness_MF3Variants_Existing(t *testing.T) {
 	const specID = "996-fixture-mf3"
 	const epicID = "mindspec-mf3b"
 
@@ -476,7 +510,7 @@ func TestReadiness_MF3Variants(t *testing.T) {
 			store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specIDCase}
 			store.Records[beadID] = FakeBeadRecord{
 				Description:  "MF-3 variant fixture.",
-				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat}},
+				Dependencies: []FakeDependency{{ID: depID, Status: tc.depStat, SpecID: specIDCase}},
 			}
 			restore := store.Install()
 			t.Cleanup(restore)
@@ -883,7 +917,7 @@ func TestReadiness_MF3_MetadataCorroboratedLandedPath_BdLess(t *testing.T) {
 	store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 	store.Records[beadID] = FakeBeadRecord{
 		Description:  "MF-3 seam fixture.",
-		Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+		Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 	}
 	store.LandedDeps = map[string]bool{depID: true}
 	restore := store.Install()
@@ -1017,27 +1051,9 @@ func TestReadiness_FX3_AllBlankKeyFilePathsFails(t *testing.T) {
 	}
 }
 
-// TestReadiness_MF3ErrorArmDiscrimination (final-review r2 F2-1 /
-// G2-R2-MF3): evaluateMF3's TWO FindLandedMerge refusal arms are
-// operational ROUTING, not cosmetics — each must emit its own truthful
-// state description and recovery verb:
-//
-//   - *lifecycle.LandedMergeNoEvidence (corroboration unavailable: a
-//     candidate merge exists, no admissible datum confirms it) → the
-//     dependency is already complete, so the recovery is `mindspec
-//     reattest <dep>` (the spec-125 verb that git-corroborates the merge
-//     and writes the missing landed binding) — NEVER `mindspec complete`.
-//   - plain ErrLandedMergeNotFound (no candidate merge names the bead) →
-//     the genuine closed-but-unmerged 2u0u split keeps `mindspec complete
-//     <dep>` as its recovery, stated conservatively (an anonymous-subject
-//     merge also lands here and is named as the other possibility).
-//
-// RED-on-revert: LandedMergeNoEvidence unwraps to ErrLandedMergeNotFound,
-// so deleting the errors.As arm silently reroutes the NoEvidence state
-// through the NotFound arm — still FAIL, but with the actively WRONG
-// `mindspec complete` recovery for an already-merged dependency. The
-// recovery-text assertions below turn that regression (and a collapse to
-// false-PASS) red.
+// Preserve the consumer-facing NoEvidence and NoCandidate routing checks.
+// The precise sentinel classes and unclassified NotFound errors are pinned
+// by the table-driven subtests of TestReadiness_MF3ErrorArmDiscrimination.
 func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 	t.Run("i NoEvidence arm: corroboration-unavailable routes to reattest", func(t *testing.T) {
 		root := t.TempDir()
@@ -1051,7 +1067,7 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NoEvidence-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
 		store.NoEvidenceDeps = map[string]bool{depID: true}
 		restore := store.Install()
@@ -1088,10 +1104,9 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 		store.Lineage[beadID] = FakeLineage{EpicID: epicID, SpecID: specID}
 		store.Records[beadID] = FakeBeadRecord{
 			Description:  "MF-3 NotFound-arm fixture.",
-			Dependencies: []FakeDependency{{ID: depID, Status: "closed"}},
+			Dependencies: []FakeDependency{{ID: depID, Status: "closed", SpecID: specID}},
 		}
-		// The dep is listed FALSE so the seam is installed but reports the
-		// plain ErrLandedMergeNotFound sentinel (no candidate merge).
+		// The dep is listed FALSE so the seam reports NoCandidate.
 		store.LandedDeps = map[string]bool{depID: false}
 		restore := store.Install()
 		t.Cleanup(restore)
@@ -1114,6 +1129,56 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 			t.Errorf("NotFound Detail must state the anonymous-subject possibility conservatively (G2-R2-MF3-ANONYMOUS), got %q", mf3.Detail)
 		}
 	})
+	const merge = "1111111111111111111111111111111111111111"
+	const second = "2222222222222222222222222222222222222222"
+	for _, tc := range []struct {
+		name, class, want, recovery string
+		err                         error
+	}{
+		{"no candidate", FailureNoCandidate, "no two-parent merge reachable from spec/996-errors's tip lands bead/owner-epic.2", "mindspec complete owner-epic.2", lifecycle.ErrLandedMergeNoCandidate},
+		{"contradiction", FailureContradiction, "a merge landing bead/owner-epic.2 exists (" + merge + ") but", "bd show owner-epic.2 --json", fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)", lifecycle.ErrLandedMergeContradiction, "owner-epic.2", "spec/996-errors", strings.Repeat("3", 40), second, merge, second)},
+		{"reverted", FailureReverted, "merge " + merge + " landing bead/owner-epic.2 was reverted or cleanly removed after landing", "bd show owner-epic.2 --json", fmt.Errorf("%w: merge %s was reverted", lifecycle.ErrLandedMergeReverted, merge)},
+		{"no evidence", FailureNoEvidence, "no admissible datum corroborates it", "mindspec reattest owner-epic.2", &lifecycle.LandedMergeNoEvidence{MergeSHA: merge, SecondParent: second}},
+		{"plain F5 error", FailureIndeterminate, "could not evaluate landed-merge state: read failed", "investigate the landed-merge evaluation failure", errors.New("read failed\x1b[31m")},
+		{"bare NotFound is indeterminate", FailureIndeterminate, "could not evaluate landed-merge state:", "investigate the landed-merge evaluation failure", fmt.Errorf("%w: unclassified read", lifecycle.ErrLandedMergeNotFound)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := findLandedMergeFn
+			t.Cleanup(func() { findLandedMergeFn = orig })
+			findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) { return nil, tc.err }
+			deps := []dependencyEdge{{ID: "owner-epic.2", Status: "closed"}}
+			r := &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: "996-errors"}
+			s := evaluateMF3("", r, mf3PlanMD(r.SpecID), deps)
+			candidate := ""
+			if tc.class == FailureNoEvidence || tc.class == FailureContradiction || tc.class == FailureReverted {
+				candidate = merge
+			}
+			if s.Pass || !strings.Contains(s.Detail, tc.want) || !strings.Contains(s.Recovery, tc.recovery) || !reflect.DeepEqual(s.Failures, []string{DependencyFailureRecord("owner-epic.2", tc.class, candidate)}) {
+				t.Fatalf("wrong error arm: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Detail, "no two-parent merge reachable") {
+				t.Fatalf("existing merge/read error misreported: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Recovery, "mindspec complete") {
+				t.Fatalf("wrong recovery: %+v", s)
+			}
+			if tc.class == FailureIndeterminate {
+				if !IsIndeterminateRecord(s.Failures[0]) {
+					t.Fatalf("must be uncoverable: %+v", s)
+				}
+				rendered := Render(&Report{BeadID: r.BeadID, Signals: []Signal{s}})
+				if strings.ContainsRune(rendered, '\x1b') {
+					t.Fatalf("unescaped read error: %q", rendered)
+				}
+				deps = append(deps, dependencyEdge{ID: "task-a", Status: "open"})
+				combined := evaluateMF3("", r, "", deps)
+				if len(combined.Failures) != 2 || combined.Recovery != s.Recovery {
+					t.Fatalf("read failure must outrank not-closed: %+v", combined)
+				}
+			}
+		})
+	}
+
 }
 
 // TestReadiness_DescriptionLegDefectsRefuse (final-review r2 F2-3): the bd

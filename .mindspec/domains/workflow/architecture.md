@@ -832,11 +832,34 @@ exactly four signals in stable order:
   closed i/v/x set is the FORM the spec pins, so `(d)`/`(c)` classify as
   sub-letters even though they are Roman-numeral-valid symbols.
 - **MF-3 — dependencies landed, not just closed.** Every `blocks`
-  dependency edge must be `closed` in bd AND positively landed-merged
-  into the spec branch via `internal/lifecycle.FindLandedMerge` — three
-  distinct refusals: not closed; closed but no landed merge found; a
-  candidate merge exists but no admissible datum corroborates it
-  (`LandedMergeNoEvidence`).
+  dependency must be `closed` in bd. A closed dependency belongs to the
+  lineage spec when its ID has that epic's plan-bead form, its embedded
+  `metadata.spec_id` equals the spec, or its own record's parent equals
+  the epic. The parent read runs only when the first two checks are
+  negative; the embedded dependency's parent and title are not inputs.
+  A non-member passes on closed status with a not-applicable explanation.
+  Members require `lifecycle.FindLandedMergeReachable`: first-parent
+  identification, then a reachable fallback that needs an audited
+  reattest and current git safety checks before automatic read-back can
+  identify it. A non-matching panel registration never vetoes a binding.
+  Each failure names its dependency and class: `not-closed`,
+  `no-candidate`, `off-first-parent`, `no-evidence`, `contradiction`, or
+  `reverted`. Membership and landed-merge read errors are `indeterminate`,
+  never a not-applicable pass or evidence that no merge exists. Linked
+  non-plan-form members and unmapped follow-ups carry deliberate scoped
+  override hints. Off-first-parent failures offer reattest, then the
+  dependent's scoped override if reattest refuses.
+
+  MF-3 evaluates every dependency and records every failure as
+  `<dep-id>:<class>[:<candidate-sha>]`, sorted independently of display.
+  A malformed dependency ID is recorded as
+  `malformed-<12-hex digest>:indeterminate`, with the raw ID kept only in
+  the escaped Detail.
+  Detail includes each failure and its recovery text. The one signal
+  recovery follows precedence `indeterminate` > `not-closed` >
+  `no-candidate` > `off-first-parent` > `no-evidence` > `contradiction` >
+  `reverted`, then dependency ID. Indeterminate records cannot be
+  overridden. An existing merge never gets a `mindspec complete` recovery.
 - **MF-4 — no genuine blocking marker.** A `TBD`/`OPEN QUESTION` marker
   or an unchecked `- [ ]` item under a blocking-region header in the
   bead's plan section or bd description fails; markers inside code
@@ -845,7 +868,7 @@ exactly four signals in stable order:
 Owning-spec resolution is LINEAGE-authoritative (bead → epic → spec via
 `phase.FindEpicForBead`), never cwd-derived. The engine lives in the
 sub-package `internal/validate/readiness` — NOT `internal/validate`
-itself — because it consumes `lifecycle.FindLandedMerge` and placing it
+itself — because it consumes `lifecycle.FindLandedMergeReachable` and placing it
 in `internal/validate` would close the `lifecycle[test] → validate →
 lifecycle` import cycle. Its COMPLETE bd read-set is routed through
 injectable func-var seams so the unit tests are hermetic with `bd`

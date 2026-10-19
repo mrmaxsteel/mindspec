@@ -107,7 +107,7 @@ func (r *Report) RecoveryCommands() []string {
 }
 
 // Render renders r as the per-signal report text: one line per signal,
-// PASS/FAIL plus (for a FAIL) the escaped evidence. Every byte of
+// PASS/FAIL plus any non-empty escaped evidence. Every byte of
 // agent-influenced text (bead descriptions, plan prose) reaches this
 // output only through termsafe.Escape — spec 124 R1 / AC-8: "All
 // bead/plan-derived text rendered in the report passes through
@@ -122,7 +122,11 @@ func Render(r *Report) string {
 	fmt.Fprintf(&b, "Readiness report for %s:\n", idrender.Bead(r.BeadID))
 	for _, s := range r.Signals {
 		if s.Pass {
-			fmt.Fprintf(&b, "%s: PASS\n", s.ID)
+			fmt.Fprintf(&b, "%s: PASS", s.ID)
+			if s.Detail != "" {
+				fmt.Fprintf(&b, " — %s", termsafe.Escape(s.Detail))
+			}
+			b.WriteByte('\n')
 			continue
 		}
 		fmt.Fprintf(&b, "%s: FAIL — %s\n", s.ID, termsafe.Escape(s.Detail))

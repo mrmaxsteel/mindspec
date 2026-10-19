@@ -16,20 +16,17 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // --- bd-less hermeticity seam (spec 124 plan-gate G2-BDLESS-ENGINE-SEAM) ---
 //
-// The two package-level func vars below are the COMPLETE bd/lineage
-// read-set EvaluateReadiness performs. Every one of MF-1..MF-4 reaches
-// internal/bead only through these vars, so engine unit tests can swap
-// both to deterministic in-memory fixtures and consult no real bd
-// process — hermetic under `bd` absent from PATH, never a t.Skip (spec
-// 124 plan-gate F3-1, the spec-119 lesson). MF-3's landed-merge leg
-// (internal/lifecycle.FindLandedMerge) is a GIT read, not bd, and is
-// exercised over real temp git repos in tests, not faked.
+// Lineage, bead records, dependency parents and landed-merge decisions
+// have injectable seams. The parent seam delegates to the record seam;
+// the lifecycle finder also reads binding metadata through internal/bead.
+// Tests use in-memory records or local bd fakes and real temp git repos.
 var (
 	// findEpicForBeadFn resolves beadID's owning epic + spec via bd/phase
 	// lineage (the internal/complete/complete.go:369 fail-closed pattern
@@ -43,8 +40,18 @@ var (
 	// status (MF-3). One `bd show <id> --json` read serves both needs.
 	fetchBeadRecordFn = fetchBeadRecordReal
 
+	// Read the dependency's own record; an embedded dependency's parent
+	// is not authoritative (bd returns null there even for parented beads).
+	fetchDependencyParentFn = func(beadID string) (string, error) {
+		rec, err := fetchBeadRecordFn(beadID)
+		if err != nil {
+			return "", err
+		}
+		return rec.Parent, nil
+	}
+
 	// findLandedMergeFn is MF-3's landed-merge decision seam (FX-1). It
-	// defaults to lifecycle.FindLandedMerge, which is a GIT read but ALSO
+	// defaults to lifecycle.FindLandedMergeReachable, which also
 	// performs a TRANSITIVE bd read: FindLandedMerge -> landedBindingForBead
 	// -> bead.GetMetadata (internal/lifecycle/landed.go), the merge-time
 	// landed-binding corroboration leg. That transitive bd read is not
@@ -55,19 +62,22 @@ var (
 	// end-to-end over real temp repos), while a bd-less test that must
 	// exercise the metadata-corroborated landed path swaps this var to a
 	// deterministic in-memory return, consulting no real bd.
-	findLandedMergeFn = lifecycle.FindLandedMerge
+	findLandedMergeFn = lifecycle.FindLandedMergeReachable
 )
 
 // dependencyEdge is one "blocks" dependency edge read off a bead's bd
 // record: the dependency's bead ID and its own bd status.
 type dependencyEdge struct {
-	ID     string
-	Status string
+	ID          string
+	Status      string
+	SpecID      string
+	SpecIDError error
 }
 
 // beadRecord is the subset of a bead's bd record EvaluateReadiness needs.
 type beadRecord struct {
 	Description  string
+	Parent       string
 	Dependencies []dependencyEdge
 }
 
@@ -84,10 +94,12 @@ func fetchBeadRecordReal(beadID string) (*beadRecord, error) {
 	}
 	var items []struct {
 		Description  string `json:"description"`
+		Parent       string `json:"parent"`
 		Dependencies []struct {
-			ID             string `json:"id"`
-			Status         string `json:"status"`
-			DependencyType string `json:"dependency_type"`
+			ID             string          `json:"id"`
+			Status         string          `json:"status"`
+			DependencyType string          `json:"dependency_type"`
+			Metadata       json.RawMessage `json:"metadata"`
 		} `json:"dependencies"`
 	}
 	if err := json.Unmarshal(out, &items); err != nil {
@@ -96,10 +108,17 @@ func fetchBeadRecordReal(beadID string) (*beadRecord, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("bead %s not found", idrender.Bead(beadID))
 	}
-	rec := &beadRecord{Description: items[0].Description}
+	rec := &beadRecord{Description: items[0].Description, Parent: items[0].Parent}
 	for _, d := range items[0].Dependencies {
 		if strings.EqualFold(d.DependencyType, "blocks") {
-			rec.Dependencies = append(rec.Dependencies, dependencyEdge{ID: d.ID, Status: d.Status})
+			var metadata struct {
+				SpecID string `json:"spec_id"`
+			}
+			var parseErr error
+			if len(d.Metadata) != 0 {
+				parseErr = json.Unmarshal(d.Metadata, &metadata)
+			}
+			rec.Dependencies = append(rec.Dependencies, dependencyEdge{ID: d.ID, Status: d.Status, SpecID: metadata.SpecID, SpecIDError: parseErr})
 		}
 	}
 	return rec, nil
@@ -162,7 +181,7 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 	report := &Report{BeadID: beadID, EpicID: epicID, SpecID: specID}
 	report.Signals = append(report.Signals, evaluateMF1(string(planContent), n))
 	report.Signals = append(report.Signals, evaluateMF2(rec.Description, sectionRaw, string(specContent), ownSpecNum))
-	report.Signals = append(report.Signals, evaluateMF3(root, specID, rec.Dependencies))
+	report.Signals = append(report.Signals, evaluateMF3(root, report, string(planContent), rec.Dependencies))
 	report.Signals = append(report.Signals, evaluateMF4(rec.Description, sectionRaw))
 	return report, nil
 }
@@ -626,84 +645,138 @@ func evaluateMF2(description, sectionRaw, specContent string, ownSpecNum int) Si
 
 // --- MF-3: dependencies closed AND landed-merged (spec 124 R2 MF-3) ---
 
-func evaluateMF3(root, specID string, deps []dependencyEdge) Signal {
+func evaluateMF3(root string, report *Report, planContent string, deps []dependencyEdge) Signal {
 	if len(deps) == 0 {
 		return Signal{ID: SignalDependencies, Pass: true}
 	}
-	specBranch, err := workspace.SpecBranch(specID)
-	if err != nil {
-		return Signal{
-			ID:       SignalDependencies,
-			Pass:     false,
-			Detail:   fmt.Sprintf("could not resolve the spec branch for %s: %v", idrender.Spec(specID), err),
-			Recovery: "fix the spec ID, then re-run `mindspec bead ready-check`",
-		}
-	}
+	specID, epicID := report.SpecID, report.EpicID
+	specBranch, branchErr := workspace.SpecBranch(specID)
+	var failures []dependencyFailure
+	var confirmations []string
+	seen := map[string]bool{}
 	for _, dep := range deps {
+		if seen[dep.ID] {
+			continue
+		}
+		seen[dep.ID] = true
+		f := dependencyFailure{id: dep.ID}
+		inspection := fmt.Sprintf("bd show %s --json", idrender.Bead(dep.ID))
 		if err := idvalidate.BeadID(dep.ID); err != nil {
-			return Signal{
-				ID:       SignalDependencies,
-				Pass:     false,
-				Detail:   fmt.Sprintf("dependency id %s is malformed", idrender.Bead(dep.ID)),
-				Recovery: fmt.Sprintf("fix the malformed dependency edge naming %s", idrender.Bead(dep.ID)),
-			}
+			f.id = "malformed-" + recordDigest(dep.ID)[:12]
+			f.class, f.detail = FailureIndeterminate, fmt.Sprintf("dependency id %s is malformed", termsafe.Escape(idrender.Bead(dep.ID)))
+			f.recovery = "fix the malformed dependency edge"
+			failures = append(failures, f)
+			continue
 		}
 		if !strings.EqualFold(strings.TrimSpace(dep.Status), "closed") {
-			return Signal{
-				ID:       SignalDependencies,
-				Pass:     false,
-				Detail:   fmt.Sprintf("dependency %s is not closed in bd (status=%s)", dep.ID, dep.Status),
-				Recovery: fmt.Sprintf("mindspec complete %s", dep.ID),
+			f.class, f.detail = FailureNotClosed, fmt.Sprintf("is not closed in bd (status=%s)", dep.Status)
+			f.recovery = fmt.Sprintf("mindspec complete %s", idrender.Bead(dep.ID))
+			failures = append(failures, f)
+			continue
+		}
+		n, planForm := bead.PlanBeadIndex(epicID, dep.ID)
+		link := ""
+		if !planForm {
+			if dep.SpecIDError != nil {
+				f.class = FailureIndeterminate
+				f.detail = fmt.Sprintf("could not determine whether %s belongs to spec %s: parsing dependency metadata: %v", dep.ID, idrender.Spec(specID), dep.SpecIDError)
+				f.recovery = inspection
+				failures = append(failures, f)
+				continue
 			}
+			if dep.SpecID == specID {
+				link = "metadata.spec_id"
+			} else {
+				parent, err := fetchDependencyParentFn(dep.ID)
+				if err != nil {
+					f.class = FailureIndeterminate
+					f.detail = fmt.Sprintf("could not determine whether %s belongs to spec %s: %v", dep.ID, idrender.Spec(specID), err)
+					f.recovery = inspection
+					failures = append(failures, f)
+					continue
+				}
+				if parent != epicID {
+					confirmations = append(confirmations, fmt.Sprintf("dependency %s: closed; not a bead of spec %s — landed-merge test not applicable", dep.ID, idrender.Spec(specID)))
+					continue
+				}
+				link = "parent edge"
+			}
+		}
+		if branchErr != nil {
+			f.class, f.detail = FailureIndeterminate, fmt.Sprintf("could not resolve the spec branch for %s: %v", idrender.Spec(specID), branchErr)
+			f.recovery = "fix the spec ID, then re-run `mindspec bead ready-check`"
+			failures = append(failures, f)
+			continue
 		}
 		_, lmErr := findLandedMergeFn(root, specBranch, dep.ID)
 		if lmErr == nil {
 			continue
 		}
 		var noEvidence *lifecycle.LandedMergeNoEvidence
+		var off *lifecycle.LandedMergeOffFirstParent
 		switch {
 		case errors.As(lmErr, &noEvidence):
-			// Corroboration-unavailable (*lifecycle.LandedMergeNoEvidence):
-			// a candidate merge EXISTS on the spec branch but no admissible
-			// datum confirms it belongs to this bead (or owned candidates
-			// conflict). The dependency is already complete, so `mindspec
-			// complete` is the WRONG verb here; `mindspec reattest` is the
-			// spec-125 verb built for exactly this state — it independently
-			// git-corroborates the candidate merge and writes the missing
-			// landed binding (final-review r2 G2-R2-MF3 / F2-1).
-			return Signal{
-				ID:       SignalDependencies,
-				Pass:     false,
-				Detail:   fmt.Sprintf("dependency %s: a candidate merge exists but no admissible datum corroborates it (%v)", dep.ID, lmErr),
-				Recovery: fmt.Sprintf("verify the candidate merge, then run `mindspec reattest %s` to write the git-corroborated landed binding, and re-run `mindspec bead ready-check`", dep.ID),
+			f.class, f.candidate = FailureNoEvidence, noEvidence.MergeSHA
+			f.detail = fmt.Sprintf("a candidate merge exists but no admissible datum corroborates it (%v)", lmErr)
+			f.recovery = fmt.Sprintf("mindspec reattest %s", idrender.Bead(dep.ID))
+		case errors.As(lmErr, &off):
+			f.class = FailureOffFirstParent
+			var candidates, identities []string
+			for _, m := range off.Candidates {
+				candidates = append(candidates, fmt.Sprintf("%s (second parent %s)", m.SHA, m.Parents[1]))
+				identities = append(identities, m.SHA)
 			}
-		case errors.Is(lmErr, lifecycle.ErrLandedMergeNotFound):
-			// No candidate merge NAMES bead/<id> at all. Usually this is the
-			// genuine closed-but-unmerged 2u0u split (recovery: `mindspec
-			// complete`), but it is NOT proof the work never landed: spec
-			// 125's FindLandedMerge also returns this sentinel for a REAL
-			// merge whose subject names no bead (an anonymous hand-crafted
-			// operator merge is never automatically identifiable, and
-			// reattest's ownership nominator is the same subject parse — see
-			// internal/lifecycle/landed.go). State the two possibilities
-			// conservatively instead of asserting "not merged" as fact
-			// (final-review r2 G2-R2-MF3-ANONYMOUS-CLASSIFICATION).
-			return Signal{
-				ID:       SignalDependencies,
-				Pass:     false,
-				Detail:   fmt.Sprintf("dependency %s is closed but no landed merge into %s names bead/%s — either it was never merged (the 2u0u split), or its merge subject does not name the bead", dep.ID, specBranch, dep.ID),
-				Recovery: fmt.Sprintf("if %s was never merged, run `mindspec complete %s`; if a real merge exists under an anonymous subject, re-merge under a bead-naming subject or use the audited attested-restore (`mindspec reattest` cannot adopt an anonymous merge)", dep.ID, dep.ID),
+			if len(off.Candidates) == 1 {
+				f.candidate = off.Candidates[0].SHA
 			}
+			f.detail = fmt.Sprintf("a merge %s naming bead/%s is reachable from %s's tip but off its first-parent chain; automatic identification never accepts it without an audited reattest; candidates: %s", strings.Join(identities, ", "), dep.ID, specBranch, strings.Join(candidates, ", "))
+			f.recovery = fmt.Sprintf("mindspec reattest %s", idrender.Bead(dep.ID))
+			f.extraExits = "recovery (if reattest refuses): " + dependencyOverride(report.BeadID)
+		case errors.Is(lmErr, lifecycle.ErrLandedMergeNoCandidate):
+			f.class = FailureNoCandidate
+			f.detail = fmt.Sprintf("no two-parent merge reachable from %s's tip lands bead/%s (first-parent scan, then the reachable-landing fallback) — either it was never merged (the 2u0u split), or its merge subject does not name the bead", specBranch, dep.ID)
+			f.recovery = fmt.Sprintf("if %s was never merged, run `mindspec complete %s`; if a real merge exists under an anonymous subject, re-merge under a bead-naming subject or use the audited attested-restore (`mindspec reattest` cannot adopt an anonymous merge)", dep.ID, dep.ID)
+		case errors.Is(lmErr, lifecycle.ErrLandedMergeContradiction):
+			f.class = FailureContradiction
+			merge, second := landedDiagnosticIdentity(lmErr)
+			f.candidate = merge
+			identity := ""
+			if merge != "" {
+				identity = " (" + merge + ")"
+			}
+			if second != "" {
+				second = " " + second
+			}
+			f.detail = fmt.Sprintf("a merge landing bead/%s exists%s but %s contradicts its second parent%s (%v)", dep.ID, identity, landedContradictionDatum(lmErr, dep.ID), second, lmErr)
+			f.recovery = inspection
+		case errors.Is(lmErr, lifecycle.ErrLandedMergeReverted):
+			f.class = FailureReverted
+			f.candidate, _ = landedDiagnosticIdentity(lmErr)
+			identity := "a merge"
+			if f.candidate != "" {
+				identity = "merge " + f.candidate
+			}
+			f.detail = fmt.Sprintf("%s landing bead/%s was reverted or cleanly removed after landing (%v)", identity, dep.ID, lmErr)
+			f.recovery = inspection
 		default:
-			return Signal{
-				ID:       SignalDependencies,
-				Pass:     false,
-				Detail:   fmt.Sprintf("dependency %s: could not evaluate landed-merge state: %v", dep.ID, lmErr),
-				Recovery: fmt.Sprintf("investigate the landed-merge evaluation failure for %s, then re-run `mindspec bead ready-check`", dep.ID),
+			f.class = FailureIndeterminate
+			f.detail = fmt.Sprintf("could not evaluate landed-merge state: %v", lmErr)
+			f.recovery = fmt.Sprintf("investigate the landed-merge evaluation failure for %s, then re-run `mindspec bead ready-check`", dep.ID)
+		}
+		if f.class != FailureIndeterminate && link != "" {
+			f.detail += fmt.Sprintf("; %s is linked to spec %s by %s but does not have the plan-bead form; if its work never landed as bead/%s, override deliberately", dep.ID, idrender.Spec(specID), link, dep.ID)
+			if f.extraExits == "" {
+				f.extraExits = "recovery (override deliberately): " + dependencyOverride(report.BeadID)
+			}
+		} else if mapped, _ := PlanMapsBead(planContent, n); f.class != FailureIndeterminate && !mapped {
+			f.detail += fmt.Sprintf("; %s has the plan-bead form but plan.md does not map it (a follow-up); if it was worked outside mindspec next and never landed as bead/%s, override deliberately", dep.ID, dep.ID)
+			if f.extraExits == "" {
+				f.extraExits = "recovery (override deliberately): " + dependencyOverride(report.BeadID)
 			}
 		}
+		failures = append(failures, f)
 	}
-	return Signal{ID: SignalDependencies, Pass: true}
+	return aggregateDependencyFailures(failures, confirmations)
 }
 
 // --- MF-4: no genuine blocking marker (spec 124 R2 MF-4) ---
