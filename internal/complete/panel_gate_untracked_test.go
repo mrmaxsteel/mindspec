@@ -11,7 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
-func TestPanelGate_UntrackedIgnoredRegistrationRestoresSkipEnvFn(t *testing.T) {
+func TestPanelGate_UntrackedIgnoredRegistration(t *testing.T) {
 	orig := panelSkipEnvFn
 	t.Cleanup(func() { panelSkipEnvFn = orig })
 	panelSkipEnvFn = func() bool { return true }

@@ -58,13 +58,14 @@ func TestCommitPaths_DirectoryPreservesAdditionsAndScope(t *testing.T) {
 	reviewIgnoreGit(t, root, "commit", "-q", "-m", "source files")
 	write("src/tracked.txt", "after\n")
 	write("src/new [file].txt", "new\n")
+	write("src/ü-note.md", "non-ASCII addition\n")
 	write("outside.txt", "unrelated staged change\n")
 	write("unstaged.txt", "unrelated unstaged change\n")
 	reviewIgnoreGit(t, root, "add", "outside.txt")
 	if err := CommitPaths(root, "source changes only", []string{"src"}); err != nil {
 		t.Fatal(err)
 	}
-	for path, want := range map[string]string{"src/tracked.txt": "after\n", "src/new [file].txt": "new\n", "outside.txt": "before\n"} {
+	for path, want := range map[string]string{"src/tracked.txt": "after\n", "src/new [file].txt": "new\n", "src/ü-note.md": "non-ASCII addition\n", "outside.txt": "before\n"} {
 		if got := reviewIgnoreGit(t, root, "show", "HEAD:"+path); got != want {
 			t.Errorf("committed %s = %q, want %q", path, got, want)
 		}
