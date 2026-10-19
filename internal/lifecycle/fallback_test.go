@@ -170,6 +170,58 @@ func TestReattest_FallbackSameTupleNoOp(t *testing.T) {
 	requireReadBack(t, f)
 }
 
+// Spec 129 R4.2: a valid audit must equal both binding and candidate to no-op.
+func TestReattest_FallbackRewritesWhenBindingDriftsFromValidAudit(t *testing.T) {
+	f := newFallbackFixture(t)
+	meta := acceptFallback(t, f)
+	meta["mindspec_landed_merge_sha"] = strings.Repeat("c", 40)
+
+	requireOffFirstParent(t, f, 1)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 {
+		t.Fatalf("drifted binding must be rewritten: %+v %v writes=%v", res, err, *writes)
+	}
+	if !auditMatches((*writes)[0].updates, fallbackSpec, f.merge, f.second) {
+		t.Fatalf("rewrite did not restore a valid matching tuple: %+v", (*writes)[0].updates)
+	}
+}
+
+// Spec 129 R4.2 F4: partially superseded content is not a reverted landing.
+func TestReattest_FallbackAcceptedThenEvolvedStaysIdentified(t *testing.T) {
+	dir, run := initLandedRepo(t, "129-test")
+	run("checkout", "-b", "bead/"+fallbackBead)
+	writeFallbackFile(t, dir, "surface-a.txt", "alpha payload\n")
+	writeFallbackFile(t, dir, "surface-b.txt", "beta payload\n")
+	run("add", ".")
+	run("commit", "-m", "work bead-one: two surfaces")
+	run("checkout", fallbackSpec)
+	run("merge", "--no-ff", "-m", "Merge bead/"+fallbackBead, "bead/"+fallbackBead)
+	f := fallbackFixture{dir: dir, run: run, merge: revParseIn(t, dir, "HEAD"), second: revParseIn(t, dir, "bead/"+fallbackBead)}
+	carry239(t, f)
+	acceptFallback(t, f)
+
+	// Later first-parent work supersedes one surface and retains the other.
+	if err := os.Rename(filepath.Join(dir, "surface-a.txt"), filepath.Join(dir, "surface-a2.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeFallbackFile(t, dir, "surface-a2.txt", "superseding replacement for alpha\n")
+	run("add", ".")
+	run("commit", "-m", "supersede surface-a with surface-a2")
+
+	outcome, err := gitutil.ContentSubsumedOutcome(dir, f.merge+"^1", f.merge, fallbackSpec)
+	if err != nil || outcome != gitutil.SubsumptionCleanDivergence {
+		t.Fatalf("shape precondition: want SubsumptionCleanDivergence, got %v %v", outcome, err)
+	}
+	requireReadBack(t, f)
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
+	var refusal *ReattestRefusal
+	if errors.As(err, &refusal) || err != nil || res == nil {
+		t.Fatalf("evolved fallback landing refused: %+v %v writes=%v", res, err, *writes)
+	}
+}
+
 func TestReattest_FallbackMalformedSameTupleRewrites(t *testing.T) {
 	for _, key := range []string{reattestKeyOp, reattestKeyAt, reattestKeyActor} {
 		t.Run(key, func(t *testing.T) {

@@ -100,12 +100,10 @@ audit.`,
 
 		deps := reattestDeps{
 			deriveSpecBranch: deriveSpecBranchFromLineage,
-			reattest: func(root, branch, id, actor string) (*lifecycle.ReattestResult, error) {
-				return lifecycle.ReattestLandedMerge(root, branch, id, actor, func(line string) { fmt.Fprintln(os.Stdout, line) })
-			},
-			actor:  reattestActor(),
-			stdout: os.Stdout,
-			stderr: os.Stderr,
+			reattest:         lifecycle.ReattestLandedMerge,
+			actor:            reattestActor(),
+			stdout:           os.Stdout,
+			stderr:           os.Stderr,
 		}
 		if err := runReattest(deps, root, beadID, specBranchFlag); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -127,7 +125,7 @@ type reattestDeps struct {
 	// (FIX-1).
 	deriveSpecBranch func(beadID string) (string, error)
 	// reattest is the derivation engine (lifecycle.ReattestLandedMerge).
-	reattest func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error)
+	reattest func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error)
 	// actor is the audit acting-identity value (user@host via argv0).
 	actor  string
 	stdout io.Writer
@@ -240,7 +238,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 		)
 	}
 
-	res, err := deps.reattest(root, scanned, beadID, deps.actor)
+	res, err := deps.reattest(root, scanned, beadID, deps.actor, func(line string) { fmt.Fprintln(deps.stdout, line) })
 	if err != nil {
 		var refusal *lifecycle.ReattestRefusal
 		if errors.As(err, &refusal) {
