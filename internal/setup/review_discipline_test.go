@@ -567,7 +567,6 @@ func TestReviewDiscipline_AC10StagedRuleMarkerOnly(t *testing.T) {
 			if len(problems) != 1 || problems[0] != want {
 				t.Fatalf("unrelated reference must fail only at its own line: got %v, want %q", problems, want)
 			}
-			t.Log(want)
 		})
 	}
 }

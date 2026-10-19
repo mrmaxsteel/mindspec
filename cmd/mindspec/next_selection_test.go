@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The fake honours the default cap and edge-only --parent; all tracker state is local.
+// The fake honors the default cap and edge-only --parent; all tracker state is local.
 const nextHonestyFakeBD = `#!/usr/bin/env python3
 import json, os, sys
 p=os.environ["HONEST_TRACKER"]
@@ -156,11 +160,7 @@ func (f *nextHonestyFixture) run(t *testing.T, args ...string) (string, error) {
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = out, out
 	cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE, SilenceErrors: true, SilenceUsage: true}
-	cmd.Flags().Int("pick", 0, "")
-	cmd.Flags().String("spec", "", "")
-	cmd.Flags().Bool("force", false, "")
-	cmd.Flags().Bool("emit-only", false, "")
-	cmd.Flags().Bool("allow-not-ready", false, "")
+	registerNextFlags(cmd)
 	cmd.SetArgs(args)
 	runErr := cmd.Execute()
 	os.Stdout, os.Stderr = oldOut, oldErr
@@ -285,11 +285,7 @@ esac
 		os.Stdout = f
 		// Fresh flags keep the real CLI RunE independent of other CLI tests.
 		cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE}
-		cmd.Flags().Int("pick", 0, "")
-		cmd.Flags().String("spec", "", "")
-		cmd.Flags().Bool("force", false, "")
-		cmd.Flags().Bool("emit-only", false, "")
-		cmd.Flags().Bool("allow-not-ready", false, "")
+		registerNextFlags(cmd)
 		cmd.SetArgs([]string{"--emit-only", fmt.Sprintf("--pick=%d", pick)})
 		err = cmd.Execute()
 		os.Stdout = orig
@@ -334,6 +330,7 @@ func TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick(t *testing.T) {
 }
 func TestNextSelection_ClaimPickMatchesEmitOnlyPick(t *testing.T) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
 	if err != nil {
 		t.Fatal(err)
@@ -442,6 +439,7 @@ func TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1(t *testing.T
 }
 func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	out, err := f.run(t, "--spec", "129-fixture")
 	if err != nil {
 		t.Fatalf("%v %s", err, out)
@@ -500,6 +498,7 @@ func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) 
 }
 func testNextPartialNotice(t *testing.T, emit bool) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"))
 	f.write(t)
 	args := []string{"--spec", "129-fixture"}
@@ -526,6 +525,7 @@ func TestNext_ScopedSelection_ReporterShapesClaimable(t *testing.T) {
 	for _, id := range []string{"epic-129.2", "epic-129.3"} {
 		t.Run(id, func(t *testing.T) {
 			f := newNextHonestyFixture(t)
+			honestyGit(t, f.root, "branch", "spec/129-fixture")
 			out, err := f.run(t, "--spec", "129-fixture", id)
 			if err != nil {
 				t.Fatalf("reporter shape: %v %s", err, out)
@@ -914,5 +914,40 @@ func TestNextMenu_PrintsSpecIDForm(t *testing.T) {
 	requireText(t, out, "129-fixture", "777-other", "mindspec next --spec=<spec-id>")
 	if strings.Contains(out, "--spec=<number>") {
 		t.Fatal("numeric menu placeholder survived")
+	}
+}
+
+// Both fixture constructors must consume the production pflag definitions.
+func TestNextSelection_UsesProductionFlagRegistration(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("missing source location")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), source, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run", "TestNext_101ReadyBeads_AllVisible"} {
+		calls := 0
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != name {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				id, ok := call.Fun.(*ast.Ident)
+				if ok && id.Name == "registerNextFlags" {
+					calls++
+				}
+				return true
+			})
+		}
+		if calls != 1 {
+			t.Fatalf("fixture %s must call registerNextFlags exactly once; got %d", name, calls)
+		}
 	}
 }

@@ -61,7 +61,23 @@ team lead spawns fresh agents per bead.`,
 		specFlag, _ := cmd.Flags().GetString("spec")
 		force, _ := cmd.Flags().GetBool("force")
 		emitOnly, _ := cmd.Flags().GetBool("emit-only")
-		allowNotReady, _ := cmd.Flags().GetBool("allow-not-ready")
+		allowNotReady, _ := cmd.Flags().GetString("allow-not-ready")
+		evidencePath, _ := cmd.Flags().GetString("evidence")
+		flagGiven := cmd.Flags().Changed("allow-not-ready")
+		beadID := ""
+		if len(args) > 0 {
+			beadID = args[0]
+		}
+		namedSignals, parseErr := next.ParseReadinessSignals(allowNotReady, flagGiven)
+		if parseErr != nil {
+			if flagGiven && allowNotReady == next.BareOverride {
+				return bareReadinessRefusal(args)
+			}
+			if beadID != "" && !next.IsReadinessSignalToken(beadID) {
+				_, parseErr = next.GateReadiness("", beadID, next.GateOptions{FlagGiven: true, NamedSignals: []string{allowNotReady}})
+			}
+			return parseErr
+		}
 
 		// Spec 128 Bead 8 round-1 panel G2: --pick < 0 is pure arg
 		// validation — checked IMMEDIATELY after flag parsing, before
@@ -170,35 +186,27 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
-		// Step 1: Proportional claim guard (ADR-0025's clarifying
-		// amendment, spec 128 R5.1 — #179). `.beads/issues.jsonl` is a
-		// build artifact co-managed by bd; dirt on that path alone is
-		// auto-handled via `bd export`. Of the remaining user dirt, only
-		// dirt ComputeEntangleablePaths names as a path THIS
-		// worktree-creating claim can itself write still blocks — round-1
-		// panel fix: that set is per-spec-aware (the target spec's
-		// recording paths, when recording is enabled) and conditional on
-		// .gitignore's current state, not unconditionally empty. Every
-		// other unrelated dirty file in the invoking checkout still does
-		// not block; it is named on stderr (Max's standing directive,
-		// 2026-09-02 — visibility without the block) and the claim
-		// proceeds.
-		blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specFlag)
-		if err != nil {
-			return fmt.Errorf("checking working tree: %w", err)
+		// Guard a known scope before any recovery worktree can be created.
+		// With no resolved scope, defer until the readiness gate supplies T:
+		// its recording paths must never be reported as unrelated dirt.
+		checkClaimDirt := func(specID string) error {
+			blockingDirt, ignoredDirt, err := next.CheckDirtyTreeProportional(root, cwd, specID)
+			if err != nil {
+				return fmt.Errorf("checking working tree: %w", err)
+			}
+			if len(blockingDirt) > 0 {
+				return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
+			}
+			if len(ignoredDirt) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+			}
+			return nil
 		}
-		if len(blockingDirt) > 0 {
-			// Spec 092 Reqs 8/12 (mindspec-tjat): the failure carries the
-			// worktree-context line and ends with a `recovery:` line. The
-			// old multi-line "Recovery steps: 1..3" stderr block advised
-			// `git restore .` — destructive over the HUMAN's dirt when the
-			// agent merely ran `next` from the wrong directory. The active
-			// worktree (when one exists) is the steer-to target; resolving
-			// it costs bd calls only on this failure path.
-			return next.DirtyTreeFailure(cwd, blockingDirt, guard.ActiveWorktreePath(root))
-		}
-		if len(ignoredDirt) > 0 {
-			fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignoredDirt))
+		guardedSpec := specFlag
+		if guardedSpec != "" {
+			if err := checkClaimDirt(guardedSpec); err != nil {
+				return err
+			}
 		}
 
 		// Step 1.7: Unmerged-bead guard — block if a predecessor bead was closed
@@ -215,6 +223,13 @@ team lead spawns fresh agents per bead.`,
 		rs, err := next.BuildReadySet(root, specFlag)
 		var emptyErr *next.EmptyAfterFilterError
 		if err != nil && !errors.As(err, &emptyErr) {
+			// A failed query cannot proceed to a claim. Preserve dirt
+			// visibility on this early exit even when no target was learned.
+			if guardedSpec == "" {
+				if dirtErr := checkClaimDirt(""); dirtErr != nil {
+					return dirtErr
+				}
+			}
 			return err
 		}
 		items := rs.Filtered
@@ -248,6 +263,9 @@ team lead spawns fresh agents per bead.`,
 					fmt.Print(formatStateLine(resolved.Mode, resolved.SpecID, activeBead))
 				})
 			}
+			if _, ignored, err := next.CheckDirtyTreeProportional(root, cwd, ""); err == nil && len(ignored) > 0 {
+				fmt.Fprintln(os.Stderr, next.IgnoredDirtNotice(ignored))
+			}
 			fmt.Println("No ready work found.")
 			fmt.Println()
 			fmt.Println("Next steps:")
@@ -269,9 +287,20 @@ team lead spawns fresh agents per bead.`,
 		// selection and BEFORE any claim/branch/worktree mutation below,
 		// so a NOT-READY refusal leaves bd state, branches, and worktrees
 		// byte-identical to their pre-call state (AC-4).
-		gateResult, gateErr := nextGateReadinessFn(root, selected.ID, allowNotReady)
+		gateResult, gateErr := nextGateReadinessFn(root, selected.ID, next.GateOptions{ScopeSpec: specFlag, NamedSignals: namedSignals, FlagGiven: flagGiven, EvidencePath: evidencePath})
 		if gateErr != nil {
 			return gateErr
+		}
+
+		// Lineage is the dispatch and recording spec, including unscoped claims.
+		specFlag = gateResult.SpecID
+		if specFlag != guardedSpec {
+			if err := checkClaimDirt(specFlag); err != nil {
+				return err
+			}
+		}
+		for _, note := range gateResult.Notes {
+			fmt.Fprintln(os.Stderr, note)
 		}
 
 		// Step 4.6: On the --allow-not-ready proceed path, write the
@@ -291,7 +320,7 @@ team lead spawns fresh agents per bead.`,
 		if len(gateResult.FailingSignals) > 0 {
 			fmt.Fprintf(os.Stderr, "warning: claiming %s despite failing readiness signal(s) (--allow-not-ready): %s\n",
 				idrender.Bead(selected.ID), strings.Join(gateResult.FailingSignals, ", "))
-			if err := next.RecordReadinessOverride(selected.ID, gateResult.FailingSignals); err != nil {
+			if err := next.RecordReadinessOverride(selected.ID, gateResult); err != nil {
 				return readinessOverrideFailure(selected.ID, err)
 			}
 		}
@@ -400,6 +429,29 @@ team lead spawns fresh agents per bead.`,
 
 		return nil
 	},
+}
+
+// bareReadinessRefusal decides the syntax refusal before resolving any bead.
+// A real positional ID then gets a read-only preflight solely for recovery;
+// a space-separated signal token never enters selection or readiness.
+func bareReadinessRefusal(args []string) error {
+	beadID := ""
+	if len(args) > 0 {
+		beadID = args[0]
+	}
+	root := ""
+	if beadID != "" && !next.IsReadinessSignalToken(beadID) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		root, err = workspace.FindRoot(cwd)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := next.GateReadiness(root, beadID, next.GateOptions{BareFlag: true})
+	return err
 }
 
 // completionGuidance renders the "When done" tail appended to the bead
@@ -534,7 +586,8 @@ func formatStateLine(mode, specID, beadID string) string {
 // phase-semantics signature, then advance the epic's stored
 // mindspec_phase to `implement` under the R3.3 lock, but ONLY for a
 // LIFECYCLE (task-typed or untyped — the ADR-0023 discriminator) claim;
-// a non-lifecycle claim (e.g. a `bug` bead) advances nothing.
+// a non-lifecycle plan-bead claim (e.g. a `bug` bead) advances nothing.
+// A bug with no epic lineage is refused earlier by EvaluateReadiness.
 // Forward-only: no-op when already `implement` — this is a NEW writer,
 // so it registers in the bead-1 writer-inventory test (writer_inventory_test.go)
 // by construction; the composite literal below must stay lexically
@@ -676,7 +729,7 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 func readinessOverrideFailure(beadID string, err error) error {
 	return guard.NewFailure(
 		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(beadID), next.RenderBDError(err)),
-		"re-run this exact `mindspec next` invocation with --allow-not-ready once bd metadata writes are healthy",
+		"re-run this exact `mindspec next` invocation with --allow-not-ready=<ids> --evidence <path-to-justification> once bd metadata writes are healthy",
 	)
 }
 
@@ -758,12 +811,18 @@ func unmergedBeadError(o lifecycle.Orphan) error {
 	return fmt.Errorf("bead %s was closed without `mindspec complete` — merge topology is broken.\nRun `mindspec complete %s` to recover, then retry `mindspec next`.", safeBeadID, safeBeadID)
 }
 
-func init() {
-	nextCmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
-	nextCmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
-	nextCmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
-	nextCmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
-	nextCmd.Flags().Bool("allow-not-ready", false, "Proceed past a failing readiness floor (spec 124); records a durable override marker naming the bypassed signals")
+func init() { registerNextFlags(nextCmd) }
+
+// registerNextFlags is shared with command fixtures so they parse the exact
+// production flag types and NoOptDefVal behavior.
+func registerNextFlags(cmd *cobra.Command) {
+	cmd.Flags().Int("pick", 0, "Pick a specific item by number (1-based) when multiple are ready; 0 (default) means unset — defaults to item 1; negative values are rejected")
+	cmd.Flags().String("spec", "", "Target spec ID to filter ready work (auto-detected if exactly one active spec)")
+	cmd.Flags().Bool("force", false, "Bypass the context clear gate (use when you know your context is clean)")
+	cmd.Flags().Bool("emit-only", false, "Emit bead primer without claiming, creating worktree, or updating state (for multi-agent mode)")
+	cmd.Flags().String("allow-not-ready", "", "Override named readiness signals: --allow-not-ready=MF-1,MF-2,MF-3,MF-4; requires --evidence when recording failures")
+	cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
+	cmd.Flags().String("evidence", "", "Readable justification file (1 byte to 64 KiB); stores only path, sha256 and size")
 }
 
 // nextSpecMenuCommand names the literal form accepted under the listed spec IDs.

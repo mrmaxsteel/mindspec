@@ -60,7 +60,7 @@ subsequent re-dispatch succeeds, never a second write here.
 This writes ONLY the dedicated bd metadata key the mechanical readiness
 floor (MF-1..MF-4) never scans — a clarification can never flip a
 mechanical PASS/FAIL (spec 124 R8e). The blunt bypass for a known-
-acceptable mechanical FAIL is "mindspec next --allow-not-ready", not
+acceptable mechanical FAIL is "mindspec next --allow-not-ready=<ids> --evidence <path>", not
 this command.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

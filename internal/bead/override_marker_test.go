@@ -34,10 +34,12 @@ func TestOverrideMarker_Validity(t *testing.T) {
 		want MarkerValidity
 	}{
 		{"valid", func(m map[string]any) {}, MarkerValid},
-		{"upper-hex-and-max-bytes", func(m map[string]any) {
+		{"max-bytes", func(m map[string]any) {
 			m["evidence"].(map[string]any)["bytes"] = 65536
-			m["evidence"].(map[string]any)["sha256"] = strings.Repeat("F", 64)
+			m["evidence"].(map[string]any)["sha256"] = strings.Repeat("f", 64)
 		}, MarkerValid},
+		{"uppercase-fingerprint", func(m map[string]any) { m["fingerprints"].(map[string]any)["MF-3"] = []string{strings.Repeat("A", 64)} }, MarkerMalformed},
+		{"uppercase-evidence-sha", func(m map[string]any) { m["evidence"].(map[string]any)["sha256"] = strings.Repeat("F", 64) }, MarkerMalformed},
 		{"legacy", func(m map[string]any) { delete(m, "schema"); delete(m, "fingerprints"); delete(m, "evidence") }, MarkerLegacy},
 		{"schema-missing-v2", func(m map[string]any) { delete(m, "schema") }, MarkerMalformed},
 		{"schema-wrong", func(m map[string]any) { m["schema"] = 1 }, MarkerMalformed},

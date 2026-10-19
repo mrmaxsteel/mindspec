@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ import (
 
 var readyCheckEvaluateFn = readiness.EvaluateReadiness
 var readyCheckReadMarkerFn = bead.ReadOverrideMarker
+var readyCheckBeadFn = next.FetchBeadByID
 
 var beadReadyCheckCmd = &cobra.Command{
 	Use:   "ready-check <bead-id>",
@@ -56,10 +58,11 @@ uncovered signals and the release/re-claim recovery.`,
 			return err
 		}
 
+		inspectRecovery := fmt.Sprintf("bd show %s --json", idrender.Bead(beadID))
 		marker, validity, err := readyCheckReadMarkerFn(beadID)
 		if err != nil {
 			return guard.NewFailure(fmt.Sprintf("could not read readiness override metadata for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())),
-				fmt.Sprintf("bd show %s --json", idrender.Bead(beadID)))
+				inspectRecovery)
 		}
 		coverage := readiness.ApplyOverride(report, marker, validity)
 		if len(coverage.Uncovered) == 0 {
@@ -68,9 +71,17 @@ uncovered signals and the release/re-claim recovery.`,
 		}
 		msg := coverage.Message + "\nuncovered: " + strings.Join(coverage.Uncovered, ",")
 		commands := report.RecoveryCommands()
-		commands = append(commands,
-			fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)),
-			fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(coverage.Failing, ",")))
+		if indeterminate := next.IndeterminateReadiness(report); len(indeterminate) > 0 {
+			return guard.NewFailure(msg+"\n"+strings.Join(indeterminate, "\n"), commands...)
+		}
+		info, err := readyCheckBeadFn(beadID)
+		if err != nil {
+			return guard.NewFailure(fmt.Sprintf("could not read claim status for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), inspectRecovery)
+		}
+		if strings.EqualFold(info.Status, "in_progress") {
+			commands = append(commands, fmt.Sprintf("mindspec release %s", idrender.Bead(beadID)))
+		}
+		commands = append(commands, fmt.Sprintf("mindspec next %s --allow-not-ready=%s --evidence <path-to-justification>", idrender.Bead(beadID), strings.Join(coverage.Failing, ",")))
 		return guard.NewFailure(msg, commands...)
 	},
 }

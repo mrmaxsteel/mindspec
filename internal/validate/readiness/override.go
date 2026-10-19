@@ -62,9 +62,9 @@ func ApplyOverride(report *Report, marker bead.OverrideMarker, validity bead.Mar
 	}
 	switch validity {
 	case bead.MarkerLegacy:
-		lines = append(lines, "override marker is legacy (no evidence) — not honoured")
+		lines = append(lines, "override marker is legacy (no evidence) — not honoured") //nolint:misspell // spec 129 R6.3 pins this text verbatim
 	case bead.MarkerMalformed:
-		lines = append(lines, "override marker is malformed — not honoured")
+		lines = append(lines, "override marker is malformed — not honoured") //nolint:misspell // spec 129 R6.3 pins this text verbatim
 	}
 	result.Message = strings.Join(lines, "\n")
 	return result

@@ -20,6 +20,7 @@ func TestADR0041_Spec129Amendment(t *testing.T) {
 	// of the scope, evidence, read-back or residual contract.
 	amendment = strings.Join(strings.Fields(amendment), " ")
 	for _, phrase := range []string{
+		"### (iii) Scoped, fingerprint-bound fourth-verb override", "plan-bead form, lineage/scope agreement", "lineage spec is the dispatch spec", "indeterminate read failures cannot be overridden", "Bare, space-separated and `all` forms refuse", "Named-but-passing signals are not recorded", "fresh readable regular file evidence of 1 byte to 64 KiB", "schema-v2 marker REPLACES", "complete sorted failure-record digests", "Existing markers never authorize a claim", "Growth uncovers; shrinkage stays covered", "LEGACY and MALFORMED", "all currently failing signals and evidence", "release is offered only when a claim exists", "no authentication",
 		"### (i) Reachable fallback and audited read-back", "### (ii) Non-corroborating panel datum and binding veto",
 		"lifecycle.FindLandedMergeReachable", "lifecycle.ReattestLandedMerge", "zero owned two-parent candidates",
 		"finder-only: no automatic acceptance", "stay first-parent only", "undirected-subject target gap",

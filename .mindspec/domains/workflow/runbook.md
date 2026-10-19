@@ -110,7 +110,7 @@ commits). Choose exactly one disposition:
 A clarification can only DISAMBIGUATE existing spec/plan/landed-code
 authority — when no span supports the answer, ACCEPT is correct, not
 clarify. For a known-acceptable MECHANICAL fail, the lever is
-`mindspec next --allow-not-ready` (recorded override marker), never
+`mindspec next --allow-not-ready=<ids> --evidence <path>` (recorded override marker), never
 `bead clarify` — the two are not interchangeable.
 
 ### Handle ADR Divergence
