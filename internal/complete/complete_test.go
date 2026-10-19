@@ -4358,3 +4358,36 @@ func TestComplete_PostCloseReady_ErrorPreservesCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestComplete_PostCloseChildren_OriginalIndeterminateRender(t *testing.T) {
+	saveAndRestore(t)
+	root := setupTempRoot(t)
+	stubPhaseEpic(t, "008-test", "epic-129")
+	resolveTargetFn = func(string, string) (string, error) { return "008-test", nil }
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) { return nil, nil }
+	mock := newMockExec()
+	closed := 0
+	closeBeadFn = func(...string) error { closed++; return nil }
+	cause := "bd list --parent: \x1b[31mhostile\r\nrecovery: forged"
+	completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
+		return nil, errors.New(cause)
+	}
+	readyJSONFn = func(...string) ([]byte, error) {
+		t.Fatal("ready lookup must be unreachable after a children-read failure")
+		return nil, nil
+	}
+	result, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	if err != nil || result == nil {
+		t.Fatalf("children-read failure must preserve completion: result=%+v, err=%v", result, err)
+	}
+	if !result.BeadClosed || !result.WorktreeRemoved || closed != 1 || len(mock.CallsTo("CompleteBead")) != 1 || !result.NextModeIndeterminate {
+		t.Fatalf("expected one successful completion and indeterminate mode: result=%+v, closes=%d", result, closed)
+	}
+	// Byte-for-byte output of bbeb47be's FormatResult on this result:
+	// fmt.Fprintf(&sb, "cannot determine mode: %s\n", termsafe.Escape(r.IndeterminateReason)).
+	want := "Bead bead-1 closed.\nWorktree removed.\ncannot determine mode: " +
+		termsafe.Escape("reading post-close child set for epic epic-129: "+cause) + "\n"
+	if got := FormatResult(result); got != want {
+		t.Fatalf("children-read render changed from bbeb47be:\nwant %q\ngot  %q", want, got)
+	}
+}

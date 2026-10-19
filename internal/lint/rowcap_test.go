@@ -219,18 +219,46 @@ func TestBDRowCapWaist(t *testing.T) {
 		})
 	}
 	t.Run("allowed", func(t *testing.T) {
-		src := []byte(`package probe
+		for _, fixture := range []struct {
+			name, path, source string
+		}{
+			{"marked", "internal/probe/probe.go", `package probe
 import "github.com/mrmaxsteel/mindspec/internal/bead"
-var keys = map[string]bool{"list": true}
-func probe(sandbox Sandbox) {
+func probe() {
 // rowcap-allowlisted: probe reads no rows
 bead.RunBD("list", "--json")
 bead.RunBDCombined("ready", "--json") // rowcap-allowlisted: probe reads no rows
-sandbox.runBD("ready", "--json")
-}`)
-		got, err := rowcapFindings(map[string][]byte{"internal/probe/probe.go": src})
-		if err != nil || len(got) != 0 {
-			t.Fatalf("allowed sources: %v, %v", got, err)
+}`},
+			{"redact-map-key", "internal/redact/redact.go", `package redact
+var keys = map[string]bool{"list": true}`},
+			{"sandbox-method", "internal/harness/probe.go", `package harness
+func probe(sandbox Sandbox) { sandbox.runBD("ready", "--json") }`},
+		} {
+			t.Run(fixture.name, func(t *testing.T) {
+				got, err := rowcapFindings(map[string][]byte{fixture.path: []byte(fixture.source)})
+				if err != nil || len(got) != 0 {
+					t.Fatalf("allowed %s: %v, %v", fixture.name, got, err)
+				}
+			})
+		}
+	})
+	t.Run("allowlist-empty-reason", func(t *testing.T) {
+		for _, reason := range []string{"", " ", " \t  "} {
+			for _, placement := range []string{"above", "inline"} {
+				t.Run(fmt.Sprintf("%q/%s", reason, placement), func(t *testing.T) {
+					marker := "// rowcap-allowlisted:" + reason
+					call := `bead.RunBD("list", "--json")`
+					body := marker + "\n" + call
+					if placement == "inline" {
+						body = call + " " + marker
+					}
+					src := "package probe\nimport \"github.com/mrmaxsteel/mindspec/internal/bead\"\nfunc probe() {\n" + body + "\n}"
+					got, err := rowcapFindings(map[string][]byte{"internal/probe/probe.go": []byte(src)})
+					if err != nil || len(got) != 1 {
+						t.Fatalf("empty allowlist reason must report the row read: got %v, %v", got, err)
+					}
+				})
+			}
 		}
 	})
 	t.Run("cross-file-alias", func(t *testing.T) {

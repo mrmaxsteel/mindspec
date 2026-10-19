@@ -1187,3 +1187,18 @@ func TestReadyJSON_BenignStderrIsNotError(t *testing.T) {
 		t.Fatalf("got %q, %v", out, err)
 	}
 }
+
+func TestReadyJSON_MultilineStderrTruncationNoticeIsError(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	notice := "Showing 100 of 106 ready issues…\x1b[31m\r"
+	stderr := "warning: benign diagnostic\n" + notice + "\ntrailing diagnostic\n"
+	execCommand = func(string, ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf '[]'; printf '%s' "$1" >&2`, "fake-bd", stderr)
+	}
+	out, err := ReadyJSON()
+	want := "bd truncated the ready set (" + termsafe.Escape(notice) + ") although mindspec requested no cap\nrecovery: bd ready -n 0 --json"
+	if err == nil || err.Error() != want || out != nil {
+		t.Fatalf("multiline stderr must reject the later truncation notice: got %q, %v; want %q", out, err, want)
+	}
+}

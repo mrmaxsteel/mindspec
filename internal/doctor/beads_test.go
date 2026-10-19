@@ -6,7 +6,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 )
+
+func TestBDVersionFloor_MatchesListJSONDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	// Non-JSON output exercises bead.minBdVersionMsg through its public
+	// consumer, without exporting a production constant or invoking real bd.
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte("#!/bin/sh\nprintf 'legacy text output\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := bead.ListJSON()
+	want := "bd list --json returned non-JSON output (your bd may be older than the supported floor " + bdVersionFloor + "). " +
+		"Run `mindspec doctor` and upgrade with `brew upgrade beads`."
+	if err == nil || err.Error() != want || out != nil {
+		t.Fatalf("ListJSON diagnostic must match doctor floor %s: got %q, %v; want %q", bdVersionFloor, out, err, want)
+	}
+}
 
 // findCheck returns the first Check with a given Name, or nil.
 func findCheck(r *Report, name string) *Check {
