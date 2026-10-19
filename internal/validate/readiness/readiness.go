@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -661,8 +662,9 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 		f := dependencyFailure{id: dep.ID}
 		inspection := fmt.Sprintf("bd show %s --json", idrender.Bead(dep.ID))
 		if err := idvalidate.BeadID(dep.ID); err != nil {
-			f.class, f.detail = FailureIndeterminate, fmt.Sprintf("dependency id %s is malformed", idrender.Bead(dep.ID))
-			f.recovery = fmt.Sprintf("fix the malformed dependency edge naming %s", idrender.Bead(dep.ID))
+			f.id = "malformed-" + recordDigest(dep.ID)[:12]
+			f.class, f.detail = FailureIndeterminate, fmt.Sprintf("dependency id %s is malformed", termsafe.Escape(idrender.Bead(dep.ID)))
+			f.recovery = "fix the malformed dependency edge"
 			failures = append(failures, f)
 			continue
 		}
@@ -729,7 +731,7 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 			}
 			f.detail = fmt.Sprintf("a merge %s naming bead/%s is reachable from %s's tip but off its first-parent chain; automatic identification never accepts it without an audited reattest; candidates: %s", strings.Join(identities, ", "), dep.ID, specBranch, strings.Join(candidates, ", "))
 			f.recovery = fmt.Sprintf("mindspec reattest %s", idrender.Bead(dep.ID))
-			f.detail += "\nrecovery (if reattest refuses): " + dependencyOverride(report.BeadID)
+			f.extraExits = "recovery (if reattest refuses): " + dependencyOverride(report.BeadID)
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeNoCandidate):
 			f.class = FailureNoCandidate
 			f.detail = fmt.Sprintf("no two-parent merge reachable from %s's tip lands bead/%s (first-parent scan, then the reachable-landing fallback) — either it was never merged (the 2u0u split), or its merge subject does not name the bead", specBranch, dep.ID)
@@ -738,7 +740,11 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 			f.class = FailureContradiction
 			merge, second := landedDiagnosticIdentity(lmErr)
 			f.candidate = merge
-			f.detail = fmt.Sprintf("a merge landing bead/%s exists (%s) but a corroborating datum contradicts its second parent %s (%v)", dep.ID, merge, second, lmErr)
+			identity := ""
+			if merge != "" {
+				identity = " (" + merge + ")"
+			}
+			f.detail = fmt.Sprintf("a merge landing bead/%s exists%s but %s contradicts its second parent %s (%v)", dep.ID, identity, landedContradictionDatum(lmErr, dep.ID), second, lmErr)
 			f.recovery = inspection
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeReverted):
 			f.class = FailureReverted
@@ -752,10 +758,14 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 		}
 		if f.class != FailureIndeterminate && link != "" {
 			f.detail += fmt.Sprintf("; %s is linked to spec %s by %s but does not have the plan-bead form; if its work never landed as bead/%s, override deliberately", dep.ID, idrender.Spec(specID), link, dep.ID)
-			f.detail += "\nrecovery (override deliberately): " + dependencyOverride(report.BeadID)
+			if f.extraExits == "" {
+				f.extraExits = "recovery (override deliberately): " + dependencyOverride(report.BeadID)
+			}
 		} else if mapped, _ := PlanMapsBead(planContent, n); f.class != FailureIndeterminate && !mapped {
 			f.detail += fmt.Sprintf("; %s has the plan-bead form but plan.md does not map it (a follow-up); if it was worked outside mindspec next and never landed as bead/%s, override deliberately", dep.ID, dep.ID)
-			f.detail += "\nrecovery (override deliberately): " + dependencyOverride(report.BeadID)
+			if f.extraExits == "" {
+				f.extraExits = "recovery (override deliberately): " + dependencyOverride(report.BeadID)
+			}
 		}
 		failures = append(failures, f)
 	}

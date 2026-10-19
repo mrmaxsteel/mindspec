@@ -10,7 +10,7 @@ import (
 )
 
 type dependencyFailure struct {
-	id, class, candidate, detail, recovery string
+	id, class, candidate, detail, recovery, extraExits string
 }
 
 var dependencyFailurePrecedence = map[string]int{
@@ -35,7 +35,11 @@ func aggregateDependencyFailures(failures []dependencyFailure, confirmations []s
 	var details []string
 	for _, f := range failures {
 		s.Failures = append(s.Failures, DependencyFailureRecord(f.id, f.class, f.candidate))
-		details = append(details, fmt.Sprintf("dependency %s [%s]: %s; recovery for %s: %s", f.id, f.class, f.detail, f.id, f.recovery))
+		block := fmt.Sprintf("dependency %s [%s]: %s\nrecovery: %s", f.id, f.class, f.detail, f.recovery)
+		if f.extraExits != "" {
+			block += "\n" + f.extraExits
+		}
+		details = append(details, block)
 	}
 	s.Failures = sortedUnique(s.Failures)
 	s.Detail = strings.Join(details, "\n")
@@ -47,16 +51,27 @@ func aggregateDependencyFailures(failures []dependencyFailure, confirmations []s
 // errors.Is determines the class, never this text. Preserve the full diagnostic
 // as evidence even when a future diagnostic format does not match.
 var diagnosticMergeRE = regexp.MustCompile(`\bmerge ([0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b`)
-var diagnosticSecondParentRE = regexp.MustCompile(`\bsecond parent ([0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b`)
+var diagnosticContradictionRE = regexp.MustCompile(`\bcontradicts merge ([0-9a-fA-F]{40}|[0-9a-fA-F]{64})'s second parent ([0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b`)
 
 func landedDiagnosticIdentity(err error) (merge, secondParent string) {
+	if m := diagnosticContradictionRE.FindStringSubmatch(err.Error()); m != nil {
+		return m[1], m[2]
+	}
 	if m := diagnosticMergeRE.FindStringSubmatch(err.Error()); m != nil {
 		merge = m[1]
 	}
-	if m := diagnosticSecondParentRE.FindStringSubmatch(err.Error()); m != nil {
-		secondParent = m[1]
-	}
 	return
+}
+
+func landedContradictionDatum(err error, depID string) string {
+	text := err.Error()
+	if strings.Contains(text, fmt.Sprintf("surviving branch bead/%s tip ", idrender.Bead(depID))) {
+		return fmt.Sprintf("the surviving branch tip bead/%s", idrender.Bead(depID))
+	}
+	if strings.Contains(text, "landed-binding merge ") {
+		return "the landed binding"
+	}
+	return "a corroborating datum"
 }
 
 func dependencyOverride(beadID string) string {

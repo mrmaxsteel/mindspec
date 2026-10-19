@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 // gitPorcelain returns `git status --porcelain` output for root — the
@@ -1128,6 +1129,56 @@ func TestReadiness_MF3ErrorArmDiscrimination(t *testing.T) {
 			t.Errorf("NotFound Detail must state the anonymous-subject possibility conservatively (G2-R2-MF3-ANONYMOUS), got %q", mf3.Detail)
 		}
 	})
+	const merge = "1111111111111111111111111111111111111111"
+	const second = "2222222222222222222222222222222222222222"
+	for _, tc := range []struct {
+		name, class, want, recovery string
+		err                         error
+	}{
+		{"no candidate", FailureNoCandidate, "no two-parent merge reachable from spec/996-errors's tip lands bead/owner-epic.2", "mindspec complete owner-epic.2", lifecycle.ErrLandedMergeNoCandidate},
+		{"contradiction", FailureContradiction, "a merge landing bead/owner-epic.2 exists (" + merge + ") but", "bd show owner-epic.2 --json", fmt.Errorf("%w: %s on %s (landed-binding merge %s/second-parent %s contradicts merge %s's second parent %s)", lifecycle.ErrLandedMergeContradiction, "owner-epic.2", "spec/996-errors", strings.Repeat("3", 40), second, merge, second)},
+		{"reverted", FailureReverted, "merge " + merge + " landing bead/owner-epic.2 was reverted or cleanly removed after landing", "bd show owner-epic.2 --json", fmt.Errorf("%w: merge %s was reverted", lifecycle.ErrLandedMergeReverted, merge)},
+		{"no evidence", FailureNoEvidence, "no admissible datum corroborates it", "mindspec reattest owner-epic.2", &lifecycle.LandedMergeNoEvidence{MergeSHA: merge, SecondParent: second}},
+		{"plain F5 error", FailureIndeterminate, "could not evaluate landed-merge state: read failed", "investigate the landed-merge evaluation failure", errors.New("read failed\x1b[31m")},
+		{"bare NotFound is indeterminate", FailureIndeterminate, "could not evaluate landed-merge state:", "investigate the landed-merge evaluation failure", fmt.Errorf("%w: unclassified read", lifecycle.ErrLandedMergeNotFound)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := findLandedMergeFn
+			t.Cleanup(func() { findLandedMergeFn = orig })
+			findLandedMergeFn = func(string, string, string) (*lifecycle.LandedMerge, error) { return nil, tc.err }
+			deps := []dependencyEdge{{ID: "owner-epic.2", Status: "closed"}}
+			r := &Report{BeadID: "owner-epic.1", EpicID: "owner-epic", SpecID: "996-errors"}
+			s := evaluateMF3("", r, mf3PlanMD(r.SpecID), deps)
+			candidate := ""
+			if tc.class == FailureNoEvidence || tc.class == FailureContradiction || tc.class == FailureReverted {
+				candidate = merge
+			}
+			if s.Pass || !strings.Contains(s.Detail, tc.want) || !strings.Contains(s.Recovery, tc.recovery) || !reflect.DeepEqual(s.Failures, []string{DependencyFailureRecord("owner-epic.2", tc.class, candidate)}) {
+				t.Fatalf("wrong error arm: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Detail, "no two-parent merge reachable") {
+				t.Fatalf("existing merge/read error misreported: %+v", s)
+			}
+			if tc.class != FailureNoCandidate && strings.Contains(s.Recovery, "mindspec complete") {
+				t.Fatalf("wrong recovery: %+v", s)
+			}
+			if tc.class == FailureIndeterminate {
+				if !IsIndeterminateRecord(s.Failures[0]) {
+					t.Fatalf("must be uncoverable: %+v", s)
+				}
+				rendered := Render(&Report{BeadID: r.BeadID, Signals: []Signal{s}})
+				if strings.ContainsRune(rendered, '\x1b') {
+					t.Fatalf("unescaped read error: %q", rendered)
+				}
+				deps = append(deps, dependencyEdge{ID: "task-a", Status: "open"})
+				combined := evaluateMF3("", r, "", deps)
+				if len(combined.Failures) != 2 || combined.Recovery != s.Recovery {
+					t.Fatalf("read failure must outrank not-closed: %+v", combined)
+				}
+			}
+		})
+	}
+
 }
 
 // TestReadiness_DescriptionLegDefectsRefuse (final-review r2 F2-3): the bd
