@@ -507,6 +507,10 @@ None.
 **Verification**
 - [ ] `go test ./internal/gitutil/ -run 'TestReachableMerges' -count=1` passes
 - [ ] `go test ./internal/lifecycle/ -run 'TestFindLandedMergeReachable|TestReattest_Fallback|TestReadBack_|TestMergedUnclosed_IgnoresFallback|TestFindLandedMerge_PanelSet|TestReattest_PanelSet|TestMergedUnclosed_PanelSet|TestReattest_RepairsContradictoryBindingOnFallback|TestReviewedSHAClass_Table|TestReviewedHeadSHASet_UntrackedIgnored|TestLandedMerge_TypedSentinelsWrapNotFound' -count=1` passes (the spec's Validation Proof command, widened)
+- [ ] AC-11 convergent no-op binding-equality leg: `TestReattest_FallbackRewritesWhenBindingDriftsFromValidAudit` passes
+- [ ] AC-11 F4 revert-shape discrimination leg: `TestReattest_FallbackAcceptedThenEvolvedStaysIdentified` passes
+- [ ] AC-11 F4 landed-then-evolved conflict leg: `TestReattest_FallbackAcceptedThenConflictEvolvedStaysIdentified` passes
+- [ ] AC-11 convergent no-op second-parent binding-equality leg: `TestReattest_FallbackRewritesWhenBindingSecondParentDrifts` passes
 - [ ] `go test ./internal/lifecycle/ ./cmd/mindspec/ -run 'TestReattest' -count=1` passes, with `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` unchanged and `TestReattest_HappyPathFleetState`'s existing assertions kept
 - [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes (NEW test file)
 - [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes (the new exec row and the new composition rows)

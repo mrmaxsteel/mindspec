@@ -1,74 +1,11 @@
-// mindspec reattest — the spec 125 R4 git-corroborated re-attest engine.
-//
-// ReattestLandedMerge is the derivation engine behind the EXPLICIT,
-// operator-invoked `mindspec reattest <bead-id>` verb (cmd/mindspec).
-// It (re)writes the merge-time landed-binding of an ALREADY-MERGED bead
-// under ADR-0041 §2(ii) as amended by spec 125 ("Amendment (Spec 125):
-// Re-attested landed-bindings under §2(ii)"): a landed-binding written
-// AFTER merge time is admissible iff it is DERIVED from an independent
-// git EXACT-second-parent match — never from an operator-asserted SHA
-// pair corroborating itself (circular: there is deliberately NO
-// parameter, flag, or argument through which a caller can supply a
-// merge/second-parent pair — AC-8(iii)), never from subject text alone,
-// and never from an agent-writable binding uncorroborated to a real
-// exact merge.
-//
-// Ownership vs landed-ness (the §2(ii) amendment's two-source rule,
-// same model as FindLandedMerge):
-//
-//   - OWNERSHIP is SUBJECT-NOMINATED: a candidate merge is this bead's
-//     ONLY if its subject names bead/<id> (either subject form, parsed
-//     by parseMergeSubjectBeadBranch, FULL branch-name equality — never
-//     prefix/substring). An ANONYMOUS merge (subject names no bead)
-//     cannot be nominated, so it is REFUSED even under explicit
-//     operator invocation — operator assertion alone never substitutes
-//     for the subject nominator (plan-gate G3-B1: this is the
-//     documented, operator-vouched trust in the subject-to-name mapping
-//     spec 121 already relied on, inside the threat boundary; datum (a)
-//     is not claimed as independent-of-subject ownership proof).
-//   - LANDED-NESS is git TOPOLOGY: a REAL two-parent first-parent merge
-//     on the scanned spec branch. The amendment's admissible standalone
-//     data consulted here: (a) the git-derived exact-second-parent
-//     merge from this scan itself (the branch-deleted happy path — no
-//     surviving tip required; topology, not the subject, is the
-//     corroboration, so it is non-circular); (b) a surviving
-//     bead-branch tip, which the scanned match must EQUAL; (c) a
-//     registered panel's reviewed_head_sha, which must EQUAL the match's
-//     second parent; (d) an existing binding git-corroborated to an
-//     exact merge. When multiple data are present they must AGREE — a
-//     contradiction REFUSES, never writes.
-//
-// Fail-closed: no owned exact merge → refuse (no guess, no write) to
-// the audited ADR-0035 `mindspec-q9ea` human attested-restore exit BY
-// NAME — datum (e), the explicitly-blessed, NEVER-sole exit for the
-// genuinely-no-mechanical-corroboration case. Owned candidates with
-// DIFFERENT second parents → ambiguity → refuse. Same-second-parent
-// re-merges are ONE bead's repeated landings: the NEWEST names the
-// written merge SHA, while Requirement 3's landed-vs-reverted content
-// check is anchored on the OLDEST merge M₁ (the AC-2e masked-revert
-// rule, reused VERBATIM from FindLandedMerge's discrimination); a
-// REVERTED classification refuses and writes nothing.
-//
-// The audit record (AC-7/AC-9) is written in the SAME metadata call as
-// the binding, under the mindspec_landed_reattest_* keys: acting
-// identity/authority, before/after binding values (empty-string before
-// when absent), RFC3339 UTC timestamp, invoking operation, the
-// corroborating git datum, and the branch actually scanned (so a
-// mis-scoped --spec-branch invocation is reconstructable). It lives in
-// the same mutable bd metadata map: detectable-by-inspection, NOT
-// cryptographically tamper-proof — exactly the amendment's claim, no
-// more. An already-correct binding — one already naming the NEWEST
-// same-second-parent merge (the same merge FindLandedMerge's
-// newest-names-SHA rule derives) — is a byte-identical NO-OP: nothing
-// is written at all (no duplicate audit churn, and the time-bearing
-// reattest_at key cannot dirty a converged state). A binding naming an
-// OLDER member of the same-second-parent re-merge group is STALE, not
-// converged (spec 125 final-review FIX-3): it is re-written to the
-// newest, audited, so the binding and FindLandedMerge's derived
-// identity converge on the same merge. A CONTRADICTORY
-// existing binding follows the G3-1 discipline: overwritten ONLY with
-// the git-corroborated exact identity, the prior value recorded in the
-// audit — never silently kept, never replaced uncorroborated.
+// Reattest derives an already-merged bead's binding from git, recording the
+// prior values and an inspectable audit in one metadata write (specs 125/129,
+// ADR-0041). Ownership is subject-nominated; operator-supplied SHA pairs are
+// never accepted. Primary candidates retain Spec-125 ambiguity and revert
+// checks. With zero primary candidates the source-named reachable fallback
+// requires F1/F3/F4/F5; registrations are advisory only. Every read failure
+// refuses before writing. A fallback no-op requires a valid matching audit
+// tuple; a primary no-op requires the binding to match the newest owned merge.
 package lifecycle
 
 import (
@@ -104,6 +41,8 @@ const (
 	reattestKeyPriorMerge    = "mindspec_landed_reattest_prior_merge_sha"
 	reattestKeyPriorSecond   = "mindspec_landed_reattest_prior_second_parent"
 	reattestKeyScannedBranch = "mindspec_landed_reattest_scanned_branch"
+	reattestKeyMerge         = "mindspec_landed_reattest_merge_sha"
+	reattestKeySecond        = "mindspec_landed_reattest_second_parent"
 )
 
 // reattestOp is the invoking-operation audit value: the one explicit
@@ -119,8 +58,8 @@ var ErrReattestRefused = errors.New("reattest refused: no git-corroborated exact
 
 // ReattestRefusal states — the closed set of fail-closed reasons.
 const (
-	// ReattestStateNoOwnedMerge: no two-parent first-parent merge on the
-	// scanned branch names this bead (truly-bare, or only an anonymous/
+	// ReattestStateNoOwnedMerge: no first-parent or admitted reachable
+	// two-parent merge on the scanned branch names this bead (truly-bare, or only an anonymous/
 	// decoy/descendant merge exists). Forward exit: the audited ADR-0035
 	// mindspec-q9ea human attested-restore.
 	ReattestStateNoOwnedMerge = "no-owned-exact-merge"
@@ -128,13 +67,15 @@ const (
 	// second parents — genuine ambiguity about which landing is this
 	// bead's tip; refused, never guessed (spec 125 R4 fail-closed rule).
 	ReattestStateAmbiguous = "ambiguous-owned-second-parents"
+	// ReattestStateMultipleFallbackCandidates refuses independent reachable
+	// merges even when they share a second parent. No grouping is safe.
+	ReattestStateMultipleFallbackCandidates = "multiple-fallback-candidates"
 	// ReattestStateTipContradiction: a surviving bead-branch tip (datum
 	// (b)) does not EQUAL the owned match's second parent — the decoy /
 	// stale-branch shape (AC-8(ii)).
 	ReattestStateTipContradiction = "surviving-tip-contradiction"
-	// ReattestStatePanelContradiction: a registered panel's
-	// reviewed_head_sha (datum (c)) does not EQUAL the owned match's
-	// second parent.
+	// ReattestStatePanelContradiction is retained for API compatibility.
+	// Non-matching panel sets no longer produce it (spec 129).
 	ReattestStatePanelContradiction = "panel-sha-contradiction"
 	// ReattestStateReverted: the R3 content check (anchored on the OLDEST
 	// same-second-parent merge M₁) classifies the bead's landed content
@@ -151,6 +92,7 @@ type ReattestRefusal struct {
 	SpecBranch string
 	State      string
 	Detail     string
+	Fallback   bool
 }
 
 func (e *ReattestRefusal) Error() string {
@@ -162,8 +104,9 @@ func (e *ReattestRefusal) Unwrap() error { return ErrReattestRefused }
 
 // ReattestResult reports what the derivation established and whether a
 // write happened. Wrote == false is the convergent no-op: the existing
-// binding already git-corroborates to the derived identity, so NOTHING
-// was written (byte-identical metadata, no audit churn).
+// binding already matches the derived identity (and, on the fallback,
+// a VALID audit matches too), so NOTHING was written (byte-identical
+// metadata, no audit churn).
 type ReattestResult struct {
 	BeadID     string
 	SpecBranch string
@@ -181,6 +124,9 @@ type ReattestResult struct {
 	// previously absent) — recorded in the audit on a write (G3-1).
 	PriorMergeSHA     string
 	PriorSecondParent string
+	// Lines describe fallback provenance and advisory registrations. The optional
+	// report callback emits them before the write.
+	Lines []string
 }
 
 // reattestNowFn is the timestamp source for the audit record (seamed so
@@ -200,7 +146,9 @@ var reattestNowFn = time.Now
 // for every fail-closed refusal, and a plain error for infra/git/read
 // failures — which are NEVER classified as either attestation or
 // refusal.
-func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResult, error) {
+// An optional report callback receives fallback provenance and advisories
+// before the single metadata write. Non-CLI callers may omit it.
+func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func(string)) (*ReattestResult, error) {
 	if strings.TrimSpace(actor) == "" {
 		return nil, fmt.Errorf("reattest requires a non-empty acting identity for the audit record")
 	}
@@ -220,19 +168,27 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 	// (>2-parent) merge is excluded even when its subject matches; an
 	// anonymous subject nominates nothing; a different bead's token
 	// nominates that other bead, never this one.
-	var candidates []gitutil.MergeCommit
-	for _, m := range merges {
-		if len(m.Parents) != 2 {
-			continue
+	candidates := ownedMergeCandidates(merges, beadBranch)
+	fallback := len(candidates) == 0
+	if fallback {
+		candidates, err = reachableCandidates(root, specBranch, beadBranch)
+		if err != nil {
+			return nil, err
 		}
-		if name, present := parseMergeSubjectBeadBranch(m.Subject); present && name == beadBranch {
-			candidates = append(candidates, m)
+		if len(candidates) > 1 {
+			var pairs []string
+			for _, m := range candidates {
+				pairs = append(pairs, fmt.Sprintf("merge %s, second parent %s", termsafe.Escape(m.SHA), termsafe.Escape(m.Parents[1])))
+			}
+			return nil, &ReattestRefusal{BeadID: beadID, SpecBranch: specBranch, Fallback: true,
+				State:  ReattestStateMultipleFallbackCandidates,
+				Detail: "multiple admitted reachable candidates (" + strings.Join(pairs, "; ") + "); F1 requires exactly one candidate, even when second parents agree"}
 		}
 	}
 	if len(candidates) == 0 {
 		return nil, &ReattestRefusal{
 			BeadID: beadID, SpecBranch: specBranch, State: ReattestStateNoOwnedMerge,
-			Detail: fmt.Sprintf("no two-parent first-parent merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited ADR-0035 mindspec-q9ea human attested-restore", specBranch, beadBranch),
+			Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited ADR-0035 mindspec-q9ea human attested-restore", specBranch, beadBranch),
 		}
 	}
 
@@ -265,27 +221,22 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 	if survives {
 		if tip != secondParent {
 			return nil, &ReattestRefusal{
-				BeadID: beadID, SpecBranch: specBranch, State: ReattestStateTipContradiction,
+				BeadID: beadID, SpecBranch: specBranch, State: ReattestStateTipContradiction, Fallback: fallback,
 				Detail: fmt.Sprintf("surviving branch %s tip %s contradicts owned merge %s's second parent %s — the named merge did not land this branch's tip", beadBranch, tip, newest.SHA, secondParent),
 			}
 		}
 		corroboration += fmt.Sprintf("; (b) surviving branch tip %s", tip)
 	}
 
-	// Datum (c): a registered panel's reviewed_head_sha must EQUAL the
-	// derived second parent.
-	if reviewed, haveReviewed := reviewedHeadSHAForBead(root, specBranch, beadID); haveReviewed && reviewed != "" {
-		if reviewed != secondParent {
-			// FIX-5 (final-review): reviewed_head_sha comes from the
-			// AGENT-WRITABLE panel.json and this Detail reaches terminal
-			// output via the cmd refusal rendering — render it escaped so
-			// it can never carry a raw hostile value.
-			return nil, &ReattestRefusal{
-				BeadID: beadID, SpecBranch: specBranch, State: ReattestStatePanelContradiction,
-				Detail: fmt.Sprintf("registered panel reviewed_head_sha %s contradicts owned merge %s's second parent %s", termsafe.Escape(reviewed), newest.SHA, secondParent),
-			}
+	// Datum (c) is a SET, never a veto. Fallback registrations are
+	// advisory output only and play no part in corroboration.
+	if !fallback {
+		reviewed := reviewedHeadSHAForBead(root, specBranch, beadID)
+		if _, exact := reviewed[secondParent]; exact {
+			corroboration += fmt.Sprintf("; (c) panel reviewed_head_sha %s", secondParent)
+		} else if len(reviewed) > 0 {
+			corroboration += "; (c) panel set non-corroborating"
 		}
-		corroboration += fmt.Sprintf("; (c) panel reviewed_head_sha %s", reviewed)
 	}
 
 	// Landed-vs-reverted: Requirement 3's discrimination REUSED VERBATIM
@@ -305,7 +256,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 		}
 		if rev {
 			return nil, &ReattestRefusal{
-				BeadID: beadID, SpecBranch: specBranch, State: ReattestStateReverted,
+				BeadID: beadID, SpecBranch: specBranch, State: ReattestStateReverted, Fallback: fallback,
 				Detail: fmt.Sprintf("merge %s's content is no longer present at %s's current tip (reverted or cleanly removed after landing) — a re-attested binding would mis-attest reverted work", oldest.SHA, specBranch),
 			}
 		}
@@ -338,7 +289,36 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 	// OLDER member of the re-merge group is STALE — it falls through to
 	// the write below and is re-written to the newest, audited, with the
 	// prior values recorded.
-	if priorMerge == newest.SHA && priorSecond == secondParent {
+	var lines []string
+	if fallback {
+		if err := fallbackSafety(root, specBranch, beadBranch, newest); err != nil {
+			state := ""
+			switch {
+			case errors.Is(err, ErrLandedMergeContradiction):
+				state = ReattestStateTipContradiction
+			case errors.Is(err, ErrLandedMergeReverted):
+				state = ReattestStateReverted
+			default:
+				return nil, err
+			}
+			return nil, &ReattestRefusal{BeadID: beadID, SpecBranch: specBranch, State: state, Detail: err.Error(), Fallback: true}
+		}
+		advisory, count, roots := advisoryRegistrationReport(root, specBranch, beadID)
+		lines = append(lines, fmt.Sprintf("candidate %s reached %s's tip off the first-parent chain; its subject names no target", termsafe.Escape(newest.SHA), termsafe.Escape(specBranch)))
+		lines = append(lines, advisory...)
+		corroboration = fmt.Sprintf("off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: %d; panel roots scanned: %s", count, roots)
+		for _, report := range reports {
+			if report != nil {
+				for _, line := range lines {
+					report(line)
+				}
+			}
+		}
+	}
+	// Spec-125 FIX-3 is unchanged on the primary path. Only a fallback
+	// candidate needs the Spec-129 audited tuple before it can converge.
+	if (!fallback && priorMerge == newest.SHA && priorSecond == secondParent) ||
+		(fallback && auditMatches(meta, specBranch, newest.SHA, secondParent)) {
 		return &ReattestResult{
 			BeadID: beadID, SpecBranch: specBranch,
 			MergeSHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent,
@@ -346,6 +326,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 			Wrote:             false,
 			PriorMergeSHA:     priorMerge,
 			PriorSecondParent: priorSecond,
+			Lines:             lines,
 		}, nil
 	}
 
@@ -363,6 +344,8 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 		reattestKeyPriorMerge:           priorMerge,
 		reattestKeyPriorSecond:          priorSecond,
 		reattestKeyScannedBranch:        specBranch,
+		reattestKeyMerge:                newest.SHA,
+		reattestKeySecond:               secondParent,
 	}
 	if writeErr := reattestBindingFn(beadID, updates); writeErr != nil {
 		return nil, fmt.Errorf("recording the re-attested landed-binding for %s (merge %s): %w", beadID, newest.SHA, writeErr)
@@ -372,6 +355,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string) (*ReattestResul
 		MergeSHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent,
 		Corroboration:     corroboration,
 		Wrote:             true,
+		Lines:             lines,
 		PriorMergeSHA:     priorMerge,
 		PriorSecondParent: priorSecond,
 	}, nil

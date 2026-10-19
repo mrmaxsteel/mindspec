@@ -23,6 +23,23 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
+func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
+	for _, state := range []string{lifecycle.ReattestStateMultipleFallbackCandidates, lifecycle.ReattestStateTipContradiction, lifecycle.ReattestStateReverted} {
+		t.Run(state, func(t *testing.T) {
+			err := reattestRefusalFailure("bead-one", "bead/bead-one", "spec/129-test", &lifecycle.ReattestRefusal{State: state, Fallback: true, Detail: "candidate refused"})
+			text := err.Error()
+			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order spec/129-test", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("refusal %q missing %q", text, want)
+				}
+			}
+			if strings.Contains(text, "q9ea") || strings.Contains(text, "git branch") {
+				t.Fatalf("fallback offered ineffective attested-restore: %s", text)
+			}
+		})
+	}
+}
+
 // TestReattestFlagSurfaceNoBypass is AC-8's flag-surface assertion: the
 // verb's ENTIRE local flag set is exactly {--spec-branch} — scoping
 // input only. There is no bypass flag of any kind, no --all/fleet flag,
@@ -68,7 +85,7 @@ func TestReattestPrecedence_LinkageWins(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	deps := reattestDeps{
 		deriveSpecBranch: func(string) (string, error) { return "spec/125-linkage", nil },
-		reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+		reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 			gotBranch = specBranch
 			return &lifecycle.ReattestResult{
 				BeadID: beadID, SpecBranch: specBranch,
@@ -101,7 +118,7 @@ func TestReattestPrecedence_FlagFallbackOnly(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		deps := reattestDeps{
 			deriveSpecBranch: func(string) (string, error) { return "", nil },
-			reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+			reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 				gotBranch = specBranch
 				return &lifecycle.ReattestResult{BeadID: beadID, SpecBranch: specBranch, MergeSHA: "1234567", SecondParent: "abc1234", Wrote: false}, nil
 			},
@@ -120,7 +137,7 @@ func TestReattestPrecedence_FlagFallbackOnly(t *testing.T) {
 	// Malformed flag value: refused through the waist, never composed.
 	deps := reattestDeps{
 		deriveSpecBranch: func(string) (string, error) { return "", nil },
-		reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+		reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 			t.Fatal("engine must not run on a malformed --spec-branch")
 			return nil, nil
 		},
@@ -150,7 +167,7 @@ func TestReattestLineageLookupErrorRefusesEvenWithFlag(t *testing.T) {
 				deriveSpecBranch: func(string) (string, error) {
 					return "", errors.New("bd lookup exploded")
 				},
-				reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+				reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 					t.Fatalf("engine must not run on an INDETERMINATE lineage lookup (flag=%q scoped the scan)", flagVal)
 					return nil, nil
 				},
@@ -175,7 +192,7 @@ func TestReattestLineageLookupErrorRefusesEvenWithFlag(t *testing.T) {
 func TestReattestNoLinkageNoFlagRefuses(t *testing.T) {
 	deps := reattestDeps{
 		deriveSpecBranch: func(string) (string, error) { return "", nil },
-		reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+		reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 			t.Fatal("engine must not run without a resolvable scan branch")
 			return nil, nil
 		},
@@ -211,7 +228,7 @@ func TestReattestRefusalRendering(t *testing.T) {
 			}
 			deps := reattestDeps{
 				deriveSpecBranch: func(string) (string, error) { return "spec/125-test", nil },
-				reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+				reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 					return nil, fmt.Errorf("wrapped: %w", refusal)
 				},
 				actor:  "tester",
@@ -237,6 +254,41 @@ func TestReattestRefusalRendering(t *testing.T) {
 	}
 }
 
+// Spec 129 R4.2 reports fallback provenance and advisories before writing.
+func TestReattestReportedLinesReachOutput(t *testing.T) {
+	const provenance = "candidate abc123 reached spec/129-test's tip off the first-parent chain; its subject names no target"
+	const advisory = "advisory: panel roots scanned: /fixture, /fixture/.mindspec/specs/129-test"
+	var stdout, stderr bytes.Buffer
+	deps := reattestDeps{
+		deriveSpecBranch: func(string) (string, error) { return "spec/129-test", nil },
+		reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
+			if len(report) != 1 || report[0] == nil {
+				t.Fatal("engine must receive one report callback")
+			}
+			for _, line := range []string{provenance, advisory} {
+				report[0](line)
+			}
+			if want := provenance + "\n" + advisory + "\n"; stdout.String() != want {
+				t.Fatalf("reported lines must reach the command output before the engine returns: got %q, want %q", stdout.String(), want)
+			}
+			return &lifecycle.ReattestResult{BeadID: beadID, SpecBranch: specBranch, MergeSHA: "abc123", SecondParent: "def456", Wrote: true, Lines: []string{provenance, advisory}}, nil
+		},
+		actor:  "tester",
+		stdout: &stdout,
+		stderr: &stderr,
+	}
+	if err := runReattest(deps, t.TempDir(), "mindspec-x1", ""); err != nil {
+		t.Fatal(err)
+	}
+	want := provenance + "\n" + advisory + "\n" +
+		"Re-attested landed-binding for bead mindspec-x1 on spec/129-test:\n" +
+		"  merge         abc123\n  second parent def456\n  corroboration \n" +
+		"Audit recorded in bd metadata (mindspec_landed_reattest_*): inspect with `bd show mindspec-x1 --json`.\n"
+	if stdout.String() != want {
+		t.Fatalf("reported lines must appear exactly once before the success output: got %q, want %q", stdout.String(), want)
+	}
+}
+
 // TestReattestSuccessOutput: the write path reports the derived identity
 // + audit pointer, the G3-1 overwrite reports the prior binding, and the
 // convergent no-op says nothing was written.
@@ -245,7 +297,7 @@ func TestReattestSuccessOutput(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		deps := reattestDeps{
 			deriveSpecBranch: func(string) (string, error) { return "spec/125-test", nil },
-			reattest: func(root, specBranch, beadID, actor string) (*lifecycle.ReattestResult, error) {
+			reattest: func(root, specBranch, beadID, actor string, report ...func(string)) (*lifecycle.ReattestResult, error) {
 				return res, nil
 			},
 			actor:  "tester",

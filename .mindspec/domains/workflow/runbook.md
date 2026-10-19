@@ -132,6 +132,25 @@ Check current mode with `/spec-status`. If unclear:
 
 ### Missing or stale landed-binding on a merged bead (spec 125)
 
+For an off-first-parent candidate (spec 129), the reachable reader names
+the merge and asks for `mindspec reattest <bead-id>`; it does not accept a
+binding or panel alone. Reattest requires exactly one admitted source-named
+merge, no contradictory surviving bead tip, and content not reverted or
+cleanly removed at the current spec tip. Git/metadata read errors refuse.
+Registrations are advisory: outside-history or locally absent SHAs change
+printed output, never the binding tuple or exit status. Missing objects
+print `(not determinable locally)`; inspect the printed checkout roots
+when a review appears in one checkout only.
+
+Acceptance writes a valid audited tuple with the binding. Subsequent
+read-back rechecks current git safety and requires audit == binding ==
+candidate; an old audit left after a binding rewrite grants nothing. A
+same-tuple re-run is a no-op only with a valid audit. This recovery does
+not make the first-parent-only merged-unclosed close path accept fallback
+merges. If fallback reattest refuses, the dependent's audited forward
+exit is `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>`;
+q9ea attested-restore cannot resolve a fallback refusal.
+
 Symptom: `FindLandedMerge`-backed surfaces (`complete`'s
 merged-unclosed reconcile, `doctor`, `next`) refuse to identify a bead
 that you know merged — typically a pre-125 bead (the fleet state spec

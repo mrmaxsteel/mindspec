@@ -200,6 +200,9 @@ func TestReattest_RefusesTrulyBare(t *testing.T) {
 	if !strings.Contains(refusal.Detail, "q9ea") {
 		t.Errorf("truly-bare refusal must name the q9ea attested-restore exit, got %q", refusal.Detail)
 	}
+	if !strings.Contains(refusal.Detail, "no first-parent or admitted reachable merge on spec/125-test names bead/bead-one") {
+		t.Errorf("no-owned refusal must name both scans: %q", refusal.Detail)
+	}
 	if len(*writes) != 0 {
 		t.Errorf("refusal wrote %d times — a refusal must write NOTHING", len(*writes))
 	}
@@ -318,17 +321,14 @@ func TestReattest_RefusesAmbiguousSecondParents(t *testing.T) {
 	}
 }
 
-// TestReattest_PanelShaContradictionRefuses: a registered panel's
-// reviewed_head_sha (datum (c)) that does not EQUAL the owned match's
-// second parent contradicts — refused; and an EQUAL one corroborates
-// (named in the audit datum).
-func TestReattest_PanelShaContradictionRefuses(t *testing.T) {
+// A non-matching panel is non-corroborating; an exact one is named in the audit.
+func TestReattest_PanelShaNonCorroborating(t *testing.T) {
 	dir, run := initLandedRepo(t, "125-test")
 	mergeBeadDefaultSubject(t, run, dir, "bead-one", "spec/125-test")
 	run("branch", "-D", "bead/bead-one")
 	mergeSHA := revParseIn(t, dir, "spec/125-test")
 	secondParent := revParseIn(t, dir, mergeSHA+"^2")
-	// An unrelated commit as the contradicting panel SHA.
+	// An unrelated commit as the non-corroborating panel SHA.
 	run("checkout", "main")
 	run("checkout", "-b", "unrelated")
 	os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("x\n"), 0644)
@@ -348,13 +348,9 @@ func TestReattest_PanelShaContradictionRefuses(t *testing.T) {
 	}
 
 	writes := installReattestRecorder(t)
-	_, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
-	var refusal *ReattestRefusal
-	if !errors.As(err, &refusal) || refusal.State != ReattestStatePanelContradiction {
-		t.Fatalf("expected %s refusal, got %v", ReattestStatePanelContradiction, err)
-	}
-	if len(*writes) != 0 {
-		t.Errorf("panel-contradicted candidate attested (%d writes)", len(*writes))
+	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	if err != nil || len(*writes) != 1 || !strings.Contains(res.Corroboration, "panel set non-corroborating") {
+		t.Fatalf("stale panel must permit datum (a), recording non-corroboration: result=%+v err=%v writes=%d", res, err, len(*writes))
 	}
 
 	// The agreeing panel corroborates and is named as datum (c).
@@ -364,7 +360,7 @@ func TestReattest_PanelShaContradictionRefuses(t *testing.T) {
 			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: secondParent},
 		}}
 	}
-	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	res, err = ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
 	if err != nil {
 		t.Fatalf("agreeing panel must corroborate: %v", err)
 	}
@@ -590,12 +586,8 @@ func TestReattest_StaleOlderRemergeBindingRewrittenToNewest(t *testing.T) {
 	}
 }
 
-// TestReattest_HostilePanelSHAEscapedInRefusal is the spec 125
-// final-review FIX-5 pin for the reattest.go site: a registered panel's
-// reviewed_head_sha is AGENT-WRITABLE and the panel-contradiction
-// refusal Detail reaches terminal output via the cmd rendering — a
-// control-byte/ANSI value must be escaped, never raw.
-func TestReattest_HostilePanelSHAEscapedInRefusal(t *testing.T) {
+// A hostile reviewed SHA never enters the corroborating set or the audit text.
+func TestReattest_HostilePanelSHANonCorroborating(t *testing.T) {
 	dir, run := initLandedRepo(t, "125-test")
 	mergeBeadDefaultSubject(t, run, dir, "bead-one", "spec/125-test")
 	run("branch", "-D", "bead/bead-one")
@@ -610,21 +602,40 @@ func TestReattest_HostilePanelSHAEscapedInRefusal(t *testing.T) {
 			Panel: panel.Panel{BeadID: &beadID, ReviewedHeadSHA: hostile},
 		}}
 	}
+	if set := reviewedHeadSHAForBead(dir, "spec/125-test", beadID); len(set) != 0 {
+		t.Fatalf("hostile SHA entered the reviewed set: %v", set)
+	}
 
 	writes := installReattestRecorder(t)
-	_, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
-	var refusal *ReattestRefusal
-	if !errors.As(err, &refusal) || refusal.State != ReattestStatePanelContradiction {
-		t.Fatalf("expected %s refusal, got %v", ReattestStatePanelContradiction, err)
+	res, err := ReattestLandedMerge(dir, "spec/125-test", "bead-one", "test-actor")
+	if err != nil || len(*writes) != 1 {
+		t.Fatalf("malformed panel must not refuse: result=%+v err=%v writes=%d", res, err, len(*writes))
 	}
-	if strings.ContainsAny(refusal.Detail, "\x1b\x07") {
-		t.Errorf("the refusal Detail renders the hostile reviewed_head_sha RAW (terminal-injectable): %q", refusal.Detail)
+	if strings.ContainsAny(res.Corroboration, "\x1b\x07") {
+		t.Errorf("corroboration contains raw hostile bytes: %q", res.Corroboration)
 	}
-	if strings.ContainsAny(err.Error(), "\x1b\x07") {
-		t.Errorf("the refusal error renders raw control bytes: %q", err.Error())
+}
+
+func TestReattest_PrimaryMatchingBindingWithoutAuditNoOp(t *testing.T) {
+	dir, run := initLandedRepo(t, "129-test")
+	mergeBead(t, run, dir, fallbackBead, fallbackSpec)
+	merge := revParseIn(t, dir, "HEAD")
+	second := revParseIn(t, dir, merge+"^2")
+	run("branch", "-D", "bead/"+fallbackBead)
+	meta := map[string]interface{}{
+		"mindspec_landed_merge_sha": merge, "mindspec_landed_second_parent": second,
 	}
-	if len(*writes) != 0 {
-		t.Errorf("panel-contradicted candidate attested (%d writes)", len(*writes))
+	stubBindingRead(t, meta)
+	before := map[string]interface{}{
+		"mindspec_landed_merge_sha": merge, "mindspec_landed_second_parent": second,
+	}
+	writes := installReattestRecorder(t)
+	res, err := ReattestLandedMerge(dir, fallbackSpec, fallbackBead, "test-actor")
+	if err != nil || res == nil || res.Wrote || len(*writes) != 0 {
+		t.Fatalf("matching primary binding without audit must no-op: %+v %v writes=%v", res, err, *writes)
+	}
+	if res.MergeSHA != merge || res.SecondParent != second || !reflect.DeepEqual(meta, before) || !strings.Contains(res.Corroboration, "(d) existing binding") {
+		t.Fatalf("no-op lost identity, changed metadata, or lost datum (d): %+v meta=%v", res, meta)
 	}
 }
 
