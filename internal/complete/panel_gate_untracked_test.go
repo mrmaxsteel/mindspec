@@ -15,13 +15,14 @@ func TestPanelGate_UntrackedIgnoredRegistrationRestoresSkipEnvFn(t *testing.T) {
 	orig := panelSkipEnvFn
 	t.Cleanup(func() { panelSkipEnvFn = orig })
 	panelSkipEnvFn = func() bool { return true }
-	t.Run("registration", TestPanelGate_UntrackedIgnoredRegistration)
+	t.Run("registration", testPanelGateUntrackedIgnoredRegistration)
 	if !panelSkipEnvFn() {
 		t.Fatal("registration test leaked its panelSkipEnvFn override after cleanup")
 	}
 }
 
-func TestPanelGate_UntrackedIgnoredRegistration(t *testing.T) {
+func testPanelGateUntrackedIgnoredRegistration(t *testing.T) {
+	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")

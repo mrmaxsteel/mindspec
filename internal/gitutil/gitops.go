@@ -1790,7 +1790,7 @@ func CommitPaths(workdir, msg string, paths []string) error {
 		}
 		run := func(args ...string) ([]byte, error) {
 			cmd := execCommand("git", gitArgs(workdir, args...)...)
-			return cmd.CombinedOutput()
+			return cmd.Output()
 		}
 		if err := stageExplicitPaths(paths, run); err != nil {
 			return err
