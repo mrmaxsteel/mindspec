@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1616,4 +1618,43 @@ func (r *recordingExecutor) CommitAll(path, msg string) error {
 		r.onCommit(path, msg)
 	}
 	return r.MockExecutor.CommitAll(path, msg)
+}
+
+func TestPlanApprove_BeadsCarrySpecID(t *testing.T) {
+	const specID = "129-linkage"
+	orig := planRunBDFn
+	t.Cleanup(func() { planRunBDFn = orig })
+	creates := 0
+	planRunBDFn = func(args ...string) ([]byte, error) {
+		if len(args) == 0 || args[0] != "create" {
+			t.Fatalf("unexpected call %q", args)
+		}
+		creates++
+		var meta map[string]interface{}
+		found := false
+		for i, a := range args {
+			if a == "--metadata" && i+1 < len(args) {
+				found = true
+				if err := json.Unmarshal([]byte(args[i+1]), &meta); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if !found || meta["spec_id"] != specID {
+			t.Fatalf("bead %d lacks spec_id %s: %q", creates, specID, args)
+		}
+		if err := idvalidate.SpecID(meta["spec_id"].(string)); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(fmt.Sprintf(`{"id":"epic-129.%d"}`, creates)), nil
+	}
+	content := "## Bead 1: First\n\n**Steps**\n1. First\n\n## Bead 2: Second\n\n**Steps**\n1. Second\n"
+	sections := validate.ParseBeadSections(content)
+	ids, _, err := createBeadsFromParsed(t.TempDir(), specID, "epic-129", content, sections, []validate.WorkChunk{{ID: 1}, {ID: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creates != 2 || len(ids) != 2 {
+		t.Fatalf("expected two checked bead creates, got %d, %v", creates, ids)
+	}
 }

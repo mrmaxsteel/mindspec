@@ -1,0 +1,8 @@
+package probe
+import "github.com/mrmaxsteel/mindspec/internal/bead"
+var runBDFn = bead.RunBD
+var combined = bead.RunBDCombined
+func probe() {
+runBDFn("ready", "--json")
+combined("list", "--json")
+}

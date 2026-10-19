@@ -212,3 +212,26 @@ func TestFixHygiene_NoDoneBeads(t *testing.T) {
 		t.Errorf("expected 'no beads' message: %v", actions)
 	}
 }
+
+func TestHygiene_ListUncapped(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	calls := 0
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		assertZeroCap(t, args)
+		if name != "bd" || args[0] != "list" {
+			t.Fatalf("unexpected process: %s %q", name, args)
+		}
+		calls++
+		return exec.Command("echo", "[]")
+	}
+	if _, err := AuditWorkset(7); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FixHygiene(true); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected both list sites, got %d", calls)
+	}
+}

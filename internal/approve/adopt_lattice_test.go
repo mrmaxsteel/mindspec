@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -598,9 +599,9 @@ func TestListEpicBeads_AllStatusesBreadth(t *testing.T) {
 		dir := adoptInitRepo(t)
 		adoptWriteFile(t, dir, ".beads/config.yaml", `status.custom: "triaged"`+"\n")
 		var capturedArgs []string
-		orig := adoptListBDFn
-		t.Cleanup(func() { adoptListBDFn = orig })
-		adoptListBDFn = func(args ...string) ([]byte, error) {
+		orig := adoptListJSONFn
+		t.Cleanup(func() { adoptListJSONFn = orig })
+		adoptListJSONFn = func(args ...string) ([]byte, error) {
 			capturedArgs = append([]string(nil), args...)
 			return []byte(`[]`), nil
 		}
@@ -620,9 +621,9 @@ func TestListEpicBeads_AllStatusesBreadth(t *testing.T) {
 
 	t.Run("missing_config_is_the_legitimate_no_customs_state", func(t *testing.T) {
 		dir := adoptInitRepo(t)
-		orig := adoptListBDFn
-		t.Cleanup(func() { adoptListBDFn = orig })
-		adoptListBDFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+		orig := adoptListJSONFn
+		t.Cleanup(func() { adoptListJSONFn = orig })
+		adoptListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
 		if _, err := listEpicBeads(dir, "epic-1"); err != nil {
 			t.Fatalf("listEpicBeads with no config.yaml: unexpected error: %v", err)
 		}
@@ -631,10 +632,10 @@ func TestListEpicBeads_AllStatusesBreadth(t *testing.T) {
 	t.Run("present_but_unparseable_config_is_evidence_error_never_narrowed", func(t *testing.T) {
 		dir := adoptInitRepo(t)
 		adoptWriteFile(t, dir, ".beads/config.yaml", "{ not: valid: yaml: [")
-		orig := adoptListBDFn
-		t.Cleanup(func() { adoptListBDFn = orig })
+		orig := adoptListJSONFn
+		t.Cleanup(func() { adoptListJSONFn = orig })
 		called := false
-		adoptListBDFn = func(args ...string) ([]byte, error) {
+		adoptListJSONFn = func(args ...string) ([]byte, error) {
 			called = true
 			return []byte(`[]`), nil
 		}
@@ -665,10 +666,10 @@ func TestListEpicBeads_AllStatusesBreadth(t *testing.T) {
 		t.Run("unrecognized_custom_status_shape_is_evidence_error_never_narrowed/"+tc.name, func(t *testing.T) {
 			dir := adoptInitRepo(t)
 			adoptWriteFile(t, dir, ".beads/config.yaml", tc.yaml)
-			orig := adoptListBDFn
-			t.Cleanup(func() { adoptListBDFn = orig })
+			orig := adoptListJSONFn
+			t.Cleanup(func() { adoptListJSONFn = orig })
 			called := false
-			adoptListBDFn = func(args ...string) ([]byte, error) {
+			adoptListJSONFn = func(args ...string) ([]byte, error) {
 				called = true
 				return []byte(`[]`), nil
 			}
@@ -685,7 +686,7 @@ func TestListEpicBeads_AllStatusesBreadth(t *testing.T) {
 // TestEvaluateAdoptLattice_CustomStatusPoisonsAndResolutionFailureErrors
 // is AC-2(ix)'s custom-status pair, run through the REAL listEpicBeads
 // (adoptListEpicBeadsFn left at its production default) with only
-// adoptListBDFn stubbed — so the lattice's own AllStatuses breadth (not
+// adoptListJSONFn stubbed — so the lattice's own AllStatuses breadth (not
 // a test double standing in for it) is what resolves the custom-status
 // bead into the enumeration.
 func TestEvaluateAdoptLattice_CustomStatusPoisonsAndResolutionFailureErrors(t *testing.T) {
@@ -693,9 +694,9 @@ func TestEvaluateAdoptLattice_CustomStatusPoisonsAndResolutionFailureErrors(t *t
 	adoptWriteFile(t, dir, ".beads/config.yaml", `status.custom: "triaged"`+"\n")
 	makeUnlandedBeadBranch(t, dir, "test-b1")
 
-	orig := adoptListBDFn
-	t.Cleanup(func() { adoptListBDFn = orig })
-	adoptListBDFn = func(args ...string) ([]byte, error) {
+	orig := adoptListJSONFn
+	t.Cleanup(func() { adoptListJSONFn = orig })
+	adoptListJSONFn = func(args ...string) ([]byte, error) {
 		return json.Marshal([]map[string]string{{"id": "test-b1", "status": "triaged"}})
 	}
 
@@ -724,5 +725,56 @@ func TestEvaluateAdoptLattice_CustomStatusPoisonsAndResolutionFailureErrors(t *t
 	}
 	if res2.Marker != adoptMarkerEvidenceError {
 		t.Fatalf("got Marker=%q, want %q (O2-4: each row asserts its own marker)", res2.Marker, adoptMarkerEvidenceError)
+	}
+}
+
+// recordRowcapBD observes the final process argv, after the bead waist.
+func recordRowcapBD(t *testing.T) func(string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ROWCAP_ARGV\"\nprintf '[]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROWCAP_ARGV", log)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func(verb string) {
+		t.Helper()
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		caps := 0
+		for i, a := range args {
+			if a == "-n" {
+				if i+1 == len(args) || args[i+1] != "0" {
+					t.Fatalf("bad cap: %q", args)
+				}
+				caps++
+			}
+		}
+		if len(args) == 0 || args[0] != verb || caps != 1 {
+			t.Fatalf("expected %s and exactly one -n 0, got %q", verb, args)
+		}
+	}
+}
+
+func TestAdoptLattice_ListViaWaist(t *testing.T) {
+	orig := adoptListJSONFn
+	t.Cleanup(func() { adoptListJSONFn = orig })
+	calls := 0
+	adoptListJSONFn = func(args ...string) ([]byte, error) {
+		calls++
+		return orig(args...)
+	}
+	check := recordRowcapBD(t)
+	if _, err := listEpicBeads(t.TempDir(), "epic-129"); err != nil {
+		t.Fatal(err)
+	}
+	check("list")
+	if calls != 1 {
+		t.Fatalf("expected one call through ListJSON waist, got %d", calls)
 	}
 }

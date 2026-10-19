@@ -18,10 +18,16 @@ package main
 //     to the global, unscoped `bd ready` query.
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/harness"
+	"github.com/spf13/cobra"
 )
 
 // nextSelectionTwoReadyBeads creates an epic with two ready (unclaimed,
@@ -617,5 +623,116 @@ func TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted(t *testing.T) 
 	}
 	if !strings.Contains(out, "**Bead**: "+bead1) {
 		t.Errorf("expected the default pick to still preview %s (the higher-priority MATCHING bead), got:\n%s", bead1, out)
+	}
+}
+
+func TestNext_101ReadyBeads_AllVisible(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".mindspec"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Error(err)
+		}
+	})
+	rows := make([]map[string]interface{}, 101)
+	for i := range rows {
+		rows[i] = map[string]interface{}{"id": fmt.Sprintf("epic-129.%d", i+1), "title": fmt.Sprintf("Ready row %d", i+1), "status": "open", "issue_type": "task"}
+	}
+	for name, n := range map[string]int{"all": 101, "capped": 100} {
+		raw, err := json.Marshal(rows[:n])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), raw, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `#!/bin/sh
+case "$1" in
+ ready)
+  previous=''; unlimited=no
+  for arg in "$@"; do
+   if { [ "$previous" = '-n' ] || [ "$previous" = '--limit' ]; } && [ "$arg" = '0' ]; then unlimited=yes; fi
+   previous="$arg"
+  done
+  if [ "$unlimited" = yes ]; then cat "$ROWCAP_FIXTURE/all"; else cat "$ROWCAP_FIXTURE/capped"; fi
+  ;;
+ show) printf '[{"id":"%s","title":"Selected row","description":"Fixture work"}]' "$2" ;;
+ *) printf 'unexpected fake bd command: %s\n' "$1" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROWCAP_FIXTURE", dir)
+	// Pin the fake's cap semantics independently of the production waist's spelling.
+	for _, limit := range [][]string{nil, {"-n", "0"}, {"--limit", "0"}} {
+		args := append([]string{"ready"}, limit...)
+		raw, err := exec.Command(filepath.Join(dir, "bd"), args...).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []map[string]interface{}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		want := 101
+		if limit == nil {
+			want = 100
+		}
+		if len(got) != want {
+			t.Fatalf("capping fake with %q returned %d rows, want %d", args, len(got), want)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, pick := range []int{0, 101} {
+		// A file avoids pipe-buffer deadlocks while the 101-item menu is written.
+		f, err := os.CreateTemp(dir, "stdout-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		orig := os.Stdout
+		os.Stdout = f
+		// Fresh flags keep the real CLI RunE independent of other CLI tests.
+		cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE}
+		cmd.Flags().Int("pick", 0, "")
+		cmd.Flags().String("spec", "", "")
+		cmd.Flags().Bool("force", false, "")
+		cmd.Flags().Bool("emit-only", false, "")
+		cmd.Flags().Bool("allow-not-ready", false, "")
+		cmd.SetArgs([]string{"--emit-only", fmt.Sprintf("--pick=%d", pick)})
+		err = cmd.Execute()
+		os.Stdout = orig
+		if closeErr := f.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		raw, readErr := os.ReadFile(f.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		out := string(raw)
+		if err != nil {
+			t.Fatalf("pick %d: %v\n%s", pick, err, out)
+		}
+		if !strings.Contains(out, "Ready work (101 items):") {
+			t.Fatalf("101 rows must be visible:\n%s", out)
+		}
+		for i := 1; i <= 101; i++ {
+			if !strings.Contains(out, fmt.Sprintf("epic-129.%d", i)) {
+				t.Fatalf("row %d missing", i)
+			}
+		}
+		if pick == 101 && !strings.Contains(out, "**Bead**: epic-129.101") {
+			t.Fatalf("pick 101 did not emit last bead:\n%s", out)
+		}
 	}
 }

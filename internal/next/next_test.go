@@ -536,13 +536,13 @@ func TestParseSpecID(t *testing.T) {
 // --- QueryReady tests ---
 
 func TestQueryReady_GlobalReady(t *testing.T) {
-	origRunBD := runBDFn
+	origRunBD := readyJSONFn
 	defer func() {
-		runBDFn = origRunBD
+		readyJSONFn = origRunBD
 	}()
 
-	runBDFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "ready" && args[1] == "--json" {
+	readyJSONFn = func(args ...string) ([]byte, error) {
+		if len(args) == 0 {
 			items := []BeadInfo{
 				{ID: "standalone-1", Title: "Standalone work"},
 			}

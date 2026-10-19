@@ -33,11 +33,12 @@ var (
 	runBDFn     = bead.RunBD
 	runBDCombFn = bead.RunBDCombined
 	listJSONFn  = bead.ListJSON
+	readyJSONFn = bead.ReadyJSON
 )
 
 // QueryReady discovers ready work via global bd ready.
 func QueryReady() ([]BeadInfo, error) {
-	out, err := runBDFn("ready", "--json")
+	out, err := readyJSONFn()
 	if err != nil {
 		return nil, fmt.Errorf("bd ready failed: %w", &bdRenderedError{err: err})
 	}
@@ -53,7 +54,7 @@ func QueryReadyForEpic(epicID string) ([]BeadInfo, error) {
 	if err := idvalidate.BeadID(epicID); err != nil {
 		return nil, fmt.Errorf("invalid epic id %s: %w", idrender.Bead(epicID), err)
 	}
-	out, err := runBDFn("ready", "--parent", epicID, "--json")
+	out, err := readyJSONFn("--parent", epicID)
 	if err != nil {
 		return nil, fmt.Errorf("bd ready for epic %s failed: %w", epicID, &bdRenderedError{err: err})
 	}

@@ -20,7 +20,7 @@ set -eu
 
 fail() {
     echo "bd-jsonl-merge-driver: $1" >&2
-    echo "recovery: install bd >= 1.0.4 (driver regenerates .beads/issues.jsonl from the Dolt DB)" >&2
+    echo "recovery: install bd >= 1.1.0 (driver regenerates .beads/issues.jsonl from the Dolt DB)" >&2
     exit 1
 }
 

@@ -130,6 +130,8 @@ nothing-to-materialize (both stages elide) path unchanged.
 
 ### bd stderr passthrough content (spec 128 R6.4/AC-11, `internal/bead/bdcli.go`)
 
+`ReadyJSON` also captures stderr on success. A `Showing N of M` notice refuses the read with `bd truncated the ready set (<escaped notice>) although mindspec requested no cap`, followed by `recovery: bd ready -n 0 --json`. Benign stderr leaves the JSON rows intact (spec 129 R2).
+
 | Symbol | Purpose |
 |:-------|:--------|
 | `wrapBDError(err)` | Decorates a failed bd invocation so its captured `exec.ExitError.Stderr` becomes part of the returned error's rendered text (previously discarded by every `%w`-wrapping caller — a stale-binary schema error surfaced as a bare "exit status 1"). |

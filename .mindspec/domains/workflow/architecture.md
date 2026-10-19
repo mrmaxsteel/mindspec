@@ -15,6 +15,8 @@ Each mode gates:
 
 ### Beads as Substrate (ADR-0023)
 
+Every decision-bearing `bd ready` and `bd list` read goes through the `internal/bead` JSON waist (`ReadyJSON` and `ListJSON`), which enforces `-n 0`. `TestBDRowCapWaist` guards against direct row reads outside that waist (spec 129 R2).
+
 Beads is both the single state store and the **contract between the planning and execution layers**. Each bead is a self-contained work packet that encapsulates requirements, context (impacted domains, ADR citations), dependencies, and acceptance criteria. A fresh agent picking up a bead doesn't need session history — the bead carries everything it needs.
 
 This is what makes execution pluggable: any orchestrator that can read beads can dispatch work. The planning layer writes beads; the execution engine reads them.
