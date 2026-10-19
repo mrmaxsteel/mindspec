@@ -410,3 +410,14 @@ func TestRenderJSON_ExcludesBeadsContext(t *testing.T) {
 		t.Errorf("beads_context should not be present in JSON output: %s", output)
 	}
 }
+
+func TestImplementTemplate_EmptinessRule(t *testing.T) {
+	const sentence = "an empty ready set is not evidence the spec is complete; the derived phase above is"
+	data, err := templateFS.ReadFile("templates/implement.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), sentence) != 1 {
+		t.Fatalf("implement template must state emptiness rule exactly once")
+	}
+}

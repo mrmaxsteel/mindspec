@@ -356,9 +356,9 @@ complete-gated.
 | Symbol | Purpose |
 |:-------|:--------|
 | `ReadySet{Filtered, Raw, SpecFlag}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | R6.1's ONE ready-set construction result — `Filtered` is the displayed/selectable list, `Raw` the pre-filter list (consulted only to name a true exclusion reason) — consumed identically by the claim path and the NON-positional `--emit-only` flows (default and `--pick N`) so `--pick N` names the same bead on both (AC-9). **Positional `--emit-only` never constructs one at all** (R6.3(a)) — it fetches by ID and prints the pinned bypass line `"emit-only: bead fetched by ID; readiness not checked."`, with no exclusion report. |
-| `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, epic-scoped otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
+| `BuildReadySet(root, specFlag string) (ReadySet, error)` | Builds a `ReadySet` — global `bd ready` when `specFlag == ""`, filtered by the plan-bead predicate otherwise — and REFUSES (never silently widens to global) when an explicit `specFlag`'s epic can't be resolved (AC-15). |
 | `SelectWork(items, pick)` (`select.go`) | Total pick semantics: `pick >= 1` always indexes the displayed list, even with exactly one item; `0` means unset; negative errors. |
-| `SelectNamedFromReadySet(rs, name)` | Positional resolution against a `ReadySet`: a filtered-out-but-ready bead gets the honest exclusion reason, never the generic "not found or not ready". |
+| `SelectNamedFromReadySet(rs, name)` | Resolves scoped selectors before empty-set handling: near-misses name their reason, unlinked ready rows name their parent, no-lineage N4 refuses before readiness, and lineage-E N4 reaches MF-1. Empty positional and pick refusals end with `recovery: mindspec next --spec <S>`. |
 | `RenderBDError(err)` (`beads.go`) | Wraps a bd/lock-derived error so callers render it via `%v`/`%s` with every line escaped through `termsafe.Escape` (ADR-0042) — the rendering half of AC-11 (the execution domain's `wrapBDError` supplies the content half). |
 
 **Total verb classification (`cmd/mindspec`, R2.1/AC-14):**

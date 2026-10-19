@@ -6,6 +6,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"os/exec"
 	"strings"
 	"testing"
@@ -56,5 +59,122 @@ func TestNextPositionalPickConflictErrors(t *testing.T) {
 	combined := stdout.String() + stderr.String()
 	if !strings.Contains(combined, "exactly one selector") {
 		t.Errorf("conflict error must mention 'exactly one selector'\nstdout=%q\nstderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestNext_SelectorOnEmptySet_Refuses(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		sentence string
+	}{
+		{"positional", []string{"epic-129.1"}, "no ready plan bead for spec 129-fixture; positional epic-129.1 cannot be claimed from an empty ready set"},
+		{"pick", []string{"--pick=1"}, "--pick 1 is out of range: 0 items"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = nil
+			f.write(t)
+			before := f.audit(t)
+			out, err := f.run(t, append([]string{"--spec", "129-fixture"}, tc.args...)...)
+			if err == nil {
+				t.Fatalf("empty selector succeeded: %s", out)
+			}
+			requireText(t, err.Error(), tc.sentence)
+			if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
+				t.Fatalf("selector recovery must end refusal: %v", err)
+			}
+			if f.audit(t) != before {
+				t.Fatal("selector refusal mutated")
+			}
+		})
+	}
+}
+func TestNext_NearMissPositional_Refuses(t *testing.T) {
+	for _, nonempty := range []bool{false, true} {
+		t.Run(fmt.Sprint(nonempty), func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			if !nonempty {
+				f.rows = nil
+			}
+			f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"))
+			f.write(t)
+			before := f.audit(t)
+			_, err := f.run(t, "--spec", "129-fixture", "nonplan-r")
+			if err == nil {
+				t.Fatal("near-miss positional claimed")
+			}
+			requireText(t, err.Error(), "bead nonplan-r is bd-ready and linked to spec 129-fixture by parent edge, but it is not a plan bead", "recovery: bd show nonplan-r --json")
+			if f.audit(t) != before {
+				t.Fatal("near-miss refusal mutated")
+			}
+		})
+	}
+}
+func TestNext_UnlinkedReadyPositional_Refuses(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("epic-777.1", "other", "epic-777", "task", "open"))
+	f.write(t)
+	before := f.audit(t)
+	_, err := f.run(t, "--spec", "129-fixture", "epic-777.1")
+	if err == nil {
+		t.Fatal("unlinked ready bead claimed")
+	}
+	requireText(t, err.Error(), "bead epic-777.1 is bd-ready but is not linked to spec 129-fixture (parent: epic-777)")
+	if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
+		t.Fatalf("unlinked recovery: %v", err)
+	}
+	if f.audit(t) != before {
+		t.Fatal("unlinked refusal mutated")
+	}
+}
+func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		t.Run(fmt.Sprint(allow), func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = append(f.rows, nextHonestyRow("epic-129.4", "neutral", "", "task", "open"))
+			f.write(t)
+			old := nextGateReadinessFn
+			calls := 0
+			nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+				calls++
+				return nil, errors.New("gate should never be reached")
+			}
+			t.Cleanup(func() { nextGateReadinessFn = old })
+			before := f.audit(t)
+			args := []string{"--spec", "129-fixture", "epic-129.4"}
+			if allow {
+				args = append(args, "--allow-not-ready")
+			}
+			_, err := f.run(t, args...)
+			if err == nil {
+				t.Fatal("no-lineage N4 selected")
+			}
+			requireText(t, err.Error(), "bead epic-129.4 has no lineage, so readiness cannot evaluate it; no readiness override applies", "recovery: bd show epic-129.4 --json")
+			if calls != 0 || f.audit(t) != before {
+				t.Fatalf("no-lineage N4 reached gate (%d) or mutated", calls)
+			}
+		})
+	}
+}
+func TestNext_N4WithLineageReachesMF1(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "follow-up", "epic-129", "bug", "open"))
+	f.write(t)
+	calls := 0
+	old := nextGateReadinessFn
+	nextGateReadinessFn = func(root, id string, allow bool) (*next.GateResult, error) {
+		calls++
+		return next.GateReadiness(root, id, allow)
+	}
+	t.Cleanup(func() { nextGateReadinessFn = old })
+	before := f.audit(t)
+	_, err := f.run(t, "--spec", "129-fixture", "epic-129.4")
+	if err == nil || calls != 1 {
+		t.Fatalf("N4 must reach gate once: %d %v", calls, err)
+	}
+	requireText(t, err.Error(), "MF-1: FAIL")
+	if f.audit(t) != before {
+		t.Fatal("NOT-READY refusal mutated")
 	}
 }

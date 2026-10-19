@@ -778,7 +778,7 @@ func TestVerbOutput_Next(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n\n## Requirements\n\n1. R1\n"), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\n---\n\n# Plan\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\nwork_chunks:\n  - id: 1\n---\n\n# Plan\n\n## Bead 1: Fixture\n"), 0o644); err != nil {
 		t.Fatalf("write plan.md: %v", err)
 	}
 	runGitInDir(t, root, "add", "-A")

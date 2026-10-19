@@ -1,24 +1,8 @@
 package main
 
-// next_selection_test.go pins spec 128 Bead 8's CLI-level selection ACs
-// end to end against a real bd + git sandbox (reusing
-// next_ready_gate_test.go's nextReadyGateSetupSandbox / Sandbox helpers,
-// since bd's actual priority-respecting `bd ready` ordering is the thing
-// under test):
-//
-//   - AC-9:  pick/emit parity + total pick semantics (single-ready-item
-//     out-of-range pick errors).
-//   - AC-10: a positional bead ID present in the raw ready set but
-//     excluded by the spec filter names the exclusion reason, never the
-//     false "not found or not ready".
-//   - AC-10b: a non-empty raw ready set that filters to empty is a loud
-//     error, never "No ready work found".
-//   - AC-15: explicit --spec scope honesty — a nonexistent full-ID spec
-//     and an existing draft spec both refuse without ever falling back
-//     to the global, unscoped `bd ready` query.
-
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,606 +10,202 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/harness"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/spf13/cobra"
 )
 
-// nextSelectionTwoReadyBeads creates an epic with two ready (unclaimed,
-// undepended) beads titled to reference specID, with DETERMINISTIC
-// differing priorities (bead1 higher priority than bead2) so `bd ready`'s
-// priority-first order is stable across the test's several invocations.
-func nextSelectionTwoReadyBeads(t *testing.T, sb *harness.Sandbox, specID string) (epicID, bead1, bead2 string) {
+// The fake honours the default cap and edge-only --parent; all tracker state is local.
+const nextHonestyFakeBD = `#!/usr/bin/env python3
+import json, os, sys
+p=os.environ["HONEST_TRACKER"]
+d=json.load(open(p))
+d["rows"]=d.get("rows") or []
+a=sys.argv[1:]
+with open(p+".argv","a") as f: f.write(json.dumps(a)+"\n")
+def emit(rows): print(json.dumps(rows))
+def arg(name, default=None):
+ for i,v in enumerate(a):
+  if v==name and i+1<len(a): return a[i+1]
+  if v.startswith(name+"="): return v.split("=",1)[1]
+ return default
+if a[0]=="ready":
+ rows=[r for r in d["rows"] if r.get("status")=="open"]
+ if arg("--parent"): rows=[r for r in rows if r.get("parent")==arg("--parent")]
+ n=int(arg("-n",arg("--limit",100)))
+ emit(rows if n==0 else rows[:n])
+elif a[0]=="list":
+ if d.get("fail_children") and arg("--parent") and arg("--status")!="closed": sys.exit("child read failed")
+ rows=d["epics"] if "--type=epic" in a else d.get("children",d["rows"])
+ if arg("--parent"): rows=[r for r in rows if r.get("parent")==arg("--parent")]
+ if arg("--status"): rows=[r for r in rows if r.get("status") in arg("--status").split(",")]
+ emit(rows)
+elif a[0]=="show":
+ if d.get("fail_show")==a[1]: sys.exit("show failed")
+ row=next((r.copy() for r in d["epics"]+d["rows"]+d.get("others",[]) if r["id"]==a[1]),None)
+ if row:
+  deps=d.get("deps",{}).get(a[1],[])[:]
+  if row.get("parent"):
+   parent=next((r for r in d["epics"]+d["rows"]+d.get("others",[]) if r["id"]==row["parent"]),{})
+   deps.append(dict(id=row["parent"],issue_type=parent.get("issue_type","task"),dependency_type="parent-child"))
+  row["dependencies"]=deps
+ emit([row] if row else [])
+elif a[0]=="update":
+ row=next(r for r in d["epics"]+d["rows"] if r["id"]==a[1])
+ if arg("--parent"): row["parent"]=arg("--parent")
+ if "--claim" in a: row["status"]="in_progress"
+ if arg("--metadata"): row["metadata"]=json.loads(arg("--metadata"))
+ with open(p,"w") as f: json.dump(d,f)
+ emit([])
+else: sys.exit("unexpected fake argv: "+repr(a))
+`
+
+type nextHonestyFixture struct {
+	root, path     string
+	rows, children []map[string]interface{}
+	epics          []map[string]interface{}
+	deps           map[string][]map[string]string
+	failChildren   bool
+}
+
+func nextHonestyRow(id, title, parent, kind, status string) map[string]interface{} {
+	return map[string]interface{}{"id": id, "title": title, "parent": parent, "issue_type": kind, "status": status, "description": "AC-1"}
+}
+func nextHonestyPlan(n int) string {
+	s := "---\nwork_chunks:\n"
+	for i := 1; i <= n; i++ {
+		s += fmt.Sprintf("  - id: %d\n    key_file_paths: [internal/fixture.go]\n", i)
+	}
+	s += "---\n"
+	for i := 1; i <= n; i++ {
+		s += fmt.Sprintf("## Bead %d: Fixture\n\n**Acceptance Criteria**\n- AC-1: works\n", i)
+	}
+	return s
+}
+func (f *nextHonestyFixture) write(t *testing.T) {
 	t.Helper()
-	epicID = sb.CreateSpecEpic(specID)
-	bead1 = sb.CreateBead("["+specID+"] Alpha", "task", epicID)
-	bead2 = sb.CreateBead("["+specID+"] Beta", "task", epicID)
-	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
-		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+	d := map[string]interface{}{"rows": f.rows, "epics": f.epics, "deps": f.deps, "fail_children": f.failChildren}
+	if f.children != nil {
+		d["children"] = f.children
 	}
-	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
-		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
-	}
-	return epicID, bead1, bead2
-}
-
-// TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick pins AC-9's
-// core: --emit-only --pick 1 and --emit-only --pick 2 emit DIFFERENT
-// beads, in bd ready's priority-first order, and --pick 3 (out of range)
-// errors on the emit-only path.
-func TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "978-selection-fixture"
-	_, bead1, bead2 := nextSelectionTwoReadyBeads(t, sb, specID)
-
-	out1, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1", "--emit-only")
+	raw, err := json.Marshal(d)
 	if err != nil {
-		t.Fatalf("--pick 1 --emit-only: %v\n%s", err, out1)
+		t.Fatal(err)
 	}
-	out2, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "2", "--emit-only")
+	if err := os.WriteFile(f.path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+func honestyGit(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.email=test@example.invalid", "-c", "user.name=test"}, args...)...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("--pick 2 --emit-only: %v\n%s", err, out2)
+		t.Fatalf("git %v: %v %s", args, err, out)
 	}
-	// Both outputs list the full ready set (both bead IDs), so the
-	// parity check is on the rendered PRIMER's own "**Bead**: <id>" line
-	// — the actually-SELECTED bead — not on mere presence anywhere in
-	// the ready-work listing.
-	primer1 := "**Bead**: " + bead1
-	primer2 := "**Bead**: " + bead2
-	if !strings.Contains(out1, primer1) {
-		t.Errorf("expected --pick 1 to emit the higher-priority bead %s (displayed row 1), got:\n%s", bead1, out1)
-	}
-	if !strings.Contains(out2, primer2) {
-		t.Errorf("expected --pick 2 to emit %s, got:\n%s", bead2, out2)
-	}
-	if strings.Contains(out1, primer2) || strings.Contains(out2, primer1) {
-		t.Errorf("--pick 1 and --pick 2 must emit DIFFERENT beads as the SELECTED primer:\npick1=%s\npick2=%s", out1, out2)
-	}
-
-	outRange, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "3", "--emit-only")
-	if err == nil {
-		t.Fatalf("expected --pick 3 (out of range on a 2-item ready set) to error, got exit 0:\n%s", outRange)
-	}
-	if !strings.Contains(outRange, "out of range") {
-		t.Errorf("expected an 'out of range' error, got:\n%s", outRange)
-	}
+	return string(out)
 }
-
-const nextSelectionParitySpecMD = `---
-title: Selection Parity Fixture
-status: Approved
----
-# Selection Parity Fixture
-
-## Acceptance Criteria
-- [ ] AC-1 — bead 1 satisfies the readiness floor.
-- [ ] AC-2 — bead 2 satisfies the readiness floor.
-`
-
-// nextSelectionParityPlanMD wires TWO independent (no depends_on between
-// them) work chunks so both beads are simultaneously ready — mirroring
-// next_ready_gate_test.go's nextReadyGatePositivePlanMD shape (a
-// confirmed-passing readiness-floor fixture) so this test exercises real
-// `bd ready`/readiness-gate plumbing rather than a bare epic+bead
-// shortcut that skips the plan.md the readiness floor requires.
-const nextSelectionParityPlanMD = `---
-status: Draft
-spec_id: 977-selection-parity
-version: "1"
-adr_citations: []
-work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/fixture/selection_parity_one.go
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/fixture/selection_parity_two.go
----
-# Plan: 977-selection-parity
-
-## ADR Fitness
-
-No existing ADRs are impacted; this is a self-contained test fixture.
-
-## Testing Strategy
-
-Unit tests via ` + "`go test`" + `.
-
-## Bead 1: Alpha
-
-**Steps**
-1. Create internal/fixture/selection_parity_one.go
-2. Implement the fixture function
-3. Add a unit test
-
-**Verification**
-- [ ] ` + "`go test ./internal/fixture/`" + ` passes
-
-**Acceptance Criteria**
-- [ ] AC-1 — bead 1 satisfies the readiness floor.
-
-**Depends on**
-None
-
-## Bead 2: Beta
-
-**Steps**
-1. Create internal/fixture/selection_parity_two.go
-2. Implement the fixture function
-3. Add a unit test
-
-**Verification**
-- [ ] ` + "`go test ./internal/fixture/`" + ` passes
-
-**Acceptance Criteria**
-- [ ] AC-2 — bead 2 satisfies the readiness floor.
-
-**Depends on**
-None
-`
-
-// TestNextSelection_ClaimPickMatchesEmitOnlyPick pins AC-9's cross-path
-// parity: the claim path's --pick 1 claims the SAME bead --emit-only
-// --pick 1 named. Uses a real plan-approve-backed two-bead fixture (both
-// independently ready, matching next_ready_gate_test.go's confirmed-
-// passing shape) since the readiness floor's plan.md/spec.md read is a
-// hard error a bare epic+bead fixture can't satisfy.
-func TestNextSelection_ClaimPickMatchesEmitOnlyPick(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "977-selection-parity"
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, specID, nextSelectionParitySpecMD, nextSelectionParityPlanMD)
-	bead1 := epicID + ".1"
-	bead2 := epicID + ".2"
-	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
-		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
+func newNextHonestyFixture(t *testing.T) *nextHonestyFixture {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root := t.TempDir()
+	f := &nextHonestyFixture{root: root, path: filepath.Join(root, "tracker.json"), deps: map[string][]map[string]string{}}
+	f.epics = []map[string]interface{}{{"id": "epic-129", "title": "[SPEC 129] fixture", "status": "open", "issue_type": "epic", "metadata": map[string]interface{}{"spec_num": 129, "spec_title": "fixture", "mindspec_phase": "plan"}}}
+	f.rows = []map[string]interface{}{nextHonestyRow("epic-129.1", "neutral", "epic-129", "task", "open"), nextHonestyRow("epic-129.2", "[129-fixture] reporter", "", "task", "open"), nextHonestyRow("epic-129.3", "[129] numeric", "", "bug", "open")}
+	f.write(t)
+	dir := filepath.Join(root, ".mindspec/specs/129-fixture")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
-		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
+	for name, data := range map[string]string{".gitignore": "tracker*\nbd\ncaptured-*\n", ".mindspec/specs/129-fixture/plan.md": nextHonestyPlan(3), ".mindspec/specs/129-fixture/spec.md": "# Fixture\n## Acceptance Criteria\n- AC-1: works\n", "bd": nextHonestyFakeBD} {
+		mode := os.FileMode(0644)
+		if name == "bd" {
+			mode = 0755
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), mode); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1", "--emit-only")
+	honestyGit(t, root, "init", "-b", "main")
+	honestyGit(t, root, "add", ".")
+	honestyGit(t, root, "commit", "-m", "fixture")
+	t.Setenv("HONEST_TRACKER", f.path)
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Cleanup(phase.SetRunBDForTest(bead.RunBD))
+	t.Cleanup(phase.SetListJSONForTest(bead.ListJSON))
+	oldExec, oldWT := newExecutorFn, nextEnsureWorktreeFn
+	newExecutorFn = func(string) executor.Executor { return &executor.MockExecutor{} }
+	nextEnsureWorktreeFn = func(string, string, string, executor.Executor) (string, error) { return "", nil }
+	t.Cleanup(func() { newExecutorFn, nextEnsureWorktreeFn = oldExec, oldWT })
+	withTestChdir(t, root)
+	return f
+}
+func (f *nextHonestyFixture) run(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	// Files avoid the pipe-buffer deadlock for a verbose ready menu.
+	out, err := os.CreateTemp(f.root, "captured-")
 	if err != nil {
-		t.Fatalf("--pick 1 --emit-only: %v\n%s", err, outEmit)
+		t.Fatal(err)
 	}
-	if !strings.Contains(outEmit, "**Bead**: "+bead1) {
-		t.Fatalf("expected --pick 1 --emit-only to name %s, got:\n%s", bead1, outEmit)
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = out, out
+	cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE, SilenceErrors: true, SilenceUsage: true}
+	cmd.Flags().Int("pick", 0, "")
+	cmd.Flags().String("spec", "", "")
+	cmd.Flags().Bool("force", false, "")
+	cmd.Flags().Bool("emit-only", false, "")
+	cmd.Flags().Bool("allow-not-ready", false, "")
+	cmd.SetArgs(args)
+	runErr := cmd.Execute()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
 	}
-
-	outClaim, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "1")
+	raw, err := os.ReadFile(out.Name())
 	if err != nil {
-		t.Fatalf("--pick 1 (claim path): %v\n%s", err, outClaim)
+		t.Fatal(err)
 	}
-	if !strings.Contains(outClaim, bead1) {
-		t.Errorf("expected the claim path's --pick 1 to claim %s (matching the emit-only preview), got:\n%s", bead1, outClaim)
-	}
-
-	status, _ := nextReadyGateBDStatus(t, sb, bead1)
-	if status != "in_progress" {
-		t.Errorf("expected %s to be claimed (in_progress) after --pick 1, got status %q", bead1, status)
+	return string(raw), runErr
+}
+func requireText(t *testing.T, out string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q:\n%s", want, out)
+		}
 	}
 }
-
-// TestNextSelection_SingleReadyItem_OutOfRangePickErrors is AC-9's
-// pinned red-on-revert: an explicit out-of-range --pick against exactly
-// ONE ready bead must error, never silently select the sole item.
-func TestNextSelection_SingleReadyItem_OutOfRangePickErrors(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "976-selection-single"
-	epicID := sb.CreateSpecEpic(specID)
-	sb.CreateBead("["+specID+"] Solo", "task", epicID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", specID, "--pick", "2", "--emit-only")
-	if err == nil {
-		t.Fatalf("expected --pick 2 against a single-item ready set to error, got exit 0:\n%s", out)
-	}
-	if !strings.Contains(out, "out of range") {
-		t.Errorf("expected an 'out of range' error, got:\n%s", out)
-	}
-}
-
-// TestNextSelection_PositionalExcludedByFilter_NamesReason pins AC-10: a
-// positional bead ID present in the raw ready set but excluded by
-// mindspec's spec-title filter gets an error naming the exclusion
-// reason — never the false "not found or not ready".
-func TestNextSelection_PositionalExcludedByFilter_NamesReason(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "975-selection-excluded"
-	epicID := sb.CreateSpecEpic(specID)
-	// Title deliberately does NOT reference specID.
-	beadID := sb.CreateBead("Unrelated work item", "task", epicID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", specID, beadID)
-	if err == nil {
-		t.Fatalf("expected the positional claim of a filter-excluded bead to refuse, got exit 0:\n%s", out)
-	}
-	if strings.Contains(out, "not found or not ready") {
-		t.Errorf("AC-10: the false 'not found or not ready' message must not appear for a filter-excluded positional bead, got:\n%s", out)
-	}
-	if !strings.Contains(out, beadID) || !strings.Contains(out, "excluded") {
-		t.Errorf("expected the refusal to name the excluded bead and the reason, got:\n%s", out)
-	}
-}
-
-// TestNextSelection_AllExcludedByFilter_LoudError pins AC-10b: a
-// non-empty raw ready set that the spec filter drops to EMPTY is a loud
-// error naming the exclusions — never the silent "No ready work found"
-// success line — on both the claim and --emit-only paths.
-func TestNextSelection_AllExcludedByFilter_LoudError(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "974-selection-all-excluded"
-	epicID := sb.CreateSpecEpic(specID)
-	sb.CreateBead("Unrelated work one", "task", epicID)
-	sb.CreateBead("Unrelated work two", "task", epicID)
-
-	outClaim, err := sb.Run("mindspec", "next", "--spec", specID)
-	if err == nil {
-		t.Fatalf("expected the claim path to refuse when every ready bead is filter-excluded, got exit 0:\n%s", outClaim)
-	}
-	if strings.Contains(outClaim, "No ready work found") {
-		t.Errorf("AC-10b: 'No ready work found' must not appear when the raw ready set was non-empty but fully filtered, got:\n%s", outClaim)
-	}
-
-	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--emit-only")
-	if err == nil {
-		t.Fatalf("expected --emit-only to refuse the same way, got exit 0:\n%s", outEmit)
-	}
-	if strings.Contains(outEmit, "No ready work found") {
-		t.Errorf("AC-10b: 'No ready work found' must not appear on --emit-only either, got:\n%s", outEmit)
-	}
-}
-
-// TestNextSelection_ExplicitSpecScopeHonesty_NonexistentSpec pins
-// AC-15(i): an explicit --spec naming a full spec ID that resolves to no
-// epic and no on-disk draft refuses, on BOTH paths, without ever
-// claiming/emitting a bead from a DIFFERENT, globally-ready epic — the
-// removed silent global `bd ready` fallback would otherwise hand back
-// exactly that other bead.
-func TestNextSelection_ExplicitSpecScopeHonesty_NonexistentSpec(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-
-	// A genuinely different, globally-ready epic — if the bogus --spec
-	// silently fell back to global `bd ready`, THIS is the bead it would
-	// hand back.
-	otherEpic := sb.CreateSpecEpic("973-other-spec")
-	otherBead := sb.CreateBead("[973-other-spec] Unrelated", "task", otherEpic)
-
-	bogusSpec := "999-does-not-exist-anywhere"
-
-	outClaim, err := sb.Run("mindspec", "next", "--spec", bogusSpec)
-	if err == nil {
-		t.Fatalf("expected the claim path to refuse for a nonexistent --spec, got exit 0:\n%s", outClaim)
-	}
-	if !strings.Contains(outClaim, bogusSpec) {
-		t.Errorf("expected the refusal to name the nonexistent spec, got:\n%s", outClaim)
-	}
-	if strings.Contains(outClaim, otherBead) {
-		t.Errorf("a nonexistent --spec must never fall back to a DIFFERENT spec's ready bead (AC-15(i)), got:\n%s", outClaim)
-	}
-
-	outEmit, err := sb.Run("mindspec", "next", "--spec", bogusSpec, "--emit-only")
-	if err == nil {
-		t.Fatalf("expected --emit-only to refuse the same way, got exit 0:\n%s", outEmit)
-	}
-	if strings.Contains(outEmit, otherBead) {
-		t.Errorf("--emit-only must never fall back to a DIFFERENT spec's ready bead either, got:\n%s", outEmit)
-	}
-
-	status, _ := nextReadyGateBDStatus(t, sb, otherBead)
-	if status != "open" {
-		t.Errorf("the other spec's bead must remain untouched (open) after the refused invocations, got status %q", status)
-	}
-}
-
-// TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft pins
-// AC-15(ii): an existing on-disk draft spec (no epic yet) refuses with
-// the honest no-epic/not-approved message, never a false "doesn't exist"
-// claim, and never selects a bead from another spec.
-func TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-
-	otherEpic := sb.CreateSpecEpic("972-other-spec")
-	otherBead := sb.CreateBead("[972-other-spec] Unrelated", "task", otherEpic)
-
-	draftSpecID := "971-draft-fixture"
-	sb.WriteFile(".mindspec/specs/"+draftSpecID+"/spec.md", "# draft\n")
-	sb.Commit("setup: draft spec directory")
-	if out, err := sb.Run("git", "branch", "spec/"+draftSpecID); err != nil {
-		t.Fatalf("git branch spec/%s: %v\n%s", draftSpecID, err, out)
-	}
-
-	out, err := sb.Run("mindspec", "next", "--spec", draftSpecID)
-	if err == nil {
-		t.Fatalf("expected the claim path to refuse for a draft (no-epic) --spec, got exit 0:\n%s", out)
-	}
-	if !strings.Contains(out, "no epic") {
-		t.Errorf("expected the honest no-epic/not-approved message, got:\n%s", out)
-	}
-	if strings.Contains(out, otherBead) {
-		t.Errorf("a draft --spec must never select a bead from ANOTHER spec (AC-15(ii)), got:\n%s", out)
-	}
-
-	status, _ := nextReadyGateBDStatus(t, sb, otherBead)
-	if status != "open" {
-		t.Errorf("the other spec's bead must remain untouched (open) after the refused invocation, got status %q", status)
-	}
-}
-
-// --- Round-1 panel G1: the spec-mandated pinned-line tests were missing ---
-
-// TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1 pins
-// AC-9's "the no-pick default path prints the self-describing line" on
-// the --emit-only display path: with >=2 ready beads and neither --pick
-// nor a positional given, the EXACT OQ-5 default line is printed, and
-// the primer that's actually emitted is displayed row 1 (the
-// higher-priority bead).
-func TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "968-selection-default-emit"
-	_, bead1, _ := nextSelectionTwoReadyBeads(t, sb, specID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", specID, "--emit-only")
+func (f *nextHonestyFixture) audit(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(f.path)
 	if err != nil {
-		t.Fatalf("default-pick --emit-only: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	const wantLine = "Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item."
-	if !strings.Contains(out, wantLine) {
-		t.Errorf("expected the exact OQ-5 default line, got:\n%s", out)
-	}
-	if !strings.Contains(out, "**Bead**: "+bead1) {
-		t.Errorf("expected the default pick to select displayed row 1 (%s), got:\n%s", bead1, out)
-	}
+	return string(raw) + honestyGit(t, f.root, "status", "--porcelain") + honestyGit(t, f.root, "for-each-ref", "--format=%(refname) %(objectname)") + honestyGit(t, f.root, "worktree", "list", "--porcelain")
 }
-
-// nextSelectionDefaultClaimSpecMD/PlanMD mirror
-// nextSelectionParitySpecMD/PlanMD (a confirmed-passing two-independent-
-// bead readiness fixture) under a fresh spec ID so this test's real
-// claim doesn't collide with TestNextSelection_ClaimPickMatchesEmitOnlyPick's.
-const nextSelectionDefaultClaimSpecID = "967-selection-default-claim"
-
-// TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1 pins AC-9's
-// default-line assertion on the CLAIM path: with >=2 ready beads and no
-// selector given, the exact OQ-5 default line prints AND the bead
-// actually claimed is displayed row 1 (the higher-priority bead) —
-// closing the round-1 G1(a) gap (grep 'Defaulting' in *_test.go
-// previously returned zero).
-func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	planMD := strings.ReplaceAll(nextSelectionParityPlanMD, "977-selection-parity", nextSelectionDefaultClaimSpecID)
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, nextSelectionDefaultClaimSpecID, nextSelectionParitySpecMD, planMD)
-	bead1 := epicID + ".1"
-	bead2 := epicID + ".2"
-	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
-		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
-	}
-	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
-		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
-	}
-
-	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionDefaultClaimSpecID)
+func (f *nextHonestyFixture) status(t *testing.T, id string) string {
+	t.Helper()
+	raw, err := os.ReadFile(f.path)
 	if err != nil {
-		t.Fatalf("default-pick claim: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	const wantLine = "Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item."
-	if !strings.Contains(out, wantLine) {
-		t.Errorf("expected the exact OQ-5 default line, got:\n%s", out)
+	var d struct{ Rows []struct{ ID, Status string } }
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, bead1) {
-		t.Errorf("expected the default pick to claim displayed row 1 (%s), got:\n%s", bead1, out)
+	for _, r := range d.Rows {
+		if r.ID == id {
+			return r.Status
+		}
 	}
-
-	status, _ := nextReadyGateBDStatus(t, sb, bead1)
-	if status != "in_progress" {
-		t.Errorf("expected %s (displayed row 1) to be claimed by the no-selector default path, got status %q", bead1, status)
-	}
-	statusOther, _ := nextReadyGateBDStatus(t, sb, bead2)
-	if statusOther != "open" {
-		t.Errorf("expected %s (displayed row 2) to remain untouched by the default pick, got status %q", bead2, statusOther)
-	}
+	t.Fatalf("missing row %s", id)
+	return ""
 }
-
-// TestNextSelection_PositionalEmitOnly_BypassesSpecFilter pins the round-1
-// G1(b) gap: R6.3(a)'s one documented exception. `--spec <s> <bead-id>
-// --emit-only` against a ready bead whose title does NOT reference the
-// spec must still proceed (R6.1's pinned bypass — positional --emit-only
-// never constructs the ready set, never applies the spec filter), print
-// ONLY the pinned bypass line, with no exclusion report and no false
-// readiness claim.
-func TestNextSelection_PositionalEmitOnly_BypassesSpecFilter(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "966-selection-bypass"
-	epicID := sb.CreateSpecEpic(specID)
-	// Title deliberately does NOT reference specID — this bead would be
-	// EXCLUDED by the spec-title filter on every OTHER path.
-	beadID := sb.CreateBead("Unrelated work item", "task", epicID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", specID, beadID, "--emit-only")
-	if err != nil {
-		t.Fatalf("expected the positional --emit-only preview to proceed despite the title not referencing the spec, got: %v\n%s", err, out)
-	}
-	const wantBypassLine = "emit-only: bead fetched by ID; readiness not checked."
-	if !strings.Contains(out, wantBypassLine) {
-		t.Errorf("expected the exact pinned bypass line, got:\n%s", out)
-	}
-	if strings.Contains(out, "excluded") {
-		t.Errorf("positional --emit-only must report NO exclusions (R6.3(a)'s documented exception — it never constructs the ready set), got:\n%s", out)
-	}
-	if strings.Contains(out, "is ready") || strings.Contains(out, "Ready work") {
-		t.Errorf("positional --emit-only must never claim readiness — 'readiness not checked' is the only readiness-shaped statement, got:\n%s", out)
-	}
-	if !strings.Contains(out, "**Bead**: "+beadID) {
-		t.Errorf("expected the primer to still be emitted for the fetched bead, got:\n%s", out)
-	}
-}
-
-// --- Round-1 panel G2: --pick < 0 boundary, validated before ANY side effect ---
-
-// TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects pins
-// that positional + --pick=-1 refuses on BOTH paths before ANY fetch or
-// claim, and before the (unrelated) positional-vs-positive-pick mutual-
-// exclusion message — the negative-pick check runs first and
-// unconditionally.
-func TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "965-selection-negative-pick"
-	epicID := sb.CreateSpecEpic(specID)
-	beadID := sb.CreateBead("["+specID+"] Solo", "task", epicID)
-
-	outClaim, err := sb.Run("mindspec", "next", beadID, "--pick=-1")
-	if err == nil {
-		t.Fatalf("expected positional + --pick=-1 to refuse on the claim path, got exit 0:\n%s", outClaim)
-	}
-	if !strings.Contains(outClaim, "pick") || !strings.Contains(outClaim, "invalid") {
-		t.Errorf("expected the invalid-pick refusal, got:\n%s", outClaim)
-	}
-	statusClaim, _ := nextReadyGateBDStatus(t, sb, beadID)
-	if statusClaim != "open" {
-		t.Errorf("expected zero side effects (bead unclaimed) after the refused claim-path invocation, got status %q", statusClaim)
-	}
-
-	outEmit, err := sb.Run("mindspec", "next", beadID, "--pick=-1", "--emit-only")
-	if err == nil {
-		t.Fatalf("expected positional + --pick=-1 to refuse on --emit-only too, got exit 0:\n%s", outEmit)
-	}
-	if strings.Contains(outEmit, "emit-only: bead fetched by ID") {
-		t.Errorf("the invalid-pick refusal must preempt --emit-only's positional bypass entirely — no bypass line, got:\n%s", outEmit)
-	}
-	statusEmit, _ := nextReadyGateBDStatus(t, sb, beadID)
-	if statusEmit != "open" {
-		t.Errorf("expected zero side effects after the refused --emit-only invocation, got status %q", statusEmit)
-	}
-}
-
-// TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds pins that an
-// invalid --pick refuses even when the (would-be) ready set is entirely
-// empty — never the silent "No ready work found" success path, on
-// either the claim or --emit-only path.
-func TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	specID := "964-selection-negative-empty"
-	sb.CreateSpecEpic(specID) // epic with ZERO children — genuinely empty ready set
-
-	outClaim, err := sb.Run("mindspec", "next", "--spec", specID, "--pick=-1")
-	if err == nil {
-		t.Fatalf("expected --pick=-1 against an empty ready set to refuse (claim path), got exit 0:\n%s", outClaim)
-	}
-	if strings.Contains(outClaim, "No ready work found") {
-		t.Errorf("an invalid pick must refuse as an invalid-pick error, never render as the unrelated 'No ready work found' success line, got:\n%s", outClaim)
-	}
-	if !strings.Contains(outClaim, "invalid") {
-		t.Errorf("expected the invalid-pick refusal, got:\n%s", outClaim)
-	}
-
-	outEmit, err := sb.Run("mindspec", "next", "--spec", specID, "--pick=-1", "--emit-only")
-	if err == nil {
-		t.Fatalf("expected --pick=-1 to refuse on --emit-only too, got exit 0:\n%s", outEmit)
-	}
-	if strings.Contains(outEmit, "No ready work found") || strings.Contains(outEmit, "no ready work found") {
-		t.Errorf("an invalid pick must never render as any 'no ready work' outcome, got:\n%s", outEmit)
-	}
-	if !strings.Contains(outEmit, "invalid") {
-		t.Errorf("expected the invalid-pick refusal, got:\n%s", outEmit)
-	}
-}
-
-// TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped pins
-// round-1 panel G3's audit of the emit-only positional fetch-error wrap:
-// a hostile positional ID never leaks a raw control byte, whether it
-// fails idvalidate.BeadID inside FetchBeadByID or in the outer
-// "fetching bead %s" wrap this bead's fix now routes through
-// idrender.Bead.
-func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	hostile := "mindspec-\x1b[31mFORGED\x1b[0m"
-
-	out, err := sb.Run("mindspec", "next", hostile, "--emit-only")
-	if err == nil {
-		t.Fatalf("expected a hostile positional ID to refuse, got exit 0:\n%s", out)
-	}
-	if strings.ContainsRune(out, 0x1b) {
-		t.Errorf("raw ESC byte survived into the rendered refusal: %q", out)
-	}
-}
-
-// --- Round-2 panel residual: R6.3(a)'s partial-exclusion NOTICE is
-// actually PRINTED, not just content-pinned at the unit level. ---
-//
-// internal/next.ReadySet.ExclusionNotice() was already unit-tested for
-// its CONTENT (internal/next/readyset_test.go), but nothing at the CLI
-// level asserted the two next.go call sites
-// (fmt.Fprintln(os.Stderr, notice)) actually run — deleting both would
-// have stayed green. These fixtures mix a plan-approved (readiness-
-// satisfying) two-bead set with a THIRD, bare, title-unreferenced bead
-// under the SAME epic so the filter partially excludes (not fully —
-// AC-10b's loud-error path is a different, already-covered case) while
-// the claim/preview still succeeds on the remaining, matching bead.
-
-const nextSelectionNoticeClaimSpecID = "963-selection-notice-claim"
-const nextSelectionNoticeEmitSpecID = "962-selection-notice-emit"
-
-// TestNextSelection_ClaimPath_PartialExclusionNoticePrinted pins the
-// claim-path call site: with a partial filter exclusion, the "excluded
-// by spec filter" notice is actually printed to the command's output
-// (not merely computable), and the claim of the remaining, matching bead
-// still succeeds.
-func TestNextSelection_ClaimPath_PartialExclusionNoticePrinted(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	planMD := strings.ReplaceAll(nextSelectionParityPlanMD, "977-selection-parity", nextSelectionNoticeClaimSpecID)
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb, nextSelectionNoticeClaimSpecID, nextSelectionParitySpecMD, planMD)
-	bead1 := epicID + ".1"
-	bead2 := epicID + ".2"
-	if out, err := sb.Run("bd", "update", bead1, "--priority", "1"); err != nil {
-		t.Fatalf("bd update %s --priority 1: %v\n%s", bead1, err, out)
-	}
-	if out, err := sb.Run("bd", "update", bead2, "--priority", "3"); err != nil {
-		t.Fatalf("bd update %s --priority 3: %v\n%s", bead2, err, out)
-	}
-	// A THIRD, bare, ready bead under the SAME epic whose title does NOT
-	// reference the spec — the spec-title filter drops it (partial
-	// exclusion: 1 of 3 raw items), while bead1/bead2 still pass.
-	excludedBead := sb.CreateBead("Unrelated work item", "task", epicID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionNoticeClaimSpecID)
-	if err != nil {
-		t.Fatalf("expected the claim to succeed on the remaining matching bead despite the partial exclusion: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "excluded by spec filter") {
-		t.Errorf("expected the partial-exclusion notice to be PRINTED (not merely computable) on the claim path, got:\n%s", out)
-	}
-	if !strings.Contains(out, bead1) {
-		t.Errorf("expected the default pick to still claim %s (the higher-priority MATCHING bead), got:\n%s", bead1, out)
-	}
-	status, _ := nextReadyGateBDStatus(t, sb, bead1)
-	if status != "in_progress" {
-		t.Errorf("expected %s to be claimed despite the partial exclusion, got status %q", bead1, status)
-	}
-	excludedStatus, _ := nextReadyGateBDStatus(t, sb, excludedBead)
-	if excludedStatus != "open" {
-		t.Errorf("the filter-excluded bead must remain untouched (open), got status %q", excludedStatus)
-	}
-}
-
-// TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted pins the
-// --emit-only call site the same way, on a bare (no plan.md) epic+bead
-// fixture — --emit-only never runs the readiness gate, so no plan
-// approval is needed to get a clean success here.
-func TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-	epicID, bead1, _ := nextSelectionTwoReadyBeads(t, sb, nextSelectionNoticeEmitSpecID)
-	sb.CreateBead("Unrelated work item", "task", epicID)
-
-	out, err := sb.Run("mindspec", "next", "--spec", nextSelectionNoticeEmitSpecID, "--emit-only")
-	if err != nil {
-		t.Fatalf("expected the --emit-only preview to succeed despite the partial exclusion: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "excluded by spec filter") {
-		t.Errorf("expected the partial-exclusion notice to be PRINTED (not merely computable) on the --emit-only path, got:\n%s", out)
-	}
-	if !strings.Contains(out, "**Bead**: "+bead1) {
-		t.Errorf("expected the default pick to still preview %s (the higher-priority MATCHING bead), got:\n%s", bead1, out)
-	}
-}
-
 func TestNext_101ReadyBeads_AllVisible(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".mindspec"), 0755); err != nil {
@@ -734,5 +314,480 @@ esac
 		if pick == 101 && !strings.Contains(out, "**Bead**: epic-129.101") {
 			t.Fatalf("pick 101 did not emit last bead:\n%s", out)
 		}
+	}
+}
+
+func TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	for pick, id := range []string{"epic-129.1", "epic-129.2"} {
+		out, err := f.run(t, "--spec", "129-fixture", "--emit-only", fmt.Sprintf("--pick=%d", pick+1))
+		if err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+		requireText(t, out, "**Bead**: "+id)
+	}
+	_, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=4")
+	if err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("range: %v", err)
+	}
+}
+func TestNextSelection_ClaimPickMatchesEmitOnlyPick(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out, "**Bead**: epic-129.2")
+	out, err = f.run(t, "--spec", "129-fixture", "--pick=2")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	if f.status(t, "epic-129.2") != "in_progress" || f.status(t, "epic-129.1") != "open" {
+		t.Fatalf("claim pick parity: %s", out)
+	}
+}
+func TestNextSelection_SingleReadyItem_OutOfRangePickErrors(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = f.rows[:1]
+	f.write(t)
+	_, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
+	if err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("range: %v", err)
+	}
+}
+func TestNextSelection_PositionalExcludedByFilter_NamesReason(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"))
+	f.write(t)
+	_, err := f.run(t, "--spec", "129-fixture", "nonplan-r")
+	if err == nil {
+		t.Fatal("non-plan child selected")
+	}
+	requireText(t, err.Error(), "bead nonplan-r is bd-ready", "not a plan bead", "recovery: bd show nonplan-r --json")
+}
+func TestNextSelection_AllExcludedByFilter_LoudError(t *testing.T) {
+	for _, emit := range []bool{false, true} {
+		t.Run(fmt.Sprint(emit), func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = []map[string]interface{}{nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open")}
+			f.write(t)
+			args := []string{"--spec", "129-fixture"}
+			if emit {
+				args = append(args, "--emit-only")
+			}
+			out, err := f.run(t, args...)
+			if err == nil {
+				t.Fatalf("blocking near-miss exit zero: %s", out)
+			}
+			requireText(t, out, "nonplan-r", "child-derived phase: plan", "an empty ready set is not evidence the spec is complete; the derived phase above is")
+		})
+	}
+}
+func TestNextSelection_ExplicitSpecScopeHonesty_NonexistentSpec(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	for _, emit := range []bool{false, true} {
+		args := []string{"--spec", "999-no-such-spec"}
+		if emit {
+			args = append(args, "--emit-only")
+		}
+		_, err := f.run(t, args...)
+		if err == nil {
+			t.Fatal("nonexistent scope succeeded")
+		}
+	}
+	raw, _ := os.ReadFile(f.path + ".argv")
+	if strings.Contains(string(raw), `"ready"`) {
+		t.Fatalf("unresolved scope queried ready: %s", raw)
+	}
+}
+func TestNextSelection_ExplicitSpecScopeHonesty_ExistingDraft(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	dir := filepath.Join(f.root, ".mindspec/specs/777-draft")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte("# Draft"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	honestyGit(t, f.root, "add", ".mindspec/specs/777-draft")
+	honestyGit(t, f.root, "commit", "-m", "draft")
+	honestyGit(t, f.root, "branch", "spec/777-draft")
+	for _, emit := range []bool{false, true} {
+		args := []string{"--spec", "777-draft"}
+		if emit {
+			args = append(args, "--emit-only")
+		}
+		_, err := f.run(t, args...)
+		if err == nil {
+			t.Fatal("draft must refuse")
+		}
+		requireText(t, err.Error(), "no epic", "spec approve")
+	}
+	raw, _ := os.ReadFile(f.path + ".argv")
+	if strings.Contains(string(raw), `"ready"`) {
+		t.Fatalf("draft scope queried ready: %s", raw)
+	}
+}
+
+const honestyDefaultLine = "Defaulting to item 1 (bd ready priority order). Use --pick=N or a bead ID to select a specific item."
+
+func TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out, honestyDefaultLine, "**Bead**: epic-129.1")
+}
+func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	out, err := f.run(t, "--spec", "129-fixture")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, honestyDefaultLine)
+	if f.status(t, "epic-129.1") != "in_progress" {
+		t.Fatal("default did not claim first row")
+	}
+}
+func TestNextSelection_PositionalEmitOnly_BypassesSpecFilter(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = []map[string]interface{}{nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open")}
+	f.write(t)
+	before := f.audit(t)
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "nonplan-r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out, "emit-only: bead fetched by ID; readiness not checked.", "**Bead**: nonplan-r")
+	if strings.Contains(out, "not a plan bead") || f.audit(t) != before {
+		t.Fatalf("positional preview mutated or classified: %s", out)
+	}
+}
+func TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	before := f.audit(t)
+	for _, args := range [][]string{{"epic-129.1", "--pick=-1"}, {"epic-129.1", "--pick=-1", "--emit-only"}} {
+		_, err := f.run(t, args...)
+		if err == nil {
+			t.Fatal("negative pick accepted")
+		}
+		requireText(t, err.Error(), "invalid")
+	}
+	if f.audit(t) != before {
+		t.Fatal("negative pick mutated")
+	}
+}
+func TestNextSelection_NegativePick_EmptyReadySet_NeverSucceeds(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = nil
+	f.write(t)
+	for _, args := range [][]string{{"--spec", "129-fixture", "--pick=-1"}, {"--spec", "129-fixture", "--pick=-1", "--emit-only"}} {
+		_, err := f.run(t, args...)
+		if err == nil {
+			t.Fatal("negative pick accepted")
+		}
+		requireText(t, err.Error(), "invalid")
+	}
+}
+func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	_, err := f.run(t, "--emit-only", "evil\x1b[31m")
+	if err == nil || strings.ContainsRune(err.Error(), 0x1b) {
+		t.Fatalf("hostile ID: %v", err)
+	}
+}
+func testNextPartialNotice(t *testing.T, emit bool) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"))
+	f.write(t)
+	args := []string{"--spec", "129-fixture"}
+	if emit {
+		args = append(args, "--emit-only")
+	}
+	out, err := f.run(t, args...)
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, "bead nonplan-r is bd-ready", "not a plan bead", "recovery: bd show nonplan-r --json", "**Bead**: epic-129.1")
+	if f.status(t, "nonplan-r") != "open" {
+		t.Fatal("near-miss claimed")
+	}
+}
+func TestNextSelection_ClaimPath_PartialExclusionNoticePrinted(t *testing.T) {
+	testNextPartialNotice(t, false)
+}
+func TestNextSelection_EmitOnlyPath_PartialExclusionNoticePrinted(t *testing.T) {
+	testNextPartialNotice(t, true)
+}
+
+func TestNext_ScopedSelection_ReporterShapesClaimable(t *testing.T) {
+	for _, id := range []string{"epic-129.2", "epic-129.3"} {
+		t.Run(id, func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			out, err := f.run(t, "--spec", "129-fixture", id)
+			if err != nil {
+				t.Fatalf("reporter shape: %v %s", err, out)
+			}
+			if f.status(t, id) != "in_progress" {
+				t.Fatal("reporter shape not claimed")
+			}
+		})
+	}
+}
+func TestNext_ScopedSelection_NamesNearMisses(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "neutral", "", "task", "open"), nextHonestyRow("nonplan-m", "neutral", "", "task", "open"), nextHonestyRow("nonplan-t", "[129-fixture] title", "", "task", "open"))
+	f.rows[len(f.rows)-2]["metadata"] = map[string]interface{}{"spec_id": "129-fixture"}
+	f.write(t)
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out, "**Bead**: epic-129.2", "bead epic-129.4", "bead nonplan-m", "by metadata.spec_id", "bead nonplan-t", "by title")
+}
+
+func TestNext_EmitOnlyReadsPlanFromSpecBranch(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
+	if err := os.Rename(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), filepath.Join(f.root, "saved-plan")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, "**Bead**: epic-129.2")
+	if strings.Contains(out, "differs from spec/") {
+		t.Fatalf("absent checkout is not divergence: %s", out)
+	}
+}
+func TestNext_PlanDivergenceNotice(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
+	if err := os.WriteFile(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), []byte(nextHonestyPlan(1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=3")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, "**Bead**: epic-129.3", "plan.md in this checkout differs from spec/129-fixture; mapping used: spec/129-fixture")
+	if strings.Count(out, "plan.md in this checkout differs") != 1 {
+		t.Fatal("divergence printed more than once")
+	}
+}
+func TestNext_PlanBlobAbsentUsesCheckout(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	// Create a branch whose tree predates the plan, without changing the checkout.
+	tree := strings.TrimSpace(honestyGit(t, f.root, "hash-object", "-w", "-t", "tree", "--stdin"))
+	// A scratch orphan branch is represented by a commit-tree over the empty tree.
+	cmd := exec.Command("git", "-C", f.root, "-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit-tree", tree, "-m", "before plan")
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit-tree: %v %s", err, raw)
+	}
+	honestyGit(t, f.root, "branch", "spec/129-fixture", strings.TrimSpace(string(raw)))
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, "**Bead**: epic-129.2")
+	if strings.Contains(out, "differs from spec/") {
+		t.Fatalf("blob absent divergence: %s", out)
+	}
+}
+func TestNext_PlanProbeFailureRefuses(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	restore := next.SetPlanProbeForTest(func(string, string, string) ([]byte, error) { return nil, errors.New("injected git failure") })
+	defer restore()
+	before := f.audit(t)
+	_, err := f.run(t, "--spec", "129-fixture", "--emit-only")
+	if err == nil {
+		t.Fatal("probe failure fell through to checkout")
+	}
+	requireText(t, err.Error(), "could not read plan.md for 129-fixture", "injected git failure")
+	if f.audit(t) != before {
+		t.Fatal("probe failure mutated")
+	}
+}
+func TestNext_LazyPlanReadForNoLineageRow(t *testing.T) {
+	for _, mapped := range []bool{true, false} {
+		t.Run(fmt.Sprint(mapped), func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = []map[string]interface{}{nextHonestyRow("epic-129.1", "neutral", "", "task", "open")}
+			f.write(t)
+			plan := nextHonestyPlan(1)
+			if !mapped {
+				plan = strings.Replace(plan, "id: 1", "id: 2", 1)
+			}
+			if err := os.WriteFile(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), []byte(plan), 0644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := f.run(t, "--spec", "129-fixture", "--emit-only")
+			if mapped {
+				if err == nil {
+					t.Fatal("N1 must block")
+				}
+				requireText(t, out, "plan.md maps Bead 1", "recovery: bd update epic-129.1 --parent epic-129")
+			} else {
+				if err != nil {
+					t.Fatalf("N4 should be informational: %v %s", err, out)
+				}
+				requireText(t, out, "no work_chunks id 1", "it also has no lineage")
+			}
+		})
+	}
+}
+func TestNext_NoPlanYetAllN4(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	if err := os.Rename(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), filepath.Join(f.root, "saved-plan")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	for _, id := range []string{"epic-129.1", "epic-129.2", "epic-129.3"} {
+		requireText(t, out, "bead "+id+" is a follow-up child")
+	}
+	requireText(t, out, "no plan.md exists yet for 129-fixture")
+}
+
+func TestNext_EmptyScoped_DerivedState(t *testing.T) {
+	for _, tc := range []struct {
+		name, stored, derived string
+		statuses              []string
+		arm                   string
+	}{
+		{"i", "implement", "review", []string{"closed"}, "recovery: mindspec impl approve 129-fixture"},
+		{"ii", "implement", "implement", []string{"in_progress"}, "Recovering..."},
+		{"iii-a", "implement", "implement", []string{"closed", "open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
+		{"iii-b", "implement", "plan", []string{"open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
+		{"iv", "plan", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = nil
+			f.children = []map[string]interface{}{}
+			for i, status := range tc.statuses {
+				f.children = append(f.children, nextHonestyRow(fmt.Sprintf("epic-129.%d", i+1), "neutral", "epic-129", "task", status))
+			}
+			f.epics[0]["metadata"].(map[string]interface{})["mindspec_phase"] = tc.stored
+			f.write(t)
+			if tc.name == "iv" {
+				if err := os.Rename(filepath.Join(f.root, ".mindspec/specs/129-fixture/plan.md"), filepath.Join(f.root, "saved-plan")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reads := 0
+			restore := next.SetPlanProbeForTest(func(string, string, string) ([]byte, error) { reads++; return nil, errors.New("unexpected plan read") })
+			defer restore()
+			recovered := 0
+			if tc.name == "ii" {
+				nextEnsureWorktreeFn = func(root, id, spec string, exec executor.Executor) (string, error) {
+					recovered++
+					expectedRoot, err := filepath.EvalSymlinks(f.root)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if root != expectedRoot || id != "epic-129.1" || spec != "129-fixture" {
+						t.Fatalf("recovery dispatch: %s %s %s", root, id, spec)
+					}
+					return filepath.Join(f.root, "recovered"), nil
+				}
+			}
+			// ResolveActiveBead uses the list query; the fake exposes children to it.
+			out, err := f.run(t, "--spec", "129-fixture")
+			if err != nil {
+				t.Fatalf("empty state: %v %s", err, out)
+			}
+			closed, progress, open := 0, 0, 0
+			for _, status := range tc.statuses {
+				switch status {
+				case "closed":
+					closed++
+				case "in_progress":
+					progress++
+				default:
+					open++
+				}
+			}
+			tally := fmt.Sprintf("lifecycle children: %d closed / %d in_progress / %d open", closed, progress, open)
+			phaseLine := fmt.Sprintf("stored phase: %s; child-derived phase: %s", tc.stored, tc.derived)
+			sentence := "an empty ready set is not evidence the spec is complete; the derived phase above is"
+			requireText(t, out, tally+"\n"+phaseLine+"\n"+sentence, tc.arm)
+			if strings.Index(out, sentence) > strings.Index(out, tc.arm) {
+				t.Fatal("derived-state report must precede the recovery arm")
+			}
+			if reads != 0 {
+				t.Fatalf("empty ready set read plan %d times", reads)
+			}
+			if tc.name == "i" {
+				requireText(t, out, "recovery: mindspec repair phase 129-fixture")
+			}
+			if strings.HasPrefix(tc.name, "iii") {
+				requireText(t, out, "recovery: bd blocked --parent epic-129")
+				if strings.Contains(out, "recovery: mindspec plan approve") {
+					t.Fatal("open children sent to plan approve")
+				}
+			}
+			if tc.name == "ii" {
+				if recovered != 1 {
+					t.Fatalf("expected one worktree recovery, got %d", recovered)
+				}
+				requireText(t, out, "Worktree recovered: "+filepath.Join(f.root, "recovered"))
+				if strings.Index(out, "child-derived phase:") > strings.Index(out, "Recovering...") {
+					t.Fatal("state must precede mutation")
+				}
+			}
+		})
+	}
+}
+func TestNext_EmptyScoped_InformationalNearMissExitsZero(t *testing.T) {
+	for _, blocking := range []bool{false, true} {
+		t.Run(fmt.Sprint(blocking), func(t *testing.T) {
+			f := newNextHonestyFixture(t)
+			f.rows = []map[string]interface{}{nextHonestyRow("epic-129.4", "follow-up", "epic-129", "bug", "open"), nextHonestyRow("nonplan-f", "reparented", "epic-129", "bug", "open"), nextHonestyRow("nonplan-t", "[129-fixture] title", "", "task", "open")}
+			f.children = []map[string]interface{}{nextHonestyRow("epic-129.1", "closed", "epic-129", "task", "closed"), f.rows[0], f.rows[1]}
+			if blocking {
+				// Bead .2 is mapped and detached: N1.
+				f.rows = append(f.rows, nextHonestyRow("epic-129.2", "neutral", "", "task", "open"))
+			}
+			f.epics[0]["metadata"].(map[string]interface{})["mindspec_phase"] = "review"
+			f.write(t)
+			out, err := f.run(t, "--spec", "129-fixture")
+			if (err != nil) != blocking {
+				t.Fatalf("blocking=%t err=%v %s", blocking, err, out)
+			}
+			requireText(t, out, "bead epic-129.4", "bead nonplan-f", "bead nonplan-t", "lifecycle children: 1 closed / 0 in_progress / 0 open", "stored phase: review; child-derived phase: review", "recovery: mindspec impl approve 129-fixture")
+		})
+	}
+}
+func TestNext_EmptyScoped_ChildReadFailure(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = nil
+	f.failChildren = true
+	f.write(t)
+	out, err := f.run(t, "--spec", "129-fixture")
+	if err == nil {
+		t.Fatalf("child read failure succeeded: %s", out)
+	}
+	requireText(t, err.Error(), "child-derived phase: indeterminate", "child read failed")
+	if strings.Contains(out, "lifecycle children:") {
+		t.Fatalf("failure printed fabricated tally: %s", out)
+	}
+}
+func TestNextMenu_PrintsSpecIDForm(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.epics = append(f.epics, map[string]interface{}{"id": "epic-777", "title": "[SPEC 777] other", "status": "open", "issue_type": "epic", "metadata": map[string]interface{}{"spec_num": 777, "spec_title": "other", "mindspec_phase": "plan"}})
+	f.write(t)
+	out, err := f.run(t)
+	if err == nil {
+		t.Fatalf("ambiguous scope succeeded: %s", out)
+	}
+	requireText(t, out, "129-fixture", "777-other", "mindspec next --spec=<spec-id>")
+	if strings.Contains(out, "--spec=<number>") {
+		t.Fatal("numeric menu placeholder survived")
 	}
 }
