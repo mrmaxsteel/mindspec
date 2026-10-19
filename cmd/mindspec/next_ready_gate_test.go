@@ -2,6 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next"
+	"reflect"
+
+	"github.com/spf13/cobra"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +23,10 @@ import (
 // floor BEFORE any mutation, with a durable `--allow-not-ready` override
 // and `--force` orthogonality.
 //
-// This drives the REAL mindspec binary end-to-end (buildMindspecBinary,
+// The legacy sandbox helpers below support the existing long integration
+// fixtures. The scoped-override fixtures use a local fake tracker and real
+// temporary git worktrees; no live tracker is consulted.
+// Legacy integrations build the real binary (buildMindspecBinary,
 // the spec 084 Bead 3 / Bead-1-AC-10 precedent) against a real bd + git
 // sandbox (internal/harness.NewSandbox) — no fake-bd shim substitutes for
 // `plan approve`/`next`'s own bd/git mutation chain (claim, branch,
@@ -271,54 +281,20 @@ func TestNextReadyGate_NegativeBead_RefusalIsZeroMutationAndForceOrthogonal(t *t
 // marker naming those signals is written to the bead (visible via
 // `bd show`).
 func TestNextReadyGate_AllowNotReady_ClaimsAndRecordsDurableMarker(t *testing.T) {
-	sb := nextReadyGateSetupSandbox(t)
-
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb,
-		"994-readiness-gate-override", nextReadyGateNegativeSpecMD,
-		strings.ReplaceAll(nextReadyGateNegativePlanMD, "996-readiness-gate-negative", "994-readiness-gate-override"))
-	beadID := epicID + ".1"
-
-	out, err := sb.Run("mindspec", "next", beadID, "--allow-not-ready")
+	f := newScopedNextFixture(t)
+	f.rows[0]["description"] = "AC-999"
+	f.write(t)
+	out, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-1,MF-2,MF-3,MF-4", "--evidence", nextEvidenceFile(t))
 	if err != nil {
-		t.Fatalf("expected `mindspec next %s --allow-not-ready` to succeed, got: %v\n%s", beadID, err, out)
+		t.Fatalf("%v %s", err, out)
 	}
-	if !strings.Contains(out, "MF-1") {
-		t.Errorf("expected the override warning to name the failing MF-1 signal, got:\n%s", out)
+	requireText(t, out, "warning", "MF-2", "MF-1 named but passing — not recorded")
+	m, v, err := bead.ReadOverrideMarker("epic-129.1")
+	if err != nil || v != bead.MarkerValid || !reflect.DeepEqual(m.Signals, []string{"MF-2"}) {
+		t.Fatalf("durable v2 marker: %+v %s %v", m, v, err)
 	}
-	if !strings.Contains(strings.ToLower(out), "warning") {
-		t.Errorf("expected an override warning in the output, got:\n%s", out)
-	}
-
-	status, metadata := nextReadyGateBDStatus(t, sb, beadID)
-	if status != "in_progress" {
-		t.Errorf("expected bead %s to be claimed (in_progress) after --allow-not-ready, got status %q", beadID, status)
-	}
-	marker, ok := metadata["mindspec_readiness_override"]
-	if !ok {
-		t.Fatalf("expected a mindspec_readiness_override metadata key on %s after --allow-not-ready; got metadata %v", beadID, metadata)
-	}
-	markerJSON, err := json.Marshal(marker)
-	if err != nil {
-		t.Fatalf("marshaling marker for inspection: %v", err)
-	}
-	if !strings.Contains(string(markerJSON), "MF-1") {
-		t.Errorf("expected the override marker to name MF-1, got: %s", markerJSON)
-	}
-
-	worktreeName := "worktree-" + beadID
-	if !sb.WorktreeExists(worktreeName) {
-		t.Errorf("expected a worktree for %s to have been created after --allow-not-ready", beadID)
-	}
-	branches := sb.ListBranches("bead/")
-	found := false
-	for _, b := range branches {
-		if strings.Contains(b, beadID) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected a bead/%s branch to exist after --allow-not-ready, got branches %v", beadID, branches)
+	if f.status(t, "epic-129.1") != "in_progress" {
+		t.Fatal("not claimed")
 	}
 }
 
@@ -353,46 +329,6 @@ func TestNextReadyGate_PositiveBead_ClaimsWithNoPromptNoRefusal(t *testing.T) {
 	}
 }
 
-// installMetadataFailingBD drops a fake `bd` executable into a temp dir
-// and prepends it to the live process PATH (restored via t.Cleanup). The
-// fake forwards EVERY bd call to the real bd binary UNLESS the
-// FAKE_BD_FAIL_METADATA env var is set AND the call carries `--metadata`,
-// in which case it exits non-zero — so the sandbox's pinned bd shim
-// (which resolves the real bd via findRealBinary, picking up this fake as
-// the earliest bd on PATH) forwards metadata writes to a controllable
-// failure. The sentinel gate lets all of setup's plan-approve metadata
-// writes pass through; the test flips it on ONLY around the
-// `next --allow-not-ready` invocation whose marker write must fail.
-//
-// This must run BEFORE nextReadyGateSetupSandbox so the fake sits ahead of
-// the real bd when the sandbox composes its shim.
-func installMetadataFailingBD(t *testing.T) {
-	t.Helper()
-	realBD, err := exec.LookPath("bd")
-	if err != nil {
-		t.Fatalf("real bd required to build the metadata-failing fake: %v", err)
-	}
-
-	fakeDir := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"if [ -n \"$FAKE_BD_FAIL_METADATA\" ]; then\n" +
-		"  for arg in \"$@\"; do\n" +
-		"    if [ \"$arg\" = \"--metadata\" ]; then\n" +
-		"      echo \"fake bd: metadata write forced to fail (spec 124 AC-4 fail-closed test)\" >&2\n" +
-		"      exit 1\n" +
-		"    fi\n" +
-		"  done\n" +
-		"fi\n" +
-		"exec \"" + realBD + "\" \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
-
-	origPath := os.Getenv("PATH")
-	os.Setenv("PATH", fakeDir+string(os.PathListSeparator)+origPath)
-	t.Cleanup(func() { os.Setenv("PATH", origPath) })
-}
-
 // TestNextReadyGate_AllowNotReady_MarkerWriteFailsClosed pins FX-1: on the
 // `--allow-not-ready` proceed path the durable override marker is a
 // GUARANTEE, not best-effort. With the marker write FORCED to fail, the
@@ -400,53 +336,17 @@ func installMetadataFailingBD(t *testing.T) {
 // bead is NOT claimed, and no worktree is created — never the prior
 // swallow-and-continue partial state (claimed + worktree, no marker).
 func TestNextReadyGate_AllowNotReady_MarkerWriteFailsClosed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-bd/real-git end-to-end flow under -short")
-	}
-	installMetadataFailingBD(t)
-
-	sb := nextReadyGateSetupSandbox(t)
-
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb,
-		"993-readiness-gate-marker-fail", nextReadyGateNegativeSpecMD,
-		strings.ReplaceAll(nextReadyGateNegativePlanMD, "996-readiness-gate-negative", "993-readiness-gate-marker-fail"))
-	beadID := epicID + ".1"
-
-	statusBefore, _ := nextReadyGateBDStatus(t, sb, beadID)
-	branchesBefore := sb.ListBranches("bead/")
-	worktreesBefore := sb.ListWorktrees()
-
-	// Flip the marker-write failure on ONLY for this invocation (setup's
-	// plan-approve metadata writes above ran with it off).
-	os.Setenv("FAKE_BD_FAIL_METADATA", "1")
-	defer os.Unsetenv("FAKE_BD_FAIL_METADATA")
-
-	out, err := sb.Run("mindspec", "next", beadID, "--allow-not-ready")
+	f := newScopedNextFixture(t)
+	f.rows[0]["description"] = "AC-999"
+	f.write(t)
+	t.Setenv("SCOPED_FAIL_METADATA", "1")
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-2", "--evidence", nextEvidenceFile(t))
 	if err == nil {
-		t.Fatalf("expected `mindspec next %s --allow-not-ready` to REFUSE when the override marker write fails, got exit 0:\n%s", beadID, out)
+		t.Fatal("marker write failure claimed")
 	}
-	if !strings.Contains(strings.ToLower(out), "marker") {
-		t.Errorf("expected the refusal to name the override marker-write failure, got:\n%s", out)
-	}
-
-	// Nothing claimed, no branch, no worktree — fail-closed, not the
-	// swallow-and-continue partial state.
-	statusAfter, metadata := nextReadyGateBDStatus(t, sb, beadID)
-	if statusAfter != statusBefore {
-		t.Errorf("bead status changed despite the fail-closed refusal: before=%q after=%q (expected the bead to remain UNCLAIMED)", statusBefore, statusAfter)
-	}
-	if statusAfter == "in_progress" {
-		t.Errorf("bead %s was claimed despite the marker-write failure — fail-closed violated", beadID)
-	}
-	if _, ok := metadata["mindspec_readiness_override"]; ok {
-		t.Errorf("expected NO override marker after the fail-closed refusal; got metadata %v", metadata)
-	}
-	if !equalStringSlices(branchesBefore, sb.ListBranches("bead/")) {
-		t.Errorf("bead branch list changed despite the fail-closed refusal: before=%v after=%v", branchesBefore, sb.ListBranches("bead/"))
-	}
-	if !equalStringSlices(worktreesBefore, sb.ListWorktrees()) {
-		t.Errorf("worktree list changed despite the fail-closed refusal: before=%v after=%v", worktreesBefore, sb.ListWorktrees())
-	}
+	requireText(t, err.Error(), "recording the --allow-not-ready override marker")
+	assertScopedNoMutation(t, f, before, true)
 }
 
 func equalStringSlices(a, b []string) bool {
@@ -461,40 +361,6 @@ func equalStringSlices(a, b []string) bool {
 	return true
 }
 
-// installClaimFailingBD mirrors installMetadataFailingBD: a fake `bd`
-// forwards every call to the real bd UNLESS the FAKE_BD_FAIL_CLAIM env
-// var is set AND the call carries `--claim`, in which case it exits
-// non-zero — forcing ClaimBead to fail AFTER the Step 4.6 override
-// marker landed (the G3-OVERRIDE-ORPHAN window, spec 124 final-review
-// r1). Must run BEFORE nextReadyGateSetupSandbox so the fake sits ahead
-// of the real bd when the sandbox composes its shim.
-func installClaimFailingBD(t *testing.T) {
-	t.Helper()
-	realBD, err := exec.LookPath("bd")
-	if err != nil {
-		t.Fatalf("real bd required to build the claim-failing fake: %v", err)
-	}
-
-	fakeDir := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"if [ -n \"$FAKE_BD_FAIL_CLAIM\" ]; then\n" +
-		"  for arg in \"$@\"; do\n" +
-		"    if [ \"$arg\" = \"--claim\" ]; then\n" +
-		"      echo \"fake bd: claim forced to fail (spec 124 G3-OVERRIDE-ORPHAN rollback test)\" >&2\n" +
-		"      exit 1\n" +
-		"    fi\n" +
-		"  done\n" +
-		"fi\n" +
-		"exec \"" + realBD + "\" \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake bd: %v", err)
-	}
-
-	origPath := os.Getenv("PATH")
-	os.Setenv("PATH", fakeDir+string(os.PathListSeparator)+origPath)
-	t.Cleanup(func() { os.Setenv("PATH", origPath) })
-}
-
 // TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker pins the
 // G3-OVERRIDE-ORPHAN fix (spec 124 final-review r1): the override marker
 // is written BEFORE ClaimBead (AC-4 fail-closed), so when ClaimBead then
@@ -504,52 +370,359 @@ func installClaimFailingBD(t *testing.T) {
 // rollback call from cmd/mindspec/next.go's claim-failure branch leaves
 // the marker behind and turns this red.
 func TestNextReadyGate_AllowNotReady_ClaimFailureRollsBackMarker(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-bd/real-git end-to-end flow under -short")
-	}
-	installClaimFailingBD(t)
-
-	sb := nextReadyGateSetupSandbox(t)
-
-	epicID := nextReadyGateApproveSingleBeadPlan(t, sb,
-		"992-readiness-gate-claim-fail", nextReadyGateNegativeSpecMD,
-		strings.ReplaceAll(nextReadyGateNegativePlanMD, "996-readiness-gate-negative", "992-readiness-gate-claim-fail"))
-	beadID := epicID + ".1"
-
-	statusBefore, _ := nextReadyGateBDStatus(t, sb, beadID)
-	branchesBefore := sb.ListBranches("bead/")
-	worktreesBefore := sb.ListWorktrees()
-
-	// Flip the claim failure on ONLY for this invocation (the marker
-	// write itself must SUCCEED — the orphan window under test is
-	// marker-landed-then-claim-lost).
-	os.Setenv("FAKE_BD_FAIL_CLAIM", "1")
-	defer os.Unsetenv("FAKE_BD_FAIL_CLAIM")
-
-	out, err := sb.Run("mindspec", "next", beadID, "--allow-not-ready")
+	f := newScopedNextFixture(t)
+	f.rows[0]["description"] = "AC-999"
+	f.write(t)
+	t.Setenv("SCOPED_FAIL_CLAIM", "1")
+	before := scopedAudit(t, f)
+	out, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-2", "--evidence", nextEvidenceFile(t))
 	if err == nil {
-		t.Fatalf("expected `mindspec next %s --allow-not-ready` to fail when the claim fails, got exit 0:\n%s", beadID, out)
+		t.Fatal("claim failure ignored")
 	}
-	if !strings.Contains(strings.ToLower(out), "rolled back") {
-		t.Errorf("expected the failure output to report the override-marker rollback, got:\n%s", out)
+	requireText(t, out, "rolled back")
+	_, v, e := bead.ReadOverrideMarker("epic-129.1")
+	if e != nil || v != bead.MarkerAbsent {
+		t.Fatalf("orphan marker %s %v", v, e)
+	}
+	// The local JSON is rewritten by rollback; compare decoded tracker data.
+	var old, now any
+	data, e := os.ReadFile(f.path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw := strings.Split(before, "\nAUDIT-GIT\n")[0]
+	if e := json.Unmarshal([]byte(raw), &old); e != nil {
+		t.Fatal(e)
+	}
+	if e := json.Unmarshal(data, &now); e != nil {
+		t.Fatal(e)
+	}
+	// Metadata's empty map is an acceptable representation of no keys.
+	row := now.(map[string]any)["rows"].([]any)[0].(map[string]any)
+	delete(row, "metadata")
+	if !reflect.DeepEqual(old, now) {
+		t.Fatalf("rollback changed tracker: before=%v after=%v", old, now)
+	}
+	if f.status(t, "epic-129.1") != "open" {
+		t.Fatal("claim succeeded")
+	}
+	if strings.Contains(honestyGit(t, f.root, "branch", "--list", "bead/*"), "bead/") {
+		t.Fatal("claim failure created branch")
+	}
+}
+
+// Scoped command tests use only a local tracker fake and temporary git repo.
+func nextEvidenceFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "why.md")
+	if err := os.WriteFile(path, []byte("operator accepts these precise failures"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+func newScopedNextFixture(t *testing.T) *nextHonestyFixture {
+	t.Helper()
+	f := newNextHonestyFixture(t)
+	f.rows = f.rows[:1]
+	f.write(t)
+	if exec.Command("git", "-C", f.root, "show-ref", "--verify", "--quiet", "refs/heads/spec/129-fixture").Run() != nil {
+		honestyGit(t, f.root, "branch", "spec/129-fixture")
+	}
+	// Extend the existing fake locally, without changing the shared fixture.
+	script := strings.Replace(nextHonestyFakeBD, `elif a[0]=="update":`, `elif a[0]=="update":
+ if os.environ.get("SCOPED_FAIL_METADATA") and arg("--metadata"): sys.exit("forced metadata write failure")
+ if os.environ.get("SCOPED_FAIL_CLAIM") and "--claim" in a: sys.exit("forced claim failure")`, 1)
+	script = strings.Replace(script, ` if arg("--parent"): row["parent"]=arg("--parent")`, ` if arg("--parent"): row["parent"]=arg("--parent")
+ if arg("--status"): row["status"]=arg("--status")
+ if arg("--unset-metadata"): row.setdefault("metadata",{}).pop(arg("--unset-metadata"),None)`, 1)
+	if err := os.WriteFile(filepath.Join(f.root, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	// The bead is unclaimed, the marker is GONE, and no branch/worktree
-	// was created — the failed claim left no orphaned override.
-	statusAfter, metadata := nextReadyGateBDStatus(t, sb, beadID)
-	if statusAfter != statusBefore {
-		t.Errorf("bead status changed despite the failed claim: before=%q after=%q", statusBefore, statusAfter)
+	return f
+}
+func runScopedNext(t *testing.T, f *nextHonestyFixture, args ...string) (string, error) {
+	t.Helper()
+	out, err := os.CreateTemp(f.root, "captured-")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if statusAfter == "in_progress" {
-		t.Errorf("bead %s claimed despite the forced claim failure", beadID)
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = out, out
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	cmd := &cobra.Command{Use: "next", RunE: nextCmd.RunE, SilenceErrors: true, SilenceUsage: true}
+	registerNextFlags(cmd)
+	cmd.SetArgs(args)
+	runErr := cmd.Execute()
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := metadata["mindspec_readiness_override"]; ok {
-		t.Errorf("ORPHANED override marker left behind after the failed claim (G3-OVERRIDE-ORPHAN); got metadata %v", metadata)
+	data, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !equalStringSlices(branchesBefore, sb.ListBranches("bead/")) {
-		t.Errorf("bead branch list changed despite the failed claim: before=%v after=%v", branchesBefore, sb.ListBranches("bead/"))
+	return string(data), runErr
+}
+func scopedAudit(t *testing.T, f *nextHonestyFixture) string {
+	t.Helper()
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !equalStringSlices(worktreesBefore, sb.ListWorktrees()) {
-		t.Errorf("worktree list changed despite the failed claim: before=%v after=%v", worktreesBefore, sb.ListWorktrees())
+	return string(data) + "\nAUDIT-GIT\n" + honestyGit(t, f.root, "for-each-ref", "--format=%(refname) %(objectname)") + honestyGit(t, f.root, "worktree", "list", "--porcelain") + honestyGit(t, f.root, "status", "--porcelain")
+}
+func assertScopedNoMutation(t *testing.T, f *nextHonestyFixture, before string, allowMetadataAttempt bool) {
+	t.Helper()
+	if f.audit(t) != before {
+		t.Fatal("refusal changed tracker, refs, worktrees or porcelain")
 	}
+	raw, err := os.ReadFile(f.path + ".argv")
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var args []string
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatal(err)
+		}
+		if len(args) > 0 && args[0] == "update" {
+			if allowMetadataAttempt && strings.Contains(line, "--metadata") {
+				continue
+			}
+			t.Fatalf("refusal performed a tracker mutation: %s", line)
+		}
+	}
+}
+func TestNext_BareAllowNotReady_Refuses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready")
+	if err == nil {
+		t.Fatal("bare flag accepted")
+	}
+	requireText(t, err.Error(), "requires =<ids>", "--allow-not-ready=<ids> --evidence <path-to-justification>")
+	assertScopedNoMutation(t, f, before, false)
+}
+func TestNext_AllowNotReadySpaceSeparated_Refuses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "--allow-not-ready", "MF-3")
+	if err == nil {
+		t.Fatal("space-separated flag accepted")
+	}
+	requireText(t, err.Error(), "requires =<ids>")
+	assertScopedNoMutation(t, f, before, false)
+	raw, err := os.ReadFile(f.path + ".argv")
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\"MF-3\"") {
+		t.Fatalf("MF-3 looked up as a bead: %s", raw)
+	}
+}
+func TestNext_InvalidScopedSignalRefuses(t *testing.T) {
+	for _, value := range []string{"MF-9", "all"} {
+		t.Run(value, func(t *testing.T) {
+			f := newScopedNextFixture(t)
+			before := f.audit(t)
+			_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready="+value)
+			if err == nil {
+				t.Fatal("invalid signal accepted")
+			}
+			requireText(t, err.Error(), "unknown readiness signal "+value)
+			assertScopedNoMutation(t, f, before, false)
+		})
+	}
+}
+func TestNext_ScopedFlagNothingFailing_ClaimsWithoutMarker(t *testing.T) {
+	f := newScopedNextFixture(t)
+	out, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-3")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	requireText(t, out, "MF-3 named but passing — not recorded")
+	if f.status(t, "epic-129.1") != "in_progress" {
+		t.Fatal("normal claim did not run")
+	}
+	_, v, err := bead.ReadOverrideMarker("epic-129.1")
+	if err != nil || v != bead.MarkerAbsent {
+		t.Fatalf("passing signal wrote marker: %s %v", v, err)
+	}
+}
+func TestNext_N4PositionalOverridesMF1(t *testing.T) {
+	f := newScopedNextFixture(t)
+	f.rows = []map[string]interface{}{nextHonestyRow("epic-129.4", "follow-up", "epic-129", "bug", "open")}
+	f.write(t)
+	out, err := runScopedNext(t, f, "epic-129.4", "--spec", "129-fixture", "--allow-not-ready=MF-1", "--evidence", nextEvidenceFile(t))
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	m, v, err := bead.ReadOverrideMarker("epic-129.4")
+	if err != nil || v != bead.MarkerValid || !reflect.DeepEqual(m.Signals, []string{"MF-1"}) || f.status(t, "epic-129.4") != "in_progress" {
+		t.Fatalf("N4 did not claim with MF1-only v2 marker: %+v %s %v", m, v, err)
+	}
+}
+func TestNext_NoLineageBugRefuses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	f.rows = []map[string]interface{}{nextHonestyRow("mindspec-bug", "orphan", "", "bug", "open")}
+	// Suppress active-target resolution without altering readiness's real lineage resolver.
+	f.epics[0]["status"] = "closed"
+	f.write(t)
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "mindspec-bug")
+	if err == nil {
+		t.Fatal("no-lineage bug claimed")
+	}
+	requireText(t, err.Error(), "evaluating readiness for mindspec-bug", "no epic")
+	assertScopedNoMutation(t, f, before, false)
+}
+func TestNext_MissingSpecBranchNeverClaims(t *testing.T) {
+	f := newScopedNextFixture(t)
+	honestyGit(t, f.root, "branch", "-D", "spec/129-fixture")
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "epic-129.1", "--spec", "129-fixture")
+	if err == nil {
+		t.Fatal("missing branch claimed")
+	}
+	requireText(t, err.Error(), "spec branch spec/129-fixture", "nothing was claimed")
+	assertScopedNoMutation(t, f, before, false)
+}
+func TestNext_UnscopedDispatchesIntoLineageSpec(t *testing.T) {
+	f := newScopedNextFixture(t)
+	// A closed epic has no active target; lineage can still resolve it.
+	f.epics[0]["status"] = "closed"
+	f.write(t)
+	base := strings.TrimSpace(honestyGit(t, f.root, "rev-parse", "spec/129-fixture"))
+	honestyGit(t, f.root, "commit", "--allow-empty", "-m", "HEAD ahead of spec")
+	head := strings.TrimSpace(honestyGit(t, f.root, "rev-parse", "HEAD"))
+	if base == head {
+		t.Fatal("fixture needs distinct tips")
+	}
+	oldGate := nextGateReadinessFn
+	defer func() { nextGateReadinessFn = oldGate }()
+	nextGateReadinessFn = func(root, id string, opts next.GateOptions) (*next.GateResult, error) {
+		if opts.ScopeSpec != "" {
+			t.Fatalf("fixture unexpectedly resolved target spec %q", opts.ScopeSpec)
+		}
+		return next.GateReadiness(root, id, opts)
+	}
+	called := false
+	nextEnsureWorktreeFn = func(root, id, spec string, e executor.Executor) (string, error) {
+		called = true
+		if spec != "129-fixture" {
+			t.Fatalf("dispatch spec %q; wanted lineage", spec)
+		}
+		// Exercise the real EnsureWorktree/DispatchBead base selection.
+		mock := &executor.MockExecutor{}
+		if _, err := next.EnsureWorktree(root, id, spec, mock); err != nil {
+			t.Fatal(err)
+		}
+		calls := mock.CallsTo("DispatchBead")
+		if len(calls) != 1 || calls[0].Args[0] != id || calls[0].Args[1] != spec {
+			t.Fatalf("DispatchBead argv: %+v", calls)
+		}
+		realExec := executor.NewMindspecExecutor(root)
+		realExec.WorktreeOps = localNextWorktrees{t, root}
+		return next.EnsureWorktree(root, id, spec, realExec)
+	}
+	out, err := runScopedNext(t, f, "epic-129.1")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	if !called {
+		t.Fatal("EnsureWorktree never called")
+	}
+	tip := strings.TrimSpace(honestyGit(t, f.root, "rev-parse", "bead/epic-129.1"))
+	if tip != base || tip == head {
+		t.Fatalf("branch cut from HEAD: got %s want %s (HEAD %s)", tip, base, head)
+	}
+	requireText(t, out, "129-fixture")
+}
+func TestNext_ReattestRecoveryScopedFormParses(t *testing.T) {
+	f := newScopedNextFixture(t)
+	reached := false
+	old := nextGateReadinessFn
+	defer func() { nextGateReadinessFn = old }()
+	sentinel := fmt.Errorf("stopped at readiness")
+	nextGateReadinessFn = func(root, id string, opts next.GateOptions) (*next.GateResult, error) {
+		reached = true
+		if id != "epic-129.1" || !opts.FlagGiven || !reflect.DeepEqual(opts.NamedSignals, []string{"MF-3"}) || opts.EvidencePath == "" {
+			t.Fatalf("parsed options: %s %+v", id, opts)
+		}
+		if _, err := os.Stat(opts.EvidencePath); err != nil {
+			t.Fatal(err)
+		}
+		return nil, sentinel
+	}
+	// Exact flag form emitted at reattest.go:275; concrete ID/path substituted.
+	before := f.audit(t)
+	_, err := runScopedNext(t, f, "epic-129.1", "--allow-not-ready=MF-3", "--evidence", nextEvidenceFile(t))
+	if !reached || err != sentinel {
+		t.Fatalf("recovery did not reach GateReadiness: %v reached %v", err, reached)
+	}
+	assertScopedNoMutation(t, f, before, false)
+}
+
+// Real git worktrees behind the executor's existing I/O seam; no bd process.
+type localNextWorktrees struct {
+	t    *testing.T
+	root string
+}
+
+func (w localNextWorktrees) Create(name, branch string) error {
+	honestyGit(w.t, w.root, "worktree", "add", name, branch)
+	return nil
+}
+func (w localNextWorktrees) Remove(name string) error {
+	entries, _ := w.List()
+	for _, entry := range entries {
+		if entry.Name == name || entry.Branch == "bead/"+name || entry.Name == "worktree-"+name {
+			honestyGit(w.t, w.root, "worktree", "remove", entry.Path)
+			return nil
+		}
+	}
+	return nil
+}
+func (w localNextWorktrees) List() ([]bead.WorktreeListEntry, error) {
+	raw := honestyGit(w.t, w.root, "worktree", "list", "--porcelain")
+	var entries []bead.WorktreeListEntry
+	for _, block := range strings.Split(strings.TrimSpace(raw), "\n\n") {
+		var e bead.WorktreeListEntry
+		for _, line := range strings.Split(block, "\n") {
+			if strings.HasPrefix(line, "worktree ") {
+				e.Path = strings.TrimPrefix(line, "worktree ")
+				e.Name = filepath.Base(e.Path)
+			}
+			if strings.HasPrefix(line, "branch ") {
+				e.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+			}
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+func scopedTrackerUpdates(t *testing.T, f *nextHonestyFixture) int {
+	t.Helper()
+	raw, err := os.ReadFile(f.path + ".argv")
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var args []string
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatal(err)
+		}
+		if len(args) > 0 && args[0] == "update" {
+			n++
+		}
+	}
+	return n
 }

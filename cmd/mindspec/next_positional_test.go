@@ -146,7 +146,7 @@ func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {
 			f.write(t)
 			old := nextGateReadinessFn
 			calls := 0
-			nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+			nextGateReadinessFn = func(string, string, next.GateOptions) (*next.GateResult, error) {
 				calls++
 				return nil, errors.New("gate should never be reached")
 			}
@@ -154,7 +154,7 @@ func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {
 			before := f.audit(t)
 			args := []string{"--spec", "129-fixture", "epic-129.4"}
 			if allow {
-				args = append(args, "--allow-not-ready")
+				args = append(args, "--allow-not-ready=MF-1,MF-2,MF-3,MF-4", "--evidence", nextEvidenceFile(t))
 			}
 			_, err := f.run(t, args...)
 			if err == nil {
@@ -169,11 +169,12 @@ func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {
 }
 func TestNext_N4WithLineageReachesMF1(t *testing.T) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "follow-up", "epic-129", "bug", "open"))
 	f.write(t)
 	calls := 0
 	old := nextGateReadinessFn
-	nextGateReadinessFn = func(root, id string, allow bool) (*next.GateResult, error) {
+	nextGateReadinessFn = func(root, id string, allow next.GateOptions) (*next.GateResult, error) {
 		calls++
 		return next.GateReadiness(root, id, allow)
 	}
@@ -196,13 +197,13 @@ func TestNext_N4ForeignLineagePositionalRefuses(t *testing.T) {
 	f.write(t)
 	old := nextGateReadinessFn
 	calls := 0
-	nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+	nextGateReadinessFn = func(string, string, next.GateOptions) (*next.GateResult, error) {
 		calls++
 		return nil, errors.New("gate should never be reached")
 	}
 	t.Cleanup(func() { nextGateReadinessFn = old })
 	before := f.audit(t)
-	_, err := f.run(t, "--spec", "129-fixture", "epic-129.4", "--allow-not-ready")
+	_, err := f.run(t, "--spec", "129-fixture", "epic-129.4", "--allow-not-ready=MF-1,MF-2,MF-3,MF-4", "--evidence", nextEvidenceFile(t))
 	if calls != 0 || f.audit(t) != before {
 		t.Fatalf("foreign-lineage N4 reached gate (%d) or mutated", calls)
 	}
@@ -217,7 +218,7 @@ func TestNext_EpicPositionalRefuses(t *testing.T) {
 	f.rows = append(f.rows, f.epics[0])
 	f.write(t)
 	old := nextGateReadinessFn
-	nextGateReadinessFn = func(string, string, bool) (*next.GateResult, error) {
+	nextGateReadinessFn = func(string, string, next.GateOptions) (*next.GateResult, error) {
 		t.Fatal("epic reached readiness gate")
 		return nil, nil
 	}

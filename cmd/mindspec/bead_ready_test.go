@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +17,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/harness"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 )
 
@@ -44,6 +49,9 @@ func runBeadReadyCheck(t *testing.T, beadID string) (stdout string, err error) {
 
 func installAbsentReadinessMarker(t *testing.T) {
 	t.Helper()
+	oldStatus := readyCheckBeadFn
+	readyCheckBeadFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{ID: id, Status: "open"}, nil }
+	t.Cleanup(func() { readyCheckBeadFn = oldStatus })
 	old := readyCheckReadMarkerFn
 	t.Cleanup(func() { readyCheckReadMarkerFn = old })
 	readyCheckReadMarkerFn = func(string) (bead.OverrideMarker, bead.MarkerValidity, error) {
@@ -75,7 +83,7 @@ func readyOverrideMarker(t *testing.T, r *readiness.Report) bead.OverrideMarker 
 }
 
 // Invokes the command's own RunE with pure read seams, never a live tracker.
-func runReadyOverride(t *testing.T, r *readiness.Report, raw any, readErr error) (string, error) {
+func runReadyOverride(t *testing.T, r *readiness.Report, raw any, readErr error, status ...string) (string, error) {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
@@ -86,6 +94,15 @@ func runReadyOverride(t *testing.T, r *readiness.Report, raw any, readErr error)
 		t.Fatal(err)
 	}
 	chdir(t, root)
+	oldStatus := readyCheckBeadFn
+	readyCheckBeadFn = func(id string) (next.BeadInfo, error) {
+		claimStatus := "in_progress"
+		if len(status) > 0 {
+			claimStatus = status[0]
+		}
+		return next.BeadInfo{ID: id, Status: claimStatus}, nil
+	}
+	t.Cleanup(func() { readyCheckBeadFn = oldStatus })
 	oldEval, oldRead := readyCheckEvaluateFn, readyCheckReadMarkerFn
 	t.Cleanup(func() { readyCheckEvaluateFn, readyCheckReadMarkerFn = oldEval, oldRead })
 	readyCheckEvaluateFn = func(gotRoot, gotID string) (*readiness.Report, error) {
@@ -599,5 +616,308 @@ Bead 1
 	}
 	if !strings.Contains(out3, "MF-3: PASS") {
 		t.Errorf("ready-check %s expected MF-3: PASS after bead 1 landed, got:\n%s", bead2, out3)
+	}
+}
+
+func TestReadyCheck_IndeterminateRecoveryNeverNamesOverride(t *testing.T) {
+	for _, origin := range []string{"membership", "landed-merge"} {
+		for _, markerKind := range []string{"absent", "legacy", "valid", "malformed"} {
+			t.Run(origin+"/"+markerKind, func(t *testing.T) {
+				r := readyOverrideReport("mindspec-fixture.1:indeterminate")
+				r.Signals[2].Detail = origin + " read failed"
+				r.Signals[1] = readiness.Signal{ID: "MF-2", Failures: []string{"dangling:R999"}, Detail: "R999 unresolved", Recovery: "bd show mindspec-fixture.2 --json"}
+				var raw any
+				switch markerKind {
+				case "legacy":
+					raw = map[string]any{"signals": []string{"MF-3"}, "overridden": "2026-10-19T00:00:00Z"}
+				case "valid":
+					raw = readyOverrideMarker(t, r)
+				case "malformed":
+					raw = map[string]any{"schema": 99}
+				}
+				out, err := runReadyOverride(t, r, raw, nil)
+				if err == nil {
+					t.Fatal("indeterminate ready-check passed")
+				}
+				requireText(t, out, "MF-3 cannot be overridden: mindspec-fixture.1:indeterminate could not be evaluated; fix the read first", "uncovered: MF-")
+				if strings.Contains(out, "--allow-not-ready=") || strings.Contains(out, "recovery: mindspec release") {
+					t.Fatalf("impossible re-claim hinted: %s", out)
+				}
+			})
+		}
+	}
+}
+func TestReadyCheck_AbsentUnclaimedDoesNotRelease(t *testing.T) {
+	r := readyOverrideReport("mindspec-fixture.1:no-candidate")
+	for _, status := range []string{"open", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			out, err := runReadyOverride(t, r, nil, nil, status)
+			if err == nil {
+				t.Fatal("uncovered failure passed")
+			}
+			requireText(t, out, "uncovered: MF-3", "recovery: mindspec next mindspec-fixture.2 --allow-not-ready=MF-3 --evidence <path-to-justification>")
+			if strings.Contains(out, "recovery: mindspec release") != (status == "in_progress") {
+				t.Fatalf("release hint does not match claim: %s", out)
+			}
+		})
+	}
+}
+func TestReadyCheck_MF4FailureSetThroughCommand(t *testing.T) {
+	for _, mode := range []string{"second-token", "plan-occurrence", "repeated-checklist"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			fx, err := readiness.BuildPositiveFixture(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fx.Store.LandedDeps = map[string]bool{fx.DepBeadID: true}
+			t.Cleanup(fx.Store.Install())
+			rec := fx.Store.Records[fx.BeadID]
+			rec.Description = "TBD"
+			planPath := filepath.Join(root, "docs/specs", fx.SpecID, "plan.md")
+			if mode == "repeated-checklist" {
+				rec.Description = ""
+				data, err := os.ReadFile(planPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(planPath, append(data, []byte("\n**Blocking Questions**\n- [ ] Decide retry count\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fx.Store.Records[fx.BeadID] = rec
+			initial, err := readiness.EvaluateReadiness(root, fx.BeadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(initial.Signals[3].Failures) != 1 {
+				t.Fatalf("fixture needs one MF4 record: %+v", initial.Signals[3])
+			}
+			m := readyOverrideMarker(t, initial)
+			out, err := runReadyOverride(t, initial, m, nil)
+			if err != nil {
+				t.Fatalf("initial override not honoured: %v %s", err, out)
+			}
+			requireText(t, out, "MF-4: OVERRIDDEN")
+			switch mode {
+			case "second-token":
+				rec.Description += "\nOPEN QUESTION: retry"
+				fx.Store.Records[fx.BeadID] = rec
+			case "plan-occurrence":
+				data, err := os.ReadFile(planPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(planPath, append(data, []byte("\n### Design\nTBD\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "repeated-checklist":
+				data, err := os.ReadFile(planPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(planPath, append(data, []byte("- [ ] Decide retry count\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			grown, err := readiness.EvaluateReadiness(root, fx.BeadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(grown.Signals[3].Failures) != 2 {
+				t.Fatalf("growth lost occurrence: %+v", grown.Signals[3])
+			}
+			out, err = runReadyOverride(t, grown, m, nil)
+			if err == nil {
+				t.Fatal("command covered grown MF4 failure set")
+			}
+			requireText(t, out, "uncovered: MF-4", "--allow-not-ready=MF-4 --evidence <path-to-justification>")
+		})
+	}
+}
+
+// Drive release's own orchestration and next's real gate/marker/claim path.
+// Surviving bead commits must be reused, and every refusal is byte-identical.
+func TestReadyCheck_ReleaseFreshReclaimReplacesMarker(t *testing.T) {
+	for _, shape := range []string{"MF2-MF3", "MF3-MF4", "grown-MF3-with-MF2"} {
+		t.Run(shape, func(t *testing.T) {
+			f := newScopedNextFixture(t)
+			id := "epic-129.1"
+			f.rows = append(f.rows, nextHonestyRow("epic-129.2", "prerequisite A", "epic-129", "task", "closed"), nextHonestyRow("epic-129.3", "prerequisite B", "epic-129", "task", "closed"))
+			firstSignals := "MF-2"
+			if shape != "MF3-MF4" {
+				f.rows[0]["description"] = "AC-999"
+			}
+			if shape != "MF2-MF3" {
+				f.deps[id] = []map[string]string{{"id": "epic-129.2", "status": "closed", "issue_type": "task", "dependency_type": "blocks"}}
+				firstSignals = "MF-3"
+				if shape == "grown-MF3-with-MF2" {
+					firstSignals = "MF-2,MF-3"
+				}
+			}
+			f.write(t)
+			wtOps := localNextWorktrees{t, f.root}
+			nextEnsureWorktreeFn = func(root, id, spec string, _ executor.Executor) (string, error) {
+				e := executor.NewMindspecExecutor(root)
+				e.WorktreeOps = wtOps
+				return next.EnsureWorktree(root, id, spec, e)
+			}
+			oldEvidence := nextEvidenceFile(t)
+			out, err := runScopedNext(t, f, id, "--spec", "129-fixture", "--allow-not-ready="+firstSignals, "--evidence", oldEvidence)
+			if err != nil {
+				t.Fatalf("initial claim: %v %s", err, out)
+			}
+			// Give the surviving branch a unique commit before release.
+			wtPath := filepath.Join(f.root, ".worktrees", "worktree-"+id)
+			honestyGit(t, wtPath, "commit", "--allow-empty", "-m", "surviving bead work")
+			surviving := strings.TrimSpace(honestyGit(t, f.root, "rev-parse", "bead/"+id))
+			marker, validity, err := bead.ReadOverrideMarker(id)
+			if err != nil || validity != bead.MarkerValid {
+				t.Fatalf("initial marker %s %v", validity, err)
+			}
+			// Add new failures without overwriting metadata or claim status.
+			data, err := os.ReadFile(f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tracker map[string]any
+			if err := json.Unmarshal(data, &tracker); err != nil {
+				t.Fatal(err)
+			}
+			row := tracker["rows"].([]any)[0].(map[string]any)
+			allSignals, uncovered, narrower := "MF-2,MF-3", "MF-3", "MF-3"
+			switch shape {
+			case "MF2-MF3":
+				tracker["deps"].(map[string]any)[id] = []map[string]string{{"id": "epic-129.2", "status": "closed", "issue_type": "task", "dependency_type": "blocks"}}
+			case "MF3-MF4":
+				row["description"] = "TBD"
+				allSignals, uncovered, narrower = "MF-3,MF-4", "MF-4", "MF-4"
+			case "grown-MF3-with-MF2":
+				tracker["deps"].(map[string]any)[id] = []map[string]string{
+					{"id": "epic-129.2", "status": "closed", "issue_type": "task", "dependency_type": "blocks"},
+					{"id": "epic-129.3", "status": "closed", "issue_type": "task", "dependency_type": "blocks"},
+				}
+			}
+			data, err = json.Marshal(tracker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f.path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			oldEval, oldRead, oldStatus := readyCheckEvaluateFn, readyCheckReadMarkerFn, readyCheckBeadFn
+			readyCheckEvaluateFn, readyCheckReadMarkerFn, readyCheckBeadFn = readiness.EvaluateReadiness, bead.ReadOverrideMarker, next.FetchBeadByID
+			defer func() { readyCheckEvaluateFn, readyCheckReadMarkerFn, readyCheckBeadFn = oldEval, oldRead, oldStatus }()
+			before := f.audit(t)
+			writesBefore := scopedTrackerUpdates(t, f)
+			_, err = runBeadReadyCheck(t, id)
+			if err == nil {
+				t.Fatal("mixed coverage passed")
+			}
+			requireText(t, err.Error(), "uncovered: "+uncovered, "recovery: mindspec release "+id, "recovery: mindspec next "+id+" --allow-not-ready="+allSignals+" --evidence <path-to-justification>")
+			if f.audit(t) != before || scopedTrackerUpdates(t, f) != writesBefore {
+				t.Fatal("ready-check mutated")
+			}
+			// Invoke release's own path, with the existing git-worktree I/O seam.
+			deps := releaseDeps{
+				root: f.root, beadWorktreePath: wtPath,
+				checkDirty:     func(string, string) ([]string, error) { return nil, nil },
+				removeWorktree: wtOps.Remove, setOpen: defaultSetOpen,
+				activeBead: func(string) (string, string, bool) { return id, "epic-129", true },
+				syncPhase:  func(string) {}, stdout: io.Discard, stderr: io.Discard,
+			}
+			if err := runRelease(deps, id, false); err != nil {
+				t.Fatal(err)
+			}
+			if f.status(t, id) != "open" {
+				t.Fatal("release did not return bead to open")
+			}
+			afterRelease, _, err := bead.ReadOverrideMarker(id)
+			if err != nil || !reflect.DeepEqual(marker, afterRelease) {
+				t.Fatalf("release changed marker: %+v %v", afterRelease, err)
+			}
+			// A prior marker never grants claim authority, even if it covers part.
+			before = f.audit(t)
+			writesBefore = scopedTrackerUpdates(t, f)
+			_, err = runScopedNext(t, f, id, "--spec", "129-fixture", "--allow-not-ready="+narrower, "--evidence", nextEvidenceFile(t))
+			if err == nil {
+				t.Fatal("narrow re-claim succeeded")
+			}
+			requireText(t, err.Error(), "--allow-not-ready="+allSignals+" --evidence <path-to-justification>")
+			if f.audit(t) != before || scopedTrackerUpdates(t, f) != writesBefore {
+				t.Fatal("narrow re-claim mutated")
+			}
+			_, err = runScopedNext(t, f, id, "--spec", "129-fixture")
+			if err == nil || f.audit(t) != before || scopedTrackerUpdates(t, f) != writesBefore {
+				t.Fatal("unflagged re-claim acquired authority from old marker")
+			}
+			newEvidence := nextEvidenceFile(t)
+			out, err = runScopedNext(t, f, id, "--spec", "129-fixture", "--allow-not-ready="+allSignals, "--evidence", newEvidence)
+			if err != nil {
+				t.Fatalf("fresh re-claim: %v %s", err, out)
+			}
+			replacement, v, err := bead.ReadOverrideMarker(id)
+			if err != nil || v != bead.MarkerValid || strings.Join(replacement.Signals, ",") != allSignals || replacement.Evidence.Path != newEvidence || replacement.Evidence.Path == oldEvidence {
+				t.Fatalf("marker was not replaced: %+v %s %v", replacement, v, err)
+			}
+			report, err := readiness.EvaluateReadiness(f.root, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, signal := range report.FailingSignals() {
+				if !reflect.DeepEqual(replacement.Fingerprints[signal.ID], readiness.FailureRecordDigests(signal)) {
+					t.Fatalf("fresh digests mismatch: %+v", replacement)
+				}
+			}
+			if got := strings.TrimSpace(honestyGit(t, f.root, "rev-parse", "bead/"+id)); got != surviving {
+				t.Fatalf("surviving branch reset: %s want %s", got, surviving)
+			}
+			out, err = runBeadReadyCheck(t, id)
+			if err != nil {
+				t.Fatalf("fresh marker not honoured: %v %s", err, out)
+			}
+			for _, signal := range replacement.Signals {
+				requireText(t, out, signal+": OVERRIDDEN")
+			}
+		})
+	}
+}
+
+func TestReadyCheck_CycleSkillCopiesMatch(t *testing.T) {
+	source, err := os.ReadFile("../../plugins/mindspec/skills/ms-bead-cycle/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := os.ReadFile("../../.claude/skills/ms-bead-cycle/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(source, installed) {
+		t.Fatal("cycle skill installed copy differs from canonical source")
+	}
+	if strings.Contains(string(source), "--allow-not-ready"+string(rune(96))) {
+		t.Fatal("cycle skill still offers bare override")
+	}
+	requireText(t, string(source), "--allow-not-ready=<ids> --evidence <path>")
+}
+
+func TestReadyCheck_ReadinessDocContracts(t *testing.T) {
+	for _, tc := range []struct {
+		path    string
+		phrases []string
+	}{
+		{"../../.mindspec/core/USAGE.md", []string{"--allow-not-ready=<ids> --evidence <path>", "mindspec bead ready-check <id>", "schema-v2", "1 byte to 64 KiB"}},
+		{"../../.mindspec/domains/execution/interfaces.md", []string{"MetaKeyReadinessOverride", "{schema: 2, signals, fingerprints, overridden, evidence: {path, sha256, bytes}}", "repository-relative evidence path"}},
+		{"../../.mindspec/domains/workflow/interfaces.md", []string{"opts GateOptions", "result *GateResult", "--allow-not-ready=<ids> --evidence <path>"}},
+	} {
+		t.Run(filepath.Base(filepath.Dir(tc.path))+"/"+filepath.Base(tc.path), func(t *testing.T) {
+			data, err := os.ReadFile(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, phrase := range tc.phrases {
+				requireText(t, string(data), phrase)
+			}
+		})
 	}
 }

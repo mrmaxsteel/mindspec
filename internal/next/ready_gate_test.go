@@ -1,7 +1,12 @@
 package next
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,19 +15,10 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 )
 
-// ready_gate_test.go pins spec 124 (impl-readiness-gate) Bead 2's
-// internal/next.GateReadiness / RecordReadinessOverride — the AC-4 unit
-// level: the gate's decision logic (refuse / override / pass) against
-// Bead 1's committed NEGATIVE/POSITIVE readiness fixtures, hermetically
-// (readiness.FakeBDStore.Install swaps the readiness engine's OWN bd/git
-// seams — no real bd, never t.Skip). The full command-level integration
-// (the durable marker actually landing in `bd show`, the byte-identical
-// refusal audit against real bd/git state, `--force` orthogonality) is
-// pinned by cmd/mindspec/next_ready_gate_test.go, which drives the real
-// `mindspec next` binary against a real bd/git sandbox — GateReadiness's
-// own bd write (RecordReadinessOverride) has no seam reachable from
-// outside internal/bead, so its actual bd round-trip can only be proven
-// by a real bd process, not faked from this package.
+// The gate tests drive the real readiness engine through FakeBDStore or a
+// report seam. Refusals audit fake tracker state and real temp git refs,
+// worktrees and porcelain, with metadata writes forbidden. Command fixtures
+// separately exercise the local fake tracker's marker/claim round-trip.
 
 // TestGateReadiness_NegativeFixtureRefuses pins AC-4's refusal shape: a
 // failing floor with allowNotReady=false returns a nil result and a
@@ -36,10 +32,11 @@ func TestGateReadiness_NegativeFixtureRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildNegativeFixture: %v", err)
 	}
+	fx.Store.LandedDeps = map[string]bool{"unused": true}
 	restore := fx.Store.Install()
 	t.Cleanup(restore)
 
-	result, err := GateReadiness(root, fx.BeadID, false)
+	result, err := GateReadiness(root, fx.BeadID, GateOptions{})
 	if err == nil {
 		t.Fatal("expected a refusal error for the negative fixture, got nil")
 	}
@@ -74,10 +71,11 @@ func TestGateReadiness_NegativeFixtureAllowNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildNegativeFixture: %v", err)
 	}
+	fx.Store.LandedDeps = map[string]bool{"unused": true}
 	restore := fx.Store.Install()
 	t.Cleanup(restore)
 
-	result, err := GateReadiness(root, fx.BeadID, true)
+	result, err := GateReadiness(root, fx.BeadID, allOverrideOptions(t))
 	if err != nil {
 		t.Fatalf("expected no error with allowNotReady=true, got: %v", err)
 	}
@@ -109,11 +107,12 @@ func TestGateReadiness_PositiveFixturePasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPositiveFixture: %v", err)
 	}
+	fx.Store.LandedDeps = map[string]bool{fx.DepBeadID: true}
 	restore := fx.Store.Install()
 	t.Cleanup(restore)
 
 	for _, allowNotReady := range []bool{false, true} {
-		result, err := GateReadiness(root, fx.BeadID, allowNotReady)
+		result, err := GateReadiness(root, fx.BeadID, fixtureOverrideOptions(t, allowNotReady))
 		if err != nil {
 			t.Fatalf("allowNotReady=%v: expected no error for the positive fixture, got: %v", allowNotReady, err)
 		}
@@ -136,7 +135,7 @@ func TestGateReadiness_EvaluationErrorPropagates(t *testing.T) {
 	restore := store.Install()
 	t.Cleanup(restore)
 
-	result, err := GateReadiness(root, "mindspec-nope.1", false)
+	result, err := GateReadiness(root, "mindspec-nope.1", GateOptions{})
 	if err == nil {
 		t.Fatal("expected an evaluation error for an unrecorded bead, got nil")
 	}
@@ -165,7 +164,7 @@ func TestGateReadiness_RenderingLegControlBytesEscaped(t *testing.T) {
 			"noise\x1b[31mmore-noise\r")
 	}
 
-	_, err := GateReadiness("root", "mindspec-abc", false)
+	_, err := GateReadiness("root", "mindspec-abc", GateOptions{})
 	if err == nil {
 		t.Fatal("expected the evaluation error to propagate")
 	}
@@ -196,7 +195,7 @@ func TestRecordReadinessOverride_WritesMarkerViaMergeMetadata(t *testing.T) {
 	}
 
 	signals := []string{"MF-2", "MF-4"}
-	if err := RecordReadinessOverride("mindspec-abcd.1", signals); err != nil {
+	if err := RecordReadinessOverride("mindspec-abcd.1", recordResult(t, signals)); err != nil {
 		t.Fatalf("RecordReadinessOverride: %v", err)
 	}
 
@@ -210,21 +209,20 @@ func TestRecordReadinessOverride_WritesMarkerViaMergeMetadata(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected the %q key to be written, got keys %v", bead.MetaKeyReadinessOverride, gotUpdates)
 	}
-	marker, ok := raw.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected the marker value to be a map, got %T", raw)
+	marker, validity := bead.ParseOverrideMarker(raw)
+	if validity != bead.MarkerValid {
+		t.Fatalf("marker must be schema v2: %v %#v", validity, raw)
 	}
-	gotSignals, ok := marker["signals"].([]string)
-	if !ok || len(gotSignals) != 2 || gotSignals[0] != "MF-2" || gotSignals[1] != "MF-4" {
-		t.Errorf("expected signals %v, got %v", signals, marker["signals"])
+	if !reflect.DeepEqual(marker.Signals, signals) {
+		t.Fatalf("signals = %v", marker.Signals)
 	}
-	ts, ok := marker["overridden"].(string)
-	if !ok || ts == "" {
-		t.Fatalf("expected a non-empty overridden timestamp string, got %v", marker["overridden"])
+	if _, err := time.Parse(time.RFC3339, marker.Overridden); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := time.Parse(time.RFC3339, ts); err != nil {
-		t.Errorf("overridden timestamp %q is not a valid RFC3339 UTC timestamp: %v", ts, err)
+	if !reflect.DeepEqual(marker.Fingerprints, recordResult(t, signals).Fingerprints) {
+		t.Fatal("wrong complete failure fingerprints")
 	}
+
 }
 
 // TestRecordReadinessOverride_PropagatesWriteFailure pins that a
@@ -239,7 +237,7 @@ func TestRecordReadinessOverride_PropagatesWriteFailure(t *testing.T) {
 		return errors.New("bd metadata merge-write failed")
 	}
 
-	if err := RecordReadinessOverride("mindspec-abcd.1", []string{"MF-1"}); err == nil {
+	if err := RecordReadinessOverride("mindspec-abcd.1", recordResult(t, []string{"MF-1"})); err == nil {
 		t.Fatal("expected the MergeMetadata failure to propagate, got nil")
 	}
 }
@@ -263,7 +261,7 @@ func TestRecordReadinessOverride_HostileFailureRendersEscaped(t *testing.T) {
 		return errors.New(hostile)
 	}
 
-	err := RecordReadinessOverride("mindspec-abcd.1", []string{"MF-1"})
+	err := RecordReadinessOverride("mindspec-abcd.1", recordResult(t, []string{"MF-1"}))
 	if err == nil {
 		t.Fatal("expected the MergeMetadata failure to propagate")
 	}
@@ -317,5 +315,449 @@ func TestRollbackReadinessOverride_PropagatesDeleteFailure(t *testing.T) {
 
 	if err := RollbackReadinessOverride("mindspec-abcd.1"); err == nil {
 		t.Fatal("expected the delete failure to propagate, got nil")
+	}
+}
+
+// These helpers never consult a live tracker. The audit includes the complete
+// fake tracker record set and real temporary git refs/worktrees/porcelain.
+func gateGit(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	c := exec.Command("git", append([]string{"-C", root}, args...)...)
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+	return string(out)
+}
+func gateAudit(t *testing.T, root string, store *readiness.FakeBDStore) string {
+	t.Helper()
+	data, err := json.Marshal(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data) + gateGit(t, root, "for-each-ref", "--format=%(refname) %(objectname)") + gateGit(t, root, "worktree", "list", "--porcelain") + gateGit(t, root, "status", "--porcelain")
+}
+func fixtureOverrideOptions(t *testing.T, on bool) GateOptions {
+	if on {
+		return allOverrideOptions(t)
+	}
+	return GateOptions{}
+}
+func allOverrideOptions(t *testing.T) GateOptions {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "why.md")
+	if err := os.WriteFile(p, []byte("operator justification"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return GateOptions{FlagGiven: true, NamedSignals: []string{"MF-1", "MF-2", "MF-3", "MF-4"}, EvidencePath: p}
+}
+func recordResult(t *testing.T, ids []string) *GateResult {
+	t.Helper()
+	e, err := ReadOverrideEvidence(allOverrideOptions(t).EvidencePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &GateResult{FailingSignals: ids, Fingerprints: map[string][]string{}, Evidence: e}
+	for _, id := range ids {
+		r.Fingerprints[id] = readiness.FailureRecordDigests(readiness.Signal{Failures: []string{id + ":fixture"}})
+	}
+	return r
+}
+func gateFixture(t *testing.T) (string, *readiness.Fixture) {
+	t.Helper()
+	root := t.TempDir()
+	fx, err := readiness.BuildPositiveFixture(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.Store.LandedDeps = map[string]bool{fx.DepBeadID: true}
+	t.Cleanup(fx.Store.Install())
+	return root, fx
+}
+func denyWrites(t *testing.T) *int {
+	t.Helper()
+	old := mergeMetadataFn
+	n := new(int)
+	mergeMetadataFn = func(string, map[string]interface{}) error { *n++; return errors.New("unexpected metadata write") }
+	t.Cleanup(func() { mergeMetadataFn = old })
+	return n
+}
+func assertGateRefusal(t *testing.T, root string, fx *readiness.Fixture, id string, opts GateOptions, wants ...string) {
+	t.Helper()
+	n := denyWrites(t)
+	before := gateAudit(t, root, fx.Store)
+	result, err := GateReadiness(root, id, opts)
+	if err == nil || result != nil {
+		t.Fatalf("expected refusal, got %+v %v", result, err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing %q: %v", want, err)
+		}
+	}
+	if *n != 0 || gateAudit(t, root, fx.Store) != before {
+		t.Fatal("refusal mutated tracker, refs or worktrees")
+	}
+}
+func TestGateReadiness_LineageSpecMismatchRefuses(t *testing.T) {
+	for _, path := range []string{"explicit", "resolved-unscoped"} {
+		t.Run(path, func(t *testing.T) {
+			root, fx := gateFixture(t)
+			assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{ScopeSpec: "997-other"}, "bead "+fx.BeadID+" resolves to spec "+fx.SpecID+" by lineage but is being claimed for spec 997-other; nothing was claimed", "recovery: bd show "+fx.BeadID+" --json")
+		})
+	}
+}
+func TestGateReadiness_NonPlanBeadRefuses(t *testing.T) {
+	for _, id := range []string{"mindspec-bug", "other-epic.1"} {
+		for _, scoped := range []bool{false, true} {
+			t.Run(id+fmtBool(scoped), func(t *testing.T) {
+				root, fx := gateFixture(t)
+				fx.Store.Lineage[id] = readiness.FakeLineage{EpicID: "mindspec-posb", SpecID: fx.SpecID}
+				fx.Store.Records[id] = readiness.FakeBeadRecord{}
+				scope := ""
+				if scoped {
+					scope = fx.SpecID
+				}
+				assertGateRefusal(t, root, fx, id, GateOptions{ScopeSpec: scope}, "bead "+id+" is not a plan bead of spec "+fx.SpecID+" (no mindspec-posb.<N> ID); mindspec next claims only plan beads", "recovery: bd show "+id+" --json")
+			})
+		}
+	}
+}
+func fmtBool(b bool) string {
+	if b {
+		return "-scoped"
+	}
+	return "-unscoped"
+}
+func TestGateReadiness_MissingSpecBranchRefuses(t *testing.T) {
+	root, fx := gateFixture(t)
+	// Move HEAD to main so the spec ref can be deleted in this local fixture.
+	gateGit(t, root, "switch", "main")
+	gateGit(t, root, "branch", "-D", "spec/"+fx.SpecID)
+	assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{}, "spec branch spec/"+fx.SpecID+" for bead "+fx.BeadID+" does not exist (finalized and deleted, or never created); nothing was claimed", "recovery: mindspec state show")
+}
+func reportWithFailures(ids ...string) *readiness.Report {
+	r := &readiness.Report{BeadID: "mindspec-posb.1", EpicID: "mindspec-posb", SpecID: "998-fixture-positive"}
+	for _, id := range []string{"MF-1", "MF-2", "MF-3", "MF-4"} {
+		s := readiness.Signal{ID: id, Pass: true}
+		for _, fail := range ids {
+			if fail == id {
+				s.Pass = false
+				s.Detail = id + " fixture failure"
+				s.Failures = []string{id + ":fixture"}
+				s.Recovery = "bd show mindspec-posb.1 --json"
+			}
+		}
+		r.Signals = append(r.Signals, s)
+	}
+	return r
+}
+func gateReport(t *testing.T, r *readiness.Report) {
+	t.Helper()
+	old := evaluateReadinessFn
+	t.Cleanup(func() { evaluateReadinessFn = old })
+	evaluateReadinessFn = func(string, string) (*readiness.Report, error) { return r, nil }
+}
+func TestGateReadiness_ScopedOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		fail, named []string
+		missing     bool
+		want        string
+	}{
+		{"MF3", []string{"MF-3"}, []string{"MF-3"}, false, ""},
+		{"subset-refusal", []string{"MF-2", "MF-3"}, []string{"MF-3"}, false, "--allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>"},
+		{"unknown", []string{"MF-3"}, []string{"MF-9"}, false, "unknown readiness signal MF-9"},
+		{"all", []string{"MF-3"}, []string{"all"}, false, "unknown readiness signal all"},
+		{"missing-evidence", []string{"MF-3"}, []string{"MF-3"}, true, "missing --evidence"},
+		{"passing-note-on-refusal", []string{"MF-2"}, []string{"MF-3"}, false, "MF-3 named but passing — not recorded"},
+		{"passing", nil, []string{"MF-3"}, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, fx := gateFixture(t)
+			r := reportWithFailures(tc.fail...)
+			gateReport(t, r)
+			opts := allOverrideOptions(t)
+			opts.NamedSignals = tc.named
+			if tc.missing {
+				opts.EvidencePath = ""
+			}
+			if tc.want != "" {
+				assertGateRefusal(t, root, fx, fx.BeadID, opts, tc.want)
+				_, err := GateReadiness(root, fx.BeadID, opts)
+				if tc.name == "subset-refusal" {
+					lines := strings.Split(err.Error(), "\n")
+					last := lines[len(lines)-1]
+					if last != "recovery: mindspec next "+fx.BeadID+" "+tc.want || strings.Contains(last, opts.EvidencePath) {
+						t.Fatalf("final recovery leaked operator path or omitted full set: %s", last)
+					}
+				}
+				return
+			}
+			got, err := GateReadiness(root, fx.BeadID, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.FailingSignals, tc.fail) {
+				t.Fatalf("recorded signals %v want %v", got.FailingSignals, tc.fail)
+			}
+			if len(tc.fail) == 0 && !reflect.DeepEqual(got.Notes, []string{"MF-3 named but passing — not recorded"}) {
+				t.Fatal(got.Notes)
+			}
+			if len(tc.fail) > 0 {
+				old := mergeMetadataFn
+				defer func() { mergeMetadataFn = old }()
+				mergeMetadataFn = func(id string, updates map[string]interface{}) error {
+					m, v := bead.ParseOverrideMarker(updates[bead.MetaKeyReadinessOverride])
+					if v != bead.MarkerValid || !reflect.DeepEqual(m.Signals, tc.fail) || !reflect.DeepEqual(m.Fingerprints["MF-3"], readiness.FailureRecordDigests(r.Signals[2])) {
+						t.Fatalf("wrong marker: %+v %s", m, v)
+					}
+					return nil
+				}
+				if err := RecordReadinessOverride(fx.BeadID, got); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+func TestGateReadiness_IndeterminateNotOverridable(t *testing.T) {
+	for _, origin := range []string{"membership-read", "landed-merge-read"} {
+		t.Run(origin, func(t *testing.T) {
+			root := t.TempDir()
+			fx, err := readiness.BuildPositiveFixture(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dep := fx.DepBeadID
+			if origin == "membership-read" {
+				dep = "external-dep"
+				rec := fx.Store.Records[fx.BeadID]
+				rec.Dependencies = []readiness.FakeDependency{{ID: dep, Status: "closed"}}
+				fx.Store.Records[fx.BeadID] = rec
+			}
+			t.Cleanup(fx.Store.Install())
+			// A local, deliberately failing metadata reader arms the real landed finder.
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "bd"), []byte("#!/bin/sh\\nprintf '%s\\n' 'local metadata read failure' >&2\\nexit 1\\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if origin == "landed-merge-read" {
+				gitPath, err := exec.LookPath("git")
+				if err != nil {
+					t.Fatal(err)
+				}
+				script := "#!/bin/sh\nfor arg in \"$@\"; do\n if [ \"$arg\" = log ]; then printf '%s\\n' 'local landed read failure' >&2; exit 1; fi\ndone\nexec \"" + gitPath + "\" \"$@\"\n"
+				if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			report, err := readiness.EvaluateReadiness(root, fx.BeadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(report.Signals[2].Failures, []string{dep + ":indeterminate"}) {
+				t.Fatalf("fixture did not arm %s: %+v", origin, report.Signals[2])
+			}
+			assertGateRefusal(t, root, fx, fx.BeadID, allOverrideOptions(t), "MF-3 cannot be overridden: "+dep+":indeterminate could not be evaluated; fix the read first")
+			_, err = GateReadiness(root, fx.BeadID, allOverrideOptions(t))
+			if strings.Contains(err.Error(), "--allow-not-ready=") {
+				t.Fatal("indeterminate refusal offered impossible override")
+			}
+		})
+	}
+}
+
+func captureOverride(t *testing.T, id string, result *GateResult) bead.OverrideMarker {
+	t.Helper()
+	var marker bead.OverrideMarker
+	old := mergeMetadataFn
+	defer func() { mergeMetadataFn = old }()
+	mergeMetadataFn = func(got string, updates map[string]interface{}) error {
+		var v bead.MarkerValidity
+		marker, v = bead.ParseOverrideMarker(updates[bead.MetaKeyReadinessOverride])
+		if got != id || v != bead.MarkerValid {
+			t.Fatalf("invalid marker: %s %s %+v", got, v, updates)
+		}
+		return nil
+	}
+	if err := RecordReadinessOverride(id, result); err != nil {
+		t.Fatal(err)
+	}
+	return marker
+}
+func overrideFixtureReport(t *testing.T, fail ...string) (string, *readiness.Fixture, *readiness.Report, GateOptions) {
+	root, fx := gateFixture(t)
+	r := reportWithFailures(fail...)
+	gateReport(t, r)
+	return root, fx, r, allOverrideOptions(t)
+}
+func TestOverride_NoScopeWidening(t *testing.T) {
+	root, fx, r, opts := overrideFixtureReport(t, "MF-3")
+	opts.NamedSignals = []string{"MF-2", "MF-3"}
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	if !reflect.DeepEqual(m.Signals, []string{"MF-3"}) || len(m.Fingerprints) != 1 {
+		t.Fatalf("passing signal recorded: %+v", m)
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "operator justification") || strings.Contains(string(raw), "\"text\"") {
+		t.Fatalf("evidence text stored: %s", raw)
+	}
+	r.Signals[1] = readiness.Signal{ID: "MF-2", Failures: []string{"dangling:R999"}, Recovery: "bd show mindspec-posb.1 --json"}
+	c := readiness.ApplyOverride(r, m, bead.MarkerValid)
+	if !reflect.DeepEqual(c.Uncovered, []string{"MF-2"}) {
+		t.Fatal(c)
+	}
+	assertGateRefusal(t, root, fx, fx.BeadID, GateOptions{}, "--allow-not-ready=MF-2,MF-3")
+}
+func TestOverride_GrowthUncovered(t *testing.T) {
+	root, fx, r, opts := overrideFixtureReport(t, "MF-3")
+	r.Signals[2].Failures = []string{"mindspec-a.1:no-candidate"}
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	r.Signals[2].Failures = append(r.Signals[2].Failures, "mindspec-b.1:no-candidate")
+	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); !reflect.DeepEqual(c.Uncovered, []string{"MF-3"}) {
+		t.Fatalf("growth stayed covered: %+v", c)
+	}
+	got, err = GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = captureOverride(t, fx.BeadID, got)
+	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); len(c.Uncovered) != 0 {
+		t.Fatalf("fresh override not honoured: %+v", c)
+	}
+}
+func TestOverride_ShrinkageStaysCovered(t *testing.T) {
+	root, fx, r, opts := overrideFixtureReport(t, "MF-3")
+	r.Signals[2].Failures = []string{"mindspec-a.1:no-candidate", "mindspec-b.1:no-candidate"}
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	r.Signals[2].Failures = r.Signals[2].Failures[:1]
+	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); len(c.Uncovered) != 0 {
+		t.Fatalf("shrinkage uncovered: %+v", c)
+	}
+}
+func TestOverride_MF4SecondBlockerUncovered(t *testing.T) {
+	root, fx, r, opts := overrideFixtureReport(t, "MF-4")
+	r.Signals[3].Failures = []string{"token:description:-:1:first"}
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	r.Signals[3].Failures = append(r.Signals[3].Failures, "token:description:-:1:second")
+	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); !reflect.DeepEqual(c.Uncovered, []string{"MF-4"}) {
+		t.Fatalf("MF4 growth covered: %+v", c)
+	}
+}
+func TestOverride_MF4OccurrenceIdentity(t *testing.T) {
+	for _, kind := range []string{"token", "checklist"} {
+		t.Run(kind, func(t *testing.T) {
+			root, fx := gateFixture(t)
+			rec := fx.Store.Records[fx.BeadID]
+			rec.Description = "TBD"
+			if kind == "checklist" {
+				path := filepath.Join(root, "docs/specs", fx.SpecID, "plan.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("\n**Blocking Questions**\n- [ ] Resolve retry count\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+				rec.Description = ""
+			}
+			fx.Store.Records[fx.BeadID] = rec
+			opts := allOverrideOptions(t)
+			got, err := GateReadiness(root, fx.BeadID, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := captureOverride(t, fx.BeadID, got)
+			if len(m.Fingerprints["MF-4"]) != 1 {
+				t.Fatalf("expected one blocker: %+v", m)
+			}
+			if kind == "token" {
+				path := filepath.Join(root, "docs/specs", fx.SpecID, "plan.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("\n### Design\nTBD\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path := filepath.Join(root, "docs/specs", fx.SpecID, "plan.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("- [ ] Resolve retry count\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, err := readiness.EvaluateReadiness(root, fx.BeadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(r.Signals[3].Failures) != 2 {
+				t.Fatalf("multiplicity lost: %+v", r.Signals[3])
+			}
+			if c := readiness.ApplyOverride(r, m, bead.MarkerValid); !reflect.DeepEqual(c.Uncovered, []string{"MF-4"}) {
+				t.Fatalf("second occurrence covered: %+v", c)
+			}
+		})
+	}
+}
+func TestOverride_ExplicitNarrowerRequestRefuses(t *testing.T) {
+	root, fx, r, opts := overrideFixtureReport(t, "MF-2", "MF-3")
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	fx.Store.SeedReadinessAttempt(fx.BeadID, bead.MetaKeyReadinessOverride, m)
+	opts.NamedSignals = []string{"MF-3"}
+	assertGateRefusal(t, root, fx, fx.BeadID, opts, "--allow-not-ready=MF-2,MF-3")
+	if !reflect.DeepEqual(m.Fingerprints["MF-2"], readiness.FailureRecordDigests(r.Signals[1])) {
+		t.Fatal("wrong token digest")
+	}
+}
+func TestOverride_WriterReaderAgreeRawMF4(t *testing.T) {
+	root, fx := gateFixture(t)
+	rec := fx.Store.Records[fx.BeadID]
+	rec.Description = "TBD \x1b[31mretry"
+	fx.Store.Records[fx.BeadID] = rec
+	opts := allOverrideOptions(t)
+	got, err := GateReadiness(root, fx.BeadID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := captureOverride(t, fx.BeadID, got)
+	r, err := readiness.EvaluateReadiness(root, fx.BeadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m.Fingerprints["MF-4"], readiness.FailureRecordDigests(r.Signals[3])) {
+		t.Fatal("writer/reader raw digests differ")
+	}
+	if c := readiness.ApplyOverride(r, m, bead.MarkerValid); len(c.Uncovered) != 0 {
+		t.Fatal(c)
 	}
 }

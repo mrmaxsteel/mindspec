@@ -160,7 +160,9 @@ func (f *nextHonestyFixture) run(t *testing.T, args ...string) (string, error) {
 	cmd.Flags().String("spec", "", "")
 	cmd.Flags().Bool("force", false, "")
 	cmd.Flags().Bool("emit-only", false, "")
-	cmd.Flags().Bool("allow-not-ready", false, "")
+	cmd.Flags().String("allow-not-ready", "", "")
+	cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
+	cmd.Flags().String("evidence", "", "")
 	cmd.SetArgs(args)
 	runErr := cmd.Execute()
 	os.Stdout, os.Stderr = oldOut, oldErr
@@ -289,7 +291,9 @@ esac
 		cmd.Flags().String("spec", "", "")
 		cmd.Flags().Bool("force", false, "")
 		cmd.Flags().Bool("emit-only", false, "")
-		cmd.Flags().Bool("allow-not-ready", false, "")
+		cmd.Flags().String("allow-not-ready", "", "")
+		cmd.Flags().Lookup("allow-not-ready").NoOptDefVal = next.BareOverride
+		cmd.Flags().String("evidence", "", "")
 		cmd.SetArgs([]string{"--emit-only", fmt.Sprintf("--pick=%d", pick)})
 		err = cmd.Execute()
 		os.Stdout = orig
@@ -334,6 +338,7 @@ func TestNextSelection_EmitOnlyPickParity_DifferentBeadsPerPick(t *testing.T) {
 }
 func TestNextSelection_ClaimPickMatchesEmitOnlyPick(t *testing.T) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "--pick=2")
 	if err != nil {
 		t.Fatal(err)
@@ -442,6 +447,7 @@ func TestNextSelection_EmitOnlyDefaultPick_PrintsLineAndSelectsRow1(t *testing.T
 }
 func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	out, err := f.run(t, "--spec", "129-fixture")
 	if err != nil {
 		t.Fatalf("%v %s", err, out)
@@ -500,6 +506,7 @@ func TestNextSelection_PositionalEmitOnly_HostileIDRendersEscaped(t *testing.T) 
 }
 func testNextPartialNotice(t *testing.T, emit bool) {
 	f := newNextHonestyFixture(t)
+	honestyGit(t, f.root, "branch", "spec/129-fixture")
 	f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"))
 	f.write(t)
 	args := []string{"--spec", "129-fixture"}
@@ -526,6 +533,7 @@ func TestNext_ScopedSelection_ReporterShapesClaimable(t *testing.T) {
 	for _, id := range []string{"epic-129.2", "epic-129.3"} {
 		t.Run(id, func(t *testing.T) {
 			f := newNextHonestyFixture(t)
+			honestyGit(t, f.root, "branch", "spec/129-fixture")
 			out, err := f.run(t, "--spec", "129-fixture", id)
 			if err != nil {
 				t.Fatalf("reporter shape: %v %s", err, out)

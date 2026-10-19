@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -114,7 +115,7 @@ func exactOverrideKeys(fields map[string]json.RawMessage, keys ...string) bool {
 }
 
 func overrideDigest(s string) bool {
-	if len(s) != 64 {
+	if len(s) != 64 || s != strings.ToLower(s) {
 		return false
 	}
 	_, err := hex.DecodeString(s)

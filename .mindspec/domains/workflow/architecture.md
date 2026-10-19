@@ -880,7 +880,7 @@ sites (ADR-0040 no-restate); every bead/plan-derived byte in it passes
 through `termsafe.Escape`, and each FAILing signal carries exactly one
 operator-authored `recovery:` line.
 
-### `mindspec next`: gate-before-mutate + `--allow-not-ready`
+### `mindspec next`: gate-before-mutate + `--allow-not-ready=<ids> --evidence <path>`
 
 `mindspec next` adopts ADR-0041's **preflight leg only** (the ADR's
 fourth-verb clause — a scope-deferral, not a certification of `next`'s
@@ -890,17 +890,30 @@ non-zero leaving bd status, git branches, and worktrees byte-identical
 to their pre-call state — no claim, no `bead/<id>` branch, no worktree.
 The refusal renders the same `readiness.Render` report plus each failing
 signal's recovery line and the two escape hatches: the standalone
-`bead ready-check` report, and re-running with `--allow-not-ready`.
+`bead ready-check` report, and re-running with `--allow-not-ready=<ids> --evidence <path>`.
 
-`--allow-not-ready` is the deliberate, RECORDED bypass: it proceeds past
-a failing floor, warns on stderr naming every failing signal, and writes
-a durable override marker (`mindspec_readiness_override`: the bypassed
-signal IDs + a UTC timestamp) via `bead.MergeMetadata` BEFORE the claim,
-FAIL-CLOSED — a marker-write failure refuses the whole command with
-nothing claimed, so `--allow-not-ready` success guarantees (marker
-durably written AND bead claimed). It is orthogonal to the pre-existing
-`--force` (session-freshness only), which gains no readiness authority.
-A passing floor adds no interactive step and no extra output.
+`--allow-not-ready=<ids> --evidence <path>` names a subset of MF-1..MF-4.
+Every current failure must be named and determinate. Fresh readable regular
+file evidence (1 byte to 64 KiB) is required whenever failures are recorded.
+The schema-v2 marker replaces the previous marker before ClaimBead,
+fail-closed: signals, complete sorted failure-record digests, UTC timestamp,
+and evidence path, sha256 and bytes, never evidence text. Prefer a
+repository-relative evidence path. A marker write failure refuses with
+nothing claimed; claim failure rolls the marker back. Passing named signals
+are noted and not recorded; an entirely passing floor requires no evidence.
+Stored markers never authorize a claim, including after release.
+`--force` remains session-freshness only.
+
+`mindspec bead ready-check <id>` covers a failure only with a VALID v2
+marker naming its signal and every current digest. Growth uncovers;
+shrinkage stays covered. Re-recording a claimed bead requires release and a
+fresh scoped re-claim naming all failing signals. Indeterminate reads refuse
+with the read-first diagnostic and no unusable override hint.
+
+Every claim checks the lineage epic's plan-bead ID form, refuses any scope
+spec mismatch, and proves that the lineage spec branch exists before
+mutation. The lineage spec is the dispatch and recording spec; unscoped
+claims cut from `spec/<T>`, never HEAD.
 
 ### The semantic Phase 0 + NOT-READY routing (skill layer)
 
@@ -948,7 +961,7 @@ ungrounded or non-resolving clarification is re-reported NOT READY.
 Both metadata keys are ADVISORY (ADR-0023: bd/Dolt stays the lifecycle
 authority) and are NEVER read by any mechanical signal — the layer
 boundary (AC-12) holds by construction, so a clarification can never
-flip a mechanical PASS/FAIL, and `--allow-not-ready` never touches the
+flip a mechanical PASS/FAIL, and `--allow-not-ready=<ids> --evidence <path>` never touches the
 semantic review. The two levers are not interchangeable.
 
 ## Landed-merge attestation integrity (spec 125, ADR-0041 §2(ii) amendment)

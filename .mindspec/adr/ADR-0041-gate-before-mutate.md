@@ -761,3 +761,31 @@ matches. Only explicit reattest may replace a contradictory binding with
 the independently scan-derived exact identity, after ownership,
 ambiguity, surviving-tip and revert checks (and F1/F3/F4/F5 on fallback).
 The prior pair is recorded in the audit; a refusal writes nothing.
+
+### (iii) Scoped, fingerprint-bound fourth-verb override
+
+`mindspec next` checks plan-bead form, lineage/scope agreement, and the
+existence of the lineage spec branch before mutation. The lineage spec
+is the dispatch spec, including an unscoped claim with no resolved target.
+
+`--allow-not-ready=<ids> --evidence <path>` names only MF-1 through MF-4.
+Every currently failing signal must be named; indeterminate read failures
+cannot be overridden. Bare, space-separated and `all` forms refuse.
+Named-but-passing signals are not recorded. An entirely passing floor
+needs no evidence and writes no marker.
+
+Each claim that records failures requires fresh readable regular file
+evidence of 1 byte to 64 KiB. Before ClaimBead, a schema-v2 marker REPLACES
+the old marker with the failing named signals, complete sorted
+failure-record digests, RFC-3339 timestamp, and evidence path/sha256/bytes,
+never evidence text. Marker-write failure refuses; claim failure rolls
+the marker back. Existing markers never authorize a claim, even after release.
+
+`mindspec bead ready-check` honours only VALID markers whose recorded
+digest sets cover every current failure record. Growth uncovers;
+shrinkage stays covered. LEGACY and MALFORMED markers grant nothing.
+Re-recording a claimed bead requires release and a fresh scoped re-claim
+with all currently failing signals and evidence; release is offered only
+when a claim exists. An indeterminate read instead requires fixing the
+read first, never an unusable re-claim hint. Marker shape and
+self-consistency provide no authentication of agent-writable metadata.

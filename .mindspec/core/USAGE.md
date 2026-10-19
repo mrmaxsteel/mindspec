@@ -194,7 +194,7 @@ Runs `mindspec approve plan <id>`
 1. **Clean tree check** — fails if uncommitted changes
 2. **Query ready work** — requires a valid molecule binding for `--spec` targets, then queries `bd ready --mol <mol-id>` for molecule-ready steps (fallbacks to global `bd ready` when no active molecule context exists)
 3. **Display & select** — shows available beads, picks first (or `--pick=N`)
-4. **Readiness gate (before any mutation)** — evaluates the four mechanical readiness signals (MF-1..MF-4, spec 124) for the selected bead. A NOT-READY refusal exits non-zero having claimed nothing and created no branch or worktree; the report names each failing signal with a `recovery:` line. `--allow-not-ready` proceeds deliberately, warning per failing signal and durably recording an override marker on the bead first (fail-closed)
+4. **Readiness gate (before any mutation)** — evaluates the four mechanical readiness signals (MF-1..MF-4, spec 124) for the selected bead. A NOT-READY refusal exits non-zero having claimed nothing and created no branch or worktree; the report names each failing signal with a `recovery:` line. `--allow-not-ready=<ids> --evidence <path>` proceeds only when every failing signal is named; indeterminate read failures refuse. A readable regular evidence file of 1 byte to 64 KiB is required for recorded failures. The schema-v2 marker records complete failure digests and evidence path, sha256 and byte count before the claim (fail-closed)
 5. **Claim** — `bd update <id> in_progress`
 6. **Create worktree** — `bd worktree create worktree-<beadID> bead/<beadID>`
 7. **Resolve mode** — maps bead type to MindSpec mode (extracts spec ID from bracket-prefix titles like `[IMPL 009-feature.1] Chunk title`)
@@ -333,7 +333,8 @@ Work is not complete until changes are committed.
 | `/impl-approve` | Approve implementation → idle |
 | `mindspec next` | Claim the next ready bead (refuses, mutation-free, when the readiness floor fails — spec 124) |
 | `mindspec next --spec <id>` | Claim ready work for a specific spec |
-| `mindspec next --allow-not-ready` | Claim deliberately despite a failing readiness floor; records a durable override marker naming the bypassed signals |
+| `mindspec bead ready-check <id>` | Read-only readiness check; exit 0 when every signal passes or is covered by a validated schema-v2 marker; growth uncovers, shrinkage stays covered |
+| `mindspec next --allow-not-ready=<ids> --evidence <path>` | Claim with fresh evidence for all named failures; replaces the schema-v2 marker with their complete failure digests |
 | `mindspec bead ready-check <bead-id>` | Read-only MF-1..MF-4 readiness report for a bead (exit 0 = all pass) |
 | `mindspec bead clarify <bead-id> --file <record.json>` | Record the one-per-bead grounded clarification for a NOT-READY bead, then re-dispatch |
 | `mindspec complete` | Close current bead and advance |

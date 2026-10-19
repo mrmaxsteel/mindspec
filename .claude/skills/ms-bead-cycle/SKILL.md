@@ -53,7 +53,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ bead-id + worktree + branch
 /ms-bead-impl          (round 1 implementation — Phase A stages the prompt, Phase B dispatches)
   ↓ commit SHA + flagged deviations
-/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then 6 reviewers fan out)
+/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then the configured reviewers fan out)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
   ↓ decide:
@@ -72,6 +72,28 @@ step 0                 (pick + claim the next eligible bead, create worktree)
 
 merge terminal         (panel-approved bead — mindspec complete)
 ```
+
+## NOT READY — pre-damage triage (spec 124 R5/R8)
+
+`/ms-bead-impl`'s dispatch ingress (`mindspec bead ready-check`, plus the staged prompt's Phase 0) can refuse a bead before any code is written. A subagent return whose first line is `NOT READY: <bead-id>` is its OWN outcome, handled distinctly from every other outcome:
+
+- **No panel round is consumed** — nothing was implemented, so there is nothing to review.
+- **Excluded from `loop.halt.max_consecutive_impl_failures`** — that brake stops *repeated failed implementations* (post-damage); NOT READY is the pre-damage refusal that PREVENTS them. Counting it toward the same brake would punish the gate for working.
+- **Never routed to `/ms-bead-fix`** — there is no implementation to fix.
+- **The bead worktree remains intact** — zero commits were made.
+
+On a NOT READY, choose exactly one of two dispositions:
+
+- **ACCEPT (the default)** — halt the bead and surface the reasons (the full ordinal-numbered report) to the user/orchestrator, with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch (back to `/ms-bead-impl`, which re-runs the ingress ready-check and re-stages Phase 0 fresh). `/ms-spec-autopilot` treats an ACCEPTed NOT READY as its existing bead-level halt class — do not proceed to the next bead.
+- **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (one entry for EVERY cited ordinal, each: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — the verb REFUSES a partial record (an unanswered cited reason means the bead is still not ready — that is ACCEPT territory) and a paraphrased reason (the pairing must repeat the cited reason verbatim); a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
+  ```bash
+  mindspec bead clarify <bead-id> --file <record.json>
+  ```
+  then re-dispatch. The cap is **categorical and durable**: ANY prior attempt record on the bead (from an earlier `bead clarify` call, even in a different session) forces the NEXT NOT READY — whether it repeats an addressed reason or raises an entirely new one — to ACCEPT. The verb itself enforces this (a second `bead clarify` on the same bead is refused), so the cap survives orchestrator restart / context loss — it is not a rule this skill has to remember to apply.
+
+  **Cap threat boundary.** The cap stops the accidental/naive unbounded clarify↔re-dispatch loop and survives process restart. It does NOT stop a deliberate, out-of-band DELETION of the bead's readiness-attempt metadata (a manual reset) — that is a conscious operator act, analogous to `--allow-not-ready=<ids> --evidence <path>` for the mechanical floor, and it destroys the append-only audit trail (visible in the record's absence). Do not delete the record to "get another round"; if the plan genuinely needs revision, ACCEPT and revise it.
+
+**Clarify vs. `--allow-not-ready=<ids> --evidence <path>` — never interchangeable.** `bead clarify` resolves a SEMANTIC Phase-0 concern with cited evidence (SR-1..SR-5 — implementability, decidability, helper existence, contradiction, ambiguity); it can never move a MECHANICAL MF-1..MF-4 signal (the layer boundary holds by construction — a clarification's dedicated metadata key is off the mechanical scan surface). `mindspec next --allow-not-ready=<ids> --evidence <path>` is the signal-scoped, evidence-recorded bypass of a failing mechanical floor at claim time — a deliberate "proceed anyway," not a resolution. Never substitute one for the other: clarifying a mechanical FAIL does nothing (the floor still refuses), and `--allow-not-ready=<ids> --evidence <path>` does not touch the semantic Phase-0 review at all.
 
 ## Merge terminal — `mindspec complete`
 
@@ -106,12 +128,14 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
 
 ## Family-asymmetry handling
 
-The headline signal is when all three Claudes APPROVE while one or more Codex REQUEST_CHANGES (or vice versa). Pay particular attention:
+The headline signal is when every Claude-family slot APPROVEs while one or more Codex slots REQUEST_CHANGES (or vice versa). Pay particular attention:
+
+The field evidence runs BOTH directions, stated portably: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed (ADR-0044): reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
 
 | Pattern | Likely meaning | Action |
 |:--------|:---------------|:-------|
-| 3 Claude APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex actually ran something and found a bug the Claudes missed | Treat as REQUEST_CHANGES — trust the empirical check |
-| 3 Codex APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
+| All Claude slots APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex claims to have run something and found a bug the Claudes missed | Verify, never confirmed: reproduce the claim yourself in an isolated checkout before treating it as a confirmed REQUEST_CHANGES |
+| All Codex slots APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
 | Unanimous APPROVE | Genuine consensus | Proceed to merge |
 | Unanimous REQUEST_CHANGES | The implementation is genuinely off; fix or rewrite |
 
@@ -122,6 +146,7 @@ The headline signal is when all three Claudes APPROVE while one or more Codex RE
 - Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
 - Don't merge with a known REQUEST_CHANGES (even at the threshold). The dissenting verdict's `concrete_changes_required` either gets folded in or filed as a follow-up bead before merge.
 - Don't run `mindspec complete` until `/ms-panel-tally` decided merge — the merge is destructive of the bead branch.
+- Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block (gate leg 7), not a replacement for it (ADR-0044).
 
 ## Then
 
