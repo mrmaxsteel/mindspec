@@ -1,168 +1,188 @@
 ---
-status: Draft
-spec_id: 129-readiness-tracker-honesty
-version: "1"
 adr_citations:
-  - ADR-0023
-  - ADR-0025
-  - ADR-0030
-  - ADR-0035
-  - ADR-0037
-  - ADR-0039
-  - ADR-0040
-  - ADR-0041
-  - ADR-0042
-  - ADR-0045
+    - ADR-0023
+    - ADR-0025
+    - ADR-0030
+    - ADR-0035
+    - ADR-0037
+    - ADR-0039
+    - ADR-0040
+    - ADR-0041
+    - ADR-0042
+    - ADR-0045
+approved_at: "2026-10-19T10:02:05Z"
+approved_by: user
+bead_ids:
+    - mindspec-icaz.1
+    - mindspec-icaz.2
+    - mindspec-icaz.3
+    - mindspec-icaz.4
+    - mindspec-icaz.5
+    - mindspec-icaz.6
+    - mindspec-icaz.7
+    - mindspec-icaz.8
+spec_id: 129-readiness-tracker-honesty
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/bead/bdcli.go
-      - internal/bead/bdcli_test.go
-      - internal/bead/hygiene.go
-      - internal/bead/hygiene_test.go
-      - internal/next/beads.go
-      - internal/next/beads_test.go
-      - internal/next/next_test.go
-      - internal/next/readyset_test.go
-      - internal/lifecycle/orphans.go
-      - internal/lifecycle/orphans_test.go
-      - internal/lifecycle/stale_open.go
-      - internal/lifecycle/stale_open_test.go
-      - internal/complete/complete.go
-      - internal/complete/complete_test.go
-      - internal/approve/adopt_lattice.go
-      - internal/approve/adopt_lattice_test.go
-      - internal/approve/plan_test.go
-      - internal/approve/spec_test.go
-      - internal/doctor/beads.go
-      - internal/doctor/beads_test.go
-      - internal/lint/rowcap_test.go
-      - internal/lint/testdata/rowcap_direct.go.txt
-      - internal/lint/testdata/rowcap_funcvar.go.txt
-      - internal/lint/testdata/rowcap_execbd.go.txt
-      - internal/lint/ratchet_argv_table_test.go
-      - cmd/mindspec/next_selection_test.go
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/gitutil/gitops.go
-      - internal/gitutil/reachable_merges_test.go
-      - internal/lifecycle/landed.go
-      - internal/lifecycle/landed_test.go
-      - internal/lifecycle/fallback.go
-      - internal/lifecycle/fallback_test.go
-      - internal/lifecycle/reattest.go
-      - internal/lifecycle/reattest_test.go
-      - cmd/mindspec/reattest.go
-      - cmd/mindspec/reattest_test.go
-      - internal/lint/ratchet_argv_table_test.go
-      - internal/lint/ratchet_composition_allowlist_test.go
-      - .mindspec/adr/ADR-0041-gate-before-mutate.md
-      - internal/validate/adr0041_spec129_amendment_test.go
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/workflow/runbook.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/bead/planbead.go
-      - internal/bead/planbead_test.go
-      - internal/validate/readiness/readiness.go
-      - internal/validate/readiness/report.go
-      - internal/validate/readiness/records.go
-      - internal/validate/readiness/records_test.go
-      - internal/validate/readiness/mf2_forms_test.go
-      - internal/validate/readiness/readiness_test.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 4
-    depends_on: [2, 3]
-    key_file_paths:
-      - internal/validate/readiness/readiness.go
-      - internal/validate/readiness/mf3.go
-      - internal/validate/readiness/fixtures.go
-      - internal/validate/readiness/readiness_test.go
-      - internal/validate/readiness/mf3_test.go
-      - .mindspec/domains/workflow/architecture.md
-  - id: 5
-    depends_on: [1, 2, 3]
-    key_file_paths:
-      - internal/next/beads.go
-      - internal/next/select.go
-      - internal/next/nearmiss.go
-      - internal/next/planread.go
-      - internal/next/nearmiss_test.go
-      - internal/next/beads_test.go
-      - internal/next/readyset_test.go
-      - internal/gitutil/fileprobe.go
-      - internal/gitutil/fileprobe_test.go
-      - cmd/mindspec/next.go
-      - cmd/mindspec/next_selection_test.go
-      - cmd/mindspec/next_positional_test.go
-      - internal/instruct/templates/implement.md
-      - internal/instruct/instruct_test.go
-      - internal/lint/ratchet_argv_table_test.go
-      - internal/lint/ratchet_composition_allowlist_test.go
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 6
-    depends_on: [3]
-    key_file_paths:
-      - internal/bead/readiness.go
-      - internal/bead/override_marker.go
-      - internal/bead/override_marker_test.go
-      - internal/validate/readiness/override.go
-      - internal/validate/readiness/override_test.go
-      - cmd/mindspec/bead_ready.go
-      - cmd/mindspec/bead_ready_test.go
-      - plugins/mindspec/skills/ms-bead-impl/SKILL.md
-      - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
-      - .claude/skills/ms-bead-impl/SKILL.md
-      - internal/setup/readiness_skill_pin_test.go
-      - internal/setup/skills.go
-      - internal/setup/historical_skills
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 7
-    depends_on: [4, 5, 6]
-    key_file_paths:
-      - internal/next/ready_gate.go
-      - internal/next/ready_gate_test.go
-      - internal/next/evidence.go
-      - internal/next/evidence_test.go
-      - cmd/mindspec/next.go
-      - cmd/mindspec/next_ready_gate_test.go
-      - cmd/mindspec/next_claim_guard_containment_test.go
-      - cmd/mindspec/verb_output_test.go
-      - cmd/mindspec/ceremony_guard_test.go
-      - cmd/mindspec/bead_ready_test.go
-      - cmd/mindspec/bead_clarify.go
-      - internal/lint/ratchet_composition_allowlist_test.go
-      - .mindspec/adr/ADR-0041-gate-before-mutate.md
-      - internal/validate/adr0041_spec129_amendment_test.go
-      - .mindspec/core/USAGE.md
-      - .mindspec/core/WORKFLOW-STATE-MACHINE.md
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/workflow/runbook.md
-      - .mindspec/domains/execution/interfaces.md
-  - id: 8
-    depends_on: []
-    key_file_paths:
-      - internal/gitutil/gitignore.go
-      - internal/gitutil/gitignore_test.go
-      - internal/gitutil/reviews_ignore_test.go
-      - internal/bootstrap/bootstrap.go
-      - internal/bootstrap/gitignore_test.go
-      - internal/complete/panel_gate_untracked_test.go
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/domains/execution/interfaces.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/bead/bdcli.go
+        - internal/bead/bdcli_test.go
+        - internal/bead/hygiene.go
+        - internal/bead/hygiene_test.go
+        - internal/next/beads.go
+        - internal/next/beads_test.go
+        - internal/next/next_test.go
+        - internal/next/readyset_test.go
+        - internal/lifecycle/orphans.go
+        - internal/lifecycle/orphans_test.go
+        - internal/lifecycle/stale_open.go
+        - internal/lifecycle/stale_open_test.go
+        - internal/complete/complete.go
+        - internal/complete/complete_test.go
+        - internal/approve/adopt_lattice.go
+        - internal/approve/adopt_lattice_test.go
+        - internal/approve/plan_test.go
+        - internal/approve/spec_test.go
+        - internal/doctor/beads.go
+        - internal/doctor/beads_test.go
+        - internal/lint/rowcap_test.go
+        - internal/lint/testdata/rowcap_direct.go.txt
+        - internal/lint/testdata/rowcap_funcvar.go.txt
+        - internal/lint/testdata/rowcap_execbd.go.txt
+        - internal/lint/ratchet_argv_table_test.go
+        - cmd/mindspec/next_selection_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/gitutil/gitops.go
+        - internal/gitutil/reachable_merges_test.go
+        - internal/lifecycle/landed.go
+        - internal/lifecycle/landed_test.go
+        - internal/lifecycle/fallback.go
+        - internal/lifecycle/fallback_test.go
+        - internal/lifecycle/reattest.go
+        - internal/lifecycle/reattest_test.go
+        - cmd/mindspec/reattest.go
+        - cmd/mindspec/reattest_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - internal/validate/adr0041_spec129_amendment_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/workflow/runbook.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/bead/planbead.go
+        - internal/bead/planbead_test.go
+        - internal/validate/readiness/readiness.go
+        - internal/validate/readiness/report.go
+        - internal/validate/readiness/records.go
+        - internal/validate/readiness/records_test.go
+        - internal/validate/readiness/mf2_forms_test.go
+        - internal/validate/readiness/readiness_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on:
+        - 2
+        - 3
+      id: 4
+      key_file_paths:
+        - internal/validate/readiness/readiness.go
+        - internal/validate/readiness/mf3.go
+        - internal/validate/readiness/fixtures.go
+        - internal/validate/readiness/readiness_test.go
+        - internal/validate/readiness/mf3_test.go
+        - .mindspec/domains/workflow/architecture.md
+    - depends_on:
+        - 1
+        - 2
+        - 3
+      id: 5
+      key_file_paths:
+        - internal/next/beads.go
+        - internal/next/select.go
+        - internal/next/nearmiss.go
+        - internal/next/planread.go
+        - internal/next/nearmiss_test.go
+        - internal/next/beads_test.go
+        - internal/next/readyset_test.go
+        - internal/gitutil/fileprobe.go
+        - internal/gitutil/fileprobe_test.go
+        - cmd/mindspec/next.go
+        - cmd/mindspec/next_selection_test.go
+        - cmd/mindspec/next_positional_test.go
+        - internal/instruct/templates/implement.md
+        - internal/instruct/instruct_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on:
+        - 3
+      id: 6
+      key_file_paths:
+        - internal/bead/readiness.go
+        - internal/bead/override_marker.go
+        - internal/bead/override_marker_test.go
+        - internal/validate/readiness/override.go
+        - internal/validate/readiness/override_test.go
+        - cmd/mindspec/bead_ready.go
+        - cmd/mindspec/bead_ready_test.go
+        - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+        - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+        - .claude/skills/ms-bead-impl/SKILL.md
+        - internal/setup/readiness_skill_pin_test.go
+        - internal/setup/skills.go
+        - internal/setup/historical_skills
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on:
+        - 4
+        - 5
+        - 6
+      id: 7
+      key_file_paths:
+        - internal/next/ready_gate.go
+        - internal/next/ready_gate_test.go
+        - internal/next/evidence.go
+        - internal/next/evidence_test.go
+        - cmd/mindspec/next.go
+        - cmd/mindspec/next_ready_gate_test.go
+        - cmd/mindspec/next_claim_guard_containment_test.go
+        - cmd/mindspec/verb_output_test.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - cmd/mindspec/bead_ready_test.go
+        - cmd/mindspec/bead_clarify.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - internal/validate/adr0041_spec129_amendment_test.go
+        - .mindspec/core/USAGE.md
+        - .mindspec/core/WORKFLOW-STATE-MACHINE.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/workflow/runbook.md
+        - .mindspec/domains/execution/interfaces.md
+    - depends_on: []
+      id: 8
+      key_file_paths:
+        - internal/gitutil/gitignore.go
+        - internal/gitutil/gitignore_test.go
+        - internal/gitutil/reviews_ignore_test.go
+        - internal/bootstrap/bootstrap.go
+        - internal/bootstrap/gitignore_test.go
+        - internal/complete/panel_gate_untracked_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/execution/interfaces.md
 ---
 # Plan: 129-readiness-tracker-honesty
 
