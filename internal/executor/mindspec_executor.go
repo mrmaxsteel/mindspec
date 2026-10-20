@@ -1394,6 +1394,11 @@ func (g *MindspecExecutor) RevParseRef(workdir, ref string) (string, error) {
 	return gitutil.RevParseRef(workdir, ref)
 }
 
+// LsTree exposes the subject-tree read through the executor I/O boundary.
+func (g *MindspecExecutor) LsTree(workdir, rev string) (string, error) {
+	return gitutil.LsTree(workdir, rev)
+}
+
 // Status returns `git status --porcelain` for workdir. Thin pass-through to
 // gitutil.Status — the panel gate's worktree dirty-check seam routed through
 // the executor (ADR-0030).

@@ -37,14 +37,14 @@ type CarriedEntries struct {
 	Rebinds     []Rebind     `json:"rebinds,omitempty"`
 }
 
-// RoundRecord captures the registration established by create. Subject digests
-// are added by the subject-tree bead; they are not interpreted by this store.
+// RoundRecord captures the registration established by create.
 type RoundRecord struct {
 	Record            string         `json:"record"`
 	Spec              string         `json:"spec"`
 	Panel             string         `json:"panel"`
 	Round             int            `json:"round"`
 	ReviewedHeadSHA   string         `json:"reviewed_head_sha"`
+	SubjectDigest     string         `json:"subject_digest"`
 	Target            string         `json:"target"`
 	Gate              string         `json:"gate"`
 	BeadID            *string        `json:"bead_id"`
@@ -70,9 +70,10 @@ type DeferralRecord struct {
 }
 
 type RebindRecord struct {
-	Record string `json:"record"`
-	Spec   string `json:"spec"`
-	Panel  string `json:"panel"`
+	Record        string `json:"record"`
+	Spec          string `json:"spec"`
+	Panel         string `json:"panel"`
+	SubjectDigest string `json:"subject_digest"`
 	Rebind
 }
 
@@ -89,7 +90,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	fields := []string{"spec", "panel", "created_at"}
 	switch kind {
 	case RecordRound:
-		fields = append(fields, "reviewed_head_sha", "target", "gate", "telemetry")
+		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "gate", "telemetry")
 	case RecordRefutation, RecordDeferral:
 		fields = append(fields, "slot", "finding", "finding_sha256", "finding_text", "by")
 		if kind == RecordRefutation {
@@ -98,7 +99,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 			fields = append(fields, "bead")
 		}
 	case RecordRebind:
-		fields = append(fields, "from_sha", "to_sha", "reason")
+		fields = append(fields, "from_sha", "to_sha", "subject_digest", "reason")
 	case RecordAbandon:
 		fields = append(fields, "reason", "by")
 	}

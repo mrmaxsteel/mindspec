@@ -623,3 +623,26 @@ the gate exists for — the stale APPROVE honored at merge time.
    see the 2026-06-17 amendment above.)*
 4. Beads 5-6 wire `--panel-state` and the panel.json writer
    (/ms-panel-run step 0) so every surface speaks this convention.
+
+## Amendment (Spec 130)
+
+- **§4 — Subject-tree staleness (R3).** `panel.Subject(gate, specDir)` derives
+  the roots: `<specs>/<spec>/` for `spec_approve` and `plan_approve`; the whole
+  tree for `bead`, `final_review`, `adhoc` and an empty gate.
+  The recorded `gate` is no longer decision-inert. It selects the subject roots
+  through `panel.Subject` and can change Allow/Block. This supersedes the
+  Spec 112 amendment's decision-inert claim for staleness only.
+  `ApproveThreshold()` stays independent of `gate`. Every subject
+  excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`, `review/**`
+  and `.beads/issues.jsonl`. Other `reviews` directories remain in the subject.
+  `subject_digest` is `sha256:` plus the sha256 of the filtered recursive
+  `ls-tree` listing. Equal SHAs are fresh with no subject read; on a SHA
+  mismatch with a recorded digest, one `GateIO.SubjectTree` call compares
+  digests. Equal digests are fresh; different digests are stale. A read error
+  or an empty filtered listing is Block (and refuses create). A legacy panel
+  without a digest keeps the original stale message byte-for-byte. `complete`,
+  `panel verify`, `panel tally` and instruct panel state share this decision.
+- **Decision Details — subprocess cap (R3.3).** The matched-path cap is
+  **three on a SHA mismatch**: rev-parse, subject-tree read, porcelain. Equal
+  SHAs make no subject-tree call and keep the two-subprocess cap. The panel
+  leaf performs no subprocess I/O; callers supply the reads through GateIO.

@@ -75,13 +75,15 @@ type CreateInput struct {
 	// this (a leaf takes plain values on faith), but every caller must
 	// supply it: panel.json must never omit reviewed_head_sha.
 	ReviewedHeadSHA string
+	// SubjectDigest is the caller-computed, non-empty subject-tree digest.
+	SubjectDigest string
 	// Gate records which of config.PanelGateKeys' five gate mixes this
-	// panel was created from — plain, decision-inert recorded metadata
+	// panel was created from — plain, recorded metadata selecting the subject
 	// per the spec-112-R9 stable contract (Panel.Gate: name `gate`, type
 	// string, `omitempty`, parse-lenient). "" means the caller omitted
 	// --gate; via Panel.Gate's `omitempty` tag this writes NO `gate` key
 	// at all, so an omitted Gate is byte-identical to pre-spec-113
-	// output (spec 113 R3, completing 112's deferred writer). The
+	// gate output (spec 113 R3, completing 112's deferred writer). The
 	// membership check against PanelGateKeys and the gate-scoped
 	// ExpectedReviewers/ApproveThresholdExpr resolution both happen in
 	// the caller (cmd/mindspec) — this leaf takes the plain value on
@@ -139,6 +141,7 @@ func Create(dir string, in CreateInput) error {
 		Round:                in.Round,
 		ExpectedReviewers:    in.ExpectedReviewers,
 		ReviewedHeadSHA:      in.ReviewedHeadSHA,
+		SubjectDigest:        in.SubjectDigest,
 		ApproveThresholdExpr: in.ApproveThresholdExpr,
 		Gate:                 in.Gate,
 	}

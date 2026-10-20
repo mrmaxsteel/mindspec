@@ -16,8 +16,9 @@
 //
 // Boundary: this package is fs-only. It makes zero git, zero bd, and
 // zero subprocess calls — staleness (`ReviewedHeadSHA` vs the live
-// ref) and dirty-tree checks are the CALLER's git work (the hook,
-// per ADR-0030's at-most-two-subprocesses budget).
+// ref) and dirty-tree checks are the caller's git work. ADR-0037 (Spec 130)
+// permits three calls on a SHA mismatch: rev-parse, subject-tree read, and
+// porcelain.
 package panel
 
 import (
@@ -56,6 +57,7 @@ type Panel struct {
 	Round             int     `json:"round"`
 	ExpectedReviewers int     `json:"expected_reviewers"`
 	ReviewedHeadSHA   string  `json:"reviewed_head_sha"`
+	SubjectDigest     string  `json:"subject_digest,omitempty"`
 	Abandoned         bool    `json:"abandoned,omitempty"`
 	// AbandonReason is REQUIRED (who/why) when Abandoned is true,
 	// but that requirement is deliberately NOT enforced at parse
@@ -81,14 +83,10 @@ type Panel struct {
 	// CONVENTION but parse-lenient like AbandonReason: an unexpected or
 	// absent value is a consumer's concern, never a parse error here
 	// (flagging it malformed would set Registration.Err and tip the gate
-	// toward fail-open, the wrong direction). Gate is DECISION-INERT
-	// (ADR-0037 §1, amended 2026-07-09 spec 112): PanelGateDecision and
-	// ApproveThreshold() never read it, so its presence, absence, or value
-	// changes no Allow/Block outcome and no threshold. It is stamped by the
-	// spec-110 panel writer (until then /ms-panel-run step 0 may hand-write
-	// it); absence costs nothing. Name ("gate"), type (string), omitempty,
-	// and parse-lenience are a STABLE CONTRACT (spec 112 R9) — no follow-up
-	// may change any of the four silently.
+	// toward fail-open, the wrong direction). Subject derives the review roots
+	// from Gate (Spec 130 R3); ApproveThreshold remains independent of it.
+	// Name ("gate"), type (string), omitempty, and parse-lenience remain the
+	// stable schema contract (Spec 112 R9).
 	Gate string `json:"gate,omitempty"`
 
 	// Refutations are snapshot copies of audited dismissals. Legacy entries

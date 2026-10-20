@@ -32,6 +32,7 @@ func TestHandEdit_FieldMatcher(t *testing.T) {
 		{"expected_reviewers", func(p *Panel) { p.ExpectedReviewers++ }},
 		{"telemetry", func(p *Panel) { p.Telemetry = "" }},
 		{"telemetry", func(p *Panel) { p.Telemetry = "optional" }},
+		{"subject_digest", func(p *Panel) { p.SubjectDigest = "sha256:manual" }},
 		{"reviewed_head_sha", func(p *Panel) { p.ReviewedHeadSHA = "changed" }},
 		{"refutations[0]", func(p *Panel) { p.Refutations = []Refutation{{Slot: "R1", Round: 1, Reason: "manual"}} }},
 		{"deferrals[0]", func(p *Panel) { p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Bead: "manual"}} }},
@@ -235,5 +236,35 @@ func TestHandEdit_NewerRoundClearsAbandonment(t *testing.T) {
 	p.AbandonReason = "halt"
 	if field, err := FirstUnbackedField(p, lines); err != nil || field != "abandoned" {
 		t.Fatalf("stale abandonment: field=%q want=abandoned err=%v", field, err)
+	}
+}
+
+func TestHandEdit_SubjectDigestLatestEvent(t *testing.T) {
+	records := ledgerFixtures(t, "p")
+	round2 := changeLedger(t, records[0], "subject_digest", "sha256:round2")
+	rebind := changeLedger(t, records[3], "subject_digest", "sha256:rebound")
+	for _, tc := range []struct {
+		name        string
+		lines       [][]byte
+		sha, digest string
+	}{
+		{"round", records[:1], "abc123", "sha256:baseline"},
+		{"rebind", [][]byte{records[0], rebind}, "def456", "sha256:rebound"},
+		{"later round", [][]byte{records[0], rebind, round2}, "abc123", "sha256:round2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := snapshotFromRound(t, records[0])
+			p.ReviewedHeadSHA = tc.sha
+			p.SubjectDigest = tc.digest
+			if field, err := FirstUnbackedField(p, tc.lines); err != nil || field != "" {
+				t.Fatalf("backed digest: %q %v", field, err)
+			}
+			for _, wrong := range []string{"", "sha256:manual"} {
+				p.SubjectDigest = wrong
+				if field, err := FirstUnbackedField(p, tc.lines); err != nil || field != "subject_digest" {
+					t.Fatalf("hand-edited digest %q: field=%q err=%v", wrong, field, err)
+				}
+			}
+		})
 	}
 }

@@ -163,6 +163,7 @@ The optional registration fields at the end of `panel.Panel` are:
 
 | Field | Shape |
 |:------|:------|
+| `subject_digest` | `sha256:` plus the subject-tree digest, recorded beside `reviewed_head_sha` |
 | `roster` | ordered `[{slot, model, lens}]`, with ids `R1..Rn` |
 | `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
 | `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
@@ -179,10 +180,10 @@ to spec-117 `disposition` rows and `panel` coverage manifests. Every event carri
 
 | Kind | Payload | Key within the panel directory |
 |:-----|:--------|:-------------------------------|
-| `round` | round, reviewed_head_sha, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
+| `round` | round, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
 | `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
 | `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
-| `rebind` | round, from_sha, to_sha, paths, reason | to_sha |
+| `rebind` | round, from_sha, to_sha, subject_digest, paths, reason | to_sha |
 | `abandon` | reason, by | created_at |
 
 A same-key retry differing only in `created_at` adds nothing; another payload
@@ -200,6 +201,20 @@ library matcher: it returns the first snapshot field without a backing event,
 using the latest round, subsequent rebind/abandon events, and payload equality
 for entry arrays (ignoring `created_at`). The first round event's `carried`
 object supplies baselines for legacy refutations, deferrals and rebinds.
+
+`panel.Subject(gate, specDir)` derives roots: spec/plan approval reviews only
+`<specs>/<spec>/`; bead, final review, adhoc and an empty gate review the whole
+tree. `<specs>` is the workspace-resolved specs directory in either layout.
+Every subject excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`,
+`review/**` and `.beads/issues.jsonl`; other `reviews` directories count.
+The digest hashes the retained recursive `ls-tree` listing; read errors and an
+empty filtered listing refuse creation and Block a mismatched-SHA gate.
+Equal SHAs are fresh without a subject read. On a SHA mismatch a recorded
+digest is compared to the live subject: equality is fresh, a difference stale.
+A legacy panel without a digest retains the original stale message.
+`complete`, `verify`, `tally` and instruct panel state use the same gate facts.
+The R5.3 matcher pins `subject_digest` to the later of the latest round and
+rebind events, alongside `reviewed_head_sha`.
 
 A Finding is `ccr[i]` from the latest-round verdict's
 `concrete_changes_required`, with the sha256 of its raw text. Empty lists use
@@ -299,8 +314,10 @@ directory is resolved layout-aware, reusing
 `<spec-dir>/reviews/<slug>` on a flat tree, otherwise the repo-root
 `review/<slug>` convention. A `--bead <id>` panel expects `--target
 bead/<id>` — the same ref `mindspec complete`'s gate rev-parses for
-staleness; a divergent `--target` can only fail SAFE (a stale-SHA Block
-at gate time), never a false-PASS. On success, stdout carries two
+staleness. The gate compares a divergent `--target` to that live branch.
+On a SHA mismatch, a changed subject tree blocks; an equal subject stays
+fresh. A legacy panel without a digest blocks on a SHA mismatch.
+On success, stdout carries two
 lines: `panel <slug> registered: round N, K expected reviewer(s),
 reviewed_head_sha <sha>` followed by `panel directory: <dir>` — the
 SAME resolved `dir` `panel.Create` wrote to. This second line is the
@@ -316,7 +333,7 @@ logic above.
 same control-byte discipline as `--bead`/`--target`, checked before the
 enum-membership check. A value outside the enum is rejected with a
 `guard.NewFailure` whose recovery line names all five keys, BEFORE any
-filesystem write. When given, `panel.json`'s decision-inert `gate` field
+filesystem write. When given, `panel.json`'s `gate` field
 (`json:"gate,omitempty"`) is stamped with the value, and
 `expected_reviewers`/`approve_threshold` are resolved through spec 112
 R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
@@ -325,13 +342,15 @@ When omitted, `expected_reviewers` uses `cfg.PanelExpectedReviewers()`,
 which resolves through the `adhoc` gate (spec 130 R2.1).
 `approve_threshold` uses `cfg.PanelApproveThresholdExpr()`, which reads
 global `panel.approve_threshold` and defaults to `n-1` when unset.
-The command writes no `gate` key. Neither `PanelGateDecision` nor
-`ApproveThreshold()` reads this field.
+The command writes no `gate` key. The field selects the subject roots
+for staleness and can change Allow/Block. `ApproveThreshold()` stays
+independent of it.
 
 **Reviewer-count advisory (spec 130 R2.1).** `config show` and
 `mindspec complete` compare recorded `expected_reviewers` against
 `cfg.PanelGateAdvisoryDefault(recordedGate, isBead)` when it returns
 `ok == true`. A known recorded gate selects that gate's resolved count.
+Thus a CLI-created `final_review` panel selects the `final_review` count.
 A bead panel with no recorded gate selects the `bead` count.
 A non-bead panel with no recorded gate and no configured gate overrides
 selects the `adhoc` count through `cfg.PanelExpectedReviewers()`.
@@ -458,7 +477,7 @@ complete-gated.
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
-| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the decision-inert `gate` field + that gate's creation-time defaults (spec 113 R3) |
+| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the `gate` field for subject selection + that gate's creation-time defaults (spec 113 R3) |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
