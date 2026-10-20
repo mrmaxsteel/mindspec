@@ -245,6 +245,7 @@ work_chunks:
       - internal/complete/panel_gate_e2e_test.go
       - .mindspec/domains/execution/interfaces.md
       - .mindspec/domains/workflow/interfaces.md
+      - .mindspec/domains/workflow/architecture.md
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
       - internal/validate/adr_spec130_keys_test.go
 ---
@@ -573,7 +574,7 @@ Bead 1, Bead 2, Bead 4.
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-24 (R11) passes. `TestComplete_Core3WarnSkips` has an abandoned case and a missing-ref case. `TestTally_AppendsManifestPerRound`: a round-2 derivation equal to the round-1 manifest appends a round-2 manifest.
+- AC-24 (R11) passes. `TestComplete_Core3WarnSkips` has an abandoned case and a missing-ref case, each with no manifest. `TestTally_AppendsManifestPerRound`: a round-2 derivation equal to the round-1 manifest appends a round-2 manifest.
 - AC-26 (part): the R13.1 §7 Core 3 and R11.5 reach items (the orphan/obligation no-hatch rule included) and the R13.2 manifest items are pinned.
 
 **Depends on**
@@ -584,7 +585,7 @@ Bead 5, Bead 6, Bead 9, Bead 12.
 **Steps**
 1. Add `internal/bead/deferral.go`. It reads a bead's status, parent chain, `discovered-from` edge and description through bd. Add one ratchet row for each new bd call.
 2. Add `cmd/mindspec/panel_defer.go`. Defer refuses: a closed or missing bead; the epic, or a child or descendant of it; a bead with no `discovered-from` edge to the epic or the panel's bead; a description without the finding text (R9.3 replacement). It shares the refute slot and round refusals. It refuses on `spec_approve` and adhoc panels, with a recovery that names `refute`. It writes the deferral, the `deferral` event and a `confirmed-deferred` row (R9.3).
-3. Add `internal/complete/panel_deferred.go`. `complete` writes `panel_deferred` with one entry per effective deferral, taken from the Allow decision that `panelGate` returns, as `AppliedRefutations` is today (`panel.Decision`, `internal/panel/gate.go`). It writes the audit through the pending-marker protocol. Each entry holds `slot`, `round`, `finding`, `finding_text`, `finding_sha256`, `bead` and `by` (R10.1).
+3. Add `internal/complete/panel_deferred.go`. `complete` writes `panel_deferred` with one entry per effective deferral, taken from each Allow decision that `panelGate` returns, as `AppliedRefutations` is today (`panel.Decision`, `internal/panel/gate.go`). It writes the audit through the pending-marker protocol. Each entry holds `slot`, `round`, `finding`, `finding_text`, `finding_sha256`, `bead` and `by` (R10.1).
 4. Re-check each effective deferral through `internal/bead/deferral.go`, at `complete` and in the `impl approve` preflight. Block on re-parent under the epic, deletion, a removed `discovered-from` edge, removed finding text, a closed bead, or a bd error. Name the slot, the finding and the bead (R10.2).
 5. Turn the deferral discharge on in `internal/panel/passrule.go` (spec Terms: effective deferral; R7.3, R7.4), together with `panel defer`, the R10.1 audit and both re-checks. Replace `TestPassRule_DeferralInactive` with `TestPassRule_DeferralActive`.
 6. Source of the deferrals (R10.2):
@@ -629,7 +630,7 @@ Bead 7, Bead 8, Bead 10.
 1. Do not change the `CompleteBead` signature. Add an optional interface `LandedReviewSetter` with `SetLandedReview(sha, panel string)` in `internal/executor/executor.go`. Implement it on `MindspecExecutor` and on the mock executor (`internal/executor/mock.go`).
 2. Make `panelGate` (`internal/complete/panel_advisory.go`) return the decision (Allow or Warn) of every matched registration, in scan order, each with its registration. The first Allow is the landed-key source. Today it returns `(matched, nil)` for an Allow, for a Warn and for `panel_gate: false`. Update every `panelGate` caller. When a returned decision is Allow, `complete` calls `SetLandedReview` once, from the first Allow, before `exec.CompleteBead`. The value of `panel` is `<slug>@r<N>`. A Warn (abandoned panel, hatch, missing ref), `panel_gate: false` or no panel makes no call.
 3. `ensureLandedBinding` writes `mindspec_landed_reviewed_sha` and `mindspec_landed_review_panel` in the same `mergeBindingFn` call as the binding, on the `CompleteBead` path only. With no setter call, it writes neither key. `FinalizeEpic` keeps the keys unchanged (R12).
-4. Update `.mindspec/domains/execution/interfaces.md` § Executor Interface (`LandedReviewSetter`, the two keys) and `.mindspec/domains/workflow/interfaces.md` (the `complete` call).
+4. Update `.mindspec/domains/execution/interfaces.md` § Executor Interface (`LandedReviewSetter`, the two keys) and `.mindspec/domains/workflow/interfaces.md` (the `complete` call). In `.mindspec/domains/workflow/architecture.md`, replace the description of the `panelGate` nil fail-open return with the new return (the decision of each matched registration).
 5. Add the ADR-0037 §8 bullet: the Spec-114 carve-out extends to the R12 keys. Add `internal/validate/adr_spec130_keys_test.go` (`TestADRAmendments_Spec130_Keys`).
 
 **Verification**
