@@ -210,8 +210,12 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		}
 
 		scanRoot := panel.PanelDirScanRoot(regs[i].Dir)
+		root, err := workspace.FindRoot(scanRoot)
+		if err != nil {
+			root = scanRoot
+		}
 		facts := panel.ResolveGateFacts(regs[i], beadID, scanRoot, panel.GateIO{
-			SpecDir:       filepath.Join(workspace.SpecsDir(scanRoot), regs[i].Panel.Spec),
+			SpecDir:       filepath.Join(workspace.SpecsDir(root), regs[i].Panel.Spec),
 			SubjectTree:   gateSubjectTreeFn,
 			RevParse:      gateRevParseFn,
 			Status:        gateStatusFn,

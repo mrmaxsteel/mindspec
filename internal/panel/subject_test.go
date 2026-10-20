@@ -86,8 +86,16 @@ func TestSubjectDigest_ExcludesPanelRootsOnly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, file := range []string{"internal/reviews/x.go", "reviews/x.go", specs + "/130/internal/reviews/x.go", ".beads/other.jsonl", "reviewing/x.go", "odd\tname.go"} {
-				sha := subjectCommit(t, root, file, "real edit")
+			for _, file := range []string{"internal/reviews/x.go", "reviews/x.go", specs + "/130/internal/reviews/x.go", ".beads/other.jsonl", "reviewing/x.go", "odd\tname.go", "mode only"} {
+				var sha string
+				if file == "mode only" {
+					// Change only the mode of a file already present in the tree.
+					subjectGit(t, root, "update-index", "--chmod=+x", specs+"/130/spec.md")
+					subjectGit(t, root, "commit", "-qm", "mode only")
+					sha = subjectGit(t, root, "rev-parse", "HEAD")
+				} else {
+					sha = subjectCommit(t, root, file, "real edit")
+				}
 				after, err := read(root, sha, Subject("bead", specs+"/130"))
 				if err != nil || after == before {
 					t.Fatalf("real edit %s did not change digest (%v)", file, err)
@@ -211,5 +219,28 @@ func TestSubjectDigest_GateErrorBlocks(t *testing.T) {
 		if d := PanelGateDecision(f); d.Action != Block || !strings.Contains(d.Message, "could not verify subject tree") {
 			t.Fatalf("must block: %+v", d)
 		}
+	}
+}
+
+func TestResolveGateFacts_LegacySkipsSubjectTree(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "review/p")
+	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc1234567"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	facts := ResolveGateFacts(Registration{Dir: dir}, "mindspec-test.1", root, GateIO{
+		RevParse: func(string, string) (string, error) { return "def4567890", nil },
+		SubjectTree: func(string, string, SubjectRoots) (string, error) {
+			calls++
+			return "", errors.New("legacy subject must not be read")
+		},
+	})
+	if calls != 0 || facts.SubjectErr != nil {
+		t.Errorf("legacy subject calls=%d err=%v, want no call and nil error", calls, facts.SubjectErr)
+	}
+	want := "panel round 1 reviewed abc1234, branch now at def4567 — commits landed after review; bump round and re-panel (/ms-panel-run step 0)\nDo NOT bypass with raw `git merge bead/mindspec-test.1` — it skips bd closure, worktree cleanup, and this gate; only `mindspec complete` merges bead branches."
+	if d := PanelGateDecision(facts); d.Action != Block || d.Message != want {
+		t.Errorf("legacy action=%v message=%q, want Block and %q", d.Action, d.Message, want)
 	}
 }

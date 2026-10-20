@@ -173,7 +173,7 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return err
 		}
 
-		dir, err := panelDirFor(root, specID, slug, gate)
+		dir, specDir, err := panelDirFor(root, specID, slug, gate)
 		if err != nil {
 			return err
 		}
@@ -183,7 +183,7 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return fmt.Errorf("resolving --target %q: %w", target, err)
 		}
 
-		digest, err := panel.SubjectTreeReader(lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, panel.PanelSpecDir(dir, filepath.Join(workspace.SpecsDir(root), specID))))
+		digest, err := panel.SubjectTreeReader(lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
 		if err != nil {
 			return fmt.Errorf("reading panel subject: %w", err)
 		}
@@ -404,7 +404,7 @@ func isValidPanelGateKey(gate string) bool {
 	return false
 }
 
-// panelDirFor resolves the panel directory for slug, layout-aware —
+// panelDirFor resolves the panel and subject spec directories, layout-aware —
 // reusing the same workspace.DetectLayout + workspace.SpecDir logic
 // internal/complete.panelGateRoots uses: flat -> co-located
 // <spec-dir>/reviews/<slug>, otherwise the repo-root review/<slug>
@@ -416,23 +416,27 @@ func isValidPanelGateKey(gate string) bool {
 // plugins/mindspec/skills/ms-panel-run/SKILL.md), legacy/canonical/
 // greenfield layout -> the same repo-root review/<slug> convention the
 // non-flat gated branch already uses (the Open Questions resolution).
-// The non-adhoc branch below is untouched, byte-identical to before.
-func panelDirFor(root, specID, slug, gate string) (string, error) {
+// Non-adhoc panels share one validated spec-dir resolution with the digest.
+func panelDirFor(root, specID, slug, gate string) (dir, specDir string, err error) {
 	layout, _ := workspace.DetectLayout(root)
 	if gate == "adhoc" {
+		specDir = workspace.SpecsDir(root)
 		if layout == workspace.LayoutFlat {
-			return filepath.Join(workspace.MindspecDir(root), "reviews", slug), nil
+			return filepath.Join(workspace.MindspecDir(root), "reviews", slug), specDir, nil
 		}
-		return filepath.Join(root, "review", slug), nil
+		return filepath.Join(root, "review", slug), specDir, nil
+	}
+	specDir, err = workspace.SpecDir(root, specID)
+	if err != nil {
+		return "", "", fmt.Errorf("resolving spec dir for %q: %w", specID, err)
 	}
 	if layout == workspace.LayoutFlat {
-		specDir, err := workspace.SpecDir(root, specID)
-		if err != nil {
-			return "", fmt.Errorf("resolving spec dir for %q: %w", specID, err)
-		}
-		return filepath.Join(specDir, "reviews", slug), nil
+		return filepath.Join(specDir, "reviews", slug), specDir, nil
 	}
-	return filepath.Join(root, "review", slug), nil
+	// Root-level panels use the repository's spec layout. SpecDir can resolve
+	// a spec worktree with a different layout; its validated basename is shared.
+	specDir = filepath.Join(workspace.SpecsDir(root), filepath.Base(specDir))
+	return filepath.Join(root, "review", slug), specDir, nil
 }
 
 // findPanelRegistration scans every review root `config show` also scans

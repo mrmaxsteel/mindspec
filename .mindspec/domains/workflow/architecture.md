@@ -160,21 +160,19 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   matched. Deliberately out of scope at spec-approve (R7c, ADR-0032):
   Accepted-status, domain-intersection (`adr-cite-irrelevant`), and
   coverage (`adr-coverage-*`) evaluation all stay plan-approve-only.
-- **Recorded `gate` field, decision-inert (Spec 112, ADR-0037 §1
-  amendment).** `internal/panel.Panel` gains one new optional field,
+- **Recorded `gate` field (Specs 112 and 130, ADR-0037 amendments).**
+  `internal/panel.Panel` gains one new optional field,
   `Gate` (`json:"gate,omitempty"`) — the gate mix
   (`spec_approve`/`plan_approve`/`bead`/`final_review`/`adhoc`) the
   panel was created from, by convention but parse-lenient like
   `AbandonReason`: an unexpected or absent value never sets
-  `Registration.Err`. It is DECISION-INERT — `PanelGateDecision` and
-  `ApproveThreshold()` never read it, so its presence, absence, or
-  value changes no `Allow`/`Block` outcome and no threshold. Name
+  `Registration.Err`. The field selects the subject roots for staleness
+  through `panel.Subject` and can change `Allow`/`Block`.
+  `ApproveThreshold()` stays independent of it. Name
   (`gate`), type (string), `omitempty`, and parse-lenience are a
   stable contract (spec 112 R9); no follow-up may change any of the
   four silently. `internal/panel` remains a dependency-clean leaf:
-  this field is the bead's only touch point — no new import, no new
-  function, and the config-free-leaf invariant (no `internal/config`
-  import) is unchanged.
+  it does not import `internal/config`.
 - **Gate-aware reviewer-count advisory selection rule (Spec 112 R7).**
   Both `panel.ReviewerCountNote` callers — `internal/complete`'s
   complete-gate advisory and `mindspec config show`'s panel scan — resolve

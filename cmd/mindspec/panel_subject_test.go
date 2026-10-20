@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/instruct"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 func subjectCLIGit(t *testing.T, root string, args ...string) string {
@@ -41,9 +42,13 @@ func subjectCLIWrite(t *testing.T, root, file, text string) {
 
 func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 	for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs"} {
-		for _, gate := range []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", ""} {
+		for _, gateCase := range []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", "adhoc bead", ""} {
+			gate := gateCase
+			if gateCase == "adhoc bead" {
+				gate = "adhoc"
+			}
 			for _, change := range []string{"archive", "ownership", "real edit", "internal reviews"} {
-				t.Run(specs+"/"+gate+"/"+change, func(t *testing.T) {
+				t.Run(specs+"/"+gateCase+"/"+change, func(t *testing.T) {
 					resetPanelCreateFlags(t)
 					stubWorktreeListEmpty(t)
 					config.ResetCache()
@@ -68,7 +73,7 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 					subjectCLIGit(t, root, "add", "-A")
 					subjectCLIGit(t, root, "commit", "-qm", "base")
 					target := "main"
-					bead := gate == "bead" || gate == ""
+					bead := gate == "bead" || gate == "" || gateCase == "adhoc bead"
 					if bead {
 						target = "bead/mindspec-subject.1"
 						subjectCLIGit(t, root, "switch", "-qc", target)
@@ -90,6 +95,9 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 					reg, err := findPanelRegistration(root, "subject")
 					if err != nil {
 						t.Fatal(err)
+					}
+					if gate == "adhoc" && specs == ".mindspec/specs" && reg.Dir != filepath.Join(root, ".mindspec/reviews/subject") {
+						t.Fatalf("adhoc bead panel at %s, want workspace review root", reg.Dir)
 					}
 					if !strings.HasPrefix(reg.Panel.SubjectDigest, "sha256:") || len(reg.Panel.SubjectDigest) != 71 {
 						t.Fatalf("create did not record digest: %+v", reg.Panel)
@@ -183,5 +191,48 @@ func TestSubjectDigest_FailsClosed(t *testing.T) {
 				t.Fatalf("refused create wrote files: before %s after %s", b, a)
 			}
 		})
+	}
+}
+
+func TestSubjectDigest_CreateUsesTargetCommit(t *testing.T) {
+	resetPanelCreateFlags(t)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+	root := t.TempDir()
+	withTestChdir(t, root)
+	subjectCLIGit(t, root, "init", "-q", "-b", "main")
+	subjectCLIWrite(t, root, ".mindspec/specs/130-example/spec.md", "reviewed target\n")
+	subjectCLIGit(t, root, "add", "-A")
+	subjectCLIGit(t, root, "commit", "-qm", "target")
+	targetSHA := subjectCLIGit(t, root, "rev-parse", "HEAD")
+	subjectCLIGit(t, root, "branch", "review-target")
+	subjectCLIWrite(t, root, ".mindspec/specs/130-example/spec.md", "different HEAD\n")
+	subjectCLIGit(t, root, "add", "-A")
+	subjectCLIGit(t, root, "commit", "-qm", "head")
+	if head := subjectCLIGit(t, root, "rev-parse", "HEAD"); head == targetSHA {
+		t.Fatal("fixture requires HEAD != target")
+	}
+	listing := subjectCLIGit(t, root, "ls-tree", "-r", "--full-tree", targetSHA, "--") + "\n"
+	want, err := panel.SubjectDigest(listing, panel.Subject("adhoc", ".mindspec/specs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	lsTreeForPanelFn = func(workdir, ref string) (string, error) {
+		refs = append(refs, ref)
+		return (&executor.MindspecExecutor{}).LsTree(workdir, ref)
+	}
+	if out, err := runPanelCmd("create", "subject", "--gate", "adhoc", "--target", "review-target"); err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	reg, err := findPanelRegistration(root, "subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0] != targetSHA {
+		t.Errorf("ls-tree refs=%v, want resolved target %s", refs, targetSHA)
+	}
+	if reg.Panel.ReviewedHeadSHA != targetSHA || reg.Panel.SubjectDigest != want {
+		t.Errorf("recorded SHA=%s digest=%s, want target SHA=%s digest=%s", reg.Panel.ReviewedHeadSHA, reg.Panel.SubjectDigest, targetSHA, want)
 	}
 }

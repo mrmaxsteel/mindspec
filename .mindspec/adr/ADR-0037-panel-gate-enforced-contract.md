@@ -628,7 +628,11 @@ the gate exists for — the stale APPROVE honored at merge time.
 
 - **§4 — Subject-tree staleness (R3).** `panel.Subject(gate, specDir)` derives
   the roots: `<specs>/<spec>/` for `spec_approve` and `plan_approve`; the whole
-  tree for `bead`, `final_review`, `adhoc` and an empty gate. Every subject
+  tree for `bead`, `final_review`, `adhoc` and an empty gate.
+  The recorded `gate` is no longer decision-inert. It selects the subject roots
+  through `panel.Subject` and can change Allow/Block. This supersedes the
+  Spec 112 amendment's decision-inert claim for staleness only.
+  `ApproveThreshold()` stays independent of `gate`. Every subject
   excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`, `review/**`
   and `.beads/issues.jsonl`. Other `reviews` directories remain in the subject.
   `subject_digest` is `sha256:` plus the sha256 of the filtered recursive
