@@ -257,6 +257,56 @@ func TestLedger_BatchRefusesBeforeAppend(t *testing.T) {
 	}
 }
 
+func TestLedger_RejectsWhitespaceSpecBeforeAppend(t *testing.T) {
+	records := map[string][]byte{
+		"disposition": mustMarshal(t, testRow("blank-spec", "p", "R1", nil)),
+		"manifest": mustMarshal(t, testManifest("p", 1, []ManifestSlot{
+			{Slot: "R1", Model: "model-a", Verdict: VerdictApprove},
+		})),
+	}
+	for kind, raw := range records {
+		t.Run(kind, func(t *testing.T) {
+			for _, state := range []string{"missing", "existing"} {
+				t.Run(state, func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "p")
+					path := filepath.Join(dir, dispositionsFileName)
+					var before []byte
+					if state == "existing" {
+						if err := AppendRecords(dir, ledgerFixtures(t, "p")[0]); err != nil {
+							t.Fatal(err)
+						}
+						var err error
+						before, err = os.ReadFile(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					bad := changeLedger(t, raw, "spec", "  ")
+					// A valid first record must not be written before the bad one is refused.
+					err := AppendRecords(dir, ledgerFixtures(t, "p")[1], bad)
+					want := "panel: record for panel p has an empty spec field (every record must carry a non-empty spec)"
+					if err == nil || err.Error() != want {
+						t.Errorf("append error = %v, want %q", err, want)
+					}
+					after, err := os.ReadFile(path)
+					if state == "missing" {
+						if !errors.Is(err, os.ErrNotExist) {
+							t.Fatalf("refused batch created ledger: read error = %v", err)
+						}
+					} else {
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !bytes.Equal(before, after) {
+							t.Fatal("refused batch changed ledger bytes")
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestLedger_AppendRecordsWithCheck(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "p")
 	records := ledgerFixtures(t, "p")

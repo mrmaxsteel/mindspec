@@ -286,6 +286,9 @@ func AppendRecordsWithCheck(dir string, check func() error, records ...[]byte) e
 			if m["panel"] != filepath.Base(filepath.Clean(dir)) {
 				return fmt.Errorf("panel: record's panel field does not match the destination panel")
 			}
+			if recSpec, _ := m["spec"].(string); strings.TrimSpace(recSpec) == "" {
+				return fmt.Errorf("panel: record for panel %s has an empty spec field (every record must carry a non-empty spec)", termsafe.Escape(filepath.Base(filepath.Clean(dir))))
+			}
 			kind, key := recordKey(m)
 			composite := kind + "\x00" + key
 			if old, exists := known[composite]; exists {
