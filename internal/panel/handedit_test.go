@@ -30,6 +30,7 @@ func TestHandEdit_FieldMatcher(t *testing.T) {
 		{"bead_id", func(p *Panel) { id := "different"; p.BeadID = &id }},
 		{"expected_reviewers", func(p *Panel) { p.ExpectedReviewers++ }},
 		{"telemetry", func(p *Panel) { p.Telemetry = "" }},
+		{"telemetry", func(p *Panel) { p.Telemetry = "optional" }},
 		{"reviewed_head_sha", func(p *Panel) { p.ReviewedHeadSHA = "changed" }},
 		{"refutations[0]", func(p *Panel) { p.Refutations = []Refutation{{Slot: "R1", Round: 1, Reason: "manual"}} }},
 		{"deferrals[0]", func(p *Panel) { p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Bead: "manual"}} }},

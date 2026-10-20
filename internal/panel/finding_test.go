@@ -81,6 +81,26 @@ func TestFinding_SlotHashPinsOrderedList(t *testing.T) {
 	if swapped.SHA256 == f.SHA256 {
 		t.Fatal("list reorder retained slot discharge")
 	}
+	v.ConcreteChangesRequired = []string{"fix /tmp/a/x", "two"}
+	f, err = SlotFinding(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected = sha256.Sum256([]byte(`["fix /tmp/a/x","two"]`))
+	if f.SHA256 != hex.EncodeToString(expected[:]) {
+		t.Fatal("slot hash does not pin raw compact JSON with paths")
+	}
+	if f.Text != "fix <path>\ntwo" {
+		t.Fatalf("unredacted slot storage: %q", f.Text)
+	}
+	v.ConcreteChangesRequired = []string{"fix /tmp/b/x", "two"}
+	changed, err := SlotFinding(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.SHA256 == f.SHA256 || changed.Text != f.Text {
+		t.Fatal("path-only list edit must change slot hash and retain redacted text")
+	}
 	v.ConcreteChangesRequired = nil
 	v.Rationale = "fallback"
 	f, err = SlotFinding(v)

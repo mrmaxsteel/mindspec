@@ -312,10 +312,18 @@ func TestDispositionAppend_RefusesVerbKinds(t *testing.T) {
 		}
 	})
 	t.Run("manifest-legacy", func(t *testing.T) {
-		mkDispositionRoot(t, specID)
+		root := mkDispositionRoot(t, specID)
 		manifest := `{"record":"panel","spec":"130","gate":"bead","panel":"p","round":1,"slots":[{"slot":"R1","model":"model-a","verdict":"APPROVE"}],"backfilled":false}`
 		if err := runDispositionAppend(t, specID, "p", manifest); err != nil {
 			t.Fatalf("legacy manifest refused: %v", err)
+		}
+		path := filepath.Join(root, ".mindspec", "specs", specID, "reviews", "p", "dispositions.jsonl")
+		stored, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read legacy manifest at canonical destination: %v", err)
+		}
+		if !bytes.Equal(bytes.TrimSpace(stored), []byte(manifest)) {
+			t.Fatalf("stored legacy manifest = %s, want %s", stored, manifest)
 		}
 	})
 }

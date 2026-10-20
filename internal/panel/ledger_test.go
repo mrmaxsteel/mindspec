@@ -3,11 +3,13 @@ package panel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 const ledgerTime = "2026-10-20T10:00:00Z"
@@ -229,6 +231,75 @@ func TestLedger_BatchRefusesBeforeAppend(t *testing.T) {
 				t.Fatal("partial batch appended")
 			}
 		})
+	}
+}
+
+func TestLedger_AppendRecordsWithCheck(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	records := ledgerFixtures(t, "p")
+	if err := AppendRecords(dir, records[0]); err != nil {
+		t.Fatal(err)
+	}
+	attempting := make(chan struct{})
+	finished := make(chan struct{})
+	lockResult := make(chan error, 1)
+	checked := false
+	err := AppendRecordsWithCheck(dir, func() error {
+		checked = true
+		go func() {
+			close(attempting)
+			unlock, err := acquireDispositionLock(filepath.Join(dir, dispositionsLockName))
+			if err == nil {
+				unlock()
+			}
+			lockResult <- err
+			close(finished)
+		}()
+		<-attempting
+		// The contender must block during the callback, then succeed once
+		// AppendRecordsWithCheck releases the lock. Only the blocked leg
+		// uses a short observation window; there are no scheduling sleeps.
+		select {
+		case <-finished:
+			t.Error("dispositions lock was available while check was running")
+		case <-time.After(100 * time.Millisecond):
+		}
+		return nil
+	}, records[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checked {
+		t.Fatal("append did not run check")
+	}
+	select {
+	case <-finished:
+		if err := <-lockResult; err != nil {
+			t.Fatalf("contender lock: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dispositions lock remained held after append returned")
+	}
+	lines, err := ReadLedger(dir)
+	if err != nil || len(lines) != 2 {
+		t.Fatalf("checked append: %d records, %v", len(lines), err)
+	}
+	path := filepath.Join(dir, dispositionsFileName)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkErr := errors.New("check refused append")
+	err = AppendRecordsWithCheck(dir, func() error { return checkErr }, records[2])
+	if !errors.Is(err, checkErr) {
+		t.Fatalf("failing check returned %v, want %v", err, checkErr)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("failing check changed dispositions.jsonl bytes")
 	}
 }
 
