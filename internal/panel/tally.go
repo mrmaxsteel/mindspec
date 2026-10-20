@@ -118,10 +118,9 @@ type Result struct {
 	HardBlocks []string
 
 	// Malformed lists the basenames of LatestRound verdict files
-	// that exist but could not be parsed (bad JSON or missing
-	// "verdict" field). A malformed verdict counts as MISSING — it
-	// appears here by name and contributes nothing to Verdicts or
-	// the counts.
+	// that exist but could not be read or parsed. They appear here by
+	// name and contribute nothing to Verdicts or the counts. An
+	// unparseable roster verdict counts as MISSING.
 	Malformed []string
 
 	// HasConsolidated reports whether consolidated-round-<LatestRound>.md
@@ -291,7 +290,7 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 		return VoteBlock, fmt.Sprintf("round %d incomplete: %d/%d verdicts present", round, len(r.Verdicts), n)
 	}
 	if r.Rejects > 0 || len(r.HardBlocks) > 0 || r.InvalidCount() > 0 || r.unexpectedVeto() {
-		return VoteBlock, fmt.Sprintf("round %d: REJECT/hard_block/INVALID recorded (%d/%d APPROVE)%s%s", round, r.Approves, n, r.unexpectedVetoNames(), r.invalidNames())
+		return VoteBlock, fmt.Sprintf("round %d: %s recorded (%d/%d APPROVE)%s%s", round, r.vetoSummary(), r.Approves, n, r.unexpectedVetoNames(), r.invalidNames())
 	}
 	if !r.PassRule(true) {
 		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE", round, r.UnresolvedNames(), r.Approves, n)
@@ -377,17 +376,11 @@ func Tally(dir string) (*Result, error) {
 		data, err := os.ReadFile(filepath.Join(dir, vf.name))
 		if err != nil {
 			res.Malformed = append(res.Malformed, vf.name)
-			if offRoster {
-				res.Unexpected = append(res.Unexpected, Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Invalid: true})
-			}
 			continue
 		}
 		var vj verdictJSON
-		if err := json.Unmarshal(data, &vj); err != nil || strings.TrimSpace(vj.Verdict) == "" {
+		if err := json.Unmarshal(data, &vj); err != nil {
 			res.Malformed = append(res.Malformed, vf.name)
-			if offRoster {
-				res.Unexpected = append(res.Unexpected, Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Invalid: true})
-			}
 			continue
 		}
 		v := Verdict{
@@ -399,7 +392,7 @@ func Tally(dir string) (*Result, error) {
 		}
 		var payload FindingVerdict
 		if err := json.Unmarshal(data, &payload); err != nil {
-			v.Invalid = true
+			v.Invalid = v.Verdict == VerdictRequestChanges
 		} else {
 			findings, err := Findings(payload)
 			v.Invalid = err != nil

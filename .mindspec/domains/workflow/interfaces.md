@@ -254,11 +254,16 @@ consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
 - `verdict` (required): a non-empty string. A reviewer MUST write one
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
-  acts on. Any other non-empty value is INVALID and blocks. An empty or
-  whitespace-only verdict, or invalid JSON, is malformed and counts as missing.
+  acts on. A parseable file with any other verdict value is INVALID and blocks.
+  This includes an empty, whitespace-only or missing verdict.
+  An unreadable or unparseable file is malformed. It counts as missing on the
+  roster and counts for nothing off the roster or on a legacy panel.
 - `hard_block` (optional boolean): a top-level sibling of `verdict`.
 
 `panel.Tally` parses verdict, hard_block, rationale and concrete_changes_required.
+It checks the finding list's shape only for REQUEST_CHANGES. A list that is not
+an array of strings makes REQUEST_CHANGES INVALID. It does not invalidate APPROVE
+or REJECT.
 The gate passes only when complete, without veto, fresh, discharged and intact.
 Every roster slot must have a parseable latest-round verdict. Only roster slots
 count toward completeness or APPROVE; unexpected files are named and count for

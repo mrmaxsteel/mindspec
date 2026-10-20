@@ -39,18 +39,32 @@ func invalidVerdict(v Verdict) bool {
 }
 
 func (r *Result) InvalidCount() int {
-	n := len(r.Malformed)
+	n := 0
 	for _, v := range r.Verdicts {
 		if invalidVerdict(v) {
 			n++
 		}
 	}
 	for _, v := range r.Unexpected {
-		if invalidVerdict(v) && !containsFile(r.Malformed, v.File) {
+		if invalidVerdict(v) {
 			n++
 		}
 	}
 	return n
+}
+
+func (r *Result) vetoSummary() string {
+	rejectOrHard := r.Rejects > 0 || len(r.HardBlocks) > 0
+	for _, v := range r.Unexpected {
+		rejectOrHard = rejectOrHard || v.Verdict == VerdictReject || v.HardBlock
+	}
+	if rejectOrHard {
+		if r.InvalidCount() > 0 {
+			return "HARD block / REJECT / INVALID"
+		}
+		return "HARD block / REJECT"
+	}
+	return "INVALID"
 }
 
 func (r *Result) unexpectedVeto() bool {
@@ -157,13 +171,4 @@ func (r *Result) invalidNames() string {
 		return ""
 	}
 	return ", INVALID from " + strings.Join(names, ", ")
-}
-
-func containsFile(files []string, name string) bool {
-	for _, f := range files {
-		if f == name {
-			return true
-		}
-	}
-	return false
 }

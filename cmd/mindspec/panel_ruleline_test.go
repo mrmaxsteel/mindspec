@@ -61,3 +61,35 @@ func TestRuleLine_INVALIDCount(t *testing.T) {
 		t.Fatal(line)
 	}
 }
+
+func TestPanelTally_UnexpectedSlotOutput(t *testing.T) {
+	for _, payload := range []string{`{"verdict":"APPROVE"}`, `{not json`} {
+		t.Run(payload, func(t *testing.T) {
+			dir := t.TempDir()
+			files := map[string]string{
+				"panel.json":            `{"round":1,"expected_reviewers":2,"target":"main","roster":[{"slot":"R1"},{"slot":"R2"}]}`,
+				"R1-round-1.json":       `{"verdict":"APPROVE"}`,
+				"R2-round-1.json":       `{"verdict":"APPROVE"}`,
+				"zz-extra-round-1.json": payload,
+			}
+			for name, data := range files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, err := panel.Tally(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			facts := panel.GateFacts{Reg: &panel.Registration{Dir: dir, Panel: *r.Panel}, Res: r, WorktreeAbsent: true}
+			out, d := renderPanelTally(r, facts, nil)
+			want := "unexpected slot: zz-extra (zz-extra-round-1.json)\n"
+			if payload == "{not json" {
+				want = "malformed (counted as missing): zz-extra-round-1.json\n"
+			}
+			if d.Action != panel.Allow || !strings.Contains(out, want) || !strings.HasSuffix(out, "decision: PASS") {
+				t.Fatalf("unexpected file tally: %+v\n%s", d, out)
+			}
+		})
+	}
+}

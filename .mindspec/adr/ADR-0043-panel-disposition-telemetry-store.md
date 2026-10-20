@@ -127,8 +127,8 @@ ordering; the transactional-write / atomicity contract (real file-locking,
 the exhaustive validator negative-fixture matrix. A script has none of these.
 
 Disposition rows and manifests are decision-inert with respect to the panel gate
-(the ADR-0037 decision matrix consumes none of them (superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130))). For the integrity-read exception see [Amendment (Spec 130)](#amendment-spec-130). No lifecycle verb reads the
-store to make a decision (ADR-0023); the store is telemetry, audited-not-
+(the ADR-0037 decision matrix consumes none of them). No lifecycle verb reads the
+store to make a decision (ADR-0023; superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130)); the store is telemetry, audited-not-
 authenticated exactly like the verdict files it summarizes.
 
 ## Consequences

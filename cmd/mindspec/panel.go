@@ -292,15 +292,13 @@ var panelTallyCmd = &cobra.Command{
 	SilenceUsage: true,
 	Use:          "tally <slug>",
 	Short:        "Print the per-slot verdicts, decision, and aggregated concrete changes required",
-	Long: `panel tally prints the per-slot verdict table, the aggregate
-APPROVE/REQUEST_CHANGES/REJECT counts + resolved threshold, the
-panel.PanelGateDecision decision, and the aggregated
-concrete_changes_required (read presentation-only from each
-REQUEST_CHANGES/REJECT verdict file — never feeding the decision). The
-exit code is derived from the decision's Action ALONE: Allow -> 0; Warn
--> 0 with the advisory printed (non-blocking, parity with
-internal/complete's Warn handling); Block -> non-zero with a final
-recovery line (ADR-0035).`,
+	Long: `panel tally prints each slot's verdict, the verdict counts, the pass
+rule, the decision, and the combined concrete changes required.
+A panel passes when it is complete, fresh, intact, and has no veto or
+unresolved finding. The APPROVE count does not control the decision.
+An allowed decision exits with code 0. A warning also exits with code 0
+and prints the advisory. A blocked decision exits with a non-zero code
+and prints a recovery line.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]

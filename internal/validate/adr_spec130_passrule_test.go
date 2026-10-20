@@ -8,6 +8,16 @@ import (
 )
 
 func TestADRAmendments_Spec130_PassRule(t *testing.T) {
+	backPointers := map[string][]string{
+		"ADR-0043-panel-disposition-telemetry-store.md": {
+			"- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (the disposition rows/manifest live inside §8's agent-writable trust boundary and the gate's decision matrix consumes none of them (superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130))",
+			"No lifecycle verb reads the store to make a decision (ADR-0023; superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130))",
+		},
+		"ADR-0044-panel-review-conduct.md": {
+			"evidence-refuted via the audited refutation procedure (see [Amendment (Spec 130)](#amendment-spec-130) for deferred outcomes)",
+			"The threshold is a floor (retired by [Amendment (Spec 130)](#amendment-spec-130))",
+		},
+	}
 	pins := map[string][]string{
 		"ADR-0037-panel-gate-enforced-contract.md":      {"§1 — Snapshot fields", "§3 — Pass rule", "complete, no veto, fresh, discharged and intact", "APPROVE count is not a decision input", "retires the Spec-109 `approve_threshold` extension", "the approve threshold remains a NECESSARY floor", "refutation cannot buy a sub-threshold panel past the gate", "§7 — Recovery and rule line", "`panel refute` and `panel defer`", "§8 — Hand-edit detection", "accidental desync only", "anti-footgun, not anti-adversary", "no signing"},
 		"ADR-0043-panel-disposition-telemetry-store.md": {"Ledger events (R5.1)", "`round`, `refutation`, `deferral`, `rebind` and `abandon`", "Gate reads (R5.3)", "`round`, `rebind` and `abandon`", "before abandonment", "carried baseline", "ignoring `created_at`"},
@@ -39,11 +49,11 @@ func TestADRAmendments_Spec130_PassRule(t *testing.T) {
 				t.Errorf("%s amendment missing %q", name, want)
 			}
 		}
-		if strings.Contains(name, "0043") && strings.Count(parts[0], "superseded for integrity reads by [Amendment (Spec 130)]") < 2 {
-			t.Errorf("%s missing ledger-read back-pointers", name)
-		}
-		if strings.Contains(name, "0044") && strings.Count(parts[0], "[Amendment (Spec 130)]") < 2 {
-			t.Errorf("%s missing conduct back-pointers", name)
+		body := strings.Join(strings.Fields(parts[0]), " ")
+		for _, span := range backPointers[name] {
+			if !strings.Contains(body, span) {
+				t.Errorf("%s missing back-pointer on its cited span %q", name, span)
+			}
 		}
 	}
 }

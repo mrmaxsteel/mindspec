@@ -127,6 +127,7 @@ func TestGate_LegacyHandEditExempt(t *testing.T) {
 }
 func TestGate_CarriedBaseline(t *testing.T) {
 	dir, p := passFixture(t, 2, VerdictRequestChanges)
+	writePassJSON(t, dir, "R2-round-1.json", FindingVerdict{Verdict: VerdictApprove})
 	p.Refutations = []Refutation{{Slot: "R1", Round: 1, Reason: "legacy"}}
 	makeNonLegacy(t, dir, &p)
 	if r := passTally(t, dir); r.IntegrityErr != nil {

@@ -35,5 +35,5 @@ If multiple active specs exist, the command fails with a list of candidates.`,
 func init() {
 	instructCmd.Flags().String("format", "", "Output format: markdown (default) or json")
 	instructCmd.Flags().String("spec", "", "Target spec ID (auto-detected if exactly one active spec)")
-	instructCmd.Flags().Bool("panel-state", false, "Append the open-panel-rounds block: per-panel tally, N-1 threshold, and reviewed-HEAD freshness vs the mindspec complete gate")
+	instructCmd.Flags().Bool("panel-state", false, "Append open-panel rounds with each tally, pass rule, and freshness check for the completion gate")
 }

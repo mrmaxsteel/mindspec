@@ -334,8 +334,8 @@ func PanelGateDecision(f GateFacts) Decision {
 			detail += fmt.Sprintf(", hard_block from %s", strings.Join(hardBlocks, ", "))
 		}
 		return Decision{Action: Block, Message: fmt.Sprintf(
-			"panel %s round %d: %s — HARD block / REJECT recorded — halt path, see /ms-panel-tally%s",
-			slug, round, detail, RawMergeFence(f.BeadID))}
+			"panel %s round %d: %s — %s recorded — halt path, see /ms-panel-tally%s",
+			slug, round, detail, f.Res.vetoSummary(), RawMergeFence(f.BeadID))}
 	}
 
 	// (9.5) Every finding must be discharged; approval counts are descriptive.
