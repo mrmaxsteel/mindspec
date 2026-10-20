@@ -23,7 +23,7 @@ func TestPanelSkills_NoHandEditInstructions(t *testing.T) {
 						t.Errorf("forbidden hand-edit/manifest/threshold instruction %q", forbidden)
 					}
 				}
-				for _, want := range []string{"mindspec panel refute", "mindspec panel abandon", "mindspec panel tally", "writes the coverage manifest", "fresh and intact", "all roster slots present", "0 REJECT", "0 hard_block", "0 INVALID", "0 unresolved REQUEST_CHANGES"} {
+				for _, want := range []string{"mindspec panel refute", "mindspec panel defer", "mindspec panel abandon", "mindspec panel tally", "writes the coverage manifest", "fresh and intact", "all roster slots present", "0 REJECT", "0 hard_block", "0 INVALID", "0 unresolved REQUEST_CHANGES"} {
 					if !strings.Contains(text, want) {
 						t.Errorf("missing panel rule %q", want)
 					}

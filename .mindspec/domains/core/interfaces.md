@@ -106,6 +106,8 @@ an existing command group must add its name there or the drift guard
 fails the same way (spec 124 registered `ready-check` and `clarify` for
 the new `bead ready-check`/`bead clarify` verbs).
 
+The `rebind`, `refute`, `abandon` and `defer` panel verbs register telemetry tokens in `internal/redact/redact.go`.
+
 Spec 127 made both registrations: `adopt` joined `SubcommandTokens` for
 the new `mindspec impl adopt` verb (R1's audited, merge-free terminal
 transition), and `allow-net-deletion` joined the third closed set,

@@ -219,19 +219,19 @@ func TestPassRule_SlotLevelVoidedByChange(t *testing.T) {
 		})
 	}
 }
-func TestPassRule_DeferralInactive(t *testing.T) {
+func TestPassRule_DeferralActive(t *testing.T) {
 	dir, p := passFixture(t, 2, VerdictApprove)
 	v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
 	writePassJSON(t, dir, "R1-round-1.json", v)
 	fs, _ := Findings(v)
 	p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}}
 	writePassJSON(t, dir, FileName, p)
-	if d := passDecision(t, dir); d.Action != Block {
-		t.Fatalf("deferral discharged legacy panel: %+v", d)
+	if d := passDecision(t, dir); d.Action != Allow || len(d.AppliedDeferrals) != 1 {
+		t.Fatalf("deferral did not discharge legacy panel: %+v", d)
 	}
 	makeNonLegacy(t, dir, &p)
-	if d := passDecision(t, dir); d.Action != Block || !strings.Contains(d.Message, "unresolved") {
-		t.Fatalf("carried deferral discharged: %+v", d)
+	if d := passDecision(t, dir); d.Action != Allow || len(d.AppliedDeferrals) != 1 {
+		t.Fatalf("carried deferral did not discharge: %+v", d)
 	}
 }
 func TestApproveThreshold_LegacyNotice(t *testing.T) {
@@ -260,5 +260,40 @@ func makeNonLegacy(t *testing.T, dir string, p *Panel) {
 	writePassJSON(t, dir, FileName, p)
 	if r := passTally(t, dir); r.IntegrityErr != nil {
 		t.Fatalf("baseline integrity: %v", r.IntegrityErr)
+	}
+}
+
+func TestPassRule_DeferralPins(t *testing.T) {
+	for _, change := range []string{"round", "text", "slot list", "invalid bead", "veto"} {
+		t.Run(change, func(t *testing.T) {
+			dir, p := passFixture(t, 2, VerdictApprove)
+			v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			f, _ := SlotFinding(v)
+			p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "max", CreatedAt: ledgerTime}}
+			if change == "invalid bead" {
+				p.Deferrals[0].Bead = "--hostile"
+			} else {
+				writePassJSON(t, dir, FileName, p)
+				if d := passDecision(t, dir); d.Action != Allow {
+					t.Fatalf("baseline: %+v", d)
+				}
+			}
+			switch change {
+			case "round":
+				p.Deferrals[0].Round = 2
+			case "text":
+				v.ConcreteChangesRequired[0] = "changed"
+			case "slot list":
+				v.ConcreteChangesRequired = append(v.ConcreteChangesRequired, "new")
+			case "veto":
+				v.HardBlock = true
+			}
+			writePassJSON(t, dir, FileName, p)
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			if d := passDecision(t, dir); d.Action != Block {
+				t.Fatalf("invalid deferral %s passed: %+v", change, d)
+			}
+		})
 	}
 }

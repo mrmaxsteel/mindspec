@@ -265,3 +265,8 @@ shipped design is the opposite:
 The R4 work-destruction preflight in front of every merge producer, and
 the full resumption state machine, are described in this domain's
 architecture doc, § Merge safety layer (spec 127).
+
+### Deferral reads and rename paths
+
+- `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
+- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.

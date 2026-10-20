@@ -51,7 +51,7 @@ When `runner: claude-code-workflow` (the Runner dispatch in `/ms-panel-run`) dis
    **NEVER inline untrusted finding text into a shell-quoted `--data '{...}'` argument.** A crafted `summary`/`note`/`reviewer` (e.g. one containing `'; touch /tmp/x; echo '`) breaks the single quote and runs arbitrary shell BEFORE `mindspec` even starts. Instead, write the JSON to a temp file with a QUOTED heredoc — the quotes on `<<'JSON'` disable ALL shell expansion and command substitution inside the body, so no finding text can escape — then pass it with `--data @<file>` (`--data -` reads the same JSON from stdin). Do NOT pass an `id`: the CLI DERIVES the canonical row `id` from the record content (a hash of `{spec,panel,reviewer,summary}`), overriding anything you supply, which is exactly what makes a re-append of the same finding an idempotent retry rather than a duplicate.
    ```bash
    cat > /tmp/disposition-row.json <<'JSON'
-   {"record":"disposition","spec":"<NNN>","gate":"<spec_approve|plan_approve|bead|final_review|adhoc>","panel":"<panel-slug>","reviewer":"<slot>","model":"<actual model that produced the verdict>","severity":"<blocking|major|minor>","summary":"<one-line finding summary>","convergent_with":["<slot>", ...],"disposition":"<confirmed-fixed|confirmed-deferred|confirmed-scope-trim|deferred|false-contamination|audited-refuted>","evidence_ref":"<fix commit / follow-up bead / refutation record>","note":"<free prose>","created_at":"<RFC-3339>","backfilled":false}
+   {"record":"disposition","spec":"<NNN>","gate":"<spec_approve|plan_approve|bead|final_review|adhoc>","panel":"<panel-slug>","reviewer":"<slot>","model":"<actual model that produced the verdict>","severity":"<blocking|major|minor>","summary":"<one-line finding summary>","convergent_with":["<slot>", ...],"disposition":"<confirmed-fixed|confirmed-scope-trim|deferred|false-contamination>","evidence_ref":"<fix commit / follow-up bead / refutation record>","note":"<free prose>","created_at":"<RFC-3339>","backfilled":false}
    JSON
    mindspec panel disposition append --spec <NNN-slug> --panel <panel-slug> --data @/tmp/disposition-row.json
    ```
@@ -123,3 +123,19 @@ Decision-dependent:
 - `merge` → `/ms-bead-cycle` merge terminal (`mindspec complete <id> "<summary>"`, hook-gated)
 - `fix` → `/ms-bead-fix`
 - `halt` → the After a halt — recovery; return to user
+
+## Defer a finding
+
+Run `mindspec panel defer <panel-slug> --slot R2 --round N --finding 'ccr[0]' --bead <follow-up> --by "<name>"`.
+Omit `--finding` to cover all findings in the slot.
+Use an open follow-up outside the owning epic and all its descendants.
+Add a `discovered-from` edge to the owning epic or reviewed bead.
+Put each deferred finding in the follow-up description.
+Spec approval and adhoc panels cannot defer findings.
+Fix the finding or use `mindspec panel refute` on these panels.
+The refute and defer verbs write the `audited-refuted` and `confirmed-deferred` rows.
+Do not append these rows by hand.
+Completion records the effective deferrals in the durable `panel_deferred` audit.
+Completion and implementation approval check the follow-up again.
+A closed, missing, re-parented or changed follow-up blocks the gate.
+An applicable refutation supersedes a deferral.
