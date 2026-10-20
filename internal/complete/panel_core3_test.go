@@ -137,6 +137,11 @@ func TestComplete_Core3Enforced(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "coverage") || !strings.Contains(err.Error(), "R1") {
 				t.Fatalf("must block naming panel and slot: %v", err)
 			}
+			if scenario == "uncovered" {
+				if !strings.Contains(err.Error(), "mindspec panel refute 'coverage' --spec '130-core3' --slot 'R1' --round 1") || strings.Contains(err.Error(), "mindspec panel tally") {
+					t.Fatalf("uncovered slot needs exact refute recovery: %v", err)
+				}
+			}
 		})
 	}
 }
@@ -281,10 +286,20 @@ func TestComplete_Core3BeforeMaterialization(t *testing.T) {
 	orig := gateRevParseFn
 	t.Cleanup(func() { gateRevParseFn = orig })
 	gateRevParseFn = func(string, string) (string, error) { return reg.Panel.ReviewedHeadSHA, nil }
+	origPreflight := completeWorkDestructionPreflightFn
+	t.Cleanup(func() { completeWorkDestructionPreflightFn = origPreflight })
+	reached := false
+	completeWorkDestructionPreflightFn = func(workdir, branch, target, overrideReason, rerun string) error {
+		reached = true
+		return origPreflight(workdir, branch, target, overrideReason, rerun)
+	}
 	ex := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
 	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
 	if err == nil || !strings.Contains(err.Error(), "no coverage manifest") {
 		t.Fatalf("Run must refuse absent coverage: %v", err)
+	}
+	if reached {
+		t.Fatal("destruction preflight reached before coverage refusal")
 	}
 	if len(ex.calls) != 0 {
 		t.Fatalf("terminal mutation reached before coverage: %v", ex.calls)

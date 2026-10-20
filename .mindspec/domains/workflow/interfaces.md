@@ -801,8 +801,6 @@ Core 3 runs in `complete` before materialization for every required matched regi
   diagnostics fixture pins byte-identical `(code, message)` output pre/post
   caching.
 
-
-
 ### Landed review identity (`complete`, Spec 130 R12)
 
 On a normal run, before `exec.CompleteBead`, `complete.Run` calls the optional

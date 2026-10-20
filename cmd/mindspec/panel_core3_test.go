@@ -223,6 +223,52 @@ func TestTally_ManifestWhenOnlyStale(t *testing.T) {
 	}
 }
 
+func TestTally_NoManifestWhenPassRuleFails(t *testing.T) {
+	root := mkPanelTestRoot(t, "")
+	reg := core3Fixture(t, root, "coverage", "final_review", false)
+	core3JSON(t, reg.Dir, "R1-round-1.json", map[string]string{"verdict": "REQUEST_CHANGES", "rationale": "unresolved finding"})
+	if err := core3Tally(t, reg, false); err == nil {
+		t.Fatal("unresolved finding must block tally")
+	}
+	if ms := core3Manifests(t, reg.Dir); len(ms) != 0 {
+		t.Fatalf("blocked panel must record no manifest: %+v", ms)
+	}
+}
+
+func TestTally_NoManifestOnAbandonedOrLegacy(t *testing.T) {
+	for _, scenario := range []string{"abandoned", "legacy", "single legacy marker"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := mkPanelTestRoot(t, "")
+			reg := core3Fixture(t, root, "coverage", "final_review", false)
+			if scenario == "abandoned" {
+				reg.Panel.Abandoned = true
+				reg.Panel.AbandonReason = "operator: superseded"
+				core3Append(t, reg.Dir, panel.AbandonRecord{Record: panel.RecordAbandon, Spec: reg.Panel.Spec, Panel: reg.Slug(), Reason: reg.Panel.AbandonReason, By: "operator", CreatedAt: core3Time})
+			} else {
+				reg.Panel.Telemetry = ""
+				if scenario == "legacy" {
+					if err := os.Rename(filepath.Join(reg.Dir, "dispositions.jsonl"), filepath.Join(reg.Dir, "saved-ledger")); err != nil {
+						t.Fatal(err)
+					}
+					core3Cover(t, reg)
+				}
+			}
+			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+			err := core3Tally(t, reg, false)
+			if scenario == "single legacy marker" {
+				if err == nil || !strings.Contains(err.Error(), "only one legacy marker") {
+					t.Fatalf("one marker must block tally: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if ms := core3Manifests(t, reg.Dir); len(ms) != 0 {
+				t.Fatalf("%s panel must record no manifest: %+v", scenario, ms)
+			}
+		})
+	}
+}
+
 func TestTally_Core3RecoveryOperands(t *testing.T) {
 	reg := panel.Registration{Dir: "/review/quote' ; $(echo probe)", Panel: panel.Panel{Spec: "130-core3", Gate: "final_review"}}
 	err := panelCoverageWriteFailure(reg, errors.New("write failed"))

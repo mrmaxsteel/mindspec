@@ -115,8 +115,8 @@ func TestImplApprove_Core3Leg(t *testing.T) {
 			reg := core3Fixture(t, root, "coverage", gate, true)
 			core3Manifest(t, reg)
 			err := implPanelCore3Preflight(root, "130-core3", nil)
-			if err == nil || !strings.Contains(err.Error(), "coverage") || !strings.Contains(err.Error(), "R1") {
-				t.Fatalf("must name panel and slot: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "mindspec panel refute 'coverage' --spec '130-core3' --slot 'R1' --round 1") || strings.Contains(err.Error(), "mindspec panel tally") {
+				t.Fatalf("uncovered slot needs exact refute recovery: %v", err)
 			}
 			core3Cover(t, reg)
 			if err := implPanelCore3Preflight(root, "130-core3", nil); err != nil {
@@ -135,6 +135,60 @@ func TestImplApprove_Core3Leg(t *testing.T) {
 		})
 	}
 }
+func TestImplApprove_Core3EveryRegistration(t *testing.T) {
+	for _, failure := range []string{"uncovered", "missing store", "malformed registration"} {
+		for _, failingFirst := range []bool{false, true} {
+			order := "failing last"
+			if failingFirst {
+				order = "failing first"
+			}
+			t.Run(failure+"/"+order, func(t *testing.T) {
+				t.Setenv(panel.SkipPanelEnv, "0")
+				root := core3ApproveRoot(t)
+				passingSlug, failingSlug := "a-bead", "z-final-review"
+				if failingFirst {
+					passingSlug, failingSlug = "z-bead", "a-final-review"
+				}
+				passing := core3Fixture(t, root, passingSlug, "bead", false)
+				core3Manifest(t, passing)
+				if err := implPanelCore3Preflight(root, "130-core3", nil); err != nil {
+					t.Fatalf("covered APPROVE registration must pass: %v", err)
+				}
+				failing := core3Fixture(t, root, failingSlug, "final_review", true)
+				core3Manifest(t, failing)
+				switch failure {
+				case "missing store":
+					if err := os.Rename(filepath.Join(failing.Dir, "dispositions.jsonl"), filepath.Join(failing.Dir, "saved-ledger")); err != nil {
+						t.Fatal(err)
+					}
+				case "malformed registration":
+					if err := os.WriteFile(filepath.Join(failing.Dir, panel.FileName), []byte(`{"spec":`), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				err := implPanelCore3Preflight(root, "130-core3", nil)
+				if err == nil || !strings.Contains(err.Error(), "panel "+failingSlug+" slots [") {
+					t.Fatalf("must block naming failing registration %s: %v", failingSlug, err)
+				}
+				switch failure {
+				case "uncovered":
+					if !strings.Contains(err.Error(), "mindspec panel refute '"+failingSlug+"' --spec '130-core3' --slot 'R1' --round 1") {
+						t.Fatalf("must name uncovered slot in recovery: %v", err)
+					}
+				case "missing store":
+					if !strings.Contains(err.Error(), "R1") || !strings.Contains(err.Error(), "only one legacy marker") {
+						t.Fatalf("must name slots and refuse missing store: %v", err)
+					}
+				case "malformed registration":
+					if !strings.Contains(err.Error(), "parse panel.json") {
+						t.Fatalf("must refuse malformed registration: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestImplApprove_AbandonedSkipIntegrity(t *testing.T) {
 	for _, scenario := range []string{"audited abandon", "manual abandon", "one marker", "roster edit", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
