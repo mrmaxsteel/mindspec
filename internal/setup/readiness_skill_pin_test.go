@@ -237,7 +237,7 @@ func TestMsSpecAutopilotSkill_AcceptedNotReadyHaltRow(t *testing.T) {
 
 // --- Final-review r1 G1/G3-OVERRIDE-COVERAGE: stale-override coverage ---
 
-const readinessStagedRule = "<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->"
+const readinessStagedRule = "<!-- staged-rule: target=next-action -->"
 const readinessExitCodeRule = "Run `mindspec bead ready-check <id>`; proceed on exit 0; otherwise stop and surface its report."
 
 // Coverage belongs to the binary; the harness adapter obeys its exit code.

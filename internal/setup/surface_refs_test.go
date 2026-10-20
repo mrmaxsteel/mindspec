@@ -87,7 +87,6 @@ const surfaceRefCodeTermDocsResidual = "lifecycle-modes.md is a contributor cont
 var surfaceRefExcludedGoFiles = map[string]string{
 	"internal/guard/registries.go":            "test-only registry data (rationales and obligations read only by internal/lint tests)",
 	"internal/validate/readiness/fixtures.go": "exported test fixtures in a non-test file so other packages' tests can import them",
-	"internal/panel/disposition_migrate.go":   "maintainer-only seed migration paths, used only by tests and never printed",
 }
 
 func surfaceRefScanContent(surface, content string, codeSurface bool) []acTenHit {
