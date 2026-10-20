@@ -224,11 +224,9 @@ path token with `<path>` after hashing. Slot-level discharges use `finding:
 "slot"` and hash the compact JSON encoding of the entire ordered list, or the
 raw rationale for an empty list.
 
-The one SANCTIONED hand-edit path, in either era, is
-`/ms-panel-tally`'s Abandon procedure, which sets `abandoned` /
-`abandon_reason` by hand — every other field is machine-written once
-spec 110 Bead 4 lands. This path is superseded by spec 130 Bead 8's abandon
-verb when that bead lands.
+The gate checks snapshot/event equality before abandonment. An unbacked field
+blocks with `panel.json changed outside the panel verbs`; legacy panels with
+neither marker remain exempt. The check detects accidental desync, not forgery.
 
 `panel.Create` writes `panel.json` as a full-struct overwrite: it never
 reads the existing file first, unlike its read-before-splice handling
@@ -256,24 +254,29 @@ consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
 - `verdict` (required): a non-empty string. A reviewer MUST write one
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
-  acts on. `panel.Tally`'s parser (`internal/panel/tally.go`) does not
-  itself enforce this enum: any OTHER non-empty string parses as
-  present (it counts toward `expected_reviewers` completeness) but is
-  neither an APPROVE nor a REJECT, so it can never help reach the
-  approve threshold and never triggers a REJECT halt. An empty or
-  whitespace-only `verdict`, or invalid JSON, is malformed and counts
-  as MISSING, not present.
+  acts on. Any other non-empty value is INVALID and blocks. An empty or
+  whitespace-only verdict, or invalid JSON, is malformed and counts as missing.
 - `hard_block` (optional boolean): a top-level sibling of `verdict`.
 
-`panel.Tally` parses only these two top-level keys from each verdict
-file; `panel.PanelGateDecision` then acts on the resulting tally —
-REJECT/`hard_block` halts the gate, otherwise the APPROVE count is
-checked against the N-1 threshold. A reviewer additionally writes
-`reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`,
-and `findings` as context for `mindspec panel tally`'s
-presentation-only aggregation — none of those five feed the gate
-decision. `hard_block` is read only at the top level as a sibling of
-`verdict`, never nested under any other reviewer-authored field.
+`panel.Tally` parses verdict, hard_block, rationale and concrete_changes_required.
+The gate passes only when complete, without veto, fresh, discharged and intact.
+Every roster slot must have a parseable latest-round verdict. Only roster slots
+count toward completeness or APPROVE; unexpected files are named and count for
+nothing, except REJECT, hard_block or INVALID blocks and names the file. Every
+file still contributes to LatestRound. Legacy panels without a roster retain
+count-based completeness. Registrations require at least two reviewers.
+
+Every REQUEST_CHANGES finding must be discharged at the current round with an
+unchanged `finding_sha256`. An item-level refutation clears one finding; a
+slot-level refutation clears all until the list or fallback rationale changes.
+Legacy unpinned refutations apply only to legacy panels. Deferrals do not yet
+count as discharges. REJECT, hard_block, INVALID, staleness and incompleteness
+cannot be discharged. Zero APPROVE can pass: resolved slots are reported as
+resolved, never approvals. `approve_threshold` remains parse-compatible and
+prints an ignored legacy notice, with no decision effect. Tally, verify and
+instruct render the same rule line, including INVALID and unresolved findings.
+`hard_block` is read only at the top level. Reviewer `findings[]` is evidence,
+not the blocking finding list.
 
 Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a

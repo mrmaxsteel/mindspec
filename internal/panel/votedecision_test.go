@@ -92,7 +92,7 @@ func TestVoteDecision(t *testing.T) {
 				Verdicts: makeVerdicts(6, 0), Approves: 4,
 			},
 			want:    VoteBlock,
-			summary: "threshold is 5/6",
+			summary: "REJECT/hard_block",
 		},
 	}
 	for _, tt := range tests {

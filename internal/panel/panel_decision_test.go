@@ -212,7 +212,7 @@ func TestPanelGateDecision(t *testing.T) {
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
 			want:     Block,
-			mustHave: []string{"4/6 APPROVE", "threshold is 5/6", "consolidated-round-1.md", fence},
+			mustHave: []string{"4/6 APPROVE", "unresolved", "consolidated-round-1.md", fence},
 		},
 		{
 			// Outcome-preserving update (Spec 114 R1 step 6f): this fixture's
@@ -238,7 +238,7 @@ func TestPanelGateDecision(t *testing.T) {
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
 			want:        Block,
-			mustHave:    []string{"1/3 APPROVE", "threshold is 2/3"},
+			mustHave:    []string{"1/3 APPROVE", "unresolved"},
 			mustNotHave: []string{"5/6", "/6"},
 		},
 	}
@@ -308,7 +308,7 @@ func TestPanelGateDecision_UnresolvedRequestChangesBlocks(t *testing.T) {
 					Verdict{File: "z-round-1.json", Slot: "z", Round: 1, Verdict: VerdictRequestChanges})
 				return GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 			}(),
-			mustHave: []string{"z", "5/6 APPROVE", "threshold is 5/6", fence},
+			mustHave: []string{"z", "5/6 APPROVE", "unresolved", fence},
 		},
 		{
 			// AC8 (block-half): an unrecognized/non-standard verdict string
@@ -454,7 +454,7 @@ func TestPanelGateDecision_ThresholdFloorIsLayeredNotReplaced(t *testing.T) {
 	if got.Action != Block {
 		t.Fatalf("action = %v, want Block\nmsg: %s", got.Action, got.Message)
 	}
-	for _, want := range []string{"x", "y", "z", "3/6 APPROVE", "threshold is 5/6", fence} {
+	for _, want := range []string{"x", "y", "z", "3/6 APPROVE", "unresolved", fence} {
 		if !strings.Contains(got.Message, want) {
 			t.Errorf("message missing %q (both the dissent AND the genuine sub-threshold tally must survive):\n%s", want, got.Message)
 		}

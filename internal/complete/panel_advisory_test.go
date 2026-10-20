@@ -27,7 +27,11 @@ func writePanel(t *testing.T, root, slug string, p panel.Panel, verdicts map[str
 	data, _ := json.Marshal(p)
 	os.WriteFile(filepath.Join(dir, "panel.json"), data, 0o644)
 	for name, v := range verdicts {
-		vd, _ := json.Marshal(map[string]string{"verdict": v})
+		payload := map[string]string{"verdict": v}
+		if v == panel.VerdictRequestChanges {
+			payload["rationale"] = "fixture finding requiring review"
+		}
+		vd, _ := json.Marshal(payload)
 		os.WriteFile(filepath.Join(dir, name), vd, 0o644)
 	}
 }

@@ -203,7 +203,7 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 }
 
 func TestGate_LegacyStaleMessageUnchanged(t *testing.T) {
-	p := &Panel{Round: 1, ReviewedHeadSHA: "abc1234567"}
+	p := &Panel{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc1234567"}
 	reg := &Registration{Dir: "review/p"}
 	d := PanelGateDecision(GateFacts{BeadID: "mindspec-test.1", Reg: reg, Res: &Result{Panel: p, LatestRound: 1}, HeadSHA: "def4567890"})
 	want := "panel round 1 reviewed abc1234, branch now at def4567 — commits landed after review; bump round and re-panel (/ms-panel-run step 0)\nDo NOT bypass with raw `git merge bead/mindspec-test.1` — it skips bd closure, worktree cleanup, and this gate; only `mindspec complete` merges bead branches."
@@ -214,7 +214,7 @@ func TestGate_LegacyStaleMessageUnchanged(t *testing.T) {
 
 func TestGate_EqualSHANoSubjectCall(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
+	if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
 		t.Fatal(err)
 	}
 	f := ResolveGateFacts(Registration{Dir: dir}, "", filepath.Dir(dir), GateIO{RevParse: func(string, string) (string, error) { return "abc123", nil }, SubjectTree: func(string, string, SubjectRoots) (string, error) {
@@ -228,7 +228,7 @@ func TestGate_EqualSHANoSubjectCall(t *testing.T) {
 
 func TestSubjectDigest_GateErrorBlocks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
+	if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, reader := range []func(string, string, SubjectRoots) (string, error){nil, func(string, string, SubjectRoots) (string, error) { return "", nil }, func(string, string, SubjectRoots) (string, error) { return "", errors.New("tree unavailable") }} {
@@ -242,7 +242,7 @@ func TestSubjectDigest_GateErrorBlocks(t *testing.T) {
 func TestResolveGateFacts_LegacySkipsSubjectTree(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc1234567"}); err != nil {
+	if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc1234567"}); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0

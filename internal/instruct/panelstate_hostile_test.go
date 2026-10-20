@@ -124,8 +124,8 @@ func TestInstructPanelState_HostilePanelEscaped(t *testing.T) {
 			"## Open Panel Rounds",
 			"093-x-b1",
 			"gate would BLOCK",
-			"threshold is 5/6",
-			"latest round 2 · 6/6 verdicts · 4 APPROVE (threshold 5)",
+			"unresolved",
+			"6/6 in, 4 APPROVE, 0 resolved, 2 unresolved",
 			"consolidated-round-2.md is present",
 		} {
 			if !strings.Contains(out, want) {

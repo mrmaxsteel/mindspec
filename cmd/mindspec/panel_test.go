@@ -946,6 +946,10 @@ func TestPanelVerbs_DecisionIsPanelGateDecision(t *testing.T) {
 // one seeded verdict file, and returns the panel directory.
 func nonBeadPanelFixture(t *testing.T, root, slug, target, sha, verdict string, expectedReviewers int) string {
 	t.Helper()
+	singleReviewerFixture := expectedReviewers == 1
+	if singleReviewerFixture {
+		expectedReviewers = 2
+	}
 	writePanelFixture(t, root, slug, panel.Panel{
 		Spec: "113-nb", Target: target, Round: 1,
 		ExpectedReviewers: expectedReviewers, ReviewedHeadSHA: sha,
@@ -954,6 +958,11 @@ func nonBeadPanelFixture(t *testing.T, root, slug, target, sha, verdict string, 
 	body := fmt.Sprintf(`{"verdict":%q}`, verdict)
 	if err := os.WriteFile(filepath.Join(dir, "R1-round-1.json"), []byte(body), 0o644); err != nil {
 		t.Fatalf("seed verdict file: %v", err)
+	}
+	if singleReviewerFixture {
+		if err := os.WriteFile(filepath.Join(dir, "R2-round-1.json"), []byte(`{"verdict":"APPROVE"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
@@ -1010,7 +1019,7 @@ func TestPanelVerify_NonBeadStaleness(t *testing.T) {
 		if len(gotRefs) != 1 || gotRefs[0] != target {
 			t.Fatalf("revParseForPanelFn rev-parsed refs %v, want exactly [%q] (never a bead/-derived ref)", gotRefs, target)
 		}
-		if strings.Contains(out, "PASS") {
+		if strings.Contains(out, "\nPASS") {
 			t.Errorf("output contains PASS for an advanced non-bead target:\n%s", out)
 		}
 		if !strings.Contains(out, "BLOCK") {
@@ -1041,7 +1050,7 @@ func TestPanelVerify_NonBeadStaleness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("panel verify: %v\noutput=%s", err, out)
 		}
-		if strings.Contains(out, "PASS") {
+		if strings.Contains(out, "\nPASS") {
 			t.Errorf("output contains PASS despite a REJECT verdict at an un-advanced target:\n%s", out)
 		}
 		if !strings.Contains(out, "BLOCK") {

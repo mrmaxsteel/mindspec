@@ -121,17 +121,7 @@ func (e PanelStateEntry) verdict() (PanelGateVerdict, string) {
 
 	d := panel.PanelGateDecision(facts)
 	if d.Action == panel.Allow {
-		// Allow carries no Message on either of its branches (gate.go:142
-		// no registered panel, gate.go:258 threshold met); synthesize the
-		// reason locally from the tally fields, reusing today's exact
-		// wording so the pinned Allow-reason rows keep passing unchanged.
-		// By the time PanelGateDecision reaches an Allow, f.Res.Panel is
-		// guaranteed non-nil (a nil Panel Blocks at gate.go's
-		// malformed-registration branch).
-		p := r.Panel
-		return GatePass, fmt.Sprintf(
-			"%d/%d APPROVE — meets threshold %d/%d; `mindspec complete` would proceed",
-			r.Approves, p.ExpectedReviewers, p.ApproveThreshold(), p.ExpectedReviewers)
+		return GatePass, fmt.Sprintf("%d/%d APPROVE, %d resolved; `mindspec complete` would proceed", r.Approves, r.ExpectedReviewers(), r.ResolvedCount())
 	}
 	return mapGateAction(d.Action), d.Message
 }
@@ -169,7 +159,7 @@ func renderPanelState(entries []PanelStateEntry) string {
 
 	var b strings.Builder
 	b.WriteString("## Open Panel Rounds\n\n")
-	b.WriteString("Where each open review panel stands vs the `mindspec complete` gate (Bead 4). ")
+	b.WriteString("Where each open review panel stands vs the `mindspec complete` gate. ")
 	b.WriteString("This INFORMS; the `mindspec complete` gate ENFORCES.\n")
 
 	for _, e := range entries {
@@ -178,12 +168,10 @@ func renderPanelState(entries []PanelStateEntry) string {
 		b.WriteString(fmt.Sprintf("- **%s** — %s\n", termsafe.Escape(e.Slug), gateLabel(v)))
 		b.WriteString(fmt.Sprintf("  - %s\n", reason))
 		if e.Tally != nil && e.Tally.Panel != nil {
-			b.WriteString(fmt.Sprintf("  - latest round %d · %d/%d verdicts · %d APPROVE (threshold %d)\n",
-				e.Tally.LatestRound,
-				len(e.Tally.Verdicts),
-				e.Tally.Panel.ExpectedReviewers,
-				e.Tally.Approves,
-				e.Tally.Panel.ApproveThreshold()))
+			b.WriteString("  - " + panel.RuleLine(e.Tally) + "\n")
+			if notice := panel.LegacyThresholdNotice(e.Tally.Panel); notice != "" {
+				b.WriteString("  - " + notice + "\n")
+			}
 			if e.Tally.HasConsolidated {
 				b.WriteString(fmt.Sprintf("  - %s is present (feed it to /ms-bead-fix)\n",
 					panel.ConsolidatedName(e.Tally.LatestRound)))

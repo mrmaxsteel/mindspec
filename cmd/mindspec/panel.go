@@ -756,6 +756,11 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		}
 	}
 
+	fmt.Fprintln(&b, panel.RuleLine(res))
+	if notice := panel.LegacyThresholdNotice(res.Panel); notice != "" {
+		fmt.Fprintln(&b, notice)
+	}
+
 	switch d.Action {
 	case panel.Allow:
 		b.WriteString("PASS\n")
@@ -877,14 +882,13 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(escapeEach(res.Malformed), ", "))
 	}
 
-	expected := res.ExpectedReviewers()
-	threshold := 0
-	if res.Panel != nil {
-		threshold = res.Panel.ApproveThreshold()
+	fmt.Fprintln(&b, panel.RuleLine(res))
+	if notice := panel.LegacyThresholdNotice(res.Panel); notice != "" {
+		fmt.Fprintln(&b, notice)
 	}
-	neutral := len(res.Verdicts) - res.Approves - res.Rejects
-	fmt.Fprintf(&b, "\nAPPROVE %d / REQUEST_CHANGES %d / REJECT %d — threshold %d/%d\n",
-		res.Approves, neutral, res.Rejects, threshold, expected)
+	for _, v := range res.Unexpected {
+		fmt.Fprintf(&b, "unexpected slot: %s (%s)\n", termsafe.Escape(v.Slot), termsafe.Escape(v.File))
+	}
 
 	b.WriteString("\ndecision: ")
 	switch d.Action {
