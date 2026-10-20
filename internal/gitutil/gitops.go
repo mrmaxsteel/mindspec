@@ -1038,11 +1038,15 @@ func mergeConflictRecordPath(workdir string) (string, error) {
 }
 
 // RecordMergeConflicts saves the unmerged paths of the merge in progress
-// in workdir, while git still has them. The first line is the MERGE_HEAD
-// SHA, so the record is used only for this merge; the paths follow,
-// NUL-separated.
+// in workdir, while git still has them. The header line is
+// "<MERGE_HEAD sha> <HEAD sha>"; the paths follow, each ended by NUL.
+// The record applies only while both SHAs match: a rerun of the same
+// merge from the same HEAD gives git the same conflict set, so a match
+// is safe. No record is written when git reports no unmerged path, so a
+// valid record is never empty.
 func RecordMergeConflicts(workdir string) error {
-	mergeHead, err := RevParseRef(workdir, "MERGE_HEAD")
+	ClearMergeConflictRecord(workdir)
+	mergeHead, head, err := mergeConflictRecordHeads(workdir)
 	if err != nil {
 		return err
 	}
@@ -1050,11 +1054,24 @@ func RecordMergeConflicts(workdir string) error {
 	if err != nil {
 		return fmt.Errorf("listing unmerged paths in %s: %w", workdir, err)
 	}
+	if len(out) == 0 {
+		return nil
+	}
 	path, err := mergeConflictRecordPath(workdir)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append([]byte(mergeHead+"\n"), out...), 0o644)
+	return os.WriteFile(path, append([]byte(mergeHead+" "+head+"\n"), out...), 0o644)
+}
+
+func mergeConflictRecordHeads(workdir string) (mergeHead, head string, err error) {
+	if mergeHead, err = RevParseRef(workdir, "MERGE_HEAD"); err != nil {
+		return "", "", err
+	}
+	if head, err = RevParseRef(workdir, "HEAD"); err != nil {
+		return "", "", err
+	}
+	return mergeHead, head, nil
 }
 
 // ClearMergeConflictRecord removes the conflict record, if any.
@@ -1064,9 +1081,11 @@ func ClearMergeConflictRecord(workdir string) {
 	}
 }
 
-// MergeConflictRecord returns the recorded conflicted paths. ok is
-// false if the record is missing or unreadable, or if its MERGE_HEAD is
-// not the current one.
+// MergeConflictRecord returns the recorded conflicted paths. ok is false
+// if the record is missing or unreadable, if its MERGE_HEAD or HEAD is
+// not the current one, or if it is malformed in any way: a header
+// without exactly two SHAs, no paths, an empty path, or no NUL after
+// the last path (a truncated record).
 func MergeConflictRecord(workdir string) (paths []string, ok bool) {
 	path, err := mergeConflictRecordPath(workdir)
 	if err != nil {
@@ -1076,15 +1095,25 @@ func MergeConflictRecord(workdir string) (paths []string, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	head, rest, found := strings.Cut(string(data), "\n")
-	if !found {
+	header, rest, found := strings.Cut(string(data), "\n")
+	if !found || rest == "" || !strings.HasSuffix(rest, "\x00") {
 		return nil, false
 	}
-	mergeHead, err := RevParseRef(workdir, "MERGE_HEAD")
-	if err != nil || head != mergeHead {
+	shas := strings.Split(header, " ")
+	if len(shas) != 2 {
 		return nil, false
 	}
-	return splitNUL([]byte(rest)), true
+	mergeHead, head, err := mergeConflictRecordHeads(workdir)
+	if err != nil || shas[0] != mergeHead || shas[1] != head {
+		return nil, false
+	}
+	for _, p := range strings.Split(strings.TrimSuffix(rest, "\x00"), "\x00") {
+		if p == "" {
+			return nil, false
+		}
+		paths = append(paths, p)
+	}
+	return paths, true
 }
 
 // leftoverMarkerLines runs `git diff --cached --check HEAD` on one path

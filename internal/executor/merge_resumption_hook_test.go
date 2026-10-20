@@ -242,3 +242,34 @@ func TestCompleteBead_ResolveMerge_BeadAuthoredMarkerBlockDoesNotBlock(t *testin
 		t.Error("the merge must be complete")
 	}
 }
+
+// TestCompleteBead_ResolveMerge_TruncatedRecordRefuses: a conflict record
+// cut off after its header lists no paths. It must not make the check
+// scan nothing: the fallback scans the staged files and refuses.
+func TestCompleteBead_ResolveMerge_TruncatedRecordRefuses(t *testing.T) {
+	g, _, specWtPath := preservedConflict(t)
+	gitOut := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", specWtPath}, args...)...).Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	recPath := gitOut("rev-parse", "--git-path", "MINDSPEC_MERGE_CONFLICTS")
+	if !filepath.IsAbs(recPath) {
+		recPath = filepath.Join(specWtPath, recPath)
+	}
+	header := gitOut("rev-parse", "MERGE_HEAD") + " " + gitOut("rev-parse", "HEAD") + "\n"
+	if err := os.WriteFile(recPath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, specWtPath, "add", "c.txt") // markers still in the file
+
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil || !strings.Contains(err.Error(), "leftover conflict markers in: c.txt") {
+		t.Fatalf("a truncated record must not let markers through; got: %v", err)
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must stay in progress after the refusal")
+	}
+}

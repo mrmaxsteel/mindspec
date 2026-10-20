@@ -269,3 +269,61 @@ func fileExistsT(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
+
+func writeRecord(t *testing.T, dir, content string) {
+	t.Helper()
+	path, err := mergeConflictRecordPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func recordHeader(t *testing.T, dir string) string {
+	t.Helper()
+	return runGitOut(t, dir, "rev-parse", "MERGE_HEAD") + " " + runGitOut(t, dir, "rev-parse", "HEAD")
+}
+
+// A record cut off after its header has no paths: invalid, fallback used.
+func TestStagedConflictMarkerFiles_TruncatedRecordFallsBack(t *testing.T) {
+	dir := fallbackMerge(t)
+	for name, content := range map[string]string{
+		"no paths":        recordHeader(t, dir) + "\n",
+		"no newline":      recordHeader(t, dir),
+		"no NUL at end":   recordHeader(t, dir) + "\nf",
+		"empty path":      recordHeader(t, dir) + "\n\x00f\x00",
+		"one sha only":    runGitOut(t, dir, "rev-parse", "MERGE_HEAD") + "\nf\x00",
+		"three fields":    recordHeader(t, dir) + " x\nf\x00",
+		"valid (control)": recordHeader(t, dir) + "\nf\x00",
+	} {
+		writeRecord(t, dir, content)
+		_, ok := MergeConflictRecord(dir)
+		if want := name == "valid (control)"; ok != want {
+			t.Errorf("%s: record ok = %v, want %v", name, ok, want)
+		}
+	}
+	writeRecord(t, dir, recordHeader(t, dir)+"\n")
+	assertMarkerFiles(t, dir, []string{"doc.md", "f"})
+}
+
+// After a raw `git merge --abort` and a re-merge of the same source tip
+// from a different HEAD, the old record is ignored.
+func TestStagedConflictMarkerFiles_RecordIgnoredAfterAbortAndNewHead(t *testing.T) {
+	dir := fallbackMerge(t)
+	runGit(t, dir, "merge", "--abort")
+	if err := os.WriteFile(filepath.Join(dir, "g"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "g")
+	runGit(t, dir, "commit", "-q", "-m", "new HEAD")
+	if err := exec.Command("git", "-C", dir, "merge", "side").Run(); err == nil {
+		t.Fatal("fixture: the re-merge must conflict")
+	}
+	runGit(t, dir, "add", "--", "f")
+	if _, ok := MergeConflictRecord(dir); ok {
+		t.Fatal("a record from before the abort must not apply to a merge from another HEAD")
+	}
+	assertMarkerFiles(t, dir, []string{"doc.md", "f"})
+}
