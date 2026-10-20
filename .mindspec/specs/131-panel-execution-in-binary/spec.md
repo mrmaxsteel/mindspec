@@ -43,7 +43,7 @@ Dependency: #252 (skills cite ADR-0044) is fixed by a separate surface-leak chan
   - `internal/instruct/**`: the `## Rules` section.
   - `internal/doctor/**`: launcher, staged-marker and checkout checks.
   - `internal/setup/**`, `plugins/mindspec/skills/**`, `.claude/skills/**`, `plugins/mindspec/workflows/ms-panel.js`, `.claude/workflows/ms-panel.js`, `plugins/mindspec/scripts/`: skill and workflow slimming; historical snapshots.
-- **core**: `internal/config/**` (`panel.runners`, `panel.lenses`, `panel.gates.<g>.lenses|acceptance`, `panel.isolation_root`, `panel.verdict_schema`, `.mindspec/config.local.yaml`); a new `internal/rules` package with the embedded rule table; `internal/bootstrap/**` (`.gitignore` lines).
+- **core**: `internal/config/**` (`panel.runners`, `panel.lenses`, `panel.gates.<g>.lenses|acceptance`, `panel.isolation_root`, `.mindspec/config.local.yaml`); a new `internal/rules` package with the embedded rule table; `internal/bootstrap/**` (`.gitignore` lines).
 - **execution**: `internal/executor/**` (worktree add and remove for slot checkouts, `cat-file -e` for the BRIEF path check).
 
 Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amendments (R13); `.mindspec/domains/workflow/interfaces.md` § Panel Artifact Schema; `CHANGELOG.md`.
@@ -106,7 +106,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
    - an abandoned panel;
    - a `reviewed_sha` other than `panel.json`'s `reviewed_head_sha`;
    - a slot and round that already have a final verdict.
-3. A draft or `VOID` submission can be replaced by a later submission for the same slot and round.
+3. A draft or `VOID` submission can be replaced by a later submission for the same slot and round. A final verdict is frozen: one final verdict per slot per round. A finding in it is corrected by refutation through the existing discharge rules, or by a new round.
 4. Submit appends one `verdict` ledger record, then writes the exact submitted bytes to `<slot>-round-<N>.json` by temp file and rename. A rerun with the same bytes converges.
 
    | `record` | Fields (plus `spec`, `panel`) | Key |
@@ -118,12 +118,12 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 ### R3 — The gate on a v2 round
 
-1. `create` records `verdict_schema` in `panel.json` and in the `round` event. Spec 130 R5.3 pins the field. The value is `panel.verdict_schema` from config: `2` by default, or `1`.
+1. `create` records `verdict_schema: 2` in `panel.json` and in the `round` event of every new round. No config key or flag changes this value. Spec 130 R5.3 pins the field, so a hand edit of it blocks.
 2. On a v2 round, a roster slot is in only when it has a final verdict, and the sha256 of its `<slot>-round-<N>.json` equals that submission's `file_sha256`.
 3. On a v2 round, a verdict file with no matching submission counts for nothing. Spec 130 R2.5 (an off-roster REJECT, INVALID or `hard_block` blocks) applies unchanged.
 4. A draft or `VOID` verdict counts as missing.
 5. Spec 130's pass rule, discharge rules and coverage manifest use only the slots that are in.
-6. A round that is not a v2 round keeps spec 130's rules.
+6. A round created before this change has no `verdict_schema: 2`. It keeps spec 130's rules.
 
 ### R4 — Runners and slot resolution
 
@@ -242,10 +242,10 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 
 1. ADR-0045: steps 1 and 3 (BRIEF and slot prompt) shipped; step 5 started (R10.5); the R10.4 marker form.
 2. ADR-0044: reviewer conduct lives in reviewer-scope rules and the BRIEF conduct region. Skills cite rule ids.
-3. ADR-0037: R3 counting and the pinned `verdict_schema` field.
+3. ADR-0037: R3 counting, the pinned `verdict_schema` field with no opt-out, and frozen final verdicts (R2.3).
 4. ADR-0043: the three new record kinds.
 5. ADR-0040: `panel.runners` and `.mindspec/config.local.yaml`.
-6. `interfaces.md` § Panel Artifact Schema describes v2, submit and slot status. `CHANGELOG.md` names: v2 on new rounds, the `panel verify` exit code, and the new spec and plan default lenses.
+6. `interfaces.md` § Panel Artifact Schema describes v2, submit and slot status. `CHANGELOG.md` names: v2 on every new round with no opt-out (a hand-written verdict file no longer counts), frozen final verdicts, the `panel verify` exit code, and the new spec and plan default lenses.
 
 ## Scope
 
@@ -275,7 +275,7 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 - [ ] **AC-1 (R1)**: The validator accepts a fixture of each verdict kind. It refuses each of these, naming the JSON pointer: no `status`; `verdict: "MAYBE"`; `VOID` without `void_reason`; `void_reason` on an APPROVE; an unknown top-level field; an unknown item field; an `executed` item without `command`; `command: 5` with 2 commands; a `traced` item with `command`; an APPROVE with one item; a REQUEST_CHANGES with none; a 1 MiB + 1 byte file; a 4097-byte `tail`. `panel schema` output and the validator agree on every fixture. Tests: `TestVerdictV2_Accepts`, `TestVerdictV2_Refusals`, `TestVerdictV2_SchemaMatchesValidator`.
 - [ ] **AC-2 (R1.5)**: A v2 REQUEST_CHANGES with items `a` and `b` gives findings `ccr[0]` and `ccr[1]` with the sha256 of `a` and `b`. A `panel refute --finding ccr[1]` discharges `ccr[1]` only. Test: `TestVerdictV2_FindingProjection`.
 - [ ] **AC-3 (R2)**: On a v2 round, submit writes the file and one `verdict` record. A rerun with the same bytes adds nothing. Each R2.2 refusal leaves the panel directory and ledger byte-identical. A draft, then a final, is accepted; a second final is refused. A `VOID`, then a final, is accepted. Submit from inside a slot directory with only `--file` succeeds. `panel disposition append` refuses each new kind. Tests: `TestPanelSubmit_Writes`, `TestPanelSubmit_Refusals`, `TestPanelSubmit_Replace`, `TestPanelSubmit_SlotDir`, `TestDispositionAppend_RefusesV2Kinds`.
-- [ ] **AC-4 (R3)**: On a v2 round with 4 roster slots, all APPROVE: 4 submitted files pass. One hand-written APPROVE file in place of a submission blocks as incomplete, and verify shows `unsubmitted`. One submitted file changed by one byte blocks. One draft blocks. One `VOID` blocks. `panel.verdict_schema: 1` gives a round that keeps spec 130's rules. A hand edit of `verdict_schema` in `panel.json` blocks. Tests: `TestGateV2_SubmittedOnly`, `TestGateV2_DigestBinding`, `TestGateV2_DraftAndVoidMissing`, `TestGateV2_SchemaOneOptOut`, `TestGate_VerdictSchemaPinned`.
+- [ ] **AC-4 (R3)**: On a v2 round with 4 roster slots, all APPROVE: 4 submitted files pass. One hand-written APPROVE file in place of a submission blocks as incomplete, and verify shows `unsubmitted`. One submitted file changed by one byte blocks. One draft blocks. One `VOID` blocks. A fixture round created without `verdict_schema: 2` keeps spec 130's rules. With any config, `create` writes `verdict_schema: 2`, and load refuses a `panel.verdict_schema` key as unknown. A hand edit of `verdict_schema` in `panel.json` blocks. Tests: `TestGateV2_SubmittedOnly`, `TestGateV2_DigestBinding`, `TestGateV2_DraftAndVoidMissing`, `TestGate_PreV2RoundKeepsV1Rules`, `TestCreate_AlwaysV2`, `TestGate_VerdictSchemaPinned`.
 - [ ] **AC-5 (R4.1–R4.4)**: Load refuses: a duplicate family; a harness runner with `argv`; a process runner without `output`; `prompt: file` without `{prompt_file}`; a `{shell}` placeholder; `on_quota` set to its own family. Zero-config `bead` is 2 claude and 2 codex. With `panel.runners: [{family: a, kind: harness}, {family: b, kind: harness}]` and no reviewers, zero-config `bead` is a, b, a, b. The R4.4 grep prints nothing. Tests: `TestRunners_Validate`, `TestRunners_ZeroConfigOrder`, `TestNoFamilyLiterals`.
 - [ ] **AC-6 (R4.5–R4.7)**: `create` writes `family` on each roster entry. A slot with only `family: b` and `models: {reviewer.b: m1}` has model `m1`. A local file that replaces runner `b` changes `config resolve` output, and the source column says `config.local.yaml`. A local file with `loop:`, a 65537-byte local file, and an unparseable local file each make `mindspec config show` refuse. Tests: `TestRoster_Family`, `TestSlotModelResolution`, `TestLocalConfig_Merge`, `TestLocalConfig_Refusals`, `TestConfigResolve_Provenance`.
 - [ ] **AC-7 (R5)**: Zero-config `spec_approve` slots get the four document lenses in order, then repeat. Zero-config `bead` slots get today's first four lens names. Load refuses `panel.gates.bead.lenses: [nope]`. The BRIEF of each gate holds its acceptance question. Tests: `TestLenses_GateDefaults`, `TestLenses_UnknownRefused`, `TestBrief_AcceptanceRegion`.
@@ -286,7 +286,7 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 - [ ] **AC-12 (R10)**: The table loads and holds every R10.2 id. `rules --scope reviewer` lists exactly the reviewer-scope rules. `rules show nope` refuses. `instruct` in implement mode lists `lifecycle.no-probe-complete` and `review.derive`; in spec mode it lists the first and not the second. The `ms-bead-impl` marker parses with `id=sequence.bead-impl-prompt`. No rule field, and no R2–R11 string literal in non-test code, matches `ADR-[0-9]`, `[Ss]pec [0-9]{3}`, `\bR[0-9]+\.[0-9]`, `#[0-9]{3}` or the bead-id pattern. Tests: `TestRuleTable_MinimumSet`, `TestRulesCmd`, `TestInstruct_RulesSection`, `TestStagedMarker_Parse`, `TestProductSurface_NoInternalRefs`.
 - [ ] **AC-13 (R11)**: With a configured process runner whose `argv[0]` is not on `PATH`, `doctor` reports an Error naming the family. With the shipped codex default and no `codex` on `PATH`, it reports a Warn. A `probe` that exits 1 gives the same level. A harness runner gives an Info line. A marker with `remove-by=2020-01-01` and a marker with an unknown id each give a Warn. A slot directory of an abandoned panel gives a Warn with `--prune`. `doctor --ci` gives none of the launcher or checkout lines. Tests: `TestDoctor_Launchers`, `TestDoctor_StagedMarkers`, `TestDoctor_StaleCheckouts`, `TestDoctor_CISkipsLaunchers`.
 - [ ] **AC-14 (R12)**: `wc -l` is 80 or less for both copies of `ms-panel-run` and `ms-panel-tally`. The R12.3 grep prints nothing. Both `ms-panel.js` copies have no `codex exec` and no `VALID_MIX_FAMILIES`, and their `ALLOWED_CLI` names `mindspec panel launch`. `codex_verdict_extract.sh` is absent. `mindspec setup claude` over an unmodified spec-130 install replaces the four skills. Tests: `TestPanelSkills_AdapterShape`, `TestPanelWorkflow_NoFamilies`, `TestSetup_RefreshesSpec130Skills`.
-- [ ] **AC-15 (R13)**: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 each contain `## Amendment (Spec 131)` with the R13 items. `interfaces.md` § Panel Artifact Schema names `panel submit` and the R8.1 statuses. `CHANGELOG.md` names the three R13.6 changes. Test: `TestADRAmendments_Spec131`.
+- [ ] **AC-15 (R13)**: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 each contain `## Amendment (Spec 131)` with the R13 items. `interfaces.md` § Panel Artifact Schema names `panel submit` and the R8.1 statuses. `CHANGELOG.md` names the four R13.6 changes. Test: `TestADRAmendments_Spec131`.
 - [ ] **AC-16 (method)**: `go build ./... && go test ./... -short` is green, including `TestPanelLeafImports_StdlibPlusTermsafeOnly` and `TestEnforcementHasNoGitLeaks`.
 
 ## Validation Proofs
@@ -309,8 +309,8 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 
 ### Open questions for the operator
 
-- [ ] **OQ-5 (v2 default)**: R3.1 makes v2 the default for every new round. A consumer kit that writes v1 files by hand stops passing until it uses `submit`. `panel.verdict_schema: 1` is the opt-out. Recommended: default 2, keep the opt-out for one minor release, and say so in `CHANGELOG.md`. Alternative: default 1 for one release.
-- [ ] **OQ-6 (final verdicts are immutable in a round)**: R2.2 refuses a second final submission for the same slot and round. A reviewer that wants to correct a final verdict needs a new round. Recommended: keep the refusal, because spec 130 pins each discharge to the finding text. Alternative: allow replacement until the first discharge or tally of that round.
+- [x] **OQ-5 (v2 default)** — RESOLVED (operator). v2 is the default for every new round, with no opt-out (R3.1). Rounds created before this change keep spec 130's rules through the pinned `verdict_schema` field (R3.6). `CHANGELOG.md` says that a hand-written verdict file no longer counts on a new round.
+- [x] **OQ-6 (final verdicts are frozen in a round)** — RESOLVED (operator, option A). One final verdict per slot per round. A second final is refused. Correction is by refutation through the existing discharge rules, or by a new round. Draft and `VOID` stay replaceable (R2.3).
 
 ## Approval
 
