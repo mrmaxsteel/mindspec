@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -139,18 +140,29 @@ The bead ID is required as the first argument.`,
 			AllowNetDeletion: allowNetDeletion,
 			ResolveMerge:     resolveMerge,
 		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, emitInstruct) != nil {
 			os.Exit(1)
 		}
-
-		completeTail(os.Stdout, os.Stderr, root, invocationCwd, result, emitInstruct)
 		return nil
 	},
 }
 
+// completeOutput preserves the normal tail after a completed merge even when
+// Run reported a ledger failure. Other errors keep their early-exit behavior.
+func completeOutput(stdout, stderr io.Writer, root, invocationCwd string, result *complete.Result, runErr error, instructFn func(string) error) error {
+	var reported *complete.ReportedError
+	alreadyReported := errors.As(runErr, &reported)
+	if runErr == nil || (alreadyReported && result != nil) {
+		completeTail(stdout, stderr, root, invocationCwd, result, instructFn)
+	}
+	if runErr != nil && !alreadyReported {
+		fmt.Fprintf(stderr, "error: %v\n", runErr)
+	}
+	return runErr
+}
+
 // completeTail is the production tail of `mindspec complete` after a
-// successful Run: result summary, instruct guidance, then the spec 092
+// completed merge: result summary, instruct guidance, then the spec 092
 // Req 4 cd-back NOTE as the LAST line of stdout (the bead worktree the
 // shell sat in may have been removed by the terminal mutation).
 // Extracted (spec 092 panel R3-2) so the last-line ordering is pinned

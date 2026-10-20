@@ -17,6 +17,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
@@ -2775,6 +2776,33 @@ func TestImplApprove_IgnoredLedgerRefuses(t *testing.T) {
 			}
 			if len(mock.CallsTo("Status")) != 0 || len(mock.CallsTo("FinalizeEpic")) != 0 {
 				t.Fatal("ignored ledger did not refuse first")
+			}
+		})
+	}
+}
+
+func TestImplApprove_UntrackedLedgerArrowRefuses(t *testing.T) {
+	for _, slug := range []string{"café -> draft", "a -> b"} {
+		t.Run(slug, func(t *testing.T) {
+			root, wt, file, git := implLedgerFixture(t)
+			dir := filepath.Join(filepath.Dir(filepath.Dir(filepath.Join(wt, file))), slug)
+			if err := os.Rename(filepath.Dir(filepath.Join(wt, file)), dir); err != nil {
+				t.Fatal(err)
+			}
+			file = ".mindspec/specs/130-test/reviews/" + slug + "/dispositions.jsonl"
+			git("config", "core.quotePath", "true")
+			realExec := &executor.MindspecExecutor{}
+			status, err := realExec.Status(wt)
+			if err != nil || !strings.HasPrefix(status, `?? "`) || !strings.Contains(status, " -> ") {
+				t.Fatalf("fixture must exercise a quoted untracked arrow path: %q %v", status, err)
+			}
+			if slug == "café -> draft" && !strings.Contains(status, `caf\303\251`) {
+				t.Fatalf("fixture must exercise non-ASCII git quoting: %q", status)
+			}
+			mock := &executor.MockExecutor{CheckIgnoreFn: realExec.CheckIgnore, StatusFn: realExec.Status}
+			err = implLedgerPreflight(root, "130-test", mock)
+			if err == nil || !strings.Contains(err.Error(), "uncommitted changes") || !strings.Contains(err.Error(), complete.LedgerCommitRecovery(wt, []string{file})) {
+				t.Fatalf("untracked ledger passed or wrong recovery: %v; status=%q", err, status)
 			}
 		})
 	}

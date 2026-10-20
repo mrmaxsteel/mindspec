@@ -151,17 +151,21 @@ below reject.
 `panel.ToolArtifactPaths` is the single home for `.beads/issues.jsonl` and
 `<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
 The gate, next guard and complete materialization share it. The ledger is
-artifact dirt; other panel files retain their ordinary classification. The gate
-and next guard decode git porcelain C-style quoted paths before matching,
-including non-ASCII spec and panel directory names.
+artifact dirt; other panel files retain their ordinary classification. The gate,
+next guard and impl approve share `panel.PorcelainPath` to decode git porcelain
+C-style quoted paths and rename destinations before matching, including
+non-ASCII spec and panel directory names and literal arrows in path names.
 On flat layouts complete checks each existing matched ledger with
 `exec.CheckIgnore` in the spec worktree before any side effect. After the
 bead merge, it commits all matched ledgers once with `exec.CommitPaths`
 and subject `chore(panel): ledger`, in that same worktree. A legacy panel
 without a ledger causes no commit or message. If the ledger commit fails,
-complete prints its recovery on stderr, clears the terminal marker, writes
-override and panel audit metadata, and advances state and syncs the derived
-phase before returning the failure. The recovery states that the bead is
+complete prints its error and recovery once on stderr, clears the terminal marker,
+writes override and panel audit metadata, and attempts to advance state. It syncs
+the phase only when the next mode can be derived; otherwise it reports that the
+next mode is indeterminate. It returns the ledger failure even if state advance
+or phase sync also fails. The CLI prints the result summary and cd-back note
+before exiting non-zero. The recovery states that the bead is
 closed and merged and only the ledger commit remains. Impl approve first checks
 ignore status, then refuses any existing spec ledger with uncommitted or
 untracked content. The ignored-path recovery runs `mindspec init` in the

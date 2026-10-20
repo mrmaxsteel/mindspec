@@ -585,32 +585,46 @@ func PanelDirScanRoot(panelDir string) string {
 func userDirtPaths(porcelain string, specDir ...string) []string {
 	var out []string
 	for _, line := range strings.Split(porcelain, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		path := strings.TrimSpace(line[3:])
-		// A quoted name may itself contain " -> "; only split after it.
-		renameTail := path
-		if strings.HasPrefix(path, "\"") {
-			if quoted, err := strconv.QuotedPrefix(path); err == nil {
-				renameTail = path[len(quoted):]
-			}
-		}
-		if idx := strings.Index(renameTail, " -> "); idx >= 0 {
-			path = strings.TrimSpace(renameTail[idx+4:])
-		}
-		if strings.HasPrefix(path, "\"") {
-			if decoded, err := strconv.Unquote(path); err == nil {
-				path = decoded
-			}
-		}
+		path, _ := PorcelainPath(line)
 		if path == "" || isArtifactPath(path, specDir...) {
 			continue
 		}
 		out = append(out, path)
 	}
 	return out
+}
+
+// PorcelainPath decodes a git porcelain v1 line, selecting the destination
+// for renames and copies. An arrow inside a quoted name is part of the name.
+// On invalid quoting it returns the raw path and an error, so callers can
+// either refuse the status or classify the raw path as user dirt.
+func PorcelainPath(line string) (string, error) {
+	line = strings.TrimRight(line, "\r")
+	if len(line) < 4 {
+		return "", nil
+	}
+	path := strings.TrimSpace(line[3:])
+	if strings.ContainsAny(line[:2], "RC") {
+		renameTail := path
+		if strings.HasPrefix(path, "\"") {
+			quoted, err := strconv.QuotedPrefix(path)
+			if err != nil {
+				return path, err
+			}
+			renameTail = path[len(quoted):]
+		}
+		if idx := strings.Index(renameTail, " -> "); idx >= 0 {
+			path = strings.TrimSpace(renameTail[idx+4:])
+		}
+	}
+	if strings.HasPrefix(path, "\"") {
+		decoded, err := strconv.Unquote(path)
+		if err != nil {
+			return path, err
+		}
+		path = decoded
+	}
+	return path, nil
 }
 
 func isArtifactPath(p string, specDir ...string) bool {

@@ -348,26 +348,7 @@ func isArtifactPath(p string, specsDir ...string) bool {
 func parsePorcelain(out string) []string {
 	var paths []string
 	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		path := strings.TrimSpace(line[3:])
-		// A quoted name may itself contain " -> "; only split after it.
-		renameTail := path
-		if strings.HasPrefix(path, "\"") {
-			if quoted, err := strconv.QuotedPrefix(path); err == nil {
-				renameTail = path[len(quoted):]
-			}
-		}
-		if idx := strings.Index(renameTail, " -> "); idx >= 0 {
-			path = strings.TrimSpace(renameTail[idx+4:])
-		}
-		if strings.HasPrefix(path, "\"") {
-			if decoded, err := strconv.Unquote(path); err == nil {
-				path = decoded
-			}
-		}
+		path, _ := panel.PorcelainPath(line)
 		if path != "" {
 			paths = append(paths, path)
 		}

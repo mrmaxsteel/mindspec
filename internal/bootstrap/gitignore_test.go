@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
@@ -301,5 +303,40 @@ func TestBootstrap_ReviewsOldHeaderDoesNotReappend(t *testing.T) {
 		if !bytes.Equal(old, after) {
 			t.Fatalf("old header caused entries to be re-appended:\nbefore:\n%s\nafter:\n%s", old, after)
 		}
+	}
+}
+
+func TestBootstrap_ReviewsV016UpgradeNoDuplicate(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	seed := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
+	file := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(file, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, line := range strings.Split(string(data), "\n") {
+		counts[line]++
+	}
+	for _, entry := range gitutil.ReviewIgnoreEntries {
+		if n := counts[entry]; n != 1 {
+			t.Errorf("entry %q appears %d times:\n%s", entry, n, data)
+		}
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, after) {
+		t.Fatalf("second init changed upgraded gitignore:\nbefore:\n%s\nafter:\n%s", data, after)
 	}
 }

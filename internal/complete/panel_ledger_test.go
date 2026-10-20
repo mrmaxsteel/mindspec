@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func ledgerFixture(t *testing.T, ledger bool) (string, string, []string, *executor.MockExecutor) {
@@ -174,8 +175,12 @@ func TestComplete_CommitsLedgerFailureRecovery(t *testing.T) {
 	if runErr == nil || !strings.Contains(runErr.Error(), LedgerCommitRecovery(wt, paths)) {
 		t.Errorf("missing commit recovery: %v", runErr)
 	}
-	if !strings.Contains(stderr, "recovery: "+LedgerCommitRecovery(wt, paths)) || !strings.Contains(stderr, "bead is closed and merged; only the panel ledger commit remains") {
+	if strings.Count(stderr, "recovery: "+LedgerCommitRecovery(wt, paths)) != 1 || strings.Count(stderr, "bead is closed and merged; only the panel ledger commit remains") != 1 {
 		t.Errorf("missing printed post-merge recovery: %q", stderr)
+	}
+	var reported *ReportedError
+	if !errors.As(runErr, &reported) {
+		t.Errorf("printed failure is not marked as reported: %v", runErr)
 	}
 	if len(mock.CallsTo("ClearStageMarker")) != 1 {
 		t.Errorf("terminal marker was not cleared: %v", mock.CallsTo("ClearStageMarker"))
@@ -185,6 +190,49 @@ func TestComplete_CommitsLedgerFailureRecovery(t *testing.T) {
 	}
 	if metadata["mol-parent-1"]["mindspec_phase"] != "implement" {
 		t.Errorf("missing post-close phase sync: %v", metadata)
+	}
+}
+
+func TestComplete_CommitsLedgerFailureWithStateFailure(t *testing.T) {
+	for _, failure := range []string{"advance", "phase sync"} {
+		t.Run(failure, func(t *testing.T) {
+			root, wt, paths, mock := ledgerFixture(t, true)
+			mock.CommitPathsErr = errors.New("commit failed")
+			stateErr := errors.New(failure + " failed")
+			if failure == "advance" {
+				completeFetchChildrenFn = func(string) ([]phase.ChildInfo, error) {
+					return nil, stateErr
+				}
+			} else {
+				completeMergeMetadataFn = func(_ string, values map[string]interface{}) error {
+					if _, ok := values["mindspec_phase"]; ok {
+						return stateErr
+					}
+					return nil
+				}
+			}
+			var result *Result
+			var runErr error
+			stderr := captureStderr(t, func() {
+				result, runErr = Run(root, "bead-1", "", "", mock, CompleteOpts{})
+			})
+			if runErr == nil || !strings.Contains(runErr.Error(), "commit failed") || !strings.Contains(runErr.Error(), stateErr.Error()) {
+				t.Fatalf("ledger and state failures must both survive: %v", runErr)
+			}
+			var reported *ReportedError
+			if !errors.As(runErr, &reported) {
+				t.Errorf("printed failure is not marked as reported: %v", runErr)
+			}
+			if strings.Count(stderr, "recovery: "+LedgerCommitRecovery(wt, paths)) != 1 {
+				t.Errorf("ledger recovery must print once: %q", stderr)
+			}
+			if result == nil || !result.BeadClosed || len(mock.CallsTo("CompleteBead")) != 1 {
+				t.Fatalf("failure must follow close and merge: result=%+v", result)
+			}
+			if result.NextModeIndeterminate != (failure == "advance") {
+				t.Errorf("wrong next-mode certainty: %+v", result)
+			}
+		})
 	}
 }
 

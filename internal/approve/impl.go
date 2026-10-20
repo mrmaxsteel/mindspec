@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1208,19 +1207,12 @@ func implLedgerPreflight(root, specID string, exec executor.Executor) error {
 	}
 	// Decode porcelain quoted paths and rename destinations. A collapsed untracked parent also contains dirt.
 	for _, line := range strings.Split(status, "\n") {
-		if len(line) < 4 {
+		dirty, err := panel.PorcelainPath(line)
+		if err != nil {
+			return guard.NewFailure("could not parse ledger status", complete.LedgerCommitRecovery(wt, paths))
+		}
+		if dirty == "" {
 			continue
-		}
-		dirty := strings.TrimSuffix(line[3:], "\r")
-		if _, dest, ok := strings.Cut(dirty, " -> "); ok {
-			dirty = dest
-		}
-		if strings.HasPrefix(dirty, "\"") {
-			decoded, err := strconv.Unquote(dirty)
-			if err != nil {
-				return guard.NewFailure("could not parse ledger status", complete.LedgerCommitRecovery(wt, paths))
-			}
-			dirty = decoded
 		}
 		for _, file := range paths {
 			if dirty == file || strings.HasPrefix(file, strings.TrimSuffix(dirty, "/")+"/") {
