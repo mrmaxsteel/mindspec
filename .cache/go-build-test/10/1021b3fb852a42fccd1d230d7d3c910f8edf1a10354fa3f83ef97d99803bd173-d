@@ -1,7 +1,0 @@
-./bootstrap.go
-./codex_bootstrap.go
-./manifest.go
-./markers.go
-./recording.go
-./codex_bootstrap_test.go
-./recording_test.go

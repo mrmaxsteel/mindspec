@@ -1,8 +1,0 @@
-./create.go
-./filestore.go
-./list.go
-./overlaystore.go
-./parse.go
-./show.go
-./store.go
-./supersede.go
