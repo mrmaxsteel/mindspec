@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
@@ -589,8 +590,20 @@ func userDirtPaths(porcelain string, specDir ...string) []string {
 			continue
 		}
 		path := strings.TrimSpace(line[3:])
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = strings.TrimSpace(path[idx+4:])
+		// A quoted name may itself contain " -> "; only split after it.
+		renameTail := path
+		if strings.HasPrefix(path, "\"") {
+			if quoted, err := strconv.QuotedPrefix(path); err == nil {
+				renameTail = path[len(quoted):]
+			}
+		}
+		if idx := strings.Index(renameTail, " -> "); idx >= 0 {
+			path = strings.TrimSpace(renameTail[idx+4:])
+		}
+		if strings.HasPrefix(path, "\"") {
+			if decoded, err := strconv.Unquote(path); err == nil {
+				path = decoded
+			}
 		}
 		if path == "" || isArtifactPath(path, specDir...) {
 			continue

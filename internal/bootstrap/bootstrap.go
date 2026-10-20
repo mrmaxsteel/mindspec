@@ -512,7 +512,7 @@ MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skil
 
 // Review negations use exact-line presence: check-ignore cannot test a ! rule.
 func ensureReviewIgnoreEntries(root string) error {
-	header := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"
+	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
 	var ignores []string
 	for _, entry := range gitutil.ReviewIgnoreEntries {
 		if !strings.HasPrefix(entry, "!") {

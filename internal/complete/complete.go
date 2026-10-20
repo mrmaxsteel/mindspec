@@ -1214,8 +1214,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
-	if err := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
-		return nil, err
+	ledgerCommitErr := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec)
+	if ledgerCommitErr != nil {
+		ledgerCommitErr = fmt.Errorf("bead is closed and merged; only the panel ledger commit remains: %w", ledgerCommitErr)
+		fmt.Fprintln(os.Stderr, ledgerCommitErr)
 	}
 
 	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the
@@ -1335,7 +1337,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var readyErr *postCloseReadyError
 		result.postCloseReadyFailed = errors.As(advanceErr, &readyErr)
 		result.NextSpec = specID
-		return result, nil
+		return result, ledgerCommitErr
 	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
@@ -1356,7 +1358,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		result.NextSpec = ""
 	}
 
-	return result, nil
+	return result, ledgerCommitErr
 }
 
 // completeSyncPhase performs step 6.5's best-effort mindspec_phase cache

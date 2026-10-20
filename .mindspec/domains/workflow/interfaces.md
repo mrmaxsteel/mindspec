@@ -151,12 +151,18 @@ below reject.
 `panel.ToolArtifactPaths` is the single home for `.beads/issues.jsonl` and
 `<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
 The gate, next guard and complete materialization share it. The ledger is
-artifact dirt; other panel files retain their ordinary classification.
+artifact dirt; other panel files retain their ordinary classification. The gate
+and next guard decode git porcelain C-style quoted paths before matching,
+including non-ASCII spec and panel directory names.
 On flat layouts complete checks each existing matched ledger with
 `exec.CheckIgnore` in the spec worktree before any side effect. After the
 bead merge, it commits all matched ledgers once with `exec.CommitPaths`
 and subject `chore(panel): ledger`, in that same worktree. A legacy panel
-without a ledger causes no commit or message. Impl approve first checks
+without a ledger causes no commit or message. If the ledger commit fails,
+complete prints its recovery on stderr, clears the terminal marker, writes
+override and panel audit metadata, and advances state and syncs the derived
+phase before returning the failure. The recovery states that the bead is
+closed and merged and only the ledger commit remains. Impl approve first checks
 ignore status, then refuses any existing spec ledger with uncommitted or
 untracked content. The ignored-path recovery runs `mindspec init` in the
 spec worktree; the uncommitted-path and commit-failure recoveries name

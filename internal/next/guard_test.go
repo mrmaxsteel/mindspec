@@ -757,3 +757,52 @@ func TestNextGuard_LedgerIsArtifact(t *testing.T) {
 		t.Fatalf("non-ledger must remain user dirt: %v", dirt)
 	}
 }
+
+func TestNextGuard_QuotedLedgerIsArtifact(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "core.quotePath", "true"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	ledger := ".mindspec/specs/130-test/reviews/café/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, ledger)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ledger), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := gitutil.StatusWithStderr(root)
+	if err != nil || !strings.Contains(status, `caf\303\251`) {
+		t.Fatalf("fixture must exercise git's C-style quoting: %q %v", status, err)
+	}
+	oldStatus, oldExport := statusPorcelainFn, exportBeadsFn
+	t.Cleanup(func() { statusPorcelainFn, exportBeadsFn = oldStatus, oldExport })
+	statusPorcelainFn = gitutil.StatusWithStderr
+	exports := 0
+	exportBeadsFn = func(string) error { exports++; return nil }
+	artifacts, dirt, err := CheckDirtyTreeDetail(root, root)
+	if err != nil || len(dirt) != 0 || len(artifacts) != 1 || artifacts[0] != ledger || exports != 1 {
+		t.Fatalf("quoted ledger classification: artifacts=%q dirt=%q exports=%d err=%v", artifacts, dirt, exports, err)
+	}
+	if paths := parsePorcelain(`R  old-ledger -> ` + strings.TrimPrefix(strings.TrimSpace(status), "?? ") + "\n"); len(paths) != 1 || paths[0] != ledger {
+		t.Fatalf("quoted rename destination: %q", paths)
+	}
+}
+
+func TestParsePorcelain_QuotedNamesAndRenames(t *testing.T) {
+	for _, tc := range []struct{ status, want string }{
+		{` M ".mindspec/specs/130-test/reviews/caf\303\251 -> draft/dispositions.jsonl"`, ".mindspec/specs/130-test/reviews/café -> draft/dispositions.jsonl"},
+		{`R  "old -> ledger" -> ".mindspec/specs/130-test/reviews/caf\303\251/dispositions.jsonl"`, ".mindspec/specs/130-test/reviews/café/dispositions.jsonl"},
+		{" M 'a'", "'a'"},
+		{" M `notes`", "`notes`"},
+	} {
+		if paths := parsePorcelain(tc.status + "\n"); len(paths) != 1 || paths[0] != tc.want {
+			t.Errorf("status %q: got %q, want %q", tc.status, paths, tc.want)
+		}
+	}
+}

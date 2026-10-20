@@ -343,9 +343,8 @@ func isArtifactPath(p string, specsDir ...string) bool {
 //
 // Each non-empty line is "XY <path>" where XY is a 2-char status field.
 // Rename/copy entries are "XY orig -> new"; the new path is what matters for
-// classification. Quoted paths (for names with unusual characters) are not
-// re-parsed — the mindspec-recognized artifact list contains only plain
-// ASCII paths, so a quoted match would legitimately be user dirt.
+// classification. Git C-style quoted paths are decoded before classification,
+// including non-ASCII bytes escaped by core.quotePath.
 func parsePorcelain(out string) []string {
 	var paths []string
 	for _, line := range strings.Split(out, "\n") {
@@ -354,8 +353,20 @@ func parsePorcelain(out string) []string {
 			continue
 		}
 		path := strings.TrimSpace(line[3:])
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = strings.TrimSpace(path[idx+4:])
+		// A quoted name may itself contain " -> "; only split after it.
+		renameTail := path
+		if strings.HasPrefix(path, "\"") {
+			if quoted, err := strconv.QuotedPrefix(path); err == nil {
+				renameTail = path[len(quoted):]
+			}
+		}
+		if idx := strings.Index(renameTail, " -> "); idx >= 0 {
+			path = strings.TrimSpace(renameTail[idx+4:])
+		}
+		if strings.HasPrefix(path, "\"") {
+			if decoded, err := strconv.Unquote(path); err == nil {
+				path = decoded
+			}
 		}
 		if path != "" {
 			paths = append(paths, path)

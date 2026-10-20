@@ -31,7 +31,7 @@ func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
 			}
 			data := assertReviewsIgnored(t, root)
 			runtimeHeader := strings.Index(string(data), "# MindSpec local runtime files (not version-controlled)")
-			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)")
+			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)")
 			if runtimeHeader < 0 || reviewHeader < 0 || runtimeHeader >= reviewHeader {
 				t.Fatalf("runtime header must precede review header:\n%s", data)
 			}
@@ -94,7 +94,7 @@ func assertReviewsIgnored(t *testing.T, root string) []byte {
 		t.Fatal(err)
 	}
 	lines := strings.Split(string(data), "\n")
-	header := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"
+	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
 	want := header + "\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
 	if !strings.Contains(string(data), want) {
 		t.Errorf("missing literal review entries under their header:\n%s", data)
@@ -268,5 +268,38 @@ func TestBootstrap_ReviewsLedgerTracked(t *testing.T) {
 				t.Fatalf("second init changed gitignore:\nbefore: %s\nafter: %s", before, after)
 			}
 		})
+	}
+}
+
+func TestBootstrap_ReviewsOldHeaderDoesNotReappend(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := bytes.ReplaceAll(data,
+		[]byte("# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"),
+		[]byte("# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"))
+	if bytes.Equal(data, old) {
+		t.Fatal("fixture did not replace the review header")
+	}
+	if err := os.WriteFile(file, old, 0644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := Run(root, false); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(old, after) {
+			t.Fatalf("old header caused entries to be re-appended:\nbefore:\n%s\nafter:\n%s", old, after)
+		}
 	}
 }

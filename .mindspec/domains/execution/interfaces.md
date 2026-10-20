@@ -125,7 +125,7 @@ boundary:
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Touches no real index/ref/worktree state. |
+| `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Exclusions use `:(exclude,glob)` pathspecs so a single `*` never matches `/`, agreeing with the tool-artifact matcher. Touches no real index/ref/worktree state. |
 | `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. |
 | `MaterializeStageCommit(wtPath, tree, parent, stage, subject)` | Builds a commit via plumbing (`git commit-tree`, no hooks) carrying the pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`; `StageMaterialization`/`StageArtifactSync`) — read back on re-entry instead of inferred from a tree diff. |
 | `PublishStageMarker(beadID, oid, expectedOld)` / `ReadStageMarker(beadID)` / `ClearStageMarker(beadID, expectedOID)` | The write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`, all via per-ref compare-and-swap: publish before either stage's branch advances (CREATE semantics when `expectedOld == ""`), read to discriminate a resumed run, clear on the terminal step only against the OID this invocation owns. |

@@ -2779,3 +2779,49 @@ func TestImplApprove_IgnoredLedgerRefuses(t *testing.T) {
 		})
 	}
 }
+
+func TestImplApprove_CanonicalLedgerPreflightSkips(t *testing.T) {
+	root, wt, _, _ := implLedgerFixture(t)
+	canonical := filepath.Join(wt, ".mindspec", "docs", "specs")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(wt, ".mindspec", "specs"), canonical); err != nil {
+		t.Fatal(err)
+	}
+	realExec := &executor.MindspecExecutor{}
+	mock := &executor.MockExecutor{CheckIgnoreFn: realExec.CheckIgnore, StatusFn: realExec.Status}
+	if err := implLedgerPreflight(root, "130-test", mock); err != nil {
+		t.Fatalf("untracked canonical-layout ledger refused: %v", err)
+	}
+	if len(mock.CallsTo("CheckIgnore")) != 0 || len(mock.CallsTo("Status")) != 0 {
+		t.Fatal("canonical-layout ledger caused flat-layout preflight I/O")
+	}
+}
+
+func TestImplApprove_CommittedLedgerIgnoresUnrelatedDirt(t *testing.T) {
+	root, wt, file, git := implLedgerFixture(t)
+	issues := filepath.Join(wt, ".beads", "issues.jsonl")
+	if err := os.MkdirAll(filepath.Dir(issues), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(issues, []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "--", file, ".beads/issues.jsonl")
+	git("-c", "user.name=Test", "-c", "user.email=test@mindspec.local", "commit", "-qm", "ledger and issues")
+	for _, name := range []string{issues, filepath.Join(wt, "user-notes.txt")} {
+		if err := os.WriteFile(name, []byte("changed\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	realExec := &executor.MindspecExecutor{}
+	status, err := realExec.Status(wt)
+	if err != nil || !strings.Contains(status, " M .beads/issues.jsonl") || !strings.Contains(status, "?? user-notes.txt") || strings.Contains(status, file) {
+		t.Fatalf("fixture must have only unrelated dirt: %q %v", status, err)
+	}
+	mock := &executor.MockExecutor{CheckIgnoreFn: realExec.CheckIgnore, StatusFn: realExec.Status}
+	if err := implLedgerPreflight(root, "130-test", mock); err != nil {
+		t.Fatalf("committed ledger refused on unrelated dirt: %v", err)
+	}
+}

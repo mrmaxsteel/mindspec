@@ -113,8 +113,18 @@ func TestComplete_CommitsLedger(t *testing.T) {
 
 func TestComplete_NoLedgerNoCommit(t *testing.T) {
 	root, _, _, mock := ledgerFixture(t, false)
-	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{}); err != nil {
-		t.Fatal(err)
+	var runErr error
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() {
+			_, runErr = Run(root, "bead-1", "", "", mock, CompleteOpts{})
+		})
+	})
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if strings.Contains(stderr+stdout, "recovery:") || strings.Contains(stderr+stdout, "chore(panel): ledger") {
+		t.Fatalf("no-ledger completion printed a recovery: stdout=%q stderr=%q", stdout, stderr)
 	}
 	if len(mock.CallsTo("CommitPaths")) != 0 || len(mock.CallsTo("CheckIgnore")) != 0 {
 		t.Fatal("legacy panel caused ledger I/O")
@@ -140,11 +150,61 @@ func TestLedger_IgnoredPathRefuses(t *testing.T) {
 }
 
 func TestComplete_CommitsLedgerFailureRecovery(t *testing.T) {
+	t.Setenv("MINDSPEC_SKIP_PANEL", "1")
 	root, wt, paths, mock := ledgerFixture(t, true)
 	mock.CommitPathsErr = errors.New("commit failed")
-	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{})
-	if err == nil || !strings.Contains(err.Error(), LedgerCommitRecovery(wt, paths)) {
-		t.Fatalf("missing commit recovery: %v", err)
+	mock.ReadStageMarkerFn = func(string) (string, string, bool, error) {
+		// The marker becomes present only after the mocked merge succeeds.
+		return "terminal-marker", "", len(mock.CallsTo("CompleteBead")) == 1, nil
+	}
+	metadata := map[string]map[string]interface{}{}
+	completeMergeMetadataFn = func(id string, values map[string]interface{}) error {
+		if metadata[id] == nil {
+			metadata[id] = map[string]interface{}{}
+		}
+		for k, v := range values {
+			metadata[id][k] = v
+		}
+		return nil
+	}
+	var runErr error
+	stderr := captureStderr(t, func() {
+		_, runErr = Run(root, "bead-1", "", "", mock, CompleteOpts{})
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), LedgerCommitRecovery(wt, paths)) {
+		t.Errorf("missing commit recovery: %v", runErr)
+	}
+	if !strings.Contains(stderr, "recovery: "+LedgerCommitRecovery(wt, paths)) || !strings.Contains(stderr, "bead is closed and merged; only the panel ledger commit remains") {
+		t.Errorf("missing printed post-merge recovery: %q", stderr)
+	}
+	if len(mock.CallsTo("ClearStageMarker")) != 1 {
+		t.Errorf("terminal marker was not cleared: %v", mock.CallsTo("ClearStageMarker"))
+	}
+	if metadata["bead-1"]["panel_gate_skipped"] != true {
+		t.Errorf("missing panel hatch audit: %v", metadata)
+	}
+	if metadata["mol-parent-1"]["mindspec_phase"] != "implement" {
+		t.Errorf("missing post-close phase sync: %v", metadata)
+	}
+}
+
+func TestComplete_CanonicalLedgerNoIO(t *testing.T) {
+	root, wt, _, mock := ledgerFixture(t, true)
+	canonical := filepath.Join(wt, ".mindspec", "docs", "specs")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(wt, ".mindspec", "specs"), canonical); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.CallsTo("CompleteBead")) != 1 {
+		t.Fatal("canonical-layout completion never reached the merge")
+	}
+	if len(mock.CallsTo("CheckIgnore")) != 0 || len(mock.CallsTo("CommitPaths")) != 0 {
+		t.Fatal("canonical-layout ledger caused flat-layout ledger I/O")
 	}
 }
 

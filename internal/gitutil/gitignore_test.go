@@ -283,3 +283,22 @@ func runGitignoreTestGit(t *testing.T, root string, args ...string) {
 		t.Fatalf("git %v: %v\n%s", args, err, string(out))
 	}
 }
+
+func TestReviewIgnoreEntries_IgnoresBeforeNegations(t *testing.T) {
+	seenNegation := false
+	ignores, negations := 0, 0
+	for _, entry := range ReviewIgnoreEntries {
+		if strings.HasPrefix(entry, "!") {
+			seenNegation = true
+			negations++
+		} else {
+			ignores++
+			if seenNegation {
+				t.Errorf("ignore entry %q follows a ledger negation", entry)
+			}
+		}
+	}
+	if ignores == 0 || negations == 0 {
+		t.Fatalf("expected both ignore and negation entries: %v", ReviewIgnoreEntries)
+	}
+}
