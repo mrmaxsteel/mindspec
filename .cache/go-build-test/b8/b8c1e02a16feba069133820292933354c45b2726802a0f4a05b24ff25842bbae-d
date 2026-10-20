@@ -1,5 +1,0 @@
-./guard.go
-./recovery.go
-./guard_test.go
-./recovery_convention_test.go
-./recovery_test.go

@@ -1,5 +1,0 @@
-./executor.go
-./mindspec_executor.go
-./mock.go
-./executor_test.go
-./merge_conflict_test.go
