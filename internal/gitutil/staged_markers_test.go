@@ -9,6 +9,39 @@ import (
 	"testing"
 )
 
+// initMarkerRepo creates a repo whose behavior does not depend on the
+// machine's global or system git config: identity, signing, rename
+// detection, conflict style and line endings are pinned locally.
+func initMarkerRepo(t *testing.T, dir string) {
+	t.Helper()
+	runGit(t, dir, "init", "-q", "-b", "main")
+	for _, kv := range [][2]string{
+		{"user.name", "test"},
+		{"user.email", "test@test.com"},
+		{"user.useConfigOnly", "false"},
+		{"commit.gpgsign", "false"},
+		{"merge.renames", "true"},
+		{"diff.renames", "true"},
+		{"merge.conflictStyle", "merge"},
+		{"merge.ff", "true"},
+		{"core.autocrlf", "false"},
+		{"rerere.enabled", "false"},
+	} {
+		runGit(t, dir, "config", kv[0], kv[1])
+	}
+}
+
+// mergeMustConflict runs `git merge ref` and fails with git's output
+// unless the merge stopped in progress with unmerged entries.
+func mergeMustConflict(t *testing.T, dir, ref string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "merge", ref)
+	out, err := cmd.CombinedOutput()
+	if err == nil || !MergeInProgress(dir) || len(ConflictedFiles(dir)) == 0 {
+		t.Fatalf("fixture: `git merge %s` must stop with conflicts; err=%v output:\n%s", ref, err, out)
+	}
+}
+
 // markerMerge builds a real repo: base, then HEAD (main) and a "side"
 // branch each change the files given, then `git merge side` is left in
 // progress and its conflicted paths are recorded, as mindspec does when
@@ -17,8 +50,7 @@ import (
 func markerMerge(t *testing.T, setup func(dir string), base, ours, theirs map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	runGit(t, dir, "init", "-q", "-b", "main")
-	runGit(t, dir, "config", "commit.gpgsign", "false")
+	initMarkerRepo(t, dir)
 	if setup != nil {
 		setup(dir)
 	}
@@ -38,14 +70,7 @@ func markerMerge(t *testing.T, setup func(dir string), base, ours, theirs map[st
 	runGit(t, dir, "checkout", "-q", "main")
 	write(ours)
 	runGit(t, dir, "commit", "-q", "-m", "ours")
-	cmd := exec.Command("git", "-C", dir, "merge", "side")
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-	if err := cmd.Run(); err == nil {
-		t.Fatal("fixture: the merge must conflict")
-	}
-	if !MergeInProgress(dir) {
-		t.Fatal("fixture: the merge must be in progress")
-	}
+	mergeMustConflict(t, dir, "side")
 	if err := RecordMergeConflicts(dir); err != nil {
 		t.Fatalf("fixture: recording the conflicted paths: %v", err)
 	}
@@ -127,8 +152,7 @@ func TestStagedConflictMarkerFiles_SetextAndOneSideFilesPass(t *testing.T) {
 func TestStagedConflictMarkerFiles_RenameModify(t *testing.T) {
 	keep := strings.Repeat("keep\n", 30)
 	dir := t.TempDir()
-	runGit(t, dir, "init", "-q", "-b", "main")
-	runGit(t, dir, "config", "commit.gpgsign", "false")
+	initMarkerRepo(t, dir)
 	write := func(name, content string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -145,9 +169,7 @@ func TestStagedConflictMarkerFiles_RenameModify(t *testing.T) {
 	runGit(t, dir, "add", "-A")
 	runGit(t, dir, "mv", "f", "renamed")
 	runGit(t, dir, "commit", "-q", "-m", "ours+rename")
-	if err := exec.Command("git", "-C", dir, "merge", "side").Run(); err == nil {
-		t.Fatal("fixture: the merge must conflict")
-	}
+	mergeMustConflict(t, dir, "side")
 	if err := RecordMergeConflicts(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +181,7 @@ func TestStagedConflictMarkerFiles_RenameModify(t *testing.T) {
 // conflicts in f, and the staged conflict output is flagged.
 func TestStagedConflictMarkerFiles_CrissCross(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init", "-q", "-b", "main")
-	runGit(t, dir, "config", "commit.gpgsign", "false")
+	initMarkerRepo(t, dir)
 	write := func(content string) {
 		if err := os.WriteFile(filepath.Join(dir, "f"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -184,9 +205,7 @@ func TestStagedConflictMarkerFiles_CrissCross(t *testing.T) {
 	if bases := runGitOut(t, dir, "merge-base", "--all", "main", "side"); len(strings.Fields(bases)) != 2 {
 		t.Fatalf("fixture: want two merge bases, got %q", bases)
 	}
-	if err := exec.Command("git", "-C", dir, "merge", "side").Run(); err == nil {
-		t.Fatal("fixture: the merge must conflict")
-	}
+	mergeMustConflict(t, dir, "side")
 	if err := RecordMergeConflicts(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -325,9 +344,7 @@ func TestStagedConflictMarkerFiles_RecordIgnoredAfterAbortAndNewHead(t *testing.
 	}
 	runGit(t, dir, "add", "g")
 	runGit(t, dir, "commit", "-q", "-m", "new HEAD")
-	if err := exec.Command("git", "-C", dir, "merge", "side").Run(); err == nil {
-		t.Fatal("fixture: the re-merge must conflict")
-	}
+	mergeMustConflict(t, dir, "side")
 	runGit(t, dir, "add", "--", "f")
 	if _, ok := MergeConflictRecord(dir); ok {
 		t.Fatal("a record from before the abort must not apply to a merge from another HEAD")
