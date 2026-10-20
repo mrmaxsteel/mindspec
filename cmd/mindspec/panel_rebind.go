@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -97,7 +98,7 @@ func panelRebindRunE(cmd *cobra.Command, args []string) error {
 	if base != reviewed {
 		return refuse(fmt.Errorf("the reviewed commit is not an ancestor of the live tip"))
 	}
-	paths, err := exec.ChangedFiles(p.ReviewedHeadSHA, tip)
+	paths, err := exec.ChangedFiles(p.ReviewedHeadSHA, tip, executor.ChangedFilesOptions{NoRenames: true})
 	if err != nil {
 		return refuse(err)
 	}

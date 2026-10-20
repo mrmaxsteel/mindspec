@@ -1221,7 +1221,7 @@ func (g *MindspecExecutor) CommitAll(path, msg string) error {
 // on. When both refs are set, shells out to `git diff --name-only base..head`
 // directly and parses the newline-separated output inline (the executor must
 // not import enforcement packages to reuse a parser).
-func (g *MindspecExecutor) ChangedFiles(base, head string) ([]string, error) {
+func (g *MindspecExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
 	if base == "" {
 		return gitutil.DiffNameOnlyRef("", head)
 	}
@@ -1235,7 +1235,12 @@ func (g *MindspecExecutor) ChangedFiles(base, head string) ([]string, error) {
 	if err := gitutil.RejectOptionLike(head); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("git", "-C", g.Root, "diff", "--name-only", base+".."+head)
+	args := []string{"-C", g.Root, "diff", "--name-only"}
+	if len(options) > 0 && options[0].NoRenames {
+		args = append(args, "--no-renames")
+	}
+	args = append(args, base+".."+head)
+	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s..%s: %w", base, head, err)

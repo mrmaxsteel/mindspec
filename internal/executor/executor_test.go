@@ -847,6 +847,36 @@ func TestChangedFiles_TwoRefs(t *testing.T) {
 	}
 }
 
+func TestChangedFilesNoRenames(t *testing.T) {
+	g, _, dir := newRepoExecutor(t)
+	runGitIn(t, dir, "config", "diff.renames", "true")
+	if err := os.WriteFile(filepath.Join(dir, "source.txt"), []byte("unchanged content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, dir, "add", "source.txt")
+	runGitIn(t, dir, "commit", "-qm", "source")
+	runGitIn(t, dir, "mv", "source.txt", "destination.txt")
+	runGitIn(t, dir, "commit", "-qm", "rename")
+	files, err := g.ChangedFiles("HEAD^", "HEAD", ChangedFilesOptions{NoRenames: true})
+	if err != nil || strings.Join(files, ",") != "destination.txt,source.txt" {
+		t.Fatalf("ChangedFilesNoRenames = %v, %v", files, err)
+	}
+	files, err = g.ChangedFiles("HEAD^", "HEAD")
+	if err != nil || strings.Join(files, ",") != "destination.txt" {
+		t.Fatalf("ChangedFiles rename behavior changed: %v, %v", files, err)
+	}
+	m := &MockExecutor{ChangedFilesOptionsFn: func(base, head string, options []ChangedFilesOptions) ([]string, error) {
+		if base != "HEAD^" || head != "HEAD" || len(options) != 1 || !options[0].NoRenames {
+			t.Fatalf("mock refs/options = %q, %q, %+v", base, head, options)
+		}
+		return []string{"destination.txt", "source.txt"}, nil
+	}}
+	files, err = m.ChangedFiles("HEAD^", "HEAD", ChangedFilesOptions{NoRenames: true})
+	if err != nil || strings.Join(files, ",") != "destination.txt,source.txt" || len(m.CallsTo("ChangedFiles")) != 1 {
+		t.Fatalf("mock ChangedFilesNoRenames = %v, %v", files, err)
+	}
+}
+
 func TestChangedFiles_EmptyBase_WorkingTreeVsHead(t *testing.T) {
 	g, _, dir := newRepoExecutor(t)
 
@@ -1008,6 +1038,14 @@ func TestExecutorRefSites_RejectOptionLikeRef(t *testing.T) {
 	t.Run("TreeDirsAtRef", func(t *testing.T) {
 		_, err := g.TreeDirsAtRef(hostile, "docs")
 		assertSEC5(t, err, "TreeDirsAtRef")
+	})
+	t.Run("ChangedFilesNoRenames/base", func(t *testing.T) {
+		_, err := g.ChangedFiles(hostile, "main", ChangedFilesOptions{NoRenames: true})
+		assertSEC5(t, err, "ChangedFilesNoRenames(base)")
+	})
+	t.Run("ChangedFilesNoRenames/head", func(t *testing.T) {
+		_, err := g.ChangedFiles("main", hostile, ChangedFilesOptions{NoRenames: true})
+		assertSEC5(t, err, "ChangedFilesNoRenames(head)")
 	})
 	t.Run("ChangedFiles/base", func(t *testing.T) {
 		_, err := g.ChangedFiles(hostile, "main")

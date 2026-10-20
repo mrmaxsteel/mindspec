@@ -618,6 +618,9 @@ func RebindDecision(reg Registration, res *Result) Decision {
 	d := PanelGateDecision(f)
 	if d.Action == Warn {
 		d.Action = Block
+		if res.Panel.Abandoned {
+			d.Message = fmt.Sprintf("rebind refuses an abandoned panel: %s", termsafe.Escape(strings.TrimSpace(res.Panel.AbandonReason)))
+		}
 	}
 	return d
 }

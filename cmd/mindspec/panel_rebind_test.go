@@ -36,9 +36,16 @@ func rebindWrite(t *testing.T, root, name, content string) {
 	}
 }
 
-func setupRebind(t *testing.T) (root, dir, from string) {
+func setupRebind(t *testing.T, gates ...string) (root, dir, from string) {
 	t.Helper()
-	root = mkPanelTestRoot(t, "")
+	gate, target := "final_review", "main"
+	var beadID *string
+	if len(gates) > 0 && gates[0] == "bead" {
+		gate, target = "bead", "bead/mindspec-demo.1"
+		id := "mindspec-demo.1"
+		beadID = &id
+	}
+	root = mkPanelTestRoot(t, "version: 1\n")
 	var err error
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
@@ -58,18 +65,20 @@ func setupRebind(t *testing.T) (root, dir, from string) {
 		}
 	})
 	rebindGit(t, root, "init", "-q", "-b", "main")
+	rebindGit(t, root, "add", ".mindspec/config.yaml")
+	rebindGit(t, root, "commit", "-qm", "parent")
 	rebindWrite(t, root, "source.go", "package example\n")
 	rebindWrite(t, root, ".gitignore", "review/\n")
 	rebindWrite(t, root, ".mindspec/domains/core/OWNERSHIP.yaml", "paths: []\n")
 	rebindGit(t, root, "add", ".")
 	rebindGit(t, root, "commit", "-qm", "base")
 	from = rebindGit(t, root, "rev-parse", "HEAD")
-	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", "HEAD")+"\n", panel.Subject("final_review", ".mindspec/specs/900-demo"))
+	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", "HEAD")+"\n", panel.Subject(gate, ".mindspec/specs/900-demo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir = filepath.Join(root, "review", "demo")
-	err = panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: "main", Gate: "final_review", Round: 1,
+	err = panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: target, Gate: gate, BeadID: beadID, Round: 1,
 		ExpectedReviewers: 2, ReviewedHeadSHA: from, SubjectDigest: digest,
 		Roster: []panel.RosterSlot{{Slot: "R1", Model: "codex", Lens: "correctness"}, {Slot: "R2", Model: "claude", Lens: "coverage"}}})
 	if err != nil {
@@ -77,6 +86,9 @@ func setupRebind(t *testing.T) (root, dir, from string) {
 	}
 	for _, slot := range []string{"R1", "R2"} {
 		rebindWrite(t, dir, slot+"-round-1.json", `{"verdict":"APPROVE"}`)
+	}
+	if beadID != nil {
+		rebindGit(t, root, "checkout", "-qb", target)
 	}
 	return
 }
@@ -97,7 +109,7 @@ func rebindGate(t *testing.T, root, dir string) panel.Decision {
 }
 
 func TestPanelRebind_OwnershipOnly(t *testing.T) {
-	root, dir, from := setupRebind(t)
+	root, dir, from := setupRebind(t, "bead")
 	name := ".mindspec/domains/core/OWNERSHIP.yaml"
 	rebindWrite(t, root, name, "paths: [internal/]\n")
 	rebindGit(t, root, "add", name)
@@ -105,6 +117,7 @@ func TestPanelRebind_OwnershipOnly(t *testing.T) {
 	if got := rebindGit(t, root, "diff", "--name-only", from+"..HEAD"); got != name {
 		t.Fatalf("fixture diff %q", got)
 	}
+	rebindGit(t, root, "checkout", "-q", "main")
 	assertRebindSuccess(t, root, dir, from, []string{name})
 }
 
@@ -119,12 +132,28 @@ func assertRebindSuccess(t *testing.T, root, dir, from string, paths []string) {
 		t.Fatalf("rebind: %v\n%s", err, out)
 	}
 	p := rebindRegistration(t, dir).Panel
-	tip := rebindGit(t, root, "rev-parse", "HEAD")
+	tip := rebindGit(t, root, "rev-parse", old.Target)
+	if old.IsBead() {
+		if branch := rebindGit(t, root, "branch", "--show-current"); branch != "main" {
+			t.Fatalf("invoking checkout = %q, want main", branch)
+		}
+		if head := rebindGit(t, root, "rev-parse", "HEAD"); head == tip {
+			t.Fatal("bead tip must differ from the invoking HEAD")
+		}
+	}
 	if p.Round != old.Round {
 		t.Fatalf("round changed: %d -> %d", old.Round, p.Round)
 	}
 	if p.ReviewedHeadSHA != tip || p.SubjectDigest == old.SubjectDigest {
 		t.Fatalf("binding did not advance: %+v", p)
+	}
+	subject := panel.Subject(p.Gate, panel.PanelSpecDir(dir, filepath.Join(root, ".mindspec/specs", p.Spec)))
+	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", tip)+"\n", subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SubjectDigest != digest {
+		t.Fatalf("subject digest = %q, want %q", p.SubjectDigest, digest)
 	}
 	if len(p.Rebinds) != 1 {
 		t.Fatalf("rebind entries = %+v", p.Rebinds)
@@ -152,13 +181,22 @@ func assertRebindSuccess(t *testing.T, root, dir, from string, paths []string) {
 func TestPanelRebind_AnyPath(t *testing.T) {
 	for _, name := range []string{"source.go", "src/reviews/source.go", "docs/space name.md", "docs/\"quoted\".md", "docs/世界.md"} {
 		t.Run(name, func(t *testing.T) {
-			root, dir, from := setupRebind(t)
+			root, dir, from := setupRebind(t, "bead")
 			rebindWrite(t, root, name, "changed\n")
 			rebindGit(t, root, "add", name)
 			rebindGit(t, root, "commit", "-qm", "change")
+			rebindGit(t, root, "checkout", "-q", "main")
 			assertRebindSuccess(t, root, dir, from, []string{name})
 		})
 	}
+}
+
+func TestPanelRebind_RenamedPath(t *testing.T) {
+	root, dir, from := setupRebind(t)
+	rebindGit(t, root, "config", "diff.renames", "true")
+	rebindGit(t, root, "mv", "source.go", "renamed.go")
+	rebindGit(t, root, "commit", "-qm", "rename source")
+	assertRebindSuccess(t, root, dir, from, []string{"renamed.go", "source.go"})
 }
 
 func TestPanelRebind_AlreadyFresh(t *testing.T) {
@@ -180,7 +218,7 @@ func TestPanelRebind_Refusals(t *testing.T) {
 	}{
 		{"empty reason", "non-empty reason", nil},
 		{"malformed", "unreadable", func(t *testing.T, root, dir string) { rebindWrite(t, dir, panel.FileName, "{") }},
-		{"abandoned", "abandoned", func(t *testing.T, root, dir string) {
+		{"abandoned", "rebind refuses an abandoned panel: max: abandoned", func(t *testing.T, root, dir string) {
 			reg := rebindRegistration(t, dir)
 			p := reg.Panel
 			p.Abandoned = true
@@ -193,7 +231,7 @@ func TestPanelRebind_Refusals(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{"round mismatch", "round", func(t *testing.T, root, dir string) { rebindWrite(t, dir, "R1-round-2.json", `{"verdict":"APPROVE"}`) }},
+		{"round mismatch", "panel.json round (1) out of date vs verdict files (round 2)", func(t *testing.T, root, dir string) { rebindWrite(t, dir, "R1-round-2.json", `{"verdict":"APPROVE"}`) }},
 		{"hand edited", "outside the panel verbs", func(t *testing.T, root, dir string) {
 			p := rebindRegistration(t, dir).Panel
 			p.ReviewedHeadSHA = strings.Repeat("b", 40)
@@ -214,15 +252,36 @@ func TestPanelRebind_Refusals(t *testing.T) {
 		{"unresolved", "REQUEST_CHANGES", func(t *testing.T, root, dir string) {
 			rebindWrite(t, dir, "R2-round-1.json", `{"verdict":"REQUEST_CHANGES","rationale":"fix this"}`)
 		}},
-		{"not ancestor", "ancestry", func(t *testing.T, root, dir string) {
+		{"unrelated history", "cannot verify reviewed commit ancestry", func(t *testing.T, root, dir string) {
 			rebindGit(t, root, "checkout", "--orphan", "unrelated")
 			rebindWrite(t, root, "other.txt", "unrelated\n")
 			rebindGit(t, root, "add", ".")
 			rebindGit(t, root, "commit", "-qm", "unrelated")
 			rebindGit(t, root, "branch", "-f", "main", "HEAD")
 		}},
+		{"diverged history", "not an ancestor of the live tip", func(t *testing.T, root, dir string) {
+			reviewed := rebindRegistration(t, dir).Panel.ReviewedHeadSHA
+			parent := rebindGit(t, root, "rev-parse", reviewed+"^")
+			rebindGit(t, root, "checkout", "-qb", "diverged", parent)
+			rebindWrite(t, root, "other.txt", "sibling\n")
+			rebindGit(t, root, "add", "other.txt")
+			rebindGit(t, root, "commit", "-qm", "sibling")
+			rebindGit(t, root, "branch", "-f", "main", "HEAD")
+			if base := rebindGit(t, root, "merge-base", reviewed, "main"); base != parent {
+				t.Fatalf("merge base = %s, want shared parent %s", base, parent)
+			}
+		}},
+		{"config renamed away", ".mindspec/config.yaml", func(t *testing.T, root, dir string) {
+			reviewed := rebindRegistration(t, dir).Panel.ReviewedHeadSHA
+			if got := rebindGit(t, root, "show", reviewed+":.mindspec/config.yaml"); got != "version: 1" {
+				t.Fatalf("reviewed config = %q", got)
+			}
+			rebindGit(t, root, "config", "diff.renames", "true")
+			rebindGit(t, root, "mv", ".mindspec/config.yaml", "old-config.yaml")
+			rebindGit(t, root, "commit", "-qm", "rename config")
+		}},
 		{"config", ".mindspec/config.yaml", func(t *testing.T, root, dir string) {
-			rebindWrite(t, root, ".mindspec/config.yaml", "version: 1\n")
+			rebindWrite(t, root, ".mindspec/config.yaml", "version: 2\n")
 			rebindGit(t, root, "add", ".mindspec/config.yaml")
 			rebindGit(t, root, "commit", "-qm", "config")
 		}},
@@ -244,6 +303,9 @@ func TestPanelRebind_Refusals(t *testing.T) {
 			out, err := runPanelVerbCmd("rebind", "demo", "--reason", reason)
 			if err == nil || !strings.Contains(fmt.Sprint(err), tc.want) {
 				t.Fatalf("want refusal containing %q, got %v %s", tc.want, err, out)
+			}
+			if tc.name == "abandoned" && strings.Contains(fmt.Sprint(err), "completing") {
+				t.Fatalf("refusal claims completion: %v", err)
 			}
 			if after := panelTreeBytes(t, dir); !reflect.DeepEqual(before, after) {
 				t.Fatalf("refusal wrote panel files")
