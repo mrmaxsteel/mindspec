@@ -15,7 +15,7 @@ const ledgerLater = "2026-10-20T11:00:00Z"
 
 func ledgerFixtures(t *testing.T, name string) [][]byte {
 	t.Helper()
-	ref := Refutation{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "a finding", Ground: "disproven", Reason: "covered", Evidence: "abc123", By: "operator", CreatedAt: ledgerTime}
+	ref := Refutation{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "a finding", Ground: "disproven", AC: "AC-13", Reason: "covered", Evidence: "abc123", By: "operator", CreatedAt: ledgerTime}
 	def := Deferral{Slot: "R1", Round: 1, Finding: "slot", FindingSHA256: strings.Repeat("b", 64), FindingText: "a finding", Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}
 	rebind := Rebind{Round: 1, FromSHA: "abc123", ToSHA: "def456", Paths: []string{"OWNERSHIP.yaml"}, Reason: "claim", CreatedAt: ledgerTime}
 	records := []interface{}{
@@ -67,27 +67,82 @@ func TestLedger_RecordKeys(t *testing.T) {
 			if err != nil || len(lines) != want {
 				t.Fatalf("timestamp retry: lines=%d want=%d err=%v", len(lines), want, err)
 			}
-			// Mutate a non-key field: every kind must refuse a conflicting payload.
-			field, value := "reason", "different reason"
-			switch kind {
-			case RecordRound:
-				field, value = "target", "other-target"
-			case RecordDeferral:
-				field, value = "bead", "mindspec-other"
+			// Keep the R5.1 keys independent of recordKey: widening a key must
+			// not turn a changed payload into a new event.
+			keyFields := map[string][]string{
+				RecordRound:      {"round", "created_at"},
+				RecordRefutation: {"slot", "round", "finding", "finding_sha256"},
+				RecordDeferral:   {"slot", "round", "finding", "finding_sha256"},
+				RecordRebind:     {"to_sha"},
+				RecordAbandon:    {"created_at"},
 			}
-			before, err := os.ReadFile(filepath.Join(dir, dispositionsFileName))
-			if err != nil {
-				t.Fatal(err)
+			excluded := map[string]bool{"created_at": true}
+			for _, field := range keyFields[kind] {
+				excluded[field] = true
 			}
-			if err := AppendRecords(dir, changeLedger(t, raw, field, value)); err == nil {
-				t.Fatal("accepted same-key changed payload")
-			}
-			after, err := os.ReadFile(filepath.Join(dir, dispositionsFileName))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(before, after) {
-				t.Fatal("conflict changed ledger")
+			for field, original := range m {
+				if excluded[field] {
+					continue
+				}
+				t.Run("conflict/"+field, func(t *testing.T) {
+					var value interface{}
+					switch field {
+					case "gate":
+						value = "adhoc"
+					case "ground":
+						value = "not-load-bearing"
+					case "roster":
+						value = []RosterSlot{{"R1", "other-model", "correctness"}, {"R2", "model-b", "architecture"}}
+					case "carried":
+						value = CarriedEntries{Refutations: []Refutation{{Slot: "R1", Round: 1, Reason: "legacy"}}}
+					case "paths":
+						value = []string{"other.yaml"}
+					default:
+						switch v := original.(type) {
+						case string:
+							value = v + "-changed"
+						case json.Number:
+							n, err := v.Int64()
+							if err != nil {
+								t.Fatal(err)
+							}
+							value = n + 1
+						case nil:
+							value = "mindspec-other"
+						default:
+							t.Fatalf("no mutation for %s (%T)", field, original)
+						}
+					}
+					changed := changeLedger(t, raw, field, value)
+					// Some fields have only one schema-valid value (telemetry),
+					// or destination constraints (panel). Pin their key exclusion
+					// too, so schema rejection cannot hide an expanded key.
+					if field != "record" { // record selects the kind itself.
+						changedMap, err := decodeRecord(changed)
+						if err != nil {
+							t.Fatal(err)
+						}
+						_, originalKey := recordKey(m)
+						_, changedKey := recordKey(changedMap)
+						if originalKey != changedKey {
+							t.Errorf("non-key field %s changed the R5.1 key", field)
+						}
+					}
+					before, err := os.ReadFile(filepath.Join(dir, dispositionsFileName))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := AppendRecords(dir, changed); err == nil {
+						t.Error("accepted same-key changed payload")
+					}
+					after, err := os.ReadFile(filepath.Join(dir, dispositionsFileName))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Error("conflict changed ledger")
+					}
+				})
 			}
 			// Every specified key component must distinguish a new event.
 			var changes map[string]interface{}
@@ -254,6 +309,13 @@ func TestPanel_LegacyJSONRoundTrip(t *testing.T) {
 	if !bytes.Equal(actual, append(expected, '\n')) {
 		t.Fatal("snapshot bytes differ")
 	}
+	info, err := os.Stat(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("snapshot mode: got %04o want 0644", info.Mode().Perm())
+	}
 	p.Round = 2
 	if err := WriteSnapshot(dir, p); err != nil {
 		t.Fatal(err)
@@ -278,5 +340,40 @@ func TestLedger_RejectsTrailingData(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, dispositionsFileName)); !os.IsNotExist(err) {
 			t.Fatalf("rejected append created data file: %v", err)
 		}
+	}
+}
+
+func TestLedger_SnapshotUnwritableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write permissions")
+	}
+	dir := t.TempDir()
+	p := Panel{Round: 1}
+	if err := WriteSnapshot(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, FileName)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Errorf("restore directory mode: %v", err)
+		}
+	})
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	p.Round = 2
+	if err := WriteSnapshot(dir, p); err == nil {
+		t.Error("snapshot write succeeded in unwritable directory")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("failed snapshot write changed old panel.json bytes")
 	}
 }

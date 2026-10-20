@@ -150,11 +150,14 @@ below reject.
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
 exactly one `panel.json` — the literal filename `panel.FileName`. The
-snapshot is rewritten by panel verbs through `panel.WriteSnapshot` (temp file
-and rename), after the event batch succeeds. `panel.AppendRecords` accepts the
+snapshot writer `panel.WriteSnapshot` exists (temp file and rename); later
+spec 130 beads route panel verbs through it after their event batches succeed.
+`panel.AppendRecords` accepts the
 exact panel directory in flat, non-flat and adhoc layouts, validates the full
 batch and checks keys under one `dispositions.lock` hold before appending.
 `panel.AppendRecord` retains the legacy spec-directory/panel-name adapter.
+`panel.AppendRecordsWithCheck` runs a pre-append check under that same lock;
+the disposition CLI uses it to check legacy markers before appending a manifest.
 
 The optional registration fields at the end of `panel.Panel` are:
 
@@ -205,6 +208,22 @@ A Finding is `ccr[i]` from the latest-round verdict's
 path token with `<path>` after hashing. Slot-level discharges use `finding:
 "slot"` and hash the compact JSON encoding of the entire ordered list, or the
 raw rationale for an empty list.
+
+The one SANCTIONED hand-edit path, in either era, is
+`/ms-panel-tally`'s Abandon procedure, which sets `abandoned` /
+`abandon_reason` by hand — every other field is machine-written once
+spec 110 Bead 4 lands. This path is superseded by spec 130 Bead 8's abandon
+verb when that bead lands.
+
+`panel.Create` writes `panel.json` as a full-struct overwrite: it never
+reads the existing file first, unlike its read-before-splice handling
+of `BRIEF.md`'s machine-managed header (Maintenance Notes below). A
+re-panel of an abandoned panel therefore deliberately clears
+`abandoned`/`abandon_reason` and revives it into an active round — this
+is the KNOWN, intentional behavior of calling `Create` again, not an
+oversight (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
+This overwrite/revival contract is superseded by spec 130 Bead 5's
+merge-forward create and audited revival when that bead lands.
 
 **Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
 file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).

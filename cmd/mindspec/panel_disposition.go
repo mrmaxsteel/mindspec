@@ -35,6 +35,8 @@ single file) and runs internal/panel.Validate followed by
 internal/panel.HygienePredicate on it — the SAME two pure functions
 Bead 2's transactional append op gates every write on. It writes
 nothing and makes no filesystem change beyond reading the named files.
+Accepted kinds: disposition, panel (coverage manifest), round, refutation,
+deferral, rebind and abandon.
 
 Exit code: 0 if every line of every matched file passes both gates;
 non-zero on the FIRST failure, with a termsafe-rendered message naming

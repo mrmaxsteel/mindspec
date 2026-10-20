@@ -31,7 +31,7 @@ var panelDispositionAppendCmd = &cobra.Command{
 	Long: `append writes disposition rows and legacy coverage manifests. It refuses
 round, refutation, deferral, rebind and abandon events, which only the panel
 verbs write. A manifest on a non-legacy panel is reserved to panel tally. It
-dispatches to internal/panel.AppendRecord, which — under ONE lock held
+dispatches to the panel ledger store, which — under ONE lock held
 on that panel's dedicated dispositions.lock file — validates the
 record (schema + R5 hygiene) BEFORE touching the data file, checks it
 for uniqueness against the file's current content (a disposition row
@@ -100,16 +100,20 @@ never interpolated into a shell-quoted argument.`,
 			return fmt.Errorf("record %s is reserved to the panel verbs; use panel create, refute, defer, rebind or abandon", termsafe.Escape(discriminator.Record))
 		}
 		if discriminator.Record == panel.RecordPanelManifest {
-			legacy, err := panel.LegacyPanel(filepath.Join(specDir, "reviews", panelName))
-			if err != nil {
+			dir := filepath.Join(specDir, "reviews", panelName)
+			if err := panel.AppendRecordsWithCheck(dir, func() error {
+				legacy, err := panel.LegacyPanel(dir)
+				if err != nil {
+					return err
+				}
+				if !legacy {
+					return fmt.Errorf("a manifest on a non-legacy panel is reserved to panel tally")
+				}
+				return nil
+			}, record); err != nil {
 				return err
 			}
-			if !legacy {
-				return fmt.Errorf("a manifest on a non-legacy panel is reserved to panel tally")
-			}
-		}
-
-		if err := panel.AppendRecord(specDir, panelName, record); err != nil {
+		} else if err := panel.AppendRecord(specDir, panelName, record); err != nil {
 			return err
 		}
 

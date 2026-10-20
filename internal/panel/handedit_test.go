@@ -181,3 +181,19 @@ func TestHandEdit_UnparseableRegistrationRefuses(t *testing.T) {
 		}
 	}
 }
+
+func TestHandEdit_NewerRoundClearsAbandonment(t *testing.T) {
+	records := ledgerFixtures(t, "p")
+	next := changeLedger(t, records[0], "round", 2)
+	next = changeLedger(t, next, "created_at", ledgerLater)
+	p := snapshotFromRound(t, next)
+	lines := [][]byte{records[0], records[4], next}
+	if field, err := FirstUnbackedField(p, lines); err != nil || field != "" {
+		t.Fatalf("new round must expect abandoned=false: field=%q err=%v", field, err)
+	}
+	p.Abandoned = true
+	p.AbandonReason = "halt"
+	if field, err := FirstUnbackedField(p, lines); err != nil || field != "abandoned" {
+		t.Fatalf("stale abandonment: field=%q want=abandoned err=%v", field, err)
+	}
+}

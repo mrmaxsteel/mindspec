@@ -242,10 +242,22 @@ func ReadLedger(dir string) ([][]byte, error) {
 // hold before any data is appended. Retries ignore created_at in payloads, but
 // created_at remains part of round and abandon keys as prescribed by R5.1.
 func AppendRecords(dir string, records ...[]byte) error {
+	return AppendRecordsWithCheck(dir, nil, records...)
+}
+
+// AppendRecordsWithCheck runs check under the same lock as the batch append,
+// before reading or writing the ledger. A failing check leaves the ledger intact.
+// The callback must not acquire the panel's disposition lock again.
+func AppendRecordsWithCheck(dir string, check func() error, records ...[]byte) error {
 	if len(records) == 0 {
 		return nil
 	}
 	return withPanelDispositionLock(dir, func() error {
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
+		}
 		existing, err := ReadLedger(dir)
 		if err != nil {
 			return err
@@ -315,6 +327,14 @@ func WriteSnapshot(dir string, p Panel) error {
 	}
 	// Keep failed temporary files recoverable; they do not register a panel.
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err
 	}
