@@ -3,6 +3,7 @@ package gitutil
 import (
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -25,8 +26,11 @@ func TestLsTree_ArgvAndRefGate(t *testing.T) {
 	if got, err := LsTree("/repo/spec", "HEAD"); err != nil || got != listing || calls != 1 {
 		t.Fatalf("listing=%q calls=%d err=%v", got, calls, err)
 	}
-	execCommand = func(string, ...string) *exec.Cmd { return exec.Command("false") }
-	if got, err := LsTree("/repo/spec", "HEAD"); err == nil || got != "" {
+	execCommand = func(string, ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "printf 'fatal: invalid tree reference\\n' >&2; exit 1")
+	}
+	if got, err := LsTree("/repo/spec", "HEAD"); err == nil || got != "" ||
+		!strings.Contains(err.Error(), "ls-tree HEAD:") || !strings.Contains(err.Error(), "fatal: invalid tree reference") {
 		t.Fatalf("read failure hidden: %q %v", got, err)
 	}
 }

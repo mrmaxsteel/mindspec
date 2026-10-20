@@ -47,7 +47,11 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 			if gateCase == "adhoc bead" {
 				gate = "adhoc"
 			}
-			for _, change := range []string{"archive", "ownership", "real edit", "internal reviews"} {
+			changes := []string{"archive", "ownership", "real edit", "internal reviews"}
+			if gate == "spec_approve" {
+				changes = append(changes, "target off checkout")
+			}
+			for _, change := range changes {
 				t.Run(specs+"/"+gateCase+"/"+change, func(t *testing.T) {
 					resetPanelCreateFlags(t)
 					stubWorktreeListEmpty(t)
@@ -115,17 +119,26 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 						if specs == ".mindspec/docs/specs" {
 							file = ".mindspec/docs/domains/workflow/OWNERSHIP.yaml"
 						}
-					case "real edit":
+					case "real edit", "target off checkout":
 						file = specs + "/130-example/spec.md"
 					case "internal reviews":
 						file = "internal/reviews/x.go"
 					}
 					if gate == "spec_approve" || gate == "plan_approve" {
-						wantStale = change == "real edit"
+						wantStale = change == "real edit" || change == "target off checkout"
 					}
 					subjectCLIWrite(t, root, file, "changed\n")
 					subjectCLIGit(t, root, "add", "-f", "--", file)
 					subjectCLIGit(t, root, "commit", "-qm", "subject change")
+					if change == "target off checkout" {
+						subjectCLIGit(t, root, "switch", "-q", "--detach", "HEAD~1")
+						if head := subjectCLIGit(t, root, "rev-parse", "HEAD"); head != reg.Panel.ReviewedHeadSHA {
+							t.Fatalf("HEAD=%s, want reviewed SHA %s", head, reg.Panel.ReviewedHeadSHA)
+						}
+						if tip := subjectCLIGit(t, root, "rev-parse", target); tip == reg.Panel.ReviewedHeadSHA {
+							t.Fatal("target must differ from the reviewed SHA")
+						}
+					}
 					// Verify is read-only and always exits zero; assert its rendered decision.
 					out, err := runPanelCmd("verify", "subject")
 					if err != nil {
@@ -234,5 +247,39 @@ func TestSubjectDigest_CreateUsesTargetCommit(t *testing.T) {
 	}
 	if reg.Panel.ReviewedHeadSHA != targetSHA || reg.Panel.SubjectDigest != want {
 		t.Errorf("recorded SHA=%s digest=%s, want target SHA=%s digest=%s", reg.Panel.ReviewedHeadSHA, reg.Panel.SubjectDigest, targetSHA, want)
+	}
+}
+
+func TestSubjectDigest_QuotedSpecPath(t *testing.T) {
+	root := t.TempDir()
+	subjectCLIGit(t, root, "init", "-q", "-b", "main")
+	subjectCLIGit(t, root, "config", "core.quotePath", "true")
+	const specDir = ".mindspec/specs/130-example"
+	const file = specDir + "/spé.md"
+	subjectCLIWrite(t, root, specDir+"/spec.md", "base\n")
+	subjectCLIWrite(t, root, file, "base\n")
+	subjectCLIGit(t, root, "add", "-A")
+	subjectCLIGit(t, root, "commit", "-qm", "base")
+	digest := func() string {
+		t.Helper()
+		listing, err := (&executor.MindspecExecutor{}).LsTree(root, "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(listing, `".mindspec/specs/130-example/sp\303\251.md"`) {
+			t.Fatalf("listing must contain a quoted non-ASCII spec path: %s", listing)
+		}
+		got, err := panel.SubjectDigest(listing, panel.Subject("spec_approve", specDir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	before := digest()
+	subjectCLIWrite(t, root, file, "changed\n")
+	subjectCLIGit(t, root, "add", "--", file)
+	subjectCLIGit(t, root, "commit", "-qm", "quoted path edit")
+	if after := digest(); after == before {
+		t.Fatal("edit to quoted spec path did not change digest")
 	}
 }

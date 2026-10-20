@@ -1425,9 +1425,11 @@ func LsTree(workdir, rev string) (string, error) {
 		return "", err
 	}
 	cmd := execCommand("git", gitArgs(workdir, "ls-tree", "-r", "--full-tree", rev, "--")...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("ls-tree: %w", err)
+		return "", fmt.Errorf("ls-tree %s: %w: %s", rev, err, strings.TrimSpace(stderr.String()))
 	}
 	return string(out), nil
 }

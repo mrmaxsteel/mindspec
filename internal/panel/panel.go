@@ -16,8 +16,9 @@
 //
 // Boundary: this package is fs-only. It makes zero git, zero bd, and
 // zero subprocess calls — staleness (`ReviewedHeadSHA` vs the live
-// ref) and dirty-tree checks are the CALLER's git work (the hook,
-// per ADR-0030's at-most-two-subprocesses budget).
+// ref) and dirty-tree checks are the caller's git work. ADR-0037 (Spec 130)
+// permits three calls on a SHA mismatch: rev-parse, subject-tree read, and
+// porcelain.
 package panel
 
 import (

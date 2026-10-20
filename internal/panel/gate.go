@@ -579,8 +579,8 @@ func PanelDirScanRoot(panelDir string) string {
 // userDirtPaths parses `git status --porcelain` output and returns the
 // user-authored dirty paths, filtering out ADR-0025 artifact paths
 // (.beads/issues.jsonl) which are designed-for and never block (Req 11).
-// Pure path filtering — no bd-export normalization call (matched-path git
-// budget stays at two subprocesses).
+// Pure path filtering adds no subprocess call. ADR-0037 (Spec 130) permits
+// three calls on a SHA mismatch: rev-parse, subject-tree read, and porcelain.
 func userDirtPaths(porcelain string) []string {
 	var out []string
 	for _, line := range strings.Split(porcelain, "\n") {
