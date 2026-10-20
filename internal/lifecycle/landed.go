@@ -752,6 +752,11 @@ func reviewedHeadSHAForBead(root, specBranch, beadID string) map[string]struct{}
 		if sha := r.Panel.ReviewedHeadSHA; classifyReviewedSHA(sha) == reviewedSHAObjectID {
 			set[sha] = struct{}{}
 		}
+		for _, entry := range panel.LedgerBackedRebinds(r.Dir, r.Panel) {
+			if classifyReviewedSHA(entry.FromSHA) == reviewedSHAObjectID {
+				set[entry.FromSHA] = struct{}{}
+			}
+		}
 	}
 	return set
 }

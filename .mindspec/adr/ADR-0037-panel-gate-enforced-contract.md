@@ -665,3 +665,17 @@ the gate exists for — the stale APPROVE honored at merge time.
 - **§3 — Pass rule (R7).** PASS requires complete, no veto, fresh, discharged and intact. Every roster slot must have a parseable latest-round verdict; REJECT, hard_block and INVALID cannot be discharged. Each REQUEST_CHANGES finding needs a round- and `finding_sha256`-pinned discharge; slot-level hashes cover the entire ordered list or the fallback rationale. Legacy unpinned entries apply only on legacy panels. APPROVE count is not a decision input; zero APPROVE can pass. This replaces the N−1 threshold, supersedes the Spec-114 sentences "the approve threshold remains a NECESSARY floor" and "refutation cannot buy a sub-threshold panel past the gate", and retires the Spec-109 `approve_threshold` extension. Recorded `approve_threshold` remains parse-compatible and prints an ignored legacy notice. Deferral discharge is inactive until its gate-time validation ships.
 - **§7 — Recovery and rule line (R8).** A Block message and the shared rule line may name the `panel refute` and `panel defer` verbs. Tally, verify and instruct use one render including INVALID, resolved and unresolved counts, with no approval threshold.
 - **§8 — Hand-edit detection (R5.3).** Snapshot/event matching detects accidental desync only: anti-footgun, not anti-adversary. It adds no signing. Off-roster files count for nothing, but an unexpected REJECT, hard_block or INVALID blocks and names the file.
+
+- **§4 — Panel rebind (R4.1–R4.5, R3.5).** `mindspec panel rebind <slug>
+  --reason <text>` moves `reviewed_head_sha` and `subject_digest` to the live
+  target tip without a round bump. The reason must be non-empty. The panel
+  must parse, be intact, not abandoned, have no round mismatch, and pass R7
+  with staleness ignored. Its reviewed SHA must be an ancestor of the tip.
+  Every diff path is accepted except `.mindspec/config.yaml`; there is no
+  allowlist or config key for paths. `rebinds[]` records
+  `{round, from_sha, to_sha, paths, reason, created_at}`, with R3.1 exclusions
+  removed from `paths`. The verb appends a `rebind` ledger event, including
+  the digest, before one snapshot write. Equal SHAs print `already fresh`
+  and write nothing. Completion copies `rebinds[]` to `panel_rebound_entries`
+  through the same fail-closed pre-close metadata stage as `panel_refuted`.
+  Only R5.3-matched `from_sha` values join the exact-equality landed set.
