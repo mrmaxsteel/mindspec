@@ -147,6 +147,8 @@ var CommandTokens = map[string]struct{}{
 // (commands with no subcommand). Verbs shared across parents (add, list,
 // show, set, start, status, …) appear once.
 var SubcommandTokens = map[string]struct{}{
+	"refute":           {}, // panel refute
+	"abandon":          {}, // panel abandon
 	"":                 {},
 	"add":              {},
 	"adopt":            {}, // impl adopt (spec 127 R1: audited, merge-free terminal transition)

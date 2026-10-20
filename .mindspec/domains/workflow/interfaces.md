@@ -335,6 +335,10 @@ recovery line — closing the spec-109-final-review G2 terminal-injection
 class (a slug/flag value bearing a control byte can never forge an
 extra display line or a fake `recovery:` line).
 
+**`mindspec panel refute <slug> --slot S --round N [--finding ccr[i]] --ground G [--ac AC-n] --reason T --evidence REF --by WHO`** validates a latest-round REQUEST_CHANGES finding without hard_block. APPROVE, REJECT, INVALID, absent slots, stale rounds, unknown findings and empty names refuse without writes. Grounds are `disproven`, `not-load-bearing` and `out_of_acceptance_scope`; the last requires an AC id in the owning spec. Evidence resolves to a commit, repo path or HTTPS URL. One batch lock hold appends the refutation event and an `audited-refuted` disposition row; an atomic rename updates the snapshot afterward. Retries converge by key. Finding text is path-redacted while hashes pin the raw text.
+
+**`mindspec panel abandon <slug> --reason T --by WHO`** requires both fields, appends an `abandon` event and sets `abandoned` and `abandon_reason`. It writes no manifest and retains existing manifests. Both verbs print the shared pass-rule line and accept `--spec` to disambiguate a slug.
+
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
 <id>] [--round N] [--gate <name>] [--reviewers N]`** resolves the target's
 live commit and subject digest and the gate's roster through

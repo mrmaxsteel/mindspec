@@ -123,7 +123,9 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
-	"mindspec": "root command: prints help or an unknown-command error, never mutates",
+	"mindspec panel refute":  "records a panel refutation and disposition; not lifecycle-phase state",
+	"mindspec panel abandon": "records audited panel abandonment; not lifecycle-phase state",
+	"mindspec":               "root command: prints help or an unknown-command error, never mutates",
 
 	// --- cobra's own auto-registered built-ins (lazily added by
 	// Execute()/InitDefaultHelpCmd/InitDefaultCompletionCmd — present in

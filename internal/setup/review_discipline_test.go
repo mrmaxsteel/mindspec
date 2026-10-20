@@ -100,8 +100,8 @@ var reviewDisciplineFragmentRows = []fragmentRow{
 	// AC-13 (partial) — every touched skill cites ADR-0044 (the ADR-file
 	// existence + Accepted-marker half is TestReviewDiscipline_ADR0044ExistsAccepted
 	// below; Bead 3 appends the two lifecycle-literal citation rows).
-	{ac: "AC-13", desc: "ms-panel-run cites ADR-0044", surface: "ms-panel-run", want: "ADR-0044"},
-	{ac: "AC-13", desc: "ms-panel-tally cites ADR-0044", surface: "ms-panel-tally", want: "ADR-0044"},
+	{ac: "AC-13", desc: "ms-panel-run states reviewer conduct", surface: "ms-panel-run", want: "Reviewers apply these conduct rules at every gate."},
+	{ac: "AC-13", desc: "ms-panel-tally states contested-finding conduct", surface: "ms-panel-tally", want: "verify, never confirmed"},
 	{ac: "AC-13", desc: "ms-bead-cycle cites ADR-0044", surface: "ms-bead-cycle", want: "ADR-0044"},
 	{ac: "AC-13", desc: "ms-bead-fix cites ADR-0044", surface: "ms-bead-fix", want: "ADR-0044"},
 	{ac: "AC-13", desc: "ms-spec-final-review cites ADR-0044", surface: "ms-spec-final-review", want: "ADR-0044"},
@@ -353,16 +353,9 @@ var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 	{
 		surface: "ms-bead-impl",
 		locator: readinessStagedRule,
-		matched: "spec-130",
+		matched: "spec-131",
 		count:   1,
 		reason:  "spec 129 R6.5 staged-rule marker: mandated rule-table spec in the verbatim marker line",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "panel-slug` (required)",
-		matched: "spec-050",
-		count:   2,
-		reason:  "intentionally retained neutral example slugs — the round-1 (`spec-050-bead2`) and round-2 (`spec-050-bead2-r2`) forms on the one Inputs line, AC-10's own worked example",
 	},
 	{
 		surface: "ms-bead-cycle",
@@ -370,13 +363,6 @@ var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 		matched: "spec-050",
 		count:   1,
 		reason:  "deliberately kept cross-project case history (R7); not a mindspec incident ID",
-	},
-	{
-		surface: "ms-panel-tally",
-		locator: "Postmortem: `bd show lola-f4a8`",
-		matched: "spec-050",
-		count:   2,
-		reason:  "cross-project provenance powering the artifact-gate HARD-block rationale; both occurrences on the one postmortem line",
 	},
 	{
 		surface: "ms-spec-final-review",
@@ -446,62 +432,6 @@ var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 		matched: "Spec 093",
 		count:   1,
 		reason:  "pre-existing feature-provenance cross-ref (complete-gate provenance); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "the workflow cannot read config itself",
-		matched: "spec 109",
-		count:   2,
-		reason:  "pre-existing feature-provenance cross-refs (workflow-path mix/substitution provenance, both on the one runner-dispatch line); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "the workflow cannot read config itself",
-		matched: "spec 111",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (workflow R1-R5 provenance, same runner-dispatch line); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "`<spec-dir>` / co-located reviews",
-		matched: "spec 106",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "`--gate adhoc` is refused",
-		matched: "spec 123",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (adhoc-gate refusal provenance); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "a zero-config install keeps its sizes",
-		matched: "Spec 126",
-		count:   1,
-		reason:  "legitimate verbatim citation of ADR-0043's `## Amendment (Spec 126)` heading — the exact AC-1/AC-3 amendment marker the guard tests pin; renaming it here would orphan the citation, so it is an ADR citation, not incident lore",
-	},
-	{
-		surface: "ms-panel-tally",
-		locator: "the location the `mindspec complete` gate scans",
-		matched: "spec 106",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-tally",
-		locator: "pre-rendered in the workflow result",
-		matched: "spec 111",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (workflow-path tally provenance); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-panel-tally",
-		locator: "Two DIFFERENT spec identifiers appear below",
-		matched: "spec 117",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (disposition-telemetry provenance); prose generalization tracked in mindspec-dtnj",
 	},
 }
 
@@ -574,7 +504,7 @@ func ac10Surfaces() map[string]string {
 }
 
 func TestReviewDiscipline_AC10StagedRuleMarkerOnly(t *testing.T) {
-	for _, token := range []string{"spec 133", "spec-130"} {
+	for _, token := range []string{"spec 133", "spec-131"} {
 		t.Run(token, func(t *testing.T) {
 			surfaces := ac10Surfaces()
 			if problems := acTenValidate(acTenScanSurfaces(surfaces), reviewDisciplineAC10Allowlist, surfaces); len(problems) != 0 {
@@ -655,72 +585,40 @@ func TestReviewDiscipline_AC10NewLoreClassesZeroOnRealSurfaces(t *testing.T) {
 	}
 }
 
-// TestReviewDiscipline_AC10NegativeDuplicateToken proves the occurrence
-// accounting bites: an extra, UNALLOWLISTED occurrence of an already-
-// allowlisted token on a DIFFERENT line in the SAME surface (ms-panel-tally
-// is allowlisted for exactly 2 "spec-050" occurrences on its postmortem
-// line) REDs the scan even though the token itself is on the allowlist —
-// the (line, count), not just the token identity, is enforced. Mutation
-// applied to a fixture copy of the real surfaces map, never the shipped
-// file.
+// TestReviewDiscipline_AC10NegativeDuplicateToken proves occurrence accounting
+// with a local allowlisted fixture: an extra hit off its locator must fail.
 func TestReviewDiscipline_AC10NegativeDuplicateToken(t *testing.T) {
 	surfaces := ac10Surfaces()
-	original := surfaces["ms-panel-tally"]
-	if !strings.Contains(original, "spec-050") {
-		t.Fatal("fixture assumption broken: ms-panel-tally no longer contains spec-050 at all")
+	locator := "fixture provenance: spec-050 and spec-050 again"
+	surfaces["ms-panel-tally"] += "\n" + locator + "\n"
+	allowed := append(append([]acTenAllowEntry{}, reviewDisciplineAC10Allowlist...), acTenAllowEntry{surface: "ms-panel-tally", locator: locator, matched: "spec-050", count: 2, reason: "synthetic occurrence-accounting fixture"})
+	if problems := acTenValidate(acTenScanSurfaces(surfaces), allowed, surfaces); len(problems) != 0 {
+		t.Fatalf("unmutated fixture: %v", problems)
 	}
-	surfaces["ms-panel-tally"] = original + "\n\nA third spec-050 reference injected for the test.\n"
-
-	hits := acTenScanSurfaces(surfaces)
-	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces)
+	surfaces["ms-panel-tally"] += "\nA third spec-050 reference injected for the test.\n"
+	problems := acTenValidate(acTenScanSurfaces(surfaces), allowed, surfaces)
 	if len(problems) == 0 {
-		t.Fatal("expected a 3rd spec-050 occurrence in ms-panel-tally (allowlisted for exactly 2, on one line) to RED the scan")
+		t.Fatal("expected third occurrence outside its locator to RED")
 	}
 	for _, p := range problems {
 		if !strings.Contains(p, "ms-panel-tally") {
-			t.Errorf("unexpected unrelated AC-10 problem alongside the duplicate-token overrun: %s", p)
+			t.Errorf("unexpected unrelated problem: %s", p)
 		}
 	}
 }
 
-// TestReviewDiscipline_AC10NegativeLocatorMismatch is the codex G1-B1 proof:
-// replacing an allowlisted token AT its declared locator with a decoy that
-// no longer matches acTenSpecIDRE, AND separately reintroducing the SAME
-// token+count on a DIFFERENT line in the SAME surface, must RED — even
-// though the token+count both still appear somewhere in the file. Before
-// the location-keyed fix this passed cleanly, because the allowlist only
-// ever keyed on surface+matched-text: moving ms-panel-run's spec-050 tokens
-// off their declared "panel-slug` (required)" locator line and
-// reintroducing the same tokens, unchanged, elsewhere in the file left the
-// scan green.
+// A portable shipped skill has no incident tokens; a local fixture proves
+// location accounting without putting forbidden provenance back into it.
 func TestReviewDiscipline_AC10NegativeLocatorMismatch(t *testing.T) {
 	surfaces := ac10Surfaces()
-	original, ok := surfaces["ms-panel-run"]
-	if !ok {
-		t.Fatal("fixture assumption broken: ms-panel-run missing from ac10Surfaces()")
+	locator := "fixture provenance: spec-050-bead2 and spec-050-bead2-r2"
+	surfaces["ms-panel-run"] += "\n" + locator + "\n"
+	allowed := append(append([]acTenAllowEntry{}, reviewDisciplineAC10Allowlist...), acTenAllowEntry{surface: "ms-panel-run", locator: "fixture provenance:", matched: "spec-050", count: 2, reason: "synthetic locator fixture"})
+	if problems := acTenValidate(acTenScanSurfaces(surfaces), allowed, surfaces); len(problems) != 0 {
+		t.Fatalf("unmutated fixture: %v", problems)
 	}
-	if !strings.Contains(original, "spec-050-bead2-r2") || !strings.Contains(original, "spec-050-bead2") {
-		t.Fatal("fixture assumption broken: ms-panel-run no longer carries its declared spec-050 worked-example tokens")
-	}
-
-	// Replace BOTH spec-050 occurrences on the declared "panel-slug`
-	// (required)" locator line with a decoy that no longer matches
-	// acTenSpecIDRE (`case-050`, not `spec-050`).
-	replacer := strings.NewReplacer("spec-050-bead2-r2", "case-050-bead2-r2", "spec-050-bead2", "case-050-bead2")
-	mutated := replacer.Replace(original)
-	if strings.Contains(mutated, "spec-050") {
-		t.Fatal("fixture assumption broken: locator-line substitution left a spec-050 behind")
-	}
-	// Reintroduce the SAME token+count, unchanged, on a wholly different
-	// line in the same surface.
-	mutated += "\n\nElsewhere in this file, purely for the fixture: spec-050 and spec-050 again.\n"
-
-	surfaces["ms-panel-run"] = mutated
-	hits := acTenScanSurfaces(surfaces)
-	problems := acTenValidate(hits, reviewDisciplineAC10Allowlist, surfaces)
-	if len(problems) == 0 {
-		t.Fatal("expected moving the allowlisted ms-panel-run spec-050 tokens off their declared locator (while reintroducing the same token+count elsewhere) to RED the AC-10 scan")
-	}
+	surfaces["ms-panel-run"] = strings.ReplaceAll(surfaces["ms-panel-run"], "spec-050", "case-050") + "\nElsewhere: spec-050 and spec-050 again.\n"
+	problems := acTenValidate(acTenScanSurfaces(surfaces), allowed, surfaces)
 	sawUnused, sawUnallowlisted := false, false
 	for _, p := range problems {
 		if strings.Contains(p, "ms-panel-run") && strings.Contains(p, "unused") {
@@ -730,11 +628,8 @@ func TestReviewDiscipline_AC10NegativeLocatorMismatch(t *testing.T) {
 			sawUnallowlisted = true
 		}
 	}
-	if !sawUnused {
-		t.Errorf("expected an 'unused' problem for ms-panel-run's now-empty locator line; got: %v", problems)
-	}
-	if !sawUnallowlisted {
-		t.Errorf("expected an 'unallowlisted hit' problem for the relocated spec-050 tokens; got: %v", problems)
+	if !sawUnused || !sawUnallowlisted {
+		t.Fatalf("expected unused locator and unallowlisted relocated hits: %v", problems)
 	}
 }
 
@@ -817,12 +712,11 @@ func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 
 var reviewDisciplineBead3FragmentRows = []fragmentRow{
 	// AC-1 (R1a) — the shipped default stated ONCE in canonical form, per
-	// surface, plus the ASCII "n-1" fragment (the pre-existing text only
-	// ever used the unicode "N − 1"/"N−1" forms).
+	// surface, plus the finding-aware pass rule.
 	{ac: "AC-1", desc: "ms-panel-run canonical shipped-default sentence", surface: "ms-panel-run", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
-	{ac: "AC-1", desc: "ms-panel-run ASCII n-1 threshold fragment", surface: "ms-panel-run", want: "n-1"},
+	{ac: "AC-1", desc: "ms-panel-run pass rule", surface: "ms-panel-run", want: "0 unresolved REQUEST_CHANGES"},
 	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
-	{ac: "AC-1", desc: "ms-panel-tally ASCII n-1 threshold fragment", surface: "ms-panel-tally", want: "n-1"},
+	{ac: "AC-1", desc: "ms-panel-tally pass rule", surface: "ms-panel-tally", want: "0 unresolved REQUEST_CHANGES"},
 
 	// AC-1 (panel F1 MINOR) — the two DEFAULT-lens-relabel sentences pinned
 	// as fragments, so a LABEL-ONLY deletion REDs here even before the
@@ -1345,9 +1239,9 @@ var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
 	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
 	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
 	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
 	{
 		surface: "ms-panel-run",
 		locator: "DEFAULT lens assignment for up to six slots",

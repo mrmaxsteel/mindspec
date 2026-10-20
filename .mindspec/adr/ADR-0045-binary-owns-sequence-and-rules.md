@@ -92,3 +92,7 @@ The Context claims above were checked against the tree when this ADR was added b
 - *History machinery*: `internal/setup/skills.go`'s `previouslyShippedSkills` matches installed skills against byte-exact embedded `historical_skills/` snapshots (not content hashes — the wording above was corrected accordingly).
 - *Conflicts stated (spec-129 round-1 panel)*: ADR-0044's Related line says that conduct "is L4 skill-layer doctrine", and its Context says that it "ships as skill/ADR text". Decision 4 forbids rules and rationale in skills. The reconciliation is in "Relation to ADR-0044" above. ADR-0040 §1 holds the default answer "start it at L4" and an open-ended staging area. Decision 5 replaces both. The Amends line names them, and ADR-0040 §1 carries a back-pointer.
 - *Not yet in the tree*: `next-action`, `submit`, `bead prompt`, `panel brief`, `.mindspec/prompts/`, and the rule table. The Implementation order above is the plan for them; none is claimed as shipped.
+
+## Amendment (Spec 130)
+
+- **Implementation status (R13.5).** Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131. The staged-rule marker names the spec-131 rule table. Refute and abandon procedures are binary verbs; skills invoke them and never edit the panel snapshot or append coverage manifests.
