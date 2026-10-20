@@ -1030,6 +1030,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// above, but NOT this pre-existing-obligation reconciliation (round-5
 	// item 3 / G3). A bead with no recorded pending reconciles to a no-op
 	// (§6 fail-open preserved).
+	// A fresh retry replaces the settled audit for the panels it just gated.
+	// The resume path already reconciles its durable entries before this point.
+	if resumeStage == "" && panelGateEnabled && !panelSkipEnvFn() {
+		if err := replaceGatedDeferrals(beadID, panelDecisions, nil, true); err != nil {
+			return nil, PanelDeferredAuditFailure(beadID, err)
+		}
+	}
 	if err := reconcilePendingDeferrals(beadID); err != nil {
 		return nil, err
 	}

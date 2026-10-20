@@ -1351,6 +1351,11 @@ func implPanelDeferralPreflight(root, specID string) error {
 		if err != nil {
 			return complete.PanelDeferredAuditFailure(beadID, err, true)
 		}
+		pending, err := complete.DecodePanelDeferred(meta, "deferral_pending_entries")
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
+		}
+		entries = complete.UnionDeferrals(entries, pending)
 		var legacy []complete.PanelDeferredEntry
 		groups := map[[2]string][]complete.PanelDeferredEntry{}
 		for _, entry := range entries {
@@ -1376,7 +1381,7 @@ func implPanelDeferralPreflight(root, specID string) error {
 			}
 			reg := panel.Registration{Dir: filepath.Join("review", identity[1]), Panel: panel.Panel{Spec: entrySpec, BeadID: &beadID}}
 			for _, current := range regs {
-				if current.Panel.Spec == entrySpec && current.Slug() == identity[1] {
+				if complete.PanelDeferredRegistrationMatches(current, entrySpec, identity[1]) {
 					reg = current
 					break
 				}

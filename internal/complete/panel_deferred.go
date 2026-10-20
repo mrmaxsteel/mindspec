@@ -50,7 +50,11 @@ func deferralFailure(reg panel.Registration, d panel.Deferral, audited bool, err
 		}
 		recovery += fmt.Sprintf(" or mindspec panel refute %s --spec %s --slot %s --round %d%s --ground disproven --evidence '<fixing commit>' --reason '<why>' --by '<who>'", core3Quote(reg.Slug()), core3Quote(reg.Panel.Spec), core3Quote(d.Slot), d.Round, finding)
 	}
-	return guard.NewFailure(fmt.Sprintf("panel %s slot %s finding %s follow-up %s: %s", termsafe.Escape(reg.Slug()), termsafe.Escape(d.Slot), termsafe.Escape(d.Finding), termsafe.Escape(d.Bead), termsafe.Escape(err.Error())), recovery)
+	scope := "panel " + termsafe.Escape(reg.Slug())
+	if reg.Dir == "" && reg.Panel.BeadID != nil {
+		scope = "bead " + idrender.Bead(*reg.Panel.BeadID)
+	}
+	return guard.NewFailure(fmt.Sprintf("%s slot %s finding %s follow-up %s: %s", scope, termsafe.Escape(d.Slot), termsafe.Escape(d.Finding), termsafe.Escape(d.Bead), termsafe.Escape(err.Error())), recovery)
 }
 
 func checkDeferral(reg panel.Registration, d panel.Deferral, texts []string, epic string, epicErr error) error {
@@ -235,6 +239,34 @@ func DecodePanelDeferred(meta map[string]interface{}, key string) ([]PanelDeferr
 	return entries, nil
 }
 
+// UnionDeferrals combines settled and pending records with the resume union rule.
+func UnionDeferrals(existing, add []PanelDeferredEntry) []PanelDeferredEntry {
+	return unionDeferrals(existing, add)
+}
+
+// PanelDeferredRegistrationMatches binds an audit identity to its ledger round.
+// A renamed registration cannot supersede another registration's audit.
+func PanelDeferredRegistrationMatches(reg panel.Registration, specID, slug string) bool {
+	if reg.Err != nil || reg.Panel.Spec != specID || reg.Slug() != slug {
+		return false
+	}
+	lines, err := panel.ReadLedger(reg.Dir)
+	if err != nil {
+		return false
+	}
+	var latest panel.RoundRecord
+	for _, line := range lines {
+		var round panel.RoundRecord
+		if err := json.Unmarshal(line, &round); err != nil {
+			return false
+		}
+		if round.Record == panel.RecordRound {
+			latest = round
+		}
+	}
+	return latest.Record == panel.RecordRound && latest.Spec == specID && latest.Panel == slug
+}
+
 func unionDeferrals(existing, add []PanelDeferredEntry) []PanelDeferredEntry {
 	out := append([]PanelDeferredEntry{}, existing...)
 	seen := map[string]bool{}
@@ -310,10 +342,61 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 		}
 		entries = append(entries, checked...)
 	}
-	if err := persistDeferralPending(beadID, entries); err != nil {
+	if err := replaceGatedDeferrals(beadID, results, entries, false); err != nil {
 		return PanelDeferredAuditFailure(beadID, err)
 	}
 	return nil
+}
+
+// replaceGatedDeferrals replaces only the registrations checked by this attempt.
+// The gate records pending entries. Settlement replaces their settled audit
+// before close. Other panels and unrelated metadata remain durable on retries.
+func replaceGatedDeferrals(beadID string, results []PanelGateResult, entries []PanelDeferredEntry, settle bool) error {
+	var gated []panel.Registration
+	for _, result := range results {
+		reg := result.Registration
+		if PanelDeferredRegistrationMatches(reg, reg.Panel.Spec, reg.Slug()) {
+			field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+			if err == nil && field == "" && (result.Decision.Action == panel.Allow || reg.Panel.Abandoned) {
+				gated = append(gated, reg)
+			}
+		}
+	}
+	if len(gated) == 0 && len(entries) == 0 {
+		return nil
+	}
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return err
+	}
+	pending, err := DecodePanelDeferred(meta, "deferral_pending_entries")
+	if err != nil {
+		return err
+	}
+	keepOtherPanels := func(prior []PanelDeferredEntry) []PanelDeferredEntry {
+		var kept []PanelDeferredEntry
+		for _, entry := range prior {
+			replaced := false
+			for _, reg := range gated {
+				if entry.Panel == reg.Slug() && (entry.Spec == "" || entry.Spec == reg.Panel.Spec) {
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				kept = append(kept, entry)
+			}
+		}
+		return kept
+	}
+	if !settle {
+		return completeMergeMetadataFn(beadID, map[string]interface{}{"deferral_pending_entries": unionDeferrals(keepOtherPanels(pending), entries)})
+	}
+	audit, err := DecodePanelDeferred(meta, "panel_deferred_entries")
+	if err != nil {
+		return err
+	}
+	return completeMergeMetadataFn(beadID, map[string]interface{}{"panel_deferred_entries": unionDeferrals(keepOtherPanels(audit), pending)})
 }
 
 // PanelDeferredAuditFailure makes metadata errors fail closed. Callers can
@@ -367,7 +450,7 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 		}
 		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: groupSpec, BeadID: &beadID}}
 		for _, current := range regs {
-			if current.Panel.Spec != groupSpec || current.Slug() != first.Panel {
+			if !PanelDeferredRegistrationMatches(current, groupSpec, first.Panel) {
 				continue
 			}
 			// Only verb-backed abandonment or refutation can supersede the audit.

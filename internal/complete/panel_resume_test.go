@@ -1,9 +1,12 @@
 package complete
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -393,6 +396,210 @@ func TestComplete_ResumeTrimsRefutedSlotMembers(t *testing.T) {
 				t.Fatalf("refutation audit lost: %+v %v", refs, err)
 			}
 
+		})
+	}
+}
+
+func TestComplete_FreshRetryReconcilesDeferredAudit(t *testing.T) {
+	const specID, beadID = "130-core3", "mindspec-core3.1"
+	for _, discharge := range []string{"refuted", "abandoned", "unchanged"} {
+		t.Run(discharge, func(t *testing.T) {
+			root, sha := setupPanelGateRepo(t, specID, beadID)
+			fake := deferralBD(t, "epic-130-core3")
+			store := newFakeMetadataStore()
+			store.wire(t)
+			panelSkipEnvFn = func() bool { return false }
+			dir := filepath.Join(root, "review", "retry-deferred")
+			if err := panel.Create(dir, panel.CreateInput{Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "a", Lens: "correctness"}, {Slot: "R2", Model: "b", Lens: "tests"}}}); err != nil {
+				t.Fatal(err)
+			}
+			v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x"}}
+			core3JSON(t, dir, "R1-round-1.json", v)
+			core3JSON(t, dir, "R2-round-1.json", map[string]string{"verdict": "APPROVE"})
+			fs, err := panel.Findings(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := panel.Deferral{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Bead: "follow-up", By: "max", CreatedAt: core3Time}
+			core3Append(t, dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: specID, Panel: "retry-deferred", Deferral: d})
+			reg := panel.Scan(root)[0]
+			reg.Panel.Deferrals = []panel.Deferral{d}
+			if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+				t.Fatal(err)
+			}
+			core3Cover(t, reg)
+			core3Manifest(t, reg)
+			closeBeadFn = func(...string) error { return errors.New("injected close failure") }
+			fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{ID: id, Status: "in_progress"}, nil }
+			first := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+			_, err = Run(root, beadID, specID, "", first, CompleteOpts{AllowDocSkew: "test fixture"})
+			if err == nil || !strings.Contains(err.Error(), "injected close failure") || first.completeCalled {
+				t.Fatalf("wrong first failure: %v merge=%v", err, first.completeCalled)
+			}
+			audit, err := DecodePanelDeferred(store.data[beadID], "panel_deferred_entries")
+			if err != nil || len(audit) != 1 {
+				t.Fatalf("first audit: %+v %v", audit, err)
+			}
+			_, stage, present := readMarker(t, root, beadID)
+			if present {
+				t.Fatalf("fresh retry requires no materialization marker: %s", stage)
+			}
+			t.Logf("first attempt: close failed, merge=%v, marker=%v, settled audit=%+v", first.completeCalled, present, audit)
+
+			setDeferredIssue(t, fake, "closed")
+			if discharge == "refuted" {
+				ref := panel.Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingSHA256: d.FindingSHA256, FindingText: d.FindingText, Ground: "disproven", Reason: "fixed", Evidence: "fix commit", By: "max", CreatedAt: core3Time}
+				core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
+				reg.Panel.Refutations = []panel.Refutation{ref}
+				if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+					t.Fatal(err)
+				}
+				live, err := panel.Tally(dir)
+				if err != nil || !live.PassRule(true) || len(live.EffectiveDeferrals()) != 0 || len(live.AppliedRefutations()) != 1 {
+					t.Fatalf("refutation must fully supersede live deferral: %+v %v", live, err)
+				}
+			} else if discharge == "abandoned" {
+				core3Append(t, dir, panel.AbandonRecord{Record: panel.RecordAbandon, Spec: specID, Panel: reg.Slug(), Reason: "rework", By: "max", CreatedAt: core3Time})
+				reg.Panel.Abandoned, reg.Panel.AbandonReason = true, "rework"
+				if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Other panels and pending refutations remain independent obligations.
+			other := audit[0]
+			other.Panel = "other-panel"
+			other.Bead = "other-follow-up"
+			core3JSON(t, fake, "other-follow-up.json", []interface{}{map[string]interface{}{
+				"id": "other-follow-up", "status": "open", "description": other.FindingText,
+				"dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}},
+			}})
+			store.data[beadID]["panel_deferred_entries"] = append(audit, other)
+			store.data[beadID]["deferral_pending_entries"] = []PanelDeferredEntry{other}
+			unrelated := refutationPendingEntry{Spec: specID, Panel: "earlier-panel", Slot: "R2", Round: 1, Reason: "earlier reason", Evidence: "earlier evidence"}
+			store.data[beadID]["refutation_pending_entries"] = []refutationPendingEntry{unrelated}
+			closeBeadFn = func(...string) error { return nil }
+			fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{ID: id, Status: "closed"}, nil }
+			retry := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+			result, err := Run(root, beadID, specID, "", retry, CompleteOpts{AllowDocSkew: "test fixture"})
+			if discharge == "unchanged" {
+				if err == nil || !strings.Contains(err.Error(), "bd reopen") || retry.completeCalled {
+					t.Fatalf("retry without discharge must block: %v merge=%v", err, retry.completeCalled)
+				}
+				return
+			}
+			if err != nil || result == nil || !result.BeadClosed || !retry.completeCalled {
+				t.Fatalf("retry must complete: %+v %v merge=%v", result, err, retry.completeCalled)
+			}
+			audit, err = DecodePanelDeferred(store.data[beadID], "panel_deferred_entries")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var own []PanelDeferredEntry
+			for _, entry := range audit {
+				if entry.Panel == reg.Slug() {
+					own = append(own, entry)
+				}
+			}
+			approvalReg := panel.Registration{Panel: panel.Panel{Spec: specID, BeadID: bp(beadID)}}
+			gateErr := CheckAuditedPanelDeferrals(approvalReg, audit)
+			if !reflect.DeepEqual(audit, []PanelDeferredEntry{other}) {
+				t.Fatalf("audit must retain only the other panel: %+v", audit)
+			}
+			pending, pendingErr := DecodePanelDeferred(store.data[beadID], "deferral_pending_entries")
+			if pendingErr != nil || !reflect.DeepEqual(pending, []PanelDeferredEntry{other}) {
+				t.Fatalf("unrelated pending lost: %+v %v", pending, pendingErr)
+			}
+			refs, refErr := decodeRefutationAudits(store.data[beadID]["panel_refuted_entries"])
+			if refErr != nil {
+				t.Fatal(refErr)
+			}
+			foundOther, foundRef := false, false
+			for _, entry := range refs {
+				if entry.Panel == unrelated.Panel && entry.Reason == unrelated.Reason && entry.Evidence == unrelated.Evidence {
+					foundOther = true
+				}
+				if entry.Panel == reg.Slug() && entry.Finding == d.Finding && entry.FindingSHA256 == d.FindingSHA256 {
+					foundRef = true
+				}
+			}
+			if !foundOther || discharge == "refuted" && !foundRef {
+				t.Fatalf("refutation audits lost: %+v", refs)
+			}
+			t.Logf("successful fresh retry: closed=%v merge=%v audit=%+v approval deferral check=%v", result.BeadClosed, retry.completeCalled, audit, gateErr)
+			if len(own) != 0 || gateErr != nil {
+				t.Fatalf("superseded deferral survived successful fresh completion: entries=%+v approval=%v", audit, gateErr)
+			}
+		})
+	}
+}
+
+func TestComplete_ResumeAuditRegistrationLedgerIdentity(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build panel writer: %v %s", err, out)
+	}
+	for _, swap := range []bool{false, true} {
+		t.Run(fmt.Sprintf("swap=%t", swap), func(t *testing.T) {
+			saveAndRestore(t)
+			stubPhaseEpic(t, "130-core3", "epic-130-core3")
+			fake := deferralBD(t, "epic-130-core3")
+			store := newFakeMetadataStore()
+			store.wire(t)
+			panelSkipEnvFn = func() bool { return false }
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			reg := deferredFixture(t, root, false)
+			const beadID = "mindspec-core3.1"
+			var entries []PanelDeferredEntry
+			for _, d := range reg.Panel.Deferrals {
+				entries = append(entries, PanelDeferredEntry{Deferral: d, Spec: reg.Panel.Spec, Panel: reg.Slug()})
+			}
+			store.data[beadID] = map[string]interface{}{"panel_deferred_entries": entries}
+			roots := PanelGateRoots(root, "", reg.Panel.Spec)
+			setDeferredIssue(t, fake, "closed")
+			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+				t.Fatalf("live panel must block: %v", err)
+			}
+			abandoned := reg
+			if swap {
+				abandoned = core3Fixture(t, root, "throwaway", "bead", false)
+			}
+			cmd := exec.Command(binary, "panel", "abandon", abandoned.Slug(), "--spec", reg.Panel.Spec, "--reason", "rework", "--by", "max")
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("abandon: %v %s", err, out)
+			}
+			if swap {
+				if err := os.Rename(reg.Dir, reg.Dir+"-old"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(abandoned.Dir, reg.Dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true)
+			audit, decodeErr := DecodePanelDeferred(store.data[beadID], "panel_deferred_entries")
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			if swap {
+				if err == nil || !strings.Contains(err.Error(), "bd reopen 'follow-up'") {
+					t.Errorf("renamed abandonment must not skip the audit: %v", err)
+				}
+				if !reflect.DeepEqual(audit, entries) {
+					t.Errorf("blocked resume changed audit: %+v; want %+v", audit, entries)
+				}
+				pending, pendingErr := DecodePanelDeferred(store.data[beadID], "deferral_pending_entries")
+				if pendingErr != nil || len(pending) != 0 {
+					t.Errorf("blocked resume changed pending audit: %+v %v", pending, pendingErr)
+				}
+			} else if err != nil || len(audit) != 0 {
+				t.Fatalf("own verb-backed abandonment must skip the audit: %+v %v", audit, err)
+			}
 		})
 	}
 }

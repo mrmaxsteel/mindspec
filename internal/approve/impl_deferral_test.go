@@ -444,6 +444,12 @@ func TestImplPreflight_PlanBeadAuditWithoutRegistration(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "bd reopen 'follow-up'") {
 						t.Fatalf("closed follow-up must block: %v", err)
 					}
+					if identity == "legacy" {
+						want := "bead " + *reg.Panel.BeadID + " slot R1 finding ccr[0] follow-up follow-up: follow-up bead must exist and be open\nrecovery: bd reopen 'follow-up'"
+						if err.Error() != want {
+							t.Fatalf("legacy refusal = %q; want %q", err.Error(), want)
+						}
+					}
 					if identity == "identified" && !strings.Contains(err.Error(), "panel "+entry.Panel+" slot") {
 						t.Fatalf("stored panel missing: %v", err)
 					}
@@ -530,5 +536,86 @@ func TestImplPreflight_FinalReviewRefutationLeavesOtherFinding(t *testing.T) {
 	core3JSON(t, fake, "follow-up.json", []interface{}{map[string]interface{}{"id": "follow-up", "status": "open", "description": "second ask", "dependencies": []map[string]string{{"id": "epic-x", "dependency_type": "discovered-from"}}}})
 	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
 		t.Fatalf("only effective member is required: %v", err)
+	}
+}
+
+func TestImplPreflight_AuditRegistrationLedgerIdentity(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build panel writer: %v %s", err, out)
+	}
+	for _, swap := range []bool{false, true} {
+		t.Run(fmt.Sprintf("swap=%t", swap), func(t *testing.T) {
+			root, reg, fake := implDeferralFixture(t, "bead")
+			entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Spec: reg.Panel.Spec, Panel: reg.Slug()}
+			implGetMetadataFn = func(string) (map[string]interface{}, error) {
+				return map[string]interface{}{"panel_deferred_entries": []complete.PanelDeferredEntry{entry}}, nil
+			}
+			core3Cover(t, reg)
+			core3Manifest(t, reg)
+			implDeferralIssue(t, fake, "closed")
+			if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+				t.Fatalf("live panel must block: %v", err)
+			}
+			abandoned := reg
+			if swap {
+				abandoned = core3Fixture(t, root, "throwaway", "bead", false)
+			}
+			cmd := exec.Command(binary, "panel", "abandon", abandoned.Slug(), "--spec", reg.Panel.Spec, "--reason", "rework", "--by", "max")
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("abandon: %v %s", err, out)
+			}
+			if swap {
+				old := reg.Dir + "-old"
+				if err := os.Rename(reg.Dir, old); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(abandoned.Dir, reg.Dir); err != nil {
+					t.Fatal(err)
+				}
+				res, err := panel.Tally(old)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := panel.WriteCoverageManifest(res); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
+				t.Fatalf("coverage after tally: %v", err)
+			}
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			if swap {
+				if err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
+					t.Fatalf("renamed abandonment must not skip the audit: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("own verb-backed abandonment must skip the audit: %v", err)
+			}
+		})
+	}
+}
+
+func TestImplPreflight_PendingDeferralAudit(t *testing.T) {
+	for _, status := range []string{"closed", "open"} {
+		t.Run(status, func(t *testing.T) {
+			root, reg, fake := implDeferralFixture(t, "bead")
+			entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Spec: reg.Panel.Spec, Panel: reg.Slug()}
+			implGetMetadataFn = func(string) (map[string]interface{}, error) {
+				return map[string]interface{}{"deferral_pending_entries": []complete.PanelDeferredEntry{entry}}, nil
+			}
+			implDeferralIssue(t, fake, status)
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			if status == "closed" {
+				if err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
+					t.Fatalf("pending deferral must block: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("open pending deferral must pass: %v", err)
+			}
+		})
 	}
 }
