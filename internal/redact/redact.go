@@ -193,6 +193,7 @@ var SubcommandTokens = map[string]struct{}{
 	"status":           {},
 	"summary":          {},
 	"tally":            {}, // panel tally
+	"rebind":           {}, // panel rebind
 	"validate":         {},
 	"verify":           {}, // panel verify
 	"worktree":         {},

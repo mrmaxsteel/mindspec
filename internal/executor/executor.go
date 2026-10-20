@@ -10,6 +10,12 @@
 // SCOPE for this boundary and lives behind internal/bead.
 package executor
 
+// ChangedFilesOptions controls commit-to-commit path listing.
+type ChangedFilesOptions struct {
+	// NoRenames lists both sides of a rename for rebind checks and records.
+	NoRenames bool
+}
+
 // Executor abstracts workspace lifecycle operations. Implementations include
 // MindspecExecutor (local git+worktrees) and MockExecutor (testing).
 //
@@ -118,7 +124,7 @@ type Executor interface {
 	// Passing base == "" means working tree vs head, matching
 	// gitutil.DiffNameOnlyRef("", ref) semantics. With both refs set it is
 	// equivalent to `git diff --name-only <base>..<head>`.
-	ChangedFiles(base, head string) ([]string, error)
+	ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error)
 
 	// LsTree returns a full recursive, repository-relative tree listing.
 	LsTree(workdir, rev string) (string, error)

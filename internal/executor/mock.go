@@ -26,6 +26,10 @@ type MockExecutor struct {
 	CommitAllErr            error
 	ChangedFilesResult      []string
 	ChangedFilesErr         error
+
+	// ChangedFilesOptionsFn lets rebind tests inspect the diff options.
+	ChangedFilesOptionsFn func(base, head string, options []ChangedFilesOptions) ([]string, error)
+
 	// ChangedFilesFn, when non-nil, takes precedence over
 	// ChangedFilesResult/ChangedFilesErr so tests can return
 	// range-dependent diffs (e.g. the per-bead gate anchoring tests,
@@ -189,8 +193,11 @@ func (m *MockExecutor) CommitAll(path, msg string) error {
 	return m.CommitAllErr
 }
 
-func (m *MockExecutor) ChangedFiles(base, head string) ([]string, error) {
+func (m *MockExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
 	m.record("ChangedFiles", base, head)
+	if m.ChangedFilesOptionsFn != nil {
+		return m.ChangedFilesOptionsFn(base, head, options)
+	}
 	if m.ChangedFilesFn != nil {
 		return m.ChangedFilesFn(base, head)
 	}

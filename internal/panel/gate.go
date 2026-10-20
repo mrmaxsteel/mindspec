@@ -1,7 +1,9 @@
 package panel
 
 import (
+	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -601,4 +603,97 @@ func isArtifactPath(p string, specDir ...string) bool {
 		dir = specDir[0]
 	}
 	return IsToolArtifactPath(p, dir)
+}
+
+// RebindDecision applies the ordinary registration and vote checks with only
+// staleness ignored. Abandonment remains a refusal, never an escape hatch.
+func RebindDecision(reg Registration, res *Result) Decision {
+	if res == nil || res.Panel == nil {
+		return Decision{Action: Block, Message: "panel registration is unreadable"}
+	}
+	f := GateFacts{Reg: &reg, Res: res, HeadSHA: res.Panel.ReviewedHeadSHA, WorktreeAbsent: true}
+	if res.Panel.IsBead() {
+		f.BeadID = *res.Panel.BeadID
+	}
+	d := PanelGateDecision(f)
+	if d.Action == Warn {
+		d.Action = Block
+		if res.Panel.Abandoned {
+			d.Message = fmt.Sprintf("rebind refuses an abandoned panel: %s", termsafe.Escape(strings.TrimSpace(res.Panel.AbandonReason)))
+		}
+	}
+	return d
+}
+
+// RebindPaths keeps every diff path except the derived subject exclusions.
+// Subject roots do not limit the judgement recorded by a rebind.
+func RebindPaths(paths []string, subject SubjectRoots) []string {
+	out := make([]string, 0, len(paths))
+	for _, name := range paths {
+		excluded := false
+		for _, pattern := range subject.Exclusions {
+			if strings.HasSuffix(pattern, "/**") {
+				prefix := strings.TrimSuffix(pattern, "/**")
+				parts := strings.Split(name, "/")
+				depth := len(strings.Split(prefix, "/"))
+				if len(parts) > depth {
+					excluded, _ = path.Match(prefix, strings.Join(parts[:depth], "/"))
+				}
+			} else {
+				excluded = name == pattern
+			}
+			if excluded {
+				break
+			}
+		}
+		if !excluded {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// LedgerBackedRebinds returns only snapshot entries whose complete payload
+// matches a rebind event or the first round's carried baseline, ignoring time.
+// Legacy exemption does not confer landed-SHA evidence on an unbacked rebind.
+func LedgerBackedRebinds(dir string, p Panel) []Rebind {
+	if _, err := LegacyPanel(dir); err != nil {
+		return nil
+	}
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return nil
+	}
+	var backed []Rebind
+	first := true
+	for _, line := range lines {
+		var kind recordDiscriminator
+		if json.Unmarshal(line, &kind) != nil {
+			return nil
+		}
+		switch kind.Record {
+		case RecordRebind:
+			var r Rebind
+			if json.Unmarshal(line, &r) != nil {
+				return nil
+			}
+			backed = append(backed, r)
+		case RecordRound:
+			if first {
+				var r RoundRecord
+				if json.Unmarshal(line, &r) != nil {
+					return nil
+				}
+				backed = append(backed, r.Carried.Rebinds...)
+				first = false
+			}
+		}
+	}
+	var matched []Rebind
+	for _, r := range p.Rebinds {
+		if matchesRebind(r, backed) {
+			matched = append(matched, r)
+		}
+	}
+	return matched
 }

@@ -215,12 +215,9 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 			}
 		}
 	case RecordRebind:
-		paths, err := requireStringArray(m, "paths", kind)
+		_, err := requireStringArray(m, "paths", kind)
 		if err != nil {
 			return err
-		}
-		if len(paths) == 0 {
-			return fmt.Errorf("rebind paths must not be empty")
 		}
 	}
 	return nil

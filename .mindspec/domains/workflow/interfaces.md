@@ -315,6 +315,24 @@ partial or alternate shape.
 
 ### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
 
+**`mindspec panel rebind <slug> --reason <text> [--spec <id>]`** refreshes
+`reviewed_head_sha` and `subject_digest` to the registered target's live tip
+without bumping the round. A non-empty reason records the operator's judgement.
+The panel must parse, be intact, not abandoned, have matching rounds, and pass
+the normal vote rule with staleness ignored. The reviewed SHA must be an
+ancestor of the live tip. The diff disables rename detection. It checks and
+records both the source and destination paths of a rename. Every diff path is
+accepted except `.mindspec/config.yaml`. There is no path allowlist or path
+configuration.
+The entry records `{round, from_sha, to_sha, paths, reason, created_at}`,
+with subject exclusions removed from `paths`. The `rebind` event also records
+the new subject digest. The verb appends the event before one snapshot write.
+An equal SHA prints `already fresh` and writes nothing. Completion copies
+entries into `panel_rebound_entries` through the fail-closed metadata stage
+before close; only ledger-matched `from_sha` values join the landed reviewed-SHA
+set, with exact equality. This verb shares slug validation and supports `--spec`
+for ambiguous slugs.
+
 `mindspec panel create | verify | tally <slug>` is the CLI half of the
 ADR-0040 portability contract (the Panel Artifact Schema above is the
 artifact half): every subcommand is a thin adapter over `panel.Create` /

@@ -260,6 +260,19 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		}
 	}
 
+	var rebound []panel.Rebind
+	for _, result := range matched {
+		if result.Decision.Action == panel.Allow {
+			rebound = append(rebound, result.Registration.Panel.Rebinds...)
+		}
+	}
+	if len(rebound) > 0 {
+		if err := writePanelReboundMetadata(beadID, rebound); err != nil {
+			return matched, guard.NewFailure(fmt.Sprintf("could not record panel rebind audit: %s", termsafe.Escape(err.Error())),
+				fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
+		}
+	}
+
 	if len(applied) > 0 {
 		if err := persistRefutationPending(beadID, applied); err != nil {
 			slots := make([]string, 0, len(applied))
@@ -903,4 +916,43 @@ func writePanelAuditMetadata(beadID string, reg *panel.Registration, w io.Writer
 // Callers receive the same preflight and matched decisions as complete.Run.
 func PanelGate(beadID string, roots []string, wtPath string, enabled bool, out io.Writer) ([]PanelGateResult, error) {
 	return panelGate(beadID, roots, wtPath, enabled, out)
+}
+
+// writePanelReboundMetadata persists the complete entries before close, through
+// the same fail-closed metadata seam as the refutation audit. Retries preserve
+// earlier entries and deduplicate complete payloads.
+func writePanelReboundMetadata(beadID string, entries []panel.Rebind) error {
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return err
+	}
+	var merged []panel.Rebind
+	if raw, present := meta["panel_rebound_entries"]; present {
+		if raw == nil {
+			return fmt.Errorf("panel_rebound_entries is null")
+		}
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &merged); err != nil {
+			return err
+		}
+	}
+	seen := map[string]bool{}
+	for _, entry := range merged {
+		data, _ := json.Marshal(entry)
+		seen[string(data)] = true
+	}
+	for _, entry := range entries {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		if !seen[string(data)] {
+			merged = append(merged, entry)
+			seen[string(data)] = true
+		}
+	}
+	return completeMergeMetadataFn(beadID, map[string]interface{}{"panel_rebound_entries": merged})
 }

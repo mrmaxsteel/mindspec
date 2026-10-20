@@ -739,7 +739,8 @@ stated, and the forge remains visible in JSONL history.
 ### (ii) Non-corroborating panel datum and binding veto
 
 Datum (c) is the SET of all well-formed `reviewed_head_sha` values across
-registrations. An exact second-parent match confirms; a non-matching set
+registrations. See [Amendment (Spec 130)](#amendment-spec-130) for the
+R3.5 ledger-matched `rebinds[].from_sha` extension. An exact second-parent match confirms; a non-matching set
 is non-corroborating, never a contradiction or a veto. Empty, placeholder
 and malformed values are non-corroborating and never git operands.
 Reattest records a non-matching set as non-corroborating and can proceed
@@ -789,3 +790,15 @@ with all currently failing signals and evidence; release is offered only
 when a claim exists. An indeterminate read instead requires fixing the
 read first, never an unusable re-claim hint. Marker shape and
 self-consistency provide no authentication of agent-writable metadata.
+
+
+## Amendment (Spec 130)
+
+- **Datum (c) — Rebind evidence (R3.5, R13.3).** The reviewed-SHA set also
+  includes each R5.3-matched `rebinds[].from_sha`, including entries matched
+  to the first round's carried baseline. Unbacked or hand-changed entries
+  supply no evidence. Corroboration uses exact equality with the merge's
+  second parent; no prefix matching or ancestor tolerance is permitted.
+- **Pre-close audit (R4.5).** `panel_rebound_entries` copies the bead panel's
+  rebind entries through the same fail-closed pre-close metadata stage as
+  `panel_refuted`. A failed audit write refuses completion before close.
