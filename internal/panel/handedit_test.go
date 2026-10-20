@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -94,21 +95,46 @@ func TestHandEdit_EntryPayloadsAndAbandonment(t *testing.T) {
 	if field, err := FirstUnbackedField(p, records); err != nil || field != "" {
 		t.Fatalf("timestamp rerun: %q %v", field, err)
 	}
-	p.Refutations[0].Reason = "changed"
-	if field, err := FirstUnbackedField(p, records); err != nil || field != "refutations[0]" {
-		t.Fatalf("changed reason: %q %v", field, err)
+	baseline := mustMarshal(t, p)
+	for _, tc := range []struct {
+		name  string
+		entry func(*Panel) reflect.Value
+	}{
+		{"refutations[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Refutations[0]).Elem() }},
+		{"deferrals[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Deferrals[0]).Elem() }},
+		{"rebinds[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Rebinds[0]).Elem() }},
+	} {
+		entryType := tc.entry(&p).Type()
+		for i := 0; i < entryType.NumField(); i++ {
+			field := entryType.Field(i)
+			if !field.IsExported() || field.Name == "CreatedAt" {
+				continue
+			}
+			t.Run(tc.name+"/"+field.Name, func(t *testing.T) {
+				edited := snapshotFromRound(t, baseline)
+				value := tc.entry(&edited).Field(i)
+				switch value.Kind() {
+				case reflect.String:
+					value.SetString(value.String() + "-changed")
+				case reflect.Int:
+					value.SetInt(value.Int() + 1)
+				case reflect.Slice:
+					if value.Type().Elem().Kind() != reflect.String {
+						t.Fatalf("unhandled slice type for %s: %s", field.Name, value.Type())
+					}
+					changed := reflect.MakeSlice(value.Type(), value.Len()+1, value.Len()+1)
+					reflect.Copy(changed, value)
+					changed.Index(value.Len()).SetString("changed")
+					value.Set(changed)
+				default:
+					t.Fatalf("unhandled kind for %s: %s", field.Name, value.Kind())
+				}
+				if field, err := FirstUnbackedField(edited, records); err != nil || field != tc.name {
+					t.Fatalf("field=%q want=%q err=%v", field, tc.name, err)
+				}
+			})
+		}
 	}
-	p.Refutations[0].Reason = ref.Reason
-	p.Deferrals[0].Bead = "mindspec-other"
-	if field, err := FirstUnbackedField(p, records); err != nil || field != "deferrals[0]" {
-		t.Fatalf("changed bead: %q %v", field, err)
-	}
-	p.Deferrals[0].Bead = def.Bead
-	p.Rebinds[0].FromSHA = "forged"
-	if field, err := FirstUnbackedField(p, records); err != nil || field != "rebinds[0]" {
-		t.Fatalf("changed from_sha: %q %v", field, err)
-	}
-	p.Rebinds[0].FromSHA = reb.FromSHA
 	p.Abandoned = false
 	if field, err := FirstUnbackedField(p, records); err != nil || field != "abandoned" {
 		t.Fatalf("hand-cleared abandonment: %q %v", field, err)

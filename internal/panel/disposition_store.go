@@ -210,7 +210,7 @@ func withoutVolatileFields(m map[string]interface{}) map[string]interface{} {
 // never computes the hash, and a wrong or absent id is corrected here.
 //
 // It is a no-op passthrough for a coverage manifest (keyed on
-// {spec,panel,round}, not id) or for any input it cannot decode as a
+// {spec,panel,round,created_at}, not id) or for any input it cannot decode as a
 // disposition record — those cases are left to AppendRecord's own
 // Validate gate to accept or reject, so this helper never becomes a
 // second, divergent validation authority.
