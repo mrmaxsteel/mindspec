@@ -59,7 +59,7 @@ var tallyWarnOut io.Writer = os.Stderr
 
 var panelCreateCmd = &cobra.Command{
 	SilenceUsage: true,
-	Use:          "create <slug> --spec <id> --target <ref> [--bead <id>] [--round N]",
+	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N]",
 	Short:        "Register (or re-panel) a review panel",
 	Long: `panel create writes <panel-dir>/panel.json and rewrites BRIEF.md's
 machine-managed header in one atomic operation (internal/panel.Create):
@@ -163,7 +163,14 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 
 		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
 		if err != nil {
-			return guard.NewFailure(err.Error(), fmt.Sprintf("mindspec panel create %s --gate bead --spec <id> --target bead/<id>", shellQuoteTarget(slug)))
+			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec <id> --target bead/<id>", shellQuoteTarget(slug))
+			if beadID != "" && gate != "" && gate != "bead" {
+				recovery = fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(target)) + panelCreateScope(specID, gate)
+				if gate != "adhoc" {
+					recovery += " --gate " + shellQuoteTarget(gate)
+				}
+			}
+			return guard.NewFailure(err.Error(), recovery)
 		}
 
 		root, err := findRoot()
@@ -337,7 +344,7 @@ func init() {
 	panelTallyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelCreateCmd.Flags().String("spec", "", "Owning spec ID")
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
-	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
+	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
 	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for adhoc size and global threshold)")
 
@@ -494,9 +501,12 @@ func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registra
 
 // checkPanelSlugOwner refuses cross-spec and adhoc collisions before any write.
 func checkPanelSlugOwner(root, slug, specID, gate, dir string) error {
+	destination, destinationErr := filepath.EvalSymlinks(dir)
 	for _, reg := range panelSlugMatches(root, slug) {
-		// Leave an unreadable destination to Create's no-write parse refusal.
-		if reg.Err != nil && reg.Dir == dir {
+		registered, registeredErr := filepath.EvalSymlinks(reg.Dir)
+		sameDir := destinationErr == nil && registeredErr == nil && destination == registered
+		// Leave the destination's parse and round checks to Create.
+		if sameDir && (reg.Err != nil || (gate == "adhoc" && reg.Panel.Gate == "adhoc")) {
 			continue
 		}
 		if reg.Err != nil || gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
@@ -661,12 +671,12 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	}
 
 	nonBead := res == nil || res.Panel == nil || !res.Panel.IsBead()
-	target := ""
+	target, gate := "", ""
 	if res != nil && res.Panel != nil {
-		target = res.Panel.Target
+		target, gate = res.Panel.Target, res.Panel.Gate
 	}
 	if nonBead {
-		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+		d = sanitizeNonBeadDecision(d, slug, target, gate, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -815,11 +825,11 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	}
 
 	if res == nil || res.Panel == nil || !res.Panel.IsBead() {
-		target := ""
+		target, gate := "", ""
 		if res != nil && res.Panel != nil {
-			target = res.Panel.Target
+			target, gate = res.Panel.Target, res.Panel.Gate
 		}
-		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+		d = sanitizeNonBeadDecision(d, slug, target, gate, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -1108,7 +1118,7 @@ func shellQuoteTarget(s string) string {
 // already-interpolated message (fragile if gitErr.Error() ever collided
 // with template text), leg (5b) rebuilds its whole sentence from scratch
 // with gitErr.Error() run through escapeConfigValue — never raw.
-func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error) panel.Decision {
+func sanitizeNonBeadDecision(d panel.Decision, slug, target, gate string, gitErr error) panel.Decision {
 	msg := d.Message
 	if msg == "" {
 		return d
@@ -1128,10 +1138,14 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error
 	// ..."); replace it wholesale with a target-naming missing-ref
 	// advisory (the Warn Action is preserved — only the Message changes).
 	if strings.Contains(msg, "references branch bead/,") {
+		scope := " --spec <id>"
+		if gate == "adhoc" {
+			scope = panelCreateScope("", gate)
+		}
 		msg = fmt.Sprintf(
 			"panel %s target %s no longer exists — the reviewed ref was deleted; "+
-				"re-create the panel against a live ref (mindspec panel create %s --spec <id> --target %s)",
-			slug, displayTarget, slug, shellQuoteTarget(displayTarget))
+				"re-create the panel against a live ref (mindspec panel create %s%s --target %s)",
+			slug, displayTarget, slug, scope, shellQuoteTarget(displayTarget))
 	}
 
 	// Leg (5b) transient git error: the shared template's message is

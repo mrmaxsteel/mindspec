@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/spf13/cobra"
@@ -70,7 +71,7 @@ func assertPanelRefusal(t *testing.T, root string, args ...string) string {
 }
 
 func TestPanelCreate_RefusesSameRoundWithVerdicts(t *testing.T) {
-	for _, gate := range []string{"bead", "final_review"} {
+	for _, gate := range []string{"bead", "final_review", "adhoc", "plan_approve"} {
 		t.Run(gate, func(t *testing.T) {
 			root := setupCreateIntegrity(t)
 			args := []string{"create", "demo", "--gate", gate, "--target", "bead/probe-x.1"}
@@ -167,7 +168,23 @@ func TestPanelCreate_BeadTargetRefusals(t *testing.T) {
 			if tc.bead != "" {
 				args = append(args, "--bead", tc.bead)
 			}
-			assertPanelRefusal(t, root, args...)
+			msg := assertPanelRefusal(t, root, args...)
+			recovery := msg[strings.LastIndex(msg, "recovery:"):]
+			if tc.gate != "" && tc.gate != "bead" {
+				if strings.Contains(recovery, "--bead") || strings.Contains(recovery, "--gate bead") ||
+					!strings.Contains(recovery, "--target '"+tc.target+"'") || !strings.Contains(recovery, "--round 1") {
+					t.Fatalf("non-bead recovery changed the requested panel: %s", recovery)
+				}
+				if tc.gate == "adhoc" {
+					if strings.Contains(recovery, "--spec") || !strings.Contains(recovery, "--gate adhoc") {
+						t.Fatalf("adhoc recovery: %s", recovery)
+					}
+				} else if !strings.Contains(recovery, "--gate '"+tc.gate+"'") || !strings.Contains(recovery, "--spec '900-demo'") {
+					t.Fatalf("recovery lost gate/spec: %s", recovery)
+				}
+			} else if !strings.Contains(recovery, "--gate bead --spec <id> --target bead/<id>") {
+				t.Fatalf("bead-target recovery: %s", recovery)
+			}
 		})
 	}
 }
@@ -277,8 +294,7 @@ func TestTallyExitActionNonBead_AdhocNoSpec(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "--spec") || !strings.Contains(err.Error(), "--gate 'adhoc'") {
 		t.Fatalf("wrong adhoc recovery: %v", err)
 	}
-	// Adhoc slug collisions take precedence at the CLI; the create error
-	// adapter must also preserve its spec-less recovery for leaf refusals.
+	// The create error adapter also preserves the spec-less round recovery.
 	err = panelCreateFailure(&panel.CreateRoundConflict{Round: 1, LatestRound: 1}, "demo", panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1})
 	if strings.Contains(err.Error(), "--spec") || !strings.Contains(err.Error(), "--round 2") || !strings.Contains(err.Error(), "panel rebind") {
 		t.Fatalf("wrong adhoc round recovery: %v", err)
@@ -315,5 +331,124 @@ func TestPanelSubcommands_SilenceUsage(t *testing.T) {
 	}
 	if strings.Contains(out, "Usage:") {
 		t.Fatalf("Block printed usage: %s", out)
+	}
+}
+
+func TestPanelCreate_AdhocRepanel(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	args := []string{"create", "demo", "--gate", "adhoc", "--target", "main"}
+	if out, err := runPanelVerbCmd(args...); err != nil {
+		t.Fatalf("seed: %v %s", err, out)
+	}
+	// A round without verdict files may also be recreated.
+	if out, err := runPanelVerbCmd(args...); err != nil {
+		t.Fatalf("recreate empty round: %v %s", err, out)
+	}
+	dir, err := panelDirFor(root, "", "demo", "adhoc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "R1-round-1.json"), []byte(`{"verdict":"REJECT"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runPanelVerbCmd(append(args, "--round", "2")...); err != nil {
+		t.Fatalf("re-panel: %v %s", err, out)
+	}
+	reg, err := findPanelRegistration(root, "demo")
+	if err != nil || reg.Panel.Round != 2 || reg.Panel.Gate != "adhoc" || reg.Panel.Spec != "" {
+		t.Fatalf("wrong re-panel registration: %+v %v", reg, err)
+	}
+}
+
+func TestPanelCreate_AdhocOwnDestinationSymlink(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	dir := writePanelFixture(t, root, "demo", panel.Panel{Gate: "adhoc", Round: 1})
+	alias := filepath.Join(t.TempDir(), "checkout")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkPanelSlugOwner(root, "demo", "", "adhoc", filepath.Join(alias, "review", "demo")); err != nil {
+		t.Fatalf("own canonical destination %s refused: %v", dir, err)
+	}
+}
+
+func TestPanelTally_AdhocBlockRecoveryRegistersNextRound(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	if out, err := runPanelVerbCmd("create", "demo", "--gate", "adhoc", "--target", "main"); err != nil {
+		t.Fatalf("seed: %v %s", err, out)
+	}
+	dir, err := panelDirFor(root, "", "demo", "adhoc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "R1-round-1.json"), []byte(`{"verdict":"REJECT"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runPanelVerbCmd("tally", "demo")
+	if err == nil || !guard.HasFinalRecoveryLine(err.Error()) {
+		t.Fatalf("expected Block recovery: %v %s", err, out)
+	}
+	recovery := err.Error()
+	start := strings.LastIndex(recovery, "mindspec panel create")
+	if start < 0 || !strings.Contains(recovery[start:], "<N+1>") || strings.Contains(recovery[start:], "--spec") {
+		t.Fatalf("wrong adhoc recovery: %s", recovery)
+	}
+	command := strings.ReplaceAll(recovery[start:], "<N+1>", "2")
+	tokens := splitPosixSingleQuoted(t, command)
+	resetPanelCreateFlags(t)
+	if out, err := runPanelVerbCmd(tokens[2:]...); err != nil {
+		t.Fatalf("printed recovery failed: %v %s", err, out)
+	}
+	reg, err := findPanelRegistration(root, "demo")
+	if err != nil || reg.Panel.Round != 2 || reg.Panel.Gate != "adhoc" || reg.Panel.Spec != "" {
+		t.Fatalf("recovery did not register round 2: %+v %v", reg, err)
+	}
+}
+
+func TestFindPanelRegistration_CheckoutDifferentSpecRefuses(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	local := writeRegistrationAt(t, root, "900-demo", "b1")
+	other := writeRegistrationAt(t, filepath.Join(root, ".worktrees", "worktree-spec-901"), "901-demo", "b1")
+	_, err := findPanelRegistration(root, "b1")
+	if err == nil || !strings.Contains(err.Error(), "spec 900-demo: "+local) || !strings.Contains(err.Error(), "spec 901-demo: "+other) {
+		t.Fatalf("cross-spec ambiguity must list both matches: %v", err)
+	}
+}
+
+func TestPanelCreate_AdhocCollisionWithMatchingSpec(t *testing.T) {
+	for _, gate := range []string{"adhoc", "final_review"} {
+		t.Run(gate, func(t *testing.T) {
+			root := setupCreateIntegrity(t)
+			existingGate := "adhoc"
+			if gate == "adhoc" {
+				existingGate = "final_review"
+			}
+			// Match the spec even on an imported adhoc registration so the
+			// gate collision cannot be masked by the cross-spec check.
+			dir := writePanelFixture(t, root, "demo", panel.Panel{Spec: "900-demo", Gate: existingGate, Round: 1})
+			before := panelTreeBytes(t, root)
+			if err := checkPanelSlugOwner(root, "demo", "900-demo", gate, dir); err == nil {
+				t.Fatal("matching spec must not bypass an adhoc/spec collision")
+			}
+			assertPanelRefusal(t, root, "create", "demo", "--gate", gate, "--spec", "900-demo", "--target", "main")
+			if after := panelTreeBytes(t, root); !reflect.DeepEqual(before, after) {
+				t.Fatal("collision changed the panel tree")
+			}
+		})
+	}
+}
+
+func TestPanelVerify_AdhocMissingRefRecoveryNoSpec(t *testing.T) {
+	for _, verb := range []string{"verify", "tally"} {
+		t.Run(verb, func(t *testing.T) {
+			root := setupCreateIntegrity(t)
+			writePanelFixture(t, root, "demo", panel.Panel{Gate: "adhoc", Target: "deleted", Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc123"})
+			stubNonBeadRevParse(t, func(string, string) (string, error) { return "", gitutil.ErrRefNotFound })
+			out, err := runPanelVerbCmd(verb, "demo")
+			if err != nil || !strings.Contains(out, "no longer exists") ||
+				!strings.Contains(out, "mindspec panel create demo --gate adhoc --target 'deleted'") || strings.Contains(out, "--spec") {
+				t.Fatalf("missing-ref adhoc advisory: %v %s", err, out)
+			}
+		})
 	}
 }

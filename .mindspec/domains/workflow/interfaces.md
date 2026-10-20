@@ -397,13 +397,16 @@ one spec, a single copy under the current checkout wins over copies under
 `.worktrees/`. Any remaining ambiguity refuses and lists every candidate
 spec and directory. Both commands print `panel directory: <dir>` and
 `resolved round: N` before their report. `create` refuses a slug owned by
-another spec. Adhoc creation refuses a slug registered anywhere; spec
-creation refuses an adhoc slug.
+another spec. Adhoc creation refuses a slug registered at another destination;
+spec creation refuses an adhoc slug. An adhoc registration at the create
+destination may be re-created under the round rules; canonical paths identify
+that destination across symlinks.
 
 **Recovery and usage.** Non-bead tally recovery uses the recorded spec id
-when known. Every adhoc create recovery omits `--spec`. Every panel
-subcommand, including disposition leaves, sets `SilenceUsage: true`, so
-an error prints no Cobra usage text.
+when known. Every adhoc create recovery omits `--spec`, including the
+missing-ref advisory. A `--bead` refusal on an explicit non-bead gate recovers with that gate
+and no `--bead`. Every panel subcommand, including disposition leaves, sets
+`SilenceUsage: true`, so an error prints no Cobra usage text.
 
 ### Lifecycle verb state honesty (spec 128)
 

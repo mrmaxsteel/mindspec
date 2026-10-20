@@ -1352,7 +1352,7 @@ func TestPanelVerbs_NonBeadGitErrHostileTargetEscaped(t *testing.T) {
 			GitErr: simulated,
 		}
 		want := panel.PanelGateDecision(facts)
-		got := sanitizeNonBeadDecision(want, "demo", target, facts.GitErr)
+		got := sanitizeNonBeadDecision(want, "demo", target, "", facts.GitErr)
 		assertClean(t, got.Message)
 	})
 }
@@ -1789,7 +1789,7 @@ func TestSanitizeNonBeadDecision(t *testing.T) {
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
 			want := panel.PanelGateDecision(tc.facts)
-			got := sanitizeNonBeadDecision(want, slug, target, tc.facts.GitErr)
+			got := sanitizeNonBeadDecision(want, slug, target, "", tc.facts.GitErr)
 
 			if got.Action != want.Action {
 				t.Fatalf("sanitizeNonBeadDecision changed Action: got %v, want %v", got.Action, want.Action)

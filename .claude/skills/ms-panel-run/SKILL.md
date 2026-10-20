@@ -56,7 +56,7 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 
 1. **Register (or re-panel) the panel.**
    ```bash
-   mindspec panel create <panel-slug> --spec <spec-id> --target <ref> [--bead <bead-id>] [--round N]
+   mindspec panel create <panel-slug> --spec <spec-id> --target <ref> [--gate bead --bead <bead-id>] [--round N]
    ```
    One call creates `<spec-dir>/reviews/<panel-slug>/`, writes `panel.json` — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read, with `expected_reviewers`/`approve_threshold` stamped from the configured panel defaults and `reviewed_head_sha` captured from `--target`'s live commit AT WRITE TIME — and writes (first `create`) or rewrites (re-panel) `BRIEF.md`'s machine-managed header, all in one atomic operation.
 
