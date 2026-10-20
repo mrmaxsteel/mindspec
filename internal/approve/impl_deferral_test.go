@@ -19,6 +19,7 @@ func implDeferralFixture(t *testing.T, gate string) (string, panel.Registration,
 	t.Helper()
 	root := core3ApproveRoot(t)
 	reg := core3Fixture(t, root, "deferred", gate, false)
+	writePlanWithBeads(t, root, reg.Panel.Spec, []string{"mindspec-core3.1"})
 	v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x"}}
 	core3JSON(t, reg.Dir, "R1-round-1.json", v)
 	findings, err := panel.Findings(v)
@@ -33,6 +34,9 @@ func implDeferralFixture(t *testing.T, gate string) (string, panel.Registration,
 	orig := implGetMetadataFn
 	t.Cleanup(func() { implGetMetadataFn = orig })
 	implGetMetadataFn = func(string) (map[string]interface{}, error) {
+		if gate != "bead" {
+			return map[string]interface{}{}, nil
+		}
 		return map[string]interface{}{"panel_deferred_entries": []panel.Deferral{d}}, nil
 	}
 	restore := phase.SetListJSONForTest(func(...string) ([]byte, error) {
@@ -395,5 +399,136 @@ func TestImplPreflight_BeadAuditSurvivesMissingRegistration(t *testing.T) {
 				t.Fatalf("audit must block and name its stored panel: %v", err)
 			}
 		})
+	}
+}
+
+func TestImplPreflight_PlanBeadAuditWithoutRegistration(t *testing.T) {
+	for _, missing := range []string{"panel.json", "directory"} {
+		for _, identity := range []string{"identified", "legacy"} {
+			for _, status := range []string{"closed", "open"} {
+				t.Run(missing+"/"+identity+"/"+status, func(t *testing.T) {
+					root, reg, fake := implDeferralFixture(t, "bead")
+					entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Spec: reg.Panel.Spec, Panel: reg.Slug()}
+					if identity == "legacy" {
+						entry.Spec, entry.Panel = "", ""
+					}
+					reads := 0
+					implGetMetadataFn = func(id string) (map[string]interface{}, error) {
+						if id != *reg.Panel.BeadID {
+							t.Fatalf("unexpected bead %q", id)
+						}
+						reads++
+						return map[string]interface{}{"panel_deferred_entries": []complete.PanelDeferredEntry{entry}}, nil
+					}
+					implDeferralIssue(t, fake, status)
+					source := reg.Dir
+					if missing == "panel.json" {
+						source = filepath.Join(reg.Dir, panel.FileName)
+					}
+					if err := os.Rename(source, filepath.Join(t.TempDir(), "saved")); err != nil {
+						t.Fatal(err)
+					}
+					if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
+						t.Fatalf("coverage: %v", err)
+					}
+					err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+					if reads != 1 {
+						t.Errorf("audit reads=%d; want 1", reads)
+					}
+					if status == "open" {
+						if err != nil {
+							t.Fatal(err)
+						}
+						return
+					}
+					if err == nil || !strings.Contains(err.Error(), "bd reopen 'follow-up'") {
+						t.Fatalf("closed follow-up must block: %v", err)
+					}
+					if identity == "identified" && !strings.Contains(err.Error(), "panel "+entry.Panel+" slot") {
+						t.Fatalf("stored panel missing: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestImplPreflight_PlanBeadReadFailure(t *testing.T) {
+	root, reg, _ := implDeferralFixture(t, "bead")
+	writePlanWithBeads(t, root, reg.Panel.Spec, []string{"bad/id"})
+	err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+	if err == nil {
+		t.Fatal("unreadable plan bead list must block")
+	}
+}
+
+func TestImplPreflight_EmptySpecMatchesAbandonedRegistration(t *testing.T) {
+	root, reg, fake := implDeferralFixture(t, "bead")
+	entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Panel: reg.Slug()}
+	implGetMetadataFn = func(string) (map[string]interface{}, error) {
+		return map[string]interface{}{"panel_deferred_entries": []complete.PanelDeferredEntry{entry}}, nil
+	}
+	implDeferralIssue(t, fake, "closed")
+	reg.Panel.Abandoned = true
+	reg.Panel.AbandonReason = "rework"
+	core3Append(t, reg.Dir, panel.AbandonRecord{Record: panel.RecordAbandon, Spec: reg.Panel.Spec, Panel: reg.Slug(), Reason: "rework", By: "max", CreatedAt: core3Time})
+	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+		t.Fatalf("empty spec must use current spec: %v", err)
+	}
+}
+
+func TestImplPreflight_ClosedBeadAuditRecovery(t *testing.T) {
+	for _, failure := range []string{"read", "decode"} {
+		t.Run(failure, func(t *testing.T) {
+			root, reg, _ := implDeferralFixture(t, "bead")
+			implGetMetadataFn = func(string) (map[string]interface{}, error) {
+				if failure == "read" {
+					return nil, fmt.Errorf("audit unavailable")
+				}
+				return map[string]interface{}{"panel_deferred_entries": "bad"}, nil
+			}
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			want := "recovery: bd reopen " + *reg.Panel.BeadID
+			if err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "mindspec complete") {
+				t.Fatalf("closed bead recovery: %v; want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestImplPreflight_FinalReviewRefutationLeavesOtherFinding(t *testing.T) {
+	root, reg, fake := implDeferralFixture(t, "final_review")
+	v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x", "second ask"}}
+	core3JSON(t, reg.Dir, "R1-round-1.json", v)
+	f, err := panel.SlotFinding(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := reg.Panel.Deferrals[0]
+	d.Finding, d.FindingSHA256, d.FindingText = f.ID, f.SHA256, f.Text
+	reg.Panel.Deferrals = []panel.Deferral{d}
+	core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
+	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+	// Refute only the first member. The slot deferral still covers the second.
+	fs, err := panel.Findings(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := panel.Refutation{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Ground: "disproven", Reason: "fixed", Evidence: "abc123", By: "max", CreatedAt: core3Time}
+	core3Append(t, reg.Dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: reg.Panel.Spec, Panel: reg.Slug(), Refutation: ref})
+	reg.Panel.Refutations = []panel.Refutation{ref}
+	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+	implDeferralIssue(t, fake, "closed")
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+		t.Fatalf("remaining finding must block: %v", err)
+	}
+	implDeferralIssue(t, fake, "open") // Description has only the refuted finding.
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil {
+		t.Fatal("missing unrefuted text must block")
+	}
+	core3JSON(t, fake, "follow-up.json", []interface{}{map[string]interface{}{"id": "follow-up", "status": "open", "description": "second ask", "dependencies": []map[string]string{{"id": "epic-x", "dependency_type": "discovered-from"}}}})
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+		t.Fatalf("only effective member is required: %v", err)
 	}
 }

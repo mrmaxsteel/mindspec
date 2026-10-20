@@ -1293,6 +1293,14 @@ func implPanelDeferralPreflight(root, specID string) error {
 	if !cfg.Enforcement.PanelGate {
 		return nil
 	}
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return err
+	}
+	planBeadIDs, err := readPlanBeadIDs(filepath.Join(specDir, "plan.md"))
+	if err != nil {
+		return guard.NewFailure("cannot read the plan bead list to check deferred findings: "+termsafe.Escape(err.Error()), "restore the plan bead list")
+	}
 	var regs []panel.Registration
 	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
 		if reg.Panel.Spec != specID && reg.Err == nil {
@@ -1315,6 +1323,9 @@ func implPanelDeferralPreflight(root, specID string) error {
 		regs = append(regs, reg)
 	}
 	beadRegs := map[string][]panel.Registration{}
+	for _, beadID := range planBeadIDs {
+		beadRegs[beadID] = nil
+	}
 	for _, reg := range regs {
 		if reg.Panel.IsBead() {
 			beadRegs[*reg.Panel.BeadID] = append(beadRegs[*reg.Panel.BeadID], reg)
@@ -1334,11 +1345,11 @@ func implPanelDeferralPreflight(root, specID string) error {
 	for beadID, registrations := range beadRegs {
 		meta, err := implGetMetadataFn(beadID)
 		if err != nil {
-			return complete.PanelDeferredAuditFailure(beadID, err)
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
 		}
 		entries, err := complete.DecodePanelDeferred(meta, "panel_deferred_entries")
 		if err != nil {
-			return complete.PanelDeferredAuditFailure(beadID, err)
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
 		}
 		var legacy []complete.PanelDeferredEntry
 		groups := map[[2]string][]complete.PanelDeferredEntry{}
@@ -1349,6 +1360,9 @@ func implPanelDeferralPreflight(root, specID string) error {
 			}
 			key := [2]string{entry.Spec, entry.Panel}
 			groups[key] = append(groups[key], entry)
+		}
+		if len(registrations) == 0 {
+			registrations = []panel.Registration{{Panel: panel.Panel{Spec: specID, BeadID: &beadID}}}
 		}
 		for _, reg := range registrations {
 			if err := complete.CheckAuditedPanelDeferrals(reg, legacy); err != nil {
@@ -1362,7 +1376,7 @@ func implPanelDeferralPreflight(root, specID string) error {
 			}
 			reg := panel.Registration{Dir: filepath.Join("review", identity[1]), Panel: panel.Panel{Spec: entrySpec, BeadID: &beadID}}
 			for _, current := range regs {
-				if current.Panel.Spec == identity[0] && current.Slug() == identity[1] {
+				if current.Panel.Spec == entrySpec && current.Slug() == identity[1] {
 					reg = current
 					break
 				}

@@ -269,3 +269,130 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 		t.Fatalf("blocked retry must not complete: %v", retry.calls)
 	}
 }
+
+func TestComplete_ResumeTrimsRefutedSlotMembers(t *testing.T) {
+	for _, missingEffective := range []bool{false, true} {
+		name := "refuted text removed"
+		if missingEffective {
+			name = "effective text removed"
+		}
+		t.Run(name, func(t *testing.T) {
+			saveAndRestore(t)
+			const specID, beadID = "130-core3", "mindspec-core3.1"
+			root, _, branch := setupRealGitFaultFixture(t, specID, beadID)
+			wireRealGitFaultSeams(t, specID)
+			wt := wireBeadWorktree(t, root, specID, beadID, branch)
+			stubPhaseEpic(t, specID, "epic-130-core3")
+			fakeBD := deferralBD(t, "epic-130-core3")
+			shim := filepath.Join(fakeBD, "bd")
+			script, err := os.ReadFile(shim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(shim, []byte(strings.Replace(string(script), "*) exit 1;;", "export|update) ;;\n*) exit 1;;", 1)), 0700); err != nil {
+				t.Fatal(err)
+			}
+			store := newFakeMetadataStore()
+			store.wire(t)
+			checkDirtyTreeFn = next.CheckDirtyTreeDetail
+			panelSkipEnvFn = func() bool { return false }
+			writeFile(t, wt, ".beads/issues.jsonl", "{\"id\":\"baseline\"}\n")
+			gitRun(t, wt, "add", "--", ".beads/issues.jsonl")
+			gitRun(t, wt, "commit", "-q", "-m", "baseline artifact")
+			sha := gateRevParse(t, root, branch)
+			dir := filepath.Join(root, "review", "deferred-resume")
+			if err := panel.Create(dir, panel.CreateInput{Spec: specID, Target: branch, BeadID: bp(beadID), Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
+				t.Fatal(err)
+			}
+			v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x", "second ask"}}
+			core3JSON(t, dir, "R1-round-1.json", v)
+			core3JSON(t, dir, "R2-round-1.json", map[string]string{"verdict": "APPROVE"})
+			fs, err := panel.Findings(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slotFinding, err := panel.SlotFinding(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := panel.Deferral{Slot: "R1", Round: 1, Finding: slotFinding.ID, FindingSHA256: slotFinding.SHA256, FindingText: slotFinding.Text, Bead: "follow-up", By: "max", CreatedAt: core3Time}
+			core3Append(t, dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: specID, Panel: "deferred-resume", Deferral: d})
+			regs := panel.ForBead(panel.Scan(root), beadID)
+			if len(regs) != 1 {
+				t.Fatalf("registrations=%+v", regs)
+			}
+			reg := regs[0]
+			reg.Panel.Deferrals = []panel.Deferral{d}
+			if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+				t.Fatal(err)
+			}
+			core3Cover(t, reg)
+			core3Manifest(t, reg)
+			writeFile(t, wt, ".beads/issues.jsonl", "{\"id\":\"changed\"}\n")
+			first := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root), failCompleteOnce: true}
+			if _, err := Run(root, beadID, specID, "", first, CompleteOpts{}); err == nil || !strings.Contains(err.Error(), "injected completion failure") {
+				t.Fatalf("expected failure after materialization; got %v calls=%v", err, first.calls)
+			}
+			if _, stage, present := readMarker(t, root, beadID); !present || stage != stageArtifactSync {
+				t.Fatalf("no resume marker stage=%s present=%v", stage, present)
+			}
+			if err := reconcilePendingDeferrals(beadID); err != nil {
+				t.Fatal(err)
+			}
+			f := fs[0]
+			ref := panel.Refutation{Slot: "R1", Round: 1, Finding: f.ID, FindingText: f.Text, FindingSHA256: f.SHA256, Ground: "disproven", Reason: "fixed", Evidence: "fix commit", By: "max", CreatedAt: core3Time}
+			core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
+			reg.Panel.Refutations = append(reg.Panel.Refutations, ref)
+			if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+				t.Fatal(err)
+			}
+			description := "second ask"
+			if missingEffective {
+				description = "test finding /tmp/x"
+			}
+			core3JSON(t, fakeBD, "follow-up.json", []interface{}{map[string]interface{}{"id": "follow-up", "status": "open", "description": description, "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
+			res, err := panel.Tally(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.PassRule(true) {
+				t.Fatal("live panel must pass")
+			}
+
+			retry := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
+			result, err := Run(root, beadID, specID, "", retry, CompleteOpts{ResolveMerge: true})
+			t.Logf("partial slot retry: result=%+v error=%v calls=%v", result, err, retry.calls)
+			if missingEffective {
+				if err == nil || !strings.Contains(err.Error(), "follow-up") || len(retry.calls) > 0 {
+					t.Fatalf("missing effective member must block before completion: %v calls=%v", err, retry.calls)
+				}
+				return
+			}
+			if err != nil || result == nil || !result.BeadClosed {
+				t.Fatalf("retry should finish with remaining effective finding: %v", err)
+			}
+
+			for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {
+				entries, err := DecodePanelDeferred(store.data[beadID], key)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("%s: %+v %v", key, entries, err)
+				}
+				e := entries[0]
+				if e.Panel != reg.Slug() || e.Spec != specID || e.Slot != d.Slot || e.Round != d.Round || e.Finding != d.Finding || e.FindingSHA256 != d.FindingSHA256 {
+					t.Fatalf("slot identity changed: %+v", e)
+				}
+				if len(e.Findings) != 1 || e.Findings[0] != fs[1] || len(e.FindingTexts) != 1 || e.FindingTexts[0] != fs[1].Text {
+					t.Fatalf("superseded member remains: %+v", e)
+				}
+				if err := CheckAuditedPanelDeferrals(reg, entries); err != nil {
+					t.Fatalf("persisted audit must pass: %v", err)
+				}
+			}
+			refs, err := decodeRefutations(store.data[beadID]["panel_refuted_entries"])
+			if err != nil || len(refs) != 1 || refs[0].Finding != fs[0].ID || refs[0].FindingSHA256 != fs[0].SHA256 {
+				t.Fatalf("refutation audit lost: %+v %v", refs, err)
+			}
+
+		})
+	}
+}

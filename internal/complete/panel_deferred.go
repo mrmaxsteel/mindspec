@@ -316,9 +316,14 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 	return nil
 }
 
-// PanelDeferredAuditFailure makes metadata errors fail closed with a retry.
-func PanelDeferredAuditFailure(beadID string, err error) error {
-	return guard.NewFailure(fmt.Sprintf("cannot read or record deferred findings for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
+// PanelDeferredAuditFailure makes metadata errors fail closed. Callers can
+// mark the bead closed to recover by reopening it; completion retries by default.
+func PanelDeferredAuditFailure(beadID string, err error, closed ...bool) error {
+	recovery := fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))
+	if len(closed) > 0 && closed[0] {
+		recovery = fmt.Sprintf("bd reopen %s", idrender.Bead(beadID))
+	}
+	return guard.NewFailure(fmt.Sprintf("cannot read or record deferred findings for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), recovery)
 }
 
 // recheckResumedPanelDeferrals checks live tracker facts from the durable audit.
@@ -381,12 +386,15 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 			}
 			refs := res.AppliedRefutations()
 			var needed []PanelDeferredEntry
+			changed := false
 			for _, entry := range group {
-				if !auditedDeferralRefuted(entry, refs, res) {
-					needed = append(needed, entry)
+				remaining, superseded := trimRefutedDeferral(entry, refs, res)
+				changed = changed || superseded
+				if remaining != nil {
+					needed = append(needed, *remaining)
 				}
 			}
-			if len(needed) != len(group) {
+			if changed {
 				var applied []refutationPendingEntry
 				for _, ref := range refs {
 					entry := pendingRefutation(ref, current.Slug())
@@ -418,19 +426,19 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 	return nil
 }
 
-func auditedDeferralRefuted(entry PanelDeferredEntry, refs []panel.Refutation, res *panel.Result) bool {
+// trimRefutedDeferral preserves the discharge identity and removes only covered
+// members. Historical slots without member identities require a whole-slot match.
+func trimRefutedDeferral(entry PanelDeferredEntry, refs []panel.Refutation, res *panel.Result) (*PanelDeferredEntry, bool) {
 	for _, ref := range refs {
 		if ref.Slot == entry.Slot && ref.Round == entry.Round && ref.Finding == entry.Finding && ref.FindingSHA256 == entry.FindingSHA256 {
-			return true
+			return nil, true
 		}
 	}
 	findings := entry.Findings
 	if entry.Finding != "slot" {
 		findings = []panel.Finding{{ID: entry.Finding, SHA256: entry.FindingSHA256}}
 	}
-	if len(findings) == 0 {
-		return false
-	}
+	var remaining []panel.Finding
 	for _, finding := range findings {
 		covered := false
 		for _, ref := range refs {
@@ -440,8 +448,19 @@ func auditedDeferralRefuted(entry PanelDeferredEntry, refs []panel.Refutation, r
 			}
 		}
 		if !covered {
-			return false
+			remaining = append(remaining, finding)
 		}
 	}
-	return true
+	if len(remaining) == len(findings) {
+		return &entry, false
+	}
+	if len(remaining) == 0 {
+		return nil, true
+	}
+	entry.Findings = remaining
+	entry.FindingTexts = nil
+	for _, finding := range remaining {
+		entry.FindingTexts = append(entry.FindingTexts, finding.Text)
+	}
+	return &entry, true
 }
