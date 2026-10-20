@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-10-20T00:21:35Z"
+approved_by: user
+status: Approved
 ---
 # Spec 130-panel-substrate-integrity: Panel Substrate Integrity
 
@@ -333,7 +333,7 @@ Each amendment is an appended section, lands with the bead that ships the citing
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-10-20
+- **Notes**: Approved via mindspec approve spec
