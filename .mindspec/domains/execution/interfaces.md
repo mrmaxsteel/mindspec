@@ -25,6 +25,16 @@ type Executor interface {
 }
 ```
 
+The optional `LandedReviewSetter` interface exposes
+`SetLandedReview(sha, panel string)` without changing `CompleteBead`.
+`MindspecExecutor` and `MockExecutor` implement it. `complete` supplies the
+first Allow panel's `reviewed_head_sha` and `<slug>@r<N>` before
+`CompleteBead`. That call consumes the identity and writes
+`mindspec_landed_reviewed_sha` and `mindspec_landed_review_panel` in the same
+metadata merge as the landed binding. The already-bound check compares these
+two keys only when supplied. Without a setter call, neither key is written or
+removed. `FinalizeEpic` leaves both keys unchanged (Spec 130 R12).
+
 `LsTree` returns a recursive, repository-relative listing at a ref, including
 when the workdir is a spec subdirectory. It rejects option-like refs. Panel
 consumers select roots and exclusions in Go and hash the retained listing.

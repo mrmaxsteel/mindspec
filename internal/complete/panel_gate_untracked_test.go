@@ -72,7 +72,8 @@ func testPanelGateUntrackedIgnoredRegistration(t *testing.T) {
 			orig := panelSkipEnvFn
 			t.Cleanup(func() { panelSkipEnvFn = orig })
 			panelSkipEnvFn = func() bool { return false }
-			reg, err := panelGate(beadID, panelGateRoots(root, "", specID), "", true, nil)
+			matches, err := panelGate(beadID, panelGateRoots(root, "", specID), "", true, nil)
+			reg := firstGateRegistration(matches)
 			if reg == nil || reg.Panel.BeadID == nil || *reg.Panel.BeadID != beadID {
 				t.Fatalf("gate must match the registration: %+v", reg)
 			}

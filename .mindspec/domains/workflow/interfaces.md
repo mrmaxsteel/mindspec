@@ -623,8 +623,10 @@ complete-gated.
   `gates:` is configured; with `gates:` absent every panel still compares
   against the flat global default, byte-identical to spec 109. The
   `internal/complete` call site is guarded on `panelReg != nil` —
-  `panelGate` returns a nil registration on its fail-open paths (empty bead
-  ID, no registered panel), and `PanelGateAdvisoryDefault`'s arguments
+  `panelGate` returns each matched registration with its Allow or Warn
+  decision in scan order, or an empty collection on its fail-open paths
+  (empty bead ID, no registered panel). `panelReg` is the first registration,
+  or nil for an empty collection, and `PanelGateAdvisoryDefault`'s arguments
   deref `panelReg.Panel`, so the guard sits ahead of that call even though
   `reviewerCountAdvisory` itself also nil-checks its `reg` parameter. No
   `Allow`/`Block` decision is touched by any of this — the gate's outcome
@@ -729,3 +731,15 @@ complete-gated.
   `O(domains × citations)` times. Both seams are countable, and a golden
   diagnostics fixture pins byte-identical `(code, message)` output pre/post
   caching.
+
+### Landed review identity (`complete`, Spec 130 R12)
+
+Before `exec.CompleteBead`, `complete.Run` calls the optional
+`executor.LandedReviewSetter.SetLandedReview(sha, panel)` once for the first
+Allow returned by `panelGate`. The values are that registration's
+`reviewed_head_sha` and `<slug>@r<N>`. A Warn (including abandoned panels,
+missing refs and the environment hatch), `enforcement.panel_gate: false`, or
+no panel supplies no identity. A config-disabled matched panel returns Warn
+without evaluating its facts. The executor writes `mindspec_landed_reviewed_sha`
+and `mindspec_landed_review_panel` together with the landed binding;
+`FinalizeEpic` leaves them unchanged.

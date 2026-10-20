@@ -837,6 +837,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// already durable. panelReg stays nil on that path, exactly as it
 	// does on every other pre-existing fail-open/no-panel path below.
 	var panelReg *panel.Registration
+	var panelDecisions []PanelGateResult
 	advisoryOut := panelAdvisoryOut
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
@@ -864,9 +865,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// round-3 redesign — it never reads a panel directory.)
 		gateRoots := panelGateRoots(root, wtPath, specID)
 		var panelGateErr error
-		panelReg, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		panelDecisions, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
 		if panelGateErr != nil {
 			return nil, panelGateErr
+		}
+		if len(panelDecisions) > 0 {
+			panelReg = &panelDecisions[0].Registration
 		}
 		// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
 		// per spec 112 R7): the Allow/Block decision above is already final;
@@ -1145,6 +1149,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
+		if setter, ok := exec.(executor.LandedReviewSetter); ok {
+			for _, matched := range panelDecisions {
+				if matched.Decision.Action == panel.Allow {
+					p := matched.Registration.Panel
+					setter.SetLandedReview(p.ReviewedHeadSHA, fmt.Sprintf("%s@r%d", matched.Registration.Slug(), p.Round))
+					break
+				}
+			}
+		}
 		completeErr = exec.CompleteBead(beadID, specBranch, "", opts.AllowNetDeletion, opts.ResolveMerge)
 		if completeErr == nil {
 			result.WorktreeRemoved = true

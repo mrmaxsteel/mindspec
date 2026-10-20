@@ -1303,3 +1303,151 @@ func TestLocateLandedMergeFn_IsLocateLandedMergeByIdentity(t *testing.T) {
 		t.Fatal("locateLandedMergeFn must be locateLandedMergeByIdentity (AC-11(i) anti-drift)")
 	}
 }
+
+func TestEnsureLandedBinding_ReviewKeysSameWrite(t *testing.T) {
+	const mergeSHA, parentSHA = "merge-sha", "second-parent-sha"
+	for _, scenario := range []string{"new", "binding matches keys absent", "wrong reviewed sha", "wrong panel", "all match", "no setter preserves", "no setter repairs binding", "read failure", "write failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			stubMergeBindingSeams(t)
+			origLocate := locateLandedMergeFn
+			t.Cleanup(func() { locateLandedMergeFn = origLocate })
+			locateLandedMergeFn = func(string, string, string) (string, string, error) {
+				return mergeSHA, parentSHA, nil
+			}
+			existing := map[string]interface{}{
+				"mindspec_landed_merge_sha": mergeSHA, "mindspec_landed_second_parent": parentSHA,
+				"mindspec_landed_reviewed_sha": "reviewed-sha", "mindspec_landed_review_panel": "panel@r3",
+				"unrelated": true,
+			}
+			review := &landedReview{sha: "reviewed-sha", panel: "panel@r3"}
+			switch scenario {
+			case "new":
+				existing = map[string]interface{}{}
+			case "binding matches keys absent":
+				delete(existing, "mindspec_landed_reviewed_sha")
+				delete(existing, "mindspec_landed_review_panel")
+			case "wrong reviewed sha":
+				existing["mindspec_landed_reviewed_sha"] = "wrong-sha"
+			case "wrong panel":
+				existing["mindspec_landed_review_panel"] = "wrong-panel@r2"
+			case "no setter preserves", "no setter repairs binding":
+				review = nil
+				if scenario == "no setter repairs binding" {
+					existing["mindspec_landed_second_parent"] = "wrong-parent"
+				}
+			}
+			mergeBindingReadFn = func(string) (map[string]interface{}, error) {
+				if scenario == "read failure" {
+					return nil, errors.New("read failed")
+				}
+				return existing, nil
+			}
+			var writes []map[string]interface{}
+			mergeBindingFn = func(id string, updates map[string]interface{}) error {
+				if id != "mindspec-review.1" {
+					t.Fatalf("wrong bead: %s", id)
+				}
+				writes = append(writes, updates)
+				if scenario == "write failure" {
+					return errSimulatedBindingWrite
+				}
+				for k, v := range updates {
+					existing[k] = v
+				}
+				return nil
+			}
+			if scenario == "write failure" {
+				existing = map[string]interface{}{}
+			}
+			err := (&MindspecExecutor{}).ensureLandedBinding("mindspec-review.1", "spec/130", "bead/mindspec-review.1", review)
+			if scenario == "write failure" {
+				if !errors.Is(err, errSimulatedBindingWrite) {
+					t.Fatalf("binding error must propagate: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			wantWrites := 1
+			if scenario == "all match" || scenario == "no setter preserves" {
+				wantWrites = 0
+			}
+			if len(writes) != wantWrites {
+				t.Fatalf("one atomic binding write or convergent no-op: got %d writes, want %d", len(writes), wantWrites)
+			}
+			if wantWrites == 1 {
+				got := writes[0]
+				if got["mindspec_landed_merge_sha"] != mergeSHA || got["mindspec_landed_second_parent"] != parentSHA || got["mindspec_landed_at"] == nil {
+					t.Fatalf("binding must share the review-key write: %+v", got)
+				}
+				if review != nil {
+					if got["mindspec_landed_reviewed_sha"] != review.sha || got["mindspec_landed_review_panel"] != review.panel {
+						t.Fatalf("both review keys must be in the binding write: %+v", got)
+					}
+				} else {
+					for _, key := range []string{"mindspec_landed_reviewed_sha", "mindspec_landed_review_panel"} {
+						if _, present := got[key]; present {
+							t.Fatalf("no setter must omit %s, even on binding repair: %+v", key, got)
+						}
+					}
+				}
+			}
+			if review == nil && (existing["mindspec_landed_reviewed_sha"] != "reviewed-sha" || existing["mindspec_landed_review_panel"] != "panel@r3") {
+				t.Fatalf("existing review keys must survive: %+v", existing)
+			}
+		})
+	}
+}
+
+func TestEnsureLandedBinding_CompleteBeadOnly(t *testing.T) {
+	for _, scenario := range []string{"complete reviewed", "complete without setter", "finalize with setter"} {
+		t.Run(scenario, func(t *testing.T) {
+			g, fake, dir := newRepoExecutor(t)
+			const specID, beadID = "130-review", "mindspec-review.1"
+			runGitIn(t, dir, "branch", "spec/"+specID)
+			specWt := filepath.Join(dir, ".worktrees", "worktree-spec-"+specID)
+			if err := os.MkdirAll(filepath.Dir(specWt), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runGitIn(t, dir, "worktree", "add", specWt, "spec/"+specID)
+			beadWt := plantBeadWorktree(t, dir, "bead/"+beadID, "review.txt")
+			fake.listEntries = []bead.WorktreeListEntry{{Name: "worktree-" + beadID, Path: beadWt, Branch: "bead/" + beadID}}
+			reviewSHA := refHash(t, dir, "bead/"+beadID)
+			if scenario != "complete without setter" {
+				g.SetLandedReview(reviewSHA, "review-panel@r2")
+			}
+			var writes []map[string]interface{}
+			mergeBindingFn = func(_ string, updates map[string]interface{}) error {
+				writes = append(writes, updates)
+				// Stop before cleanup/finalization side effects in this fixture.
+				return errSimulatedBindingWrite
+			}
+			var err error
+			if scenario == "finalize with setter" {
+				_, err = g.FinalizeEpic("epic-review", specID, "spec/"+specID, []string{beadID}, "", false)
+			} else {
+				err = g.CompleteBead(beadID, "spec/"+specID, "", "", false)
+				if g.landedReview != nil {
+					t.Fatal("CompleteBead must consume the supplied review identity")
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), errSimulatedBindingWrite.Error()) || len(writes) != 1 {
+				t.Fatalf("expected one binding attempt through the real producer: err=%v writes=%v", err, writes)
+			}
+			got := writes[0]
+			if got["mindspec_landed_merge_sha"] != refHash(t, dir, "spec/"+specID) || got["mindspec_landed_second_parent"] != reviewSHA {
+				t.Fatalf("must bind the real landed merge: %+v", got)
+			}
+			if scenario == "complete reviewed" {
+				if got["mindspec_landed_reviewed_sha"] != reviewSHA || got["mindspec_landed_review_panel"] != "review-panel@r2" {
+					t.Fatalf("CompleteBead must include supplied keys: %+v", got)
+				}
+			} else {
+				for _, key := range []string{"mindspec_landed_reviewed_sha", "mindspec_landed_review_panel"} {
+					if _, present := got[key]; present {
+						t.Fatalf("only reviewed CompleteBead may write %s: %+v", key, got)
+					}
+				}
+			}
+		})
+	}
+}

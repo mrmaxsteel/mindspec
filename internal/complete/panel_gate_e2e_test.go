@@ -345,7 +345,8 @@ func TestPanelGate_Hatch_ConfigToggle(t *testing.T) {
 	}, subThresholdVerdicts())
 
 	// panelGateEnabled=false → no block.
-	reg, err := panelGate(beadID, []string{root}, "", false, nil)
+	matches, err := panelGate(beadID, []string{root}, "", false, nil)
+	reg := firstGateRegistration(matches)
 	if err != nil {
 		t.Fatalf("enforcement.panel_gate=false must skip the gate; got: %v", err)
 	}
