@@ -2,6 +2,7 @@ package complete
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,13 +14,36 @@ import (
 )
 
 func TestComplete_ResumeRechecksDurableDeferrals(t *testing.T) {
-	for _, change := range []string{"open", "closed", "deleted", "edge removed", "text removed", "reparented", "bd error", "closed present", "refuted-other present", "abandoned-handset present", "env hatch", "config hatch", "refuted", "refuted audited"} {
+	for _, change := range []string{"open", "closed", "deleted", "edge removed", "text removed", "reparented", "bd error", "closed present", "refuted-other present", "abandoned-handset present", "abandoned present", "env hatch", "config hatch", "refuted", "refuted audited"} {
+		t.Run(change, func(t *testing.T) { runDeferredMaterializationRetry(t, change) })
+	}
+}
+
+func TestComplete_ResumePreservesLegacyDeferralIdentity(t *testing.T) {
+	runDeferredMaterializationRetry(t, "legacy identity")
+}
+
+func TestComplete_ResumeSlotRefutationSupersedesItemDeferral(t *testing.T) {
+	for _, change := range []string{"slot refuted", "slot refuted audited", "slot refuted-other present"} {
 		t.Run(change, func(t *testing.T) { runDeferredMaterializationRetry(t, change) })
 	}
 }
 
 func runDeferredMaterializationRetry(t *testing.T, change string) {
 	saveAndRestore(t)
+	var binary string
+	if change == "abandoned present" {
+		moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		binary = filepath.Join(t.TempDir(), "mindspec")
+		build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+		build.Dir = moduleRoot
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build abandonment writer: %v %s", err, out)
+		}
+	}
 	const specID, beadID = "130-core3", "mindspec-core3.1"
 	root, _, branch := setupRealGitFaultFixture(t, specID, beadID)
 	wireRealGitFaultSeams(t, specID)
@@ -74,7 +98,7 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	if _, stage, present := readMarker(t, root, beadID); !present || stage != stageArtifactSync {
 		t.Fatalf("no resume marker stage=%s present=%v", stage, present)
 	}
-	if change == "refuted audited" {
+	if strings.HasSuffix(change, "refuted audited") {
 		// A prior attempt can settle the audit before completion fails.
 		if err := reconcilePendingDeferrals(beadID); err != nil {
 			t.Fatal(err)
@@ -85,10 +109,24 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 		}
 		store.data[beadID]["panel_refuted_entries"] = []refutationPendingEntry{{Spec: specID, Panel: "earlier-panel", Slot: "R2", Round: 1, Reason: "earlier reason", Evidence: "earlier evidence"}}
 	}
-	if change != "open" {
-		setDeferredIssue(t, fakeBD, strings.TrimSuffix(strings.NewReplacer("abandoned-handset", "closed", "refuted-other", "closed").Replace(change), " present"))
+	if change == "legacy identity" {
+		if err := reconcilePendingDeferrals(beadID); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {
+			entries, err := DecodePanelDeferred(store.data[beadID], key)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("expected durable deferral in %s: %+v %v", key, entries, err)
+			}
+			entries[0].Spec, entries[0].Panel = "", ""
+			store.data[beadID][key] = entries
+		}
 	}
-	if change == "env hatch" || change == "config hatch" || change == "refuted" || change == "refuted audited" {
+	refuted := strings.Contains(change, "refuted") && !strings.Contains(change, "refuted-other")
+	if change != "open" && change != "legacy identity" {
+		setDeferredIssue(t, fakeBD, strings.TrimSuffix(strings.NewReplacer("abandoned-handset", "closed", "abandoned", "closed", "refuted-other", "closed").Replace(change), " present"))
+	}
+	if change == "env hatch" || change == "config hatch" || strings.Contains(change, "refuted") {
 		setDeferredIssue(t, fakeBD, "closed")
 	}
 	if change == "env hatch" {
@@ -98,21 +136,45 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 		writeFile(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
 		config.ResetCache()
 	}
-	if change == "refuted" || change == "refuted audited" {
-		ref := panel.Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingText: d.FindingText, FindingSHA256: d.FindingSHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
+	if refuted {
+		finding := fs[0]
+		if strings.HasPrefix(change, "slot ") {
+			finding, err = panel.SlotFinding(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		ref := panel.Refutation{Slot: d.Slot, Round: d.Round, Finding: finding.ID, FindingText: finding.Text, FindingSHA256: finding.SHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
 		core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
 		reg.Panel.Refutations = append(reg.Panel.Refutations, ref)
 		if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
 			t.Fatal(err)
 		}
-	} else if change == "refuted-other present" {
+		res, err := panel.Tally(dir)
+		if err != nil || !res.PassRule(true) || len(res.EffectiveDeferrals()) != 0 || len(res.AppliedRefutations()) != 1 {
+			t.Fatalf("refutation must supersede the live deferral: %+v %v", res, err)
+		}
+	} else if change == "abandoned present" {
+		cmd := exec.Command(binary, "panel", "abandon", reg.Slug(), "--spec", specID, "--reason", "rework", "--by", "max")
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("abandon panel: %v %s", err, out)
+		}
+	} else if strings.HasSuffix(change, "refuted-other present") {
 		v2 := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"a different finding"}}
 		core3JSON(t, dir, "R1-round-1.json", v2)
 		fs2, err := panel.Findings(v2)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ref := panel.Refutation{Slot: "R1", Round: 1, Finding: fs2[0].ID, FindingText: fs2[0].Text, FindingSHA256: fs2[0].SHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
+		finding := fs2[0]
+		if strings.HasPrefix(change, "slot ") {
+			finding, err = panel.SlotFinding(v2)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		ref := panel.Refutation{Slot: "R1", Round: 1, Finding: finding.ID, FindingText: finding.Text, FindingSHA256: finding.SHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
 		core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
 		reg.Panel.Refutations = append(reg.Panel.Refutations, ref)
 		if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
@@ -136,20 +198,43 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	retry := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
 	result, err := Run(root, beadID, specID, "", retry, CompleteOpts{ResolveMerge: true})
 	t.Logf("follow-up %s on resume: result=%+v err=%v calls=%v", change, result, err, retry.calls)
-	if change == "open" || change == "env hatch" || change == "config hatch" || change == "refuted" || change == "refuted audited" {
+	if change == "open" || change == "legacy identity" || change == "abandoned present" || change == "env hatch" || change == "config hatch" || refuted {
 		if err != nil || result == nil || !result.BeadClosed {
-			t.Fatalf("open control must finish: result=%+v err=%v", result, err)
+			t.Fatalf("retry must finish: result=%+v err=%v", result, err)
 		}
-		if change == "refuted" || change == "refuted audited" {
+		if change == "legacy identity" {
+			for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {
+				entries, err := DecodePanelDeferred(store.data[beadID], key)
+				if err != nil || len(entries) != 1 || entries[0].Spec != "" || entries[0].Panel != "" {
+					t.Errorf("resume changed stored identity in %s: %+v %v", key, entries, err)
+				}
+			}
+		}
+		if change == "abandoned present" {
+			for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {
+				entries, err := DecodePanelDeferred(store.data[beadID], key)
+				if err != nil || len(entries) != 0 {
+					t.Errorf("abandoned deferral remains in %s: %+v %v", key, entries, err)
+				}
+			}
+		}
+		if refuted {
 			refs, err := decodeRefutations(store.data[beadID]["panel_refuted_entries"])
 			wantRefs := 1
-			if change == "refuted audited" {
+			if strings.HasSuffix(change, "refuted audited") {
 				wantRefs++
 				if len(refs) != wantRefs || refs[1].Slot != "R2" || refs[1].Reason != "earlier reason" || refs[1].Evidence != "earlier evidence" {
 					t.Fatalf("resume lost the historical refutation audit: %+v %v", refs, err)
 				}
 			}
-			if err != nil || len(refs) != wantRefs || refs[0].Finding != d.Finding || refs[0].FindingSHA256 != d.FindingSHA256 || refs[0].Evidence != "fixing commit" {
+			finding := fs[0]
+			if strings.HasPrefix(change, "slot ") {
+				finding, err = panel.SlotFinding(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err != nil || len(refs) != wantRefs || refs[0].Finding != finding.ID || refs[0].FindingSHA256 != finding.SHA256 || refs[0].Evidence != "fixing commit" {
 				t.Fatalf("resume refutation lost its durable audit: %+v %v", refs, err)
 			}
 			for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {

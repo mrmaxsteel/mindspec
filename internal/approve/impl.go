@@ -1293,6 +1293,7 @@ func implPanelDeferralPreflight(root, specID string) error {
 	if !cfg.Enforcement.PanelGate {
 		return nil
 	}
+	var regs []panel.Registration
 	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
 		if reg.Panel.Spec != specID && reg.Err == nil {
 			continue
@@ -1311,37 +1312,66 @@ func implPanelDeferralPreflight(root, specID string) error {
 			return complete.PanelCore3Failure(reg, fmt.Errorf("panel.json changed outside the panel verbs (%s)", field))
 		}
 
+		regs = append(regs, reg)
+	}
+	beadRegs := map[string][]panel.Registration{}
+	for _, reg := range regs {
+		if reg.Panel.IsBead() {
+			beadRegs[*reg.Panel.BeadID] = append(beadRegs[*reg.Panel.BeadID], reg)
+			continue
+		}
 		if reg.Panel.Abandoned {
 			continue
 		}
-		if reg.Panel.IsBead() {
-			meta, err := implGetMetadataFn(*reg.Panel.BeadID)
-			if err != nil {
-				return complete.PanelDeferredAuditFailure(*reg.Panel.BeadID, err)
+		res, err := panel.Tally(reg.Dir)
+		if err != nil {
+			return err
+		}
+		if err := complete.CheckPanelDeferrals(reg, res.EffectiveDeferrals(), false); err != nil {
+			return err
+		}
+	}
+	for beadID, registrations := range beadRegs {
+		meta, err := implGetMetadataFn(beadID)
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err)
+		}
+		entries, err := complete.DecodePanelDeferred(meta, "panel_deferred_entries")
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err)
+		}
+		var legacy []complete.PanelDeferredEntry
+		groups := map[[2]string][]complete.PanelDeferredEntry{}
+		for _, entry := range entries {
+			if entry.Spec == "" && entry.Panel == "" {
+				legacy = append(legacy, entry)
+				continue
 			}
-			entries, err := complete.DecodePanelDeferred(meta, "panel_deferred_entries")
-			if err != nil {
-				return complete.PanelDeferredAuditFailure(*reg.Panel.BeadID, err)
-			}
-			var scoped []complete.PanelDeferredEntry
-			for _, entry := range entries {
-				if (entry.Spec == "" && entry.Panel == "") || (entry.Spec == reg.Panel.Spec && entry.Panel == reg.Slug()) {
-					scoped = append(scoped, entry)
-				}
-			}
-			if err := complete.CheckAuditedPanelDeferrals(reg, scoped); err != nil {
-				return err
-			}
-		} else {
-			res, err := panel.Tally(reg.Dir)
-			if err != nil {
-				return err
-			}
-			if err := complete.CheckPanelDeferrals(reg, res.EffectiveDeferrals(), false); err != nil {
+			key := [2]string{entry.Spec, entry.Panel}
+			groups[key] = append(groups[key], entry)
+		}
+		for _, reg := range registrations {
+			if err := complete.CheckAuditedPanelDeferrals(reg, legacy); err != nil {
 				return err
 			}
 		}
-
+		for identity, group := range groups {
+			entrySpec := identity[0]
+			if entrySpec == "" {
+				entrySpec = specID
+			}
+			reg := panel.Registration{Dir: filepath.Join("review", identity[1]), Panel: panel.Panel{Spec: entrySpec, BeadID: &beadID}}
+			for _, current := range regs {
+				if current.Panel.Spec == identity[0] && current.Slug() == identity[1] {
+					reg = current
+					break
+				}
+			}
+			// Only an intact registration with this stored identity can skip the audit.
+			if err := complete.CheckAuditedPanelDeferrals(reg, group); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

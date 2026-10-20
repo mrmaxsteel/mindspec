@@ -110,6 +110,26 @@ func (r *Result) refutationApplies(v Verdict, ref Refutation) bool {
 	return false
 }
 
+// RefutationCoversFinding checks the current verdict and the stored finding identity.
+// A slot refutation covers each unchanged item in that slot and round.
+func (r *Result) RefutationCoversFinding(ref Refutation, slot string, round int, finding Finding) bool {
+	if ref.Slot != slot || ref.Round != round {
+		return false
+	}
+	for _, v := range r.Verdicts {
+		if v.Slot != slot || !r.refutationApplies(v, ref) {
+			continue
+		}
+		for _, current := range v.Findings {
+			if current.ID == finding.ID && current.SHA256 == finding.SHA256 &&
+				(ref.Finding == "slot" || ref.FindingSHA256 == "" || ref.Finding == finding.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r *Result) unresolvedFindings(v Verdict) []string {
 	if r.Panel == nil {
 		return []string{"slot"}
@@ -220,7 +240,7 @@ func (r *Result) DeferralTexts(d Deferral) []string {
 			}
 			covered := false
 			for _, ref := range r.Panel.Refutations {
-				if r.refutationApplies(v, ref) && (ref.Finding == "slot" || ref.FindingSHA256 == "" || ref.Finding == f.ID) {
+				if r.RefutationCoversFinding(ref, v.Slot, r.LatestRound, f) {
 					covered = true
 				}
 			}

@@ -346,18 +346,23 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 	regs := panel.ForBead(panelScanFn(roots...), beadID)
 	groups := map[string][]PanelDeferredEntry{}
 	for _, entry := range entries {
-		if entry.Spec == "" {
-			entry.Spec = specID
+		groupSpec := entry.Spec
+		if groupSpec == "" {
+			groupSpec = specID
 		}
-		key, _ := json.Marshal([]string{entry.Spec, entry.Panel})
+		key, _ := json.Marshal([]string{groupSpec, entry.Panel})
 		groups[string(key)] = append(groups[string(key)], entry)
 	}
 	var effective []PanelDeferredEntry
 	for _, group := range groups {
 		first := group[0]
-		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: first.Spec, BeadID: &beadID}}
+		groupSpec := first.Spec
+		if groupSpec == "" {
+			groupSpec = specID
+		}
+		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: groupSpec, BeadID: &beadID}}
 		for _, current := range regs {
-			if current.Panel.Spec != first.Spec || current.Slug() != first.Panel {
+			if current.Panel.Spec != groupSpec || current.Slug() != first.Panel {
 				continue
 			}
 			// Only verb-backed abandonment or refutation can supersede the audit.
@@ -377,7 +382,7 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 			refs := res.AppliedRefutations()
 			var needed []PanelDeferredEntry
 			for _, entry := range group {
-				if !auditedDeferralRefuted(entry, refs) {
+				if !auditedDeferralRefuted(entry, refs, res) {
 					needed = append(needed, entry)
 				}
 			}
@@ -413,19 +418,23 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 	return nil
 }
 
-func auditedDeferralRefuted(entry PanelDeferredEntry, refs []panel.Refutation) bool {
+func auditedDeferralRefuted(entry PanelDeferredEntry, refs []panel.Refutation, res *panel.Result) bool {
 	for _, ref := range refs {
 		if ref.Slot == entry.Slot && ref.Round == entry.Round && ref.Finding == entry.Finding && ref.FindingSHA256 == entry.FindingSHA256 {
 			return true
 		}
 	}
-	if entry.Finding != "slot" || len(entry.Findings) == 0 {
+	findings := entry.Findings
+	if entry.Finding != "slot" {
+		findings = []panel.Finding{{ID: entry.Finding, SHA256: entry.FindingSHA256}}
+	}
+	if len(findings) == 0 {
 		return false
 	}
-	for _, finding := range entry.Findings {
+	for _, finding := range findings {
 		covered := false
 		for _, ref := range refs {
-			if ref.Slot == entry.Slot && ref.Round == entry.Round && ref.Finding == finding.ID && ref.FindingSHA256 == finding.SHA256 {
+			if res.RefutationCoversFinding(ref, entry.Slot, entry.Round, finding) {
 				covered = true
 				break
 			}
