@@ -623,6 +623,8 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    The dated Verification note cites the files that ground each Context claim. "Amended by ADR-0045" back-pointer blockquotes are added to ADR-0040 §1 and to ADR-0044 in the same commit.
 2. The S0 rule table (`.mindspec/policy/rules.yaml`) is not delivered here. Its home is spec 130 (OQ-1).
 
+   Re-pointed 2026-10-19: the rule table moves to spec 131; #233's reviewed-tree check and #251 move to the spec-129 follow-on
+
 ### R8 — Review artifacts stay out of git by default
 
 Panel reviews are an optional local helper (operator decision, 2026-10-19). The operator's lane rules (an untracked local kit) already state "`reviews/` is never committed"; R8 makes the binary agree.

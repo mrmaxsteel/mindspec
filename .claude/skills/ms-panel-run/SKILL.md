@@ -1,15 +1,13 @@
 ---
 name: ms-panel-run
-description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped defaults: bead 4, spec/plan/final/adhoc 6; alternating Claude Agents and Codex CLI sessions) in parallel and wait for verdicts
+description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped defaults: bead 4, spec/plan/final/adhoc 6; alternating Claude Agents and Codex CLI sessions) in parallel and wait for all verdicts
 ---
 
 # Run a Review Panel
 
-The gate sets the panel size. An explicit reviewer list in `.mindspec/config.yaml` overrides the gate default.
+Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the in-binary `mindspec complete` gate and `mindspec instruct --panel-state` consume. Then fan out one `Agent` call per configured Claude-family slot and one `codex exec` background process per configured Codex-family slot, all in parallel — the slot counts and families come from the configured panel mix (see Inputs below, and the Panel-size ladder for how an operator scales it). Each writes a JSON verdict to disk. Wait for every configured slot, then hand off to `/ms-panel-tally`.
 
-Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the in-binary `mindspec complete` gate and `mindspec instruct --panel-state` consume. Then fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
-
-Step 0 was previously the separate `/ms-panel-create` skill; it is folded in here so the panel directory, BRIEF, and `panel.json` are always created together — the gate's source of truth (`panel.json`) cannot be forgotten.
+Step 0 creates the panel directory, BRIEF, and `panel.json` together — the gate's source of truth (`panel.json`) cannot be forgotten.
 
 ## Runner dispatch
 
@@ -19,38 +17,43 @@ Read the effective `runner:` value before doing anything else — it selects **w
 mindspec config show | grep '^runner:'
 ```
 
-- **`claude-code-workflow`** (workflow-path) — compose the slot lenses (§ Slot lens defaults below; the retained judgment step) then invoke the `/ms-panel` workflow **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}` (`mix` is the resolved `panel:` reviewer mix, spec 109; `claude_sub_on_quota` is resolved the same way, from config `panel.substitution.claude_sub_on_quota`, spec 109 — the workflow cannot read config itself and fail-closes an omitted flag to `false`). The workflow performs registration (`mindspec panel create`), reviewer fan-out, the parse-retry/quota-wall-substitution ladder, and the verify/tally-return itself (spec 111 R1–R5) — do not separately walk Step 0 through the Anti-patterns section below on this path; those sections are labelled **claude-code-skills path only** and are superseded here.
+- **`claude-code-workflow`** (workflow-path) — compose the slot lenses (the Slot lens defaults below — or the Document-gate lens defaults below for `spec_approve`/`plan_approve` document panels; the retained judgment step) then invoke the `/ms-panel` workflow **once** with the resolved `{slug, spec, target, bead_id?, round, lenses[], mix, claude_sub_on_quota}`. Resolve `mix` from the configured reviewer list and `claude_sub_on_quota` from `panel.substitution.claude_sub_on_quota`; the workflow cannot read config itself and treats an omitted substitution flag as `false`. The workflow performs registration (`mindspec panel create`), reviewer fan-out, the parse-retry/quota-wall-substitution ladder, and the verify/tally-return itself — do not separately walk Step 0 through the Anti-patterns section below on this path; those sections are labelled **claude-code-skills path only** and are superseded here.
 - **`claude-code-skills`** (skills-path — the **default** until the workflow path is proven) — the existing manual launch path runs **unchanged**: Step 0 through the Anti-patterns section below, exactly as written.
-- **`external`** — a documented out-of-scope **stub**: no adapter ships for this runner. The panel runs human/skills-path per ADR-0040 degraded modes.
+- **`external`** — a documented out-of-scope **stub**: no adapter ships for this runner. The panel runs human/skills-path using the manual path.
 
 A host lacking workflow capability (no Claude Code dynamic-workflow support) degrades to the skills path regardless of the configured `runner:` value.
 
 ## Inputs
 
-- `panel-slug` (required) — e.g. `spec-050-bead2` (round 1) or `spec-050-bead2-r2` (round 2).
+- `panel-slug` (required) — the panel name, reused across rounds.
 - `target` (required) — one of `bead <bead-id>`, `pr <pr-number>`, or `commit <sha>`. For `/ms-spec-final-review`, `target` is the spec branch (`bead_id` null).
 - `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
 
-`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel defaults (spec/plan/bead/final 6/6/4/6 reviewers; adhoc 6, N−1 threshold), so there is nothing to pass here.
+`expected_reviewers` and the roster are not skill inputs — `panel create` records them in `panel.json` from the configured panel mix (shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6; alternating `claude` + `codex`), so there is nothing to pass here. `DefaultConfig` has no global reviewer list; zero-config installs use these per-gate sizes; the Panel-size ladder below is how an operator scales it per gate.
 
-> **`<spec-dir>` / co-located reviews (spec 106 flat layout).** Panels are
+> **`<spec-dir>` / co-located reviews.** Panels are
 > co-located under the spec they review: `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`,
 > so the panel dir is `<spec-dir>/reviews/<panel-slug>/` (a sibling of the spec's
 > `recording/`). The in-binary `mindspec complete` gate scans
 > `<spec-dir>/reviews/*/panel.json` on a flat tree — the old repo-root `review`
 > directory no longer drives the gate. `<spec-slug>` is the full spec directory
-> name (e.g. `106-layout-flatten`); for a `pr`/`commit` target that belongs to a
+> name; for a `pr`/`commit` target that belongs to a
 > spec, use that spec's dir.
 >
 > **Ad-hoc reviews (no owning spec).** A review not tied to any spec's lifecycle —
 > a repo-wide review, a pre-release review, a design/proposal review, or a
 > standalone bug-fix — writes its panel dir to **`<repo>/.mindspec/reviews/<panel-slug>/`**
 > (a top-level sibling of `.mindspec/specs/`), never under a spec dir and never to
-> the old repo-root `review/`. For an ad-hoc panel, substitute
-> `.mindspec/reviews/<panel-slug>` for `<spec-dir>/reviews/<panel-slug>` everywhere
-> in the steps below. These panels are stored artifacts only — they are NOT scanned
-> by the `mindspec complete` gate (which is spec-lifecycle-scoped), so no `panel.json`
-> of theirs ever gates a merge.
+> the old repo-root `review/`. Register it with **`--gate adhoc` and NO `--spec`**:
+> ```bash
+> mindspec panel create <panel-slug> --gate adhoc --target <ref>
+> ```
+> For an ad-hoc panel, substitute `.mindspec/reviews/<panel-slug>` for
+> `<spec-dir>/reviews/<panel-slug>` everywhere in the steps below. These panels are
+> stored artifacts only — they are NOT scanned by the `mindspec complete` gate
+> (which is spec-lifecycle-scoped), so no `panel.json` of theirs ever gates a
+> merge; they ARE talliable (`mindspec panel tally <panel-slug>`), same as any
+> other registered panel.
 
 ## Step 0 — register the panel
 
@@ -58,25 +61,33 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
    ```bash
    mindspec panel create <panel-slug> --spec <spec-id> --target <ref> [--gate bead --bead <bead-id>] [--round N]
    ```
-   One call creates `<spec-dir>/reviews/<panel-slug>/`, writes `panel.json` — the single source of truth the pre-complete gate (ADR-0037) and `mindspec instruct --panel-state` read, with `expected_reviewers`/`approve_threshold` stamped from the configured panel defaults and `reviewed_head_sha` captured from `--target`'s live commit AT WRITE TIME — and writes (first `create`) or rewrites (re-panel) `BRIEF.md`'s machine-managed header, all in one atomic operation.
+   One call creates `<spec-dir>/reviews/<panel-slug>/`, writes `panel.json` — the single source of truth the pre-complete gate and `mindspec instruct --panel-state` read, with `expected_reviewers` and the roster resolved from the configured panel defaults and `reviewed_head_sha` captured from `--target`'s live commit AT WRITE TIME — and writes (first `create`) or rewrites (re-panel) `BRIEF.md`'s machine-managed header, all in one atomic operation.
 
-   On a re-panel (`--round N+1`), `round` and `reviewed_head_sha` co-bump in the SAME write by construction — the two fields can never drift apart, which is exactly the invariant that closes the stale-verdict bypass (lola-f4a8 class). Prior round verdict files (`<slot>-round-<K>.json`, K < N+1) and the skill-authored BRIEF body below the header are left untouched.
+   On a re-panel (`--round N+1`), `round` and `reviewed_head_sha` co-bump in the SAME write by construction — the two fields can never drift apart, which is exactly the invariant that closes the stale-verdict bypass. Prior round verdict files (`<slot>-round-<K>.json`, K < N+1) and the skill-authored BRIEF body below the header are left untouched.
 
    `panel create` prints a `panel directory: <dir>` line. **Capture that exact path and use it directly** for the rest of this skill — the BRIEF stub, the codex prompt files, and the verdict-file existence checks — instead of re-deriving it from the `<spec-dir>/reviews/<panel-slug>/` convention note above. The convention note documents `panelDirFor`'s flat-layout branch only; `panelDirFor` also has a non-flat legacy fallback (`<root>/review/<slug>`) that the reported line always resolves correctly and the prose convention does not cover.
 
-   Optional fields the abandon procedure (`/ms-panel-tally` § halt-recover) sets by hand, directly in `panel.json`: `"abandoned": true` plus `"abandon_reason": "<who/why>"` (required when abandoned) — a plain file edit, not something `panel create` writes.
+   Use `mindspec panel abandon <panel-slug> --reason "<why>" --by "<name>"` to leave the panel flow with an audited reason. Use `mindspec panel refute <panel-slug> --slot R2 --round N --ground disproven --reason "<why>" --evidence <reference> --by "<name>"` for an evidenced refutation. The verbs own the snapshot and ledger writes.
 
-2. **Fill in the BRIEF.md stub** `create` wrote. The machine-managed header (delimited by `<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`) already carries the slug, round, branch, reviewed commit, and the "## Your job" verdict-JSON contract (`verdict`, top-level `hard_block`, `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`, `findings`) — never edit inside it; it is machine-managed and gets rewritten wholesale on every `create`. Below it, `create` left a stub with four headings for the skill to fill:
+   PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES; each finding must be fixed, refuted or effectively deferred.
+
+   Use the roster ids `R1..Rn` from `panel.json` as verdict file prefixes: `<slot>-round-<N>.json`. Keep the same prefix when substituting a reviewer family. `mindspec panel tally` writes the coverage manifest.
+
+2. **Fill in the BRIEF.md stub** `create` wrote. The machine-managed header (delimited by `<!-- mindspec:panel-header -->` … `<!-- /mindspec:panel-header -->`) already carries the slug, round, branch, reviewed commit, and the "## Your job" verdict-JSON contract (`verdict`, top-level `hard_block`, `reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`, `findings`) — never edit inside it; it is machine-managed and gets rewritten wholesale on every `create`. Below it, `create` left a stub with five headings for the skill to fill:
 
    ```markdown
    ## Summary
 
-   <1-paragraph plain-English summary of what this panel reviews. Don't paste the plan; summarise it.>
+   <1-paragraph plain-English summary of what this panel reviews. Additive, never a replacement for the Acceptance Criteria below.>
 
    ## Files in Scope
 
    - `path/to/file.py`
    - ...
+
+   ## Acceptance Criteria (verbatim from spec.md)
+
+   <!-- paste each Rn/ACn this work claims to satisfy VERBATIM from spec.md, byte-exact, with its id -->
 
    ## Prior-Round Asks   [round >= 2]
 
@@ -85,24 +96,26 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 
    ## Lens
 
-   <per-slot lens assignment — see "Slot lens defaults" below>
+   <per-slot lens assignment — see "Slot lens defaults" or "Document-gate lens defaults" below>
    ```
+
+   The BRIEF MUST paste each `Rn`/`ACn` the work claims to satisfy VERBATIM from `spec.md` under **Acceptance Criteria** — byte-exact, with its id — never a paraphrase; the Summary's plain-English paraphrase is additive, never a replacement for it (aligning with `ms-bead-impl`'s verbatim-quoting rule). Assign one slot's lens the **AC-provenance duty**: trace every claimed AC clause to a landed+passing test against the SPEC text itself, not the BRIEF's Summary — a summarised BRIEF silently dropping a clause is exactly the gap this duty closes.
 
    For round >= 2, also note any fix-author deviations (why the author diverged from the brief, and what they did instead) — fold them into Summary or a sub-bullet under Prior-Round Asks; there's no dedicated stub heading for them.
 
-3. **Pre-stage the codex prompts.** Codex CLI sessions cannot accept the BRIEF as a tool input the way Claude `Agent` calls can. Write `/tmp/codex_<panel-slug>_r{4,5,6}.md` files, each opening with:
+3. **Pre-stage the codex prompts.** Codex CLI sessions cannot accept the BRIEF as a tool input the way Claude `Agent` calls can. Write one `/tmp/codex_<panel-slug>_r<N>.md` file per configured codex-family slot (`<N>` is the slot's id from the configured mix, never a literal 4-6 range), each opening with:
    > You are R{N} codex on the <panel-slug> round-<round> verification panel. Read `<abs-path>/BRIEF.md`.
 
    followed by the slot-specific lens, the previous-round JSON path (round >= 2), and the concrete_changes_required items they personally raised in the previous round.
 
 ## Launch the panel
 
-> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), this mechanized launch is superseded by the schema+wrapper mechanism (R3–R4) and the single `/ms-panel` invocation (R6) — do not re-run it when `runner: claude-code-workflow`.
+> **`claude-code-skills` path only.** On the workflow path (the Runner dispatch), this mechanized launch is superseded by the schema+wrapper mechanism and the single `/ms-panel` invocation — do not re-run it when `runner: claude-code-workflow`.
 
 1. **Launch Codex first** (they run 4-10 min vs Claude 1-3 min; start the slow ones first).
 
-   For each codex slot R4, R5, R6:
-   - The `/tmp/codex_<panel-slug>_r<N>.md` prompt (from step 0) tells the reviewer to read `<spec-dir>/reviews/<panel-slug>/BRIEF.md`, names the slot id (`R4 codex`, etc.) and the lens, and for round >= 2 points at the previous round's JSON.
+   For each configured codex-family slot:
+   - The `/tmp/codex_<panel-slug>_r<N>.md` prompt (from step 0) tells the reviewer to read `<spec-dir>/reviews/<panel-slug>/BRIEF.md`, names the slot id and the lens, and for round >= 2 points at the previous round's JSON.
 
      **Prompt MUST include this terminal instruction verbatim:**
 
@@ -128,7 +141,7 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 
 2. **Launch Claude `Agent`s second** (faster; start after Codex is already running).
 
-   For each claude slot R1, R2, R3:
+   For each configured claude-family slot:
    - Compose a prompt with the BRIEF path, slot id, lens, and required JSON output path.
    - Spawn a `general-purpose` `Agent` with `run_in_background: true`.
 
@@ -136,18 +149,18 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 
 4. **Detect codex failures.** See "Codex failure detection (deterministic)" below.
 
-5. **Verify all six JSON files exist** at `<spec-dir>/reviews/<panel-slug>/<slot>-round-<N>.json`.
+5. **Verify one verdict JSON exists for every configured reviewer** at `<spec-dir>/reviews/<panel-slug>/<slot>-round-<N>.json` — the expected-file list is derived from `panel.json`'s `expected_reviewers`, never a literal six.
 
 ## Codex failure detection (deterministic)
 
-> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), this bash-level detection is superseded by the workflow's own schema+wrapper mechanism and parse-retry/quota-wall-substitution ladder (R3–R4) — do not re-state it for `runner: claude-code-workflow`.
+> **`claude-code-skills` path only.** On the workflow path (the Runner dispatch), this bash-level detection is superseded by the workflow's own schema+wrapper mechanism and parse-retry/quota-wall-substitution ladder — do not re-state it for `runner: claude-code-workflow`.
 
 A healthy codex run writes its JSON verdict to the named output path. Failure modes: codex hit its usage limit, codex tried to write but the sandbox rejected the path, or codex "finished thinking" without ever attempting a write. Detect each deterministically — the original v1 check used `"Output JSON to"` in the log as a healthy-ack signal, but that string is just codex echoing the prompt back; it appears even when the file never lands. Use three layers instead, in order.
 
 **Pre-condition: honest task-notification timing.** This check is only reliable when the `<task-notification>` fires on *codex* exit, not on a shell-wrapper exit. That requires single-source backgrounding (see launch step 1 above) — drop `&` and `nohup`; use only the Bash tool's `run_in_background: true`. The earlier double-backgrounded pattern made the file-existence primary check race against still-running codex, producing false "completed in 1 sec, file empty" reports. With the timing honest, layer 1 below is reliable on first read.
 
 ```bash
-EXPECTED_JSON="<spec-dir>/reviews/<panel-slug>/codex-<slot>-round-<N>.json"
+EXPECTED_JSON="<spec-dir>/reviews/<panel-slug>/<slot>-round-<N>.json"
 OUT="/tmp/codex_<panel-slug>_r<slot>.out"
 
 # Layer 1 (primary): did the file land?
@@ -180,15 +193,15 @@ extract_verdict_from_log() {
 
 (Where `$MINDSPEC_PLUGIN_DIR` is `plugins/mindspec/` resolved from wherever the plugin is embedded.) The script scans the codex `.out` log for the largest contiguous JSON object containing both `"verdict"` and `"confidence"` keys and emits it on stdout; non-zero exit means nothing extractable.
 
-`launch_claude_sub_for_slot` spawns a `general-purpose` `Agent` with the same BRIEF + slot id + lens prompt the codex slot used, but writes its verdict JSON with `reviewer_id: "R<slot> claude-sub"` so the tally can see the family-substitution explicitly. Keep the slot name (R4 stays R4) so verdict comparability is preserved across rounds.
+`launch_claude_sub_for_slot` spawns a `general-purpose` `Agent` with the same BRIEF + slot id + lens prompt the codex slot used, but writes its verdict JSON with `reviewer_id: "R<slot> claude-sub"` so the tally can see the family-substitution explicitly. Keep the slot name so verdict comparability is preserved across rounds.
 
-When deciding whether to retry codex once before substituting: don't. Empirically on lola spec-050, every codex slot that tripped the usage-limit detector stayed tripped on retry — the user's account quota refreshes hourly, not per-process. Skip straight to claude-sub.
+When deciding whether to retry codex once before substituting: don't. Quota-tripped CLI slots stay tripped on immediate retry — account quotas refresh on a clock, not per-process. Skip straight to claude-sub.
 
 ## Working directory matters
 
-> **`claude-code-skills` path only.** On the workflow path (§ Runner dispatch), the `/ms-panel` workflow's own codex-wrapper agent step owns its working directory — this is superseded and not restated for `runner: claude-code-workflow`.
+> **`claude-code-skills` path only.** On the workflow path (the Runner dispatch), the `/ms-panel` workflow's own codex-wrapper agent step owns its working directory — this is superseded and not restated for `runner: claude-code-workflow`.
 
-Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, /Users/Max/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
+Codex's default sandbox is `workspace-write [workdir, /tmp, $TMPDIR, $HOME/.codex/memories]`. The `workdir` is whatever directory you `cd` into before `codex exec`. If the panel JSON path (`<spec-dir>/reviews/<panel-slug>/...`) is outside that workdir, codex's write silently fails.
 
 **Launch convention**: always `cd <repo>` first so `<spec-dir>/reviews/...` is inside the sandbox. Single-source the backgrounding via the Bash tool's `run_in_background: true` — no `&`, no `nohup`:
 
@@ -201,25 +214,87 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 
 ## Slot lens defaults
 
-The table below gives the **DEFAULT lens assignment for up to six slots**. Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column.
+The table below gives the **DEFAULT lens assignment for up to six slots**. Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column. For a scaled mix (the Panel-size ladder below), assign each configured slot a distinct lens, reusing or splitting this default set.
 
 | Slot | Family | Lens |
 |:-----|:-------|:-----|
-| R1 | Claude | Author-of-record — diff matches plan §<bead>? |
+| R1 | Claude | Author-of-record — diff matches plan <work unit>? |
 | R2 | Claude | Codebase-pin — named files and tests actually exist + green? |
 | R3 | Claude | Prompt-shape / contract stability — downstream surface stable? |
 | R4 | Codex  | Empirical prober — run validators by hand |
 | R5 | Codex  | Schema / type correctness — Pydantic, SQLAlchemy, unions |
 | R6 | Codex  | Next-bead integration — will the next bead consume this cleanly? |
 
-Mix to taste. The point is six distinct lenses, not six clones. For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
+Mix to taste. The point is N distinct lenses, not clones. For round >= 2, each slot inherits its previous-round lens and is told to evaluate only its own `concrete_changes_required` items as ADDRESSED / PARTIAL / MISSED / NEW_ISSUE, plus flagged fix-author deviations from the BRIEF.
+
+## Document-gate lens defaults
+
+`spec_approve` and `plan_approve` panels (invoked from the `ms-spec-approve`/`ms-plan-approve` literals) review a DOCUMENT — `spec.md` or `plan.md` — not a code diff. Assign each configured slot one of these document-review lenses, parallel to the bead Slot lens defaults above:
+
+| Lens | Focus |
+|:-----|:------|
+| Falsifiability of ACs | Is every claimed acceptance criterion concrete and testable — not vague, subjective, or unfalsifiable? |
+| Scope / domain honesty | Does the document's claimed scope and Impacted Domains match what it actually asks for — no silent overreach or understatement? |
+| Contradiction hunting | Do any two requirements — or a requirement and a Non-Goal — conflict? |
+| Feasibility / blast-radius | Is the approach technically sound and proportionate to the risk surface it touches? |
+
+**Escalation.** A high-blast-radius document (multiple domains, a security surface, a public contract) scales the mix via `panel.gates` — family-level guidance only (the Panel-size ladder below), the same escalation mechanism the bead and final-review gates use.
+
+## Panel-size ladder (operator preference)
+
+The configured panel mix is the single authority (the Inputs above), and `DefaultConfig` resolves the per-gate sizes above — a zero-config install keeps its sizes unless an explicit reviewer list overrides them. An operator MAY scale the mix per gate via `panel.gates` in `.mindspec/config.yaml` — for example, a scale-by-gate-cost ladder (bead 8, spec/plan 9, final review 12), family-level only:
+
+```yaml
+# panel:
+#   gates:
+#     bead:
+#       reviewers:
+#         - family: claude
+#           count: 4
+#         - family: codex
+#           count: 4
+#     spec_approve:
+#       reviewers:
+#         - family: claude
+#           count: 5
+#         - family: codex
+#           count: 4
+#     plan_approve:
+#       reviewers:
+#         - family: claude
+#           count: 5
+#         - family: codex
+#           count: 4
+#     final_review:
+#       reviewers:
+#         - family: claude
+#           count: 6
+#         - family: codex
+#           count: 6
+```
+
+Uncomment and edit `.mindspec/config.yaml` to opt in. Every reviewer entry above carries ONLY `family` + `count` — never a `model:` key: this documented ladder example is deliberately family-level guidance. An operator who needs per-model pinning sets the `model:` key on reviewer entries in their OWN `.mindspec/config.yaml` — an operator-local choice this example intentionally never prescribes.
+
+## Reviewer conduct
+
+Reviewers apply these conduct rules at every gate.
+
+**Mutation-isolation.** Any reviewer that EXECUTES or MUTATES code — runs tests, deletes an escape to probe it, edits a fixture — does so in its OWN isolated checkout, never the shared bead worktree: `git worktree add --detach /tmp/rev-<panel-slug>-<slot> <reviewed_head_sha>` (or `git archive`), removed when the reviewer is done. Read-only inspection of the shared tree remains fine. Reviewers that mutate a shared checkout contaminate each other's probes — one slot's deleted escape becomes another slot's false REQUEST_CHANGES. This applies most directly to the R4 empirical-prober row of the Slot lens defaults table above: "run validators by hand" means in an isolated checkout, never the shared one.
+
+**Security-classifier substitution fallback.** When a reviewer family's safety classifier refuses an adversarial/security-framed lens, re-dispatch the SAME slot with a correctness-framed persona instead of the security framing — keep the slot id, mark the substitution in `reviewer_id` — the same convention as the quota-substitution above (`launch_claude_sub_for_slot`).
+
+**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Every finding receives a recorded disposition. PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES; each finding must be fixed, refuted or effectively deferred.
+
+**Absolute scratch.** Every scratch file you write — not only the codex `/tmp/codex_*.md` prompts above — lives at an ABSOLUTE path under `/tmp` (or the panel directory for verdicts), never a relative path: harness cwd-resets turn a relative write into sibling-worktree corruption.
+
+
 
 ## Anti-patterns
 
-> **`claude-code-skills` path only.** These are codex-specific bash-launch anti-patterns for the manual path; on the workflow path (§ Runner dispatch) they are superseded by the single `/ms-panel` invocation (R6), which owns its own codex-wrapper backgrounding and log handling.
+> **`claude-code-skills` path only.** These are codex-specific bash-launch anti-patterns for the manual path; on the workflow path (the Runner dispatch) they are superseded by the single `/ms-panel` invocation, which owns its own codex-wrapper backgrounding and log handling.
 
 - Don't read `.out` files via `Read` while a codex session is still active — they grow and can overflow context. Wait for the completion notification, then grep targeted strings.
-- Don't run all six reviewers as foreground tool calls — that serialises the panel and wastes 5-10 minutes.
+- Don't run all reviewers as foreground tool calls — that serialises the panel and wastes 5-10 minutes.
 - Don't reuse a codex `/tmp/codex_*.md` file across rounds — write a fresh one per round so the round number is unambiguous in the prompt.
 - Don't ask Claude reviewers to also do the codex empirical-probe lens — duplication is worse than coverage gaps; trust the family split.
 - Don't hand-edit `panel.json`'s `round`/`reviewed_head_sha` instead of calling `mindspec panel create --round N+1`. The verb is the only place the two co-bump atomically; the gate reads `panel.json`, and a stale or hand-desynced pair is a silent bypass.
