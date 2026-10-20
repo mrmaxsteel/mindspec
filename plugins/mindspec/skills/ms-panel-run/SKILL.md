@@ -211,7 +211,7 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 
 ## Slot lens defaults
 
-The table below is the **DEFAULT lens assignment for the shipped 6-slot mix** (bead-target panels). For a scaled mix (§ Panel-size ladder below), assign each configured slot a distinct lens, reusing or splitting this default set.
+The table below gives the **DEFAULT lens assignment for up to six slots**. Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column. For a scaled mix (§ Panel-size ladder below), assign each configured slot a distinct lens, reusing or splitting this default set.
 
 | Slot | Family | Lens |
 |:-----|:-------|:-----|

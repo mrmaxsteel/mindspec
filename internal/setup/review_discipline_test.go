@@ -827,7 +827,9 @@ var reviewDisciplineBead3FragmentRows = []fragmentRow{
 	// AC-1 (panel F1 MINOR) — the two DEFAULT-lens-relabel sentences pinned
 	// as fragments, so a LABEL-ONLY deletion REDs here even before the
 	// structural six-row-table check below notices the table lost its label.
-	{ac: "AC-1", desc: "ms-panel-run slot-lens table DEFAULT label", surface: "ms-panel-run", want: "DEFAULT lens assignment for the shipped 6-slot mix"},
+	{ac: "AC-1", desc: "ms-panel-run slot-lens table DEFAULT label", surface: "ms-panel-run", want: "DEFAULT lens assignment for up to six slots"},
+	{ac: "AC-1", desc: "ms-panel-run slot lenses follow the gate size and families follow the resolved roster", surface: "ms-panel-run", want: "Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column."},
+	{ac: "AC-1", desc: "ms-panel-run has no shipped six-slot mix claim", surface: "ms-panel-run", want: "shipped 6-slot mix", negate: true},
 	{ac: "AC-1", desc: "ms-panel-run slot-lens table scaled-mix assignment rule", surface: "ms-panel-run", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
 	{ac: "AC-1", desc: "ms-spec-final-review lens table DEFAULT label", surface: "ms-spec-final-review", want: "DEFAULT lens assignment for the shipped mix"},
 	{ac: "AC-1", desc: "ms-spec-final-review lens table scaled-mix assignment rule", surface: "ms-spec-final-review", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
@@ -1230,11 +1232,11 @@ var acOneTableLineRE = regexp.MustCompile(`^[ \t]*\|`)
 
 // The two fragments a six-row slot table's introducing prose MUST carry
 // (within acOneTableContextWindow lines above the first slot row) to be the
-// labelled shipped default rather than a residual fixed-six instruction.
+// labelled default lens set rather than a residual fixed-six instruction.
 // These are verbatim from the two real labelled tables; the Bead3 fragment
 // rows pin the full sentences so a label-only rewording REDs there too.
 const (
-	acOneTableDefaultLabelFragment  = "DEFAULT lens assignment for the shipped"
+	acOneTableDefaultLabelFragment  = "DEFAULT lens assignment for"
 	acOneTableScaledMixRuleFragment = "assign each configured slot a distinct lens, reusing or splitting this default set"
 	acOneTableContextWindow         = 12
 )
@@ -1331,7 +1333,7 @@ func acOneSurfaces() map[string]string {
 // reviewDisciplineAC1Allowlist is the explicit allowlist, enumerated over
 // the FULL expanded surface set + pattern set: the ONE labelled
 // shipped-DEFAULT sentence per surface that carries it, plus the ONE
-// DEFAULT-label token the "6-slot" pattern class itself matches inside
+// DEFAULT-label token the "six slot" pattern class itself matches inside
 // ms-panel-run's labelled lens-table heading. Every other legitimate
 // "6"/"six" mention on the expanded surfaces (the DEFAULT-labelled lens
 // tables' prose, the fenced ladder example's `count:` values, ms-panel-run's
@@ -1348,8 +1350,8 @@ var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
 	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
 	{
 		surface: "ms-panel-run",
-		locator: "(bead-target panels)",
-		matched: "6-slot",
+		locator: "DEFAULT lens assignment for up to six slots",
+		matched: "six slot",
 		count:   1,
 		reason:  "the DEFAULT-labelled lens-table heading sentence (§ Slot lens defaults) — the exact label + scaled-mix rule the structural six-row-table check REQUIRES; pinned positively by the Bead3 fragment rows so a label-only deletion REDs",
 	},
@@ -1757,7 +1759,7 @@ func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) 
 		surface string
 		label   string
 	}{
-		{"ms-panel-run", "DEFAULT lens assignment for the shipped 6-slot mix"},
+		{"ms-panel-run", "DEFAULT lens assignment for up to six slots"},
 		{"ms-spec-final-review", "DEFAULT lens assignment for the shipped mix"},
 	} {
 		t.Run(tc.surface, func(t *testing.T) {

@@ -298,12 +298,15 @@ func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error)
 // resolve through, so the two callers cannot drift. recordedGate is a
 // panel.json Panel.Gate value (possibly empty or outside PanelGateKeys);
 // isBead is Panel.IsBead(). Returns (0, false) when the advisory must be
-// SKIPPED. Selection: a known recordedGate -> that gate's PanelGateExpectedReviewers;
-// an empty recordedGate with isBead -> the "bead" gate's; a legacy non-bead
-// with no recorded gate and no gate overrides -> the adhoc default; anything else
-// (non-bead with no recorded gate, or an unknown recorded value) ->
-// (0, false). Never calls a gate-scoped resolver with a value outside
+// SKIPPED. Never calls a gate-scoped resolver with a value outside
 // PanelGateKeys, so no resolver error can surface through this helper.
+//
+//   - recordedGate is a known gate key: that gate's PanelGateExpectedReviewers, true.
+//   - recordedGate is empty and isBead: the "bead" gate's PanelGateExpectedReviewers, true.
+//   - a legacy non-bead panel with no recorded gate and no gate overrides
+//     compares against the adhoc default, preserving its historical advisory.
+//   - a non-bead panel with no recorded gate and configured gate overrides,
+//     or a non-empty recorded value outside the enum: (0, false) — skip the note.
 func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool)
 ```
 

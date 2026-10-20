@@ -201,6 +201,8 @@ If the panel runs in a worktree under a parent repo, `cd` to the worktree, not t
 
 ## Slot lens defaults
 
+The table below gives the **DEFAULT lens assignment for up to six slots**. Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column.
+
 | Slot | Family | Lens |
 |:-----|:-------|:-----|
 | R1 | Claude | Author-of-record — diff matches plan §<bead>? |
