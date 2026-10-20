@@ -59,7 +59,7 @@ Sequencing with the panel-execution lane (spec 131): both lanes touch `internal/
 
 - [ADR-0041](../../adr/ADR-0041-gate-before-mutate.md) — AMENDED (R13.1): early guard copies, the state line and stage resume for `impl approve` (R2). `--merge-only` is a commit phase with no close, and the closing call publishes the close (R3). The Spec-129 amendment (ii) changes: the reviewed-tree rule is a confirming datum in `FindLandedMerge` (R5). It never vetoes.
 - [ADR-0036](../../adr/ADR-0036-ownership-discovery.md) — AMENDED (R13.1): `complete` reads ownership at the landing tree (R1).
-- [ADR-0025](../../adr/ADR-0025-jsonl-as-build-artifact.md) — APPLIED: the spec branch's export shows the close before evidence is deleted (R3.5).
+- [ADR-0025](../../adr/ADR-0025-jsonl-as-build-artifact.md) — APPLIED: the spec branch's export shows the close before evidence is deleted (R3.6).
 - [ADR-0023](../../adr/ADR-0023.md) — APPLIED: lineage is a bd parent-child dependency (R7).
 - [ADR-0030](../../adr/ADR-0030-executor-boundary.md) — APPLIED: strategy, probe and stage git work stays in the executor (R2, R4).
 - [ADR-0035](../../adr/ADR-0035-agent-error-contract.md) — APPLIED: every new refusal ends with a `recovery:` line (R2, R3, R4, R6, R7).
@@ -67,31 +67,35 @@ Sequencing with the panel-execution lane (spec 131): both lanes touch `internal/
 Terms:
 
 - *Spec tip*: the commit at `spec/<id>` when the verb runs.
-- *Landing tree*: `git merge-tree --write-tree` of the spec tip and the bead commit (or bead tree T), through the net-effect primitive (`internal/gitutil/neteffect.go:147`).
-- *Naming merge*: a first-parent merge on the spec branch whose subject names `bead/<id>`.
-- *Valid merge M for bead B*: M is reachable from the spec tip; M is a naming merge for B; M's second parent equals the current `bead/<B>` tip; and the landed-evidence revert check (`FindLandedMerge` R5(d) rules) finds M not reverted at the spec tip.
+- *Landing tree*: `git merge-tree --write-tree --merge-base=<B>` of the spec tip and the bead commit (or the materialized bead tree T), through the net-effect primitive (`internal/gitutil/neteffect.go:147`). B is `git merge-base <spec tip> <bead HEAD>` for both legs. merge-tree writes an output tree also when paths conflict.
+- *Naming merge*: a merge on the spec branch's first-parent chain whose subject names `bead/<id>`.
+- *Valid merge M for bead B*: M is reachable from the spec tip; M is a naming merge for B; M's second parent equals the current `bead/<B>` tip; and the landed-evidence revert check (`FindLandedMerge` R5(d) rules) finds M not reverted at the spec tip; and M's change is fully present at the spec tip (no partial revert, R3.4).
 - *Tool-artifact paths*: the set that `panel.ToolArtifactPaths` returns.
 
 ## Requirements
+
+Every new refusal prints full commit SHAs and escapes subjects, IDs and inner errors with `termsafe`.
 
 ### R1 — Ownership at the landing tree (#234)
 
 1. Both `complete` ownership legs (committed range and materialize) pass the landing tree as `ownerRef`.
 2. All six readers in Background use that one ref. No reader takes a union of two refs.
 3. A changed path is owned when an `OWNERSHIP.yaml` glob at the landing tree matches it for a domain in the spec's resolved Impacted Domains.
-4. When the landing tree cannot be computed because of a conflict, the gate refuses before any mutation. It prints the same recovery as a bead-to-spec merge conflict.
+4. When `OWNERSHIP.yaml` itself is a conflicted path in the landing tree, the gate refuses before any mutation. It prints the same recovery as a bead-to-spec merge conflict.
+5. When only other paths conflict, the gate reads `OWNERSHIP.yaml` from the merge-tree output tree. `MergeInto` then runs and keeps the conflict as today.
+6. On `--resolve-merge` re-entry (a merge is in progress in the spec worktree), the landing tree is `git write-tree` of the spec worktree index. When the index still has unmerged entries, today's unresolved-conflict refusal stays.
 
 ### R2 — `impl approve` that can finish (#244)
 
 1. `ApproveImpl` runs an early copy of the merge-layout guard and of the work-destruction preflight for the resolved strategy. The copy runs before the phase-reconcile write, the `--supersede-adr` placeholder write and MUTATION 1/3.
 2. The executor keeps its own guards in front of every `MergeInto` and `MergeBranch` call. They run on the tip after the auto-merge. Both copies must pass.
-3. On the push strategy, `ApproveImpl` runs `git push --dry-run --no-verify` to the same remote and refspec as `PushBranch`, with `GIT_TERMINAL_PROMPT=0`, before MUTATION 1/3.
+3. When the resolved strategy pushes (`pr`, or `auto` with a remote), `ApproveImpl` runs `git push --dry-run --no-verify` to the same remote and refspec as `PushBranch`, with `GIT_TERMINAL_PROMPT=0`, before MUTATION 1/3.
 4. Only a failed probe refuses. A missing credential helper alone never refuses.
 5. The refusal adds a credential-helper hint only when the probe fails with an authentication error on an HTTP(S) remote.
 6. A pre-push hook failure on the real push is a post-close failure under R2.7.
 7. A failure after MUTATION 1/3 adds one state line before the inner error. `ApproveImpl` reads the epic status after the failure and prints it ("epic closed" or "epic still open"), plus the finalize stage that failed.
 8. The inner error's recovery lines stay unchanged and come last. `ApproveImpl` adds `recovery: mindspec impl approve <spec>` only when the inner error has none.
-9. Before its first merge or push, `FinalizeEpic` writes the spec tip that it lands to epic metadata `mindspec_finalize_tip`.
+9. `FinalizeEpic` writes the final publication tip to epic metadata `mindspec_finalize_tip`. It writes the key after the export commit and all bead auto-merges, immediately before the spec-to-main merge or the spec-branch push. Every run overwrites it. The pre-finalize tip record stays separate.
 10. A re-run converges from each durable stage, on both paths:
 
 | Failed stage | Re-run outcome |
@@ -99,67 +103,76 @@ Terms:
 | close or phase write | Closes idempotently, then runs `FinalizeEpic`. |
 | `auto_merge` | Merges the remaining beads. Merged beads are ancestors and are skipped. |
 | `push` (push path) | Pushes again. A branch that is already pushed is a no-op. |
+| `orphan_finalize` (protected main) | Reuses the existing `chore/finalize-<id>` branch, pushes it with `--force-with-lease` on the recorded remote SHA, and never opens a second PR. This holds before and after the carrier push, and after local spec-branch deletion. |
 | direct merge to main | Skips the merge when the spec tip is an ancestor of main. |
 | `pre_cleanup` / cleanup | Finishes the remaining removals. |
-| after spec-branch deletion | When `mindspec_finalize_tip` is an ancestor of main (direct) or of the remote spec branch (push), finishes cleanup, prints "already landed" and exits 0. Otherwise the branch-missing refusal stays. |
+| after spec-branch deletion | Prints "already landed" and exits 0 only under R2.12. Otherwise today's branch-missing refusal and adopt recovery stay. |
 
 11. While the spec branch exists, a re-run runs every pre-close gate again on the current spec tip. No gate is skipped because the epic is closed.
+12. The "already landed" re-run needs all of these: the epic is closed and the phase is done; `mindspec_finalize_tip` is an ancestor of the target; and every child bead's landed binding is an ancestor of the target. The target is main (direct) or the remote spec branch, read with `git ls-remote` (push). Cleanup then runs the destruction guard again and deletes only bead branches whose tips are ancestors of the target.
 
 ### R3 — Merge, then verify, then close (#250)
 
+0. Git state selects the path. When the spec branch's first-parent chain has a naming merge for the bead, `complete` takes the closing path (R3.4–R3.7). Otherwise it takes today's merge path. A marker that names another bead's merge, or a commit that is not a naming merge for the bead, refuses, whatever else exists.
 1. `mindspec complete <bead> --merge-only` runs every gate that `complete` runs, materializes, and merges the bead into the spec branch. It prints the merge SHA and both parents.
 2. It writes `mindspec_merge_only_sha=<merge>` to bead metadata. The marker is a hint. Git state decides.
 3. It does not close the bead, commit the panel ledger, write the landed binding, clear the stage marker, or remove the branch or worktree.
-4. A plain `complete` after `--merge-only` refuses before any close or cleanup when: the bead tip moved past the marker merge's second parent (it names the new commits); the bead worktree is dirty; or no valid merge exists. The recovery is `mindspec complete <bead> --merge-only`. For a reverted merge, the text says to commit a fix on the bead branch first.
-5. Otherwise the plain call re-runs every gate (panel, doc-sync, ADR) on the current tip and does not merge again. It does these steps in this order:
+4. A bead has at most one naming merge. A `--merge-only` or any other step that would make a second naming merge refuses (R3.8 makes no merge). The closing path refuses before any close or cleanup when:
+   - the bead tip moved past the merge's second parent (the text names the new commits);
+   - the bead worktree has user changes (tool-artifact paths are ignored);
+   - the naming merge is not valid;
+   - M's change is reverted fully or partly on the spec branch: the content check gives a clean divergence on M's paths, and no later naming merge for another bead touches them.
+5. A fix found after verification goes to a follow-up bead. The refusal says this and prints `recovery: bd create "<title>" --parent <epic> --deps <bead>`. When the bead tip moved, the text lists the new commits for the follow-up bead and adds `recovery: git -C <bead worktree> reset --keep <second parent>`, then `recovery: mindspec complete <bead>`. For a reverted merge, the text says that a person must decide what happens to the bead, and adds `recovery: mindspec doctor`.
+6. Before step 1, the closing path checks that the spec worktree has no merge in progress and no staged changes outside the export and ledger paths. Otherwise it refuses with the recovery for that other merge. The closing path makes no commit on the bead branch. It re-runs every gate (panel, doc-sync, ADR) on the current tip, makes no merge, and does these steps in this order:
 
 | Step | Effect |
 |---|---|
 | 1 | `bd close` the bead. |
 | 2 | Write the landed binding and the reviewed-SHA keys for the valid merge. |
 | 3 | Write the doc-skew and ADR override metadata. |
-| 4 | Export the tracker and commit the export and the panel ledger on the spec branch, in the spec worktree. This commit publishes the close. |
+| 4 | Export the tracker and commit the export and the panel ledger on the spec branch, in the spec worktree, with a path-scoped commit. This commit publishes the close. |
 | 5 | Clear the stage marker. |
 | 6 | Remove the bead branch and worktree. |
 
-6. A failure at steps 1–4 refuses with recovery `mindspec complete <bead>`. A re-run converges, because each step is idempotent. Step 6 does not start until step 4 succeeds.
-7. A repeated `--merge-only` with a valid merge makes no new merge. It writes the marker for that merge. This is also the recovery when the marker write fails after the merge.
-8. `doctor` reports a stale-open bead at Info when a valid merge exists for it, with recovery `mindspec complete <bead>`. Without a valid merge, the finding stays at Error. The marker does not change the severity.
+7. A failure at steps 1–4 refuses with recovery `mindspec complete <bead>`. A re-run converges, because each step is idempotent. Step 6 does not start until step 4 succeeds. After step 4, a re-run on the closed bead finishes steps 5 and 6 and does not evaluate the valid-merge rule again.
+8. A repeated `--merge-only` when a valid merge for the current tip exists makes no new merge. It writes the marker for that merge. This is also the recovery when the marker write fails after the merge.
+9. `doctor` reports a stale-open bead at Info when a valid merge exists for it, with recovery `mindspec complete <bead>`. Without a valid merge, the finding stays at Error. The marker does not change the severity.
 
 ### R4 — `merge_strategy` decides the landing
 
 1. `merge_strategy` accepts `auto`, `pr` and `direct`.
 2. One resolver in `internal/lifecycle` returns the strategy and its source (`config` or `default`). `ApproveImpl` calls it one time in preflight, from the main checkout's config, and passes the strategy to `FinalizeEpic` as a parameter. `FinalizeEpic` does not read config again. The early guard gate (R2.1) uses the same value.
-3. A config load failure or an unknown value refuses before any mutation. It never falls back to the default. Text: `cannot use merge_strategy: <reason>`. Recovery: `set merge_strategy to auto (the default) in .mindspec/config.yaml, then re-run`.
+3. A config load failure or an unknown value refuses before any mutation. It never falls back to the default. Text: `cannot use merge_strategy: <reason>`. Recovery: `set merge_strategy to auto in .mindspec/config.yaml, then re-run`.
 4. `auto` keeps today's rule: push when a remote exists, else merge locally.
 5. `pr` requires a remote. With no remote, preflight refuses with `merge_strategy is pr but no git remote is configured` and `recovery: git remote add origin <url>`.
 6. `direct` merges into main locally and does not push, even with a remote.
 7. `impl approve` prints `merge strategy: <value> (from <source>)`.
 8. When `direct` and a remote both exist, `impl approve` prints a notice that it will not push, and `doctor` reports a Warn.
-9. The harness sandbox and the lifecycle scenario fixture change to `auto`. `scenario_finalize_pr` keeps its push leg.
+9. The harness sandbox, the lifecycle scenario fixture and the verb-output fixture (`cmd/mindspec/verb_output_test.go:419`) change to `auto`. These fixtures have no remote, so behavior does not change. `scenario_finalize_pr` keeps its push leg.
 
 ### R5 — Reviewed-tree datum (#233)
 
 1. The reviewed set R comes from the panel registrations (`reviewedHeadSHAForBead`). The `mindspec_landed_reviewed_sha` key counts only when it is in that set. Otherwise the provenance calls it unverified, and it does not confirm.
-2. In `FindLandedMerge`, the panel datum confirms a candidate with second parent D when D is in R (today's rule), or when some r in R is an ancestor of D and `git diff --no-renames --name-only r D` lists only tool-artifact paths.
+2. In `FindLandedMerge`, the panel datum confirms a candidate with second parent D when D is in R (today's rule), or when some r in R is an ancestor of D and `git diff --no-renames --name-only -z r D` lists no path or only tool-artifact paths. The tool-artifact set is `panel.ToolArtifactPaths` for the spec directory of the bead's own epic.
 3. The datum never vetoes and never overrides a tip or binding contradiction. The revert check still runs after it.
 4. The datum is not evaluated on the reachable-fallback path.
 5. The provenance string names the rule that matched: `exact` or `reviewed-tree`.
 
-Safety: subject text still nominates ownership, and topology still proves landed-ness. The new rule accepts only a D that adds tool-written files to a reviewed tree. It confirms nothing that an exact match would not confirm for reviewed content.
+Safety: subject text still nominates ownership, and topology still proves landed-ness. The new rule accepts only a D that adds tool-written files to a reviewed tree. It confirms nothing that an exact match would not confirm for reviewed content. A panel ledger change such as `dispositions.jsonl` in D is safe: it records review results and changes no code, and the panel gate reads it separately. A tool-artifact path of another spec does not match.
 
 ### R6 — Ancestor without a naming merge (#251)
 
 1. Reattest evaluates R6 only after the primary scan and the reachable fallback both find no candidate.
 2. When `bead/<P>` is absent, the outcome stays `no-owned-exact-merge`. A git read error refuses as indeterminate and makes no claim.
-3. P has own commits when the `bead/<P>` tip is an ancestor of the spec tip and is not on the spec branch's first-parent chain. Without own commits, the outcome stays `no-owned-exact-merge`.
-4. With own commits, reattest runs the landed content and revert checks (`landedContentSubsumed`, `landedRevertShape`) on P's commits at the spec tip.
-5. Content present: state `ancestor-without-naming-merge`. The text says that P's changes are present on the spec branch, that no merge names P, and that a re-merge cannot help.
-6. Content reverted or indeterminate: the outcome stays `no-owned-exact-merge`. One more line says that P's commits are in the spec history, and that the tool cannot show that their changes are present. It makes no claim that the work is present.
-7. The R6.5 recovery has one line for each open bead in the same epic that depends on P: `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>`. With zero dependents, the text says that no bead waits on P, and the recovery is `mindspec doctor`.
-8. `doctor` reports P itself, at Warn, when P has no landed binding and R6.5 applies. It prints the R6.7 recovery lines.
-9. Reattest gets no operator nomination.
-10. Error-injection tests cover the three `fallbackSafety` reads (forward content, reverse content, branch tip). Each read error refuses.
+3. The base B is the newest commit on the spec branch's first-parent chain that is an ancestor of the `bead/<P>` tip. P's range is B..P-tip. When B cannot be found, the state is unknown, with no override recommendation. When the range is empty, the outcome stays `no-owned-exact-merge`.
+4. When P's tip equals, or every commit in the range is reachable from, the second parent of another bead's naming merge, the text says "not P's own work", with no override recommendation.
+5. Otherwise reattest checks the range at the spec tip with base-taking helpers: the content check (`ContentSubsumedOutcome` with base B, head P-tip, target spec tip) and a new revert check. The new check takes a base, a head and a target, and reports whether the target reverts any change in base..head.
+6. Content present and not reverted: state `ancestor-without-naming-merge`. The text says that P's changes are present on the spec branch, that no merge names P, that a re-merge cannot help, and that a person must verify the work before using the override.
+7. Content reverted or indeterminate: the outcome stays `no-owned-exact-merge`. One more line says that P's commits are in the spec history, and that the tool cannot show that their changes are present. It makes no claim that the work is present.
+8. The R6.6 recovery has one line for each open bead in the same epic that depends on P: `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>`. With zero dependents, the text says that no bead waits on P, and the recovery is `mindspec doctor`.
+9. `doctor` reports P itself, at Warn, when P has no landed binding and R6.6 applies. It prints the R6.8 recovery lines.
+10. Reattest gets no operator nomination.
+11. Regression guards: error-injection tests cover the three existing `fallbackSafety` reads (forward content, reverse content, branch tip). Each read error refuses. A separate test covers a read error on the new R6 path.
 
 ### R7 — One lineage (wtjr, fdfg.6)
 
@@ -168,7 +181,11 @@ Safety: subject text still nominates ownership, and topology still proves landed
 3. The bead-title fallback in `FindEpicForBeadWithCache` goes.
 4. `internal/phase` returns the lineage provenance with the epic. `next` uses it and runs no second `bd show` per plan row.
 5. `spec approve` writes the full spec ID to epic metadata `spec_id`.
-6. Epic-to-spec resolution reads `spec_id` (validated with `idvalidate.SpecID`) first, then `spec_num` plus `spec_title`, then the epic's own `[SPEC <id>]` title parsed as a full spec ID. A lettered ID resolves to its own spec, never to the base number.
+6. Epic-to-spec resolution has three sources: `spec_id`, then `spec_num` plus `spec_title`, then the epic's own `[SPEC <id>]` title parsed as a full spec ID with any letter. A lettered ID resolves to its own spec, never to the base number. Rules:
+   - `spec_num` 0 or an empty `spec_title` counts as absent.
+   - A `spec_id` that fails `idvalidate.SpecID` refuses for that epic. Resolution does not fall through.
+   - When two present sources disagree, resolution refuses and prints `recovery: bd update <epic> --set-metadata spec_id=<id>` with the exact ID from the title. It never picks the plain ID.
+   - When more than one epic, closed epics included, resolves to one spec ID, resolution refuses and names each epic.
 7. `beadIndex` accepts a bead ID only when it equals `<epicID>.<N>`.
 8. `doctor` lists, at Warn, every open bead that resolves only through the removed bead-title rule. Its recovery is `bd update <bead> --parent <epic>`. Doctor uses the title parse only for this diagnosis.
 9. `spec create` refuses a new lettered spec ID such as `129b-x`. Existing lettered directories stay valid. No directory is renamed.
@@ -177,7 +194,7 @@ Safety: subject text still nominates ownership, and topology still proves landed
 
 1. ADR-0041 and ADR-0036 get a "Spec 132 amendment" section with the R1, R2, R3 and R5 changes.
 2. Spec 129 gets dated status notes: the "Deferred to the follow-on spec" list names spec 132 for G, H, #250, I and lineage; AC-11 says that advisories never change the exit code, the binding or the audited tuple; AC-1 quotes the emitted diagnostic; the plan verification command sets `-timeout=20m`.
-3. `merge-safety.md` and the workflow runbook name the attested-restore exit, the R6 states and `--merge-only`.
+3. `merge-safety.md` and the workflow runbook name the attested-restore exit, the R6 states, `--merge-only`, the one-naming-merge rule and the partial-revert refusal.
 
 ## Deferred to follow-on spec
 
@@ -209,29 +226,29 @@ These items move to one follow-on spec. Each carries the round-1 corrections bel
 ## Acceptance Criteria
 
 - [ ] **AC-1 (R1.1–R1.3)**: A claim added at the spec tip after the bead forks makes `complete` pass in both legs. A claim revoked at the spec tip makes `complete` refuse with `adr-divergence-unowned`. Tests: `TestCommittedRangeGate_SpecTipClaimOwns`, `TestMaterialize_SpecTipClaimOwns`, `TestCommittedRangeGate_RevokedAtSpecTipRefuses`, `TestCheckUnclaimedSource_LandingTree`.
-- [ ] **AC-2 (R1.4)**: Conflicting `OWNERSHIP.yaml` edits refuse with the merge-conflict recovery and change nothing. Test: `TestCommittedRangeGate_LandingTreeConflictRefuses`.
+- [ ] **AC-2 (R1.4–R1.6)**: Conflicting `OWNERSHIP.yaml` edits refuse with the merge-conflict recovery and change nothing. A conflict on a source file only passes the gate, `MergeInto` keeps the conflict, and `--resolve-merge` then completes with ownership read from the resolved index. Tests: `TestCommittedRangeGate_LandingTreeConflictRefuses`, `TestCommittedRangeGate_SourceConflictPassesThenResolves`.
 - [ ] **AC-3 (R2.1)**: A layout-guard failure and a destruction failure each exit non-zero with the epic open and the phase unchanged, including from a stale-phase fixture. Tests: `TestApproveImpl_EarlyLayoutGuardRefuses`, `TestApproveImpl_EarlyDestructionRefuses`, `TestApproveImpl_EarlyGuardBeforePhaseReconcile`.
 - [ ] **AC-4 (R2.2)**: An auto-merge in `FinalizeEpic` makes the spec-to-main merge destructive after the early check passed. The executor guard still refuses. Test: `TestFinalizeEpic_ExecutorGuardAfterAutoMerge`.
 - [ ] **AC-5 (R2.3–R2.5)**: Through a push-probe seam, an HTTPS auth failure refuses before the close and names the credential helper. A non-fast-forward failure refuses and does not name it. A file remote with `GIT_CONFIG_GLOBAL=/dev/null` and no helper passes. The probe argv has `--dry-run --no-verify` and the `PushBranch` remote and refspec. Tests: `TestApproveImpl_PushProbeAuthFailureNamesHelper`, `TestApproveImpl_PushProbeNonFastForwardNoHelperHint`, `TestApproveImpl_PushProbeFileRemoteNoHelperPasses`, `TestPushProbe_ArgvMatchesPushBranch`.
 - [ ] **AC-6 (R2.7, R2.8)**: An injected spec-to-main conflict after the close prints "epic closed", the stage, and the `--resolve-merge` recovery last, with no added `impl approve` line. An injected close failure prints "epic still open". An inner error with no recovery gets `recovery: mindspec impl approve <spec>`. Tests: `TestApproveImpl_PostCloseConflictKeepsInnerRecovery`, `TestApproveImpl_StateLineReadsEpicStatus`, `TestApproveImpl_PostCloseBareErrorGetsRerun`.
-- [ ] **AC-7 (R2.9, R2.10)**: For each `finalizeStepHook` stage on both paths, a failed run then a re-run lands the spec with one close, one merge or push, and exit 0. After spec-branch deletion, the re-run prints "already landed". Test: `TestApproveImpl_RerunConvergesFromEachStage` (table over stages and paths; runs both calls).
-- [ ] **AC-8 (R2.11)**: A source commit that fails doc-sync, added to the spec branch between the calls, makes the re-run refuse. Test: `TestApproveImpl_RerunReRunsGates`.
-- [ ] **AC-9 (R3.1–R3.3)**: `--merge-only` leaves the bead open, the branch and worktree present, no binding, no ledger commit, and the marker written. Test: `TestComplete_MergeOnlyKeepsBeadOpen`.
-- [ ] **AC-10 (R3.4)**: Each refusal leaves the bead open and the branch and worktree present: a bead commit after `--merge-only` (named in the text), a dirty worktree, a marker that names another bead's merge, and a reverted merge. Tests: `TestComplete_BeadAdvancedAfterMergeOnlyRefuses`, `TestComplete_DirtyAfterMergeOnlyRefuses`, `TestComplete_ForeignMarkerRefuses`, `TestComplete_RevertedMergeOnlyRefuses`.
-- [ ] **AC-11 (R3.5, R3.6)**: A plain `complete` after `--merge-only` makes no new merge. The spec branch's last commit has an export that shows the bead closed, and it lands before the branch removal. An injected export-commit failure keeps the branch and worktree, and a re-run converges. Tests: `TestComplete_AfterMergeOnlyPublishesClose`, `TestComplete_AfterMergeOnlyExportFailureConverges`.
-- [ ] **AC-12 (R3.7)**: After an injected marker-write failure, a repeated `--merge-only` writes the marker and makes no new merge. Test: `TestComplete_RepeatedMergeOnlyNoNewMerge`.
-- [ ] **AC-13 (R3.8)**: `doctor` gives Info for a stale-open bead with a valid merge, and Error for a forged marker with no valid merge. Test: `TestDoctor_StaleOpenSeverityFromGitState`.
+- [ ] **AC-7 (R2.9, R2.10)**: For each `finalizeStepHook` stage, `orphan_finalize` included, on both paths, a failed run then a re-run lands the spec with one close and exit 0. Each remote ref is pushed at most once per converged state, and no second PR opens. A fixture with a finalize-time auto-merge shows that `mindspec_finalize_tip` equals the merged or pushed tip. Tests: `TestApproveImpl_RerunConvergesFromEachStage` (table over stages and paths; runs both calls), `TestFinalizeEpic_FinalizeTipIsPublishedTip`.
+- [ ] **AC-8 (R2.11, R2.12)**: A source commit that fails doc-sync, added to the spec branch between the calls, makes the re-run refuse. After a real landing and spec-branch deletion, the re-run prints "already landed". A forged `mindspec_finalize_tip` (main HEAD or the fork point) with a deleted spec branch and an unlanded bead branch refuses, and the bead branch survives. Tests: `TestApproveImpl_RerunReRunsGates`, `TestApproveImpl_AfterDeletionAlreadyLanded`, `TestApproveImpl_ForgedFinalizeTipRefuses`.
+- [ ] **AC-9 (R3.0–R3.3)**: `--merge-only` leaves the bead open, the branch and worktree present, no binding, no ledger commit, and the marker written. A hand naming merge with no marker takes the closing path. A marker that names another bead's merge refuses, also when a valid merge for the bead exists. Tests: `TestComplete_MergeOnlyKeepsBeadOpen`, `TestComplete_HandMergeTakesClosingPath`, `TestComplete_ForeignMarkerRefuses`.
+- [ ] **AC-10 (R3.4, R3.5)**: Each refusal leaves the bead open and the branch and worktree present: a bead commit after `--merge-only` (named in the text), user changes in the worktree (tool-artifact changes alone pass), a fully reverted merge, a partly reverted merge, and a second `--merge-only`. A subject with control characters prints escaped. Full loop: `--merge-only`, a fix commit, a second `--merge-only` refuses, the fix goes to a follow-up bead, the reset and plain `complete` close the bead over the first merge, and reattest, `doctor`, the dependents' MF-3 and `impl approve` all read the bead as landed. Tests: `TestComplete_BeadAdvancedAfterMergeOnlyRefuses`, `TestComplete_UserDirtAfterMergeOnlyRefuses`, `TestComplete_RevertedMergeOnlyRefuses`, `TestComplete_PartlyRevertedMergeOnlyRefuses`, `TestComplete_SecondMergeOnlyRefuses`, `TestComplete_MergeOnlyRefusalEscapes`, `TestComplete_MergeOnlyFollowUpLoop`.
+- [ ] **AC-11 (R3.6, R3.7)**: The closing path makes no new merge and no bead-branch commit. The spec branch's last commit has an export that shows the bead closed, and it lands before the branch removal. A spec worktree with another merge in progress refuses before the close. An injected export-commit failure keeps the branch and worktree, and a re-run converges. An injected step-5 failure and a partial step 6 each finish on a re-run. Tests: `TestComplete_AfterMergeOnlyPublishesClose`, `TestComplete_ClosingPathSpecWorktreeBusyRefuses`, `TestComplete_AfterMergeOnlyExportFailureConverges`, `TestComplete_ClosedBeadFinishesCleanup`.
+- [ ] **AC-12 (R3.8)**: After an injected marker-write failure, a repeated `--merge-only` writes the marker and makes no new merge. Test: `TestComplete_RepeatedMergeOnlyNoNewMerge`.
+- [ ] **AC-13 (R3.9)**: `doctor` gives Info for a stale-open bead with a valid merge, and Error for a forged marker with no valid merge. Test: `TestDoctor_StaleOpenSeverityFromGitState`.
 - [ ] **AC-14 (R4.2–R4.3)**: A broken `config.yaml` and `merge_strategy: bogus` each refuse before the close with the R4.3 text. `FinalizeEpic` with `direct` makes no push even when config on disk says `pr`. Tests: `TestApproveImpl_StrategyLoadFailureRefuses`, `TestApproveImpl_UnknownStrategyRefuses`, `TestFinalizeEpic_UsesPassedStrategy`.
-- [ ] **AC-15 (R4.4–R4.9)**: `pr` with no remote refuses. `direct` with a remote merges locally, makes no push call, prints the notice, and `doctor` warns. `auto` keeps both paths. Output names the strategy and source. The harness fixtures read `auto`. Tests: `TestApproveImpl_PRStrategyNoRemoteRefuses`, `TestFinalizeEpic_DirectWithRemoteDoesNotPush`, `TestFinalizeEpic_AutoUnchanged`, `TestDoctor_DirectWithRemoteWarns`, `TestHarnessSandbox_StrategyAuto`.
-- [ ] **AC-16 (R5.1–R5.5)**: A branch-less bead whose D adds only tool-artifact paths to a reviewed r is identified on the `complete` reconcile path, with provenance `reviewed-tree`. This fails on the old code. A D that also changes a source file, or renames a source file to a tool-artifact path, is not confirmed. A metadata key that is not in R does not confirm. The fallback path ignores the datum. Tests: `TestFindLandedMerge_ReviewedTreeConfirms`, `TestFindLandedMerge_ReviewedTreeSourceDiffNoConfirm`, `TestFindLandedMerge_ReviewedTreeRenameNoConfirm`, `TestFindLandedMerge_UnregisteredKeyNoConfirm`, `TestReattestFallback_IgnoresPanelDatum`.
-- [ ] **AC-17 (R6.1–R6.5)**: P's commits arrive inside a later bead's merge with content present, so reattest returns `ancestor-without-naming-merge`. Test: `TestReattest_AncestorWithoutNamingMerge`.
-- [ ] **AC-18 (R6.2, R6.3, R6.6)**: A zero-commit `bead/<P>`, a branch restored at a first-parent commit, and a deleted branch each give `no-owned-exact-merge`. Reverted content gives `no-owned-exact-merge` with the history line and no "present" claim. An injected git read error refuses as indeterminate. Tests: `TestReattest_AncestorZeroCommitsNoClaim`, `TestReattest_AncestorFirstParentRestoreNoClaim`, `TestReattest_AncestorDeletedBranch`, `TestReattest_AncestorRevertedHistoryOnly`, `TestReattest_AncestorReadErrorIndeterminate`.
-- [ ] **AC-19 (R6.7, R6.8)**: Two dependents give two recovery lines. Zero dependents give `recovery: mindspec doctor`. `doctor` names P, not its dependent. Tests: `TestReattest_AncestorRecoveryPerDependent`, `TestReattest_AncestorZeroDependents`, `TestDoctor_AncestorNamesPrerequisite`.
-- [ ] **AC-20 (R6.10)**: An injected error on each of the three `fallbackSafety` reads refuses. Tests: `TestFallbackSafety_ForwardContentErrorRefuses`, `TestFallbackSafety_ReverseContentErrorRefuses`, `TestFallbackSafety_BranchTipErrorRefuses`.
-- [ ] **AC-21 (internal refs)**: The reattest refusals, the reattest `Short` text and the two `materialize.go` messages match none of `ADR-[0-9]`, `q9ea` or `[Ss]pec [0-9]{3}`. The no-owned refusal contains "attested restore" and a plain sentence that a person must verify the merge first. Recovery lines are commands with no parentheses. A fixture bead `mindspec-ab12` and its `bead/mindspec-ab12` branch render in their operand positions. Tests: `TestReattestText_NoHistoricalCitations`, `TestReattestText_OperandsRender`, `TestMaterializeText_NoHistoricalCitations`.
+- [ ] **AC-15 (R4.4–R4.9)**: `pr` with no remote refuses. `direct` with a remote merges locally, makes no push call, prints the notice, and `doctor` warns. `auto` keeps both paths. Output names the strategy and source. The harness and verb-output fixtures read `auto`. Tests: `TestApproveImpl_PRStrategyNoRemoteRefuses`, `TestFinalizeEpic_DirectWithRemoteDoesNotPush`, `TestFinalizeEpic_AutoUnchanged`, `TestDoctor_DirectWithRemoteWarns`, `TestHarnessSandbox_StrategyAuto`.
+- [ ] **AC-16 (R5.1–R5.5)**: A branch-less bead whose D adds only tool-artifact paths to a reviewed r is identified on the `complete` reconcile path, with provenance `reviewed-tree`. This fails on the old code. An empty wrapper commit on r also confirms. A D that also changes a source file, renames a source file to a tool-artifact path, or changes another spec's tool-artifact path is not confirmed. A metadata key that is not in R does not confirm. The fallback path ignores the datum. Tests: `TestFindLandedMerge_ReviewedTreeConfirms`, `TestFindLandedMerge_ReviewedTreeEmptyWrapperConfirms`, `TestFindLandedMerge_ReviewedTreeSourceDiffNoConfirm`, `TestFindLandedMerge_ReviewedTreeRenameNoConfirm`, `TestFindLandedMerge_ReviewedTreeOtherSpecDirNoConfirm`, `TestFindLandedMerge_UnregisteredKeyNoConfirm`, `TestReattestFallback_IgnoresPanelDatum`.
+- [ ] **AC-17 (R6.1–R6.6)**: P's commits arrive inside a later bead's merge with content present, so reattest returns `ancestor-without-naming-merge` with the person-must-verify sentence. Test: `TestReattest_AncestorWithoutNamingMerge`.
+- [ ] **AC-18 (R6.2–R6.5, R6.7)**: A zero-commit `bead/<P>`, a branch restored at a first-parent commit, and a deleted branch each give `no-owned-exact-merge`. A branch restored at another bead's tip, and a zero-commit branch cut from another bead's tip, each give "not P's own work". A revert of P's earlier commit, and fully reverted content, each give `no-owned-exact-merge` with the history line and no "present" claim. A missing base gives unknown. An injected git read error on the new path refuses as indeterminate. Tests: `TestReattest_AncestorZeroCommitsNoClaim`, `TestReattest_AncestorFirstParentRestoreNoClaim`, `TestReattest_AncestorDeletedBranch`, `TestReattest_AncestorOtherBeadTipNotOwn`, `TestReattest_AncestorEarlierCommitReverted`, `TestReattest_AncestorRevertedHistoryOnly`, `TestReattest_AncestorNoBaseUnknown`, `TestReattest_AncestorReadErrorIndeterminate`.
+- [ ] **AC-19 (R6.8, R6.9)**: Two dependents give two recovery lines. Zero dependents give `recovery: mindspec doctor`. `doctor` names P, not its dependent. Tests: `TestReattest_AncestorRecoveryPerDependent`, `TestReattest_AncestorZeroDependents`, `TestDoctor_AncestorNamesPrerequisite`.
+- [ ] **AC-20 (R6.11, regression guards)**: An injected error on each of the three existing `fallbackSafety` reads refuses. Tests: `TestFallbackSafety_ForwardContentErrorRefuses`, `TestFallbackSafety_ReverseContentErrorRefuses`, `TestFallbackSafety_BranchTipErrorRefuses`.
+- [ ] **AC-21 (internal refs)**: The reattest refusals, the reattest `Short` text, the two `materialize.go` messages and the R4.3 recovery match none of `ADR-[0-9]`, `q9ea` or `[Ss]pec [0-9]{3}`. The no-owned refusal contains "attested restore" and a plain sentence that a person must verify the merge first. Recovery lines are commands with no parentheses. A fixture bead `mindspec-ab12` and its `bead/mindspec-ab12` branch render in their operand positions. Tests: `TestReattestText_NoHistoricalCitations`, `TestReattestText_OperandsRender`, `TestMaterializeText_NoHistoricalCitations`.
 - [ ] **AC-22 (R7.1–R7.3)**: A `blocks` edge to a foreign epic is not lineage. Two parent-child epics refuse. A `[129]` title with no parent-child edge has no lineage. Tests: `TestFindEpicForBead_BlocksDepIgnored`, `TestFindEpicForBead_TwoParentsRefuse`, `TestFindEpicForBead_NoTitleFallback`.
 - [ ] **AC-23 (R7.4)**: A foreign-lineage plan row costs one `bd show`. Test: `TestBuildReadySet_OneShowPerPlanRow`.
-- [ ] **AC-24 (R7.5, R7.6)**: With epics for `129-x` and `129b-y` both present, each bead resolves to its own spec, and `next`, `complete` and `plan approve` act on `129b-y`. Tests: `TestResolveSpec_PlainAndLetteredBothPresent`, `TestLifecycle_LetteredSpecResolves`.
+- [ ] **AC-24 (R7.5, R7.6)**: With epics for `129-x` and `129b-y` both present, each bead resolves to its own spec, and `next`, `complete` and `plan approve` act on `129b-y`. A `[SPEC 008b-human-gates]` epic with legacy `spec_num=8`, `spec_title=human-gates` and no `spec_id` refuses with the `--set-metadata spec_id=008b-human-gates` recovery. `spec_num` 0 counts as absent. An invalid `spec_id` refuses. Two epics on one spec, one closed, refuse and name both. Tests: `TestResolveSpec_PlainAndLetteredBothPresent`, `TestLifecycle_LetteredSpecResolves`, `TestResolveSpec_LegacyPairDisagreesRefuses`, `TestResolveSpec_SpecNumZeroAbsent`, `TestResolveSpec_InvalidSpecIDRefuses`, `TestResolveSpec_TwoEpicsRefuse`.
 - [ ] **AC-25 (R7.7–R7.9)**: `beadIndex` rejects `mindspec-x.3` for epic `mindspec-y`. `doctor` lists a title-only open bead with the `bd update --parent` recovery. `spec create 129b-x` refuses, and `idvalidate` accepts `008b-human-gates`. Tests: `TestBeadIndex_RequiresEpicPrefix`, `TestDoctor_TitleOnlyLineage`, `TestSpecCreate_RefusesLetteredID`.
 - [ ] **AC-26 (R13)**: Each ADR and spec-129 note exists, and `mindspec validate spec 129-readiness-tracker-honesty` passes. Test: `TestDocs_Spec132Amendments`.
 
@@ -246,7 +263,7 @@ These items move to one follow-on spec. Each carries the round-1 corrections bel
 ## Open Questions
 
 - [ ] **`merge_strategy`: honour or delete?** (a) Honour it, as R4 says. (b) Delete the key and its `config show` row, and keep the `HasRemote` rule. Recommended: (a). Repos already set the key, and `direct` with a remote is a real need. The cost is the harness fixture change and the R4.8 notice.
-- [ ] **#250 shape.** (a) `--merge-only` plus the git-state severity rule, as R3 says. (b) No new flag. Document "merge by hand, then `complete`" as supported. `doctor` gives Info when a valid merge exists (R3.8 rule), with its own AC: a hand naming merge whose second parent is the bead tip gives Info, and a reverted one gives Error. (c) Only `--merge-only`, with Info gated by the marker. Recommended: (a). It gives a verified tool path, and R3.8 also covers hand merges. Option (c) trusts an agent-writable marker.
+- [ ] **#250 shape.** Every option keeps one naming merge per bead (R3.4): a fix found after verification goes to a follow-up bead, and the bead closes over its first merge. (a) `--merge-only` plus the git-state severity rule, as R3 says. (b) No new flag. Document "merge by hand, then `complete`" as supported. `doctor` gives Info when a valid merge exists (R3.9 rule), with its own AC: a hand naming merge whose second parent is the bead tip gives Info, and a reverted one gives Error. (c) Only `--merge-only`, with Info gated by the marker. Recommended: (a). It gives a verified tool path, and R3.9 also covers hand merges. Option (c) trusts an agent-writable marker.
 - [ ] **Confirm the split.** R8–R12 move to one follow-on spec, as "Deferred to follow-on spec" says. Recommended: confirm. Spec 132 is then about 9 beads: R1, R2 (two beads), R3 (two beads), R4, R5, R6, R7.
 - [ ] **Freshness warning (follow-on spec).** (a) Warn once per session per reason. (b) A dispatch flag on `next` that an orchestrator sets. Recommended: (a), together with the refusal-text change. With (a) alone, the gate still refuses fresh agents.
 
