@@ -1061,7 +1061,27 @@ func RecordMergeConflicts(workdir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append([]byte(mergeHead+" "+head+"\n"), out...), 0o644)
+	// Write a temp file in the same git dir, then rename it into place,
+	// so a crash never leaves a cut-off record that still parses.
+	tmp, err := os.CreateTemp(filepath.Dir(path), mergeConflictRecordName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	data := append([]byte(mergeHead+" "+head+"\n"), out...)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	return nil
 }
 
 func mergeConflictRecordHeads(workdir string) (mergeHead, head string, err error) {
@@ -1086,6 +1106,8 @@ func ClearMergeConflictRecord(workdir string) {
 // not the current one, or if it is malformed in any way: a header
 // without exactly two SHAs, no paths, an empty path, or no NUL after
 // the last path (a truncated record).
+// Limit: after a raw abort, a hand re-merge of the same tip from the same
+// HEAD with other merge options can reuse the record; that is out of scope.
 func MergeConflictRecord(workdir string) (paths []string, ok bool) {
 	path, err := mergeConflictRecordPath(workdir)
 	if err != nil {

@@ -211,6 +211,13 @@ func TestStagedConflictMarkerFiles_RecordLimitsScan(t *testing.T) {
 	if paths, ok := MergeConflictRecord(dir); !ok || !reflect.DeepEqual(paths, []string{"f"}) {
 		t.Fatalf("record = %q, %v; want [f], true", paths, ok)
 	}
+	recPath, err := mergeConflictRecordPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := filepath.Glob(recPath + ".tmp-*"); len(left) != 0 {
+		t.Errorf("the atomic write must leave no temp file; found %q", left)
+	}
 	assertMarkerFiles(t, dir, []string{"f"})
 }
 
