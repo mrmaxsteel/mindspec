@@ -887,6 +887,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if panelGateErr != nil {
 			return nil, panelGateErr
 		}
+		if err := checkPanelCore3(panelDecisions, panelGateEnabled, advisoryOut); err != nil {
+			return nil, err
+		}
 		if len(panelDecisions) > 0 {
 			panelReg = &panelDecisions[0].Registration
 		}

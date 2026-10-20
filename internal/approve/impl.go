@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -31,6 +32,7 @@ import (
 )
 
 var (
+	implPanelSkipEnvFn  = func() bool { return os.Getenv(panel.SkipPanelEnv) == "1" }
 	implRunBDCombinedFn = bead.RunBDCombined
 	implRunBDFn         = bead.RunBD
 	implMergeMetadataFn = bead.MergeMetadata
@@ -543,6 +545,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// NO push, NO placeholder-ADR write. Hatches (MINDSPEC_SKIP_PANEL,
 	// enforcement.panel_gate: false) bypass NOTHING here.
 	if err := runOrphanObligationGate(root, specID, specBranch, beadIDs, planErr); err != nil {
+		return nil, err
+	}
+
+	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
 		return nil, err
 	}
 
@@ -1218,6 +1224,53 @@ func implLedgerPreflight(root, specID string, exec executor.Executor) error {
 			if dirty == file || strings.HasPrefix(file, strings.TrimSuffix(dirty, "/")+"/") {
 				return guard.NewFailure("panel ledger has uncommitted changes: "+termsafe.Escape(file), complete.LedgerCommitRecovery(wt, []string{file}))
 			}
+		}
+	}
+	return nil
+}
+
+// implPanelCore3Preflight checks every spec registration, final review included.
+// Integrity checks precede the abandoned/legacy skip; no gate decision runs here.
+func implPanelCore3Preflight(root, specID string, out io.Writer) error {
+	if implPanelSkipEnvFn() {
+		return nil
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enforcement.PanelGate {
+		return nil
+	}
+	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
+		if reg.Panel.Spec != specID && reg.Err == nil {
+			continue
+		}
+		if reg.Err != nil {
+			return complete.PanelCore3Failure(reg, reg.Err)
+		}
+		legacy, err := panel.LegacyPanel(reg.Dir)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		if field != "" {
+			return complete.PanelCore3Failure(reg, fmt.Errorf("panel.json changed outside the panel verbs (%s)", field))
+		}
+		if legacy || reg.Panel.Abandoned {
+			if out != nil {
+				fmt.Fprintf(out, "panel advisory: %s coverage check skipped for legacy or abandoned registration\n", termsafe.Escape(reg.Slug()))
+			}
+			continue
+		}
+		if reg.Panel.Telemetry != "required" {
+			continue
+		}
+		if err := panel.CheckCore3(reg); err != nil {
+			return complete.PanelCore3Failure(reg, err)
 		}
 	}
 	return nil

@@ -8,6 +8,8 @@ package panel
 // independently of Bead 4's live migration.
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -406,5 +408,63 @@ func TestDispositionQuery_LedgerKinds(t *testing.T) {
 				t.Fatal("query ignored malformed event")
 			}
 		})
+	}
+}
+
+func TestComputeQ4_LastManifestOnly(t *testing.T) {
+	first := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "old", Verdict: "APPROVE"}})
+	last := testManifest("p", 2, []ManifestSlot{{Slot: "R1", Model: "new", Verdict: "APPROVE"}, {Slot: "R2", Model: "new", Verdict: "APPROVE"}})
+	other := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "other", Verdict: "APPROVE"}})
+	other.Spec = "998"
+	ms := []CoverageManifest{first, other, last}
+	for _, result := range ComputeQ4(nil, ms) {
+		if result.Gate == "bead" && result.SlotTotal != 3 {
+			t.Fatalf("last manifest per spec/panel must give 3 slots: %+v", result)
+		}
+	}
+	models := ManifestModels(ms)
+	if len(models) != 2 || models[0] != "new" || models[1] != "other" {
+		t.Fatalf("models must use last manifests: %v", models)
+	}
+	dir := filepath.Join(t.TempDir(), "p")
+	for _, m := range []CoverageManifest{first, last} {
+		m.CreatedAt = fmt.Sprintf("2026-10-20T00:00:0%dZ", m.Round)
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendRecords(dir, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, loaded, err := LoadStore(filepath.Join(dir, "dispositions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].Round != 2 {
+		t.Fatalf("store readers must see only last manifest: %+v", loaded)
+	}
+}
+
+func TestCheckCompleteness_LastManifestOnly(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	for i, verdict := range []string{"APPROVE", "REQUEST_CHANGES", "APPROVE"} {
+		m := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "model", Verdict: verdict}})
+		m.CreatedAt = fmt.Sprintf("2026-10-20T00:00:0%dZ", i)
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendRecords(dir, raw); err != nil {
+			t.Fatal(err)
+		}
+		err = CheckCompletenessAt(dir, "p")
+		if verdict == "REQUEST_CHANGES" {
+			if err == nil {
+				t.Fatal("last REQUEST_CHANGES manifest must require coverage")
+			}
+		} else if err != nil {
+			t.Fatalf("last APPROVE manifest must pass: %v", err)
+		}
 	}
 }

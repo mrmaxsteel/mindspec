@@ -317,6 +317,9 @@ and prints a recovery line.`,
 		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
 		facts := resolvePanelGateFacts(root, reg)
 		changes := collectSlotChanges(reg, facts.Res)
+		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
+			return panelCoverageWriteFailure(reg, err)
+		}
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)
 
@@ -1196,4 +1199,9 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target, gate string, gitErr
 
 	d.Message = msg
 	return d
+}
+
+func panelCoverageWriteFailure(reg panel.Registration, err error) error {
+	return guard.NewFailure("could not record panel coverage: "+termsafe.Escape(err.Error()),
+		fmt.Sprintf("mindspec panel tally %s%s", shellQuoteTarget(reg.Slug()), panelCreateScope(reg.Panel.Spec, reg.Panel.Gate)))
 }

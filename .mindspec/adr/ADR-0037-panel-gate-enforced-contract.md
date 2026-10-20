@@ -679,3 +679,6 @@ the gate exists for — the stale APPROVE honored at merge time.
   and write nothing. Completion copies `rebinds[]` to `panel_rebound_entries`
   through the same fail-closed pre-close metadata stage as `panel_refuted`.
   Only R5.3-matched `from_sha` values join the exact-equality landed set.
+- **§7 — Core 3 coverage (R11.5, R11.6).** At `complete`, Core 3 runs only on each returned Allow; a Warn registration (abandoned, missing ref, git error) skips Core 3 with one advisory line. A legacy registration passes with one advisory line. Abandonment stays the audited exit. At `impl approve`, Core 3 runs no gate decision and checks every required registration of the spec, final review included. It skips abandoned and legacy registrations only after the legacy-marker and R5.3 integrity checks; a hand-set `abandoned: true` blocks.
+- **Spec-115 contract reach — Core 3 (R11.5).** The `impl approve` Core 3 preflight leg blocks on incomplete coverage and honours both `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`. The orphan/obligation refusal keeps its no-hatch rule.
+- **Complete preflight outside the cap — Core 3 (R11).** Core 3 runs before materialization, outside the gate subprocess cap, on every matched required Allow registration. Both panel hatches skip this leg.
