@@ -1141,6 +1141,10 @@ func attemptFreshMerge(workdir string, mergeFn func() error, conflictFailure fun
 		if !gitutil.MergeInProgress(workdir) {
 			return worktreeStateRefusal(workdir, blockingPaths(workdir), mergeErr)
 		}
+		// Record git's own conflicted-path list while it still exists, so
+		// --resolve-merge later scans exactly those files for leftover
+		// markers. Best effort: without it, every staged path is scanned.
+		_ = gitutil.RecordMergeConflicts(workdir)
 		return conflictFailure(mergeErr)
 	}
 	return nil

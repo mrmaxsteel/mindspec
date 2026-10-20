@@ -224,10 +224,16 @@ func TestCompleteBead_ResolveMerge_ResolutionSetextHeadingConcludes(t *testing.T
 
 // TestCompleteBead_ResolveMerge_BeadAuthoredMarkerBlockDoesNotBlock: a
 // bead file that documents a full conflict block is content from the
-// bead side (present in MERGE_HEAD), not a leftover of the resolution.
+// bead side, not a leftover of the resolution. It passes because the
+// conflict record does not list it, not because of the fallback scan.
 func TestCompleteBead_ResolveMerge_BeadAuthoredMarkerBlockDoesNotBlock(t *testing.T) {
 	doc := "Example:\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n"
 	g, _, specWtPath := preservedConflictWithBeadFiles(t, map[string]string{"conflicts.md": doc})
+	// The stopped merge recorded git's conflicted paths; conflicts.md is
+	// not one of them. Without the record, the fallback would scan it.
+	if paths, ok := gitutil.MergeConflictRecord(specWtPath); !ok || len(paths) != 1 || paths[0] != "c.txt" {
+		t.Fatalf("conflict record = %q, %v; want [c.txt], true", paths, ok)
+	}
 	stageFile(t, specWtPath, "resolved\n")
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
 		t.Fatalf("bead-authored marker lines must not block --resolve-merge, got: %v", err)

@@ -390,6 +390,7 @@ func AbortMerge(workdir string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("aborting merge in %s: %s", workdir, strings.TrimSpace(string(out)))
 	}
+	ClearMergeConflictRecord(workdir)
 	return nil
 }
 
@@ -965,6 +966,7 @@ func CommitNoEdit(workdir string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing (--no-edit) in %s: %s", workdir, escapeLines(strings.TrimSpace(string(out))))
 	}
+	ClearMergeConflictRecord(workdir)
 	return nil
 }
 
@@ -973,17 +975,25 @@ func CommitNoEdit(workdir string) error {
 // markers still in it has no unmerged index entry, so ConflictedFiles
 // misses it.
 //
-// Git does the marker detection. Only files changed on BOTH sides since
-// the merge base can have been conflicted, so files changed on one side
-// only (for example a bead's Markdown file with a '=======' setext
-// underline) are never scanned. For each candidate,
+// Git does the marker detection. The files scanned are the ones git
+// reported as conflicted when the merge stopped (RecordMergeConflicts),
+// so a file changed by one side only (for example a Markdown file with a
+// '=======' setext underline) is never scanned. If that record is
+// missing, unreadable, or belongs to another merge, every path staged
+// against HEAD is scanned. For each file,
 // `git diff --cached --check HEAD` reports leftover marker lines; it
-// honours the conflict-marker-size attribute and CRLF endings. A file is
-// flagged only if one reported line starts with '<' or '>': a lone
-// `=======` or `|||||||` line is not a conflict block.
+// honours the conflict-marker-size attribute and CRLF endings.
 func StagedConflictMarkerFiles(workdir string) []string {
+	candidates, ok := MergeConflictRecord(workdir)
+	if !ok {
+		out, err := markerGit(workdir, "diff", "--cached", "--name-only", "-z", "--no-renames", "HEAD", "--")
+		if err != nil {
+			return nil
+		}
+		candidates = splitNUL(out)
+	}
 	var files []string
-	for _, path := range markerCandidatePaths(workdir) {
+	for _, path := range candidates {
 		lines := leftoverMarkerLines(workdir, path)
 		if len(lines) == 0 {
 			continue
@@ -995,6 +1005,10 @@ func StagedConflictMarkerFiles(workdir string) []string {
 			continue
 		}
 		content := strings.Split(string(staged), "\n")
+		// A file is flagged only if a reported line starts with '<' or
+		// '>': a lone `=======` or `|||||||` line is not a conflict block.
+		// Marker lines already committed in a parent are earlier damage,
+		// not leftovers of this merge, and are out of scope.
 		for _, n := range lines {
 			if n >= 1 && n <= len(content) {
 				if l := content[n-1]; strings.HasPrefix(l, "<") || strings.HasPrefix(l, ">") {
@@ -1007,35 +1021,70 @@ func StagedConflictMarkerFiles(workdir string) []string {
 	return files
 }
 
-// markerCandidatePaths returns the paths changed on both sides of the
-// in-progress merge since its merge base (NUL-separated output, so any
-// path is safe). If the merge base cannot be read, every path staged
-// relative to HEAD is a candidate.
-func markerCandidatePaths(workdir string) []string {
-	base, err := gitMergeBase(workdir, "HEAD", "MERGE_HEAD")
-	if err != nil || base == "" {
-		out, err := markerGit(workdir, "diff", "--cached", "--name-only", "-z", "--no-renames", "HEAD", "--")
-		if err != nil {
-			return nil
-		}
-		return splitNUL(out)
+// mergeConflictRecordName is the file, in the worktree's git dir, that
+// holds the paths a mindspec-started merge stopped with as conflicted.
+const mergeConflictRecordName = "MINDSPEC_MERGE_CONFLICTS"
+
+func mergeConflictRecordPath(workdir string) (string, error) {
+	out, err := markerGit(workdir, "rev-parse", "--git-path", mergeConflictRecordName)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s path in %s: %w", mergeConflictRecordName, workdir, err)
 	}
-	ours, err1 := markerGit(workdir, "diff", "--name-only", "-z", "--no-renames", base, "HEAD", "--")
-	theirs, err2 := markerGit(workdir, "diff", "--name-only", "-z", "--no-renames", base, "MERGE_HEAD", "--")
-	if err1 != nil || err2 != nil {
-		return nil
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workdir, path)
 	}
-	inTheirs := map[string]bool{}
-	for _, p := range splitNUL(theirs) {
-		inTheirs[p] = true
+	return path, nil
+}
+
+// RecordMergeConflicts saves the unmerged paths of the merge in progress
+// in workdir, while git still has them. The first line is the MERGE_HEAD
+// SHA, so the record is used only for this merge; the paths follow,
+// NUL-separated.
+func RecordMergeConflicts(workdir string) error {
+	mergeHead, err := RevParseRef(workdir, "MERGE_HEAD")
+	if err != nil {
+		return err
 	}
-	var both []string
-	for _, p := range splitNUL(ours) {
-		if inTheirs[p] {
-			both = append(both, p)
-		}
+	out, err := markerGit(workdir, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return fmt.Errorf("listing unmerged paths in %s: %w", workdir, err)
 	}
-	return both
+	path, err := mergeConflictRecordPath(workdir)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append([]byte(mergeHead+"\n"), out...), 0o644)
+}
+
+// ClearMergeConflictRecord removes the conflict record, if any.
+func ClearMergeConflictRecord(workdir string) {
+	if path, err := mergeConflictRecordPath(workdir); err == nil {
+		_ = os.Remove(path)
+	}
+}
+
+// MergeConflictRecord returns the recorded conflicted paths. ok is
+// false if the record is missing or unreadable, or if its MERGE_HEAD is
+// not the current one.
+func MergeConflictRecord(workdir string) (paths []string, ok bool) {
+	path, err := mergeConflictRecordPath(workdir)
+	if err != nil {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	head, rest, found := strings.Cut(string(data), "\n")
+	if !found {
+		return nil, false
+	}
+	mergeHead, err := RevParseRef(workdir, "MERGE_HEAD")
+	if err != nil || head != mergeHead {
+		return nil, false
+	}
+	return splitNUL([]byte(rest)), true
 }
 
 // leftoverMarkerLines runs `git diff --cached --check HEAD` on one path
