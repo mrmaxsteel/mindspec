@@ -300,8 +300,9 @@ count-based completeness. Registrations require at least two reviewers.
 Every REQUEST_CHANGES finding must be discharged at the current round with an
 unchanged `finding_sha256`. An item-level refutation clears one finding; a
 slot-level refutation clears all until the list or fallback rationale changes.
-Legacy unpinned refutations apply only to legacy panels. Deferrals do not yet
-count as discharges. REJECT, hard_block, INVALID, staleness and incompleteness
+Legacy unpinned refutations apply only to legacy panels. An effective deferral
+discharges the finding it covers; the gate re-checks it. REJECT, hard_block,
+INVALID, staleness and incompleteness
 cannot be discharged. Zero APPROVE can pass: resolved slots are reported as
 resolved, never approvals. `approve_threshold` remains parse-compatible and
 prints an ignored legacy notice, with no decision effect. Tally, verify and

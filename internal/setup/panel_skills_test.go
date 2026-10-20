@@ -40,3 +40,23 @@ func TestPanelSkills_NoHandEditInstructions(t *testing.T) {
 		}
 	}
 }
+
+func TestPanelSkills_TallyTemplateExcludesVerbKinds(t *testing.T) {
+	for _, base := range []string{"plugins/mindspec/skills", ".claude/skills"} {
+		t.Run(base, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(repoRoot(t), base, "ms-panel-tally", "SKILL.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			templates := regexp.MustCompile(`"disposition":"<([^>]+)>"`).FindAllStringSubmatch(string(data), -1)
+			if len(templates) != 1 {
+				t.Fatalf("want one disposition template, got %d", len(templates))
+			}
+			for _, kind := range strings.Split(templates[0][1], "|") {
+				if kind == "confirmed-deferred" || kind == "audited-refuted" {
+					t.Errorf("template lists verb-owned kind %q", kind)
+				}
+			}
+		})
+	}
+}

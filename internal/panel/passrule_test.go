@@ -234,6 +234,21 @@ func TestPassRule_DeferralActive(t *testing.T) {
 		t.Fatalf("carried deferral did not discharge: %+v", d)
 	}
 }
+func TestPassRule_DeferralActivePartialItem(t *testing.T) {
+	dir, p := passFixture(t, 2, VerdictApprove)
+	v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first", "second"}}
+	writePassJSON(t, dir, "R1-round-1.json", v)
+	fs, err := Findings(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}}
+	writePassJSON(t, dir, FileName, p)
+	if d := passDecision(t, dir); d.Action != Block {
+		t.Fatalf("partial item deferral cleared its sibling: %+v", d)
+	}
+}
+
 func TestApproveThreshold_LegacyNotice(t *testing.T) {
 	for _, value := range []string{"unanimous", "7", "0"} {
 		dir, p := passFixture(t, 2, VerdictRequestChanges)

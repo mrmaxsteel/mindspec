@@ -107,13 +107,59 @@ func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 		return nil
 	}
 	epic, epicErr := phase.FindEpicBySpecID(reg.Panel.Spec)
+	type checked struct {
+		entry PanelDeferredEntry
+		texts []string
+		err   error
+	}
+	var checks []checked
 	for _, d := range entries {
 		texts := d.FindingTexts
 		if len(texts) == 0 {
 			texts = []string{d.FindingText}
 		}
-		if err := checkDeferral(reg, d.Deferral, texts, epic, epicErr); err != nil {
-			return deferralFailure(reg, d.Deferral, true, err)
+		checks = append(checks, checked{d, texts, checkDeferral(reg, d.Deferral, texts, epic, epicErr)})
+	}
+	for _, failed := range checks {
+		if failed.err == nil {
+			continue
+		}
+		needed := map[string]int{}
+		for _, text := range failed.texts {
+			needed[text]++
+		}
+		for text, count := range needed {
+			items := map[string]bool{}
+			slotCount := 0
+			for _, valid := range checks {
+				if valid.err != nil || valid.entry.Slot != failed.entry.Slot || valid.entry.Round != failed.entry.Round {
+					continue
+				}
+				// Item alternatives must cover the same finding and raw text hash.
+				// Two slot records must pin the same list. Mixed records use the
+				// completion-time finding boundaries, never later panel state.
+				if valid.entry.Finding != "slot" && failed.entry.Finding != "slot" && (valid.entry.Finding != failed.entry.Finding || valid.entry.FindingSHA256 != failed.entry.FindingSHA256) {
+					continue
+				}
+				if valid.entry.Finding == "slot" && failed.entry.Finding == "slot" && valid.entry.FindingSHA256 != failed.entry.FindingSHA256 {
+					continue
+				}
+				matches := 0
+				for _, validText := range valid.texts {
+					if validText == text {
+						matches++
+					}
+				}
+				if valid.entry.Finding == "slot" && matches > slotCount {
+					slotCount = matches
+				} else if valid.entry.Finding != "slot" && matches > 0 {
+					items[valid.entry.Finding] = true
+				}
+			}
+			// One item record cannot cover two findings with identical text.
+			if slotCount < count && len(items) < count {
+				return deferralFailure(reg, failed.entry.Deferral, true, failed.err)
+			}
 		}
 	}
 	return nil
@@ -169,9 +215,6 @@ func unionDeferrals(existing, add []PanelDeferredEntry) []PanelDeferredEntry {
 }
 
 func persistDeferralPending(beadID string, entries []PanelDeferredEntry) error {
-	if len(entries) == 0 {
-		return nil
-	}
 	meta, err := completeGetMetadataFn(beadID)
 	if err != nil {
 		return err
@@ -180,7 +223,11 @@ func persistDeferralPending(beadID string, entries []PanelDeferredEntry) error {
 	if err != nil {
 		return err
 	}
-	return completeMergeMetadataFn(beadID, map[string]interface{}{"deferral_pending_entries": unionDeferrals(existing, entries)})
+	if len(existing) == 0 && len(entries) == 0 {
+		return nil
+	}
+	// A retry can supersede a deferral with a refutation. Keep only this run's checked entries.
+	return completeMergeMetadataFn(beadID, map[string]interface{}{"deferral_pending_entries": unionDeferrals(nil, entries)})
 }
 
 // reconcilePendingDeferrals settles the durable obligation before every close,

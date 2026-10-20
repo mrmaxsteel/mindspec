@@ -29,7 +29,7 @@ func deferArgs() []string {
 	return []string{"defer", "p", "--slot", "R1", "--round", "1", "--bead", "follow-up", "--by", "max"}
 }
 func TestPanelDefer_BDChecks(t *testing.T) {
-	for _, name := range []string{"closed", "missing", "epic", "child", "grandchild", "no edge", "wrong edge", "wrong text", "bd error"} {
+	for _, name := range []string{"closed", "missing", "epic", "child", "grandchild", "parent-child dependency", "reviewed bead edge", "partial slot text", "no edge", "wrong edge", "wrong text", "bd error"} {
 		t.Run(name, func(t *testing.T) {
 			root, _ := setupDischarge(t)
 			fake := fakeDeferralBD(t)
@@ -46,6 +46,13 @@ func TestPanelDefer_BDChecks(t *testing.T) {
 			case "grandchild":
 				issue["parent"] = "child-x"
 				rebindWrite(t, fake, "child-x.json", `[{"id":"child-x","parent":"epic-x"}]`)
+			case "parent-child dependency":
+				issue["dependencies"] = []map[string]string{{"id": "child-x", "dependency_type": "parent-child"}, {"id": "epic-x", "dependency_type": "discovered-from"}}
+				rebindWrite(t, fake, "child-x.json", `[{"id":"child-x","parent":"epic-x"}]`)
+			case "reviewed bead edge":
+				issue["dependencies"] = []map[string]string{{"id": "probe-x.1", "dependency_type": "discovered-from"}}
+			case "partial slot text":
+				issue["description"] = "missing test"
 			case "no edge":
 				issue["dependencies"] = []interface{}{}
 			case "wrong edge":
@@ -65,7 +72,11 @@ func TestPanelDefer_BDChecks(t *testing.T) {
 				raw = []byte(`bad json`)
 			}
 			rebindWrite(t, fake, file, string(raw))
-			assertPanelRefusal(t, root, args...)
+			if name == "reviewed bead edge" {
+				requirePanelVerb(t, args...)
+			} else {
+				assertPanelRefusal(t, root, args...)
+			}
 		})
 	}
 }
@@ -272,4 +283,27 @@ func TestLedger_RecordKinds(t *testing.T) {
 			t.Fatalf("adhoc provenance: %+v", event)
 		}
 	})
+}
+
+func TestPanelDefer_RechecksInsideLock(t *testing.T) {
+	root, _ := setupDischarge(t)
+	fake := fakeDeferralBD(t)
+	rebindWrite(t, fake, "closed.json", `[{"id":"follow-up","status":"closed"}]`)
+	// The first show succeeds. The next show sees the follow-up closed.
+	script := "#!/bin/sh\ncase \"$1\" in\nlist) cat '" + fake + "/epics.json';;\nshow) if [ -f '" + fake + "/read-once' ]; then cat '" + fake + "/closed.json'; else touch '" + fake + "/read-once'; cat '" + fake + "/follow-up.json'; fi;;\n*) exit 1;;\nesac\n"
+	rebindWrite(t, fake, "bd", script)
+	if err := os.Chmod(filepath.Join(fake, "bd"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := panelTreeBytes(t, root)
+	out, err := runPanelVerbCmd(deferArgs()...)
+	if err == nil || !strings.Contains(err.Error(), "must exist and be open") {
+		t.Fatalf("in-lock closure must refuse: %v %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(fake, "read-once")); err != nil {
+		t.Fatal("pre-lock read did not run:", err)
+	}
+	if !reflect.DeepEqual(before, panelTreeBytes(t, root)) {
+		t.Fatal("in-lock refusal wrote panel files")
+	}
 }
