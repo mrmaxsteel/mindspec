@@ -127,3 +127,25 @@ func TestPanelCreate_ReviewersOverridesCarriedRoster(t *testing.T) {
 		t.Fatalf("override ignored: %+v", p)
 	}
 }
+
+func TestPanelCreate_LegacyPathRecovery(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	dir := filepath.Join(root, "review", "p")
+	p := panel.Panel{Spec: "130-test", Gate: "bead", Target: "bead/probe-x.1", Round: 1,
+		Refutations: []panel.Refutation{{Slot: "F1", Round: 1, Finding: "ccr[0]", Evidence: "/tmp/probe/result"}}}
+	if err := panel.WriteSnapshot(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	before := panelTreeBytes(t, root)
+	out, err := runPanelVerbCmd("create", "p", "--spec", "130-test", "--gate", "bead", "--target", "bead/probe-x.1", "--round", "2")
+	if err == nil {
+		t.Fatalf("legacy path accepted: %s", out)
+	}
+	want := "recovery: remove the absolute path from refutation[0] slot F1 finding ccr[0] in the legacy panel.json, then run create again"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("missing specific recovery: %v", err)
+	}
+	if after := panelTreeBytes(t, root); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refusal wrote files: %+v", after)
+	}
+}

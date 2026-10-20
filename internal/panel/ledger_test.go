@@ -540,6 +540,7 @@ func TestLedger_ValidateRejectsMalformedShapes(t *testing.T) {
 		{"finding-id", records[1], "finding", "ccr[-1]", "finding must be slot or ccr[i]"},
 		{"refutation-ground", records[1], "ground", "unknown", "refutation ground is unknown"},
 		{"empty-rebind-paths", records[3], "paths", []string{}, "rebind paths must not be empty"},
+		{"round-gate", records[0], "gate", "noncanonical", "round gate must be empty or a canonical gate"},
 		{"round-telemetry", records[0], "telemetry", "optional", "round telemetry must be required"},
 		{"manifest-created-at", manifest, "created_at", "not-a-timestamp", "panel created_at must be RFC-3339"},
 	} {

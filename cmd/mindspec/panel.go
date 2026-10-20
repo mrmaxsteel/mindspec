@@ -75,6 +75,10 @@ A later round keeps the previous roster unless --reviewers is supplied.
 
 For --gate bead, --target must be bead/<id>; bead_id is derived from it.
 An explicit --bead must match and is refused for other gates.
+For existing bead panels with a divergent recorded target, the gate compares
+that target to the live bead/<id> branch. On a SHA mismatch, a changed subject
+tree blocks; an equal subject stays fresh. A legacy panel without a digest
+blocks on a SHA mismatch.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.
 These refusals write nothing.
@@ -90,7 +94,8 @@ Without --gate, the roster uses adhoc defaults and the gate stays omitted.
 --gate adhoc requires --spec to be omitted and writes under
 .mindspec/reviews/<slug>/ on flat layouts, otherwise review/<slug>/.
 Other invocations require --spec and use the spec's review directory
-on flat layouts, otherwise review/<slug>/.`,
+on flat layouts, otherwise review/<slug>/.
+Ad-hoc panels are never scanned by mindspec complete.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -360,7 +365,7 @@ func init() {
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
 	panelCreateCmd.Flags().String("gate", "", "Panel gate (spec_approve|plan_approve|bead|final_review|adhoc); omit for adhoc reviewer defaults")
-	panelCreateCmd.Flags().Int("reviewers", 0, "Override roster size (at least 2); otherwise preserve the previous roster")
+	panelCreateCmd.Flags().Int("reviewers", 0, "Set roster size (at least 2); on a round bump, omission keeps the previous roster")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)
@@ -544,6 +549,10 @@ func panelCreateScope(specID, gate string) string {
 }
 
 func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
+	var legacyPath *panel.CreateLegacyPathError
+	if errors.As(err, &legacyPath) {
+		return guard.NewFailure(legacyPath.Error(), legacyPath.Recovery())
+	}
 	round := in.Round
 	var conflict *panel.CreateRoundConflict
 	if errors.As(err, &conflict) {

@@ -330,16 +330,23 @@ bytes refused before membership checks. Existing panel.json must parse, and
 verdict filenames forbid recreating their round or an older round. These
 refusals write nothing.
 
+For existing bead panels with a divergent recorded target, the gate compares that target to the live `bead/<id>` branch. On a SHA mismatch, a changed subject tree blocks; an equal subject stays fresh. A legacy panel without a digest blocks on a SHA mismatch.
+
 Create preserves each refutation, deferral and rebind that matches its ledger
 event or the first round event's carried baseline, ignoring only `created_at`.
 It names each unbacked entry it drops. Legacy panels retain every entry and
-record them in the first round event's `carried` field. Revival clears
+record them in the first round event's `carried` field. A legacy entry with a
+`/tmp/` or `/Users/` token refuses before any write. The recovery names the entry.
+Remove the absolute path from that entry in the legacy `panel.json`.
+Run `create` again. Create reports dropped entries after the snapshot write,
+before the BRIEF write. Revival clears
 abandonment and appends `{reason, abandoned_at, revived_at}` to
 `abandon_history`; legacy panels without an abandonment event have an empty
 `abandoned_at`. A round bump archives the old BRIEF as `BRIEF-round-N.md`
 without overwriting an existing archive. The managed `mindspec:prior-round`
 region renders the preceding round's `consolidated-round-N.md` through
-`termsafe.Escape`, or `none recorded`. Verdicts and the authored BRIEF body
+`termsafe.Escape`, or `none recorded`. It quotes marker and fence lines so
+later header updates can read the region. Verdicts and the authored BRIEF body
 are preserved.
 
 On success, stdout carries `panel <slug> registered: round N, K expected
@@ -501,7 +508,7 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
-| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the `gate` field for subject selection + that gate's creation-time defaults (spec 113 R3) |
+| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |

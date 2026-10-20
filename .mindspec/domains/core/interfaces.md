@@ -262,8 +262,8 @@ type LoopContext struct {
 // PanelExpectedReviewers uses adhoc resolution for create without --gate (default 6).
 // PanelApproveThresholdExpr is the RAW panel.approve_threshold expression —
 // it does NOT resolve to an int; resolution is single-homed in
-// internal/panel.Panel.ApproveThreshold (workflow domain). These are the
-// values the spec-110 panel.json writer stamps as a fresh panel's defaults.
+// internal/panel.Panel.ApproveThreshold (workflow domain). Config display
+// uses this legacy expression. Panel create does not write approve_threshold.
 func (c *Config) PanelExpectedReviewers() int
 func (c *Config) PanelApproveThresholdExpr() string
 
@@ -321,7 +321,7 @@ With no count argument, the configured expansion is unchanged.
 
 **Per-gate refusals (spec 112 R4)**, same guard-style/never-panic contract: a `panel.gates` key outside `PanelGateKeys` (the recovery line enumerates all five valid keys and disambiguates from `loop.gate_authority`'s different vocabulary); a configured gate entry setting neither `reviewers` nor `approve_threshold`; a reviewer entry (global or per-gate) with neither `model` nor `family`; an explicit non-positive `count` (`Count != nil && *Count < 1`; an ABSENT count is fine, defaulting to 1); a per-gate `reviewers` list whose expanded sum is `< 2`; and a `substitutes` entry with an empty key or value, or key == value. Legacy per-gate `approve_threshold` values are not range-checked against reviewer counts (spec 130 R2.1). **No model or lens name-membership check exists on any `Load` path** — an unknown model id alone never errors; the curated `KnownModels()` list drives only a `config show` warning (a later bead).
 
-Used by workflow: `internal/panel` stays a config-free leaf and never imports this package — its callers resolve `PanelExpectedReviewers()`/`PanelApproveThresholdExpr()`/the gate-scoped resolvers here and pass plain values in. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render those resolved values alongside `panel.ReviewerCountNote`.
+Used by workflow: `internal/panel` stays a config-free leaf and never imports this package. Panel create resolves `PanelGateReviewerSlots()` here and passes the roster as plain values. It does not use `PanelApproveThresholdExpr()` or write `approve_threshold`. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render the legacy config values alongside `panel.ReviewerCountNote`.
 
 ### Per-gate panel config example (spec 112)
 

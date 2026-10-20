@@ -65,7 +65,7 @@ type CreateInput struct {
 	Roster               []RosterSlot
 	// ReviewersOverride replaces the previous roster when --reviewers was supplied.
 	ReviewersOverride bool
-	// ReportDropped receives a description of each unbacked entry after success.
+	// ReportDropped receives each unbacked entry after the snapshot is written.
 	ReportDropped func(string)
 }
 
@@ -164,6 +164,33 @@ func Create(dir string, in CreateInput) error {
 	// A remaining marker still denotes a non-legacy registration. Create is the
 	// recovery for hand edits, including removal of one of the markers.
 	legacy := latest == nil && !telemetryPresent
+	if legacy {
+		checkEntry := func(entry interface{}, name string) error {
+			data, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			if err := HygienePredicate(data); err != nil {
+				return &CreateLegacyPathError{Entry: name}
+			}
+			return nil
+		}
+		for i, r := range old.Refutations {
+			if err := checkEntry(r, fmt.Sprintf("refutation[%d] slot %s finding %s", i, r.Slot, r.Finding)); err != nil {
+				return err
+			}
+		}
+		for i, d := range old.Deferrals {
+			if err := checkEntry(d, fmt.Sprintf("deferral[%d] slot %s finding %s", i, d.Slot, d.Finding)); err != nil {
+				return err
+			}
+		}
+		for i, r := range old.Rebinds {
+			if err := checkEntry(r, fmt.Sprintf("rebind[%d] round %d from %s to %s", i, r.Round, r.FromSHA, r.ToSHA)); err != nil {
+				return err
+			}
+		}
+	}
 	carried := CarriedEntries{}
 	var dropped []string
 	keep := func(ok bool, name string) bool {
@@ -241,6 +268,12 @@ func Create(dir string, in CreateInput) error {
 	priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
 	if err == nil {
 		prior = termsafe.Escape(string(priorData))
+		// Quoted prose must not become region syntax or toggle fence scanning.
+		trimmed := strings.TrimSpace(prior)
+		if strings.HasPrefix(trimmed, "```") || markerLookalikeRE.MatchString(trimmed) ||
+			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
+			prior = "> " + prior
+		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read prior round: %w", err)
 	}
@@ -280,13 +313,13 @@ func Create(dir string, in CreateInput) error {
 	if err := WriteSnapshot(dir, p); err != nil {
 		return err
 	}
-	if err := os.WriteFile(briefPath, []byte(newBrief), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", briefPath, err)
-	}
 	for _, name := range dropped {
 		if in.ReportDropped != nil {
 			in.ReportDropped("dropped unbacked " + termsafe.Escape(name))
 		}
+	}
+	if err := os.WriteFile(briefPath, []byte(newBrief), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", briefPath, err)
 	}
 	return nil
 }
@@ -302,6 +335,18 @@ func renderCreateBriefHeader(slug string, p Panel, prior string) string {
 	b.WriteString(prior)
 	b.WriteString("\n<!-- /mindspec:prior-round -->\n")
 	return strings.TrimSuffix(header, briefHeaderClose) + b.String() + briefHeaderClose
+}
+
+// CreateLegacyPathError identifies a legacy entry that cannot enter the ledger.
+// Callers render Recovery with their normal failure format.
+type CreateLegacyPathError struct{ Entry string }
+
+func (e *CreateLegacyPathError) Error() string {
+	return "cannot carry legacy " + termsafe.Escape(e.Entry) + " with an absolute path"
+}
+
+func (e *CreateLegacyPathError) Recovery() string {
+	return "remove the absolute path from " + termsafe.Escape(e.Entry) + " in the legacy panel.json, then run create again"
 }
 
 // CreateRoundConflict lets callers render a recovery using the resolved binding.
