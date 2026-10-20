@@ -302,3 +302,10 @@ Reviewers apply these conduct rules at every gate.
 ## Then
 
 Hand off to `/ms-panel-tally`.
+
+Use `mindspec panel defer <panel-slug> --slot R2 --round N --finding 'ccr[0]' --bead <follow-up> --by "<name>"` to record a deferral.
+Use an open follow-up outside the owning epic and its descendants.
+Link it with `discovered-from` to the epic or reviewed bead.
+Put each finding in its description.
+Completion and implementation approval check these facts again.
+The defer verb writes the snapshot, audit event and `confirmed-deferred` row.

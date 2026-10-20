@@ -837,6 +837,12 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/complete/panel_core3.go", Func: "PanelCore3Failure", Detail: "arg1:unprovable",
 		Rationale:  "The recovery local selects mindspec panel tally or mindspec panel refute, with shell-quoted terminal-escaped slug/spec operands. The fold cannot resolve the local builder.",
 		Obligation: "internal/complete TestComplete_Core3RecoveryOperands checks both emitted recovery branches with hostile slug/spec operands against the destructive floor and the final recovery-line contract."},
+	{File: "internal/complete/panel_deferred.go", Func: "deferralFailure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery local selects bd reopen or panel refute. core3Quote shell-quotes and terminal-escapes each operand.",
+		Obligation: "internal/complete TestGateTime_DeferralRecoveryOperands checks emitted recovery quoting and the final recovery line against the destructive floor."},
+	{File: "internal/complete/panel_deferred.go", Func: "PanelDeferredAuditFailure", Detail: "arg1:unprovable",
+		Rationale:  "The retry command passes the reviewed bead through idrender.Bead for ID validation, shell quoting and terminal escaping.",
+		Obligation: "internal/complete TestGateTime_DeferralRecoveryOperands checks the emitted retry against the destructive floor and final recovery-line contract."},
 }
 
 // mindspecVerbTemplateObligation is the shared Obligation text for

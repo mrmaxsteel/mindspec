@@ -552,6 +552,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
+	if err := implPanelDeferralPreflight(root, specID); err != nil {
+		return nil, err
+	}
+
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested so the new file exists on disk even if a downstream
 	// step fails. Spec 087's pre-create-before-the-gate-skip-decision
@@ -1272,6 +1276,66 @@ func implPanelCore3Preflight(root, specID string, out io.Writer) error {
 		if err := panel.CheckCore3(reg); err != nil {
 			return complete.PanelCore3Failure(reg, err)
 		}
+	}
+	return nil
+}
+
+// implPanelDeferralPreflight checks integrity before abandonment. Bead panels
+// use the immutable completion audit; non-bead panels use current discharges.
+func implPanelDeferralPreflight(root, specID string) error {
+	if implPanelSkipEnvFn() {
+		return nil
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enforcement.PanelGate {
+		return nil
+	}
+	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
+		if reg.Panel.Spec != specID && reg.Err == nil {
+			continue
+		}
+		if reg.Err != nil {
+			return complete.PanelCore3Failure(reg, reg.Err)
+		}
+		if _, err := panel.LegacyPanel(reg.Dir); err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		if field != "" {
+			return complete.PanelCore3Failure(reg, fmt.Errorf("panel.json changed outside the panel verbs (%s)", field))
+		}
+
+		if reg.Panel.Abandoned {
+			continue
+		}
+		if reg.Panel.IsBead() {
+			meta, err := implGetMetadataFn(*reg.Panel.BeadID)
+			if err != nil {
+				return complete.PanelDeferredAuditFailure(*reg.Panel.BeadID, err)
+			}
+			entries, err := complete.DecodePanelDeferred(meta, "panel_deferred_entries")
+			if err != nil {
+				return complete.PanelDeferredAuditFailure(*reg.Panel.BeadID, err)
+			}
+			if err := complete.CheckAuditedPanelDeferrals(reg, entries); err != nil {
+				return err
+			}
+		} else {
+			res, err := panel.Tally(reg.Dir)
+			if err != nil {
+				return err
+			}
+			if err := complete.CheckPanelDeferrals(reg, res.EffectiveDeferrals(), false); err != nil {
+				return err
+			}
+		}
+
 	}
 	return nil
 }

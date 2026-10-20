@@ -335,3 +335,22 @@ func TestPanelRebind_ExcludedPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelRebind_EffectiveDeferral(t *testing.T) {
+	root, dir, _ := setupRebind(t)
+	resetDischargeFlags(t)
+	fakeDeferralBD(t)
+	writeDischargeVerdict(t, dir, "R1", panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"missing test"}})
+	args := deferArgs()
+	args[1] = "demo"
+	requirePanelVerb(t, args...)
+	rebindWrite(t, root, "source.go", "package changed\n")
+	rebindGit(t, root, "add", "source.go")
+	rebindGit(t, root, "commit", "-qm", "change")
+	if out, err := runPanelVerbCmd("rebind", "demo", "--reason", "max: checked"); err != nil {
+		t.Fatalf("effective deferral must permit rebind: %v %s", err, out)
+	}
+	if d := rebindGate(t, root, dir); d.Action != panel.Allow || len(d.AppliedDeferrals) != 1 {
+		t.Fatalf("rebound panel: %+v", d)
+	}
+}

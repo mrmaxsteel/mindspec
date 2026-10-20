@@ -1,14 +1,17 @@
 package panel
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // PassRule is the single vote rule. Freshness is supplied by the caller;
-// approval counts and deferrals are deliberately not decision inputs.
+// approval counts are not decision inputs. Effective deferrals discharge findings.
 func (r *Result) PassRule(fresh bool) bool {
 	return fresh && r.intactError() == nil && !r.RoundMismatch && r.Complete() &&
 		r.Rejects == 0 && len(r.HardBlocks) == 0 && r.InvalidCount() == 0 &&
@@ -119,12 +122,18 @@ func (r *Result) unresolvedFindings(v Verdict) []string {
 		}
 	}
 	var unresolved []string
+	deferrals := r.EffectiveDeferrals()
 	for _, f := range v.Findings {
 		covered := false
 		for _, ref := range r.Panel.Refutations {
 			if ref.Finding == f.ID && r.refutationApplies(v, ref) {
 				covered = true
 				break
+			}
+		}
+		for _, d := range deferrals {
+			if d.Slot == v.Slot && (d.Finding == "slot" || d.Finding == f.ID) {
+				covered = true
 			}
 		}
 		if !covered {
@@ -171,4 +180,65 @@ func (r *Result) invalidNames() string {
 		return ""
 	}
 	return ", INVALID from " + strings.Join(names, ", ")
+}
+
+// EffectiveDeferrals returns current, text-pinned deferrals. A covering
+// refutation supersedes a deferral, including part of a slot-level deferral.
+// Slot-level records retain their identity for audit and recovery. Text lists
+// are derived from the live verdict, so superseded items need no bd check.
+func (r *Result) EffectiveDeferrals() []Deferral {
+	if r.Panel == nil {
+		return nil
+	}
+	var out []Deferral
+	for _, d := range r.Panel.Deferrals {
+		if validateDeferral(d) != nil {
+			continue
+		}
+		for _, v := range r.Verdicts {
+			if !r.refutationApplies(v, Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingSHA256: d.FindingSHA256}) {
+				continue
+			}
+			if len(r.DeferralTexts(d)) > 0 {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+// DeferralTexts returns only findings not superseded by a refutation.
+func (r *Result) DeferralTexts(d Deferral) []string {
+	var texts []string
+	for _, v := range r.Verdicts {
+		if v.Slot != d.Slot {
+			continue
+		}
+		for _, f := range v.Findings {
+			if d.Finding != "slot" && d.Finding != f.ID {
+				continue
+			}
+			covered := false
+			for _, ref := range r.Panel.Refutations {
+				if r.refutationApplies(v, ref) && (ref.Finding == "slot" || ref.FindingSHA256 == "" || ref.Finding == f.ID) {
+					covered = true
+				}
+			}
+			if !covered {
+				texts = append(texts, f.Text)
+			}
+		}
+	}
+	return texts
+}
+
+func validateDeferral(d Deferral) error {
+	hash, err := hex.DecodeString(d.FindingSHA256)
+	if err != nil || len(hash) != 32 || !validFindingID(d.Finding) || d.Slot == "" || d.Round < 1 || strings.TrimSpace(d.By) == "" || strings.TrimSpace(d.FindingText) == "" {
+		return fmt.Errorf("invalid deferral fields")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, d.CreatedAt); err != nil {
+		return err
+	}
+	return idvalidate.BeadID(d.Bead)
 }

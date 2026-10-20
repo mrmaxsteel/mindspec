@@ -71,6 +71,7 @@ type Decision struct {
 	Action             GateAction
 	Message            string
 	AppliedRefutations []Refutation
+	AppliedDeferrals   []Deferral
 }
 
 // RawMergeFence is appended to every Block message (Spec 093 Req 12 / G3-1,
@@ -347,7 +348,7 @@ func PanelGateDecision(f GateFacts) Decision {
 			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE. Run /ms-bead-fix with %s, then re-panel%s",
 			slug, round, f.Res.UnresolvedNames(), f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
-	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations()}
+	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations(), AppliedDeferrals: f.Res.EffectiveDeferrals()}
 }
 
 // presentVerdictFiles renders the present-verdict-file list for the

@@ -219,21 +219,36 @@ func TestPassRule_SlotLevelVoidedByChange(t *testing.T) {
 		})
 	}
 }
-func TestPassRule_DeferralInactive(t *testing.T) {
+func TestPassRule_DeferralActive(t *testing.T) {
 	dir, p := passFixture(t, 2, VerdictApprove)
 	v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
 	writePassJSON(t, dir, "R1-round-1.json", v)
 	fs, _ := Findings(v)
 	p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}}
 	writePassJSON(t, dir, FileName, p)
-	if d := passDecision(t, dir); d.Action != Block {
-		t.Fatalf("deferral discharged legacy panel: %+v", d)
+	if d := passDecision(t, dir); d.Action != Allow || len(d.AppliedDeferrals) != 1 {
+		t.Fatalf("deferral did not discharge legacy panel: %+v", d)
 	}
 	makeNonLegacy(t, dir, &p)
-	if d := passDecision(t, dir); d.Action != Block || !strings.Contains(d.Message, "unresolved") {
-		t.Fatalf("carried deferral discharged: %+v", d)
+	if d := passDecision(t, dir); d.Action != Allow || len(d.AppliedDeferrals) != 1 {
+		t.Fatalf("carried deferral did not discharge: %+v", d)
 	}
 }
+func TestPassRule_DeferralActivePartialItem(t *testing.T) {
+	dir, p := passFixture(t, 2, VerdictApprove)
+	v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first", "second"}}
+	writePassJSON(t, dir, "R1-round-1.json", v)
+	fs, err := Findings(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: fs[0].ID, FindingSHA256: fs[0].SHA256, FindingText: fs[0].Text, Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}}
+	writePassJSON(t, dir, FileName, p)
+	if d := passDecision(t, dir); d.Action != Block {
+		t.Fatalf("partial item deferral cleared its sibling: %+v", d)
+	}
+}
+
 func TestApproveThreshold_LegacyNotice(t *testing.T) {
 	for _, value := range []string{"unanimous", "7", "0"} {
 		dir, p := passFixture(t, 2, VerdictRequestChanges)
@@ -260,5 +275,71 @@ func makeNonLegacy(t *testing.T, dir string, p *Panel) {
 	writePassJSON(t, dir, FileName, p)
 	if r := passTally(t, dir); r.IntegrityErr != nil {
 		t.Fatalf("baseline integrity: %v", r.IntegrityErr)
+	}
+}
+
+func TestPassRule_DeferralPins(t *testing.T) {
+	for _, change := range []string{"round", "text", "slot list", "invalid bead", "veto"} {
+		t.Run(change, func(t *testing.T) {
+			dir, p := passFixture(t, 2, VerdictApprove)
+			v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			f, _ := SlotFinding(v)
+			p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "max", CreatedAt: ledgerTime}}
+			if change == "invalid bead" {
+				p.Deferrals[0].Bead = "--hostile"
+			} else {
+				writePassJSON(t, dir, FileName, p)
+				if d := passDecision(t, dir); d.Action != Allow {
+					t.Fatalf("baseline: %+v", d)
+				}
+			}
+			switch change {
+			case "round":
+				p.Deferrals[0].Round = 2
+			case "text":
+				v.ConcreteChangesRequired[0] = "changed"
+			case "slot list":
+				v.ConcreteChangesRequired = append(v.ConcreteChangesRequired, "new")
+			case "veto":
+				v.HardBlock = true
+			}
+			writePassJSON(t, dir, FileName, p)
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			if d := passDecision(t, dir); d.Action != Block {
+				t.Fatalf("invalid deferral %s passed: %+v", change, d)
+			}
+		})
+	}
+}
+
+func TestPassRule_DeferralSlotPins(t *testing.T) {
+	for _, id := range []string{"ccr[0]", "slot"} {
+		t.Run(id, func(t *testing.T) {
+			dir, p := passFixture(t, 2, VerdictApprove)
+			v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			writePassJSON(t, dir, "R2-round-1.json", v)
+			fs, err := Findings(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := fs[0]
+			if id == "slot" {
+				f, err = SlotFinding(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "max", CreatedAt: ledgerTime}}
+			writePassJSON(t, dir, FileName, p)
+			if d := passDecision(t, dir); d.Action != Block {
+				t.Fatalf("R1 deferral must leave R2 blocked: %+v", d)
+			}
+			unresolved := passTally(t, dir).UnresolvedVerdicts()
+			if len(unresolved) != 1 || unresolved[0].Slot != "R2" {
+				t.Fatalf("only R2 must stay unresolved: %+v", unresolved)
+			}
+		})
 	}
 }

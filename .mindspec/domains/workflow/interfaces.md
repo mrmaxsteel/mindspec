@@ -300,8 +300,9 @@ count-based completeness. Registrations require at least two reviewers.
 Every REQUEST_CHANGES finding must be discharged at the current round with an
 unchanged `finding_sha256`. An item-level refutation clears one finding; a
 slot-level refutation clears all until the list or fallback rationale changes.
-Legacy unpinned refutations apply only to legacy panels. Deferrals do not yet
-count as discharges. REJECT, hard_block, INVALID, staleness and incompleteness
+Legacy unpinned refutations apply only to legacy panels. An effective deferral
+discharges the finding it covers; the gate re-checks it. REJECT, hard_block,
+INVALID, staleness and incompleteness
 cannot be discharged. Zero APPROVE can pass: resolved slots are reported as
 resolved, never approvals. `approve_threshold` remains parse-compatible and
 prints an ignored legacy notice, with no decision effect. Tally, verify and
@@ -357,7 +358,13 @@ extra display line or a fake `recovery:` line).
 
 **`mindspec panel refute <slug> --slot S --round N [--finding ccr[i]] --ground G [--ac AC-n] --reason T --evidence REF --by WHO`** validates a latest-round REQUEST_CHANGES finding without hard_block. APPROVE, REJECT, INVALID, absent slots, stale rounds, unknown findings and empty names refuse without writes. Grounds are `disproven`, `not-load-bearing` and `out_of_acceptance_scope`; the last requires an AC id in the owning spec. Evidence resolves to a commit, repo path or HTTPS URL. One batch lock hold appends the refutation event and an `audited-refuted` disposition row; an atomic rename updates the snapshot afterward. Retries converge by key. Finding text is path-redacted while hashes pin the raw text.
 
-**`mindspec panel abandon <slug> --reason T --by WHO`** requires both fields, appends an `abandon` event and sets `abandoned` and `abandon_reason`. It writes no manifest and retains existing manifests. Both verbs print the shared pass-rule line and accept `--spec` to disambiguate a slug.
+**`mindspec panel defer <slug> --slot S --round N [--finding ccr[i]] --bead B --by WHO`** appends a deferral event and a `confirmed-deferred` row in one locked batch. It then replaces the snapshot. Only the panel verbs write discharge records. Spec approval and adhoc panels cannot defer findings.
+
+An effective deferral applies to the latest round and unchanged finding text. A covering refutation supersedes it. Rebind uses the same resolution rule as the gate. Completion re-checks every effective deferral before materialization. It persists a pending marker from Allow decisions and settles the durable `panel_deferred` audit before close. Each entry holds slot, round, finding, finding text, finding hash, follow-up bead and author. The audit also stores effective finding text boundaries for slot-level entries.
+
+Implementation approval checks registration integrity before it skips abandoned panels. It reads non-bead deferrals from the snapshot and ledger. It reads bead-panel deferrals from the completion audit. A later panel refutation does not alter that audit. Both lifecycle checks require an existing open follow-up outside the owning epic, a `discovered-from` edge to the epic or reviewed bead, and each path-redacted finding in the path-redacted description. A failed read or changed fact voids that deferral; the finding blocks unless another discharge covers it. Both panel hatches skip these checks.
+
+**`mindspec panel abandon <slug> --reason T --by WHO`** requires both fields, appends an `abandon` event and sets `abandoned` and `abandon_reason`. It writes no manifest and retains existing manifests. The discharge and abandon verbs print the shared pass-rule line and accept `--spec` to disambiguate a slug.
 
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
 <id>] [--round N] [--gate <name>] [--reviewers N]`** resolves the target's

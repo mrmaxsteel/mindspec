@@ -887,6 +887,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if panelGateErr != nil {
 			return nil, panelGateErr
 		}
+		if err := checkAndRecordPanelDeferrals(beadID, panelDecisions, panelGateEnabled); err != nil {
+			return nil, err
+		}
 		if err := checkPanelCore3(panelDecisions, panelGateEnabled, advisoryOut); err != nil {
 			return nil, err
 		}
@@ -1028,6 +1031,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// above, but NOT this pre-existing-obligation reconciliation (round-5
 	// item 3 / G3). A bead with no recorded pending reconciles to a no-op
 	// (§6 fail-open preserved).
+	if err := reconcilePendingDeferrals(beadID); err != nil {
+		return nil, err
+	}
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}

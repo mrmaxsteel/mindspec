@@ -124,6 +124,7 @@ var mutatingVerbAliases = map[string]string{
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
 	"mindspec panel rebind":  "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
+	"mindspec panel defer":   "records a panel deferral and disposition; no lifecycle phase mutation",
 	"mindspec panel refute":  "records a panel refutation and disposition; not lifecycle-phase state",
 	"mindspec panel abandon": "records audited panel abandonment; not lifecycle-phase state",
 	"mindspec":               "root command: prints help or an unknown-command error, never mutates",

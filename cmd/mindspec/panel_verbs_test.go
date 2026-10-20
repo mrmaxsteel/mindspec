@@ -18,9 +18,9 @@ import (
 
 func resetDischargeFlags(t *testing.T) {
 	t.Helper()
-	for _, cmd := range []*cobra.Command{panelRefuteCmd, panelAbandonCmd} {
+	for _, cmd := range []*cobra.Command{panelRefuteCmd, panelAbandonCmd, panelDeferCmd} {
 		reset := func() {
-			for _, name := range []string{"spec", "slot", "finding", "ground", "ac", "reason", "evidence", "by", "round"} {
+			for _, name := range []string{"spec", "slot", "finding", "ground", "ac", "reason", "evidence", "by", "round", "bead"} {
 				flag := cmd.Flags().Lookup(name)
 				if flag != nil {
 					if err := flag.Value.Set(flag.DefValue); err != nil {
@@ -427,13 +427,32 @@ func TestPanelAbandon_VerbRetryAndIncompleteRound(t *testing.T) {
 }
 func TestPanelAbandon_KeepsManifest(t *testing.T) {
 	_, dir := setupDischarge(t)
-	manifest := panel.CoverageManifest{Record: "panel", Spec: "900-demo", Gate: "bead", Panel: "p", Round: 1, Slots: []panel.ManifestSlot{{Slot: "R1", Model: "claude", Verdict: "APPROVE"}, {Slot: "R2", Model: "codex", Verdict: "APPROVE"}}, CreatedAt: "2026-10-20T00:00:00Z"}
-	raw, err := json.Marshal(manifest)
+	requirePanelVerb(t, refuteArgs()...)
+	if out, err := runPanelVerbCmd("tally", "p"); err != nil {
+		t.Fatalf("tally: %v %s", err, out)
+	}
+	lines, err := panel.ReadLedger(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := panel.AppendRecords(dir, raw); err != nil {
-		t.Fatal(err)
+	var manifest panel.CoverageManifest
+	manifestIndex := -1
+	for i, line := range lines {
+		var row struct {
+			Record string `json:"record"`
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			t.Fatal(err)
+		}
+		if row.Record == "panel" {
+			manifestIndex = i
+			if err := json.Unmarshal(line, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if manifestIndex < 0 {
+		t.Fatal("tally did not write a manifest")
 	}
 	before, err := panel.ReadLedger(dir)
 	if err != nil {
@@ -444,11 +463,11 @@ func TestPanelAbandon_KeepsManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != len(before)+1 || !bytes.Equal(after[1], before[1]) {
+	if len(after) != len(before)+1 || !bytes.Equal(after[manifestIndex], before[manifestIndex]) {
 		t.Fatalf("manifest was removed or rewritten: %s", after)
 	}
 	var retained panel.CoverageManifest
-	if err := json.Unmarshal(after[1], &retained); err != nil {
+	if err := json.Unmarshal(after[manifestIndex], &retained); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(panel.ComputeQ4(nil, []panel.CoverageManifest{manifest}), panel.ComputeQ4(nil, []panel.CoverageManifest{retained})) {
