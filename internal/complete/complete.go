@@ -365,19 +365,6 @@ type Result struct {
 	postCloseReadyFailed bool
 }
 
-// SummaryGaveCd reports whether FormatResult prints a `cd` line to the
-// spec worktree for r (implement, plan, and review modes).
-func (r *Result) SummaryGaveCd() bool {
-	if r == nil || r.NextModeIndeterminate || !r.WorktreeRemoved || r.SpecWorktree == "" {
-		return false
-	}
-	switch r.NextMode {
-	case state.ModeImplement, state.ModePlan, state.ModeReview:
-		return true
-	}
-	return false
-}
-
 func defaultFindLocalRoot() (string, error) {
 	return workspace.FindLocalRoot(".")
 }
@@ -1521,12 +1508,13 @@ func FormatResult(r *Result) string {
 	switch r.NextMode {
 	case state.ModeImplement:
 		// advanceState returns implement with an EMPTY next bead when no
-		// child is ready (peers in progress, or blocked) — never print an
-		// empty "Next bead ready:" line or a claim instruction then.
+		// ready bead was found (peers in progress, blocked, not yet
+		// propagated, or an unreadable ready list) — never print an empty
+		// "Next bead ready:" line or a claim instruction then.
 		if r.NextBead != "" {
 			fmt.Fprintf(&sb, "Next bead ready: %s\n", idrender.Bead(r.NextBead))
 		} else {
-			sb.WriteString("No bead is ready yet (other beads are in progress or blocked).\n")
+			sb.WriteString("No bead is ready now.\n")
 		}
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", idrender.Spec(r.NextSpec))
 		// Spec 092 Req 4 (mindspec-qxsy): the implement branch carries
@@ -1538,7 +1526,7 @@ func FormatResult(r *Result) string {
 		if r.NextBead != "" {
 			sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 		} else {
-			sb.WriteString("\nSTOP HERE. Do NOT claim a bead now.\nTell the user: run `mindspec next` when another bead is complete.\n")
+			sb.WriteString("\nSTOP HERE. Do NOT claim a bead now.\nTell the user: run `mindspec next` once a bead is ready.\n")
 		}
 	case state.ModePlan:
 		// R2.3 (spec 128 bead 5, round-4/round-5 tally): reworded to fit

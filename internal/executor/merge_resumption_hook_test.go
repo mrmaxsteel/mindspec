@@ -31,20 +31,27 @@ exit 0
 // conclude the operator's resolved merge. The merge-conclusion commit is
 // the tool's own, like a conflict-free `git merge`, which never fires
 // pre-commit.
-func TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook(t *testing.T) {
-	t.Setenv("MINDSPEC_ALLOW_MAIN", "")
-	g, fake, dir := newRepoExecutor(t)
-	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
-
+// installPreCommit points the repo's core.hooksPath at a fresh dir with
+// script as its pre-commit hook.
+func installPreCommit(t *testing.T, dir, script string) {
+	t.Helper()
 	hooksDir := filepath.Join(t.TempDir(), "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "pre-commit"), []byte(blockingSpecBranchPreCommit), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(hooksDir, "pre-commit"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	runGitIn(t, dir, "config", "core.hooksPath", hooksDir)
+}
 
+// preservedConflict runs the first (conflicting) CompleteBead so a merge
+// is preserved in the spec worktree, and wires real bead-worktree
+// removal for the later successful completion.
+func preservedConflict(t *testing.T) (g *MindspecExecutor, dir, specWtPath string) {
+	t.Helper()
+	g, fake, dir := newRepoExecutor(t)
+	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
 	fake.listEntries = []bead.WorktreeListEntry{{
 		Name:   "worktree-mindspec-x.1",
 		Path:   beadWtDir,
@@ -55,19 +62,35 @@ func TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook(t *testin
 			_ = exec.Command("git", "-C", dir, "worktree", "remove", "--force", beadWtDir).Run()
 		}
 	}
-
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", false); err == nil {
 		t.Fatal("expected a merge-conflict error, got nil")
 	}
 	if !gitutil.MergeInProgress(specWtPath) {
 		t.Fatal("the conflict must be preserved after the first attempt")
 	}
+	return g, dir, specWtPath
+}
 
-	// Sanity: the hook really blocks a plain commit on the spec branch.
-	if err := os.WriteFile(filepath.Join(specWtPath, "c.txt"), []byte("resolved\n"), 0o644); err != nil {
+func stageFile(t *testing.T, specWtPath, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(specWtPath, "c.txt"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGitIn(t, specWtPath, "add", "c.txt")
+}
+
+// TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook:
+// with a pre-commit hook that blocks spec-branch commits (implement
+// mode) and no MINDSPEC_ALLOW_MAIN in the caller's env, `--resolve-merge`
+// must still conclude the operator's resolved merge: it is the tool's
+// own merge conclusion.
+func TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook(t *testing.T) {
+	t.Setenv("MINDSPEC_ALLOW_MAIN", "")
+	g, dir, specWtPath := preservedConflict(t)
+	installPreCommit(t, dir, blockingSpecBranchPreCommit)
+	stageFile(t, specWtPath, "resolved\n")
+
+	// Sanity: the hook really blocks a plain commit on the spec branch.
 	probe := exec.Command("git", "-C", specWtPath, "commit", "--no-edit")
 	probe.Env = append(os.Environ(), "MINDSPEC_ALLOW_MAIN=")
 	if out, err := probe.CombinedOutput(); err == nil || !strings.Contains(string(out), "blocked during implement mode") {
@@ -78,12 +101,70 @@ func TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook(t *testin
 	}
 
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
-		t.Fatalf("--resolve-merge must conclude the merge despite the pre-commit hook, got: %v", err)
+		t.Fatalf("--resolve-merge must conclude the merge despite the mindspec gate, got: %v", err)
 	}
 	if gitutil.MergeInProgress(specWtPath) {
 		t.Error("the merge must be complete — no MERGE_HEAD should remain")
 	}
 	if got, err := os.ReadFile(filepath.Join(specWtPath, "c.txt")); err != nil || string(got) != "resolved\n" {
 		t.Errorf("spec branch tip must carry the resolved content; got %q, err=%v", got, err)
+	}
+}
+
+// TestCompleteBead_ResolveMerge_UserPreCommitHookStillRuns: only the
+// mindspec gate is bypassed. A user's own pre-commit hook (not the
+// mindspec gate, ignores MINDSPEC_ALLOW_MAIN) still runs and can refuse
+// the merge conclusion; the merge then stays in progress.
+func TestCompleteBead_ResolveMerge_UserPreCommitHookStillRuns(t *testing.T) {
+	g, dir, specWtPath := preservedConflict(t)
+	installPreCommit(t, dir, "#!/bin/sh\necho 'user hook refused' >&2\nexit 1\n")
+	stageFile(t, specWtPath, "resolved\n")
+
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil {
+		t.Fatal("a refusing user pre-commit hook must stop --resolve-merge from concluding the merge")
+	}
+	if !strings.Contains(err.Error(), "user hook refused") {
+		t.Errorf("the user hook's refusal must surface; got:\n%v", err)
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must stay in progress after the user hook refuses")
+	}
+}
+
+// TestCompleteBead_ResolveMerge_RefusesStagedConflictMarkers: a file
+// staged with its conflict markers still in it has no unmerged index
+// entry, but --resolve-merge must not commit it. It re-prints the
+// resolution steps (naming the file, no `git commit` step) and keeps
+// the merge in progress. Once the markers are gone (trailing whitespace
+// alone is not a marker), it concludes.
+func TestCompleteBead_ResolveMerge_RefusesStagedConflictMarkers(t *testing.T) {
+	g, _, specWtPath := preservedConflict(t)
+	runGitIn(t, specWtPath, "add", "c.txt") // markers still in the file
+	if len(gitutil.ConflictedFiles(specWtPath)) != 0 {
+		t.Fatal("fixture: after `git add` there must be no unmerged entries")
+	}
+
+	err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true)
+	if err == nil {
+		t.Fatal("--resolve-merge must refuse staged conflict markers")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "c.txt") || !strings.Contains(msg, ResolveMergeFlag) {
+		t.Errorf("refusal must name the file and the --resolve-merge re-run; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "git commit") {
+		t.Errorf("resolution steps must not tell the operator to run `git commit`; got:\n%s", msg)
+	}
+	if !gitutil.MergeInProgress(specWtPath) {
+		t.Fatal("the merge must stay in progress after the refusal")
+	}
+
+	stageFile(t, specWtPath, "resolved \n")
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("with markers removed, --resolve-merge must conclude, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must be complete")
 	}
 }

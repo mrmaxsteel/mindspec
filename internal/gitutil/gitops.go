@@ -952,18 +952,49 @@ func CommitAll(workdir, message string) error {
 // surface depends on (spec 125's parseMergeSubjectBeadBranch), not a
 // courtesy.
 //
-// `--no-verify` matches the other tool-made commits (CommitNoVerify):
-// this commit concludes a merge the tool itself started, so mindspec's
-// own pre-commit hook (which blocks spec-branch and protected-branch
-// commits in implement mode) must not refuse it. A conflict-free
-// `git merge` never fires pre-commit; the resumed conclusion must not
-// either.
+// This commit concludes a merge the tool itself started, so mindspec's
+// own pre-commit gate (which blocks spec-branch and protected-branch
+// commits in implement mode) must not refuse it. The gate's escape is
+// set on this one subprocess only. No `--no-verify`: the user's own
+// pre-commit and commit-msg hooks still run on the hand-resolved
+// content.
 func CommitNoEdit(workdir string) error {
-	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit", "--no-verify")
+	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit")
+	cmd.Env = append(os.Environ(), "MINDSPEC_ALLOW_MAIN=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing (--no-edit) in %s: %s", workdir, escapeLines(strings.TrimSpace(string(out))))
 	}
 	return nil
+}
+
+// StagedConflictMarkerFiles lists the files whose staged changes (index
+// vs HEAD) add leftover conflict-marker lines, per
+// `git diff --cached --check`. Whitespace problems the same check
+// reports are ignored. A file resolved by `git add` with its markers
+// still in it has no unmerged index entry, so ConflictedFiles misses it.
+func StagedConflictMarkerFiles(workdir string) []string {
+	cmd := execCommand("git", "-C", workdir, "diff", "--cached", "--check")
+	out, _ := cmd.Output() // non-zero exit just means problems were found
+	const marker = ": leftover conflict marker"
+	seen := map[string]bool{}
+	var files []string
+	for _, line := range strings.Split(string(out), "\n") {
+		i := strings.LastIndex(line, marker)
+		if i < 0 {
+			continue
+		}
+		loc := line[:i] // "<path>:<line>"
+		j := strings.LastIndex(loc, ":")
+		if j <= 0 {
+			continue
+		}
+		f := loc[:j]
+		if !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 // TreeSHA resolves ref's tree object SHA in workdir (`git rev-parse
