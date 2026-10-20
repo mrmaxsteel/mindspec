@@ -150,21 +150,61 @@ below reject.
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
 exactly one `panel.json` — the literal filename `panel.FileName`. The
-steady-state intent, from Bead 4 onward, is that `mindspec panel
-create` (`panel.Create`, this bead) is the sole writer, in full; before
-Bead 4 lands that CLI verb, `/ms-panel-run` step 0 hand-authors it
-directly. The one SANCTIONED hand-edit path, in either era, is
-`/ms-panel-tally`'s Abandon procedure, which sets `abandoned` /
-`abandon_reason` by hand — every other field is machine-written once
-Bead 4 lands.
+snapshot is rewritten by panel verbs through `panel.WriteSnapshot` (temp file
+and rename), after the event batch succeeds. `panel.AppendRecords` accepts the
+exact panel directory in flat, non-flat and adhoc layouts, validates the full
+batch and checks keys under one `dispositions.lock` hold before appending.
+`panel.AppendRecord` retains the legacy spec-directory/panel-name adapter.
 
-`panel.Create` writes `panel.json` as a full-struct overwrite: it never
-reads the existing file first, unlike its read-before-splice handling
-of `BRIEF.md`'s machine-managed header (Maintenance Notes below). A
-re-panel of an abandoned panel therefore deliberately clears
-`abandoned`/`abandon_reason` and revives it into an active round — this
-is the KNOWN, intentional behavior of calling `Create` again, not an
-oversight (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
+The optional registration fields at the end of `panel.Panel` are:
+
+| Field | Shape |
+|:------|:------|
+| `roster` | ordered `[{slot, model, lens}]`, with ids `R1..Rn` |
+| `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
+| `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
+| `telemetry` | `"required"` on new registrations |
+| `abandon_history` | `[{reason, abandoned_at, revived_at}]` |
+
+Refutations have `slot`, `round`, `reason`, `evidence` and optional
+`finding`, `finding_sha256`, `finding_text`, `ground`, `ac`, `by`, `created_at`.
+Absent new fields are omitted on serialization, preserving legacy JSON shapes.
+
+The panel directory's `dispositions.jsonl` stores these verb events in addition
+to spec-117 `disposition` rows and `panel` coverage manifests. Every event carries
+`spec`, `panel` and `created_at`; adhoc events use `spec: "adhoc"`.
+
+| Kind | Payload | Key within the panel directory |
+|:-----|:--------|:-------------------------------|
+| `round` | round, reviewed_head_sha, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
+| `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
+| `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
+| `rebind` | round, from_sha, to_sha, paths, reason | to_sha |
+| `abandon` | reason, by | created_at |
+
+A same-key retry differing only in `created_at` adds nothing; another payload
+difference refuses the entire batch. For `round` and `abandon`, a different
+timestamp is a different key. Coverage manifest keys are
+`spec, panel, round, created_at` (timestamp absent on legacy manifests).
+`panel disposition validate`, `check` and `query` accept all event kinds and
+reject malformed records. Events contribute no telemetry rows or slot coverage.
+`panel disposition append` refuses the verb kinds, and manifests on non-legacy
+panels; only `tally` writes those manifests.
+
+A legacy panel has neither a `telemetry` field nor a `round` ledger event.
+Exactly one marker is a registration error. `panel.CheckHandEdits` is the R5.3
+library matcher: it returns the first snapshot field without a backing event,
+using the latest round, subsequent rebind/abandon events, and payload equality
+for entry arrays (ignoring `created_at`). The first round event's `carried`
+object supplies baselines for legacy refutations, deferrals and rebinds.
+
+A Finding is `ccr[i]` from the latest-round verdict's
+`concrete_changes_required`, with the sha256 of its raw text. Empty lists use
+`ccr[0]` with the rationale; an empty rationale too is INVALID. Reviewer
+`findings[]` is evidence only. Storage text replaces each `/tmp/` or `/Users/`
+path token with `<path>` after hashing. Slot-level discharges use `finding:
+"slot"` and hash the compact JSON encoding of the entire ordered list, or the
+raw rationale for an empty list.
 
 **Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
 file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).

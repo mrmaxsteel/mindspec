@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,13 +28,15 @@ import (
 var panelDispositionAppendCmd = &cobra.Command{
 	Use:   "append --spec <id> --panel <name> --data <literal|-|@file>",
 	Short: "Append one disposition row or coverage manifest via the R6(b) transactional op",
-	Long: `append is the SOLE write path onto a panel's dispositions.jsonl. It
+	Long: `append writes disposition rows and legacy coverage manifests. It refuses
+round, refutation, deferral, rebind and abandon events, which only the panel
+verbs write. A manifest on a non-legacy panel is reserved to panel tally. It
 dispatches to internal/panel.AppendRecord, which — under ONE lock held
 on that panel's dedicated dispositions.lock file — validates the
 record (schema + R5 hygiene) BEFORE touching the data file, checks it
 for uniqueness against the file's current content (a disposition row
 keyed on its own "id"; a coverage manifest keyed on
-{spec, panel, round}), and either no-ops (the key already exists) or
+{spec, panel, round, created_at}), and either no-ops (the key already exists) or
 appends it as a single atomic write.
 
 A validation or hygiene failure exits non-zero and leaves the data file
@@ -85,6 +88,25 @@ never interpolated into a shell-quoted argument.`,
 		specDir, err := resolveDispositionSpecDir(specID)
 		if err != nil {
 			return err
+		}
+
+		var discriminator struct {
+			Record string `json:"record"`
+		}
+		if err := json.Unmarshal(record, &discriminator); err != nil {
+			return err
+		}
+		if panel.IsVerbRecord(discriminator.Record) {
+			return fmt.Errorf("record %s is reserved to the panel verbs; use panel create, refute, defer, rebind or abandon", termsafe.Escape(discriminator.Record))
+		}
+		if discriminator.Record == panel.RecordPanelManifest {
+			legacy, err := panel.LegacyPanel(filepath.Join(specDir, "reviews", panelName))
+			if err != nil {
+				return err
+			}
+			if !legacy {
+				return fmt.Errorf("a manifest on a non-legacy panel is reserved to panel tally")
+			}
 		}
 
 		if err := panel.AppendRecord(specDir, panelName, record); err != nil {

@@ -3,15 +3,19 @@
 // validator (R2/R6(a)), and the R5 path-hygiene predicate.
 //
 // A per-panel store file (`<spec-dir>/reviews/<panel>/dispositions.jsonl`)
-// carries two record kinds, distinguished by the `record` discriminator:
+// carries telemetry and panel-verb records, distinguished by `record`:
 //
 //   - `record: "disposition"` — one row per distinct finding the
 //     `/ms-panel-tally` authority adjudicated (DispositionRow).
+//
 //   - `record: "panel"` — one durable coverage manifest per terminal
 //     panel, capturing every verdict-file slot's token/model/terminal
 //     verdict (CoverageManifest).
 //
-// Both are agent-writable, forgeable-by-content repo data (ADR-0037 §8):
+//   - round, refutation, deferral, rebind, abandon — panel-verb events
+//     (Spec 130 R5.1; shapes and validation in ledger.go).
+//
+// All are agent-writable, forgeable-by-content repo data (ADR-0037 §8):
 // this package validates SHAPE, never authenticity. Validate and
 // HygienePredicate are pure functions over a single JSON line's raw
 // bytes — no filesystem or git access — so Bead 2's transactional append
@@ -23,6 +27,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -148,8 +153,8 @@ type ManifestSlot struct {
 // the durable per-terminal-panel coverage manifest that makes the R1(b)
 // completeness floor and Q4's per-slot denominator derivable from the
 // store alone, with no raw-verdict-file dependency. Every terminal
-// panel writes exactly one of these, including a finding-less
-// all-APPROVE panel (Slots non-empty, zero disposition rows).
+// panel can write later manifests under distinct created_at keys (Spec 130).
+// CreatedAt is omitted on legacy manifests; their existing keys are preserved.
 type CoverageManifest struct {
 	Record     string         `json:"record"`
 	Spec       string         `json:"spec"`
@@ -158,6 +163,7 @@ type CoverageManifest struct {
 	Round      int            `json:"round"`
 	Slots      []ManifestSlot `json:"slots"`
 	Backfilled bool           `json:"backfilled"`
+	CreatedAt  string         `json:"created_at,omitempty"`
 }
 
 // isValidGate reports whether gate is one of CanonicalGateKeys (mirrored
@@ -211,8 +217,8 @@ func decodeRecord(data []byte) (map[string]interface{}, error) {
 	// (e.g. a line with trailing garbage) rather than accept only its
 	// first value.
 	var extra json.RawMessage
-	if err := dec.Decode(&extra); err == nil {
-		return nil, fmt.Errorf("disposition record contains more than one JSON value")
+	if err := dec.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("disposition record contains trailing data after its JSON value")
 	}
 	if m == nil {
 		return nil, fmt.Errorf("disposition record decoded to a null/empty JSON value")
@@ -387,8 +393,10 @@ func Validate(data []byte) error {
 		return validateDispositionMap(m)
 	case RecordPanelManifest:
 		return validateManifestMap(m)
+	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+		return validateLedgerMap(m, record)
 	default:
-		return fmt.Errorf("disposition record field %s must be one of {%q,%q}, got %s", termsafe.Escape("record"), RecordDisposition, RecordPanelManifest, termsafe.Escape(record))
+		return fmt.Errorf("unknown disposition record kind %s", termsafe.Escape(record))
 	}
 }
 
@@ -470,6 +478,14 @@ func validateDispositionMap(m map[string]interface{}) error {
 // already-decoded fields against R6(a).
 func validateManifestMap(m map[string]interface{}) error {
 	const kind = "panel"
+	if err := optionalString(m, "created_at", kind); err != nil {
+		return err
+	}
+	if value, ok := m["created_at"].(string); ok {
+		if _, err := time.Parse(time.RFC3339, value); err != nil {
+			return fmt.Errorf("panel created_at must be RFC-3339")
+		}
+	}
 
 	for _, f := range requiredManifestFields {
 		if _, ok := m[f]; !ok {

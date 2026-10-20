@@ -8,6 +8,7 @@ package panel
 // independently of Bead 4's live migration.
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -368,5 +369,42 @@ func TestQueryMetrics_LoadStoreEmptyGlobIsNotAnError(t *testing.T) {
 		if render := (ModelRate{Numerator: r.Genuine, Denominator: r.SlotTotal}).Render(); render != "0/0" {
 			t.Errorf("Q4 gate %s render = %q, want 0/0", r.Gate, render)
 		}
+	}
+}
+
+// Audit events coexist with telemetry without inflating query rows or manifests.
+func TestDispositionQuery_LedgerKinds(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	records := ledgerFixtures(t, "p")
+	row := testRow("d-ledger-query", "p", "R1", nil)
+	manifest := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "model-a", Verdict: "REQUEST_CHANGES"}})
+	records = append(records, mustMarshal(t, row), mustMarshal(t, manifest))
+	if err := AppendRecords(dir, records...); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, dispositionsFileName)
+	rows, manifests, err := LoadStore(path)
+	if err != nil || len(rows) != 1 || len(manifests) != 1 {
+		t.Fatalf("mixed ledger query: rows=%d manifests=%d err=%v", len(rows), len(manifests), err)
+	}
+	if rows[0].ID != row.ID || manifests[0].Panel != "p" {
+		t.Fatalf("query payload changed: %+v %+v", rows, manifests)
+	}
+	// Every new kind is validated, rather than silently discarded on read.
+	for _, raw := range ledgerFixtures(t, "p") {
+		m, err := decodeRecord(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run(m["record"].(string), func(t *testing.T) {
+			badPath := filepath.Join(t.TempDir(), "dispositions.jsonl")
+			bad := changeLedger(t, raw, "created_at", "invalid-time")
+			if err := os.WriteFile(badPath, bad, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := LoadStore(badPath); err == nil {
+				t.Fatal("query ignored malformed event")
+			}
+		})
 	}
 }

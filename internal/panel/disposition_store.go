@@ -1,30 +1,7 @@
-// disposition_store.go: spec 117 Bead 2 — the R6(b) transactional
-// append op, the R6(a) terminal coverage-manifest write, and the
-// R1(b) completeness floor read from the durable per-panel store.
-//
-// A per-panel store lives at <spec-dir>/reviews/<panel>/dispositions.jsonl
-// (disposition.go's doc comment). This file adds the SINGLE write path
-// onto that store — AppendRecord — plus the two callers built on it
-// (WriteTerminalManifest, CheckCompleteness). No other code in this
-// repo may append to or create a dispositions.jsonl file; the
-// `/ms-panel-tally` skill and Bead 4's migration transform both funnel
-// through AppendRecord so the gate-before-mutate + idempotency +
-// concurrency guarantees below hold for every writer.
-//
-// Concurrency/atomicity (R6(b), AC7): every AppendRecord call runs, under
-// ONE lock held on a DEDICATED <panel-dir>/dispositions.lock file (NEVER
-// on dispositions.jsonl itself — see disposition_lock_unix.go /
-// disposition_lock_windows.go), as a single indivisible unit: (a)
-// Validate + HygienePredicate the incoming record BEFORE touching the
-// data file at all; (b) read the CURRENT dispositions.jsonl and check
-// the incoming record's stable key (a disposition row's `id`; a coverage
-// manifest's `{spec,panel,round}`) against every existing record's key;
-// (c) if the key already exists, no-op (idempotent); otherwise append
-// the record with a single atomic O_APPEND write. A validation/hygiene
-// refusal returns BEFORE step (b)/(c) — the data file is left
-// byte-unchanged, and is never created (O_CREATE'd) if it did not
-// already exist, because the lock acquisition only ever opens/creates
-// the LOCKFILE, not the data file.
+// disposition_store.go implements the transactional panel ledger store.
+// AppendRecord retains the spec-directory adapter for legacy callers;
+// AppendRecords accepts an exact panel directory and validates an entire batch
+// under one dispositions.lock hold before appending any data (Spec 130 R5.1).
 package panel
 
 import (
@@ -81,12 +58,15 @@ func dispositionsLockPath(specDir, panelName string) string {
 // (dispositions.jsonl) is never touched by this function — only fn may
 // open it — so lock acquisition itself never violates gate-before-mutate.
 func withDispositionLock(specDir, panelName string, fn func() error) error {
-	dir := panelStoreDir(specDir, panelName)
+	return withPanelDispositionLock(panelStoreDir(specDir, panelName), fn)
+}
+
+func withPanelDispositionLock(dir string, fn func() error) error {
 	if err := os.MkdirAll(dir, dispositionsDirMode); err != nil {
 		return fmt.Errorf("panel: create panel directory %s: %w", termsafe.Escape(dir), err)
 	}
 
-	lockPath := dispositionsLockPath(specDir, panelName)
+	lockPath := filepath.Join(dir, dispositionsLockName)
 	unlock, err := acquireDispositionLock(lockPath)
 	if err != nil {
 		return fmt.Errorf("panel: acquire disposition lock: %w", err)
@@ -96,32 +76,34 @@ func withDispositionLock(specDir, panelName string, fn func() error) error {
 	return fn()
 }
 
-// recordKey identifies the decoded record m's uniqueness key: for a
-// disposition row, its `id`; for a coverage manifest, the composite
-// `{spec,panel,round}` (round rendered via json.Number.String() to avoid
-// a lossy float round-trip). The returned kind is the `record`
-// discriminator; two records collide only when BOTH kind and key match
-// (R6(b)) — a row and a manifest never collide even if a string field
-// happened to coincide.
+// recordKey returns the kind and a JSON tuple of that kind's R5.1 key
+// components. Keys are scoped to a panel directory. JSON tuples preserve number
+// literals and cannot collide through delimiters embedded in string fields.
 func recordKey(m map[string]interface{}) (kind, key string) {
-	record, _ := m["record"].(string)
-	switch record {
+	kind, _ = m["record"].(string)
+	var fields []string
+	switch kind {
 	case RecordDisposition:
-		id, _ := m["id"].(string)
-		return RecordDisposition, id
+		fields = []string{"id"}
 	case RecordPanelManifest:
-		spec, _ := m["spec"].(string)
-		panelField, _ := m["panel"].(string)
-		round := ""
-		if rv, ok := m["round"]; ok {
-			if num, ok := rv.(json.Number); ok {
-				round = num.String()
-			}
-		}
-		return RecordPanelManifest, spec + "\x00" + panelField + "\x00" + round
+		fields = []string{"spec", "panel", "round", "created_at"}
+	case RecordRound:
+		fields = []string{"round", "created_at"}
+	case RecordRefutation, RecordDeferral:
+		fields = []string{"slot", "round", "finding", "finding_sha256"}
+	case RecordRebind:
+		fields = []string{"to_sha"}
+	case RecordAbandon:
+		fields = []string{"created_at"}
 	default:
-		return record, ""
+		return kind, ""
 	}
+	values := make([]interface{}, len(fields))
+	for i, f := range fields {
+		values[i] = m[f]
+	}
+	data, _ := json.Marshal(values)
+	return kind, string(data)
 }
 
 // readDispositionLines reads path and returns its non-blank lines
@@ -186,101 +168,13 @@ func appendDispositionLine(path string, record []byte) error {
 	return nil
 }
 
-// AppendRecord is the R6(b) canonical, transactional append op: the
-// SOLE way any code in this repo may add a line to
-// <specDir>/reviews/<panel>/dispositions.jsonl. record is one raw JSON
-// line — either a `record:"disposition"` row or a `record:"panel"`
-// coverage manifest.
-//
-// It performs, under ONE lock on that panel's dedicated
-// dispositions.lock file, as a single indivisible unit:
-//
-//  1. Validate(record) then HygienePredicate(record) — a failure of
-//     EITHER returns immediately, before the data file is read or
-//     written at all (gate-before-mutate, ADR-0041).
-//  2. A uniqueness/idempotency check of record's key (a row's `id`; a
-//     manifest's `{spec,panel,round}`) against every record currently in
-//     dispositions.jsonl. A match is a no-op: AppendRecord returns nil
-//     without touching the file.
-//  3. Otherwise, one atomic O_APPEND of record onto dispositions.jsonl.
-//
-// panelName must be non-empty; it is used verbatim as a directory
-// segment (CLI callers validate it is a bare slug before reaching here —
-// see cmd/mindspec's validatePanelSlug).
+// AppendRecord adapts a legacy spec-directory/panel-name destination to the
+// exact-directory batch API. The same key and conflict rules apply to both.
 func AppendRecord(specDir, panelName string, record []byte) error {
 	if strings.TrimSpace(panelName) == "" {
 		return fmt.Errorf("panel: panel name must not be empty")
 	}
-
-	return withDispositionLock(specDir, panelName, func() error {
-		if err := Validate(record); err != nil {
-			return err
-		}
-		if err := HygienePredicate(record); err != nil {
-			return err
-		}
-
-		newMap, err := decodeRecord(record)
-		if err != nil {
-			// Validate already parsed record successfully, so this path
-			// is unreachable in practice; handled defensively rather than
-			// panicking.
-			return err
-		}
-
-		// Record↔destination consistency (FR-2, gate-before-mutate): the
-		// record's OWN `panel` field must name the destination panel — a
-		// row/manifest for panel X must never land in panel Y's file,
-		// which would silently corrupt every floor/Q attribution that
-		// reads the record's own fields rather than its on-disk location.
-		// Validate (above) already proved `panel` is a non-empty string;
-		// `spec` likewise. We additionally require a non-empty `spec` here
-		// explicitly so the invariant is self-documenting at the write
-		// boundary. (The bare `spec` field intentionally differs from the
-		// <NNN-slug> spec DIRECTORY — the migration and its tests write to
-		// arbitrary target dirs — so specDir is not a reliable carrier of
-		// the expected bare spec, and the destination check is keyed on
-		// the panel segment, which specDir DOES encode verbatim.)
-		recPanel, _ := newMap["panel"].(string)
-		if recPanel != panelName {
-			return fmt.Errorf("panel: record's panel field %s does not match the destination panel %s (a record must be appended to its own panel's store)", termsafe.Escape(recPanel), termsafe.Escape(panelName))
-		}
-		if recSpec, _ := newMap["spec"].(string); strings.TrimSpace(recSpec) == "" {
-			return fmt.Errorf("panel: record for panel %s has an empty spec field (every record must carry a non-empty spec)", termsafe.Escape(panelName))
-		}
-
-		newKind, newKey := recordKey(newMap)
-
-		path := dispositionsPath(specDir, panelName)
-		existing, err := readDispositionLines(path)
-		if err != nil {
-			return err
-		}
-		for _, line := range existing {
-			m, decErr := decodeRecord(line)
-			if decErr != nil {
-				// A pre-existing line that no longer decodes is not this
-				// op's job to repair; it simply cannot collide with the
-				// incoming record's key.
-				continue
-			}
-			kind, key := recordKey(m)
-			if kind == newKind && key == newKey {
-				// Same (kind,key): a TRUE retry (byte-identical semantic
-				// content) is an idempotent no-op (R6). But an append-only
-				// store must never silently DROP changed content under an
-				// existing key — that is a conflict, not a retry — so
-				// compare the full payload (excluding the volatile
-				// created_at timestamp) and surface a mismatch (FR-4).
-				if recordsSemanticallyEqual(newMap, m) {
-					return nil // idempotent no-op: this exact content is already stored.
-				}
-				return fmt.Errorf("panel: a record with this id/key already exists with different content — the append-only store treats changed content under an existing key as a conflict, not a retry (key %s)", termsafe.Escape(newKey))
-			}
-		}
-
-		return appendDispositionLine(path, record)
-	})
+	return AppendRecords(panelStoreDir(specDir, panelName), record)
 }
 
 // recordsSemanticallyEqual reports whether two already-decoded records
@@ -406,6 +300,12 @@ func CheckCompleteness(specDir, panelName string) error {
 	covered := map[string]bool{}
 
 	for _, line := range lines {
+		if err := Validate(line); err != nil {
+			return fmt.Errorf("panel %s: malformed record: %w", termsafe.Escape(panelName), err)
+		}
+		if err := HygienePredicate(line); err != nil {
+			return err
+		}
 		m, decErr := decodeRecord(line)
 		if decErr != nil {
 			return fmt.Errorf("panel %s: dispositions.jsonl contains a malformed record: %s", termsafe.Escape(panelName), decErr.Error())
@@ -418,6 +318,9 @@ func CheckCompleteness(specDir, panelName string) error {
 				return fmt.Errorf("panel %s: %s", termsafe.Escape(panelName), cmErr.Error())
 			}
 			manifest = &cm
+		case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+			// Events are validated above; only disposition rows cover slots.
+			continue
 		case RecordDisposition:
 			row, rowErr := decodeDispositionRow(line)
 			if rowErr != nil {
