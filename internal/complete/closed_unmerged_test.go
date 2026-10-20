@@ -185,6 +185,32 @@ func TestRun_CompleteBeadPlainFailureGainsRecoveryLine(t *testing.T) {
 	}
 }
 
+// TestRun_ResolveMergeFailureRecoveryKeepsFlag: when a --resolve-merge
+// invocation fails (e.g. the merge-conclusion commit is refused), the
+// recovery must re-issue the SAME command. A plain re-run would refuse
+// over the resolved merge the operator left staged.
+func TestRun_ResolveMergeFailureRecoveryKeepsFlag(t *testing.T) {
+	execErr := errors.New("committing (--no-edit) in /repo/.worktrees/worktree-spec-008-test: hook refused")
+	root, mock, _ := setupCompleteBeadFailure(t, execErr)
+
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{ResolveMerge: true})
+	if err == nil {
+		t.Fatal("expected an error when CompleteBead fails")
+	}
+	msg := err.Error()
+	want := "recovery: mindspec complete bead-1 " + executor.ResolveMergeFlag
+	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
+	if got := lines[len(lines)-1]; got != want {
+		t.Errorf("final recovery line = %q, want %q", got, want)
+	}
+	if !strings.Contains(msg, "re-run `mindspec complete bead-1 "+executor.ResolveMergeFlag+"`") {
+		t.Errorf("the re-run instruction must keep %s; got:\n%s", executor.ResolveMergeFlag, msg)
+	}
+	if cmd := finalRecoveryCommand(t, msg); guard.IsBannedRecoveryCommand(cmd) {
+		t.Errorf("final recovery command is banned (Req 19): %q", cmd)
+	}
+}
+
 // --- Spec 121 R6 (mindspec-tpjn): orphan-preflight convergence (ADR-0041 §2(i)) ---
 
 // captureStdout redirects os.Stdout for the duration of fn and returns

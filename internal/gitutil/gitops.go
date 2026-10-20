@@ -951,8 +951,15 @@ func CommitAll(workdir, message string) error {
 // survives unchanged, which is the identity mechanism the R5(d) re-entry
 // surface depends on (spec 125's parseMergeSubjectBeadBranch), not a
 // courtesy.
+//
+// `--no-verify` matches the other tool-made commits (CommitNoVerify):
+// this commit concludes a merge the tool itself started, so mindspec's
+// own pre-commit hook (which blocks spec-branch and protected-branch
+// commits in implement mode) must not refuse it. A conflict-free
+// `git merge` never fires pre-commit; the resumed conclusion must not
+// either.
 func CommitNoEdit(workdir string) error {
-	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit")
+	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit", "--no-verify")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing (--no-edit) in %s: %s", workdir, escapeLines(strings.TrimSpace(string(out))))
 	}

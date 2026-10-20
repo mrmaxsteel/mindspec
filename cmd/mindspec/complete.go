@@ -140,11 +140,22 @@ The bead ID is required as the first argument.`,
 			AllowNetDeletion: allowNetDeletion,
 			ResolveMerge:     resolveMerge,
 		})
-		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, emitInstruct) != nil {
+		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, completeInstructFn(result)) != nil {
 			os.Exit(1)
 		}
 		return nil
 	},
+}
+
+// completeInstructFn picks the instruct tail for complete. Run moves
+// this process to the repo root, so when the summary already printed
+// the `cd`, the tail must not add a cwd-based worktree redirect (it would
+// claim "main worktree" and could point at a peer's bead worktree).
+func completeInstructFn(result *complete.Result) func(string) error {
+	if result != nil && result.SummaryGaveCd() {
+		return emitInstructAfterCd
+	}
+	return emitInstruct
 }
 
 // completeOutput preserves the normal tail after a completed merge even when

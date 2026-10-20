@@ -19,6 +19,38 @@ import (
 //
 // root is the main repo root (for spec dirs and guard).
 func emitInstruct(root string) error {
+	return emitInstructTail(root, false)
+}
+
+// emitInstructAfterCd is emitInstruct for a verb whose own summary
+// already printed a `cd` line. It never adds the worktree redirect: the
+// verb may have changed this process's cwd (complete moves to the repo
+// root), so a cwd-based "you are in the main worktree" check would be
+// false, and its target can be a peer agent's bead worktree.
+func emitInstructAfterCd(root string) error {
+	return emitInstructTail(root, true)
+}
+
+// Seams for worktreeRedirect (tests stub the bd-backed guard reads).
+var (
+	activeWorktreePathFn = guard.ActiveWorktreePath
+	isMainCWDFn          = guard.IsMainCWD
+)
+
+// worktreeRedirect returns the redirect block, or "" when none applies.
+// summaryGaveCd suppresses it (see emitInstructAfterCd).
+func worktreeRedirect(root string, summaryGaveCd bool) string {
+	if summaryGaveCd {
+		return ""
+	}
+	wtPath := activeWorktreePathFn(root)
+	if wtPath == "" || !isMainCWDFn(root) {
+		return ""
+	}
+	return fmt.Sprintf("\n## Worktree Redirect\n\nYou are in the main worktree. Switch to:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
+}
+
+func emitInstructTail(root string, summaryGaveCd bool) error {
 	// ADR-0023: derive state from beads, not focus files.
 	ctx, _ := phase.ResolveContext(root)
 
@@ -64,8 +96,8 @@ func emitInstruct(root string) error {
 	}
 
 	// CWD redirect: if on main with active worktree, emit redirect only.
-	if wtPath := guard.ActiveWorktreePath(root); wtPath != "" && guard.IsMainCWD(root) {
-		fmt.Fprintf(os.Stdout, "\n## Worktree Redirect\n\nYou are in the main worktree. Switch to:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
+	if redirect := worktreeRedirect(root, summaryGaveCd); redirect != "" {
+		fmt.Fprint(os.Stdout, redirect)
 		return nil
 	}
 

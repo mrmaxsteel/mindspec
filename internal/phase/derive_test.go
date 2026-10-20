@@ -1052,6 +1052,20 @@ func TestFindActiveBeadForEpicWithCache_MalformedNotSelected(t *testing.T) {
 	}
 }
 
+// TestFindActiveBeadForEpicWithCache_ParallelInProgressIsAmbiguous: two
+// in_progress beads (parallel agents) select none, so the guard's
+// worktree redirect falls back to the spec worktree, never a peer's
+// bead worktree.
+func TestFindActiveBeadForEpicWithCache_ParallelInProgressIsAmbiguous(t *testing.T) {
+	restore := SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return []byte(`[{"id":"mindspec-9cyu.1","title":"a","status":"in_progress","issue_type":"task"},{"id":"mindspec-9cyu.2","title":"b","status":"in_progress","issue_type":"task"}]`), nil
+	})
+	defer restore()
+	if got := FindActiveBeadForEpicWithCache(NewCache(), "epic-1"); got != "" {
+		t.Errorf("FindActiveBeadForEpicWithCache = %q, want \"\" (parallel in_progress beads are ambiguous)", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Spec 092 Bead 3 (Req 1): stored-vs-derived phase detail
 // ---------------------------------------------------------------------------
