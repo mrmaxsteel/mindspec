@@ -83,7 +83,7 @@ Two floors are enforced at config load, not left to good intentions: an always-p
 The panel lifecycle is three agent-neutral CLI verbs — the contract any orchestrator can drive:
 
 ```bash
-mindspec panel create <slug> --spec <id> --target <ref> [--bead <id>] [--round N]
+mindspec panel create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N]
                                  # writes the panel dir, BRIEF, panel.json in one
                                  # operation; pins round, threshold, reviewed_head_sha
 mindspec panel verify <slug>     # read-only: completeness + staleness report,

@@ -312,11 +312,14 @@ and the skill-authored BRIEF body untouched on a re-panel. The panel
 directory is resolved layout-aware, reusing
 `internal/complete.panelGateRoots`' own logic: the co-located
 `<spec-dir>/reviews/<slug>` on a flat tree, otherwise the repo-root
-`review/<slug>` convention. A `--bead <id>` panel expects `--target
-bead/<id>` — the same ref `mindspec complete`'s gate rev-parses for
-staleness. The gate compares a divergent `--target` to that live branch.
-On a SHA mismatch, a changed subject tree blocks; an equal subject stays
-fresh. A legacy panel without a digest blocks on a SHA mismatch.
+`review/<slug>` convention. For `--gate bead`, `--target` must be `bead/<id>`;
+`bead_id` is derived from the target and validated with `idvalidate.BeadID`.
+An explicit `--bead` must match the target id and is refused for every
+other gate, including an omitted gate. These refusals write nothing.
+For existing bead panels with a divergent recorded target, the gate
+compares that target to the live `bead/<id>` branch. On a SHA mismatch,
+a changed subject tree blocks; an equal subject stays fresh. A legacy
+panel without a digest blocks on a SHA mismatch.
 On success, stdout carries two
 lines: `panel <slug> registered: round N, K expected reviewer(s),
 reviewed_head_sha <sha>` followed by `panel directory: <dir>` — the
@@ -359,15 +362,15 @@ skips the note. An unknown non-empty recorded gate always skips the note.
 These rules apply when `gates:` is absent too. The advisory does not
 change the gate decision.
 
-**`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
-ALWAYS exits `0` — it is a report, never a gate. It prints verdicts
+**`mindspec panel verify <slug> [--spec <id>]`** is READ-ONLY: it writes no file and
+exits `0` after resolving the registration — it is a report, never a gate. It prints verdicts
 present vs `expected_reviewers`, per-slot parse status (malformed files
 named), `reviewed_head_sha` vs the live target tip, and a PASS/BLOCK
 preview computed by `panel.PanelGateDecision` over facts gathered by
 `panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
 gate enforces.
 
-**`mindspec panel tally <slug>`** is ADVISORY-BUT-BLOCK-CAPABLE: its
+**`mindspec panel tally <slug> [--spec <id>]`** is ADVISORY-BUT-BLOCK-CAPABLE: its
 exit code tracks the `panel.PanelGateDecision` decision alone, and is
 non-zero on `Block`. Do not describe `verify`/`tally` as both
 "read-only/advisory" — `verify` never blocks; `tally` can. `tally`
@@ -403,6 +406,29 @@ a `sanitizeNonBeadDecision` CLI-layer rewrite (never touching
 the empty `git merge bead/` fence with target-naming text, and never
 emits a `mindspec complete <bead>` recovery line for a panel that is not
 complete-gated.
+
+**Create integrity (spec 130 R1).** An existing `panel.json` must parse.
+`create --round N` refuses when N is at or below the filename-derived
+LatestRound of verdict files, even when their contents are malformed.
+The refusal leaves every file unchanged and names `--round <LatestRound+1>`
+and `mindspec panel rebind`. A round with no verdict files may be recreated.
+
+**Registration resolution.** Lookup collects every matching slug. `--spec`
+selects the owning spec for `tally` and `verify`. Among copies belonging to
+one spec, a single copy under the current checkout wins over copies under
+`.worktrees/`. Any remaining ambiguity refuses and lists every candidate
+spec and directory. Both commands print `panel directory: <dir>` and
+`resolved round: N` before their report. `create` refuses a slug owned by
+another spec. Adhoc creation refuses a slug registered at another destination;
+spec creation refuses an adhoc slug. An adhoc registration at the create
+destination may be re-created under the round rules; canonical paths identify
+that destination across symlinks.
+
+**Recovery and usage.** Non-bead tally recovery uses the recorded spec id
+when known. Every adhoc create recovery omits `--spec`, including the
+missing-ref advisory. A `--bead` refusal on an explicit non-bead gate recovers with that gate
+and no `--bead`. Every panel subcommand, including disposition leaves, sets
+`SilenceUsage: true`, so an error prints no Cobra usage text.
 
 ### Lifecycle verb state honesty (spec 128)
 

@@ -42,10 +42,16 @@ func subjectCLIWrite(t *testing.T, root, file, text string) {
 
 func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 	for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs"} {
-		for _, gateCase := range []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", "adhoc bead", ""} {
+		for _, gateCase := range []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", "adhoc bead", "adhoc bead target", "", "omitted gate"} {
 			gate := gateCase
-			if gateCase == "adhoc bead" {
+			switch gateCase {
+			case "adhoc bead", "adhoc bead target":
 				gate = "adhoc"
+			case "":
+				// Completion matching requires a bead gate and a matching target.
+				gate = "bead"
+			case "omitted gate":
+				gate = ""
 			}
 			changes := []string{"archive", "ownership", "real edit", "internal reviews"}
 			if gate == "spec_approve" {
@@ -77,8 +83,8 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 					subjectCLIGit(t, root, "add", "-A")
 					subjectCLIGit(t, root, "commit", "-qm", "base")
 					target := "main"
-					bead := gate == "bead" || gate == "" || gateCase == "adhoc bead"
-					if bead {
+					bead := gate == "bead"
+					if bead || gate == "" || gateCase == "adhoc bead" || gateCase == "adhoc bead target" {
 						target = "bead/mindspec-subject.1"
 						subjectCLIGit(t, root, "switch", "-qc", target)
 					}
@@ -90,8 +96,16 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 					if gate != "adhoc" {
 						args = append(args, "--spec", "130-example")
 					}
-					if bead {
+					if bead || gateCase == "adhoc bead" {
 						args = append(args, "--bead", "mindspec-subject.1")
+					}
+					if gateCase == "adhoc bead" {
+						// This binding is refused; the target-only sibling retains
+						// the workspace-root subject and staleness coverage.
+						if msg := assertPanelRefusal(t, root, args...); !strings.Contains(msg, "--bead requires --gate bead") {
+							t.Fatalf("unexpected refusal: %s", msg)
+						}
+						return
 					}
 					if out, err := runPanelCmd(args...); err != nil {
 						t.Fatalf("create: %v\n%s", err, out)

@@ -140,6 +140,14 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 		} {
 			t.Run(gate+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
+				subjectGit(t, root, "init", "-q", "-b", "main")
+				reviewedSHA := subjectCommit(t, root, ".mindspec/specs/130/spec.md", "base")
+				target, beadID := "main", ""
+				if gate == "bead" {
+					beadID = "mindspec-subject.1"
+					target = "bead/" + beadID
+					subjectGit(t, root, "switch", "-qc", target)
+				}
 				dir := filepath.Join(root, ".mindspec/specs/130/reviews/p")
 				base := "100644 blob abc\t.mindspec/specs/130/spec.md\n"
 				listing := base + "100644 blob def\t" + tc.path + "\n"
@@ -150,7 +158,7 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: "abc123", SubjectDigest: digest, Gate: gate}); err != nil {
+				if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: reviewedSHA, SubjectDigest: digest, Gate: gate, Target: target}); err != nil {
 					t.Fatal(err)
 				}
 				for i := 1; i <= 2; i++ {
@@ -158,12 +166,21 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				liveSHA := subjectCommit(t, root, tc.path, "changed")
+				if liveSHA == reviewedSHA {
+					t.Fatal("fixture requires a changed target SHA")
+				}
 				calls := 0
-				facts := ResolveGateFacts(Registration{Dir: dir}, "", root, GateIO{
-					RevParse: func(string, string) (string, error) { return "def456", nil },
+				facts := ResolveGateFacts(Registration{Dir: dir}, beadID, root, GateIO{
+					RevParse: func(scanRoot, ref string) (string, error) {
+						if beadID != "" && ref != target {
+							t.Fatalf("live ref=%s, want %s", ref, target)
+						}
+						return gitutil.RevParseRef(scanRoot, target)
+					},
 					SubjectTree: func(_, ref string, s SubjectRoots) (string, error) {
 						calls++
-						if ref != "def456" {
+						if ref != liveSHA {
 							t.Fatal(ref)
 						}
 						return SubjectDigest(listing, s)

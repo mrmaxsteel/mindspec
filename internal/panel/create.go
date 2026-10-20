@@ -2,11 +2,14 @@ package panel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
 // briefHeaderOpen/briefHeaderClose delimit the BRIEF.md region Create
@@ -96,17 +99,12 @@ type CreateInput struct {
 // R1): Round and ReviewedHeadSHA land in the SAME Panel value, so no
 // code path can write one without the other, and both files are
 // computed in full — including validating any existing BRIEF.md's
-// marker state — before either is touched on disk. Create never reads,
-// writes, or deletes any `<slot>-round-<N>.json` verdict file.
+// marker state — before either is touched on disk. Create never writes
+// or deletes any `<slot>-round-<N>.json` verdict file.
 //
-// panel.json is written as a full-struct overwrite: Create never reads
-// an existing panel.json first (unlike its read-before-splice
-// BRIEF.md handling below). A re-panel of a directory whose panel.json
-// carries a hand-set `abandoned`/`abandon_reason` (the /ms-panel-tally
-// Abandon procedure) therefore CLEARS those fields and revives the
-// panel into an active round — this is the known, intentional
-// behavior of calling Create again, not an oversight
-// (TestCreate_RepanelOfAbandonedPanelRevivesIt pins it).
+// Existing panel.json must parse before any write. Verdict filenames are
+// authoritative for round conflicts, including malformed verdict contents.
+// A successful re-panel replaces the registration and revives abandonment.
 //
 // The two writes below (panel.json, then BRIEF.md) are sequential and
 // not crash-atomic as a pair: a process death between them leaves
@@ -134,6 +132,29 @@ type CreateInput struct {
 // internal/panel is a leaf: Create imports no internal/config and no
 // git.
 func Create(dir string, in CreateInput) error {
+	beadID := ""
+	if in.BeadID != nil {
+		beadID = *in.BeadID
+	}
+	binding, err := CreateBeadID(in.Gate, in.Target, beadID)
+	if err != nil {
+		return err
+	}
+	in.BeadID = binding
+	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
+		if reg := load(dir); reg.Err != nil {
+			return reg.Err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read panel.json: %w", err)
+	}
+	res, err := Tally(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if res != nil && res.LatestRound > 0 && in.Round <= res.LatestRound {
+		return &CreateRoundConflict{Round: in.Round, LatestRound: res.LatestRound}
+	}
 	p := Panel{
 		BeadID:               in.BeadID,
 		Spec:                 in.Spec,
@@ -183,6 +204,35 @@ func Create(dir string, in CreateInput) error {
 		return fmt.Errorf("write %s: %w", briefPath, err)
 	}
 	return nil
+}
+
+// CreateRoundConflict lets callers render a recovery using the resolved binding.
+type CreateRoundConflict struct{ Round, LatestRound int }
+
+func (e *CreateRoundConflict) Error() string {
+	return fmt.Sprintf("cannot create round %d: verdict files already reach round %d", e.Round, e.LatestRound)
+}
+
+// CreateBeadID derives and validates the binding before callers resolve git or
+// write files. An omitted gate is non-bead, like every gate other than bead.
+func CreateBeadID(gate, target, beadID string) (*string, error) {
+	if gate != "bead" {
+		if beadID != "" {
+			return nil, fmt.Errorf("--bead requires --gate bead")
+		}
+		return nil, nil
+	}
+	if !strings.HasPrefix(target, "bead/") {
+		return nil, fmt.Errorf("--gate bead requires --target bead/<id>")
+	}
+	derived := strings.TrimPrefix(target, "bead/")
+	if err := idvalidate.BeadID(derived); err != nil {
+		return nil, fmt.Errorf("invalid bead target: %w", err)
+	}
+	if beadID != "" && beadID != derived {
+		return nil, fmt.Errorf("--bead %q does not match --target %q", beadID, target)
+	}
+	return &derived, nil
 }
 
 // renderBriefHeader renders the machine-managed BRIEF region: the
