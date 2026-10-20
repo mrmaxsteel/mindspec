@@ -1380,11 +1380,12 @@ func implPanelDeferralPreflight(root, specID string) error {
 				entrySpec = specID
 			}
 			reg := panel.Registration{Dir: filepath.Join("review", identity[1]), Panel: panel.Panel{Spec: entrySpec, BeadID: &beadID}}
-			for _, current := range regs {
-				if complete.PanelDeferredRegistrationMatches(current, entrySpec, identity[1]) {
-					reg = current
-					break
-				}
+			matches, err := complete.PanelDeferredRegistrations(regs, entrySpec, identity[1])
+			if err != nil {
+				return err
+			}
+			if len(matches) == 1 {
+				reg = matches[0]
 			}
 			// Only an intact registration with this stored identity can skip the audit.
 			if err := complete.CheckAuditedPanelDeferrals(reg, group); err != nil {

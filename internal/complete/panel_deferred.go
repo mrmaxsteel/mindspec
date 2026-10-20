@@ -3,7 +3,7 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,7 +43,7 @@ func CheckPanelDeferrals(reg panel.Registration, entries []panel.Deferral, audit
 
 func deferralFailure(reg panel.Registration, d panel.Deferral, audited bool, err error) error {
 	recovery := fmt.Sprintf("bd reopen %s", core3Quote(d.Bead))
-	if !audited {
+	if !audited && reg.Dir != "" {
 		finding := ""
 		if d.Finding != "slot" {
 			finding = " --finding " + core3Quote(d.Finding)
@@ -267,6 +267,24 @@ func PanelDeferredRegistrationMatches(reg panel.Registration, specID, slug strin
 	return latest.Record == panel.RecordRound && latest.Spec == specID && latest.Panel == slug
 }
 
+// PanelDeferredRegistrations resolves every ledger-bound match for an audit
+// identity. Callers must reject duplicates before applying any supersession.
+func PanelDeferredRegistrations(regs []panel.Registration, specID, slug string) ([]panel.Registration, error) {
+	var matches []panel.Registration
+	var dirs []string
+	for _, reg := range regs {
+		if PanelDeferredRegistrationMatches(reg, specID, slug) {
+			matches = append(matches, reg)
+			dirs = append(dirs, termsafe.Escape(reg.Dir))
+		}
+	}
+	if len(matches) > 1 {
+		sort.Strings(dirs)
+		return matches, fmt.Errorf("panel %s for spec %s is registered at %d paths: %s; remove the duplicates", termsafe.Escape(slug), idrender.Spec(specID), len(matches), strings.Join(dirs, ", "))
+	}
+	return matches, nil
+}
+
 func unionDeferrals(existing, add []PanelDeferredEntry) []PanelDeferredEntry {
 	out := append([]PanelDeferredEntry{}, existing...)
 	seen := map[string]bool{}
@@ -352,10 +370,14 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 // The gate records pending entries. Settlement replaces their settled audit
 // before close. Other panels and unrelated metadata remain durable on retries.
 func replaceGatedDeferrals(beadID string, results []PanelGateResult, entries []PanelDeferredEntry, settle bool) error {
-	var gated []panel.Registration
+	var regs, gated []panel.Registration
+	for _, result := range results {
+		regs = append(regs, result.Registration)
+	}
 	for _, result := range results {
 		reg := result.Registration
-		if PanelDeferredRegistrationMatches(reg, reg.Panel.Spec, reg.Slug()) {
+		matches, err := PanelDeferredRegistrations(regs, reg.Panel.Spec, reg.Slug())
+		if err == nil && len(matches) == 1 && matches[0].Dir == reg.Dir {
 			field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
 			if err == nil && field == "" && (result.Decision.Action == panel.Allow || reg.Panel.Abandoned) {
 				gated = append(gated, reg)
@@ -431,7 +453,7 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 	if len(entries) == 0 {
 		return nil
 	}
-	regs := panel.ForBead(panelScanFn(roots...), beadID)
+	regs := panelScanFn(roots...)
 	groups := map[string][]PanelDeferredEntry{}
 	for _, entry := range entries {
 		groupSpec := entry.Spec
@@ -441,18 +463,28 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 		key, _ := json.Marshal([]string{groupSpec, entry.Panel})
 		groups[string(key)] = append(groups[string(key)], entry)
 	}
+	// Resolve every identity before any group can write superseding entries.
+	resolved := map[string][]panel.Registration{}
+	for key, group := range groups {
+		groupSpec := group[0].Spec
+		if groupSpec == "" {
+			groupSpec = specID
+		}
+		matches, err := PanelDeferredRegistrations(regs, groupSpec, group[0].Panel)
+		if err != nil {
+			return err
+		}
+		resolved[key] = matches
+	}
 	var effective []PanelDeferredEntry
-	for _, group := range groups {
+	for key, group := range groups {
 		first := group[0]
 		groupSpec := first.Spec
 		if groupSpec == "" {
 			groupSpec = specID
 		}
-		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: groupSpec, BeadID: &beadID}}
-		for _, current := range regs {
-			if !PanelDeferredRegistrationMatches(current, groupSpec, first.Panel) {
-				continue
-			}
+		reg := panel.Registration{Panel: panel.Panel{Spec: groupSpec, BeadID: &beadID}}
+		for _, current := range resolved[key] {
 			// Only verb-backed abandonment or refutation can supersede the audit.
 			field, err := panel.CheckHandEdits(current.Dir, current.Panel)
 			if current.Err != nil || err != nil || field != "" {

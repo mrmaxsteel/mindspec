@@ -260,10 +260,17 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	if err == nil {
 		t.Fatal("invalid follow-up must block completion on retry")
 	}
-	for _, want := range []string{"R1", "ccr[0]", "follow-up", "bd reopen", "panel refute"} {
+	for _, want := range []string{"R1", "ccr[0]", "follow-up", "bd reopen"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("recovery omits %q: %v", want, err)
 		}
+	}
+	if change == "closed present" || strings.HasSuffix(change, "refuted-other present") {
+		if !strings.Contains(err.Error(), "panel refute") {
+			t.Errorf("live registration must offer refutation: %v", err)
+		}
+	} else if !strings.HasPrefix(err.Error(), "bead "+beadID+" slot ") || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
+		t.Errorf("missing or invalid registration must name the bead and offer reopen only: %v", err)
 	}
 	if closedOnRetry {
 		t.Error("blocked retry must not close the bead")
@@ -601,5 +608,139 @@ func TestComplete_ResumeAuditRegistrationLedgerIdentity(t *testing.T) {
 				t.Fatalf("own verb-backed abandonment must skip the audit: %+v %v", audit, err)
 			}
 		})
+	}
+}
+
+func TestComplete_DuplicatePanelIdentityPreservesAudit(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build panel writer: %v %s", err, out)
+	}
+	for _, attempt := range []string{"resume-review", "resume-reviews", "pending", "settle"} {
+		t.Run(attempt, func(t *testing.T) {
+			saveAndRestore(t)
+			stubPhaseEpic(t, "130-core3", "epic-130-core3")
+			fake := deferralBD(t, "epic-130-core3")
+			store := newFakeMetadataStore()
+			store.wire(t)
+			panelSkipEnvFn = func() bool { return false }
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			reg := deferredFixture(t, root, false)
+			beadID := *reg.Panel.BeadID
+			var entries []PanelDeferredEntry
+			for _, d := range reg.Panel.Deferrals {
+				entries = append(entries, PanelDeferredEntry{Deferral: d, Spec: reg.Panel.Spec, Panel: reg.Slug()})
+			}
+			pending := entries
+			if attempt == "settle" {
+				pending = []PanelDeferredEntry{}
+			}
+			store.data[beadID] = map[string]interface{}{"panel_deferred_entries": entries, "deferral_pending_entries": pending}
+			roots := PanelGateRoots(root, "", reg.Panel.Spec)
+			setDeferredIssue(t, fake, "closed")
+			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+				t.Fatalf("closed follow-up must block before the copy: %v", err)
+			}
+			live := reg.Dir
+			aside := filepath.Join(t.TempDir(), "live")
+			if err := os.Rename(live, aside); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.CopyFS(live, os.DirFS(aside)); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(binary, "panel", "abandon", reg.Slug(), "--spec", reg.Panel.Spec, "--reason", "rework", "--by", "max")
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("abandon byte copy: %v %s", err, out)
+			}
+			segment := "review"
+			if attempt == "resume-reviews" {
+				segment = "reviews"
+			}
+			duplicate := filepath.Join(root, ".mindspec", "docs", "specs", reg.Panel.Spec, segment, reg.Slug())
+			if err := os.MkdirAll(filepath.Dir(duplicate), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(live, duplicate); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(aside, live); err != nil {
+				t.Fatal(err)
+			}
+			regs := panel.Scan(roots...)
+			if len(regs) != 2 {
+				t.Fatalf("want live and abandoned registrations: %+v", regs)
+			}
+			var results []PanelGateResult
+			for _, current := range regs {
+				field, err := panel.CheckHandEdits(current.Dir, current.Panel)
+				if err != nil || field != "" || !PanelDeferredRegistrationMatches(current, reg.Panel.Spec, reg.Slug()) {
+					t.Fatalf("copy must have intact ledger identity: %+v %q %v", current, field, err)
+				}
+				results = append(results, PanelGateResult{Registration: current, Decision: panel.Decision{Action: panel.Allow}})
+			}
+			if strings.HasPrefix(attempt, "resume-") {
+				err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true)
+				for _, want := range []string{"panel " + reg.Slug() + " for spec " + reg.Panel.Spec + " is registered at 2 paths:", live, duplicate, "remove the duplicates"} {
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("duplicate identity must block and name both paths; want %q: %v", want, err)
+					}
+				}
+			} else if err := replaceGatedDeferrals(beadID, results, nil, attempt == "settle"); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"panel_deferred_entries", "deferral_pending_entries"} {
+				audit, err := DecodePanelDeferred(store.data[beadID], key)
+				want := entries
+				if key == "deferral_pending_entries" {
+					want = pending
+				}
+				if err != nil || !reflect.DeepEqual(audit, want) {
+					t.Errorf("duplicate identity changed %s: %+v %v; want %+v", key, audit, err, want)
+				}
+			}
+			if strings.HasPrefix(attempt, "resume-") {
+				if err := os.Rename(live, filepath.Join(t.TempDir(), "live")); err != nil {
+					t.Fatal(err)
+				}
+				if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err != nil {
+					t.Fatalf("single abandoned registration must skip: %v", err)
+				}
+				for _, key := range []string{"panel_deferred_entries", "deferral_pending_entries"} {
+					audit, err := DecodePanelDeferred(store.data[beadID], key)
+					if err != nil || len(audit) != 0 {
+						t.Errorf("single abandoned registration retains %s: %+v %v", key, audit, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestComplete_ResumeMissingPanelNamesBeadRecovery(t *testing.T) {
+	saveAndRestore(t)
+	stubPhaseEpic(t, "130-core3", "epic-130-core3")
+	fake := deferralBD(t, "epic-130-core3")
+	setDeferredIssue(t, fake, "closed")
+	store := newFakeMetadataStore()
+	store.wire(t)
+	panelSkipEnvFn = func() bool { return false }
+	root := t.TempDir()
+	reg := deferredFixture(t, root, false)
+	beadID := *reg.Panel.BeadID
+	entry := PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Spec: reg.Panel.Spec, Panel: reg.Slug()}
+	store.data[beadID] = map[string]interface{}{"panel_deferred_entries": []PanelDeferredEntry{entry}}
+	if err := os.Rename(reg.Dir, filepath.Join(t.TempDir(), "saved-panel")); err != nil {
+		t.Fatal(err)
+	}
+	err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, []string{root}, true)
+	if err == nil || !strings.HasPrefix(err.Error(), "bead "+beadID+" slot R1 finding ccr[0] follow-up follow-up:") || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") || strings.Contains(err.Error(), "panel refute") {
+		t.Fatalf("missing registration must name the bead and offer reopen only: %v", err)
 	}
 }

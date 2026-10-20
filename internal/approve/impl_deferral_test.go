@@ -619,3 +619,107 @@ func TestImplPreflight_PendingDeferralAudit(t *testing.T) {
 		})
 	}
 }
+
+func TestImplPreflight_RejectsDuplicatePanelIdentity(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build panel writer: %v %s", err, out)
+	}
+	for _, layout := range []string{"legacy", "flat"} {
+		for _, segment := range []string{"review", "reviews"} {
+			t.Run(layout+"/"+segment, func(t *testing.T) {
+				root, reg, fake := implDeferralFixture(t, "bead")
+				entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0], Spec: reg.Panel.Spec, Panel: reg.Slug()}
+				implGetMetadataFn = func(string) (map[string]interface{}, error) {
+					return map[string]interface{}{"panel_deferred_entries": []complete.PanelDeferredEntry{entry}}, nil
+				}
+				core3Cover(t, reg)
+				core3Manifest(t, reg)
+				implDeferralIssue(t, fake, "closed")
+				specDir := filepath.Join(root, "docs", "specs", reg.Panel.Spec)
+				if layout == "flat" {
+					flatDir := filepath.Join(root, ".mindspec", "specs", reg.Panel.Spec)
+					if err := os.MkdirAll(flatDir, 0700); err != nil {
+						t.Fatal(err)
+					}
+					plan, err := os.ReadFile(filepath.Join(specDir, "plan.md"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(flatDir, "plan.md"), plan, 0600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Rename(filepath.Join(root, "docs"), filepath.Join(t.TempDir(), "docs")); err != nil {
+						t.Fatal(err)
+					}
+					liveSegment := "reviews"
+					if segment == "reviews" {
+						liveSegment = "review"
+					}
+					live := filepath.Join(flatDir, liveSegment, reg.Slug())
+					if err := os.MkdirAll(filepath.Dir(live), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Rename(reg.Dir, live); err != nil {
+						t.Fatal(err)
+					}
+					reg.Dir, specDir = live, flatDir
+				}
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
+					t.Fatalf("closed follow-up must block before the copy: %v", err)
+				}
+				live := reg.Dir
+				aside := filepath.Join(t.TempDir(), "live")
+				if err := os.Rename(live, aside); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.CopyFS(live, os.DirFS(aside)); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command(binary, "panel", "abandon", reg.Slug(), "--spec", reg.Panel.Spec, "--reason", "rework", "--by", "max")
+				cmd.Dir = root
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("abandon byte copy: %v %s", err, out)
+				}
+				duplicate := filepath.Join(specDir, segment, reg.Slug())
+				if err := os.MkdirAll(filepath.Dir(duplicate), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(live, duplicate); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(aside, live); err != nil {
+					t.Fatal(err)
+				}
+				regs := panel.Scan(complete.PanelGateRoots(root, "", reg.Panel.Spec)...)
+				if len(regs) != 2 {
+					t.Fatalf("want live and abandoned registrations: %+v", regs)
+				}
+				for _, current := range regs {
+					field, err := panel.CheckHandEdits(current.Dir, current.Panel)
+					if err != nil || field != "" || !complete.PanelDeferredRegistrationMatches(current, reg.Panel.Spec, reg.Slug()) {
+						t.Fatalf("copy must have intact ledger identity: %+v %q %v", current, field, err)
+					}
+				}
+				if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
+					t.Fatalf("registration integrity must pass: %v", err)
+				}
+				err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+				for _, want := range []string{"panel " + reg.Slug() + " for spec " + reg.Panel.Spec + " is registered at 2 paths:", live, duplicate, "remove the duplicates"} {
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("duplicate identity must block and name both paths; want %q: %v", want, err)
+					}
+				}
+				// A single verb-backed abandonment still skips the closed follow-up.
+				if err := os.Rename(live, filepath.Join(t.TempDir(), "live")); err != nil {
+					t.Fatal(err)
+				}
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+					t.Fatalf("single abandoned registration must skip: %v", err)
+				}
+			})
+		}
+	}
+}
