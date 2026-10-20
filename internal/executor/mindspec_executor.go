@@ -95,6 +95,20 @@ type MindspecExecutor struct {
 	// `bd worktree` wrappers; tests may inject a fake to avoid requiring `bd`
 	// on PATH.
 	WorktreeOps WorktreeOps
+
+	landedReview *landedReview
+}
+
+// landedReview is supplied only to CompleteBead's binding producer.
+type landedReview struct {
+	sha, panel string
+}
+
+var _ LandedReviewSetter = (*MindspecExecutor)(nil)
+
+// SetLandedReview supplies the reviewed identity for the next CompleteBead call.
+func (g *MindspecExecutor) SetLandedReview(sha, panel string) {
+	g.landedReview = &landedReview{sha: sha, panel: panel}
 }
 
 // NewMindspecExecutor creates a MindspecExecutor wired to the production
@@ -337,6 +351,9 @@ func (g *MindspecExecutor) DispatchBead(beadID, specID string) (WorkspaceInfo, e
 // CompleteBead closes out a bead: commits, merges into spec, removes worktree,
 // deletes branch. Mirrors the logic in internal/complete/complete.go.
 func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error {
+	review := g.landedReview
+	g.landedReview = nil // never reuse a previous invocation's panel identity
+
 	beadBranch, err := workspace.BeadBranch(beadID)
 	if err != nil {
 		return err
@@ -479,7 +496,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// MergeInto of an already-ancestor branch is a no-op, and the
 		// re-run's ensureLandedBinding locates the SAME merge by identity —
 		// never a silent warn-and-continue past an unrecorded binding.
-		if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch); bindErr != nil {
+		if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch, review); bindErr != nil {
 			return guard.NewFailure(
 				fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
 				fmt.Sprintf("mindspec complete %s", beadID),
@@ -719,7 +736,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			// still ABSENT and must be recorded now, BEFORE the cleanup
 			// leg further down runs, so the fail-closed refusal
 			// converges here too, not just at CompleteBead's leg.
-			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch); bindErr != nil {
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch, nil); bindErr != nil {
 				return result, guard.NewFailure(
 					fmt.Sprintf("bead %s's branch %s is already merged into %s but its landed-merge binding is missing and could not be recorded (%v) — refusing to clean it up before this binding is durable.", beadID, e.Branch, specBranch, bindErr),
 					fmt.Sprintf("mindspec impl approve %s", specID),
@@ -778,7 +795,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			// further down removes this bead's worktree/branch. See
 			// CompleteBead's identical discipline above for the full
 			// rationale.
-			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch); bindErr != nil {
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, e.Branch, nil); bindErr != nil {
 				return result, guard.NewFailure(
 					fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean it up before this binding is durable.", beadID, e.Branch, specBranch, bindErr),
 					fmt.Sprintf("mindspec impl approve %s", specID),
@@ -1739,7 +1756,7 @@ func beadTipLandedOnSpec(root, specBranch, beadBranch string) (bool, error) {
 // cleanup and names the recovery (re-run the lifecycle command): the
 // branch survives as the corroborating datum and the re-invocation
 // converges.
-func (g *MindspecExecutor) ensureLandedBinding(beadID, specBranch, beadBranch string) error {
+func (g *MindspecExecutor) ensureLandedBinding(beadID, specBranch, beadBranch string, review *landedReview) error {
 	mergeSHA, secondParent, locErr := locateLandedMergeFn(g.Root, specBranch, beadBranch)
 	if locErr != nil {
 		if !errors.Is(locErr, errNoLandedMergeIdentified) {
@@ -1766,18 +1783,25 @@ func (g *MindspecExecutor) ensureLandedBinding(beadID, specBranch, beadBranch st
 	if existing, readErr := mergeBindingReadFn(beadID); readErr == nil {
 		sha, _ := existing["mindspec_landed_merge_sha"].(string)
 		sp, _ := existing["mindspec_landed_second_parent"].(string)
-		if strings.TrimSpace(sha) == mergeSHA && strings.TrimSpace(sp) == secondParent {
+		reviewMatches := review == nil || (existing["mindspec_landed_reviewed_sha"] == review.sha &&
+			existing["mindspec_landed_review_panel"] == review.panel)
+		if strings.TrimSpace(sha) == mergeSHA && strings.TrimSpace(sp) == secondParent && reviewMatches {
 			return nil // already bound to this located merge — convergent no-op
 		}
 	}
 	// A read failure is NOT treated as "already bound" — fall through and
 	// attempt the write; a persistent failure surfaces via the write below.
 
-	if bindErr := mergeBindingFn(beadID, map[string]interface{}{
+	updates := map[string]interface{}{
 		"mindspec_landed_merge_sha":     mergeSHA,
 		"mindspec_landed_second_parent": secondParent,
 		"mindspec_landed_at":            time.Now().UTC().Format(time.RFC3339),
-	}); bindErr != nil {
+	}
+	if review != nil {
+		updates["mindspec_landed_reviewed_sha"] = review.sha
+		updates["mindspec_landed_review_panel"] = review.panel
+	}
+	if bindErr := mergeBindingFn(beadID, updates); bindErr != nil {
 		return fmt.Errorf("recording the landed-merge binding for %s (merge %s): %w", beadID, mergeSHA, bindErr)
 	}
 	return nil

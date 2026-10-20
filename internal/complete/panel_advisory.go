@@ -107,6 +107,13 @@ var (
 	gateIsRefNotFoundFn                   = gateExecutor.IsRefNotFound
 )
 
+// PanelGateResult preserves each matched registration and its gate decision in
+// scan order. A disabled gate yields Warn without evaluating the registration.
+type PanelGateResult struct {
+	Registration panel.Registration
+	Decision     panel.Decision
+}
+
 // panelGate is the AUTHORITATIVE in-binary panel gate (Spec 099 Bead 2,
 // R1+R5; ADR-0037). It runs in complete.Run at the step-2.25 site — BEFORE
 // the artifact-materialization subphase (spec 128 Bead 6's
@@ -146,9 +153,9 @@ var (
 // shared fact-gatherer's bead/<id> rev-parse so the two call sites cannot
 // diverge.
 //
-// It returns the matched registration (for the post-completion audit writes,
-// reusing this scan) and an error (non-nil only on a Block, INCLUDING the
-// durable-obligation marker-write Block below).
+// It returns each matched registration with its decision in scan order (for
+// landed review keys and post-completion audits), and an error on a Block,
+// including the durable-obligation marker-write Block below.
 //
 // DURABLE-OBLIGATION protocol, part (a) (Spec 114 R2 step 5a): when the
 // decision Allows carrying a non-empty AppliedRefutations set, the
@@ -166,7 +173,7 @@ var (
 // the write fails, the refutation is NOT applied: this function returns a
 // Block (a genuine guard.NewFailure, not an abort-with-applied), so the RC
 // stays unresolved.
-func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer) (*panel.Registration, error) {
+func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer) ([]PanelGateResult, error) {
 	if beadID == "" {
 		return nil, nil
 	}
@@ -184,21 +191,18 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		return nil, nil
 	}
 
-	var matched *panel.Registration
+	var matched []PanelGateResult
 	var firstWarn string
 	var applied []panel.Refutation
 	appliedSeen := make(map[string]bool) // dedup by (slot, round) ACROSS matched panels (item 3/step 4).
 	for i := range regs {
-		if matched == nil {
-			r := regs[i]
-			matched = &r
-		}
 		// Honor the hatches with parity to the hook: a set skip env or a
 		// disabled gate yields a Warn/Allow decision that never blocks. We
 		// pass these through panel.GateFacts so the decision (not this
 		// caller) owns the messaging, and the skip variable is never named.
 		if skipEnv {
 			d := panel.PanelGateDecision(panel.GateFacts{BeadID: beadID, SkipEnv: true})
+			matched = append(matched, PanelGateResult{Registration: regs[i], Decision: d})
 			if d.Action == panel.Warn && firstWarn == "" {
 				firstWarn = d.Message
 			}
@@ -206,6 +210,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		}
 		if !panelGateEnabled {
 			// Config-disabled gate: do not evaluate facts, do not block.
+			matched = append(matched, PanelGateResult{Registration: regs[i], Decision: panel.Decision{Action: panel.Warn}})
 			continue
 		}
 
@@ -227,6 +232,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 			Worktree: func() string { return wtPath },
 		})
 		d := panel.PanelGateDecision(facts)
+		matched = append(matched, PanelGateResult{Registration: regs[i], Decision: d})
 		switch d.Action {
 		case panel.Block:
 			// A Block from any matched panel wins (R5). The decision.Message
@@ -894,7 +900,7 @@ func writePanelAuditMetadata(beadID string, reg *panel.Registration, w io.Writer
 }
 
 // PanelGate checks the registered bead panels without completing the bead.
-// Callers receive the same preflight and matched registration as complete.Run.
-func PanelGate(beadID string, roots []string, wtPath string, enabled bool, out io.Writer) (*panel.Registration, error) {
+// Callers receive the same preflight and matched decisions as complete.Run.
+func PanelGate(beadID string, roots []string, wtPath string, enabled bool, out io.Writer) ([]PanelGateResult, error) {
 	return panelGate(beadID, roots, wtPath, enabled, out)
 }

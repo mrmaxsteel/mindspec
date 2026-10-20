@@ -646,3 +646,13 @@ the gate exists for — the stale APPROVE honored at merge time.
   **three on a SHA mismatch**: rev-parse, subject-tree read, porcelain. Equal
   SHAs make no subject-tree call and keep the two-subprocess cap. The panel
   leaf performs no subprocess I/O; callers supply the reads through GateIO.
+
+- **§8 — Durable reviewed-SHA keys (R12).** The Spec-114 audit-durability
+  carve-out extends to `mindspec_landed_reviewed_sha` and
+  `mindspec_landed_review_panel`. `complete` uses the first Allow panel
+  decision in scan order: `reviewed_head_sha` and `<slug>@r<N>` are written
+  in the same `mergeBindingFn` call as the landed binding, only through
+  `CompleteBead`. A Warn, either hatch, or no panel writes neither key.
+  The already-bound check compares the keys only when supplied;
+  `FinalizeEpic` writes neither key and removes neither key. This extends
+  audit durability, not general tamper-resistance.

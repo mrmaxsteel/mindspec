@@ -192,10 +192,14 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   value outside the enum, so an unrecognized recorded `gate` can never
   surface a resolver error through the advisory path. `internal/complete`'s
   call site additionally guards on `panelReg != nil` before invoking the
-  rule (`panelReg.Panel` would otherwise be dereferenced on `panelGate`'s
-  nil fail-open return — the common panel-less `mindspec complete`); the
-  gate's own `Allow`/`Block` decision is fully computed before this call
-  runs and is never affected by it.
+  rule. `panelGate` returns each matched registration with its Allow or Warn
+  decision in scan order; an empty collection means no matched panel.
+  `panelReg` selects the first registration for the advisory and audit writes.
+  The first Allow supplies the landed review identity through the optional
+  `executor.LandedReviewSetter` before `CompleteBead` (Spec 130 R12).
+  Warn and config-disabled registrations supply no identity. The gate's
+  decision is fully computed before the advisory runs and is never affected
+  by it.
 - **`config show` gates/substitutes/known-model rendering + `--gate`
   resolved view (Spec 112 R8/R9).** `renderConfig` renders `panel.gates`
   in `config.PanelGateKeys` enum declaration order (never map-iteration

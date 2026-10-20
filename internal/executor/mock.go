@@ -390,3 +390,10 @@ func (m *MockExecutor) ResetIndexToHead(wtPath string) error {
 
 // Compile-time interface check.
 var _ Executor = (*MockExecutor)(nil)
+
+var _ LandedReviewSetter = (*MockExecutor)(nil)
+
+// SetLandedReview records the reviewed identity supplied before CompleteBead.
+func (m *MockExecutor) SetLandedReview(sha, panel string) {
+	m.record("SetLandedReview", sha, panel)
+}

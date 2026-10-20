@@ -837,6 +837,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// already durable. panelReg stays nil on that path, exactly as it
 	// does on every other pre-existing fail-open/no-panel path below.
 	var panelReg *panel.Registration
+	var panelDecisions []PanelGateResult
 	advisoryOut := panelAdvisoryOut
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
@@ -864,9 +865,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// round-3 redesign — it never reads a panel directory.)
 		gateRoots := panelGateRoots(root, wtPath, specID)
 		var panelGateErr error
-		panelReg, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		panelDecisions, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
 		if panelGateErr != nil {
 			return nil, panelGateErr
+		}
+		if len(panelDecisions) > 0 {
+			panelReg = &panelDecisions[0].Registration
 		}
 		// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
 		// per spec 112 R7): the Allow/Block decision above is already final;
@@ -881,6 +885,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if gateCfgErr == nil && panelReg != nil {
 			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
+			}
+		}
+	}
+
+	// Capture the first Allow before materialization so every write-ahead marker
+	// carries the identity needed by a retry that skips the panel gate.
+	var landedReview *stageMarkerReview
+	if resumeStage != "" {
+		landedReview, err = readStageMarkerReview(beadID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		for _, matched := range panelDecisions {
+			if matched.Decision.Action == panel.Allow {
+				p := matched.Registration.Panel
+				landedReview = &stageMarkerReview{sha: p.ReviewedHeadSHA, panel: fmt.Sprintf("%s@r%d", matched.Registration.Slug(), p.Round)}
+				break
 			}
 		}
 	}
@@ -956,17 +978,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// already run in this branch); wtPath == "" is a pure dirt-check
 		// refusal-or-noop (the committed-range gate above already ran).
 		if err := runMaterialization(materializationInput{
-			exec:        exec,
-			root:        root,
-			beadID:      beadID,
-			beadHead:    beadHead,
-			wtPath:      wtPath,
-			specDir:     specDir,
-			commitMsg:   commitMsg,
-			base:        base,
-			opts:        opts,
-			resumeStage: resumeStage,
-			warnWriter:  warnWriter,
+			exec:         exec,
+			root:         root,
+			beadID:       beadID,
+			beadHead:     beadHead,
+			wtPath:       wtPath,
+			specDir:      specDir,
+			commitMsg:    commitMsg,
+			base:         base,
+			opts:         opts,
+			resumeStage:  resumeStage,
+			landedReview: landedReview,
+			warnWriter:   warnWriter,
 		}); err != nil {
 			return nil, err
 		}
@@ -1145,6 +1168,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
+		if setter, ok := exec.(executor.LandedReviewSetter); ok && landedReview != nil {
+			setter.SetLandedReview(landedReview.sha, landedReview.panel)
+		}
 		completeErr = exec.CompleteBead(beadID, specBranch, "", opts.AllowNetDeletion, opts.ResolveMerge)
 		if completeErr == nil {
 			result.WorktreeRemoved = true

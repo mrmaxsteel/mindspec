@@ -321,3 +321,9 @@ type FinalizeResult struct {
 	// merge/FF until then. Always empty on the no-remote "direct" path.
 	FinalizeBranch string
 }
+
+// LandedReviewSetter optionally supplies the first Allow panel's reviewed identity
+// for the next CompleteBead binding write (Spec 130 R12).
+type LandedReviewSetter interface {
+	SetLandedReview(sha, panel string)
+}
