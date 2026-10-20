@@ -181,16 +181,15 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   the comparison default through one shared, config-homed rule,
   `(*config.Config).PanelGateAdvisoryDefault(recordedGate string, isBead
   bool) (int, bool)`, so the two surfaces cannot drift from each other.
-  The selection: (1) `gates:` unconfigured (`len(Gates) == 0`) → the flat
-  global default, exactly as Spec 109 shipped it; (2) a recorded gate that
-  is one of the five `panel.gates` keys → that gate's own resolved
-  default; (3) a gate-less bead panel (`Panel.IsBead()`, `Gate == ""`) →
-  the `bead` gate's default; (4) anything else — a gate-less non-bead
-  panel, or a recorded value outside the five-key enum — returns `(0,
-  false)`, and the caller must SKIP the note rather than guess: a
-  correctly-configured 9-reviewer `spec_approve` panel or 12-reviewer
-  `final_review` panel must never be flagged against an unrelated
-  default, and a spurious advisory trains operators to ignore real ones.
+  Apply these rules in order (spec 130 R2.1):
+
+  1. A known recorded gate uses that gate's resolved reviewer count.
+  2. A bead panel with no recorded gate uses the `bead` gate's count.
+  3. A non-bead panel with no recorded gate and no configured gate
+     overrides uses `PanelExpectedReviewers()`, which resolves through `adhoc`.
+  4. All other cases return `(0, false)`. The caller skips the note.
+     This includes every unknown non-empty recorded gate.
+
   `PanelGateAdvisoryDefault` never calls a gate-scoped resolver with a
   value outside the enum, so an unrecognized recorded `gate` can never
   surface a resolver error through the advisory path. `internal/complete`'s

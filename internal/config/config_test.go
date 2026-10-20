@@ -1463,6 +1463,9 @@ func TestPanelGateAdvisoryDefault_SelectionRule(t *testing.T) {
 	if got, ok := globalCfg.PanelGateAdvisoryDefault("", true); !ok || got != 4 {
 		t.Errorf("gates-absent, bead panel: got (%d,%v), want (4,true)", got, ok)
 	}
+	if got, ok := globalCfg.PanelGateAdvisoryDefault("weird-value", false); got != 0 || ok {
+		t.Errorf("gates-absent, unknown recorded gate: got (%d,%v), want (0,false)", got, ok)
+	}
 
 	cfg := &Config{Panel: Panel{
 		Reviewers: []Reviewer{{Family: "claude", Count: intp(3)}, {Family: "codex", Count: intp(3)}},

@@ -2006,6 +2006,52 @@ func TestPanelCreate_ZeroConfigNoGateUsesSixReviewers(t *testing.T) {
 	}
 }
 
+func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		global string
+		want   string
+	}{
+		{name: "explicit global", global: "  approve_threshold: 2\n", want: "2"},
+		{name: "default global", want: "n-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPanelCreateFlags(t)
+			cfgYAML := "panel:\n" + tc.global + "  gates:\n    adhoc:\n      approve_threshold: 3\n"
+			root := mkPanelTestRoot(t, cfgYAML)
+			withTestChdir(t, root)
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+
+			origRevParse := revParseForPanelFn
+			t.Cleanup(func() { revParseForPanelFn = origRevParse })
+			revParseForPanelFn = func(string, string) (string, error) {
+				return "1234deadbeef1234deadbeef1234deadbeef1234", nil
+			}
+
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs([]string{"panel", "create", "global-threshold", "--spec", "130-test", "--target", "bead/mindspec-x.1", "--bead", "mindspec-x.1"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("panel create (no --gate): %v\nstderr=%s", err, stderr.String())
+			}
+
+			data, err := os.ReadFile(filepath.Join(root, "review", "global-threshold", panel.FileName))
+			if err != nil {
+				t.Fatalf("read panel.json: %v", err)
+			}
+			var got panel.Panel
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("unmarshal panel.json: %v", err)
+			}
+			if got.ApproveThresholdExpr != tc.want {
+				t.Errorf("approve_threshold = %q, want global %q; adhoc threshold is 3", got.ApproveThresholdExpr, tc.want)
+			}
+		})
+	}
+}
+
 // TestPanelCreate_GateOmittedByteIdentical pins the 112-R9
 // byte-identical-when-absent contract at the CLI layer: `panel create`
 // without --gate writes a panel.json with no "gate" key, and its other
