@@ -439,10 +439,25 @@ func resolutionSteps(workdir string, conflicted []string, reentryHint string) st
 func stillConflictedRefusal(workdir string, reentryHint string) error {
 	conflicted := gitutil.ConflictedFiles(workdir)
 	if len(conflicted) == 0 {
-		// Staged but with leftover conflict markers.
-		conflicted = gitutil.StagedConflictMarkerFiles(workdir)
+		// Staged, but the resolution left conflict markers in.
+		return guard.NewFailure(leftoverMarkerSteps(workdir, gitutil.StagedConflictMarkerFiles(workdir), reentryHint), reentryHint)
 	}
 	return guard.NewFailure(resolutionSteps(workdir, conflicted, reentryHint), reentryHint)
+}
+
+// leftoverMarkerSteps is the refusal for files that are staged but still
+// hold conflict markers the resolution added.
+func leftoverMarkerSteps(workdir string, files []string, reentryHint string) string {
+	escaped := make([]string, len(files))
+	for i, f := range files {
+		escaped[i] = termsafe.Escape(f)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "leftover conflict markers in: %s (merge in %s) — remove them:", strings.Join(escaped, ", "), workdir)
+	fmt.Fprintf(&b, "\n  1. delete the marker lines from:\n     %s", strings.Join(escaped, "\n     "))
+	fmt.Fprintf(&b, "\n  2. git add %s", strings.Join(escaped, " "))
+	fmt.Fprintf(&b, "\n  3. re-run %s", reentryHint)
+	return b.String()
 }
 
 // completeResumedMerge is the R5(d)(iii)/(iv) completion leg: the index

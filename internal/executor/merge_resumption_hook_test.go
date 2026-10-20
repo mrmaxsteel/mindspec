@@ -25,12 +25,6 @@ esac
 exit 0
 `
 
-// TestCompleteBead_ResolveMerge_ConcludesUnderBlockingPreCommitHook:
-// with a pre-commit hook that blocks spec-branch commits (implement
-// mode) and no MINDSPEC_ALLOW_MAIN escape, `--resolve-merge` must still
-// conclude the operator's resolved merge. The merge-conclusion commit is
-// the tool's own, like a conflict-free `git merge`, which never fires
-// pre-commit.
 // installPreCommit points the repo's core.hooksPath at a fresh dir with
 // script as its pre-commit hook.
 func installPreCommit(t *testing.T, dir, script string) {
@@ -50,8 +44,24 @@ func installPreCommit(t *testing.T, dir, script string) {
 // removal for the later successful completion.
 func preservedConflict(t *testing.T) (g *MindspecExecutor, dir, specWtPath string) {
 	t.Helper()
+	return preservedConflictWithBeadFiles(t, nil)
+}
+
+// preservedConflictWithBeadFiles is preservedConflict, but the bead also
+// commits extraFiles (path -> content), which merge without conflict.
+func preservedConflictWithBeadFiles(t *testing.T, extraFiles map[string]string) (g *MindspecExecutor, dir, specWtPath string) {
+	t.Helper()
 	g, fake, dir := newRepoExecutor(t)
 	specWtPath, beadWtDir := setupConflictingSpecAndBead(t, dir)
+	if len(extraFiles) > 0 {
+		for name, content := range extraFiles {
+			if err := os.WriteFile(filepath.Join(beadWtDir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGitIn(t, beadWtDir, "add", name)
+		}
+		runGitIn(t, beadWtDir, "commit", "-m", "bead extra files")
+	}
 	fake.listEntries = []bead.WorktreeListEntry{{
 		Name:   "worktree-mindspec-x.1",
 		Path:   beadWtDir,
@@ -150,8 +160,11 @@ func TestCompleteBead_ResolveMerge_RefusesStagedConflictMarkers(t *testing.T) {
 		t.Fatal("--resolve-merge must refuse staged conflict markers")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "c.txt") || !strings.Contains(msg, ResolveMergeFlag) {
+	if !strings.Contains(msg, "leftover conflict markers in: c.txt") || !strings.Contains(msg, ResolveMergeFlag) {
 		t.Errorf("refusal must name the file and the --resolve-merge re-run; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "conflicted") {
+		t.Errorf("a staged file is not conflicted; the refusal must not say so; got:\n%s", msg)
 	}
 	if strings.Contains(msg, "git commit") {
 		t.Errorf("resolution steps must not tell the operator to run `git commit`; got:\n%s", msg)
@@ -163,6 +176,61 @@ func TestCompleteBead_ResolveMerge_RefusesStagedConflictMarkers(t *testing.T) {
 	stageFile(t, specWtPath, "resolved \n")
 	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
 		t.Fatalf("with markers removed, --resolve-merge must conclude, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must be complete")
+	}
+}
+
+// setextReadme is a Markdown file whose heading underline is exactly
+// seven '=' — the same text as a conflict separator line.
+const setextReadme = "Summary\n=======\n\nBody.\n"
+
+// TestCompleteBead_ResolveMerge_BeadSetextHeadingDoesNotBlock: the bead
+// adds a Markdown file with a '=======' underline; the conflict is in
+// another file. That line comes from the bead side, not from the
+// resolution, so once c.txt is resolved --resolve-merge concludes.
+func TestCompleteBead_ResolveMerge_BeadSetextHeadingDoesNotBlock(t *testing.T) {
+	g, _, specWtPath := preservedConflictWithBeadFiles(t, map[string]string{"README.md": setextReadme})
+	stageFile(t, specWtPath, "resolved\n")
+	if files := gitutil.StagedConflictMarkerFiles(specWtPath); len(files) != 0 {
+		t.Errorf("bead-authored setext underline must not count as a marker; got %v", files)
+	}
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("--resolve-merge must conclude, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must be complete")
+	}
+	if got, err := os.ReadFile(filepath.Join(specWtPath, "README.md")); err != nil || string(got) != setextReadme {
+		t.Errorf("README.md must land unchanged; got %q, err=%v", got, err)
+	}
+}
+
+// TestCompleteBead_ResolveMerge_ResolutionSetextHeadingConcludes: the
+// resolution itself writes a Markdown heading with a '=======' underline
+// into the conflicted file and no other marker lines. A lone separator
+// is not a conflict block, so --resolve-merge concludes.
+func TestCompleteBead_ResolveMerge_ResolutionSetextHeadingConcludes(t *testing.T) {
+	g, _, specWtPath := preservedConflict(t)
+	stageFile(t, specWtPath, "Merged\n=======\nspec side\nbead side\n")
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("a lone '=======' line must not block --resolve-merge, got: %v", err)
+	}
+	if gitutil.MergeInProgress(specWtPath) {
+		t.Error("the merge must be complete")
+	}
+}
+
+// TestCompleteBead_ResolveMerge_BeadAuthoredMarkerBlockDoesNotBlock: a
+// bead file that documents a full conflict block is content from the
+// bead side (present in MERGE_HEAD), not a leftover of the resolution.
+func TestCompleteBead_ResolveMerge_BeadAuthoredMarkerBlockDoesNotBlock(t *testing.T) {
+	doc := "Example:\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n"
+	g, _, specWtPath := preservedConflictWithBeadFiles(t, map[string]string{"conflicts.md": doc})
+	stageFile(t, specWtPath, "resolved\n")
+	if err := g.CompleteBead("mindspec-x.1", "spec/077-test", "", "", true); err != nil {
+		t.Fatalf("bead-authored marker lines must not block --resolve-merge, got: %v", err)
 	}
 	if gitutil.MergeInProgress(specWtPath) {
 		t.Error("the merge must be complete")
