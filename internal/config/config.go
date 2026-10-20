@@ -929,15 +929,29 @@ func (c *Config) PanelGateApproveThresholdExpr(gate string) (string, error) {
 	return c.resolveGateThresholdExpr(gate), nil
 }
 
-// PanelGateReviewerSlots returns gate's deterministic, expanded reviewer
+// PanelGateReviewerSlots optionally fills an explicit count round-robin over
+// the resolved reviewer entries, ignoring their counts. Without an override it
+// returns gate's deterministic, expanded reviewer
 // slots (spec 112 R3), resolved through the same per-field chain as
 // PanelGateExpectedReviewers. Returns an error for a gate name outside
 // PanelGateKeys.
-func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error) {
+func (c *Config) PanelGateReviewerSlots(gate string, count ...int) ([]ReviewerSlot, error) {
 	if !isValidGateKey(gate) {
 		return nil, gateKeyError(gate)
 	}
-	return expandSlots(c.resolveGateReviewers(gate)), nil
+	reviewers := c.resolveGateReviewers(gate)
+	if len(count) > 0 {
+		if len(count) != 1 || count[0] < 2 {
+			return nil, fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+		}
+		resized := make([]Reviewer, count[0])
+		for i := range resized {
+			resized[i] = reviewers[i%len(reviewers)]
+			resized[i].Count = nil
+		}
+		reviewers = resized
+	}
+	return expandSlots(reviewers), nil
 }
 
 // expandSlots deterministically expands reviewers into "R1".."Rn" slots in

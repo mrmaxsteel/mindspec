@@ -90,7 +90,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	fields := []string{"spec", "panel", "created_at"}
 	switch kind {
 	case RecordRound:
-		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "gate", "telemetry")
+		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "telemetry")
 	case RecordRefutation, RecordDeferral:
 		fields = append(fields, "slot", "finding", "finding_sha256", "finding_text", "by")
 		if kind == RecordRefutation {
@@ -126,8 +126,14 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	}
 	switch kind {
 	case RecordRound:
-		if !isValidGate(m["gate"].(string)) {
-			return fmt.Errorf("round gate must be a canonical gate")
+		gate, ok := m["gate"].(string)
+		if !ok {
+			return fmt.Errorf("round gate must be a string")
+		}
+		// An omitted create --gate retains the snapshot's empty gate. It still
+		// uses the adhoc roster defaults, and must match its round event exactly.
+		if gate != "" && !isValidGate(gate) {
+			return fmt.Errorf("round gate must be empty or a canonical gate")
 		}
 		if m["telemetry"] != "required" {
 			return fmt.Errorf("round telemetry must be required")

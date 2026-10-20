@@ -21,7 +21,8 @@ func TestComplete_FindsDerivedBeadPanel(t *testing.T) {
 	dir := filepath.Join(root, "review", "derived")
 	if err := panel.Create(dir, panel.CreateInput{
 		Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1,
-		ExpectedReviewers: 2, ReviewedHeadSHA: sha,
+		ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture",
+		Roster: []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "integration"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

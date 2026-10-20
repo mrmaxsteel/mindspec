@@ -158,7 +158,7 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := Create(dir, CreateInput{Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: reviewedSHA, SubjectDigest: digest, Gate: gate, Target: target}); err != nil {
+				if err := Create(dir, CreateInput{Round: 1, Spec: "130", Roster: createRoster(2), ExpectedReviewers: 2, ReviewedHeadSHA: reviewedSHA, SubjectDigest: digest, Gate: gate, Target: target}); err != nil {
 					t.Fatal(err)
 				}
 				for i := 1; i <= 2; i++ {
@@ -214,7 +214,7 @@ func TestGate_LegacyStaleMessageUnchanged(t *testing.T) {
 
 func TestGate_EqualSHANoSubjectCall(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
+	if err := Create(dir, CreateInput{Round: 1, Spec: "130", Target: "main", Roster: createRoster(2), ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
 		t.Fatal(err)
 	}
 	f := ResolveGateFacts(Registration{Dir: dir}, "", filepath.Dir(dir), GateIO{RevParse: func(string, string) (string, error) { return "abc123", nil }, SubjectTree: func(string, string, SubjectRoots) (string, error) {
@@ -228,7 +228,7 @@ func TestGate_EqualSHANoSubjectCall(t *testing.T) {
 
 func TestSubjectDigest_GateErrorBlocks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
+	if err := Create(dir, CreateInput{Round: 1, Spec: "130", Target: "main", Roster: createRoster(2), ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, reader := range []func(string, string, SubjectRoots) (string, error){nil, func(string, string, SubjectRoots) (string, error) { return "", nil }, func(string, string, SubjectRoots) (string, error) { return "", errors.New("tree unavailable") }} {
@@ -242,7 +242,7 @@ func TestSubjectDigest_GateErrorBlocks(t *testing.T) {
 func TestResolveGateFacts_LegacySkipsSubjectTree(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "review/p")
-	if err := Create(dir, CreateInput{Round: 1, ReviewedHeadSHA: "abc1234567"}); err != nil {
+	if err := WriteSnapshot(dir, Panel{Round: 1, ReviewedHeadSHA: "abc1234567"}); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
