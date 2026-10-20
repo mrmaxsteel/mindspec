@@ -122,7 +122,18 @@ func TestPassRule_NeverDischarged(t *testing.T) {
 			if d := passDecision(t, dir); d.Action != Block {
 				t.Fatalf("veto discharged: %+v", d)
 			}
-			for _, ref := range passTally(t, dir).AppliedRefutations() {
+			r := passTally(t, dir)
+			// Check applicability itself. AppliedRefutations also filters vetoes.
+			for _, verdict := range r.Verdicts {
+				if verdict.Slot != "R1" {
+					continue
+				}
+				ref := Refutation{Slot: verdict.Slot, Round: r.LatestRound, Finding: "slot", FindingSHA256: verdict.SlotSHA256}
+				if r.refutationApplies(verdict, ref) {
+					t.Fatal("veto refutation reported effective")
+				}
+			}
+			for _, ref := range r.AppliedRefutations() {
 				if ref.Slot == "R1" {
 					t.Fatal("veto refutation reported effective")
 				}

@@ -13,7 +13,7 @@ import (
 )
 
 func TestComplete_ResumeRechecksDurableDeferrals(t *testing.T) {
-	for _, change := range []string{"open", "closed", "deleted", "edge removed", "text removed", "reparented", "bd error", "env hatch", "config hatch", "refuted"} {
+	for _, change := range []string{"open", "closed", "deleted", "edge removed", "text removed", "reparented", "bd error", "closed present", "refuted-other present", "abandoned-handset present", "env hatch", "config hatch", "refuted", "refuted audited"} {
 		t.Run(change, func(t *testing.T) { runDeferredMaterializationRetry(t, change) })
 	}
 }
@@ -74,10 +74,21 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	if _, stage, present := readMarker(t, root, beadID); !present || stage != stageArtifactSync {
 		t.Fatalf("no resume marker stage=%s present=%v", stage, present)
 	}
-	if change != "open" {
-		setDeferredIssue(t, fakeBD, change)
+	if change == "refuted audited" {
+		// A prior attempt can settle the audit before completion fails.
+		if err := reconcilePendingDeferrals(beadID); err != nil {
+			t.Fatal(err)
+		}
+		audited, err := DecodePanelDeferred(store.data[beadID], "panel_deferred_entries")
+		if err != nil || len(audited) != 1 {
+			t.Fatalf("expected settled deferral before retry: %+v %v", audited, err)
+		}
+		store.data[beadID]["panel_refuted_entries"] = []refutationPendingEntry{{Spec: specID, Panel: "earlier-panel", Slot: "R2", Round: 1, Reason: "earlier reason", Evidence: "earlier evidence"}}
 	}
-	if change == "env hatch" || change == "config hatch" || change == "refuted" {
+	if change != "open" {
+		setDeferredIssue(t, fakeBD, strings.TrimSuffix(strings.NewReplacer("abandoned-handset", "closed", "refuted-other", "closed").Replace(change), " present"))
+	}
+	if change == "env hatch" || change == "config hatch" || change == "refuted" || change == "refuted audited" {
 		setDeferredIssue(t, fakeBD, "closed")
 	}
 	if change == "env hatch" {
@@ -87,14 +98,33 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 		writeFile(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
 		config.ResetCache()
 	}
-	if change == "refuted" {
+	if change == "refuted" || change == "refuted audited" {
 		ref := panel.Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingText: d.FindingText, FindingSHA256: d.FindingSHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
 		core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
 		reg.Panel.Refutations = append(reg.Panel.Refutations, ref)
 		if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
 			t.Fatal(err)
 		}
-	} else {
+	} else if change == "refuted-other present" {
+		v2 := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"a different finding"}}
+		core3JSON(t, dir, "R1-round-1.json", v2)
+		fs2, err := panel.Findings(v2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := panel.Refutation{Slot: "R1", Round: 1, Finding: fs2[0].ID, FindingText: fs2[0].Text, FindingSHA256: fs2[0].SHA256, Reason: "fixed", Ground: "disproven", Evidence: "fixing commit", By: "max", CreatedAt: core3Time}
+		core3Append(t, dir, panel.RefutationRecord{Record: panel.RecordRefutation, Spec: specID, Panel: reg.Slug(), Refutation: ref})
+		reg.Panel.Refutations = append(reg.Panel.Refutations, ref)
+		if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+			t.Fatal(err)
+		}
+	} else if change == "abandoned-handset present" {
+		reg.Panel.Abandoned = true
+		reg.Panel.AbandonReason = "hand"
+		if err := panel.WriteSnapshot(dir, reg.Panel); err != nil {
+			t.Fatal(err)
+		}
+	} else if change != "closed present" {
 		// The completion record must suffice even if the original registration disappears.
 		if err := os.Rename(dir, filepath.Join(t.TempDir(), "saved-panel")); err != nil {
 			t.Fatal(err)
@@ -106,14 +136,35 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	retry := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
 	result, err := Run(root, beadID, specID, "", retry, CompleteOpts{ResolveMerge: true})
 	t.Logf("follow-up %s on resume: result=%+v err=%v calls=%v", change, result, err, retry.calls)
-	if change == "open" || change == "env hatch" || change == "config hatch" || change == "refuted" {
+	if change == "open" || change == "env hatch" || change == "config hatch" || change == "refuted" || change == "refuted audited" {
 		if err != nil || result == nil || !result.BeadClosed {
 			t.Fatalf("open control must finish: result=%+v err=%v", result, err)
 		}
-		if change == "refuted" {
+		if change == "refuted" || change == "refuted audited" {
 			refs, err := decodeRefutations(store.data[beadID]["panel_refuted_entries"])
-			if err != nil || len(refs) != 1 || refs[0].Finding != d.Finding || refs[0].FindingSHA256 != d.FindingSHA256 || refs[0].Evidence != "fixing commit" {
+			wantRefs := 1
+			if change == "refuted audited" {
+				wantRefs++
+				if len(refs) != wantRefs || refs[1].Slot != "R2" || refs[1].Reason != "earlier reason" || refs[1].Evidence != "earlier evidence" {
+					t.Fatalf("resume lost the historical refutation audit: %+v %v", refs, err)
+				}
+			}
+			if err != nil || len(refs) != wantRefs || refs[0].Finding != d.Finding || refs[0].FindingSHA256 != d.FindingSHA256 || refs[0].Evidence != "fixing commit" {
 				t.Fatalf("resume refutation lost its durable audit: %+v %v", refs, err)
+			}
+			for _, key := range []string{"deferral_pending_entries", "panel_deferred_entries"} {
+				audited, err := DecodePanelDeferred(store.data[beadID], key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range audited {
+					if entry.Slot == d.Slot && entry.Finding == d.Finding && entry.FindingSHA256 == d.FindingSHA256 {
+						t.Errorf("refuted finding remains in %s: %+v", key, entry)
+					}
+				}
+				if err := CheckAuditedPanelDeferrals(reg, audited); err != nil {
+					t.Errorf("successful refuted retry left an active deferral in %s: %v", key, err)
+				}
 			}
 		}
 		return

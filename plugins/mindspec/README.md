@@ -46,7 +46,7 @@ These are the existing mindspec gating skills. The new skills in this plugin ass
 | Skill | Purpose |
 |:------|:--------|
 | `/ms-panel-run` | Step 0 writes the panel dir + BRIEF + `panel.json`; then launch 6 reviewers (3 Claude `Agent`s + 3 Codex CLI sessions) and collect verdicts |
-| `/ms-panel-tally` | Single decision authority: decision matrix + N−1 threshold, artifact gates, consolidation, halt-recovery, escape hatch |
+| `/ms-panel-tally` | Single decision authority: decision matrix (fresh, intact, complete, no veto, no unresolved REQUEST_CHANGES), artifact gates, consolidation, halt-recovery, escape hatch |
 
 ### Orchestrators (new)
 
@@ -73,10 +73,10 @@ Each cycle iteration:
 step 0              → pick + claim next bead, create worktree
 /ms-bead-impl       → implementation subagent commits to bead/<id>
 /ms-panel-run       → step 0 writes BRIEF + panel.json at <spec-dir>/reviews/<panel>/; 6 reviewers fan out in parallel
-/ms-panel-tally     → verdicts summarised; if ≥ N−1 APPROVE (5/6) → done
+/ms-panel-tally     → tally PASS → done; tally BLOCK → fix, refute or defer
 /ms-bead-fix        → consolidated changes → fix subagent → new commit
 /ms-panel-run       → round 2 re-bumps round + reviewed_head_sha, verifies the fix
-... iterate until APPROVE or max-rounds reached
+... repeat until tally PASS or the round limit
 merge terminal      → mindspec complete <bead-id> "<summary>" (hook-gated)
 ```
 
@@ -110,23 +110,11 @@ A six-slot panel with 3+3 lets you weight convergence: if all three Claudes APPR
 
 Empirically (lola, ~25 beads): unanimous APPROVE on round 1 is rare. Most beads need exactly one fix round. The reviewers that flag changes are usually one Claude and two Codex, or two Claudes and three Codex — different lenses landing on different defects.
 
-> **Why six and not four or eight.** Six is tuned, not derived —
-> the binding constraints are majority arithmetic and verdict
-> variance. With a 5-of-6 threshold, one dissent still routes to
-> merge-with-record while two dissents force a fix round; that is
-> the behavior we actually want from a panel. Shrink to four and
-> the same property needs 3-of-4, where a single noisy verdict
-> swings 25% of the panel — empirically (lola, ~25 beads) sub-5
-> panels rerouted on one-off flags far too often (~33%
-> single-flag variance, vs ~20% at six). Grow to eight and the
-> marginal reviewers mostly duplicate an existing lens while
-> adding 4–10 minutes of codex wall-clock per round and
-> proportional spend — across 25 beads we never saw an 8th lens
-> that would have changed a decision a 6-panel got wrong. Treat 6
-> (3 Claude + 3 Codex) as the sweet spot for a single-developer
-> compute budget, and scale the threshold as ceil(5N/6) if you
-> change N. This is an empirical setting, not a theorem — revisit
-> it if your defect mix differs.
+> **Why six reviewers.** The default panel uses three reviewers from
+> each model family. Each reviewer has a separate lens. Adjust the panel
+> size for the work and the compute budget. The pass rule stays the same:
+> the panel must be fresh, intact and complete. It must have no veto and
+> no unresolved REQUEST_CHANGES finding.
 
 ## Why these patterns
 

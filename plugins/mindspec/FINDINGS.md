@@ -83,7 +83,7 @@ See item 16 in Part 1 below for details.
 9. **Why 6 reviewers specifically.** **[ADJUDICATED — spec 093, Bead 7: rationale paragraph landed in README]**
    The README says "mixed families catch different defects" but doesn't justify 6 vs 4 or 8. Empirically on lola: ≥5 covers comfortable majority-vote; <5 has too much variance (one reviewer flagging changes is a 33% reroute, vs 20% at 5/6). But that's an empirical claim, not a derived one. Could be documented as "tunable, 6 was the sweet spot for our compute budget".
 
-   **Resolution:** Landed. The "Why six and not four or eight" paragraph (majority arithmetic + verdict variance + ceil(5N/6) threshold scaling) is appended to README § "Why six reviewers, mixed families".
+   **Resolution:** Landed. The README explains the default panel size. Panel size does not change the pass rule.
 
 10. **Why round-2 panels and not just one-shot review.** **[ADJUDICATED — spec 093, Bead 7: rationale sidebar landed in README]**
     The pattern "fix → re-review" is described in `/ms-bead-cycle` but the rationale isn't pinned. In practice the round-2 panel catches fix-author deviations the original BRIEF couldn't predict (the lola Bead 2 r2 panel found a routing bug the r1 panel approved). Should be a sidebar in the README.
@@ -179,7 +179,7 @@ See item 16 in Part 1 below for details.
 
 | Primitive | What it'd buy us | Priority |
 |:----------|:-----------------|:---------|
-| **`PreToolUse` hook on `mindspec complete`** | Declaratively enforce "≥5/6 APPROVE before merge"; no orchestrator skill can bypass it. | **ENFORCED (spec 093)** — shipped as a `PreToolUse` Bash gate: fail-open without a panel, fail-closed with one (malformed/missing verdicts block). The gate is now an enforced contract, not a convention. |
+| **`PreToolUse` hook on `mindspec complete`** | Enforce a fresh, intact and complete panel with no veto and no unresolved REQUEST_CHANGES before merge. | **ENFORCED (spec 093)** — shipped as a `PreToolUse` Bash gate: fail-open without a panel, fail-closed with one (malformed/missing verdicts block). The gate is now an enforced contract, not a convention. |
 | **`Monitor` on codex output files** | Detect usage-limit / hang within seconds instead of after timeout; swap in claude-sub immediately. | **Medium** — saves 5-10 min per failed codex slot. |
 | **Existing `SessionStart` hook + extended `mindspec instruct`** | Surface panel/subagent state on fresh sessions; recover from compaction faster. | **Medium** — cheap, high-leverage. |
 | **`/deep-research` and `ultracode` workflows** | Port `/ms-spec-autopilot` to a durable background workflow for large specs. | **Low** — premature until a spec actually has 50+ beads. |

@@ -150,6 +150,7 @@ func TestPanelCreate_BeadIDDerivedFromTarget(t *testing.T) {
 func TestPanelCreate_BeadTargetRefusals(t *testing.T) {
 	for _, tc := range []struct{ name, gate, target, bead string }{
 		{"main", "bead", "main", ""},
+		{"bare id", "bead", "probe-x.1", ""},
 		{"empty id", "bead", "bead/", ""},
 		{"invalid id", "bead", "bead/probe/x", ""},
 		{"option id", "bead", "bead/-probe", ""},

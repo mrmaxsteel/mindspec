@@ -2,11 +2,14 @@ package approve
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -270,5 +273,52 @@ func TestGateTime_DeferralPreflightBeforeMutation(t *testing.T) {
 				t.Fatal("approval mutated before the deferral refusal")
 			}
 		})
+	}
+}
+
+func TestImplPreflight_BeadAuditPanelScope(t *testing.T) {
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/mindspec")
+	build.Dir = moduleRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build abandonment writer: %v %s", err, out)
+	}
+	for _, identity := range []string{"current", "legacy"} {
+		for _, abandoned := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/abandoned=%t", identity, abandoned), func(t *testing.T) {
+				root, reg, fake := implDeferralFixture(t, "bead")
+				entry := complete.PanelDeferredEntry{Deferral: reg.Panel.Deferrals[0]}
+				if identity == "current" {
+					entry.Panel, entry.Spec = reg.Slug(), reg.Panel.Spec
+				}
+				implGetMetadataFn = func(string) (map[string]interface{}, error) {
+					return map[string]interface{}{"panel_deferred_entries": []complete.PanelDeferredEntry{entry}}, nil
+				}
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+					t.Fatalf("open baseline: %v", err)
+				}
+				if abandoned {
+					cmd := exec.Command(binary, "panel", "abandon", reg.Slug(), "--spec", reg.Panel.Spec, "--reason", "rework", "--by", "max")
+					cmd.Dir = root
+					if out, err := cmd.CombinedOutput(); err != nil {
+						t.Fatalf("abandon panel: %v %s", err, out)
+					}
+				}
+				core3Fixture(t, root, "second-panel", "bead", false)
+				implDeferralIssue(t, fake, "closed")
+				err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+				if abandoned && identity == "current" {
+					if err != nil {
+						t.Fatalf("another panel revived the abandoned panel's audit: %v", err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), "bd reopen") {
+					t.Fatalf("active or legacy deferral must still block: %v", err)
+				}
+			})
+		}
 	}
 }

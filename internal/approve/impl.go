@@ -1323,7 +1323,13 @@ func implPanelDeferralPreflight(root, specID string) error {
 			if err != nil {
 				return complete.PanelDeferredAuditFailure(*reg.Panel.BeadID, err)
 			}
-			if err := complete.CheckAuditedPanelDeferrals(reg, entries); err != nil {
+			var scoped []complete.PanelDeferredEntry
+			for _, entry := range entries {
+				if (entry.Spec == "" && entry.Panel == "") || (entry.Spec == reg.Panel.Spec && entry.Panel == reg.Slug()) {
+					scoped = append(scoped, entry)
+				}
+			}
+			if err := complete.CheckAuditedPanelDeferrals(reg, scoped); err != nil {
 				return err
 			}
 		} else {

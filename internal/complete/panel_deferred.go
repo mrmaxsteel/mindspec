@@ -352,6 +352,7 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 		key, _ := json.Marshal([]string{entry.Spec, entry.Panel})
 		groups[string(key)] = append(groups[string(key)], entry)
 	}
+	var effective []PanelDeferredEntry
 	for _, group := range groups {
 		first := group[0]
 		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: first.Spec, BeadID: &beadID}}
@@ -396,6 +397,17 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 		}
 		if err := checkAuditedPanelDeferrals(reg, group, false); err != nil {
 			return err
+		}
+		effective = append(effective, group...)
+	}
+	if err := persistDeferralPending(beadID, effective); err != nil {
+		return PanelDeferredAuditFailure(beadID, err)
+	}
+	// The bead is still open. A prior attempt may have settled an audit
+	// that a later refutation or abandonment has now superseded.
+	if len(audit) > 0 {
+		if err := completeMergeMetadataFn(beadID, map[string]interface{}{"panel_deferred_entries": unionDeferrals(nil, effective)}); err != nil {
+			return PanelDeferredAuditFailure(beadID, err)
 		}
 	}
 	return nil

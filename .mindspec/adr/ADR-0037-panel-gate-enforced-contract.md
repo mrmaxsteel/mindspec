@@ -442,8 +442,10 @@ panel, once registered, is a commitment.
 >
 > 1. **Applied ≡ durably persisted.** A refutation is "applied" ONLY
 >    once a **self-contained** `refutation_pending` marker carrying the
->    full refutation content — `{slot, round, reason, evidence}` — is
->    durably persisted on bead metadata as part of the allow-decision,
+>    full stored identity and refutation content — `{spec, panel, slot,
+>    round, finding, finding_sha256, finding_text, reason, evidence, ground,
+>    ac, by, created_at}` — is durably persisted on bead metadata as part
+>    of the allow-decision,
 >    UNIONed with any existing unsatisfied entries (never a bare
 >    replace). The marker read-or-write is part of the decision: a
 >    failure returns a BLOCK (the RC stays unresolved), making
