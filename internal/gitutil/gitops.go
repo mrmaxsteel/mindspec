@@ -973,161 +973,113 @@ func CommitNoEdit(workdir string) error {
 // markers still in it has no unmerged index entry, so ConflictedFiles
 // misses it.
 //
-// Only marker lines the resolution itself introduced count: a staged
-// line must be new relative to BOTH HEAD and MERGE_HEAD. Content
-// authored on either side (for example a Markdown setext underline of
-// seven '=') drops out. A `=======` or `|||||||` line counts only when
-// the same file also has a new `<<<<<<<` or `>>>>>>>` line, as every
-// real conflict block has.
+// Git does the marker detection. Only files changed on BOTH sides since
+// the merge base can have been conflicted, so files changed on one side
+// only (for example a bead's Markdown file with a '=======' setext
+// underline) are never scanned. For each candidate,
+// `git diff --cached --check HEAD` reports leftover marker lines; it
+// honours the conflict-marker-size attribute and CRLF endings. A file is
+// flagged only if one reported line starts with '<' or '>': a lone
+// `=======` or `|||||||` line is not a conflict block.
 func StagedConflictMarkerFiles(workdir string) []string {
-	vsHead := stagedMarkerLines(workdir, "HEAD")
-	if len(vsHead) == 0 {
-		return nil
-	}
-	vsMerge := map[markerKey]bool{}
-	for _, m := range stagedMarkerLines(workdir, "MERGE_HEAD") {
-		vsMerge[m.key] = true
-	}
-	hasOpen := map[string]bool{}
-	var order []string
-	for _, m := range vsHead {
-		if !vsMerge[m.key] {
+	var files []string
+	for _, path := range markerCandidatePaths(workdir) {
+		lines := leftoverMarkerLines(workdir, path)
+		if len(lines) == 0 {
 			continue
 		}
-		if m.kind == markerOpenClose && !hasOpen[m.key.path] {
-			hasOpen[m.key.path] = true
-			order = append(order, m.key.path)
-		}
-	}
-	return order
-}
-
-type markerKind int
-
-const (
-	markerOpenClose markerKind = iota + 1 // <<<<<<< or >>>>>>>
-	markerSeparator                       // ======= or |||||||
-)
-
-type markerKey struct {
-	path string
-	line int // line number in the staged (index) version
-}
-
-type markerHit struct {
-	key  markerKey
-	kind markerKind
-}
-
-// markerKindOf classifies a staged line the way `git diff --check`
-// does: seven marker characters followed by whitespace or end of line.
-func markerKindOf(line string) markerKind {
-	if len(line) < 7 {
-		return 0
-	}
-	if len(line) > 7 && line[7] != ' ' && line[7] != '\t' {
-		return 0
-	}
-	switch line[:7] {
-	case "<<<<<<<", ">>>>>>>":
-		return markerOpenClose
-	case "=======", "|||||||":
-		return markerSeparator
-	}
-	return 0
-}
-
-// stagedMarkerLines parses `git diff --cached -U0 <base>` and returns
-// the added (index-side) lines that look like conflict markers, keyed by
-// path and index line number, in diff order.
-func stagedMarkerLines(workdir, base string) []markerHit {
-	cmd := execCommand("git", gitArgs(workdir, "-c", "core.quotePath=false",
-		"diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-		"--no-renames", "--no-prefix", base, "--")...)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	return parseAddedMarkerLines(string(out))
-}
-
-// parseAddedMarkerLines walks unified-diff output (-U0, --no-prefix).
-// It tracks each hunk's remaining old/new line counts so that a content
-// line which itself starts with "+++" is never read as a file header.
-func parseAddedMarkerLines(diff string) []markerHit {
-	var hits []markerHit
-	path := ""
-	inHunk := false
-	oldLeft, newLeft, newLine := 0, 0, 0
-	for _, line := range strings.Split(diff, "\n") {
-		if inHunk {
-			switch {
-			case strings.HasPrefix(line, "+"):
-				if k := markerKindOf(line[1:]); k != 0 && path != "" {
-					hits = append(hits, markerHit{markerKey{path, newLine}, k})
-				}
-				newLine++
-				newLeft--
-			case strings.HasPrefix(line, "-"):
-				oldLeft--
-			case strings.HasPrefix(line, "\\"):
-				// "\ No newline at end of file"
-			}
-			if oldLeft <= 0 && newLeft <= 0 {
-				inHunk = false
-			}
-			continue
-		}
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			path = ""
-		case strings.HasPrefix(line, "+++ "):
-			p := strings.TrimPrefix(line, "+++ ")
-			if p == "/dev/null" {
-				p = ""
-			} else if strings.HasPrefix(p, "\"") {
-				if u, err := strconv.Unquote(p); err == nil {
-					p = u
-				}
-			}
-			path = p
-		case strings.HasPrefix(line, "@@ "):
-			o, n, start, ok := parseHunkHeader(line)
-			if ok {
-				oldLeft, newLeft, newLine = o, n, start
-				inHunk = oldLeft > 0 || newLeft > 0
-			}
-		}
-	}
-	return hits
-}
-
-// parseHunkHeader reads "@@ -a[,b] +c[,d] @@" and returns b, d and c.
-func parseHunkHeader(line string) (oldCount, newCount, newStart int, ok bool) {
-	f := strings.Fields(line)
-	if len(f) < 3 || !strings.HasPrefix(f[1], "-") || !strings.HasPrefix(f[2], "+") {
-		return 0, 0, 0, false
-	}
-	rng := func(s string) (start, count int, ok bool) {
-		count = 1
-		parts := strings.SplitN(s, ",", 2)
-		start, err := strconv.Atoi(parts[0])
+		staged, err := markerGit(workdir, "show", ":"+path)
 		if err != nil {
-			return 0, 0, false
+			// Cannot read the staged content: fail closed.
+			files = append(files, path)
+			continue
 		}
-		if len(parts) == 2 {
-			if count, err = strconv.Atoi(parts[1]); err != nil {
-				return 0, 0, false
+		content := strings.Split(string(staged), "\n")
+		for _, n := range lines {
+			if n >= 1 && n <= len(content) {
+				if l := content[n-1]; strings.HasPrefix(l, "<") || strings.HasPrefix(l, ">") {
+					files = append(files, path)
+					break
+				}
 			}
 		}
-		return start, count, true
 	}
-	_, oc, ok1 := rng(f[1][1:])
-	ns, nc, ok2 := rng(f[2][1:])
-	if !ok1 || !ok2 {
-		return 0, 0, 0, false
+	return files
+}
+
+// markerCandidatePaths returns the paths changed on both sides of the
+// in-progress merge since its merge base (NUL-separated output, so any
+// path is safe). If the merge base cannot be read, every path staged
+// relative to HEAD is a candidate.
+func markerCandidatePaths(workdir string) []string {
+	base, err := gitMergeBase(workdir, "HEAD", "MERGE_HEAD")
+	if err != nil || base == "" {
+		out, err := markerGit(workdir, "diff", "--cached", "--name-only", "-z", "--no-renames", "HEAD", "--")
+		if err != nil {
+			return nil
+		}
+		return splitNUL(out)
 	}
-	return oc, nc, ns, true
+	ours, err1 := markerGit(workdir, "diff", "--name-only", "-z", "--no-renames", base, "HEAD", "--")
+	theirs, err2 := markerGit(workdir, "diff", "--name-only", "-z", "--no-renames", base, "MERGE_HEAD", "--")
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	inTheirs := map[string]bool{}
+	for _, p := range splitNUL(theirs) {
+		inTheirs[p] = true
+	}
+	var both []string
+	for _, p := range splitNUL(ours) {
+		if inTheirs[p] {
+			both = append(both, p)
+		}
+	}
+	return both
+}
+
+// leftoverMarkerLines runs `git diff --cached --check HEAD` on one path
+// and returns the staged line numbers git reports as leftover conflict
+// markers. Whitespace problems are ignored. One path per call, so the
+// path never has to be parsed back out of the output.
+func leftoverMarkerLines(workdir, path string) []int {
+	// Exit status 2 only means problems were found; the output is valid.
+	out, _ := markerGit(workdir, "diff", "--cached", "--check", "--no-ext-diff", "HEAD", "--", path)
+	const marker = ": leftover conflict marker"
+	var lines []int
+	for _, line := range strings.Split(string(out), "\n") {
+		i := strings.LastIndex(line, marker)
+		if i < 0 {
+			continue
+		}
+		loc := line[:i] // "<path>:<line>"
+		j := strings.LastIndex(loc, ":")
+		if j < 0 {
+			continue
+		}
+		if n, err := strconv.Atoi(loc[j+1:]); err == nil {
+			lines = append(lines, n)
+		}
+	}
+	return lines
+}
+
+// markerGit runs one git command for the conflict-marker check, with
+// literal pathspecs so a path is never read as pathspec magic.
+func markerGit(workdir string, args ...string) ([]byte, error) {
+	full := append([]string{"--literal-pathspecs"}, args...)
+	cmd := execCommand("git", gitArgs(workdir, full...)...)
+	return cmd.Output()
+}
+
+func splitNUL(b []byte) []string {
+	var out []string
+	for _, p := range strings.Split(string(b), "\x00") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // TreeSHA resolves ref's tree object SHA in workdir (`git rev-parse
