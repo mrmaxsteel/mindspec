@@ -45,7 +45,11 @@ func changeLedger(t *testing.T, data []byte, key string, value interface{}) []by
 }
 
 func TestLedger_RecordKeys(t *testing.T) {
-	for _, raw := range ledgerFixtures(t, "p") {
+	records := append(ledgerFixtures(t, "p"), mustMarshal(t, CoverageManifest{
+		Record: RecordPanelManifest, Spec: "130", Panel: "p", Gate: "bead", Round: 1,
+		Slots: []ManifestSlot{{Slot: "R1", Model: "model-a", Verdict: VerdictApprove}}, CreatedAt: ledgerTime,
+	}))
+	for _, raw := range records {
 		m, _ := decodeRecord(raw)
 		kind := m["record"].(string)
 		t.Run(kind, func(t *testing.T) {
@@ -59,7 +63,7 @@ func TestLedger_RecordKeys(t *testing.T) {
 			}
 			retry := changeLedger(t, raw, "created_at", ledgerLater)
 			want := 1
-			if kind == RecordRound || kind == RecordAbandon {
+			if kind == RecordRound || kind == RecordAbandon || kind == RecordPanelManifest {
 				want = 2
 			}
 			if err := AppendRecords(dir, retry); err != nil {
@@ -72,11 +76,12 @@ func TestLedger_RecordKeys(t *testing.T) {
 			// Keep the R5.1 keys independent of recordKey: widening a key must
 			// not turn a changed payload into a new event.
 			keyFields := map[string][]string{
-				RecordRound:      {"round", "created_at"},
-				RecordRefutation: {"slot", "round", "finding", "finding_sha256"},
-				RecordDeferral:   {"slot", "round", "finding", "finding_sha256"},
-				RecordRebind:     {"to_sha"},
-				RecordAbandon:    {"created_at"},
+				RecordPanelManifest: {"spec", "panel", "round", "created_at"},
+				RecordRound:         {"round", "created_at"},
+				RecordRefutation:    {"slot", "round", "finding", "finding_sha256"},
+				RecordDeferral:      {"slot", "round", "finding", "finding_sha256"},
+				RecordRebind:        {"to_sha"},
+				RecordAbandon:       {"created_at"},
 			}
 			excluded := map[string]bool{"created_at": true}
 			for _, field := range keyFields[kind] {
@@ -93,6 +98,8 @@ func TestLedger_RecordKeys(t *testing.T) {
 						value = "adhoc"
 					case "ground":
 						value = "not-load-bearing"
+					case "slots":
+						value = []ManifestSlot{{Slot: "R1", Model: "other-model", Verdict: VerdictApprove}}
 					case "roster":
 						value = []RosterSlot{{"R1", "other-model", "correctness"}, {"R2", "model-b", "architecture"}}
 					case "carried":
@@ -109,6 +116,8 @@ func TestLedger_RecordKeys(t *testing.T) {
 								t.Fatal(err)
 							}
 							value = n + 1
+						case bool:
+							value = !v
 						case nil:
 							value = "mindspec-other"
 						default:
@@ -149,6 +158,20 @@ func TestLedger_RecordKeys(t *testing.T) {
 			// Every specified key component must distinguish a new event.
 			var changes map[string]interface{}
 			switch kind {
+			case RecordPanelManifest:
+				changes = map[string]interface{}{"spec": "131", "panel": "other", "round": 2, "created_at": "2026-10-20T12:00:00Z"}
+				// The destination fixes panel, so its key component is checked
+				// directly rather than appended to this panel's ledger.
+				other, err := decodeRecord(changeLedger(t, raw, "panel", "other"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, key := recordKey(m)
+				_, otherKey := recordKey(other)
+				if key == otherKey {
+					t.Fatal("panel must distinguish manifest keys")
+				}
+				delete(changes, "panel")
 			case RecordRound:
 				changes = map[string]interface{}{"round": 2, "created_at": "2026-10-20T12:00:00Z"}
 			case RecordRefutation, RecordDeferral:
@@ -446,5 +469,38 @@ func TestLedger_SnapshotUnwritableDirectory(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Error("failed snapshot write changed old panel.json bytes")
+	}
+}
+
+func TestLedger_ValidateRejectsMalformedShapes(t *testing.T) {
+	records := ledgerFixtures(t, "p")
+	manifest := mustMarshal(t, CoverageManifest{
+		Record: RecordPanelManifest, Spec: "130", Panel: "p", Gate: "bead", Round: 1,
+		Slots: []ManifestSlot{{Slot: "R1", Model: "model-a", Verdict: VerdictApprove}}, CreatedAt: ledgerTime,
+	})
+	for _, tc := range []struct {
+		name  string
+		raw   []byte
+		field string
+		bad   interface{}
+		want  string
+	}{
+		{"uppercase-hash", records[1], "finding_sha256", strings.Repeat("A", 64), "finding_sha256 must be a lowercase sha256"},
+		{"short-hash", records[1], "finding_sha256", strings.Repeat("a", 62), "finding_sha256 must be a lowercase sha256"},
+		{"finding-id", records[1], "finding", "ccr[-1]", "finding must be slot or ccr[i]"},
+		{"refutation-ground", records[1], "ground", "unknown", "refutation ground is unknown"},
+		{"empty-rebind-paths", records[3], "paths", []string{}, "rebind paths must not be empty"},
+		{"round-telemetry", records[0], "telemetry", "optional", "round telemetry must be required"},
+		{"manifest-created-at", manifest, "created_at", "not-a-timestamp", "panel created_at must be RFC-3339"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := Validate(tc.raw); err != nil {
+				t.Fatalf("valid control: %v", err)
+			}
+			err := Validate(changeLedger(t, tc.raw, tc.field, tc.bad))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate malformed %s: err=%v want %q", tc.field, err, tc.want)
+			}
+		})
 	}
 }

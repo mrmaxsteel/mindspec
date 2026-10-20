@@ -63,6 +63,46 @@ func TestFinding_EmptyListRationale(t *testing.T) {
 	}
 }
 
+func TestFinding_EmptyListRawRationaleHash(t *testing.T) {
+	for _, find := range []struct {
+		name string
+		get  func(FindingVerdict) (Finding, error)
+	}{
+		{"Findings", func(v FindingVerdict) (Finding, error) {
+			findings, err := Findings(v)
+			if err != nil {
+				return Finding{}, err
+			}
+			if len(findings) != 1 {
+				t.Fatalf("empty-list fallback: got %d findings", len(findings))
+			}
+			return findings[0], nil
+		}},
+		{"SlotFinding", SlotFinding},
+	} {
+		t.Run(find.name, func(t *testing.T) {
+			var previous Finding
+			for _, rationale := range []string{"fix /tmp/a/x", "fix /tmp/b/x"} {
+				got, err := find.get(FindingVerdict{Verdict: VerdictRequestChanges, Rationale: rationale})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := sha256.Sum256([]byte(rationale))
+				if got.SHA256 != hex.EncodeToString(want[:]) {
+					t.Errorf("%q: SHA256=%s must pin raw rationale", rationale, got.SHA256)
+				}
+				if got.Text != "fix <path>" {
+					t.Errorf("%q: Text=%q want %q", rationale, got.Text, "fix <path>")
+				}
+				if previous.SHA256 != "" && (got.SHA256 == previous.SHA256 || got.Text != previous.Text) {
+					t.Error("path-only rationale edit must change hash and retain redacted text")
+				}
+				previous = got
+			}
+		})
+	}
+}
+
 func TestFinding_SlotHashPinsOrderedList(t *testing.T) {
 	v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"one", "two"}}
 	f, err := SlotFinding(v)

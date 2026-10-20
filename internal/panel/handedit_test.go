@@ -68,30 +68,43 @@ func TestHandEdit_FieldMatcher(t *testing.T) {
 
 func TestHandEdit_EntryPayloadsAndAbandonment(t *testing.T) {
 	records := ledgerFixtures(t, "p")
-	p := snapshotFromRound(t, records[0])
+	// Keep two events of every kind. Snapshot entries include both payloads,
+	// and the reflection cases below edit the entry backed by the second event.
+	secondRound := changeLedger(t, records[0], "created_at", ledgerLater)
+	secondRef := changeLedger(t, records[1], "slot", "R2")
+	secondDef := changeLedger(t, records[2], "slot", "R2")
+	secondReb := changeLedger(t, records[3], "from_sha", "def456")
+	secondReb = changeLedger(t, secondReb, "to_sha", "ghi789")
+	secondAbandon := changeLedger(t, records[4], "created_at", ledgerLater)
+	secondAbandon = changeLedger(t, secondAbandon, "reason", "second halt")
+	records = [][]byte{records[0], secondRound, records[1], secondRef, records[2], secondDef, records[3], secondReb, records[4], secondAbandon}
+	p := snapshotFromRound(t, secondRound)
 	var ref Refutation
 	var def Deferral
 	var reb Rebind
+	var ref2 Refutation
+	var def2 Deferral
+	var reb2 Rebind
 	for _, item := range []struct {
 		raw  []byte
 		dest interface{}
-	}{{records[1], &ref}, {records[2], &def}, {records[3], &reb}} {
+	}{{records[2], &ref}, {records[3], &ref2}, {records[4], &def}, {records[5], &def2}, {records[6], &reb}, {records[7], &reb2}} {
 		if err := json.Unmarshal(item.raw, item.dest); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p.Refutations = []Refutation{ref}
-	p.Deferrals = []Deferral{def}
-	p.Rebinds = []Rebind{reb}
-	p.ReviewedHeadSHA = reb.ToSHA
+	p.Refutations = []Refutation{ref, ref2}
+	p.Deferrals = []Deferral{def, def2}
+	p.Rebinds = []Rebind{reb, reb2}
+	p.ReviewedHeadSHA = reb2.ToSHA
 	p.Abandoned = true
-	p.AbandonReason = "halt"
+	p.AbandonReason = "second halt"
 	if field, err := FirstUnbackedField(p, records); err != nil || field != "" {
 		t.Fatalf("backed snapshot: %q %v", field, err)
 	}
-	p.Refutations[0].CreatedAt = ledgerLater
-	p.Deferrals[0].CreatedAt = ledgerLater
-	p.Rebinds[0].CreatedAt = ledgerLater
+	p.Refutations[1].CreatedAt = ledgerLater
+	p.Deferrals[1].CreatedAt = ledgerLater
+	p.Rebinds[1].CreatedAt = ledgerLater
 	if field, err := FirstUnbackedField(p, records); err != nil || field != "" {
 		t.Fatalf("timestamp rerun: %q %v", field, err)
 	}
@@ -100,9 +113,9 @@ func TestHandEdit_EntryPayloadsAndAbandonment(t *testing.T) {
 		name  string
 		entry func(*Panel) reflect.Value
 	}{
-		{"refutations[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Refutations[0]).Elem() }},
-		{"deferrals[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Deferrals[0]).Elem() }},
-		{"rebinds[0]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Rebinds[0]).Elem() }},
+		{"refutations[1]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Refutations[1]).Elem() }},
+		{"deferrals[1]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Deferrals[1]).Elem() }},
+		{"rebinds[1]", func(p *Panel) reflect.Value { return reflect.ValueOf(&p.Rebinds[1]).Elem() }},
 	} {
 		entryType := tc.entry(&p).Type()
 		for i := 0; i < entryType.NumField(); i++ {
