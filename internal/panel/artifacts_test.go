@@ -115,3 +115,14 @@ func TestGate_PorcelainQuotedNamesAndRenames(t *testing.T) {
 		}
 	}
 }
+
+func TestGate_MalformedQuotedPathIsUserDirt(t *testing.T) {
+	for _, raw := range []string{`"bad\q"`, `"unterminated`} {
+		t.Run(raw, func(t *testing.T) {
+			dirt := userDirtPaths("?? "+raw+"\n", ".mindspec/specs")
+			if len(dirt) != 1 || dirt[0] != raw {
+				t.Fatalf("malformed quoted path must remain raw user dirt: got %q, want [%q]", dirt, raw)
+			}
+		})
+	}
+}

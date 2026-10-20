@@ -177,6 +177,26 @@ func TestCheckDirtyTree_Clean(t *testing.T) {
 	}
 }
 
+func TestCheckDirtyTree_MalformedQuotedPathIsUserDirt(t *testing.T) {
+	for _, raw := range []string{`"bad\q"`, `"unterminated`} {
+		t.Run(raw, func(t *testing.T) {
+			g := &fakeGuard{porcelainResponses: []string{"?? " + raw + "\n"}}
+			g.install(t)
+			root := t.TempDir()
+			artifact, user, err := CheckDirtyTreeDetail(root, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(artifact) != 0 || !reflect.DeepEqual(user, []string{raw}) {
+				t.Fatalf("malformed quoted path must remain raw user dirt: artifacts=%q user=%q, want [%q]", artifact, user, raw)
+			}
+			if g.exportCalled || g.porcelainCalls != 1 {
+				t.Fatalf("user dirt triggered normalization: export=%v status calls=%d", g.exportCalled, g.porcelainCalls)
+			}
+		})
+	}
+}
+
 func TestCheckDirtyTree_OnlyArtifact_Proceeds(t *testing.T) {
 	// Artifact dirty → run bd export → re-check returns clean → proceed.
 	g := &fakeGuard{porcelainResponses: []string{

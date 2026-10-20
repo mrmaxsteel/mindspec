@@ -2808,6 +2808,51 @@ func TestImplApprove_UntrackedLedgerArrowRefuses(t *testing.T) {
 	}
 }
 
+func TestImplApprove_MalformedQuotedLedgerStatusRefuses(t *testing.T) {
+	for _, raw := range []string{`"bad\q"`, `"unterminated`} {
+		t.Run(raw, func(t *testing.T) {
+			root, wt, file, _ := implLedgerFixture(t)
+			realExec := &executor.MindspecExecutor{}
+			mock := &executor.MockExecutor{
+				CheckIgnoreFn: realExec.CheckIgnore,
+				StatusFn: func(dir string) (string, error) {
+					if dir != wt {
+						t.Fatalf("status checkout = %q, want %q", dir, wt)
+					}
+					return "?? " + raw + "\n", nil
+				},
+			}
+			err := implLedgerPreflight(root, "130-test", mock)
+			if err == nil || !strings.Contains(err.Error(), "could not parse ledger status") || !strings.Contains(err.Error(), complete.LedgerCommitRecovery(wt, []string{file})) {
+				t.Fatalf("malformed quoted status must refuse with ledger recovery: %v", err)
+			}
+		})
+	}
+}
+
+func TestImplApprove_QuotedRenamedLedgerRefuses(t *testing.T) {
+	root, wt, file, _ := implLedgerFixture(t)
+	dir := filepath.Join(filepath.Dir(filepath.Dir(filepath.Join(wt, file))), "café -> draft")
+	if err := os.Rename(filepath.Dir(filepath.Join(wt, file)), dir); err != nil {
+		t.Fatal(err)
+	}
+	file = ".mindspec/specs/130-test/reviews/café -> draft/dispositions.jsonl"
+	realExec := &executor.MindspecExecutor{}
+	mock := &executor.MockExecutor{
+		CheckIgnoreFn: realExec.CheckIgnore,
+		StatusFn: func(dir string) (string, error) {
+			if dir != wt {
+				t.Fatalf("status checkout = %q, want %q", dir, wt)
+			}
+			return `R  "old -> ledger" -> ".mindspec/specs/130-test/reviews/caf\303\251 -> draft/dispositions.jsonl"` + "\n", nil
+		},
+	}
+	err := implLedgerPreflight(root, "130-test", mock)
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("panel ledger has uncommitted changes: %q", file)) || !strings.Contains(err.Error(), complete.LedgerCommitRecovery(wt, []string{file})) {
+		t.Fatalf("quoted rename must refuse using the decoded destination ledger: %v", err)
+	}
+}
+
 func TestImplApprove_CanonicalLedgerPreflightSkips(t *testing.T) {
 	root, wt, _, _ := implLedgerFixture(t)
 	canonical := filepath.Join(wt, ".mindspec", "docs", "specs")
