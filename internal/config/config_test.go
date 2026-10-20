@@ -364,7 +364,7 @@ func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
 	}
 
 	// panel:
-	wantReviewers := []Reviewer{{Family: "claude", Count: intp(3)}, {Family: "codex", Count: intp(3)}}
+	var wantReviewers []Reviewer
 	if !reflect.DeepEqual(cfg.Panel.Reviewers, wantReviewers) {
 		t.Errorf("panel.reviewers: got %+v, want %+v", cfg.Panel.Reviewers, wantReviewers)
 	}
@@ -452,7 +452,7 @@ func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
 }
 
 // TestPanelExpectedReviewers_SumsReviewerCounts covers spec 109 AC2:
-// PanelExpectedReviewers sums reviewers[].count (6 for the default 3+3 mix,
+// PanelExpectedReviewers resolves adhoc (6 by default,
 // and the correct sum for a custom mix); PanelApproveThresholdExpr returns
 // the raw expression, never resolving it to an int.
 func TestPanelExpectedReviewers_SumsReviewerCounts(t *testing.T) {
@@ -516,11 +516,11 @@ func TestLoad_RefusesUnweakenableKnobs(t *testing.T) {
 		},
 		{
 			name:    "approve_threshold zero",
-			content: "panel:\n  approve_threshold: \"0\"\n",
+			content: "panel:\n  reviewers: [{family: claude, count: 6}]\n  approve_threshold: \"0\"\n",
 		},
 		{
 			name:    "approve_threshold negative",
-			content: "panel:\n  approve_threshold: \"-1\"\n",
+			content: "panel:\n  reviewers: [{family: claude, count: 6}]\n  approve_threshold: \"-1\"\n",
 		},
 		{
 			name:    "approve_threshold exceeds reviewer count",
@@ -687,9 +687,9 @@ runner: claude-code-workflow
 }
 
 // TestLoad_GatesAbsentByteIdentical109 covers spec 112 AC1/R2: zero-config
-// defaults equal 109's exactly; the 109 AC7 populated fixture loads with
-// every field unchanged; with gates absent every gate-scoped resolver
-// returns the global-derived values; `gates: {}` behaves identically to an
+// defaults use spec 130's per-gate sizes; the 109 AC7 populated fixture loads with
+// every field unchanged; absent gates resolve per-gate sizes or an explicit
+// global list; `gates: {}` behaves identically to an
 // absent `gates:` key everywhere; and a count-less reviewer entry — which
 // 109 refuses outright — loads as count: 1 (the one deliberate monotone
 // relaxation).
@@ -701,7 +701,7 @@ func TestLoad_GatesAbsentByteIdentical109(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantReviewers := []Reviewer{{Family: "claude", Count: intp(3)}, {Family: "codex", Count: intp(3)}}
+	var wantReviewers []Reviewer
 	if !reflect.DeepEqual(cfg.Panel.Reviewers, wantReviewers) {
 		t.Errorf("panel.reviewers: got %+v, want %+v", cfg.Panel.Reviewers, wantReviewers)
 	}
@@ -764,18 +764,22 @@ runner: claude-code-workflow
 		t.Errorf("109 fixture gates/substitutes must stay empty: gates=%v substitutes=%v", fixtureCfg.Panel.Gates, fixtureCfg.Panel.Substitution.Substitutes)
 	}
 
-	// Gates absent: every gate-scoped resolver returns the global-derived
-	// values, for both the zero-config and the populated fixture.
+	// Gates absent: resolve per-gate defaults for zero config and preserve
+	// the explicit global list in the populated fixture.
 	for _, c := range []*Config{cfg, fixtureCfg} {
 		wantSum := c.PanelExpectedReviewers()
 		wantExpr := c.PanelApproveThresholdExpr()
 		for _, gate := range PanelGateKeys {
+			gateWant := wantSum
+			if c == cfg && gate == "bead" {
+				gateWant = 4
+			}
 			gotSum, err := c.PanelGateExpectedReviewers(gate)
 			if err != nil {
 				t.Fatalf("PanelGateExpectedReviewers(%s): %v", gate, err)
 			}
-			if gotSum != wantSum {
-				t.Errorf("PanelGateExpectedReviewers(%s) = %d, want global %d (gates absent)", gate, gotSum, wantSum)
+			if gotSum != gateWant {
+				t.Errorf("PanelGateExpectedReviewers(%s) = %d, want %d (gates absent)", gate, gotSum, gateWant)
 			}
 			gotExpr, err := c.PanelGateApproveThresholdExpr(gate)
 			if err != nil {
@@ -809,8 +813,12 @@ runner: claude-code-workflow
 	}
 	for _, gate := range PanelGateKeys {
 		got, err := emptyGatesCfg.PanelGateExpectedReviewers(gate)
-		if err != nil || got != 6 {
-			t.Errorf("gates:{} PanelGateExpectedReviewers(%s) = %d, err=%v, want 6", gate, got, err)
+		want := 6
+		if gate == "bead" {
+			want = 4
+		}
+		if err != nil || got != want {
+			t.Errorf("gates:{} PanelGateExpectedReviewers(%s) = %d, err=%v, want %d", gate, got, err, want)
 		}
 	}
 
@@ -1024,8 +1032,8 @@ panel:
 }
 
 // TestLoad_RefusesPerGateKnobs covers spec 112 AC3/R4: every per-gate
-// refusal (a)-(h) errors with a recovery line — including the two named
-// inheritance shapes — and an unknown model id alone does NOT error.
+// structural refusal errors with a recovery line; legacy thresholds,
+// including both inheritance shapes, and unknown model ids load.
 func TestLoad_RefusesPerGateKnobs(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -1066,31 +1074,31 @@ func TestLoad_RefusesPerGateKnobs(t *testing.T) {
 		{
 			name:          "per-gate threshold zero",
 			content:       "panel:\n  gates:\n    bead:\n      reviewers:\n        - {model: claude-opus-4-8, count: 3}\n        - {model: claude-sonnet-5, count: 3}\n      approve_threshold: \"0\"\n",
-			wantErr:       true,
+			wantErr:       false,
 			recoveryWants: []string{"recovery:"},
 		},
 		{
 			name:          "per-gate threshold negative",
 			content:       "panel:\n  gates:\n    bead:\n      reviewers:\n        - {model: claude-opus-4-8, count: 3}\n        - {model: claude-sonnet-5, count: 3}\n      approve_threshold: \"-1\"\n",
-			wantErr:       true,
+			wantErr:       false,
 			recoveryWants: []string{"recovery:"},
 		},
 		{
 			name:          "per-gate threshold exceeds own resolved sum",
 			content:       "panel:\n  gates:\n    bead:\n      reviewers:\n        - {model: claude-opus-4-8, count: 3}\n        - {model: claude-sonnet-5, count: 3}\n      approve_threshold: \"7\"\n",
-			wantErr:       true,
+			wantErr:       false,
 			recoveryWants: []string{"recovery:"},
 		},
 		{
 			name:          "global integer threshold inherited by a differently-sized per-gate reviewers-only entry",
 			content:       "panel:\n  approve_threshold: \"5\"\n  gates:\n    bead:\n      reviewers:\n        - {model: claude-opus-4-8, count: 1}\n        - {model: claude-sonnet-5, count: 1}\n",
-			wantErr:       true,
+			wantErr:       false,
 			recoveryWants: []string{"recovery:"},
 		},
 		{
 			name:          "bead integer threshold inherited through adhoc->bead by a smaller reviewers-only adhoc",
 			content:       "panel:\n  gates:\n    bead:\n      reviewers:\n        - {model: claude-opus-4-8, count: 3}\n        - {model: claude-sonnet-5, count: 3}\n      approve_threshold: \"5\"\n    adhoc:\n      reviewers:\n        - {model: claude-opus-4-8, count: 1}\n        - {model: claude-sonnet-5, count: 1}\n",
-			wantErr:       true,
+			wantErr:       false,
 			recoveryWants: []string{"recovery:"},
 		},
 		{
@@ -1442,18 +1450,18 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 
 // TestPanelGateAdvisoryDefault_SelectionRule covers the config half of spec
 // 112 R7 (the step-4 helper, ahead of Bead 3's caller-side test): known-gate
-// / bead-fallback / skip / gates-absent-global rows.
+// / bead-fallback / skip / gates-absent per-gate rows.
 func TestPanelGateAdvisoryDefault_SelectionRule(t *testing.T) {
-	// Gates absent: always the global default, regardless of recordedGate/isBead.
+	// Gates absent: recorded gates still resolve their own default size.
 	globalCfg := DefaultConfig()
 	if got, ok := globalCfg.PanelGateAdvisoryDefault("", false); !ok || got != 6 {
 		t.Errorf("gates-absent, non-bead, no recorded gate: got (%d,%v), want (6,true)", got, ok)
 	}
 	if got, ok := globalCfg.PanelGateAdvisoryDefault("spec_approve", false); !ok || got != 6 {
-		t.Errorf("gates-absent, recorded gate ignored: got (%d,%v), want (6,true)", got, ok)
+		t.Errorf("gates-absent, recorded spec gate: got (%d,%v), want (6,true)", got, ok)
 	}
-	if got, ok := globalCfg.PanelGateAdvisoryDefault("", true); !ok || got != 6 {
-		t.Errorf("gates-absent, bead panel: got (%d,%v), want (6,true)", got, ok)
+	if got, ok := globalCfg.PanelGateAdvisoryDefault("", true); !ok || got != 4 {
+		t.Errorf("gates-absent, bead panel: got (%d,%v), want (4,true)", got, ok)
 	}
 
 	cfg := &Config{Panel: Panel{
@@ -1559,4 +1567,160 @@ func TestLoad_EmptyStringModel(t *testing.T) {
 			t.Errorf("error message missing ADR-0035 recovery line: %v", msg)
 		}
 	})
+}
+
+func TestPanelGateDefaults_PerGateSizes(t *testing.T) {
+	for name, cfg := range map[string]*Config{"default": DefaultConfig(), "zero": {}} {
+		t.Run(name, func(t *testing.T) {
+			if len(cfg.Panel.Reviewers) != 0 {
+				t.Fatalf("implicit global reviewers: %+v", cfg.Panel.Reviewers)
+			}
+			for gate, want := range map[string]int{"spec_approve": 6, "plan_approve": 6, "bead": 4, "final_review": 6, "adhoc": 6} {
+				got, err := cfg.PanelGateExpectedReviewers(gate)
+				if err != nil || got != want {
+					t.Errorf("%s count = %d, %v; want %d", gate, got, err, want)
+				}
+				slots, err := cfg.PanelGateReviewerSlots(gate)
+				if err != nil || len(slots) != want {
+					t.Errorf("%s slots = %+v, %v; want %d", gate, slots, err, want)
+				}
+				if n, ok := cfg.PanelGateAdvisoryDefault(gate, gate == "bead"); !ok || n != want {
+					t.Errorf("%s advisory = %d, %v; want %d, true", gate, n, ok, want)
+				}
+			}
+		})
+	}
+}
+
+func TestPanelGateDefaults_RoundRobinFamilies(t *testing.T) {
+	cfg := DefaultConfig()
+	for _, gate := range PanelGateKeys {
+		slots, err := cfg.PanelGateReviewerSlots(gate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		families := map[string]int{}
+		for i, slot := range slots {
+			want := []string{"claude", "codex"}[i%2]
+			if slot.Model != want || slot.Slot != fmt.Sprintf("R%d", i+1) || slot.Lens != defaultLenses[i%len(defaultLenses)] {
+				t.Errorf("%s slot %d = %+v; want family %s, ordered id and default lens", gate, i, slot, want)
+			}
+			families[slot.Model]++
+		}
+		if gate == "bead" && (families["claude"] != 2 || families["codex"] != 2) {
+			t.Errorf("bead families = %v; want 2+2", families)
+		}
+	}
+}
+
+func TestPanelGateDefaults_ExplicitGlobalWins(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Panel.Reviewers = []Reviewer{{Family: "claude", Count: intp(3)}}
+	for _, gate := range PanelGateKeys {
+		slots, err := cfg.PanelGateReviewerSlots(gate)
+		if err != nil || len(slots) != 3 {
+			t.Fatalf("%s slots = %+v, %v; want 3", gate, slots, err)
+		}
+		for _, slot := range slots {
+			if slot.Model != "claude" {
+				t.Errorf("%s model = %s; want claude", gate, slot.Model)
+			}
+		}
+	}
+	cfg.Panel.Gates = map[string]GatePanel{"bead": {Reviewers: []Reviewer{{Family: "codex", Count: intp(5)}}}}
+	for _, gate := range []string{"bead", "adhoc"} {
+		slots, err := cfg.PanelGateReviewerSlots(gate)
+		if err != nil || len(slots) != 5 {
+			t.Fatalf("%s explicit bead inheritance = %+v, %v; want 5", gate, slots, err)
+		}
+		for _, slot := range slots {
+			if slot.Model != "codex" {
+				t.Errorf("%s inherited model = %s; want codex", gate, slot.Model)
+			}
+		}
+	}
+	cfg.Panel.Gates["adhoc"] = GatePanel{Reviewers: []Reviewer{{Model: "custom", Count: intp(2)}}}
+	if slots, err := cfg.PanelGateReviewerSlots("adhoc"); err != nil || len(slots) != 2 || slots[0].Model != "custom" {
+		t.Errorf("adhoc override = %+v, %v", slots, err)
+	}
+}
+
+func TestPanelGateDefaults_NoGateAndGateThreshold(t *testing.T) {
+	for name, content := range map[string]string{
+		"global threshold only": "panel:\n  approve_threshold: 3\n",
+		"gate threshold only":   "panel:\n  gates:\n    bead:\n      approve_threshold: 5\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ResetCache()
+			defer ResetCache()
+			cfg, err := Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cfg.Panel.Reviewers) != 0 {
+				t.Errorf("Load backfilled global reviewers: %+v", cfg.Panel.Reviewers)
+			}
+			if got := cfg.PanelExpectedReviewers(); got != 6 {
+				t.Errorf("no-gate default = %d; want 6", got)
+			}
+			if got, err := cfg.PanelGateExpectedReviewers("bead"); err != nil || got != 4 {
+				t.Errorf("bead = %d, %v; want 4", got, err)
+			}
+			gate := "adhoc"
+			want := "3"
+			if name == "gate threshold only" {
+				gate = "bead"
+				want = "5"
+			}
+			if got, err := cfg.PanelGateApproveThresholdExpr(gate); err != nil || got != want {
+				t.Errorf("threshold = %q, %v; want %q", got, err, want)
+			}
+		})
+	}
+}
+
+func TestPanelGateDefaults_AdhocSize(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Panel.Gates = map[string]GatePanel{"bead": {ApproveThreshold: "5"}}
+	if n, err := cfg.PanelGateExpectedReviewers("adhoc"); err != nil || n != 6 {
+		t.Errorf("adhoc with no explicit bead list = %d, %v; want 6", n, err)
+	}
+	if n := cfg.PanelExpectedReviewers(); n != 6 {
+		t.Errorf("no-gate = %d; want 6", n)
+	}
+	cfg.Panel.Gates["bead"] = GatePanel{Reviewers: []Reviewer{{Family: "claude", Count: intp(3)}}}
+	if n, err := cfg.PanelGateExpectedReviewers("adhoc"); err != nil || n != 3 {
+		t.Errorf("adhoc explicit bead list = %d, %v; want 3", n, err)
+	}
+	if n := cfg.PanelExpectedReviewers(); n != 3 {
+		t.Errorf("no-gate with explicit bead list = %d; want 3", n)
+	}
+}
+
+func TestConfigValidate_SingleReviewerText(t *testing.T) {
+	for _, gate := range append([]string{"global"}, PanelGateKeys...) {
+		t.Run(gate, func(t *testing.T) {
+			cfg := DefaultConfig()
+			reviewers := []Reviewer{{Family: "claude", Count: intp(1)}}
+			if gate == "global" {
+				cfg.Panel.Reviewers = reviewers
+			} else {
+				cfg.Panel.Gates = map[string]GatePanel{gate: {Reviewers: reviewers}}
+			}
+			err := validateOrchestration(cfg)
+			if err == nil {
+				t.Fatal("single reviewer must fail")
+			}
+			if !strings.Contains(err.Error(), "a one-reviewer panel cannot pass") || strings.Contains(err.Error(), "always-pass") || !strings.Contains(err.Error(), "recovery:") {
+				t.Errorf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
 }

@@ -1,6 +1,6 @@
 ---
 name: ms-panel-run
-description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch 6 reviewers (3 Claude Agents + 3 Codex CLI sessions) in parallel and wait for verdicts
+description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped defaults: bead 4, spec/plan/final/adhoc 6; alternating Claude Agents and Codex CLI sessions) in parallel and wait for verdicts
 ---
 
 # Run a 6-Reviewer Panel
@@ -29,7 +29,7 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 - `target` (required) — one of `bead <bead-id>`, `pr <pr-number>`, or `commit <sha>`. For `/ms-spec-final-review`, `target` is the spec branch (`bead_id` null).
 - `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
 
-`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel defaults (6 reviewers, N−1 threshold), so there is nothing to pass here.
+`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel defaults (spec/plan/bead/final 6/6/4/6 reviewers; adhoc 6, N−1 threshold), so there is nothing to pass here.
 
 > **`<spec-dir>` / co-located reviews (spec 106 flat layout).** Panels are
 > co-located under the spec they review: `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`,

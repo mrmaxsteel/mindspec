@@ -179,7 +179,7 @@ every gate absent configuration. This amendment resolves the ambiguity
 without touching the Decision above (the telemetry-store design is
 unaffected by panel SIZE):
 
-- **The shipped default is 6 / `n-1`, unconditionally.** `DefaultConfig`
+- **The shipped default is 6 / `n-1`, unconditionally.** (Size superseded by [Amendment (Spec 130)](#amendment-spec-130).) `DefaultConfig`
   panel VALUES are unchanged by spec 126 and remain the product's out-of-box
   shape for every gate (bead, spec_approve, plan_approve, final_review,
   adhoc) — a zero-config install keeps this size.
@@ -195,3 +195,8 @@ unaffected by panel SIZE):
   infeasible) — read them as project history, not as the product's
   documented default; this Amendment is the disambiguating cross-reference
   `internal/setup`'s [CI] guard greps for.
+
+
+## Amendment (Spec 130)
+
+- The default becomes 6/6/4/6 per gate (`spec_approve`/`plan_approve`/`bead`/`final_review`), with `adhoc` defaulting to 6 (R2.1); this reverses spec 112 R2. `DefaultConfig` holds no `panel.reviewers` list. Without an explicit reviewer list, families alternate `claude`, `codex`; an explicit global list applies to every gate without its own list, and `adhoc` inherits an explicit `bead` list. This supersedes the size in Amendment (Spec 126)'s "The shipped default is 6 / `n-1`, unconditionally" bullet.

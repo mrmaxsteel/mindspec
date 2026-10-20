@@ -101,7 +101,7 @@ type Panel struct {
 	// configured" predicate keys off len(Gates) > 0, never key presence —
 	// `gates: {}` behaves identically to an absent `gates:` key. Left empty
 	// by DefaultConfig; loadUncached backfills it with nothing (absent means
-	// "use the global default", not "use some other default").
+	// "resolve the global list or the per-gate default size").
 	Gates map[string]GatePanel `yaml:"gates"`
 	// Note is optional free-text advisory metadata (spec 112 R1) — e.g.
 	// "fable-window 2026-07, codex-enabled" — so a point-in-time reviewer
@@ -453,16 +453,10 @@ func DefaultConfig() *Config {
 			MinParallelism:  0.25,
 		},
 		Panel: Panel{
-			Reviewers: []Reviewer{
-				{Family: "claude", Count: intp(3)},
-				{Family: "codex", Count: intp(3)},
-			},
 			ApproveThreshold: "n-1",
 			Substitution:     Substitution{ClaudeSubOnQuota: true},
-			// Gates, Note, and Substitution.Substitutes stay empty here
-			// (spec 112 R2): the standing per-gate protocol is the
-			// documented example, never the default — an existing
-			// install's zero-config panel sizes must not change.
+			// Reviewers stays empty: each gate supplies its own default size
+			// (spec 130 R2.1). Gates, Note, and Substitutes are opt-in.
 		},
 		Models:   map[string]string{},
 		Commands: map[string]string{},
@@ -616,9 +610,6 @@ func loadUncached(root string) (*Config, error) {
 	// Enforcement.PanelGate above, the pre-populated `true` default
 	// survives an absent key (yaml.v3 leaves it untouched) and an explicit
 	// `false` intentionally overrides it.
-	if len(cfg.Panel.Reviewers) == 0 {
-		cfg.Panel.Reviewers = DefaultConfig().Panel.Reviewers
-	}
 	if cfg.Panel.ApproveThreshold == "" {
 		cfg.Panel.ApproveThreshold = "n-1"
 	}
@@ -691,20 +682,22 @@ func validateOrchestration(cfg *Config) error {
 		return err
 	}
 
-	total := 0
-	for _, r := range cfg.Panel.Reviewers {
-		total += r.CountValue()
-	}
-	expr := strings.TrimSpace(cfg.Panel.ApproveThreshold)
-	if !strings.EqualFold(expr, "n-1") {
-		n, err := strconv.Atoi(expr)
-		if err != nil || n < 1 || n > total {
-			return fmt.Errorf("panel.approve_threshold %q must be \"n-1\" or an integer in [1, %d] (sum of reviewers.count)\nrecovery: set panel.approve_threshold to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", cfg.Panel.ApproveThreshold, total, total)
+	// Only an explicit global list constrains the legacy global threshold.
+	if len(cfg.Panel.Reviewers) > 0 {
+		total := 0
+		for _, r := range cfg.Panel.Reviewers {
+			total += r.CountValue()
 		}
-	}
-
-	if total < 2 {
-		return fmt.Errorf("panel.reviewers must sum to at least 2 (got %d): a single-reviewer panel makes the default \"n-1\" threshold resolve to 0, an always-pass gate\nrecovery: add at least one more reviewer under panel.reviewers in .mindspec/config.yaml", total)
+		if total < 2 {
+			return fmt.Errorf("panel.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass\nrecovery: add at least one more reviewer under panel.reviewers in .mindspec/config.yaml", total)
+		}
+		expr := strings.TrimSpace(cfg.Panel.ApproveThreshold)
+		if !strings.EqualFold(expr, "n-1") {
+			n, err := strconv.Atoi(expr)
+			if err != nil || n < 1 || n > total {
+				return fmt.Errorf("panel.approve_threshold %q must be \"n-1\" or an integer in [1, %d] (sum of reviewers.count)\nrecovery: set panel.approve_threshold to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", cfg.Panel.ApproveThreshold, total, total)
+			}
+		}
 	}
 
 	return validateGates(cfg)
@@ -738,8 +731,8 @@ func validateReviewerEntries(reviewers []Reviewer, label string) error {
 // validateGates applies the spec 112 R4 refusals scoped to panel.gates: (a)
 // an unknown gates key, (b) a configured gate entry setting neither
 // reviewers nor approve_threshold, (e) a per-gate reviewers list whose own
-// expanded sum is < 2, and (f)+(g) the resolved threshold-vs-sum check run
-// per configured gate over the R3 per-field inheritance chain. (c)/(d) ride
+// expanded sum is < 2. Legacy gate thresholds are not range-checked
+// (spec 130 R2.1). (c)/(d) ride
 // validateReviewerEntries for each gate's own reviewers list; (h)
 // (substitutes) is validated separately.
 func validateGates(cfg *Config) error {
@@ -780,24 +773,7 @@ func validateGates(cfg *Config) error {
 				ownSum += r.CountValue()
 			}
 			if ownSum < 2 {
-				return fmt.Errorf("panel.gates.%s.reviewers must sum to at least 2 (got %d): a single-reviewer gate makes the default \"n-1\" threshold resolve to 0, an always-pass gate\nrecovery: add at least one more reviewer under panel.gates.%s.reviewers in .mindspec/config.yaml", gate, ownSum, gate)
-			}
-		}
-
-		// (f)+(g): the resolved threshold must lie in [1, the resolved
-		// reviewer sum] at every link of the adhoc->bead->global chain —
-		// run for every configured gate regardless of which field(s) it
-		// sets itself, because an inherited half must still respect the
-		// INHERITING gate's own resolved sum.
-		resolvedExpr := strings.TrimSpace(cfg.resolveGateThresholdExpr(gate))
-		if !strings.EqualFold(resolvedExpr, "n-1") {
-			resolvedSum := 0
-			for _, r := range cfg.resolveGateReviewers(gate) {
-				resolvedSum += r.CountValue()
-			}
-			n, err := strconv.Atoi(resolvedExpr)
-			if err != nil || n < 1 || n > resolvedSum {
-				return fmt.Errorf("panel.gates.%s's resolved approve_threshold %q must be \"n-1\" or an integer in [1, %d] (that gate's resolved reviewer sum)\nrecovery: set panel.gates.%s.approve_threshold (or the value it inherits from bead/global) to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", gate, cfg.resolveGateThresholdExpr(gate), resolvedSum, gate, resolvedSum)
+				return fmt.Errorf("panel.gates.%s.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass\nrecovery: add at least one more reviewer under panel.gates.%s.reviewers in .mindspec/config.yaml", gate, ownSum, gate)
 			}
 		}
 	}
@@ -841,28 +817,12 @@ func (c *Config) WorktreePath(root, name string) string {
 	return filepath.Join(root, c.WorktreeRoot, name)
 }
 
-// PanelExpectedReviewers returns the sum of the configured panel.reviewers
-// counts — the creation-time default the spec-110 panel.json writer will
-// stamp as a fresh panel's expected_reviewers. Defaults to 6 (the 3+3 mix)
-// when Reviewers is unset, independent of whether this Config went through
-// Load's backfill.
+// PanelExpectedReviewers returns the no-gate creation-time reviewer count.
+// A create without --gate uses adhoc resolution, including explicit bead
+// inheritance, and defaults to 6 (spec 130 R2.1).
 func (c *Config) PanelExpectedReviewers() int {
-	total := 0
-	for _, r := range c.globalReviewers() {
-		total += r.CountValue()
-	}
-	return total
-}
-
-// globalReviewers returns panel.reviewers with the built-in 3+3 fallback
-// (mirroring PanelExpectedReviewers' historical sum semantics as a list
-// rather than a sum) — the single "global" tier every gate-scoped resolver
-// falls back to.
-func (c *Config) globalReviewers() []Reviewer {
-	if len(c.Panel.Reviewers) == 0 {
-		return DefaultConfig().Panel.Reviewers
-	}
-	return c.Panel.Reviewers
+	n, _ := c.PanelGateExpectedReviewers("adhoc")
+	return n
 }
 
 // PanelApproveThresholdExpr returns the RAW panel.approve_threshold
@@ -895,19 +855,32 @@ func gateKeyError(gate string) error {
 	return fmt.Errorf("gate %q is not one of the five valid panel gate keys (%s)\nrecovery: pass one of %s to the gate-scoped config resolver, or fix the panel.gates key spelling in .mindspec/config.yaml", gate, strings.Join(PanelGateKeys, ", "), strings.Join(PanelGateKeys, ", "))
 }
 
-// resolveGateReviewers walks the R3 per-field resolution chain for a gate's
-// reviewer list: the gate's own configured reviewers -> (adhoc only)
-// bead's resolved reviewers -> the global list (with its own built-in
-// fallback via globalReviewers). gate is assumed already validated against
-// PanelGateKeys by the caller.
+// resolveGateReviewers selects an explicit gate list, an explicit bead list
+// for adhoc, or the explicit global list. Without a list, the gate's own
+// default size is filled round-robin over claude, codex (spec 130 R2.1).
+// gate is assumed already validated against PanelGateKeys by the caller.
 func (c *Config) resolveGateReviewers(gate string) []Reviewer {
 	if gp, ok := c.Panel.Gates[gate]; ok && len(gp.Reviewers) > 0 {
 		return gp.Reviewers
 	}
 	if gate == "adhoc" {
-		return c.resolveGateReviewers("bead")
+		if gp, ok := c.Panel.Gates["bead"]; ok && len(gp.Reviewers) > 0 {
+			return gp.Reviewers
+		}
 	}
-	return c.globalReviewers()
+	if len(c.Panel.Reviewers) > 0 {
+		return c.Panel.Reviewers
+	}
+	size := 6
+	if gate == "bead" {
+		size = 4
+	}
+	families := []string{"claude", "codex"}
+	reviewers := make([]Reviewer, size)
+	for i := range reviewers {
+		reviewers[i] = Reviewer{Family: families[i%len(families)]}
+	}
+	return reviewers
 }
 
 // resolveGateThresholdExpr walks the R3 per-field resolution chain for a
@@ -1009,16 +982,13 @@ func expandSlots(reviewers []Reviewer) []ReviewerSlot {
 // in that case. Never calls a gate-scoped resolver with a value outside
 // PanelGateKeys, so no resolver error can surface through this helper.
 //
-//   - len(Gates) == 0 (gates not configured): every panel compares against
-//     the global default, exactly as 109 ships it — (PanelExpectedReviewers(), true).
 //   - recordedGate is a known gate key: that gate's PanelGateExpectedReviewers, true.
 //   - recordedGate is empty and isBead: the "bead" gate's PanelGateExpectedReviewers, true.
+//   - a legacy non-bead panel with no recorded gate and no gate overrides
+//     compares against the adhoc default, preserving its historical advisory.
 //   - anything else (a non-bead panel with no recorded gate, or a recorded
 //     value outside the enum): (0, false) — skip the note.
 func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool) {
-	if len(c.Panel.Gates) == 0 {
-		return c.PanelExpectedReviewers(), true
-	}
 	if isValidGateKey(recordedGate) {
 		n, err := c.PanelGateExpectedReviewers(recordedGate)
 		if err != nil {
@@ -1032,6 +1002,9 @@ func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int
 			return 0, false
 		}
 		return n, true
+	}
+	if recordedGate == "" && len(c.Panel.Gates) == 0 {
+		return c.PanelExpectedReviewers(), true
 	}
 	return 0, false
 }

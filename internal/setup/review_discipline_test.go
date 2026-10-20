@@ -799,9 +799,9 @@ var reviewDisciplineBead3FragmentRows = []fragmentRow{
 	// AC-1 (R1a) — the shipped default stated ONCE in canonical form, per
 	// surface, plus the ASCII "n-1" fragment (the pre-existing text only
 	// ever used the unicode "N − 1"/"N−1" forms).
-	{ac: "AC-1", desc: "ms-panel-run canonical shipped-default sentence", surface: "ms-panel-run", want: "shipped default: 6 reviewers"},
+	{ac: "AC-1", desc: "ms-panel-run canonical shipped-default sentence", surface: "ms-panel-run", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
 	{ac: "AC-1", desc: "ms-panel-run ASCII n-1 threshold fragment", surface: "ms-panel-run", want: "n-1"},
-	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped default: 6 reviewers"},
+	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
 	{ac: "AC-1", desc: "ms-panel-tally ASCII n-1 threshold fragment", surface: "ms-panel-tally", want: "n-1"},
 
 	// AC-1 (panel F1 MINOR) — the two DEFAULT-lens-relabel sentences pinned
@@ -909,34 +909,35 @@ func TestReviewDiscipline_LiteralFragments(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestReviewDiscipline_AC1PanelSizeConsistency is AC-1(c)/(d)'s structural
-// half: config.DefaultConfig().Panel resolves to exactly 6 reviewer slots
-// across exactly the families {claude, codex} (3+3), ApproveThreshold ==
+// half: config.DefaultConfig() resolves 6/6/4/6 per gate (adhoc 6),
+// across equal claude/codex families, no global list, ApproveThreshold ==
 // "n-1". This is a separate row from the embedded-fragment checks above by
 // construction — reverting a DefaultConfig VALUE reds THIS test without
 // touching a single skill byte, exactly the "any one surface alone reds"
 // property AC-1(c) requires.
 func TestReviewDiscipline_AC1PanelSizeConsistency(t *testing.T) {
-	panel := config.DefaultConfig().Panel
-	if panel.ApproveThreshold != "n-1" {
-		t.Errorf("DefaultConfig().Panel.ApproveThreshold = %q, want \"n-1\"", panel.ApproveThreshold)
+	cfg := config.DefaultConfig()
+	if len(cfg.Panel.Reviewers) != 0 {
+		t.Errorf("implicit global reviewers: %+v", cfg.Panel.Reviewers)
 	}
-	families := map[string]int{}
-	total := 0
-	for _, r := range panel.Reviewers {
-		families[r.Family] += r.CountValue()
-		total += r.CountValue()
+	if cfg.Panel.ApproveThreshold != "n-1" {
+		t.Errorf("threshold = %q, want n-1", cfg.Panel.ApproveThreshold)
 	}
-	if total != 6 {
-		t.Errorf("DefaultConfig().Panel.Reviewers sums to %d, want 6", total)
-	}
-	if len(families) != 2 {
-		t.Errorf("DefaultConfig().Panel.Reviewers spans families %v (%d distinct), want exactly {claude, codex}", families, len(families))
-	}
-	if families["claude"] != 3 {
-		t.Errorf("DefaultConfig().Panel claude slots = %d, want 3", families["claude"])
-	}
-	if families["codex"] != 3 {
-		t.Errorf("DefaultConfig().Panel codex slots = %d, want 3", families["codex"])
+	for gate, want := range map[string]int{"spec_approve": 6, "plan_approve": 6, "bead": 4, "final_review": 6, "adhoc": 6} {
+		slots, err := cfg.PanelGateReviewerSlots(gate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(slots) != want {
+			t.Errorf("%s slots = %d; want %d", gate, len(slots), want)
+		}
+		families := map[string]int{}
+		for _, slot := range slots {
+			families[slot.Model]++
+		}
+		if len(families) != 2 || families["claude"] != want/2 || families["codex"] != want/2 {
+			t.Errorf("%s families = %v; want %d of each claude, codex", gate, families, want/2)
+		}
 	}
 }
 
@@ -1319,40 +1320,18 @@ func acOneSurfaces() map[string]string {
 // a future edit that needs a digit/enumeration in one of those sections
 // should add its OWN locator-keyed entry here rather than loosen a pattern.
 var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
-	{
-		surface: "ms-panel-run",
-		locator: "so there is nothing to pass here",
-		matched: "6 reviewers",
-		count:   1,
-		reason:  "the ONE canonical labelled shipped-default sentence (AC-1a), Inputs section",
-	},
-	{
-		surface: "ms-panel-tally",
-		locator: "see `ms-panel-run`'s § Panel-size ladder",
-		matched: "6 reviewers",
-		count:   1,
-		reason:  "the ONE canonical labelled shipped-default sentence (AC-1a), Step 1",
-	},
+	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
+	{surface: "ms-panel-tally", locator: "see `ms-panel-run`'s § Panel-size ladder", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
 	{
 		surface: "ms-panel-run",
 		locator: "(bead-target panels)",
 		matched: "6-slot",
 		count:   1,
 		reason:  "the DEFAULT-labelled lens-table heading sentence (§ Slot lens defaults) — the exact label + scaled-mix rule the structural six-row-table check REQUIRES; pinned positively by the Bead3 fragment rows so a label-only deletion REDs",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "then launch one reviewer per configured slot",
-		matched: "3 Claude",
-		count:   1,
-		reason:  "the frontmatter description's labelled shipped-default parenthetical (\"shipped default: 3 Claude Agents + 3 Codex CLI sessions\") — the AC-1a labelled-default form, not an execution instruction; frontmatter cannot carry backticks the way the Inputs sentence does",
-	},
-	{
-		surface: "ms-panel-run",
-		locator: "then launch one reviewer per configured slot",
-		matched: "3 Codex",
-		count:   1,
-		reason:  "second token of the same labelled shipped-default frontmatter parenthetical",
 	},
 }
 
@@ -1421,7 +1400,7 @@ func TestReviewDiscipline_AC1SweepGuard(t *testing.T) {
 // TestReviewDiscipline_AC1SweepGuardNegativeHeadingForm proves the guard REDs
 // when the OLD "# Run a 6-Reviewer Panel" heading is reintroduced into a
 // FIXTURE copy of ms-panel-run's bytes (never the real file), while the
-// allowlisted "shipped default: 6 reviewers" sentence is untouched and must
+// allowlisted per-gate shipped-default sentence is untouched and must
 // NOT be implicated — the RED-on-revert demo the plan's Verification section
 // names explicitly (G1-1-R2: the hyphenated heading form is exactly what the
 // separator-tolerant 6[- ]reviewers? pattern exists to catch).

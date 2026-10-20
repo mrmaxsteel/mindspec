@@ -122,7 +122,7 @@ Skipping the panel gate entirely requires a **human**. A user sets `MINDSPEC_SKI
 
 ## Anti-patterns
 
-- Don't auto-merge below the N−1 threshold. The threshold is N−1 (5/6 for the default panel), and you should still note family asymmetry. Note the threshold is now a **floor, not a sufficient condition**: clearing it does not pass the gate while any latest-round REQUEST_CHANGES stays unresolved.
+- Don't auto-merge below the N−1 threshold. The threshold is N−1 (3/4 for the default bead panel; 5/6 for the default spec/plan/final/adhoc panels), and you should still note family asymmetry. Note the threshold is now a **floor, not a sufficient condition**: clearing it does not pass the gate while any latest-round REQUEST_CHANGES stays unresolved.
 - Don't pass raw verdict JSONs to the fix subagent — dedupe first. Six verdicts × ~3 items each = ~18 lines of duplicated asks otherwise.
 - Don't ignore `confidence`. A 0.96 REQUEST_CHANGES from one slot should outweigh a 0.70 APPROVE from another. `mindspec panel tally`'s printed table carries `verdict`/`hard_block` only, not `confidence` — read it from the underlying `<slot>-round-<N>.json` files when weighing verdicts, and note the weighting in the report.
 - Don't drop a REQUEST_CHANGES because "only one reviewer flagged it". A single empirically-grounded objection can be load-bearing — verify the claim before discarding — and the gate now BLOCKS on any unresolved REQUEST_CHANGES; the only per-slot escape is the audited refutation procedure (§ After a halt — recovery, item 5).

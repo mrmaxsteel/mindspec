@@ -306,7 +306,7 @@ func configKeySet(rendered string) map[string]bool {
 // TestCeremonyNonInflation_ConfigKeys pins AC-14(a)'s fourth surface:
 // `mindspec config show`'s effective-config key set (called in-process via
 // renderConfig, the exact function `config show` invokes, over a
-// no-.mindspec-config.yaml temp dir so the result is DefaultConfig() —
+// no-.mindspec-config.yaml temp dir plus an explicit reviewer fixture —
 // deterministic and independent of this repo's real .mindspec/config.yaml,
 // which any developer could otherwise edit to add a NEW key and hide it
 // from a --help-only guard).
@@ -316,6 +316,10 @@ func TestCeremonyNonInflation_ConfigKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load(empty dir): %v", err)
 	}
+	// Spec 130 leaves the global list empty by default. Keep its count key
+	// governed by the same baseline using an explicit list.
+	count := 3
+	cfg.Panel.Reviewers = []config.Reviewer{{Family: "claude", Count: &count}, {Family: "codex", Count: &count}}
 	rendered, err := renderConfig(cfg)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)

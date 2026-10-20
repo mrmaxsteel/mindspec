@@ -1,6 +1,6 @@
 ---
 name: ms-panel-run
-description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped default: 3 Claude Agents + 3 Codex CLI sessions) in parallel and wait for all verdicts
+description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped defaults: bead 4, spec/plan/final/adhoc 6; alternating Claude Agents and Codex CLI sessions) in parallel and wait for all verdicts
 ---
 
 # Run a Review Panel
@@ -29,7 +29,7 @@ A host lacking workflow capability (no Claude Code dynamic-workflow support) deg
 - `target` (required) — one of `bead <bead-id>`, `pr <pr-number>`, or `commit <sha>`. For `/ms-spec-final-review`, `target` is the spec branch (`bead_id` null).
 - `round` (default `1`) — the panel round; reviewers write to `<slot>-round-<N>.json`.
 
-`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel mix (shipped default: 6 reviewers — 3 `claude` + 3 `codex` — threshold `n-1`), so there is nothing to pass here. `DefaultConfig` panel VALUES are unchanged by this doctrine, full stop — zero-config installs keep this default; § Panel-size ladder below is how an operator scales it per gate.
+`expected_reviewers` and `approve_threshold` are not skill inputs — `panel create` stamps both onto `panel.json` from the configured panel mix (shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6; alternating `claude` + `codex` — threshold `n-1`), so there is nothing to pass here. `DefaultConfig` has no global reviewer list; zero-config installs use these per-gate sizes; § Panel-size ladder below is how an operator scales it per gate.
 
 > **`<spec-dir>` / co-located reviews (spec 106 flat layout).** Panels are
 > co-located under the spec they review: `<spec-dir>` is `<repo>/.mindspec/specs/<spec-slug>/`,
@@ -239,7 +239,7 @@ Mix to taste. The point is N distinct lenses, not clones. For round >= 2, each s
 
 ## Panel-size ladder (operator preference)
 
-The configured panel mix is the single authority (§ Inputs above), and `DefaultConfig` panel VALUES ship unchanged — a zero-config install keeps its sizes. An operator MAY scale the mix per gate via `panel.gates` in `.mindspec/config.yaml` — for example, a scale-by-gate-cost ladder (bead 8, spec/plan 9, final review 12), family-level only (see ADR-0043's `## Amendment (Spec 126)`):
+The configured panel mix is the single authority (§ Inputs above), and `DefaultConfig` resolves the per-gate sizes above — a zero-config install keeps its sizes unless an explicit reviewer list overrides them. An operator MAY scale the mix per gate via `panel.gates` in `.mindspec/config.yaml` — for example, a scale-by-gate-cost ladder (bead 8, spec/plan 9, final review 12), family-level only (see ADR-0043's `## Amendment (Spec 126)`):
 
 ```yaml
 # panel:

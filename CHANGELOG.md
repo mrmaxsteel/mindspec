@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Default panel sizes are 6/6/4/6 for spec/plan/bead/final review, with adhoc defaulting to 6 (spec 130 R2.1). Explicit reviewer lists retain precedence.
+
 ## [0.15.0] - 2026-10-18
 
 Two specs since v0.14.0. The theme is **lifecycle-verb trustworthiness**: spec 127 stops the verbs from printing or executing recovery that destroys work and gives an externally-merged spec a first-class, audited, merge-free path to its terminal state; spec 128 makes the verbs tell the truth about state (modes, result-before-guidance, hints that don't make state worse) and act deterministically on it (`complete` retry convergence, a proportional claim guard, honest bead selection). Not a pure drop-in: four behaviour changes are deliberate — a one-time per-epic phase-semantics v2 migration, `plan approve` now storing `plan` instead of `implement`, `complete`'s doc-sync / ADR-divergence gates measuring a prospective snapshot before committing (ADR-0041 §1 amended), and the dirty-tree block on `mindspec next` replaced by a proportional claim guard (ADR-0025 amended) — see **Changed**. Otherwise well-formed repos behave as v0.14.0, and an ordinary bead merge is unchanged. Deferred to follow-on specs rather than shipped here: MF-3 readiness false-negatives (GH #239, #232, #234), `impl approve` closing the epic before pushing (GH #244), the remaining spec-completion-signal face of GH #255, and the panel-artifact-integrity and `reattest` clusters.
