@@ -112,7 +112,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 ### R2 — `panel submit`
 
 1. `mindspec panel submit <slug> --slot S --round N --file F [--spec ID]` submits a verdict. `--file -` reads stdin.
-2. Short form: `mindspec panel submit --file F`, run in a slot directory or under it, or with `F` an absolute path inside a slot directory. Submit takes the spec, slug, round and slot from the slot directory of the cwd, else of `F`, with the R6.9 checks. Explicit flags that disagree with the path refuse.
+2. Short form: `mindspec panel submit --file F`, run in a slot directory or under it, or with `F` an absolute path inside a slot directory. Submit takes the spec, slug, round and slot from the slot directory of the cwd, else of `F`, with the R6.9 checks. A relative `F` gives no slot. When the cwd and `F` are in different slot directories, submit refuses and names both. Explicit flags that disagree with the path refuse.
 3. Submit refuses each of these, and writes nothing:
    - a round that is not a v2 round (recovery: `mindspec panel create <slug> --round <N+1>`);
    - a file that fails R1 (the message names the JSON pointer of the first error);
@@ -142,7 +142,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. `create` writes `verdict_schema: 2` to `panel.json` and to the `round` event of every new round. No config key or flag changes it. This spec adds `verdict_schema` to spec 130 R5.3's pinned-field list.
 2. The gate takes v2-ness from the latest `round` event only, never from `panel.json`. When an earlier `round` event of the panel has `verdict_schema: 2` and the latest one does not, the gate blocks with a registration error.
-3. On a v2 round, a roster slot is in only when its latest submission is `final`, its verdict is not `VOID`, the sha256 of `<slot>-round-<N>.json` equals that submission's `file_sha256`, and every `launch` event later than it in the ledger belongs to a closed attempt (R8.2). So a replacement in flight, or one that failed, keeps the slot out. A replacement that returns the same final bytes closes its attempt, and the slot is in again.
+3. On a v2 round, a roster slot is in only when its latest submission is `final`, its verdict is not `VOID`, the sha256 of `<slot>-round-<N>.json` equals that submission's `file_sha256`, and either no `launch` event is later than it in the ledger, or the highest-numbered attempt with a `launch` event later than it is closed (R8.2). A later attempt supersedes earlier open or failed attempts. So a replacement in flight, or one that failed, keeps the slot out, and a later attempt that returns the same final bytes puts it in again.
 4. A verdict file with no matching latest submission counts for nothing. Spec 130 R2.5 (an off-roster REJECT, INVALID or `hard_block` blocks) applies unchanged.
 5. Spec 130's pass rule, discharge rules and coverage manifest use only the slots that are in. A discharge of `ccr[i]` applies while its `finding_sha256` equals the sha256 of `ccr[i]`'s text in the latest submission (spec 130 R7.3, unchanged). A slot-level discharge applies while the slot hash is unchanged (spec 130 R7.4).
 6. A round whose `round` event has no `verdict_schema` keeps spec 130's rules. Such a round only exists from before this change.
@@ -225,30 +225,32 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
    - Before it reuses a tree, checkout `lstat`s `tree/` and `tree/.git`. Each must be a real directory, not a symlink and not a file. Checkout also refuses when `tree/.git/commondir` exists, when the tree's local git config sets `core.worktree` or `core.bare`, or when `tree/.git/objects/info/alternates` differs from the one line that the clone wrote. Each refusal has the same `--prune --slot` recovery.
    - Every git call of the binary in an existing tree runs with `-c core.fsmonitor=false -c core.hooksPath=/dev/null` and with `GIT_CONFIG_NOSYSTEM=1`.
    - Every git call of the binary for a slot (clone, checkout, remote, check) and every reviewer process run with git's repository-locating variables removed from the environment: each name that `git rev-parse --local-env-vars` prints (for example `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_CONFIG*`).
-5. `panel checkout <slug> --slot S --dispatch [--replace]` does the R6.4 checkout, then appends a `launch` event with status `dispatched` and the next attempt number. It refuses a slot whose effective runner is a process runner (recovery: `mindspec panel launch`), and a slot whose latest submission is final and not `VOID`, unless `--replace` is set. `--dispatch` needs `--slot`. It refuses a panel and round that a landed binding names (R2.3), before any ledger append, with the same recovery.
+5. `panel checkout <slug> --slot S --dispatch [--replace]` does the R6.4 checkout and creates `attempt-<k>/` with an exclusive `mkdir` (`k` as in R7.2). It appends `launch_failed` for each earlier `dispatched` attempt of the slot with no outcome event, then a `launch` event with status `dispatched` and attempt `k`. It refuses a slot whose effective runner is a process runner (recovery: `mindspec panel launch`), and a slot whose latest submission is final and not `VOID`, unless `--replace` is set. `--dispatch` needs `--slot`. It refuses a panel and round that a landed binding names (R2.3), before any ledger append, with the same recovery.
 6. `panel checkout <slug> --fixer` creates `<…>/r<N>/fixer/` with no tree. It is scratch only. The fixer works in the target's own worktree: the bead worktree for a bead panel, the spec worktree for a final review.
-7. `panel checkout <slug> --prune [--slot S]` removes the checkouts of the panel, or of one slot. `create` for round N+1 removes the panel's checkouts of earlier rounds. `abandon` removes all. Removal deletes the directory, dirty or not, under the verified root, and does not follow symlinks. Before it changes anything, each of these three verbs takes the slot lock (Terms) of every affected slot, without waiting, in sorted slot-name order, and before the ledger lock. It also tests each attempt's `run.lock` (R7.3) without waiting. When a lock is held, the verb refuses, changes nothing, and names each held slot (recovery: `mindspec panel verify`). Removal never deletes a slot lock file, so every verb that locks a slot locks the same file.
+7. `panel checkout <slug> --prune [--slot S]` removes the checkouts of the panel, or of one slot. `create` for round N+1 removes the panel's checkouts of earlier rounds. `abandon` removes all. Removal deletes the directory, dirty or not, under the verified root, and does not follow symlinks. Before it changes anything, each of these three verbs takes the slot lock (Terms) of every affected slot, without waiting, in sorted slot-name order, and before the ledger lock. Then it runs the R7.3 orphan check on each affected slot. When a slot lock is held, or the orphan check refuses, the verb removes nothing and names each held slot or attempt directory (recovery for a held slot lock: `mindspec panel verify`). Removal never deletes a slot lock file, so every verb that locks a slot locks the same file.
 8. These walks skip the resolved isolation root: panel registration lookup, the `doctor` ownership walk, the `doctor` links walk, and the `migrate` walks. No ledger record contains an isolation-root path.
 9. Root discovery. When the cwd is in a slot directory or under it, every `mindspec panel` verb and `mindspec rules` take the main root from the slot directory's `slot.json`. The slot directory is the nearest ancestor of the cwd that holds both `slot.json` and `tree/`. The verb refuses unless the slot directory path is exactly `<main root>/<isolation_root>/<spec>/<slug>/r<N>/<slot>`, with the isolation root that the main root's config resolves, and unless `slot.json` names the same spec, slug, round and slot. These verbs never use the clone as the root. Every other `mindspec` command run under `tree/` acts on the clone; a reviewer can use this to probe the reviewed code.
 
 ### R7 — `panel launch` and `panel recover`
 
 1. `mindspec panel launch <slug> <slot> [--spec ID] [--replace]` starts the slot's effective process runner and waits. It refuses: a slot whose effective runner is a harness runner (recovery: `mindspec panel prompt`); an abandoned panel; a round that is not a v2 round; a slot whose latest submission is final with a verdict other than `VOID`, unless `--replace` is set (a final `VOID` needs no `--replace`); a slot whose lock another process holds (recovery: `mindspec panel verify`); a panel and round that a landed binding names (R2.3), before any ledger append.
-2. Launch takes the slot lock (Terms) and holds it until it exits. Lock order: the slot lock first, then the panel ledger lock for each append. No verb takes them in the other order. Under the slot lock, launch first ensures the R6 checkout at the reviewed SHA, with the R6.2 and R6.4 refusals. Then, for each earlier attempt directory of the slot (an orphan check):
-   - when its `run.lock` (R7.3) is held, tested without waiting, launch sends SIGKILL to the group in its `pgid` file, but only when that value is greater than 1 and is not launch's own process group;
-   - when its `run.lock` is free, launch sends no signal;
-   - in both cases, a `started` event of that attempt with no outcome event gets a `launch_failed` outcome.
+2. Launch takes the slot lock (Terms) and holds it until it exits. Lock order: the slot lock first, then the panel ledger lock for each append. No verb takes them in the other order. Under the slot lock, launch ensures the R6 checkout at the reviewed SHA, with the R6.2 and R6.4 refusals, then runs the R7.3 orphan check. Each start is a new attempt `k`, in `attempt-<k>/` in the slot directory. `k` is 1 + the larger of the highest ledger attempt and the highest attempt directory on disk. Launch never reads files of an earlier attempt.
+3. Each attempt runs under a *supervisor*: the `mindspec` binary in an internal mode, started by launch as the leader of a new process group.
+   - Launch creates `attempt-<k>/` with an exclusive `mkdir` and writes `prompt.md` with a new random nonce (R9.4). It takes the ledger lock, starts the supervisor, appends a `launch` event with status `started`, `attempt`, `pgid` (the supervisor's pid), `runner_kind`, `runner_source`, `argv_sha256` (the sha256 of the argv template before expansion) and `nonce_sha256`, and then releases the ledger lock.
+   - The supervisor takes an exclusive lock on `attempt-<k>/run.lock`, and writes its pid to `attempt-<k>/pgid` by temp file and rename. Only then does it start `argv` as its child in the same group: with no shell, with the slot directory as cwd, with stdout to `attempt-<k>/stdout.log` and stderr to `attempt-<k>/stderr.log`, and with every `MINDSPEC_` variable and every R6.4 git variable removed from the environment.
+   - The child inherits only stdin, stdout and stderr. The slot lock, the ledger lock and `run.lock` are close-on-exec.
+   - The supervisor enforces `timeout_minutes`, also when launch is dead. When the child exits or times out, the supervisor writes `attempt-<k>/exit.json` (exit code and timeout flag) by temp file and rename, then sends SIGKILL to its own group, which ends it too.
 
-   Each start is a new attempt `k`, in `attempt-<k>/` in the slot directory. `k` is 1 + the larger of the highest ledger attempt and the highest attempt directory on disk. Launch never reads files of an earlier attempt.
-3. For each attempt, launch:
-   - creates `attempt-<k>/` with an exclusive `mkdir`, and takes an exclusive lock on `attempt-<k>/run.lock`. The child inherits that descriptor (not close-on-exec), so the lock stays held while a member of the group lives;
-   - creates a random nonce and writes `prompt.md` with it (R9.4);
-   - takes the ledger lock, and holds it until the `started` append;
-   - starts `argv` with no shell, in a new process group, with the slot directory as cwd, and with every `MINDSPEC_` variable and every R6.4 git variable removed from the environment, then writes the group id to `attempt-<k>/pgid`;
-   - appends a `launch` event with status `started`, `attempt`, `pgid`, `runner_kind`, `runner_source`, `argv_sha256` (the sha256 of the argv template before expansion) and `nonce_sha256`;
-   - writes stdout to `attempt-<k>/stdout.log` and stderr to `attempt-<k>/stderr.log`;
-   - kills the process group at `timeout_minutes`.
-4. When the process ends, launch appends one outcome event with `stdout_sha256`, `stderr_sha256` and, when `attempt-<k>/verdict.json` exists, `verdict_sha256`:
+   So a held `run.lock` means a live supervisor, and the `pgid` file holds that supervisor's pid, which no other process can have while it lives.
+
+   *Orphan check*, for each attempt of the slot with no outcome event (an attempt directory with no ledger event, or a `started` event with no outcome):
+   - `run.lock` free: no signal;
+   - `run.lock` held and the `pgid` file holds a decimal value greater than 1 that is not the caller's own group: SIGKILL to that group, then a wait of up to 5 seconds for `run.lock` to be free;
+   - `run.lock` still held, or the `pgid` file absent, not decimal, 1 or less, or the caller's own group: refuse, naming the attempt directory;
+   - otherwise, a `started` event with no outcome gets a `launch_failed` outcome.
+
+   An attempt with an outcome event is not tested.
+4. When the supervisor ends, launch reads `attempt-<k>/exit.json` (absent: `launch_failed`) and appends one outcome event with `stdout_sha256`, `stderr_sha256` and, when `attempt-<k>/verdict.json` exists, `verdict_sha256`:
    - `submitted`: exit 0 before the timeout, and R2 accepts the verdict. The event names the `seq` that R2.5 selected, also when no new `verdict` record was appended. With `output: stdout`, the verdict is the one block in `stdout.log` between `MINDSPEC-VERDICT-BEGIN <nonce>` and `MINDSPEC-VERDICT-END <nonce>`. With `output: file`, it is `attempt-<k>/verdict.json`;
    - `quota_wall`: a non-zero exit or a timeout, and the last 64 KiB of `stderr.log` contains a configured quota signal;
    - `launch_failed`: any other non-zero exit or timeout;
@@ -272,11 +274,11 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. `panel verify` gives each roster slot one status from this closed set: `final`, `damaged`, `void`, `draft`, `running`, `quota_wall`, `launch_failed`, `malformed`, `unsubmitted`, `missing`.
 2. On a v2 round, the status comes from the first rule that applies:
-   - the latest submission is final and not `VOID`, and every `launch` event later than it in the ledger belongs to a closed attempt: `final` when the file matches its `file_sha256`, else `damaged` (recovery: `mindspec panel submit` with the original bytes, or `mindspec panel recover`);
+   - the latest submission is final and not `VOID`, and either no `launch` event is later than it in the ledger, or the highest-numbered attempt with a `launch` event later than it is closed: `final` when the file matches its `file_sha256`, else `damaged` (recovery: `mindspec panel submit` with the original bytes, or `mindspec panel recover`);
    - a verdict file exists whose sha256 matches no latest submission: `unsubmitted`;
    - the latest event among the slot's submissions and `launch` events decides:
-     - a submission, or a `submitted` outcome (through the submission its `seq` names): `void` for `VOID`, `draft` for `draft`. A `submitted` outcome for a final non-`VOID` submission closes its attempt, so the first rule applies;
-     - `started`: `running` while the slot lock is held, else `launch_failed`;
+     - a submission, or a `submitted` outcome (through the submission its `seq` names): `void` for `VOID`, `draft` for `draft`. This bullet never sees a closed final, because the first rule takes it;
+     - `started`: `running` while the slot lock or the attempt's `run.lock` is held, else `launch_failed`;
      - `dispatched`: `launch_failed` when the harness runner has `timeout_minutes` and the event is older than that limit, else `running`;
      - `quota_wall`, `launch_failed` and `malformed`: their own names;
    - with no such event: `missing`.
@@ -305,7 +307,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
    - the BRIEF;
    - the slot's id, effective family, effective model (the value for `model`), lens and focus;
    - the absolute slot directory and tree;
-   - the output instruction for the effective runner: the nonce marker lines, `verdict.json`, or, for a harness runner, the command `mindspec panel submit --file <slot_dir>/verdict.json` with the absolute slot directory;
+   - the output instruction for the effective runner: the nonce marker lines, `verdict.json`, or, for a harness runner, the command `mindspec panel submit --file <slot_dir>/attempt-<k>/verdict.json` with the absolute slot directory and the attempt of the latest `dispatched` event;
    - from round 2, the slot's own prior-round items, each to grade ADDRESSED, PARTIAL, MISSED or NEW_ISSUE. On a v2 prior round, the items are the `concrete_changes_required` texts of the slot's latest submission. On a prior round with no `verdict_schema`, they are the parsed `concrete_changes_required` of `<slot>-round-<N-1>.json`; an unparseable or absent file gives `no prior-round items`;
    - the instruction to write scratch only in the slot directory.
 5. The adapter passes the slot's effective model to its agent tool. When the tool cannot run that model, the adapter reports the slot and does not run it on another model. When the effective model equals the family string (the zero-config case), the adapter dispatches with the harness's default model, and the verdict `model` is the slot model, as a label.
@@ -389,7 +391,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 3. No copy of `ms-panel-run`, `ms-panel-tally`, `ms-bead-fix`, `ms-spec-final-review`, `ms-bead-cycle` or `ms-bead-impl` contains `/tmp`. None contains a tool family name, except the harness's own name in a path such as `.claude/` and the R4.5 `runner:` values. These skills contain no lens table, no size ladder and no failure-detection section. They cite rule ids for conduct. `ms-bead-cycle`'s family table becomes family-neutral.
 4. `ms-spec-final-review` uses `panel checkout --slot` for isolated reviewer work. `ms-bead-fix` uses `panel checkout --fixer` for scratch and dispatches the fixer in the target's own worktree (R6.6).
-5. Both copies of `ms-panel.js` name no tool family. `ALLOWED_CLI` is exactly `mindspec panel create`, `mindspec panel verify`, `mindspec panel tally`, `mindspec panel launch`, `mindspec panel checkout`, `mindspec panel prompt`, `mindspec panel submit` and `mindspec panel recover`. `buildCommand` builds each one with fixed flags; `submit` takes only `--file <slot_dir>/verdict.json`, an absolute path, and uses the R2.2 short form; `checkout` for a dispatch takes `--slot S --dispatch` and, after a final, `--replace`. `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder go. The workflow takes the roster from `panel verify --json` after `create` and follows the R12.1 table. A harness reviewer step submits through a `buildCommand` `panel submit` call. It never writes a verdict file with the Write tool, as the reviewer steps of today's `ms-panel.js` do.
+5. Both copies of `ms-panel.js` name no tool family. `ALLOWED_CLI` is exactly `mindspec panel create`, `mindspec panel verify`, `mindspec panel tally`, `mindspec panel launch`, `mindspec panel checkout`, `mindspec panel prompt`, `mindspec panel submit` and `mindspec panel recover`. `buildCommand` builds each one with fixed flags; `submit` takes only `--file <slot_dir>/attempt-<k>/verdict.json`, the absolute path that the slot prompt names, and uses the R2.2 short form; `checkout` for a dispatch takes `--slot S --dispatch` and, after a final, `--replace`. `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder go. The workflow takes the roster from `panel verify --json` after `create` and follows the R12.1 table. A harness reviewer step submits through a `buildCommand` `panel submit` call. It never writes a verdict file with the Write tool, as the reviewer steps of today's `ms-panel.js` do.
 6. `plugins/mindspec/scripts/codex_verdict_extract.sh` is deleted. `panel recover` replaces it.
 7. `setup`'s historical skill snapshots gain the replaced versions of every R12.3 skill, so an unmodified installed copy refreshes.
 
@@ -439,6 +441,7 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 ## Non-Goals
 
 - Authentication of a submitter. Submit binds bytes to a ledger record. Any process with write access to the repository can submit, or can append to the ledger file. ADR-0037 §8 applies.
+- A descendant of a reviewer that calls `setsid` leaves the attempt's group, and the supervisor does not kill it. It holds no mindspec lock, so it blocks no verb.
 - Protection from the code under review. The nonce stops marker lines that appear by accident in output. It does not stop code that the reviewer runs, because that code can read the slot directory.
 - A round limit, `next-action`, `bead prompt`, the implementation and fix prompt templates, `config resolve --role` and the drafting and implementation model keys (spec 133).
 - A family minimum, `exclude_author_family`, a binding of a harness runner to a named harness, and any rule that judges reviewer output (operator ruling).
@@ -507,6 +510,7 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - a dirty tree is removed by `create --round 2`; `abandon` removes all;
   - `checkout --slot --dispatch` on a harness slot appends one `dispatched` event; on a process slot it refuses; after a final APPROVE it refuses without `--replace`;
   - after a final, plain `checkout --slot` and `checkout --all` leave the slot `final` and the ledger byte-identical;
+  - after `--dispatch --replace`, a submit with no new `attempt-<k>/verdict.json` refuses, and the slot stays `running`;
   - a `tree/.git/commondir` file, `core.worktree` or `core.bare` in the tree's local config, and an extra line in `objects/info/alternates` each make a rerun refuse with `--prune --slot`;
   - a launcher paused after it opens the slot lock file and before it locks it; `checkout --prune` runs; the launcher resumes beside a second launch: at most one runner starts, and the lock file still exists;
   - load refuses an empty, absolute, `.`, `.git/x`, `.worktrees/x` and tracked root; checkout refuses a symlinked root and a non-ignored root (recovery `mindspec init`);
@@ -516,14 +520,16 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - with `GIT_DIR` set to the main repository's git directory in the caller's environment, checkout creates the clone in the slot, the fake reviewer child sees no `GIT_` variable from `git rev-parse --local-env-vars`, and `git stash` in the tree leaves the main refs unchanged;
   - while a fake runner blocks under a held slot lock: `checkout --prune`, `create --round 2` and `abandon` each refuse, name the held slot, and change no file and no ledger record.
 
-  Tests: `TestPanelCheckout_DispatchFlag`, `TestPanelCheckout_PlainWritesNoLedger`, `TestPanelCheckout_GitRedirectRefused`, `TestSlotLock_StableAcrossPrune`, `TestPanelCheckout_TreeLstat`, `TestPanelCheckout_NoFsmonitor`, `TestPanelCheckout_GitEnvScrubbed`, `TestPanelCleanup_RefusesHeldLock`, `TestPanelCheckout_Creates`, `TestPanelCheckout_GitStaysInSlot`, `TestPanelCheckout_NoOrigin`, `TestPanelCheckout_Refusals`, `TestPanelCheckout_Prune`, `TestPanelCheckout_HarnessDispatched`, `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`.
+  Tests: `TestPanelDispatch_StaleFileRefused`, `TestPanelCheckout_DispatchFlag`, `TestPanelCheckout_PlainWritesNoLedger`, `TestPanelCheckout_GitRedirectRefused`, `TestSlotLock_StableAcrossPrune`, `TestPanelCheckout_TreeLstat`, `TestPanelCheckout_NoFsmonitor`, `TestPanelCheckout_GitEnvScrubbed`, `TestPanelCleanup_RefusesHeldLock`, `TestPanelCheckout_Creates`, `TestPanelCheckout_GitStaysInSlot`, `TestPanelCheckout_NoOrigin`, `TestPanelCheckout_Refusals`, `TestPanelCheckout_Prune`, `TestPanelCheckout_HarnessDispatched`, `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`.
 - [ ] **AC-9 (R6.9)**: With a REAL slot clone of a fixture repository:
   - `mindspec panel submit --file v.json` run from `<slot_dir>/tree/sub/` appends to the main ledger and writes the main verdict file; the clone's `.mindspec/` stays byte-identical;
   - the long form run from `tree/sub/` does the same;
   - a `tree/sub/slot.json` with no sibling `tree/` is ignored; a slot directory whose `slot.json` names another slot refuses; a copy of a slot directory outside the isolation root refuses;
   - `mindspec rules` run from `tree/` reads the main root.
 
-  Tests: `TestSlotRoot_SubmitFromClone`, `TestSlotRoot_Refusals`, `TestSlotRoot_Rules`.
+  - `TestSlotRoot_SubmitFromFilePath`: from the main root with an absolute `F` in a slot directory, submit succeeds; a relative `F` refuses; with the cwd in slot A and `F` in slot B, submit refuses and names both.
+
+  Tests: `TestSlotRoot_SubmitFromFilePath`, `TestSlotRoot_SubmitFromClone`, `TestSlotRoot_Refusals`, `TestSlotRoot_Rules`.
 - [ ] **AC-10 (R7)**: With a fake runner script per case:
   - `create`, then the R12.1 adapter sequence, runs a process runner that reads a tracked file in `tree/` and checks that `tree/` `HEAD` is the reviewed SHA before it prints its verdict;
   - a valid nonce block on stdout and exit 0 gives `submitted`; so does a valid `verdict.json` in file mode;
@@ -540,14 +546,18 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - a second concurrent launch of the slot refuses; a harness slot refuses, naming `panel prompt`;
   - launch exits 0 only for a submitted final; no ledger record contains the isolation root;
   - a final `VOID`, then the R12.1 relaunch without `--replace`, starts attempt 2; a final APPROVE from it makes verify exit 0, and tally runs;
-  - launch is killed with SIGKILL while the fake reviewer sleeps; a second launch kills the orphan process group first (its marker file stops growing) and appends `launch_failed` for attempt 1 before it starts attempt 2;
-  - with a fault injected after the process start and before the `started` append, the next launch finds the held `run.lock`, kills the group, and starts attempt k+1;
+  - launch is killed with SIGKILL while the fake reviewer sleeps: the supervisor still kills the group at the timeout; before the timeout, a second launch kills the group first (its marker file stops growing) and appends `launch_failed` for attempt 1 before it starts attempt 2; `create --round N+1` in the same state kills the group and succeeds;
+  - a fault after the supervisor starts and before the `pgid` write: no argv ran, and the next launch proceeds;
+  - a held `run.lock` with an absent `pgid` file makes the next launch refuse, naming the attempt directory;
+  - a fake reviewer starts a `setsid` sleeper and exits 0 with a final verdict: `create --round 2` succeeds, and a later launch of the slot sends no signal;
   - an attempt whose `run.lock` is free and whose `pgid` names a live unrelated process group gets no signal; a `pgid` of 0 or 1 gets no signal;
+  - while the fake runner sleeps, `panel verify` and a submit to another slot end without waiting;
+  - each of these gives `final`, verify exit 0, a passing gate and no new `verdict` record: final A, a replacement that ends `launch_failed`, then a replacement that returns A; a replacement that is `malformed`, then the automatic retry that returns A; a harness dispatch that returns with no submission, then a redispatch that submits A;
   - a submitted final A, then `launch --replace` that returns A again: no new `verdict` record, the attempt is closed, the slot is `final`, verify exits 0, and the gate passes; the same for a harness `checkout --slot --dispatch --replace` and a CLI submit of A; a later `launch --replace` that ends with exit 1 blocks again;
   - `launch --replace` and `checkout --slot --dispatch --replace` on a landed panel and round refuse and append nothing;
   - quota handoff, end to end: a process slot with `on_quota` to a harness family hits `quota_wall`; verify `--json` gives kind `harness`, status `quota_wall` and `handoff_pending: true`, and exits 1; the R12.1 harness column redispatches; a fake harness agent submits; the slot is `final`. The same holds through the workflow fixture of AC-15.
 
-  Tests: `TestPanelLaunch_VoidRetry`, `TestPanelLaunch_KillsOrphan`, `TestPanelLaunch_OrphanBeforeStarted`, `TestPanelLaunch_NoSignalStalePgid`, `TestPanelLaunch_IdenticalFinalReplacement`, `TestPanelDispatch_IdenticalFinalReplacement`, `TestPanelLaunch_LandedRoundRefused`, `TestPanelLaunch_QuotaHandoffE2E`, `TestPanelLaunch_AdapterE2E`, `TestPanelLaunch_Outcomes`, `TestPanelLaunch_Channels`, `TestPanelLaunch_Retry`, `TestPanelLaunch_Substitution`, `TestPanelLaunch_DraftAndVoid`, `TestPanelLaunch_IdenticalResubmit`, `TestPanelLaunch_Env`, `TestPanelLaunch_Refusals`, `TestPanelRecover_Stdout`, `TestPanelRecover_File`, `TestLedger_NoScratchPaths`.
+  Tests: `TestPanelLaunch_VoidRetry`, `TestPanelLaunch_KillsOrphan`, `TestPanelLaunch_SupervisorTimeoutAfterLaunchDeath`, `TestPanelLaunch_FaultBeforePgid`, `TestPanelLaunch_HeldLockNoPgidRefuses`, `TestPanelLaunch_SetsidDescendant`, `TestPanelLaunch_NoSignalStalePgid`, `TestPanelLaunch_LocksNotInherited`, `TestPanelLaunch_RecoverAfterFailedReplacement`, `TestPanelLaunch_IdenticalFinalReplacement`, `TestPanelDispatch_IdenticalFinalReplacement`, `TestPanelLaunch_LandedRoundRefused`, `TestPanelLaunch_QuotaHandoffE2E`, `TestPanelLaunch_AdapterE2E`, `TestPanelLaunch_Outcomes`, `TestPanelLaunch_Channels`, `TestPanelLaunch_Retry`, `TestPanelLaunch_Substitution`, `TestPanelLaunch_DraftAndVoid`, `TestPanelLaunch_IdenticalResubmit`, `TestPanelLaunch_Env`, `TestPanelLaunch_Refusals`, `TestPanelRecover_Stdout`, `TestPanelRecover_File`, `TestLedger_NoScratchPaths`.
 - [ ] **AC-11 (R8)**:
   - a fixture with one slot in each R8.1 status gives that status;
   - a launch killed with SIGKILL (a `started` event and a free slot lock) gives `launch_failed`, and verify exits 2;
