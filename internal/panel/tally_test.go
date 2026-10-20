@@ -175,7 +175,7 @@ func TestTally_MalformedVerdictIsMissingAndNamed(t *testing.T) {
 	}
 }
 
-func TestTally_MissingVerdictFieldIsMalformed(t *testing.T) {
+func TestTally_MissingVerdictFieldIsInvalid(t *testing.T) {
 	files := roundFiles(1, "APPROVE", "APPROVE", "APPROVE", "APPROVE", "APPROVE")
 	files["codex-c-round-1.json"] = `{"confidence": 0.8, "concrete_changes_required": []}`
 	dir := panelDir(t, registered(1, 6), files)
@@ -183,11 +183,11 @@ func TestTally_MissingVerdictFieldIsMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(res.Malformed, []string{"codex-c-round-1.json"}) {
-		t.Errorf("verdict-less JSON must be malformed/missing, got %v", res.Malformed)
+	if len(res.Malformed) != 0 || res.InvalidCount() != 1 {
+		t.Errorf("verdict-less JSON must be INVALID, got malformed=%v invalid=%d", res.Malformed, res.InvalidCount())
 	}
-	if len(res.Verdicts) != 5 {
-		t.Errorf("verdicts = %d, want 5", len(res.Verdicts))
+	if len(res.Verdicts) != 6 || !res.Complete() {
+		t.Errorf("verdicts = %d, complete=%v, want 6 present", len(res.Verdicts), res.Complete())
 	}
 }
 

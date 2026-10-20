@@ -12,8 +12,8 @@ import (
 )
 
 // ADR-0037 AMENDMENT NOTE (Spec 099): this is the SINGLE home of the
-// panel-gate enforced contract (registration §1, round derivation §2, N−1
-// threshold §3, staleness §4, dirty-tree §5, fail-open/fail-closed asymmetry
+// panel-gate enforced contract (registration §1, round derivation §2, pass
+// rule §3, staleness §4, dirty-tree §5, fail-open/fail-closed asymmetry
 // §6, escape hatches §7, trust boundary §8). It was relocated here from
 // internal/hook/precomplete.go so that the in-binary `mindspec complete` gate
 // — the SOLE panel-gate enforcement point — reads one decision over one set
@@ -62,13 +62,9 @@ const (
 // The caller maps it to its own protocol (the hook -> hook.Result, the
 // in-binary gate -> guard.NewFailure for Block).
 //
-// AppliedRefutations (Spec 114 R2) is populated ONLY on the leg-(10)
-// threshold Allow return — the only path where a refutation can have
-// changed the outcome (every applied refutation is outcome-relevant by
-// construction: without it, its RC would have blocked at leg 9.5).
-// Warn/short-circuit paths never evaluate refutations and return nil. Note:
-// Decision is no longer comparable with ==/!= (this field is a slice) —
-// callers needing equality must compare Action+Message instead.
+// AppliedRefutations is populated only on the full pass-rule Allow return.
+// Warn and short-circuit paths do not apply discharges. Callers compare
+// Action and Message rather than comparing Decision directly (it has a slice).
 type Decision struct {
 	Action             GateAction
 	Message            string
@@ -179,6 +175,7 @@ type GateFacts struct {
 //	(1) no panel      → Allow (fail-open, HC-4)
 //	(2) malformed reg → Block (a registered-but-unparseable panel is NOT
 //	                    "no panel"; it must not tip fail-open)
+//	(2b) integrity/floor → Block before abandonment
 //	(3) abandoned     → Allow + Warn  (BEFORE staleness — an abandoned
 //	                    panel whose branch gained commits must never be
 //	                    false-Blocked by the stale-SHA rule)
@@ -189,10 +186,8 @@ type GateFacts struct {
 //	(7) dirty tree    → Block  (materialize-past-review bypass; skipped when worktree absent)
 //	(8) incomplete    → Block  (verdicts < expected_reviewers)
 //	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
-//	(9.5) unresolved  → Block  (unresolved REQUEST_CHANGES / unrecognized
-//	                    verdict(s) — Spec 114 R1; layered ON TOP of the
-//	                    threshold floor, not a replacement for it)
-//	(10) threshold    → Allow iff APPROVE ≥ N−1, else Block
+//	(9.5) unresolved  → Block (every finding must be discharged)
+//	(10) pass rule    → Allow when all findings are discharged
 //
 // false POSITIVES (a wrongful Block) are the pinned bug class (Req 9); the
 // missing-ref and missing-worktree pass-throughs exist to keep the
@@ -228,6 +223,10 @@ func PanelGateDecision(f GateFacts) Decision {
 	round := f.Res.LatestRound
 	if round == 0 {
 		round = p.Round
+	}
+
+	if err := f.Res.intactError(); err != nil {
+		return Decision{Action: Block, Message: fmt.Sprintf("panel %s registration: %s%s", slug, err, RawMergeFence(f.BeadID))}
 	}
 
 	// (3) Abandoned — legitimate exit, audited on bead metadata at complete
@@ -325,8 +324,8 @@ func PanelGateDecision(f GateFacts) Decision {
 
 	// (9) REJECT or hard_block — halt path; no vote count overrides an
 	// evidence-bearing gate (the lola-f4a8 artifact-gate rule, mechanized).
-	if f.Res.Rejects > 0 || len(f.Res.HardBlocks) > 0 {
-		detail := fmt.Sprintf("%d/%d APPROVE", f.Res.Approves, n)
+	if f.Res.Rejects > 0 || len(f.Res.HardBlocks) > 0 || f.Res.InvalidCount() > 0 || f.Res.unexpectedVeto() {
+		detail := fmt.Sprintf("%d/%d APPROVE, %d INVALID%s", f.Res.Approves, n, f.Res.InvalidCount(), f.Res.unexpectedVetoNames()+f.Res.invalidNames())
 		if len(f.Res.HardBlocks) > 0 {
 			// Escape each slot PER ELEMENT before joining (Spec 116 R2).
 			hardBlocks := make([]string, len(f.Res.HardBlocks))
@@ -336,48 +335,17 @@ func PanelGateDecision(f GateFacts) Decision {
 			detail += fmt.Sprintf(", hard_block from %s", strings.Join(hardBlocks, ", "))
 		}
 		return Decision{Action: Block, Message: fmt.Sprintf(
-			"panel %s round %d: %s — HARD block / REJECT recorded — halt path, see /ms-panel-tally%s",
-			slug, round, detail, RawMergeFence(f.BeadID))}
+			"panel %s round %d: %s — %s recorded — halt path, see /ms-panel-tally%s",
+			slug, round, detail, f.Res.vetoSummary(), RawMergeFence(f.BeadID))}
 	}
 
-	// (9.5) Unresolved non-APPROVE — any latest-round verdict that is neither
-	// a canonical APPROVE nor a canonical REJECT (i.e. REQUEST_CHANGES, or an
-	// unrecognized/non-standard verdict string — both are "not an APPROVE")
-	// Blocks, exactly like a REJECT, regardless of the approve count (Spec
-	// 114 R1). This is LAYERED on top of the leg (10) threshold floor, not a
-	// replacement: leg (10) below still Blocks a sub-threshold panel even
-	// once every unresolved verdict is cleared. The message deliberately
-	// carries a substring-set superset of leg (10)'s message ("X/N APPROVE",
-	// "threshold is T/N", the consolidated-round name, the fence) so
-	// pre-existing sub-threshold fixtures whose panels carry RC/neutral
-	// filler keep their pinned substring assertions green even where they
-	// now route through this leg instead of leg (10). It never contains
-	// "refut" (no refutation escape is advertised here — Bead 1 has none
-	// yet; AC10) and never MINDSPEC_SKIP_PANEL (HC-7).
-	if unresolved := f.Res.UnresolvedVerdicts(); len(unresolved) > 0 {
-		// Escape each slot PER ELEMENT before joining (Spec 116 R2).
-		slots := make([]string, len(unresolved))
-		for i, v := range unresolved {
-			slots[i] = termsafe.Escape(v.Slot)
-		}
-		threshold := p.ApproveThreshold()
+	// (9.5) Every finding must be discharged; approval counts are descriptive.
+	if !f.Res.PassRule(true) {
 		return Decision{Action: Block, Message: fmt.Sprintf(
-			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE (threshold is %d/%d); every latest-round verdict must be APPROVE. Run /ms-bead-fix with %s, then re-panel (/ms-panel-run step 0)%s",
-			slug, round, strings.Join(slots, ", "), f.Res.Approves, n, threshold, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
+			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE. Run /ms-bead-fix with %s, then re-panel%s",
+			slug, round, f.Res.UnresolvedNames(), f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
-
-	// (10) Threshold — N−1 (Req 12, single home in panel.ApproveThreshold).
-	// Spec 114 R2: this is the ONLY leg that returns AppliedRefutations — a
-	// refutation only ever changes the outcome by clearing leg 9.5's block,
-	// so this Allow is the sole point where "what got applied" is
-	// outcome-relevant.
-	threshold := p.ApproveThreshold()
-	if f.Res.Approves >= threshold && threshold > 0 {
-		return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations()}
-	}
-	return Decision{Action: Block, Message: fmt.Sprintf(
-		"panel %s round %d: %d/%d APPROVE — threshold is %d/%d. Run /ms-bead-fix with %s, then re-panel%s",
-		slug, round, f.Res.Approves, n, threshold, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
+	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations()}
 }
 
 // presentVerdictFiles renders the present-verdict-file list for the

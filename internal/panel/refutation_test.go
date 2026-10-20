@@ -121,10 +121,8 @@ func TestPanelGateDecision_Refutations(t *testing.T) {
 		}
 	})
 
-	// (iv) AC7: 6A+2RC BOTH refuted, but expected=8/threshold=7 (default
-	// N-1) → Block via leg (10) naming the THRESHOLD tally, not the
-	// unresolved-slot message — a refutation cannot buy past the floor.
-	t.Run("AC7_BothRCsRefutedButSubThreshold_BlocksOnFloorNotUnresolved", func(t *testing.T) {
+	// All findings discharged passes regardless of the legacy approval floor.
+	t.Run("BothRCsRefuted_SubThresholdPasses", func(t *testing.T) {
 		p := &Panel{BeadID: ptr("mindspec-bd01"), Round: 1, ExpectedReviewers: 8, ReviewedHeadSHA: sha}
 		p.Refutations = []Refutation{
 			{Slot: "revA", Round: 1, Reason: "dismissed A"},
@@ -136,21 +134,11 @@ func TestPanelGateDecision_Refutations(t *testing.T) {
 			Verdict{File: "revB-round-1.json", Slot: "revB", Round: 1, Verdict: VerdictRequestChanges})
 		facts := GateFacts{BeadID: "mindspec-bd01", Reg: regn("/wt/review/slug"), Res: r, HeadSHA: sha}
 
-		if th := p.ApproveThreshold(); th != 7 {
-			t.Fatalf("precondition: threshold = %d, want 7 (N-1 of 8)", th)
-		}
 		got := PanelGateDecision(facts)
-		if got.Action != Block {
-			t.Fatalf("action = %v, want Block (sub-threshold floor): %+v", got.Action, got)
+		if got.Action != Allow || len(got.AppliedRefutations) != 2 {
+			t.Fatalf("discharged panel must pass: %+v", got)
 		}
-		for _, want := range []string{"6/8 APPROVE", "threshold is 7/8"} {
-			if !strings.Contains(got.Message, want) {
-				t.Errorf("message missing %q: %s", want, got.Message)
-			}
-		}
-		if strings.Contains(got.Message, "unresolved REQUEST_CHANGES") {
-			t.Errorf("message must be the THRESHOLD block, not the unresolved-slot message: %s", got.Message)
-		}
+
 		// Approves is the genuine tally: never incremented by a refutation
 		// (AC9's per-row assertion).
 		if r.Approves != 6 {
