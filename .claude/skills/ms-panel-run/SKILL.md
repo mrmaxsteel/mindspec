@@ -3,7 +3,9 @@ name: ms-panel-run
 description: Set up a mindspec review panel (step 0 — dir + BRIEF + panel.json) then launch one reviewer per configured slot (shipped defaults: bead 4, spec/plan/final/adhoc 6; alternating Claude Agents and Codex CLI sessions) in parallel and wait for verdicts
 ---
 
-# Run a 6-Reviewer Panel
+# Run a Review Panel
+
+The gate sets the panel size. An explicit reviewer list in `.mindspec/config.yaml` overrides the gate default.
 
 Step 0 creates the panel directory, the BRIEF.md the reviewers read, and the `panel.json` state file the in-binary `mindspec complete` gate and `mindspec instruct --panel-state` consume. Then fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex) in parallel. Each writes a JSON verdict to disk. Wait for all six, then hand off to `/ms-panel-tally`.
 

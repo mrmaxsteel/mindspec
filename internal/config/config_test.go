@@ -1646,6 +1646,24 @@ func TestPanelGateDefaults_ExplicitGlobalWins(t *testing.T) {
 }
 
 func TestPanelGateDefaults_NoGateAndGateThreshold(t *testing.T) {
+	for _, threshold := range []string{"7", "0"} {
+		t.Run("global threshold without reviewers "+threshold, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			content := fmt.Sprintf("panel:\n  approve_threshold: %q\n", threshold)
+			if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ResetCache()
+			defer ResetCache()
+			if _, err := Load(root); err != nil {
+				t.Fatalf("approve_threshold %q without an explicit reviewer list must load: %v", threshold, err)
+			}
+		})
+	}
+
 	for name, content := range map[string]string{
 		"global threshold only": "panel:\n  approve_threshold: 3\n",
 		"gate threshold only":   "panel:\n  gates:\n    bead:\n      approve_threshold: 5\n",

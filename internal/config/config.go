@@ -986,8 +986,8 @@ func expandSlots(reviewers []Reviewer) []ReviewerSlot {
 //   - recordedGate is empty and isBead: the "bead" gate's PanelGateExpectedReviewers, true.
 //   - a legacy non-bead panel with no recorded gate and no gate overrides
 //     compares against the adhoc default, preserving its historical advisory.
-//   - anything else (a non-bead panel with no recorded gate, or a recorded
-//     value outside the enum): (0, false) — skip the note.
+//   - a non-bead panel with no recorded gate and configured gate overrides,
+//     or a non-empty recorded value outside the enum: (0, false) — skip the note.
 func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool) {
 	if isValidGateKey(recordedGate) {
 		n, err := c.PanelGateExpectedReviewers(recordedGate)

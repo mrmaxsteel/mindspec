@@ -23,7 +23,7 @@ Each reviewer writes a verdict JSON: `reviewer_id`, a verdict (`APPROVE` / `REQU
 
 ## Six lenses, two model families
 
-A default panel is **six reviewers across two model families** — by default three Claude agents and three Codex CLI sessions, launched in parallel. Cross-family review is deliberate: each model family has systematic blind spots, and a family split on a verdict (one family approves, the other doesn't) is itself reported as a signal.
+The gate sets the default panel size: **6 reviewers for spec, plan, final, and adhoc reviews; 4 for bead reviews**. Slots alternate between Claude and Codex in round-robin order. Reviewers run in parallel. To override these defaults, set `panel.reviewers` in `.mindspec/config.yaml`, or set `panel.gates.<gate>.reviewers` for one gate. Cross-family review is deliberate: each model family has systematic blind spots, and a family split on a verdict (one family approves, the other doesn't) is itself reported as a signal.
 
 Six reviewers would be pointless as six clones, so each slot carries a distinct lens:
 

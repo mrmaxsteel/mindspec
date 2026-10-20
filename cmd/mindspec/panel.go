@@ -183,12 +183,10 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			beadPtr = &beadID
 		}
 
-		// Spec 113 R3: when --gate is set, resolve the creation-time
-		// defaults through 112 R3's gate-scoped resolvers instead of the
-		// global ones; when omitted, EXACTLY today's global-resolver
-		// calls with Gate: "" — preserving the 112-R9
-		// byte-identical-when-absent contract. The resolver errors are
-		// unreachable post-validation (gate is already confirmed a
+		// When --gate is set, resolve the creation-time defaults through
+		// that gate's resolvers. With no --gate, the size resolves through
+		// the adhoc gate and the recorded Gate stays empty. Resolver errors
+		// are unreachable post-validation (gate is already confirmed a
 		// member of PanelGateKeys above) but returned defensively rather
 		// than ignored.
 		expectedReviewers := cfg.PanelExpectedReviewers()

@@ -33,6 +33,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestReviewDiscipline_Spec130NoUnchangedPanelValuesClaim(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		".claude/skills/ms-panel-run/SKILL.md",
+		"plugins/mindspec/skills/ms-panel-run/SKILL.md",
+	} {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(root, path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stale := range []string{"`DefaultConfig` panel VALUES are unchanged", "VALUES ship unchanged"} {
+				if strings.Contains(string(data), stale) {
+					t.Errorf("%s contains stale panel-size claim %q", path, stale)
+				}
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AC-4 / AC-5 / AC-8 / AC-9 / AC-13(partial) — the simple fragment table.
 // ---------------------------------------------------------------------------

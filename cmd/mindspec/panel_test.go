@@ -1970,6 +1970,42 @@ func TestPanelCreate_GateInvalidRejectedBeforeWrite(t *testing.T) {
 	}
 }
 
+// TestPanelCreate_ZeroConfigNoGateUsesSixReviewers pins spec 130's
+// no-gate size at the CLI boundary without using the resolver as its oracle.
+func TestPanelCreate_ZeroConfigNoGateUsesSixReviewers(t *testing.T) {
+	resetPanelCreateFlags(t)
+	root := mkPanelTestRoot(t, "version: 1\n")
+	withTestChdir(t, root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	origRevParse := revParseForPanelFn
+	t.Cleanup(func() { revParseForPanelFn = origRevParse })
+	revParseForPanelFn = func(string, string) (string, error) {
+		return "1234deadbeef1234deadbeef1234deadbeef1234", nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"panel", "create", "zero-config", "--spec", "130-test", "--target", "bead/mindspec-x.1", "--bead", "mindspec-x.1"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("panel create (zero config, no --gate): %v\nstderr=%s", err, stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "review", "zero-config", panel.FileName))
+	if err != nil {
+		t.Fatalf("read panel.json: %v", err)
+	}
+	var got panel.Panel
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal panel.json: %v", err)
+	}
+	if got.ExpectedReviewers != 6 {
+		t.Errorf("expected_reviewers = %d, want 6 (zero config, no --gate)", got.ExpectedReviewers)
+	}
+}
+
 // TestPanelCreate_GateOmittedByteIdentical pins the 112-R9
 // byte-identical-when-absent contract at the CLI layer: `panel create`
 // without --gate writes a panel.json with no "gate" key, and its other
