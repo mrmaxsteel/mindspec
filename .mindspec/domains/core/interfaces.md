@@ -291,7 +291,7 @@ type ReviewerSlot struct {
 // internal/panel.Panel.ApproveThreshold (ADR-0037 §3).
 func (c *Config) PanelGateExpectedReviewers(gate string) (int, error)
 func (c *Config) PanelGateApproveThresholdExpr(gate string) (string, error)
-func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error)
+func (c *Config) PanelGateReviewerSlots(gate string, count ...int) ([]ReviewerSlot, error)
 
 // PanelGateAdvisoryDefault is the single-home selection rule (spec 112 R7)
 // both cmd/mindspec's `config show` and internal/complete's panel advisory
@@ -309,6 +309,11 @@ func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error)
 //     or a non-empty recorded value outside the enum: (0, false) — skip the note.
 func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool)
 ```
+
+An optional count argument to `PanelGateReviewerSlots` requires at least 2
+slots. It selects resolved reviewer entries round-robin in list order,
+ignores their configured counts, and preserves model and lens selection.
+With no count argument, the configured expansion is unchanged.
 
 **Deterministic slot expansion** (spec 112 R3): `PanelGateReviewerSlots` flattens a gate's resolved reviewer list into slots `"R1".."Rn"` in declaration order, expanding each entry's `CountValue()`. An entry's explicit `lens` applies to every slot it produces and does NOT advance the default-lens cursor. A lens-less slot takes `defaultLenses[cursor % 6]` from the interleaved ordering `author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration` (structural/sharp alternating); **one global cursor per expansion, starting at index 0**, advances only over lens-less slots. Normative worked example — a 9-reviewer, all-lens-less, 3-entries-of-`count: 3` panel expands to exactly: `R1` author-of-record, `R2` empirical-prober, `R3` codebase-pin, `R4` adversarial, `R5` contract-stability, `R6` integration, `R7` author-of-record, `R8` empirical-prober, `R9` codebase-pin.
 

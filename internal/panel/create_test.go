@@ -23,6 +23,8 @@ func TestCreate_WritesRegistrationAtomically(t *testing.T) {
 		Target:               "bead/mindspec-x.1",
 		Round:                1,
 		ExpectedReviewers:    6,
+		Roster:               createRoster(6),
+		SubjectDigest:        "sha256:fixture",
 		ApproveThresholdExpr: "n-1",
 		ReviewedHeadSHA:      "abc1234abc1234abc1234abc1234abc1234abc1",
 	}
@@ -42,7 +44,7 @@ func TestCreate_WritesRegistrationAtomically(t *testing.T) {
 		t.Fatalf("unmarshal panel.json: %v", err)
 	}
 	if got.ExpectedReviewers != in1.ExpectedReviewers ||
-		got.ApproveThresholdExpr != in1.ApproveThresholdExpr ||
+		got.ApproveThresholdExpr != "" ||
 		got.ReviewedHeadSHA != in1.ReviewedHeadSHA ||
 		got.Round != in1.Round ||
 		got.BeadID == nil || *got.BeadID != *in1.BeadID ||
@@ -128,6 +130,8 @@ func TestCreate_BRIEFMarkerEdgeCases(t *testing.T) {
 		Target:            "bead/mindspec-x.1",
 		Round:             1,
 		ExpectedReviewers: 6,
+		Roster:            createRoster(6),
+		SubjectDigest:     "sha256:fixture",
 		ReviewedHeadSHA:   "cafefeedcafefeedcafefeedcafefeedcafefeed",
 	}
 
@@ -150,7 +154,7 @@ func TestCreate_BRIEFMarkerEdgeCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := renderBriefHeader(filepath.Base(dir), in.Round, in.Target, in.ReviewedHeadSHA) + "\n\n" + original
+		want := renderCreateBriefHeader(filepath.Base(dir), load(dir).Panel, "none recorded") + "\n\n" + original
 		if string(got) != want {
 			t.Fatalf("legacy BRIEF.md not prepended byte-identically:\ngot:  %q\nwant: %q", got, want)
 		}
@@ -276,14 +280,8 @@ func TestCreate_BRIEFMarkerEdgeCases(t *testing.T) {
 	})
 }
 
-// TestCreate_RepanelOfAbandonedPanelRevivesIt pins the KNOWN, intentional
-// overwrite asymmetry (S2.2): Create writes panel.json as a full-struct
-// overwrite without reading the existing file first (unlike its
-// read-before-splice BRIEF.md handling), so a re-panel of a panel.json
-// whose abandoned/abandon_reason fields were hand-set by the
-// /ms-panel-tally Abandon procedure silently clears them and revives the
-// panel into an active round. This test exists so a future change to
-// that behavior is a conscious, test-visible decision.
+// TestCreate_RepanelOfAbandonedPanelRevivesIt verifies that create is also
+// the recovery for an abandoned snapshot on the next round.
 func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "reviews", "demo")
@@ -292,15 +290,16 @@ func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 		Target:            "bead/mindspec-x.1",
 		Round:             1,
 		ExpectedReviewers: 6,
+		Roster:            createRoster(6),
+		SubjectDigest:     "sha256:fixture",
 		ReviewedHeadSHA:   "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
 	}
 	if err := Create(dir, in); err != nil {
 		t.Fatalf("initial Create: %v", err)
 	}
 
-	// Simulate the SANCTIONED /ms-panel-tally Abandon procedure: a
-	// hand-edit of panel.json setting abandoned/abandon_reason. Create
-	// reads this registration before recreating the next round.
+	// Simulate a hand-edited abandoned snapshot. Create reads it before
+	// recreating the next round and preserves its abandonment as history.
 	panelPath := filepath.Join(dir, FileName)
 	raw, err := os.ReadFile(panelPath)
 	if err != nil {
@@ -336,27 +335,22 @@ func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after.Abandoned || after.AbandonReason != "" {
-		t.Fatalf("re-panel did not clear abandoned/abandon_reason — this test pins the KNOWN full-overwrite behavior (a re-panel deliberately revives an abandoned panel); got %+v", after)
+		t.Fatalf("re-panel did not clear abandoned/abandon_reason; got %+v", after)
 	}
 	if after.Round != 2 || after.ReviewedHeadSHA != in2.ReviewedHeadSHA {
 		t.Fatalf("re-panel did not co-bump round/SHA alongside the revival: got %+v", after)
 	}
 }
 
-// TestCreate_StampsGate pins spec 113 R3's writer-side completion of the
-// spec-112-R9 stable contract: Create(in) with a non-empty Gate stamps
-// panel.json's "gate" key with that exact value, and Create(in) with
-// Gate == "" (the default zero value, i.e. --gate omitted) produces
-// panel.json bytes with NO "gate" key at all — byte-identical to the
-// marshal a pre-spec-113 Create (which had no Gate field) would have
-// produced over the same other fields, because Panel.Gate carries
-// `json:"gate,omitempty"`.
+// TestCreate_StampsGate checks explicit gates and the omitted gate.
 func TestCreate_StampsGate(t *testing.T) {
 	base := CreateInput{
 		Spec:                 "113-panel-verb-workflow-followups",
 		Target:               "spec/113-x",
 		Round:                1,
 		ExpectedReviewers:    3,
+		Roster:               createRoster(3),
+		SubjectDigest:        "sha256:fixture",
 		ApproveThresholdExpr: "n-1",
 		ReviewedHeadSHA:      "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
 	}
@@ -384,38 +378,17 @@ func TestCreate_StampsGate(t *testing.T) {
 		}
 	})
 
-	t.Run("gate omitted is byte-identical to the pre-spec-113 field set", func(t *testing.T) {
+	t.Run("gate omitted retains empty gate", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "reviews", "demo")
-		in := base // Gate left at its zero value ""
-		if err := Create(dir, in); err != nil {
-			t.Fatalf("Create: %v", err)
+		if err := Create(dir, base); err != nil {
+			t.Fatal(err)
 		}
-		data, err := os.ReadFile(filepath.Join(dir, FileName))
-		if err != nil {
-			t.Fatalf("read panel.json: %v", err)
+		got := load(dir).Panel
+		if got.Gate != "" || got.Telemetry != "required" || len(got.Roster) != 3 || got.ApproveThresholdExpr != "" {
+			t.Fatalf("implicit adhoc registration: %+v", got)
 		}
-		if strings.Contains(string(data), `"gate"`) {
-			t.Fatalf("panel.json wrote a gate key for an omitted --gate:\n%s", data)
-		}
-
-		// Reconstruct the pre-spec-113 Panel value by hand (the same
-		// fields Create wrote before CreateInput.Gate existed) and assert
-		// its marshal is byte-for-byte identical to what Create just
-		// wrote — the R9 stable "byte-identical-when-absent" contract.
-		legacy := Panel{
-			Spec:                 in.Spec,
-			Target:               in.Target,
-			Round:                in.Round,
-			ExpectedReviewers:    in.ExpectedReviewers,
-			ReviewedHeadSHA:      in.ReviewedHeadSHA,
-			ApproveThresholdExpr: in.ApproveThresholdExpr,
-		}
-		want, err := json.MarshalIndent(legacy, "", "  ")
-		if err != nil {
-			t.Fatalf("marshal legacy Panel: %v", err)
-		}
-		if string(data) != string(want) {
-			t.Fatalf("panel.json not byte-identical to the pre-spec-113 field set:\ngot:  %s\nwant: %s", data, want)
+		if field, err := CheckHandEdits(dir, got); err != nil || field != "" {
+			t.Fatalf("registration not backed: %s %v", field, err)
 		}
 	})
 }
@@ -717,7 +690,7 @@ func TestRenderBriefHeader_GoldenUnchanged(t *testing.T) {
 		"Review the diff at the reviewed commit above and write your verdict as\n" +
 		"a single JSON file named `<your-slot>-round-1.json` beside this BRIEF\n" +
 		"(the panel artifact schema — see `.mindspec/domains/workflow/interfaces.md`\n" +
-		"§ Panel Artifact Schema). Required and optional top-level fields:\n\n" +
+		"Panel Artifact Schema). Required and optional top-level fields:\n\n" +
 		"- `verdict` (required): one of `APPROVE`, `REQUEST_CHANGES`, `REJECT`.\n" +
 		"- `hard_block` (optional boolean, a top-level sibling of `verdict` — never\n" +
 		"  a per-finding field): set `true` only for an evidence-bearing halt that\n" +

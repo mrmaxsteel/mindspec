@@ -64,47 +64,33 @@ var tallyWarnOut io.Writer = os.Stderr
 
 var panelCreateCmd = &cobra.Command{
 	SilenceUsage: true,
-	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N]",
+	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N]",
 	Short:        "Register (or re-panel) a review panel",
-	Long: `panel create writes <panel-dir>/panel.json and rewrites BRIEF.md's
-machine-managed header in one atomic operation (internal/panel.Create):
-expected_reviewers and approve_threshold are stamped from the configured
-panel defaults (config.PanelExpectedReviewers / PanelApproveThresholdExpr,
-spec 109), and reviewed_head_sha is captured from --target's live commit
-AT WRITE TIME, together with the subject_digest. A --round N re-panel
-co-bumps round + reviewed_head_sha + subject_digest in
-the SAME write, leaving prior verdict files and the skill-authored BRIEF
-body untouched.
+	Long: `panel create registers the target's live commit and subject digest, writes a
+reviewer roster and round event, and updates BRIEF.md's managed header.
+The roster lists R1..Rn with each reviewer's model and lens. Gate defaults
+are 6 reviewers for spec_approve, plan_approve, final_review and adhoc,
+and 4 for bead. --reviewers N overrides the size; N must be at least 2.
+A later round keeps the previous roster unless --reviewers is supplied.
 
-For --gate bead, --target must be bead/<id>; bead_id is derived from it
-and validated. An explicit --bead must match that id and is refused on
-other gates, including an omitted gate.
+For --gate bead, --target must be bead/<id>; bead_id is derived from it.
+An explicit --bead must match and is refused for other gates.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.
 These refusals write nothing.
-For existing bead panels, ` + "`mindspec complete`" + `'s gate compares a
-divergent recorded target to the live bead/<id> branch. On a SHA mismatch,
-a changed subject tree blocks; an equal subject stays fresh. A legacy
-panel without a digest blocks on a SHA mismatch.
 
-An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
-panel.json "gate" field, selects its subject roots, and resolves expected_reviewers/
-approve_threshold from that gate's creation-time defaults
-(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr).
---gate must be one of
-the five config.PanelGateKeys (spec_approve, plan_approve, bead,
-final_review, adhoc). Without --gate, expected_reviewers resolves through
-the adhoc gate. approve_threshold reads global panel.approve_threshold
-(default n-1). No "gate" key is written.
+A round bump preserves ledger-backed refutations, deferrals and rebinds,
+and names dropped entries. Legacy entries are preserved as a baseline.
+An abandoned panel is revived with history. The old BRIEF is archived as
+BRIEF-round-N.md without overwriting an existing archive. The new header
+includes the prior round's consolidation and keeps the authored body.
 
---gate adhoc is the one exception to the --spec requirement above (spec
-123 R8): an ad-hoc panel has no owning spec, so --spec must be OMITTED
-(supplying both is refused with a recovery line) and the panel is
-written to .mindspec/reviews/<slug>/ (flat layout) or review/<slug>/
-(legacy layout) instead of a spec-scoped directory. Every other --gate
-value still requires --spec. Ad-hoc panels are stored artifacts only:
-creatable and talliable (` + "`panel tally`" + `), but never scanned by
-` + "`mindspec complete`" + `'s gate (ADR-0037 scope).`,
+--gate selects spec_approve, plan_approve, bead, final_review or adhoc.
+Without --gate, the roster uses adhoc defaults and the gate stays omitted.
+--gate adhoc requires --spec to be omitted and writes under
+.mindspec/reviews/<slug>/ on flat layouts, otherwise review/<slug>/.
+Other invocations require --spec and use the spec's review directory
+on flat layouts, otherwise review/<slug>/.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -117,6 +103,11 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 		beadID, _ := cmd.Flags().GetString("bead")
 		round, _ := cmd.Flags().GetInt("round")
 		gate, _ := cmd.Flags().GetString("gate")
+		reviewers, _ := cmd.Flags().GetInt("reviewers")
+		override := cmd.Flags().Changed("reviewers")
+		if override && reviewers < 2 {
+			return fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+		}
 
 		// Control-byte discipline (spec-109-final-review G2): a --bead/
 		// --target value carrying a control byte must never reach
@@ -213,45 +204,49 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return fmt.Errorf("reading panel subject: %w", err)
 		}
 
-		// When --gate is set, resolve the creation-time defaults through
-		// that gate's resolvers. With no --gate, the size resolves through
-		// the adhoc gate and the recorded Gate stays empty. Resolver errors
-		// are unreachable post-validation (gate is already confirmed a
-		// member of PanelGateKeys above) but returned defensively rather
-		// than ignored.
-		expectedReviewers := cfg.PanelExpectedReviewers()
-		approveThresholdExpr := cfg.PanelApproveThresholdExpr()
-		if gate != "" {
-			expectedReviewers, err = cfg.PanelGateExpectedReviewers(gate)
-			if err != nil {
-				return err
-			}
-			approveThresholdExpr, err = cfg.PanelGateApproveThresholdExpr(gate)
-			if err != nil {
-				return err
-			}
+		rosterGate := gate
+		if rosterGate == "" {
+			rosterGate = "adhoc"
 		}
-
+		var sizes []int
+		if override {
+			sizes = []int{reviewers}
+		}
+		slots, err := cfg.PanelGateReviewerSlots(rosterGate, sizes...)
+		if err != nil {
+			return err
+		}
+		roster := make([]panel.RosterSlot, len(slots))
+		for i, slot := range slots {
+			roster[i] = panel.RosterSlot{Slot: slot.Slot, Model: slot.Model, Lens: slot.Lens}
+		}
 		in := panel.CreateInput{
-			BeadID:               beadPtr,
-			Spec:                 specID,
-			Target:               target,
-			Round:                round,
-			ExpectedReviewers:    expectedReviewers,
-			ApproveThresholdExpr: approveThresholdExpr,
-			ReviewedHeadSHA:      sha,
-			SubjectDigest:        digest,
-			Gate:                 gate,
+			BeadID: beadPtr, Spec: specID, Target: target, Round: round,
+			Roster: roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
+			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
+			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },
 		}
 		if err := panel.Create(dir, in); err != nil {
 			return panelCreateFailure(err, slug, in)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "panel %s registered: round %d, %d expected reviewer(s), reviewed_head_sha %s\n",
-			slug, round, in.ExpectedReviewers, sha)
+			slug, round, recordedPanelReviewerCount(dir), sha)
 		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\n", dir)
 		return nil
 	},
+}
+
+func recordedPanelReviewerCount(dir string) int {
+	data, err := os.ReadFile(filepath.Join(dir, panel.FileName))
+	if err != nil {
+		return 0
+	}
+	var p panel.Panel
+	if json.Unmarshal(data, &p) != nil {
+		return 0
+	}
+	return len(p.Roster)
 }
 
 var panelVerifyCmd = &cobra.Command{
@@ -364,7 +359,8 @@ func init() {
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
-	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); selects subject roots and stamps the gate and its creation-time defaults (omit for adhoc size and global threshold)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate (spec_approve|plan_approve|bead|final_review|adhoc); omit for adhoc reviewer defaults")
+	panelCreateCmd.Flags().Int("reviewers", 0, "Override roster size (at least 2); otherwise preserve the previous roster")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)

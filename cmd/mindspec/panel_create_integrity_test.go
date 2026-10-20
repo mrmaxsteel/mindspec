@@ -141,6 +141,10 @@ func TestPanelCreate_BeadIDDerivedFromTarget(t *testing.T) {
 	if len(regs) != 1 || regs[0].Panel.Target != "bead/probe-x.1" {
 		t.Fatalf("derived panel missing: %+v", regs)
 	}
+	if len(regs[0].Panel.Roster) != 4 || regs[0].Panel.ExpectedReviewers != 4 {
+		t.Fatalf("bead needs 4 slots: %+v", regs[0].Panel)
+	}
+
 }
 
 func TestPanelCreate_BeadTargetRefusals(t *testing.T) {

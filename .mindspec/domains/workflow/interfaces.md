@@ -302,52 +302,50 @@ class (a slug/flag value bearing a control byte can never forge an
 extra display line or a fake `recovery:` line).
 
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
-<id>] [--round N] [--gate <name>]`** stamps `expected_reviewers`/`approve_threshold`
-from the config resolvers (`config.PanelExpectedReviewers()` /
-`config.PanelApproveThresholdExpr()`, spec 109) and `reviewed_head_sha`
-from `--target`'s live commit (resolved via the executor at write
-time), in the SAME `panel.Create` write that co-bumps `panel.json` and
-the BRIEF machine-managed header (Bead 1) — leaving prior verdict files
-and the skill-authored BRIEF body untouched on a re-panel. The panel
-directory is resolved layout-aware, reusing
-`internal/complete.panelGateRoots`' own logic: the co-located
-`<spec-dir>/reviews/<slug>` on a flat tree, otherwise the repo-root
-`review/<slug>` convention. For `--gate bead`, `--target` must be `bead/<id>`;
-`bead_id` is derived from the target and validated with `idvalidate.BeadID`.
-An explicit `--bead` must match the target id and is refused for every
-other gate, including an omitted gate. These refusals write nothing.
-For existing bead panels with a divergent recorded target, the gate
-compares that target to the live `bead/<id>` branch. On a SHA mismatch,
-a changed subject tree blocks; an equal subject stays fresh. A legacy
-panel without a digest blocks on a SHA mismatch.
-On success, stdout carries two
-lines: `panel <slug> registered: round N, K expected reviewer(s),
-reviewed_head_sha <sha>` followed by `panel directory: <dir>` — the
-SAME resolved `dir` `panel.Create` wrote to. This second line is the
-stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
-reads to learn the panel directory without re-deriving the layout
-logic above.
+<id>] [--round N] [--gate <name>] [--reviewers N]`** resolves the target's
+live commit and subject digest and the gate's roster through
+`config.PanelGateReviewerSlots`. It appends a `round` ledger event before
+rewriting `panel.json`, then rewrites the BRIEF machine-managed header.
+Both snapshot and event contain `roster: [{slot, model, lens}]`,
+`expected_reviewers: len(roster)` and `telemetry: "required"`. New writes
+omit `approve_threshold`. The BRIEF lists each roster entry as `slot model lens`.
 
-**`--gate <name>`** (spec 112 R9's deferred writer, completed by spec
-113 R3) is optional and validated against the closed enum
-`config.PanelGateKeys` (`spec_approve`, `plan_approve`, `bead`,
-`final_review`, `adhoc` — the single declaration,
-`internal/config/config.go:101`; the CLI never keeps a second copy) —
-same control-byte discipline as `--bead`/`--target`, checked before the
-enum-membership check. A value outside the enum is rejected with a
-`guard.NewFailure` whose recovery line names all five keys, BEFORE any
-filesystem write. When given, `panel.json`'s `gate` field
-(`json:"gate,omitempty"`) is stamped with the value, and
-`expected_reviewers`/`approve_threshold` are resolved through spec 112
-R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
-`cfg.PanelGateApproveThresholdExpr(gate)`).
-When omitted, `expected_reviewers` uses `cfg.PanelExpectedReviewers()`,
-which resolves through the `adhoc` gate (spec 130 R2.1).
-`approve_threshold` uses `cfg.PanelApproveThresholdExpr()`, which reads
-global `panel.approve_threshold` and defaults to `n-1` when unset.
-The command writes no `gate` key. The field selects the subject roots
-for staleness and can change Allow/Block. `ApproveThreshold()` stays
-independent of it.
+Gate defaults are 6 slots for `spec_approve`, `plan_approve`, `final_review`
+and `adhoc`, and 4 for `bead`. An explicit reviewer list retains its configured
+size. `--reviewers N` requires N >= 2 and distributes slots round-robin over
+the resolved reviewer entries in list order, ignoring their configured counts;
+without an explicit list, the family order is `claude, codex`. Slots use ids
+`R1..Rn`. A re-panel copies the latest round event's roster unless
+`--reviewers` is supplied (legacy panels copy a recorded roster if present).
+Without `--gate`, create uses `adhoc` roster defaults, omits the snapshot
+`gate` key and writes an empty `gate` in the matching round event.
+
+The panel directory is `<spec-dir>/reviews/<slug>` on flat layouts,
+otherwise `review/<slug>`. Explicit `--gate adhoc` requires `--spec` to be
+omitted and uses `.mindspec/reviews/<slug>` on flat layouts. For `--gate bead`,
+`--target` must be `bead/<id>`; `bead_id` is derived and validated with
+`idvalidate.BeadID`. An explicit `--bead` must match and is refused on other
+gates. `--gate` accepts the closed enum `config.PanelGateKeys`, with control
+bytes refused before membership checks. Existing panel.json must parse, and
+verdict filenames forbid recreating their round or an older round. These
+refusals write nothing.
+
+Create preserves each refutation, deferral and rebind that matches its ledger
+event or the first round event's carried baseline, ignoring only `created_at`.
+It names each unbacked entry it drops. Legacy panels retain every entry and
+record them in the first round event's `carried` field. Revival clears
+abandonment and appends `{reason, abandoned_at, revived_at}` to
+`abandon_history`; legacy panels without an abandonment event have an empty
+`abandoned_at`. A round bump archives the old BRIEF as `BRIEF-round-N.md`
+without overwriting an existing archive. The managed `mindspec:prior-round`
+region renders the preceding round's `consolidated-round-N.md` through
+`termsafe.Escape`, or `none recorded`. Verdicts and the authored BRIEF body
+are preserved.
+
+On success, stdout carries `panel <slug> registered: round N, K expected
+reviewer(s), reviewed_head_sha <sha>` and `panel directory: <dir>`.
+Dropped-entry reports precede these lines. The reported K reflects the
+written roster, including a carried roster after a config change.
 
 **Reviewer-count advisory (spec 130 R2.1).** `config show` and
 `mindspec complete` compare recorded `expected_reviewers` against

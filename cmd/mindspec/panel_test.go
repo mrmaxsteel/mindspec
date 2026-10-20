@@ -114,7 +114,7 @@ func resetPanelCreateFlags(t *testing.T) {
 	t.Cleanup(func() { lsTreeForPanelFn = original })
 	t.Helper()
 	restore := func() {
-		for _, name := range []string{"spec", "target", "bead", "round", "gate"} {
+		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers"} {
 			if f := panelCreateCmd.Flags().Lookup(name); f != nil {
 				_ = f.Value.Set(f.DefValue)
 				f.Changed = false
@@ -216,8 +216,8 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 	if got.ExpectedReviewers != 3 {
 		t.Errorf("expected_reviewers = %d, want 3 (from the config resolver)", got.ExpectedReviewers)
 	}
-	if got.ApproveThresholdExpr != "2" {
-		t.Errorf("approve_threshold = %q, want the raw config expression %q", got.ApproveThresholdExpr, "2")
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if got.ReviewedHeadSHA != sha1 {
 		t.Errorf("reviewed_head_sha = %q, want %q", got.ReviewedHeadSHA, sha1)
@@ -1904,8 +1904,8 @@ func TestPanelCreate_GateStampsPerGateDefaults(t *testing.T) {
 	if got.ExpectedReviewers != wantReviewers {
 		t.Errorf("expected_reviewers = %d, want the final_review-gate-resolved %d", got.ExpectedReviewers, wantReviewers)
 	}
-	if got.ApproveThresholdExpr != wantThreshold {
-		t.Errorf("approve_threshold = %q, want the final_review-gate-resolved %q", got.ApproveThresholdExpr, wantThreshold)
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if !strings.Contains(string(data), `"gate": "final_review"`) {
 		t.Errorf("panel.json bytes missing the literal gate key:\n%s", data)
@@ -2047,15 +2047,15 @@ func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {
 			if err := json.Unmarshal(data, &got); err != nil {
 				t.Fatalf("unmarshal panel.json: %v", err)
 			}
-			if got.ApproveThresholdExpr != tc.want {
-				t.Errorf("approve_threshold = %q, want global %q; adhoc threshold is 3", got.ApproveThresholdExpr, tc.want)
+			if got.ApproveThresholdExpr != "" {
+				t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 			}
 		})
 	}
 }
 
 // TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold pins the
-// omitted gate's adhoc size resolution and global threshold. An explicit
+// omitted gate's adhoc size resolution and retired threshold. An explicit
 // global reviewer list overrides the built-in per-gate size defaults.
 func TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold(t *testing.T) {
 	resetPanelCreateFlags(t)
@@ -2098,8 +2098,8 @@ func TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold(t *testing.T) {
 	if got.ExpectedReviewers != cfg.PanelExpectedReviewers() {
 		t.Errorf("expected_reviewers = %d, want the adhoc size with explicit global reviewers %d", got.ExpectedReviewers, cfg.PanelExpectedReviewers())
 	}
-	if got.ApproveThresholdExpr != cfg.PanelApproveThresholdExpr() {
-		t.Errorf("approve_threshold = %q, want the global threshold %q", got.ApproveThresholdExpr, cfg.PanelApproveThresholdExpr())
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if got.Gate != "" {
 		t.Errorf("p.Gate = %q, want empty", got.Gate)
