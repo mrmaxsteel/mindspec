@@ -320,15 +320,25 @@ filesystem write. When given, `panel.json`'s decision-inert `gate` field
 (`json:"gate,omitempty"`) is stamped with the value, and
 `expected_reviewers`/`approve_threshold` are resolved through spec 112
 R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
-`cfg.PanelGateApproveThresholdExpr(gate)`) instead of the global ones.
-When omitted, behavior is byte-identical to pre-spec-113 output: the
-global resolvers are used and no `gate` key is written. The field stays
-decision-inert end to end — neither `PanelGateDecision` nor
-`ApproveThreshold()` reads it — but it IS what `config
-show`/`mindspec complete`'s `PanelGateAdvisoryDefault` selection keys on
-for the reviewer-count advisory note, so a CLI-created `final_review`
-panel now selects that gate's per-gate default instead of being
-advisory-skipped.
+`cfg.PanelGateApproveThresholdExpr(gate)`).
+When omitted, `expected_reviewers` uses `cfg.PanelExpectedReviewers()`,
+which resolves through the `adhoc` gate (spec 130 R2.1).
+`approve_threshold` uses `cfg.PanelApproveThresholdExpr()`, which reads
+global `panel.approve_threshold` and defaults to `n-1` when unset.
+The command writes no `gate` key. Neither `PanelGateDecision` nor
+`ApproveThreshold()` reads this field.
+
+**Reviewer-count advisory (spec 130 R2.1).** `config show` and
+`mindspec complete` compare recorded `expected_reviewers` against
+`cfg.PanelGateAdvisoryDefault(recordedGate, isBead)` when it returns
+`ok == true`. A known recorded gate selects that gate's resolved count.
+A bead panel with no recorded gate selects the `bead` count.
+A non-bead panel with no recorded gate and no configured gate overrides
+selects the `adhoc` count through `cfg.PanelExpectedReviewers()`.
+A non-bead panel with no recorded gate and configured gate overrides
+skips the note. An unknown non-empty recorded gate always skips the note.
+These rules apply when `gates:` is absent too. The advisory does not
+change the gate decision.
 
 **`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
 ALWAYS exits `0` — it is a report, never a gate. It prints verdicts

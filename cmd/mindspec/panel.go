@@ -77,11 +77,12 @@ stale-SHA Block, never a false-PASS.
 An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
 decision-inert panel.json "gate" field and resolves expected_reviewers/
 approve_threshold from that gate's creation-time defaults
-(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr) instead
-of the global panel.reviewers/approve_threshold. --gate must be one of
+(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr).
+--gate must be one of
 the five config.PanelGateKeys (spec_approve, plan_approve, bead,
-final_review, adhoc); omitting it is byte-identical to today: the global
-defaults are used and no "gate" key is written.
+final_review, adhoc). Without --gate, expected_reviewers resolves through
+the adhoc gate. approve_threshold reads global panel.approve_threshold
+(default n-1). No "gate" key is written.
 
 --gate adhoc is the one exception to the --spec requirement above (spec
 123 R8): an ad-hoc panel has no owning spec, so --spec must be OMITTED
@@ -183,12 +184,10 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			beadPtr = &beadID
 		}
 
-		// Spec 113 R3: when --gate is set, resolve the creation-time
-		// defaults through 112 R3's gate-scoped resolvers instead of the
-		// global ones; when omitted, EXACTLY today's global-resolver
-		// calls with Gate: "" — preserving the 112-R9
-		// byte-identical-when-absent contract. The resolver errors are
-		// unreachable post-validation (gate is already confirmed a
+		// When --gate is set, resolve the creation-time defaults through
+		// that gate's resolvers. With no --gate, the size resolves through
+		// the adhoc gate and the recorded Gate stays empty. Resolver errors
+		// are unreachable post-validation (gate is already confirmed a
 		// member of PanelGateKeys above) but returned defensively rather
 		// than ignored.
 		expectedReviewers := cfg.PanelExpectedReviewers()
@@ -327,7 +326,7 @@ func init() {
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
-	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for global defaults)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for adhoc size and global threshold)")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)

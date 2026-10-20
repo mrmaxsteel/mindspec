@@ -48,12 +48,9 @@ func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
 		t.Fatalf("renderConfig: %v", err)
 	}
 
-	// panel reviewers (3+3 default mix) and the raw threshold expression.
-	if !strings.Contains(out, "family: claude") || !strings.Contains(out, "count: 3") {
-		t.Errorf("expected the claude reviewer entry, got:\n%s", out)
-	}
-	if !strings.Contains(out, "family: codex") {
-		t.Errorf("expected the codex reviewer entry, got:\n%s", out)
+	// No implicit global list: gate resolution supplies the default sizes.
+	if !strings.Contains(out, "  reviewers:\n  approve_threshold:") || strings.Contains(out, "family: claude") || strings.Contains(out, "family: codex") {
+		t.Errorf("expected no global reviewer entries, got:\n%s", out)
 	}
 	if !strings.Contains(out, "approve_threshold: n-1") {
 		t.Errorf("expected the raw approve_threshold expression, got:\n%s", out)
@@ -108,7 +105,7 @@ func TestConfigShow_ReviewerCountNoteWhenPanelDiffers(t *testing.T) {
 	}
 	out := stdout.String() + stderr.String()
 
-	// Default config is 3+3=6 expected reviewers; the panel recorded 4.
+	// The legacy no-gate default is adhoc (6); the panel recorded 4.
 	if !strings.Contains(out, "recorded 4") || !strings.Contains(out, "config default is 6") {
 		t.Errorf("expected a reviewer-count note (recorded 4 vs default 6), got:\n%s", out)
 	}
@@ -297,8 +294,8 @@ func TestConfigShow_GatesSubstitutesAndModelAdvisory(t *testing.T) {
 	}
 
 	// Resolved sums + raw threshold expressions.
-	if !strings.Contains(out1, "expected_reviewers: 6") {
-		t.Errorf("expected bead's inherited resolved sum (6), got:\n%s", out1)
+	if !strings.Contains(out1, "expected_reviewers: 4") {
+		t.Errorf("expected bead's per-gate default sum (4), got:\n%s", out1)
 	}
 	if !strings.Contains(out1, "approve_threshold: 5") {
 		t.Errorf("expected bead's own raw threshold expression (5), got:\n%s", out1)

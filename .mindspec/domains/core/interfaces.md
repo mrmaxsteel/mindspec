@@ -161,7 +161,7 @@ func (c *Config) CommandLines() []string              // "<command>   # <task>" 
 func (c *Config) RenderBuildTestSection(level int) string // "" when Commands unset — section omitted, never a placeholder
 
 type Panel struct {
-    Reviewers        []Reviewer   `yaml:"reviewers"`         // ALL-GATES default; default [{claude,3},{codex,3}]
+    Reviewers        []Reviewer   `yaml:"reviewers"`         // explicit ALL-GATES list; default empty (per-gate sizes)
     ApproveThreshold string       `yaml:"approve_threshold"` // RAW "n-1" or integer string; default "n-1"; never resolved here
     Substitution     Substitution `yaml:"substitution"`
     // Gates is the optional per-gate override map (spec 112 R1), keyed by
@@ -169,7 +169,7 @@ type Panel struct {
     // EQUIVALENT everywhere — every "gates is configured" predicate keys
     // off len(Gates) > 0, never key presence. Default: empty (the standing
     // per-gate protocol below is the documented EXAMPLE, never the
-    // default — DefaultConfig's panel stays 109's 3+3/"n-1").
+    // default — sizes resolve per gate, with no global reviewer list).
     Gates map[string]GatePanel `yaml:"gates"`
     // Note is optional free-text advisory metadata (spec 112 R1): parsed
     // and echoed verbatim by `config show`; never read by any validation
@@ -259,7 +259,7 @@ type LoopContext struct {
     ControllerHandoff string `yaml:"controller_handoff"` // per-spec | at-usage-threshold; default per-spec
 }
 
-// PanelExpectedReviewers is the sum of panel.reviewers[].count (default 6).
+// PanelExpectedReviewers uses adhoc resolution for create without --gate (default 6).
 // PanelApproveThresholdExpr is the RAW panel.approve_threshold expression —
 // it does NOT resolve to an int; resolution is single-homed in
 // internal/panel.Panel.ApproveThreshold (workflow domain). These are the
@@ -282,8 +282,10 @@ type ReviewerSlot struct {
 // outside PanelGateKeys (fail loud on a caller typo, never silently fall
 // back to defaults). Resolution walks a PER-FIELD chain — reviewers and
 // approve_threshold resolve independently: the gate's own configured value
-// -> (for "adhoc" only) "bead"'s resolved value -> the global
-// reviewers/approve_threshold -> the built-in 3+3/"n-1" default.
+// -> (for "adhoc" only) an explicit "bead" list -> the explicit global
+// reviewers -> per-gate default sizes 6/6/4/6 for spec/plan/bead/final;
+// adhoc defaults to 6. Default families alternate claude, codex.
+// Thresholds independently inherit adhoc -> bead -> global -> "n-1".
 // PanelGateApproveThresholdExpr returns the RAW expression, NEVER a
 // resolved integer — resolution to an int stays single-homed in
 // internal/panel.Panel.ApproveThreshold (ADR-0037 §3).
@@ -296,26 +298,29 @@ func (c *Config) PanelGateReviewerSlots(gate string) ([]ReviewerSlot, error)
 // resolve through, so the two callers cannot drift. recordedGate is a
 // panel.json Panel.Gate value (possibly empty or outside PanelGateKeys);
 // isBead is Panel.IsBead(). Returns (0, false) when the advisory must be
-// SKIPPED. Selection: len(Gates) == 0 -> (PanelExpectedReviewers(), true)
-// always; a known recordedGate -> that gate's PanelGateExpectedReviewers;
-// an empty recordedGate with isBead -> the "bead" gate's; anything else
-// (non-bead with no recorded gate, or an unknown recorded value) ->
-// (0, false). Never calls a gate-scoped resolver with a value outside
+// SKIPPED. Never calls a gate-scoped resolver with a value outside
 // PanelGateKeys, so no resolver error can surface through this helper.
+//
+//   - recordedGate is a known gate key: that gate's PanelGateExpectedReviewers, true.
+//   - recordedGate is empty and isBead: the "bead" gate's PanelGateExpectedReviewers, true.
+//   - a legacy non-bead panel with no recorded gate and no gate overrides
+//     compares against the adhoc default, preserving its historical advisory.
+//   - a non-bead panel with no recorded gate and configured gate overrides,
+//     or a non-empty recorded value outside the enum: (0, false) — skip the note.
 func (c *Config) PanelGateAdvisoryDefault(recordedGate string, isBead bool) (int, bool)
 ```
 
 **Deterministic slot expansion** (spec 112 R3): `PanelGateReviewerSlots` flattens a gate's resolved reviewer list into slots `"R1".."Rn"` in declaration order, expanding each entry's `CountValue()`. An entry's explicit `lens` applies to every slot it produces and does NOT advance the default-lens cursor. A lens-less slot takes `defaultLenses[cursor % 6]` from the interleaved ordering `author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration` (structural/sharp alternating); **one global cursor per expansion, starting at index 0**, advances only over lens-less slots. Normative worked example — a 9-reviewer, all-lens-less, 3-entries-of-`count: 3` panel expands to exactly: `R1` author-of-record, `R2` empirical-prober, `R3` codebase-pin, `R4` adversarial, `R5` contract-stability, `R6` integration, `R7` author-of-record, `R8` empirical-prober, `R9` codebase-pin.
 
-`Load` refuses (guard-style error with a `recovery: <command>` line, ADR-0035), and never panics, on: a `panel_skip` key anywhere under `loop.gate_authority` (panel-skip is permanently human, `MINDSPEC_SKIP_PANEL` is env-only, ADR-0037 §7); a `loop.halt.on_reject` other than `halt`; a `gate_authority` value outside `{panel, human}`; a `controller_handoff` outside `{per-spec, at-usage-threshold}`; an unknown `runner`; a `panel.approve_threshold` that is neither `"n-1"` nor an integer in `[1, sum(reviewers.count)]`; a `reviewers[].count < 1`; or a `sum(reviewers.count) < 2` (both close the threshold-skip loophole from the reviewer side, since a single-reviewer panel makes the default `"n-1"` resolve to an always-pass `0`). An absent/empty `panel:`/`models:`/`loop:`/`runner:` block round-trips to its documented default.
+`Load` refuses (guard-style error with a `recovery: <command>` line, ADR-0035), and never panics, on: a `panel_skip` key anywhere under `loop.gate_authority` (panel-skip is permanently human, `MINDSPEC_SKIP_PANEL` is env-only, ADR-0037 §7); a `loop.halt.on_reject` other than `halt`; a `gate_authority` value outside `{panel, human}`; a `controller_handoff` outside `{per-spec, at-usage-threshold}`; an unknown `runner`; an explicit global `panel.reviewers` list with `panel.approve_threshold` neither `"n-1"` nor an integer in `[1, sum(reviewers.count)]`; a `reviewers[].count < 1`; or an explicit reviewer list with `sum(reviewers.count) < 2` (a one-reviewer panel cannot pass). Without a global list, the global threshold is not range-checked. An absent/empty `panel:`/`models:`/`loop:`/`runner:` block round-trips to its documented default.
 
-**Per-gate refusals (spec 112 R4)**, same guard-style/never-panic contract: a `panel.gates` key outside `PanelGateKeys` (the recovery line enumerates all five valid keys and disambiguates from `loop.gate_authority`'s different vocabulary); a configured gate entry setting neither `reviewers` nor `approve_threshold`; a reviewer entry (global or per-gate) with neither `model` nor `family`; an explicit non-positive `count` (`Count != nil && *Count < 1`; an ABSENT count is fine, defaulting to 1); a per-gate `reviewers` list whose expanded sum is `< 2`; a per-gate or INHERITED `approve_threshold` that is neither `"n-1"` nor an integer in `[1, that gate's resolved reviewer sum]` — checked at every link of the `adhoc` -> `bead` -> global inheritance chain, so a global integer valid for the global sum but out of range for a smaller inheriting gate is refused, and likewise a `bead` integer threshold inherited through `adhoc` by a smaller reviewers-only `adhoc` gate; and a `substitutes` entry with an empty key or value, or key == value. **No model or lens name-membership check exists on any `Load` path** — an unknown model id alone never errors; the curated `KnownModels()` list drives only a `config show` warning (a later bead).
+**Per-gate refusals (spec 112 R4)**, same guard-style/never-panic contract: a `panel.gates` key outside `PanelGateKeys` (the recovery line enumerates all five valid keys and disambiguates from `loop.gate_authority`'s different vocabulary); a configured gate entry setting neither `reviewers` nor `approve_threshold`; a reviewer entry (global or per-gate) with neither `model` nor `family`; an explicit non-positive `count` (`Count != nil && *Count < 1`; an ABSENT count is fine, defaulting to 1); a per-gate `reviewers` list whose expanded sum is `< 2`; and a `substitutes` entry with an empty key or value, or key == value. Legacy per-gate `approve_threshold` values are not range-checked against reviewer counts (spec 130 R2.1). **No model or lens name-membership check exists on any `Load` path** — an unknown model id alone never errors; the curated `KnownModels()` list drives only a `config show` warning (a later bead).
 
 Used by workflow: `internal/panel` stays a config-free leaf and never imports this package — its callers resolve `PanelExpectedReviewers()`/`PanelApproveThresholdExpr()`/the gate-scoped resolvers here and pass plain values in. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render those resolved values alongside `panel.ReviewerCountNote`.
 
 ### Per-gate panel config example (spec 112)
 
-The operator's standing review protocol (rev 2026-07-07) is the DOCUMENTED EXAMPLE for `panel.gates` — never the shipped default (`DefaultConfig` stays 109's 3+3/`"n-1"` with `gates`/`substitutes` empty). An operator commits this shape to their own `.mindspec/config.yaml` to enable it:
+The operator's standing review protocol (rev 2026-07-07) is the DOCUMENTED EXAMPLE for `panel.gates` — never the shipped default (`DefaultConfig` has no global reviewer list and resolves 6/6/4/6 per gate, adhoc 6, with `gates`/`substitutes` empty). An operator commits this shape to their own `.mindspec/config.yaml` to enable it:
 
 ```yaml
 panel:
