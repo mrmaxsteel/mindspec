@@ -7,11 +7,13 @@ package panel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -235,12 +237,8 @@ func CanonicalizeDispositionRowID(record []byte) []byte {
 	return out
 }
 
-// WriteTerminalManifest is a thin wrapper over AppendRecord (R6(a)):
-// EVERY terminal panel calls this exactly once, including a
-// finding-less all-APPROVE panel (zero disposition rows written, one
-// manifest line still written). manifest.Record is forced to
-// RecordPanelManifest so a caller can never accidentally submit a
-// mistagged record through this entry point.
+// WriteTerminalManifest retains the legacy spec-directory adapter. New tally
+// callers use WriteCoverageManifest, which appends only changed derivations.
 func WriteTerminalManifest(specDir, panelName string, manifest CoverageManifest) error {
 	manifest.Record = RecordPanelManifest
 	data, err := json.Marshal(manifest)
@@ -287,7 +285,12 @@ func isTerminalRC(verdict string) bool {
 // first uncovered slot token on violation, or nil if the floor holds
 // (including the vacuous case of a manifest with zero RC/REJECT slots).
 func CheckCompleteness(specDir, panelName string) error {
-	path := dispositionsPath(specDir, panelName)
+	return CheckCompletenessAt(panelStoreDir(specDir, panelName), panelName)
+}
+
+// CheckCompletenessAt checks a panel in any supported directory layout.
+func CheckCompletenessAt(dir, panelName string) error {
+	path := filepath.Join(dir, dispositionsFileName)
 	lines, err := readDispositionLines(path)
 	if err != nil {
 		return err
@@ -339,8 +342,130 @@ func CheckCompleteness(specDir, panelName string) error {
 
 	for _, slot := range manifest.Slots {
 		if isTerminalRC(slot.Verdict) && !covered[slot.Slot] {
-			return fmt.Errorf("panel %s: completeness floor violated — slot %s (terminal verdict %s) has no covering disposition row (reviewer or convergent_with)", termsafe.Escape(panelName), termsafe.Escape(slot.Slot), termsafe.Escape(slot.Verdict))
+			return &UncoveredSlotError{Panel: panelName, Slot: slot.Slot, Verdict: slot.Verdict}
 		}
 	}
 	return nil
+}
+
+// DeriveCoverageManifest derives coverage from roster slots and latest verdicts.
+// Roster order and roster model identity are authoritative; unexpected files
+// never contribute slots. Legacy registrations do not require coverage.
+func DeriveCoverageManifest(res *Result) CoverageManifest {
+	p := res.Panel
+	m := CoverageManifest{Record: RecordPanelManifest, Spec: p.Spec, Gate: p.Gate,
+		Panel: filepath.Base(res.Dir), Round: res.LatestRound, Slots: []ManifestSlot{}}
+	if m.Spec == "" {
+		m.Spec = "adhoc"
+	}
+	if m.Gate == "" {
+		m.Gate = "adhoc"
+	}
+	bySlot := make(map[string]Verdict)
+	for _, v := range res.Verdicts {
+		bySlot[v.Slot] = v
+	}
+	for _, slot := range p.Roster {
+		if v, ok := bySlot[slot.Slot]; ok {
+			m.Slots = append(m.Slots, ManifestSlot{Slot: slot.Slot, Model: slot.Model, Verdict: v.Verdict})
+		}
+	}
+	return m
+}
+
+// WriteCoverageManifest is tally's append-only manifest writer. Freshness is
+// deliberately absent: coverage can be recorded while a non-bead target is stale.
+func WriteCoverageManifest(res *Result) error {
+	if res == nil || res.Panel == nil || res.Panel.Abandoned || !res.PassRule(true) {
+		return nil
+	}
+	legacy, err := LegacyPanel(res.Dir)
+	if err != nil {
+		return err
+	}
+	if legacy {
+		return nil
+	}
+
+	derived := DeriveCoverageManifest(res)
+	stamped := derived
+	stamped.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	data, err := json.Marshal(stamped)
+	if err != nil {
+		return err
+	}
+	unchanged := errors.New("coverage unchanged")
+	err = AppendRecordsWithCheck(res.Dir, func() error {
+		_, manifests, err := loadDispositionFile(filepath.Join(res.Dir, dispositionsFileName))
+		if err != nil {
+			return err
+		}
+		for i := len(manifests) - 1; i >= 0; i-- {
+			if manifests[i].Round != derived.Round {
+				continue
+			}
+			previous := manifests[i]
+			previous.CreatedAt = ""
+			if reflect.DeepEqual(previous, derived) {
+				return unchanged
+			}
+			break
+		}
+		return nil
+	}, data)
+	if errors.Is(err, unchanged) {
+		return nil
+	}
+	return err
+
+}
+
+// CheckCore3 checks required coverage, without a gate decision or git reads.
+// Callers decide which registrations to skip before invoking it.
+func CheckCore3(reg Registration) error {
+	res, err := Tally(reg.Dir)
+	if err != nil {
+		return err
+	}
+	if res.PanelErr != nil {
+		return res.PanelErr
+	}
+	if res.Panel == nil {
+		return fmt.Errorf("panel registration missing")
+	}
+	_, manifests, err := loadDispositionFile(filepath.Join(reg.Dir, dispositionsFileName))
+	if err != nil {
+		return err
+	}
+	if len(manifests) == 0 {
+		return fmt.Errorf("no coverage manifest recorded")
+	}
+	last := manifests[len(manifests)-1]
+	derived := DeriveCoverageManifest(res)
+	if last.Round != res.LatestRound || last.Round != res.Panel.Round {
+		return fmt.Errorf("coverage manifest round %d differs from current round %d", last.Round, res.Panel.Round)
+	}
+	if !res.Complete() || res.RoundMismatch {
+		return fmt.Errorf("coverage verdict files are incomplete or from another round")
+	}
+	if last.Spec != derived.Spec || last.Panel != derived.Panel || last.Gate != derived.Gate || !reflect.DeepEqual(last.Slots, derived.Slots) {
+		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)", coverageSlotNames(derived))
+	}
+	return CheckCompletenessAt(reg.Dir, reg.Slug())
+}
+
+func coverageSlotNames(m CoverageManifest) string {
+	slots := make([]string, 0, len(m.Slots))
+	for _, s := range m.Slots {
+		slots = append(slots, termsafe.Escape(s.Slot))
+	}
+	return strings.Join(slots, ", ")
+}
+
+// UncoveredSlotError names the slot whose durable disposition coverage is absent.
+// Lifecycle callers use its slot to construct a concrete discharge recovery.
+type UncoveredSlotError struct{ Panel, Slot, Verdict string }
+
+func (e *UncoveredSlotError) Error() string {
+	return fmt.Sprintf("panel %s: completeness floor violated — slot %s (terminal verdict %s) has no covering disposition row (reviewer or convergent_with)", termsafe.Escape(e.Panel), termsafe.Escape(e.Slot), termsafe.Escape(e.Verdict))
 }

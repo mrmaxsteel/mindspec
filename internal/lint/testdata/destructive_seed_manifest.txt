@@ -230,6 +230,9 @@ internal/next/guard.go	DirtyTreeFailure	arg1:unprovable
 internal/next/guard.go	WorktreeSetupFailure	arg1:unprovable
 internal/next/ready_gate.go	GateReadiness	variadic-spread:recovery
 
+cmd/mindspec/panel.go	panelCoverageWriteFailure	arg1:unprovable
+internal/complete/panel_core3.go	PanelCore3Failure	arg1:unprovable
+
 [known_sites_exemption_list]
 # BEAD 7 EXIT (fixture (β)'s documented discipline): the four
 # .claude/agents/spec-orchestrator.md lines this section used to carry

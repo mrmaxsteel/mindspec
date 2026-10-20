@@ -831,6 +831,12 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "`guard.NewFailure(..., fmt.Sprintf(\"re-run with %s to finish it: %s\", ResolveMergeFlag, reentryHint))` — ResolveMergeFlag is a package const (provable), but reentryHint is the same plain string parameter as stillConflictedRefusal's entry above.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers (same obligation as stillConflictedRefusal's entry above — both receive reentryHint from the identical three real callers).",
 	},
+	{File: "cmd/mindspec/panel.go", Func: "panelCoverageWriteFailure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery combines a mindspec panel tally template with shellQuoteTarget and panelCreateScope. These helpers quote the slug/spec and omit spec scope for adhoc; the fold cannot resolve their values.",
+		Obligation: "cmd/mindspec TestTally_Core3RecoveryOperands checks the emitted recovery from the actual failure helper with metacharacters in the slug against the destructive floor."},
+	{File: "internal/complete/panel_core3.go", Func: "PanelCore3Failure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery local selects mindspec panel tally or mindspec panel refute, with shell-quoted terminal-escaped slug/spec operands. The fold cannot resolve the local builder.",
+		Obligation: "internal/complete TestComplete_Core3RecoveryOperands checks both emitted recovery branches with hostile slug/spec operands against the destructive floor and the final recovery-line contract."},
 }
 
 // mindspecVerbTemplateObligation is the shared Obligation text for

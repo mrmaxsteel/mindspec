@@ -313,6 +313,8 @@ Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a
 partial or alternate shape.
 
+Coverage manifests are written only by binary `tally`, from roster slots only and latest-round verdict files, when every pass-rule row except freshness holds. A stale non-bead panel can therefore record coverage. The append key is `spec, panel, round, created_at`; tally appends unless the last manifest of that round equals the derivation. Earlier manifests remain after abandonment. Every manifest reader, including `ComputeQ4`, uses only the last manifest per spec/panel. Core 3 validates all ledger records, requires the current round's manifest to equal the roster/verdict derivation, and requires covering disposition rows for REQUEST_CHANGES and REJECT slots.
+
 ### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
 
 `mindspec panel create | verify | tally <slug>` is the CLI half of the
@@ -520,6 +522,8 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 |:-------|:--------|
 | `newExecutorFn` (`root.go`) | Package-level `Executor`-constructing seam every verb's `RunE` composes with, letting `verb_output_test.go` drive real `RunE` functions against `executor.MockExecutor`. |
 | `mutatingVerbRows` / `mutatingVerbAliases` / `nonMutatingAllowlist` (`verb_output_test.go`) | The total-classification tables the cobra-tree walk checks every runnable command against — an unclassified new command, or one misclassified as mutating without a row, is red. |
+
+Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks every required spec registration, final review included, without running a gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
 
 ## Consumed Interfaces
 
@@ -796,6 +800,8 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
   `O(domains × citations)` times. Both seams are countable, and a golden
   diagnostics fixture pins byte-identical `(code, message)` output pre/post
   caching.
+
+
 
 ### Landed review identity (`complete`, Spec 130 R12)
 

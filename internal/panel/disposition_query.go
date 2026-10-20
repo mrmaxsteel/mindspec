@@ -57,7 +57,7 @@ func LoadStore(pattern string) ([]DispositionRow, []CoverageManifest, error) {
 		rows = append(rows, fr...)
 		manifests = append(manifests, fm...)
 	}
-	return rows, manifests, nil
+	return rows, LastManifests(manifests), nil
 }
 
 // recordDiscriminator decodes just the `record` field of an
@@ -208,6 +208,23 @@ func ComputeModelRates(rows []DispositionRow, match func(disposition string) boo
 	return out
 }
 
+// LastManifests selects the last append-order manifest for each spec/panel.
+// The result retains the order of those last occurrences, not timestamp order.
+func LastManifests(manifests []CoverageManifest) []CoverageManifest {
+	type identity struct{ spec, panel string }
+	last := make(map[identity]int)
+	for i, m := range manifests {
+		last[identity{m.Spec, m.Panel}] = i
+	}
+	var out []CoverageManifest
+	for i, m := range manifests {
+		if last[identity{m.Spec, m.Panel}] == i {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // ManifestModels returns the sorted, de-duplicated set of every model
 // named in any coverage manifest's slots[] roster. Q1/Q2 union this
 // with the models appearing in disposition ROWS so a model that was
@@ -218,7 +235,7 @@ func ComputeModelRates(rows []DispositionRow, match func(disposition string) boo
 // absence (adjudicated from panel finding G1-001).
 func ManifestModels(manifests []CoverageManifest) []string {
 	seen := map[string]bool{}
-	for _, m := range manifests {
+	for _, m := range LastManifests(manifests) {
 		for _, s := range m.Slots {
 			seen[s.Model] = true
 		}
@@ -309,7 +326,7 @@ func ComputeQ4(rows []DispositionRow, manifests []CoverageManifest) []Q4Result {
 		}
 	}
 	slotsByGate := make(map[string]int, len(CanonicalGateKeys))
-	for _, m := range manifests {
+	for _, m := range LastManifests(manifests) {
 		slotsByGate[m.Gate] += len(m.Slots)
 	}
 
