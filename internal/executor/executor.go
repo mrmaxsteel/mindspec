@@ -120,6 +120,9 @@ type Executor interface {
 	// equivalent to `git diff --name-only <base>..<head>`.
 	ChangedFiles(base, head string) ([]string, error)
 
+	// LsTree returns a full recursive, repository-relative tree listing.
+	LsTree(workdir, rev string) (string, error)
+
 	// FileAtRef returns the content of path at git ref (wraps
 	// `git show <ref>:<path>`). Empty ref is undefined.
 	FileAtRef(ref, path string) ([]byte, error)

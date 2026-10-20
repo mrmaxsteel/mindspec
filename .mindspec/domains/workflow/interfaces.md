@@ -163,6 +163,7 @@ The optional registration fields at the end of `panel.Panel` are:
 
 | Field | Shape |
 |:------|:------|
+| `subject_digest` | `sha256:` plus the subject-tree digest, recorded beside `reviewed_head_sha` |
 | `roster` | ordered `[{slot, model, lens}]`, with ids `R1..Rn` |
 | `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
 | `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
@@ -179,10 +180,10 @@ to spec-117 `disposition` rows and `panel` coverage manifests. Every event carri
 
 | Kind | Payload | Key within the panel directory |
 |:-----|:--------|:-------------------------------|
-| `round` | round, reviewed_head_sha, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
+| `round` | round, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
 | `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
 | `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
-| `rebind` | round, from_sha, to_sha, paths, reason | to_sha |
+| `rebind` | round, from_sha, to_sha, subject_digest, paths, reason | to_sha |
 | `abandon` | reason, by | created_at |
 
 A same-key retry differing only in `created_at` adds nothing; another payload
@@ -200,6 +201,20 @@ library matcher: it returns the first snapshot field without a backing event,
 using the latest round, subsequent rebind/abandon events, and payload equality
 for entry arrays (ignoring `created_at`). The first round event's `carried`
 object supplies baselines for legacy refutations, deferrals and rebinds.
+
+`panel.Subject(gate, specDir)` derives roots: spec/plan approval reviews only
+`<specs>/<spec>/`; bead, final review, adhoc and an empty gate review the whole
+tree. `<specs>` is the workspace-resolved specs directory in either layout.
+Every subject excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`,
+`review/**` and `.beads/issues.jsonl`; other `reviews` directories count.
+The digest hashes the retained recursive `ls-tree` listing; read errors and an
+empty filtered listing refuse creation and Block a mismatched-SHA gate.
+Equal SHAs are fresh without a subject read. On a SHA mismatch a recorded
+digest is compared to the live subject: equality is fresh, a difference stale.
+A legacy panel without a digest retains the original stale message.
+`complete`, `verify`, `tally` and instruct panel state use the same gate facts.
+The R5.3 matcher pins `subject_digest` to the later of the latest round and
+rebind events, alongside `reviewed_head_sha`.
 
 A Finding is `ccr[i]` from the latest-round verdict's
 `concrete_changes_required`, with the sha256 of its raw text. Empty lists use

@@ -1418,6 +1418,20 @@ func StatusZWithStderr(workdir string) (string, error) {
 	return stdout.String(), nil
 }
 
+// LsTree returns the recursive, repository-relative tree listing at rev.
+// --full-tree makes the output independent of workdir's depth in the repo.
+func LsTree(workdir, rev string) (string, error) {
+	if err := RejectOptionLike(rev); err != nil {
+		return "", err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "ls-tree", "-r", "--full-tree", rev, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("ls-tree: %w", err)
+	}
+	return string(out), nil
+}
+
 // LsFiles runs `git ls-files <args...>` in workdir (workdir=="" → cwd) and
 // returns stdout. Caller is responsible for adding `--` separators where
 // untrusted paths are passed (SEC-5).

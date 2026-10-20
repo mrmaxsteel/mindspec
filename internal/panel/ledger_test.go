@@ -21,10 +21,10 @@ func ledgerFixtures(t *testing.T, name string) [][]byte {
 	def := Deferral{Slot: "R1", Round: 1, Finding: "slot", FindingSHA256: strings.Repeat("b", 64), FindingText: "a finding", Bead: "mindspec-followup", By: "operator", CreatedAt: ledgerTime}
 	rebind := Rebind{Round: 1, FromSHA: "abc123", ToSHA: "def456", Paths: []string{"OWNERSHIP.yaml"}, Reason: "claim", CreatedAt: ledgerTime}
 	records := []interface{}{
-		RoundRecord{Record: RecordRound, Spec: "130", Panel: name, Round: 1, ReviewedHeadSHA: "abc123", Target: "bead/mindspec-example", Gate: "bead", Roster: []RosterSlot{{"R1", "model-a", "correctness"}, {"R2", "model-b", "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: ledgerTime},
+		RoundRecord{Record: RecordRound, Spec: "130", Panel: name, Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:baseline", Target: "bead/mindspec-example", Gate: "bead", Roster: []RosterSlot{{"R1", "model-a", "correctness"}, {"R2", "model-b", "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: ledgerTime},
 		RefutationRecord{Record: RecordRefutation, Spec: "130", Panel: name, Refutation: ref},
 		DeferralRecord{Record: RecordDeferral, Spec: "130", Panel: name, Deferral: def},
-		RebindRecord{Record: RecordRebind, Spec: "130", Panel: name, Rebind: rebind},
+		RebindRecord{Record: RecordRebind, Spec: "130", Panel: name, SubjectDigest: "sha256:baseline", Rebind: rebind},
 		AbandonRecord{Record: RecordAbandon, Spec: "130", Panel: name, Reason: "halt", By: "operator", CreatedAt: ledgerTime},
 	}
 	out := make([][]byte, len(records))

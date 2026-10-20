@@ -54,6 +54,9 @@ type MockExecutor struct {
 	// when non-nil, fully drive the corresponding method so tests can inject
 	// staleness / dirty-tree / ref-not-found facts; otherwise the simple result
 	// fields are returned.
+	LsTreeFn          func(workdir, rev string) (string, error)
+	LsTreeResult      string
+	LsTreeErr         error
 	RevParseRefFn     func(workdir, ref string) (string, error)
 	RevParseRefResult string
 	RevParseRefErr    error
@@ -216,6 +219,14 @@ func (m *MockExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
 func (m *MockExecutor) MergeBase(a, b string) (string, error) {
 	m.record("MergeBase", a, b)
 	return m.MergeBaseResult, m.MergeBaseErr
+}
+
+func (m *MockExecutor) LsTree(workdir, rev string) (string, error) {
+	m.record("LsTree", workdir, rev)
+	if m.LsTreeFn != nil {
+		return m.LsTreeFn(workdir, rev)
+	}
+	return m.LsTreeResult, m.LsTreeErr
 }
 
 func (m *MockExecutor) RevParseRef(workdir, ref string) (string, error) {

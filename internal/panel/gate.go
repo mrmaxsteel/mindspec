@@ -146,6 +146,11 @@ type GateFacts struct {
 	HeadSHA    string
 	MissingRef bool
 
+	// SubjectDigest is the live subject on a SHA mismatch. SubjectErr is a
+	// fail-closed read error, separate from the rev-parse fail-open GitErr.
+	SubjectDigest string
+	SubjectErr    error
+
 	// GitErr true means the rev-parse failed with a TRANSIENT or structural
 	// error (not a clean "ref absent"): exit 128, git missing, lock
 	// contention. It is deliberately NOT folded into MissingRef so a transient
@@ -179,7 +184,7 @@ type GateFacts struct {
 //	(4) round mismatch→ Block
 //	(5) missing ref   → Allow + Warn  (rerun-after-merge)
 //	(5b) transient gitErr → Allow + Warn  (honest, NOT "merge landed")
-//	(6) stale SHA     → Block  (the lola-f4a8 pin)
+//	(6) stale subject → Block  (legacy: stale SHA; read errors also Block)
 //	(7) dirty tree    → Block  (materialize-past-review bypass; skipped when worktree absent)
 //	(8) incomplete    → Block  (verdicts < expected_reviewers)
 //	(9) REJECT/hard   → Block  (halt path, no vote count overrides)
@@ -274,16 +279,14 @@ func PanelGateDecision(f GateFacts) Decision {
 			escBeadID, escBeadID, termsafe.Escape(f.GitErr.Error()))}
 	}
 
-	// (6) Stale SHA — verdicts reviewed a different commit. BLOCK, never
-	// Warn (a Warn here is the same prose-under-pressure failure the gate
-	// exists to close — the lola-f4a8 bypass class, Req 11).
-	if p.ReviewedHeadSHA != "" && f.HeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, f.HeadSHA) {
-		// Escape AFTER short() truncates (not before): truncating an
-		// already-escaped quoted literal could split an escape sequence.
-		return Decision{Action: Block, Message: fmt.Sprintf(
-			"panel round %d reviewed %s, branch now at %s — commits landed after review; "+
-				"bump round and re-panel (/ms-panel-run step 0)%s",
-			round, termsafe.Escape(short(p.ReviewedHeadSHA)), termsafe.Escape(short(f.HeadSHA)), RawMergeFence(f.BeadID))}
+	// (6) Subject freshness. Legacy panels retain the exact stale-SHA message.
+	if f.SubjectErr != nil || (p.ReviewedHeadSHA != "" && f.HeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, f.HeadSHA) && (p.SubjectDigest == "" || p.SubjectDigest != f.SubjectDigest)) {
+		// Escape AFTER short() truncates to avoid splitting an escape sequence.
+		message := fmt.Sprintf("panel round %d reviewed %s, branch now at %s — commits landed after review; bump round and re-panel (/ms-panel-run step 0)", round, termsafe.Escape(short(p.ReviewedHeadSHA)), termsafe.Escape(short(f.HeadSHA)))
+		if f.SubjectErr != nil {
+			message = fmt.Sprintf("panel %s: could not verify subject tree: %s — bump round and re-panel (/ms-panel-run step 0)", slug, termsafe.Escape(f.SubjectErr.Error()))
+		}
+		return Decision{Action: Block, Message: fmt.Sprintf("%s%s", message, RawMergeFence(f.BeadID))}
 	}
 
 	// (7) Dirty tree — uncommitted USER edits would be MATERIALIZED into a
@@ -439,6 +442,10 @@ func short(sha string) string {
 // these to gitutil.RevParseRef / gitutil.Status / errors.Is(e,
 // gitutil.ErrRefNotFound); the in-binary gate (Bead 2) wires the same.
 type GateIO struct {
+	// SpecDir is resolved by the caller through workspace.SpecsDir.
+	SpecDir string
+	// SubjectTree returns the subject digest at ref, or an error (fail closed).
+	SubjectTree func(scanRoot, ref string, roots SubjectRoots) (string, error)
 	// RevParse runs `git rev-parse <ref>` in scanRoot, returning the SHA. A
 	// genuine "ref absent" error must satisfy IsRefNotFound; any other error
 	// is treated as a transient/structural git error.
@@ -454,8 +461,8 @@ type GateIO struct {
 	// resolution — which may itself cost a `git worktree list` subprocess in
 	// the caller — is only paid on the dirty-check path, NEVER on the
 	// abandoned / round-mismatch / missing-ref / transient-gitErr short
-	// circuits that exit before the dirty check (preserving the two-subprocess
-	// matched-path budget).
+	// circuits that exit before the dirty check. Subject reads add one
+	// subprocess only on a SHA mismatch (Spec 130 R3.3).
 	Worktree func() string
 }
 
@@ -464,8 +471,8 @@ type GateIO struct {
 // caller pre-resolves scanRoot (the panel dir's grandparent) and injects the
 // git I/O (incl. the bead-worktree resolver) via deps, so this function does
 // NO git wiring that would need an internal import. Matched-path git budget:
-// at most TWO subprocesses (rev-parse + porcelain) — the worktree resolver is
-// only invoked on the dirty-check path.
+// at most three on a SHA mismatch (rev-parse + subject tree + porcelain);
+// equal SHAs make no subject read. The worktree resolver is lazy.
 func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) GateFacts {
 	f := GateFacts{BeadID: beadID, Reg: &reg}
 
@@ -504,7 +511,7 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 		}
 	}
 
-	// (7) staleness — one `git rev-parse bead/<id>` in the scan root. The
+	// (6) staleness — one `git rev-parse bead/<id>` in the scan root. The
 	// bead-branch ref "bead/"+beadID (== workspace.BeadBranchPrefix) is
 	// inlined to keep internal/panel a leaf.
 	sha, rerr := deps.RevParse(scanRoot, "bead/"+beadID)
@@ -522,8 +529,21 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 		return f
 	}
 	f.HeadSHA = sha
+	if p := res.Panel; p != nil && p.SubjectDigest != "" && p.ReviewedHeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, sha) {
+		if deps.SubjectTree == nil {
+			f.SubjectErr = fmt.Errorf("subject-tree reader unavailable")
+		} else {
+			f.SubjectDigest, f.SubjectErr = deps.SubjectTree(scanRoot, sha, Subject(p.Gate, PanelSpecDir(reg.Dir, deps.SpecDir)))
+			if f.SubjectErr == nil && f.SubjectDigest == "" {
+				f.SubjectErr = fmt.Errorf("empty subject digest")
+			}
+		}
+		if f.SubjectErr != nil {
+			return f
+		}
+	}
 
-	// (8) dirty tree — one `git status --porcelain` in the resolved bead
+	// (7) dirty tree — one `git status --porcelain` in the resolved bead
 	// worktree (Req 11). The worktree resolver is invoked HERE (not earlier)
 	// so its cost is only paid on the dirty-check path; "" means absent.
 	wt := ""

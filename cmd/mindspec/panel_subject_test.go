@@ -1,0 +1,187 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/instruct"
+)
+
+func subjectCLIGit(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=Subject Test", "-c", "user.email=subject@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func subjectCLIWrite(t *testing.T, root, file, text string) {
+	t.Helper()
+	file = filepath.Join(root, file)
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(text), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
+	for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs"} {
+		for _, gate := range []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc", ""} {
+			for _, change := range []string{"archive", "ownership", "real edit", "internal reviews"} {
+				t.Run(specs+"/"+gate+"/"+change, func(t *testing.T) {
+					resetPanelCreateFlags(t)
+					stubWorktreeListEmpty(t)
+					config.ResetCache()
+					t.Cleanup(config.ResetCache)
+					root := t.TempDir()
+					withTestChdir(t, root)
+					subjectCLIGit(t, root, "init", "-q", "-b", "main")
+					subjectCLIWrite(t, root, specs+"/130-example/spec.md", "base\n")
+					subjectCLIWrite(t, root, "internal/reviews/x.go", "base\n")
+					subjectCLIWrite(t, root, ".mindspec/domains/workflow/OWNERSHIP.yaml", "base\n")
+					// Canonical fixtures must not contain flat lifecycle markers.
+					if specs == ".mindspec/docs/specs" {
+						// OWNERSHIP is an ordinary subject file in this fixture's domains tree.
+						// Only specs/adr/core/domain DIRECTORY markers determine layout.
+						// Use the canonical domains path instead of a flat lifecycle marker.
+						source := filepath.Join(root, ".mindspec/domains")
+						dest := filepath.Join(root, ".mindspec/docs/domains")
+						if err := os.Rename(source, dest); err != nil {
+							t.Fatal(err)
+						}
+					}
+					subjectCLIGit(t, root, "add", "-A")
+					subjectCLIGit(t, root, "commit", "-qm", "base")
+					target := "main"
+					bead := gate == "bead" || gate == ""
+					if bead {
+						target = "bead/mindspec-subject.1"
+						subjectCLIGit(t, root, "switch", "-qc", target)
+					}
+					lsTreeForPanelFn = func(workdir, ref string) (string, error) { return (&executor.MindspecExecutor{}).LsTree(workdir, ref) }
+					args := []string{"create", "subject", "--target", target}
+					if gate != "" {
+						args = append(args, "--gate", gate)
+					}
+					if gate != "adhoc" {
+						args = append(args, "--spec", "130-example")
+					}
+					if bead {
+						args = append(args, "--bead", "mindspec-subject.1")
+					}
+					if out, err := runPanelCmd(args...); err != nil {
+						t.Fatalf("create: %v\n%s", err, out)
+					}
+					reg, err := findPanelRegistration(root, "subject")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !strings.HasPrefix(reg.Panel.SubjectDigest, "sha256:") || len(reg.Panel.SubjectDigest) != 71 {
+						t.Fatalf("create did not record digest: %+v", reg.Panel)
+					}
+					for i := 1; i <= reg.Panel.ExpectedReviewers; i++ {
+						subjectCLIWrite(t, reg.Dir, fmt.Sprintf("R%d-round-1.json", i), `{"verdict":"APPROVE"}`)
+					}
+					file := ""
+					wantStale := change != "archive"
+					switch change {
+					case "archive":
+						file = specs + "/130-example/reviews/old/BRIEF-round-1.md"
+					case "ownership":
+						file = ".mindspec/domains/workflow/OWNERSHIP.yaml"
+						if specs == ".mindspec/docs/specs" {
+							file = ".mindspec/docs/domains/workflow/OWNERSHIP.yaml"
+						}
+					case "real edit":
+						file = specs + "/130-example/spec.md"
+					case "internal reviews":
+						file = "internal/reviews/x.go"
+					}
+					if gate == "spec_approve" || gate == "plan_approve" {
+						wantStale = change == "real edit"
+					}
+					subjectCLIWrite(t, root, file, "changed\n")
+					subjectCLIGit(t, root, "add", "-f", "--", file)
+					subjectCLIGit(t, root, "commit", "-qm", "subject change")
+					// Verify is read-only and always exits zero; assert its rendered decision.
+					out, err := runPanelCmd("verify", "subject")
+					if err != nil {
+						t.Fatalf("verify: %v %s", err, out)
+					}
+					want := "gate would PASS"
+					if wantStale {
+						want = "gate would BLOCK"
+					}
+					verifyWant := "\nPASS\n"
+					if wantStale {
+						verifyWant = "\nBLOCK:"
+					}
+					if !strings.Contains(out, verifyWant) {
+						t.Fatalf("verify want %s:\n%s", want, out)
+					}
+					out, err = runPanelCmd("tally", "subject")
+					if (err != nil) != wantStale {
+						t.Fatalf("tally stale=%v err=%v:\n%s", wantStale, err, out)
+					}
+					roots := []string{root, filepath.Join(root, specs, "130-example"), filepath.Join(root, ".mindspec")}
+					state := instruct.PanelState(roots...)
+					if !strings.Contains(state, want) {
+						t.Fatalf("instruct want %s:\n%s", want, state)
+					}
+					if bead {
+						var warnings bytes.Buffer
+						matched, err := complete.PanelGate("mindspec-subject.1", roots, "", true, &warnings)
+						if matched == nil || (err != nil) != wantStale || warnings.Len() != 0 {
+							t.Fatalf("complete stale=%v matched=%v err=%v warnings=%s", wantStale, matched != nil, err, warnings.String())
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestSubjectDigest_FailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, listing string
+		err           error
+	}{
+		{"ls-tree error", "", errors.New("unreadable tree")}, {"empty tree", "", nil}, {"excluded only", "100644 blob abc\t.beads/issues.jsonl\n", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPanelCreateFlags(t)
+			root := mkFlatPanelTestRoot(t)
+			withTestChdir(t, root)
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+			stubNonBeadRevParse(t, func(string, string) (string, error) { return "abc123", nil })
+			lsTreeForPanelFn = func(string, string) (string, error) { return tc.listing, tc.err }
+			before := snapshotTree(t, root)
+			out, err := runPanelCmd("create", "subject", "--gate", "adhoc", "--target", "main")
+			if err == nil {
+				t.Fatalf("create must refuse: %s", out)
+			}
+			after := snapshotTree(t, root)
+			b, _ := json.Marshal(before)
+			a, _ := json.Marshal(after)
+			if string(a) != string(b) {
+				t.Fatalf("refused create wrote files: before %s after %s", b, a)
+			}
+		})
+	}
+}

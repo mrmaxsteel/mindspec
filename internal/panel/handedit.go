@@ -68,7 +68,7 @@ func FirstUnbackedField(p Panel, lines [][]byte) (string, error) {
 	var refutations []Refutation
 	var deferrals []Deferral
 	var rebinds []Rebind
-	var lastRebind *Rebind
+	var lastRebind *RebindRecord
 	var abandoned *AbandonRecord
 	for _, line := range lines {
 		if err := Validate(line); err != nil {
@@ -102,11 +102,11 @@ func FirstUnbackedField(p Panel, lines [][]byte) (string, error) {
 			}
 			deferrals = append(deferrals, d)
 		case RecordRebind:
-			var r Rebind
+			var r RebindRecord
 			if err := json.Unmarshal(line, &r); err != nil {
 				return "", err
 			}
-			rebinds = append(rebinds, r)
+			rebinds = append(rebinds, r.Rebind)
 			lastRebind = &r
 		case RecordAbandon:
 			var a AbandonRecord
@@ -143,11 +143,16 @@ func FirstUnbackedField(p Panel, lines [][]byte) (string, error) {
 		return "expected_reviewers", nil
 	}
 	sha := latest.ReviewedHeadSHA
+	digest := latest.SubjectDigest
 	if lastRebind != nil {
 		sha = lastRebind.ToSHA
+		digest = lastRebind.SubjectDigest
 	}
 	if p.ReviewedHeadSHA != sha {
 		return "reviewed_head_sha", nil
+	}
+	if p.SubjectDigest != digest {
+		return "subject_digest", nil
 	}
 	refutations = append(refutations, first.Carried.Refutations...)
 	deferrals = append(deferrals, first.Carried.Deferrals...)

@@ -18,11 +18,16 @@ type Executor interface {
 
     // Query methods
     IsTreeClean(path string) error
+    LsTree(workdir, rev string) (string, error)
     DiffStat(base, head string) (string, error)
     CommitCount(base, head string) (int, error)
     CommitAll(path, msg string) error
 }
 ```
+
+`LsTree` returns a recursive, repository-relative listing at a ref, including
+when the workdir is a spec subdirectory. It rejects option-like refs. Panel
+consumers select roots and exclusions in Go and hash the retained listing.
 
 The two merge-producing methods gained paired parameters in spec 127
 (R4(b)/R5(d)): `overrideReason` is the operator's audited

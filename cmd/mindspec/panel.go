@@ -45,6 +45,11 @@ var revParseForPanelFn = func(root, ref string) (string, error) {
 	return newExecutor(root).RevParseRef(root, ref)
 }
 
+// lsTreeForPanelFn captures the create-time subject through the executor.
+var lsTreeForPanelFn = func(workdir, rev string) (string, error) {
+	return newExecutor(workdir).LsTree(workdir, rev)
+}
+
 // panelWorktreeListFn resolves the bead-worktree list for the panel gate's
 // dirty-tree check (mirroring internal/complete's worktreeListFn seam).
 // Swappable in tests so `panel verify`/`panel tally` never spawn a real
@@ -64,18 +69,18 @@ machine-managed header in one atomic operation (internal/panel.Create):
 expected_reviewers and approve_threshold are stamped from the configured
 panel defaults (config.PanelExpectedReviewers / PanelApproveThresholdExpr,
 spec 109), and reviewed_head_sha is captured from --target's live commit
-AT WRITE TIME. A --round N re-panel co-bumps round + reviewed_head_sha in
+AT WRITE TIME, together with the subject_digest. A --round N re-panel
+co-bumps round + reviewed_head_sha + subject_digest in
 the SAME write, leaving prior verdict files and the skill-authored BRIEF
 body untouched.
 
 A --bead <id> panel expects --target bead/<id> — the exact ref
 ` + "`mindspec complete`'s gate rev-parses for staleness. A --target that" + `
-diverges from bead/<id> can only FAIL SAFE: at gate time the recorded
-reviewed_head_sha will not match the live bead/<id> tip, producing a
-stale-SHA Block, never a false-PASS.
+differs from bead/<id> is compared to that live branch at gate time.
+On a SHA mismatch, a changed subject tree blocks; an equal subject stays fresh.
 
 An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
-decision-inert panel.json "gate" field and resolves expected_reviewers/
+panel.json "gate" field, selects its subject roots, and resolves expected_reviewers/
 approve_threshold from that gate's creation-time defaults
 (config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr) instead
 of the global panel.reviewers/approve_threshold. --gate must be one of
@@ -178,6 +183,11 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return fmt.Errorf("resolving --target %q: %w", target, err)
 		}
 
+		digest, err := panel.SubjectTreeReader(lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, panel.PanelSpecDir(dir, filepath.Join(workspace.SpecsDir(root), specID))))
+		if err != nil {
+			return fmt.Errorf("reading panel subject: %w", err)
+		}
+
 		var beadPtr *string
 		if beadID != "" {
 			beadPtr = &beadID
@@ -212,6 +222,7 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			ExpectedReviewers:    expectedReviewers,
 			ApproveThresholdExpr: approveThresholdExpr,
 			ReviewedHeadSHA:      sha,
+			SubjectDigest:        digest,
 			Gate:                 gate,
 		}
 		if err := panel.Create(dir, in); err != nil {
@@ -327,7 +338,7 @@ func init() {
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
-	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for global defaults)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); selects subject roots and stamps the gate and its creation-time defaults (omit for global defaults)")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)
@@ -470,6 +481,8 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	}
 
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
+		SpecDir:       filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec),
+		SubjectTree:   panel.SubjectTreeReader(exec.LsTree),
 		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,

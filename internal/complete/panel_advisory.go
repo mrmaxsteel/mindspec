@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -101,6 +102,7 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 var (
 	gateExecutor        executor.Executor = &executor.MindspecExecutor{}
 	gateRevParseFn                        = gateExecutor.RevParseRef
+	gateSubjectTreeFn                     = panel.SubjectTreeReader(gateExecutor.LsTree)
 	gateStatusFn                          = gateExecutor.Status
 	gateIsRefNotFoundFn                   = gateExecutor.IsRefNotFound
 )
@@ -209,6 +211,8 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 
 		scanRoot := panel.PanelDirScanRoot(regs[i].Dir)
 		facts := panel.ResolveGateFacts(regs[i], beadID, scanRoot, panel.GateIO{
+			SpecDir:       filepath.Join(workspace.SpecsDir(scanRoot), regs[i].Panel.Spec),
+			SubjectTree:   gateSubjectTreeFn,
 			RevParse:      gateRevParseFn,
 			Status:        gateStatusFn,
 			IsRefNotFound: gateIsRefNotFoundFn,
@@ -883,4 +887,10 @@ func writePanelAuditMetadata(beadID string, reg *panel.Registration, w io.Writer
 			fmt.Fprintf(w, "Warning: could not record panel_abandoned metadata on %s: %v\n", idrender.Bead(beadID), err)
 		}
 	}
+}
+
+// PanelGate checks the registered bead panels without completing the bead.
+// Callers receive the same preflight and matched registration as complete.Run.
+func PanelGate(beadID string, roots []string, wtPath string, enabled bool, out io.Writer) (*panel.Registration, error) {
+	return panelGate(beadID, roots, wtPath, enabled, out)
 }

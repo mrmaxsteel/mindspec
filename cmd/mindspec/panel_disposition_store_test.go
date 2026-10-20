@@ -134,10 +134,10 @@ func ledgerCLIFixtures(t *testing.T, name string) [][]byte {
 	const timestamp = "2026-10-20T10:00:00Z"
 	ref := panel.Refutation{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "blocking item", Ground: "disproven", Reason: "covered", Evidence: "abc123", By: "operator", CreatedAt: timestamp}
 	values := []interface{}{
-		panel.RoundRecord{Record: panel.RecordRound, Spec: "130", Panel: name, Round: 1, ReviewedHeadSHA: "abc123", Target: "main", Gate: "final_review", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: timestamp},
+		panel.RoundRecord{Record: panel.RecordRound, Spec: "130", Panel: name, Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:baseline", Target: "main", Gate: "final_review", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: timestamp},
 		panel.RefutationRecord{Record: panel.RecordRefutation, Spec: "130", Panel: name, Refutation: ref},
 		panel.DeferralRecord{Record: panel.RecordDeferral, Spec: "130", Panel: name, Deferral: panel.Deferral{Slot: "R1", Round: 1, Finding: "slot", FindingSHA256: strings.Repeat("b", 64), FindingText: "blocking item", Bead: "mindspec-followup", By: "operator", CreatedAt: timestamp}},
-		panel.RebindRecord{Record: panel.RecordRebind, Spec: "130", Panel: name, Rebind: panel.Rebind{Round: 1, FromSHA: "abc123", ToSHA: "def456", Paths: []string{"OWNERSHIP.yaml"}, Reason: "claim", CreatedAt: timestamp}},
+		panel.RebindRecord{Record: panel.RecordRebind, Spec: "130", Panel: name, SubjectDigest: "sha256:baseline", Rebind: panel.Rebind{Round: 1, FromSHA: "abc123", ToSHA: "def456", Paths: []string{"OWNERSHIP.yaml"}, Reason: "claim", CreatedAt: timestamp}},
 		panel.AbandonRecord{Record: panel.RecordAbandon, Spec: "130", Panel: name, Reason: "halt", By: "operator", CreatedAt: timestamp},
 	}
 	records := make([][]byte, len(values))

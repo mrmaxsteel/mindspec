@@ -102,6 +102,16 @@ func snapshotTree(t *testing.T, root string) []string {
 // default and FAILS under `-shuffle` when it happens to run after one.
 // Same shared-mutable-singleton class as S2-1 itself, one flag set over.
 func resetPanelCreateFlags(t *testing.T) {
+	original := lsTreeForPanelFn
+	lsTreeForPanelFn = func(_, _ string) (string, error) {
+		spec, _ := panelCreateCmd.Flags().GetString("spec")
+		var listing strings.Builder
+		for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/spec.md\n", specs, spec)
+		}
+		return listing.String(), nil
+	}
+	t.Cleanup(func() { lsTreeForPanelFn = original })
 	t.Helper()
 	restore := func() {
 		for _, name := range []string{"spec", "target", "bead", "round", "gate"} {
