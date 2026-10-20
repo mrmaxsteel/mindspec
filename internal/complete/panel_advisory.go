@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -163,7 +162,7 @@ type PanelGateResult struct {
 // DURABLY persisted on bead metadata — folded into this function rather than
 // left to a later best-effort write. It reads the existing
 // `refutation_pending_entries` (fail-closed, via completeGetMetadataFn),
-// UNIONS this run's applied (slot, round) entries into that set (never a
+// UNIONS this run's applied finding entries into that set (never a
 // bare replace — an older still-unsatisfied pending from a prior run must
 // survive), and writes the merged array. Each entry is SELF-CONTAINED
 // (round-3 redesign): it carries the applied refutation's full
@@ -193,8 +192,8 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 
 	var matched []PanelGateResult
 	var firstWarn string
-	var applied []panel.Refutation
-	appliedSeen := make(map[string]bool) // dedup by (slot, round) ACROSS matched panels (item 3/step 4).
+	var applied []refutationPendingEntry
+	appliedSeen := make(map[string]bool) // Full finding identity, including panel scope.
 	for i := range regs {
 		// Honor the hatches with parity to the hook: a set skip env or a
 		// disabled gate yields a Warn/Allow decision that never blocks. We
@@ -250,12 +249,14 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 			}
 		case panel.Allow:
 			for _, ref := range d.AppliedRefutations {
-				key := pendingEntryKey(ref.Slot, ref.Round)
+				entry := pendingRefutation(ref, regs[i].Slug())
+				entry.Spec = regs[i].Panel.Spec
+				key := pendingEntryKey(entry)
 				if appliedSeen[key] {
 					continue
 				}
 				appliedSeen[key] = true
-				applied = append(applied, ref)
+				applied = append(applied, entry)
 			}
 		}
 	}
@@ -274,7 +275,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 	}
 
 	if len(applied) > 0 {
-		if err := persistRefutationPending(beadID, applied); err != nil {
+		if err := persistPendingEntries(beadID, applied); err != nil {
 			slots := make([]string, 0, len(applied))
 			for _, a := range applied {
 				slots = append(slots, termsafe.Escape(a.Slot))
@@ -302,30 +303,35 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 // no-panel, AND hatch). All reads/writes below go through the (fail-closed)
 // completeGetMetadataFn / completeMergeMetadataFn seams.
 
-// refutationPendingEntry is one element of the durable `refutation_pending_entries`
-// bead-metadata array: the obligation a refutation created, recorded at
-// apply time. It is SELF-CONTAINED (round-3 redesign): it carries the FULL
-// refutation content — slot, round, reason, evidence — copied from the
-// panel.json refutations entry whose application it records, so the
-// pre-close reconciliation can settle the obligation as an honest
-// `panel_refuted` audit from this marker ALONE, never re-reading a mutable
-// panel directory. (The former origin-panel field, and the re-tally-based
-// "verified discharge" it fed, are deliberately GONE: any discharge that
-// trusts on-disk panel files has an irreducible spoofing surface — three
-// review rounds each found a distinct false-discharge variant — so the
-// obligation is now always settled as the truthful panel_refuted record
-// instead.)
+// refutationPendingEntry retains the full discharge and its panel scope.
+// Empty finding and panel fields keep old slot-level markers readable.
 type refutationPendingEntry struct {
-	Slot     string `json:"slot"`
-	Round    int    `json:"round"`
-	Reason   string `json:"reason,omitempty"`
-	Evidence string `json:"evidence,omitempty"`
+	Panel         string `json:"panel,omitempty"`
+	Spec          string `json:"spec,omitempty"`
+	Slot          string `json:"slot"`
+	Round         int    `json:"round"`
+	Reason        string `json:"reason,omitempty"`
+	Evidence      string `json:"evidence,omitempty"`
+	Finding       string `json:"finding,omitempty"`
+	FindingSHA256 string `json:"finding_sha256,omitempty"`
+	FindingText   string `json:"finding_text,omitempty"`
+	Ground        string `json:"ground,omitempty"`
+	AC            string `json:"ac,omitempty"`
+	By            string `json:"by,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
 }
 
-// pendingEntryKey is the (slot, round) dedup identity shared by every
-// union helper below.
-func pendingEntryKey(slot string, round int) string {
-	return slot + "\x00" + strconv.Itoa(round)
+func pendingRefutation(ref panel.Refutation, slug string) refutationPendingEntry {
+	return refutationPendingEntry{Panel: slug, Slot: ref.Slot, Round: ref.Round,
+		Reason: ref.Reason, Evidence: ref.Evidence, Finding: ref.Finding,
+		FindingSHA256: ref.FindingSHA256, FindingText: ref.FindingText,
+		Ground: ref.Ground, AC: ref.AC, By: ref.By, CreatedAt: ref.CreatedAt}
+}
+
+// pendingEntryKey pins each obligation to one panel, slot, round and finding text.
+func pendingEntryKey(entry refutationPendingEntry) string {
+	data, _ := json.Marshal([]interface{}{entry.Spec, entry.Panel, entry.Slot, entry.Round, entry.Finding, entry.FindingSHA256})
+	return string(data)
 }
 
 // decodePendingEntries decodes the raw `refutation_pending_entries`
@@ -373,7 +379,22 @@ func decodeRefutations(raw interface{}) ([]panel.Refutation, error) {
 	return out, nil
 }
 
-// unionPendingEntries returns the deterministic (slot, round)-deduplicated
+func decodeRefutationAudits(raw interface{}) ([]refutationPendingEntry, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding panel_refuted_entries: %w", err)
+	}
+	var out []refutationPendingEntry
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding panel_refuted_entries: %w", err)
+	}
+	return out, nil
+}
+
+// unionPendingEntries returns the deterministic full-identity-deduplicated
 // union of existing pending entries and the current run's newly recorded
 // ones (an obligation is never clobbered). A key present in BOTH keeps the
 // existing entry, back-filling an empty Reason/Evidence from the added one —
@@ -384,7 +405,7 @@ func unionPendingEntries(existing, add []refutationPendingEntry) []refutationPen
 	idx := make(map[string]int)
 	var out []refutationPendingEntry
 	merge := func(e refutationPendingEntry) {
-		key := pendingEntryKey(e.Slot, e.Round)
+		key := pendingEntryKey(e)
 		if i, ok := idx[key]; ok {
 			if out[i].Reason == "" {
 				out[i].Reason = e.Reason
@@ -407,40 +428,14 @@ func unionPendingEntries(existing, add []refutationPendingEntry) []refutationPen
 		if out[i].Slot != out[j].Slot {
 			return out[i].Slot < out[j].Slot
 		}
-		return out[i].Round < out[j].Round
+		return pendingEntryKey(out[i]) < pendingEntryKey(out[j])
 	})
 	return out
 }
 
-// unionRefutations returns the (slot, round)-deduplicated union of existing
-// panel_refuted_entries and the newly satisfied entries — same dedup/sort
-// discipline as unionPendingEntries.
-func unionRefutations(existing, add []panel.Refutation) []panel.Refutation {
-	seen := make(map[string]bool)
-	var out []panel.Refutation
-	for _, e := range existing {
-		key := pendingEntryKey(e.Slot, e.Round)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, e)
-	}
-	for _, a := range add {
-		key := pendingEntryKey(a.Slot, a.Round)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, a)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Slot != out[j].Slot {
-			return out[i].Slot < out[j].Slot
-		}
-		return out[i].Round < out[j].Round
-	})
-	return out
+// unionRefutations uses the same full identity as the pending store.
+func unionRefutations(existing, add []refutationPendingEntry) []refutationPendingEntry {
+	return unionPendingEntries(existing, add)
 }
 
 // persistRefutationPending is the DURABLE-OBLIGATION marker write (Spec 114
@@ -451,6 +446,14 @@ func unionRefutations(existing, add []panel.Refutation) []panel.Refutation {
 // slot/round/reason/evidence content (round-3 redesign), making the marker
 // self-contained for the pre-close reconciliation.
 func persistRefutationPending(beadID string, applied []panel.Refutation) error {
+	var entries []refutationPendingEntry
+	for _, ref := range applied {
+		entries = append(entries, pendingRefutation(ref, ""))
+	}
+	return persistPendingEntries(beadID, entries)
+}
+
+func persistPendingEntries(beadID string, add []refutationPendingEntry) error {
 	existingMeta, err := completeGetMetadataFn(beadID)
 	if err != nil {
 		return fmt.Errorf("reading existing refutation obligations: %w", err)
@@ -461,15 +464,6 @@ func persistRefutationPending(beadID string, applied []panel.Refutation) error {
 		// into — fail-closed, the refutation is NOT applied (panelGate
 		// Blocks), exactly like a read error above.
 		return fmt.Errorf("reading existing refutation obligations: %w", decErr)
-	}
-	add := make([]refutationPendingEntry, 0, len(applied))
-	for _, a := range applied {
-		add = append(add, refutationPendingEntry{
-			Slot:     a.Slot,
-			Round:    a.Round,
-			Reason:   a.Reason,
-			Evidence: a.Evidence,
-		})
 	}
 	merged := unionPendingEntries(existing, add)
 	if err := completeMergeMetadataFn(beadID, map[string]interface{}{
@@ -488,7 +482,15 @@ func persistRefutationPending(beadID string, applied []panel.Refutation) error {
 // (best-effort), this RETURNS the merge error non-swallowing: it runs
 // inside the pre-close reconciliation, and a failure there fails completion
 // pre-close (AC11).
-func writePanelRefutedMetadata(beadID string, entries []panel.Refutation) error {
+func writePanelRefutedMetadata(beadID string, refs []panel.Refutation) error {
+	var entries []refutationPendingEntry
+	for _, ref := range refs {
+		entries = append(entries, pendingRefutation(ref, ""))
+	}
+	return writePanelRefutedEntries(beadID, entries)
+}
+
+func writePanelRefutedEntries(beadID string, entries []refutationPendingEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -496,7 +498,7 @@ func writePanelRefutedMetadata(beadID string, entries []panel.Refutation) error 
 	if err != nil {
 		return fmt.Errorf("reading existing panel_refuted_entries: %w", err)
 	}
-	existing, decErr := decodeRefutations(existingMeta["panel_refuted_entries"])
+	existing, decErr := decodeRefutationAudits(existingMeta["panel_refuted_entries"])
 	if decErr != nil {
 		// Fail-closed: unioning into a corrupt audit array could lose an
 		// earlier satisfied entry — the completion fails pre-close instead.
@@ -522,12 +524,7 @@ func writePanelRefutedMetadata(beadID string, entries []panel.Refutation) error 
 // CHECK-ONLY caller (CheckPendingObligations) only needs the (slot, round)
 // identity to name in its refusal. Carrying both costs nothing and keeps the
 // two callers thin wrappers over one decode+coverage core.
-type uncoveredPendingEntry struct {
-	Slot     string
-	Round    int
-	Reason   string
-	Evidence string
-}
+type uncoveredPendingEntry = refutationPendingEntry
 
 // uncoveredPendingObligations is the SHARED core both CheckPendingObligations
 // (the exported check-only predicate) and reconcilePendingRefutations (the
@@ -537,7 +534,7 @@ type uncoveredPendingEntry struct {
 // beadID's metadata via the caller-supplied getMeta (dependency-injected so
 // internal/approve can pass its own bead.GetMetadata seam without reaching
 // into internal/complete's completeGetMetadataFn) and returns every pending
-// entry NOT (slot, round)-exactly covered by a durable panel_refuted_entries
+// entry NOT identity-exactly covered by a durable panel_refuted_entries
 // record.
 //
 // Fail-closed throughout, matching Spec 114 R2's discipline exactly: a
@@ -605,7 +602,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 			"bead %s carries a present-but-null panel_refuted_entries value — a present-but-corrupt audit store cannot prove which obligations are already satisfied",
 			safeBeadID)
 	}
-	coveredRefuted, decErr := decodeRefutations(rawRefuted)
+	coveredRefuted, decErr := decodeRefutationAudits(rawRefuted)
 	if decErr != nil {
 		return nil, fmt.Errorf(
 			"bead %s carries a panel_refuted_entries record that could not be decoded — a corrupt audit store cannot prove which obligations are already satisfied (%v)",
@@ -619,7 +616,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 	// entries are already shape-checked below (empty slot / round < 1 ->
 	// error); refuted (covering) entries were NOT — an asymmetry. A
 	// malformed covering entry cannot over-cover a valid pending obligation
-	// (its coverage key pendingEntryKey("", 0) can never equal a VALID
+	// (its empty-slot coverage key can never equal a VALID
 	// pending entry's key, since a pending entry with empty slot/round<1 is
 	// itself rejected below before the coverage check), so this is
 	// defense-in-depth, not a live fail-open. But the R3 contract states a
@@ -649,7 +646,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 	// never needs its own early return.
 	covered := make(map[string]bool, len(coveredRefuted))
 	for _, c := range coveredRefuted {
-		covered[pendingEntryKey(c.Slot, c.Round)] = true
+		covered[pendingEntryKey(c)] = true
 	}
 
 	var out []uncoveredPendingEntry
@@ -662,11 +659,11 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 				"bead %s carries a malformed refutation_pending entry (slot %q, round %d) — a shape-invalid obligation store cannot prove the bead is obligation-free",
 				safeBeadID, p.Slot, p.Round)
 		}
-		if covered[pendingEntryKey(p.Slot, p.Round)] {
+		if covered[pendingEntryKey(p)] {
 			// Already covered by a durable audit — a no-op, not re-flagged.
 			continue
 		}
-		out = append(out, uncoveredPendingEntry{Slot: p.Slot, Round: p.Round, Reason: p.Reason, Evidence: p.Evidence})
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -682,7 +679,7 @@ func uncoveredPendingObligations(beadID string, getMeta func(string) (map[string
 // (below), which consumes the identical core to SETTLE.
 //
 // Returns nil when the bead has no recorded pending entries, or every entry
-// is (slot, round)-exactly covered by a durable panel_refuted_entries
+// is identity-exactly covered by a durable panel_refuted_entries
 // record. Returns a non-nil error naming the first uncovered slot@round
 // otherwise, and a non-nil error (never decode-as-empty) on a metadata read
 // error, a present-but-corrupt entries value, or a shape-invalid entry
@@ -726,7 +723,7 @@ func PanelGateRoots(root, wtPath, specID string) []string {
 //
 // Settlement is SATISFY-FROM-MARKER (round-3 redesign): every pending entry
 // not already covered by a durable `panel_refuted_entries` record — the
-// already-covered no-op is (slot, round)-exact, so a compound-failure retry
+// already-covered no-op is identity-exact, so a compound-failure retry
 // whose audit landed but whose close failed never re-Refuses or re-writes
 // (plan L533-535) — is flushed to the `panel_refuted` audit (slot, round,
 // reason, evidence, timestamp) FROM THE MARKER ITSELF. No re-tally, no
@@ -767,17 +764,7 @@ func reconcilePendingRefutations(beadID string) error {
 		return nil
 	}
 
-	toSatisfy := make([]panel.Refutation, 0, len(uncovered))
-	for _, u := range uncovered {
-		toSatisfy = append(toSatisfy, panel.Refutation{
-			Slot:     u.Slot,
-			Round:    u.Round,
-			Reason:   u.Reason,
-			Evidence: u.Evidence,
-		})
-	}
-
-	if err := writePanelRefutedMetadata(beadID, toSatisfy); err != nil {
+	if err := writePanelRefutedEntries(beadID, uncovered); err != nil {
 		// Non-swallowing: an obligation may NEVER merge un-audited. The
 		// completion fails pre-close and the bead stays in_progress.
 		return fmt.Errorf("recording panel_refuted for %s: %w", idrender.Bead(beadID), err)

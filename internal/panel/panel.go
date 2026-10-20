@@ -296,24 +296,19 @@ func Scan(roots ...string) []Registration {
 	return regs
 }
 
-// ForBead filters registrations to those whose panel targets the
-// given bead ID in the snapshot or latest ledger round. Ledger attribution
-// keeps a snapshot bead_id edit visible to the integrity check. Legacy panels
-// retain snapshot-only selection. Malformed registrations (Err != nil) never match —
-// the gate's bead-scoped lookup cannot attribute them, but they
-// remain visible in the full Scan result for diagnostics.
+// ForBead selects registrations by the snapshot or the latest decodable ledger
+// round's bead ID. Raw ledger attribution survives invalid ledger lines and an
+// unparseable snapshot, so the selected registration reaches the integrity gate.
+// Legacy panels without a ledger retain snapshot-only selection.
 func ForBead(regs []Registration, beadID string) []Registration {
 	if beadID == "" {
 		return nil
 	}
 	var out []Registration
 	for _, r := range regs {
-		if r.Err != nil {
-			continue
-		}
-		matches := r.Panel.IsBead() && *r.Panel.BeadID == beadID
+		matches := r.Err == nil && r.Panel.IsBead() && *r.Panel.BeadID == beadID
 		if !matches {
-			lines, err := ReadLedger(r.Dir)
+			lines, err := readDispositionLines(filepath.Join(r.Dir, dispositionsFileName))
 			if err == nil {
 				var latest *string
 				for _, line := range lines {

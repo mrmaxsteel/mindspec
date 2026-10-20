@@ -860,19 +860,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
 	}
-	if resumeStage == "" {
-		// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
-		// copy here for the enforcement.panel_gate toggle (default true) AND
-		// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
-		// advisory below compares against. gateCfgErr is deliberately non-fatal
-		// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
-		// true default on a load error) — the advisory below is simply skipped
-		// on that same error, never blocking the gate.
-		gateCfg, gateCfgErr := config.Load(root)
-		panelGateEnabled := true
-		if gateCfgErr == nil {
-			panelGateEnabled = gateCfg.Enforcement.PanelGate
+	// Live deferral checks also run on attested materialization retries.
+	gateCfg, gateCfgErr := config.Load(root)
+	panelGateEnabled := true
+	if gateCfgErr == nil {
+		panelGateEnabled = gateCfg.Enforcement.PanelGate
+	}
+	if resumeStage != "" {
+		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
+			return nil, err
 		}
+	}
+	if resumeStage == "" {
 		// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
 		// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
 		// co-located <spec-dir>/reviews/ panels (the transition union); on a flat

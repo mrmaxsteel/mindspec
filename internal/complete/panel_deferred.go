@@ -3,6 +3,7 @@ package complete
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 // The audit must not read later verdicts or refutations to reconstruct them.
 type PanelDeferredEntry struct {
 	panel.Deferral
+	Panel        string          `json:"panel,omitempty"`
+	Spec         string          `json:"spec,omitempty"`
 	FindingTexts []string        `json:"finding_texts,omitempty"`
 	Findings     []panel.Finding `json:"findings,omitempty"`
 }
@@ -122,6 +125,10 @@ func checkedPanelDeferrals(reg panel.Registration, entries []panel.Deferral) ([]
 
 // CheckAuditedPanelDeferrals uses only the completion-time text boundaries.
 func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredEntry) error {
+	return checkAuditedPanelDeferrals(reg, entries, true)
+}
+
+func checkAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredEntry, audited bool) error {
 	if reg.Panel.Abandoned || len(entries) == 0 {
 		return nil
 	}
@@ -166,7 +173,7 @@ func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 			items := map[string]bool{}
 			slotCount := 0
 			for _, valid := range checks {
-				if valid.err != nil || valid.entry.Slot != failed.entry.Slot || valid.entry.Round != failed.entry.Round {
+				if valid.err != nil || valid.entry.Panel != failed.entry.Panel || valid.entry.Spec != failed.entry.Spec || valid.entry.Slot != failed.entry.Slot || valid.entry.Round != failed.entry.Round {
 					continue
 				}
 				// Old slot records have no member identities. Preserve their text
@@ -188,7 +195,7 @@ func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 			}
 			// One item record cannot cover two findings with identical text.
 			if slotCount < count && len(items) < count {
-				return deferralFailure(reg, failed.entry.Deferral, true, failed.err)
+				return deferralFailure(reg, failed.entry.Deferral, audited, failed.err)
 			}
 		}
 	}
@@ -297,6 +304,10 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 		if err != nil {
 			return err
 		}
+		for i := range checked {
+			checked[i].Panel = result.Registration.Slug()
+			checked[i].Spec = result.Registration.Panel.Spec
+		}
 		entries = append(entries, checked...)
 	}
 	if err := persistDeferralPending(beadID, entries); err != nil {
@@ -308,4 +319,108 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 // PanelDeferredAuditFailure makes metadata errors fail closed with a retry.
 func PanelDeferredAuditFailure(beadID string, err error) error {
 	return guard.NewFailure(fmt.Sprintf("cannot read or record deferred findings for %s: %s", idrender.Bead(beadID), termsafe.Escape(err.Error())), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
+}
+
+// recheckResumedPanelDeferrals checks live tracker facts from the durable audit.
+// A materialization marker attests content, not the follow-up's current status.
+func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled bool) error {
+	if !enabled || panelSkipEnvFn() {
+		return nil
+	}
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return PanelDeferredAuditFailure(beadID, err)
+	}
+	pending, err := DecodePanelDeferred(meta, "deferral_pending_entries")
+	if err != nil {
+		return PanelDeferredAuditFailure(beadID, err)
+	}
+	audit, err := DecodePanelDeferred(meta, "panel_deferred_entries")
+	if err != nil {
+		return PanelDeferredAuditFailure(beadID, err)
+	}
+	entries := unionDeferrals(audit, pending)
+	if len(entries) == 0 {
+		return nil
+	}
+	regs := panel.ForBead(panelScanFn(roots...), beadID)
+	groups := map[string][]PanelDeferredEntry{}
+	for _, entry := range entries {
+		if entry.Spec == "" {
+			entry.Spec = specID
+		}
+		key, _ := json.Marshal([]string{entry.Spec, entry.Panel})
+		groups[string(key)] = append(groups[string(key)], entry)
+	}
+	for _, group := range groups {
+		first := group[0]
+		reg := panel.Registration{Dir: filepath.Join("review", first.Panel), Panel: panel.Panel{Spec: first.Spec, BeadID: &beadID}}
+		for _, current := range regs {
+			if current.Panel.Spec != first.Spec || current.Slug() != first.Panel {
+				continue
+			}
+			// Only verb-backed abandonment or refutation can supersede the audit.
+			field, err := panel.CheckHandEdits(current.Dir, current.Panel)
+			if current.Err != nil || err != nil || field != "" {
+				continue
+			}
+			reg = current
+			if reg.Panel.Abandoned {
+				group = nil
+				break
+			}
+			res, err := panel.Tally(current.Dir)
+			if err != nil {
+				return err
+			}
+			refs := res.AppliedRefutations()
+			var needed []PanelDeferredEntry
+			for _, entry := range group {
+				if !auditedDeferralRefuted(entry, refs) {
+					needed = append(needed, entry)
+				}
+			}
+			if len(needed) != len(group) {
+				var applied []refutationPendingEntry
+				for _, ref := range refs {
+					entry := pendingRefutation(ref, current.Slug())
+					entry.Spec = current.Panel.Spec
+					applied = append(applied, entry)
+				}
+				if err := persistPendingEntries(beadID, applied); err != nil {
+					return err
+				}
+			}
+			group = needed
+			break
+		}
+		if err := checkAuditedPanelDeferrals(reg, group, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func auditedDeferralRefuted(entry PanelDeferredEntry, refs []panel.Refutation) bool {
+	for _, ref := range refs {
+		if ref.Slot == entry.Slot && ref.Round == entry.Round && ref.Finding == entry.Finding && ref.FindingSHA256 == entry.FindingSHA256 {
+			return true
+		}
+	}
+	if entry.Finding != "slot" || len(entry.Findings) == 0 {
+		return false
+	}
+	for _, finding := range entry.Findings {
+		covered := false
+		for _, ref := range refs {
+			if ref.Slot == entry.Slot && ref.Round == entry.Round && ref.Finding == finding.ID && ref.FindingSHA256 == finding.SHA256 {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
 }

@@ -17,7 +17,7 @@ A panel run produces a directory of artifacts that live in the repo, next to the
 └── consolidated-round-1.md     # the merged change list, if a fix round is needed
 ```
 
-`panel.json` records the target (bead, spec, plan, final branch diff, or PR), the round number, `expected_reviewers`, the reviewer roster, `reviewed_head_sha`, and the subject digest. `reviewed_head_sha` identifies the commit the panel judged. Ad-hoc panels (repo reviews, pre-release checks) live under `.mindspec/reviews/<panel-slug>/` instead.
+`panel.json` records the target (bead, spec, plan, final branch diff, or PR), the round number, `expected_reviewers`, the reviewer roster, `reviewed_head_sha`, and the subject digest. `reviewed_head_sha` identifies the commit the panel judged. Ad-hoc panels (repo reviews, pre-release checks) use `.mindspec/reviews/<panel-slug>/` on flat layouts. Other layouts use `review/<panel-slug>/`.
 
 Each reviewer writes a verdict JSON: `reviewer_id`, a verdict (`APPROVE` / `REQUEST_CHANGES` / `REJECT`), `confidence`, `rationale`, `concrete_changes_required`, structured `findings`, and an optional `hard_block`.
 
@@ -73,7 +73,7 @@ models:                          # optional per-phase model selection
 runner: claude-code-skills       # who executes the panel plumbing (see below)
 ```
 
-Two floors are enforced at config load, not left to good intentions: an always-pass threshold is refused, and panel skipping cannot be delegated to config at all.
+Config load refuses a one-reviewer panel because it cannot pass. Panel skipping cannot be delegated to config.
 
 `mindspec config show` prints the effective merged configuration.
 

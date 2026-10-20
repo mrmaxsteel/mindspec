@@ -1,6 +1,7 @@
 package complete
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -116,8 +117,8 @@ func TestPanelRefuted_WriteMetadata(t *testing.T) {
 		if _, err := time.Parse(time.RFC3339, at); err != nil {
 			t.Errorf("panel_refuted_at not RFC3339: %q (%v)", at, err)
 		}
-		gotEntries, ok := got["panel_refuted_entries"].([]panel.Refutation)
-		if !ok || len(gotEntries) != 1 || gotEntries[0] != entries[0] {
+		gotEntries, decErr := decodeRefutations(got["panel_refuted_entries"])
+		if decErr != nil || len(gotEntries) != 1 || gotEntries[0].Slot != entries[0].Slot || gotEntries[0].Reason != entries[0].Reason || gotEntries[0].Evidence != entries[0].Evidence {
 			t.Errorf("panel_refuted_entries = %+v, want %+v", got["panel_refuted_entries"], entries)
 		}
 	})
@@ -487,7 +488,10 @@ func TestPanelRefuted_CrossRun_UnionReconcilesAll(t *testing.T) {
 	if meta["panel_refuted"] != true {
 		t.Errorf("expected both obligations satisfied (panel_refuted=true), got %v", meta["panel_refuted"])
 	}
-	satisfied, _ := meta["panel_refuted_entries"].([]panel.Refutation)
+	satisfied, decErr := decodeRefutations(meta["panel_refuted_entries"])
+	if decErr != nil {
+		t.Fatal(decErr)
+	}
 	foundX, foundB := false, false
 	for _, e := range satisfied {
 		if e.Slot == "X" && e.Round == 1 && e.Reason == "dismissed X" {
@@ -1095,5 +1099,153 @@ func TestPanelRefuted_MarkerCarriesReasonEvidence(t *testing.T) {
 	}
 	if entries[0] != want {
 		t.Errorf("panel_refuted must carry the marker's reason+evidence: got %+v, want %+v", entries[0], want)
+	}
+}
+
+func TestRefutationAudit_ItemIdentitySurvivesRetry(t *testing.T) {
+	oldGet, oldMerge := completeGetMetadataFn, completeMergeMetadataFn
+	t.Cleanup(func() { completeGetMetadataFn, completeMergeMetadataFn = oldGet, oldMerge })
+	store := newFakeMetadataStore()
+	store.wire(t)
+	refs := []panel.Refutation{
+		{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "first ask", Ground: "disproven", Reason: "first reason", Evidence: "first-proof", By: "max"},
+		{Slot: "R1", Round: 1, Finding: "ccr[1]", FindingSHA256: strings.Repeat("b", 64), FindingText: "second ask", Ground: "disproven", Reason: "second reason", Evidence: "second-proof", By: "max"},
+		{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("c", 64), FindingText: "revised ask", Ground: "disproven", Reason: "revised reason", Evidence: "revised-proof", By: "max"},
+	}
+	if err := persistRefutationPending("probe-x.1", refs[:1]); err != nil {
+		t.Fatal(err)
+	}
+	store.failMerge = failOnKey("panel_refuted")
+	if err := reconcilePendingRefutations("probe-x.1"); err == nil {
+		t.Fatal("audit write must fail")
+	}
+	store.failMerge = nil
+	if err := persistRefutationPending("probe-x.1", refs); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcilePendingRefutations("probe-x.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckPendingObligations("probe-x.1", store.Get); err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeRefutations(store.data["probe-x.1"]["panel_refuted_entries"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(refs) {
+		t.Fatalf("audit lost distinct findings: got %+v, want %+v", got, refs)
+	}
+	for _, want := range refs {
+		found := false
+		for _, entry := range got {
+			if entry.Finding == want.Finding && entry.FindingSHA256 == want.FindingSHA256 {
+				found = true
+				if entry.Reason != want.Reason || entry.Evidence != want.Evidence || entry.FindingText != want.FindingText || entry.Ground != want.Ground || entry.By != want.By {
+					t.Errorf("audit lost payload: %+v, want %+v", entry, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("missing audit entry: %+v", want)
+		}
+	}
+}
+
+func TestPanelGate_RefutationAuditKeepsPanelScope(t *testing.T) {
+	const specID, beadID = "130-audit", "probe-x.1"
+	root, sha := setupPanelGateRepo(t, specID, beadID)
+	store := newFakeMetadataStore()
+	store.wire(t)
+	v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"first ask", "second ask"}}
+	findings, err := panel.Findings(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"first-panel", "second-panel"} {
+		var refs []panel.Refutation
+		for _, finding := range findings {
+			refs = append(refs, panel.Refutation{Slot: "R1", Round: 1, Finding: finding.ID, FindingSHA256: finding.SHA256, FindingText: finding.Text, Reason: slug + finding.ID, Evidence: slug + "-proof", Ground: "disproven", By: "max"})
+		}
+		writePanel(t, root, slug, panel.Panel{BeadID: bp(beadID), Spec: specID, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: sha, Refutations: refs}, map[string]string{"R1-round-1.json": "REQUEST_CHANGES", "R2-round-1.json": "APPROVE"})
+		core3JSON(t, filepath.Join(root, "review", slug), "R1-round-1.json", v)
+	}
+	if _, err := panelGate(beadID, []string{root}, "", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	store.failMerge = failOnKey("panel_refuted")
+	if err := reconcilePendingRefutations(beadID); err == nil {
+		t.Fatal("audit write must fail")
+	}
+	store.failMerge = nil
+	if _, err := panelGate(beadID, []string{root}, "", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcilePendingRefutations(beadID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(store.data[beadID]["panel_refuted_entries"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("audit collapsed panel or finding identities: %s", raw)
+	}
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		slug, _ := entry["panel"].(string)
+		finding, _ := entry["finding"].(string)
+		if slug == "" || entry["spec"] != specID || entry["reason"] != slug+finding || entry["evidence"] != slug+"-proof" {
+			t.Errorf("audit lost scope or payload: %+v", entry)
+		}
+		seen[slug+":"+finding] = true
+	}
+	if len(seen) != 4 {
+		t.Fatalf("audit identities repeat: %s", raw)
+	}
+}
+
+func TestRefutationAudit_CoveragePinsFinding(t *testing.T) {
+	oldGet, oldMerge := completeGetMetadataFn, completeMergeMetadataFn
+	t.Cleanup(func() { completeGetMetadataFn, completeMergeMetadataFn = oldGet, oldMerge })
+	for _, change := range []string{"finding", "text hash"} {
+		t.Run(change, func(t *testing.T) {
+			store := newFakeMetadataStore()
+			store.wire(t)
+			first := panel.Refutation{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), Reason: "first", Evidence: "first-proof"}
+			if err := persistRefutationPending("probe-x.1", []panel.Refutation{first}); err != nil {
+				t.Fatal(err)
+			}
+			if err := reconcilePendingRefutations("probe-x.1"); err != nil {
+				t.Fatal(err)
+			}
+			second := first
+			if change == "finding" {
+				second.Finding = "ccr[1]"
+			} else {
+				second.FindingSHA256 = strings.Repeat("b", 64)
+			}
+			second.Reason, second.Evidence = "second", "second-proof"
+			if err := persistRefutationPending("probe-x.1", []panel.Refutation{second}); err != nil {
+				t.Fatal(err)
+			}
+			if err := CheckPendingObligations("probe-x.1", store.Get); err == nil {
+				t.Fatal("another finding or text must not cover the new obligation")
+			}
+			if err := reconcilePendingRefutations("probe-x.1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := CheckPendingObligations("probe-x.1", store.Get); err != nil {
+				t.Fatal(err)
+			}
+			got, err := decodeRefutations(store.data["probe-x.1"]["panel_refuted_entries"])
+			if err != nil || len(got) != 2 {
+				t.Fatalf("new obligation did not receive its audit: %+v %v", got, err)
+			}
+		})
 	}
 }

@@ -276,3 +276,35 @@ func TestImplPreflight_BeadIDHandEdit(t *testing.T) {
 		t.Fatalf("snapshot bead edit escaped approval preflight: %v", err)
 	}
 }
+
+func TestImplPreflight_CorruptBeadRegistration(t *testing.T) {
+	for _, damage := range []string{"malformed ledger", "unparseable snapshot"} {
+		t.Run(damage, func(t *testing.T) {
+			root := core3ApproveRoot(t)
+			reg := core3Fixture(t, root, "binding", "bead", false)
+			want := "parse panel.json"
+			if damage == "unparseable snapshot" {
+				if err := os.WriteFile(filepath.Join(reg.Dir, panel.FileName), []byte("{"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				wrong := "probe-wrong.1"
+				reg.Panel.BeadID = &wrong
+				core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+				f, err := os.OpenFile(filepath.Join(reg.Dir, "dispositions.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, writeErr := f.WriteString("<<<<<<< HEAD\n")
+				closeErr := f.Close()
+				if writeErr != nil || closeErr != nil {
+					t.Fatalf("append conflict: %v %v", writeErr, closeErr)
+				}
+				want = "ledger line"
+			}
+			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("corrupt registration escaped preflight: %v", err)
+			}
+		})
+	}
+}
