@@ -39,6 +39,7 @@ func setDeferredIssue(t *testing.T, dir, change string) {
 	case "reparented":
 		issue["parent"] = "child-x"
 		core3JSON(t, dir, "child-x.json", []interface{}{map[string]interface{}{"id": "child-x", "parent": "epic-130-core3"}})
+		core3JSON(t, dir, "epic-130-core3.json", []interface{}{map[string]interface{}{"id": "epic-130-core3", "status": "open"}})
 	case "deleted":
 		core3JSON(t, dir, "follow-up.json", []interface{}{})
 		return
@@ -167,6 +168,9 @@ func TestGateTime_DeferralRecheck(t *testing.T) {
 			}
 			setDeferredIssue(t, fake, change)
 			err := checkAndRecordPanelDeferrals("reviewed-bead", results, true)
+			if change == "reparented" && (err == nil || !strings.Contains(err.Error(), "outside the owning epic")) {
+				t.Fatalf("reparented deferral must reach epic comparison: %v", err)
+			}
 			for _, want := range []string{"R1", "ccr[0]", "follow-up"} {
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("changed deferral allowed or unnamed %s: %v", change, err)

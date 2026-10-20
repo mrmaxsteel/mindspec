@@ -61,6 +61,7 @@ func implDeferralIssue(t *testing.T, fake, change string) {
 	case "reparented":
 		issue["parent"] = "child-x"
 		core3JSON(t, fake, "child-x.json", []interface{}{map[string]interface{}{"id": "child-x", "parent": "epic-x"}})
+		core3JSON(t, fake, "epic-x.json", []interface{}{map[string]interface{}{"id": "epic-x", "status": "open"}})
 	case "deleted":
 		core3JSON(t, fake, "follow-up.json", []interface{}{})
 		return
@@ -82,6 +83,9 @@ func TestGateTime_DeferralRecheck(t *testing.T) {
 				}
 				implDeferralIssue(t, fake, change)
 				err := implPanelDeferralPreflight(root, "130-core3")
+				if change == "reparented" && (err == nil || !strings.Contains(err.Error(), "outside the owning epic")) {
+					t.Fatalf("reparented deferral must reach epic comparison: %v", err)
+				}
 				for _, want := range []string{"R1", "ccr[0]", "follow-up"} {
 					if err == nil || !strings.Contains(err.Error(), want) {
 						t.Fatalf("changed deferral did not block: %v", err)

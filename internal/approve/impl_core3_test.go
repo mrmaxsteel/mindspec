@@ -265,3 +265,14 @@ func TestImplApprove_Core3LegBeforeMutation(t *testing.T) {
 		t.Fatal("approval mutated before coverage")
 	}
 }
+
+func TestImplPreflight_BeadIDHandEdit(t *testing.T) {
+	root := core3ApproveRoot(t)
+	reg := core3Fixture(t, root, "binding", "bead", false)
+	wrong := "probe-wrong.1"
+	reg.Panel.BeadID = &wrong
+	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+	if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "changed outside the panel verbs (bead_id)") {
+		t.Fatalf("snapshot bead edit escaped approval preflight: %v", err)
+	}
+}

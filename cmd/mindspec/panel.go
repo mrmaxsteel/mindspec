@@ -31,7 +31,7 @@ import (
 
 var panelCmd = &cobra.Command{
 	Use:   "panel",
-	Short: "Manage review panels (create, verify, tally)",
+	Short: "Manage review panels (create, verify, tally, refute, defer, rebind, abandon)",
 }
 
 // revParseForPanelFn resolves ref's commit SHA in root — the seam `panel

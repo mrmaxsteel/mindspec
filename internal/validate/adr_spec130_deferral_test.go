@@ -16,6 +16,15 @@ func TestADRAmendments_Spec130_Deferral(t *testing.T) {
 			{"Complete preflight outside the cap — deferrals (R10.2)", "before materialization and outside the gate subprocess cap", "A failed read voids that deferral", "Both panel hatches skip this leg"}},
 		"ADR-0043-panel-disposition-telemetry-store.md": {{"Canonical writers — discharge verbs (R9.1)", "supersedes \"Writes go through ONE canonical Go verb\"", "`refute`, `defer` and `tally` also write the store", "one lock hold", "Agents do not hand-append these rows"}},
 	}
+	conduct, err := os.ReadFile(filepath.Join("..", "..", ".mindspec", "adr", "ADR-0044-panel-review-conduct.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stale := range []string{"no deferral discharges", "active only when"} {
+		if strings.Contains(string(conduct), stale) {
+			t.Errorf("deferral discharge must be active: ADR-0044 contains %q", stale)
+		}
+	}
 	for file, fragments := range pins {
 		data, err := os.ReadFile(filepath.Join("..", "..", ".mindspec", "adr", file))
 		if err != nil {

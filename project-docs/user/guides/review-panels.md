@@ -17,7 +17,7 @@ A panel run produces a directory of artifacts that live in the repo, next to the
 └── consolidated-round-1.md     # the merged change list, if a fix round is needed
 ```
 
-`panel.json` records the target (bead, spec, plan, final branch diff, or PR), the round number, `expected_reviewers`, `approve_threshold`, and `reviewed_head_sha` — the exact commit the panel judged. Ad-hoc panels (repo reviews, pre-release checks) live under `.mindspec/reviews/<panel-slug>/` instead.
+`panel.json` records the target (bead, spec, plan, final branch diff, or PR), the round number, `expected_reviewers`, the reviewer roster, `reviewed_head_sha`, and the subject digest. `reviewed_head_sha` identifies the commit the panel judged. Ad-hoc panels (repo reviews, pre-release checks) live under `.mindspec/reviews/<panel-slug>/` instead.
 
 Each reviewer writes a verdict JSON: `reviewer_id`, a verdict (`APPROVE` / `REQUEST_CHANGES` / `REJECT`), `confidence`, `rationale`, `concrete_changes_required`, structured `findings`, and an optional `hard_block`.
 
@@ -42,8 +42,8 @@ The final review of a whole spec branch (run once, after the last bead merges) s
 
 Tallying is not a judgment call. The decision is a pure function in the binary — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop.
 
-- **Approval threshold: N−1.** On a six-reviewer panel, five APPROVEs pass; one dissent is tolerated. (The threshold scales with panel size and is pinned in `panel.json` at creation, so it can't drift mid-round.)
-- **Below threshold → fix round.** The `concrete_changes_required` lists from all reviewers are consolidated into one mechanical change list; a fix-up agent applies it; the round number and `reviewed_head_sha` bump together, and the panel re-reviews the new head. Stale verdicts — verdicts for a commit that is no longer HEAD — never count.
+- **Pass rule.** A panel passes only when it is fresh and intact, every roster slot has a verdict, and it has 0 REJECT, 0 `hard_block`, 0 INVALID and 0 unresolved REQUEST_CHANGES verdicts. The APPROVE count is not a decision input.
+- **Each finding is fixed, refuted or deferred.** To fix findings, run a fix round. Consolidate the reviewers' `concrete_changes_required` lists into one change list. A fix agent applies it. Increase the round number and update `reviewed_head_sha` together. The panel reviews the new head. To refute a finding, record evidence with `mindspec panel refute`. To defer a finding, name an open follow-up bead with `mindspec panel defer`. Stale verdicts never count. If the panel passes apart from staleness and the new commits need no new review (for example, an ownership-only commit), run `mindspec panel rebind <slug> --reason '<who>: <why>'` instead. It moves the panel to the new tip with no new round and records the changed paths. It refuses a failing panel.
 - **Any REJECT → halt.** A REJECT stops the track for a human. It is never auto-fixed: a rejection that gets quietly patched over is precisely the verification debt the panel exists to prevent.
 - **Bounded rounds.** A bead that keeps failing its panel halts after a configured maximum rather than looping forever.
 
@@ -60,7 +60,6 @@ panel:
   reviewers:
     - {family: claude, count: 3}
     - {family: codex,  count: 3}
-  approve_threshold: "n-1"
   substitution:
     claude_sub_on_quota: true   # if a codex slot hits a quota wall, a claude
                                 # substitute fills the SAME slot id — the panel
@@ -80,24 +79,32 @@ Two floors are enforced at config load, not left to good intentions: an always-p
 
 ## The panel verbs
 
-The panel lifecycle is three agent-neutral CLI verbs — the contract any orchestrator can drive:
+The panel lifecycle is a set of agent-neutral CLI verbs — the contract any orchestrator can drive:
 
 ```bash
 mindspec panel create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N]
                                  # writes the panel dir, BRIEF, panel.json in one
-                                 # operation; pins round, threshold, reviewed_head_sha
+                                 # operation; pins round, roster, reviewed_head_sha, subject digest
 mindspec panel verify <slug>     # read-only: completeness + staleness report,
                                  # prints the same PASS/BLOCK the gate computes
 mindspec panel tally <slug>      # renders the decision from the binary:
                                  # verdict table, decision, consolidated changes;
                                  # exit 0 on allow, non-zero (with recovery) on block
+# Refute one finding with evidence. Omit --finding to cover the whole slot.
+mindspec panel refute <slug> --slot R2 --round N --finding 'ccr[0]' --ground disproven --reason '<why>' --evidence <reference> --by '<name>'
+# Defer a finding to an open follow-up bead.
+mindspec panel defer <slug> --slot R2 --round N --finding 'ccr[0]' --bead <follow-up> --by '<name>'
+# Move a passing panel to the new tip with no new round.
+mindspec panel rebind <slug> --reason '<who>: <why>'
+# Abandon a panel with an audited reason.
+mindspec panel abandon <slug> --reason '<why>' --by '<name>'
 ```
 
 The **runner** selects who executes the plumbing between those verbs — launching reviewers, collecting verdicts:
 
 - `claude-code-skills` (default) — the `/ms-panel-run` and `/ms-panel-tally` skills orchestrate reviewers from your Claude Code session.
 - `claude-code-workflow` — the `/ms-panel` workflow runs the whole round as one deterministic fan-out and returns a single compact result, keeping six reviewers' transcripts out of your session's context. Recommended once you're running loops.
-- `external` — bring your own orchestrator; anything that can exec the three verbs and write verdict JSONs can run a panel.
+- `external` — bring your own orchestrator; anything that can exec the panel verbs and write verdict JSONs can run a panel.
 
 Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip.
 
@@ -107,7 +114,7 @@ Whatever the runner, it is an adapter, never a second decision authority: the de
 
 ## Cost and when to lighten the panel
 
-Six frontier-model reviewers per round is a real cost, and it's the right default for exactly the reason it's expensive: it's the thing standing between semi-autonomous merges and unreviewed slop. If you want to economize, do it explicitly — a smaller `reviewers:` mix in config on low-stakes repos — rather than by skipping. The threshold scales down with panel size automatically, and the artifact hard gates and REJECT semantics apply at any size.
+Six frontier-model reviewers per round is a real cost, and it's the right default for exactly the reason it's expensive: it's the thing standing between semi-autonomous merges and unreviewed slop. If you want to economize, do it explicitly — a smaller `reviewers:` mix in config on low-stakes repos — rather than by skipping. The pass rule, artifact hard gates and REJECT rules apply at every panel size.
 
 ## Related
 

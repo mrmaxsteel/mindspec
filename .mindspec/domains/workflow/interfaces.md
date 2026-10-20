@@ -176,8 +176,7 @@ hatch skips these checks or the ledger commit. Adhoc ledgers stay ignored.
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
 exactly one `panel.json` — the literal filename `panel.FileName`. The
-snapshot writer `panel.WriteSnapshot` exists (temp file and rename); later
-spec 130 beads route panel verbs through it after their event batches succeed.
+snapshot writer `panel.WriteSnapshot` exists (temp file and rename); `create`, `rebind`, `refute`, `defer` and `abandon` call it after their ledger events are appended.
 `panel.AppendRecords` accepts the
 exact panel directory in flat, non-flat and adhoc layouts, validates the full
 batch and checks keys under one `dispositions.lock` hold before appending.
@@ -254,15 +253,7 @@ The gate checks snapshot/event equality before abandonment. An unbacked field
 blocks with `panel.json changed outside the panel verbs`; legacy panels with
 neither marker remain exempt. The check detects accidental desync, not forgery.
 
-`panel.Create` writes `panel.json` as a full-struct overwrite: it never
-reads the existing file first, unlike its read-before-splice handling
-of `BRIEF.md`'s machine-managed header (Maintenance Notes below). A
-re-panel of an abandoned panel therefore deliberately clears
-`abandoned`/`abandon_reason` and revives it into an active round — this
-is the KNOWN, intentional behavior of calling `Create` again, not an
-oversight (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
-This overwrite/revival contract is superseded by spec 130 Bead 5's
-merge-forward create and audited revival when that bead lands.
+`panel.Create` reads and parses the existing `panel.json` first and merges forward (see the Create paragraph below). A re-panel of an abandoned panel revives it, clears `abandoned`, and appends `{reason, abandoned_at, revived_at}` to `abandon_history` (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
 
 **Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
 file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).
@@ -445,8 +436,8 @@ exit code tracks the `panel.PanelGateDecision` decision alone, and is
 non-zero on `Block`. Do not describe `verify`/`tally` as both
 "read-only/advisory" — `verify` never blocks; `tally` can. `tally`
 prints the per-slot verdict table (slot, verdict, `hard_block`), the
-aggregate APPROVE/REQUEST_CHANGES/REJECT counts + the resolved
-threshold, the `panel.PanelGateDecision` decision, and the aggregated
+malformed-file list, the shared rule line (`panel.RuleLine`), the legacy
+`approve_threshold` notice when the field is recorded, any unexpected slots, the `panel.PanelGateDecision` decision, and the aggregated
 `concrete_changes_required` — read presentation-only from each
 REQUEST_CHANGES/REJECT verdict file (a re-parse failure, an absent key,
 or a non-array-of-strings type attributes zero items to that slot with
@@ -470,7 +461,7 @@ always-absent ref `bead/`, so every non-bead panel short-circuited at
 the missing-ref leg with a malformed `references branch bead/` message
 and reported PASS even after its target advanced past
 `reviewed_head_sha`, or with a REJECT verdict on file. The fix un-shadows
-staleness and the incomplete/REJECT/threshold legs for non-bead panels;
+staleness and the incomplete/REJECT/unresolved-finding legs for non-bead panels;
 a `sanitizeNonBeadDecision` CLI-layer rewrite (never touching
 `Decision.Action`) replaces the empty-bead-interpolation fragments and
 the empty `git merge bead/` fence with target-naming text, and never

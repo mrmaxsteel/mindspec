@@ -125,5 +125,5 @@ failure MODE portably.
 
 ## Amendment (Spec 130)
 
-- **Finding outcomes (R7, R13.4).** Every finding is fixed, evidence-refuted or deferred to a validated follow-up bead. Deferral is the third outcome, active only when gate-time validation ships; until then no deferral discharges a finding. Refutations are round- and `finding_sha256`-pinned; slot-level refutations pin the full ordered list or fallback rationale.
+- **Finding outcomes (R7, R13.4).** Every finding is fixed, evidence-refuted or deferred to a validated follow-up bead. Deferral is the third outcome: an effective deferral to a validated follow-up bead discharges its finding, and `complete` and `impl approve` re-check that bead. Refutations are round- and `finding_sha256`-pinned; slot-level refutations pin the full ordered list or fallback rationale.
 - **Pass rule (R7).** The approval threshold floor is retired. Complete, no veto, fresh, discharged and intact are all required; APPROVE count is not a decision input. REJECT, hard_block, INVALID, staleness and incompleteness cannot be discharged. Zero APPROVE with all findings discharged passes and reports resolved slots separately.
