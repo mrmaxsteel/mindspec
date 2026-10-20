@@ -46,8 +46,8 @@ A claim you cannot ground in a file is a claim you reject.
 Validate **every** `## Impacted Domains` entry against the real domain set under `.mindspec/domains/`.
 
 - **Reject invented domains.** If the author writes a domain that is not a directory under `.mindspec/domains/` — e.g. "caching", "scheduling", "auth" when no such domain exists — reject it. Name the real domains that exist and ask which actual domain owns this work, or whether a new domain genuinely needs to be created (a heavy decision, not a typo). An invented/non-existent Impacted Domain is a repo-grounding failure: tag it **`[GROUNDING]`** (the domain does not exist in the tree), never `[STRUCTURAL]`.
-- **Map file-path entries to owners.** When an Impacted Domains entry is a file path or glob rather than a bare domain name, normalize it to its **owning domain** per the ADR-0036 (Ownership Discovery) model — look up which domain's `OWNERSHIP.yaml` claims that path. A path that no domain owns is itself a finding: either the wrong path, or an ownership gap the spec must close.
-- Cross-check that the domains the author declared actually match the files the spec will touch. A spec that edits `internal/setup/**` but never declares the domain that owns it is mis-scoped.
+- **Map file-path entries to owners.** When an Impacted Domains entry is a file path or glob rather than a bare domain name, normalize it to its **owning domain** — look up which domain's `OWNERSHIP.yaml` claims that path. A path that no domain owns is itself a finding: either the wrong path, or an ownership gap the spec must close.
+- Cross-check that the domains the author declared actually match the files the spec will touch. A spec that edits `src/billing/**` but never declares the domain that owns it is mis-scoped.
 
 ## Technique: synonym / fuzzy-language detection
 

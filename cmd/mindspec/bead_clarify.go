@@ -29,7 +29,7 @@ const maxClarifyRecordBytes = 1 << 20 // 1 MiB
 
 var beadClarifyCmd = &cobra.Command{
 	Use:   "clarify <bead-id>",
-	Short: "Record a grounded readiness clarification for a NOT-READY bead (spec 124 R8)",
+	Short: "Record a grounded readiness clarification for a NOT-READY bead",
 	Long: `Writes the append-only readiness-attempt record for a bead: the
 original ordinal-keyed Phase-0 "NOT READY: <bead-id>" report, plus one
 grounded clarification entry per cited ordinal (each carrying a concrete
@@ -48,18 +48,17 @@ command line:
   }
 
 This performs exactly ONE write per bead. The record's mere presence is
-the categorical, restart-proof cap on the clarification loop (spec 124
-R8d): once a bead carries an attempt record, this command refuses a
+the categorical, restart-proof cap on the clarification loop: once a bead carries an attempt record, this command refuses a
 second write, regardless of whether the new attempt cites the same or
 different reasons — escalate to plan/spec revision instead.
 
-There is NO --finalize or update surface (R8e, derive-don't-write): the
+There is NO --finalize or update surface (derive-don't-write): the
 terminal READY/escalated disposition is derived from whether the
 subsequent re-dispatch succeeds, never a second write here.
 
 This writes ONLY the dedicated bd metadata key the mechanical readiness
 floor (MF-1..MF-4) never scans — a clarification can never flip a
-mechanical PASS/FAIL (spec 124 R8e). The blunt bypass for a known-
+mechanical PASS/FAIL. The blunt bypass for a known-
 acceptable mechanical FAIL is "mindspec next --allow-not-ready=<ids> --evidence <path>", not
 this command.`,
 	Args: cobra.ExactArgs(1),

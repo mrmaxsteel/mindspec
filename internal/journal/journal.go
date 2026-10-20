@@ -166,10 +166,10 @@ func Dir() (string, error) {
 		// target. Resolution failure FAILS CLOSED (nothing written).
 		resolved, err := config.CanonicalPath(d)
 		if err != nil {
-			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q: cannot canonicalize it for the HC-3 git-tree guard (fail closed): %w", d, err)
+			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q: cannot canonicalize it for the git-tree guard (fail closed): %w", d, err)
 		}
 		if root := config.EnclosingGitTree(resolved); root != "" {
-			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q (resolves to %q): it is inside the git work tree at %q (HC-3: the friction store must never be under a committable tree)", d, resolved, root)
+			return "", fmt.Errorf("refusing MINDSPEC_STATE_DIR %q (resolves to %q): it is inside the git work tree at %q (the friction store must never be under a committable tree)", d, resolved, root)
 		}
 		// Return the RESOLVED path so the journal write lands at the real,
 		// guard-checked target rather than re-traversing the symlink.

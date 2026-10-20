@@ -22,11 +22,11 @@ var beadCmd = &cobra.Command{
 
 var beadSpecCmd = &cobra.Command{
 	Use:        "spec [spec-id]",
-	Short:      "Deprecated: lifecycle managed via beads (ADR-0023)",
+	Short:      "Deprecated: lifecycle managed via beads",
 	Deprecated: "use 'mindspec spec create' which creates a lifecycle epic",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "Lifecycle state is derived from beads (ADR-0023).")
+		fmt.Fprintln(os.Stderr, "Lifecycle state is derived from beads.")
 		fmt.Fprintln(os.Stderr, "Use 'mindspec spec create' to create a new spec with lifecycle tracking.")
 		return nil
 	},
@@ -34,7 +34,7 @@ var beadSpecCmd = &cobra.Command{
 
 var beadPlanCmd = &cobra.Command{
 	Use:        "plan [spec-id]",
-	Short:      "Deprecated: lifecycle managed via beads (ADR-0023)",
+	Short:      "Deprecated: lifecycle managed via beads",
 	Deprecated: "use 'mindspec approve plan' which creates implementation beads",
 	Args:       cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

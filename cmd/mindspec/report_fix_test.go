@@ -302,8 +302,8 @@ func TestADR0038_PlaceholderOnly(t *testing.T) {
 }
 
 // TestBootstrapParadoxDoc_Exists is codex-completeness #4: the named standalone
-// bootstrap-paradox doc artifact exists, is placeholder-only, and cross-links
-// the ADR.
+// bootstrap-paradox doc artifact exists, is placeholder-only, and cites no
+// mindspec ADR (a consumer's own .mindspec/adr/ holds different ADRs).
 func TestBootstrapParadoxDoc_Exists(t *testing.T) {
 	root := repoRootFromTestDir(t)
 	if root == "" {
@@ -320,8 +320,8 @@ func TestBootstrapParadoxDoc_Exists(t *testing.T) {
 	if !strings.Contains(strings.ToLower(body), "bootstrap") || !strings.Contains(strings.ToLower(body), "install") {
 		t.Errorf("bootstrap doc must describe the install-failure bootstrap paradox")
 	}
-	if !strings.Contains(body, "ADR-0038") {
-		t.Errorf("bootstrap doc must cross-link ADR-0038")
+	if strings.Contains(body, "ADR-0038") {
+		t.Errorf("bootstrap doc must not cite mindspec's ADR-0038")
 	}
 	for _, leak := range []string{"ghp_", "sk-", "AKIA", "/Users/", "token="} {
 		if strings.Contains(body, leak) {

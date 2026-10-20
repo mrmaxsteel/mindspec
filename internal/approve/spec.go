@@ -354,7 +354,7 @@ version: "1"
 # the ## ADR Fitness section explains why no ADR applies.
 # adr_citations:
 #   - ADR-XXXX
-# work_chunks: the AUTHORITATIVE dependency-wiring source (spec 097 R3) — the
+# work_chunks: the AUTHORITATIVE dependency-wiring source — the
 # ONLY thing bd dependency edges are wired from. Each chunk's "id" is 1-based
 # and maps positionally to the Nth "## Bead N" section below (chunk id 1 -> the
 # first "## Bead" section, id 2 -> the second, and so on); "depends_on" lists

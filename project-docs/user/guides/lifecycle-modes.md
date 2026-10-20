@@ -1,10 +1,10 @@
 # Lifecycle Modes: The Per-Verb Agreement Table
 
-Spec 128 (lifecycle-verb-state-honesty) audited every lifecycle verb's
+This guide checks every lifecycle verb's
 success state against three independently-computed surfaces — `mindspec
 state show`'s printed mode, the instruct tail's selected guidance
-template, and the phase derivation itself (ADR-0023 §3) — and pinned the
-result here. ADR-0023 keeps derivation **authority** (the rules that
+template, and the phase derivation itself — and pins the
+result here. The phase-derivation rules keep derivation **authority** (the rules that
 produce a phase from epic/bead state); this guide carries the **per-verb
 view**: for each verb's success on its canonical state, what mode do all
 three surfaces report, and where — by explicit design, not omission — do
@@ -67,34 +67,34 @@ with no matching fixture function fails too
 
 | Row | State show | Instruct tail | Derivation | Notes |
 |:----|:-----------|:--------------|:-----------|:------|
-| `spec create → spec` | `spec` | `spec` | `spec` | Pre-epic draft: spec directory + `spec/<id>` branch exist, no epic. Three DISTINCT mechanisms, no double-counting: state show via `resolve.ResolveModeWithCache`'s per-spec draft check; the tail via `ResolveContextFromDirWithCache`'s path-convention `WorktreeSpec` branch; derivation via `resolve.DiscoverDraftSpecsWithCache`, bead 3's own enumerate-all discovery (bd-health-probed, git-branch-verified, on-disk-tree-verified) — the status-aware analog for a no-epic state that `DerivePhaseWithStatus` itself cannot express. **Disclosed scope:** the tail assertion here is the `WorktreeSpec` context-path proxy only, because `internal/phase`'s test package cannot import `cmd/mindspec`'s `emitInstruct` — not because `emitInstruct` is draft-unaware. Bead 5 (AC-3) made the verb's own main-checkout `emitInstruct` invocation consult the same draft-discovery surface before finalizing idle; `cmd/mindspec/verb_output_test.go`'s `TestEmitInstruct_MainCheckoutSingleDraft_RendersSpecModeNotIdle` drives that real invocation end-to-end and confirms it renders spec mode, never idle. |
+| `spec create → spec` | `spec` | `spec` | `spec` | Pre-epic draft: spec directory + `spec/<id>` branch exist, no epic. Three DISTINCT mechanisms, no double-counting: state show via `resolve.ResolveModeWithCache`'s per-spec draft check; the tail via `ResolveContextFromDirWithCache`'s path-convention `WorktreeSpec` branch; derivation via `resolve.DiscoverDraftSpecsWithCache`, the enumerate-all draft discovery (bd-health-probed, git-branch-verified, on-disk-tree-verified) — the status-aware analog for a no-epic state that `DerivePhaseWithStatus` itself cannot express. **Disclosed scope:** the tail assertion here is the `WorktreeSpec` context-path proxy only, because `internal/phase`'s test package cannot import `cmd/mindspec`'s `emitInstruct` — not because `emitInstruct` is draft-unaware. The verb's own main-checkout `emitInstruct` invocation consults the same draft-discovery surface before finalizing idle; `cmd/mindspec/verb_output_test.go`'s `TestEmitInstruct_MainCheckoutSingleDraft_RendersSpecModeNotIdle` drives that real invocation end-to-end and confirms it renders spec mode, never idle. |
 | `spec approve → plan` | `plan` | `plan` | `plan` | Epic just created, no children yet ("Epic exists, no children → plan"). |
-| `plan approve → plan` | `plan` | `plan` | `plan` | **Settled fact 1.** OQ-3 option 1: `plan approve` now writes `mindspec_phase: "plan"` (not `implement`); all lifecycle children exist and are open, none claimed. TRUE three-surface agreement — the pre-128 stored-`implement`/derived-`plan` window is dissolved, not merely suppressed. |
+| `plan approve → plan` | `plan` | `plan` | `plan` | `plan approve` writes `mindspec_phase: "plan"` (not `implement`); all lifecycle children exist and are open, none claimed. TRUE three-surface agreement — the earlier stored-`implement`/derived-`plan` window is dissolved, not merely suppressed. |
 | `next (claim) → implement` | `implement` | `implement` | `implement` | The first lifecycle claim advances stored phase to `implement` (a new writer, `cmd/mindspec/next.go`'s `advancePhaseOnClaim`); one child `in_progress`. |
 | `complete → implement (mid-spec)` | `implement` | `implement` | `implement` | Some lifecycle children closed, some open, none `in_progress` — "between beads" (`derive.go`'s amended row). Fixtured with a `blocked` sibling present alongside the closed+open pair — blocked counts as neither closed nor in_progress, so the "remaining beads blocked" trigger is fixture-backed, not just code-verified. |
 | `complete → plan (empty lifecycle subset)` | `plan` | `plan` | `plan` | Completing a non-lifecycle follow-up (e.g. a `bug`) on an epic with **zero** lifecycle children. The empty-lifecycle-subset fallback — never `review` (the vacuous-review guard). |
-| `complete → plan (all-open, non-lifecycle child completed)` | `plan` | `plan` | `plan` | Completing a non-lifecycle follow-up while every lifecycle task remains open and none was ever claimed. Stored is already `plan` under OQ-3 option 1, so `complete`'s write here is plan-over-plan — never a backward move, needing no sanction (discharges the inherited round-6 R3 / OQ-3-interlock advisory). |
+| `complete → plan (all-open, non-lifecycle child completed)` | `plan` | `plan` | `plan` | Completing a non-lifecycle follow-up while every lifecycle task remains open and none was ever claimed. Stored is already `plan`, so `complete`'s write here is plan-over-plan — never a backward move, needing no sanction. |
 | `complete → review (last bead)` | `review` | `review` | `review` | All lifecycle children closed. |
-| `release → implement (sibling closed)` | `implement` | *(none — see below)* | `implement` | **Tail-less** (R2.1: `release` emits no instruct tail — no template-selection surface exists for this row). Release's step-6.5 sync re-derives from fresh children via the sanctioned redesign leg (`phase.SanctionedDerivedSync`) and writes the child-derived value directly: a sibling bead is already closed, none `in_progress`. |
+| `release → implement (sibling closed)` | `implement` | *(none — see below)* | `implement` | **Tail-less** (`release` emits no instruct tail — no template-selection surface exists for this row). Release's step-6.5 sync re-derives from fresh children via the sanctioned redesign leg (`phase.SanctionedDerivedSync`) and writes the child-derived value directly: a sibling bead is already closed, none `in_progress`. |
 | `release → plan (no sibling closed)` | `plan` | *(none — see below)* | `plan` | Tail-less, same mechanism as above; no sibling closed (all lifecycle children open). TRUE two-surface agreement — the sanctioned sync writes exactly what it derives, no annotated stored/derived split. |
-| `repair phase → plan (v2-reconciliation, already consistent)` | `plan` | *(none — see below)* | `plan` | Tail-less (repair phase emits no instruct tail either, R2.1). A legacy (marker-absent, stored `implement`, all-open) epic runs through `phase.EnsurePhaseSemanticsV2`'s one-shot rewrite first (`repair.go`'s own first step), landing stored `plan` + the v2 marker; the children (still all-open) independently derive `plan` too, so repair's own re-derivation finds `freshStored == freshDerived` — the "already consistent" success line (`Phase for <spec> already consistent: plan`). |
+| `repair phase → plan (v2-reconciliation, already consistent)` | `plan` | *(none — see below)* | `plan` | Tail-less (repair phase emits no instruct tail either). A legacy (marker-absent, stored `implement`, all-open) epic runs through `phase.EnsurePhaseSemanticsV2`'s one-shot rewrite first (`repair.go`'s own first step), landing stored `plan` + the v2 marker; the children (still all-open) independently derive `plan` too, so repair's own re-derivation finds `freshStored == freshDerived` — the "already consistent" success line (`Phase for <spec> already consistent: plan`). |
 | `repair phase → implement (forced backward)` | `implement` | *(none — see below)* | `implement` | Tail-less. Stored `review`, one lifecycle bead reopened to `open` (an operator or out-of-band edit) — a genuine backward disagreement (`phase.IsBackwardMove("review", "implement")` is true). `mindspec repair phase <spec-id> --force-backward "<reason>"` writes the derived value plus a recorded `mindspec_phase_force_reason`, unconditionally, once forced — the ONE way an operator can move phase backward at all (see the writer taxonomy below). |
-| `impl approve / impl adopt → done / idle (terminal)` | `idle` | `idle` | `done` | **Two facts at two layers**, not one row's single mode (R1.3's terminal-rows carve-out). The closed epic with its done marker derives `done` through the status-aware surface directly. Separately, `state show`/the tail report `idle` — a **global, zero-open-epic discovery** outcome (the epic is closed and therefore excluded from every active-epic query), never a per-epic derivation. |
+| `impl approve / impl adopt → done / idle (terminal)` | `idle` | `idle` | `done` | **Two facts at two layers**, not one row's single mode (the terminal-rows carve-out). The closed epic with its done marker derives `done` through the status-aware surface directly. Separately, `state show`/the tail report `idle` — a **global, zero-open-epic discovery** outcome (the epic is closed and therefore excluded from every active-epic query), never a per-epic derivation. |
 
 <!-- /agreement-table:rows -->
 
 ## Carve-outs, spelled out
 
-Spec-create is NOT a carve-out (round-2 tally ruling): R1.3/AC-2 name the
-status-aware derivation surface for every row, and this table does not
+Spec-create is NOT a carve-out: the status-aware derivation surface
+applies to every row, and this table does not
 narrow that on its own authority. Its Derivation cell is asserted against
-`resolve.DiscoverDraftSpecsWithCache` — bead 3's own status-aware,
+`resolve.DiscoverDraftSpecsWithCache` — the status-aware,
 enumerate-all draft-discovery mechanism — invoked independently of the
 tail's context-path call (separate function, separate Cache, no shared
-result). The two carve-outs that ARE spec-authorized:
+result). The two carve-outs that ARE authorized:
 
 - **Release rows and repair phase rows**: both verbs mutate lifecycle
-  state but emit no instruct tail (R2.1) — there is no third surface to
+  state but emit no instruct tail — there is no third surface to
   check, ever, for either verb. All four of these rows assert two-surface
   agreement only, and their Instruct-tail cell is the literal sentinel
   `*(none — see below)*`. Release's and repair's fixtures both drive the
@@ -116,11 +116,10 @@ recognizes them rather than mistaking either for a table violation:
 - **Marker-absent epic with an explicitly-blocked lifecycle child.**
   A legacy (pre-`mindspec_phase_semantics: "v2"`) epic whose derivation
   would otherwise regress no longer self-heals once one of its lifecycle
-  children is explicitly `blocked` (G2 strictness, by design — spec 128
-  bead 2). The chain out is: the stored-vs-derived mismatch warning fires
+  children is explicitly `blocked` (strict by design). The chain out is: the stored-vs-derived mismatch warning fires
   first, and its OWN recovery line is the inspection action `bd show
   <epic-id>` — it deliberately never names the backward write itself
-  (AC-5(iv): a warning must never recommend the move it is warning
+  (a warning must never recommend the move it is warning
   against). Inspecting confirms the epic is genuinely stuck; from there,
   `mindspec repair phase <spec-id>` (unforced) refuses the backward move
   and its OWN refusal output is what names the escape:
@@ -182,9 +181,9 @@ sanctioned backward writer.
   /complete.go`'s `completeSyncPhase` (the step-6.5 writer behind this
   table's `complete` rows) is forward-by-intent in every state this table
   fixtures, but its own doc comment (`completeSyncPhase` in
-  `internal/complete/complete.go` — cited by function name; the previous
-  line-range citation was falsified by a later bead's edits above it) records a
-  narrower reachable residue this bead does not close: in an
+  `internal/complete/complete.go` — cited by function name, not by line
+  range) records a
+  narrower reachable residue that stays open: in an
   out-of-band state not fixtured here — stored `implement` after a
   previously-surfaced release-sync failure, or a crash between a claim
   and `next`'s stored-phase advance, with every lifecycle child still
@@ -192,7 +191,7 @@ sanctioned backward writer.
   value older in lifecycle order, without routing through
   `SanctionedDerivedSync`'s fenced surface. This is accepted as-is (its
   precondition is always a state some OTHER warning already surfaced)
-  and routed to a future bead rather than fixed here. So: the "exactly
+  and left for future work rather than fixed here. So: the "exactly
   one sanctioned backward writer" claim above is precise about
   `SanctionedDerivedSync`'s fenced, general-purpose surface — it is not a
   claim that no code path anywhere can ever produce an equivalent effect.
@@ -214,6 +213,6 @@ See also [merge-safety.md](merge-safety.md) for the release/merge-safety
 verbs this table's `release` rows summarize the state-honesty half of,
 including its "Gate-refused `mindspec complete` converges on a plain
 retry" section for the `complete` rows' gate-before-mutate reorder
-(spec 128 R4, #186) and its `mindspec impl adopt` section for the
+and its `mindspec impl adopt` section for the
 frozen-contract/externally-merged-predecessor guidance this file's
 terminal row's `idle`/`done` split is the destination state of.

@@ -819,7 +819,7 @@ managed-by: mindspec
    against the spec DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
    ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
-   assignments (ADR-0044). This step is guidance, not a mechanized
+   assignments. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
 3. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
@@ -844,7 +844,7 @@ managed-by: mindspec
    against the plan DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
    ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
-   assignments (ADR-0044). This step is guidance, not a mechanized
+   assignments. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
 3. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
@@ -891,7 +891,7 @@ the branch ref (or settle the obligation out-of-band) so
 Skip/abandon hatches do not bypass this refusal. Disclosed residual: a
 bead branch already raw-` + "`git merge`" + `d and then ` + "`bd close`" + `d,
 carrying no durable refutation obligation, leaves nothing for this gate
-to detect — see ADR-0037.
+to detect.
 `,
 	}
 }

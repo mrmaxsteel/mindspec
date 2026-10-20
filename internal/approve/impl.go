@@ -1074,7 +1074,7 @@ func formatOpenChildHint(specID string, open []phase.ChildInfo) string {
 		}
 	}
 	return fmt.Sprintf(
-		"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent', mindspec-bk5t)\n",
+		"hint: spec %s reached review with open non-lifecycle follow-up child(ren) not blocking the lifecycle: %s\nrecovery: leave attached, or re-file as standalone backlog with 'bd create' then close the epic child — do NOT use 'bd update <id> --parent \"\"' (the detach is not reflected in 'bd list --parent')\n",
 		idrender.Spec(specID), strings.Join(names, ", "))
 }
 

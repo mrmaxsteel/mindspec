@@ -35,7 +35,7 @@ or to something else entirely — only the repo can tell you).
 
 Manifest schema: a ` + "`paths:`" + ` list of globs, plus an
 optional ` + "`exclude:`" + ` list of globs subtracted from
-` + "`paths`" + ` (see spec 086 / ADR-0031). Entries whose first
+` + "`paths`" + `. Entries whose first
 path segment is ` + "`viz`, `agentmind`, or `bench`" + ` are a
 HARD ERROR — those subsystems are out of doc-sync scope;
 never claim paths under them.

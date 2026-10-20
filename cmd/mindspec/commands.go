@@ -27,8 +27,8 @@ to declare THIS repo's build/test commands under commands: in
 .mindspec/config.yaml. Once populated, "mindspec init" and every
 "mindspec setup <agent>" verb render the declared commands as the
 managed AGENTS.md "Build & Test" section — mindspec never guesses your
-build system (ADR-0036 ZFC), and never plants its OWN build commands
-into a consuming repo (ADR-0040's consumer-identity clause). Writes
+build system, and never plants its OWN build commands
+into a consuming repo. Writes
 nothing.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

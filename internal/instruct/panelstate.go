@@ -350,7 +350,7 @@ func renderInProgressBeads(entries []BeadStateEntry) string {
 	var b strings.Builder
 	b.WriteString("## In-Progress Beads\n\n")
 	b.WriteString("Claimed beads (IN_PROGRESS) with their worktree and last commit. ")
-	b.WriteString("Git detail is capped at the active bead + 3 others (Req 14).\n")
+	b.WriteString("Git detail is capped at the active bead + 3 others.\n")
 
 	for i, e := range entries {
 		if i >= inProgressDetailCap {

@@ -591,8 +591,7 @@ func checkBeadsMergeDriver(r *Report, root string) {
 			Name:   "Beads merge driver",
 			Status: Error,
 			Message: fmt.Sprintf("merge.beads.driver %q invokes `bd merge`, which was removed in bd 1.0.x — "+
-				"every both-sides-changed merge of .beads/issues.jsonl fails, leaving the path unmerged "+
-				"(incident 2026-06-11)", driver) + recovery,
+				"every both-sides-changed merge of .beads/issues.jsonl fails, leaving the path unmerged", driver) + recovery,
 		})
 		return
 	}

@@ -18,13 +18,12 @@ var contextBeadCmd = &cobra.Command{
 	Use:   "bead <bead-id>",
 	Short: "Generate bead context from bd show",
 	Long: `Generate bead-scoped context to stdout.
-Reads pre-populated fields from bd show --json (Spec 074).
+Reads pre-populated fields from bd show --json.
 
-When --max-tokens N is supplied (N >= 0), the new spec 088 budgeted
-layout is emitted via contextpack.BuildBead with tokenize.Approx as
-the token counter. When --max-tokens is NOT passed, the legacy
-contextpack.RenderBeadContext path is used to preserve byte-identical
-output for callers that rely on it (HC-2 / HC-3 golden assertions).`,
+When --max-tokens N is supplied (N >= 0), a token-budgeted
+layout is emitted, with an approximate token counter. When --max-tokens
+is NOT passed, the legacy layout is used to preserve byte-identical
+output for callers that rely on it.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		beadID := args[0]

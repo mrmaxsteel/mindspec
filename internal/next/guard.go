@@ -554,7 +554,7 @@ func IgnoredDirtNotice(ignoredDirt []string) string {
 	for i, p := range ignoredDirt {
 		quoted[i] = strconv.Quote(p)
 	}
-	return fmt.Sprintf("note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked — ADR-0025 R5.1): %s", strings.Join(quoted, ", "))
+	return fmt.Sprintf("note: claiming despite unrelated dirty path(s) this claim does not touch (not blocked): %s", strings.Join(quoted, ", "))
 }
 
 // DirtyTreeFailure formats the blocking user-dirt guard failure for
@@ -590,7 +590,7 @@ func DirtyTreeFailure(cwd string, userDirt []string, activeWorktree string) erro
 		fmt.Fprintf(&b, "  %s\n", termsafe.Escape(p))
 	}
 	b.WriteString("these may be the user's work in progress — do NOT stash, discard, or commit them on the user's behalf\n")
-	b.WriteString("(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)\n")
+	b.WriteString("(.beads/issues.jsonl is auto-handled and never blocks)\n")
 	b.WriteString(workspace.ContextLine(cwd, cwd))
 	if activeWorktree != "" && !pathWithin(cwd, activeWorktree) {
 		return guard.NewFailure(b.String(),

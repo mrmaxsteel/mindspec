@@ -46,10 +46,10 @@ import (
 
 var reattestCmd = &cobra.Command{
 	Use:   "reattest <bead-id>",
-	Short: "Re-attest an already-merged bead's landed-binding from independent git topology (ADR-0041 §2(ii))",
+	Short: "Re-attest an already-merged bead's landed-binding from independent git topology",
 	Long: `Explicit, operator-invoked, fail-closed recovery for an already-merged
-bead whose merge-time landed-binding is missing or stale (the pre-125
-fleet state): DERIVES the binding from an independent git scan of the
+bead whose merge-time landed-binding is missing or stale (for example,
+a bead merged before landed-bindings were recorded): DERIVES the binding from an independent git scan of the
 spec branch — a two-parent first-parent merge whose subject names this
 bead (ownership) and whose topology proves it landed (landed-ness) —
 and writes ONLY the scan-derived SHAs, together with an inspectable
@@ -61,13 +61,14 @@ fallback is available. It requires exactly one candidate, no contradicting
 surviving tip, and content not reverted at the current tip; read errors
 refuse. Registrations are advisory only. Acceptance writes an audited
 tuple, checked again with git safety on subsequent reads. Fallback
-refusals offer the dependent's evidenced MF-3 override, never q9ea.
+refusals offer the dependent's evidenced MF-3 override, never the
+human attested-restore.
 
 Fail-closed: with no owned exact merge it REFUSES (no guess, no write)
-to the audited ADR-0035 q9ea human attested-restore exit. There is no
+to the audited human attested-restore exit. There is no
 bypass flag, and no way to assert a merge/second-parent pair — an
 operator-asserted pair corroborating itself is circular and
-inadmissible (ADR-0041 §2(ii), spec 125 amendment).
+inadmissible.
 
 --spec-branch names WHERE to scan when the bead has NO epic linkage
 recorded; the linkage wins whenever derivable, and a FAILED linkage
@@ -283,10 +284,10 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 		// deliberately non-mechanical (verify before running, never blind).
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s.\n"+
-				"this is the genuinely-no-mechanical-corroboration state — the blessed exit is the audited ADR-0035 mindspec-q9ea human attested-restore: locate the merge you believe carried this bead's work, VERIFY it by inspecting its diff, then restore the branch ref at its second parent (`git branch %s <verified-second-parent-sha>`) — never run it blindly.",
+				"this is the genuinely-no-mechanical-corroboration state — the blessed exit is the audited human attested-restore: locate the merge you believe carried this bead's work, VERIFY it by inspecting its diff, then restore the branch ref at its second parent (`git branch %s <verified-second-parent-sha>`) — never run it blindly.",
 				safeBeadID, r.Detail, beadBranch),
 			inspect,
-			fmt.Sprintf("git branch %s <verified-second-parent-sha>   (ADR-0035 q9ea attested-restore — human verification REQUIRED first)", beadBranch),
+			fmt.Sprintf("git branch %s <verified-second-parent-sha>   (attested-restore — human verification REQUIRED first)", beadBranch),
 		)
 	case lifecycle.ReattestStateAmbiguous:
 		return guard.NewFailure(

@@ -612,7 +612,7 @@ func TestIgnoredDirtNotice_PinsStableWording(t *testing.T) {
 	msg := IgnoredDirtNotice([]string{"foo.txt"})
 	for _, want := range []string{
 		"claiming despite unrelated dirty path(s)",
-		"not blocked — ADR-0025 R5.1",
+		"(not blocked)",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("notice missing stable substring %q: %q", want, msg)

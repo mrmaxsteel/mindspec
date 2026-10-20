@@ -33,7 +33,7 @@ func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
 					t.Errorf("refusal %q missing %q", text, want)
 				}
 			}
-			if strings.Contains(text, "q9ea") || strings.Contains(text, "git branch") {
+			if strings.Contains(text, "attested-restore:") || strings.Contains(text, "git branch") {
 				t.Fatalf("fallback offered ineffective attested-restore: %s", text)
 			}
 		})
@@ -243,8 +243,8 @@ func TestReattestRefusalRendering(t *testing.T) {
 				t.Errorf("refusal for %s lacks a final recovery line (ADR-0035): %v", state, err)
 			}
 			if state == lifecycle.ReattestStateNoOwnedMerge {
-				if !strings.Contains(err.Error(), "q9ea") || !strings.Contains(err.Error(), "attested-restore") {
-					t.Errorf("truly-bare refusal must name the ADR-0035 q9ea attested-restore exit, got %v", err)
+				if !strings.Contains(err.Error(), "human attested-restore") {
+					t.Errorf("truly-bare refusal must name the human attested-restore exit, got %v", err)
 				}
 				if !strings.Contains(strings.ToLower(err.Error()), "verify") {
 					t.Errorf("the q9ea exit is deliberately non-mechanical — the message must demand verification first, got %v", err)

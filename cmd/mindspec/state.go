@@ -25,9 +25,9 @@ var stateCmd = &cobra.Command{
 var stateSetCmd = &cobra.Command{
 	Use:   "set",
 	Short: "Set the current mode and active work (deprecated)",
-	Long:  `Deprecated: lifecycle state is now derived from beads (ADR-0023). This command is a no-op.`,
+	Long:  `Deprecated: lifecycle state is now derived from beads. This command is a no-op.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("state set is deprecated: lifecycle state is now derived from beads (ADR-0023)")
+		fmt.Println("state set is deprecated: lifecycle state is now derived from beads")
 		return nil
 	},
 }

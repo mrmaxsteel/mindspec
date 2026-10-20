@@ -35,6 +35,8 @@ var historicalSkillsFS embed.FS
 //     frozen snapshot. Skill names never contain a dot.
 //     The pre129 snapshots preserve the override comparison and bare-flag
 //     revisions of ms-bead-impl and ms-bead-cycle for schema-v2 refresh.
+//     The presurface snapshots preserve every skill body that cited
+//     mindspec-internal records before those citations were removed.
 //   - The marker-less variant of each lifecycle skill: pre-093 lifecycle
 //     skills shipped without the `managed-by: mindspec` frontmatter line, so
 //     stripping that line from the current canonical content reconstructs the

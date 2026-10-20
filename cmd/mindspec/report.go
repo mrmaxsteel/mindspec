@@ -92,9 +92,9 @@ friction report store (reports.jsonl), collapsing events by fingerprint.
 v1 is OWNER-LOCAL: report writes the local report store only and attempts NO
 remote push (the owner's cross-install push is deferred). It NEVER writes to
 the beads tracker, .beads/issues.jsonl, or any bd/dolt/git path — the friction
-store is isolated from the shared remote (HC-3).
+store is isolated from the shared remote.
 
-In CI (GITHUB_ACTIONS set) report is a no-op beyond the journal (HC-6).`,
+In CI (GITHUB_ACTIONS set) report is a no-op beyond the journal.`,
 		Args: cobra.NoArgs,
 		RunE: runReport,
 	}
@@ -135,7 +135,7 @@ func runReport(cmd *cobra.Command, _ []string) error {
 	if inCI() {
 		// HC-6: in CI, report is a no-op beyond the journal — no report write,
 		// no prompt, no push.
-		fmt.Fprintln(out, "report: CI detected (GITHUB_ACTIONS) — no-op beyond the journal (HC-6).")
+		fmt.Fprintln(out, "report: CI detected (GITHUB_ACTIONS) — no-op beyond the journal.")
 		return nil
 	}
 

@@ -7,16 +7,16 @@ description: Stage a pre-built implementation prompt for a claimed bead (Phase A
 
 Land one PR-sized implementation for a single claimed bead. You orchestrate; the subagent codes. Two phases: **A** stages a structured prompt, **B** dispatches the subagent with it. Phase A was previously the separate `/ms-bead-prep` skill; it is folded in here so prompt-staging is part of dispatch, not ad-hoc improvisation.
 
-**Why staged prompts matter.** On lola spec-050, pre-staged prompts were the single biggest quality lever on impl-subagent output. A subagent given a structured prompt with explicit files, helpers, ACs, and boundaries produced a passing-first-round implementation; the same subagent given a one-line "implement bead 1" produced rework on round 2. The pattern is documented in `plugins/mindspec/FINDINGS.md` (item 3).
+**Why staged prompts matter.** Pre-staged prompts are the biggest quality lever on impl-subagent output. A subagent given a structured prompt with explicit files, helpers, ACs, and boundaries usually passes on the first round; the same subagent given a one-line "implement this bead" usually needs rework.
 
 Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in every subagent prompt — do not re-transcribe them here.
 
 ## Inputs
 
-- `bead-id` (required) — the `bd` id, e.g. `lola-8gbp.3`.
+- `bead-id` (required) — the `bd` id, e.g. `proj-a1b2.3`.
 - `prompt-path` (optional) — pre-staged implementation prompt at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`. If supplied, skip Phase A and read it; if absent, run Phase A to stage one.
 
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; prep prompts and panel artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
+> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; prep prompts and panel artifacts are co-located under `<spec-dir>/reviews/`.
 
 ## Ingress — readiness re-check (EVERY dispatch path)
 
@@ -26,9 +26,9 @@ Run this FIRST, unconditionally, before the Phase-A-skip decision below — on e
 mindspec bead ready-check <bead-id>
 ```
 
-This is not part of Phase A and it is not optional. It runs whether Phase A stages a fresh prompt, a `prompt-path` was supplied (which skips Phase A entirely), or the documented manual `bd update --claim --status in_progress` / `git worktree add` fallback was used instead of `mindspec next` (step 0's belt-and-braces path). None of those paths may bypass this check — a bead claimed before spec 124 shipped, or a plan/spec hand-edited after the claim, is caught here at dispatch time even if it slipped past `mindspec next`'s own gate.
+This is not part of Phase A and it is not optional. It runs whether Phase A stages a fresh prompt, a `prompt-path` was supplied (which skips Phase A entirely), or the documented manual `bd update --claim --status in_progress` / `git worktree add` fallback was used instead of `mindspec next` (step 0's belt-and-braces path). None of those paths may bypass this check — a bead claimed before the readiness gate existed, or a plan/spec hand-edited after the claim, is caught here at dispatch time even if it slipped past `mindspec next`'s own gate.
 
-<!-- staged-rule: target=next-action (ADR-0045 step 4, spec 133); remove-by=2027-06-30 (provisional; the spec-131 rule table may revise it) -->
+<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->
 Run `mindspec bead ready-check <id>`; proceed on exit 0; otherwise stop and surface its report.
 
 - **Re-dispatch** — if `bd show <bead-id>` reveals a `mindspec_readiness_attempt` metadata key (written by `mindspec bead clarify`), read the record and inject its entries, keyed by ordinal, into the staged prompt's `## Phase 0` / `## Readiness Clarification` sections below. The injection iterates the record's `report` array: EVERY originally-cited reason is rendered, never a subset. For EACH report ordinal you MUST render BOTH the original cited NOT-READY reason (verbatim from the record's `report` array — the `{ordinal, signal, reason}` entry) AND its paired clarification (from the record's `clarifications` array — the `{ordinal, reason, answer, span}` entry); a report ordinal with NO paired clarification MUST still be rendered, with `clarification: (none recorded)`, so the fresh Phase 0 sees the unaddressed reason and re-reports NOT READY for it — the anti-browbeat rule cannot be evaded by clarifying only some reasons. Pairing the original reason with its answer is load-bearing: the re-dispatched Phase 0 cannot apply the anti-browbeat rule (judging whether the clarification genuinely RESOLVES the reason) if it never sees the reason it is supposed to resolve. If the stored record is malformed (an empty `report` array, a clarification citing an ordinal absent from `report`, or a pairing that cannot be established), STOP — fail closed to the NOT-READY routing rather than dispatching with a partial injection. The injected record is SUPPLEMENTARY EVIDENCE for the fresh Phase 0's own review, never a substitute for it: the record's `report` array is operator-supplied and may itself omit originally-cited reasons, so it must NEVER be treated as the complete cited-set or as a bound on what Phase 0 re-reviews (see the independent re-derivation rule in the Phase 0 block).
@@ -84,7 +84,7 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
 
    If ANY signal FAILS, make **zero commits** and return a report whose first line is EXACTLY `NOT READY: <bead-id>`, followed by reasons numbered by **ordinal** (1, 2, … — each unique within the report), each tagged with its signal ID (one of `SR-1`, `SR-2`, `SR-3`, `SR-4`, `SR-5`) and quoting the offending or missing span **verbatim**, plus the concrete unblocking question.
 
-   **Clarification-handling rule (anti-browbeat, R8c)**: on a re-dispatch, each `## Readiness Clarification` entry below pairs, per ordinal, the ORIGINAL cited NOT-READY reason with the clarification that answers it. Judge whether the clarification actually **resolves** its paired original reason against the cited source span — a bare "it's ready" never suffices, and an entry must never be read as license to invent new normative behavior. Any cited reason ordinal that lacks a mapped, span-grounded clarification, OR whose clarification does not genuinely resolve the paired original reason, MUST be **re-reported NOT READY** — do not let a plausible-sounding but ungrounded clarification talk you into READY.
+   **Clarification-handling rule (anti-browbeat)**: on a re-dispatch, each `## Readiness Clarification` entry below pairs, per ordinal, the ORIGINAL cited NOT-READY reason with the clarification that answers it. Judge whether the clarification actually **resolves** its paired original reason against the cited source span — a bare "it's ready" never suffices, and an entry must never be read as license to invent new normative behavior. Any cited reason ordinal that lacks a mapped, span-grounded clarification, OR whose clarification does not genuinely resolve the paired original reason, MUST be **re-reported NOT READY** — do not let a plausible-sounding but ungrounded clarification talk you into READY.
 
    **Independent re-derivation rule (re-dispatch)**: on a re-dispatch, run your OWN fresh SR-1..SR-5 review from the spec/plan material quoted above, exactly as on a first dispatch — RE-DERIVE your reasons independently before consulting the `## Readiness Clarification` entries. The injected clarification record is supplementary evidence, NOT a closed checklist of the only reasons to consider: its `report` array is operator-supplied and may omit reasons the original Phase 0 actually cited, so never treat "every injected entry is addressed" as READY. Re-report NOT READY for ANY genuinely-unresolved concern you re-derive yourself — including a concern that appears nowhere in the injected record. A clarification only helps if it genuinely resolves a reason YOU independently still find.
 

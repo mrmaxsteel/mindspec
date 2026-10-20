@@ -571,7 +571,7 @@ func adoptStaleBranchPresentRefusal(specID, specBranch string, outcome guard.Des
 func adoptOrphanPresentRefusal(root, specID, beadID, beadBranch string) error {
 	hint := adoptEvaluateOrphanHintFn(root, beadID, beadBranch, specID)
 	msg := fmt.Sprintf(
-		"spec %s's epic has a closed bead %s whose branch %s still exists and is not landed in main — this is the composite incident state (a stale bead branch alongside externally-landed spec content); adopting now, before that branch's state is resolved, is refused",
+		"spec %s's epic has a closed bead %s whose branch %s still exists and is not landed in main — this is the composite state (a stale bead branch alongside externally-landed spec content); adopting now, before that branch's state is resolved, is refused",
 		idrender.Spec(specID), idrender.Bead(beadID), termsafe.Escape(beadBranch),
 	)
 	if hint.EvidenceNote != "" {

@@ -197,8 +197,8 @@ func TestReattest_RefusesTrulyBare(t *testing.T) {
 	if !errors.As(err, &refusal) || refusal.State != ReattestStateNoOwnedMerge {
 		t.Fatalf("expected %s refusal, got %v", ReattestStateNoOwnedMerge, err)
 	}
-	if !strings.Contains(refusal.Detail, "q9ea") {
-		t.Errorf("truly-bare refusal must name the q9ea attested-restore exit, got %q", refusal.Detail)
+	if !strings.Contains(refusal.Detail, "human attested-restore") {
+		t.Errorf("truly-bare refusal must name the human attested-restore exit, got %q", refusal.Detail)
 	}
 	if !strings.Contains(refusal.Detail, "no first-parent or admitted reachable merge on spec/125-test names bead/bead-one") {
 		t.Errorf("no-owned refusal must name both scans: %q", refusal.Detail)

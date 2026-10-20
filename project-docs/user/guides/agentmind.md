@@ -184,7 +184,7 @@ Replay a recorded session:
 ./bin/mindspec agentmind replay session.ndjson --speed 0
 
 # Replay a specific spec's recording
-./bin/mindspec agentmind replay --spec 022-agentmind-viz-mvp
+./bin/mindspec agentmind replay --spec 001-my-feature
 
 # Filter to a specific lifecycle phase
 ./bin/mindspec agentmind replay session.ndjson --phase implement

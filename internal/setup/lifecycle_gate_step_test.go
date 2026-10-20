@@ -117,7 +117,7 @@ func enforcementNotePresent(content string) bool {
 // `mindspec panel create` invocation (bounded — codex G1), binds
 // "do NOT run <the CORRECT approve verb>" to the
 // "until `/ms-panel-tally` returns Allow" instruction (bounded, in the
-// SAME literal — a wrong-verb swap REDs this), cites ADR-0044, and
+// SAME literal — a wrong-verb swap REDs this), cites no mindspec ADR, and
 // carries the portable "binary enforcement ... separate, tracked
 // enhancement" note.
 func TestLifecycleGateStep_NamesGateVerbAndEnforcementNote(t *testing.T) {
@@ -134,8 +134,8 @@ func TestLifecycleGateStep_NamesGateVerbAndEnforcementNote(t *testing.T) {
 			if !notBeforeTallyVerbPresent(content, tc.verb) {
 				t.Errorf("%s literal missing the bounded \"do NOT run `%s` ... until `/ms-panel-tally` returns Allow\" fragment", tc.name, tc.verb)
 			}
-			if !strings.Contains(content, "ADR-0044") {
-				t.Errorf("%s literal missing the ADR-0044 citation", tc.name)
+			if strings.Contains(content, "ADR-0044") {
+				t.Errorf("%s literal must not cite mindspec's ADR-0044", tc.name)
 			}
 			if !enforcementNotePresent(content) {
 				t.Errorf("%s literal missing the portable \"binary enforcement of these gates is a separate, tracked enhancement\" note", tc.name)

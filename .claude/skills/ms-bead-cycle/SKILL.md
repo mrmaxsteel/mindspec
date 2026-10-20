@@ -16,7 +16,7 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orch
 - `max-rounds` (default `3`) — stop iterating after this many panel rounds.
 - `prompt-path` (optional) — pre-staged impl prompt at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`.
 
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel and prep artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
+> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel and prep artifacts are co-located under `<spec-dir>/reviews/`.
 
 ## Step 0 — pick + claim the next bead
 
@@ -24,7 +24,7 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orch
    ```bash
    bd ready 2>&1 | grep "<spec-prefix>"
    ```
-   `bd ready` already filters to beads with no blocking deps. **Cross-check against the plan's `Depends on:` lines** for each bead — `bd` and the plan can disagree (lola spec-050: `bd` showed Bead 5 ready while the plan said it depended on Beads 1-4). When they disagree, **trust the plan**, and fix `bd` (`bd update <bead> --add-dep <blocker>`) before proceeding.
+   `bd ready` already filters to beads with no blocking deps. **Cross-check against the plan's `Depends on:` lines** for each bead — `bd` and the plan can disagree (for example, `bd` can show a bead as ready while the plan says it depends on earlier beads). When they disagree, **trust the plan**, and fix `bd` (`bd update <bead> --add-dep <blocker>`) before proceeding.
 
 2. **Disambiguate multiple active specs.** If `mindspec state show` reports more than one active spec, ask the user which to focus on — never guess.
 
@@ -74,7 +74,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
 merge terminal         (panel-approved bead — mindspec complete)
 ```
 
-## NOT READY — pre-damage triage (spec 124 R5/R8)
+## NOT READY — pre-damage triage
 
 `/ms-bead-impl`'s dispatch ingress (`mindspec bead ready-check`, plus the staged prompt's Phase 0) can refuse a bead before any code is written. A subagent return whose first line is `NOT READY: <bead-id>` is its OWN outcome, handled distinctly from every other outcome:
 
@@ -112,11 +112,11 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
    ```bash
    git -C <spec-worktree> log --oneline -3   # should show `Merge bead/<bead-id>` at top
    ```
-   (`FormatResult` prints no merge SHA, so the `git log` is the merge-commit verify.)
+   (`mindspec complete` prints no merge SHA, so the `git log` is the merge-commit verify.)
 
 3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).
 
-> The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: 092 Bead 5's honest user-dirt blocking and `FormatResult`'s closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the in-binary `mindspec complete` gate's dirty-tree Block (Spec 093 Req 11). Don't re-add the checklist as prose.
+> The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: `mindspec complete`'s user-dirt blocking and its closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the in-binary `mindspec complete` gate's dirty-tree Block. Don't re-add the checklist as prose.
 
 **Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.
 
@@ -131,7 +131,7 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
 
 The headline signal is when every Claude-family slot APPROVEs while one or more Codex slots REQUEST_CHANGES (or vice versa). Pay particular attention:
 
-The field evidence runs BOTH directions, stated portably: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed (ADR-0044): reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
+Evidence runs BOTH directions: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed: reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
 
 | Pattern | Likely meaning | Action |
 |:--------|:---------------|:-------|
@@ -147,7 +147,7 @@ The field evidence runs BOTH directions, stated portably: CLI reviewers catch re
 - Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
 - Resolve each REQUEST_CHANGES finding before merge. Fix it, refute it with evidence, or defer it to a validated follow-up bead. Re-run tally.
 - Don't run `mindspec complete` until `/ms-panel-tally` decided merge — the merge is destructive of the bead branch.
-- Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block (gate leg 7), not a replacement for it (ADR-0044).
+- Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block in the `mindspec complete` gate, not a replacement for it.
 
 ## Then
 
