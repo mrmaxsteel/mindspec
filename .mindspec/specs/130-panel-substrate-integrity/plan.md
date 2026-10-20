@@ -16,6 +16,7 @@ work_chunks:
     key_file_paths:
       - internal/config/config.go
       - internal/config/config_test.go
+      - cmd/mindspec/config_test.go
       - internal/setup/review_discipline_test.go
       - plugins/mindspec/skills/ms-panel-run/SKILL.md
       - .claude/skills/ms-panel-run/SKILL.md
@@ -97,9 +98,14 @@ work_chunks:
       - internal/panel/tally.go
       - internal/panel/tally_test.go
       - internal/panel/handedit.go
+      - internal/panel/panel_decision_test.go
+      - internal/panel/refutation_test.go
+      - internal/panel/votedecision_test.go
       - cmd/mindspec/panel.go
       - cmd/mindspec/panel_ruleline_test.go
       - internal/instruct/panelstate.go
+      - internal/instruct/panelstate_test.go
+      - internal/instruct/panelstate_hostile_test.go
       - internal/complete/panel_advisory.go
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
@@ -117,6 +123,7 @@ work_chunks:
       - internal/complete/panel_refuted_test.go
       - internal/lifecycle/landed.go
       - internal/lifecycle/landed_test.go
+      - internal/guard/registries.go
       - .mindspec/domains/core/interfaces.md
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
@@ -129,6 +136,7 @@ work_chunks:
       - cmd/mindspec/panel_abandon.go
       - cmd/mindspec/panel_verbs_test.go
       - internal/lint/ratchet_argv_table_test.go
+      - internal/guard/registries.go
       - plugins/mindspec/skills/ms-panel-tally/SKILL.md
       - plugins/mindspec/skills/ms-panel-run/SKILL.md
       - plugins/mindspec/skills/ms-bead-impl/SKILL.md
@@ -165,6 +173,7 @@ work_chunks:
       - internal/complete/complete.go
       - internal/approve/impl.go
       - internal/approve/impl_test.go
+      - internal/guard/registries.go
       - .mindspec/domains/execution/interfaces.md
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/specs/129-readiness-tracker-honesty/spec.md
@@ -184,6 +193,7 @@ work_chunks:
       - internal/complete/complete.go
       - internal/approve/impl.go
       - internal/approve/impl_test.go
+      - internal/guard/registries.go
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
       - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
@@ -201,6 +211,9 @@ work_chunks:
       - internal/complete/complete.go
       - internal/approve/impl.go
       - internal/approve/impl_test.go
+      - internal/panel/passrule.go
+      - internal/panel/passrule_test.go
+      - internal/guard/registries.go
       - plugins/mindspec/skills/ms-panel-tally/SKILL.md
       - plugins/mindspec/skills/ms-panel-run/SKILL.md
       - .claude/skills/ms-panel-tally/SKILL.md
@@ -214,12 +227,19 @@ work_chunks:
   - id: 12
     depends_on: [4]
     key_file_paths:
+      - internal/executor/executor.go
       - internal/executor/mindspec_executor.go
       - internal/executor/mock.go
       - internal/executor/merge_binding_test.go
       - internal/complete/complete.go
       - internal/complete/panel_advisory.go
       - internal/complete/panel_landed_review_test.go
+      - internal/complete/panel_advisory_test.go
+      - internal/complete/panel_advisory_hostile_test.go
+      - internal/complete/panel_adhoc_isolation_test.go
+      - internal/complete/panel_gate_layout_test.go
+      - internal/complete/panel_gate_untracked_test.go
+      - internal/complete/panel_gate_e2e_test.go
       - .mindspec/domains/execution/interfaces.md
       - .mindspec/domains/workflow/interfaces.md
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
@@ -230,7 +250,7 @@ work_chunks:
 ## ADR Fitness
 
 - **ADR-0030 (executor boundary)**: stays fit. `internal/complete` and `internal/approve` get `ls-tree` and `check-ignore` through two new Executor methods (Beads 4 and 9). They never import `gitutil`. `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` stays green.
-- **ADR-0035 (agent error contract)**: stays fit. Every new refusal uses `guard.NewFailure` with one `recovery:` line. New recovery templates go into `internal/guard/registries.go`.
+- **ADR-0035 (agent error contract)**: stays fit. Every new refusal uses `guard.NewFailure` with one `recovery:` line. Register each recovery with an unprovable operand in `guard.OpaqueOperandRegistry` (`internal/guard/registries.go`).
 - **ADR-0037 (panel gate contract)**: amended. Bead 4 appends the `## Amendment (Spec 130)` section. Beads 6, 7, 8, 9, 10, 11 and 12 add bullets to it for the code that each one ships. See "ADR landing" below.
 - **ADR-0041 (gate before mutate)**: amended. Bead 7 appends the section and a back-pointer at datum (c) to R3.5. All verbs check before they write.
 - **ADR-0043 (disposition store)**: amended. Bead 1 appends the `## Amendment (Spec 130)` section, adds the inline back-pointer at the Spec-126 bullet, and keeps the `## Amendment (Spec 126)` heading. Beads 6, 9, 10 and 11 add bullets.
@@ -245,10 +265,11 @@ Each bead that edits an ADR adds its own pin file `internal/validate/adr_spec130
 - **Integration tests** in `internal/complete` use real temp git repos, `setupPanelGateRepo` (`internal/complete/panel_gate_e2e_test.go`) and `fakeBdOnPath` (`internal/complete/fault_injection_realgit_test.go`). These helpers are package-private. Tests in `internal/approve` and `cmd/mindspec` copy their pattern into a local helper. The `defer` checks use a fake `bd` on PATH.
 - **Hatch seams**: `complete` tests set `panelSkipEnvFn` (`internal/complete/panel_advisory.go`). `internal/approve` has no seam today (`runOrphanObligationGate`: "Hatches ... are never consulted here"). Bead 10 adds `implPanelSkipEnvFn` in `internal/approve/impl.go`, and Bead 11 uses it. Tests do not set real environment variables.
 - **Argv ratchet**: each new exec site adds one row to `internal/lint/ratchet_argv_table_test.go` (`TestArgvIDOperandGated`).
+- **Recovery operands**: a bead that adds a recovery line with a substituted command operand registers it in `guard.OpaqueOperandRegistry` (`internal/guard/registries.go`). `go test ./internal/lint/... -run TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned` (`internal/lint/destructive_guidance_test.go`) fails on an unregistered one.
 - **Union merge**: parallel beads can add rows to the ratchet table and bullets to the same ADR `## Amendment (Spec 130)` section. Merge them as a union. Keep every row and every bullet.
 - **Real verification**: a Verification line counts only when `go test <pkg> -list '<regex>'` prints each test that the bead names. `[no tests to run]` is a failure.
 - **Boundary tests**: `TestEnforcementHasNoGitLeaks` is in `internal/lint/boundary_test.go`. Run it with `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks`. `TestPanelLeafImports_StdlibPlusTermsafeOnly` runs in `./internal/panel/...`.
-- **Doc-sync**: `complete` runs the doc-sync gate. `runCommittedRangeGate` calls `validate.ValidateDocsRange` (`internal/complete/complete.go`), and the snapshot path calls `validate.ValidateDocsSnapshot` (`internal/complete/materialize.go`). In `internal/validate/docsync.go`, `isSourceFile` counts non-test `.go` files under `internal/` or `cmd/`. `checkInternalPackages` maps each `internal/` file to its domain through `OWNERSHIP.yaml`. It fails with "internal sources in domain %q changed ... but no doc updates under" unless a doc under `.mindspec/domains/<domain>/` changes in the same range. A `cmd/` change only warns. Thus each bead updates the `interfaces.md` of each domain whose `internal/` code it changes: `core` (`internal/config`), `execution` (`internal/executor`, `internal/gitutil`, `internal/bead`) and `workflow` (`internal/panel`, `internal/complete`, `internal/approve`, `internal/next`, `internal/instruct`, `internal/lifecycle`, `internal/bootstrap`, `internal/guard`). No bead uses `--allow-doc-skew`. `validateSpecArtifactSync` accepts a spec 129 `spec.md` change only with an ADR or sibling change; Beads 8 and 9 edit an ADR in the same range.
+- **Doc-sync**: `complete` runs the doc-sync gate. `runCommittedRangeGate` calls `validate.ValidateDocsRange` (`internal/complete/complete.go`), and the snapshot path calls `validate.ValidateDocsSnapshot` (`internal/complete/materialize.go`). In `internal/validate/docsync.go`, `isSourceFile` counts non-test `.go` files under `internal/` or `cmd/`. `checkInternalPackages` maps each `internal/` file to its domain through `OWNERSHIP.yaml`. It fails with "internal sources in domain %q changed ... but no doc updates under" unless a doc under `.mindspec/domains/<domain>/` changes in the same range. `cmd/**` is in the workflow domain too (`.mindspec/domains/workflow/OWNERSHIP.yaml`), so a `cmd/` source change needs a workflow doc change. Thus each bead updates the `interfaces.md` of each domain whose `internal/` or `cmd/` code it changes: `core` (`internal/config`), `execution` (`internal/executor`, `internal/gitutil`, `internal/bead`) and `workflow` (`cmd/`, `internal/panel`, `internal/complete`, `internal/approve`, `internal/next`, `internal/instruct`, `internal/lifecycle`, `internal/bootstrap`, `internal/guard`). No bead uses `--allow-doc-skew`. `validateSpecArtifactSync` accepts a spec 129 `spec.md` change only with an ADR or sibling change; Beads 8 and 9 edit an ADR in the same range.
 - **Every bead** ends with `gofmt -l .` (empty output) and `go build ./... && go test ./... -short` (AC-27).
 - **Dogfood boundary**: this spec changes the panel gate that the lane itself uses. Bead panels run on the installed v0.16.0 binary, not a spec-branch build. No branch build is installed during the run.
 
@@ -260,13 +281,13 @@ Each bead that edits an ADR adds its own pin file `internal/validate/adr_spec130
 3. Make `PanelExpectedReviewers` resolve through the per-gate defaults. A `create` without `--gate` uses the `adhoc` size (6). Make `PanelGateAdvisoryDefault` use the size of the recorded gate.
 4. Apply the sum-below-2 check and the `approve_threshold` range check only to an explicit global list. Do not range-check `panel.gates.<g>.approve_threshold`. A config with no `panel.reviewers` and `approve_threshold: 3` loads. A config with only `panel.gates.bead.approve_threshold: 5` loads.
 5. Change the single-reviewer error text in `validateOrchestration` and `validateGates`. The text says "cannot pass" and not "always-pass" (R1.9).
-6. Update the spec-112 pins: the `DefaultConfig` 3+3 assertions in `internal/config/config_test.go` (`TestLoad_GatesAbsentByteIdentical109` and its siblings).
+6. Update the spec-112 pins: the `DefaultConfig` 3+3 assertions in `internal/config/config_test.go` (`TestLoad_GatesAbsentByteIdentical109` and its siblings), and in `cmd/mindspec/config_test.go` `TestConfigShow_EmitsPanelModelsLoop` ("family: claude", "count: 3" on `renderConfig(DefaultConfig())`) and `TestConfigShow_GatesSubstitutesAndModelAdvisory` ("expected_reviewers: 6").
 7. Change the size text in the skills. Change only the size; Bead 8 replaces the threshold text.
-   - `plugins/.../ms-panel-run/SKILL.md`: the description "(shipped default: 3 Claude Agents + 3 Codex CLI sessions)", the sentence "shipped default: 6 reviewers — 3 `claude` + 3 `codex`", and each sentence "`DefaultConfig` panel VALUES are unchanged".
+   - `plugins/.../ms-panel-run/SKILL.md`: the description "(shipped default: 3 Claude Agents + 3 Codex CLI sessions)", the sentence "shipped default: 6 reviewers — 3 `claude` + 3 `codex`", the sentence "`DefaultConfig` panel VALUES are unchanged", and the sentence "`DefaultConfig` panel VALUES ship unchanged — a zero-config install keeps its sizes".
    - `.claude/.../ms-panel-run/SKILL.md`: the description "launch 6 reviewers (3 Claude Agents + 3 Codex CLI sessions)" and "(6 reviewers, N−1 threshold)".
    - `plugins/.../ms-panel-tally/SKILL.md`: "shipped default: 6 reviewers".
    - `.claude/.../ms-panel-tally/SKILL.md`: "5/6 for the default panel".
-8. Update the spec-126 pins in `internal/setup/review_discipline_test.go`: the "shipped default: 6 reviewers" and "n-1" fragment rows for the `ms-panel-run` and `ms-panel-tally` surfaces, and `TestReviewDiscipline_AC1PanelSizeConsistency`. Keep `TestReviewDiscipline_ADR0043Amendment`.
+8. Update the spec-126 pins in `internal/setup/review_discipline_test.go`: the "shipped default: 6 reviewers" and "n-1" fragment rows for the `ms-panel-run` and `ms-panel-tally` surfaces, and `TestReviewDiscipline_AC1PanelSizeConsistency`. Keep `TestReviewDiscipline_ADR0043Amendment`. The text "a zero-config install keeps its sizes" is the locator of the AC-10 allowlist entry (`surface: "ms-panel-run"`, `matched: "Spec 126"`). Keep that locator and the Spec 126 citation, or update the entry. Add an entry for each new `Spec 130` token in that skill.
 9. In ADR-0043, append `## Amendment (Spec 130)` with the first bullet: the default becomes 6/6/4/6 per gate (R2.1); this reverses spec 112 R2. Add an inline back-pointer at the bullet "The shipped default is 6 / `n-1`, unconditionally". Keep the `## Amendment (Spec 126)` heading.
 10. Add a `CHANGELOG.md` `## [Unreleased]` line that names the 6/6/4/6 change.
 11. Update `.mindspec/domains/core/interfaces.md` § Config with the per-gate defaults.
@@ -274,6 +295,7 @@ Each bead that edits an ADR adds its own pin file `internal/validate/adr_spec130
 
 **Verification**
 - [ ] `go test ./internal/config/... -run 'TestPanelGateDefaults_|TestConfigValidate_SingleReviewerText|TestLoad_GatesAbsentByteIdentical109'` passes
+- [ ] `go test ./cmd/mindspec/... -run 'TestConfigShow_EmitsPanelModelsLoop|TestConfigShow_GatesSubstitutesAndModelAdvisory'` passes
 - [ ] `go test ./internal/setup/... -run TestReviewDiscipline_` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_Sizes` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
@@ -313,7 +335,7 @@ None.
 ## Bead 3: Create refusals and registration resolution
 
 **Steps**
-1. In `internal/panel/create.go`, refuse `create --round N` when round N has verdict files, and refuse a round below the recorded round. Name `--round <N+1>` and `panel rebind` in the recovery. Leave `panel.json` byte-identical. A round with no verdict files is re-created (R1.1).
+1. In `internal/panel/create.go`, refuse `create --round N` when round N has verdict files, and refuse a round below LatestRound (from the verdict files). Name `--round <N+1>` and `panel rebind` in the recovery. Leave `panel.json` byte-identical. A round with no verdict files is re-created (R1.1).
 2. Refuse an unparseable `panel.json` with no write (R1.3).
 3. For `--gate bead`, derive `bead_id` from `--target bead/<id>`. Refuse `--target main`, a `--bead` that differs from the target, and `--bead` on a non-bead gate. Write no file on a refusal (R1.6).
 4. In `cmd/mindspec/panel.go`, make `findPanelRegistration` refuse an ambiguous slug and list each match. Accept `--spec` to choose one. Let the checkout copy win over a `.worktrees/` copy of the same spec. `tally` and `verify` print the resolved directory and round. Refuse `create` of a slug that another spec owns, and refuse adhoc and non-adhoc slug collisions (R1.7).
@@ -375,14 +397,14 @@ None.
 4. Before a bump, archive `BRIEF.md` as `BRIEF-round-<N>.md`. Never overwrite an archive. Tally counts only `.json` slots (R1.4).
 5. Render the prior-round region in the new BRIEF: `consolidated-round-<N>.md` with `termsafe.Escape`, or `none recorded` (R1.5).
 6. Add `--reviewers N`. Refuse N below 2. Fill N slots from the resolved family list, round-robin (R2.2, R2.3).
-7. Write the roster with ids `R1..Rn` from `PanelGateReviewerSlots`. List each slot in the BRIEF as `slot model lens`. A later round carries the roster forward unchanged (R2.4, OQ-2).
+7. Write the roster with ids `R1..Rn` from `PanelGateReviewerSlots`. List each slot in the BRIEF as `slot model lens`. A later round carries the roster forward unchanged unless `--reviewers` is given (R2.4, OQ-2).
 8. Append the `round` event in the same operation as the `panel.json` write. Set `telemetry: "required"` on new panels (R11.1).
 9. Write no `approve_threshold` (R7.5).
 10. Extend `TestPanelCreate_BeadIDDerivedFromTarget` to assert 4 slots.
 11. Update `.mindspec/domains/workflow/interfaces.md` § Panel CLI Verb Tree (`--reviewers`, roster) and, if `internal/config/config.go` changes, `.mindspec/domains/core/interfaces.md` § Config.
 
 **Verification**
-- [ ] `go test ./internal/panel/... -run 'TestCreate_CarriesRefutationsAcrossRoundBump|TestCreate_LegacyBumpRecordsCarried|TestCreate_RevivalAppendsAbandonHistory|TestCreate_ArchivesBriefOnBump|TestCreate_NeverOverwritesArchive|TestCreate_PriorRoundRegion|TestCreate_RosterCarriedForward|TestCreate_BriefListsRoster|TestCreate_DropsUnbackedEntries'` passes
+- [ ] `go test ./internal/panel/... -run 'TestCreate_CarriesRefutationsAcrossRoundBump|TestCreate_LegacyBumpRecordsCarried|TestCreate_RevivalAppendsAbandonHistory|TestCreate_ArchivesBriefOnBump|TestCreate_NeverOverwritesArchive|TestCreate_PriorRoundRegion|TestCreate_RosterCarriedForward|TestCreate_ReviewersOverridesCarriedRoster|TestCreate_BriefListsRoster|TestCreate_DropsUnbackedEntries'` passes
 - [ ] `go test ./cmd/mindspec/... -run 'TestPanelCreate_ReviewersFloor|TestPanelCreate_ReviewersN|TestPanelCreate_NoApproveThreshold|TestPanelCreate_BeadIDDerivedFromTarget'` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
@@ -391,7 +413,7 @@ None.
 - AC-14 (create part): `TestCreate_LegacyBumpRecordsCarried` passes. A legacy panel with two hand refutations, bumped to round 2, keeps both, and the new `round` event's `carried` field holds both. `TestCreate_DropsUnbackedEntries` passes.
 - AC-3 (R1.4, R1.5) passes.
 - AC-4 (R2.1 part): 4 slots.
-- AC-8 (create part), AC-9 (roster and BRIEF part), AC-18 (`TestPanelCreate_NoApproveThreshold`) pass.
+- AC-8 (create part), AC-9 (roster and BRIEF part; `TestCreate_ReviewersOverridesCarriedRoster`: a round-2 `create --reviewers 3` writes a 3-slot roster), AC-18 (`TestPanelCreate_NoApproveThreshold`) pass.
 
 **Depends on**
 Bead 1, Bead 2, Bead 3, Bead 4.
@@ -400,7 +422,7 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 
 **Steps**
 1. Add `internal/panel/passrule.go`. A panel passes only when it is complete, has no veto, is fresh, has every finding discharged, and is intact (R7.1). The APPROVE count is not an input. Other gate legs stay unchanged.
-2. A discharge is pinned to its round and its `finding_sha256`. An item-level discharge clears one finding. A slot-level discharge clears the slot until the verdict file changes (R7.2-R7.4). A refuted REJECT, `hard_block` or INVALID still blocks. Until Bead 11, no verb writes a deferral, and R5.3 blocks a hand-added one.
+2. A discharge is pinned to its round and its `finding_sha256`. An item-level discharge clears one finding. A slot-level discharge clears the slot until the verdict file changes (R7.2-R7.4). A refuted REJECT, `hard_block` or INVALID still blocks. The pass rule counts no deferral as a discharge, on any panel, legacy and carried entries included. Bead 11 turns the deferral discharge on. `TestPassRule_DeferralInactive`: a complete, fresh legacy panel with a same-round, text-pinned, hand-added deferral stays unresolved.
 3. Treat a recorded `approve_threshold` as legacy. Print the legacy line. It does not change the decision (R7.5).
 4. Count roster slots only. An off-roster file counts nothing. An off-roster REJECT or INVALID blocks and names the file. A legacy panel with no roster tallies as today (R2.5).
 5. Make a sub-floor `expected_reviewers` a registration error that names `--reviewers 2` and no `/ms-bead-fix` (R2.2).
@@ -414,14 +436,14 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 13. Add `internal/validate/adr_spec130_passrule_test.go` (`TestADRAmendments_Spec130_PassRule`). It pins the items of steps 10-12, the Spec-109 retirement included.
 
 **Verification**
-- [ ] `go test ./internal/panel/... -run 'TestPassRule_|TestApproveThreshold_LegacyNotice|TestTally_OffRoster|TestTally_LegacyNoRosterUnchanged|TestGate_SubFloorRegistrationError|TestGate_HandEditDetected|TestGate_HandChangedEntryPayload|TestGate_OneMarkerBlocks|TestGate_LegacyHandEditExempt|TestGate_CarriedBaseline'` passes
+- [ ] `go test ./internal/panel/... -run 'TestPassRule_|TestApproveThreshold_LegacyNotice|TestTally_OffRosterSlotCountsNothing|TestTally_OffRosterRejectBlocks|TestTally_OffRosterInvalidBlocks|TestTally_LegacyNoRosterUnchanged|TestGate_SubFloorRegistrationError|TestGate_HandEditDetected|TestGate_HandChangedEntryPayload|TestGate_OneMarkerBlocks|TestGate_LegacyHandEditExempt|TestGate_CarriedBaseline'` passes
 - [ ] `go test ./cmd/mindspec/... -run 'TestRuleLine_SharedRender|TestRuleLine_INVALIDCount'` passes
 - [ ] `grep -rn -e 'threshold is %d' -e 'threshold %d' cmd/mindspec internal/panel internal/instruct internal/complete --include='*.go' | grep -v _test` prints nothing
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_PassRule` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-17 (R7.1-R7.3), AC-18 (R7.4, R7.5 tally part), AC-19 (R8, the tests and the grep) pass.
+- AC-17 (R7.1-R7.3), AC-18 (R7.4, R7.5 tally part), AC-19 (R8, the tests and the grep) pass. `TestPassRule_DeferralInactive` passes.
 - AC-8 (gate part), AC-9 (tally part), AC-14 (gate tests, a hand-set `abandoned: true` included) pass.
 - AC-26 (part): the R13.1 §1/§3/§7/§8 items, the R13.2 ledger-read items and R13.4 are pinned.
 
@@ -431,7 +453,7 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 ## Bead 7: Panel rebind
 
 **Steps**
-1. Add `cmd/mindspec/panel_rebind.go`: `panel rebind <slug> --reason <text>`. It refuses an empty reason, a panel that does not pass, a reviewed SHA that is not an ancestor of HEAD, and a diff path outside `panel.rebind_allowlist` (default `OWNERSHIP.yaml`) (R4.1-R4.3).
+1. Add `cmd/mindspec/panel_rebind.go`: `panel rebind <slug> --reason <text>`. It refuses an empty reason, a panel that does not pass R7 with staleness ignored, a reviewed SHA that is not an ancestor of HEAD, and a diff path outside `panel.rebind_allowlist` (default `[".mindspec/domains/*/OWNERSHIP.yaml"]`) (R4.1-R4.3).
 2. Always refuse a diff that contains `.mindspec/config.yaml`, even with a widened allowlist. Refuse an empty allowlist. Add the config key in `internal/config/config.go`.
 3. When the recorded SHA equals the tip, print `already fresh` and write nothing (R4.4).
 4. Otherwise, append a `rebinds[]` entry and a `rebind` event in one operation. Set the new reviewed SHA and digest. Do not bump the round (R4.4).
@@ -444,11 +466,12 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 - [ ] `go test ./cmd/mindspec/... -run 'TestPanelRebind_OwnershipOnly|TestPanelRebind_Refusals|TestPanelRebind_AlreadyFresh'` passes
 - [ ] `go test ./internal/complete/... -run TestComplete_CopiesRebinds` passes
 - [ ] `go test ./internal/lifecycle/... -run TestReviewedHeadSHASet_IncludesRebindFrom` passes
+- [ ] `go test ./internal/lint/... -run TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_Rebind` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-12 (R4.1-R4.5, R3.5) passes, except `TestToolArtifactPaths_SingleHome` (Bead 9).
+- AC-12 (R4.1-R4.5, R3.5) passes, except `TestToolArtifactPaths_SingleHome` (Bead 9). `TestPanelRebind_OwnershipOnly` uses the default `[".mindspec/domains/*/OWNERSHIP.yaml"]` and a diff that changes only a domain `OWNERSHIP.yaml`; the panel is stale before the rebind and passes after it.
 - AC-26 (part): the R13.1 §4 rebind item and R13.3 are pinned.
 
 **Depends on**
@@ -475,7 +498,7 @@ Bead 5, Bead 6.
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run 'TestPanelRefute_|TestPanelAbandon_Verb'` passes
 - [ ] `go test ./internal/setup/... -run 'TestPanelSkills_NoHandEditInstructions|TestReviewDiscipline_|TestMsBeadImplSkill_'` passes
-- [ ] `go test ./internal/lint/... -run TestArgvIDOperandGated` passes
+- [ ] `go test ./internal/lint/... -run 'TestArgvIDOperandGated|TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned'` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_Verbs` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
@@ -501,7 +524,7 @@ Bead 5, Bead 6.
 5. In `internal/bootstrap/bootstrap.go`, write the negation lines by exact-line presence. Do not use the check-ignore re-append. A second run leaves `.gitignore` byte-identical (R6.2).
 6. Add the two lines to this repo's `.gitignore`. Change its R8.4 comment to name option (B) (R6.3). Add the spec 129 R8.4 status line (R6.4).
 7. Add `CheckIgnore` to the Executor interface, `MindspecExecutor` and `mock.go`. It calls the existing `gitutil.CheckIgnore`.
-8. Add `internal/complete/panel_ledger.go`. Before the bead merge, check each ledger path with `check-ignore` in the spec worktree. Refuse before any side effect, with the R6.6 recovery. After the merge, commit each matched ledger in one `chore(panel): ledger` commit with `exec.CommitPaths`. A legacy panel with no ledger makes no commit and prints no line.
+8. Add `internal/complete/panel_ledger.go`. Before the bead merge, check each ledger path with `check-ignore` in the spec worktree. Refuse before any side effect, with the R6.6 recovery. After the merge, commit each matched ledger in one `chore(panel): ledger` commit with `exec.CommitPaths`, in the spec worktree, as the `check-ignore` check. This step applies only on the flat layout. If the commit fails, print the `impl approve` recovery line. A legacy panel with no ledger makes no commit and prints no line.
 9. In `internal/approve/impl.go`, add a preflight leg. It runs the same `check-ignore` check, with the same refusal. Then it refuses an uncommitted or untracked spec ledger, with the `git -C <spec-worktree>` recovery.
 10. Hatches: the two hatches do not skip the R6.6 refusal at `impl approve` (spec text). At `complete`, the hatches also do not skip the `check-ignore` refusal or the ledger commit. The ledger is a tool artifact, not a gate input, and an ignored ledger breaks the later `impl approve` leg.
 11. Update `.mindspec/domains/execution/interfaces.md` § Gitignore Ensure and § Executor Interface (`CheckIgnore`), and `.mindspec/domains/workflow/interfaces.md` (the ledger commit and the tool-artifact home).
@@ -513,7 +536,7 @@ Bead 5, Bead 6.
 - [ ] `go test ./internal/next/... -run TestNextGuard_LedgerIsArtifact` passes
 - [ ] `go test ./internal/complete/... -run 'TestComplete_CommitsLedger|TestComplete_NoLedgerNoCommit|TestLedger_IgnoredPathRefuses|TestMaterialize_LedgerIsArtifact'` passes
 - [ ] `go test ./internal/approve/... -run 'TestImplApprove_UncommittedLedgerRefuses|TestImplApprove_IgnoredLedgerRefuses'` passes
-- [ ] `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` passes
+- [ ] `go test ./internal/lint/... -run 'TestEnforcementHasNoGitLeaks|TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned'` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_Ledger` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
@@ -528,26 +551,27 @@ Bead 1, Bead 2, Bead 4.
 ## Bead 10: Core 3 coverage enforcement
 
 **Steps**
-1. Make `tally` write the coverage manifest. It lists roster slots only. It appends a new manifest when the verdict set changed since the last one. It writes one on an Allow, and on a stale non-bead registration with covering rows (R11.2).
+1. Make `tally` write the coverage manifest. It lists roster slots only. It appends a new manifest unless the last manifest of that round equals the derivation (R11.2). It writes one on an Allow, and on a stale non-bead registration with covering rows (R11.2).
 2. Make `ComputeQ4` and every manifest reader use only the last manifest of each panel (R11.3).
 3. Add `internal/complete/panel_core3.go`. After the gate Allow and before materialization, check each required registration that `panel.ForBead` matches. Block on a REQUEST_CHANGES slot with no covering row, a missing store, no manifest, a manifest for another round, a manifest that differs from the verdict files, or a malformed record (R11.4). A legacy registration passes with an advisory. A Warn registration skips the check with one advisory line (R11.6).
 4. In `internal/approve/impl.go`, add a preflight leg on every required registration of the spec, final review included. It runs no gate decision. Before it skips an abandoned or legacy registration, it runs the legacy-marker check and the R5.3 check. A hand-set `abandoned: true` with no `abandon` event blocks. It names the panel and slot (R11.5).
 5. Add the approve-side hatch seam `implPanelSkipEnvFn` in `internal/approve/impl.go`. Both legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false` (OQ-3). `complete` uses `panelSkipEnvFn`.
 6. Tests seed refutation, deferral and abandon events with the Bead 2 batch append, not with the verbs.
 7. Update `.mindspec/domains/workflow/interfaces.md` § Panel Artifact Schema (manifest rules) and § Lifecycle verb state honesty (the Core 3 legs).
-8. Add ADR-0037 bullets: §7 the Core 3 skip rules (R11.5, R11.6); the Spec-115 reach note for the R11.5 leg, which blocks and honours the two hatches; the Core 3 leg is a `complete` preflight leg outside the cap. Add ADR-0043 bullets: the binary writes the coverage manifest (R11.2), roster slots only, the `created_at` key; this supersedes "one per terminal panel", "appended ONCE at terminal state" and "Every terminal panel writes its manifest regardless of finding count"; abandonment keeps earlier manifests; every manifest reader uses the last manifest (R11.3); Consequences: `complete` and `impl approve` gate on completeness (R11). Add `internal/validate/adr_spec130_core3_test.go` (`TestADRAmendments_Spec130_Core3`).
+8. Add ADR-0037 bullets: §7 the Core 3 skip rules (R11.5, R11.6); the Spec-115 reach note for the R11.5 leg, which blocks and honours the two hatches; the orphan/obligation refusal keeps its no-hatch rule; the Core 3 leg is a `complete` preflight leg outside the cap. Add ADR-0043 bullets: the binary writes the coverage manifest (R11.2), roster slots only, the `created_at` key; this supersedes "one per terminal panel", "appended ONCE at terminal state" and "Every terminal panel writes its manifest regardless of finding count"; abandonment keeps earlier manifests; every manifest reader uses the last manifest (R11.3); Consequences: `complete` and `impl approve` gate on completeness (R11). Add `internal/validate/adr_spec130_core3_test.go` (`TestADRAmendments_Spec130_Core3`).
 
 **Verification**
-- [ ] `go test ./cmd/mindspec/... -run 'TestTally_AppendsManifestOnChange|TestTally_WritesManifestOnAllow|TestTally_ManifestWhenOnlyStale'` passes
+- [ ] `go test ./cmd/mindspec/... -run 'TestTally_AppendsManifestOnChange|TestTally_AppendsManifestPerRound|TestTally_WritesManifestOnAllow|TestTally_ManifestWhenOnlyStale'` passes
 - [ ] `go test ./internal/panel/... -run TestComputeQ4_LastManifestOnly` passes
 - [ ] `go test ./internal/complete/... -run 'TestComplete_Core3'` passes
 - [ ] `go test ./internal/approve/... -run 'TestImplApprove_Core3Leg|TestImplApprove_AbandonedSkipIntegrity|TestImplApprove_Core3Hatches'` passes
+- [ ] `go test ./internal/lint/... -run TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130_Core3` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-24 (R11) passes.
-- AC-26 (part): the R13.1 §7 Core 3 and R11.5 reach items and the R13.2 manifest items are pinned.
+- AC-24 (R11) passes. `TestTally_AppendsManifestPerRound`: a round-2 derivation equal to the round-1 manifest appends a round-2 manifest.
+- AC-26 (part): the R13.1 §7 Core 3 and R11.5 reach items (the orphan/obligation no-hatch rule included) and the R13.2 manifest items are pinned.
 
 **Depends on**
 Bead 5, Bead 6, Bead 9.
@@ -559,32 +583,35 @@ Bead 5, Bead 6, Bead 9.
 2. Add `cmd/mindspec/panel_defer.go`. Defer refuses: a closed or missing bead; the epic, or a child or descendant of it; a bead with no `discovered-from` edge to the epic or the panel's bead; a description without the finding text (R9.3 replacement). It shares the refute slot and round refusals. It refuses on `spec_approve` and adhoc panels, with a recovery that names `refute`. It writes the deferral, the `deferral` event and a `confirmed-deferred` row (R9.3).
 3. Add `internal/complete/panel_deferred.go`. `complete` writes `panel_deferred` with one entry per effective deferral, through the pending-marker protocol. Each entry holds `slot`, `round`, `finding`, `finding_text`, `finding_sha256`, `bead` and `by` (R10.1).
 4. Re-check each effective deferral through `internal/bead/deferral.go`, at `complete` and in the `impl approve` preflight. Block on re-parent under the epic, deletion, a removed `discovered-from` edge, removed finding text, a closed bead, or a bd error. Name the slot, the finding and the bead (R10.2).
-5. Source of the deferrals (R10.2):
+5. Turn the deferral discharge on in `internal/panel/passrule.go` (spec Terms: effective deferral; R7.3, R7.4), together with `panel defer`, the R10.1 audit and both re-checks. Replace `TestPassRule_DeferralInactive` with `TestPassRule_DeferralActive`.
+6. Source of the deferrals (R10.2):
    - At `complete`: each registration that `panel.ForBead` matches.
    - At `impl approve`, a non-bead registration: its `panel.json` and ledger.
    - At `impl approve`, a bead panel: its bead's `panel_deferred` audit. A `panel refute` on the bead panel after `complete` does not change this re-check.
-6. Recovery for a closed bead: at `complete` and for a non-bead registration at `impl approve`, name `bd reopen <B>` or `mindspec panel refute`. The refute line carries the deferral's `--finding`, and has no `--finding` for a slot-level deferral. For a bead panel at `impl approve`, name `bd reopen <B>` only.
-7. A refutation of the same finding and text supersedes the deferral. Skip deferrals on abandoned registrations; at `impl approve`, the R11.5 integrity check runs before this skip. Compare redacted text, so a raw `/tmp/x` in the bead description passes.
-8. Both legs honour the two hatches through `panelSkipEnvFn` and `implPanelSkipEnvFn` (OQ-3).
-9. Update both copies of `ms-panel-tally` and `ms-panel-run` to name `mindspec panel defer`. Extend `TestPanelSkills_NoHandEditInstructions` to require it.
-10. Add `TestLedger_RecordKinds`: each verb appends its R5.1 record with `spec` and `panel`.
-11. Add `TestPanelAbandon_KeepsManifest`: after `tally` writes a manifest, `panel abandon` keeps it, and `ComputeQ4` still counts its slots.
-12. Update `.mindspec/domains/workflow/interfaces.md` § Panel CLI Verb Tree (`defer`, the re-check) and `.mindspec/domains/execution/interfaces.md` (`internal/bead` deferral reads).
-13. Add ADR-0037 bullets: §1 the verbs are the only writers; §8 the Spec-114 carve-out extends to the `panel_deferred` audit (R10.1); the Spec-115 reach note for the R10.2 leg, which blocks and honours the two hatches; the R10.2 re-check is a `complete` preflight leg outside the cap. Add the ADR-0043 bullet: this supersedes "Writes go through ONE canonical Go verb", because `refute`, `defer` and `tally` also write the store. Add `internal/validate/adr_spec130_deferral_test.go` (`TestADRAmendments_Spec130_Deferral`).
+7. Recovery for a closed bead: at `complete` and for a non-bead registration at `impl approve`, name `bd reopen <B>` or `mindspec panel refute`. The refute line carries the deferral's `--finding`, and has no `--finding` for a slot-level deferral. For a bead panel at `impl approve`, name `bd reopen <B>` only.
+8. A refutation of the same finding and text supersedes the deferral. Skip deferrals on abandoned registrations; at `impl approve`, the R11.5 integrity check runs before this skip. Compare redacted text, so a raw `/tmp/x` in the bead description passes.
+9. Both legs honour the two hatches through `panelSkipEnvFn` and `implPanelSkipEnvFn` (OQ-3).
+10. Update both copies of `ms-panel-tally` and `ms-panel-run` to name `mindspec panel defer`. Extend `TestPanelSkills_NoHandEditInstructions` to require it.
+11. Add `TestLedger_RecordKinds`: each verb appends its R5.1 record with `spec` and `panel`.
+12. Add `TestPanelAbandon_KeepsManifest`: after `tally` writes a manifest, `panel abandon` keeps it, and `ComputeQ4` still counts its slots.
+13. Update `.mindspec/domains/workflow/interfaces.md` § Panel CLI Verb Tree (`defer`, the re-check) and `.mindspec/domains/execution/interfaces.md` (`internal/bead` deferral reads).
+14. Add ADR-0037 bullets: §1 the verbs are the only writers; §8 the Spec-114 carve-out extends to the `panel_deferred` audit (R10.1); the Spec-115 reach note for the R10.2 leg, which blocks and honours the two hatches; the R10.2 re-check is a `complete` preflight leg outside the cap. Add the ADR-0043 bullet: this supersedes "Writes go through ONE canonical Go verb", because `refute`, `defer` and `tally` also write the store. Add `internal/validate/adr_spec130_deferral_test.go` (`TestADRAmendments_Spec130_Deferral`).
 
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run 'TestPanelDefer_|TestLedger_RecordKinds|TestPanelAbandon_KeepsManifest'` passes
 - [ ] `go test ./internal/bead/... -run TestDeferral_` passes
 - [ ] `go test ./internal/complete/... -run 'TestComplete_PanelDeferredAudit|TestGateTime_'` passes
 - [ ] `go test ./internal/approve/... -run TestGateTime_` passes
+- [ ] `go test ./internal/panel/... -run TestPassRule_DeferralActive` passes
 - [ ] `go test ./internal/setup/... -run TestPanelSkills_NoHandEditInstructions` passes
-- [ ] `go test ./internal/lint/... -run 'TestArgvIDOperandGated|TestEnforcementHasNoGitLeaks'` passes
+- [ ] `go test ./internal/lint/... -run 'TestArgvIDOperandGated|TestEnforcementHasNoGitLeaks|TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned'` passes
 - [ ] `go test ./internal/validate/... -run TestADRAmendments_Spec130` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
 - AC-21 (R9.1, R9.3): `TestPanelDefer_BDChecks`, `TestPanelDefer_SharedRefusals`, `TestPanelDefer_NoEpicGates`, `TestPanelDefer_Writes` pass. `TestPanelDefer_BDChecks` has a descendant (grandchild) case.
-- AC-23 (R10) passes. `TestGateTime_DeferThenCloseBlocks` writes a deferral to an open bead through the `panel defer` write path, then closes the bead or removes its `discovered-from` edge. `complete` blocks before materialization.
+- AC-23 (R10) passes. `TestGateTime_OpenBeadDeferralResolves`: a deferral to an open bead resolves its finding and `complete` Allows. `TestGateTime_DeferThenCloseBlocks` writes a deferral to an open bead through the `panel defer` write path, then closes the bead or removes its `discovered-from` edge. `complete` blocks before materialization.
+- AC-17 (deferral part): `TestPassRule_DeferralActive` passes.
 - AC-15 (defer part): `TestPanelSkills_NoHandEditInstructions` requires `mindspec panel defer`.
 - AC-22 (part): `TestPanelAbandon_KeepsManifest` passes.
 - AC-13 (verb part): `TestLedger_RecordKinds` passes.
@@ -596,8 +623,8 @@ Bead 7, Bead 8, Bead 10.
 ## Bead 12: Landed reviewed-SHA keys
 
 **Steps**
-1. Do not change the `CompleteBead` signature. Add an optional interface `LandedReviewSetter` with `SetLandedReview(sha, panel string)` on `MindspecExecutor` and on the mock executor (`internal/executor/mock.go`).
-2. When `complete`'s gate decision is Allow, `complete` calls it once, before `exec.CompleteBead`. The value of `panel` is `<slug>@r<N>`. A Warn (abandoned panel, hatch) or no panel makes no call.
+1. Do not change the `CompleteBead` signature. Add an optional interface `LandedReviewSetter` with `SetLandedReview(sha, panel string)` in `internal/executor/executor.go`. Implement it on `MindspecExecutor` and on the mock executor (`internal/executor/mock.go`).
+2. Make `panelGate` (`internal/complete/panel_advisory.go`) return the Allow decision and the registration that Allowed. Today it returns `(matched, nil)` for an Allow, for a Warn and for `panel_gate: false`. Update every `panelGate` caller. When the decision is Allow, `complete` calls `SetLandedReview` once, before `exec.CompleteBead`. The value of `panel` is `<slug>@r<N>`. A Warn (abandoned panel, hatch, missing ref), `panel_gate: false` or no panel makes no call.
 3. `ensureLandedBinding` writes `mindspec_landed_reviewed_sha` and `mindspec_landed_review_panel` in the same `mergeBindingFn` call as the binding, on the `CompleteBead` path only. With no setter call, it writes neither key. `FinalizeEpic` keeps the keys unchanged (R12).
 4. Update `.mindspec/domains/execution/interfaces.md` § Executor Interface (`LandedReviewSetter`, the two keys) and `.mindspec/domains/workflow/interfaces.md` (the `complete` call).
 5. Add the ADR-0037 §8 bullet: the Spec-114 carve-out extends to the R12 keys. Add `internal/validate/adr_spec130_keys_test.go` (`TestADRAmendments_Spec130_Keys`).
@@ -609,7 +636,7 @@ Bead 7, Bead 8, Bead 10.
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-25 (R12) passes. `TestComplete_LandedReviewOnAllowOnly` uses the mock executor. It asserts one `SetLandedReview(<reviewed_head_sha>, <slug>@r<N>)` call before `CompleteBead` on an Allow, and no call with no panel or with an abandoned panel.
+- AC-25 (R12) passes. `TestComplete_LandedReviewOnAllowOnly` gets its Allow from `setupPanelGateRepo` and records calls through an executor wrapper that it passes to `Run`. It asserts one `SetLandedReview(<reviewed_head_sha>, <slug>@r<N>)` call before `CompleteBead` on an Allow. It asserts no call with no panel, with an abandoned panel, with `panelSkipEnvFn` true, with `panel_gate: false`, and with a missing reviewed ref.
 - AC-26 (part): the R13.1 §8 R12-keys item is pinned.
 
 **Depends on**
@@ -617,7 +644,7 @@ Bead 4.
 
 ## Carrier-brief resolutions
 
-- **Ordering**: R6 (Bead 9) depends on R3 (Bead 4). R1.1 (Bead 3) lands before R4 (Bead 7, through Bead 5). R9.3 `defer` lands with R10.1 and R10.2 (Bead 11). No merged state has a deferral discharge without the gate-time re-check. Before Bead 11, no verb writes a deferral, and R5.3 blocks a hand-added one.
+- **Ordering**: R6 (Bead 9) depends on R3 (Bead 4). R1.1 (Bead 3) lands before R4 (Bead 7, through Bead 5). R9.3 `defer` lands with R10.1 and R10.2 (Bead 11). No merged state has a deferral discharge without the gate-time re-check. Before Bead 11, the R7 pass rule counts no deferral as a discharge, on any panel, legacy and carried entries included. Bead 11 turns it on together with `panel defer`, the R10.1 audit and both re-checks.
 - **ADR landing**: each ADR text change lands in the bead that ships its code, or in a bead that depends on that bead. The first bead that touches an ADR appends `## Amendment (Spec 130)`; later beads add bullets to it. ADR-0037: Bead 4 appends; Beads 6, 7, 8, 9, 10, 11 and 12 depend on Bead 4 and add bullets. ADR-0043: Bead 1 appends; Beads 6, 9, 10 and 11 depend on Bead 1 and add bullets. ADR-0041 (Bead 7), ADR-0044 (Bead 6) and ADR-0045 (Bead 8) have one bead each. Each bead pins only its own text. The ADR-0043 `## Amendment (Spec 126)` heading stays (`TestReviewDiscipline_ADR0043Amendment`).
 - **Outside the cap**: the three `complete` preflight legs land with their code: the `check-ignore` call (Bead 9), Core 3 (Bead 10) and the R10.2 re-check (Bead 11). Each bead adds its own cap bullet.
 - **Hatches at `complete`**: the hatches do not skip the `check-ignore` refusal or the ledger commit (Bead 9).
@@ -639,7 +666,7 @@ In the Verification column, `\|` is table escaping for the regex `|`.
 | AC-6 | 1, 3 | `go test ./cmd/mindspec/... -run 'TestTallyExitActionNonBead_\|TestPanelSubcommands_SilenceUsage'`; `go test ./internal/config/... -run TestConfigValidate_SingleReviewerText` |
 | AC-7 | 1 | `go test ./internal/config/... -run TestPanelGateDefaults_` |
 | AC-8 | 5, 6 | `go test ./cmd/mindspec/... -run 'TestPanelCreate_ReviewersFloor\|TestPanelCreate_ReviewersN'`; `go test ./internal/panel/... -run TestGate_SubFloorRegistrationError` |
-| AC-9 | 5, 6 | `go test ./internal/panel/... -run 'TestCreate_RosterCarriedForward\|TestCreate_BriefListsRoster\|TestTally_OffRoster\|TestTally_LegacyNoRosterUnchanged'` |
+| AC-9 | 5, 6 | `go test ./internal/panel/... -run 'TestCreate_RosterCarriedForward\|TestCreate_ReviewersOverridesCarriedRoster\|TestCreate_BriefListsRoster\|TestTally_OffRosterSlotCountsNothing\|TestTally_OffRosterRejectBlocks\|TestTally_OffRosterInvalidBlocks\|TestTally_LegacyNoRosterUnchanged'` |
 | AC-10 | 4 | `go test ./internal/panel/... ./cmd/mindspec/... -run 'TestSubject_PerGate\|TestSubjectDigest_'` |
 | AC-11 | 4 | `go test ./internal/panel/... -run 'TestGate_SubjectTreeStaleness\|TestGate_LegacyStaleMessageUnchanged\|TestGate_EqualSHANoSubjectCall'`; `go test ./cmd/mindspec/... -run TestPanelConsumers_SubjectTreeParity` |
 | AC-12 | 7, 9 | `go test ./cmd/mindspec/... -run TestPanelRebind_`; `go test ./internal/complete/... -run TestComplete_CopiesRebinds`; `go test ./internal/lifecycle/... -run TestReviewedHeadSHASet_IncludesRebindFrom`; `go test ./internal/panel/... -run TestToolArtifactPaths_SingleHome` |
@@ -647,14 +674,14 @@ In the Verification column, `\|` is table escaping for the regex `|`.
 | AC-14 | 5, 6 | `go test ./internal/panel/... -run 'TestGate_HandEditDetected\|TestGate_HandChangedEntryPayload\|TestGate_OneMarkerBlocks\|TestGate_LegacyHandEditExempt\|TestGate_CarriedBaseline\|TestCreate_DropsUnbackedEntries\|TestCreate_LegacyBumpRecordsCarried'` |
 | AC-15 | 8, 11 | `go test ./internal/setup/... -run TestPanelSkills_NoHandEditInstructions` |
 | AC-16 | 9 | `go test ./internal/bootstrap/... -run 'TestBootstrap_ReviewsLedgerTracked\|TestBootstrap_ReviewsIgnored'`; `go test ./internal/next/... -run TestNextGuard_LedgerIsArtifact`; `go test ./internal/complete/... -run 'TestComplete_CommitsLedger\|TestComplete_NoLedgerNoCommit\|TestLedger_IgnoredPathRefuses'`; `go test ./internal/approve/... -run 'TestImplApprove_UncommittedLedgerRefuses\|TestImplApprove_IgnoredLedgerRefuses'` |
-| AC-17 | 6 | `go test ./internal/panel/... -run 'TestPassRule_EachTermBlocks\|TestPassRule_ZeroApprovePasses\|TestPassRule_NeverDischarged\|TestPassRule_EmptyRCInvalid\|TestPassRule_RoundPinned\|TestPassRule_FindingTextPinned'` |
+| AC-17 | 6, 11 | `go test ./internal/panel/... -run 'TestPassRule_EachTermBlocks\|TestPassRule_ZeroApprovePasses\|TestPassRule_NeverDischarged\|TestPassRule_EmptyRCInvalid\|TestPassRule_RoundPinned\|TestPassRule_FindingTextPinned\|TestPassRule_DeferralActive'` |
 | AC-18 | 5, 6 | `go test ./internal/panel/... -run 'TestPassRule_ItemLevelDischarge\|TestPassRule_SlotLevelVoidedByChange\|TestApproveThreshold_LegacyNotice'`; `go test ./cmd/mindspec/... -run TestPanelCreate_NoApproveThreshold` |
 | AC-19 | 6 | `go test ./cmd/mindspec/... -run 'TestRuleLine_SharedRender\|TestRuleLine_INVALIDCount'`; the AC-19 grep prints nothing |
 | AC-20 | 8 | `go test ./cmd/mindspec/... -run TestPanelRefute_` |
 | AC-21 | 11 | `go test ./cmd/mindspec/... -run TestPanelDefer_`; `go test ./internal/bead/... -run TestDeferral_` |
 | AC-22 | 8, 11 | `go test ./cmd/mindspec/... -run 'TestPanelAbandon_Verb\|TestPanelAbandon_KeepsManifest'` |
 | AC-23 | 11 | `go test ./internal/complete/... ./internal/approve/... -run 'TestComplete_PanelDeferredAudit\|TestGateTime_'` |
-| AC-24 | 10 | `go test ./cmd/mindspec/... -run 'TestTally_AppendsManifestOnChange\|TestTally_WritesManifestOnAllow\|TestTally_ManifestWhenOnlyStale'`; `go test ./internal/panel/... -run TestComputeQ4_LastManifestOnly`; `go test ./internal/complete/... -run TestComplete_Core3`; `go test ./internal/approve/... -run 'TestImplApprove_Core3Leg\|TestImplApprove_AbandonedSkipIntegrity\|TestImplApprove_Core3Hatches'` |
+| AC-24 | 10 | `go test ./cmd/mindspec/... -run 'TestTally_AppendsManifestOnChange\|TestTally_AppendsManifestPerRound\|TestTally_WritesManifestOnAllow\|TestTally_ManifestWhenOnlyStale'`; `go test ./internal/panel/... -run TestComputeQ4_LastManifestOnly`; `go test ./internal/complete/... -run TestComplete_Core3`; `go test ./internal/approve/... -run 'TestImplApprove_Core3Leg\|TestImplApprove_AbandonedSkipIntegrity\|TestImplApprove_Core3Hatches'` |
 | AC-25 | 12 | `go test ./internal/executor/... -run TestEnsureLandedBinding_`; `go test ./internal/complete/... -run TestComplete_LandedReviewOnAllowOnly` |
 | AC-26 | 1, 4, 6, 7, 8, 9, 10, 11, 12 | `go test ./internal/validate/... -run TestADRAmendments_Spec130` |
-| AC-27 | all | `gofmt -l .`; `go build ./... && go test ./... -short`; the boundary tests run in their own packages: `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` and `go test ./internal/panel/... -run TestPanelLeafImports_StdlibPlusTermsafeOnly` |
+| AC-27 | all | `gofmt -l .`; `go build ./... && go test ./... -short`; the boundary tests run in their own packages: `go test ./internal/lint/... -run 'TestEnforcementHasNoGitLeaks\|TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned'` and `go test ./internal/panel/... -run TestPanelLeafImports_StdlibPlusTermsafeOnly` |
