@@ -143,14 +143,12 @@ work_chunks:
       key_file_paths:
         - cmd/mindspec/panel_rebind.go
         - cmd/mindspec/panel_rebind_test.go
-        - internal/config/config.go
         - internal/panel/gate.go
         - internal/complete/panel_advisory.go
         - internal/complete/panel_refuted_test.go
         - internal/lifecycle/landed.go
         - internal/lifecycle/landed_test.go
         - internal/guard/registries.go
-        - .mindspec/domains/core/interfaces.md
         - .mindspec/domains/workflow/interfaces.md
         - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
         - .mindspec/adr/ADR-0041-gate-before-mutate.md
@@ -495,17 +493,17 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 ## Bead 7: Panel rebind
 
 **Steps**
-1. Add `cmd/mindspec/panel_rebind.go`: `panel rebind <slug> --reason <text>`. It refuses an empty reason, a panel that does not pass R7 with staleness ignored, a reviewed SHA that is not an ancestor of HEAD, and a diff path outside `panel.rebind_allowlist` (default `[".mindspec/domains/*/OWNERSHIP.yaml"]`) (R4.1-R4.3).
-2. Always refuse a diff that contains `.mindspec/config.yaml`, even with a widened allowlist. Refuse an empty allowlist. Add the config key in `internal/config/config.go`.
+1. Add `cmd/mindspec/panel_rebind.go`: `panel rebind <slug> --reason <text>`. It refuses an empty reason, a panel that fails the parse, abandon, round or R5.3 check, a panel that does not pass R7 with staleness ignored, a reviewed SHA that is not an ancestor of HEAD, and a diff that contains `.mindspec/config.yaml` (R4.1, R4.2).
+2. Accept every other changed path. Do not add a config key or a path match. Record the diff paths, minus the R3.1 exclusions, in the entry's `paths` (R4.3).
 3. When the recorded SHA equals the tip, print `already fresh` and write nothing (R4.4).
 4. Otherwise, append a `rebinds[]` entry and a `rebind` event in one operation. Set the new reviewed SHA and digest. Do not bump the round (R4.4).
 5. `complete` writes `panel_rebound_entries`, through the same stage as `panel_refuted` (R4.5).
 6. In `internal/lifecycle/landed.go`, add each R5.3-matched `rebinds[].from_sha` to the `reviewedHeadSHAForBead` set. Use exact equality (R3.5, OQ-5).
-7. Update `.mindspec/domains/core/interfaces.md` § Config (`panel.rebind_allowlist`) and `.mindspec/domains/workflow/interfaces.md` § Panel CLI Verb Tree (`rebind`).
+7. Update `.mindspec/domains/workflow/interfaces.md` § Panel CLI Verb Tree (`rebind`).
 8. Add the ADR-0037 §4 rebind bullet. Append `## Amendment (Spec 130)` to ADR-0041 with the datum (c) back-pointer to R3.5. Add `internal/validate/adr_spec130_rebind_test.go` (`TestADRAmendments_Spec130_Rebind`).
 
 **Verification**
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelRebind_OwnershipOnly|TestPanelRebind_Refusals|TestPanelRebind_AlreadyFresh'` passes
+- [ ] `go test ./cmd/mindspec/... -run 'TestPanelRebind_OwnershipOnly|TestPanelRebind_AnyPath|TestPanelRebind_Refusals|TestPanelRebind_AlreadyFresh'` passes
 - [ ] `go test ./internal/complete/... -run TestComplete_CopiesRebinds` passes
 - [ ] `go test ./internal/lifecycle/... -run TestReviewedHeadSHASet_IncludesRebindFrom` passes
 - [ ] `go test ./internal/lint/... -run TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned` passes
@@ -513,7 +511,7 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-12 (R4.1-R4.5, R3.5) passes, except `TestToolArtifactPaths_SingleHome` (Bead 9). `TestPanelRebind_OwnershipOnly` uses the default `[".mindspec/domains/*/OWNERSHIP.yaml"]` and a diff that changes only a domain `OWNERSHIP.yaml`; the panel is stale before the rebind and passes after it.
+- AC-12 (R4.1-R4.5, R3.5) passes, except `TestToolArtifactPaths_SingleHome` (Bead 9). `TestPanelRebind_OwnershipOnly` uses a diff that changes only a domain `OWNERSHIP.yaml`; the panel is stale before the rebind and passes after it. `TestPanelRebind_AnyPath` uses a diff that changes a `.go` file; the rebind succeeds and the entry's `paths` holds that file. `TestPanelRebind_Refusals` has one case for each R4.1 and R4.2 refusal.
 - AC-26 (part): the R13.1 §4 rebind item and R13.3 are pinned.
 
 **Depends on**
