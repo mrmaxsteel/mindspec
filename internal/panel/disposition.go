@@ -236,7 +236,7 @@ func decodeRecord(data []byte) (map[string]interface{}, error) {
 // meaningless downstream — e.g. an empty `reviewer` cannot byte-match a
 // slot token (R1), an empty `spec`/`panel` breaks the store's per-panel
 // glob key. Optional fields never reach here (they use optionalString),
-// and `convergent_with[]` entries are validated by requireStringArray,
+// and `convergent_with[]` entries are validated by validateStringArray,
 // so this NEVER rejects a legitimate empty array `convergent_with: []`
 // or an absent optional.
 func requireString(m map[string]interface{}, field, kind string) (string, error) {
@@ -317,27 +317,25 @@ func validateIntegerNumber(v interface{}, field, kind string) error {
 	return nil
 }
 
-// requireStringArray returns m[field] as a []string, erroring if the
+// validateStringArray validates m[field], erroring if the
 // field is absent, not a JSON array, or contains a non-string element
 // (R2's `convergent_with[]`).
-func requireStringArray(m map[string]interface{}, field, kind string) ([]string, error) {
+func validateStringArray(m map[string]interface{}, field, kind string) error {
 	v, ok := m[field]
 	if !ok {
-		return nil, fmt.Errorf("%s record is missing required field %s", kind, termsafe.Escape(field))
+		return fmt.Errorf("%s record is missing required field %s", kind, termsafe.Escape(field))
 	}
 	arr, ok := v.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("%s record field %s must be an array, got %s", kind, termsafe.Escape(field), jsonTypeName(v))
+		return fmt.Errorf("%s record field %s must be an array, got %s", kind, termsafe.Escape(field), jsonTypeName(v))
 	}
-	out := make([]string, 0, len(arr))
 	for i, el := range arr {
-		s, ok := el.(string)
+		_, ok := el.(string)
 		if !ok {
-			return nil, fmt.Errorf("%s record field %s[%d] must be a string, got %s", kind, termsafe.Escape(field), i, jsonTypeName(el))
+			return fmt.Errorf("%s record field %s[%d] must be a string, got %s", kind, termsafe.Escape(field), i, jsonTypeName(el))
 		}
-		out = append(out, s)
 	}
-	return out, nil
+	return nil
 }
 
 // jsonTypeName names v's decoded JSON type for an error message —
@@ -439,7 +437,7 @@ func validateDispositionMap(m map[string]interface{}) error {
 	if _, err := requireString(m, "summary", kind); err != nil {
 		return err
 	}
-	if _, err := requireStringArray(m, "convergent_with", kind); err != nil {
+	if err := validateStringArray(m, "convergent_with", kind); err != nil {
 		return err
 	}
 	disposition, err := requireString(m, "disposition", kind)

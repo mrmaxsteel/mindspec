@@ -215,8 +215,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 			}
 		}
 	case RecordRebind:
-		_, err := requireStringArray(m, "paths", kind)
-		if err != nil {
+		if err := validateStringArray(m, "paths", kind); err != nil {
 			return err
 		}
 	}
