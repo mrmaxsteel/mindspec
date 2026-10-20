@@ -982,7 +982,7 @@ func CommitNoEdit(workdir string) error {
 // missing, unreadable, or belongs to another merge, every path staged
 // against HEAD is scanned. For each file,
 // `git diff --cached --check HEAD` reports leftover marker lines; it
-// honours the conflict-marker-size attribute and CRLF endings.
+// honors the conflict-marker-size attribute and CRLF endings.
 func StagedConflictMarkerFiles(workdir string) []string {
 	candidates, ok := MergeConflictRecord(workdir)
 	if !ok {
