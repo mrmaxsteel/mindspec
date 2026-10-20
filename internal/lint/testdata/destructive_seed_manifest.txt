@@ -150,7 +150,9 @@
 cmd/mindspec/bead_clarify.go	beadClarifyCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:commands
+cmd/mindspec/panel.go	checkPanelSlugOwner	arg1:unprovable
 cmd/mindspec/panel.go	findPanelRegistration	arg1:unprovable
+cmd/mindspec/panel.go	panelCreateFailure	arg1:unprovable
 cmd/mindspec/panel.go	panelCreateCmd	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitAction	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable

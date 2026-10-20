@@ -268,7 +268,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/panel.go",
 		Func:       "tallyExitActionNonBead",
 		Detail:     "arg1:unprovable",
-		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1> --spec <id>` template plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
+		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1>` template plus a recorded `--spec %s` for non-adhoc panels plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor checks representative renderings of this exact template shape.",
 	},
 
@@ -319,6 +319,20 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Func:       "panelCreateCmd",
 		Detail:     "arg1:unprovable",
 		Rationale:  "disclosed-residual: `fmt.Sprintf(\"use `+\"`panel create %s --spec <id> --target <ref>`\"+` for a gated panel, or `+\"`panel create %s --gate adhoc --target <ref>`\"+` for an ad-hoc panel\", slug, slug)` and a second Sprintf substituting `keys` (`strings.Join(config.PanelGateKeys, \", \")` — a fixed, code-defined 5-entry list, never user input). slug is validated by validatePanelSlug (rejects empty/\".\"/\"..\"/path separators/control bytes) but NOT whitespace or other printable content — an operator-chosen slug containing floor-shaped text (e.g. a slug literally spelled \"git reset --hard\") is a distinct, unexamined risk this obligation does not cover. Narrowing the claim rather than overclaiming it: this text is advisory guidance shown back to the SAME operator who named the slug, never executed by the product, and is reviewed at the moment it is read, same as any other diagnostic string.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "checkPanelSlugOwner",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The new-slug create command appends panelCreateScope, which preserves the recorded spec or omits --spec for adhoc. The helper call is opaque to the fold; the command is a mindspec verb.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "panelCreateFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The recovery is assembled from a mindspec panel create template, panelCreateScope and an optional mindspec panel rebind template. Slug/target/gate are shell quoted; the assembled recovery local is opaque to the fold.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

@@ -240,6 +240,7 @@ func init() {
 	rootCmd.AddCommand(instructCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(nextCmd)
+	silencePanelUsage(panelCmd)
 	rootCmd.AddCommand(panelCmd) // spec 110 R1/R2/R3: `panel create|verify|tally`
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(reattestCmd) // spec 125 R4: explicit git-corroborated landed-binding re-attest
@@ -267,4 +268,12 @@ func init() {
 	rootCmd.AddCommand(agentmindDeprecatedCmd)
 	rootCmd.AddCommand(vizDeprecatedCmd)
 	rootCmd.AddCommand(benchDeprecatedCmd)
+}
+
+// Cobra reads SilenceUsage from the executed command, not its ancestors.
+func silencePanelUsage(cmd *cobra.Command) {
+	cmd.SilenceUsage = true
+	for _, child := range cmd.Commands() {
+		silencePanelUsage(child)
+	}
 }

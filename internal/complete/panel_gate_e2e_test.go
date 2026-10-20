@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +14,30 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
+
+func TestComplete_FindsDerivedBeadPanel(t *testing.T) {
+	const specID, beadID = "130-derived", "probe-x.1"
+	root, sha := setupPanelGateRepo(t, specID, beadID)
+	dir := filepath.Join(root, "review", "derived")
+	if err := panel.Create(dir, panel.CreateInput{
+		Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1,
+		ExpectedReviewers: 2, ReviewedHeadSHA: sha,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	regs := panel.ForBead(panel.Scan(root), beadID)
+	if len(regs) != 1 {
+		t.Fatalf("derived registration not selectable: %+v", regs)
+	}
+	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
+	if err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("incomplete derived panel must block complete: res=%+v err=%v", res, err)
+	}
+	if ex.completeCalled || res != nil {
+		t.Fatalf("blocked complete mutated state: merge=%v result=%+v", ex.completeCalled, res)
+	}
+}
 
 // Spec 099 Bead 2 (R1+R2+R5): the AUTHORITATIVE in-binary panel gate in
 // mindspec complete. These e2e tests stand up a REAL temp git repo (so the

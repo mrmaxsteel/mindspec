@@ -18,6 +18,7 @@ func TestCreate_WritesRegistrationAtomically(t *testing.T) {
 
 	in1 := CreateInput{
 		BeadID:               &beadID,
+		Gate:                 "bead",
 		Spec:                 "110-panel-verbs-parser-parity",
 		Target:               "bead/mindspec-x.1",
 		Round:                1,
@@ -299,8 +300,7 @@ func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 
 	// Simulate the SANCTIONED /ms-panel-tally Abandon procedure: a
 	// hand-edit of panel.json setting abandoned/abandon_reason. Create
-	// never reads panel.json back, so this is the only way these fields
-	// get set.
+	// reads this registration before recreating the next round.
 	panelPath := filepath.Join(dir, FileName)
 	raw, err := os.ReadFile(panelPath)
 	if err != nil {
