@@ -25,6 +25,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -40,27 +41,15 @@ const (
 	stageArtifactSync    = "artifact-sync"
 )
 
-// materializedArtifactPaths is the named-artifact exclusion set the
-// snapshot's M-stage leaves unchanged-at-tip (ADR-0025). Mirrors
-// internal/next's own artifactPaths list (unexported there); duplicated
-// here rather than imported because internal/next is not a shared leaf
-// this package should widen its surface through for one constant.
-var materializedArtifactPaths = []string{".beads/issues.jsonl"}
-
-// nonArtifactPaths returns the subset of paths NOT in
-// materializedArtifactPaths (fix-round G1): the S-stage's own delta
-// (exec.ChangedFilesTree(currentTip, tree2)) is expected to contain
-// ONLY the named artifact's own refresh — anything else in that exact
-// delta is classified here, at the tree actually about to be committed,
-// rather than trusted from an earlier, separate read.
-func nonArtifactPaths(paths []string) []string {
-	known := make(map[string]bool, len(materializedArtifactPaths))
-	for _, p := range materializedArtifactPaths {
-		known[p] = true
+// nonArtifactPaths filters the shared tool-artifact set from an S-stage delta.
+func nonArtifactPaths(paths []string, specDir ...string) []string {
+	dir := ""
+	if len(specDir) > 0 {
+		dir = specDir[0]
 	}
 	var out []string
 	for _, p := range paths {
-		if !known[p] {
+		if !panel.IsToolArtifactPath(p, dir) {
 			out = append(out, p)
 		}
 	}
@@ -432,7 +421,7 @@ func runMaterialization(in materializationInput) error {
 	currentTip := ""
 	if in.resumeStage == "" {
 		// --- Normal run: snapshot once, gate, then materialize. -------
-		tree, err := exec.SnapshotWorktreeTree(wtPath, materializedArtifactPaths)
+		tree, err := exec.SnapshotWorktreeTree(wtPath, panel.ToolArtifactPaths(workspace.SpecsDir(wtPath)))
 		if err != nil {
 			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
 		}
@@ -544,7 +533,7 @@ func runMaterialization(in materializationInput) error {
 		// this closes the classification-to-snapshot race totally,
 		// because the check now inspects the same data the commit is
 		// built from, not a separate, earlier read.
-		if nonArtifact := nonArtifactPaths(changedFromCurrent); len(nonArtifact) > 0 {
+		if nonArtifact := nonArtifactPaths(changedFromCurrent, workspace.SpecsDir(wtPath)); len(nonArtifact) > 0 {
 			return sExitGenuineDirtRefusal(beadID, nonArtifact)
 		}
 		oid, _, present, merr := exec.ReadStageMarker(beadID)

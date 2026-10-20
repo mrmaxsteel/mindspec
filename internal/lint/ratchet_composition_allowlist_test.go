@@ -9,6 +9,7 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/complete/panel_ledger.go SpecLedgerPaths workspace.SpecDir":                                               {Count: 1, Gate: "waist: SpecDir validates specID before any path composition and returns an error on malformed IDs (spec 130 R6.6); callers also validate at Run/ApproveImpl ingress"},
 	"cmd/mindspec/bead.go beadWorktreeCmd workspace.BeadBranch":                                                         {Count: 2, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"cmd/mindspec/bead.go beadWorktreeCmd workspace.BeadWorktreeName":                                                   {Count: 2, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"cmd/mindspec/complete.go completeCmd workspace.SpecWorktreePath":                                                   {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2); early: --spec routes the ResolveSpecPrefix result gate (R3/AC-7)"},

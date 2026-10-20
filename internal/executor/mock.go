@@ -63,6 +63,8 @@ type MockExecutor struct {
 	StatusFn          func(workdir string) (string, error)
 	StatusResult      string
 	StatusErr         error
+	CheckIgnoreFn     func(workdir, file string) error
+	CheckIgnoreErr    error
 	IsRefNotFoundFn   func(error) bool
 
 	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when
@@ -397,3 +399,20 @@ var _ LandedReviewSetter = (*MockExecutor)(nil)
 func (m *MockExecutor) SetLandedReview(sha, panel string) {
 	m.record("SetLandedReview", sha, panel)
 }
+
+// CheckIgnore records the ledger preflight; default is a non-ignored path.
+func (m *MockExecutor) CheckIgnore(workdir, file string) error {
+	m.record("CheckIgnore", workdir, file)
+	if m.CheckIgnoreFn != nil {
+		return m.CheckIgnoreFn(workdir, file)
+	}
+	if m.CheckIgnoreErr != nil {
+		return m.CheckIgnoreErr
+	}
+	return mockNotIgnored{}
+}
+
+type mockNotIgnored struct{}
+
+func (mockNotIgnored) Error() string { return "exit status 1" }
+func (mockNotIgnored) ExitCode() int { return 1 }

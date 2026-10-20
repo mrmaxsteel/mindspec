@@ -48,7 +48,8 @@ private content.
 
 **The store is append-only JSONL, one file per panel**, at
 `.mindspec/specs/<spec>/reviews/<panel>/dispositions.jsonl`, git-versioned and
-riding the same lifecycle auto-commits that already persist spec artifacts.
+riding the same lifecycle auto-commits that already persist spec artifacts
+(see [Amendment (Spec 130)](#amendment-spec-130) for the tracked-again R6 contract).
 Cross-panel / cross-spec reads glob `.mindspec/specs/*/reviews/*/dispositions.jsonl`;
 "queryable" means glob + jq plus a small machine-checkable Go surface — NOT SQL.
 
@@ -200,3 +201,5 @@ unaffected by panel SIZE):
 ## Amendment (Spec 130)
 
 - The default becomes 6/6/4/6 per gate (`spec_approve`/`plan_approve`/`bead`/`final_review`), with `adhoc` defaulting to 6 (R2.1); this reverses spec 112 R2. `DefaultConfig` holds no `panel.reviewers` list. Without an explicit reviewer list, families alternate `claude`, `codex`; an explicit global list applies to every gate without its own list, and `adhoc` inherits an explicit `bead` list. This supersedes the size in Amendment (Spec 126)'s "The shipped default is 6 / `n-1`, unconditionally" bullet.
+
+- **Tracked again (R6).** `dispositions.jsonl` is tracked again under spec 129 R8.4 option (B). Bootstrap writes the two ledger negations by exact-line presence, idempotently. Complete commits existing matched flat-layout ledgers after the bead merge in the spec worktree, through `exec.CommitPaths`; impl approve requires every existing spec ledger committed and refuses ignored ledgers before checking status. Both checks and the commit are outside the panel hatches. Adhoc ledgers stay ignored.

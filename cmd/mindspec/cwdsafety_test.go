@@ -247,6 +247,46 @@ func TestCompleteTail_NoNoteWhileCwdExists(t *testing.T) {
 	}
 }
 
+func TestCompleteOutput_ReportedLedgerFailure(t *testing.T) {
+	root := t.TempDir()
+	invocationCwd := filepath.Join(root, ".worktrees", "removed-bead")
+	recovery := "recovery: git -C '" + root + "' add -- ledger && git -C '" + root + "' commit -m \"chore(panel): ledger\""
+	message := "bead is closed and merged; only the panel ledger commit remains: commit failed\n" + recovery
+	runErr := &complete.ReportedError{Err: errors.New(message)}
+	var stdout, stderr bytes.Buffer
+	// Run prints the diagnostic before returning the reported error.
+	fmt.Fprintln(&stderr, runErr)
+	result := &complete.Result{BeadID: "bead-doom", BeadClosed: true, WorktreeRemoved: true, NextMode: state.ModeReview}
+	err := completeOutput(&stdout, &stderr, root, invocationCwd, result, runErr, func(string) error {
+		fmt.Fprintln(&stdout, "instruct guidance line")
+		return nil
+	})
+	if !errors.Is(err, runErr) {
+		t.Fatalf("reported failure must still exit non-zero: %v", err)
+	}
+	if strings.Count(stderr.String(), recovery) != 1 || strings.Count(stderr.String(), "bead is closed and merged; only the panel ledger commit remains") != 1 {
+		t.Errorf("error and recovery must appear once: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Bead bead-doom closed.") || !strings.Contains(stdout.String(), "instruct guidance line") {
+		t.Errorf("missing normal completion summary or guidance: %q", stdout.String())
+	}
+	if got, want := lastLine(stdout.String()), "NOTE: your shell's working directory was removed — run: cd "+root; got != want {
+		t.Errorf("last stdout line: got %q, want %q", got, want)
+	}
+}
+
+func TestCompleteOutput_UnreportedFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	runErr := errors.New("pre-merge failure")
+	err := completeOutput(&stdout, &stderr, "", "", nil, runErr, func(string) error {
+		t.Fatal("instruct called after a pre-merge failure")
+		return nil
+	})
+	if !errors.Is(err, runErr) || stderr.String() != "error: pre-merge failure\n" || stdout.Len() != 0 {
+		t.Fatalf("unexpected error output: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+}
+
 // TestCompleteTail_SuccessBranch_AgreesWithResultNextMode is AC-4's
 // success branch (spec 128 bead 5), driven over the REAL production
 // completeTail wiring: when result.NextModeIndeterminate is false, the

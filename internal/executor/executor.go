@@ -162,6 +162,9 @@ type Executor interface {
 	// dirty-check seam for the panel gate). Empty output means a clean tree.
 	Status(workdir string) (string, error)
 
+	// CheckIgnore returns nil for an ignored path, exit 1 for a non-ignored path.
+	CheckIgnore(workdir, file string) error
+
 	// IsRefNotFound reports whether err is the genuine "ref absent" case
 	// (branch already deleted) from RevParseRef vs a transient/structural git
 	// failure — the panel gate's missing-ref pass-through distinction. Routing

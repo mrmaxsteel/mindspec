@@ -270,6 +270,11 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
+	// R6.6 is outside both panel hatches and precedes lifecycle writes.
+	if err := implLedgerPreflight(root, specID, exec); err != nil {
+		return nil, err
+	}
+
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
 	// lifecycle command. No-op if the epic already has mindspec_phase, or
 	// when no epic exists yet. Migration errors fail the command
@@ -1181,4 +1186,39 @@ func joinResultErrorMessages(r *validate.Result) string {
 		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// implLedgerPreflight requires every flat spec ledger to be committed, including
+// untracked ledgers that a normal porcelain directory summary would collapse.
+func implLedgerPreflight(root, specID string, exec executor.Executor) error {
+	wt, paths, err := complete.SpecLedgerPaths(root, specID, "")
+	if err != nil {
+		return err
+	}
+	if err := complete.CheckPanelLedgers(wt, paths, exec); err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	status, err := exec.Status(wt)
+	if err != nil {
+		return guard.NewFailure("could not verify panel ledgers are committed: "+termsafe.Escape(err.Error()), complete.LedgerCommitRecovery(wt, paths))
+	}
+	// Decode porcelain quoted paths and rename destinations. A collapsed untracked parent also contains dirt.
+	for _, line := range strings.Split(status, "\n") {
+		dirty, err := panel.PorcelainPath(line)
+		if err != nil {
+			return guard.NewFailure("could not parse ledger status", complete.LedgerCommitRecovery(wt, paths))
+		}
+		if dirty == "" {
+			continue
+		}
+		for _, file := range paths {
+			if dirty == file || strings.HasPrefix(file, strings.TrimSuffix(dirty, "/")+"/") {
+				return guard.NewFailure("panel ledger has uncommitted changes: "+termsafe.Escape(file), complete.LedgerCommitRecovery(wt, []string{file}))
+			}
+		}
+	}
+	return nil
 }

@@ -242,7 +242,8 @@ retirement deferred to a follow-up bead. See the amendment below.
 > **Option A′ — the leaf's own local-copy precedent — was weighed and
 > REJECTED.** `gate.go` already carries two local-copy precedents for
 > avoiding an import: `artifactPaths` (`gate.go:520-526`, "a local copy
-> rather than importing internal/next") and the inlined `"bead/"` literal
+> rather than importing internal/next"; superseded by the R4.6 single home in
+> [Amendment (Spec 130)](#amendment-spec-130)) and the inlined `"bead/"` literal
 > in place of importing `internal/workspace` (`gate.go:27-28`). The same
 > pattern was considered here — a ~7-line local copy of the safe-set/quote
 > loop inside `internal/panel`, avoiding the import and this amendment
@@ -656,3 +657,7 @@ the gate exists for — the stale APPROVE honored at merge time.
   The already-bound check compares the keys only when supplied;
   `FinalizeEpic` writes neither key and removes neither key. This extends
   audit durability, not general tamper-resistance.
+- **Spec-116 artifactPaths — single home (R4.6).** `panel.ToolArtifactPaths` owns `.beads/issues.jsonl` and `<specs>/*/reviews/*/dispositions.jsonl`, with stdlib `path.Match` matching. The panel gate, next guard and complete materialization all use this home; no consumer carries a local list.
+- **§8 — tracked ledger (R6).** The Spec-114 carve-out for durable audit metadata extends to the tracked ledger `dispositions.jsonl`. The ledger stays agent-writable within the anti-footgun trust boundary; tracking preserves its audit history, not authentication.
+- **Spec-115 reach — third impl approve leg (R6.6).** In addition to the two new impl approve legs in this spec, the tracked-ledger preflight is a third new leg: ignored, untracked or uncommitted spec ledgers refuse. Neither `MINDSPEC_SKIP_PANEL` nor `enforcement.panel_gate: false` skips this leg. Both refusal recoveries name the spec worktree; the ignored-path recovery runs `mindspec init` there.
+- **Complete preflight outside the cap (R6.6).** Before any side effect, complete checks each matched existing flat-layout ledger with `check-ignore` in the spec worktree. This preflight is outside the gate subprocess cap. After the bead merge, complete commits those ledgers together via `exec.CommitPaths` as `chore(panel): ledger`, in the same spec worktree. Both hatches preserve this check and commit; a legacy panel with no ledger makes no ledger commit.

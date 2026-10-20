@@ -1364,7 +1364,7 @@ func IsInsideWorkTree(workdir string) bool {
 // Status runs `git status --porcelain` in workdir (workdir=="" → cwd) and
 // returns stdout. Use this when stderr is not interesting.
 func Status(workdir string) (string, error) {
-	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain")...)
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "--untracked-files=all")...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("status --porcelain: %w", err)
@@ -1372,12 +1372,13 @@ func Status(workdir string) (string, error) {
 	return string(out), nil
 }
 
-// StatusWithStderr runs `git status --porcelain` and uses CombinedOutput so
-// stderr is preserved in the error on failure (e.g. missing `-C` target).
+// StatusWithStderr enumerates untracked files individually so tool-artifact
+// matching never sees only a collapsed parent directory. It uses
+// CombinedOutput so stderr is preserved in the error on failure (e.g. missing `-C` target).
 // On success the returned string is the combined output (which is stdout
 // only when the command succeeds).
 func StatusWithStderr(workdir string) (string, error) {
-	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain")...)
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "--untracked-files=all")...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("status --porcelain: %w: %s", err, strings.TrimSpace(string(out)))
@@ -1408,7 +1409,7 @@ func StatusWithStderr(workdir string) (string, error) {
 // contaminated by an advisory message; stderr is folded in only for the
 // genuine-failure (non-zero exit) case StatusWithStderr already covers.
 func StatusZWithStderr(workdir string) (string, error) {
-	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "-z")...)
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "--untracked-files=all", "-z")...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

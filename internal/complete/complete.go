@@ -409,6 +409,15 @@ func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
 	return hint.EvidenceNote + ": " + lines
 }
 
+// ReportedError carries a failure already printed by Run. Callers must still
+// return a non-zero status, but should not print the diagnostic again.
+type ReportedError struct {
+	Err error
+}
+
+func (e *ReportedError) Error() string { return e.Err.Error() }
+func (e *ReportedError) Unwrap() error { return e.Err }
+
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
 // beadID is required — it must always be provided by the caller.
@@ -566,6 +575,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			fmt.Sprintf("resolving bead %s's epic lineage failed: %s — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, termsafe.Escape(lineageErr.Error())),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
+	}
+
+	// R6.6 runs before migration, marker clearing, materialization or close.
+	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
+	if ledgerErr != nil {
+		return nil, ledgerErr
+	}
+	if err := CheckPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
+		return nil, err
 	}
 
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
@@ -1230,6 +1248,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 	}
 
+	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
+	ledgerCommitErr := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec)
+	if ledgerCommitErr != nil {
+		ledgerCommitErr = fmt.Errorf("bead is closed and merged; only the panel ledger commit remains: %w", ledgerCommitErr)
+		fmt.Fprintln(os.Stderr, ledgerCommitErr)
+		ledgerCommitErr = &ReportedError{Err: ledgerCommitErr}
+	}
+
 	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the
 	// ordinary completion path (exec.CompleteBead just merged and cleaned
 	// up bead/<id> — the write-ahead marker's job is done) and the
@@ -1347,7 +1373,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var readyErr *postCloseReadyError
 		result.postCloseReadyFailed = errors.As(advanceErr, &readyErr)
 		result.NextSpec = specID
-		return result, nil
+		if ledgerCommitErr != nil {
+			return result, &ReportedError{Err: errors.Join(advanceErr, ledgerCommitErr)}
+		}
+		return result, ledgerCommitErr
 	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
@@ -1360,7 +1389,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// entirely above on the indeterminate return — no value fabricated
 	// from a nil child set is ever written (AC-4b).
 	if nextMode != "" && epicID != "" {
-		completeSyncPhase(root, epicID, nextMode, beadID)
+		if syncErr := completeSyncPhase(root, epicID, nextMode, beadID); syncErr != nil && ledgerCommitErr != nil {
+			ledgerCommitErr = &ReportedError{Err: errors.Join(syncErr, ledgerCommitErr)}
+		}
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1368,7 +1399,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		result.NextSpec = ""
 	}
 
-	return result, nil
+	return result, ledgerCommitErr
 }
 
 // completeSyncPhase performs step 6.5's best-effort mindspec_phase cache
@@ -1409,7 +1440,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // project-docs/user/guides/lifecycle-modes.md's "Disclosed residual,
 // not silently excepted" bullet (the writer-taxonomy section). The
 // residue itself remains as described; it is disclosed, not fixed.
-func completeSyncPhase(root, epicID, nextMode, beadID string) {
+func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil
 	}); syncErr != nil {
@@ -1421,7 +1452,9 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) {
 		// disposition: no manufactured recovery line on the non-timeout
 		// leg) is unchanged; only the rendered text is per-line escaped.
 		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(next.RenderBDError(syncErr), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
+		return syncErr
 	}
+	return nil
 }
 
 // FormatResult returns a human-readable summary of the completion.

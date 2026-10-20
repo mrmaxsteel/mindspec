@@ -81,10 +81,9 @@ const nullOID = "0000000000000000000000000000000000000000"
 // because the seed already has it and `add -A -- . <exclusion>` never
 // re-stages it.
 //
-// excludePaths are named-artifact exclusions in plain repo-relative
-// path form (e.g. ".beads/issues.jsonl"); this function itself builds
-// git's short exclude-pathspec form (":!<path>") for each, so callers
-// need not know that syntax.
+// excludePaths are repo-relative artifact paths or glob patterns (e.g.
+// ".beads/issues.jsonl"). Each becomes a ":(exclude,glob)" pathspec so
+// a single star never matches a directory separator, matching path.Match.
 func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, err error) {
 	tip, err := RevParseHEAD(wtPath)
 	if err != nil {
@@ -106,7 +105,7 @@ func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, er
 
 	addArgs := []string{"add", "-A", "--", "."}
 	for _, p := range excludePaths {
-		addArgs = append(addArgs, ":!"+p)
+		addArgs = append(addArgs, ":(exclude,glob)"+p)
 	}
 	addCmd := execCommand("git", gitArgs(wtPath, addArgs...)...)
 	addCmd.Env = env
