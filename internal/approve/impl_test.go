@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -2688,4 +2689,93 @@ func TestReadPlanBeadIDsRejectsMalformed(t *testing.T) {
 			t.Errorf("expected to close epic-parent, got: %v", closed)
 		}
 	})
+}
+
+func implLedgerFixture(t *testing.T) (string, string, string, func(...string)) {
+	t.Helper()
+	restore := phase.SetListJSONForTest(func(...string) ([]byte, error) {
+		t.Fatal("impl approve reached lifecycle reads before refusing dirty ledger")
+		return nil, nil
+	})
+	t.Cleanup(restore)
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root := t.TempDir()
+	wt := filepath.Join(root, ".worktrees", "worktree-spec-130-test")
+	file := ".mindspec/specs/130-test/reviews/p/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(wt, file)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, file), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", wt}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	git("init", "-q")
+	return root, wt, file, git
+}
+
+func TestImplApprove_UncommittedLedgerRefuses(t *testing.T) {
+	for _, state := range []string{"untracked", "staged", "modified"} {
+		t.Run(state, func(t *testing.T) {
+			root, wt, file, git := implLedgerFixture(t)
+			if state != "untracked" {
+				git("add", "--", file)
+			}
+			if state == "modified" {
+				git("-c", "user.name=Test", "-c", "user.email=test@mindspec.local", "commit", "-qm", "base")
+				if err := os.WriteFile(filepath.Join(wt, file), []byte("changed\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			realExec := &executor.MindspecExecutor{}
+			mock := &executor.MockExecutor{CheckIgnoreFn: realExec.CheckIgnore, StatusFn: realExec.Status}
+			_, err := ApproveImpl(root, "130-test", mock)
+			if err == nil || !strings.Contains(err.Error(), "uncommitted") || !strings.Contains(err.Error(), "git -C '"+wt+"' add -- '"+file+"'") || !strings.Contains(err.Error(), `commit -m "chore(panel): ledger"`) {
+				t.Fatalf("wrong ledger refusal: %v", err)
+			}
+			if len(mock.CallsTo("FinalizeEpic")) != 0 {
+				t.Fatal("finalized with uncommitted ledger")
+			}
+			git("add", "--", file)
+			git("-c", "user.name=Test", "-c", "user.email=test@mindspec.local", "commit", "-qm", "ledger")
+			if err := implLedgerPreflight(root, "130-test", mock); err != nil {
+				t.Fatalf("committed ledger refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestImplApprove_IgnoredLedgerRefuses(t *testing.T) {
+	for _, hatch := range []string{"0", "1"} {
+		t.Run(hatch, func(t *testing.T) {
+			t.Setenv("MINDSPEC_SKIP_PANEL", hatch)
+			root, wt, _, _ := implLedgerFixture(t)
+			if err := os.WriteFile(filepath.Join(wt, ".gitignore"), []byte(".mindspec/specs/*/reviews/**\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte("enforcement:\n  panel_gate: false\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			realExec := &executor.MindspecExecutor{}
+			mock := &executor.MockExecutor{CheckIgnoreFn: realExec.CheckIgnore, StatusFn: realExec.Status}
+			_, err := ApproveImpl(root, "130-test", mock)
+			if err == nil || !strings.Contains(err.Error(), "ignored") || !strings.Contains(err.Error(), "(cd '"+wt+"' && mindspec init)") || !strings.Contains(err.Error(), "git -C '"+wt+"' commit") {
+				t.Fatalf("ignored ledger lacks init/spec-worktree recovery: %v", err)
+			}
+			if len(mock.CallsTo("Status")) != 0 || len(mock.CallsTo("FinalizeEpic")) != 0 {
+				t.Fatal("ignored ledger did not refuse first")
+			}
+		})
+	}
 }

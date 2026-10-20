@@ -562,7 +562,7 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 		f.WorktreeAbsent = true
 		return f
 	}
-	f.UserDirt = userDirtPaths(out)
+	f.UserDirt = userDirtPaths(out, PanelSpecDir(reg.Dir, deps.SpecDir))
 	return f
 }
 
@@ -578,10 +578,10 @@ func PanelDirScanRoot(panelDir string) string {
 
 // userDirtPaths parses `git status --porcelain` output and returns the
 // user-authored dirty paths, filtering out ADR-0025 artifact paths
-// (.beads/issues.jsonl) which are designed-for and never block (Req 11).
+// from ToolArtifactPaths, which never block (Req 11; spec 130 R4.6).
 // Pure path filtering adds no subprocess call. ADR-0037 (Spec 130) permits
 // three calls on a SHA mismatch: rev-parse, subject-tree read, and porcelain.
-func userDirtPaths(porcelain string) []string {
+func userDirtPaths(porcelain string, specDir ...string) []string {
 	var out []string
 	for _, line := range strings.Split(porcelain, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -592,7 +592,7 @@ func userDirtPaths(porcelain string) []string {
 		if idx := strings.Index(path, " -> "); idx >= 0 {
 			path = strings.TrimSpace(path[idx+4:])
 		}
-		if path == "" || isArtifactPath(path) {
+		if path == "" || isArtifactPath(path, specDir...) {
 			continue
 		}
 		out = append(out, path)
@@ -600,19 +600,10 @@ func userDirtPaths(porcelain string) []string {
 	return out
 }
 
-// artifactPaths mirrors internal/next's ADR-0025 classification
-// (.beads/issues.jsonl). Kept as a local copy rather than importing
-// internal/next to avoid a panel→next dependency edge; the list is one entry
-// today and any addition is a one-line append in both places.
-var artifactPaths = []string{
-	".beads/issues.jsonl",
-}
-
-func isArtifactPath(p string) bool {
-	for _, a := range artifactPaths {
-		if p == a {
-			return true
-		}
+func isArtifactPath(p string, specDir ...string) bool {
+	dir := ""
+	if len(specDir) > 0 {
+		dir = specDir[0]
 	}
-	return false
+	return IsToolArtifactPath(p, dir)
 }

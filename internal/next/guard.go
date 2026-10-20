@@ -12,21 +12,12 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
-
-// artifactPaths is the list of paths mindspec treats as co-managed build
-// artifacts (ADR-0025). A dirty diff on these paths does not block workflow
-// guards; user-authored dirt still does.
-//
-// Today the only artifact is .beads/issues.jsonl. Adding a future artifact
-// (e.g. .beads/events.jsonl) is a one-line append.
-var artifactPaths = []string{
-	".beads/issues.jsonl",
-}
 
 // Package-level function variables for testability. Tests swap these to
 // simulate porcelain output and to verify bd export is invoked when and only
@@ -307,13 +298,13 @@ func defaultStatusPorcelainZ(cwd string) (string, error) {
 // classifyDirty partitions a list of repo-relative dirty paths into co-managed
 // artifact dirt (safe to ignore per ADR-0025) and user dirt (must block).
 // Empty inputs are skipped.
-func classifyDirty(paths []string) (artifactDirt, userDirt []string) {
+func classifyDirty(paths []string, specsDir ...string) (artifactDirt, userDirt []string) {
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		if isArtifactPath(p) {
+		if isArtifactPath(p, specsDir...) {
 			artifactDirt = append(artifactDirt, p)
 		} else {
 			userDirt = append(userDirt, p)
@@ -339,13 +330,12 @@ func escapeLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func isArtifactPath(p string) bool {
-	for _, a := range artifactPaths {
-		if p == a {
-			return true
-		}
+func isArtifactPath(p string, specsDir ...string) bool {
+	dir := ""
+	if len(specsDir) > 0 {
+		dir = specsDir[0]
 	}
-	return false
+	return panel.IsToolArtifactPath(p, dir)
 }
 
 // parsePorcelain extracts repo-relative paths from `git status --porcelain`
@@ -450,9 +440,9 @@ func parsePorcelainZ(out string) []dirtyEntry {
 // (a rename's OrigPath is not consulted for artifact classification —
 // unchanged scope from the pre-round-1 behavior; only entanglement
 // matching below considers both sides of a rename).
-func classifyDirtyZ(entries []dirtyEntry) (artifactEntries, userEntries []dirtyEntry) {
+func classifyDirtyZ(entries []dirtyEntry, specsDir ...string) (artifactEntries, userEntries []dirtyEntry) {
 	for _, e := range entries {
-		if isArtifactPath(e.Path) {
+		if isArtifactPath(e.Path, specsDir...) {
 			artifactEntries = append(artifactEntries, e)
 		} else {
 			userEntries = append(userEntries, e)
@@ -526,7 +516,7 @@ func CheckDirtyTreeProportional(repoRoot, cwd, specID string) (blockingDirt, ign
 	if err != nil {
 		return nil, nil, err
 	}
-	artifactEntries, userEntries := classifyDirtyZ(parsePorcelainZ(out))
+	artifactEntries, userEntries := classifyDirtyZ(parsePorcelainZ(out), workspace.SpecsDir(cwd))
 
 	if len(artifactEntries) > 0 {
 		if err := exportBeadsFn(repoRoot); err != nil {
@@ -536,7 +526,7 @@ func CheckDirtyTreeProportional(repoRoot, cwd, specID string) (blockingDirt, ign
 		if err != nil {
 			return nil, nil, err
 		}
-		_, userEntries = classifyDirtyZ(parsePorcelainZ(out2))
+		_, userEntries = classifyDirtyZ(parsePorcelainZ(out2), workspace.SpecsDir(cwd))
 	}
 
 	for _, e := range userEntries {
@@ -770,7 +760,7 @@ func pathWithin(dir, root string) bool {
 // artifact dirt to fold it into a follow-up `chore: sync beads artifact`
 // commit instead of ignoring it, so the bead→spec merge operates on a
 // genuinely clean tree. Per ADR-0025 the artifact list is explicit and small
-// (today: .beads/issues.jsonl only).
+// (panel.ToolArtifactPaths).
 //
 // Note: bead.Export writes <repoRoot>/.beads/issues.jsonl (the path resolves
 // relative to the export workdir), so callers checking a worktree should
@@ -781,7 +771,7 @@ func CheckDirtyTreeDetail(repoRoot, cwd string) (artifactDirt, userDirt []string
 	if err != nil {
 		return nil, nil, err
 	}
-	artifactDirt, userDirt = classifyDirty(parsePorcelain(out))
+	artifactDirt, userDirt = classifyDirty(parsePorcelain(out), workspace.SpecsDir(cwd))
 
 	if len(artifactDirt) == 0 {
 		return nil, userDirt, nil
@@ -795,6 +785,6 @@ func CheckDirtyTreeDetail(repoRoot, cwd string) (artifactDirt, userDirt []string
 	if err != nil {
 		return nil, nil, err
 	}
-	artifactDirt, userDirt = classifyDirty(parsePorcelain(out2))
+	artifactDirt, userDirt = classifyDirty(parsePorcelain(out2), workspace.SpecsDir(cwd))
 	return artifactDirt, userDirt, nil
 }

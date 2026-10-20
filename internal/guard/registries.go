@@ -155,6 +155,18 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl.go", Func: "implLedgerPreflight", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
+	{File: "internal/complete/panel_ledger.go", Func: "CheckPanelLedgers", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
+	{File: "internal/complete/panel_ledger.go", Func: "commitPanelLedgers", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
 	{
 		File:       "cmd/mindspec/bead_ready.go",
 		Func:       "beadReadyCheckCmd",

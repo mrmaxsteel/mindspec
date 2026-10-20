@@ -568,6 +568,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		)
 	}
 
+	// R6.6 runs before migration, marker clearing, materialization or close.
+	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
+	if ledgerErr != nil {
+		return nil, ledgerErr
+	}
+	if err := CheckPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
+		return nil, err
+	}
+
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
 	// the life of this call, so resolve it ONCE through a shared cache and
 	// thread that cache through the migration, the impl-only guard, and the
@@ -1202,6 +1211,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, errors.New(msg)
 		}
 		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
+	}
+
+	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
+	if err := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
+		return nil, err
 	}
 
 	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the

@@ -1406,6 +1406,11 @@ func (g *MindspecExecutor) Status(workdir string) (string, error) {
 	return gitutil.Status(workdir)
 }
 
+// CheckIgnore delegates the ledger preflight to gitutil.
+func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
+	return gitutil.CheckIgnore(workdir, file)
+}
+
 // IsRefNotFound reports whether err is gitutil.ErrRefNotFound (the genuine
 // branch-deleted case). Exposing the sentinel test through the executor keeps
 // the gitutil.ErrRefNotFound errors.Is check out of internal/complete

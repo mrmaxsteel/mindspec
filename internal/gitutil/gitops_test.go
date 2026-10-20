@@ -788,7 +788,7 @@ func TestStatus_PassesC(t *testing.T) {
 	if out != "?? new.txt\n" {
 		t.Errorf("unexpected output: %q", out)
 	}
-	assertArgs(t, (*calls)[0].args, "-C", "/tmp/wt", "status", "--porcelain")
+	assertArgs(t, (*calls)[0].args, "-C", "/tmp/wt", "status", "--porcelain", "--untracked-files=all")
 }
 
 func TestStatus_NoWorkdir(t *testing.T) {
@@ -796,7 +796,7 @@ func TestStatus_NoWorkdir(t *testing.T) {
 	if _, err := Status(""); err != nil {
 		t.Fatal(err)
 	}
-	assertArgs(t, (*calls)[0].args, "status", "--porcelain")
+	assertArgs(t, (*calls)[0].args, "status", "--porcelain", "--untracked-files=all")
 }
 
 func TestStatusWithStderr_PreservesOutputOnFailure(t *testing.T) {

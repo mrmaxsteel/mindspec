@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,5 +219,54 @@ func runGit(t *testing.T, root string, args ...string) {
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, string(out))
+	}
+}
+
+func TestBootstrap_ReviewsLedgerTracked(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			root := t.TempDir()
+			runGit(t, root, "init", "-q")
+			if existing {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("# existing\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range []string{"!.mindspec/specs/*/reviews/*/", "!.mindspec/specs/*/reviews/*/dispositions.jsonl"} {
+				if strings.Count(string(before), entry+"\n") != 1 {
+					t.Fatalf("negation missing or duplicated: %q", before)
+				}
+			}
+			for _, name := range []string{"dispositions.jsonl", "panel.json", "BRIEF.md", "R1-round-1.json", "dispositions.lock"} {
+				file := ".mindspec/specs/130-test/reviews/p/" + name
+				cmd := exec.Command("git", "-C", root, "check-ignore", "-q", "--", file)
+				err := cmd.Run()
+				if name == "dispositions.jsonl" {
+					var exit *exec.ExitError
+					if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+						t.Fatalf("ledger still ignored: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("%s not ignored: %v", name, err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatalf("second init changed gitignore:\nbefore: %s\nafter: %s", before, after)
+			}
+		})
 	}
 }

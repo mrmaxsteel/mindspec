@@ -3,12 +3,17 @@ package next
 import (
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"os/exec"
 )
 
 // --- classifyDirty ---
@@ -703,5 +708,52 @@ func TestWorktreeSetupFailure_HonorsCustomWorktreeRoot(t *testing.T) {
 	assertRecipeFailureInvariants(t, msg)
 	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down") {
 		t.Errorf("recipe must honor cfg.WorktreeRoot end-to-end: %q", msg)
+	}
+}
+
+func TestNextGuard_LedgerIsArtifact(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldStatus, oldStatusZ, oldExport := statusPorcelainFn, statusPorcelainZFn, exportBeadsFn
+	t.Cleanup(func() { statusPorcelainFn, statusPorcelainZFn, exportBeadsFn = oldStatus, oldStatusZ, oldExport })
+
+	// Real untracked ledgers must be enumerated as files, never collapsed dirs.
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	ledger := ".mindspec/specs/130-test/reviews/p/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, ledger)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ledger), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []func(string) (string, error){gitutil.Status, gitutil.StatusWithStderr, gitutil.StatusZWithStderr} {
+		out, err := read(root)
+		if err != nil || !strings.Contains(out, ledger) {
+			t.Fatalf("untracked ledger collapsed: %q %v", out, err)
+		}
+	}
+	statusPorcelainFn = func(string) (string, error) { return " M " + ledger + "\n", nil }
+	statusPorcelainZFn = func(string) (string, error) { return " M " + ledger + "\x00", nil }
+	exportBeadsFn = func(string) error { return nil }
+	artifacts, dirt, err := CheckDirtyTreeDetail(root, root)
+	if err != nil || len(dirt) != 0 || len(artifacts) != 1 || artifacts[0] != ledger {
+		t.Fatalf("classification: %v %v %v", artifacts, dirt, err)
+	}
+	blocking, ignored, err := CheckDirtyTreeProportional(root, root, "130-test")
+	if err != nil || len(blocking) != 0 || len(ignored) != 0 {
+		t.Fatalf("proportional classification: %v %v %v", blocking, ignored, err)
+	}
+	_, dirt = classifyDirty([]string{ledger, ".mindspec/specs/130-test/reviews/p/panel.json"}, workspace.SpecsDir(root))
+	if len(dirt) != 1 {
+		t.Fatalf("non-ledger must remain user dirt: %v", dirt)
 	}
 }
