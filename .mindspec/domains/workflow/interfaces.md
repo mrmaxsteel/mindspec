@@ -734,7 +734,7 @@ complete-gated.
 
 ### Landed review identity (`complete`, Spec 130 R12)
 
-Before `exec.CompleteBead`, `complete.Run` calls the optional
+On a normal run, before `exec.CompleteBead`, `complete.Run` calls the optional
 `executor.LandedReviewSetter.SetLandedReview(sha, panel)` once for the first
 Allow returned by `panelGate`. The values are that registration's
 `reviewed_head_sha` and `<slug>@r<N>`. A Warn (including abandoned panels,
@@ -742,4 +742,9 @@ missing refs and the environment hatch), `enforcement.panel_gate: false`, or
 no panel supplies no identity. A config-disabled matched panel returns Warn
 without evaluating its facts. The executor writes `mindspec_landed_reviewed_sha`
 and `mindspec_landed_review_panel` together with the landed binding;
-`FinalizeEpic` leaves them unchanged.
+`FinalizeEpic` leaves them unchanged. Before publishing each write-ahead stage
+marker, `complete` records the first Allow's identity in the same metadata write
+as the marker attestation. An authenticated materialization resume skips the
+panel gate and replays that recorded identity through `SetLandedReview` before
+`CompleteBead`. A resume with no recorded identity supplies none. Each new marker
+attestation overwrites both identity fields, including when there was no Allow.

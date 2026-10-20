@@ -889,6 +889,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	}
 
+	// Capture the first Allow before materialization so every write-ahead marker
+	// carries the identity needed by a retry that skips the panel gate.
+	var landedReview *stageMarkerReview
+	if resumeStage != "" {
+		landedReview, err = readStageMarkerReview(beadID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		for _, matched := range panelDecisions {
+			if matched.Decision.Action == panel.Allow {
+				p := matched.Registration.Panel
+				landedReview = &stageMarkerReview{sha: p.ReviewedHeadSHA, panel: fmt.Sprintf("%s@r%d", matched.Registration.Slug(), p.Round)}
+				break
+			}
+		}
+	}
+
 	// 2.26. Spec 127 R4(a) — the §1-phase work-destruction preflight for
 	// this verb's OWN bead→spec merge (CompleteBead's MergeInto), sited
 	// immediately after the panel gate and BEFORE the artifact-
@@ -960,17 +978,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// already run in this branch); wtPath == "" is a pure dirt-check
 		// refusal-or-noop (the committed-range gate above already ran).
 		if err := runMaterialization(materializationInput{
-			exec:        exec,
-			root:        root,
-			beadID:      beadID,
-			beadHead:    beadHead,
-			wtPath:      wtPath,
-			specDir:     specDir,
-			commitMsg:   commitMsg,
-			base:        base,
-			opts:        opts,
-			resumeStage: resumeStage,
-			warnWriter:  warnWriter,
+			exec:         exec,
+			root:         root,
+			beadID:       beadID,
+			beadHead:     beadHead,
+			wtPath:       wtPath,
+			specDir:      specDir,
+			commitMsg:    commitMsg,
+			base:         base,
+			opts:         opts,
+			resumeStage:  resumeStage,
+			landedReview: landedReview,
+			warnWriter:   warnWriter,
 		}); err != nil {
 			return nil, err
 		}
@@ -1149,14 +1168,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
-		if setter, ok := exec.(executor.LandedReviewSetter); ok {
-			for _, matched := range panelDecisions {
-				if matched.Decision.Action == panel.Allow {
-					p := matched.Registration.Panel
-					setter.SetLandedReview(p.ReviewedHeadSHA, fmt.Sprintf("%s@r%d", matched.Registration.Slug(), p.Round))
-					break
-				}
-			}
+		if setter, ok := exec.(executor.LandedReviewSetter); ok && landedReview != nil {
+			setter.SetLandedReview(landedReview.sha, landedReview.panel)
 		}
 		completeErr = exec.CompleteBead(beadID, specBranch, "", opts.AllowNetDeletion, opts.ResolveMerge)
 		if completeErr == nil {

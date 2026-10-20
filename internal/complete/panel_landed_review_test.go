@@ -1,13 +1,16 @@
 package complete
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -22,7 +25,8 @@ func firstGateRegistration(matches []PanelGateResult) *panel.Registration {
 
 type landedReviewRecorder struct {
 	executor.Executor
-	calls []string
+	calls            []string
+	failCompleteOnce bool
 }
 
 func (e *landedReviewRecorder) SetLandedReview(sha, panel string) {
@@ -31,6 +35,10 @@ func (e *landedReviewRecorder) SetLandedReview(sha, panel string) {
 
 func (e *landedReviewRecorder) CompleteBead(_, _, _, _ string, _ bool) error {
 	e.calls = append(e.calls, "CompleteBead")
+	if e.failCompleteOnce {
+		e.failCompleteOnce = false
+		return errors.New("injected completion failure")
+	}
 	return nil
 }
 
@@ -44,14 +52,14 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 			t.Cleanup(func() { panelSkipEnvFn = origSkip })
 			panelSkipEnvFn = func() bool { return scenario == "env hatch" }
 
-			p := panel.Panel{BeadID: bp(beadID), Spec: specID, Round: 1,
+			p := panel.Panel{BeadID: bp(beadID), Spec: specID, Round: 3,
 				ExpectedReviewers: 6, ReviewedHeadSHA: reviewedSHA}
 			if scenario == "abandoned" {
 				p.Abandoned = true
 				p.AbandonReason = "superseded"
 			}
 			if scenario != "no panel" {
-				writePanel(t, root, "b-first-allow", p, approveVerdicts(6))
+				writePanel(t, root, "b-first-allow", p, landedReviewVerdicts(p.Round))
 			}
 			if scenario == "config hatch" {
 				writeFile(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
@@ -69,9 +77,9 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 				warn := p
 				warn.Abandoned = true
 				warn.AbandonReason = "old panel"
-				writePanel(t, root, "a-warn", warn, approveVerdicts(6))
-				// A later Allow has a different reviewed SHA but the same
-				// subject. Both pass the real subject-tree gate; first wins.
+				writePanel(t, root, "a-warn", warn, landedReviewVerdicts(warn.Round))
+				// The first Allow reviews a SHA different from the bead tip.
+				// Both Allows have the same subject; the first panel SHA wins.
 				gitRun(t, root, "checkout", "-q", "--detach", reviewedSHA)
 				writeFile(t, root, "review/artifact.txt", "review-only commit\n")
 				gitRun(t, root, "add", "review/artifact.txt")
@@ -85,7 +93,13 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 					t.Fatal(err)
 				}
 				p.ReviewedHeadSHA, p.SubjectDigest = laterSHA, digest
-				writePanel(t, root, "c-last-allow", p, approveVerdicts(6))
+				writePanel(t, root, "b-first-allow", p, landedReviewVerdicts(p.Round))
+				p.ReviewedHeadSHA = reviewedSHA
+				writePanel(t, root, "c-last-allow", p, landedReviewVerdicts(p.Round))
+				reviewedSHA = laterSHA
+				if tip := gateRevParse(t, root, "bead/"+beadID); tip == reviewedSHA {
+					t.Fatal("first Allow must review a SHA different from the bead tip")
+				}
 			}
 
 			ex := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
@@ -95,7 +109,7 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 			}
 			want := []string{"CompleteBead"}
 			if scenario == "allow" || scenario == "warn then two allows" {
-				want = []string{fmt.Sprintf("SetLandedReview(%s, b-first-allow@r1)", reviewedSHA), "CompleteBead"}
+				want = []string{fmt.Sprintf("SetLandedReview(%s, b-first-allow@r3)", reviewedSHA), "CompleteBead"}
 			}
 			if !reflect.DeepEqual(ex.calls, want) {
 				t.Fatalf("review setter must run exactly once before CompleteBead, only for the first Allow: got %v, want %v", ex.calls, want)
@@ -128,5 +142,78 @@ func TestPanelGate_ReturnsEveryMatchedDecision(t *testing.T) {
 				t.Errorf("scan-order decision %d: got %+v, want %s %v", i, matches[i], slug, want)
 			}
 		}
+	}
+}
+
+// Use verdict filenames matching the registration's round so the real gate Allows.
+func landedReviewVerdicts(round int) map[string]string {
+	verdicts := map[string]string{}
+	for name, verdict := range approveVerdicts(6) {
+		verdicts[strings.Replace(name, "-round-1.json", fmt.Sprintf("-round-%d.json", round), 1)] = verdict
+	}
+	return verdicts
+}
+
+func TestComplete_LandedReviewResume(t *testing.T) {
+	for _, scenario := range []string{"allow", "no recorded identity", "legacy attestation"} {
+		t.Run(scenario, func(t *testing.T) {
+			saveAndRestore(t)
+			const specID, beadID = "930-review-resume", "mindspec-reviewresume.1"
+			root, _, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
+			wireRealGitFaultSeams(t, specID)
+			wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+			store := newFakeMetadataStore()
+			store.wire(t)
+			if scenario == "no recorded identity" {
+				// A fresh no-panel publication must overwrite an older marker's identity.
+				store.data[beadID] = map[string]interface{}{
+					"mindspec_stage_marker_oid":          "old-marker",
+					"mindspec_stage_marker_reviewed_sha": "old-reviewed-sha",
+					"mindspec_stage_marker_review_panel": "old-panel@r8",
+				}
+			}
+			checkDirtyTreeFn = next.CheckDirtyTreeDetail
+			origSkip := panelSkipEnvFn
+			t.Cleanup(func() { panelSkipEnvFn = origSkip })
+			panelSkipEnvFn = func() bool { return false }
+			writeFile(t, wtPath, ".beads/issues.jsonl", "{\"id\":\"baseline\"}\n")
+			gitRun(t, wtPath, "add", "--", ".beads/issues.jsonl")
+			gitRun(t, wtPath, "commit", "-q", "-m", "baseline artifact")
+			reviewedSHA := gateRevParse(t, root, beadBranch)
+			const slug = "resume-allow"
+			if scenario != "no recorded identity" {
+				writePanel(t, root, slug, panel.Panel{BeadID: bp(beadID), Spec: specID, Round: 1,
+					ExpectedReviewers: 6, ReviewedHeadSHA: reviewedSHA}, approveVerdicts(6))
+			}
+			writeFile(t, wtPath, ".beads/issues.jsonl", "{\"id\":\"changed\"}\n")
+			first := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root), failCompleteOnce: true}
+			if _, err := Run(root, beadID, specID, "", first, CompleteOpts{}); err == nil {
+				t.Fatal("first completion must fail after full materialization")
+			}
+			want := []string{"CompleteBead"}
+			if scenario != "no recorded identity" {
+				want = []string{fmt.Sprintf("SetLandedReview(%s, %s@r1)", reviewedSHA, slug), "CompleteBead"}
+			}
+			if !reflect.DeepEqual(first.calls, want) {
+				t.Fatalf("first completion calls: got %v, want %v", first.calls, want)
+			}
+			tip := gateRevParse(t, root, beadBranch)
+			if oid, stage, present := readMarker(t, root, beadID); !present || oid != tip || tip == reviewedSHA || stage != stageArtifactSync {
+				t.Fatalf("expected advanced, attested artifact-sync marker: oid=%s tip=%s reviewed=%s stage=%s present=%v", oid, tip, reviewedSHA, stage, present)
+			}
+			if scenario == "legacy attestation" {
+				// Older publishers recorded only the marker OID.
+				store.data[beadID] = map[string]interface{}{stageMarkerAttestationKey: tip}
+				want = []string{"CompleteBead"}
+			}
+			retry := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
+			result, err := Run(root, beadID, specID, "", retry, CompleteOpts{ResolveMerge: true})
+			if err != nil || result == nil || !result.BeadClosed {
+				t.Fatalf("resume must converge: result=%+v err=%v calls=%v", result, err, retry.calls)
+			}
+			if !reflect.DeepEqual(retry.calls, want) {
+				t.Fatalf("resume must replay the original panel identity before CompleteBead: got %v, want %v", retry.calls, want)
+			}
+		})
 	}
 }

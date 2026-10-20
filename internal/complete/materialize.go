@@ -115,6 +115,28 @@ func materializationSubject(beadID, commitMsg string) string {
 // the same statement at the decision level.
 const stageMarkerAttestationKey = "mindspec_stage_marker_oid"
 
+const stageMarkerReviewSHAKey = "mindspec_stage_marker_reviewed_sha"
+const stageMarkerReviewPanelKey = "mindspec_stage_marker_review_panel"
+
+type stageMarkerReview struct {
+	sha, panel string
+}
+
+// readStageMarkerReview is used only after the discriminator authenticates a resume.
+// Older attestations and publications with no Allow supply no review identity.
+func readStageMarkerReview(beadID string) (*stageMarkerReview, error) {
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return nil, fmt.Errorf("reading the materialization review identity for %s: %s", idrender.Bead(beadID), next.RenderBDError(err))
+	}
+	sha, _ := meta[stageMarkerReviewSHAKey].(string)
+	panel, _ := meta[stageMarkerReviewPanelKey].(string)
+	if sha == "" || panel == "" {
+		return nil, nil
+	}
+	return &stageMarkerReview{sha: sha, panel: panel}, nil
+}
+
 // readStageMarkerAttestation reads beadID's recorded attestation OID, ""
 // when absent or non-string. A READ FAILURE propagates (fix-round G3's
 // discipline): it is never mapped to "unattested" — that would clear
@@ -152,10 +174,19 @@ func readStageMarkerAttestation(beadID string) (string, error) {
 // ever ADMITS an unattested resume. On failure, refuses BEFORE anything
 // is published (aerr is bd-derived — escaped per G3's render
 // discipline).
-func recordStageMarkerAttestation(beadID, oid string) error {
-	if aerr := completeMergeMetadataFn(beadID, map[string]interface{}{
+func recordStageMarkerAttestation(beadID, oid string, review *stageMarkerReview) error {
+	// Always overwrite both identity fields alongside the OID: a new publication
+	// without an Allow must not inherit an identity from an older marker.
+	updates := map[string]interface{}{
 		stageMarkerAttestationKey: oid,
-	}); aerr != nil {
+		stageMarkerReviewSHAKey:   "",
+		stageMarkerReviewPanelKey: "",
+	}
+	if review != nil {
+		updates[stageMarkerReviewSHAKey] = review.sha
+		updates[stageMarkerReviewPanelKey] = review.panel
+	}
+	if aerr := completeMergeMetadataFn(beadID, updates); aerr != nil {
 		return guard.NewFailure(
 			fmt.Sprintf("bead %s's materialization failed while recording the write-ahead marker attestation: %v — refusing before any marker publish; nothing was published.", idrender.Bead(beadID), next.RenderBDError(aerr)),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd metadata writes are healthy)", idrender.Bead(beadID)),
@@ -326,6 +357,7 @@ type materializationInput struct {
 	root, beadID, beadHead, wtPath, specDir, commitMsg, base string
 	opts                                                     CompleteOpts
 	resumeStage                                              string
+	landedReview                                             *stageMarkerReview
 	warnWriter                                               io.Writer
 }
 
@@ -434,7 +466,7 @@ func runMaterialization(in materializationInput) error {
 			if buildErr != nil {
 				return fmt.Errorf("building the materialization commit for %s: %w", idrender.Bead(beadID), buildErr)
 			}
-			if aerr := recordStageMarkerAttestation(beadID, c); aerr != nil {
+			if aerr := recordStageMarkerAttestation(beadID, c, in.landedReview); aerr != nil {
 				return aerr
 			}
 			if pubErr := exec.PublishStageMarker(beadID, c, ""); pubErr != nil {
@@ -532,7 +564,7 @@ func runMaterialization(in materializationInput) error {
 		if buildErr != nil {
 			return fmt.Errorf("building the artifact-sync commit for %s: %w", idrender.Bead(beadID), buildErr)
 		}
-		if aerr := recordStageMarkerAttestation(beadID, d); aerr != nil {
+		if aerr := recordStageMarkerAttestation(beadID, d, in.landedReview); aerr != nil {
 			return aerr
 		}
 		if pubErr := exec.PublishStageMarker(beadID, d, expectedOld); pubErr != nil {
