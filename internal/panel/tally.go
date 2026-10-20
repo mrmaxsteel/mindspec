@@ -57,12 +57,13 @@ type Verdict struct {
 	// HardBlock reports the optional `"hard_block": true` flag —
 	// evidence-bearing gates (missing measurement artifacts etc.)
 	// that no vote count may override.
-	HardBlock bool
+	HardBlock  bool
+	Invalid    bool
+	Findings   []Finding
+	SlotSHA256 string
 }
 
-// verdictJSON is the on-disk shape; only the fields the gates consume
-// are parsed (reviewers also write confidence, rationale,
-// concrete_changes_required — those stay with /ms-panel-tally).
+// verdictJSON validates the core verdict fields before finding payload parsing.
 type verdictJSON struct {
 	Verdict   string `json:"verdict"`
 	HardBlock bool   `json:"hard_block"`
@@ -85,7 +86,9 @@ type Result struct {
 	// PanelErr records a panel.json read/parse failure (the file
 	// exists but is unusable). A registered-but-malformed panel must
 	// not be treated as "no panel" by gating consumers.
-	PanelErr error
+	PanelErr     error
+	IntegrityErr error
+	Unexpected   []Verdict
 
 	// LatestRound is the FILENAME-derived latest round: max(N) over
 	// `*-round-<N>.json` in the directory. 0 when no verdict files
@@ -115,10 +118,9 @@ type Result struct {
 	HardBlocks []string
 
 	// Malformed lists the basenames of LatestRound verdict files
-	// that exist but could not be parsed (bad JSON or missing
-	// "verdict" field). A malformed verdict counts as MISSING — it
-	// appears here by name and contributes nothing to Verdicts or
-	// the counts.
+	// that exist but could not be read or parsed. They appear here by
+	// name and contribute nothing to Verdicts or the counts. An
+	// unparseable roster verdict counts as MISSING.
 	Malformed []string
 
 	// HasConsolidated reports whether consolidated-round-<LatestRound>.md
@@ -150,7 +152,24 @@ func (r *Result) MissingCount() int {
 // verdict in the latest round. False for unregistered or malformed
 // registrations (ExpectedReviewers 0 is never "complete").
 func (r *Result) Complete() bool {
-	return r.ExpectedReviewers() > 0 && len(r.Verdicts) >= r.ExpectedReviewers()
+	if r.ExpectedReviewers() <= 0 || len(r.Verdicts) < r.ExpectedReviewers() {
+		return false
+	}
+	if r.Panel != nil {
+		for _, slot := range r.Panel.Roster {
+			present := false
+			for _, verdict := range r.Verdicts {
+				if verdict.Slot == slot.Slot {
+					present = true
+					break
+				}
+			}
+			if !present {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // UnresolvedVerdicts returns the latest-round verdicts whose canonical
@@ -162,16 +181,8 @@ func (r *Result) Complete() bool {
 // slot-sorted (see Tally), so the returned slice — and every message built
 // from it — is deterministic (Spec 114 R1).
 //
-// Spec 114 R2 (the audited-refutation escape): a latest-round
-// REQUEST_CHANGES is treated as RESOLVED — and excluded here — iff some
-// Panel.Refutations entry has a byte-equal Slot AND Round == r.LatestRound
-// (isRefuted, the single home of this matching rule). This is the ONLY
-// gate-validation home for refutations (tally.go, single-homed per the
-// plan): REJECT/hard_block/unrecognized verdicts are never
-// VerdictRequestChanges, so they can never be refuted here, and a
-// round-N refutation never clears a round-(N+1) re-RC because the check is
-// against the CURRENT r.LatestRound, not the verdict's own (always-latest)
-// round.
+// Only REQUEST_CHANGES findings can be discharged. Matching uses the latest
+// round and current finding hashes; vetoes remain independently blocking.
 func (r *Result) UnresolvedVerdicts() []Verdict {
 	var out []Verdict
 	for _, v := range r.Verdicts {
@@ -186,61 +197,47 @@ func (r *Result) UnresolvedVerdicts() []Verdict {
 	return out
 }
 
-// isRefuted reports whether some recorded Panel.Refutations entry names
-// slot at the panel's CURRENT LatestRound (Spec 114 R2) — byte-exact Slot
-// match, exact Round match. The single home of the refutation-matching
-// rule; UnresolvedVerdicts and AppliedRefutations both call this so they
-// can never disagree.
+// isRefuted requires every current finding to have an applicable refutation.
 func (r *Result) isRefuted(slot string) bool {
-	if r.Panel == nil {
-		return false
-	}
-	for _, ref := range r.Panel.Refutations {
-		if ref.Slot == slot && ref.Round == r.LatestRound {
-			return true
+	for _, v := range r.Verdicts {
+		if v.Slot == slot {
+			return len(r.unresolvedFindings(v)) == 0 && v.Verdict == VerdictRequestChanges && !v.HardBlock && !v.Invalid
 		}
 	}
 	return false
 }
 
-// AppliedRefutations returns exactly the recorded Panel.Refutations entries
-// that matched a latest-round REQUEST_CHANGES verdict via the same exact
-// rule isRefuted applies (Spec 114 R2): byte-equal Slot, Round ==
-// r.LatestRound. Entries matching nothing — a stale round, an unknown slot,
-// or a REJECT/hard_block/unrecognized-verdict slot (never
-// VerdictRequestChanges) — are NEVER returned. Deterministically
-// deduplicated by (slot, round): two refutations entries naming the same
-// slot+round collapse to ONE record, first-wins in the panel's recorded
-// array order (stable); the result is then slot-sorted for determinism,
-// mirroring Verdicts' own sort (Tally).
+// AppliedRefutations reports each effective entry, deduplicated by slot,
+// round, finding and hash. A partially resolved slot still has effective entries.
 func (r *Result) AppliedRefutations() []Refutation {
-	if r.Panel == nil || len(r.Panel.Refutations) == 0 {
+	if r.Panel == nil {
 		return nil
 	}
-	rcSlots := make(map[string]bool)
-	for _, v := range r.Verdicts {
-		if v.Verdict == VerdictRequestChanges {
-			rcSlots[v.Slot] = true
-		}
-	}
-	seen := make(map[string]bool)
 	var out []Refutation
-	for _, ref := range r.Panel.Refutations {
-		if ref.Round != r.LatestRound || !rcSlots[ref.Slot] || seen[ref.Slot] {
+	seen := map[string]bool{}
+	for _, v := range r.Verdicts {
+		if v.Verdict != VerdictRequestChanges || v.HardBlock || v.Invalid {
 			continue
 		}
-		seen[ref.Slot] = true
-		out = append(out, ref)
+		for _, ref := range r.Panel.Refutations {
+			if !r.refutationApplies(v, ref) {
+				continue
+			}
+			key := fmt.Sprintf("%s:%d:%s:%s", ref.Slot, ref.Round, ref.Finding, ref.FindingSHA256)
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, ref)
+			}
+		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
 	return out
 }
 
 // VoteVerdict is the deterministic vote-only gate outcome of a tally
 // (Spec 093 Req 12). It is the subset of the pre-complete hook's decision
 // that depends ONLY on fs-derived panel state — registration validity,
-// round consistency, verdict completeness, REJECT/hard_block, and the N−1
-// threshold — and deliberately EXCLUDES the staleness (reviewed_head_sha)
+// round consistency, verdict completeness, vetoes and discharged findings — and deliberately EXCLUDES the staleness (reviewed_head_sha)
 // and dirty-tree checks, which require git the hook owns. The complete-side
 // advisory tally (Req 13d) renders this so its "gate would PASS/BLOCK" line
 // is computed by the SAME tally the hook consumes and can never disagree on
@@ -248,11 +245,10 @@ func (r *Result) AppliedRefutations() []Refutation {
 type VoteVerdict int
 
 const (
-	// VotePass means the vote portion would not block: threshold met, no
-	// REJECT/hard_block, complete, round-consistent.
+	// VotePass means all vote terms hold, independently of freshness.
 	VotePass VoteVerdict = iota
 	// VoteBlock means the vote portion would block (incomplete, REJECT,
-	// hard_block, sub-threshold, round mismatch, or malformed registration).
+	// hard_block, unresolved findings, round mismatch, or malformed registration).
 	VoteBlock
 	// VoteAbandoned means the panel is a recorded abandonment — the gate
 	// passes with a warning, not a block.
@@ -270,6 +266,9 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 		return VotePass, "no registered panel"
 	}
 	p := r.Panel
+	if err := r.intactError(); err != nil {
+		return VoteBlock, err.Error()
+	}
 	round := r.LatestRound
 	if round == 0 {
 		round = p.Round
@@ -290,24 +289,13 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 	if !r.Complete() {
 		return VoteBlock, fmt.Sprintf("round %d incomplete: %d/%d verdicts present", round, len(r.Verdicts), n)
 	}
-	if r.Rejects > 0 || len(r.HardBlocks) > 0 {
-		return VoteBlock, fmt.Sprintf("round %d: REJECT/hard_block recorded (%d/%d APPROVE)", round, r.Approves, n)
+	if r.Rejects > 0 || len(r.HardBlocks) > 0 || r.InvalidCount() > 0 || r.unexpectedVeto() {
+		return VoteBlock, fmt.Sprintf("round %d: %s recorded (%d/%d APPROVE)%s%s", round, r.vetoSummary(), r.Approves, n, r.unexpectedVetoNames(), r.invalidNames())
 	}
-	threshold := p.ApproveThreshold()
-	if unresolved := r.UnresolvedVerdicts(); len(unresolved) > 0 {
-		slots := make([]string, len(unresolved))
-		for i, v := range unresolved {
-			// R4: Slot is derived from a reviewer verdict filename —
-			// escape per-entry.
-			slots[i] = termsafe.Escape(v.Slot)
-		}
-		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE, threshold is %d/%d",
-			round, strings.Join(slots, ", "), r.Approves, n, threshold, n)
+	if !r.PassRule(true) {
+		return VoteBlock, fmt.Sprintf("round %d: unresolved non-APPROVE verdict(s) from %s — %d/%d APPROVE", round, r.UnresolvedNames(), r.Approves, n)
 	}
-	if threshold > 0 && r.Approves >= threshold {
-		return VotePass, fmt.Sprintf("round %d: %d/%d APPROVE (threshold %d/%d)", round, r.Approves, n, threshold, n)
-	}
-	return VoteBlock, fmt.Sprintf("round %d: %d/%d APPROVE — threshold is %d/%d", round, r.Approves, n, threshold, n)
+	return VotePass, fmt.Sprintf("round %d: %d/%d APPROVE, %d resolved", round, r.Approves, n, r.ResolvedCount())
 }
 
 // Tally reads a panel directory and reports its registration plus
@@ -336,6 +324,12 @@ func Tally(dir string) (*Result, error) {
 		} else {
 			p := reg.Panel
 			res.Panel = &p
+			field, checkErr := CheckHandEdits(dir, p)
+			if checkErr != nil {
+				res.IntegrityErr = checkErr
+			} else if field != "" {
+				res.IntegrityErr = fmt.Errorf("%s", field)
+			}
 		}
 	}
 
@@ -367,18 +361,25 @@ func Tally(dir string) (*Result, error) {
 		res.RoundMismatch = res.Panel.Round != res.LatestRound
 	}
 
+	roster := map[string]bool{}
+	if res.Panel != nil {
+		for _, slot := range res.Panel.Roster {
+			roster[slot.Slot] = true
+		}
+	}
 	// Tally the latest round only.
 	for _, vf := range vfiles {
 		if vf.round != res.LatestRound {
 			continue
 		}
+		offRoster := len(roster) > 0 && !roster[vf.slot]
 		data, err := os.ReadFile(filepath.Join(dir, vf.name))
 		if err != nil {
 			res.Malformed = append(res.Malformed, vf.name)
 			continue
 		}
 		var vj verdictJSON
-		if err := json.Unmarshal(data, &vj); err != nil || strings.TrimSpace(vj.Verdict) == "" {
+		if err := json.Unmarshal(data, &vj); err != nil {
 			res.Malformed = append(res.Malformed, vf.name)
 			continue
 		}
@@ -388,6 +389,21 @@ func Tally(dir string) (*Result, error) {
 			Round:     vf.round,
 			Verdict:   strings.ToUpper(strings.TrimSpace(vj.Verdict)),
 			HardBlock: vj.HardBlock,
+		}
+		var payload FindingVerdict
+		if err := json.Unmarshal(data, &payload); err != nil {
+			v.Invalid = v.Verdict == VerdictRequestChanges
+		} else {
+			findings, err := Findings(payload)
+			v.Invalid = err != nil
+			v.Findings = findings
+			if slot, err := SlotFinding(payload); err == nil {
+				v.SlotSHA256 = slot.SHA256
+			}
+		}
+		if offRoster {
+			res.Unexpected = append(res.Unexpected, v)
+			continue
 		}
 		res.Verdicts = append(res.Verdicts, v)
 		switch v.Verdict {

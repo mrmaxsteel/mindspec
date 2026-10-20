@@ -8,6 +8,9 @@ package panel
 // independently of Bead 4's live migration.
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -367,6 +370,101 @@ func TestQueryMetrics_LoadStoreEmptyGlobIsNotAnError(t *testing.T) {
 		}
 		if render := (ModelRate{Numerator: r.Genuine, Denominator: r.SlotTotal}).Render(); render != "0/0" {
 			t.Errorf("Q4 gate %s render = %q, want 0/0", r.Gate, render)
+		}
+	}
+}
+
+// Audit events coexist with telemetry without inflating query rows or manifests.
+func TestDispositionQuery_LedgerKinds(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	records := ledgerFixtures(t, "p")
+	row := testRow("d-ledger-query", "p", "R1", nil)
+	manifest := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "model-a", Verdict: "REQUEST_CHANGES"}})
+	records = append(records, mustMarshal(t, row), mustMarshal(t, manifest))
+	if err := AppendRecords(dir, records...); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, dispositionsFileName)
+	rows, manifests, err := LoadStore(path)
+	if err != nil || len(rows) != 1 || len(manifests) != 1 {
+		t.Fatalf("mixed ledger query: rows=%d manifests=%d err=%v", len(rows), len(manifests), err)
+	}
+	if rows[0].ID != row.ID || manifests[0].Panel != "p" {
+		t.Fatalf("query payload changed: %+v %+v", rows, manifests)
+	}
+	// Every new kind is validated, rather than silently discarded on read.
+	for _, raw := range ledgerFixtures(t, "p") {
+		m, err := decodeRecord(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run(m["record"].(string), func(t *testing.T) {
+			badPath := filepath.Join(t.TempDir(), "dispositions.jsonl")
+			bad := changeLedger(t, raw, "created_at", "invalid-time")
+			if err := os.WriteFile(badPath, bad, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := LoadStore(badPath); err == nil {
+				t.Fatal("query ignored malformed event")
+			}
+		})
+	}
+}
+
+func TestComputeQ4_LastManifestOnly(t *testing.T) {
+	first := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "old", Verdict: "APPROVE"}})
+	last := testManifest("p", 2, []ManifestSlot{{Slot: "R1", Model: "new", Verdict: "APPROVE"}, {Slot: "R2", Model: "new", Verdict: "APPROVE"}})
+	other := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "other", Verdict: "APPROVE"}})
+	other.Spec = "998"
+	ms := []CoverageManifest{first, other, last}
+	for _, result := range ComputeQ4(nil, ms) {
+		if result.Gate == "bead" && result.SlotTotal != 3 {
+			t.Fatalf("last manifest per spec/panel must give 3 slots: %+v", result)
+		}
+	}
+	models := ManifestModels(ms)
+	if len(models) != 2 || models[0] != "new" || models[1] != "other" {
+		t.Fatalf("models must use last manifests: %v", models)
+	}
+	dir := filepath.Join(t.TempDir(), "p")
+	for _, m := range []CoverageManifest{first, last} {
+		m.CreatedAt = fmt.Sprintf("2026-10-20T00:00:0%dZ", m.Round)
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendRecords(dir, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, loaded, err := LoadStore(filepath.Join(dir, "dispositions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].Round != 2 {
+		t.Fatalf("store readers must see only last manifest: %+v", loaded)
+	}
+}
+
+func TestCheckCompleteness_LastManifestOnly(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	for i, verdict := range []string{"APPROVE", "REQUEST_CHANGES", "APPROVE"} {
+		m := testManifest("p", 1, []ManifestSlot{{Slot: "R1", Model: "model", Verdict: verdict}})
+		m.CreatedAt = fmt.Sprintf("2026-10-20T00:00:0%dZ", i)
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendRecords(dir, raw); err != nil {
+			t.Fatal(err)
+		}
+		err = CheckCompletenessAt(dir, "p")
+		if verdict == "REQUEST_CHANGES" {
+			if err == nil {
+				t.Fatal("last REQUEST_CHANGES manifest must require coverage")
+			}
+		} else if err != nil {
+			t.Fatalf("last APPROVE manifest must pass: %v", err)
 		}
 	}
 }

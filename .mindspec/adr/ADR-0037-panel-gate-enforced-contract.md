@@ -242,7 +242,8 @@ retirement deferred to a follow-up bead. See the amendment below.
 > **Option A′ — the leaf's own local-copy precedent — was weighed and
 > REJECTED.** `gate.go` already carries two local-copy precedents for
 > avoiding an import: `artifactPaths` (`gate.go:520-526`, "a local copy
-> rather than importing internal/next") and the inlined `"bead/"` literal
+> rather than importing internal/next"; superseded by the R4.6 single home in
+> [Amendment (Spec 130)](#amendment-spec-130)) and the inlined `"bead/"` literal
 > in place of importing `internal/workspace` (`gate.go:27-28`). The same
 > pattern was considered here — a ~7-line local copy of the safe-set/quote
 > loop inside `internal/panel`, avoiding the import and this amendment
@@ -441,8 +442,10 @@ panel, once registered, is a commitment.
 >
 > 1. **Applied ≡ durably persisted.** A refutation is "applied" ONLY
 >    once a **self-contained** `refutation_pending` marker carrying the
->    full refutation content — `{slot, round, reason, evidence}` — is
->    durably persisted on bead metadata as part of the allow-decision,
+>    full stored identity and refutation content — `{spec, panel, slot,
+>    round, finding, finding_sha256, finding_text, reason, evidence, ground,
+>    ac, by, created_at}` — is durably persisted on bead metadata as part
+>    of the allow-decision,
 >    UNIONed with any existing unsatisfied entries (never a bare
 >    replace). The marker read-or-write is part of the decision: a
 >    failure returns a BLOCK (the RC stays unresolved), making
@@ -623,3 +626,67 @@ the gate exists for — the stale APPROVE honored at merge time.
    see the 2026-06-17 amendment above.)*
 4. Beads 5-6 wire `--panel-state` and the panel.json writer
    (/ms-panel-run step 0) so every surface speaks this convention.
+
+## Amendment (Spec 130)
+
+- **§4 — Subject-tree staleness (R3).** `panel.Subject(gate, specDir)` derives
+  the roots: `<specs>/<spec>/` for `spec_approve` and `plan_approve`; the whole
+  tree for `bead`, `final_review`, `adhoc` and an empty gate.
+  The recorded `gate` is no longer decision-inert. It selects the subject roots
+  through `panel.Subject` and can change Allow/Block. This supersedes the
+  Spec 112 amendment's decision-inert claim for staleness only.
+  `ApproveThreshold()` stays independent of `gate`. Every subject
+  excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`, `review/**`
+  and `.beads/issues.jsonl`. Other `reviews` directories remain in the subject.
+  `subject_digest` is `sha256:` plus the sha256 of the filtered recursive
+  `ls-tree` listing. Equal SHAs are fresh with no subject read; on a SHA
+  mismatch with a recorded digest, one `GateIO.SubjectTree` call compares
+  digests. Equal digests are fresh; different digests are stale. A read error
+  or an empty filtered listing is Block (and refuses create). A legacy panel
+  without a digest keeps the original stale message byte-for-byte. `complete`,
+  `panel verify`, `panel tally` and instruct panel state share this decision.
+- **Decision Details — subprocess cap (R3.3).** The matched-path cap is
+  **three on a SHA mismatch**: rev-parse, subject-tree read, porcelain. Equal
+  SHAs make no subject-tree call and keep the two-subprocess cap. The panel
+  leaf performs no subprocess I/O; callers supply the reads through GateIO.
+
+- **§8 — Durable reviewed-SHA keys (R12).** The Spec-114 audit-durability
+  carve-out extends to `mindspec_landed_reviewed_sha` and
+  `mindspec_landed_review_panel`. `complete` uses the first Allow panel
+  decision in scan order: `reviewed_head_sha` and `<slug>@r<N>` are written
+  in the same `mergeBindingFn` call as the landed binding, only through
+  `CompleteBead`. A Warn, either hatch, or no panel writes neither key.
+  The already-bound check compares the keys only when supplied;
+  `FinalizeEpic` writes neither key and removes neither key. This extends
+  audit durability, not general tamper-resistance.
+- **Spec-116 artifactPaths — single home (R4.6).** `panel.ToolArtifactPaths` owns `.beads/issues.jsonl` and `<specs>/*/reviews/*/dispositions.jsonl`, with stdlib `path.Match` matching. The panel gate, next guard and complete materialization all use this home; no consumer carries a local list.
+- **§8 — tracked ledger (R6).** The Spec-114 carve-out for durable audit metadata extends to the tracked ledger `dispositions.jsonl`. The ledger stays agent-writable within the anti-footgun trust boundary; tracking preserves its audit history, not authentication.
+- **Spec-115 reach — third impl approve leg (R6.6).** In addition to the two new impl approve legs in this spec, the tracked-ledger preflight is a third new leg: ignored, untracked or uncommitted spec ledgers refuse. Neither `MINDSPEC_SKIP_PANEL` nor `enforcement.panel_gate: false` skips this leg. Both refusal recoveries name the spec worktree; the ignored-path recovery runs `mindspec init` there.
+- **Complete preflight outside the cap (R6.6).** Before any side effect, complete checks each matched existing flat-layout ledger with `check-ignore` in the spec worktree. This preflight is outside the gate subprocess cap. After the bead merge, complete commits those ledgers together via `exec.CommitPaths` as `chore(panel): ledger`, in the same spec worktree. Both hatches preserve this check and commit; a legacy panel with no ledger makes no ledger commit.
+- **§1 — Snapshot fields (R5.3, R7).** Registration includes `roster`, `subject_digest`, `telemetry`, finding-pinned `refutations`, `deferrals`, `rebinds` and `abandon_history`. The gate checks the two legacy markers together and checks snapshot/event equality before abandonment; panels require at least two slots.
+- **§3 — Pass rule (R7).** PASS requires complete, no veto, fresh, discharged and intact. Every roster slot must have a parseable latest-round verdict; REJECT, hard_block and INVALID cannot be discharged. Each REQUEST_CHANGES finding needs a round- and `finding_sha256`-pinned discharge; slot-level hashes cover the entire ordered list or the fallback rationale. Legacy unpinned entries apply only on legacy panels. APPROVE count is not a decision input; zero APPROVE can pass. This replaces the N−1 threshold, supersedes the Spec-114 sentences "the approve threshold remains a NECESSARY floor" and "refutation cannot buy a sub-threshold panel past the gate", and retires the Spec-109 `approve_threshold` extension. Recorded `approve_threshold` remains parse-compatible and prints an ignored legacy notice. An effective deferral discharges the finding it covers; the gate re-checks it.
+- **§7 — Recovery and rule line (R8).** A Block message and the shared rule line may name the `panel refute` and `panel defer` verbs. Tally, verify and instruct use one render including INVALID, resolved and unresolved counts, with no approval threshold.
+- **§8 — Hand-edit detection (R5.3).** Snapshot/event matching detects accidental desync only: anti-footgun, not anti-adversary. It adds no signing. Off-roster files count for nothing, but an unexpected REJECT, hard_block or INVALID blocks and names the file.
+
+- **§4 — Panel rebind (R4.1–R4.5, R3.5).** `mindspec panel rebind <slug>
+  --reason <text>` moves `reviewed_head_sha` and `subject_digest` to the live
+  target tip without a round bump. The reason must be non-empty. The panel
+  must parse, be intact, not abandoned, have no round mismatch, and pass R7
+  with staleness ignored. Its reviewed SHA must be an ancestor of the tip.
+  Every diff path is accepted except `.mindspec/config.yaml`; there is no
+  allowlist or config key for paths. `rebinds[]` records
+  `{round, from_sha, to_sha, paths, reason, created_at}`, with R3.1 exclusions
+  removed from `paths`. The verb appends a `rebind` ledger event, including
+  the digest, before one snapshot write. Equal SHAs print `already fresh`
+  and write nothing. Completion copies `rebinds[]` to `panel_rebound_entries`
+  through the same fail-closed pre-close metadata stage as `panel_refuted`.
+  Only R5.3-matched `from_sha` values join the exact-equality landed set.
+- **§7 — Core 3 coverage (R11.5, R11.6).** At `complete`, Core 3 runs only on each returned Allow; a Warn registration (abandoned, missing ref, git error) skips Core 3 with one advisory line. A legacy registration passes with one advisory line. Abandonment stays the audited exit. At `impl approve`, Core 3 runs no gate decision and checks every required registration of the spec, final review included. It skips abandoned and legacy registrations only after the legacy-marker and R5.3 integrity checks; a hand-set `abandoned: true` blocks.
+- **Spec-115 contract reach — Core 3 (R11.5).** The `impl approve` Core 3 preflight leg blocks on incomplete coverage and honours both `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`. The orphan/obligation refusal keeps its no-hatch rule.
+- **Complete preflight outside the cap — Core 3 (R11).** Core 3 runs before materialization, outside the gate subprocess cap, on every matched required Allow registration. Both panel hatches skip this leg.
+- **§7 — Abandon verb (R9.4).** `mindspec panel abandon` requires a reason and a name, appends an `abandon` event and sets `abandoned` and `abandon_reason`. It writes no manifest and removes none. Abandonment stays the audited exit; the `panel_abandoned` audit at complete is unchanged.
+
+- **§1 — Discharge writers (R9).** `panel refute` and `panel defer` are the only writers of refutations and deferrals. Each appends its event and disposition row in one lock hold, then replaces the snapshot. Effective deferrals discharge current text-pinned findings. Refutations supersede matching deferrals.
+- **§8 — Deferred audit carve-out (R10.1).** The Spec-114 `panel_refuted` carve-out extends to the durable `panel_deferred` audit. Completion takes entries only from Allow decisions. It persists self-contained pending markers and settles them before close. Each panel can contribute any number of entries.
+- **Spec-115 contract reach — deferrals (R10.2).** A failed re-check voids that deferral. The `complete` and `impl approve` preflight leg blocks on a finding that no valid discharge covers. It honours `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`. The orphan/obligation refusal keeps its no-hatch rule. Bead panels use the completion audit at implementation approval. Later refutations do not alter that audit. Approval checks each identified audit entry once. Completion and approval refuse a panel identity registered at more than one path. A duplicate identity cannot replace or remove audit entries. Only a verb-backed abandonment of its exact spec and panel registration skips it. Missing and renamed registrations do not skip entries. Approval checks entries with no panel identity under each of the bead's registrations. It also checks a plan bead with no registration left. Non-bead panels use current effective deferrals. Integrity runs before abandonment skips.
+- **Complete preflight outside the cap — deferrals (R10.2).** The bd re-check runs before materialization and outside the gate subprocess cap. It checks existence, open status, every ancestor, the discovered-from edge and redacted description text. A failed read voids that deferral. A materialization retry keeps stored entry identities. It removes deferrals covered by an intact abandonment or an applicable refutation from pending and audit entries. A slot refutation covers each item with a matching round and raw-text hash. Both panel hatches skip this leg.

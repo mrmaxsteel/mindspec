@@ -409,12 +409,12 @@ func TestPanelGateDecision_HostileFieldsEscaped(t *testing.T) {
 		}
 	})
 
-	t.Run("leg 10: threshold Block (sub-threshold via audited refutations) — slug", func(t *testing.T) {
+	t.Run("unresolved Block (one dissent refuted) — slug", func(t *testing.T) {
 		hostileSlug := "evil10" + hostileSuffix
 		buildFacts := func(slug string) GateFacts {
 			p := &Panel{
 				Round: 1, ExpectedReviewers: 6,
-				Refutations: []Refutation{{Slot: "rc1", Round: 1}, {Slot: "rc2", Round: 1}},
+				Refutations: []Refutation{{Slot: "rc1", Round: 1}},
 			}
 			verdicts := makeApproveVerdicts(4)
 			verdicts = append(verdicts,
@@ -430,7 +430,7 @@ func TestPanelGateDecision_HostileFieldsEscaped(t *testing.T) {
 
 		wantAction := PanelGateDecision(buildFacts("evil10")).Action
 		if wantAction != Block {
-			t.Fatalf("test fixture bug: expected the clean-baseline leg-10 fixture to Block (sub-threshold, 4/6 with both dissents refuted), got %v", wantAction)
+			t.Fatalf("test fixture bug: expected unresolved rc2 to Block, got %v", wantAction)
 		}
 		got := PanelGateDecision(buildFacts(hostileSlug))
 		if got.Action != wantAction {

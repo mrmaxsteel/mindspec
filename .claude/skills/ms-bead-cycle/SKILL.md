@@ -57,8 +57,9 @@ step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
   ↓ decide:
-       ≥ N−1 APPROVE   → merge terminal → exit
-       below threshold → /ms-bead-fix → continue
+       tally PASS  → merge terminal → exit
+       tally BLOCK → fix, refute or defer each finding
+                   → /ms-bead-fix or re-panel → continue
        any REJECT / HARD block → halt (see /ms-panel-tally § halt-recover)
 
 /ms-bead-fix           (round 1 → round 2 fix commit)
@@ -144,7 +145,7 @@ The field evidence runs BOTH directions, stated portably: CLI reviewers catch re
 - Don't skip the panel even when "the diff looks fine to me". The point of the panel is that *your* judgement is one of seven — don't pre-empt it.
 - Don't run multiple fix-cycles inside a round. One panel → one fix → one re-panel. Compounding fixes within a round makes the next panel's job ambiguous.
 - Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
-- Don't merge with a known REQUEST_CHANGES (even at the threshold). The dissenting verdict's `concrete_changes_required` either gets folded in or filed as a follow-up bead before merge.
+- Resolve each REQUEST_CHANGES finding before merge. Fix it, refute it with evidence, or defer it to a validated follow-up bead. Re-run tally.
 - Don't run `mindspec complete` until `/ms-panel-tally` decided merge — the merge is destructive of the bead branch.
 - Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block (gate leg 7), not a replacement for it (ADR-0044).
 

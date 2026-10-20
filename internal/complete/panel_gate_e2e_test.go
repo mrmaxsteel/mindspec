@@ -3,7 +3,9 @@ package complete
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +15,31 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
+
+func TestComplete_FindsDerivedBeadPanel(t *testing.T) {
+	const specID, beadID = "130-derived", "probe-x.1"
+	root, sha := setupPanelGateRepo(t, specID, beadID)
+	dir := filepath.Join(root, "review", "derived")
+	if err := panel.Create(dir, panel.CreateInput{
+		Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1,
+		ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture",
+		Roster: []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "integration"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	regs := panel.ForBead(panel.Scan(root), beadID)
+	if len(regs) != 1 {
+		t.Fatalf("derived registration not selectable: %+v", regs)
+	}
+	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{})
+	if err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("incomplete derived panel must block complete: res=%+v err=%v", res, err)
+	}
+	if ex.completeCalled || res != nil {
+		t.Fatalf("blocked complete mutated state: merge=%v result=%+v", ex.completeCalled, res)
+	}
+}
 
 // Spec 099 Bead 2 (R1+R2+R5): the AUTHORITATIVE in-binary panel gate in
 // mindspec complete. These e2e tests stand up a REAL temp git repo (so the
@@ -49,6 +76,8 @@ func setupPanelGateRepo(t *testing.T, specID, beadID string) (root, beadSHA stri
 
 	root = t.TempDir()
 	gitRun(t, root, "init", "-q", "-b", "main")
+	gitRun(t, root, "config", "user.name", "Test")
+	gitRun(t, root, "config", "user.email", "test@example.com")
 	writeFile(t, root, "README.md", "# fixture\n")
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-q", "-m", "base")
@@ -345,7 +374,8 @@ func TestPanelGate_Hatch_ConfigToggle(t *testing.T) {
 	}, subThresholdVerdicts())
 
 	// panelGateEnabled=false → no block.
-	reg, err := panelGate(beadID, []string{root}, "", false, nil)
+	matches, err := panelGate(beadID, []string{root}, "", false, nil)
+	reg := firstGateRegistration(matches)
 	if err != nil {
 		t.Fatalf("enforcement.panel_gate=false must skip the gate; got: %v", err)
 	}
@@ -419,5 +449,98 @@ func TestPanelGate_SharedDecisionPin(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), strings.TrimRight(want.Message, "\n")) {
 		t.Errorf("in-binary block must carry the shared decision body verbatim;\nwant prefix:\n%s\ngot:\n%s",
 			want.Message, err.Error())
+	}
+}
+
+func TestComplete_BeadIDHandEditCannotEvadeGate(t *testing.T) {
+	const specID, beadID = "130-binding", "probe-x.1"
+	root, sha := setupPanelGateRepo(t, specID, beadID)
+	dir := filepath.Join(root, "review", "binding")
+	if err := panel.Create(dir, panel.CreateInput{
+		Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1,
+		ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture",
+		Roster: []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "integration"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	regs := panel.ForBead(panel.Scan(root), beadID)
+	if len(regs) != 1 {
+		t.Fatalf("baseline registration: %+v", regs)
+	}
+	p := regs[0].Panel
+	p.BeadID = bp("probe-wrong.1")
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, panel.FileName), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	closeBeadFn = func(...string) error { closed = true; return nil }
+	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+	if err == nil || !strings.Contains(err.Error(), "changed outside the panel verbs (bead_id)") {
+		t.Fatalf("snapshot bead edit escaped integrity gate: result=%+v err=%v", res, err)
+	}
+	if closed || ex.completeCalled || res != nil {
+		t.Fatalf("blocked completion mutated state: closed=%v merge=%v result=%+v", closed, ex.completeCalled, res)
+	}
+}
+
+func TestComplete_CorruptRegistrationCannotEvadeGate(t *testing.T) {
+	for _, damage := range []string{"bead edit and malformed ledger", "unparseable snapshot"} {
+		t.Run(damage, func(t *testing.T) {
+			const specID, beadID = "130-binding", "probe-x.1"
+			root, sha := setupPanelGateRepo(t, specID, beadID)
+			dir := filepath.Join(root, "review", "binding")
+			if err := panel.Create(dir, panel.CreateInput{
+				Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1,
+				ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture",
+				Roster: []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "integration"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := "registration (panel.json) is unreadable"
+			if damage == "unparseable snapshot" {
+				if err := os.WriteFile(filepath.Join(dir, panel.FileName), []byte("{"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				regs := panel.ForBead(panel.Scan(root), beadID)
+				if len(regs) != 1 {
+					t.Fatalf("baseline registration: %+v", regs)
+				}
+				p := regs[0].Panel
+				p.BeadID = bp("probe-wrong.1")
+				raw, err := json.Marshal(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, panel.FileName), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				f, err := os.OpenFile(filepath.Join(dir, "dispositions.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, writeErr := f.WriteString("<<<<<<< HEAD\n")
+				closeErr := f.Close()
+				if writeErr != nil || closeErr != nil {
+					t.Fatalf("append conflict: %v %v", writeErr, closeErr)
+				}
+				want = "changed outside the panel verbs"
+			}
+			closed := false
+			closeBeadFn = func(...string) error { closed = true; return nil }
+			ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("corrupt registration escaped gate: result=%+v err=%v", res, err)
+			}
+			if closed || ex.completeCalled || res != nil {
+				t.Fatalf("blocked completion mutated state: closed=%v merge=%v result=%+v", closed, ex.completeCalled, res)
+			}
+		})
 	}
 }

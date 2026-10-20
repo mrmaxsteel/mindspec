@@ -409,6 +409,15 @@ func renderOrphanRecoverySegment(hint lifecycle.OrphanHint) string {
 	return hint.EvidenceNote + ": " + lines
 }
 
+// ReportedError carries a failure already printed by Run. Callers must still
+// return a non-zero status, but should not print the diagnostic again.
+type ReportedError struct {
+	Err error
+}
+
+func (e *ReportedError) Error() string { return e.Err.Error() }
+func (e *ReportedError) Unwrap() error { return e.Err }
+
 // Run orchestrates bead completion: close bead, remove worktree, advance state.
 // root is the main repo root (for spec dirs, lifecycle, merges).
 // beadID is required — it must always be provided by the caller.
@@ -566,6 +575,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			fmt.Sprintf("resolving bead %s's epic lineage failed: %s — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, termsafe.Escape(lineageErr.Error())),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
+	}
+
+	// R6.6 runs before migration, marker clearing, materialization or close.
+	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
+	if ledgerErr != nil {
+		return nil, ledgerErr
+	}
+	if err := CheckPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
+		return nil, err
 	}
 
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
@@ -837,23 +855,23 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// already durable. panelReg stays nil on that path, exactly as it
 	// does on every other pre-existing fail-open/no-panel path below.
 	var panelReg *panel.Registration
+	var panelDecisions []PanelGateResult
 	advisoryOut := panelAdvisoryOut
 	if advisoryOut == nil {
 		advisoryOut = os.Stderr
 	}
-	if resumeStage == "" {
-		// CONFIG: cfg is loaded at step 5.5 (AFTER this gate); read an EARLIER
-		// copy here for the enforcement.panel_gate toggle (default true) AND
-		// (spec 109 R8) the PanelExpectedReviewers() default the reviewer-count
-		// advisory below compares against. gateCfgErr is deliberately non-fatal
-		// here (mirrors the pre-109 behavior of leaving panelGateEnabled at its
-		// true default on a load error) — the advisory below is simply skipped
-		// on that same error, never blocking the gate.
-		gateCfg, gateCfgErr := config.Load(root)
-		panelGateEnabled := true
-		if gateCfgErr == nil {
-			panelGateEnabled = gateCfg.Enforcement.PanelGate
+	// Live deferral checks also run on attested materialization retries.
+	gateCfg, gateCfgErr := config.Load(root)
+	panelGateEnabled := true
+	if gateCfgErr == nil {
+		panelGateEnabled = gateCfg.Enforcement.PanelGate
+	}
+	if resumeStage != "" {
+		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
+			return nil, err
 		}
+	}
+	if resumeStage == "" {
 		// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
 		// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
 		// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
@@ -864,9 +882,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// round-3 redesign — it never reads a panel directory.)
 		gateRoots := panelGateRoots(root, wtPath, specID)
 		var panelGateErr error
-		panelReg, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		panelDecisions, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
 		if panelGateErr != nil {
 			return nil, panelGateErr
+		}
+		if err := checkAndRecordPanelDeferrals(beadID, panelDecisions, panelGateEnabled); err != nil {
+			return nil, err
+		}
+		if err := checkPanelCore3(panelDecisions, panelGateEnabled, advisoryOut); err != nil {
+			return nil, err
+		}
+		if len(panelDecisions) > 0 {
+			panelReg = &panelDecisions[0].Registration
 		}
 		// Caller-side panel.ReviewerCountNote advisory (spec 109 R8, gate-aware
 		// per spec 112 R7): the Allow/Block decision above is already final;
@@ -881,6 +908,24 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if gateCfgErr == nil && panelReg != nil {
 			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
+			}
+		}
+	}
+
+	// Capture the first Allow before materialization so every write-ahead marker
+	// carries the identity needed by a retry that skips the panel gate.
+	var landedReview *stageMarkerReview
+	if resumeStage != "" {
+		landedReview, err = readStageMarkerReview(beadID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		for _, matched := range panelDecisions {
+			if matched.Decision.Action == panel.Allow {
+				p := matched.Registration.Panel
+				landedReview = &stageMarkerReview{sha: p.ReviewedHeadSHA, panel: fmt.Sprintf("%s@r%d", matched.Registration.Slug(), p.Round)}
+				break
 			}
 		}
 	}
@@ -956,17 +1001,18 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// already run in this branch); wtPath == "" is a pure dirt-check
 		// refusal-or-noop (the committed-range gate above already ran).
 		if err := runMaterialization(materializationInput{
-			exec:        exec,
-			root:        root,
-			beadID:      beadID,
-			beadHead:    beadHead,
-			wtPath:      wtPath,
-			specDir:     specDir,
-			commitMsg:   commitMsg,
-			base:        base,
-			opts:        opts,
-			resumeStage: resumeStage,
-			warnWriter:  warnWriter,
+			exec:         exec,
+			root:         root,
+			beadID:       beadID,
+			beadHead:     beadHead,
+			wtPath:       wtPath,
+			specDir:      specDir,
+			commitMsg:    commitMsg,
+			base:         base,
+			opts:         opts,
+			resumeStage:  resumeStage,
+			landedReview: landedReview,
+			warnWriter:   warnWriter,
 		}); err != nil {
 			return nil, err
 		}
@@ -984,6 +1030,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// above, but NOT this pre-existing-obligation reconciliation (round-5
 	// item 3 / G3). A bead with no recorded pending reconciles to a no-op
 	// (§6 fail-open preserved).
+	// A fresh retry replaces the settled audit for the panels it just gated.
+	// The resume path already reconciles its durable entries before this point.
+	if resumeStage == "" && panelGateEnabled && !panelSkipEnvFn() {
+		if err := replaceGatedDeferrals(beadID, panelDecisions, nil, true); err != nil {
+			return nil, PanelDeferredAuditFailure(beadID, err)
+		}
+	}
+	if err := reconcilePendingDeferrals(beadID); err != nil {
+		return nil, err
+	}
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}
@@ -1145,6 +1201,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
 		}
 	} else {
+		if setter, ok := exec.(executor.LandedReviewSetter); ok && landedReview != nil {
+			setter.SetLandedReview(landedReview.sha, landedReview.panel)
+		}
 		completeErr = exec.CompleteBead(beadID, specBranch, "", opts.AllowNetDeletion, opts.ResolveMerge)
 		if completeErr == nil {
 			result.WorktreeRemoved = true
@@ -1202,6 +1261,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, errors.New(msg)
 		}
 		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
+	}
+
+	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
+	ledgerCommitErr := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec)
+	if ledgerCommitErr != nil {
+		ledgerCommitErr = fmt.Errorf("bead is closed and merged; only the panel ledger commit remains: %w", ledgerCommitErr)
+		fmt.Fprintln(os.Stderr, ledgerCommitErr)
+		ledgerCommitErr = &ReportedError{Err: ledgerCommitErr}
 	}
 
 	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the
@@ -1321,7 +1388,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var readyErr *postCloseReadyError
 		result.postCloseReadyFailed = errors.As(advanceErr, &readyErr)
 		result.NextSpec = specID
-		return result, nil
+		if ledgerCommitErr != nil {
+			return result, &ReportedError{Err: errors.Join(advanceErr, ledgerCommitErr)}
+		}
+		return result, ledgerCommitErr
 	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
@@ -1334,7 +1404,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// entirely above on the indeterminate return — no value fabricated
 	// from a nil child set is ever written (AC-4b).
 	if nextMode != "" && epicID != "" {
-		completeSyncPhase(root, epicID, nextMode, beadID)
+		if syncErr := completeSyncPhase(root, epicID, nextMode, beadID); syncErr != nil && ledgerCommitErr != nil {
+			ledgerCommitErr = &ReportedError{Err: errors.Join(syncErr, ledgerCommitErr)}
+		}
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1342,7 +1414,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		result.NextSpec = ""
 	}
 
-	return result, nil
+	return result, ledgerCommitErr
 }
 
 // completeSyncPhase performs step 6.5's best-effort mindspec_phase cache
@@ -1383,7 +1455,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 // project-docs/user/guides/lifecycle-modes.md's "Disclosed residual,
 // not silently excepted" bullet (the writer-taxonomy section). The
 // residue itself remains as described; it is disclosed, not fixed.
-func completeSyncPhase(root, epicID, nextMode, beadID string) {
+func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 	if syncErr := phase.WithPhaseWriteLock(root, epicID, completeMergeMetadataFn, func(string, bool) (map[string]interface{}, error) {
 		return map[string]interface{}{"mindspec_phase": nextMode}, nil
 	}); syncErr != nil {
@@ -1395,7 +1467,9 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) {
 		// disposition: no manufactured recovery line on the non-timeout
 		// leg) is unchanged; only the rendered text is per-line escaped.
 		fmt.Fprintln(os.Stderr, phase.DescribeLockFailure(next.RenderBDError(syncErr), fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))))
+		return syncErr
 	}
+	return nil
 }
 
 // FormatResult returns a human-readable summary of the completion.

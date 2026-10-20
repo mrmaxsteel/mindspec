@@ -147,10 +147,16 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+# Spec 130 R6.6: shell-quoted ledger recoveries, registered with TestLedger_RecoveryOperands obligations.
+internal/approve/impl.go	implLedgerPreflight	arg1:unprovable
+internal/complete/panel_ledger.go	CheckPanelLedgers	arg1:unprovable
+internal/complete/panel_ledger.go	commitPanelLedgers	arg1:unprovable
 cmd/mindspec/bead_clarify.go	beadClarifyCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:commands
+cmd/mindspec/panel.go	checkPanelSlugOwner	arg1:unprovable
 cmd/mindspec/panel.go	findPanelRegistration	arg1:unprovable
+cmd/mindspec/panel.go	panelCreateFailure	arg1:unprovable
 cmd/mindspec/panel.go	panelCreateCmd	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitAction	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable
@@ -223,6 +229,11 @@ internal/next/guard.go	ClaimFailure	arg1:unprovable
 internal/next/guard.go	DirtyTreeFailure	arg1:unprovable
 internal/next/guard.go	WorktreeSetupFailure	arg1:unprovable
 internal/next/ready_gate.go	GateReadiness	variadic-spread:recovery
+
+cmd/mindspec/panel.go	panelCoverageWriteFailure	arg1:unprovable
+internal/complete/panel_core3.go	PanelCore3Failure	arg1:unprovable
+internal/complete/panel_deferred.go	deferralFailure	arg1:unprovable
+internal/complete/panel_deferred.go	PanelDeferredAuditFailure	arg1:unprovable
 
 [known_sites_exemption_list]
 # BEAD 7 EXIT (fixture (β)'s documented discipline): the four

@@ -117,7 +117,7 @@ func TestPanelStateEntry_Verdict(t *testing.T) {
 				LiveBranchSHA: "abc1234",
 			},
 			wantGate:   GatePass,
-			wantReason: "meets threshold 6/6",
+			wantReason: "6/6 APPROVE, 0 resolved",
 		},
 		{
 			// Above threshold: 6/6 APPROVE → PASS.
@@ -139,7 +139,7 @@ func TestPanelStateEntry_Verdict(t *testing.T) {
 				LiveBranchSHA: "abc1234",
 			},
 			wantGate:   GateBlock,
-			wantReason: "threshold is 5/6",
+			wantReason: "unresolved",
 		},
 		{
 			// Incomplete: only 3/6 verdicts present → BLOCK (incomplete
@@ -274,8 +274,8 @@ func TestRenderPanelState_Block(t *testing.T) {
 		"## Open Panel Rounds",
 		"093-x-b1",
 		"gate would BLOCK",
-		"threshold is 5/6",
-		"latest round 2 · 6/6 verdicts · 4 APPROVE (threshold 5)",
+		"unresolved",
+		"6/6 in, 4 APPROVE, 0 resolved, 2 unresolved",
 		"consolidated-round-2.md is present",
 	} {
 		if !strings.Contains(out, want) {
@@ -304,7 +304,7 @@ func TestRenderPanelState_Pass(t *testing.T) {
 	if strings.Contains(out, "gate would BLOCK") {
 		t.Errorf("PASS panel must not also say BLOCK\n%s", out)
 	}
-	if !strings.Contains(out, "6 APPROVE (threshold 6)") {
+	if !strings.Contains(out, "6 APPROVE, 0 resolved") {
 		t.Errorf("expected at-threshold tally line\n%s", out)
 	}
 }

@@ -155,6 +155,18 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl.go", Func: "implLedgerPreflight", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
+	{File: "internal/complete/panel_ledger.go", Func: "CheckPanelLedgers", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
+	{File: "internal/complete/panel_ledger.go", Func: "commitPanelLedgers", Detail: "arg1:unprovable",
+		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
+		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
+
 	{
 		File:       "cmd/mindspec/bead_ready.go",
 		Func:       "beadReadyCheckCmd",
@@ -268,7 +280,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/panel.go",
 		Func:       "tallyExitActionNonBead",
 		Detail:     "arg1:unprovable",
-		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1> --spec <id>` template plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
+		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1>` template plus a recorded `--spec %s` for non-adhoc panels plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor checks representative renderings of this exact template shape.",
 	},
 
@@ -319,6 +331,20 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Func:       "panelCreateCmd",
 		Detail:     "arg1:unprovable",
 		Rationale:  "disclosed-residual: `fmt.Sprintf(\"use `+\"`panel create %s --spec <id> --target <ref>`\"+` for a gated panel, or `+\"`panel create %s --gate adhoc --target <ref>`\"+` for an ad-hoc panel\", slug, slug)` and a second Sprintf substituting `keys` (`strings.Join(config.PanelGateKeys, \", \")` — a fixed, code-defined 5-entry list, never user input). slug is validated by validatePanelSlug (rejects empty/\".\"/\"..\"/path separators/control bytes) but NOT whitespace or other printable content — an operator-chosen slug containing floor-shaped text (e.g. a slug literally spelled \"git reset --hard\") is a distinct, unexamined risk this obligation does not cover. Narrowing the claim rather than overclaiming it: this text is advisory guidance shown back to the SAME operator who named the slug, never executed by the product, and is reviewed at the moment it is read, same as any other diagnostic string.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "checkPanelSlugOwner",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The new-slug create command appends panelCreateScope, which preserves the recorded spec or omits --spec for adhoc. The helper call is opaque to the fold; the command is a mindspec verb.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "cmd/mindspec/panel.go",
+		Func:       "panelCreateFailure",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The recovery is assembled from a mindspec panel create template, panelCreateScope and an optional mindspec panel rebind template. Slug/target/gate are shell quoted; the assembled recovery local is opaque to the fold.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -805,6 +831,18 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "`guard.NewFailure(..., fmt.Sprintf(\"re-run with %s to finish it: %s\", ResolveMergeFlag, reentryHint))` — ResolveMergeFlag is a package const (provable), but reentryHint is the same plain string parameter as stillConflictedRefusal's entry above.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergeResumptionReentryHintCallers (same obligation as stillConflictedRefusal's entry above — both receive reentryHint from the identical three real callers).",
 	},
+	{File: "cmd/mindspec/panel.go", Func: "panelCoverageWriteFailure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery combines a mindspec panel tally template with shellQuoteTarget and panelCreateScope. These helpers quote the slug/spec and omit spec scope for adhoc; the fold cannot resolve their values.",
+		Obligation: "cmd/mindspec TestTally_Core3RecoveryOperands checks the emitted recovery from the actual failure helper with metacharacters in the slug against the destructive floor."},
+	{File: "internal/complete/panel_core3.go", Func: "PanelCore3Failure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery local selects mindspec panel tally or mindspec panel refute, with shell-quoted terminal-escaped slug/spec operands. The fold cannot resolve the local builder.",
+		Obligation: "internal/complete TestComplete_Core3RecoveryOperands checks both emitted recovery branches with hostile slug/spec operands against the destructive floor and the final recovery-line contract."},
+	{File: "internal/complete/panel_deferred.go", Func: "deferralFailure", Detail: "arg1:unprovable",
+		Rationale:  "The recovery local selects bd reopen or panel refute. core3Quote shell-quotes and terminal-escapes each operand.",
+		Obligation: "internal/complete TestGateTime_DeferralRecoveryOperands checks emitted recovery quoting and the final recovery line against the destructive floor."},
+	{File: "internal/complete/panel_deferred.go", Func: "PanelDeferredAuditFailure", Detail: "arg1:unprovable",
+		Rationale:  "The retry command passes the reviewed bead through idrender.Bead for ID validation, shell quoting and terminal escaping.",
+		Obligation: "internal/complete TestGateTime_DeferralRecoveryOperands checks the emitted retry against the destructive floor and final recovery-line contract."},
 }
 
 // mindspecVerbTemplateObligation is the shared Obligation text for

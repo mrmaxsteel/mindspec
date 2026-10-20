@@ -6,7 +6,7 @@
 - **Deciders**: Max
 - **Supersedes**: n/a
 - **Superseded-by**: n/a
-- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (the disposition rows/manifest live inside §8's agent-writable trust boundary and the gate's decision matrix consumes none of them — telemetry, decision-inert, not tamper-proofing), [ADR-0023](ADR-0023.md) (beads remain the single lifecycle-state authority; this store is an analysis dataset that POINTS at follow-up beads via `evidence_ref`, never a second state authority), [ADR-0025](ADR-0025-jsonl-as-build-artifact.md) (JSONL-as-projection precedent — this store is a git-versioned JSONL projection of orchestrator judgment, not a source of gate truth), [ADR-0040](ADR-0040-orchestration-layering-ratchet.md) (disposition JUDGMENT stays at the `/ms-panel-tally` skill layer; the binary contributes only mechanism), [ADR-0041](ADR-0041-gate-before-mutate.md) (the append op's validate-then-mutate ordering is this contract's preflight discipline), [ADR-0042](ADR-0042-render-derivation-provenance.md) (the store's agent-writable free text is untrusted-provenance and every render routes through the shipped termsafe/idrender sinks)
+- **Related**: [ADR-0037](ADR-0037-panel-gate-enforced-contract.md) (the disposition rows/manifest live inside §8's agent-writable trust boundary and the gate's decision matrix consumes none of them (superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130)) — telemetry, decision-inert, not tamper-proofing), [ADR-0023](ADR-0023.md) (beads remain the single lifecycle-state authority; this store is an analysis dataset that POINTS at follow-up beads via `evidence_ref`, never a second state authority), [ADR-0025](ADR-0025-jsonl-as-build-artifact.md) (JSONL-as-projection precedent — this store is a git-versioned JSONL projection of orchestrator judgment, not a source of gate truth), [ADR-0040](ADR-0040-orchestration-layering-ratchet.md) (disposition JUDGMENT stays at the `/ms-panel-tally` skill layer; the binary contributes only mechanism), [ADR-0041](ADR-0041-gate-before-mutate.md) (the append op's validate-then-mutate ordering is this contract's preflight discipline), [ADR-0042](ADR-0042-render-derivation-provenance.md) (the store's agent-writable free text is untrusted-provenance and every render routes through the shipped termsafe/idrender sinks)
 
 ---
 
@@ -48,7 +48,8 @@ private content.
 
 **The store is append-only JSONL, one file per panel**, at
 `.mindspec/specs/<spec>/reviews/<panel>/dispositions.jsonl`, git-versioned and
-riding the same lifecycle auto-commits that already persist spec artifacts.
+riding the same lifecycle auto-commits that already persist spec artifacts
+(see [Amendment (Spec 130)](#amendment-spec-130) for the tracked-again R6 contract).
 Cross-panel / cross-spec reads glob `.mindspec/specs/*/reviews/*/dispositions.jsonl`;
 "queryable" means glob + jq plus a small machine-checkable Go surface — NOT SQL.
 
@@ -128,7 +129,7 @@ the exhaustive validator negative-fixture matrix. A script has none of these.
 
 Disposition rows and manifests are decision-inert with respect to the panel gate
 (the ADR-0037 decision matrix consumes none of them). No lifecycle verb reads the
-store to make a decision (ADR-0023); the store is telemetry, audited-not-
+store to make a decision (ADR-0023; superseded for integrity reads by [Amendment (Spec 130)](#amendment-spec-130)); the store is telemetry, audited-not-
 authenticated exactly like the verdict files it summarizes.
 
 ## Consequences
@@ -179,7 +180,7 @@ every gate absent configuration. This amendment resolves the ambiguity
 without touching the Decision above (the telemetry-store design is
 unaffected by panel SIZE):
 
-- **The shipped default is 6 / `n-1`, unconditionally.** `DefaultConfig`
+- **The shipped default is 6 / `n-1`, unconditionally.** (Size superseded by [Amendment (Spec 130)](#amendment-spec-130).) `DefaultConfig`
   panel VALUES are unchanged by spec 126 and remain the product's out-of-box
   shape for every gate (bead, spec_approve, plan_approve, final_review,
   adhoc) — a zero-config install keeps this size.
@@ -195,3 +196,18 @@ unaffected by panel SIZE):
   infeasible) — read them as project history, not as the product's
   documented default; this Amendment is the disambiguating cross-reference
   `internal/setup`'s [CI] guard greps for.
+
+
+## Amendment (Spec 130)
+
+- The default becomes 6/6/4/6 per gate (`spec_approve`/`plan_approve`/`bead`/`final_review`), with `adhoc` defaulting to 6 (R2.1); this reverses spec 112 R2. `DefaultConfig` holds no `panel.reviewers` list. Without an explicit reviewer list, families alternate `claude`, `codex`; an explicit global list applies to every gate without its own list, and `adhoc` inherits an explicit `bead` list. This supersedes the size in Amendment (Spec 126)'s "The shipped default is 6 / `n-1`, unconditionally" bullet.
+
+- **Tracked again (R6).** `dispositions.jsonl` is tracked again under spec 129 R8.4 option (B). Bootstrap writes the two ledger negations by exact-line presence, idempotently. Complete commits existing matched flat-layout ledgers after the bead merge in the spec worktree, through `exec.CommitPaths`; impl approve requires every existing spec ledger committed and refuses ignored ledgers before checking status. Both checks and the commit are outside the panel hatches. Adhoc ledgers stay ignored.
+- **Ledger events (R5.1).** `round`, `refutation`, `deferral`, `rebind` and `abandon` join disposition rows and coverage manifests. Only the corresponding panel verbs write events; every event carries spec and panel identity. The snapshot follows the ledger append.
+- **Gate reads (R5.3).** The gate reads `round`, `rebind` and `abandon` events to check snapshot equality before abandonment, and matches refutation/deferral/rebind entry payloads against events or the first round's carried baseline, ignoring `created_at`. These integrity reads supersede the decision-inert ledger-read claims above; disposition rows remain telemetry.
+
+- **Coverage manifest writer (R11.2).** Only the binary's `tally` writes coverage manifests, derived from roster slots only and latest-round verdict files. This supersedes "`slots` enumerates EVERY verdict-file slot": the manifest lists roster slots only, not every verdict file. Every pass-rule row except freshness must hold; an Allow and a stale non-bead panel with covering rows both write coverage. The key is `spec, panel, round, created_at`. A new manifest is appended, never rewritten, unless the last manifest of that round equals the derivation. This supersedes "one per terminal panel", "appended ONCE at terminal state" and "Every terminal panel writes its manifest regardless of finding count". A panel that never meets these conditions has no manifest and is not in the Q4 denominator. Abandonment keeps earlier manifests and their Q4 inclusion because the store is append-only. This also supersedes "Writes go through ONE canonical Go verb": `refute`, `defer` and `tally` also write the store.
+- **Manifest readers (R11.3).** Every manifest reader, `ComputeQ4` included, uses only the last manifest of each panel, keyed by spec and panel. Core 3 requires that last manifest to match LatestRound, the roster and verdict files, validates every ledger record, and applies the completeness floor. An older-round manifest cannot satisfy a newer registration.
+- **Consequences — lifecycle completeness (R11).** `complete` and `impl approve` gate on completeness of the required store, manifest and covering disposition rows. This supersedes the decision-inert and "No lifecycle verb reads the store" claims and the Related line's "consumes none of them" claim for these coverage reads.
+
+- **Canonical writers — discharge verbs (R9.1).** This supersedes "Writes go through ONE canonical Go verb". `refute`, `defer` and `tally` also write the store. Refute and defer append their event and disposition row in one lock hold. The verbs own `audited-refuted` and `confirmed-deferred` rows. Agents do not hand-append these rows.

@@ -3,11 +3,14 @@ package bootstrap
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 )
 
 func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
@@ -30,7 +33,7 @@ func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
 			}
 			data := assertReviewsIgnored(t, root)
 			runtimeHeader := strings.Index(string(data), "# MindSpec local runtime files (not version-controlled)")
-			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)")
+			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)")
 			if runtimeHeader < 0 || reviewHeader < 0 || runtimeHeader >= reviewHeader {
 				t.Fatalf("runtime header must precede review header:\n%s", data)
 			}
@@ -93,7 +96,7 @@ func assertReviewsIgnored(t *testing.T, root string) []byte {
 		t.Fatal(err)
 	}
 	lines := strings.Split(string(data), "\n")
-	header := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"
+	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
 	want := header + "\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
 	if !strings.Contains(string(data), want) {
 		t.Errorf("missing literal review entries under their header:\n%s", data)
@@ -218,5 +221,122 @@ func runGit(t *testing.T, root string, args ...string) {
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, string(out))
+	}
+}
+
+func TestBootstrap_ReviewsLedgerTracked(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			root := t.TempDir()
+			runGit(t, root, "init", "-q")
+			if existing {
+				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("# existing\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range []string{"!.mindspec/specs/*/reviews/*/", "!.mindspec/specs/*/reviews/*/dispositions.jsonl"} {
+				if strings.Count(string(before), entry+"\n") != 1 {
+					t.Fatalf("negation missing or duplicated: %q", before)
+				}
+			}
+			for _, name := range []string{"dispositions.jsonl", "panel.json", "BRIEF.md", "R1-round-1.json", "dispositions.lock"} {
+				file := ".mindspec/specs/130-test/reviews/p/" + name
+				cmd := exec.Command("git", "-C", root, "check-ignore", "-q", "--", file)
+				err := cmd.Run()
+				if name == "dispositions.jsonl" {
+					var exit *exec.ExitError
+					if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+						t.Fatalf("ledger still ignored: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("%s not ignored: %v", name, err)
+				}
+			}
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatalf("second init changed gitignore:\nbefore: %s\nafter: %s", before, after)
+			}
+		})
+	}
+}
+
+func TestBootstrap_ReviewsOldHeaderDoesNotReappend(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := bytes.ReplaceAll(data,
+		[]byte("# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"),
+		[]byte("# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"))
+	if bytes.Equal(data, old) {
+		t.Fatal("fixture did not replace the review header")
+	}
+	if err := os.WriteFile(file, old, 0644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := Run(root, false); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(old, after) {
+			t.Fatalf("old header caused entries to be re-appended:\nbefore:\n%s\nafter:\n%s", old, after)
+		}
+	}
+}
+
+func TestBootstrap_ReviewsV016UpgradeNoDuplicate(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	seed := "# MindSpec panel reviews (local, not version-controlled; spec 129 R8)\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
+	file := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(file, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, line := range strings.Split(string(data), "\n") {
+		counts[line]++
+	}
+	for _, entry := range gitutil.ReviewIgnoreEntries {
+		if n := counts[entry]; n != 1 {
+			t.Errorf("entry %q appears %d times:\n%s", entry, n, data)
+		}
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, after) {
+		t.Fatalf("second init changed upgraded gitignore:\nbefore:\n%s\nafter:\n%s", data, after)
 	}
 }

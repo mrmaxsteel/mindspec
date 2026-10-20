@@ -65,6 +65,9 @@ func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: unquoting import path %s: %v", e.Name(), imp.Path.Value, err)
 			}
+			if path == "os/exec" {
+				t.Errorf("%s imports %s: internal/panel must not execute processes", e.Name(), path)
+			}
 			if !strings.HasPrefix(path, modulePrefix) {
 				continue // stdlib or third-party -- the leaf invariant only constrains internal imports
 			}

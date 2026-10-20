@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 func gitStatusPorcelainT(t *testing.T, dir string) string {
@@ -475,4 +477,28 @@ func mustRevParse(t *testing.T, dir, ref string) string {
 		t.Fatalf("rev-parse %s: %v", ref, err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestSnapshotWorktreeTree_LedgerGlobMatchesArtifactMatcher(t *testing.T) {
+	dir := initGitRepo(t)
+	reviews := ".mindspec/specs/130-test/reviews/p/"
+	ledger := reviews + "dispositions.jsonl"
+	nested := reviews + "nested/dispositions.jsonl"
+	registration := reviews + "panel.json"
+	for _, file := range []string{ledger, nested, registration} {
+		mustWrite(t, dir, file, "{}\n")
+	}
+	tree, err := SnapshotWorktreeTree(dir, panel.ToolArtifactPaths(filepath.Join(dir, ".mindspec", "specs")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := lsTreeNames(t, dir, tree)
+	if containsPath(names, ledger) {
+		t.Errorf("matched untracked ledger entered snapshot: %v", names)
+	}
+	for _, file := range []string{nested, registration} {
+		if !containsPath(names, file) {
+			t.Errorf("non-artifact %s missing from snapshot: %v", file, names)
+		}
+	}
 }

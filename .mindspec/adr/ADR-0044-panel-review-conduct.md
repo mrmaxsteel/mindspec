@@ -80,9 +80,9 @@ every mindspec panel gate. Skills cite this ADR; they do not restate it.
    interactive reviewers missed.)
 
 3. **Findings-never-out-voted, reviewer-facing.** Every finding is fixed or
-   evidence-refuted via the audited refutation procedure — never dropped
+   evidence-refuted via the audited refutation procedure (see [Amendment (Spec 130)](#amendment-spec-130) for deferred outcomes) — never dropped
    because the APPROVE count cleared the threshold. The threshold is a
-   floor, not a license; a "minor" finding is still adjudicated. This is
+   floor (retired by [Amendment (Spec 130)](#amendment-spec-130)), not a license; a "minor" finding is still adjudicated. This is
    the reviewer-facing statement of the ADR-0043 doctrine; the binary
    already enforces the any-unresolved-RC Block.
 
@@ -121,3 +121,9 @@ failure MODE portably.
 - A fresh `mindspec setup <agent>` install carries the same panel
   discipline the origin project practices; the conduct no longer lives
   only in operator memory.
+
+
+## Amendment (Spec 130)
+
+- **Finding outcomes (R7, R13.4).** Every finding is fixed, evidence-refuted or deferred to a validated follow-up bead. Deferral is the third outcome: an effective deferral to a validated follow-up bead discharges its finding, and `complete` and `impl approve` re-check that bead. Refutations are round- and `finding_sha256`-pinned; slot-level refutations pin the full ordered list or fallback rationale.
+- **Pass rule (R7).** The approval threshold floor is retired. Complete, no veto, fresh, discharged and intact are all required; APPROVE count is not a decision input. REJECT, hard_block, INVALID, staleness and incompleteness cannot be discharged. Zero APPROVE with all findings discharged passes and reports resolved slots separately.

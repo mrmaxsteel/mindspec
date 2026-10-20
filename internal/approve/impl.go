@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -31,6 +32,7 @@ import (
 )
 
 var (
+	implPanelSkipEnvFn  = func() bool { return os.Getenv(panel.SkipPanelEnv) == "1" }
 	implRunBDCombinedFn = bead.RunBDCombined
 	implRunBDFn         = bead.RunBD
 	implMergeMetadataFn = bead.MergeMetadata
@@ -270,6 +272,11 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
+	// R6.6 is outside both panel hatches and precedes lifecycle writes.
+	if err := implLedgerPreflight(root, specID, exec); err != nil {
+		return nil, err
+	}
+
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
 	// lifecycle command. No-op if the epic already has mindspec_phase, or
 	// when no epic exists yet. Migration errors fail the command
@@ -538,6 +545,14 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// NO push, NO placeholder-ADR write. Hatches (MINDSPEC_SKIP_PANEL,
 	// enforcement.panel_gate: false) bypass NOTHING here.
 	if err := runOrphanObligationGate(root, specID, specBranch, beadIDs, planErr); err != nil {
+		return nil, err
+	}
+
+	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
+		return nil, err
+	}
+
+	if err := implPanelDeferralPreflight(root, specID); err != nil {
 		return nil, err
 	}
 
@@ -1181,4 +1196,202 @@ func joinResultErrorMessages(r *validate.Result) string {
 		msgs = append(msgs, fmt.Sprintf("[%s] %s", i.Name, i.Message))
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// implLedgerPreflight requires every flat spec ledger to be committed, including
+// untracked ledgers that a normal porcelain directory summary would collapse.
+func implLedgerPreflight(root, specID string, exec executor.Executor) error {
+	wt, paths, err := complete.SpecLedgerPaths(root, specID, "")
+	if err != nil {
+		return err
+	}
+	if err := complete.CheckPanelLedgers(wt, paths, exec); err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	status, err := exec.Status(wt)
+	if err != nil {
+		return guard.NewFailure("could not verify panel ledgers are committed: "+termsafe.Escape(err.Error()), complete.LedgerCommitRecovery(wt, paths))
+	}
+	// Decode porcelain quoted paths and rename destinations. A collapsed untracked parent also contains dirt.
+	for _, line := range strings.Split(status, "\n") {
+		dirty, err := panel.PorcelainPath(line)
+		if err != nil {
+			return guard.NewFailure("could not parse ledger status", complete.LedgerCommitRecovery(wt, paths))
+		}
+		if dirty == "" {
+			continue
+		}
+		for _, file := range paths {
+			if dirty == file || strings.HasPrefix(file, strings.TrimSuffix(dirty, "/")+"/") {
+				return guard.NewFailure("panel ledger has uncommitted changes: "+termsafe.Escape(file), complete.LedgerCommitRecovery(wt, []string{file}))
+			}
+		}
+	}
+	return nil
+}
+
+// implPanelCore3Preflight checks every spec registration, final review included.
+// Integrity checks precede the abandoned/legacy skip; no gate decision runs here.
+func implPanelCore3Preflight(root, specID string, out io.Writer) error {
+	if implPanelSkipEnvFn() {
+		return nil
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enforcement.PanelGate {
+		return nil
+	}
+	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
+		if reg.Panel.Spec != specID && reg.Err == nil {
+			continue
+		}
+		if reg.Err != nil {
+			return complete.PanelCore3Failure(reg, reg.Err)
+		}
+		legacy, err := panel.LegacyPanel(reg.Dir)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		if field != "" {
+			return complete.PanelCore3Failure(reg, fmt.Errorf("panel.json changed outside the panel verbs (%s)", field))
+		}
+		if legacy || reg.Panel.Abandoned {
+			if out != nil {
+				fmt.Fprintf(out, "panel advisory: %s coverage check skipped for legacy or abandoned registration\n", termsafe.Escape(reg.Slug()))
+			}
+			continue
+		}
+		if reg.Panel.Telemetry != "required" {
+			continue
+		}
+		if err := panel.CheckCore3(reg); err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+	}
+	return nil
+}
+
+// implPanelDeferralPreflight checks integrity before abandonment. Bead panels
+// use the immutable completion audit; non-bead panels use current discharges.
+func implPanelDeferralPreflight(root, specID string) error {
+	if implPanelSkipEnvFn() {
+		return nil
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enforcement.PanelGate {
+		return nil
+	}
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return err
+	}
+	planBeadIDs, err := readPlanBeadIDs(filepath.Join(specDir, "plan.md"))
+	if err != nil {
+		return guard.NewFailure("cannot read the plan bead list to check deferred findings: "+termsafe.Escape(err.Error()), "restore the plan bead list")
+	}
+	var regs []panel.Registration
+	for _, reg := range panel.Scan(complete.PanelGateRoots(root, "", specID)...) {
+		if reg.Panel.Spec != specID && reg.Err == nil {
+			continue
+		}
+		if reg.Err != nil {
+			return complete.PanelCore3Failure(reg, reg.Err)
+		}
+		if _, err := panel.LegacyPanel(reg.Dir); err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+		if err != nil {
+			return complete.PanelCore3Failure(reg, err)
+		}
+		if field != "" {
+			return complete.PanelCore3Failure(reg, fmt.Errorf("panel.json changed outside the panel verbs (%s)", field))
+		}
+
+		regs = append(regs, reg)
+	}
+	beadRegs := map[string][]panel.Registration{}
+	for _, beadID := range planBeadIDs {
+		beadRegs[beadID] = nil
+	}
+	for _, reg := range regs {
+		if reg.Panel.IsBead() {
+			beadRegs[*reg.Panel.BeadID] = append(beadRegs[*reg.Panel.BeadID], reg)
+			continue
+		}
+		if reg.Panel.Abandoned {
+			continue
+		}
+		res, err := panel.Tally(reg.Dir)
+		if err != nil {
+			return err
+		}
+		if err := complete.CheckPanelDeferrals(reg, res.EffectiveDeferrals(), false); err != nil {
+			return err
+		}
+	}
+	for beadID, registrations := range beadRegs {
+		meta, err := implGetMetadataFn(beadID)
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
+		}
+		entries, err := complete.DecodePanelDeferred(meta, "panel_deferred_entries")
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
+		}
+		pending, err := complete.DecodePanelDeferred(meta, "deferral_pending_entries")
+		if err != nil {
+			return complete.PanelDeferredAuditFailure(beadID, err, true)
+		}
+		entries = complete.UnionDeferrals(entries, pending)
+		var legacy []complete.PanelDeferredEntry
+		groups := map[[2]string][]complete.PanelDeferredEntry{}
+		for _, entry := range entries {
+			if entry.Spec == "" && entry.Panel == "" {
+				legacy = append(legacy, entry)
+				continue
+			}
+			key := [2]string{entry.Spec, entry.Panel}
+			groups[key] = append(groups[key], entry)
+		}
+		if len(registrations) == 0 {
+			registrations = []panel.Registration{{Panel: panel.Panel{Spec: specID, BeadID: &beadID}}}
+		}
+		for _, reg := range registrations {
+			if err := complete.CheckAuditedPanelDeferrals(reg, legacy); err != nil {
+				return err
+			}
+		}
+		for identity, group := range groups {
+			entrySpec := identity[0]
+			if entrySpec == "" {
+				entrySpec = specID
+			}
+			reg := panel.Registration{Dir: filepath.Join("review", identity[1]), Panel: panel.Panel{Spec: entrySpec, BeadID: &beadID}}
+			matches, err := complete.PanelDeferredRegistrations(regs, entrySpec, identity[1])
+			if err != nil {
+				return err
+			}
+			if len(matches) == 1 {
+				reg = matches[0]
+			}
+			// Only an intact registration with this stored identity can skip the audit.
+			if err := complete.CheckAuditedPanelDeferrals(reg, group); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

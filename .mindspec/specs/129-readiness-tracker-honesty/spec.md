@@ -623,6 +623,8 @@ Diagnostic strings are first-class outputs. ACs pin what a message says and what
    The dated Verification note cites the files that ground each Context claim. "Amended by ADR-0045" back-pointer blockquotes are added to ADR-0040 §1 and to ADR-0044 in the same commit.
 2. The S0 rule table (`.mindspec/policy/rules.yaml`) is not delivered here. Its home is spec 130 (OQ-1).
 
+   Re-pointed 2026-10-19: the rule table moves to spec 131; #233's reviewed-tree check and #251 move to the spec-129 follow-on
+
 ### R8 — Review artifacts stay out of git by default
 
 Panel reviews are an optional local helper (operator decision, 2026-10-19). The operator's lane rules (an untracked local kit) already state "`reviews/` is never committed"; R8 makes the binary agree.
@@ -631,6 +633,8 @@ Panel reviews are an optional local helper (operator decision, 2026-10-19). The 
 2. **No auto-committing verb commits reviews by default.** The verbs that commit on the operator's behalf, enumerated by `grep -rn -e 'CommitAll' -e 'commitWithExport' -e 'CommitPaths' -e '"add", "-A"' --include='*.go' internal cmd | grep -v _test.go`, are: `spec create`, `spec approve`, `plan approve`, the executor's `commitWithExport` (bead and finalize commits), `complete`'s materialization (`gitutil.SnapshotWorktreeTree`), `adopt` (explicit `.beads/issues.jsonl`) and the legacy layout mover (an already-staged `git mv`). Each stages with `git add -A` or an explicit path, so the ignore entry is the whole mechanism and no commit path changes. A review file that is already tracked stays tracked, and its edits are still committed; untracking is out of scope.
 3. **Every gate that reads reviews works on untracked files.** Every consumer reads the filesystem, and none reads a review path from a ref or blob: `complete`'s `panelGate` (via `panelGateRoots`), `impl approve`'s advisory slot line, `lifecycle.reviewedHeadSHAForBead`, `instruct`'s panel state, `config show`, the disposition store and `panel disposition query`. `validate`'s `isCoLocatedReview` matches diff paths, and an untracked file is never in a diff.
 4. **Retention after finalize: needs operator decision.** An ignored review lives only in the spec worktree, and finalize's worktree removal deletes it. Afterwards the panel datum for a later `reattest`, the spec-117 `dispositions.jsonl` telemetry and `panel disposition query` from `main` see nothing. The options are:
+   Decided 2026-10-19: option (B), shipped by spec 130 R6
+
    - (A) accept the loss, since reviews are advisory;
    - (B) keep `dispositions.jsonl` tracked, with the patterns `.mindspec/specs/*/reviews/**`, `!.mindspec/specs/*/reviews/*/` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl`, reached by appending the two negation lines after R8.1's entries (git cannot re-include a file under an excluded directory);
    - (C) finalize copies `reviews/` to an untracked location in the main checkout before removing the worktree.

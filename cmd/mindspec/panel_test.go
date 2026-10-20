@@ -102,9 +102,19 @@ func snapshotTree(t *testing.T, root string) []string {
 // default and FAILS under `-shuffle` when it happens to run after one.
 // Same shared-mutable-singleton class as S2-1 itself, one flag set over.
 func resetPanelCreateFlags(t *testing.T) {
+	original := lsTreeForPanelFn
+	lsTreeForPanelFn = func(_, _ string) (string, error) {
+		spec, _ := panelCreateCmd.Flags().GetString("spec")
+		var listing strings.Builder
+		for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
+			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/spec.md\n", specs, spec)
+		}
+		return listing.String(), nil
+	}
+	t.Cleanup(func() { lsTreeForPanelFn = original })
 	t.Helper()
 	restore := func() {
-		for _, name := range []string{"spec", "target", "bead", "round", "gate"} {
+		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers"} {
 			if f := panelCreateCmd.Flags().Lookup(name); f != nil {
 				_ = f.Value.Set(f.DefValue)
 				f.Changed = false
@@ -190,7 +200,7 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 		return stdout.String() + stderr.String(), err
 	}
 
-	if out, err := runPanel("create", "demo", "--spec", "110-test", "--target", "bead/"+beadID, "--bead", beadID); err != nil {
+	if out, err := runPanel("create", "demo", "--spec", "110-test", "--target", "bead/"+beadID, "--gate", "bead", "--bead", beadID); err != nil {
 		t.Fatalf("panel create (round 1): %v\noutput=%s", err, out)
 	}
 
@@ -206,8 +216,8 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 	if got.ExpectedReviewers != 3 {
 		t.Errorf("expected_reviewers = %d, want 3 (from the config resolver)", got.ExpectedReviewers)
 	}
-	if got.ApproveThresholdExpr != "2" {
-		t.Errorf("approve_threshold = %q, want the raw config expression %q", got.ApproveThresholdExpr, "2")
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if got.ReviewedHeadSHA != sha1 {
 		t.Errorf("reviewed_head_sha = %q, want %q", got.ReviewedHeadSHA, sha1)
@@ -240,7 +250,7 @@ func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
 
 	sha2 := "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"
 	revParseForPanelFn = func(string, string) (string, error) { return sha2, nil }
-	if out, err := runPanel("create", "demo", "--spec", "110-test", "--target", "bead/"+beadID, "--bead", beadID, "--round", "2"); err != nil {
+	if out, err := runPanel("create", "demo", "--spec", "110-test", "--target", "bead/"+beadID, "--gate", "bead", "--bead", beadID, "--round", "2"); err != nil {
 		t.Fatalf("panel create (round 2): %v\noutput=%s", err, out)
 	}
 
@@ -327,7 +337,7 @@ func TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds(t *testing.T) {
 	// The exact documented recovery shape, `--round 2` standing in for
 	// `--round <N+1>`.
 	if out, err := runPanel("create", "stale-repanel", "--spec", "127-test",
-		"--target", "bead/"+beadID, "--bead", beadID, "--round", "2"); err != nil {
+		"--target", "bead/"+beadID, "--gate", "bead", "--bead", beadID, "--round", "2"); err != nil {
 		t.Fatalf("documented recovery invocation failed: %v\noutput=%s", err, out)
 	}
 
@@ -660,8 +670,8 @@ func splitPosixSingleQuoted(t *testing.T, s string) []string {
 // follower's shell reaches), and asserts the composed effect at the seam
 // the gate actually consumes: panel.Scan + panel.ForBead. It reuses bead
 // 7's proven pattern from
-// TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds, including its
-// omission control (the same argv with `--bead` stripped must NOT become
+// TestPanelCreate_StaleSHARecovery_BindsBeadAndForBeadFinds, and adds a
+// derivation control (the same bead-gate argv without `--bead` stays
 // selectable), so the assertion cannot pass vacuously.
 func TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds(t *testing.T) {
 	root := mkPanelTestRoot(t, "")
@@ -685,11 +695,16 @@ func TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds(t *testing.T) {
 	runGitInDir(t, root, "branch", "bead/"+beadID)
 	stubWorktreeListEmpty(t)
 
-	resetPanelCreateFlags(t)
-	if out, err := runPanelVerbCmd("create", slug, "--spec", "127-test",
-		"--target", "bead/"+beadID, "--bead", beadID, "--round", "1"); err != nil {
-		t.Fatalf("seeding the round-1 bead panel failed: %v\noutput=%s", err, out)
+	// A legacy registration has a bead binding but no recorded gate.
+	// Its emitted recovery must now supply --gate bead to remain executable.
+	sha, err := revParseForPanelFn(root, "bead/"+beadID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	writePanelFixture(t, root, slug, panel.Panel{
+		Spec: "127-test", Target: "bead/" + beadID, BeadID: ptrStr(beadID),
+		Round: 1, ExpectedReviewers: 6, ReviewedHeadSHA: sha,
+	})
 
 	// A REJECT verdict at an UN-advanced target: the decision Blocks for a
 	// substantive reason, so the recovery under test is the one an agent
@@ -758,39 +773,26 @@ func TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds(t *testing.T) {
 		t.Errorf("re-panel round = %d, want 2 (the recovery must bump past the round it just adjudicated)", bound[0].Panel.Round)
 	}
 
-	// Omission control, mirroring the exact defect this fixes: the SAME
-	// invocation with `--bead` stripped — the pre-fix recovery's shape —
-	// must NOT be selectable by ForBead.
-	var noBead []string
+	// Spec 130 also binds the recovery when --bead is omitted: --gate
+	// bead derives the id from the target, closing the historical escape.
+	var derived []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--bead" {
-			i++ // also drop its value
+			i++
 			continue
 		}
-		if args[i] == args[1] { // the slug positional
-			noBead = append(noBead, args[1]+"-nobead")
+		if args[i] == args[1] {
+			derived = append(derived, args[1]+"-derived")
 			continue
 		}
-		noBead = append(noBead, args[i])
+		derived = append(derived, args[i])
 	}
 	resetPanelCreateFlags(t)
-	if out, err := runPanelVerbCmd(noBead...); err != nil {
-		t.Fatalf("no-bead control invocation failed: %v\nargv=%q\noutput=%s", err, noBead, out)
+	if out, err := runPanelVerbCmd(derived...); err != nil {
+		t.Fatalf("derived binding: %v\n%s", err, out)
 	}
-	if got := len(panel.ForBead(panel.Scan(root), beadID)); got != 1 {
-		t.Fatalf("panel.ForBead finds %d registration(s) after adding a --bead-less panel for the SAME bead; want the bound re-panel only — a second match would disprove the control", got)
-	}
-	controlFound := false
-	for _, r := range panel.Scan(root) {
-		if r.Slug() == args[1]+"-nobead" {
-			controlFound = true
-			if r.Panel.BeadID != nil {
-				t.Fatalf("the --bead-less control registered BeadID %q, want nil (bead_id: null) — the control does not reproduce the pre-fix registration", *r.Panel.BeadID)
-			}
-		}
-	}
-	if !controlFound {
-		t.Fatal("the --bead-less control registration is not in panel.Scan(root) at all")
+	if got := len(panel.ForBead(panel.Scan(root), beadID)); got != 2 {
+		t.Fatalf("derived recovery selected %d panels, want 2", got)
 	}
 }
 
@@ -944,6 +946,10 @@ func TestPanelVerbs_DecisionIsPanelGateDecision(t *testing.T) {
 // one seeded verdict file, and returns the panel directory.
 func nonBeadPanelFixture(t *testing.T, root, slug, target, sha, verdict string, expectedReviewers int) string {
 	t.Helper()
+	singleReviewerFixture := expectedReviewers == 1
+	if singleReviewerFixture {
+		expectedReviewers = 2
+	}
 	writePanelFixture(t, root, slug, panel.Panel{
 		Spec: "113-nb", Target: target, Round: 1,
 		ExpectedReviewers: expectedReviewers, ReviewedHeadSHA: sha,
@@ -952,6 +958,11 @@ func nonBeadPanelFixture(t *testing.T, root, slug, target, sha, verdict string, 
 	body := fmt.Sprintf(`{"verdict":%q}`, verdict)
 	if err := os.WriteFile(filepath.Join(dir, "R1-round-1.json"), []byte(body), 0o644); err != nil {
 		t.Fatalf("seed verdict file: %v", err)
+	}
+	if singleReviewerFixture {
+		if err := os.WriteFile(filepath.Join(dir, "R2-round-1.json"), []byte(`{"verdict":"APPROVE"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
@@ -1008,7 +1019,7 @@ func TestPanelVerify_NonBeadStaleness(t *testing.T) {
 		if len(gotRefs) != 1 || gotRefs[0] != target {
 			t.Fatalf("revParseForPanelFn rev-parsed refs %v, want exactly [%q] (never a bead/-derived ref)", gotRefs, target)
 		}
-		if strings.Contains(out, "PASS") {
+		if strings.Contains(out, "\nPASS") {
 			t.Errorf("output contains PASS for an advanced non-bead target:\n%s", out)
 		}
 		if !strings.Contains(out, "BLOCK") {
@@ -1039,7 +1050,7 @@ func TestPanelVerify_NonBeadStaleness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("panel verify: %v\noutput=%s", err, out)
 		}
-		if strings.Contains(out, "PASS") {
+		if strings.Contains(out, "\nPASS") {
 			t.Errorf("output contains PASS despite a REJECT verdict at an un-advanced target:\n%s", out)
 		}
 		if !strings.Contains(out, "BLOCK") {
@@ -1127,7 +1138,7 @@ func TestPanelVerify_NonBeadIncompleteBlocks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("panel verify: %v\noutput=%s", err, out)
 		}
-		if strings.Contains(out, "PASS") {
+		if strings.Contains(out, "\nPASS") {
 			t.Errorf("output contains PASS for an incomplete non-bead panel:\n%s", out)
 		}
 		if !strings.Contains(out, "BLOCK") {
@@ -1360,7 +1371,7 @@ func TestPanelVerbs_NonBeadGitErrHostileTargetEscaped(t *testing.T) {
 			GitErr: simulated,
 		}
 		want := panel.PanelGateDecision(facts)
-		got := sanitizeNonBeadDecision(want, "demo", target, facts.GitErr)
+		got := sanitizeNonBeadDecision(want, "demo", target, "", facts.GitErr)
 		assertClean(t, got.Message)
 	})
 }
@@ -1797,7 +1808,7 @@ func TestSanitizeNonBeadDecision(t *testing.T) {
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
 			want := panel.PanelGateDecision(tc.facts)
-			got := sanitizeNonBeadDecision(want, slug, target, tc.facts.GitErr)
+			got := sanitizeNonBeadDecision(want, slug, target, "", tc.facts.GitErr)
 
 			if got.Action != want.Action {
 				t.Fatalf("sanitizeNonBeadDecision changed Action: got %v, want %v", got.Action, want.Action)
@@ -1902,8 +1913,8 @@ func TestPanelCreate_GateStampsPerGateDefaults(t *testing.T) {
 	if got.ExpectedReviewers != wantReviewers {
 		t.Errorf("expected_reviewers = %d, want the final_review-gate-resolved %d", got.ExpectedReviewers, wantReviewers)
 	}
-	if got.ApproveThresholdExpr != wantThreshold {
-		t.Errorf("approve_threshold = %q, want the final_review-gate-resolved %q", got.ApproveThresholdExpr, wantThreshold)
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if !strings.Contains(string(data), `"gate": "final_review"`) {
 		t.Errorf("panel.json bytes missing the literal gate key:\n%s", data)
@@ -1970,11 +1981,92 @@ func TestPanelCreate_GateInvalidRejectedBeforeWrite(t *testing.T) {
 	}
 }
 
-// TestPanelCreate_GateOmittedByteIdentical pins the 112-R9
-// byte-identical-when-absent contract at the CLI layer: `panel create`
-// without --gate writes a panel.json with no "gate" key, and its other
-// fields match the global-resolver values exactly as before spec 113.
-func TestPanelCreate_GateOmittedByteIdentical(t *testing.T) {
+// TestPanelCreate_ZeroConfigNoGateUsesSixReviewers pins spec 130's
+// no-gate size at the CLI boundary without using the resolver as its oracle.
+func TestPanelCreate_ZeroConfigNoGateUsesSixReviewers(t *testing.T) {
+	resetPanelCreateFlags(t)
+	root := mkPanelTestRoot(t, "version: 1\n")
+	withTestChdir(t, root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	origRevParse := revParseForPanelFn
+	t.Cleanup(func() { revParseForPanelFn = origRevParse })
+	revParseForPanelFn = func(string, string) (string, error) {
+		return "1234deadbeef1234deadbeef1234deadbeef1234", nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"panel", "create", "zero-config", "--spec", "130-test", "--target", "bead/mindspec-x.1"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("panel create (zero config, no --gate): %v\nstderr=%s", err, stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "review", "zero-config", panel.FileName))
+	if err != nil {
+		t.Fatalf("read panel.json: %v", err)
+	}
+	var got panel.Panel
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal panel.json: %v", err)
+	}
+	if got.ExpectedReviewers != 6 {
+		t.Errorf("expected_reviewers = %d, want 6 (zero config, no --gate)", got.ExpectedReviewers)
+	}
+}
+
+func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		global string
+		want   string
+	}{
+		{name: "explicit global", global: "  approve_threshold: 2\n", want: "2"},
+		{name: "default global", want: "n-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPanelCreateFlags(t)
+			cfgYAML := "panel:\n" + tc.global + "  gates:\n    adhoc:\n      approve_threshold: 3\n"
+			root := mkPanelTestRoot(t, cfgYAML)
+			withTestChdir(t, root)
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+
+			origRevParse := revParseForPanelFn
+			t.Cleanup(func() { revParseForPanelFn = origRevParse })
+			revParseForPanelFn = func(string, string) (string, error) {
+				return "1234deadbeef1234deadbeef1234deadbeef1234", nil
+			}
+
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs([]string{"panel", "create", "global-threshold", "--spec", "130-test", "--target", "bead/mindspec-x.1"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("panel create (no --gate): %v\nstderr=%s", err, stderr.String())
+			}
+
+			data, err := os.ReadFile(filepath.Join(root, "review", "global-threshold", panel.FileName))
+			if err != nil {
+				t.Fatalf("read panel.json: %v", err)
+			}
+			var got panel.Panel
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("unmarshal panel.json: %v", err)
+			}
+			if got.ApproveThresholdExpr != "" {
+				t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
+			}
+		})
+	}
+}
+
+// TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold pins the
+// omitted gate's adhoc size resolution and retired threshold. An explicit
+// global reviewer list overrides the built-in per-gate size defaults.
+func TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold(t *testing.T) {
 	resetPanelCreateFlags(t)
 	cfgYAML := "panel:\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
 	root := mkPanelTestRoot(t, cfgYAML)
@@ -1990,7 +2082,7 @@ func TestPanelCreate_GateOmittedByteIdentical(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"panel", "create", "demo", "--spec", "113-test", "--target", "bead/mindspec-x.1", "--bead", "mindspec-x.1"})
+	rootCmd.SetArgs([]string{"panel", "create", "demo", "--spec", "113-test", "--target", "bead/mindspec-x.1"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("panel create (no --gate): %v\nstderr=%s", err, stderr.String())
 	}
@@ -2013,10 +2105,10 @@ func TestPanelCreate_GateOmittedByteIdentical(t *testing.T) {
 		t.Fatalf("unmarshal panel.json: %v", err)
 	}
 	if got.ExpectedReviewers != cfg.PanelExpectedReviewers() {
-		t.Errorf("expected_reviewers = %d, want the GLOBAL default %d (byte-identical-when-absent contract)", got.ExpectedReviewers, cfg.PanelExpectedReviewers())
+		t.Errorf("expected_reviewers = %d, want the adhoc size with explicit global reviewers %d", got.ExpectedReviewers, cfg.PanelExpectedReviewers())
 	}
-	if got.ApproveThresholdExpr != cfg.PanelApproveThresholdExpr() {
-		t.Errorf("approve_threshold = %q, want the GLOBAL default %q (byte-identical-when-absent contract)", got.ApproveThresholdExpr, cfg.PanelApproveThresholdExpr())
+	if got.ApproveThresholdExpr != "" {
+		t.Errorf("approve_threshold = %q, want no threshold", got.ApproveThresholdExpr)
 	}
 	if got.Gate != "" {
 		t.Errorf("p.Gate = %q, want empty", got.Gate)

@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +31,7 @@ import (
 
 var panelCmd = &cobra.Command{
 	Use:   "panel",
-	Short: "Manage review panels (create, verify, tally)",
+	Short: "Manage review panels (create, verify, tally, refute, defer, rebind, abandon)",
 }
 
 // revParseForPanelFn resolves ref's commit SHA in root — the seam `panel
@@ -45,6 +46,11 @@ var revParseForPanelFn = func(root, ref string) (string, error) {
 	return newExecutor(root).RevParseRef(root, ref)
 }
 
+// lsTreeForPanelFn captures the create-time subject through the executor.
+var lsTreeForPanelFn = func(workdir, rev string) (string, error) {
+	return newExecutor(workdir).LsTree(workdir, rev)
+}
+
 // panelWorktreeListFn resolves the bead-worktree list for the panel gate's
 // dirty-tree check (mirroring internal/complete's worktreeListFn seam).
 // Swappable in tests so `panel verify`/`panel tally` never spawn a real
@@ -57,40 +63,39 @@ var panelWorktreeListFn = bead.WorktreeList
 var tallyWarnOut io.Writer = os.Stderr
 
 var panelCreateCmd = &cobra.Command{
-	Use:   "create <slug> --spec <id> --target <ref> [--bead <id>] [--round N]",
-	Short: "Register (or re-panel) a review panel",
-	Long: `panel create writes <panel-dir>/panel.json and rewrites BRIEF.md's
-machine-managed header in one atomic operation (internal/panel.Create):
-expected_reviewers and approve_threshold are stamped from the configured
-panel defaults (config.PanelExpectedReviewers / PanelApproveThresholdExpr,
-spec 109), and reviewed_head_sha is captured from --target's live commit
-AT WRITE TIME. A --round N re-panel co-bumps round + reviewed_head_sha in
-the SAME write, leaving prior verdict files and the skill-authored BRIEF
-body untouched.
+	SilenceUsage: true,
+	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N]",
+	Short:        "Register (or re-panel) a review panel",
+	Long: `panel create registers the target's live commit and subject digest, writes a
+reviewer roster and round event, and updates BRIEF.md's managed header.
+The roster lists R1..Rn with each reviewer's model and lens. Gate defaults
+are 6 reviewers for spec_approve, plan_approve, final_review and adhoc,
+and 4 for bead. --reviewers N overrides the size; N must be at least 2.
+A later round keeps the previous roster unless --reviewers is supplied.
 
-A --bead <id> panel expects --target bead/<id> — the exact ref
-` + "`mindspec complete`'s gate rev-parses for staleness. A --target that" + `
-diverges from bead/<id> can only FAIL SAFE: at gate time the recorded
-reviewed_head_sha will not match the live bead/<id> tip, producing a
-stale-SHA Block, never a false-PASS.
+For --gate bead, --target must be bead/<id>; bead_id is derived from it.
+An explicit --bead must match and is refused for other gates.
+For existing bead panels with a divergent recorded target, the gate compares
+that target to the live bead/<id> branch. On a SHA mismatch, a changed subject
+tree blocks; an equal subject stays fresh. A legacy panel without a digest
+blocks on a SHA mismatch.
+Existing panel.json must parse. Verdict files prevent recreating their
+round or an older round; bump --round or use panel rebind.
+These refusals write nothing.
 
-An optional --gate <name> (spec 112 R9 / spec 113 R3) stamps the
-decision-inert panel.json "gate" field and resolves expected_reviewers/
-approve_threshold from that gate's creation-time defaults
-(config.PanelGateExpectedReviewers/PanelGateApproveThresholdExpr) instead
-of the global panel.reviewers/approve_threshold. --gate must be one of
-the five config.PanelGateKeys (spec_approve, plan_approve, bead,
-final_review, adhoc); omitting it is byte-identical to today: the global
-defaults are used and no "gate" key is written.
+A round bump preserves ledger-backed refutations, deferrals and rebinds,
+and names dropped entries. Legacy entries are preserved as a baseline.
+An abandoned panel is revived with history. The old BRIEF is archived as
+BRIEF-round-N.md without overwriting an existing archive. The new header
+includes the prior round's consolidation and keeps the authored body.
 
---gate adhoc is the one exception to the --spec requirement above (spec
-123 R8): an ad-hoc panel has no owning spec, so --spec must be OMITTED
-(supplying both is refused with a recovery line) and the panel is
-written to .mindspec/reviews/<slug>/ (flat layout) or review/<slug>/
-(legacy layout) instead of a spec-scoped directory. Every other --gate
-value still requires --spec. Ad-hoc panels are stored artifacts only:
-creatable and talliable (` + "`panel tally`" + `), but never scanned by
-` + "`mindspec complete`" + `'s gate (ADR-0037 scope).`,
+--gate selects spec_approve, plan_approve, bead, final_review or adhoc.
+Without --gate, the roster uses adhoc defaults and the gate stays omitted.
+--gate adhoc requires --spec to be omitted and writes under
+.mindspec/reviews/<slug>/ on flat layouts, otherwise review/<slug>/.
+Other invocations require --spec and use the spec's review directory
+on flat layouts, otherwise review/<slug>/.
+Ad-hoc panels are never scanned by mindspec complete.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -103,6 +108,11 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 		beadID, _ := cmd.Flags().GetString("bead")
 		round, _ := cmd.Flags().GetInt("round")
 		gate, _ := cmd.Flags().GetString("gate")
+		reviewers, _ := cmd.Flags().GetInt("reviewers")
+		override := cmd.Flags().Changed("reviewers")
+		if override && reviewers < 2 {
+			return fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+		}
 
 		// Control-byte discipline (spec-109-final-review G2): a --bead/
 		// --target value carrying a control byte must never reach
@@ -159,6 +169,18 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 				fmt.Sprintf("pass one of %s to --gate", keys))
 		}
 
+		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
+		if err != nil {
+			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec <id> --target bead/<id>", shellQuoteTarget(slug))
+			if beadID != "" && gate != "" && gate != "bead" {
+				recovery = fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(target)) + panelCreateScope(specID, gate)
+				if gate != "adhoc" {
+					recovery += " --gate " + shellQuoteTarget(gate)
+				}
+			}
+			return guard.NewFailure(err.Error(), recovery)
+		}
+
 		root, err := findRoot()
 		if err != nil {
 			return err
@@ -168,8 +190,12 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return err
 		}
 
-		dir, err := panelDirFor(root, specID, slug, gate)
+		dir, specDir, err := panelDirFor(root, specID, slug, gate)
 		if err != nil {
+			return err
+		}
+
+		if err := checkPanelSlugOwner(root, slug, specID, gate, dir); err != nil {
 			return err
 		}
 
@@ -178,56 +204,60 @@ creatable and talliable (` + "`panel tally`" + `), but never scanned by
 			return fmt.Errorf("resolving --target %q: %w", target, err)
 		}
 
-		var beadPtr *string
-		if beadID != "" {
-			beadPtr = &beadID
+		digest, err := panel.SubjectTreeReader(lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
+		if err != nil {
+			return fmt.Errorf("reading panel subject: %w", err)
 		}
 
-		// Spec 113 R3: when --gate is set, resolve the creation-time
-		// defaults through 112 R3's gate-scoped resolvers instead of the
-		// global ones; when omitted, EXACTLY today's global-resolver
-		// calls with Gate: "" — preserving the 112-R9
-		// byte-identical-when-absent contract. The resolver errors are
-		// unreachable post-validation (gate is already confirmed a
-		// member of PanelGateKeys above) but returned defensively rather
-		// than ignored.
-		expectedReviewers := cfg.PanelExpectedReviewers()
-		approveThresholdExpr := cfg.PanelApproveThresholdExpr()
-		if gate != "" {
-			expectedReviewers, err = cfg.PanelGateExpectedReviewers(gate)
-			if err != nil {
-				return err
-			}
-			approveThresholdExpr, err = cfg.PanelGateApproveThresholdExpr(gate)
-			if err != nil {
-				return err
-			}
+		rosterGate := gate
+		if rosterGate == "" {
+			rosterGate = "adhoc"
 		}
-
+		var sizes []int
+		if override {
+			sizes = []int{reviewers}
+		}
+		slots, err := cfg.PanelGateReviewerSlots(rosterGate, sizes...)
+		if err != nil {
+			return err
+		}
+		roster := make([]panel.RosterSlot, len(slots))
+		for i, slot := range slots {
+			roster[i] = panel.RosterSlot{Slot: slot.Slot, Model: slot.Model, Lens: slot.Lens}
+		}
 		in := panel.CreateInput{
-			BeadID:               beadPtr,
-			Spec:                 specID,
-			Target:               target,
-			Round:                round,
-			ExpectedReviewers:    expectedReviewers,
-			ApproveThresholdExpr: approveThresholdExpr,
-			ReviewedHeadSHA:      sha,
-			Gate:                 gate,
+			BeadID: beadPtr, Spec: specID, Target: target, Round: round,
+			Roster: roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
+			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
+			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },
 		}
 		if err := panel.Create(dir, in); err != nil {
-			return err
+			return panelCreateFailure(err, slug, in)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "panel %s registered: round %d, %d expected reviewer(s), reviewed_head_sha %s\n",
-			slug, round, in.ExpectedReviewers, sha)
+			slug, round, recordedPanelReviewerCount(dir), sha)
 		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\n", dir)
 		return nil
 	},
 }
 
+func recordedPanelReviewerCount(dir string) int {
+	data, err := os.ReadFile(filepath.Join(dir, panel.FileName))
+	if err != nil {
+		return 0
+	}
+	var p panel.Panel
+	if json.Unmarshal(data, &p) != nil {
+		return 0
+	}
+	return len(p.Roster)
+}
+
 var panelVerifyCmd = &cobra.Command{
-	Use:   "verify <slug>",
-	Short: "Print a read-only completeness/staleness report; writes nothing",
+	SilenceUsage: true,
+	Use:          "verify <slug>",
+	Short:        "Print a read-only completeness/staleness report; writes nothing",
 	Long: `panel verify prints, for the named panel: verdicts present vs
 expected_reviewers, per-slot parse status (malformed files named),
 reviewed_head_sha vs the live target tip, and a PASS/BLOCK preview
@@ -245,10 +275,12 @@ is not itself a gate).`,
 		if err != nil {
 			return err
 		}
-		reg, err := findPanelRegistration(root, slug)
+		specID, _ := cmd.Flags().GetString("spec")
+		reg, err := findPanelRegistration(root, slug, specID)
 		if err != nil {
 			return err
 		}
+		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
 		facts := resolvePanelGateFacts(root, reg)
 		line, _ := renderPanelVerify(facts.Res, facts)
 		fmt.Fprintln(cmd.OutOrStdout(), line)
@@ -257,17 +289,16 @@ is not itself a gate).`,
 }
 
 var panelTallyCmd = &cobra.Command{
-	Use:   "tally <slug>",
-	Short: "Print the per-slot verdicts, decision, and aggregated concrete changes required",
-	Long: `panel tally prints the per-slot verdict table, the aggregate
-APPROVE/REQUEST_CHANGES/REJECT counts + resolved threshold, the
-panel.PanelGateDecision decision, and the aggregated
-concrete_changes_required (read presentation-only from each
-REQUEST_CHANGES/REJECT verdict file — never feeding the decision). The
-exit code is derived from the decision's Action ALONE: Allow -> 0; Warn
--> 0 with the advisory printed (non-blocking, parity with
-internal/complete's Warn handling); Block -> non-zero with a final
-recovery line (ADR-0035).`,
+	SilenceUsage: true,
+	Use:          "tally <slug>",
+	Short:        "Print the per-slot verdicts, decision, and aggregated concrete changes required",
+	Long: `panel tally prints each slot's verdict, the verdict counts, the pass
+rule, the decision, and the combined concrete changes required.
+A panel passes when it is complete, fresh, intact, and has no veto or
+unresolved finding. The APPROVE count does not control the decision.
+An allowed decision exits with code 0. A warning also exits with code 0
+and prints the advisory. A blocked decision exits with a non-zero code
+and prints a recovery line.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
@@ -278,12 +309,17 @@ recovery line (ADR-0035).`,
 		if err != nil {
 			return err
 		}
-		reg, err := findPanelRegistration(root, slug)
+		specID, _ := cmd.Flags().GetString("spec")
+		reg, err := findPanelRegistration(root, slug, specID)
 		if err != nil {
 			return err
 		}
+		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
 		facts := resolvePanelGateFacts(root, reg)
 		changes := collectSlotChanges(reg, facts.Res)
+		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
+			return panelCoverageWriteFailure(reg, err)
+		}
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)
 
@@ -318,16 +354,19 @@ recovery line (ADR-0035).`,
 				NextRound: nextPanelRound(reg, facts.Res),
 			})
 		}
-		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate)
+		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate, reg.Panel.Spec)
 	},
 }
 
 func init() {
+	panelVerifyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
+	panelTallyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelCreateCmd.Flags().String("spec", "", "Owning spec ID")
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
-	panelCreateCmd.Flags().String("bead", "", "Bead ID this panel targets (omit for a non-bead panel)")
+	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
-	panelCreateCmd.Flags().String("gate", "", "Panel gate mix (spec_approve|plan_approve|bead|final_review|adhoc); stamps the decision-inert gate field and its creation-time defaults (omit for global defaults)")
+	panelCreateCmd.Flags().String("gate", "", "Panel gate (spec_approve|plan_approve|bead|final_review|adhoc); omit for adhoc reviewer defaults")
+	panelCreateCmd.Flags().Int("reviewers", 0, "Set roster size (at least 2); on a round bump, omission keeps the previous roster")
 
 	panelCmd.AddCommand(panelCreateCmd)
 	panelCmd.AddCommand(panelVerifyCmd)
@@ -393,7 +432,7 @@ func isValidPanelGateKey(gate string) bool {
 	return false
 }
 
-// panelDirFor resolves the panel directory for slug, layout-aware —
+// panelDirFor resolves the panel and subject spec directories, layout-aware —
 // reusing the same workspace.DetectLayout + workspace.SpecDir logic
 // internal/complete.panelGateRoots uses: flat -> co-located
 // <spec-dir>/reviews/<slug>, otherwise the repo-root review/<slug>
@@ -405,38 +444,130 @@ func isValidPanelGateKey(gate string) bool {
 // plugins/mindspec/skills/ms-panel-run/SKILL.md), legacy/canonical/
 // greenfield layout -> the same repo-root review/<slug> convention the
 // non-flat gated branch already uses (the Open Questions resolution).
-// The non-adhoc branch below is untouched, byte-identical to before.
-func panelDirFor(root, specID, slug, gate string) (string, error) {
+// Non-adhoc panels share one validated spec-dir resolution with the digest.
+func panelDirFor(root, specID, slug, gate string) (dir, specDir string, err error) {
 	layout, _ := workspace.DetectLayout(root)
 	if gate == "adhoc" {
+		specDir = workspace.SpecsDir(root)
 		if layout == workspace.LayoutFlat {
-			return filepath.Join(workspace.MindspecDir(root), "reviews", slug), nil
+			return filepath.Join(workspace.MindspecDir(root), "reviews", slug), specDir, nil
 		}
-		return filepath.Join(root, "review", slug), nil
+		return filepath.Join(root, "review", slug), specDir, nil
+	}
+	specDir, err = workspace.SpecDir(root, specID)
+	if err != nil {
+		return "", "", fmt.Errorf("resolving spec dir for %q: %w", specID, err)
 	}
 	if layout == workspace.LayoutFlat {
-		specDir, err := workspace.SpecDir(root, specID)
-		if err != nil {
-			return "", fmt.Errorf("resolving spec dir for %q: %w", specID, err)
-		}
-		return filepath.Join(specDir, "reviews", slug), nil
+		return filepath.Join(specDir, "reviews", slug), specDir, nil
 	}
-	return filepath.Join(root, "review", slug), nil
+	// Root-level panels use the repository's spec layout. SpecDir can resolve
+	// a spec worktree with a different layout; its validated basename is shared.
+	specDir = filepath.Join(workspace.SpecsDir(root), filepath.Base(specDir))
+	return filepath.Join(root, "review", slug), specDir, nil
 }
 
-// findPanelRegistration scans every review root `config show` also scans
-// (configShowReviewRoots, config.go) and returns the registration whose
-// Slug() == slug. A slug not found among any registered panel is a clear
-// error with a recovery hint — never a panic, never a silent pass.
-func findPanelRegistration(root, slug string) (panel.Registration, error) {
+// panelSlugMatches collects every registration, preserving ambiguity.
+func panelSlugMatches(root, slug string) []panel.Registration {
+	var matches []panel.Registration
 	for _, reg := range panel.Scan(configShowReviewRoots(root)...) {
 		if reg.Slug() == slug {
-			return reg, nil
+			matches = append(matches, reg)
 		}
 	}
+	return matches
+}
+
+// findPanelRegistration selects a spec before preferring its checkout copy.
+// A malformed registration never gains a speculative spec identity.
+func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registration, error) {
+	specID := ""
+	if len(specIDs) > 0 {
+		specID = specIDs[0]
+	}
+	var matches []panel.Registration
+	for _, reg := range panelSlugMatches(root, slug) {
+		if specID == "" || (reg.Err == nil && reg.Panel.Spec == specID) {
+			matches = append(matches, reg)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		sameSpec := true
+		var checkout []panel.Registration
+		for _, reg := range matches {
+			if reg.Err != nil || reg.Panel.Spec != matches[0].Panel.Spec {
+				sameSpec = false
+			}
+			rel, err := filepath.Rel(root, reg.Dir)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+				rel != ".worktrees" && !strings.HasPrefix(rel, ".worktrees"+string(filepath.Separator)) {
+				checkout = append(checkout, reg)
+			}
+		}
+		if sameSpec && len(checkout) == 1 {
+			return checkout[0], nil
+		}
+		var details []string
+		for _, reg := range matches {
+			details = append(details, fmt.Sprintf("spec %s: %s", termsafe.Escape(reg.Panel.Spec), termsafe.Escape(reg.Dir)))
+		}
+		return panel.Registration{}, guard.NewFailure(
+			fmt.Sprintf("ambiguous panel slug %q:\n%s", slug, strings.Join(details, "\n")),
+			fmt.Sprintf("mindspec panel tally %s --spec <id> (choose a listed spec; if copies remain, run from that checkout)", shellQuoteTarget(slug)))
+	}
 	return panel.Registration{}, guard.NewFailure(
-		fmt.Sprintf("no registered panel found for slug %q", slug),
-		fmt.Sprintf("mindspec panel create %s --spec <id> --target <ref>", slug))
+		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, specID),
+		fmt.Sprintf("mindspec panel create %s --spec <id> --target <ref>", shellQuoteTarget(slug)))
+}
+
+// checkPanelSlugOwner refuses cross-spec and adhoc collisions before any write.
+func checkPanelSlugOwner(root, slug, specID, gate, dir string) error {
+	destination, destinationErr := filepath.EvalSymlinks(dir)
+	for _, reg := range panelSlugMatches(root, slug) {
+		registered, registeredErr := filepath.EvalSymlinks(reg.Dir)
+		sameDir := destinationErr == nil && registeredErr == nil && destination == registered
+		// Leave the destination's parse and round checks to Create.
+		if sameDir && (reg.Err != nil || (gate == "adhoc" && reg.Panel.Gate == "adhoc")) {
+			continue
+		}
+		if reg.Err != nil || gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
+			return guard.NewFailure(fmt.Sprintf("panel slug %q is already registered in %s (spec %s)", slug, termsafe.Escape(reg.Dir), termsafe.Escape(reg.Panel.Spec)),
+				"mindspec panel create <new-slug> --target <ref>"+panelCreateScope(specID, gate))
+		}
+	}
+	return nil
+}
+
+// panelCreateScope preserves the spec-less adhoc invocation in all new recoveries.
+func panelCreateScope(specID, gate string) string {
+	if gate == "adhoc" {
+		return " --gate adhoc"
+	}
+	return " --spec " + shellQuoteTarget(escapeConfigValue(specID))
+}
+
+func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
+	var legacyPath *panel.CreateLegacyPathError
+	if errors.As(err, &legacyPath) {
+		return guard.NewFailure(legacyPath.Error(), legacyPath.Recovery())
+	}
+	round := in.Round
+	var conflict *panel.CreateRoundConflict
+	if errors.As(err, &conflict) {
+		round = conflict.LatestRound + 1
+	}
+	command := fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(escapeConfigValue(in.Target))) + panelCreateScope(in.Spec, in.Gate)
+	if in.Gate != "" && in.Gate != "adhoc" {
+		command += " --gate " + shellQuoteTarget(in.Gate)
+	}
+	recovery := "repair the registration or BRIEF if needed, then " + command
+	if conflict != nil {
+		recovery = command + fmt.Sprintf("; or mindspec panel rebind %s --reason '<who>: <why>'", shellQuoteTarget(slug))
+	}
+	return guard.NewFailure(err.Error(), recovery)
 }
 
 // resolvePanelGateFacts gathers panel.GateFacts for reg exactly as
@@ -470,6 +601,8 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	}
 
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
+		SpecDir:       filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec),
+		SubjectTree:   panel.SubjectTreeReader(exec.LsTree),
 		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
@@ -568,12 +701,12 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	}
 
 	nonBead := res == nil || res.Panel == nil || !res.Panel.IsBead()
-	target := ""
+	target, gate := "", ""
 	if res != nil && res.Panel != nil {
-		target = res.Panel.Target
+		target, gate = res.Panel.Target, res.Panel.Gate
 	}
 	if nonBead {
-		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+		d = sanitizeNonBeadDecision(d, slug, target, gate, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -627,6 +760,11 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 		case facts.HeadSHA != "":
 			fmt.Fprintf(&b, "reviewed_head_sha: %s — live tip: %s\n", headSHA, facts.HeadSHA)
 		}
+	}
+
+	fmt.Fprintln(&b, panel.RuleLine(res))
+	if notice := panel.LegacyThresholdNotice(res.Panel); notice != "" {
+		fmt.Fprintln(&b, notice)
 	}
 
 	switch d.Action {
@@ -722,11 +860,11 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	}
 
 	if res == nil || res.Panel == nil || !res.Panel.IsBead() {
-		target := ""
+		target, gate := "", ""
 		if res != nil && res.Panel != nil {
-			target = res.Panel.Target
+			target, gate = res.Panel.Target, res.Panel.Gate
 		}
-		d = sanitizeNonBeadDecision(d, slug, target, facts.GitErr)
+		d = sanitizeNonBeadDecision(d, slug, target, gate, facts.GitErr)
 	}
 
 	var b strings.Builder
@@ -750,14 +888,13 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(escapeEach(res.Malformed), ", "))
 	}
 
-	expected := res.ExpectedReviewers()
-	threshold := 0
-	if res.Panel != nil {
-		threshold = res.Panel.ApproveThreshold()
+	fmt.Fprintln(&b, panel.RuleLine(res))
+	if notice := panel.LegacyThresholdNotice(res.Panel); notice != "" {
+		fmt.Fprintln(&b, notice)
 	}
-	neutral := len(res.Verdicts) - res.Approves - res.Rejects
-	fmt.Fprintf(&b, "\nAPPROVE %d / REQUEST_CHANGES %d / REJECT %d — threshold %d/%d\n",
-		res.Approves, neutral, res.Rejects, threshold, expected)
+	for _, v := range res.Unexpected {
+		fmt.Fprintf(&b, "unexpected slot: %s (%s)\n", termsafe.Escape(v.Slot), termsafe.Escape(v.File))
+	}
 
 	b.WriteString("\ndecision: ")
 	switch d.Action {
@@ -888,9 +1025,13 @@ func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
 		if f.Target != "" {
 			recreate += fmt.Sprintf(" --target %s", shellQuoteTarget(escapeConfigValue(f.Target)))
 		}
-		if f.Gate != "" {
-			recreate += fmt.Sprintf(" --gate %s", shellQuoteTarget(escapeConfigValue(f.Gate)))
+		// Legacy bead panels omitted gate. Their recovery must satisfy the
+		// create binding checks as well as preserve their bead identity.
+		gate := f.Gate
+		if gate == "" {
+			gate = "bead"
 		}
+		recreate += fmt.Sprintf(" --gate %s", shellQuoteTarget(escapeConfigValue(gate)))
 		return guard.NewFailure(d.Message, fmt.Sprintf(
 			"re-run the panel (%s), then mindspec complete %s", recreate, safeBeadID))
 	default:
@@ -920,14 +1061,21 @@ func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
 // rendering a dangling `--target ` with nothing after it. gate (F3-1) is
 // included only when the panel recorded one, so the re-panel recovery
 // preserves that gate's creation-time defaults.
-func tallyExitActionNonBead(d panel.Decision, slug, target, gate string) error {
+func tallyExitActionNonBead(d panel.Decision, slug, target, gate, specID string) error {
 	switch d.Action {
 	case panel.Warn:
 		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
 		return nil
 	case panel.Block:
 		var cmd strings.Builder
-		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1> --spec <id>", slug)
+		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1>", slug)
+		if gate != "adhoc" {
+			renderedSpec := "<id>"
+			if specID != "" {
+				renderedSpec = shellQuoteTarget(escapeConfigValue(specID))
+			}
+			fmt.Fprintf(&cmd, " --spec %s", renderedSpec)
+		}
 		if target != "" {
 			fmt.Fprintf(&cmd, " --target %s", shellQuoteTarget(escapeConfigValue(target)))
 		}
@@ -1004,7 +1152,7 @@ func shellQuoteTarget(s string) string {
 // already-interpolated message (fragile if gitErr.Error() ever collided
 // with template text), leg (5b) rebuilds its whole sentence from scratch
 // with gitErr.Error() run through escapeConfigValue — never raw.
-func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error) panel.Decision {
+func sanitizeNonBeadDecision(d panel.Decision, slug, target, gate string, gitErr error) panel.Decision {
 	msg := d.Message
 	if msg == "" {
 		return d
@@ -1024,10 +1172,14 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error
 	// ..."); replace it wholesale with a target-naming missing-ref
 	// advisory (the Warn Action is preserved — only the Message changes).
 	if strings.Contains(msg, "references branch bead/,") {
+		scope := " --spec <id>"
+		if gate == "adhoc" {
+			scope = panelCreateScope("", gate)
+		}
 		msg = fmt.Sprintf(
 			"panel %s target %s no longer exists — the reviewed ref was deleted; "+
-				"re-create the panel against a live ref (mindspec panel create %s --spec <id> --target %s)",
-			slug, displayTarget, slug, shellQuoteTarget(displayTarget))
+				"re-create the panel against a live ref (mindspec panel create %s%s --target %s)",
+			slug, displayTarget, slug, scope, shellQuoteTarget(displayTarget))
 	}
 
 	// Leg (5b) transient git error: the shared template's message is
@@ -1047,4 +1199,9 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target string, gitErr error
 
 	d.Message = msg
 	return d
+}
+
+func panelCoverageWriteFailure(reg panel.Registration, err error) error {
+	return guard.NewFailure("could not record panel coverage: "+termsafe.Escape(err.Error()),
+		fmt.Sprintf("mindspec panel tally %s%s", shellQuoteTarget(reg.Slug()), panelCreateScope(reg.Panel.Spec, reg.Panel.Gate)))
 }

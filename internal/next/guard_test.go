@@ -3,12 +3,17 @@ package next
 import (
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"os/exec"
 )
 
 // --- classifyDirty ---
@@ -169,6 +174,26 @@ func TestCheckDirtyTree_Clean(t *testing.T) {
 	}
 	if g.porcelainCalls != 1 {
 		t.Errorf("porcelain calls = %d, want 1 (no re-check on clean)", g.porcelainCalls)
+	}
+}
+
+func TestCheckDirtyTree_MalformedQuotedPathIsUserDirt(t *testing.T) {
+	for _, raw := range []string{`"bad\q"`, `"unterminated`} {
+		t.Run(raw, func(t *testing.T) {
+			g := &fakeGuard{porcelainResponses: []string{"?? " + raw + "\n"}}
+			g.install(t)
+			root := t.TempDir()
+			artifact, user, err := CheckDirtyTreeDetail(root, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(artifact) != 0 || !reflect.DeepEqual(user, []string{raw}) {
+				t.Fatalf("malformed quoted path must remain raw user dirt: artifacts=%q user=%q, want [%q]", artifact, user, raw)
+			}
+			if g.exportCalled || g.porcelainCalls != 1 {
+				t.Fatalf("user dirt triggered normalization: export=%v status calls=%d", g.exportCalled, g.porcelainCalls)
+			}
+		})
 	}
 }
 
@@ -703,5 +728,101 @@ func TestWorktreeSetupFailure_HonorsCustomWorktreeRoot(t *testing.T) {
 	assertRecipeFailureInvariants(t, msg)
 	if !strings.Contains(msg, "git -C /repo/custom-trees/worktree-spec-093-skills-thin-down worktree add custom-trees/worktree-mindspec-ab12 -b bead/mindspec-ab12 spec/093-skills-thin-down") {
 		t.Errorf("recipe must honor cfg.WorktreeRoot end-to-end: %q", msg)
+	}
+}
+
+func TestNextGuard_LedgerIsArtifact(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mindspec", "specs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldStatus, oldStatusZ, oldExport := statusPorcelainFn, statusPorcelainZFn, exportBeadsFn
+	t.Cleanup(func() { statusPorcelainFn, statusPorcelainZFn, exportBeadsFn = oldStatus, oldStatusZ, oldExport })
+
+	// Real untracked ledgers must be enumerated as files, never collapsed dirs.
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	ledger := ".mindspec/specs/130-test/reviews/p/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, ledger)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ledger), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []func(string) (string, error){gitutil.Status, gitutil.StatusWithStderr, gitutil.StatusZWithStderr} {
+		out, err := read(root)
+		if err != nil || !strings.Contains(out, ledger) {
+			t.Fatalf("untracked ledger collapsed: %q %v", out, err)
+		}
+	}
+	statusPorcelainFn = func(string) (string, error) { return " M " + ledger + "\n", nil }
+	statusPorcelainZFn = func(string) (string, error) { return " M " + ledger + "\x00", nil }
+	exportBeadsFn = func(string) error { return nil }
+	artifacts, dirt, err := CheckDirtyTreeDetail(root, root)
+	if err != nil || len(dirt) != 0 || len(artifacts) != 1 || artifacts[0] != ledger {
+		t.Fatalf("classification: %v %v %v", artifacts, dirt, err)
+	}
+	blocking, ignored, err := CheckDirtyTreeProportional(root, root, "130-test")
+	if err != nil || len(blocking) != 0 || len(ignored) != 0 {
+		t.Fatalf("proportional classification: %v %v %v", blocking, ignored, err)
+	}
+	_, dirt = classifyDirty([]string{ledger, ".mindspec/specs/130-test/reviews/p/panel.json"}, workspace.SpecsDir(root))
+	if len(dirt) != 1 {
+		t.Fatalf("non-ledger must remain user dirt: %v", dirt)
+	}
+}
+
+func TestNextGuard_QuotedLedgerIsArtifact(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "core.quotePath", "true"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	ledger := ".mindspec/specs/130-test/reviews/café/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, ledger)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ledger), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := gitutil.StatusWithStderr(root)
+	if err != nil || !strings.Contains(status, `caf\303\251`) {
+		t.Fatalf("fixture must exercise git's C-style quoting: %q %v", status, err)
+	}
+	oldStatus, oldExport := statusPorcelainFn, exportBeadsFn
+	t.Cleanup(func() { statusPorcelainFn, exportBeadsFn = oldStatus, oldExport })
+	statusPorcelainFn = gitutil.StatusWithStderr
+	exports := 0
+	exportBeadsFn = func(string) error { exports++; return nil }
+	artifacts, dirt, err := CheckDirtyTreeDetail(root, root)
+	if err != nil || len(dirt) != 0 || len(artifacts) != 1 || artifacts[0] != ledger || exports != 1 {
+		t.Fatalf("quoted ledger classification: artifacts=%q dirt=%q exports=%d err=%v", artifacts, dirt, exports, err)
+	}
+	if paths := parsePorcelain(`R  old-ledger -> ` + strings.TrimPrefix(strings.TrimSpace(status), "?? ") + "\n"); len(paths) != 1 || paths[0] != ledger {
+		t.Fatalf("quoted rename destination: %q", paths)
+	}
+}
+
+func TestParsePorcelain_QuotedNamesAndRenames(t *testing.T) {
+	for _, tc := range []struct{ status, want string }{
+		{` M ".mindspec/specs/130-test/reviews/caf\303\251 -> draft/dispositions.jsonl"`, ".mindspec/specs/130-test/reviews/café -> draft/dispositions.jsonl"},
+		{`R  "old -> ledger" -> ".mindspec/specs/130-test/reviews/caf\303\251/dispositions.jsonl"`, ".mindspec/specs/130-test/reviews/café/dispositions.jsonl"},
+		{" M 'a'", "'a'"},
+		{" M `notes`", "`notes`"},
+	} {
+		if paths := parsePorcelain(tc.status + "\n"); len(paths) != 1 || paths[0] != tc.want {
+			t.Errorf("status %q: got %q, want %q", tc.status, paths, tc.want)
+		}
 	}
 }

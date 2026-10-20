@@ -147,24 +147,113 @@ never at the prompt-format level). `internal/panel` is the single home
 of these shapes; this section must not name a pattern the constants
 below reject.
 
+**Tool artifacts and ledger commits (spec 130 R4.6/R6).**
+`panel.ToolArtifactPaths` is the single home for `.beads/issues.jsonl` and
+`<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
+The gate, next guard and complete materialization share it. The ledger is
+artifact dirt; other panel files retain their ordinary classification. The gate,
+next guard and impl approve share `panel.PorcelainPath` to decode git porcelain
+C-style quoted paths and rename destinations before matching, including
+non-ASCII spec and panel directory names and literal arrows in path names.
+On flat layouts complete checks each existing matched ledger with
+`exec.CheckIgnore` in the spec worktree before any side effect. After the
+bead merge, it commits all matched ledgers once with `exec.CommitPaths`
+and subject `chore(panel): ledger`, in that same worktree. A legacy panel
+without a ledger causes no commit or message. If the ledger commit fails,
+complete prints its error and recovery once on stderr, clears the terminal marker,
+writes override and panel audit metadata, and attempts to advance state. It syncs
+the phase only when the next mode can be derived; otherwise it reports that the
+next mode is indeterminate. It returns the ledger failure even if state advance
+or phase sync also fails. The CLI prints the result summary and cd-back note
+before exiting non-zero. The recovery states that the bead is
+closed and merged and only the ledger commit remains. Impl approve first checks
+ignore status, then refuses any existing spec ledger with uncommitted or
+untracked content. The ignored-path recovery runs `mindspec init` in the
+spec worktree; the uncommitted-path and commit-failure recoveries name
+`git -C <spec-worktree> add <path>` and the ledger commit. Neither panel
+hatch skips these checks or the ledger commit. Adhoc ledgers stay ignored.
+
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
 exactly one `panel.json` — the literal filename `panel.FileName`. The
-steady-state intent, from Bead 4 onward, is that `mindspec panel
-create` (`panel.Create`, this bead) is the sole writer, in full; before
-Bead 4 lands that CLI verb, `/ms-panel-run` step 0 hand-authors it
-directly. The one SANCTIONED hand-edit path, in either era, is
-`/ms-panel-tally`'s Abandon procedure, which sets `abandoned` /
-`abandon_reason` by hand — every other field is machine-written once
-Bead 4 lands.
+snapshot writer `panel.WriteSnapshot` exists (temp file and rename); `create`, `rebind`, `refute`, `defer` and `abandon` call it after their ledger events are appended.
+`panel.AppendRecords` accepts the
+exact panel directory in flat, non-flat and adhoc layouts, validates the full
+batch and checks keys under one `dispositions.lock` hold before appending.
+`panel.AppendRecord` retains the legacy spec-directory/panel-name adapter.
+`panel.AppendRecordsWithCheck` runs a pre-append check under that same lock;
+the disposition CLI uses it to check legacy markers before appending a manifest.
 
-`panel.Create` writes `panel.json` as a full-struct overwrite: it never
-reads the existing file first, unlike its read-before-splice handling
-of `BRIEF.md`'s machine-managed header (Maintenance Notes below). A
-re-panel of an abandoned panel therefore deliberately clears
-`abandoned`/`abandon_reason` and revives it into an active round — this
-is the KNOWN, intentional behavior of calling `Create` again, not an
-oversight (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
+The optional registration fields at the end of `panel.Panel` are:
+
+| Field | Shape |
+|:------|:------|
+| `subject_digest` | `sha256:` plus the subject-tree digest, recorded beside `reviewed_head_sha` |
+| `roster` | ordered `[{slot, model, lens}]`, with ids `R1..Rn` |
+| `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
+| `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
+| `telemetry` | `"required"` on new registrations |
+| `abandon_history` | `[{reason, abandoned_at, revived_at}]` |
+
+Refutations have `slot`, `round`, `reason`, `evidence` and optional
+`finding`, `finding_sha256`, `finding_text`, `ground`, `ac`, `by`, `created_at`.
+Absent new fields are omitted on serialization, preserving legacy JSON shapes.
+
+The panel directory's `dispositions.jsonl` stores these verb events in addition
+to spec-117 `disposition` rows and `panel` coverage manifests. Every event carries
+`spec`, `panel` and `created_at`; adhoc events use `spec: "adhoc"`.
+
+| Kind | Payload | Key within the panel directory |
+|:-----|:--------|:-------------------------------|
+| `round` | round, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
+| `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
+| `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
+| `rebind` | round, from_sha, to_sha, subject_digest, paths, reason | to_sha |
+| `abandon` | reason, by | created_at |
+
+A same-key retry differing only in `created_at` adds nothing; another payload
+difference refuses the entire batch. For `round` and `abandon`, a different
+timestamp is a different key. Coverage manifest keys are
+`spec, panel, round, created_at` (timestamp absent on legacy manifests).
+`panel disposition validate`, `check` and `query` accept all event kinds and
+reject malformed records. Events contribute no telemetry rows or slot coverage.
+`panel disposition append` refuses the verb kinds, and manifests on non-legacy
+panels; only `tally` writes those manifests.
+
+A legacy panel has neither a `telemetry` field nor a `round` ledger event.
+Exactly one marker is a registration error. `panel.CheckHandEdits` is the R5.3
+library matcher: it returns the first snapshot field without a backing event,
+using the latest round, subsequent rebind/abandon events, and payload equality
+for entry arrays (ignoring `created_at`). The first round event's `carried`
+object supplies baselines for legacy refutations, deferrals and rebinds.
+
+`panel.Subject(gate, specDir)` derives roots: spec/plan approval reviews only
+`<specs>/<spec>/`; bead, final review, adhoc and an empty gate review the whole
+tree. `<specs>` is the workspace-resolved specs directory in either layout.
+Every subject excludes exactly `<specs>/*/reviews/**`, `.mindspec/reviews/**`,
+`review/**` and `.beads/issues.jsonl`; other `reviews` directories count.
+The digest hashes the retained recursive `ls-tree` listing; read errors and an
+empty filtered listing refuse creation and Block a mismatched-SHA gate.
+Equal SHAs are fresh without a subject read. On a SHA mismatch a recorded
+digest is compared to the live subject: equality is fresh, a difference stale.
+A legacy panel without a digest retains the original stale message.
+`complete`, `verify`, `tally` and instruct panel state use the same gate facts.
+The R5.3 matcher pins `subject_digest` to the later of the latest round and
+rebind events, alongside `reviewed_head_sha`.
+
+A Finding is `ccr[i]` from the latest-round verdict's
+`concrete_changes_required`, with the sha256 of its raw text. Empty lists use
+`ccr[0]` with the rationale; an empty rationale too is INVALID. Reviewer
+`findings[]` is evidence only. Storage text replaces each `/tmp/` or `/Users/`
+path token with `<path>` after hashing. Slot-level discharges use `finding:
+"slot"` and hash the compact JSON encoding of the entire ordered list, or the
+raw rationale for an empty list.
+
+The gate checks snapshot/event equality before abandonment. An unbacked field
+blocks with `panel.json changed outside the panel verbs`; legacy panels with
+neither marker remain exempt. The check detects accidental desync, not forgery.
+
+`panel.Create` reads and parses the existing `panel.json` first and merges forward (see the Create paragraph below). A re-panel of an abandoned panel revives it, clears `abandoned`, and appends `{reason, abandoned_at, revived_at}` to `abandon_history` (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
 
 **Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
 file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).
@@ -182,30 +271,61 @@ consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
 - `verdict` (required): a non-empty string. A reviewer MUST write one
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
-  acts on. `panel.Tally`'s parser (`internal/panel/tally.go`) does not
-  itself enforce this enum: any OTHER non-empty string parses as
-  present (it counts toward `expected_reviewers` completeness) but is
-  neither an APPROVE nor a REJECT, so it can never help reach the
-  approve threshold and never triggers a REJECT halt. An empty or
-  whitespace-only `verdict`, or invalid JSON, is malformed and counts
-  as MISSING, not present.
+  acts on. A parseable file with any other verdict value is INVALID and blocks.
+  This includes an empty, whitespace-only or missing verdict.
+  An unreadable or unparseable file is malformed. It counts as missing on the
+  roster and counts for nothing off the roster or on a legacy panel.
 - `hard_block` (optional boolean): a top-level sibling of `verdict`.
 
-`panel.Tally` parses only these two top-level keys from each verdict
-file; `panel.PanelGateDecision` then acts on the resulting tally —
-REJECT/`hard_block` halts the gate, otherwise the APPROVE count is
-checked against the N-1 threshold. A reviewer additionally writes
-`reviewer_id`, `confidence`, `rationale`, `concrete_changes_required`,
-and `findings` as context for `mindspec panel tally`'s
-presentation-only aggregation — none of those five feed the gate
-decision. `hard_block` is read only at the top level as a sibling of
-`verdict`, never nested under any other reviewer-authored field.
+`panel.Tally` parses verdict, hard_block, rationale and concrete_changes_required.
+It checks the finding list's shape only for REQUEST_CHANGES. A list that is not
+an array of strings makes REQUEST_CHANGES INVALID. It does not invalidate APPROVE
+or REJECT.
+The gate passes only when complete, without veto, fresh, discharged and intact.
+Every roster slot must have a parseable latest-round verdict. Only roster slots
+count toward completeness or APPROVE; unexpected files are named and count for
+nothing, except REJECT, hard_block or INVALID blocks and names the file. Every
+file still contributes to LatestRound. Legacy panels without a roster retain
+count-based completeness. Registrations require at least two reviewers.
+
+Every REQUEST_CHANGES finding must be discharged at the current round with an
+unchanged `finding_sha256`. An item-level refutation clears one finding; a
+slot-level refutation clears all until the list or fallback rationale changes.
+Legacy unpinned refutations apply only to legacy panels. An effective deferral
+discharges the finding it covers; the gate re-checks it. REJECT, hard_block,
+INVALID, staleness and incompleteness
+cannot be discharged. Zero APPROVE can pass: resolved slots are reported as
+resolved, never approvals. `approve_threshold` remains parse-compatible and
+prints an ignored legacy notice, with no decision effect. Tally, verify and
+instruct render the same rule line, including INVALID and unresolved findings.
+`hard_block` is read only at the top level. Reviewer `findings[]` is evidence,
+not the blocking finding list.
 
 Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a
 partial or alternate shape.
 
+Coverage manifests are written only by binary `tally`, from roster slots only and latest-round verdict files, when every pass-rule row except freshness holds. A stale non-bead panel can therefore record coverage. The append key is `spec, panel, round, created_at`; tally appends unless the last manifest of that round equals the derivation. Earlier manifests remain after abandonment. Every manifest reader, including `ComputeQ4`, uses only the last manifest per spec/panel. Core 3 validates all ledger records, requires the current round's manifest to equal the roster/verdict derivation, and requires covering disposition rows for REQUEST_CHANGES and REJECT slots.
+
 ### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
+
+**`mindspec panel rebind <slug> --reason <text> [--spec <id>]`** refreshes
+`reviewed_head_sha` and `subject_digest` to the registered target's live tip
+without bumping the round. A non-empty reason records the operator's judgement.
+The panel must parse, be intact, not abandoned, have matching rounds, and pass
+the normal vote rule with staleness ignored. The reviewed SHA must be an
+ancestor of the live tip. The diff disables rename detection. It checks and
+records both the source and destination paths of a rename. Every diff path is
+accepted except `.mindspec/config.yaml`. There is no path allowlist or path
+configuration.
+The entry records `{round, from_sha, to_sha, paths, reason, created_at}`,
+with subject exclusions removed from `paths`. The `rebind` event also records
+the new subject digest. The verb appends the event before one snapshot write.
+An equal SHA prints `already fresh` and writes nothing. Completion copies
+entries into `panel_rebound_entries` through the fail-closed metadata stage
+before close; only ledger-matched `from_sha` values join the landed reviewed-SHA
+set, with exact equality. This verb shares slug validation and supports `--spec`
+for ambiguous slugs.
 
 `mindspec panel create | verify | tally <slug>` is the CLI half of the
 ADR-0040 portability contract (the Panel Artifact Schema above is the
@@ -227,65 +347,97 @@ recovery line — closing the spec-109-final-review G2 terminal-injection
 class (a slug/flag value bearing a control byte can never forge an
 extra display line or a fake `recovery:` line).
 
+**`mindspec panel refute <slug> --slot S --round N [--finding ccr[i]] --ground G [--ac AC-n] --reason T --evidence REF --by WHO`** validates a latest-round REQUEST_CHANGES finding without hard_block. APPROVE, REJECT, INVALID, absent slots, stale rounds, unknown findings and empty names refuse without writes. Grounds are `disproven`, `not-load-bearing` and `out_of_acceptance_scope`; the last requires an AC id in the owning spec. Evidence resolves to a commit, repo path or HTTPS URL. One batch lock hold appends the refutation event and an `audited-refuted` disposition row; an atomic rename updates the snapshot afterward. Retries converge by key. Finding text is path-redacted while hashes pin the raw text.
+
+**`mindspec panel defer <slug> --slot S --round N [--finding ccr[i]] --bead B --by WHO`** appends a deferral event and a `confirmed-deferred` row in one locked batch. It then replaces the snapshot. Only the panel verbs write discharge records. Spec approval and adhoc panels cannot defer findings.
+
+An effective deferral applies to the latest round and unchanged finding text. A covering refutation supersedes it. Rebind uses the same resolution rule as the gate. Completion re-checks every effective deferral before materialization. It persists a pending marker from Allow decisions and settles the durable `panel_deferred` audit before close. Each entry holds panel, spec, slot, round, finding, finding text, finding hash, follow-up bead and author. The audit also stores effective finding text boundaries for slot-level entries.
+
+Implementation approval checks registration integrity before it skips abandoned panels. It reads non-bead deferrals from the snapshot and ledger. It reads bead-panel deferrals from the union of settled and pending deferral entries in the completion audit. A fresh `complete` attempt replaces the entries of the panels it gated. A later panel refutation does not alter that audit. Approval checks each identified audit entry once. Completion and approval refuse a panel identity registered at more than one path. Approval skips an entry only when its exact spec and panel registration has a verb-backed abandonment. A missing or renamed registration does not skip the entry. Approval checks entries with no panel identity under each of the bead's registrations. It also checks a plan bead with no registration left. Both lifecycle checks require an existing open follow-up outside the owning epic, a `discovered-from` edge to the epic or reviewed bead, and each path-redacted finding in the path-redacted description. A failed read or changed fact voids that deferral; the finding blocks unless another discharge covers it. Both panel hatches skip these checks.
+
+**`mindspec panel abandon <slug> --reason T --by WHO`** requires both fields, appends an `abandon` event and sets `abandoned` and `abandon_reason`. It writes no manifest and retains existing manifests. The discharge and abandon verbs print the shared pass-rule line and accept `--spec` to disambiguate a slug.
+
 **`mindspec panel create <slug> --spec <id> --target <ref> [--bead
-<id>] [--round N] [--gate <name>]`** stamps `expected_reviewers`/`approve_threshold`
-from the config resolvers (`config.PanelExpectedReviewers()` /
-`config.PanelApproveThresholdExpr()`, spec 109) and `reviewed_head_sha`
-from `--target`'s live commit (resolved via the executor at write
-time), in the SAME `panel.Create` write that co-bumps `panel.json` and
-the BRIEF machine-managed header (Bead 1) — leaving prior verdict files
-and the skill-authored BRIEF body untouched on a re-panel. The panel
-directory is resolved layout-aware, reusing
-`internal/complete.panelGateRoots`' own logic: the co-located
-`<spec-dir>/reviews/<slug>` on a flat tree, otherwise the repo-root
-`review/<slug>` convention. A `--bead <id>` panel expects `--target
-bead/<id>` — the same ref `mindspec complete`'s gate rev-parses for
-staleness; a divergent `--target` can only fail SAFE (a stale-SHA Block
-at gate time), never a false-PASS. On success, stdout carries two
-lines: `panel <slug> registered: round N, K expected reviewer(s),
-reviewed_head_sha <sha>` followed by `panel directory: <dir>` — the
-SAME resolved `dir` `panel.Create` wrote to. This second line is the
-stable, greppable contract a caller (e.g. the `ms-panel-run` skill)
-reads to learn the panel directory without re-deriving the layout
-logic above.
+<id>] [--round N] [--gate <name>] [--reviewers N]`** resolves the target's
+live commit and subject digest and the gate's roster through
+`config.PanelGateReviewerSlots`. It appends a `round` ledger event before
+rewriting `panel.json`, then rewrites the BRIEF machine-managed header.
+Both snapshot and event contain `roster: [{slot, model, lens}]`,
+`expected_reviewers: len(roster)` and `telemetry: "required"`. New writes
+omit `approve_threshold`. The BRIEF lists each roster entry as `slot model lens`.
 
-**`--gate <name>`** (spec 112 R9's deferred writer, completed by spec
-113 R3) is optional and validated against the closed enum
-`config.PanelGateKeys` (`spec_approve`, `plan_approve`, `bead`,
-`final_review`, `adhoc` — the single declaration,
-`internal/config/config.go:101`; the CLI never keeps a second copy) —
-same control-byte discipline as `--bead`/`--target`, checked before the
-enum-membership check. A value outside the enum is rejected with a
-`guard.NewFailure` whose recovery line names all five keys, BEFORE any
-filesystem write. When given, `panel.json`'s decision-inert `gate` field
-(`json:"gate,omitempty"`) is stamped with the value, and
-`expected_reviewers`/`approve_threshold` are resolved through spec 112
-R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
-`cfg.PanelGateApproveThresholdExpr(gate)`) instead of the global ones.
-When omitted, behavior is byte-identical to pre-spec-113 output: the
-global resolvers are used and no `gate` key is written. The field stays
-decision-inert end to end — neither `PanelGateDecision` nor
-`ApproveThreshold()` reads it — but it IS what `config
-show`/`mindspec complete`'s `PanelGateAdvisoryDefault` selection keys on
-for the reviewer-count advisory note, so a CLI-created `final_review`
-panel now selects that gate's per-gate default instead of being
-advisory-skipped.
+Gate defaults are 6 slots for `spec_approve`, `plan_approve`, `final_review`
+and `adhoc`, and 4 for `bead`. An explicit reviewer list retains its configured
+size. `--reviewers N` requires N >= 2 and distributes slots round-robin over
+the resolved reviewer entries in list order, ignoring their configured counts;
+without an explicit list, the family order is `claude, codex`. Slots use ids
+`R1..Rn`. A re-panel copies the latest round event's roster unless
+`--reviewers` is supplied (legacy panels copy a recorded roster if present).
+Without `--gate`, create uses `adhoc` roster defaults, omits the snapshot
+`gate` key and writes an empty `gate` in the matching round event.
 
-**`mindspec panel verify <slug>`** is READ-ONLY: it writes no file and
-ALWAYS exits `0` — it is a report, never a gate. It prints verdicts
+The panel directory is `<spec-dir>/reviews/<slug>` on flat layouts,
+otherwise `review/<slug>`. Explicit `--gate adhoc` requires `--spec` to be
+omitted and uses `.mindspec/reviews/<slug>` on flat layouts. For `--gate bead`,
+`--target` must be `bead/<id>`; `bead_id` is derived and validated with
+`idvalidate.BeadID`. An explicit `--bead` must match and is refused on other
+gates. `--gate` accepts the closed enum `config.PanelGateKeys`, with control
+bytes refused before membership checks. Existing panel.json must parse, and
+verdict filenames forbid recreating their round or an older round. These
+refusals write nothing.
+
+For existing bead panels with a divergent recorded target, the gate compares that target to the live `bead/<id>` branch. On a SHA mismatch, a changed subject tree blocks; an equal subject stays fresh. A legacy panel without a digest blocks on a SHA mismatch.
+
+Create preserves each refutation, deferral and rebind that matches its ledger
+event or the first round event's carried baseline, ignoring only `created_at`.
+It names each unbacked entry it drops. Legacy panels retain every entry and
+record them in the first round event's `carried` field. A legacy entry with a
+`/tmp/` or `/Users/` token refuses before any write. The recovery names the entry.
+Remove the absolute path from that entry in the legacy `panel.json`.
+Run `create` again. Create reports dropped entries after the snapshot write,
+before the BRIEF write. Revival clears
+abandonment and appends `{reason, abandoned_at, revived_at}` to
+`abandon_history`; legacy panels without an abandonment event have an empty
+`abandoned_at`. A round bump archives the old BRIEF as `BRIEF-round-N.md`
+without overwriting an existing archive. The managed `mindspec:prior-round`
+region renders the preceding round's `consolidated-round-N.md` through
+`termsafe.Escape`, or `none recorded`. It quotes marker and fence lines so
+later header updates can read the region. Verdicts and the authored BRIEF body
+are preserved.
+
+On success, stdout carries `panel <slug> registered: round N, K expected
+reviewer(s), reviewed_head_sha <sha>` and `panel directory: <dir>`.
+Dropped-entry reports precede these lines. The reported K reflects the
+written roster, including a carried roster after a config change.
+
+**Reviewer-count advisory (spec 130 R2.1).** `config show` and
+`mindspec complete` compare recorded `expected_reviewers` against
+`cfg.PanelGateAdvisoryDefault(recordedGate, isBead)` when it returns
+`ok == true`. A known recorded gate selects that gate's resolved count.
+Thus a CLI-created `final_review` panel selects the `final_review` count.
+A bead panel with no recorded gate selects the `bead` count.
+A non-bead panel with no recorded gate and no configured gate overrides
+selects the `adhoc` count through `cfg.PanelExpectedReviewers()`.
+A non-bead panel with no recorded gate and configured gate overrides
+skips the note. An unknown non-empty recorded gate always skips the note.
+These rules apply when `gates:` is absent too. The advisory does not
+change the gate decision.
+
+**`mindspec panel verify <slug> [--spec <id>]`** is READ-ONLY: it writes no file and
+exits `0` after resolving the registration — it is a report, never a gate. It prints verdicts
 present vs `expected_reviewers`, per-slot parse status (malformed files
 named), `reviewed_head_sha` vs the live target tip, and a PASS/BLOCK
 preview computed by `panel.PanelGateDecision` over facts gathered by
 `panel.ResolveGateFacts` — the IDENTICAL decision `mindspec complete`'s
 gate enforces.
 
-**`mindspec panel tally <slug>`** is ADVISORY-BUT-BLOCK-CAPABLE: its
+**`mindspec panel tally <slug> [--spec <id>]`** is ADVISORY-BUT-BLOCK-CAPABLE: its
 exit code tracks the `panel.PanelGateDecision` decision alone, and is
 non-zero on `Block`. Do not describe `verify`/`tally` as both
 "read-only/advisory" — `verify` never blocks; `tally` can. `tally`
 prints the per-slot verdict table (slot, verdict, `hard_block`), the
-aggregate APPROVE/REQUEST_CHANGES/REJECT counts + the resolved
-threshold, the `panel.PanelGateDecision` decision, and the aggregated
+malformed-file list, the shared rule line (`panel.RuleLine`), the legacy
+`approve_threshold` notice when the field is recorded, any unexpected slots, the `panel.PanelGateDecision` decision, and the aggregated
 `concrete_changes_required` — read presentation-only from each
 REQUEST_CHANGES/REJECT verdict file (a re-parse failure, an absent key,
 or a non-array-of-strings type attributes zero items to that slot with
@@ -309,12 +461,35 @@ always-absent ref `bead/`, so every non-bead panel short-circuited at
 the missing-ref leg with a malformed `references branch bead/` message
 and reported PASS even after its target advanced past
 `reviewed_head_sha`, or with a REJECT verdict on file. The fix un-shadows
-staleness and the incomplete/REJECT/threshold legs for non-bead panels;
+staleness and the incomplete/REJECT/unresolved-finding legs for non-bead panels;
 a `sanitizeNonBeadDecision` CLI-layer rewrite (never touching
 `Decision.Action`) replaces the empty-bead-interpolation fragments and
 the empty `git merge bead/` fence with target-naming text, and never
 emits a `mindspec complete <bead>` recovery line for a panel that is not
 complete-gated.
+
+**Create integrity (spec 130 R1).** An existing `panel.json` must parse.
+`create --round N` refuses when N is at or below the filename-derived
+LatestRound of verdict files, even when their contents are malformed.
+The refusal leaves every file unchanged and names `--round <LatestRound+1>`
+and `mindspec panel rebind`. A round with no verdict files may be recreated.
+
+**Registration resolution.** Lookup collects every matching slug. `--spec`
+selects the owning spec for `tally` and `verify`. Among copies belonging to
+one spec, a single copy under the current checkout wins over copies under
+`.worktrees/`. Any remaining ambiguity refuses and lists every candidate
+spec and directory. Both commands print `panel directory: <dir>` and
+`resolved round: N` before their report. `create` refuses a slug owned by
+another spec. Adhoc creation refuses a slug registered at another destination;
+spec creation refuses an adhoc slug. An adhoc registration at the create
+destination may be re-created under the round rules; canonical paths identify
+that destination across symlinks.
+
+**Recovery and usage.** Non-bead tally recovery uses the recorded spec id
+when known. Every adhoc create recovery omits `--spec`, including the
+missing-ref advisory. A `--bead` refusal on an explicit non-bead gate recovers with that gate
+and no `--bead`. Every panel subcommand, including disposition leaves, sets
+`SilenceUsage: true`, so an error prints no Cobra usage text.
 
 ### Lifecycle verb state honesty (spec 128)
 
@@ -368,6 +543,8 @@ complete-gated.
 | `newExecutorFn` (`root.go`) | Package-level `Executor`-constructing seam every verb's `RunE` composes with, letting `verb_output_test.go` drive real `RunE` functions against `executor.MockExecutor`. |
 | `mutatingVerbRows` / `mutatingVerbAliases` / `nonMutatingAllowlist` (`verb_output_test.go`) | The total-classification tables the cobra-tree walk checks every runnable command against — an unclassified new command, or one misclassified as mutating without a row, is red. |
 
+Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks every required spec registration, final review included, without running a gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
+
 ## Consumed Interfaces
 
 - **core**: `workspace.FindRoot()`, `workspace.DetectWorktreeContext()` for locating state and worktrees
@@ -389,9 +566,9 @@ complete-gated.
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
-| `mindspec panel create <slug>` | Register (or re-panel) a review panel — stamps the config resolvers + `reviewed_head_sha` (spec 110 R1); optional `--gate <name>` stamps the decision-inert `gate` field + that gate's creation-time defaults (spec 113 R3) |
+| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
-| `mindspec panel tally <slug>` | Per-slot verdicts + aggregate + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
+| `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
 | `mindspec models populate` | Print the ZFC agent prompt for declaring the per-phase `models:` protocol in `.mindspec/config.yaml`; writes nothing (spec 123 R6, mirrors `mindspec source populate`) |
 | `mindspec commands populate` | Print the ZFC agent prompt for declaring the consumer's build/test guidance under `commands:`; writes nothing — once populated, `init`/`setup` render the entries as the managed AGENTS.md "Build & Test" section (spec 123 R7) |
@@ -535,8 +712,10 @@ complete-gated.
   `gates:` is configured; with `gates:` absent every panel still compares
   against the flat global default, byte-identical to spec 109. The
   `internal/complete` call site is guarded on `panelReg != nil` —
-  `panelGate` returns a nil registration on its fail-open paths (empty bead
-  ID, no registered panel), and `PanelGateAdvisoryDefault`'s arguments
+  `panelGate` returns each matched registration with its Allow or Warn
+  decision in scan order, or an empty collection on its fail-open paths
+  (empty bead ID, no registered panel). `panelReg` is the first registration,
+  or nil for an empty collection, and `PanelGateAdvisoryDefault`'s arguments
   deref `panelReg.Panel`, so the guard sits ahead of that call even though
   `reviewerCountAdvisory` itself also nil-checks its `reg` parameter. No
   `Allow`/`Block` decision is touched by any of this — the gate's outcome
@@ -641,3 +820,24 @@ complete-gated.
   `O(domains × citations)` times. Both seams are countable, and a golden
   diagnostics fixture pins byte-identical `(code, message)` output pre/post
   caching.
+
+### Landed review identity (`complete`, Spec 130 R12)
+
+On a normal run, before `exec.CompleteBead`, `complete.Run` calls the optional
+`executor.LandedReviewSetter.SetLandedReview(sha, panel)` once for the first
+Allow returned by `panelGate`. The values are that registration's
+`reviewed_head_sha` and `<slug>@r<N>`. A Warn (including abandoned panels,
+missing refs and the environment hatch), `enforcement.panel_gate: false`, or
+no panel supplies no identity. A config-disabled matched panel returns Warn
+without evaluating its facts. The executor writes `mindspec_landed_reviewed_sha`
+and `mindspec_landed_review_panel` together with the landed binding;
+`FinalizeEpic` leaves them unchanged. Before publishing each write-ahead stage
+marker, `complete` records the first Allow's identity in the same metadata write
+as the marker attestation. An authenticated materialization resume skips the
+panel gate decision. It still re-checks the recorded deferrals against live
+tracker facts. It keeps each stored entry's identity. An intact abandoned panel
+removes its deferrals from the pending marker and audit. An applicable slot
+refutation removes each covered item whose round and raw-text hash still match.
+It replays the recorded landed identity through `SetLandedReview` before
+`CompleteBead`. A resume with no recorded identity supplies none. Each new marker
+attestation overwrites both identity fields, including when there was no Allow.

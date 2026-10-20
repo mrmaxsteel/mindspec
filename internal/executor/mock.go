@@ -26,6 +26,10 @@ type MockExecutor struct {
 	CommitAllErr            error
 	ChangedFilesResult      []string
 	ChangedFilesErr         error
+
+	// ChangedFilesOptionsFn lets rebind tests inspect the diff options.
+	ChangedFilesOptionsFn func(base, head string, options []ChangedFilesOptions) ([]string, error)
+
 	// ChangedFilesFn, when non-nil, takes precedence over
 	// ChangedFilesResult/ChangedFilesErr so tests can return
 	// range-dependent diffs (e.g. the per-bead gate anchoring tests,
@@ -54,12 +58,17 @@ type MockExecutor struct {
 	// when non-nil, fully drive the corresponding method so tests can inject
 	// staleness / dirty-tree / ref-not-found facts; otherwise the simple result
 	// fields are returned.
+	LsTreeFn          func(workdir, rev string) (string, error)
+	LsTreeResult      string
+	LsTreeErr         error
 	RevParseRefFn     func(workdir, ref string) (string, error)
 	RevParseRefResult string
 	RevParseRefErr    error
 	StatusFn          func(workdir string) (string, error)
 	StatusResult      string
 	StatusErr         error
+	CheckIgnoreFn     func(workdir, file string) error
+	CheckIgnoreErr    error
 	IsRefNotFoundFn   func(error) bool
 
 	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when
@@ -184,8 +193,11 @@ func (m *MockExecutor) CommitAll(path, msg string) error {
 	return m.CommitAllErr
 }
 
-func (m *MockExecutor) ChangedFiles(base, head string) ([]string, error) {
+func (m *MockExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
 	m.record("ChangedFiles", base, head)
+	if m.ChangedFilesOptionsFn != nil {
+		return m.ChangedFilesOptionsFn(base, head, options)
+	}
 	if m.ChangedFilesFn != nil {
 		return m.ChangedFilesFn(base, head)
 	}
@@ -216,6 +228,14 @@ func (m *MockExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) {
 func (m *MockExecutor) MergeBase(a, b string) (string, error) {
 	m.record("MergeBase", a, b)
 	return m.MergeBaseResult, m.MergeBaseErr
+}
+
+func (m *MockExecutor) LsTree(workdir, rev string) (string, error) {
+	m.record("LsTree", workdir, rev)
+	if m.LsTreeFn != nil {
+		return m.LsTreeFn(workdir, rev)
+	}
+	return m.LsTreeResult, m.LsTreeErr
 }
 
 func (m *MockExecutor) RevParseRef(workdir, ref string) (string, error) {
@@ -379,3 +399,27 @@ func (m *MockExecutor) ResetIndexToHead(wtPath string) error {
 
 // Compile-time interface check.
 var _ Executor = (*MockExecutor)(nil)
+
+var _ LandedReviewSetter = (*MockExecutor)(nil)
+
+// SetLandedReview records the reviewed identity supplied before CompleteBead.
+func (m *MockExecutor) SetLandedReview(sha, panel string) {
+	m.record("SetLandedReview", sha, panel)
+}
+
+// CheckIgnore records the ledger preflight; default is a non-ignored path.
+func (m *MockExecutor) CheckIgnore(workdir, file string) error {
+	m.record("CheckIgnore", workdir, file)
+	if m.CheckIgnoreFn != nil {
+		return m.CheckIgnoreFn(workdir, file)
+	}
+	if m.CheckIgnoreErr != nil {
+		return m.CheckIgnoreErr
+	}
+	return mockNotIgnored{}
+}
+
+type mockNotIgnored struct{}
+
+func (mockNotIgnored) Error() string { return "exit status 1" }
+func (mockNotIgnored) ExitCode() int { return 1 }

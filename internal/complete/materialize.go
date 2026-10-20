@@ -25,6 +25,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -40,27 +41,15 @@ const (
 	stageArtifactSync    = "artifact-sync"
 )
 
-// materializedArtifactPaths is the named-artifact exclusion set the
-// snapshot's M-stage leaves unchanged-at-tip (ADR-0025). Mirrors
-// internal/next's own artifactPaths list (unexported there); duplicated
-// here rather than imported because internal/next is not a shared leaf
-// this package should widen its surface through for one constant.
-var materializedArtifactPaths = []string{".beads/issues.jsonl"}
-
-// nonArtifactPaths returns the subset of paths NOT in
-// materializedArtifactPaths (fix-round G1): the S-stage's own delta
-// (exec.ChangedFilesTree(currentTip, tree2)) is expected to contain
-// ONLY the named artifact's own refresh — anything else in that exact
-// delta is classified here, at the tree actually about to be committed,
-// rather than trusted from an earlier, separate read.
-func nonArtifactPaths(paths []string) []string {
-	known := make(map[string]bool, len(materializedArtifactPaths))
-	for _, p := range materializedArtifactPaths {
-		known[p] = true
+// nonArtifactPaths filters the shared tool-artifact set from an S-stage delta.
+func nonArtifactPaths(paths []string, specDir ...string) []string {
+	dir := ""
+	if len(specDir) > 0 {
+		dir = specDir[0]
 	}
 	var out []string
 	for _, p := range paths {
-		if !known[p] {
+		if !panel.IsToolArtifactPath(p, dir) {
 			out = append(out, p)
 		}
 	}
@@ -115,6 +104,28 @@ func materializationSubject(beadID, commitMsg string) string {
 // the same statement at the decision level.
 const stageMarkerAttestationKey = "mindspec_stage_marker_oid"
 
+const stageMarkerReviewSHAKey = "mindspec_stage_marker_reviewed_sha"
+const stageMarkerReviewPanelKey = "mindspec_stage_marker_review_panel"
+
+type stageMarkerReview struct {
+	sha, panel string
+}
+
+// readStageMarkerReview is used only after the discriminator authenticates a resume.
+// Older attestations and publications with no Allow supply no review identity.
+func readStageMarkerReview(beadID string) (*stageMarkerReview, error) {
+	meta, err := completeGetMetadataFn(beadID)
+	if err != nil {
+		return nil, fmt.Errorf("reading the materialization review identity for %s: %s", idrender.Bead(beadID), next.RenderBDError(err))
+	}
+	sha, _ := meta[stageMarkerReviewSHAKey].(string)
+	panel, _ := meta[stageMarkerReviewPanelKey].(string)
+	if sha == "" || panel == "" {
+		return nil, nil
+	}
+	return &stageMarkerReview{sha: sha, panel: panel}, nil
+}
+
 // readStageMarkerAttestation reads beadID's recorded attestation OID, ""
 // when absent or non-string. A READ FAILURE propagates (fix-round G3's
 // discipline): it is never mapped to "unattested" — that would clear
@@ -152,10 +163,19 @@ func readStageMarkerAttestation(beadID string) (string, error) {
 // ever ADMITS an unattested resume. On failure, refuses BEFORE anything
 // is published (aerr is bd-derived — escaped per G3's render
 // discipline).
-func recordStageMarkerAttestation(beadID, oid string) error {
-	if aerr := completeMergeMetadataFn(beadID, map[string]interface{}{
+func recordStageMarkerAttestation(beadID, oid string, review *stageMarkerReview) error {
+	// Always overwrite both identity fields alongside the OID: a new publication
+	// without an Allow must not inherit an identity from an older marker.
+	updates := map[string]interface{}{
 		stageMarkerAttestationKey: oid,
-	}); aerr != nil {
+		stageMarkerReviewSHAKey:   "",
+		stageMarkerReviewPanelKey: "",
+	}
+	if review != nil {
+		updates[stageMarkerReviewSHAKey] = review.sha
+		updates[stageMarkerReviewPanelKey] = review.panel
+	}
+	if aerr := completeMergeMetadataFn(beadID, updates); aerr != nil {
 		return guard.NewFailure(
 			fmt.Sprintf("bead %s's materialization failed while recording the write-ahead marker attestation: %v — refusing before any marker publish; nothing was published.", idrender.Bead(beadID), next.RenderBDError(aerr)),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd metadata writes are healthy)", idrender.Bead(beadID)),
@@ -326,6 +346,7 @@ type materializationInput struct {
 	root, beadID, beadHead, wtPath, specDir, commitMsg, base string
 	opts                                                     CompleteOpts
 	resumeStage                                              string
+	landedReview                                             *stageMarkerReview
 	warnWriter                                               io.Writer
 }
 
@@ -400,7 +421,7 @@ func runMaterialization(in materializationInput) error {
 	currentTip := ""
 	if in.resumeStage == "" {
 		// --- Normal run: snapshot once, gate, then materialize. -------
-		tree, err := exec.SnapshotWorktreeTree(wtPath, materializedArtifactPaths)
+		tree, err := exec.SnapshotWorktreeTree(wtPath, panel.ToolArtifactPaths(workspace.SpecsDir(wtPath)))
 		if err != nil {
 			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
 		}
@@ -434,7 +455,7 @@ func runMaterialization(in materializationInput) error {
 			if buildErr != nil {
 				return fmt.Errorf("building the materialization commit for %s: %w", idrender.Bead(beadID), buildErr)
 			}
-			if aerr := recordStageMarkerAttestation(beadID, c); aerr != nil {
+			if aerr := recordStageMarkerAttestation(beadID, c, in.landedReview); aerr != nil {
 				return aerr
 			}
 			if pubErr := exec.PublishStageMarker(beadID, c, ""); pubErr != nil {
@@ -512,7 +533,7 @@ func runMaterialization(in materializationInput) error {
 		// this closes the classification-to-snapshot race totally,
 		// because the check now inspects the same data the commit is
 		// built from, not a separate, earlier read.
-		if nonArtifact := nonArtifactPaths(changedFromCurrent); len(nonArtifact) > 0 {
+		if nonArtifact := nonArtifactPaths(changedFromCurrent, workspace.SpecsDir(wtPath)); len(nonArtifact) > 0 {
 			return sExitGenuineDirtRefusal(beadID, nonArtifact)
 		}
 		oid, _, present, merr := exec.ReadStageMarker(beadID)
@@ -532,7 +553,7 @@ func runMaterialization(in materializationInput) error {
 		if buildErr != nil {
 			return fmt.Errorf("building the artifact-sync commit for %s: %w", idrender.Bead(beadID), buildErr)
 		}
-		if aerr := recordStageMarkerAttestation(beadID, d); aerr != nil {
+		if aerr := recordStageMarkerAttestation(beadID, d, in.landedReview); aerr != nil {
 			return aerr
 		}
 		if pubErr := exec.PublishStageMarker(beadID, d, expectedOld); pubErr != nil {

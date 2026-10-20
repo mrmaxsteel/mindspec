@@ -17,12 +17,31 @@ type Executor interface {
     HandoffEpic(epicID, specID string, beadIDs []string) error
 
     // Query methods
+    CheckIgnore(workdir, file string) error
     IsTreeClean(path string) error
+    LsTree(workdir, rev string) (string, error)
     DiffStat(base, head string) (string, error)
     CommitCount(base, head string) (int, error)
     CommitAll(path, msg string) error
 }
 ```
+
+The optional `LandedReviewSetter` interface exposes
+`SetLandedReview(sha, panel string)` without changing `CompleteBead`.
+`MindspecExecutor` and `MockExecutor` implement it. `complete` supplies the
+first Allow panel's `reviewed_head_sha` and `<slug>@r<N>` before
+`CompleteBead`. That call consumes the identity and writes
+`mindspec_landed_reviewed_sha` and `mindspec_landed_review_panel` in the same
+metadata merge as the landed binding. The already-bound check compares these
+two keys only when supplied. Without a setter call, neither key is written or
+removed. `FinalizeEpic` leaves both keys unchanged (Spec 130 R12).
+
+`LsTree` returns a recursive, repository-relative listing at a ref, including
+when the workdir is a spec subdirectory. It rejects option-like refs. Panel
+consumers select roots and exclusions in Go and hash the retained listing.
+
+`CheckIgnore` delegates to `gitutil.CheckIgnore`: nil means ignored, exit 1
+means not ignored; all other errors fail the ledger preflight closed.
 
 The two merge-producing methods gained paired parameters in spec 127
 (R4(b)/R5(d)): `overrideReason` is the operator's audited
@@ -74,8 +93,8 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | Symbol | Purpose |
 |:-------|:--------|
 | `RuntimeIgnoreEntries` | The single canonical list of MindSpec local runtime files that must never be tracked (`.mindspec/session.json`, `.mindspec/focus` — ADR-0015). Bootstrap, setup, and doctor all consume THIS var, so the writer sides and the doctor detection side cannot drift. |
-| `ReviewIgnoreEntries` | Optional local panel artifacts: `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` (spec 129 R8). Separate from runtime entries so already-tracked reviews do not become doctor runtime-file findings. The `/**` form permits later negations for retention. |
-| `EnsureGitignoreEntriesWithHeader(root, header, entries...)` | The same append and ignore-check semantics as `EnsureGitignoreEntries`, with a caller-supplied header. Bootstrap uses `# MindSpec panel reviews (local, not version-controlled; spec 129 R8)` for reviews; `EnsureGitignoreEntries` delegates with the runtime header. |
+| `ReviewIgnoreEntries` | Optional local panel artifacts: `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` (spec 129 R8). Separate from runtime entries so already-tracked reviews do not become doctor runtime-file findings. The following negations retain the flat spec ledger: `!.mindspec/specs/*/reviews/*/` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl` (spec 130 R6). Bootstrap writes the ledger negations by exact-line presence only, preserving bytes on a second init; adhoc ledgers remain ignored. |
+| `EnsureGitignoreEntriesWithHeader(root, header, entries...)` | The same append and ignore-check semantics as `EnsureGitignoreEntries`, with a caller-supplied header. Runtime callers use this ignore-check helper; bootstrap uses this for the plain review patterns and writes their ledger negations separately by exact-line presence because negations cannot be checked as ignored paths. `EnsureGitignoreEntries` delegates with the runtime header. |
 | `EnsureGitignoreEntries(root, entries...)` | Entry-granular, negation-aware `.gitignore` ensure (final review G1): guarantees each entry is ACTUALLY ignored by git, not merely present as a line. Existing bytes are never reordered or rewritten; entries needing a fresh line are appended under a shared header comment; creates the file if absent. An entry needs a fresh line when its exact line is absent (delimiter-stripped comparison only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence), OR when the line IS present but `git check-ignore` reports the path un-ignored anyway — a LATER negation rule (`!entry`) defeats it under git's last-match-wins ordering, so the plain entry is RE-APPENDED (a harmless duplicate line) to make the last match the ignore rule again. So the same entry can legitimately appear more than once, and a converged call still shells out to `git check-ignore` per line-present entry before concluding nothing needs writing (no write happens in that case). On an indeterminate git verdict (no repository / exit status outside {0,1}, e.g. 128) it falls back to line-presence alone rather than force a spurious re-append. Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
 
 ### Merge-safety primitives (spec 127, `internal/gitutil`)
@@ -116,7 +135,7 @@ boundary:
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Touches no real index/ref/worktree state. |
+| `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Exclusions use `:(exclude,glob)` pathspecs so a single `*` never matches `/`, agreeing with the tool-artifact matcher. Touches no real index/ref/worktree state. |
 | `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. |
 | `MaterializeStageCommit(wtPath, tree, parent, stage, subject)` | Builds a commit via plumbing (`git commit-tree`, no hooks) carrying the pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`; `StageMaterialization`/`StageArtifactSync`) — read back on re-entry instead of inferred from a tree diff. |
 | `PublishStageMarker(beadID, oid, expectedOld)` / `ReadStageMarker(beadID)` / `ClearStageMarker(beadID, expectedOID)` | The write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`, all via per-ref compare-and-swap: publish before either stage's branch advances (CREATE semantics when `expectedOld == ""`), read to discriminate a resumed run, clear on the terminal step only against the OID this invocation owns. |
@@ -246,3 +265,8 @@ shipped design is the opposite:
 The R4 work-destruction preflight in front of every merge producer, and
 the full resumption state machine, are described in this domain's
 architecture doc, § Merge safety layer (spec 127).
+
+### Deferral reads and rename paths
+
+- `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
+- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.

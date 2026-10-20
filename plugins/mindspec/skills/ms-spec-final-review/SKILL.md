@@ -54,7 +54,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
 
    Each reviewer writes a verdict JSON to `<spec-dir>/reviews/<spec-slug>-final/<slot>-round-1.json`.
 
-5. **Tally through `/ms-panel-tally`** — the single decision authority. The artifact-gate HARD-block rule, the N−1 threshold, and the halt-recovery procedure all live there; the F5 "evidence path NAMED but artifact MISSING → HARD block" finding is a `"hard_block": true` verdict the tally halts on regardless of vote count. On APPROVE → proceed to `/ms-impl-approve`.
+5. **Tally through `/ms-panel-tally`** — the single decision authority. The artifact-gate HARD-block rule, the pass rule, and the halt-recovery procedure all live there; the F5 "evidence path NAMED but artifact MISSING → HARD block" finding is a `"hard_block": true` verdict the tally halts on regardless of vote count. On APPROVE → proceed to `/ms-impl-approve`.
 
 ## Reviewer conduct
 
@@ -62,7 +62,7 @@ Per **ADR-0044** (the normative doctrine home; this section states only the role
 
 **Mutation-isolation** (the F2 full-regression run above): any execution or mutation happens in an isolated detached checkout (`git worktree add --detach`), never the shared spec worktree, removed when the reviewer is done; read-only inspection stays fine.
 
-**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Every finding you raise is fixed or evidence-refuted via the audited `refutations` procedure — never dropped because the APPROVE count cleared the threshold. The threshold is a floor, not a license.
+**How your verdict is adjudicated (reviewer-facing): findings-never-out-voted.** Fix each finding, refute it with evidence, or defer it to a validated follow-up bead. The approval count does not resolve findings.
 
 **Absolute scratch.** Every scratch file you write lives at an ABSOLUTE path under `/tmp` (or the panel directory for verdicts), never a relative path — harness cwd-resets turn a relative write into sibling-worktree corruption.
 

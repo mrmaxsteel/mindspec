@@ -31,6 +31,8 @@ var RuntimeIgnoreEntries = []string{
 var ReviewIgnoreEntries = []string{
 	".mindspec/specs/*/reviews/**",
 	".mindspec/reviews/**",
+	"!.mindspec/specs/*/reviews/*/",
+	"!.mindspec/specs/*/reviews/*/dispositions.jsonl",
 }
 
 // gitignoreRuntimeHeader is the comment written above any entries

@@ -235,9 +235,7 @@ func Run(root string, dryRun bool) (*Result, error) {
 		if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
 			return nil, fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
 		}
-		if err := gitutil.EnsureGitignoreEntriesWithHeader(root,
-			"# MindSpec panel reviews (local, not version-controlled; spec 129 R8)",
-			gitutil.ReviewIgnoreEntries...); err != nil {
+		if err := ensureReviewIgnoreEntries(root); err != nil {
 			return nil, fmt.Errorf("ensuring .gitignore review entries: %w", err)
 		}
 	}
@@ -511,3 +509,43 @@ On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-app
 
 MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `
+
+// Review negations use exact-line presence: check-ignore cannot test a ! rule.
+func ensureReviewIgnoreEntries(root string) error {
+	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
+	var ignores []string
+	for _, entry := range gitutil.ReviewIgnoreEntries {
+		if !strings.HasPrefix(entry, "!") {
+			ignores = append(ignores, entry)
+		}
+	}
+	if err := gitutil.EnsureGitignoreEntriesWithHeader(root, header, ignores...); err != nil {
+		return err
+	}
+	file := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	present := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		present[strings.TrimSuffix(line, "\r")] = true
+	}
+	var missing []string
+	for _, entry := range gitutil.ReviewIgnoreEntries {
+		if !present[entry] {
+			missing = append(missing, entry)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	content := string(data)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if !present[header] {
+		content += "\n" + header + "\n"
+	}
+	return os.WriteFile(file, []byte(content+strings.Join(missing, "\n")+"\n"), 0644)
+}

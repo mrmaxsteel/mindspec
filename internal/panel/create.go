@@ -2,11 +2,16 @@ package panel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // briefHeaderOpen/briefHeaderClose delimit the BRIEF.md region Create
@@ -44,142 +49,333 @@ const briefStubBody = `## Summary
 <!-- TODO(skill): per-slot review lens assignments -->
 `
 
-// CreateInput carries the plain values Create writes into a panel
-// directory's panel.json and BRIEF.md machine-managed header, in one
-// atomic operation (Spec 110 R1). Every field is a plain value the
-// CALLER (cmd/mindspec) resolves — the 109 config resolvers for
-// ExpectedReviewers/ApproveThresholdExpr, the executor for
-// ReviewedHeadSHA — so internal/panel stays an import-clean,
-// config-free, git-free leaf (spec 109's "config reaches the leaf only
-// as plain values" pattern, R7b).
+// CreateInput contains caller-resolved registration values. The caller resolves
+// the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
-	// BeadID is nil for a non-bead (final-review/PR) panel; it marshals
-	// to panel.json's `bead_id: null`.
-	BeadID *string
-	// Spec is the owning spec ID.
-	Spec string
-	// Target is the reviewed ref (e.g. "bead/mindspec-x.1"), also
-	// recorded verbatim as the BRIEF header's branch field.
-	Target string
-	// Round is the panel round, 1-based.
-	Round int
-	// ExpectedReviewers is the recorded reviewer count (109's
-	// config.PanelExpectedReviewers(), read by the caller).
+	BeadID            *string
+	Spec              string
+	Target            string
+	Round             int
 	ExpectedReviewers int
-	// ApproveThresholdExpr is the optional recorded threshold override
-	// (109's config.PanelApproveThresholdExpr(), read by the caller);
-	// "" means "use the N-1 default" (see Panel.ApproveThreshold).
+	// ApproveThresholdExpr is retained for source compatibility, but never written.
 	ApproveThresholdExpr string
-	// ReviewedHeadSHA is the target ref's resolved commit, captured by
-	// the caller AT WRITE TIME. Never empty — Create does not validate
-	// this (a leaf takes plain values on faith), but every caller must
-	// supply it: panel.json must never omit reviewed_head_sha.
-	ReviewedHeadSHA string
-	// Gate records which of config.PanelGateKeys' five gate mixes this
-	// panel was created from — plain, decision-inert recorded metadata
-	// per the spec-112-R9 stable contract (Panel.Gate: name `gate`, type
-	// string, `omitempty`, parse-lenient). "" means the caller omitted
-	// --gate; via Panel.Gate's `omitempty` tag this writes NO `gate` key
-	// at all, so an omitted Gate is byte-identical to pre-spec-113
-	// output (spec 113 R3, completing 112's deferred writer). The
-	// membership check against PanelGateKeys and the gate-scoped
-	// ExpectedReviewers/ApproveThresholdExpr resolution both happen in
-	// the caller (cmd/mindspec) — this leaf takes the plain value on
-	// faith and never imports internal/config or git.
-	Gate string
+	ReviewedHeadSHA      string
+	SubjectDigest        string
+	Gate                 string
+	Roster               []RosterSlot
+	// ReviewersOverride replaces the previous roster when --reviewers was supplied.
+	ReviewersOverride bool
+	// ReportDropped receives each unbacked entry after the snapshot is written.
+	ReportDropped func(string)
 }
 
-// Create writes dir/panel.json and rewrites dir/BRIEF.md's
-// machine-managed header block in a single logical operation (Spec 110
-// R1): Round and ReviewedHeadSHA land in the SAME Panel value, so no
-// code path can write one without the other, and both files are
-// computed in full — including validating any existing BRIEF.md's
-// marker state — before either is touched on disk. Create never reads,
-// writes, or deletes any `<slot>-round-<N>.json` verdict file.
-//
-// panel.json is written as a full-struct overwrite: Create never reads
-// an existing panel.json first (unlike its read-before-splice
-// BRIEF.md handling below). A re-panel of a directory whose panel.json
-// carries a hand-set `abandoned`/`abandon_reason` (the /ms-panel-tally
-// Abandon procedure) therefore CLEARS those fields and revives the
-// panel into an active round — this is the known, intentional
-// behavior of calling Create again, not an oversight
-// (TestCreate_RepanelOfAbandonedPanelRevivesIt pins it).
-//
-// The two writes below (panel.json, then BRIEF.md) are sequential and
-// not crash-atomic as a pair: a process death between them leaves
-// panel.json bumped and BRIEF.md stale. The next Create call recomputes
-// and rewrites both from scratch, so this is a self-healing bound, not
-// a corruption risk — no temp-file+rename is used here.
-//
-// On a first create (no BRIEF.md yet at dir/BRIEF.md), the header is
-// written followed by a fresh briefStubBody for the skill to fill in.
-// On a re-panel (BRIEF.md already exists with exactly one matching
-// marker pair), only the delimited region is replaced in place; every
-// byte before the opening marker and after the closing marker —
-// including the skill-authored body and any CRLF line endings in it —
-// is preserved exactly. A BRIEF.md with no markers at all (legacy) gets
-// a fresh header prepended, with the entire existing file kept
-// byte-identical below it.
-//
-// If the existing BRIEF.md's markers are ambiguous or corrupt — an
-// opening marker with no matching closing marker, a closing marker with
-// no opening marker, or more than one opening/closing marker pair —
-// Create returns a non-nil error and writes NEITHER panel.json NOR
-// BRIEF.md: the marker-state validation happens before any write, so a
-// corrupt BRIEF can never leave the two files disagreeing.
-//
-// internal/panel is a leaf: Create imports no internal/config and no
-// git.
+// Create validates and computes the snapshot and BRIEF before writing. It
+// archives the previous BRIEF without replacing an existing archive, appends
+// the round event before the snapshot, then writes the new BRIEF. These writes
+// are a single logical operation, not a crash-atomic multi-file transaction.
+// A retry can repair a stale snapshot or BRIEF; verdict files are never changed.
 func Create(dir string, in CreateInput) error {
-	p := Panel{
-		BeadID:               in.BeadID,
-		Spec:                 in.Spec,
-		Target:               in.Target,
-		Round:                in.Round,
-		ExpectedReviewers:    in.ExpectedReviewers,
-		ReviewedHeadSHA:      in.ReviewedHeadSHA,
-		ApproveThresholdExpr: in.ApproveThresholdExpr,
-		Gate:                 in.Gate,
+	beadID := ""
+	if in.BeadID != nil {
+		beadID = *in.BeadID
 	}
-	panelData, err := json.MarshalIndent(p, "", "  ")
+	binding, err := CreateBeadID(in.Gate, in.Target, beadID)
 	if err != nil {
-		return fmt.Errorf("marshal panel.json: %w", err)
+		return err
 	}
-
+	in.BeadID = binding
+	var old Panel
+	var telemetryPresent bool
+	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
+		reg := load(dir)
+		if reg.Err != nil {
+			return reg.Err
+		}
+		old = reg.Panel
+		data, err := os.ReadFile(filepath.Join(dir, FileName))
+		if err != nil {
+			return err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		_, telemetryPresent = fields["telemetry"]
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read panel.json: %w", err)
+	}
+	res, err := Tally(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if res != nil && res.LatestRound > 0 && in.Round <= res.LatestRound {
+		return &CreateRoundConflict{Round: in.Round, LatestRound: res.LatestRound}
+	}
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return err
+	}
+	var first, latest *RoundRecord
+	backed := CarriedEntries{}
+	abandonedAt := ""
+	for _, line := range lines {
+		var kind recordDiscriminator
+		if err := json.Unmarshal(line, &kind); err != nil {
+			return err
+		}
+		switch kind.Record {
+		case RecordRound:
+			var r RoundRecord
+			if err := json.Unmarshal(line, &r); err != nil {
+				return err
+			}
+			if first == nil {
+				first = &r
+				backed = r.Carried
+			}
+			latest = &r
+			abandonedAt = ""
+		case RecordRefutation:
+			var r Refutation
+			if err := json.Unmarshal(line, &r); err != nil {
+				return err
+			}
+			backed.Refutations = append(backed.Refutations, r)
+		case RecordDeferral:
+			var d Deferral
+			if err := json.Unmarshal(line, &d); err != nil {
+				return err
+			}
+			backed.Deferrals = append(backed.Deferrals, d)
+		case RecordRebind:
+			var r Rebind
+			if err := json.Unmarshal(line, &r); err != nil {
+				return err
+			}
+			backed.Rebinds = append(backed.Rebinds, r)
+		case RecordAbandon:
+			var a AbandonRecord
+			if err := json.Unmarshal(line, &a); err != nil {
+				return err
+			}
+			abandonedAt = a.CreatedAt
+		}
+	}
+	// A remaining marker still denotes a non-legacy registration. Create is the
+	// recovery for hand edits, including removal of one of the markers.
+	legacy := latest == nil && !telemetryPresent
+	if legacy {
+		checkEntry := func(entry interface{}, name string) error {
+			data, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			if err := HygienePredicate(data); err != nil {
+				return &CreateLegacyPathError{Entry: name}
+			}
+			return nil
+		}
+		for i, r := range old.Refutations {
+			if err := checkEntry(r, fmt.Sprintf("refutation[%d] slot %s finding %s", i, r.Slot, r.Finding)); err != nil {
+				return err
+			}
+		}
+		for i, d := range old.Deferrals {
+			if err := checkEntry(d, fmt.Sprintf("deferral[%d] slot %s finding %s", i, d.Slot, d.Finding)); err != nil {
+				return err
+			}
+		}
+		for i, r := range old.Rebinds {
+			if err := checkEntry(r, fmt.Sprintf("rebind[%d] round %d from %s to %s", i, r.Round, r.FromSHA, r.ToSHA)); err != nil {
+				return err
+			}
+		}
+	}
+	carried := CarriedEntries{}
+	var dropped []string
+	keep := func(ok bool, name string) bool {
+		if legacy || ok {
+			return true
+		}
+		dropped = append(dropped, name)
+		return false
+	}
+	for i, r := range old.Refutations {
+		if keep(matchesRefutation(r, backed.Refutations), fmt.Sprintf("refutations[%d] slot %s round %d finding %s", i, r.Slot, r.Round, r.Finding)) {
+			carried.Refutations = append(carried.Refutations, r)
+		}
+	}
+	for i, d := range old.Deferrals {
+		if keep(matchesDeferral(d, backed.Deferrals), fmt.Sprintf("deferrals[%d] slot %s round %d finding %s bead %s", i, d.Slot, d.Round, d.Finding, d.Bead)) {
+			carried.Deferrals = append(carried.Deferrals, d)
+		}
+	}
+	for i, r := range old.Rebinds {
+		if keep(matchesRebind(r, backed.Rebinds), fmt.Sprintf("rebinds[%d] round %d from %s to %s", i, r.Round, r.FromSHA, r.ToSHA)) {
+			carried.Rebinds = append(carried.Rebinds, r)
+		}
+	}
+	roster := in.Roster
+	if !in.ReviewersOverride {
+		if latest != nil {
+			roster = latest.Roster
+		} else if legacy && len(old.Roster) > 0 {
+			roster = old.Roster
+		}
+	}
+	if len(roster) < 2 {
+		return fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+	}
+	gate := in.Gate
+	p := Panel{BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
+		ExpectedReviewers: len(roster), Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
+		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
+		Refutations: carried.Refutations, Deferrals: carried.Deferrals, Rebinds: carried.Rebinds,
+		AbandonHistory: old.AbandonHistory}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if old.Abandoned {
+		p.AbandonHistory = append(p.AbandonHistory, AbandonHistory{Reason: old.AbandonReason, AbandonedAt: abandonedAt, RevivedAt: now})
+	}
+	baseline := CarriedEntries{}
+	if legacy {
+		baseline = carried
+	}
+	spec := in.Spec
+	if spec == "" {
+		spec = "adhoc"
+	}
+	event := RoundRecord{Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
+		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
+		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
+		Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	if err := Validate(eventData); err != nil {
+		return err
+	}
+	if err := HygienePredicate(eventData); err != nil {
+		return err
+	}
 	briefPath := filepath.Join(dir, "BRIEF.md")
 	existing, readErr := os.ReadFile(briefPath)
 	briefExists := readErr == nil
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return fmt.Errorf("read %s: %w", briefPath, readErr)
 	}
-
-	slug := filepath.Base(dir)
-	header := renderBriefHeader(slug, in.Round, in.Target, in.ReviewedHeadSHA)
-
+	prior := "none recorded"
+	priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
+	if err == nil {
+		prior = termsafe.Escape(string(priorData))
+		// Quoted prose must not become region syntax or toggle fence scanning.
+		trimmed := strings.TrimSpace(prior)
+		if strings.HasPrefix(trimmed, "```") || markerLookalikeRE.MatchString(trimmed) ||
+			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
+			prior = "> " + prior
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read prior round: %w", err)
+	}
+	header := renderCreateBriefHeader(filepath.Base(dir), p, prior)
 	var newBrief string
 	if briefExists {
-		spliced, err := spliceBriefHeader(string(existing), header)
+		newBrief, err = spliceBriefHeader(string(existing), header)
 		if err != nil {
 			return fmt.Errorf("BRIEF.md header in %s: %w", briefPath, err)
 		}
-		newBrief = spliced
 	} else {
 		newBrief = header + "\n\n" + briefStubBody
 	}
-
-	// Both files are fully computed above; only now do we touch disk,
-	// and both writes happen unconditionally together.
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create panel dir %s: %w", dir, err)
+		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, FileName), panelData, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", FileName, err)
+	if briefExists && old.Round > 0 && in.Round > old.Round {
+		archive := filepath.Join(dir, fmt.Sprintf("BRIEF-round-%d.md", old.Round))
+		f, err := os.OpenFile(archive, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("archive BRIEF: %w", err)
+		}
+		if err == nil {
+			_, writeErr := f.Write(existing)
+			closeErr := f.Close()
+			if writeErr != nil {
+				return writeErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		}
+	}
+	if err := AppendRecords(dir, eventData); err != nil {
+		return err
+	}
+	if err := WriteSnapshot(dir, p); err != nil {
+		return err
+	}
+	for _, name := range dropped {
+		if in.ReportDropped != nil {
+			in.ReportDropped("dropped unbacked " + termsafe.Escape(name))
+		}
 	}
 	if err := os.WriteFile(briefPath, []byte(newBrief), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", briefPath, err)
 	}
 	return nil
+}
+
+func renderCreateBriefHeader(slug string, p Panel, prior string) string {
+	header := renderBriefHeader(slug, p.Round, p.Target, p.ReviewedHeadSHA)
+	var b strings.Builder
+	b.WriteString("## Reviewer roster\n\n")
+	for _, slot := range p.Roster {
+		fmt.Fprintf(&b, "%s %s %s\n", slot.Slot, termsafe.Escape(slot.Model), termsafe.Escape(slot.Lens))
+	}
+	b.WriteString("\n<!-- mindspec:prior-round -->\n")
+	b.WriteString(prior)
+	b.WriteString("\n<!-- /mindspec:prior-round -->\n")
+	return strings.TrimSuffix(header, briefHeaderClose) + b.String() + briefHeaderClose
+}
+
+// CreateLegacyPathError identifies a legacy entry that cannot enter the ledger.
+// Callers render Recovery with their normal failure format.
+type CreateLegacyPathError struct{ Entry string }
+
+func (e *CreateLegacyPathError) Error() string {
+	return "cannot carry legacy " + termsafe.Escape(e.Entry) + " with an absolute path"
+}
+
+func (e *CreateLegacyPathError) Recovery() string {
+	return "remove the absolute path from " + termsafe.Escape(e.Entry) + " in the legacy panel.json, then run create again"
+}
+
+// CreateRoundConflict lets callers render a recovery using the resolved binding.
+type CreateRoundConflict struct{ Round, LatestRound int }
+
+func (e *CreateRoundConflict) Error() string {
+	return fmt.Sprintf("cannot create round %d: verdict files already reach round %d", e.Round, e.LatestRound)
+}
+
+// CreateBeadID derives and validates the binding before callers resolve git or
+// write files. An omitted gate is non-bead, like every gate other than bead.
+func CreateBeadID(gate, target, beadID string) (*string, error) {
+	if gate != "bead" {
+		if beadID != "" {
+			return nil, fmt.Errorf("--bead requires --gate bead")
+		}
+		return nil, nil
+	}
+	if !strings.HasPrefix(target, "bead/") {
+		return nil, fmt.Errorf("--gate bead requires --target bead/<id>")
+	}
+	derived := strings.TrimPrefix(target, "bead/")
+	if err := idvalidate.BeadID(derived); err != nil {
+		return nil, fmt.Errorf("invalid bead target: %w", err)
+	}
+	if beadID != "" && beadID != derived {
+		return nil, fmt.Errorf("--bead %q does not match --target %q", beadID, target)
+	}
+	return &derived, nil
 }
 
 // renderBriefHeader renders the machine-managed BRIEF region: the
@@ -199,7 +395,7 @@ func renderBriefHeader(slug string, round int, target, sha string) string {
 	b.WriteString("Review the diff at the reviewed commit above and write your verdict as\n")
 	fmt.Fprintf(&b, "a single JSON file named `<your-slot>-round-%d.json` beside this BRIEF\n", round)
 	b.WriteString("(the panel artifact schema — see `.mindspec/domains/workflow/interfaces.md`\n")
-	b.WriteString("§ Panel Artifact Schema). Required and optional top-level fields:\n\n")
+	b.WriteString("Panel Artifact Schema). Required and optional top-level fields:\n\n")
 	b.WriteString("- `verdict` (required): one of `APPROVE`, `REQUEST_CHANGES`, `REJECT`.\n")
 	b.WriteString("- `hard_block` (optional boolean, a top-level sibling of `verdict` — never\n")
 	b.WriteString("  a per-finding field): set `true` only for an evidence-bearing halt that\n")

@@ -55,7 +55,6 @@ Level 2 is where gate authority itself is delegated — a scoped grant, written 
 # .mindspec/config.yaml
 panel:
   reviewers: [{family: claude, count: 3}, {family: codex, count: 3}]
-  approve_threshold: "n-1"
 loop:
   enabled: true
   gate_authority:              # who may pass each gate unattended: panel | human
@@ -74,7 +73,7 @@ loop:
   handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
 ```
 
-With `gate_authority: panel` on a gate, `approve` runs a panel against that target (a spec, a plan, or the final branch diff) and accepts the panel's decision under the same quorum, staleness, and threshold semantics the bead-merge gate has always used. The config is refused at load time if it tries to weaken the floor: `panel_skip` under `gate_authority`, a non-`halt` value for `on_reject`, or an always-pass threshold are all rejected before the loop starts.
+With `gate_authority: panel` on a gate, `approve` runs a panel against the spec, plan, or final branch diff. It uses the same pass rule and freshness checks as the bead merge gate. Config load refuses a one-reviewer panel because it cannot pass. It also refuses `panel_skip` under `gate_authority` and any `on_reject` value other than `halt`.
 
 ### Halt conditions
 

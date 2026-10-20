@@ -237,7 +237,7 @@ func TestMsSpecAutopilotSkill_AcceptedNotReadyHaltRow(t *testing.T) {
 
 // --- Final-review r1 G1/G3-OVERRIDE-COVERAGE: stale-override coverage ---
 
-const readinessStagedRule = "<!-- staged-rule: target=next-action (ADR-0045 step 4, spec 133); remove-by=2027-06-30 (provisional; the spec-130 rule table may revise it) -->"
+const readinessStagedRule = "<!-- staged-rule: target=next-action (ADR-0045 step 4, spec 133); remove-by=2027-06-30 (provisional; the spec-131 rule table may revise it) -->"
 const readinessExitCodeRule = "Run `mindspec bead ready-check <id>`; proceed on exit 0; otherwise stop and surface its report."
 
 // Coverage belongs to the binary; the harness adapter obeys its exit code.
@@ -252,6 +252,20 @@ func TestMsBeadImplSkill_OverrideCoverageCheckShipped(t *testing.T) {
 	content := readinessSkillFile(t, "ms-bead-impl")
 	if !mutationProbeOverrideCoveragePresent(content) {
 		t.Error("expected the staged ready-check exit-code line, immediately after its marker, with no skill-side override comparison")
+	}
+}
+
+func TestMsBeadImplSkill_ClaudeCopyMatchesPlugin(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), ".claude", "skills", "ms-bead-impl", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !mutationProbeOverrideCoveragePresent(content) {
+		t.Error("expected the staged ready-check exit-code line immediately after its marker in the Claude copy")
+	}
+	if content != readinessSkillFile(t, "ms-bead-impl") {
+		t.Error("Claude ms-bead-impl copy differs from the plugin copy")
 	}
 }
 

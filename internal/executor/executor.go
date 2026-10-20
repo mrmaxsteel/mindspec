@@ -10,6 +10,12 @@
 // SCOPE for this boundary and lives behind internal/bead.
 package executor
 
+// ChangedFilesOptions controls commit-to-commit path listing.
+type ChangedFilesOptions struct {
+	// NoRenames lists both sides of a rename for rebind checks and records.
+	NoRenames bool
+}
+
 // Executor abstracts workspace lifecycle operations. Implementations include
 // MindspecExecutor (local git+worktrees) and MockExecutor (testing).
 //
@@ -118,7 +124,10 @@ type Executor interface {
 	// Passing base == "" means working tree vs head, matching
 	// gitutil.DiffNameOnlyRef("", ref) semantics. With both refs set it is
 	// equivalent to `git diff --name-only <base>..<head>`.
-	ChangedFiles(base, head string) ([]string, error)
+	ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error)
+
+	// LsTree returns a full recursive, repository-relative tree listing.
+	LsTree(workdir, rev string) (string, error)
 
 	// FileAtRef returns the content of path at git ref (wraps
 	// `git show <ref>:<path>`). Empty ref is undefined.
@@ -158,6 +167,9 @@ type Executor interface {
 	// Status returns `git status --porcelain` for workdir (the worktree
 	// dirty-check seam for the panel gate). Empty output means a clean tree.
 	Status(workdir string) (string, error)
+
+	// CheckIgnore returns nil for an ignored path, exit 1 for a non-ignored path.
+	CheckIgnore(workdir, file string) error
 
 	// IsRefNotFound reports whether err is the genuine "ref absent" case
 	// (branch already deleted) from RevParseRef vs a transient/structural git
@@ -317,4 +329,10 @@ type FinalizeResult struct {
 	// will keep reverting the epic-close/bead-done state in Dolt on every
 	// merge/FF until then. Always empty on the no-remote "direct" path.
 	FinalizeBranch string
+}
+
+// LandedReviewSetter optionally supplies the first Allow panel's reviewed identity
+// for the next CompleteBead binding write (Spec 130 R12).
+type LandedReviewSetter interface {
+	SetLandedReview(sha, panel string)
 }

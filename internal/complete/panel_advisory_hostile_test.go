@@ -111,7 +111,8 @@ func TestCompletePanelGate_HostilePanelEscaped(t *testing.T) {
 		}, map[string]string{"a-round-1.json": "APPROVE"})
 
 		var warnBuf bytes.Buffer
-		reg, err := panelGate(beadID, []string{root}, "", true, &warnBuf)
+		matches, err := panelGate(beadID, []string{root}, "", true, &warnBuf)
+		reg := firstGateRegistration(matches)
 		if err != nil {
 			t.Fatalf("an abandoned panel must Warn, not Block: %v", err)
 		}

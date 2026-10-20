@@ -86,13 +86,13 @@ func TestVoteDecision(t *testing.T) {
 			want: VotePass,
 		},
 		{
-			name: "sub-threshold 4/6 with 6 present → Block",
+			name: "6 present with empty INVALID verdicts → Block",
 			res: &Result{
 				Panel: &Panel{ExpectedReviewers: 6, Round: 1}, LatestRound: 1,
 				Verdicts: makeVerdicts(6, 0), Approves: 4,
 			},
 			want:    VoteBlock,
-			summary: "threshold is 5/6",
+			summary: "INVALID",
 		},
 	}
 	for _, tt := range tests {
