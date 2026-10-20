@@ -261,9 +261,12 @@ filesystem write. When given, `panel.json`'s decision-inert `gate` field
 (`json:"gate,omitempty"`) is stamped with the value, and
 `expected_reviewers`/`approve_threshold` are resolved through spec 112
 R3's gate-scoped resolvers (`cfg.PanelGateExpectedReviewers(gate)` /
-`cfg.PanelGateApproveThresholdExpr(gate)`) instead of the global ones.
-When omitted, behavior is byte-identical to pre-spec-113 output: the
-global resolvers are used and no `gate` key is written. The field stays
+`cfg.PanelGateApproveThresholdExpr(gate)`).
+When omitted, `expected_reviewers` uses `cfg.PanelExpectedReviewers()`,
+which resolves through the `adhoc` gate (spec 130 R2.1).
+`approve_threshold` uses `cfg.PanelApproveThresholdExpr()`, which reads
+global `panel.approve_threshold` and defaults to `n-1` when unset.
+The command writes no `gate` key. The field stays
 decision-inert end to end — neither `PanelGateDecision` nor
 `ApproveThreshold()` reads it — but it IS what `config
 show`/`mindspec complete`'s `PanelGateAdvisoryDefault` selection keys on
