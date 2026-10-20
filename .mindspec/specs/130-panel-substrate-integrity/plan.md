@@ -100,6 +100,7 @@ work_chunks:
       - internal/panel/handedit.go
       - internal/panel/panel_decision_test.go
       - internal/panel/refutation_test.go
+      - internal/panel/hostile_fields_test.go
       - internal/panel/votedecision_test.go
       - cmd/mindspec/panel.go
       - cmd/mindspec/panel_ruleline_test.go
@@ -181,7 +182,7 @@ work_chunks:
       - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
       - internal/validate/adr_spec130_ledger_test.go
   - id: 10
-    depends_on: [5, 6, 9]
+    depends_on: [5, 6, 9, 12]
     key_file_paths:
       - internal/panel/disposition_store.go
       - internal/panel/disposition_query.go
@@ -190,6 +191,7 @@ work_chunks:
       - cmd/mindspec/panel_test.go
       - internal/complete/panel_core3.go
       - internal/complete/panel_core3_test.go
+      - internal/complete/panel_advisory.go
       - internal/complete/complete.go
       - internal/approve/impl.go
       - internal/approve/impl_test.go
@@ -213,6 +215,7 @@ work_chunks:
       - internal/approve/impl_test.go
       - internal/panel/passrule.go
       - internal/panel/passrule_test.go
+      - internal/panel/gate.go
       - internal/guard/registries.go
       - plugins/mindspec/skills/ms-panel-tally/SKILL.md
       - plugins/mindspec/skills/ms-panel-run/SKILL.md
@@ -421,7 +424,7 @@ Bead 1, Bead 2, Bead 3, Bead 4.
 ## Bead 6: Pass rule, roster tally and hand-edit gate
 
 **Steps**
-1. Add `internal/panel/passrule.go`. A panel passes only when it is complete, has no veto, is fresh, has every finding discharged, and is intact (R7.1). The APPROVE count is not an input. Other gate legs stay unchanged.
+1. Add `internal/panel/passrule.go`. A panel passes only when it is complete, has no veto, is fresh, has every finding discharged, and is intact (R7.1). The APPROVE count is not an input. Other gate legs stay unchanged. Rework every test fixture that expects a sub-threshold Block (leg 10), in `hostile_fields_test.go` and `refutation_test.go`, so that it blocks on an R7 term.
 2. A discharge is pinned to its round and its `finding_sha256`. An item-level discharge clears one finding. A slot-level discharge clears the slot until the verdict file changes (R7.2-R7.4). A refuted REJECT, `hard_block` or INVALID still blocks. The pass rule counts no deferral as a discharge, on any panel, legacy and carried entries included. Bead 11 turns the deferral discharge on. `TestPassRule_DeferralInactive`: a complete, fresh legacy panel with a same-round, text-pinned, hand-added deferral stays unresolved.
 3. Treat a recorded `approve_threshold` as legacy. Print the legacy line. It does not change the decision (R7.5).
 4. Count roster slots only. An off-roster file counts nothing. An off-roster REJECT or INVALID blocks and names the file. A legacy panel with no roster tallies as today (R2.5).
@@ -553,7 +556,7 @@ Bead 1, Bead 2, Bead 4.
 **Steps**
 1. Make `tally` write the coverage manifest. It lists roster slots only. It appends a new manifest unless the last manifest of that round equals the derivation (R11.2). It writes one on an Allow, and on a stale non-bead registration with covering rows (R11.2).
 2. Make `ComputeQ4` and every manifest reader use only the last manifest of each panel (R11.3).
-3. Add `internal/complete/panel_core3.go`. After the gate Allow and before materialization, check each required registration that `panel.ForBead` matches. Block on a REQUEST_CHANGES slot with no covering row, a missing store, no manifest, a manifest for another round, a manifest that differs from the verdict files, or a malformed record (R11.4). A legacy registration passes with an advisory. A Warn registration skips the check with one advisory line (R11.6).
+3. Add `internal/complete/panel_core3.go`. Read the per-registration decisions that `panelGate` returns (Bead 12). Before materialization, check each required registration whose returned decision is Allow. Block on a REQUEST_CHANGES slot with no covering row, a missing store, no manifest, a manifest for another round, a manifest that differs from the verdict files, or a malformed record (R11.4). A legacy registration passes with an advisory. A Warn registration (abandoned, missing ref, git error) skips the check with one advisory line (R11.6). Do not derive Warn from the `abandoned` field.
 4. In `internal/approve/impl.go`, add a preflight leg on every required registration of the spec, final review included. It runs no gate decision. Before it skips an abandoned or legacy registration, it runs the legacy-marker check and the R5.3 check. A hand-set `abandoned: true` with no `abandon` event blocks. It names the panel and slot (R11.5).
 5. Add the approve-side hatch seam `implPanelSkipEnvFn` in `internal/approve/impl.go`. Both legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false` (OQ-3). `complete` uses `panelSkipEnvFn`.
 6. Tests seed refutation, deferral and abandon events with the Bead 2 batch append, not with the verbs.
@@ -570,18 +573,18 @@ Bead 1, Bead 2, Bead 4.
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- AC-24 (R11) passes. `TestTally_AppendsManifestPerRound`: a round-2 derivation equal to the round-1 manifest appends a round-2 manifest.
+- AC-24 (R11) passes. `TestComplete_Core3WarnSkips` has an abandoned case and a missing-ref case. `TestTally_AppendsManifestPerRound`: a round-2 derivation equal to the round-1 manifest appends a round-2 manifest.
 - AC-26 (part): the R13.1 §7 Core 3 and R11.5 reach items (the orphan/obligation no-hatch rule included) and the R13.2 manifest items are pinned.
 
 **Depends on**
-Bead 5, Bead 6, Bead 9.
+Bead 5, Bead 6, Bead 9, Bead 12.
 
 ## Bead 11: Defer verb, deferral audit and gate-time re-check
 
 **Steps**
 1. Add `internal/bead/deferral.go`. It reads a bead's status, parent chain, `discovered-from` edge and description through bd. Add one ratchet row for each new bd call.
 2. Add `cmd/mindspec/panel_defer.go`. Defer refuses: a closed or missing bead; the epic, or a child or descendant of it; a bead with no `discovered-from` edge to the epic or the panel's bead; a description without the finding text (R9.3 replacement). It shares the refute slot and round refusals. It refuses on `spec_approve` and adhoc panels, with a recovery that names `refute`. It writes the deferral, the `deferral` event and a `confirmed-deferred` row (R9.3).
-3. Add `internal/complete/panel_deferred.go`. `complete` writes `panel_deferred` with one entry per effective deferral, through the pending-marker protocol. Each entry holds `slot`, `round`, `finding`, `finding_text`, `finding_sha256`, `bead` and `by` (R10.1).
+3. Add `internal/complete/panel_deferred.go`. `complete` writes `panel_deferred` with one entry per effective deferral, taken from the Allow decision that `panelGate` returns, as `AppliedRefutations` is today (`panel.Decision`, `internal/panel/gate.go`). It writes the audit through the pending-marker protocol. Each entry holds `slot`, `round`, `finding`, `finding_text`, `finding_sha256`, `bead` and `by` (R10.1).
 4. Re-check each effective deferral through `internal/bead/deferral.go`, at `complete` and in the `impl approve` preflight. Block on re-parent under the epic, deletion, a removed `discovered-from` edge, removed finding text, a closed bead, or a bd error. Name the slot, the finding and the bead (R10.2).
 5. Turn the deferral discharge on in `internal/panel/passrule.go` (spec Terms: effective deferral; R7.3, R7.4), together with `panel defer`, the R10.1 audit and both re-checks. Replace `TestPassRule_DeferralInactive` with `TestPassRule_DeferralActive`.
 6. Source of the deferrals (R10.2):
@@ -624,7 +627,7 @@ Bead 7, Bead 8, Bead 10.
 
 **Steps**
 1. Do not change the `CompleteBead` signature. Add an optional interface `LandedReviewSetter` with `SetLandedReview(sha, panel string)` in `internal/executor/executor.go`. Implement it on `MindspecExecutor` and on the mock executor (`internal/executor/mock.go`).
-2. Make `panelGate` (`internal/complete/panel_advisory.go`) return the Allow decision and the registration that Allowed. Today it returns `(matched, nil)` for an Allow, for a Warn and for `panel_gate: false`. Update every `panelGate` caller. When the decision is Allow, `complete` calls `SetLandedReview` once, before `exec.CompleteBead`. The value of `panel` is `<slug>@r<N>`. A Warn (abandoned panel, hatch, missing ref), `panel_gate: false` or no panel makes no call.
+2. Make `panelGate` (`internal/complete/panel_advisory.go`) return the decision (Allow or Warn) of every matched registration, in scan order, each with its registration. The first Allow is the landed-key source. Today it returns `(matched, nil)` for an Allow, for a Warn and for `panel_gate: false`. Update every `panelGate` caller. When a returned decision is Allow, `complete` calls `SetLandedReview` once, from the first Allow, before `exec.CompleteBead`. The value of `panel` is `<slug>@r<N>`. A Warn (abandoned panel, hatch, missing ref), `panel_gate: false` or no panel makes no call.
 3. `ensureLandedBinding` writes `mindspec_landed_reviewed_sha` and `mindspec_landed_review_panel` in the same `mergeBindingFn` call as the binding, on the `CompleteBead` path only. With no setter call, it writes neither key. `FinalizeEpic` keeps the keys unchanged (R12).
 4. Update `.mindspec/domains/execution/interfaces.md` § Executor Interface (`LandedReviewSetter`, the two keys) and `.mindspec/domains/workflow/interfaces.md` (the `complete` call).
 5. Add the ADR-0037 §8 bullet: the Spec-114 carve-out extends to the R12 keys. Add `internal/validate/adr_spec130_keys_test.go` (`TestADRAmendments_Spec130_Keys`).
@@ -644,11 +647,11 @@ Bead 4.
 
 ## Carrier-brief resolutions
 
-- **Ordering**: R6 (Bead 9) depends on R3 (Bead 4). R1.1 (Bead 3) lands before R4 (Bead 7, through Bead 5). R9.3 `defer` lands with R10.1 and R10.2 (Bead 11). No merged state has a deferral discharge without the gate-time re-check. Before Bead 11, the R7 pass rule counts no deferral as a discharge, on any panel, legacy and carried entries included. Bead 11 turns it on together with `panel defer`, the R10.1 audit and both re-checks.
+- **Ordering**: R6 (Bead 9) depends on R3 (Bead 4). R1.1 (Bead 3) lands before R4 (Bead 7, through Bead 5). R9.3 `defer` lands with R10.1 and R10.2 (Bead 11). No merged state has a deferral discharge without the gate-time re-check. Before Bead 11, the R7 pass rule counts no deferral as a discharge, on any panel, legacy and carried entries included. Bead 11 turns it on together with `panel defer`, the R10.1 audit and both re-checks. Core 3 (Bead 10) and the R10.1 audit (Bead 11) read the gate decisions that Bead 12 returns.
 - **ADR landing**: each ADR text change lands in the bead that ships its code, or in a bead that depends on that bead. The first bead that touches an ADR appends `## Amendment (Spec 130)`; later beads add bullets to it. ADR-0037: Bead 4 appends; Beads 6, 7, 8, 9, 10, 11 and 12 depend on Bead 4 and add bullets. ADR-0043: Bead 1 appends; Beads 6, 9, 10 and 11 depend on Bead 1 and add bullets. ADR-0041 (Bead 7), ADR-0044 (Bead 6) and ADR-0045 (Bead 8) have one bead each. Each bead pins only its own text. The ADR-0043 `## Amendment (Spec 126)` heading stays (`TestReviewDiscipline_ADR0043Amendment`).
 - **Outside the cap**: the three `complete` preflight legs land with their code: the `check-ignore` call (Bead 9), Core 3 (Bead 10) and the R10.2 re-check (Bead 11). Each bead adds its own cap bullet.
 - **Hatches at `complete`**: the hatches do not skip the `check-ignore` refusal or the ledger commit (Bead 9).
-- **Bead count and chain**: 12 beads, split by mechanism. Longest chain: 4 beads (for example Bead 4 → Bead 5 → Bead 7 → Bead 11, or Bead 4 → Bead 9 → Bead 10 → Bead 11). Beads 1, 2, 3 and 4 start in parallel. Bead 12 starts after Bead 4.
+- **Bead count and chain**: 12 beads, split by mechanism. Longest chain: 4 beads (for example Bead 4 → Bead 5 → Bead 7 → Bead 11, Bead 4 → Bead 9 → Bead 10 → Bead 11, or Bead 4 → Bead 12 → Bead 10 → Bead 11). Beads 1, 2, 3 and 4 start in parallel. Bead 12 starts after Bead 4. Bead 12 is not a leaf: Bead 10 depends on it.
 - **Dogfood**: bead panels run on the installed v0.16.0 binary. No branch build is installed during the run.
 - **OQ-1**: Bead 1. **OQ-2**: Bead 5 (roster ids) and Bead 8 (skill text). **OQ-3**: Beads 10 and 11. **OQ-4**: Bead 2. **OQ-5**: Bead 7.
 
