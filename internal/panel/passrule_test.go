@@ -312,3 +312,34 @@ func TestPassRule_DeferralPins(t *testing.T) {
 		})
 	}
 }
+
+func TestPassRule_DeferralSlotPins(t *testing.T) {
+	for _, id := range []string{"ccr[0]", "slot"} {
+		t.Run(id, func(t *testing.T) {
+			dir, p := passFixture(t, 2, VerdictApprove)
+			v := FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"first"}}
+			writePassJSON(t, dir, "R1-round-1.json", v)
+			writePassJSON(t, dir, "R2-round-1.json", v)
+			fs, err := Findings(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := fs[0]
+			if id == "slot" {
+				f, err = SlotFinding(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			p.Deferrals = []Deferral{{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "max", CreatedAt: ledgerTime}}
+			writePassJSON(t, dir, FileName, p)
+			if d := passDecision(t, dir); d.Action != Block {
+				t.Fatalf("R1 deferral must leave R2 blocked: %+v", d)
+			}
+			unresolved := passTally(t, dir).UnresolvedVerdicts()
+			if len(unresolved) != 1 || unresolved[0].Slot != "R2" {
+				t.Fatalf("only R2 must stay unresolved: %+v", unresolved)
+			}
+		})
+	}
+}

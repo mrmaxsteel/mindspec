@@ -15,10 +15,13 @@ import (
 )
 
 // PanelDeferredEntry retains finding boundaries after a slot-level discharge.
+// Findings stores each member's id, raw-text hash and redacted text beside
+// FindingTexts. Old slot entries without Findings retain text-only coverage.
 // The audit must not read later verdicts or refutations to reconstruct them.
 type PanelDeferredEntry struct {
 	panel.Deferral
-	FindingTexts []string `json:"finding_texts,omitempty"`
+	FindingTexts []string        `json:"finding_texts,omitempty"`
+	Findings     []panel.Finding `json:"findings,omitempty"`
 }
 
 // CheckPanelDeferrals is shared by completion and non-bead approval. The
@@ -79,7 +82,23 @@ func checkedPanelDeferrals(reg panel.Registration, entries []panel.Deferral) ([]
 			failures = append(failures, failed{d, err})
 			continue
 		}
-		valid = append(valid, PanelDeferredEntry{Deferral: d, FindingTexts: texts})
+		var findings []panel.Finding
+		for _, v := range res.Verdicts {
+			if v.Slot != d.Slot {
+				continue
+			}
+			for _, f := range v.Findings {
+				if d.Finding != "slot" && d.Finding != f.ID {
+					continue
+				}
+				item := d
+				item.Finding = f.ID
+				if len(res.DeferralTexts(item)) > 0 {
+					findings = append(findings, f)
+				}
+			}
+		}
+		valid = append(valid, PanelDeferredEntry{Deferral: d, FindingTexts: texts, Findings: findings})
 	}
 	// Voiding a deferral can leave another discharge for the same finding.
 	// Recompute resolution with only the deferrals whose live checks passed.
@@ -108,9 +127,9 @@ func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 	}
 	epic, epicErr := phase.FindEpicBySpecID(reg.Panel.Spec)
 	type checked struct {
-		entry PanelDeferredEntry
-		texts []string
-		err   error
+		entry    PanelDeferredEntry
+		findings []panel.Finding
+		err      error
 	}
 	var checks []checked
 	for _, d := range entries {
@@ -118,35 +137,46 @@ func CheckAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 		if len(texts) == 0 {
 			texts = []string{d.FindingText}
 		}
-		checks = append(checks, checked{d, texts, checkDeferral(reg, d.Deferral, texts, epic, epicErr)})
+		findings := d.Findings
+		if d.Finding != "slot" || len(findings) == 0 {
+			findings = nil
+			for _, text := range texts {
+				f := panel.Finding{Text: text}
+				if d.Finding != "slot" {
+					f.ID, f.SHA256 = d.Finding, d.FindingSHA256
+				}
+				findings = append(findings, f)
+			}
+		}
+		checks = append(checks, checked{d, findings, checkDeferral(reg, d.Deferral, texts, epic, epicErr)})
 	}
 	for _, failed := range checks {
 		if failed.err == nil {
 			continue
 		}
-		needed := map[string]int{}
-		for _, text := range failed.texts {
-			needed[text]++
+		needed := map[panel.Finding]int{}
+		for _, finding := range failed.findings {
+			needed[finding]++
+			// Legacy slot alternatives must also retain text multiplicity.
+			if finding.ID != "" {
+				needed[panel.Finding{Text: finding.Text}]++
+			}
 		}
-		for text, count := range needed {
+		for finding, count := range needed {
 			items := map[string]bool{}
 			slotCount := 0
 			for _, valid := range checks {
 				if valid.err != nil || valid.entry.Slot != failed.entry.Slot || valid.entry.Round != failed.entry.Round {
 					continue
 				}
-				// Item alternatives must cover the same finding and raw text hash.
-				// Two slot records must pin the same list. Mixed records use the
-				// completion-time finding boundaries, never later panel state.
-				if valid.entry.Finding != "slot" && failed.entry.Finding != "slot" && (valid.entry.Finding != failed.entry.Finding || valid.entry.FindingSHA256 != failed.entry.FindingSHA256) {
-					continue
-				}
+				// Old slot records have no member identities. Preserve their text
+				// coverage; new records require both the id and raw-text hash.
 				if valid.entry.Finding == "slot" && failed.entry.Finding == "slot" && valid.entry.FindingSHA256 != failed.entry.FindingSHA256 {
 					continue
 				}
 				matches := 0
-				for _, validText := range valid.texts {
-					if validText == text {
+				for _, f := range valid.findings {
+					if f.Text == finding.Text && (f.ID == "" || finding.ID == "" || (f.ID == finding.ID && f.SHA256 == finding.SHA256)) {
 						matches++
 					}
 				}

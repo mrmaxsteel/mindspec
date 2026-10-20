@@ -498,7 +498,7 @@ func TestComplete_PanelDeferredAuditReplacesStalePending(t *testing.T) {
 }
 
 func TestGateTime_AuditedDeferralAlternateCoverage(t *testing.T) {
-	for _, change := range []string{"slot closed", "only cover closed", "wrong finding", "wrong text", "duplicate text only one cover", "duplicate text both covers"} {
+	for _, change := range []string{"slot closed", "only cover closed", "wrong finding", "wrong text", "partial item cover", "duplicate text only one cover", "duplicate text both covers", "duplicate text legacy slot one cover", "duplicate text legacy slot both covers"} {
 		t.Run(change, func(t *testing.T) {
 			saveAndRestore(t)
 			stubPhaseEpic(t, "130-core3", "epic-130-core3")
@@ -536,6 +536,8 @@ func TestGateTime_AuditedDeferralAlternateCoverage(t *testing.T) {
 			}
 			setDeferredIssue(t, fake, "closed")
 			switch change {
+			case "partial item cover":
+				audit = audit[:2]
 			case "only cover closed":
 				core3JSON(t, fake, "alternate-1.json", []interface{}{map[string]interface{}{"id": "alternate-1", "status": "closed"}})
 			case "wrong finding":
@@ -547,7 +549,7 @@ func TestGateTime_AuditedDeferralAlternateCoverage(t *testing.T) {
 				audit[0].FindingTexts = audit[1].FindingTexts
 				audit[0].FindingSHA256 = audit[1].FindingSHA256
 				core3JSON(t, fake, "alternate-0.json", []interface{}{map[string]interface{}{"id": "alternate-0", "status": "open", "description": audit[1].FindingText, "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
-			case "duplicate text only one cover", "duplicate text both covers":
+			case "duplicate text only one cover", "duplicate text both covers", "duplicate text legacy slot one cover", "duplicate text legacy slot both covers":
 				duplicate := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"second ask", "second ask"}}
 				slot, err := panel.SlotFinding(duplicate)
 				if err != nil {
@@ -563,9 +565,20 @@ func TestGateTime_AuditedDeferralAlternateCoverage(t *testing.T) {
 				audit[0].FindingText = slot.Text
 				audit[0].FindingSHA256 = slot.SHA256
 				audit[0].FindingTexts = []string{items[0].Text, items[1].Text}
+				audit[0].Findings = items
 				audit[1].FindingText = items[0].Text
 				audit[1].FindingSHA256 = items[0].SHA256
 				audit[1].FindingTexts = []string{items[0].Text}
+				if strings.Contains(change, "legacy slot") {
+					audit = audit[:2]
+					audit[1].Finding = "slot"
+					audit[1].FindingText = slot.Text
+					audit[1].FindingSHA256 = slot.SHA256
+					audit[1].Findings = nil
+					if change == "duplicate text legacy slot both covers" {
+						audit[1].FindingTexts = []string{items[0].Text, items[1].Text}
+					}
+				}
 				core3JSON(t, fake, "alternate-0.json", []interface{}{map[string]interface{}{"id": "alternate-0", "status": "open", "description": items[0].Text, "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
 			case "wrong text":
 				core3JSON(t, fake, "alternate-1.json", []interface{}{map[string]interface{}{"id": "alternate-1", "status": "open", "description": "different finding", "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
@@ -573,12 +586,129 @@ func TestGateTime_AuditedDeferralAlternateCoverage(t *testing.T) {
 			// Approval must not reconstruct coverage from later mutable verdicts.
 			core3JSON(t, reg.Dir, "R1-round-1.json", panel.FindingVerdict{Verdict: "APPROVE"})
 			err = CheckAuditedPanelDeferrals(reg, audit)
-			if change == "slot closed" || change == "duplicate text both covers" {
+			if change == "slot closed" || change == "duplicate text both covers" || change == "duplicate text legacy slot both covers" {
 				if err != nil {
 					t.Fatalf("valid item alternatives must cover closed slot: %v", err)
 				}
 			} else if err == nil {
 				t.Fatal("uncovered audited finding must block")
+			}
+		})
+	}
+}
+
+func TestGateTime_AuditedDeferralFindingIdentity(t *testing.T) {
+	for _, change := range []string{"unchanged", "reordered", "raw path changed", "legacy slot"} {
+		t.Run(change, func(t *testing.T) {
+			saveAndRestore(t)
+			stubPhaseEpic(t, "130-core3", "epic-130-core3")
+			fake := deferralBD(t, "epic-130-core3")
+			store := newFakeMetadataStore()
+			store.wire(t)
+			reg := deferredFixture(t, t.TempDir(), false)
+			record := func() []PanelDeferredEntry {
+				t.Helper()
+				if err := checkAndRecordPanelDeferrals("reviewed-bead", deferredResults(t, reg), true); err != nil {
+					t.Fatal(err)
+				}
+				pending, err := DecodePanelDeferred(store.data["reviewed-bead"], "deferral_pending_entries")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range pending {
+					if len(entry.Findings) != len(entry.FindingTexts) || len(entry.Findings) == 0 {
+						t.Fatalf("pending must retain each finding: %+v", entry)
+					}
+				}
+				if err := reconcilePendingDeferrals("reviewed-bead"); err != nil {
+					t.Fatal(err)
+				}
+				audit, err := DecodePanelDeferred(store.data["reviewed-bead"], "panel_deferred_entries")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return audit
+			}
+			if audit := record(); len(audit) != 2 {
+				t.Fatalf("expected original item entries: %+v", audit)
+			}
+			v, err := panel.ReadFindingVerdict(reg.Dir, "R1", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "reordered":
+				v.ConcreteChangesRequired[0], v.ConcreteChangesRequired[1] = v.ConcreteChangesRequired[1], v.ConcreteChangesRequired[0]
+			case "raw path changed", "legacy slot":
+				v.ConcreteChangesRequired[0] = "test finding /tmp/y"
+			}
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			f, err := panel.SlotFinding(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := panel.Deferral{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "alternate-slot", By: "max", CreatedAt: core3Time}
+			reg.Panel.Deferrals = append(reg.Panel.Deferrals, d)
+			core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
+			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+			core3JSON(t, fake, "alternate-slot.json", []interface{}{map[string]interface{}{"id": "alternate-slot", "status": "open", "description": f.Text, "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
+			audit := record()
+			if len(audit) != 3 || len(audit[2].Findings) != 2 {
+				t.Fatalf("audit must retain slot member identities: %+v", audit)
+			}
+			want, err := panel.Findings(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, got := range audit[2].Findings {
+				if got != want[i] {
+					t.Fatalf("audit member %d: got %+v, want %+v", i, got, want[i])
+				}
+			}
+			if change == "legacy slot" {
+				audit[2].Findings = nil
+			}
+			if err := CheckAuditedPanelDeferrals(reg, audit); err != nil {
+				t.Fatalf("open baseline: %v", err)
+			}
+			setDeferredIssue(t, fake, "closed")
+			core3JSON(t, reg.Dir, "R1-round-1.json", panel.FindingVerdict{Verdict: "APPROVE"})
+			err = CheckAuditedPanelDeferrals(reg, audit)
+			if change == "unchanged" || change == "legacy slot" {
+				if err != nil {
+					t.Fatalf("matching alternative must cover original items: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("changed slot member identity must not cover original items")
+			}
+		})
+	}
+}
+
+func TestGateTime_AuditedDeferralScope(t *testing.T) {
+	for _, scope := range []string{"other slot", "other round"} {
+		t.Run(scope, func(t *testing.T) {
+			saveAndRestore(t)
+			stubPhaseEpic(t, "130-core3", "epic-130-core3")
+			fake := deferralBD(t, "epic-130-core3")
+			reg := deferredFixture(t, t.TempDir(), false)
+			d := reg.Panel.Deferrals[0]
+			original := PanelDeferredEntry{Deferral: d, FindingTexts: []string{d.FindingText}}
+			alternative := original
+			alternative.Bead = "alternate-slot"
+			if scope == "other slot" {
+				alternative.Slot = "R2"
+			} else {
+				alternative.Round = 2
+			}
+			core3JSON(t, fake, "alternate-slot.json", []interface{}{map[string]interface{}{"id": "alternate-slot", "status": "open", "description": d.FindingText, "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
+			audit := []PanelDeferredEntry{original, alternative}
+			if err := CheckAuditedPanelDeferrals(reg, audit); err != nil {
+				t.Fatalf("open baseline: %v", err)
+			}
+			setDeferredIssue(t, fake, "closed")
+			if err := CheckAuditedPanelDeferrals(reg, audit); err == nil {
+				t.Fatal("an alternative from another slot or round must not cover the finding")
 			}
 		})
 	}
