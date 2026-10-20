@@ -85,6 +85,9 @@ func panelEvidenceResolves(root, evidence string) bool {
 		candidate = filepath.Join(root, candidate)
 	}
 	if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
+		if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolvedRoot
+		}
 		rel, err := filepath.Rel(root, resolved)
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			if _, err := os.Stat(resolved); err == nil {
@@ -171,6 +174,9 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 		resolved, err := filepath.EvalSymlinks(evidence)
 		if err != nil {
 			return panelVerbFailure(err)
+		}
+		if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolvedRoot
 		}
 		relative, err := filepath.Rel(root, resolved)
 		if err != nil {

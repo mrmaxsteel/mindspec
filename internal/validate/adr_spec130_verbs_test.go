@@ -35,6 +35,10 @@ func TestADRAmendments_Spec130_Verbs(t *testing.T) {
 		t.Fatal("R7 missing")
 	}
 	r7, _, _ = strings.Cut(r7, "### R8")
+	_, r7, ok = strings.Cut(r7, "2. The S0 rule table")
+	if !ok {
+		t.Fatal("R7.2 missing")
+	}
 	if !strings.Contains(r7, "Re-pointed 2026-10-19: the rule table moves to spec 131; #233's reviewed-tree check and #251 move to the spec-129 follow-on") {
 		t.Error("R7.2 status line missing")
 	}

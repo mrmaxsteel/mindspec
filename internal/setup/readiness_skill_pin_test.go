@@ -255,6 +255,20 @@ func TestMsBeadImplSkill_OverrideCoverageCheckShipped(t *testing.T) {
 	}
 }
 
+func TestMsBeadImplSkill_ClaudeCopyMatchesPlugin(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), ".claude", "skills", "ms-bead-impl", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !mutationProbeOverrideCoveragePresent(content) {
+		t.Error("expected the staged ready-check exit-code line immediately after its marker in the Claude copy")
+	}
+	if content != readinessSkillFile(t, "ms-bead-impl") {
+		t.Error("Claude ms-bead-impl copy differs from the plugin copy")
+	}
+}
+
 func TestMsBeadImplSkill_OverrideCoverageMutationProbe(t *testing.T) {
 	content := readinessSkillFile(t, "ms-bead-impl")
 	if !mutationProbeOverrideCoveragePresent(content) {

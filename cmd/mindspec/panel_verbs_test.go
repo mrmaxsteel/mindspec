@@ -207,7 +207,7 @@ func TestPanelRefute_Refusals(t *testing.T) {
 		{name: "INVALID", verdict: &panel.FindingVerdict{Verdict: "INVALID"}},
 		{name: "empty RC", verdict: &panel.FindingVerdict{Verdict: "REQUEST_CHANGES"}},
 		{name: "absent slot", flag: "--slot", value: "R3"},
-		{name: "stale round", flag: "--round", value: "2"},
+		{name: "future round", flag: "--round", value: "2"},
 		{name: "unknown finding", flag: "--finding", value: "ccr[99]"},
 		{name: "empty by", flag: "--by", value: " "},
 		{name: "unresolved evidence", flag: "--evidence", value: "does-not-exist"},
@@ -228,6 +228,24 @@ func TestPanelRefute_Refusals(t *testing.T) {
 			assertPanelRefusal(t, root, args...)
 		})
 	}
+	t.Run("stale round", func(t *testing.T) {
+		root, dir := setupDischarge(t)
+		roster := []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "tests"}}
+		if err := panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: "bead/probe-x.1", Gate: "bead", Round: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Roster: roster, ExpectedReviewers: 2}); err != nil {
+			t.Fatal(err)
+		}
+		for _, slot := range []string{"R1", "R2"} {
+			raw, err := os.ReadFile(filepath.Join(dir, slot+"-round-1.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, slot+"-round-2.json"), raw, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertPanelRefusal(t, root, refuteArgs()...)
+		requirePanelVerb(t, replaceRefuteArg(refuteArgs(), "--round", "2")...)
+	})
 }
 func TestPanelRefute_RedactsPaths(t *testing.T) {
 	_, dir := setupDischarge(t)
@@ -280,6 +298,65 @@ func TestPanelRefute_Evidence(t *testing.T) {
 					t.Fatal("absolute repo evidence must be stored relatively")
 				}
 			}
+		})
+	}
+	for _, absolute := range []bool{false, true} {
+		name := "symlink relative"
+		if absolute {
+			name = "symlink absolute"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, dir := setupDischarge(t)
+			link := filepath.Join(t.TempDir(), "repo")
+			if err := os.Symlink(root, link); err != nil {
+				t.Fatal(err)
+			}
+			withTestChdir(t, link)
+			t.Setenv("PWD", link)
+			if got, err := findRoot(); err != nil || got != link {
+				t.Fatalf("symlink root not exercised: got %q, %v", got, err)
+			}
+			evidence := ".mindspec"
+			if absolute {
+				evidence = filepath.Join(link, evidence)
+			}
+			requirePanelVerb(t, replaceRefuteArg(refuteArgs(), "--evidence", evidence)...)
+			res, err := panel.Tally(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Panel.Refutations) != 1 || res.Panel.Refutations[0].Evidence != ".mindspec" {
+				t.Fatalf("symlink evidence must be stored relatively: %+v", res.Panel.Refutations)
+			}
+		})
+	}
+	for _, name := range []string{"/etc/hosts", "../", "outside file", "blob", "tree"} {
+		t.Run(name, func(t *testing.T) {
+			root, _ := setupDischarge(t)
+			evidence := name
+			switch name {
+			case "outside file":
+				evidence = filepath.Join(t.TempDir(), "proof.txt")
+				if err := os.WriteFile(evidence, []byte("outside proof"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "blob", "tree":
+				subjectCLIGit(t, root, "init")
+				subjectCLIWrite(t, root, "proof.txt", "proof")
+				subjectCLIGit(t, root, "add", "proof.txt")
+				subjectCLIGit(t, root, "commit", "-m", "evidence")
+				object := "HEAD:proof.txt"
+				if name == "tree" {
+					object = "HEAD^{tree}"
+				}
+				evidence = subjectCLIGit(t, root, "rev-parse", object)
+			}
+			if name != "blob" && name != "tree" {
+				if _, err := os.Stat(evidence); err != nil {
+					t.Fatalf("outside evidence must exist: %v", err)
+				}
+			}
+			assertPanelRefusal(t, root, replaceRefuteArg(refuteArgs(), "--evidence", evidence)...)
 		})
 	}
 }
