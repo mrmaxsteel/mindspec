@@ -34,7 +34,9 @@ Defects, each checked on `d15787fd`:
 - **`panel verify` always exits 0** (`cmd/mindspec/panel.go:262`). An orchestrator cannot wait on it.
 - **Root discovery stops at a clone.** `workspace.FindRoot` (`internal/workspace/workspace.go:33`) maps a linked worktree to its main root, but it takes any directory with a real `.git` as the root. A command run inside a slot clone (R6.3) would act on the clone.
 
-This spec changes five spec-130 rules. (1) R2.1 "today's substitution applies unchanged" is replaced: substitution happens only when a runner configures `on_quota` (R4.9). (2) R2.1's zero-config fill uses the runner table (R4.4). (3) R5.3's pinned-field list gains `verdict_schema` (R3.1). (4) R2.4's carried roster gains `family` (R4.8). (5) R5.1's key semantics: the `verdict` key holds a per-slot sequence number, so two submissions never share a key (R2.5).
+This spec changes six spec-130 rules. (1) R2.1 "today's substitution applies unchanged" is replaced: substitution happens only when a runner configures `on_quota` (R4.9). (2) R2.1's zero-config fill uses the runner table (R4.4). (3) R5.3's pinned-field list gains `verdict_schema` (R3.1). (4) R2.4's carried roster gains `family` (R4.8). (5) R5.1's key semantics: the `verdict` key holds a per-slot sequence number, so two submissions never share a key (R2.5). (6) R2.3: when no reviewer list resolves, `--reviewers N` goes round-robin over the merged runner order (R4.4), not over the two-name literal in `config.go:878`.
+
+User documents that describe the removed behavior: `project-docs/user/guides/review-panels.md` (lines 24–26 "two model families", 61–65 `substitution: claude_sub_on_quota`), `README.md` (lines 26, 37, 73 "two model families") and `plugins/mindspec/README.md` (lines 3, 48 "3 Claude + 3 Codex", 135 "`codex` CLI on PATH", 140 quota substitution). R13.7 changes them.
 
 Dependency: #252 (skills cite an ADR) is fixed by a separate surface-leak change. R12 rewrites the same skill files. R12 lands after that change, or includes its edits.
 
@@ -51,7 +53,7 @@ Dependency: #252 (skills cite an ADR) is fixed by a separate surface-leak change
 
 Repository config: this repository's `.mindspec/config.yaml` gains `panel.runners` (R4.13).
 
-Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amendments (R13); `.mindspec/domains/workflow/interfaces.md` § Panel Artifact Schema; `CHANGELOG.md`.
+Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amendments (R13); `.mindspec/domains/workflow/interfaces.md` § Panel Artifact Schema; `CHANGELOG.md`; `project-docs/user/guides/review-panels.md`; `README.md` (panel paragraphs only); `plugins/mindspec/README.md`.
 
 ## ADR Touchpoints
 
@@ -74,7 +76,9 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 - *Submission*: a `verdict` ledger record that `panel submit` (or launch or recover) wrote. Its `seq` is its position among the slot's submissions in the round, from 1.
 - *Latest submission*: the submission with the highest `seq` for a slot and round.
 - *Attempt*: one `started` (process) or `dispatched` (harness) `launch` event. Its number `k` counts all attempts of the slot in the round, from 1.
-- *Effective runner*: the runner of the slot's family, or of the `to_family` of the slot's `substitution` event in the round.
+- *Effective runner*: the runner of the slot's family, or of the `to_family` of the slot's `substitution` event in the round. Its *effective kind* is its `kind`.
+- *Harness redispatch*: the adapter action `panel checkout --slot S`, then `panel prompt --slot S`, then one dispatch of that prompt with the harness's agent tool. The checkout appends a new `dispatched` event (R6.5).
+- *Model-safe value*: a non-empty string that does not start with `-` and holds no whitespace and no control byte.
 
 ### R1 — Verdict schema v2
 
@@ -113,8 +117,9 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
    - a `slot` or `round` field that differs from the target slot and round;
    - a slot that is not on the roster, a round other than `panel.json`'s `round`, or an abandoned panel;
    - a `reviewed_sha` other than the current `reviewed_head_sha`, except for a same-bytes rerun (R2.5);
-   - a `model` other than the slot's effective model (R4.6). The slot prompt states that value;
-   - a CLI submission when the slot's effective runner is a process runner (recovery: `mindspec panel launch` or `mindspec panel recover`).
+   - a `model` other than the slot's effective model (R4.6), or a `model` that is not a model-safe value. The slot prompt states the effective model;
+   - a CLI submission when the slot's effective runner is a process runner (recovery: `mindspec panel launch` or `mindspec panel recover`);
+   - a panel and round that a landed binding names (the bead's `mindspec_landed_review_panel` metadata). The recovery is `mindspec panel create <slug> --round <N+1>`.
 4. A later submission for the same slot and round replaces the earlier one, at any status. The ledger keeps every `verdict` record. The gate reads only the latest submission.
 5. Submit holds the panel ledger lock from the R2.3 checks to the end of the write. Under that lock:
    - when the latest submission has the same `file_sha256`, submit appends no `verdict` record and rewrites the file. This repairs a crash between append and rename. It applies only against the latest submission;
@@ -123,7 +128,9 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
    | `record` | Fields (plus `spec`, `panel`) | Key |
    |:---------|:-------|:----|
-   | `verdict` | slot, round, seq, status, verdict, family, model, via (`direct`, `launch` or `recover`), attempt, reason, file_sha256, created_at | slot, round, seq |
+   | `verdict` | slot, round, seq, status, verdict, family, model, runner_kind, runner_source, via (`direct`, `launch` or `recover`), attempt, reason, file_sha256, created_at | slot, round, seq |
+
+   Submit resolves `runner_kind` (the effective kind) and `runner_source` (`config.yaml`, `config.local.yaml` or `default`) under the ledger lock, from the same config load as the R2.3 process-runner check.
 
 6. The CLI always writes `via: direct`. No flag and no environment variable of `panel submit` sets `via`, `attempt` or `seq`. Launch and recover call the submit path in-process.
 7. Submit prints the slot status (R8) and spec 130's rule line.
@@ -133,7 +140,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. `create` writes `verdict_schema: 2` to `panel.json` and to the `round` event of every new round. No config key or flag changes it. This spec adds `verdict_schema` to spec 130 R5.3's pinned-field list.
 2. The gate takes v2-ness from the latest `round` event only, never from `panel.json`. When an earlier `round` event of the panel has `verdict_schema: 2` and the latest one does not, the gate blocks with a registration error.
-3. On a v2 round, a roster slot is in only when its latest submission is `final`, its verdict is not `VOID`, and the sha256 of `<slot>-round-<N>.json` equals that submission's `file_sha256`.
+3. On a v2 round, a roster slot is in only when its latest submission is `final`, its verdict is not `VOID`, the sha256 of `<slot>-round-<N>.json` equals that submission's `file_sha256`, and no `launch` event other than a `submitted` outcome is later than it in the ledger (R8.2). So a replacement in flight, or one that failed, keeps the slot out.
 4. A verdict file with no matching latest submission counts for nothing. Spec 130 R2.5 (an off-roster REJECT, INVALID or `hard_block` blocks) applies unchanged.
 5. Spec 130's pass rule, discharge rules and coverage manifest use only the slots that are in. A discharge of `ccr[i]` applies while its `finding_sha256` equals the sha256 of `ccr[i]`'s text in the latest submission (spec 130 R7.3, unchanged). A slot-level discharge applies while the slot hash is unchanged (spec 130 R7.4).
 6. A round whose `round` event has no `verdict_schema` keeps spec 130's rules. Such a round only exists from before this change.
@@ -149,11 +156,11 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 5. `TestNoFamilyLiterals` reads the tool names from the R4.12 data file. It checks every Go string literal in non-test files and every shipped data value in `internal/config`, `internal/panel` and `cmd/mindspec/panel*.go`. No match is allowed, with these exemptions:
    - by path: the R4.12 data file;
    - by value: the `runner:` adapter values `claude-code-skills` and `claude-code-workflow`. They name install targets for the skills, not reviewer families;
-   - by value: the frozen historical keys of the rename table in `internal/panel/disposition_migrate.go` (for example `G-codex`). They name panel files that already exist.
+   - by value: the frozen historical keys and values of the rename table in `internal/panel/disposition_migrate.go` (for example the key `G-codex` and the value `G1-codex`). They name panel files that already exist.
 
    `knownModels`, `KnownModels()` and the `config show` known-model warning are deleted. They drive only an advisory warning on an unlisted model id.
-6. Each roster entry gains `family`. `create` takes it from the reviewer entry. A slot's model is the reviewer entry's `model`, else `models["reviewer.<family>"]`, else the family string. The model of a substitute is `models["reviewer.<to_family>"]`, else the to-family string. It never uses the reviewer entry's `model`. The substitution record stores it. The *effective model* is the model of the effective runner.
-7. A reviewer entry with no `family` gets family `harness`. When a reviewer entry names a family with no runner, `create` refuses, `config resolve` refuses, and `doctor` reports an Error. Each names the reviewer entry, with the recovery `add a runner for the family to panel.runners`.
+6. Each roster entry gains `family`. `create` takes it from the reviewer entry. A slot's model is the reviewer entry's `model`, else `models["reviewer.<family>"]`, else the family string. The model of a substitute is `models["reviewer.<to_family>"]`, else the to-family string. It never uses the reviewer entry's `model`. The substitution record stores it. The *effective model* is the model of the effective runner. Load and `create` refuse a model value that is not model-safe, from any source.
+7. A reviewer entry with no `family` gets family `harness`. Its `model` stays its model: the adapter passes it to its agent tool (R9.5). `config resolve` and `doctor` print one Warn for each such entry: `<entry> runs on the harness runner; add a family and a runner to run it elsewhere`. When a reviewer entry names a family with no runner, `create` refuses, `config resolve` refuses, and `doctor` reports an Error. Each names the reviewer entry, with the recovery `add a runner for the family to panel.runners`.
 8. The first v2 round of a panel copies the prior roster (spec 130 R2.4). For a carried slot with no `family`, `create` sets `family` to the slot's model only when a runner has exactly that family. Otherwise `create` refuses. The recovery is `mindspec panel create <slug> --round <N+1> --reviewers <n>`, which takes a fresh roster from config. `create` never changes an earlier round record.
 9. `panel.substitution` is retired. Load refuses a `substitution` key under `panel`, with the recovery `set on_quota on the runner in panel.runners`. Substitution happens only when a runner has `on_quota`.
 10. `.mindspec/config.local.yaml` is optional and machine-local. It can set only `panel.runners` and `models`. It merges after `config.yaml` with the R4.4 rule: a local runner replaces the runner of the same family, or is appended. Every command refuses when the file is over 65536 bytes, does not parse, has another key, or cannot be read for a reason other than absence. `mindspec init` adds the file to `.gitignore`.
@@ -169,7 +176,11 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
         argv: [codex, exec, --skip-git-repo-check, -s, workspace-write, -m, "{model}", -C, "{slot_dir}", "-"]
         prompt: stdin
         output: stdout
+        quota_signals: ["ERROR: You've hit your usage limit"]
+        on_quota: claude
     ```
+
+    The quota string is the literal that `ms-panel-run` uses today. Panels in this repository run with the installed release binary, not a spec-branch build. So this spec's own bead and final panels run on the released binary until the spec merges. Config load does not refuse unknown keys (`yaml.Unmarshal` in `config.go`), so a released binary ignores `panel.runners`, and the block can also land on `main` before the spec merges.
 
 ### R5 — Lenses and acceptance questions as config
 
@@ -209,20 +220,23 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 2. `panel checkout` and `panel launch` refuse when a component of the resolved root is a symlink, and when `git check-ignore` does not ignore the root (recovery: `mindspec init`). `mindspec init` adds the effective isolation root (configured or default) to `.gitignore`, on a new or an existing install.
 3. A slot directory is `<isolation_root>/<spec or adhoc>/<slug>/r<N>/<slot>/`. It holds `slot.json`, `prompt.md` and `tree/`. `slot.json` records the spec, slug, round, slot and the absolute main root. `tree/` is `git clone --shared --no-checkout` of the repository, then a detached checkout of the reviewed SHA, then removal of the `origin` remote. The clone's git directory is inside `tree/`, so a reviewer CLI that may write only under its cwd can run git in the tree.
 4. `mindspec panel checkout <slug> (--slot S | --all) [--spec ID]` creates slot directories and prints each absolute path. A rerun reuses a directory whose tree `HEAD` is the reviewed SHA. It refuses an abandoned panel, an off-roster slot, a slot whose lock is held (R7.2), and a tree at another SHA (recovery: `mindspec panel checkout <slug> --prune --slot S`).
+   - Before it reuses a tree, checkout `lstat`s `tree/` and `tree/.git`. Each must be a real directory, not a symlink and not a file. Else checkout refuses with the same `--prune --slot` recovery.
+   - Every git call of the binary in an existing tree runs with `-c core.fsmonitor=false -c core.hooksPath=/dev/null` and with `GIT_CONFIG_NOSYSTEM=1`.
+   - Every git call of the binary for a slot (clone, checkout, remote, check) and every reviewer process run with git's repository-locating variables removed from the environment: each name that `git rev-parse --local-env-vars` prints (for example `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_CONFIG*`).
 5. For a slot whose effective runner is a harness runner, `panel checkout --slot S` also appends a `launch` event with status `dispatched` and the next attempt number.
 6. `panel checkout <slug> --fixer` creates `<…>/r<N>/fixer/` with no tree. It is scratch only. The fixer works in the target's own worktree: the bead worktree for a bead panel, the spec worktree for a final review.
-7. `panel checkout <slug> --prune [--slot S]` removes the checkouts of the panel, or of one slot. `create` for round N+1 removes the panel's checkouts of earlier rounds. `abandon` removes all. Removal deletes the directory, dirty or not, under the verified root, and does not follow symlinks.
+7. `panel checkout <slug> --prune [--slot S]` removes the checkouts of the panel, or of one slot. `create` for round N+1 removes the panel's checkouts of earlier rounds. `abandon` removes all. Removal deletes the directory, dirty or not, under the verified root, and does not follow symlinks. Before it changes anything, each of these three verbs takes the lock of every affected slot, without waiting, in sorted slot-name order, and before the ledger lock. When a lock is held, the verb refuses, changes nothing, and names each held slot (recovery: `mindspec panel verify`).
 8. These walks skip the resolved isolation root: panel registration lookup, the `doctor` ownership walk, the `doctor` links walk, and the `migrate` walks. No ledger record contains an isolation-root path.
 9. Root discovery. When the cwd is in a slot directory or under it, every `mindspec panel` verb and `mindspec rules` take the main root from the slot directory's `slot.json`. The slot directory is the nearest ancestor of the cwd that holds both `slot.json` and `tree/`. The verb refuses unless the slot directory path is exactly `<main root>/<isolation_root>/<spec>/<slug>/r<N>/<slot>`, with the isolation root that the main root's config resolves, and unless `slot.json` names the same spec, slug, round and slot. These verbs never use the clone as the root. Every other `mindspec` command run under `tree/` acts on the clone; a reviewer can use this to probe the reviewed code.
 
 ### R7 — `panel launch` and `panel recover`
 
-1. `mindspec panel launch <slug> <slot> [--spec ID] [--replace]` starts the slot's effective process runner and waits. It refuses: a slot whose effective runner is a harness runner (recovery: `mindspec panel prompt`); an abandoned panel; a round that is not a v2 round; a slot whose latest submission is final, unless `--replace` is set; a slot whose lock another process holds (recovery: `mindspec panel verify`).
-2. Launch takes an exclusive lock file in the slot directory and holds it until it exits. Lock order: the slot lock first, then the panel ledger lock for each append. No verb takes them in the other order. Under the slot lock, launch first ensures the R6 checkout at the reviewed SHA, with the R6.2 and R6.4 refusals. Each start is a new attempt `k`, in `attempt-<k>/` in the slot directory. Launch never reads files of an earlier attempt.
+1. `mindspec panel launch <slug> <slot> [--spec ID] [--replace]` starts the slot's effective process runner and waits. It refuses: a slot whose effective runner is a harness runner (recovery: `mindspec panel prompt`); an abandoned panel; a round that is not a v2 round; a slot whose latest submission is final with a verdict other than `VOID`, unless `--replace` is set (a final `VOID` needs no `--replace`); a slot whose lock another process holds (recovery: `mindspec panel verify`).
+2. Launch takes an exclusive lock file in the slot directory and holds it until it exits. Lock order: the slot lock first, then the panel ledger lock for each append. No verb takes them in the other order. Under the slot lock, launch first ensures the R6 checkout at the reviewed SHA, with the R6.2 and R6.4 refusals. When the slot's latest `started` event has no outcome event (an orphan of a killed launch), launch sends SIGKILL to the process group that the event records, and appends a `launch_failed` outcome for it, before it starts a new attempt. Each start is a new attempt `k`, in `attempt-<k>/` in the slot directory. Launch never reads files of an earlier attempt.
 3. For each attempt, launch:
    - creates a random nonce and writes `prompt.md` with it (R9.4);
-   - appends a `launch` event with status `started`, `attempt`, `runner_source`, `argv_sha256` and `nonce_sha256`;
-   - runs `argv` with no shell, with the slot directory as cwd, and with every `MINDSPEC_` variable removed from the environment;
+   - starts `argv` with no shell, in a new process group, with the slot directory as cwd, and with every `MINDSPEC_` variable and every R6.4 git variable removed from the environment;
+   - appends a `launch` event with status `started`, `attempt`, `pgid`, `runner_kind`, `runner_source`, `argv_sha256` (the sha256 of the argv template before expansion) and `nonce_sha256`;
    - writes stdout to `attempt-<k>/stdout.log` and stderr to `attempt-<k>/stderr.log`;
    - kills the process group at `timeout_minutes`.
 4. When the process ends, launch appends one outcome event with `stdout_sha256`, `stderr_sha256` and, when `attempt-<k>/verdict.json` exists, `verdict_sha256`:
@@ -235,7 +249,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
    | `record` | Fields (plus `spec`, `panel`) | Key |
    |:---------|:-------|:----|
-   | `launch` | slot, round, attempt, family, model, status, seq, exit_code, runner_source, argv_sha256, nonce_sha256, stdout_sha256, stderr_sha256, verdict_sha256, created_at | slot, round, attempt, status |
+   | `launch` | slot, round, attempt, family, model, status, seq, exit_code, pgid, runner_kind, runner_source, argv_sha256, nonce_sha256, stdout_sha256, stderr_sha256, verdict_sha256, created_at | slot, round, attempt, status |
    | `substitution` | slot, round, from_family, to_family, model, created_at | slot, round |
 
 7. Launch exits 0 only when it recorded `submitted` for a `final` verdict. Otherwise it exits non-zero and prints the slot status.
@@ -249,7 +263,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. `panel verify` gives each roster slot one status from this closed set: `final`, `damaged`, `void`, `draft`, `running`, `quota_wall`, `launch_failed`, `malformed`, `unsubmitted`, `missing`.
 2. On a v2 round, the status comes from the first rule that applies:
-   - the latest submission is final and not `VOID`: `final` when the file matches its `file_sha256`, else `damaged` (recovery: `mindspec panel submit` with the original bytes, or `mindspec panel recover`);
+   - the latest submission is final and not `VOID`, and no `launch` event other than a `submitted` outcome is later than it in the ledger: `final` when the file matches its `file_sha256`, else `damaged` (recovery: `mindspec panel submit` with the original bytes, or `mindspec panel recover`);
    - a verdict file exists whose sha256 matches no latest submission: `unsubmitted`;
    - the latest event among the slot's submissions and `launch` events decides:
      - a submission, or a `submitted` outcome (through the submission its `seq` names): `void` for `VOID`, `draft` for `draft`;
@@ -257,13 +271,16 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
      - `dispatched`: `launch_failed` when the harness runner has `timeout_minutes` and the event is older than that limit, else `running`;
      - `quota_wall`, `launch_failed` and `malformed`: their own names;
    - with no such event: `missing`.
-3. Annotations, advice only, never a gate input:
+
+   So a replacement in flight (a `started` event under a held lock, or a `dispatched` event, after the latest final submission) gives `running`. A replacement that ends with no submission gives its own outcome status (for example `launch_failed`), never the earlier `final`. The earlier final counts again only when a later rule run gives `final`, for example after a submission.
+3. Annotations, advice only, never a gate input. Each comes from ledger records, not from the current config:
    - `substituted <from>-><to>` for a slot with a substitution;
-   - `local runner` when the effective runner comes from `config.local.yaml`;
-   - `replaced <old>-><new>` when the latest submission replaced a final submission with `REQUEST_CHANGES`, `REJECT` or `hard_block`. `tally` prints one line for each such slot.
+   - `local runner` when the latest submission's `runner_source` is `config.local.yaml`;
+   - `direct on process family` when a submission of the round has `via: direct` and the slot's family has a process runner in the current config;
+   - `replaced <old>-><new>` when any earlier final submission of the slot in the round has `REQUEST_CHANGES`, `REJECT` or `hard_block`, and the latest submission has none of them. `<old>` is the verdict of the most recent such submission. `tally` prints one line for each such slot.
 4. On another round, a parseable verdict file gives `final`, an unparseable file gives `malformed`, and no file gives `missing`.
-5. `--json` prints, for each slot: slot, family, model, lens, effective kind, status, and annotations. Adapters take the roster of an existing panel from this output.
-6. Exit codes: 0 when every slot is `final`; 1 when a slot is `running` or `missing`, or is `draft` with a harness effective runner; 2 in every other case. Verify prints the rule line and the PASS/BLOCK preview, and writes nothing. It tests the slot lock without waiting and without taking it.
+5. `--json` prints, for each slot: slot, family, model, lens, effective kind, status, annotations, and `handoff_pending`. `handoff_pending` is true when the slot has a `substitution` event to a family with a harness runner and no `dispatched` event after it. Adapters take the roster of an existing panel, and the column of the R12.1 table, from this output.
+6. Exit codes: 0 when every slot is `final`; 1 when a slot is `running` or `missing`, is `draft` with a harness effective runner, or is `quota_wall` with `handoff_pending`; 2 in every other case. Verify prints the rule line and the PASS/BLOCK preview, and writes nothing. It tests the slot lock without waiting and without taking it.
 7. Every reviewer-supplied string that submit, verify, prompt, launch or recover prints goes through `termsafe`.
 
 ### R9 — BRIEF and slot prompt (#254)
@@ -280,9 +297,9 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
    - the slot's id, effective family, effective model (the value for `model`), lens and focus;
    - the absolute slot directory and tree;
    - the output instruction for the effective runner: the nonce marker lines, `verdict.json`, or the `panel submit` command;
-   - from round 2, the slot's own prior-round items, each to grade ADDRESSED, PARTIAL, MISSED or NEW_ISSUE;
+   - from round 2, the slot's own prior-round items, each to grade ADDRESSED, PARTIAL, MISSED or NEW_ISSUE. On a v2 prior round, the items are the `concrete_changes_required` texts of the slot's latest submission. On a prior round with no `verdict_schema`, they are the parsed `concrete_changes_required` of `<slot>-round-<N-1>.json`; an unparseable or absent file gives `no prior-round items`;
    - the instruction to write scratch only in the slot directory.
-5. When a harness slot's model equals its family string (the zero-config case), the adapter dispatches with the harness's default model. The verdict `model` is still the slot model, as a label.
+5. The adapter passes the slot's effective model to its agent tool. When the tool cannot run that model, the adapter reports the slot and does not run it on another model. When the effective model equals the family string (the zero-config case), the adapter dispatches with the harness's default model, and the verdict `model` is the slot model, as a label.
 
 ### R10 — Rule table
 
@@ -322,7 +339,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. For each process runner that a resolved roster of any gate uses, `doctor` checks that `argv[0]` is on `PATH`. A failure is an Error.
 2. `doctor` runs a runner's `probe` only when the runner comes from `config.local.yaml` and `git ls-files` does not track that file, or under `doctor --probe`. A probe must exit 0 within 10 seconds, else Error. A probe that plain `doctor` does not run gets one Info line that says so.
-3. `doctor` prints the R4.12 tool suggestion as Info, and the R4.7 family Error.
+3. `doctor` prints the R4.12 tool suggestion as Info, the R4.7 family Error, and the R4.7 model-only Warn.
 4. When config does not load (for example, the retired `panel.substitution`, or an R4.10 local-file refusal), `doctor` reports the load error as one Error with its recovery.
 5. `doctor` warns when `.mindspec/config.local.yaml` is tracked, and when an existing config file or the effective isolation root is not ignored (recovery: `mindspec init`).
 6. `doctor` warns about each staged-rule marker in an installed skill that has no id, an unknown id, or a past `remove-by` date. It lists the rules whose `enforced_by` is not `advisory` (Info).
@@ -333,15 +350,17 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 1. Both copies of `ms-panel-run` have at most 80 lines. For each `runner:` value:
    - `claude-code-workflow`: run the `/ms-panel` workflow once with `{slug, spec, target, bead_id, round}`;
-   - `claude-code-skills` and `external`: `panel create`; `panel verify --json` for the roster; act on each slot by the table below; run `panel verify` again after each process or agent ends; on exit 0, run `ms-panel-tally`.
+   - `claude-code-skills` and `external`: `panel create`; `panel verify --json` for the roster; act on each slot by the table below; run `panel verify --json` again after each process or agent ends; on exit 0, run `ms-panel-tally`.
+
+   The column is the slot's effective kind in the latest `verify --json` output. "Once" counts per slot and round: after one retry action, the next non-final, non-running status is reported, not retried. *Redispatch* is the harness redispatch (Terms).
 
    | Status | Process slot | Harness slot |
    |:-------|:-------------|:-------------|
-   | `missing` | `panel launch` in the background | `panel checkout --slot`, `panel prompt --slot`, dispatch with this harness's agent tool |
-   | `running` | wait | wait for the agent |
-   | `draft`, `unsubmitted`, `void` | `panel launch` once more, then report | after the agent returns: dispatch once more with `panel prompt --slot`, then report |
-   | `launch_failed`, `malformed` | `panel launch` once more, then report | dispatch once more, then report |
-   | `quota_wall` | with a harness substitute: `panel checkout --slot`, `panel prompt --slot`, dispatch; else report | report |
+   | `missing` | `panel launch` in the background | redispatch |
+   | `running` | wait | wait while the agent runs; when the agent has returned and the slot is still `running`, redispatch once, then report |
+   | `draft`, `unsubmitted`, `void` | `panel launch` once more, then report | redispatch once, then report |
+   | `launch_failed`, `malformed` | `panel launch` once more, then report | redispatch once, then report |
+   | `quota_wall` | report (a harness substitute shows the harness column) | with `handoff_pending`: redispatch; else report |
    | `damaged` | `panel recover`, then report | report |
 
 2. Both copies of `ms-panel-tally` have at most 80 lines. Each current section is kept short or replaced:
@@ -361,7 +380,7 @@ Documentation surfaces: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 amen
 
 3. No copy of `ms-panel-run`, `ms-panel-tally`, `ms-bead-fix`, `ms-spec-final-review`, `ms-bead-cycle` or `ms-bead-impl` contains `/tmp`. None contains a tool family name, except the harness's own name in a path such as `.claude/` and the R4.5 `runner:` values. These skills contain no lens table, no size ladder and no failure-detection section. They cite rule ids for conduct. `ms-bead-cycle`'s family table becomes family-neutral.
 4. `ms-spec-final-review` uses `panel checkout --slot` for isolated reviewer work. `ms-bead-fix` uses `panel checkout --fixer` for scratch and dispatches the fixer in the target's own worktree (R6.6).
-5. Both copies of `ms-panel.js` name no tool family. `ALLOWED_CLI` is exactly `mindspec panel create`, `mindspec panel verify`, `mindspec panel tally`, `mindspec panel launch`, `mindspec panel checkout` and `mindspec panel prompt`. `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder go. The workflow takes the roster from `panel verify --json` after `create` and follows the R12.1 table. A harness reviewer runs `mindspec panel submit` itself, as its prompt says.
+5. Both copies of `ms-panel.js` name no tool family. `ALLOWED_CLI` is exactly `mindspec panel create`, `mindspec panel verify`, `mindspec panel tally`, `mindspec panel launch`, `mindspec panel checkout`, `mindspec panel prompt`, `mindspec panel submit` and `mindspec panel recover`. `buildCommand` builds each one with fixed flags; `submit` takes only `--file <path>` and uses the short form from the slot directory (R2.2). `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder go. The workflow takes the roster from `panel verify --json` after `create` and follows the R12.1 table. A harness reviewer step submits through a `buildCommand` `panel submit` call. It never writes a verdict file with the Write tool, as the reviewer steps of today's `ms-panel.js` do.
 6. `plugins/mindspec/scripts/codex_verdict_extract.sh` is deleted. `panel recover` replaces it.
 7. `setup`'s historical skill snapshots gain the replaced versions of every R12.3 skill, so an unmodified installed copy refreshes.
 
@@ -391,7 +410,11 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
    - `panel.substitution` is retired; use `on_quota` on a runner;
    - the `panel verify` exit codes;
    - the new spec and plan default lenses;
-   - the first-v2-round roster recovery.
+   - the first-v2-round roster recovery;
+   - a model-only reviewer entry now runs on the harness with its model, and `config resolve` and `doctor` warn about it (R4.7).
+7. User documents:
+   - `project-docs/user/guides/review-panels.md`: zero config is one harness family; `panel.runners`, with an `on_quota` example, replaces `panel.substitution`; reviewers use `panel submit`; the R8.1 statuses and R8.6 exit codes of `panel verify`;
+   - `README.md` (panel paragraphs only) and `plugins/mindspec/README.md`: no claim that a panel has two model families or a fixed family split, and no requirement for a named reviewer CLI. The plugin README describes `on_quota` in place of the quota substitution paragraph.
 
 ## Scope
 
@@ -429,9 +452,11 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - with a crash injected after the append and before the rename, a same-bytes rerun makes the slot `final` and adds no record;
   - two concurrent submits for one slot leave one file whose sha256 equals the latest record;
   - a CLI submit on a process slot refuses; `panel submit --via launch` is an unknown flag; a `model` other than the effective model refuses;
-  - `panel disposition append` refuses each new kind.
+  - `panel disposition append` refuses each new kind;
+  - a submit to a panel and round that a bead's `mindspec_landed_review_panel` names refuses, and the recovery names `--round`;
+  - a local file flips family `b` to a harness runner, a direct submit for a `b` slot succeeds with `runner_source: config.local.yaml`, then the local file is deleted: verify still shows `local runner` and `direct on process family`.
 
-  Tests: `TestPanelSubmit_Writes`, `TestPanelSubmit_Refusals`, `TestPanelSubmit_Replace`, `TestPanelSubmit_ABA`, `TestPanelSubmit_CrashRepair`, `TestPanelSubmit_Race`, `TestPanelSubmit_NoViaFlag`, `TestDispositionAppend_RefusesV2Kinds`.
+  Tests: `TestPanelSubmit_LandedBindingRefused`, `TestPanelVerify_AnnotationsFromRecords`, `TestPanelSubmit_Writes`, `TestPanelSubmit_Refusals`, `TestPanelSubmit_Replace`, `TestPanelSubmit_ABA`, `TestPanelSubmit_CrashRepair`, `TestPanelSubmit_Race`, `TestPanelSubmit_NoViaFlag`, `TestDispositionAppend_RefusesV2Kinds`.
 - [ ] **AC-4 (R3)**: On a v2 round with 4 roster slots:
   - 4 submitted final APPROVE files pass;
   - a hand-written file in place of a submission blocks, and verify shows `unsubmitted`;
@@ -446,25 +471,25 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 
   Tests: `TestGateV2_SubmittedOnly`, `TestGateV2_DigestBinding`, `TestGateV2_DraftAndVoidMissing`, `TestGateV2_ReplacementAndDischarge`, `TestGateV2_DischargePositional`, `TestGate_VerdictSchemaPinned`, `TestGate_PreV2RoundKeepsV1Rules`, `TestCreate_AlwaysV2`.
 - [ ] **AC-5 (R4.1–R4.5, R4.9)**:
-  - load refuses: a duplicate family; a harness runner with `argv`; a process runner without `output`; `prompt: file` without `{prompt_file}`; a `{shell}` placeholder; `x{tree}`; `argv[0]` = `{tree}/run`; `on_quota` set to its own family; `panel.substitution` (the recovery names `on_quota`);
+  - load refuses: a duplicate family; a harness runner with `argv`; a process runner without `output`; `prompt: file` without `{prompt_file}`; a `{shell}` placeholder; `x{tree}`; `argv[0]` = `{tree}/run`; `on_quota` set to its own family; `panel.substitution` (the recovery names `on_quota`); `models: {reviewer.b: "--x"}`, a model with a space, and an empty model; `create` refuses a reviewer entry `model: "-x"`;
   - a process runner with no `timeout_minutes` has a 60-minute limit;
   - zero-config `bead` gives 4 slots, all family `harness`;
   - config runners `a` and `b` and no reviewers give `bead` slots harness, a, b, harness; a config runner `{family: harness, kind: process, …}` replaces the default;
-  - `TestNoFamilyLiterals` finds no tool name from the data file in the R4.5 paths outside the exemptions; a planted literal `"codex"` in `internal/panel` fails it; `KnownModels` does not exist.
+  - `TestNoFamilyLiterals` finds no tool name from the data file in the R4.5 paths outside the exemptions, and passes on the rename-table value `G1-codex`; a planted literal `"codex"` in `internal/panel` fails it; `KnownModels` does not exist.
 
-  Tests: `TestRunners_Validate`, `TestRunners_TimeoutDefault`, `TestRunners_ZeroConfigHarness`, `TestRunners_MergeByFamily`, `TestSubstitution_Retired`, `TestNoFamilyLiterals`.
+  Tests: `TestModelValue_Refusals`, `TestRunners_Validate`, `TestRunners_TimeoutDefault`, `TestRunners_ZeroConfigHarness`, `TestRunners_MergeByFamily`, `TestSubstitution_Retired`, `TestNoFamilyLiterals`.
 - [ ] **AC-6 (R4.6–R4.13)**:
   - `create` writes `family` on each roster entry; a slot with only `family: b` and `models: {reviewer.b: m1}` has model `m1`;
-  - a model-only reviewer entry gets family `harness`;
+  - a model-only reviewer entry `{model: m7}` gets family `harness` and model `m7`; `config resolve` and `doctor` each print one Warn for it with `add a family and a runner`;
   - a config with `{family: x}` and no runner `x`: `create` refuses, `config resolve` refuses, and `doctor` gives an Error; each recovery names `panel.runners`;
   - a substitution from `a` (entry model `m1`) to `b` with `models: {reviewer.b: m2}` records model `m2`; with no such key, model `b`;
   - a pre-change panel whose roster has model `harness` and no family gets family `harness` at its first v2 round; one with model `m9` and no runner `m9` refuses with `--reviewers`; earlier round records stay byte-identical;
   - a local file that replaces runner `b` changes `config resolve` output, and the source column says `config.local.yaml`;
   - a local file with `loop:`, a 65537-byte local file, and an unparseable local file each make `mindspec config show` refuse;
   - with a listed tool command on `PATH` and no runner for it, `config resolve` prints one suggestion line; without it, none;
-  - this repository's `.mindspec/config.yaml` loads, and `config resolve --gate bead` gives no refusal.
+  - this repository's `.mindspec/config.yaml` loads, `config resolve --gate bead` gives no refusal, and the `codex` runner has the R4.13 `quota_signals` and `on_quota: claude`.
 
-  Tests: `TestRoster_Family`, `TestSlotModelResolution`, `TestReviewer_ModelOnlyIsHarness`, `TestCreate_RefusesUnrunnableFamily`, `TestSubstituteModel`, `TestCreate_FirstV2RoundFamily`, `TestLocalConfig_Merge`, `TestLocalConfig_Refusals`, `TestConfigResolve_Provenance`, `TestConfigResolve_ToolSuggestion`, `TestRepoConfig_Resolves`.
+  Tests: `TestRoster_Family`, `TestSlotModelResolution`, `TestReviewer_ModelOnlyIsHarness`, `TestReviewer_ModelOnlyWarn`, `TestCreate_RefusesUnrunnableFamily`, `TestSubstituteModel`, `TestCreate_FirstV2RoundFamily`, `TestLocalConfig_Merge`, `TestLocalConfig_Refusals`, `TestConfigResolve_Provenance`, `TestConfigResolve_ToolSuggestion`, `TestRepoConfig_Resolves`.
 - [ ] **AC-7 (R5)**: Zero-config `spec_approve` slots get the four document lenses in order, then repeat. Zero-config `bead` slots get the first four R5.4 lenses. A gate entry with only `lenses` loads. Load refuses `panel.gates.bead.lenses: [nope]`. The BRIEF of each gate holds its R5.5 question. No default focus text contains a tool, language or library name. Tests: `TestLenses_GateDefaults`, `TestLenses_LensOnlyGateEntry`, `TestLenses_UnknownRefused`, `TestBrief_AcceptanceRegion`.
 - [ ] **AC-8 (R6)**:
   - `panel checkout --all` on a 4-slot panel creates 4 slot directories, each with `slot.json` (with the main root) and a `tree/` whose `HEAD` is the reviewed SHA; a rerun changes nothing; `git -C tree remote` prints nothing;
@@ -474,9 +499,12 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - a harness slot checkout appends one `dispatched` event;
   - load refuses an empty, absolute, `.`, `.git/x`, `.worktrees/x` and tracked root; checkout refuses a symlinked root and a non-ignored root (recovery `mindspec init`);
   - on an existing install, `mindspec init` adds the default ignore line; with `panel.isolation_root: review-scratch`, it adds `review-scratch`, and checkout then succeeds;
-  - a `panel.json` and an OWNERSHIP-matching file under the root are not seen by `panel tally`, the `doctor` ownership walk or the links walk.
+  - a `panel.json` and an OWNERSHIP-matching file under the root are not seen by `panel tally`, the `doctor` ownership walk or the links walk;
+  - a `tree/.git` that is a gitdir file, and a `tree/` that is a symlink, each make checkout refuse with `--prune --slot`; a `core.fsmonitor` command set in the tree's git config, which writes a marker file, does not run on a checkout rerun;
+  - with `GIT_DIR` set to the main repository's git directory in the caller's environment, checkout creates the clone in the slot, the fake reviewer child sees no `GIT_` variable from `git rev-parse --local-env-vars`, and `git stash` in the tree leaves the main refs unchanged;
+  - while a fake runner blocks under a held slot lock: `checkout --prune`, `create --round 2` and `abandon` each refuse, name the held slot, and change no file and no ledger record.
 
-  Tests: `TestPanelCheckout_Creates`, `TestPanelCheckout_GitStaysInSlot`, `TestPanelCheckout_NoOrigin`, `TestPanelCheckout_Refusals`, `TestPanelCheckout_Prune`, `TestPanelCheckout_HarnessDispatched`, `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`.
+  Tests: `TestPanelCheckout_TreeLstat`, `TestPanelCheckout_NoFsmonitor`, `TestPanelCheckout_GitEnvScrubbed`, `TestPanelCleanup_RefusesHeldLock`, `TestPanelCheckout_Creates`, `TestPanelCheckout_GitStaysInSlot`, `TestPanelCheckout_NoOrigin`, `TestPanelCheckout_Refusals`, `TestPanelCheckout_Prune`, `TestPanelCheckout_HarnessDispatched`, `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`.
 - [ ] **AC-9 (R6.9)**: With a REAL slot clone of a fixture repository:
   - `mindspec panel submit --file v.json` run from `<slot_dir>/tree/sub/` appends to the main ledger and writes the main verdict file; the clone's `.mindspec/` stays byte-identical;
   - the long form run from `tree/sub/` does the same;
@@ -498,21 +526,25 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - two launches that return the same draft give `draft`, not `running`; the same holds for two identical `VOID` verdicts; a harness redispatch (`checkout --slot`) followed by the same draft gives `draft`;
   - the child environment holds no `MINDSPEC_` variable;
   - a second concurrent launch of the slot refuses; a harness slot refuses, naming `panel prompt`;
-  - launch exits 0 only for a submitted final; no ledger record contains the isolation root.
+  - launch exits 0 only for a submitted final; no ledger record contains the isolation root;
+  - a final `VOID`, then the R12.1 relaunch without `--replace`, starts attempt 2; a final APPROVE from it makes verify exit 0, and tally runs;
+  - launch is killed with SIGKILL while the fake reviewer sleeps; a second launch kills the orphan process group first (its marker file stops growing) and appends `launch_failed` for attempt 1 before it starts attempt 2;
+  - quota handoff, end to end: a process slot with `on_quota` to a harness family hits `quota_wall`; verify `--json` gives kind `harness`, status `quota_wall` and `handoff_pending: true`, and exits 1; the R12.1 harness column redispatches; a fake harness agent submits; the slot is `final`. The same holds through the workflow fixture of AC-15.
 
-  Tests: `TestPanelLaunch_AdapterE2E`, `TestPanelLaunch_Outcomes`, `TestPanelLaunch_Channels`, `TestPanelLaunch_Retry`, `TestPanelLaunch_Substitution`, `TestPanelLaunch_DraftAndVoid`, `TestPanelLaunch_IdenticalResubmit`, `TestPanelLaunch_Env`, `TestPanelLaunch_Refusals`, `TestPanelRecover_Stdout`, `TestPanelRecover_File`, `TestLedger_NoScratchPaths`.
+  Tests: `TestPanelLaunch_VoidRetry`, `TestPanelLaunch_KillsOrphan`, `TestPanelLaunch_QuotaHandoffE2E`, `TestPanelLaunch_AdapterE2E`, `TestPanelLaunch_Outcomes`, `TestPanelLaunch_Channels`, `TestPanelLaunch_Retry`, `TestPanelLaunch_Substitution`, `TestPanelLaunch_DraftAndVoid`, `TestPanelLaunch_IdenticalResubmit`, `TestPanelLaunch_Env`, `TestPanelLaunch_Refusals`, `TestPanelRecover_Stdout`, `TestPanelRecover_File`, `TestLedger_NoScratchPaths`.
 - [ ] **AC-11 (R8)**:
   - a fixture with one slot in each R8.1 status gives that status;
   - a launch killed with SIGKILL (a `started` event and a free slot lock) gives `launch_failed`, and verify exits 2;
   - a `dispatched` slot with a hand-written verdict file gives `unsubmitted`;
   - a `dispatched` slot whose harness runner has `timeout_minutes: 1` and an event 2 minutes old gives `launch_failed`;
-  - an APPROVE that replaced a final REQUEST_CHANGES shows `replaced REQUEST_CHANGES->APPROVE`, and `tally` prints one line for it;
+  - an APPROVE that replaced a final REQUEST_CHANGES shows `replaced REQUEST_CHANGES->APPROVE`, and `tally` prints one line for it; final RC, then APPROVE, then a different APPROVE still shows `replaced REQUEST_CHANGES->APPROVE`;
+  - a final APPROVE, then `launch --replace` while the fake runner holds the lock, gives `running`, verify exits 1, and the gate blocks; when that replacement ends with exit 1, the slot is `launch_failed`, not `final`; a harness `checkout --slot` after a final APPROVE gives `running`;
   - verify exits 0 when every slot is `final`, 1 with one `running` slot, and 2 with one `launch_failed` slot and no pending slot;
   - a v1 round with all files parseable exits 0;
   - `--json` gives the same statuses and each slot's family, model, lens and kind;
   - an ESC byte in a verdict `model` is escaped in verify output; verify writes nothing.
 
-  Tests: `TestPanelVerify_SlotStatus`, `TestPanelVerify_KilledLaunch`, `TestPanelVerify_DispatchedUnsubmitted`, `TestPanelVerify_HarnessTimeout`, `TestPanelVerify_Replaced`, `TestPanelVerify_ExitCodes`, `TestPanelVerify_V1Round`, `TestPanelVerify_JSONRoster`, `TestPanelVerify_Termsafe`.
+  Tests: `TestPanelVerify_SlotStatus`, `TestPanelVerify_KilledLaunch`, `TestPanelVerify_DispatchedUnsubmitted`, `TestPanelVerify_HarnessTimeout`, `TestPanelVerify_Replaced`, `TestPanelVerify_ReplacementInFlight`, `TestPanelVerify_ExitCodes`, `TestPanelVerify_V1Round`, `TestPanelVerify_JSONRoster`, `TestPanelVerify_Termsafe`.
 - [ ] **AC-12 (R9)**: A spec fixture whose AC section holds an ADR citation, `.mindspec/domains/x.md`, a file to create and a file to delete:
   - `create` succeeds, and the BRIEF quotes the section verbatim inside its fence;
   - outside the quotation, the BRIEF contains no `.mindspec/domains/` and no internal reference;
@@ -520,9 +552,9 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - the verdict contract names `mindspec panel submit`;
   - a template path absent at the reviewed SHA makes `create` refuse;
   - a spec with no AC section renders `no acceptance criteria section found`; an ESC byte in an AC is escaped;
-  - `panel prompt` for a process slot names the nonce marker lines; for a harness slot it names `panel submit`; at round 2 it lists that slot's round-1 items only, with an ESC byte escaped.
+  - `panel prompt` for a process slot names the nonce marker lines; for a harness slot it names `panel submit`; at round 2 it lists that slot's round-1 items only, with an ESC byte escaped; when round 1 has no `verdict_schema`, the items come from the parsed round-1 file.
 
-  Tests: `TestBrief_QuotedACs`, `TestBrief_Regions`, `TestBrief_PathCheck`, `TestPanelPrompt_Render`, `TestPanelPrompt_PriorRound`.
+  Tests: `TestBrief_QuotedACs`, `TestBrief_Regions`, `TestBrief_PathCheck`, `TestPanelPrompt_Render`, `TestPanelPrompt_PriorRound`, `TestPanelPrompt_PriorRoundV1`.
 - [ ] **AC-13 (R10)**: The table loads and holds every R10.2 id. `rules --scope reviewer` lists exactly the reviewer-scope rules. `rules show nope` refuses. `instruct` in implement mode lists `lifecycle.no-probe-complete` and `review.derive`; in spec mode it lists the first and not the second. `ms-bead-fix` renders the fixer-scope rules into its prompt. The `ms-bead-impl` marker parses with `id=sequence.bead-impl-prompt`. No rule field, no shipped data file, and no R2–R12 string literal in non-test code matches `ADR-[0-9]`, `[Ss]pec [0-9]{3}`, `\bR[0-9]+\.[0-9]`, `#[0-9]{3}` or the bead-id pattern. Tests: `TestRuleTable_MinimumSet`, `TestRulesCmd`, `TestInstruct_RulesSection`, `TestBeadFix_FixerRules`, `TestStagedMarker_Parse`, `TestProductSurface_NoInternalRefs`.
 - [ ] **AC-14 (R11)**:
   - a process runner whose `argv[0]` is not on `PATH` gives an Error naming the family;
@@ -535,8 +567,8 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
   - `doctor --ci` gives none of the R11.8 lines.
 
   Tests: `TestDoctor_Launchers`, `TestDoctor_ProbeNotRunFromTrackedConfig`, `TestDoctor_TrackedLocalProbe`, `TestDoctor_LoadErrorReported`, `TestDoctor_ConfigWarnings`, `TestDoctor_StagedMarkers`, `TestDoctor_StaleCheckouts`, `TestDoctor_CISkips`.
-- [ ] **AC-15 (R12)**: `wc -l` is 80 or less for both copies of `ms-panel-run` and `ms-panel-tally`. For every R12.3 skill copy, `grep -n -i -E '/tmp|codex|copilot|gemini'` prints nothing, and every `claude` match is a path token such as `.claude/` or an R4.5 `runner:` value. Both `ms-panel.js` copies pass the same grep, and `ALLOWED_CLI` equals the R12.5 set. Each `ms-panel-run` copy has one R12.1 table row for each non-final status. `codex_verdict_extract.sh` is absent. `mindspec setup claude` over an unmodified spec-130 install replaces every R12.3 skill. Tests: `TestPanelSkills_AdapterShape`, `TestPanelRun_StatusTable`, `TestSkills_NoFamilyNoTmp`, `TestMsPanelWorkflow_AllowedCLIExactSet`, `TestSetup_RefreshesSpec130Skills`.
-- [ ] **AC-16 (R13)**: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 each contain `## Amendment (Spec 131)` with the R13 items. `interfaces.md` § Panel Artifact Schema names `panel submit` and the R8.1 statuses. `CHANGELOG.md` names the eight R13.6 changes and holds the before-and-after example. Test: `TestADRAmendments_Spec131`.
+- [ ] **AC-15 (R12)**: `wc -l` is 80 or less for both copies of `ms-panel-run` and `ms-panel-tally`. For every R12.3 skill copy, `grep -n -i -E '/tmp|codex|copilot|gemini'` prints nothing, and every `claude` match is a path token such as `.claude/` or an R4.5 `runner:` value. Both `ms-panel.js` copies pass the same grep, and `ALLOWED_CLI` equals the R12.5 set, including `panel submit` and `panel recover`. A workflow fixture with one harness slot and a fake agent ends with the slot `final`, and no reviewer step uses the Write tool on a verdict path. In an adapter fixture, a fake harness agent that returns with no submission and no file gets exactly one redispatch (one more `dispatched` event), and then the slot is reported. Each `ms-panel-run` copy has one R12.1 table row for each non-final status. `codex_verdict_extract.sh` is absent. `mindspec setup claude` over an unmodified spec-130 install replaces every R12.3 skill. Tests: `TestPanelSkills_AdapterShape`, `TestPanelRun_StatusTable`, `TestSkills_NoFamilyNoTmp`, `TestMsPanelWorkflow_AllowedCLIExactSet`, `TestMsPanelWorkflow_HarnessSubmits`, `TestPanelRun_SilentHarnessRedispatchOnce`, `TestSetup_RefreshesSpec130Skills`.
+- [ ] **AC-16 (R13)**: ADR-0037, ADR-0040, ADR-0043, ADR-0044 and ADR-0045 each contain `## Amendment (Spec 131)` with the R13 items. `interfaces.md` § Panel Artifact Schema names `panel submit` and the R8.1 statuses. `CHANGELOG.md` names the nine R13.6 changes and holds the before-and-after example. In `review-panels.md`, `README.md` and `plugins/mindspec/README.md`, `claude_sub_on_quota` and `panel.substitution` appear only in a sentence that says they are retired; neither README says "two model families" or "3 Claude + 3 Codex"; the plugin README has no line that requires the `codex` CLI. Tests: `TestADRAmendments_Spec131`, `TestUserDocs_NoRetiredPanelClaims`.
 - [ ] **AC-17 (method)**: `go build ./... && go test ./... -short` is green, including `TestPanelLeafImports_StdlibPlusTermsafeOnly` and `TestEnforcementHasNoGitLeaks`.
 
 ## Validation Proofs
