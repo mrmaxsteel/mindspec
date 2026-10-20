@@ -5,7 +5,8 @@
 // directory (`review/<slug>/panel.json`), written by /ms-panel-run
 // step 0. Reviewer verdicts land beside it as `<slot>-round-<N>.json`
 // files. This package reads BOTH and reports their combined state;
-// it never writes either.
+// its read model does not mutate either. Panel verbs use the ledger and
+// snapshot writers in this package.
 //
 // Trust boundary (ADR-0037): every input this package reads is an
 // agent-writable repo artifact. Consumers (the pre-complete hook,
@@ -90,30 +91,22 @@ type Panel struct {
 	// may change any of the four silently.
 	Gate string `json:"gate,omitempty"`
 
-	// Refutations is the audited-refutation escape (Spec 114 R2, OQ3): each
-	// entry records a human operator's dismissal of one reviewer's
-	// unresolved REQUEST_CHANGES at one round. There is no CLI verb to
-	// write one (OQ3 — /ms-panel-tally's procedure is to hand-edit
-	// panel.json); the gate carries the whole validation burden
-	// (tally.go's UnresolvedVerdicts / AppliedRefutations, the single home
-	// of the matching rule). Parse-lenient EXACTLY like AbandonReason
-	// above: an absent array, an empty array, or entries with
-	// missing/empty fields are consumer concerns, never a parse error —
-	// enforcement lives in the gate. The one asymmetry: a TYPE-mismatched
-	// entry (e.g. a string `round`) fails json.Unmarshal of the WHOLE
-	// panel.json → Registration.Err → gate leg (2) Block (gate.go) — the
-	// fail-CLOSED direction, which is the safe one (the OQ2/R2 requirement
-	// is only that lenience never tips fail-OPEN). Every pre-existing
-	// panel.json omits this field → byte-identical behavior (the §1
-	// precedent of 109's approve_threshold and 112's gate).
+	// Refutations are snapshot copies of audited dismissals. Legacy entries
+	// may lack finding hashes; the finding-aware pass rule interprets them.
+	// Parse lenience is retained: wrong types fail registration parsing,
+	// while missing fields are consumer validation concerns.
 	Refutations []Refutation `json:"refutations,omitempty"`
+
+	Roster         []RosterSlot     `json:"roster,omitempty"`
+	Deferrals      []Deferral       `json:"deferrals,omitempty"`
+	Rebinds        []Rebind         `json:"rebinds,omitempty"`
+	Telemetry      string           `json:"telemetry,omitempty"`
+	AbandonHistory []AbandonHistory `json:"abandon_history,omitempty"`
 }
 
-// Refutation is one audited dismissal of a reviewer's unresolved
-// REQUEST_CHANGES (Spec 114 R2). It clears exactly one (Slot, Round) pair —
-// never a REJECT, hard_block, or unrecognized verdict, never another slot,
-// and never a later re-RC at a newer round (tally.go's AppliedRefutations
-// is the sole interpreter of this matching rule).
+// Refutation records a dismissal at one round. Finding is ccr[i] or slot;
+// FindingSHA256 pins raw finding text. Legacy entries can omit both. Only a
+// REQUEST_CHANGES finding is dischargeable; other vetoes remain consumer checks.
 type Refutation struct {
 	// Slot is the reviewer slot this refutation targets — matched
 	// byte-exactly (case-sensitive) against a Verdict.Slot.
@@ -125,7 +118,50 @@ type Refutation struct {
 	// Reason is the human-authored justification (who/why).
 	Reason string `json:"reason,omitempty"`
 	// Evidence points to supporting evidence (a commit, a comment, a doc).
-	Evidence string `json:"evidence,omitempty"`
+	Evidence      string `json:"evidence,omitempty"`
+	Finding       string `json:"finding,omitempty"`
+	FindingSHA256 string `json:"finding_sha256,omitempty"`
+	FindingText   string `json:"finding_text,omitempty"`
+	Ground        string `json:"ground,omitempty"`
+	AC            string `json:"ac,omitempty"`
+	By            string `json:"by,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+}
+
+// RosterSlot is one ordered reviewer identity in a round.
+type RosterSlot struct {
+	Slot  string `json:"slot"`
+	Model string `json:"model"`
+	Lens  string `json:"lens"`
+}
+
+// Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
+type Deferral struct {
+	Slot          string `json:"slot"`
+	Round         int    `json:"round"`
+	Finding       string `json:"finding"`
+	FindingSHA256 string `json:"finding_sha256"`
+	FindingText   string `json:"finding_text"`
+	Bead          string `json:"bead"`
+	By            string `json:"by"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// Rebind records a same-round refresh after tool-artifact-only changes.
+type Rebind struct {
+	Round     int      `json:"round"`
+	FromSHA   string   `json:"from_sha"`
+	ToSHA     string   `json:"to_sha"`
+	Paths     []string `json:"paths"`
+	Reason    string   `json:"reason"`
+	CreatedAt string   `json:"created_at"`
+}
+
+// AbandonHistory preserves an abandonment when create revives a panel.
+type AbandonHistory struct {
+	Reason      string `json:"reason"`
+	AbandonedAt string `json:"abandoned_at"`
+	RevivedAt   string `json:"revived_at"`
 }
 
 // ApproveThreshold is the single home of the panel-approval threshold rule

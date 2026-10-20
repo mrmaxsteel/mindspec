@@ -31,7 +31,9 @@ var panelDispositionQueryCmd = &cobra.Command{
 	Short: "Run one of the R3 Q1-Q5 disposition-telemetry queries over the per-panel JSONL store",
 	Long: `query loads every dispositions.jsonl file matched by the resolved
 glob (by default ` + "`" + panel.DefaultGlobPattern + "`" + `, every
-panel of every spec) and reports one of five metrics:
+panel of every spec). It accepts disposition, panel (coverage manifest),
+round, refutation, deferral, rebind and abandon records; the five event kinds
+contribute no telemetry rows or slot coverage. It reports one of five metrics:
 
   Q1  per-model genuine-find rate (genuine/total)
   Q2  per-model false-positive rate (false-positive/total)
