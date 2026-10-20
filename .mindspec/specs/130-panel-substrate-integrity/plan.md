@@ -1,253 +1,291 @@
 ---
-status: Draft
-spec_id: 130-panel-substrate-integrity
-version: "1"
 adr_citations:
-  - ADR-0030
-  - ADR-0035
-  - ADR-0037
-  - ADR-0041
-  - ADR-0043
-  - ADR-0044
-  - ADR-0045
+    - ADR-0030
+    - ADR-0035
+    - ADR-0037
+    - ADR-0041
+    - ADR-0043
+    - ADR-0044
+    - ADR-0045
+approved_at: "2026-10-20T01:31:10Z"
+approved_by: user
+bead_ids:
+    - mindspec-inyk.1
+    - mindspec-inyk.2
+    - mindspec-inyk.3
+    - mindspec-inyk.4
+    - mindspec-inyk.5
+    - mindspec-inyk.6
+    - mindspec-inyk.7
+    - mindspec-inyk.8
+    - mindspec-inyk.9
+    - mindspec-inyk.10
+    - mindspec-inyk.11
+    - mindspec-inyk.12
+spec_id: 130-panel-substrate-integrity
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/config/config.go
-      - internal/config/config_test.go
-      - cmd/mindspec/config_test.go
-      - internal/setup/review_discipline_test.go
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - .claude/skills/ms-panel-run/SKILL.md
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - .claude/skills/ms-panel-tally/SKILL.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - .mindspec/domains/core/interfaces.md
-      - CHANGELOG.md
-      - internal/validate/adr_spec130_sizes_test.go
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/panel/panel.go
-      - internal/panel/ledger.go
-      - internal/panel/ledger_test.go
-      - internal/panel/finding.go
-      - internal/panel/finding_test.go
-      - internal/panel/handedit.go
-      - internal/panel/disposition.go
-      - internal/panel/disposition_store.go
-      - internal/panel/disposition_query.go
-      - internal/panel/disposition_query_test.go
-      - cmd/mindspec/panel_disposition.go
-      - cmd/mindspec/panel_disposition_store.go
-      - cmd/mindspec/panel_disposition_store_test.go
-      - .mindspec/domains/workflow/interfaces.md
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/panel/create.go
-      - internal/panel/create_test.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_test.go
-      - cmd/mindspec/root.go
-      - internal/complete/panel_advisory.go
-      - internal/complete/panel_gate_e2e_test.go
-      - internal/guard/registries.go
-      - .mindspec/domains/workflow/interfaces.md
-  - id: 4
-    depends_on: []
-    key_file_paths:
-      - internal/panel/subject.go
-      - internal/panel/subject_test.go
-      - internal/panel/panel.go
-      - internal/panel/create.go
-      - internal/panel/gate.go
-      - internal/panel/panel_decision_test.go
-      - internal/gitutil/gitops.go
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - internal/complete/panel_advisory.go
-      - internal/instruct/panelstate.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_subject_test.go
-      - internal/lint/ratchet_argv_table_test.go
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/execution/interfaces.md
-      - internal/validate/adr_spec130_subject_test.go
-  - id: 5
-    depends_on: [1, 2, 3, 4]
-    key_file_paths:
-      - internal/panel/create.go
-      - internal/panel/create_test.go
-      - internal/panel/panel.go
-      - internal/config/config.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_test.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/core/interfaces.md
-  - id: 6
-    depends_on: [1, 2, 3, 4]
-    key_file_paths:
-      - internal/panel/passrule.go
-      - internal/panel/passrule_test.go
-      - internal/panel/ruleline.go
-      - internal/panel/gate.go
-      - internal/panel/tally.go
-      - internal/panel/tally_test.go
-      - internal/panel/handedit.go
-      - internal/panel/panel_decision_test.go
-      - internal/panel/refutation_test.go
-      - internal/panel/hostile_fields_test.go
-      - internal/panel/votedecision_test.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_ruleline_test.go
-      - internal/instruct/panelstate.go
-      - internal/instruct/panelstate_test.go
-      - internal/instruct/panelstate_hostile_test.go
-      - internal/complete/panel_advisory.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - .mindspec/adr/ADR-0044-panel-review-conduct.md
-      - internal/validate/adr_spec130_passrule_test.go
-  - id: 7
-    depends_on: [5, 6]
-    key_file_paths:
-      - cmd/mindspec/panel_rebind.go
-      - cmd/mindspec/panel_rebind_test.go
-      - internal/config/config.go
-      - internal/panel/gate.go
-      - internal/complete/panel_advisory.go
-      - internal/complete/panel_refuted_test.go
-      - internal/lifecycle/landed.go
-      - internal/lifecycle/landed_test.go
-      - internal/guard/registries.go
-      - .mindspec/domains/core/interfaces.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0041-gate-before-mutate.md
-      - internal/validate/adr_spec130_rebind_test.go
-  - id: 8
-    depends_on: [5, 6]
-    key_file_paths:
-      - cmd/mindspec/panel_refute.go
-      - cmd/mindspec/panel_abandon.go
-      - cmd/mindspec/panel_verbs_test.go
-      - internal/lint/ratchet_argv_table_test.go
-      - internal/guard/registries.go
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - plugins/mindspec/skills/ms-bead-impl/SKILL.md
-      - .claude/skills/ms-panel-tally/SKILL.md
-      - .claude/skills/ms-panel-run/SKILL.md
-      - .claude/skills/ms-bead-impl/SKILL.md
-      - internal/setup/review_discipline_test.go
-      - internal/setup/readiness_skill_pin_test.go
-      - internal/setup/panel_skills_test.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
-      - .mindspec/specs/129-readiness-tracker-honesty/spec.md
-      - internal/validate/adr_spec130_verbs_test.go
-  - id: 9
-    depends_on: [1, 2, 4]
-    key_file_paths:
-      - internal/gitutil/gitignore.go
-      - internal/gitutil/reviews_ignore_test.go
-      - internal/bootstrap/bootstrap.go
-      - internal/bootstrap/gitignore_test.go
-      - .gitignore
-      - internal/panel/artifacts.go
-      - internal/panel/artifacts_test.go
-      - internal/panel/gate.go
-      - internal/next/guard.go
-      - internal/next/guard_test.go
-      - internal/complete/materialize.go
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - internal/complete/panel_ledger.go
-      - internal/complete/panel_ledger_test.go
-      - internal/complete/complete.go
-      - internal/approve/impl.go
-      - internal/approve/impl_test.go
-      - internal/guard/registries.go
-      - .mindspec/domains/execution/interfaces.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/specs/129-readiness-tracker-honesty/spec.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - internal/validate/adr_spec130_ledger_test.go
-  - id: 10
-    depends_on: [5, 6, 9, 12]
-    key_file_paths:
-      - internal/panel/disposition_store.go
-      - internal/panel/disposition_query.go
-      - internal/panel/disposition_query_test.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_test.go
-      - internal/complete/panel_core3.go
-      - internal/complete/panel_core3_test.go
-      - internal/complete/panel_advisory.go
-      - internal/complete/complete.go
-      - internal/approve/impl.go
-      - internal/approve/impl_test.go
-      - internal/guard/registries.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - internal/validate/adr_spec130_core3_test.go
-  - id: 11
-    depends_on: [7, 8, 10]
-    key_file_paths:
-      - internal/bead/deferral.go
-      - internal/bead/deferral_test.go
-      - cmd/mindspec/panel_defer.go
-      - cmd/mindspec/panel_verbs_test.go
-      - internal/lint/ratchet_argv_table_test.go
-      - internal/complete/panel_deferred.go
-      - internal/complete/panel_deferred_test.go
-      - internal/complete/complete.go
-      - internal/approve/impl.go
-      - internal/approve/impl_test.go
-      - internal/panel/passrule.go
-      - internal/panel/passrule_test.go
-      - internal/panel/gate.go
-      - internal/guard/registries.go
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - .claude/skills/ms-panel-tally/SKILL.md
-      - .claude/skills/ms-panel-run/SKILL.md
-      - internal/setup/panel_skills_test.go
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/execution/interfaces.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-      - internal/validate/adr_spec130_deferral_test.go
-  - id: 12
-    depends_on: [4]
-    key_file_paths:
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - internal/executor/merge_binding_test.go
-      - internal/complete/complete.go
-      - internal/complete/panel_advisory.go
-      - internal/complete/panel_landed_review_test.go
-      - internal/complete/panel_advisory_test.go
-      - internal/complete/panel_advisory_hostile_test.go
-      - internal/complete/panel_adhoc_isolation_test.go
-      - internal/complete/panel_gate_layout_test.go
-      - internal/complete/panel_gate_untracked_test.go
-      - internal/complete/panel_gate_e2e_test.go
-      - .mindspec/domains/execution/interfaces.md
-      - .mindspec/domains/workflow/interfaces.md
-      - .mindspec/domains/workflow/architecture.md
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-      - internal/validate/adr_spec130_keys_test.go
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/config/config.go
+        - internal/config/config_test.go
+        - cmd/mindspec/config_test.go
+        - internal/setup/review_discipline_test.go
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - .claude/skills/ms-panel-run/SKILL.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - .mindspec/domains/core/interfaces.md
+        - CHANGELOG.md
+        - internal/validate/adr_spec130_sizes_test.go
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/panel/panel.go
+        - internal/panel/ledger.go
+        - internal/panel/ledger_test.go
+        - internal/panel/finding.go
+        - internal/panel/finding_test.go
+        - internal/panel/handedit.go
+        - internal/panel/disposition.go
+        - internal/panel/disposition_store.go
+        - internal/panel/disposition_query.go
+        - internal/panel/disposition_query_test.go
+        - cmd/mindspec/panel_disposition.go
+        - cmd/mindspec/panel_disposition_store.go
+        - cmd/mindspec/panel_disposition_store_test.go
+        - .mindspec/domains/workflow/interfaces.md
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/panel/create.go
+        - internal/panel/create_test.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_test.go
+        - cmd/mindspec/root.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/panel_gate_e2e_test.go
+        - internal/guard/registries.go
+        - .mindspec/domains/workflow/interfaces.md
+    - depends_on: []
+      id: 4
+      key_file_paths:
+        - internal/panel/subject.go
+        - internal/panel/subject_test.go
+        - internal/panel/panel.go
+        - internal/panel/create.go
+        - internal/panel/gate.go
+        - internal/panel/panel_decision_test.go
+        - internal/gitutil/gitops.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/complete/panel_advisory.go
+        - internal/instruct/panelstate.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_subject_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+        - internal/validate/adr_spec130_subject_test.go
+    - depends_on:
+        - 1
+        - 2
+        - 3
+        - 4
+      id: 5
+      key_file_paths:
+        - internal/panel/create.go
+        - internal/panel/create_test.go
+        - internal/panel/panel.go
+        - internal/config/config.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/core/interfaces.md
+    - depends_on:
+        - 1
+        - 2
+        - 3
+        - 4
+      id: 6
+      key_file_paths:
+        - internal/panel/passrule.go
+        - internal/panel/passrule_test.go
+        - internal/panel/ruleline.go
+        - internal/panel/gate.go
+        - internal/panel/tally.go
+        - internal/panel/tally_test.go
+        - internal/panel/handedit.go
+        - internal/panel/panel_decision_test.go
+        - internal/panel/refutation_test.go
+        - internal/panel/hostile_fields_test.go
+        - internal/panel/votedecision_test.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_ruleline_test.go
+        - internal/instruct/panelstate.go
+        - internal/instruct/panelstate_test.go
+        - internal/instruct/panelstate_hostile_test.go
+        - internal/complete/panel_advisory.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - .mindspec/adr/ADR-0044-panel-review-conduct.md
+        - internal/validate/adr_spec130_passrule_test.go
+    - depends_on:
+        - 5
+        - 6
+      id: 7
+      key_file_paths:
+        - cmd/mindspec/panel_rebind.go
+        - cmd/mindspec/panel_rebind_test.go
+        - internal/config/config.go
+        - internal/panel/gate.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/panel_refuted_test.go
+        - internal/lifecycle/landed.go
+        - internal/lifecycle/landed_test.go
+        - internal/guard/registries.go
+        - .mindspec/domains/core/interfaces.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - internal/validate/adr_spec130_rebind_test.go
+    - depends_on:
+        - 5
+        - 6
+      id: 8
+      key_file_paths:
+        - cmd/mindspec/panel_refute.go
+        - cmd/mindspec/panel_abandon.go
+        - cmd/mindspec/panel_verbs_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/guard/registries.go
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-panel-run/SKILL.md
+        - .claude/skills/ms-bead-impl/SKILL.md
+        - internal/setup/review_discipline_test.go
+        - internal/setup/readiness_skill_pin_test.go
+        - internal/setup/panel_skills_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
+        - .mindspec/specs/129-readiness-tracker-honesty/spec.md
+        - internal/validate/adr_spec130_verbs_test.go
+    - depends_on:
+        - 1
+        - 2
+        - 4
+      id: 9
+      key_file_paths:
+        - internal/gitutil/gitignore.go
+        - internal/gitutil/reviews_ignore_test.go
+        - internal/bootstrap/bootstrap.go
+        - internal/bootstrap/gitignore_test.go
+        - .gitignore
+        - internal/panel/artifacts.go
+        - internal/panel/artifacts_test.go
+        - internal/panel/gate.go
+        - internal/next/guard.go
+        - internal/next/guard_test.go
+        - internal/complete/materialize.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/complete/panel_ledger.go
+        - internal/complete/panel_ledger_test.go
+        - internal/complete/complete.go
+        - internal/approve/impl.go
+        - internal/approve/impl_test.go
+        - internal/guard/registries.go
+        - .mindspec/domains/execution/interfaces.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/specs/129-readiness-tracker-honesty/spec.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - internal/validate/adr_spec130_ledger_test.go
+    - depends_on:
+        - 5
+        - 6
+        - 9
+        - 12
+      id: 10
+      key_file_paths:
+        - internal/panel/disposition_store.go
+        - internal/panel/disposition_query.go
+        - internal/panel/disposition_query_test.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_test.go
+        - internal/complete/panel_core3.go
+        - internal/complete/panel_core3_test.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/complete.go
+        - internal/approve/impl.go
+        - internal/approve/impl_test.go
+        - internal/guard/registries.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - internal/validate/adr_spec130_core3_test.go
+    - depends_on:
+        - 7
+        - 8
+        - 10
+      id: 11
+      key_file_paths:
+        - internal/bead/deferral.go
+        - internal/bead/deferral_test.go
+        - cmd/mindspec/panel_defer.go
+        - cmd/mindspec/panel_verbs_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/complete/panel_deferred.go
+        - internal/complete/panel_deferred_test.go
+        - internal/complete/complete.go
+        - internal/approve/impl.go
+        - internal/approve/impl_test.go
+        - internal/panel/passrule.go
+        - internal/panel/passrule_test.go
+        - internal/panel/gate.go
+        - internal/guard/registries.go
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-panel-run/SKILL.md
+        - internal/setup/panel_skills_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+        - internal/validate/adr_spec130_deferral_test.go
+    - depends_on:
+        - 4
+      id: 12
+      key_file_paths:
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/executor/merge_binding_test.go
+        - internal/complete/complete.go
+        - internal/complete/panel_advisory.go
+        - internal/complete/panel_landed_review_test.go
+        - internal/complete/panel_advisory_test.go
+        - internal/complete/panel_advisory_hostile_test.go
+        - internal/complete/panel_adhoc_isolation_test.go
+        - internal/complete/panel_gate_layout_test.go
+        - internal/complete/panel_gate_untracked_test.go
+        - internal/complete/panel_gate_e2e_test.go
+        - .mindspec/domains/execution/interfaces.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+        - internal/validate/adr_spec130_keys_test.go
 ---
 # Plan: 130-panel-substrate-integrity
 
