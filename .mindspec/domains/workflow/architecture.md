@@ -438,6 +438,8 @@ parent. Its changes must remain present at the spec tip. This state gives
 Info and a `mindspec complete <bead>` recovery. The finding has no fix
 function. The operator verifies the merge before closing the bead.
 Metadata markers do not change severity. Other stale-open findings stay Error.
+If a merge-state read or recovery builder fails, the scan still checks the
+existing landed evidence. A confirmed landed merge stays Error.
 
 The presence check lists both sides of renames. It excludes tool artifacts.
 A path is reverted when its content equals the content before the merge,
@@ -446,6 +448,8 @@ exempts the paths it changes. Other later edits do not count as reverts.
 An open bead with a reverted path gets one Error with restore guidance.
 It gets no stale-open finding and no automatic fix. Closed beads get no
 reverted-merge finding.
+The scan excludes closed beads even when the tracker returns them in the
+open-bead list.
 
 Restore guidance lists later first-parent commits that changed the reverted
 paths, newest first. It shows full commit IDs and escaped subjects. It warns

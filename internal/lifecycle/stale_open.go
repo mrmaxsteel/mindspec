@@ -145,12 +145,12 @@ func openMergeFindings(workdir, specID, epicID string, beadIDs []string) ([]Stal
 		if err == nil && len(merges) > 0 {
 			specDir, dirErr := mergeSpecDir(workdir, specBranch)
 			if dirErr != nil {
-				continue
+				goto fallback
 			}
 			m := namingMergeIdentity(merges[0])
 			presence, presenceErr := CheckMergePresence(workdir, specBranch, specDir, m)
 			if presenceErr != nil {
-				continue
+				goto fallback
 			}
 			if len(presence.RevertedPaths) > 0 {
 				wt, wtErr := gitutil.WorktreeForBranch(workdir, specBranch)
@@ -167,7 +167,7 @@ func openMergeFindings(workdir, specID, epicID string, beadIDs []string) ([]Stal
 				}
 				message, recoveryErr := RestoreMergeRecovery(wt, id, parent, m, presence, outcome)
 				if recoveryErr != nil {
-					continue
+					goto fallback
 				}
 				reverted = append(reverted, RevertedMergeBead{BeadID: id, Message: message})
 				continue
@@ -178,6 +178,8 @@ func openMergeFindings(workdir, specID, epicID string, beadIDs []string) ([]Stal
 				continue
 			}
 		}
+	fallback:
+		// A merge-state read error must not hide existing landed evidence.
 		landed, ok, mErr := MergedUnclosed(workdir, specBranch, id)
 		if mErr != nil || !ok {
 			continue

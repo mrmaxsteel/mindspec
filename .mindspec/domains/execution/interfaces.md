@@ -72,16 +72,6 @@ Low-level git operations used by `MindspecExecutor`; `internal/next` also consum
 
 ### Landed-merge identity primitives (spec 125, ADR-0041 §2(ii))
 
-The merge-state reader also uses these read-only helpers in
-`internal/gitutil/gitops.go`:
-
-| Function | Contract |
-|:---------|:---------|
-| `DiffNameOnlyNoRenames(workdir, base, head)` | Runs `git diff --no-renames --name-only -z`. Returns both sides of a rename. Splits on NUL to preserve path bytes. |
-| `FirstParentCommitsAfter(workdir, base, head)` | Returns later commits on the first-parent chain, newest first, with full IDs, parents and subjects. |
-| `TreePathEntry(workdir, ref, path)` | Reads the path's mode, type and object ID. An empty result means absence. A read failure returns an error. |
-| `WorktreeForBranch(workdir, branch)` | Finds the branch checkout from NUL-separated worktree records. Returns an empty path when no checkout exists. |
-
 Unlike the executor-only helpers above, these two are ALSO consumed by
 the workflow domain's landed-merge read side
 (`internal/lifecycle.FindLandedMerge` / `ReattestLandedMerge`) — they
@@ -93,6 +83,18 @@ cannot drift:
 | `ExactSecondParentMerges(workdir, branch, tip)` | `branch`'s two-parent first-parent merges whose second parent EQUALS `tip` exactly, newest-first. The ONE exact-match landed-ness primitive: octopus merges and ancestor-consistent-but-not-equal candidates are excluded, never guessed at. `tip` is option-reject gated before reaching any git argv. |
 | `ReachableMerges(workdir, ref)` | Every merge reachable from `ref`, newest-first in topological order (`git log --merges --topo-order`), with SHA, full parents and subject. Includes merges off the first-parent chain. Rejects option-like refs. Lifecycle uses it only after zero owned primary candidates; the primitive itself grants no landing or close decision (spec 129). |
 | `RevertShape(workdir, mergeSHA, target)` | Reverse un-apply no-op test — `merge-tree(base=M, ours=target tip, theirs=M^1)` with rename/copy detection DISABLED (`-c merge.renames=false`). True iff the un-apply is a clean no-op whose tree equals the tip's (the tip carries none of M's content at its original paths — a true `git revert M`, or its content-indistinguishable clean-full-removal residual). Requires a >=2-parent merge; any infra failure propagates as `(false, err)` — undetermined is never a classification. Consulted only under `ContentSubsumedOutcome`'s `SubsumptionCleanDivergence` arm; the forward (rename-detecting) legs are untouched. |
+
+### Merge-state read helpers
+
+The merge-state reader also uses these read-only helpers in
+`internal/gitutil/gitops.go`:
+
+| Function | Contract |
+|:---------|:---------|
+| `DiffNameOnlyNoRenames(workdir, base, head)` | Runs `git diff --no-renames --name-only -z`. Returns both sides of a rename. Splits on NUL to preserve path bytes. |
+| `FirstParentCommitsAfter(workdir, base, head)` | Returns later commits on the first-parent chain, newest first, with full IDs, parents and subjects. |
+| `TreePathEntry(workdir, ref, path)` | Reads the path's mode, type and object ID. An empty result means absence. A read failure returns an error. |
+| `WorktreeForBranch(workdir, branch)` | Finds the branch checkout from NUL-separated worktree records. Returns an empty path when no checkout exists. |
 
 ### Gitignore Ensure (`internal/gitutil/gitignore.go`, spec 123 R4)
 

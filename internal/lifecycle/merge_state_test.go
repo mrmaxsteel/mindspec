@@ -60,6 +60,37 @@ func mergeStatePresence(t *testing.T, dir string, m *LandedMerge) MergePresence 
 	return p
 }
 
+func TestMergeState_MultipleNamingMergesInvalid(t *testing.T) {
+	dir, run, _ := mergeStateRepo(t)
+	run("switch", "bead/"+mergeStateBead)
+	mergeStateWrite(t, dir, "followup", "second change\n")
+	run("add", ".")
+	run("commit", "-m", "second change")
+	run("switch", mergeStateBranch)
+	run("merge", "--no-ff", "-m", "Merge bead/"+mergeStateBead, "bead/"+mergeStateBead)
+	merges, err := FindNamingMerges(dir, mergeStateBranch, mergeStateBead)
+	if err != nil || len(merges) != 2 {
+		t.Fatalf("want two naming merges: %+v, %v", merges, err)
+	}
+	tip := revParseIn(t, dir, "bead/"+mergeStateBead)
+	if tip != merges[0].Parents[1] {
+		t.Fatalf("bead tip %s differs from newest second parent %s", tip, merges[0].Parents[1])
+	}
+	for _, merge := range merges {
+		presence := mergeStatePresence(t, dir, namingMergeIdentity(merge))
+		if len(presence.ChangedPaths) == 0 || len(presence.RevertedPaths) != 0 {
+			t.Fatalf("merge content must remain present: %+v", presence)
+		}
+	}
+	valid, err := FindValidMerge(dir, mergeStateBranch, mergeStateBead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid != nil {
+		t.Fatalf("multiple naming merges must not be valid: %+v", valid)
+	}
+}
+
 func TestMergeState_LaterMergeExemptsPath(t *testing.T) {
 	dir, run, m := mergeStateRepo(t)
 	run("switch", "-c", "bead/mindspec-test.2")

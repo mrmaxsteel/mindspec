@@ -159,6 +159,9 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 		bySpec := make(map[string][]string)
 		var specOrder []string
 		for _, b := range open {
+			if strings.EqualFold(strings.TrimSpace(b.Status), "closed") {
+				continue
+			}
 			parent := strings.TrimSpace(b.Parent)
 			specID, isLifecycle := epicSpec[parent]
 			if !isLifecycle {
