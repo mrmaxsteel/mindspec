@@ -38,7 +38,9 @@ work_chunks:
       internal/executor/finalize_scoping_test.go, internal/executor/layout_guard_test.go,
       internal/executor/finalize_orphan_test.go, internal/executor/merge_binding_test.go,
       internal/executor/merge_conflict_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, .mindspec/adr/ADR-0041-gate-before-mutate.md,
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt,
+      .mindspec/adr/ADR-0041-gate-before-mutate.md,
       .mindspec/domains/workflow/architecture.md, .mindspec/domains/execution/interfaces.md,
       .mindspec/domains/execution/architecture.md, internal/validate/adr_spec132_preflight_test.go]
   - id: 3
@@ -47,7 +49,9 @@ work_chunks:
       internal/executor/mindspec_executor.go, internal/executor/executor.go,
       internal/executor/mock.go, internal/executor/finalize_tip_test.go, internal/gitutil/gitops.go,
       internal/gitutil/gitops_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, .mindspec/adr/ADR-0041-gate-before-mutate.md,
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt,
+      .mindspec/adr/ADR-0041-gate-before-mutate.md,
       .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/runbook.md,
       .mindspec/domains/execution/architecture.md, .mindspec/domains/execution/interfaces.md,
       internal/validate/adr_spec132_finalize_test.go]
@@ -56,7 +60,9 @@ work_chunks:
     key_file_paths: [internal/lifecycle/merge_state.go, internal/lifecycle/merge_state_test.go,
       internal/lifecycle/stale_open.go, internal/lifecycle/scan.go, internal/gitutil/gitops.go,
       internal/gitutil/gitops_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, internal/doctor/doctor.go, internal/doctor/doctor_test.go,
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt,
+      internal/doctor/doctor.go, internal/doctor/doctor_test.go,
       internal/doctor/lifecycle_integrity.go, internal/doctor/lifecycle_integrity_test.go,
       cmd/mindspec/doctor.go, cmd/mindspec/doctor_info_test.go,
       .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/interfaces.md,
@@ -69,7 +75,8 @@ work_chunks:
       cmd/mindspec/complete.go, cmd/mindspec/merge_only_loop_test.go, internal/executor/executor.go,
       internal/executor/mindspec_executor.go, internal/executor/mock.go,
       internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/ratchet_argv_table_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt,
+      internal/lint/destructive_guidance_test.go, internal/lint/ratchet_argv_table_test.go,
       .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/domains/workflow/architecture.md,
       .mindspec/domains/workflow/runbook.md, .mindspec/domains/workflow/interfaces.md,
       .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md,
@@ -102,18 +109,23 @@ work_chunks:
       cmd/mindspec/reattest_test.go, internal/doctor/ancestor.go,
       internal/doctor/lifecycle_integrity.go, internal/doctor/ancestor_test.go,
       internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt,
+      internal/lint/destructive_guidance_test.go,
       .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/runbook.md,
       .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md]
   - id: 9
     depends_on: []
     key_file_paths: [internal/phase/derive.go, internal/phase/cache.go, internal/phase/cache_test.go,
       internal/phase/lineage.go, internal/phase/lineage_test.go,
+      internal/phase/lineage_error_test.go, internal/phase/agreement_table_test.go,
       internal/phase/resolve_spec_test.go, internal/approve/spec.go, internal/approve/spec_test.go,
       internal/next/beads.go, internal/next/readyset_test.go,
       internal/validate/readiness/readiness.go, internal/validate/readiness/readiness_test.go,
-      internal/doctor/lineage.go, internal/doctor/lineage_test.go, cmd/mindspec/spec.go,
-      cmd/mindspec/spec_create_lettered_test.go, cmd/mindspec/lettered_spec_test.go,
-      internal/guard/registries.go, .mindspec/adr/ADR-0023.md,
+      internal/doctor/doctor.go, internal/doctor/lineage.go, internal/doctor/lineage_test.go,
+      cmd/mindspec/spec.go, cmd/mindspec/spec_create_lettered_test.go,
+      cmd/mindspec/lettered_spec_test.go, cmd/mindspec/verb_output_test.go,
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/testdata/destructive_seed_manifest.txt, .mindspec/adr/ADR-0023.md,
       .mindspec/domains/core/interfaces.md, .mindspec/domains/core/architecture.md,
       .mindspec/domains/workflow/interfaces.md, internal/validate/adr_spec132_lineage_test.go]
 ---
@@ -150,9 +162,9 @@ No ADR needs a superseding ADR. Each pin file is `internal/validate/adr_spec132_
 - **Cross-package tests.** `internal/approve` imports `internal/complete`, so a `package complete` test cannot call `approve.ApproveImpl`. A test that runs both `complete` and `impl approve` lives in `cmd/mindspec` (package `main`), which imports both.
 - **Fault seams.** Finalize stages use `finalizeStepHookFn` (`internal/executor/mindspec_executor.go`). Bead 3 exports a test setter for it, so `internal/approve` tests drive the real `MindspecExecutor`. The has-remote probe uses `implHasRemoteFn`, which returns `(bool, error)` after Bead 2. Bead 2 adds a push-probe seam. Bead 5 adds a seam per closing step. Bead 8 adds a read seam for each `fallbackSafety` read.
 - **Argv ratchet.** Each new git exec site adds one row to `internal/lint/ratchet_argv_table_test.go` (`go test ./internal/lint/... -run TestArgvIDOperandGated`). New sites: merge-tree with conflicted paths (Bead 1), `RemoteConfigured` and `PushProbe` (Bead 2), stage-resume reads (Bead 3), `DiffNameOnlyNoRenames` (Bead 4), the range revert check (Bead 8).
-- **Recovery operands and destructive guidance.** Every bead that adds a recovery line runs `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList`. A guidance line with a floor-family command adds one `KnownSitesExemptionList` entry and raises `wantKnownSitesLiveCount` by one.
+- **Recovery operands and destructive guidance.** Every bead that adds a recovery line runs `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList`. A guidance line with a floor-family command adds one `KnownSitesExemptionList` entry and raises `wantKnownSitesLiveCount` by one. That entry also adds a `[known_sites_exemption_list]` line (surface, exact text, count, family) to `internal/lint/testdata/destructive_seed_manifest.txt` and a `backgroundJustifiedWideningExemptions` row in `internal/lint/destructive_guidance_test.go`, and raises that list's count sentinel by one. Each new `guard.OpaqueOperandRegistry` entry adds an `[opaque_operand_registry]` line (file, func, detail) to the same manifest. Every bead that edits `internal/guard/registries.go` runs `go test ./internal/lint/... -run TestBootstrapManifest_`.
 - **Doc-sync.** `checkInternalPackages` (`internal/validate/docsync.go`) maps each changed non-test source under `internal/` or `cmd/` to its domain through `OWNERSHIP.yaml`. It refuses unless a doc under `.mindspec/domains/<domain>/` changes in the same range. Domains: core (`internal/config`, `internal/phase`), execution (`internal/executor`, `internal/gitutil`, `internal/harness`), workflow (`cmd/`, `internal/complete`, `internal/approve`, `internal/lifecycle`, `internal/validate`, `internal/doctor`, `internal/next`, `internal/guard`). Each bead names its doc per domain. Bead 1 edits spec 129 `spec.md` and `plan.md` together with ADR-0036, so `validateSpecArtifactSync` passes.
-- **Union merge.** Parallel beads add rows to the argv ratchet table, the operand registry and `KnownSitesExemptionList`, subsections to the ADR-0041 `## Amendment (Spec 132)` section, entries to the Executor interface and `MockExecutor`, and sections to the domain docs, `runbook.md` and `merge-safety.md`. A merge conflict in these keeps every row, entry and section, and one `## Amendment (Spec 132)` heading. A conflict on `wantKnownSitesLiveCount` takes the base value plus each bead's added entries. A bead that creates the amendment heading checks first whether it exists at the spec tip.
+- **Union merge.** Parallel beads add rows to the argv ratchet table, the operand registry and `KnownSitesExemptionList`, subsections to the ADR-0041 `## Amendment (Spec 132)` section, entries to the Executor interface and `MockExecutor`, and sections to the domain docs, `runbook.md` and `merge-safety.md`. Parallel beads also add lines to `destructive_seed_manifest.txt` and rows to `backgroundJustifiedWideningExemptions` (Beads 5 and 8), and edit `cmd/mindspec/verb_output_test.go` (Beads 6 and 9). A merge conflict in these keeps every row, entry, line and section, and one `## Amendment (Spec 132)` heading. A conflict on `wantKnownSitesLiveCount` or on the widening-list count sentinel takes the base value plus each bead's added entries. A bead that creates the amendment heading checks first whether it exists at the spec tip.
 - **Integration with `origin/main`.** See § Operator Rulings and Lane Constraints, "When `origin/main` comes in". Per-bead checks run on the spec branch; the full suite runs again after that one merge.
 - **Real verification.** A Verification line counts only when `go test <pkg> -list '<regex>'` prints each test that the bead names. `[no tests to run]` is a failure. A scanner test has a positive control: a planted violation turns it red.
 - **Every bead** ends with `gofmt -l .` (empty output), `go build ./...`, `go test ./internal/lint/... -run 'TestEnforcementHasNoGitLeaks|TestArgvIDOperandGated'` and `go test ./... -short -timeout 20m`.
@@ -192,7 +204,7 @@ None.
 1. Add `gitutil.RemoteConfigured() (bool, error)`: a failing `git remote` returns `(false, err)`. Expose it through a `lifecycle` wrapper and make `implHasRemoteFn` return `(bool, error)`. Migrate the bool-only stubs in `internal/approve/main_test.go` and `merge_preflight_ac5_test.go`. `gitutil.HasRemote()` and its other callers do not change (R4.4a).
 2. In `ApproveImpl` (`internal/approve/impl.go`), decide has-remote one time, after the EnsureMigrated exemption and before the branch-existence switch (`implSpecBranchExistsFn`, `implBranchMissingRefusal`). Thus the decision also precedes the `--supersede-adr` placeholder write, the phase-reconcile write and MUTATION 1/3, and Bead 3's "already landed" path reuses it. A probe error refuses: `cannot tell whether a git remote is configured: <err>`, then `recovery: git remote -v`. An error never selects local merge (R4.3, R4.4a).
 3. Append a `hasRemote bool` parameter to `FinalizeEpic` in the Executor interface, `MindspecExecutor` and `MockExecutor`. Remove the `gitutil.HasRemote()` call in `FinalizeEpic`; `result.MergeStrategy` follows the passed value. Update every call site and the argument-count assertions (`len(calls[0].Args) != 6` in `impl_test.go` and `merge_preflight_ac5_test.go`) to 7. Update the two-probe comments on `HasRemote` (`internal/lifecycle/gitquery.go`) and on `implHasRemoteFn` (R4.4).
-4. Add Executor method `PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error`. It enumerates the merges that `FinalizeEpic` will make, with the same helper. Push path: every pending bead-to-spec auto-merge. Direct path: those, plus spec-to-main. For each merge it calls `guardMergeLayout` and `preflightMergeDestruction` with the same (branch, target, allow-set, override) arguments as `FinalizeEpic`, and it mutates nothing. `ApproveImpl` calls it in preflight, in place of today's direct-only `implWorkDestructionPreflightFn` call. The executor guards stay in front of every `MergeInto` and `MergeBranch` call (R2.1, R2.2).
+4. Add Executor method `PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error`. It enumerates the merges that `FinalizeEpic` will make, with the same helper. Push path: every pending bead-to-spec auto-merge. Direct path: those, plus spec-to-main. For each merge it calls `guardMergeLayout` and `preflightMergeDestruction` with the same (branch, target, allow-set, override) arguments as `FinalizeEpic`, and it mutates nothing. `ApproveImpl` calls it in preflight, in place of today's direct-only `implWorkDestructionPreflightFn` call. The executor guards stay in front of every `MergeInto` and `MergeBranch` call (R2.1, R2.2). Delete the `implWorkDestructionPreflightFn` seam, its stub in `main_test.go` and `TestImplWorkDestructionPreflightFn_DeclaredDefaultIsRealImplementation`. In `TestOpaqueOperandRegistry_MergePreflightRerunCallers` (`internal/guard/registries_test.go`), remove the `impl.go` case: the `mindspec_executor.go` case already covers the `preflightMergeDestruction` call in `PreflightFinalizeMerges`. Add `PreflightFinalizeMergesErr` and a call record to `MockExecutor`. Rewrite the `TestApproveImpl_AC5_*` tests to set that error and read that record: `_StaleSpecBranchRefusesBeforeMutation` and `_StillAppliesWithNoRemoteConfigured` assert a refusal before any mutation with `hasRemote` false; `_SkippedWhenRemoteConfigured` becomes `_PushPathPreflightsBeadMergesOnly` and asserts one call with `hasRemote` true. `TestApproveImpl_AC7_AllowNetDeletionOverrideCompletes` asserts that the override reason reaches the mock.
 5. Add Executor method `PushProbe(branch string) error`. It runs `git push --dry-run --no-verify` to the remote and refspec of `PushBranch`, with `GIT_TERMINAL_PROMPT=0`. When has-remote is true, `ApproveImpl` calls it before MUTATION 1/3. Only a failed probe refuses. Add a credential-helper hint only for an authentication error on an HTTP(S) remote (R2.3–R2.5).
 6. Add `internal/executor/hasremote_callsite_test.go` (`TestExecutor_HasRemoteOnlyInSpecBranchBase`). It parses the non-test sources of `internal/executor` and fails on any `gitutil.HasRemote` or `gitutil.RemoteConfigured` call outside `specBranchBase`. Its positive control is a planted call in a parsed fixture.
 7. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for early guards, the push probe and the one has-remote decision. Update `.mindspec/domains/workflow/architecture.md` (`impl approve` preflight order), `.mindspec/domains/execution/interfaces.md` (`FinalizeEpic` parameter, `PreflightFinalizeMerges`, `PushProbe`, `RemoteConfigured`) and `.mindspec/domains/execution/architecture.md` (finalize no longer probes). Add `internal/validate/adr_spec132_preflight_test.go` (`TestDocs_Spec132Amendments_Preflight`).
@@ -204,6 +216,7 @@ None.
 - [ ] `go test ./internal/executor/... -run 'TestFinalizeEpic_ExecutorGuardAfterAutoMerge|TestPushProbe_ArgvMatchesPushBranch|TestPreflightFinalizeMerges_MatchesFinalizeMerges|TestFinalizeEpic_WithRemotePushes|TestFinalizeEpic_NoRemoteMergesLocally|TestFinalizeEpic_PassedFalseWithRemoteMergesLocally|TestFinalizeEpic_PassedTrueNoRemoteTakesPushLeg|TestExecutor_HasRemoteOnlyInSpecBranchBase'` passes
 - [ ] `go test ./internal/gitutil/... -run 'TestRemoteConfigured_WithRemote|TestRemoteConfigured_NoRemote|TestRemoteConfigured_GitErrorReturnsError'` passes, and `-list 'TestRemoteConfigured_'` prints those three tests. The error case runs outside a git repository and asserts `(false, non-nil)`.
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Preflight` passes
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -232,6 +245,7 @@ None.
 - [ ] `TestApproveImpl_AfterDeletionAlreadyLanded` and `TestApproveImpl_RemoteSpecBranchDeletedUsesMain` assert exactly one `implHasRemoteFn` call
 - [ ] `go test ./internal/executor/... -run TestFinalizeEpic_FinalizeTipIsPublishedTip` passes
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Finalize` passes
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -256,9 +270,10 @@ Bead 2. It needs the `FinalizeEpic` has-remote parameter and the one has-remote 
 **Verification**
 - [ ] `go test ./internal/doctor/... -run 'TestDoctor_StaleOpenSeverityFromGitState|TestDoctor_RevertedMergeOnlyOneFinding|TestDoctor_FixSkipsRevertedMergeOnly|TestDoctor_ClosedRevertedNoFinding|TestDoctor_FixSkipsStaleOpenInfo'` passes
 - [ ] `go test ./cmd/mindspec/... -run TestDoctorStatusTag_Info` passes
-- [ ] `go test ./internal/lifecycle/... -run 'TestMergeState_LaterMergeExemptsPath|TestMergeState_LaterEditNotRevert|TestMergeState_RenamedAwayPathIsReverted|TestMergeState_RestoreCheckoutFromConstructor|TestMergeState_RestoreOmitsCheckoutOnUserChanges'` passes. The rename fixture moves an M path away after M; with `--no-renames` the presence check reports it reverted.
+- [ ] `go test ./internal/lifecycle/... -run 'TestMergeState_LaterMergeExemptsPath|TestMergeState_LaterEditNotRevert|TestMergeState_RenameInMergeRestoredOldPathIsReverted|TestMergeState_RestoreCheckoutFromConstructor|TestMergeState_RestoreOmitsCheckoutOnUserChanges'` passes. In the rename fixture, M renames `a` to `b`, and a later commit restores `a` with its M^1 content. The presence check reports `a` reverted. The test fails when the path list comes from `gitutil.DiffNameOnly` (rename detection on), because that list has only `b`.
 - [ ] `go test ./internal/gitutil/... -run 'TestDiffNameOnlyNoRenames_RenameListsBothPaths|TestDiffNameOnlyNoRenames_NULSeparated'` passes
 - [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` passes
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -288,6 +303,7 @@ None.
 - [ ] `go test ./internal/complete/... -run 'TestComplete_AfterMergeOnlyPublishesClose|TestComplete_ClosingPathSpecWorktreeBusyRefuses|TestComplete_AfterMergeOnlyExportFailureConverges|TestComplete_ClosedBeadFinishesCleanup|TestComplete_OverrideRunRecoveryRepeatsFlag|TestComplete_RepeatedMergeOnlyNoNewMerge'` passes
 - [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList` pass
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_MergeOnly` passes
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -368,6 +384,7 @@ Bead 4 (`gitutil.DiffNameOnlyNoRenames`).
 - [ ] `go test ./cmd/mindspec/... -run 'TestReattestText_NoHistoricalCitations|TestReattestText_OperandsRender'` passes
 - [ ] `go test ./internal/gitutil/... -run 'TestRangeRevertedAt_DetectsRevertOfRangeChange|TestRangeRevertedAt_LaterEditNotRevert|TestRangeRevertedAt_BaseExcludesEarlierCommits'` passes
 - [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList` pass
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -383,22 +400,24 @@ None.
 ## Bead 9: One lineage and full spec IDs
 
 **Steps**
-1. In `internal/phase`, add `FindEpicLineageWithCache`. It returns the epic, the spec ID and the lineage provenance. Lineage is the one `parent-child` dependency on an epic. A `blocks` edge is not lineage. Two parent-child epics refuse with `recovery: bd dep remove <bead> <epic>`. Remove the bead-title fallback. Keep the signatures of `FindEpicForBead` and `FindEpicForBeadWithCache`; they call the new function (R7.1–R7.3).
+1. In `internal/phase`, add `FindEpicLineageWithCache`. It returns the epic, the spec ID and the lineage provenance. Lineage is the one `parent-child` dependency on an epic. A `blocks` edge is not lineage. Two parent-child epics refuse with `recovery: bd dep remove <bead> <epic>`. Remove the bead-title fallback. Keep the signatures of `FindEpicForBead` and `FindEpicForBeadWithCache`; they call the new function (R7.1–R7.3). Existing fixtures whose epic dependency has no `dependency_type` gain `"dependency_type":"parent-child"`: `internal/phase/lineage_error_test.go`, `wireEpicFixture` in `internal/phase/agreement_table_test.go` (so `TestAgreementTable_Rows` keeps its claim rows) and `TestVerbOutput_Next` in `cmd/mindspec/verb_output_test.go`. `TestFindEpicForBead_DependentEpicLookupErrorPropagates` stays: a failed parent-epic lookup still propagates and is not `ErrNoEpicLineage`. Delete `TestFindEpicForBead_EpicListErrorPropagates`, which tests the removed title-fallback list; `TestFindEpicForBead_NoTitleFallback` replaces it and asserts no lineage and no epic-list call.
 2. Add one full-ID resolver for epic to spec, with three sources in order: `spec_id`, then `spec_num` plus `spec_title`, then the epic's `[SPEC <id>]` title as a full spec ID. Apply the R7.6 rules: a valid `spec_id` decides; an invalid one refuses; `spec_num` 0 or an empty title is absent; a disagreement or no source refuses with `recovery: bd update <epic> --set-metadata spec_id=<id>` (R7.6).
 3. Route `(*Cache).FindEpicBySpecID` (`internal/phase/cache.go`) through that resolver. It scans every epic that `AllEpics` returns, closed epics included, before it memoizes. Two epics on one spec refuse in a verb that resolves that spec and name both; the refusal is memoized as an error, never as the first match (R7.6).
 4. `spec approve` writes the full spec ID to epic metadata `spec_id` (`internal/approve/spec.go`) (R7.5). `next` uses the returned lineage provenance and runs no second `bd show` per plan row (`internal/next/beads.go`) (R7.4).
 5. `beadIndex` (`internal/validate/readiness/readiness.go`) accepts a bead ID only when it equals `<epicID>.<N>` (R7.7). `spec create` refuses a new lettered ID such as `129b-x` (`cmd/mindspec/spec.go`); existing lettered directories stay valid (R7.9).
-6. Add `internal/doctor/lineage.go`: a Warn for each open bead that resolves only through the removed title rule, with `recovery: bd update <bead> --parent <epic>`, and a report for two epics on one spec that continues (R7.6, R7.8).
+6. Add `internal/doctor/lineage.go`: a Warn for each open bead that resolves only through the removed title rule, with `recovery: bd update <bead> --parent <epic>`, and a report for two epics on one spec that continues (R7.6, R7.8). `RunWithOptions` (`internal/doctor/doctor.go`) calls the new `checkLineage(r, root)` after `checkLifecycleIntegrity(r, root)`.
 7. Docs: add `#### Amendment (spec 132-readiness-followon)` to ADR-0023 (see § ADR Fitness). Update `.mindspec/domains/core/interfaces.md` and `architecture.md` (lineage API, spec-ID resolution, cache) and `.mindspec/domains/workflow/interfaces.md` (`spec_id` metadata, doctor lineage check, `spec create` refusal). Add `internal/validate/adr_spec132_lineage_test.go` (`TestDocs_Spec132Amendments_Lineage`).
 
 **Verification**
 - [ ] `go test ./internal/phase/... -run 'TestFindEpicForBead_BlocksDepIgnored|TestFindEpicForBead_TwoParentsRefuse|TestFindEpicForBead_NoTitleFallback|TestResolveSpec_|TestCacheFindEpicBySpecID_SpecIDOnlyLettered|TestCacheFindEpicBySpecID_DuplicateWithClosedEpicRefuses'` passes
 - [ ] `go test ./internal/next/... -run 'TestBuildReadySet_OneShowPerPlanRow|TestBuildReadySet_ScopedLetteredSpecResolves|TestBuildReadySet_ScopedDuplicateEpicsRefuse'` passes (the `--spec` path through `rs.Cache.FindEpicBySpecID`)
 - [ ] `go test ./internal/validate/readiness/... -run TestBeadIndex_RequiresEpicPrefix` passes
-- [ ] `go test ./internal/doctor/... -run TestDoctor_TitleOnlyLineage` passes
+- [ ] `go test ./internal/doctor/... -run 'TestDoctor_TitleOnlyLineage|TestRunWithOptions_LineageFindingsReachReport'` passes. The second test runs `RunWithOptions` with fake `bd` and asserts that the title-only Warn and the two-epic report are in the returned report, and that a check after `checkLineage` (`checkGit`) also ran.
+- [ ] `go test ./internal/phase/... -run 'TestFindEpicForBead_|TestAgreementTable_Rows'` and `go test ./cmd/mindspec/... -run TestVerbOutput_Next` pass
 - [ ] `go test ./cmd/mindspec/... -run 'TestSpecCreate_RefusesLetteredID|TestLifecycle_LetteredSpecResolves'` passes
 - [ ] `go test ./internal/approve/... -run TestSpecApprove_WritesSpecID` passes
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Lineage` passes
+- [ ] `go test ./internal/lint/... -run TestBootstrapManifest_` and `go test ./internal/guard/...` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
