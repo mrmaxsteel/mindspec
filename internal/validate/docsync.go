@@ -67,27 +67,17 @@ func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 // INDEPENDENT of base/head — the diff range and the attribution tree
 // are separate inputs (spec 095 / mindspec-vvs9). A non-empty ownerRef
 // reads attribution from that git ref via the executor (the per-bead
-// gate passes beadHead; impl approve passes the spec-branch tip); ""
+// gate passes the landing tree; impl approve passes the spec-branch tip); ""
 // preserves the on-disk working-tree read (the `mindspec validate docs`
 // CLI). source_globs is deliberately NOT ref-anchored — see sourceGlobs.
 func ValidateDocsRange(root, base, head, ownerRef string, exec executor.Executor) *Result {
 	return validateDocsRange(root, base, head, ownerRef, exec, "")
 }
 
-// ValidateDocsSnapshot is bead 6's prospective-snapshot leg (spec 128,
-// OQ-1(a)): base is the same merge-base the committed-range gate uses;
-// treeOID is a candidate tree T (from gitutil.SnapshotWorktreeTree, via
-// the executor's SnapshotWorktreeTree seam) rather than a committed ref;
-// wtPath is the bead worktree the tree-vs-tree diff (ChangedFilesTree)
-// runs in — never a hardcoded root, never the caller's cwd. The OWNERSHIP
-// attribution input (manifests + domain enumeration) is read from treeOID
-// too (git accepts a bare tree OID anywhere a ref is accepted), so
-// attribution and diffed content come from the identical candidate the
-// eventual commit will contain. Reconcile mode and the impl-approve
-// whole-branch backstop keep calling ValidateDocsRange unchanged — this
-// leg is for the per-bead gate's normal (non-reconcile) path only.
-func ValidateDocsSnapshot(root, base, treeOID, wtPath string, exec executor.Executor) *Result {
-	return validateDocsRange(root, base, treeOID, treeOID, exec, wtPath)
+// ValidateDocsSnapshot diffs candidate tree T in wtPath. It reads all
+// ownership inputs at ownerRef, the prospective landing tree.
+func ValidateDocsSnapshot(root, base, treeOID, ownerRef, wtPath string, exec executor.Executor) *Result {
+	return validateDocsRange(root, base, treeOID, ownerRef, exec, wtPath)
 }
 
 // validateDocsRange is the shared implementation behind ValidateDocsRange

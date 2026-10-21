@@ -270,3 +270,16 @@ architecture doc, § Merge safety layer (spec 127).
 
 - `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
 - `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.
+
+
+### Landing-tree ownership inputs
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `gitutil.MergeTreeLanding(workdir, base, ours, theirs)` | Runs `git merge-tree --write-tree --name-only -z --merge-base=<base>`. Returns the tree and raw conflicted paths on exit 0 or 1. Other failures return an error. It changes no ref, index, or worktree. |
+| `Executor.LandingTree(workdir, base, specTip, beadRef)` | Previews the bead content into the spec tip. A bare candidate tree is wrapped in an unreferenced commit for the merge. During a preserved merge in `workdir`, returns the resolved index tree instead. Unmerged entries refuse. `MockExecutor` records the call and supports a result, conflict list, error, or function. |
+| `gitutil.LandingIndexTree(workdir)` | Runs `git write-tree` on the real index. Returns an unreferenced tree. Unmerged entries refuse. |
+
+The workflow layer passes the spec worktree as `workdir` when it exists.
+Source conflicts retain a preview tree with clean ownership manifests.
+Ownership conflicts return their path list for the caller's path decision.

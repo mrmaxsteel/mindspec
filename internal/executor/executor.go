@@ -156,6 +156,11 @@ type Executor interface {
 	// `git merge-base <a> <b>`).
 	MergeBase(a, b string) (string, error)
 
+	// LandingTree previews beadRef into specTip from base. A bare tree is
+	// wrapped in an unreferenced commit. During a preserved merge in workdir,
+	// it reads the resolved index instead. It never updates a ref or index.
+	LandingTree(workdir, base, specTip, beadRef string) (tree string, conflicted []string, err error)
+
 	// RevParseRef resolves ref to its commit SHA in workdir (wraps
 	// `git rev-parse --verify <ref>^{commit}`). A genuinely-absent ref
 	// returns an error satisfying IsRefNotFound; any other failure (not-a-

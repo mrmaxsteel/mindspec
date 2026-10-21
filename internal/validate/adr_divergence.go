@@ -38,7 +38,7 @@ import (
 // transition from the spec-086 stub for HC-3 traceability.
 // ownerRef (spec 095 / mindspec-vvs9) is the git ref the OWNERSHIP
 // attribution input is read from — INDEPENDENT of the diff range. The
-// per-bead caller passes beadHead; the impl-approve backstop passes the
+// per-bead caller passes the landing tree; the impl-approve backstop passes the
 // spec-branch tip; "" preserves the on-disk working-tree read. Do not
 // assume ownerRef == the diff head: they are wired separately at each
 // call site even when they presently coincide.
@@ -78,20 +78,15 @@ func CheckADRDivergence(
 	return ValidateDivergence(exec, root, specDir, beadID, diffRef, headRef, ownerRef, implApprove)
 }
 
-// CheckADRDivergenceSnapshot is bead 6's prospective-snapshot leg (spec
-// 128, OQ-1(a)): the per-bead gate's normal (non-reconcile) path only.
-// treeOID is a candidate tree T (from gitutil.SnapshotWorktreeTree),
-// used as BOTH the diff head and the OWNERSHIP ownerRef (attribution and
-// diffed content therefore come from the identical candidate); wtPath is
-// the bead worktree the tree-vs-tree diff runs in. implApprove is always
-// false here — the impl-approve whole-branch backstop keeps calling
-// CheckADRDivergence (the committed-range leg) unchanged.
+// CheckADRDivergenceSnapshot checks candidate content at treeOID with
+// ownership at ownerRef. wtPath is the bead worktree used for the diff.
 func CheckADRDivergenceSnapshot(
 	root, diffRef string,
 	exec executor.Executor,
 	specDir string,
 	beadID string,
 	treeOID string,
+	ownerRef string,
 	wtPath string,
 ) (*Result, []DivergenceFinding) {
 	r := &Result{SubCommand: "adr-divergence", TargetID: beadID}
@@ -99,5 +94,5 @@ func CheckADRDivergenceSnapshot(
 		r.AddError("adr-divergence-load", "specDir required")
 		return r, nil
 	}
-	return ValidateDivergenceSnapshot(exec, root, specDir, beadID, diffRef, treeOID, wtPath, false)
+	return ValidateDivergenceSnapshot(exec, root, specDir, beadID, diffRef, treeOID, ownerRef, wtPath, false)
 }

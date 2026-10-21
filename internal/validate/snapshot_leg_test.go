@@ -6,8 +6,7 @@ package validate
 // per-bead gate reorder depends on: (1) the diff routes through
 // ChangedFilesTree(wtPath, base, treeOID) — never ChangedFiles — and
 // (2) the OWNERSHIP attribution reads (TreeDirsAtRef/FileAtRefOrAbsent)
-// use treeOID as their ref, never a committed branch name, so
-// attribution and diffed content come from the identical candidate.
+// use the separate landing-tree ownerRef. The diff stays at treeOID.
 
 import (
 	"path/filepath"
@@ -25,7 +24,7 @@ func TestValidateDocsSnapshot_UsesChangedFilesTree(t *testing.T) {
 	// bead 6) is never taken — this test wants to observe the tree leg
 	// in isolation.
 	mock := &executor.MockExecutor{ChangedFilesTreeResult: []string{}}
-	ValidateDocsSnapshot(t.TempDir(), "BASE-SHA", "TREE-OID", "/wt/bead-1", mock)
+	ValidateDocsSnapshot(t.TempDir(), "BASE-SHA", "TREE-OID", "LANDING-TREE", "/wt/bead-1", mock)
 
 	treeCalls := mock.CallsTo("ChangedFilesTree")
 	if len(treeCalls) != 1 {
@@ -41,8 +40,8 @@ func TestValidateDocsSnapshot_UsesChangedFilesTree(t *testing.T) {
 
 // TestValidateDocsSnapshot_AttributionReadsTreeOID: when the diff
 // contains an internal/ source change, the domain-enumeration and
-// manifest reads (TreeDirsAtRef/FileAtRefOrAbsent) must use treeOID as
-// their ref — not a branch name, not "".
+// manifest reads (TreeDirsAtRef/FileAtRefOrAbsent) must use the landing
+// tree as their ref. The candidate tree remains the diff head.
 func TestValidateDocsSnapshot_AttributionReadsTreeOID(t *testing.T) {
 	var gotDirsRef, gotFileRef string
 	mock := &executor.MockExecutor{
@@ -56,15 +55,15 @@ func TestValidateDocsSnapshot_AttributionReadsTreeOID(t *testing.T) {
 			return []byte("paths:\n  - internal/widget/**\n"), true, nil
 		},
 	}
-	res := ValidateDocsSnapshot(t.TempDir(), "BASE-SHA", "TREE-OID", "/wt/bead-1", mock)
+	res := ValidateDocsSnapshot(t.TempDir(), "BASE-SHA", "TREE-OID", "LANDING-TREE", "/wt/bead-1", mock)
 	if res == nil {
 		t.Fatal("expected a non-nil result")
 	}
-	if gotDirsRef != "TREE-OID" {
-		t.Errorf("TreeDirsAtRef ref = %q, want TREE-OID", gotDirsRef)
+	if gotDirsRef != "LANDING-TREE" {
+		t.Errorf("TreeDirsAtRef ref = %q, want LANDING-TREE", gotDirsRef)
 	}
-	if gotFileRef != "TREE-OID" {
-		t.Errorf("FileAtRefOrAbsent ref = %q, want TREE-OID", gotFileRef)
+	if gotFileRef != "LANDING-TREE" {
+		t.Errorf("FileAtRefOrAbsent ref = %q, want LANDING-TREE", gotFileRef)
 	}
 }
 
@@ -77,7 +76,7 @@ func TestCheckADRDivergenceSnapshot_UsesChangedFilesTree(t *testing.T) {
 	// spec.md/plan.md degrades to a no-op result per ValidateDivergence's
 	// own doc comment — this test only asserts the diff routing, not the
 	// findings).
-	_, findings := CheckADRDivergenceSnapshot(root, "BASE-SHA", mock, root, "mindspec-x.1", "TREE-OID", "/wt/bead-1")
+	_, findings := CheckADRDivergenceSnapshot(root, "BASE-SHA", mock, root, "mindspec-x.1", "TREE-OID", "LANDING-TREE", "/wt/bead-1")
 	if findings != nil {
 		t.Fatalf("expected nil findings for a specDir with no spec.md, got %v", findings)
 	}
@@ -105,7 +104,7 @@ func TestValidateDivergenceSnapshot_UsesChangedFilesTreeAndForcedOwnerRef(t *tes
 			return nil, nil
 		},
 	}
-	_, _ = ValidateDivergenceSnapshot(mock, root, specDir, "mindspec-x.1", "BASE-SHA", "TREE-OID", "/wt/bead-1", false)
+	_, _ = ValidateDivergenceSnapshot(mock, root, specDir, "mindspec-x.1", "BASE-SHA", "TREE-OID", "LANDING-TREE", "/wt/bead-1", false)
 
 	treeCalls := mock.CallsTo("ChangedFilesTree")
 	if len(treeCalls) != 1 {
@@ -117,9 +116,8 @@ func TestValidateDivergenceSnapshot_UsesChangedFilesTreeAndForcedOwnerRef(t *tes
 	if calls := mock.CallsTo("ChangedFiles"); len(calls) != 0 {
 		t.Errorf("expected zero ChangedFiles (committed-range) calls, got %d", len(calls))
 	}
-	// Domain enumeration (candidateDomains fallback) reads at treeOID —
-	// ownerRef forced, never a branch name.
-	if gotDirsRef != "TREE-OID" {
-		t.Errorf("TreeDirsAtRef ref = %q, want TREE-OID (ownerRef forced to the snapshot tree)", gotDirsRef)
+	// Domain enumeration reads at the supplied landing-tree ownerRef.
+	if gotDirsRef != "LANDING-TREE" {
+		t.Errorf("TreeDirsAtRef ref = %q, want LANDING-TREE (separate from candidate content)", gotDirsRef)
 	}
 }

@@ -49,11 +49,16 @@ type MockExecutor struct {
 	// TreeDirsAtRefFn, when non-nil, fully drives TreeDirsAtRef so tests
 	// can return ref-dependent domain-directory enumerations. When nil,
 	// the simple result fields below are returned.
-	TreeDirsAtRefFn     func(ref, dirPath string) ([]string, error)
-	TreeDirsAtRefResult []string
-	TreeDirsAtRefErr    error
-	MergeBaseResult     string
-	MergeBaseErr        error
+	TreeDirsAtRefFn       func(ref, dirPath string) ([]string, error)
+	TreeDirsAtRefResult   []string
+	TreeDirsAtRefErr      error
+	LandingTreeFn         func(workdir, base, specTip, beadRef string) (string, []string, error)
+	LandingTreeResult     string
+	LandingTreeConflicted []string
+	LandingTreeErr        error
+
+	MergeBaseResult string
+	MergeBaseErr    error
 	// Panel-gate git seams (spec 099). RevParseRefFn / StatusFn / IsRefNotFoundFn,
 	// when non-nil, fully drive the corresponding method so tests can inject
 	// staleness / dirty-tree / ref-not-found facts; otherwise the simple result
@@ -423,3 +428,15 @@ type mockNotIgnored struct{}
 
 func (mockNotIgnored) Error() string { return "exit status 1" }
 func (mockNotIgnored) ExitCode() int { return 1 }
+
+func (m *MockExecutor) LandingTree(workdir, base, specTip, beadRef string) (string, []string, error) {
+	m.record("LandingTree", workdir, base, specTip, beadRef)
+	if m.LandingTreeFn != nil {
+		return m.LandingTreeFn(workdir, base, specTip, beadRef)
+	}
+	tree := m.LandingTreeResult
+	if tree == "" {
+		tree = "mock-landing-tree"
+	}
+	return tree, m.LandingTreeConflicted, m.LandingTreeErr
+}

@@ -676,9 +676,9 @@ Panel reviews are an optional local helper (operator decision, 2026-10-19). The 
 
 ## Non-Goals
 
-Deferred to **the follow-on spec** (readiness-tracker-honesty, part 2). It takes the next free plain spec number, not a lettered ID; see Background K. The diagnosis is already reproduced and recorded here, so the follow-on spec need not re-derive it:
+Deferred to **spec 132-readiness-followon**. Status note (2026-10-21): spec 132 owns G, H, #250, I, and phase-lineage unification. The diagnosis is already reproduced and recorded here, so the follow-on spec need not re-derive it:
 
-- **G — OWNERSHIP.yaml read from the wrong ref (#234).** `validate.CheckADRDivergence` is called from `complete.runCommittedRangeGate` with `ownerRef = beadHead`, and `CheckADRDivergenceSnapshot` forces `ownerRef` to the bead worktree's candidate tree `T`. The impl-approve backstop passes the spec-branch tip. A claim committed on the spec branch after the bead branched is invisible on both per-bead legs. Fix shape: a path is owned if a manifest claims it at the bead tree OR at the spec-branch tip.
+- **G — OWNERSHIP.yaml read from the wrong ref (#234).** `validate.CheckADRDivergence` is called from `complete.runCommittedRangeGate` with `ownerRef = beadHead`, and `CheckADRDivergenceSnapshot` forces `ownerRef` to the bead worktree's candidate tree `T`. The impl-approve backstop passes the spec-branch tip. A claim committed on the spec branch after the bead branched is invisible on both per-bead legs. Status note (2026-10-21): spec 132 uses one landing-tree ownership ref. The bead/spec union is not the rule.
 - **H — `impl approve` closes the epic before finalizing (#244).** `approve.ApproveImpl` runs `bd close <epic>` and `mindspec_phase=done` BEFORE `exec.FinalizeEpic`. Any FinalizeEpic failure leaves a CLOSED epic and an unmerged spec: push (`gitutil.PushBranch`), `guardMergeLayout`, `preflightMergeDestruction`, or a direct-path merge conflict. A plain reorder is not available: `FinalizeEpic`'s `commitWithExport(specWtPath, …)` must export the JSONL with the epic already closed (the wu7t carrier). Fix shape:
   - hoist the refusal checks and a `git push --dry-run` auth probe ahead of the close;
   - turn any post-close failure into a guard failure naming "epic closed, spec unmerged", with the resume command.
@@ -707,7 +707,7 @@ Also not goals:
 
 ## Acceptance Criteria
 
-- [ ] **AC-1 (R1.1, R1.2)**: Fixture: a fake bd that honours `-n` and the default cap.
+- [ ] **AC-1 (R1.1, R1.2)**: Status note (2026-10-21): the emitted N2c diagnostic is "bead <id> has the plan-bead form for epic <epic>, but its lineage resolves to <lineage> through its dependency on epic <lineage>". Fixture: a fake bd that honours `-n` and the default cap.
   - Its `--parent` is **edge-only**, which is the reporter's apparent bd.
   - Ready rows carry `parent`/`metadata` when set.
   - `bd show` and the epic list are served for `FindEpicForBead`.
@@ -840,7 +840,7 @@ Also not goals:
 - [ ] **AC-11 (R4.2)**: Real-git fixtures extending `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`).
   - **The "#239 topology":** spec/S's content reaches `main` through a sibling branch's PR merge, and then spec/S is fast-forwarded to `main`, so earlier landings become reachable only through a second parent.
   - **"Refuses":** writes nothing; MF-3 names the candidate; the recovery lists `reattest`, then the dependent's `--allow-not-ready=MF-3 --evidence <path-to-justification>`, and never q9ea.
-  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`. In every leg they are advisory: they change printed lines, never the exit code or the writes.
+  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`. Status note (2026-10-21): advisories change printed lines only. They never change the exit code, the binding, or the audited tuple.
 
   *Acceptance and its exits*
   - (i) **#239 recoverable, not auto-passed.** X lands on spec/S by its own `Merge bead/X`, then the #239 topology follows. Registration: `{round 1: B}`, where B is the second parent.

@@ -290,3 +290,28 @@ this ADR remain in the tree as historical record.
   (Reqs 10, 12) and the migrate-prompt phases (Req 14).
 - Yegge (2024) — Zero Framework Cognition: heuristic classification
   is forbidden; route semantic decisions to agents/operators.
+
+
+## Amendment (Spec 132)
+
+`complete` reads ownership at the landing tree. For an unmerged bead,
+this is the three-way merge of the spec tip and bead content, using their
+merge-base. The source diff stays at the bead content: the committed
+range or candidate tree `T`.
+
+This narrows the ADR-0041 snapshot-gate clause:
+"every OWNERSHIP/content read anchored at `T` too".
+The ownership read uses the landing tree. The diffed content stays at `T`.
+
+One `ownerRef` feeds all six readers: Impacted-Domains normalization,
+domain enumeration, path attribution, ADR domain resolution,
+`checkInternalPackages`, and `checkUnclaimedSource`. No reader takes a
+union of the bead and spec claims. A path is owned only when a manifest
+at the landing tree claims it for a resolved Impacted Domain.
+
+A source conflict does not prevent reads of clean ownership manifests.
+The merge keeps the conflict for resolution. A conflict in an
+`OWNERSHIP.yaml` file returns the conflicted paths before ownership is
+read. On `--resolve-merge` re-entry, the landing tree is the spec
+worktree's resolved index from `git write-tree`. Unmerged index entries
+still refuse. A materialization resume also runs this ownership gate.
