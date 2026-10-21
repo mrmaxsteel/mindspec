@@ -143,18 +143,16 @@ func TestCommittedRangeGate_SourceConflictPassesThenResolves(t *testing.T) {
 	if !gitutil.MergeInProgress(specWorktree) {
 		t.Fatal("merge conflict was not preserved")
 	}
-	_, _, preservedErr := ex.LandingTree(specWorktree, base, "spec/132-landing", "bead/landing-1")
-	if preservedErr == nil {
-		t.Fatal("unmerged index must produce a preserved-merge refusal")
-	}
 	err = runCommittedRangeGate(root, "landing-1", "bead/landing-1", specDir, base, ex, CompleteOpts{ResolveMerge: true}, io.Discard)
 	if err == nil {
 		t.Fatal("unmerged index must still refuse")
 	}
 	refusal := err.Error()
 	for _, want := range []string{
-		"a merge is already in progress",
-		"\nconflicted files:\n  internal/core/core.go",
+		"merge conflict preserved in " + specWorktree,
+		"1. edit the conflicted file(s):\n     internal/core/core.go",
+		"2. git add internal/core/core.go",
+		"3. re-run mindspec complete " + idrender.Bead("landing-1") + " --resolve-merge",
 		"\nrecovery: mindspec complete " + idrender.Bead("landing-1") + " --resolve-merge",
 	} {
 		if !strings.Contains(refusal, want) {
@@ -163,9 +161,6 @@ func TestCommittedRangeGate_SourceConflictPassesThenResolves(t *testing.T) {
 	}
 	if strings.Contains(refusal, "<bead>") {
 		t.Errorf("unmerged-index refusal has a placeholder: %s", refusal)
-	}
-	if want := preservedErr.Error() + "\nrecovery: mindspec complete " + idrender.Bead("landing-1") + " --resolve-merge"; refusal != want {
-		t.Errorf("preserved refusal changed: got %q, want %q", refusal, want)
 	}
 	_, recovery, found := strings.Cut(refusal, "\nrecovery: ")
 	if !found {
@@ -205,6 +200,62 @@ func TestCommittedRangeGate_SourceConflictPassesThenResolves(t *testing.T) {
 	}
 	if got := gateRevParse(t, specWorktree, "HEAD^2"); got != gateRevParse(t, root, "bead/landing-1") {
 		t.Fatal("wrong second parent")
+	}
+}
+
+func TestCommittedRangeGate_UnmergedReentryBindingRefuses(t *testing.T) {
+	for _, kind := range []string{"foreign", "indeterminate"} {
+		t.Run(kind, func(t *testing.T) {
+			root, specDir, base, ex := landingFixture(t, false)
+			ex.WorktreeOps = noopWorktreeOps{}
+			cfg, err := config.Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			specWorktree, err := workspace.SpecWorktreePath(root, cfg, "132-landing")
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, root, "worktree", "add", specWorktree, "spec/132-landing")
+			writeFile(t, specWorktree, "internal/core/core.go", "package core\n\nconst Value = 2\n")
+			gitRun(t, specWorktree, "add", "-A")
+			gitRun(t, specWorktree, "commit", "-qm", "spec source")
+			source := "bead/landing-1"
+			if kind == "foreign" {
+				source = "bead/foreign"
+				gitRun(t, root, "checkout", "-qb", source, base)
+				writeFile(t, root, "internal/core/core.go", "package core\n\nconst Value = 9\n")
+				gitRun(t, root, "add", "-A")
+				gitRun(t, root, "commit", "-qm", "foreign source")
+			}
+			if err := gitutil.MergeInto(specWorktree, source); err == nil {
+				t.Fatal("expected a source conflict")
+			}
+			if kind == "indeterminate" {
+				// A drifted source without its merge-start marker has no binding proof.
+				gitRun(t, root, "commit", "--allow-empty", "-qm", "advance source")
+				gitRun(t, root, "update-ref", "-d", gitutil.MergeSourceMarkerRef(source))
+			}
+			before := gitStatusPorcelain(t, specWorktree)
+			want := ex.CompleteBead("landing-1", "spec/132-landing", "", "", true)
+			if want == nil {
+				t.Fatal("executor must refuse the unbound merge")
+			}
+			phrase := "does not correspond to the requested source bead/landing-1"
+			if kind == "indeterminate" {
+				phrase = "could not verify that the merge preserved in"
+			}
+			if !strings.Contains(want.Error(), phrase) {
+				t.Fatalf("fixture lacks %s refusal: %v", kind, want)
+			}
+			got := runCommittedRangeGate(root, "landing-1", "bead/landing-1", specDir, base, ex, CompleteOpts{ResolveMerge: true}, io.Discard)
+			if got == nil || got.Error() != want.Error() {
+				t.Fatalf("gate must keep executor refusal: got %v, want %v", got, want)
+			}
+			if !gitutil.MergeInProgress(specWorktree) || gitStatusPorcelain(t, specWorktree) != before {
+				t.Fatal("refusal changed the preserved conflict state")
+			}
+		})
 	}
 }
 

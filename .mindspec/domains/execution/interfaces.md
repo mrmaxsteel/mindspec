@@ -278,7 +278,8 @@ architecture doc, § Merge safety layer (spec 127).
 |:-------|:--------|
 | `gitutil.MergeTreeLanding(workdir, base, ours, theirs)` | Runs `git merge-tree --write-tree --name-only -z --merge-base=<base>`. Returns the tree and raw conflicted paths on exit 0 or 1. Other failures return an error. It changes no ref, index, or worktree. |
 | `Executor.LandingTree(workdir, base, specTip, beadRef)` | Previews the bead content into the spec tip. A bare candidate tree is wrapped in an unreferenced commit for the merge. During a preserved merge in `workdir`, returns the resolved index tree instead. Unmerged entries refuse. `MockExecutor` records the call and supports a result, conflict list, error, or function. |
-| `executor.IsPreservedMergeError(err)` | Identifies a preserved-merge refusal, including a wrapped refusal. Callers can keep its text and add the exact recovery command. |
+| `executor.IsPreservedMergeError(err)` | Identifies a preserved-merge refusal, including a wrapped refusal. |
+| `executor.PreservedMergeReentryRefusal(err, expectedSource, reentryHint)` | Uses the refusal's worktree to render the unresolved `resumeAwareMerge` refusal. Checks source binding first. Returns the foreign or indeterminate refusal when binding fails, or the edit, stage, and re-run steps for the bound conflict. It changes no merge, ref, index entry, or worktree file. |
 | `gitutil.LandingIndexTree(workdir)` | Runs `git write-tree` on the real index. Returns an unreferenced tree. Unmerged entries refuse. It can update the index cache-tree extension. Staged entries do not change. |
 
 The workflow layer passes the spec worktree as `workdir` when it exists.

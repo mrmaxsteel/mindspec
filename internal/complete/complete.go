@@ -1691,7 +1691,9 @@ func (e *landingOwnershipError) Unwrap() error { return e.cause }
 
 func (e *landingOwnershipError) Error() string {
 	if executor.IsPreservedMergeError(e.cause) {
-		return guard.NewFailure(e.cause.Error(), fmt.Sprintf("mindspec complete %s --resolve-merge", idrender.Bead(e.beadID))).Error()
+		if branch, err := workspace.BeadBranch(e.beadID); err == nil {
+			return executor.PreservedMergeReentryRefusal(e.cause, branch, fmt.Sprintf("mindspec complete %s --resolve-merge", idrender.Bead(e.beadID))).Error()
+		}
 	}
 	return guard.NewFailure(
 		"cannot check landing-tree ownership for "+idrender.Bead(e.beadID)+": "+termsafe.Escape(e.cause.Error()),
