@@ -20,6 +20,10 @@ work_chunks:
       - internal/config/lenses.go
       - internal/config/local.go
       - internal/config/review_tools.yaml
+      - internal/config/family_literals_test.go
+      - internal/executor/executor.go
+      - internal/executor/mindspec_executor.go
+      - internal/executor/mock.go
       - cmd/mindspec/config.go
       - internal/bootstrap/bootstrap.go
       - .mindspec/config.yaml
@@ -34,37 +38,57 @@ work_chunks:
       - plugins/mindspec/skills/ms-bead-impl/SKILL.md
       - .claude/skills/ms-bead-impl/SKILL.md
       - internal/setup/readiness_skill_pin_test.go
+      - internal/setup/review_discipline_test.go
+      - internal/setup/product_surface_test.go
       - .mindspec/adr/ADR-0044-panel-review-conduct.md
+      - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
   - id: 3
     depends_on: []
     key_file_paths:
+      - internal/panel/panel.go
       - internal/panel/verdict_v2.go
       - internal/panel/submit.go
       - internal/panel/ledger.go
       - internal/panel/slotlayout.go
+      - internal/panel/slot_lock_logic.go
       - internal/panel/slot_lock_unix.go
       - internal/panel/slot_lock_windows.go
+      - internal/panel/paneltest
+      - internal/workspace/slotroot.go
+      - cmd/mindspec/root.go
+      - cmd/mindspec/panel_landed.go
       - cmd/mindspec/panel_schema.go
       - cmd/mindspec/panel_disposition_store.go
       - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
   - id: 4
     depends_on: [1, 2, 3]
     key_file_paths:
+      - internal/panel/panel.go
       - internal/panel/gate.go
       - internal/panel/slotstatus.go
       - internal/panel/create.go
-      - internal/workspace/slotroot.go
       - cmd/mindspec/panel.go
       - cmd/mindspec/panel_submit.go
+      - cmd/mindspec/panel_refute.go
+      - cmd/mindspec/panel_rebind.go
+      - cmd/mindspec/panel_defer.go
+      - cmd/mindspec/panel_abandon.go
+      - cmd/mindspec/panel_disposition_store.go
+      - cmd/mindspec/rules.go
       - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
   - id: 5
     depends_on: [1, 3]
     key_file_paths:
       - cmd/mindspec/panel_checkout.go
+      - cmd/mindspec/panel.go
+      - cmd/mindspec/panel_abandon.go
+      - cmd/mindspec/git_boundary_test.go
       - internal/executor/executor.go
       - internal/executor/mindspec_executor.go
-      - cmd/mindspec/panel_abandon.go
+      - internal/executor/mock.go
+      - internal/panel/panel.go
       - cmd/mindspec/migrate.go
+      - internal/bootstrap/bootstrap.go
       - internal/doctor/ownership.go
       - internal/doctor/links.go
   - id: 6
@@ -72,6 +96,8 @@ work_chunks:
     key_file_paths:
       - internal/panel/brief.go
       - internal/panel/prompt.go
+      - internal/panel/create.go
+      - cmd/mindspec/panel.go
       - cmd/mindspec/panel_prompt.go
       - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
   - id: 7
@@ -80,12 +106,16 @@ work_chunks:
       - internal/panellaunch/launch.go
       - internal/panellaunch/supervisor_unix.go
       - internal/panellaunch/launch_windows.go
+      - internal/panellaunch/boundary_test.go
       - cmd/mindspec/panel_launch.go
       - cmd/mindspec/panel_recover.go
+      - cmd/mindspec/panel_checkout.go
       - plugins/mindspec/workflows/ms-panel.js
       - .claude/workflows/ms-panel.js
       - plugins/mindspec/workflow_test.go
       - plugins/mindspec/scripts/codex_verdict_extract.sh
+      - internal/setup/historical_workflows
+      - internal/setup/upgrade_refresh_workflow_test.go
   - id: 8
     depends_on: [1, 2, 3]
     key_file_paths:
@@ -101,11 +131,22 @@ work_chunks:
       - plugins/mindspec/skills/ms-bead-fix/SKILL.md
       - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
       - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
+      - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+      - .claude/skills/ms-panel-run/SKILL.md
+      - .claude/skills/ms-panel-tally/SKILL.md
+      - .claude/skills/ms-bead-fix/SKILL.md
+      - .claude/skills/ms-bead-cycle/SKILL.md
+      - .claude/skills/ms-spec-final-review/SKILL.md
+      - .claude/skills/ms-bead-impl/SKILL.md
       - internal/setup/historical_skills
+      - internal/setup/upgrade_refresh_spec131_test.go
       - internal/setup/review_discipline_test.go
+      - cmd/mindspec/slot_lock_windows_test.go
       - .mindspec/domains/workflow/interfaces.md
       - CHANGELOG.md
       - project-docs/user/guides/review-panels.md
+      - README.md
+      - plugins/mindspec/README.md
 ---
 # Plan: 131-panel-execution-in-binary
 
@@ -120,8 +161,22 @@ The binary runs the panel and takes in each verdict. This plan builds spec 131 R
   - OQ-7: Bead 1 ships one default runner `{family: harness, kind: harness}`, deletes the two-name family literal in `resolveGateReviewers` and adds `TestNoFamilyLiterals`. A one-family panel is valid. The tool suggestion is advice only (Bead 1 for `config resolve`, Bead 8 for `doctor`).
 - **Dogfood boundary.** See `## Testing Strategy`, first bullet. Owner: every bead and every panel of this lane.
 - **Legacy rounds (R3.6).** Bead 4 owns the `verdict_schema` pin. Its tests are `TestGate_PreV2RoundKeepsV1Rules`, `TestGate_VerdictSchemaPinned` and `TestCreate_AlwaysV2`.
-- **ADR amendments with their citing beads (R13).** ADR-0040 in Bead 1. ADR-0044 in Bead 2. ADR-0045 in Bead 2 (rule table, `instruct`, marker form) and Bead 6 (BRIEF and slot prompt templates), under one `## Amendment (Spec 131)` heading. ADR-0043 in Bead 3. ADR-0037 in Bead 4. Each bead adds its own pin test file `internal/validate/adr_spec131_<adr>_test.go` with a function named `TestADRAmendments_Spec131<ADR>`. So `go test ./internal/validate/... -run TestADRAmendments_Spec131` runs all of them. Each bead names the existing pin tests that must stay green.
-- **Shared panel files.** The split is by mechanism: config (1), rules (2), verdict and ledger contract (3), gate and verify (4), slot clones (5), BRIEF and prompt (6), process supervision (7), doctor (8), skill adapter text (9). A dependency is declared only where a bead calls the code or reads the contract of another bead. Two beads that edit one file are kept apart only when the edits conflict. Beads 1 and 5 both edit `internal/executor/executor.go`; Bead 5 depends on Bead 1, so they do not run at once.
+- **ADR amendments with their citing beads (R13).** ADR-0040 in Bead 1. ADR-0044 in Bead 2. ADR-0045 in Bead 2 (rule table, `instruct`, marker form) and Bead 6 (BRIEF and slot prompt templates), under one `## Amendment (Spec 131)` heading. ADR-0043 in Bead 3. ADR-0037 in Bead 4. Each bead adds its own pin test file `internal/validate/adr_spec131_<adr>_test.go` with a function named `TestADRAmendments_Spec131<ADR>`.
+- **ADR pin constraint.** The spec-130 pins (`TestADRAmendments_Spec130_*`) read each ADR to end of file, and the deferral pin needs a unique heading prefix. So a Spec 131 amendment must not repeat a Spec 130 bullet heading (a line that starts `- **<heading>` as used under the Spec 130 amendment) and must not contain the literal `## Amendment (Spec 130)`. Each bead that amends an ADR runs the spec-130 pins after its edit.
+- **Root discovery (choice: move the helper to wave 1).** Bead 3 owns the one root helper, so no new edge is needed and the chain stays at 3. Bead 3 adds `workspace.FindSlotRoot(cwd string, isolationRoot func(mainRoot string) (string, error)) (SlotRoot, bool, error)` and the cmd-layer `findPanelRoot(isolationRoot func(mainRoot string) (string, error)) (string, error)` in `cmd/mindspec/root.go`. With no slot directory above the cwd, `findPanelRoot` returns what `findRoot` returns. Bead 1 adds `config.IsolationRootFor(mainRoot string) (string, error)`; every caller passes it. Bead 4 changes `resolvePanelVerb` and every existing panel RunE and `mindspec rules` to call `findPanelRoot`. Beads 5, 6 and 7 call it in `panel checkout`, `panel prompt`, `panel launch` and `panel recover`. Bead 7 (after 4, 5 and 6) adds `TestSlotRoot_EveryPanelVerb`.
+- **Shared helpers with one owner.** Later beads code against these signatures and do not write a second copy.
+  - Executor `LsFiles` (tracked check) and `ObjectExists` (`cat-file -e`): Bead 1. Bead 5 adds the clone calls. Bead 6 calls `ObjectExists`.
+  - `panel.LatestSubmissions(dir string) (map[string]SubmissionRecord, error)` (latest `verdict` record per slot): Bead 3. Beads 4, 6 and 7 call it.
+  - `landedBindingFor(exec executor.Executor, spec, slug string, round int) (bool, error)` in `cmd/mindspec/panel_landed.go` (true when a bead's landed-review metadata binds this panel round): Bead 3. Beads 4, 5 and 7 call it.
+  - Slot lock API (`AcquireSlotLock`, `TrySlotLock`, `ProbeSlotLock`) and the slot-layout paths: Bead 3.
+  - `internal/panel/paneltest`: Bead 3 (v2 panel fixture, ledger seeder for `round`, `verdict`, `dispatched`, `started`, `launch_failed`, `substitution` and attempt directories, verdict builder).
+- **Shared files in wave 2.** Beads in one wave edit one file only at the seams below. The merge order in wave 2 is 4, then 5, then 6, then 8. A later bead rebases on the earlier merge and keeps its edit inside its seam.
+  - `internal/panel/create.go`: Bead 4 adds the `verdict_schema` and `family` writes and the first-v2 carry in `Create`. Bead 6 adds one `BriefRegions` field to `CreateInput` and one render call in `renderCreateBriefHeader`.
+  - `cmd/mindspec/panel.go`: Bead 4 changes the `create` and `verify` RunE root lookup and the submit wiring. Bead 5 adds one call `cleanupPriorRound(...)` before `panel.Create`; it takes the slot locks in sorted order, then the ledger lock. Bead 6 fills `CreateInput.BriefRegions`.
+  - `internal/panel/panel.go`: Bead 4 edits the pinned-field list. Bead 5 edits `Scan` (skip the isolation root).
+  - `cmd/mindspec/panel_abandon.go`: Bead 4 changes the root lookup. Bead 5 adds the cleanup call.
+  - Executor files: Bead 1 (wave 1) and Bead 5 (wave 2) do not run at once, because Bead 5 depends on Bead 1.
+- **Adapter redispatch.** The executable adapter is `ms-panel.js` (Bead 7). So Bead 7 owns `TestPanelRun_SilentHarnessRedispatchOnce`. Bead 9 writes the same rule into the skill table and pins it with `TestPanelRun_StatusTable`.
 - **#252 dependency.** PR #267 (`fix/no-internal-refs-on-surface`) is an ancestor of the spec branch (by `git merge-base --is-ancestor`). Bead 9 checks that the #252 edits are present in the skill files before it rewrites them. If they are absent, Bead 9 includes them.
 
 ### Bead count
@@ -151,20 +206,21 @@ Wave 1: 1, 2, 3. Wave 2: 4, 5, 6, 8. Wave 3: 7, 9.
 - **ADR-0043 (disposition telemetry store).** Sound. Three new kinds join the one ledger. The `verdict` key holds `seq`. Amended.
 - **ADR-0040 (orchestration layering ratchet).** Sound. Launchers become config data. The `runner:` key keeps its meaning. Amended.
 - **ADR-0036 (ZFC).** Applied. Quota detection matches only the exit code and configured literals. No code judges reviewer output or names a tool.
-- **ADR-0030 (executor boundary).** Applied. Clone, remote, `ls-files`, `check-ignore` and `cat-file` calls go through `internal/executor`. `internal/panel` stays a leaf: it may import only `internal/termsafe` and `internal/idvalidate` (`TestPanelLeafImports_StdlibPlusTermsafeOnly`). So config resolution, rule lookup and git calls happen in the cmd layer, which passes values or callbacks into `internal/panel`. Process supervision lives in a new package `internal/panellaunch`. `TestEnforcementHasNoGitLeaks` stays green.
+- **ADR-0030 (executor boundary).** Applied. Clone, remote, `ls-files`, `check-ignore` and `cat-file` calls go through `internal/executor`. `internal/panel` stays a leaf: it may import only `internal/termsafe` and `internal/idvalidate` (`TestPanelLeafImports_StdlibPlusTermsafeOnly`). So config resolution, rule lookup and git calls happen in the cmd layer, which passes values or callbacks into `internal/panel`. Process supervision lives in a new package `internal/panellaunch`. `TestEnforcementHasNoGitLeaks` scans only `internal/{validate,approve,complete,state,phase}`. It does not guard `cmd/mindspec`, `internal/workspace` or `internal/panellaunch`. So Bead 5 adds `TestPanelCheckout_GitOnlyViaExecutor` and Bead 7 adds `TestPanelLaunch_NoGitCalls` (see those beads).
 - **ADR-0035 (agent error contract).** Applied. Every new refusal ends with one `recovery:` line. No divergence is proposed.
 
 ## Testing Strategy
 
-- **Dogfood boundary.** This spec changes the panel verbs and the gate that this lane uses. Every panel of this lane runs on the installed v0.17.0 binary `~/.local/bin/mindspec`. No panel runs on a spec-branch build. Nobody installs a branch build. The R4.13 `panel.runners` block is safe for the released binary, because its config load ignores unknown keys.
+- **Dogfood boundary.** This spec changes the panel verbs, the gate, the panel skills and the `/ms-panel` workflow that this lane uses. Every panel of this lane runs on the installed v0.17.0 binary `~/.local/bin/mindspec`. No panel runs on a spec-branch build. Nobody installs a branch build. Lane panels use the main checkout's installed skills and `/ms-panel` workflow, never the spec branch's rewritten copies, until the spec merges. The R4.13 `panel.runners` block is safe for the released binary, because its config load ignores unknown keys.
 - **No real model CLI.** Tests use temp repos (`t.TempDir()` with `git init`) and local fake runner scripts only. No test starts a real `codex`, `claude` or other model CLI. The R4.12 suggestion tests put a fake executable on a temp `PATH`.
+- **Presence rule.** A wrong bead must not pass because a test is absent. A `go test -run` pattern that matches no test passes. So each "owned tests" item below means: `go test <pkgs> -run '^(<names>)$' -v -count=1` exits 0 and prints one top-level `--- PASS: <Name>` line for each listed name. A missing line fails the item. Every `-run` pattern in this plan is anchored. A build-tagged Windows test is checked by `GOOS=windows go vet ./...` and by a `grep` for its `func` line in a file with `//go:build windows`.
 - **Layers.**
   - Unit: `internal/config`, `internal/rules`, `internal/panel` (pure; fake resolvers and callbacks), `internal/workspace`.
-  - Integration: `cmd/mindspec` tests drive the verbs in temp repos. Ledger fixtures seed `launch`, `verdict` and `substitution` records where a test needs a state that a later bead's verb makes.
-  - Process: `internal/panellaunch` tests run fake runners under the supervisor. Unix-only tests use `_unix_test.go` or a `!windows` build tag. Windows tests use a `windows` build tag. `GOOS=windows go build ./...` runs in Bead 3 and Bead 7.
+  - Integration: `cmd/mindspec` tests drive the verbs in temp repos. The Bead 3 `paneltest` seeder writes ledger records and attempt directories where a test needs a state that a later bead's verb makes.
+  - Process: `internal/panellaunch` tests run fake runners under the supervisor. Unix-only tests use `_unix_test.go` or a `!windows` build tag. Windows tests use a `windows` build tag.
   - Workflow: Bead 7 runs `ms-panel.js` under `node` from Go with a stub harness API. The test fails, and does not skip, when `node` is absent.
-- **Shared helpers.** Bead 3 adds `internal/panel/paneltest` helpers: a v2 panel fixture, a ledger seeder and a verdict builder. Later beads use them. Bead 4 adds a cmd-layer slot-clone helper for AC-9.
-- **Shipped-surface rule.** Every bead that adds or changes surface text (skills, workflows, setup-written files, templates, rule table, data files, CLI help, errors and output, user manuals) cites no ADR-NNNN, spec number, R-id or §, bead ID or issue number. `TestSurfaceRefs_NoInternalReferences` (exists) and `TestProductSurface_NoInternalRefs` (Bead 2) enforce it. Each later bead keeps both green.
+- **Windows gap.** CI has no Windows job, and `.github/` is outside the spec's Impacted Domains. So the R7.9 stale-file algorithm is OS-neutral code with injected pid-liveness and file operations, and Bead 3 tests it on Unix. `GOOS=windows go vet ./...` runs in Beads 3, 7 and 9, so the Windows code and the build-tagged tests compile. Nothing in this plan executes `TestSlotLock_WindowsLifecycle` or `TestPanelLaunch_WindowsRefuses`. That execution is a named gap; it needs a Windows host after the spec merges.
+- **Shipped-surface rule.** Every bead that adds or changes surface text (skills, workflows, setup-written files, templates, rule table, data files, CLI help, errors and output, user manuals) cites no ADR-NNNN, spec number, R-id or §, bead ID or issue number. `TestSurfaceRefs_NoInternalReferences` (exists; Go string literals) and `TestProductSurface_NoInternalRefs` (Bead 2; embedded data files and rule fields) enforce it. Each later bead keeps both green.
 - **Gates for every bead.** `go build ./...`, `go test ./... -short`, `go vet ./...` and `gofmt -l .` (empty output). CI runs `-short` and the race tests.
 
 ## Bead 1: Panel config: runners, lenses, local file, isolation root
@@ -172,23 +228,22 @@ Wave 1: 1, 2, 3. Wave 2: 4, 5, 6, 8. Wave 3: 7, 9.
 Scope: R4.1–R4.7 (config side), R4.9–R4.13, R5, R6.1, and the R4.10 and R6.2 `.gitignore` lines from `mindspec init`.
 
 **Steps**
-1. Add `panel.runners` to `internal/config` per spec "R4 — Runners and slot resolution" R4.1–R4.4: types, argv placeholder check, merge by family over the default `{family: harness, kind: harness}`, default `timeout_minutes` 60 for a process runner. Make zero-config fill go round-robin over the merged runner order. Delete the two-name literal in `resolveGateReviewers`.
+1. Add `panel.runners` to `internal/config` per spec "R4 — Runners and slot resolution" R4.1–R4.4: types, argv placeholder check, merge by family over the default `{family: harness, kind: harness}`, default `timeout_minutes` 60 for a process runner. Make zero-config fill go round-robin over the merged runner order. Delete the two-name literal in `resolveGateReviewers`. Add `TestNoFamilyLiterals` per R4.5. Its scanner takes a root directory. The test runs it on the repository, and on a `t.TempDir()` fixture with a planted `"codex"` literal in a non-test `.go` file, and asserts one hit there (the same form as `TestSurfaceRefs_NegativeEachClass`).
 2. Add family and model resolution to slot expansion: each slot gets `Family`; model order per R4.6; a `SubstituteModel(toFamily)` helper; model-safe refusal from every source. A model-only entry gets family `harness` (R4.7). A family with no runner refuses with the recovery `add a runner for the family to panel.runners`. `create` and `config resolve` both get this refusal through slot expansion.
 3. Add `.mindspec/config.local.yaml` (R4.10): only `panel.runners` and `models`, a 65536-byte limit, strict keys, merge after `config.yaml`. Retire `panel.substitution` (R4.9) with the `on_quota` recovery. Delete `knownModels`, `KnownModels()` and the `config show` known-model warning (R4.5).
-4. Add R5: `panel.lenses`, `panel.gates.<g>.lenses|acceptance`, the R5.4 and R5.5 default tables as data, lens-name validation, and a lens-only gate entry. Delete `defaultLenses`. Add `panel.isolation_root` with the R6.1 lexical refusals in load, and the tracked-value refusal through a new executor `ls-files` call at the cmd-layer config load.
-5. Add `mindspec config resolve --gate G [--json]` with per-value source and the R4.7 model-only Warn. Add `internal/config/review_tools.yaml` and the R4.12 suggestion line. Add `TestNoFamilyLiterals` per R4.5. Make `mindspec init` add `config.local.yaml` and the effective isolation root to `.gitignore`.
-6. Add the R4.13 `panel.runners` block to this repository's `.mindspec/config.yaml`. Append `## Amendment (Spec 131)` to ADR-0040 per R13.5, and add `TestADRAmendments_Spec131ADR0040`.
+4. Add R5: `panel.lenses`, `panel.gates.<g>.lenses|acceptance`, the R5.4 and R5.5 default tables as data, lens-name validation, and a lens-only gate entry. Delete `defaultLenses`. Add `panel.isolation_root` with the R6.1 lexical refusals in load, and `config.IsolationRootFor(mainRoot)`.
+5. Add two executor calls in `executor.go`, `mindspec_executor.go` and `mock.go`: `LsFiles` (is a path tracked) and `ObjectExists` (`git cat-file -e <sha>:<path>`). Use `LsFiles` for the tracked-root refusal at the cmd-layer config load.
+6. Add `mindspec config resolve --gate G [--json]` with per-value source and the R4.7 model-only Warn. Add `internal/config/review_tools.yaml` and the R4.12 suggestion line. Make `mindspec init` add `config.local.yaml` and the effective isolation root to `.gitignore`.
+7. Add the R4.13 `panel.runners` block to this repository's `.mindspec/config.yaml`. Append `## Amendment (Spec 131)` to ADR-0040 per R13.5, and add `TestADRAmendments_Spec131ADR0040`.
 
 **Verification**
-- [ ] `go test ./internal/config/... -run 'TestModelValue_Refusals|TestRunners_|TestSubstitution_Retired|TestNoFamilyLiterals|TestSlotModelResolution|TestReviewer_ModelOnlyIsHarness|TestSubstituteModel|TestLocalConfig_|TestLenses_|TestIsolationRoot_Validate|TestRepoConfig_Resolves'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestCreate_RefusesUnrunnableFamily|TestReviewer_ModelOnlyWarn|TestConfigResolve_|TestLocalConfig_Refusals'` passes (create and `config resolve` legs)
-- [ ] `go test ./internal/bootstrap/... -run TestBootstrap_ScratchIgnoredExisting` passes
-- [ ] `go test ./internal/validate/... -run 'TestADRAmendments_Spec131ADR0040'` passes, and `go test ./cmd/mindspec/... -run TestADR0040` and `go test ./internal/next/... -run TestGateReadiness` stay green
-- [ ] `go test ./internal/setup/... -run 'TestRunClaude_|TestSurfaceRefs_'` stays green
+- [ ] Owned tests (presence rule): `go test ./internal/config/... ./internal/executor/... ./internal/bootstrap/... ./internal/validate/... ./cmd/mindspec/... -run '^(TestModelValue_Refusals|TestRunners_Validate|TestRunners_TimeoutDefault|TestRunners_ZeroConfigHarness|TestRunners_MergeByFamily|TestSubstitution_Retired|TestNoFamilyLiterals|TestSlotModelResolution|TestReviewer_ModelOnlyIsHarness|TestReviewer_ModelOnlyWarn|TestCreate_RefusesUnrunnableFamily|TestSubstituteModel|TestLocalConfig_Merge|TestLocalConfig_Refusals|TestConfigResolve_Provenance|TestConfigResolve_ToolSuggestion|TestRepoConfig_Resolves|TestLenses_GateDefaults|TestLenses_LensOnlyGateEntry|TestLenses_UnknownRefused|TestIsolationRoot_Validate|TestBootstrap_ScratchIgnoredExisting|TestExecutor_LsFilesObjectExists|TestADRAmendments_Spec131ADR0040)$' -v -count=1` prints a `--- PASS:` line for each of the 24 names
+- [ ] `TestNoFamilyLiterals -v` output shows its planted-fixture subtest passing (the scanner reports the planted `"codex"`)
+- [ ] Stay green: `go test ./cmd/mindspec/... -run '^TestADR0040'`, `go test ./internal/next/... -run '^TestGateReadiness'`, `go test ./internal/validate/... -run '^TestADRAmendments_Spec130_'` and `go test ./internal/setup/... -run '^(TestRunClaude_|TestSurfaceRefs_)'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- [ ] AC-5 in full: every listed load refusal; the 60-minute default; zero-config `bead` gives 4 `harness` slots; the merge-by-family order; `TestNoFamilyLiterals` passes on `G1-codex` and fails on a planted `"codex"`; `KnownModels` does not exist
+- [ ] AC-5 in full: every listed load refusal; the 60-minute default; zero-config `bead` gives 4 `harness` slots; the merge-by-family order; `TestNoFamilyLiterals` passes on `G1-codex` and reports the planted `"codex"`; `KnownModels` does not exist
 - [ ] AC-6: the slot-model, model-only, unrunnable-family (create and `config resolve` legs), substitute-model, local-merge, local-refusal, provenance, tool-suggestion and repo-config items
 - [ ] AC-7: the lens default, lens-only entry and unknown-lens items; no default focus text names a tool, language or library
 - [ ] AC-8: load refuses an empty, absolute, `.`, `.git/x`, `.worktrees/x` and tracked root; `mindspec init` on an existing install adds the default ignore line
@@ -203,74 +258,72 @@ Scope: R10.1–R10.7 except the `ms-bead-fix` prompt edit (Bead 9).
 
 **Steps**
 1. Add package `internal/rules` with one embedded YAML table per spec "R10 — Rule table" R10.1, holding at least the R10.2 rows. The `gates` field limits `review.ci-parity` to `final_review`. Add lookup by id, scope and gate.
-2. Add `mindspec rules [--scope S] [--json]` and `mindspec rules show <id>`. An unknown id or scope refuses with a `recovery:` line. Leave a root-resolver hook so that Bead 4 can add slot-directory root discovery.
+2. Add `mindspec rules [--scope S] [--json]` and `mindspec rules show <id>` in `cmd/mindspec/rules.go`. An unknown id or scope refuses with a `recovery:` line. Bead 4 changes its root lookup to `findPanelRoot`.
 3. Make `instruct` render a `## Rules` section: orchestrator-scope rules in every mode, plus implementer-scope rules in implement mode (R10.6).
 4. Change the `ms-bead-impl` staged-rule marker in both copies to `<!-- staged-rule: id=sequence.bead-impl-prompt; remove-by=YYYY-MM-DD -->` (R10.5). Add a marker parser. Update `readinessStagedRule` in `internal/setup/readiness_skill_pin_test.go` and the matching rows in `internal/setup/review_discipline_test.go`.
-5. Add `TestProductSurface_NoInternalRefs` per R10.7: it scans rule fields, shipped data files and non-test string literals that this spec adds for `ADR-[0-9]`, `[Ss]pec [0-9]{3}`, `\bR[0-9]+\.[0-9]`, `#[0-9]{3}` and the bead-id pattern.
-6. Append `## Amendment (Spec 131)` to ADR-0044 per R13.2. Start the ADR-0045 amendment with the step-1, step-5 and marker-form items (R13.1). Add `TestADRAmendments_Spec131ADR0044` and `TestADRAmendments_Spec131ADR0045Rules`.
+5. Add `TestProductSurface_NoInternalRefs` (R10.7) in `internal/setup/product_surface_test.go`. It parses every non-test `.go` file under `internal/` with `go/parser`, collects every `//go:embed` directive, and scans each file that a directive names, plus every rule field. The pattern set is `ADR-[0-9]`, `[Ss]pec [0-9]{3}`, `\bR[0-9]+\.[0-9]`, `#[0-9]{3}` and the bead-id pattern. It exempts only `internal/setup/historical_skills/` and `internal/setup/historical_workflows/`, which hold frozen earlier bodies used as digest oracles and never written as new content; the exemption is a named list in the test. A negative subtest plants `R7.3` in a temp data file, runs the same scanner and asserts a hit. Go string literals stay covered by `TestSurfaceRefs_NoInternalReferences`.
+6. Append `## Amendment (Spec 131)` to ADR-0044 per R13.2. Start the ADR-0045 amendment with the step-1, step-5 and marker-form items (R13.1). Obey the ADR pin constraint in `## Lane resolutions`. Add `TestADRAmendments_Spec131ADR0044` and `TestADRAmendments_Spec131ADR0045Rules`.
 
 **Verification**
-- [ ] `go test ./internal/rules/... -run 'TestRuleTable_MinimumSet|TestStagedMarker_Parse'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestRulesCmd'` passes
-- [ ] `go test ./internal/instruct/... -run TestInstruct_RulesSection` passes
-- [ ] `go test ./internal/setup/... -run 'TestProductSurface_NoInternalRefs|TestMsBeadImplSkill_|TestReviewDiscipline_|TestSurfaceRefs_|TestLifecycleGateStep_'` passes
-- [ ] `go test ./internal/validate/... -run 'TestADRAmendments_Spec131ADR004[45]|TestADRAmendments_Spec130_'` passes (the spec-130 pins, incl. the ADR-0045 marker text in `TestADRAmendments_Spec130_Verbs`, stay green because the amendment is append-only)
+- [ ] Owned tests (presence rule): `go test ./internal/rules/... ./cmd/mindspec/... ./internal/instruct/... ./internal/setup/... ./internal/validate/... -run '^(TestRuleTable_MinimumSet|TestStagedMarker_Parse|TestRulesCmd|TestInstruct_RulesSection|TestProductSurface_NoInternalRefs|TestADRAmendments_Spec131ADR0044|TestADRAmendments_Spec131ADR0045Rules)$' -v -count=1` prints a `--- PASS:` line for each of the 7 names
+- [ ] `TestProductSurface_NoInternalRefs -v` output shows the planted-`R7.3` subtest passing
+- [ ] Stay green after the ADR edits: `go test ./internal/validate/... -run '^TestADRAmendments_Spec130_'` (incl. the ADR-0045 marker text in `TestADRAmendments_Spec130_Verbs`)
+- [ ] Stay green: `go test ./internal/setup/... -run '^(TestMsBeadImplSkill_|TestReviewDiscipline_|TestSurfaceRefs_|TestLifecycleGateStep_)'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- [ ] AC-13: the table holds every R10.2 id; `rules --scope reviewer` lists exactly the reviewer rules; `rules show nope` refuses; `instruct` lists `lifecycle.no-probe-complete` in spec and implement mode and `review.derive` only in implement mode; the `ms-bead-impl` marker parses with `id=sequence.bead-impl-prompt`; the internal-reference scan is clean
+- [ ] AC-13: the table holds every R10.2 id; `rules --scope reviewer` lists exactly the reviewer rules; `rules show nope` refuses; `instruct` lists `lifecycle.no-probe-complete` in spec and implement mode and `review.derive` only in implement mode; the `ms-bead-impl` marker parses with `id=sequence.bead-impl-prompt`; the internal-reference scan is clean on every embedded data file and goes red on the planted fixture
 - [ ] AC-16: ADR-0044 carries the R13.2 amendment; ADR-0045 carries the R13.1 rule-table items
 
 **Depends on**
 None
 
-## Bead 3: Verdict v2, ledger kinds, submit core, slot layout and lock
+## Bead 3: Verdict v2, ledger kinds, submit core, slot layout, lock and root helper
 
-Scope: R1, R2.4–R2.6 and R2.8 (core), the `verdict`, `launch` and `substitution` record kinds, the slot-directory layout, the slot lock (Terms, R7.3 lock tests, R7.9 lock-file rules).
+Scope: R1, R2.4–R2.6 and R2.8 (core), the `verdict`, `launch` and `substitution` record kinds, the slot-directory layout, the slot lock (Terms, R7.3 lock tests, R7.9 lock-file rules), the R6.9 root helper, and the shared helpers in `## Lane resolutions`.
 
 **Steps**
 1. Add the v2 verdict per spec "R1 — Verdict schema v2": one Go definition that gives the schema layer and the JSON Schema, plus the transport and relation layer. Each error names its JSON pointer. Add the R1.6 projection to `ccr[i]` and the slot hash. Add `mindspec panel schema`.
-2. Add the three record kinds to the ledger (`IsVerbRecord`, `validateLedgerMap`, keys per the R2.5 and R7.6 tables). Add `Family` to `RosterSlot`. Make `panel disposition append` refuse the three kinds; `validate|check|query` accept them.
-3. Add `panel.Submit` in the leaf package. It takes the target, the bytes and a resolver callback that returns the effective model, `runner_kind` and `runner_source`. Under the ledger lock it runs the pure R2.3 checks, then the R2.5 same-bytes repair or the append with `seq` and the temp-file rename, then the `submitted` outcome for an open `dispatched` attempt. Add a crash-injection hook for tests.
-4. Add slot-layout path helpers (`<isolation_root>/<spec or adhoc>/<slug>/r<N>/<slot>/`, `slot.json`, `tree/`, `attempt-<k>/`, `.locks/…/<slot>.lock`) and the attempt-number rule of R7.2.
-5. Add the slot lock: `flock` on Unix with no file deletion; on Windows, the R7.9 exclusive-create file with pid, stale-file rename and relink. Add the non-waiting lock test and the 1-second bounded retry (R7.3). Follow `disposition_lock_unix.go` and `disposition_lock_windows.go`.
-6. Append `## Amendment (Spec 131)` to ADR-0043 per R13.4. Add `TestADRAmendments_Spec131ADR0043`.
+2. Add the three record kinds to the ledger (`IsVerbRecord`, `validateLedgerMap`, keys per the R2.5 and R7.6 tables). Add `Family` to `RosterSlot` in `panel.go`. Make `panel disposition append` refuse the three kinds; `validate|check|query` accept them.
+3. Add `panel.Submit` in the leaf package. It takes the target, the bytes and a resolver callback that returns the effective model, `runner_kind` and `runner_source`. Under the ledger lock it runs the pure R2.3 checks, then the R2.5 same-bytes repair or the append with `seq` and the temp-file rename, then the `submitted` outcome for an open `dispatched` attempt. Add a crash-injection hook for tests. Add `panel.LatestSubmissions`.
+4. Add slot-layout path helpers (`<isolation_root>/<spec or adhoc>/<slug>/r<N>/<slot>/`, `slot.json`, `tree/`, `attempt-<k>/`, `.locks/…/<slot>.lock`) and the attempt-number rule of R7.2. Add `internal/panel/paneltest` (fixture, seeder, verdict builder).
+5. Add the slot lock API. Unix: `flock`, no file deletion. Windows: put the R7.9 decision logic in `slot_lock_logic.go` (no build tag), with injected pid-liveness and file operations (exclusive create, read, rename, link, remove): a dead pid is stale and free; an empty or unparseable file is held; the stale-file rename, re-read and delete-only-if-same-pid; the relink put-back; the link-fails case deletes the moved file only when its pid is dead, else refuses and names both files; no path deletes a file whose pid is live. `slot_lock_windows.go` binds the real OS calls. Add the non-waiting probe and the 1-second bounded retry (R7.3). Follow `disposition_lock_unix.go` and `disposition_lock_windows.go`.
+6. Add `workspace.FindSlotRoot` in `internal/workspace/slotroot.go` per R6.9: the nearest ancestor with `slot.json` and `tree/`, the exact-path check against the isolation-root callback, and the `slot.json` field check. Add `findPanelRoot` in `cmd/mindspec/root.go` (signature in `## Lane resolutions`). Add `landedBindingFor` in `cmd/mindspec/panel_landed.go`.
+7. Append `## Amendment (Spec 131)` to ADR-0043 per R13.4, obeying the ADR pin constraint. Add `TestADRAmendments_Spec131ADR0043`.
 
 **Verification**
-- [ ] `go test ./internal/panel/... -run 'TestVerdictV2_|TestPanelSubmit_Writes|TestPanelSubmit_Replace|TestPanelSubmit_CrashRepair|TestPanelSubmit_Race|TestSlotLock_'` passes
-- [ ] `go test ./internal/panel/... -run 'TestPanelLeafImports_StdlibPlusTermsafeOnly|TestLedger|TestScan_'` stays green
-- [ ] `go test ./cmd/mindspec/... -run 'TestDispositionAppend_RefusesV2Kinds|TestPanelSchema'` passes
-- [ ] `go test ./internal/validate/... -run 'TestADRAmendments_Spec131ADR0043|TestADRAmendments_Spec130_'` passes
-- [ ] `GOOS=windows go build ./...` passes
+- [ ] Owned tests (presence rule): `go test ./internal/panel/... ./internal/workspace/... ./internal/validate/... ./cmd/mindspec/... -run '^(TestVerdictV2_Accepts|TestVerdictV2_Refusals|TestVerdictV2_TransportLayer|TestVerdictV2_SchemaMatchesValidator|TestPanelSubmit_Writes|TestPanelSubmit_Replace|TestPanelSubmit_CrashRepair|TestPanelSubmit_Race|TestLatestSubmissions|TestSlotLock_StaleLogic|TestSlotLock_UnixProbeNoDelete|TestFindSlotRoot|TestFindPanelRoot_NoSlotFallsBack|TestLandedBindingFor|TestDispositionAppend_RefusesV2Kinds|TestPanelSchema|TestADRAmendments_Spec131ADR0043)$' -v -count=1` prints a `--- PASS:` line for each of the 17 names
+- [ ] `TestSlotLock_StaleLogic` runs on Unix with fakes and has one subtest each for: dead pid freed; empty file held; unparseable file held; live pid never deleted; rename re-read finds a new pid and relinks; relink race leaves one holder; link fails and the moved file's pid is live, so it refuses and names both files
+- [ ] Stay green: `go test ./internal/panel/... -run '^(TestPanelLeafImports_StdlibPlusTermsafeOnly|TestLedger|TestScan_)'` and `go test ./internal/validate/... -run '^TestADRAmendments_Spec130_'`
+- [ ] `GOOS=windows go vet ./...` passes
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
 - [ ] AC-1 in full, including the 1 MiB padding case, the 4096-byte `tail` case and schema-versus-validator agreement
 - [ ] AC-2 (code only): the R1.6 projection gives `ccr[i]` and the slot hash; Bead 4 owns the test, because the refute leg needs the v2 gate
 - [ ] AC-3: submit writes the file and one `verdict` record with `seq: 1`; a same-bytes rerun adds no record; final APPROVE then final REQUEST_CHANGES both stay in the ledger; a crash after the append repairs on rerun; two concurrent submits leave the file that matches the latest record; `panel disposition append` refuses each new kind
+- [ ] AC-10 (logic only): the R7.9 stale-file rules hold under `TestSlotLock_StaleLogic`
 - [ ] AC-16: ADR-0043 carries the R13.4 amendment
 
 **Depends on**
 None
 
-## Bead 4: Gate, verify, submit CLI and slot root discovery
+## Bead 4: Gate, verify, submit CLI and root wiring
 
-Scope: R2.1–R2.3, R2.7, R2.9 (CLI), R3, R4.6–R4.8 (create side), R6.9, R8.
+Scope: R2.1–R2.3, R2.7, R2.9, R3, R4.6–R4.8 (create side), R6.9 wiring, R8.
 
 **Steps**
-1. Make `create` write `verdict_schema: 2` to `panel.json` and every new `round` event, and add it to the pinned-field list (R3.1). Write `family` on each roster entry. Add the first-v2-round family carry and its refusal (R4.8).
-2. Change the gate per spec "R3 — The gate on a v2 round": v2-ness from the latest `round` event only; a slot is in only by R3.3; R3.5 discharge binding on the latest submission; R3.6 rounds with no `verdict_schema` keep spec 130's rules.
-3. Add `mindspec panel submit` (long and short form) in `cmd/mindspec/panel_submit.go`. It resolves config, the effective runner and the effective model, and passes them to `panel.Submit`. Add the landed-binding refusal, the process-slot refusal, R2.9 attempt binding and the status print (R2.7). Add no `--via` flag.
+1. Make `create` write `verdict_schema: 2` to `panel.json` and every new `round` event, and add it to the pinned-field list in `panel.go` (R3.1). Write `family` on each roster entry. Add the first-v2-round family carry and its refusal (R4.8). Stay inside the `create.go` seam in `## Lane resolutions`.
+2. Change the gate per spec "R3 — The gate on a v2 round": v2-ness from the latest `round` event only; a slot is in only by R3.3; R3.5 discharge binding on the latest submission (`panel.LatestSubmissions`); R3.6 rounds with no `verdict_schema` keep spec 130's rules.
+3. Add `mindspec panel submit` (long and short form) in `cmd/mindspec/panel_submit.go`. It resolves config, the effective runner and the effective model, and passes them to `panel.Submit`. Add the landed-binding refusal (`landedBindingFor`), the process-slot refusal, R2.9 attempt binding and the status print (R2.7). Add no `--via` flag.
 4. Add R8 slot status to `panel verify`: the closed status set, the R8.2 rule order, R8.3 annotations, `--json` with `handoff_pending`, the R8.6 exit codes, and `termsafe` for every reviewer string. `tally` prints one line per `replaced` slot. Verify writes nothing.
-5. Add R6.9 root discovery in `internal/workspace`: find the nearest ancestor with `slot.json` and `tree/`, check the exact path and the `slot.json` fields, and return the main root. Wire it into every `mindspec panel` verb and into `mindspec rules` through the Bead 2 hook.
-6. Append `## Amendment (Spec 131)` to ADR-0037 per R13.3. Add `TestADRAmendments_Spec131ADR0037`.
+5. Change `resolvePanelVerb`, every RunE in `panel.go`, `panel_rebind.go`, `panel_disposition_store.go`, `panel_defer.go`, `panel_abandon.go`, and `mindspec rules` to call `findPanelRoot(config.IsolationRootFor)` (R6.9). Add a real `git clone --shared` test helper for AC-9 (test code may run git).
+6. Append `## Amendment (Spec 131)` to ADR-0037 per R13.3, obeying the ADR pin constraint. Add `TestADRAmendments_Spec131ADR0037`.
 
 **Verification**
-- [ ] `go test ./internal/panel/... -run 'TestVerdictV2_FindingProjection|TestGateV2_|TestGate_VerdictSchemaPinned|TestGate_PreV2RoundKeepsV1Rules|TestCreate_AlwaysV2|TestRoster_Family|TestCreate_FirstV2RoundFamily'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelSubmit_Refusals|TestPanelSubmit_ABA|TestPanelSubmit_NoViaFlag|TestPanelSubmit_LandedBindingRefused|TestPanelVerify_AnnotationsFromRecords|TestPanelVerify_SlotStatus|TestPanelVerify_DispatchedUnsubmitted|TestPanelVerify_HarnessTimeout|TestPanelVerify_Replaced|TestPanelVerify_ExitCodes|TestPanelVerify_V1Round|TestPanelVerify_JSONRoster|TestPanelVerify_Termsafe'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestSlotRoot_'` passes (a real `git clone --shared` slot built by the test helper)
-- [ ] `go test ./internal/validate/... -run 'TestADRAmendments_Spec131ADR0037|TestADRAmendments_Spec130_'` passes
-- [ ] `go test ./internal/complete/... -run 'TestReadinessIsolation_|TestPanelGate_AdHocPanelNeverGates'` and `go test ./internal/panel/... -run 'TestCreate_|TestScan_'` stay green
+- [ ] Owned tests (presence rule): `go test ./internal/panel/... ./cmd/mindspec/... ./internal/validate/... -run '^(TestVerdictV2_FindingProjection|TestGateV2_SubmittedOnly|TestGateV2_DigestBinding|TestGateV2_DraftAndVoidMissing|TestGateV2_ReplacementAndDischarge|TestGateV2_DischargePositional|TestGate_VerdictSchemaPinned|TestGate_PreV2RoundKeepsV1Rules|TestCreate_AlwaysV2|TestRoster_Family|TestCreate_FirstV2RoundFamily|TestPanelSubmit_Refusals|TestPanelSubmit_ABA|TestPanelSubmit_NoViaFlag|TestPanelSubmit_LandedBindingRefused|TestPanelSubmit_SupersededAttemptRefused|TestPanelSubmit_SameAttemptDraftThenFinal|TestPanelSubmit_SameAttemptRerunRepairs|TestPanelSubmit_EndedAttemptRefused|TestPanelSubmit_LongFormSuperseded|TestPanelVerify_AnnotationsFromRecords|TestPanelVerify_SlotStatus|TestPanelVerify_DispatchedUnsubmitted|TestPanelVerify_HarnessTimeout|TestPanelVerify_Replaced|TestPanelVerify_ExitCodes|TestPanelVerify_V1Round|TestPanelVerify_JSONRoster|TestPanelVerify_Termsafe|TestSlotRoot_SubmitFromFilePath|TestSlotRoot_SubmitFromClone|TestSlotRoot_Refusals|TestSlotRoot_Rules|TestADRAmendments_Spec131ADR0037)$' -v -count=1` prints a `--- PASS:` line for each of the 34 names
+- [ ] The five attempt-binding tests seed `dispatched` events, `attempt-<k>/` directories and a `launch_failed` outcome with the Bead 3 `paneltest` seeder; no test in this bead needs `panel checkout`
+- [ ] Stay green: `go test ./internal/complete/... -run '^(TestReadinessIsolation_|TestPanelGate_AdHocPanelNeverGates)'`, `go test ./internal/panel/... -run '^(TestCreate_|TestScan_)'` and `go test ./internal/validate/... -run '^TestADRAmendments_Spec130_'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
@@ -278,56 +331,55 @@ Scope: R2.1–R2.3, R2.7, R2.9 (CLI), R3, R4.6–R4.8 (create side), R6.9, R8.
 - [ ] AC-2: `TestVerdictV2_FindingProjection` — findings `ccr[0]` and `ccr[1]` carry the sha256 of `a` and `b`; `panel refute --finding ccr[1]` discharges `ccr[1]` only
 - [ ] AC-4 in full; the R3.6 pin is owned here (`TestGate_PreV2RoundKeepsV1Rules`, `TestGate_VerdictSchemaPinned`, `TestCreate_AlwaysV2`)
 - [ ] AC-6: `create` writes `family`; the first-v2-round carry and its `--reviewers` refusal; earlier round records stay byte-identical
+- [ ] AC-8: the attempt-binding items (superseded attempt, same-attempt draft then final, same-attempt rerun repair, ended attempt, long-form superseded) on seeded ledgers
 - [ ] AC-9 in full
 - [ ] AC-11: every item that a seeded ledger can reach (slot status per R8.1, `dispatched` with a hand-written file, harness timeout, `replaced` annotations and the tally line, exit codes, v1 round, `--json`, `termsafe`, verify writes nothing)
 - [ ] AC-16: ADR-0037 carries the R13.3 amendment
 
 **Depends on**
-Bead 1 (slot family, effective runner and model), Bead 2 (the `mindspec rules` root hook), Bead 3 (verdict, ledger kinds, `panel.Submit`, slot layout and lock test)
+Bead 1 (slot family, effective runner and model, `IsolationRootFor`), Bead 2 (`cmd/mindspec/rules.go`), Bead 3 (verdict, ledger kinds, `panel.Submit`, `LatestSubmissions`, `findPanelRoot`, `landedBindingFor`, `paneltest`)
 
 ## Bead 5: Slot checkout, dispatch and cleanup
 
 Scope: R6.2–R6.8.
 
 **Steps**
-1. Add executor calls for slot clones: `clone --shared --no-checkout`, detached checkout, `remote remove origin`, `check-ignore` and `cat-file -e`. Each runs with `-c core.fsmonitor=false -c core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, and the `git rev-parse --local-env-vars` names removed (R6.4).
-2. Add `mindspec panel checkout <slug> (--slot S | --all)` per spec "R6 — Slot clones and scratch" R6.2–R6.4: the symlink and ignore refusals, `slot.json` with the main root, reuse at the reviewed SHA, the `lstat`, `commondir`, `core.worktree`, `core.bare` and `alternates` refusals with the `--prune --slot` recovery. Plain checkout writes no ledger record.
-3. Add `--dispatch [--replace]` (R6.5): exclusive `mkdir` of `attempt-<k>/`, `launch_failed` for earlier open `dispatched` attempts, then one `dispatched` event. Refuse a process slot, a final non-`VOID` slot without `--replace`, and a landed binding before any append. Add `--fixer` (R6.6).
-4. Add `--prune [--slot S]`, and the cleanup in `create --round N+1` and `abandon` (R6.7): slot locks in sorted order before the ledger lock, the orphan check hook (a no-op until Bead 7 fills it), no symlink follow, and no slot-lock file deletion on Unix.
-5. Make the registration lookup (`panel.Scan`), the `doctor` ownership and links walks and the `migrate` walks skip the resolved isolation root (R6.8).
+1. Add executor calls for slot clones in `executor.go`, `mindspec_executor.go` and `mock.go`: `clone --shared --no-checkout`, detached checkout, `remote remove origin` and `check-ignore`. Each runs with `-c core.fsmonitor=false -c core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, and the `git rev-parse --local-env-vars` names removed (R6.4). Use the Bead 1 `ObjectExists`; do not add a second one.
+2. Add `mindspec panel checkout <slug> (--slot S | --all)` per spec "R6 — Slot clones and scratch" R6.2–R6.4. It finds the root with `findPanelRoot`. Add the symlink and ignore refusals, `slot.json` with the main root, reuse at the reviewed SHA, and the `lstat`, `commondir`, `core.worktree`, `core.bare` and `alternates` refusals with the `--prune --slot` recovery. Plain checkout writes no ledger record.
+3. Add `--dispatch [--replace]` (R6.5): exclusive `mkdir` of `attempt-<k>/`, `launch_failed` for earlier open `dispatched` attempts, then one `dispatched` event. Refuse a process slot, a final non-`VOID` slot without `--replace`, and a landed binding (`landedBindingFor`) before any append. Add `--fixer` (R6.6).
+4. Add `--prune [--slot S]`, and `cleanupPriorRound` for `create --round N+1` (one call in `panel.go` before `panel.Create`) and `abandon` (R6.7): slot locks in sorted order before the ledger lock, the orphan check hook (a no-op until Bead 7 fills it), no symlink follow, and no slot-lock file deletion on Unix.
+5. Make the registration lookup (`panel.Scan` in `panel.go`), the `doctor` ownership and links walks, and the `migrate` walks skip the resolved isolation root (R6.8). Make `mindspec init` add a custom isolation root to `.gitignore`.
+6. Add `TestPanelCheckout_GitOnlyViaExecutor` in `cmd/mindspec/git_boundary_test.go`. It parses `panel_checkout.go`, `panel_submit.go`, `panel_prompt.go`, `panel_launch.go`, `panel_recover.go` (each when present) and `internal/workspace/slotroot.go` with `go/parser`. It fails on an import of `os/exec` or `internal/gitutil`, and on a string literal `"git"`. A negative subtest runs the same check on a temp file that imports `os/exec` and asserts a hit.
 
 **Verification**
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelCheckout_|TestPanelDispatch_StaleFileRefused'` passes
-- [ ] `go test ./internal/bootstrap/... ./cmd/mindspec/... -run 'TestBootstrap_CustomRootIgnored'` passes
-- [ ] `go test ./internal/panel/... ./internal/doctor/... ./cmd/mindspec/... -run 'TestWalks_SkipIsolationRoot'` passes
-- [ ] `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` and `go test ./internal/executor/...` stay green
-- [ ] `go test ./internal/doctor/... -run 'TestOwnership|TestLinks'` and `go test ./cmd/mindspec/... -run 'TestMigrate|TestPanelAbandon|TestPanelCreate'` stay green
+- [ ] Owned tests (presence rule): `go test ./cmd/mindspec/... ./internal/bootstrap/... ./internal/panel/... ./internal/doctor/... -run '^(TestPanelCheckout_Creates|TestPanelCheckout_GitStaysInSlot|TestPanelCheckout_NoOrigin|TestPanelCheckout_Refusals|TestPanelCheckout_Prune|TestPanelCheckout_HarnessDispatched|TestPanelCheckout_DispatchFlag|TestPanelCheckout_PlainWritesNoLedger|TestPanelCheckout_GitRedirectRefused|TestPanelCheckout_TreeLstat|TestPanelCheckout_NoFsmonitor|TestPanelCheckout_GitEnvScrubbed|TestPanelCheckout_PruneKeepsLockFile|TestPanelCheckout_GitOnlyViaExecutor|TestPanelCleanup_HeldLockNoChange|TestPanelDispatch_StaleFileRefused|TestBootstrap_CustomRootIgnored|TestWalks_SkipIsolationRoot)$' -v -count=1` prints a `--- PASS:` line for each of the 18 names
+- [ ] `TestPanelCleanup_HeldLockNoChange`: the test process holds one slot lock through the Bead 3 lock API; `checkout --prune`, `create --round 2` and `abandon` each refuse, name the held slot, and leave every file under the panel and isolation directories and the ledger byte-identical
+- [ ] `TestPanelCheckout_PruneKeepsLockFile` (Unix): after `--prune --slot S`, the slot lock file still exists at its path
+- [ ] Stay green: `go test ./internal/executor/...`, `go test ./internal/doctor/... -run '^(TestOwnership|TestLinks)'` and `go test ./cmd/mindspec/... -run '^(TestMigrate|TestPanelAbandon|TestPanelCreate)'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- [ ] AC-8: `checkout --all` on 4 slots, idempotent rerun, no `origin`; `git status` and `git stash` in a slot tree leave the main git directory unchanged; the other-SHA, git-redirect, `lstat`, fsmonitor and `GIT_DIR` items; `--prune --slot`; `create --round 2` and `abandon` cleanup; the `--dispatch` event and refusals; plain checkout after a final writes nothing; the symlinked and non-ignored root refusals; the custom-root `init` item; the walk items
-- [ ] AC-8 tests owned here: `TestPanelCheckout_Creates`, `_GitStaysInSlot`, `_NoOrigin`, `_Refusals`, `_Prune`, `_HarnessDispatched`, `_DispatchFlag`, `_PlainWritesNoLedger`, `_GitRedirectRefused`, `_TreeLstat`, `_NoFsmonitor`, `_GitEnvScrubbed`, `TestPanelDispatch_StaleFileRefused`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`
+- [ ] AC-8: `checkout --all` on 4 slots, idempotent rerun, no `origin`; `git status` and `git stash` in a slot tree leave the main git directory unchanged; the other-SHA, git-redirect, `lstat`, fsmonitor and `GIT_DIR` items; `--prune --slot` keeps the lock file; `create --round 2` and `abandon` cleanup, and their refusal on a held lock; the `--dispatch` event and refusals; plain checkout after a final writes nothing; the symlinked and non-ignored root refusals; the custom-root `init` item; the walk items
+- [ ] AC-17 support: new cmd-layer panel files run git only through `internal/executor`
 
 **Depends on**
-Bead 1 (`panel.isolation_root`, runner kind), Bead 3 (slot layout, slot lock, `launch` record kind)
+Bead 1 (`panel.isolation_root`, `IsolationRootFor`, runner kind, `ObjectExists`), Bead 3 (slot layout, slot lock API, `launch` record kind, `findPanelRoot`, `landedBindingFor`)
 
 ## Bead 6: BRIEF regions and slot prompt
 
 Scope: R9.1–R9.4. R9.5 is adapter behaviour; Bead 9 writes it into the skills.
 
 **Steps**
-1. Add the four BRIEF regions per spec "R9 — BRIEF and slot prompt" R9.1: acceptance (from Bead 1 config), quoted spec ACs at the reviewed SHA (fenced, `termsafe`), conduct (reviewer-scope rules for the gate, from Bead 2, passed in by the cmd layer), and the verdict contract.
-2. Add the R9.3 check: binary-authored text names no documentation path and no internal reference; every repository path it names exists at the reviewed SHA (`cat-file -e` through the executor), else `create` refuses. Paths in the quotation are not checked.
-3. Add `mindspec panel prompt <slug> --slot S` (R9.4). It prints the BRIEF, slot id, effective family, model, lens and focus, the absolute slot directory and tree, the output instruction for the effective runner, and the scratch instruction. It writes nothing. A harness prompt with no `dispatched` event refuses with the `panel checkout --slot S --dispatch` recovery.
+1. Add the four BRIEF regions per spec "R9 — BRIEF and slot prompt" R9.1: acceptance (from Bead 1 config), quoted spec ACs at the reviewed SHA (fenced, `termsafe`), conduct (reviewer-scope rules for the gate, from Bead 2, passed in by the cmd layer), and the verdict contract. Add one `BriefRegions` field to `CreateInput` and one render call in `renderCreateBriefHeader`; fill the field in `cmd/mindspec/panel.go`. Stay inside the seams in `## Lane resolutions`.
+2. Add the R9.3 check: binary-authored text names no documentation path and no internal reference; every repository path it names exists at the reviewed SHA (the Bead 1 `ObjectExists`), else `create` refuses. Paths in the quotation are not checked.
+3. Add `mindspec panel prompt <slug> --slot S` (R9.4). It finds the root with `findPanelRoot`. It prints the BRIEF, slot id, effective family, model, lens and focus, the absolute slot directory and tree, the output instruction for the effective runner, and the scratch instruction. It writes nothing. For a harness runner, the output instruction names the attempt of the latest `dispatched` event, as R9.4 states. This bead adds no refusal that R9.4 does not state.
 4. Add the process output instruction as a render function that takes the nonce. Bead 7 calls it with a new nonce for `attempt-<k>/prompt.md`.
-5. Add round-2 prior items: the slot's latest-submission items on a v2 prior round; the parsed `<slot>-round-<N-1>.json` items on a v1 prior round; else `no prior-round items`.
-6. Extend the ADR-0045 `## Amendment (Spec 131)` section with the step-3 template items (R13.1). Add `TestADRAmendments_Spec131ADR0045Templates`.
+5. Add round-2 prior items: the slot's latest-submission items (`panel.LatestSubmissions`) on a v2 prior round; the parsed `<slot>-round-<N-1>.json` items on a v1 prior round; else `no prior-round items`.
+6. Extend the ADR-0045 `## Amendment (Spec 131)` section with the step-3 template items (R13.1), obeying the ADR pin constraint. Add `TestADRAmendments_Spec131ADR0045Templates`.
 
 **Verification**
-- [ ] `go test ./internal/panel/... -run 'TestBrief_QuotedACs|TestBrief_Regions|TestBrief_PathCheck|TestBrief_AcceptanceRegion'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelPrompt_Render|TestPanelPrompt_PriorRound|TestPanelPrompt_PriorRoundV1'` passes
-- [ ] `go test ./internal/panel/... -run 'TestCreate_|TestPanelLeafImports_StdlibPlusTermsafeOnly'` stays green
-- [ ] `go test ./internal/validate/... -run 'TestADRAmendments_Spec131ADR0045|TestADRAmendments_Spec130_Verbs'` passes
+- [ ] Owned tests (presence rule): `go test ./internal/panel/... ./cmd/mindspec/... ./internal/validate/... -run '^(TestBrief_QuotedACs|TestBrief_Regions|TestBrief_PathCheck|TestBrief_AcceptanceRegion|TestPanelPrompt_Render|TestPanelPrompt_PriorRound|TestPanelPrompt_PriorRoundV1|TestADRAmendments_Spec131ADR0045Templates)$' -v -count=1` prints a `--- PASS:` line for each of the 8 names
+- [ ] Stay green: `go test ./internal/panel/... -run '^(TestCreate_|TestPanelLeafImports_StdlibPlusTermsafeOnly)'`, `go test ./internal/validate/... -run '^(TestADRAmendments_Spec131ADR0045Rules|TestADRAmendments_Spec130_)'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
@@ -336,37 +388,37 @@ Scope: R9.1–R9.4. R9.5 is adapter behaviour; Bead 9 writes it into the skills.
 - [ ] AC-16: ADR-0045 carries the R13.1 template items
 
 **Depends on**
-Bead 1 (lenses and acceptance data), Bead 2 (rule table), Bead 3 (verdict contract, ledger reads, slot layout)
+Bead 1 (lenses and acceptance data, `ObjectExists`, `IsolationRootFor`), Bead 2 (rule table), Bead 3 (verdict contract, `LatestSubmissions`, slot layout, `findPanelRoot`)
 
 ## Bead 7: Launch, supervisor, recover and the panel workflow
 
-Scope: R7, R12.5, R12.6, and the AC-8, AC-10 and AC-11 items that need a running launcher.
+Scope: R7, R12.5, R12.6, the adapter-redispatch item of AC-15, and the AC-8, AC-10 and AC-11 items that need a running launcher.
 
 **Steps**
 1. Add package `internal/panellaunch` with the supervisor internal mode in `supervisor_unix.go` per spec "R7 — `panel launch` and `panel recover`" R7.3: new process group, close-on-exec `run.lock`, `pgid` by rename, start pipe, no shell, scrubbed `MINDSPEC_` and git variables, child stdin per `prompt`, timeout, `exit.json`, SIGKILL to its group on every exit path.
-2. Add `mindspec panel launch <slug> <slot> [--replace]` (R7.1, R7.2): refusals, slot lock then ledger lock, checkout through Bead 5, the orphan check (fill the Bead 5 hook), attempt `k`, prompt with nonce through Bead 6, the `started` event, then `start`.
+2. Add `mindspec panel launch <slug> <slot> [--replace]` (R7.1, R7.2). It finds the root with `findPanelRoot`. Add the refusals (incl. the landed round, through `landedBindingFor`), slot lock then ledger lock, checkout through Bead 5, the orphan check (fill the Bead 5 hook in `panel_checkout.go`), attempt `k`, prompt with nonce through Bead 6, the `started` event, then `start`.
 3. Add outcomes, retry and substitution (R7.4–R7.7): nonce block or `verdict.json`, `quota_wall` from the stderr tail and configured literals only, `launch_failed`, `malformed` with one retry, `on_quota` substitution with the Bead 1 substitute model, the harness handoff print, exit 0 only for a submitted final.
-4. Add `mindspec panel recover <slug> <slot> --reason R` (R7.8) with the digest and nonce checks. Add the Windows refusal `process runners need a Unix host` in `launch_windows.go` (R7.9).
-5. Rewrite both `ms-panel.js` copies per R12.5: exact `ALLOWED_CLI`, fixed-flag `buildCommand`, roster from `panel verify --json`, the R12.1 table, a harness reviewer step that submits through `panel submit`. Remove `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder. Delete `plugins/mindspec/scripts/codex_verdict_extract.sh` (R12.6).
-6. Add node-run workflow fixtures in `plugins/mindspec/workflow_test.go` with a stub harness API: one harness slot with a fake agent ends `final` with no Write on a verdict path; the quota handoff runs end to end.
+4. Add `mindspec panel recover <slug> <slot> --reason R` (R7.8) with the digest and nonce checks; it finds the root with `findPanelRoot`. Add the Windows refusal `process runners need a Unix host` in `launch_windows.go` (R7.9).
+5. Rewrite both `ms-panel.js` copies per R12.5: exact `ALLOWED_CLI`, fixed-flag `buildCommand`, roster from `panel verify --json`, the R12.1 table, a harness reviewer step that submits through `panel submit`, and one redispatch (R12.1 harness redispatch) when a harness agent returns with no submission and no file. Remove `VALID_MIX_FAMILIES`, the substitution flag and the parse-retry ladder. Delete `plugins/mindspec/scripts/codex_verdict_extract.sh` (R12.6). Snapshot the v0.17.0 workflow before the rewrite lands: `git show v0.17.0:plugins/mindspec/workflows/ms-panel.js > internal/setup/historical_workflows/ms-panel.pre131.js` (sha256 `fa8d6e59a9b0893aa4f11f2685316177c1ffd6ddba84e2e49a59d768b54b6bec`). Add `TestUpgradeRefreshWorkflow_V0170Refreshes` in `upgrade_refresh_workflow_test.go`, in the form of `TestUpgradeRefreshWorkflow_DigestOracle` and `_UnmodifiedOldBodyRefreshes`: it pins that digest, and an installed copy with that body refreshes to the new body.
+6. Add node-run workflow fixtures in `plugins/mindspec/workflow_test.go` with a stub harness API. `TestMsPanelWorkflow_HarnessSubmits`: one harness slot with a fake agent ends `final` with no Write on a verdict path. `TestPanelRun_SilentHarnessRedispatchOnce` drives `ms-panel.js` under `node` against a temp panel; the stub agent returns with no submission and no file; the test asserts exactly one more `dispatched` event in the ledger, then a reported slot, and goes red on zero or two redispatches.
+7. Add `TestSlotRoot_EveryPanelVerb`: from a real slot `tree/sub` cwd, it walks `panelCmd.Commands()` and asserts that each verb resolves the main root. It fails on a panel verb that it does not cover, so a new verb cannot skip root discovery. Add `TestPanelLaunch_NoGitCalls` in `internal/panellaunch/boundary_test.go`: it parses the package's non-test files and fails on an import of `internal/gitutil` and on a string literal `"git"` passed to `exec.Command` or `exec.CommandContext`.
 
 **Verification**
-- [ ] `go test ./internal/panellaunch/... ./cmd/mindspec/... -run 'TestPanelLaunch_|TestPanelRecover_|TestLedger_NoScratchPaths|TestPanelDispatch_IdenticalFinalReplacement'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelVerify_KilledLaunchLiveSupervisor|TestPanelVerify_KilledLaunchBothLocksFree|TestPanelVerify_ReplacementInFlight|TestSlotLock_StableAcrossPrune|TestPanelCleanup_RefusesHeldLock'` passes
-- [ ] `go test ./plugins/mindspec/... -run 'TestMsPanelWorkflow_'` passes with `node` on `PATH`
-- [ ] `GOOS=windows go build ./...` passes; `go test ./internal/panellaunch/... -run TestPanelLaunch_WindowsRefuses` passes on a Windows runner (build-tagged)
+- [ ] Owned tests (presence rule): `go test ./internal/panellaunch/... ./cmd/mindspec/... ./plugins/mindspec/... ./internal/setup/... -run '^(TestPanelLaunch_VoidRetry|TestPanelLaunch_KillsOrphan|TestPanelLaunch_SupervisorTimeoutAfterLaunchDeath|TestPanelLaunch_FaultBeforePgid|TestPanelLaunch_LaunchDiesBeforeStart|TestPanelLaunch_LedgerPgidOnly|TestPanelLaunch_NoEventNoPgidRefuses|TestPanelLaunch_OrphanOutcomeDigests|TestPanelLaunch_VerifyLoopNoRefusal|TestPanelLaunch_SupervisorTermKillsGroup|TestPanelLaunch_ChildStdinNull|TestPanelLaunch_SetsidDescendant|TestPanelLaunch_NoSignalStalePgid|TestPanelLaunch_LocksNotInherited|TestPanelLaunch_RecoverAfterFailedReplacement|TestPanelLaunch_IdenticalFinalReplacement|TestPanelDispatch_IdenticalFinalReplacement|TestPanelLaunch_LandedRoundRefused|TestPanelLaunch_QuotaHandoffE2E|TestPanelLaunch_AdapterE2E|TestPanelLaunch_Outcomes|TestPanelLaunch_Channels|TestPanelLaunch_Retry|TestPanelLaunch_Substitution|TestPanelLaunch_DraftAndVoid|TestPanelLaunch_IdenticalResubmit|TestPanelLaunch_Env|TestPanelLaunch_Refusals|TestPanelLaunch_NoGitCalls|TestPanelRecover_Stdout|TestPanelRecover_File|TestLedger_NoScratchPaths|TestPanelVerify_KilledLaunchLiveSupervisor|TestPanelVerify_KilledLaunchBothLocksFree|TestPanelVerify_ReplacementInFlight|TestSlotLock_StableAcrossPrune|TestPanelCleanup_RefusesHeldLock|TestSlotRoot_EveryPanelVerb|TestMsPanelWorkflow_AllowedCLIExactSet|TestMsPanelWorkflow_HarnessSubmits|TestPanelRun_SilentHarnessRedispatchOnce|TestUpgradeRefreshWorkflow_V0170Refreshes)$' -v -count=1` prints a `--- PASS:` line for each of the 42 names, with `node` on `PATH`
+- [ ] `TestPanelLaunch_WindowsRefuses` exists: `grep -l 'func TestPanelLaunch_WindowsRefuses(' internal/panellaunch/*_test.go` names one file, and that file has `//go:build windows`; `GOOS=windows go vet ./...` passes
 - [ ] `test ! -e plugins/mindspec/scripts/codex_verdict_extract.sh` and `grep -n -i -E '/tmp|codex|copilot|gemini' plugins/mindspec/workflows/ms-panel.js .claude/workflows/ms-panel.js` prints nothing
-- [ ] `go test ./internal/setup/... -run 'TestClaudeSetup_InstallsWorkflowClaudeTargetOnly|TestSurfaceRefs_|TestProductSurface_NoInternalRefs'` stays green
+- [ ] Stay green: `go test ./internal/setup/... -run '^(TestClaudeSetup_InstallsWorkflowClaudeTargetOnly|TestSurfaceRefs_|TestProductSurface_NoInternalRefs|TestUpgradeRefreshWorkflow_)'` and `go test ./cmd/mindspec/... -run '^TestPanelCheckout_GitOnlyViaExecutor$'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- [ ] AC-10 in full, including the adapter end-to-end run, the supervisor fault cases, the lock tests, the Windows refusal, the identical-final replacement cases, the landed-round refusal and the quota handoff through the workflow fixture
-- [ ] AC-8: the paused-launcher prune race (`TestSlotLock_StableAcrossPrune`) and the held-lock cleanup refusal (`TestPanelCleanup_RefusesHeldLock`)
+- [ ] AC-10 in full except the Windows execution (named gap): the adapter end-to-end run, the supervisor fault cases, the lock tests, the identical-final replacement cases, the landed-round refusal and the quota handoff through the workflow fixture; the Windows refusal compiles
+- [ ] AC-8: the paused-launcher prune race (`TestSlotLock_StableAcrossPrune`) and the launcher-held and fake-runner cleanup refusal (`TestPanelCleanup_RefusesHeldLock`)
+- [ ] AC-9 support: every panel verb, incl. `checkout`, `prompt`, `launch` and `recover`, resolves the main root from a slot tree
 - [ ] AC-11: the killed-launch items and the replacement-in-flight item
-- [ ] AC-15: `ALLOWED_CLI` equals the R12.5 set; both `ms-panel.js` copies pass the family and `/tmp` grep; the harness workflow fixture ends `final` with no Write on a verdict path; the extract script is absent
+- [ ] AC-15: `ALLOWED_CLI` equals the R12.5 set; both `ms-panel.js` copies pass the family and `/tmp` grep; the harness workflow fixture ends `final` with no Write on a verdict path; exactly one redispatch for a silent harness agent; the extract script is absent; an unmodified v0.17.0 workflow install refreshes
 
 **Depends on**
-Bead 1 (runner argv, `on_quota`, substitute model), Bead 3 (record kinds, `panel.Submit`, slot lock), Bead 4 (verify status and gate for outcome tests), Bead 5 (checkout and the orphan-check hook), Bead 6 (process prompt render with nonce)
+Bead 1 (runner argv, `on_quota`, substitute model), Bead 3 (record kinds, `panel.Submit`, slot lock, `findPanelRoot`, `landedBindingFor`), Bead 4 (verify status, gate and submit for outcome tests), Bead 5 (checkout and the orphan-check hook), Bead 6 (process prompt render with nonce, `panel prompt`)
 
 ## Bead 8: Doctor checks
 
@@ -374,15 +426,14 @@ Scope: R11.1–R11.8, and the doctor legs of the R4.7 Error and Warn.
 
 **Steps**
 1. Add a launcher check per spec "R11 — Doctor checks" R11.1: for each process runner that a resolved roster of any gate uses, `argv[0]` is on `PATH`, else an Error naming the family.
-2. Add the probe rule (R11.2): run `probe` only for a runner from an untracked `config.local.yaml` or under `doctor --probe`; 10-second limit; one Info line for a probe not run. Use the executor `ls-files` call from Bead 1 for the tracked check.
+2. Add the probe rule (R11.2): run `probe` only for a runner from an untracked `config.local.yaml` or under `doctor --probe`; 10-second limit; one Info line for a probe not run. Use the Bead 1 executor `LsFiles` call for the tracked check.
 3. Add R11.3–R11.5: the tool suggestion as Info, the unrunnable-family Error, the model-only Warn, the load error as one Error with its recovery, and the tracked-local-file and non-ignored-root Warns.
 4. Add R11.6 and R11.7: staged-rule markers in installed skills (no id, unknown id from Bead 2, past `remove-by`), the Info list of enforced rules, and slot directories of a missing, abandoned or later-round panel (recovery `mindspec panel checkout <slug> --prune`), found through the Bead 3 layout helpers.
 5. Make `doctor --ci` skip R11.1, R11.2, the R11.3 suggestion and R11.7 (R11.8).
 
 **Verification**
-- [ ] `go test ./internal/doctor/... ./cmd/mindspec/... -run 'TestDoctor_Launchers|TestDoctor_ProbeNotRunFromTrackedConfig|TestDoctor_TrackedLocalProbe|TestDoctor_LoadErrorReported|TestDoctor_ConfigWarnings|TestDoctor_StagedMarkers|TestDoctor_StaleCheckouts|TestDoctor_CISkips'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestCreate_RefusesUnrunnableFamily|TestReviewer_ModelOnlyWarn'` passes with the doctor legs added
-- [ ] `go test ./internal/doctor/...` and `go test ./cmd/mindspec/... -run 'TestDoctor'` stay green
+- [ ] Owned tests (presence rule): `go test ./internal/doctor/... ./cmd/mindspec/... -run '^(TestDoctor_Launchers|TestDoctor_ProbeNotRunFromTrackedConfig|TestDoctor_TrackedLocalProbe|TestDoctor_LoadErrorReported|TestDoctor_ConfigWarnings|TestDoctor_StagedMarkers|TestDoctor_StaleCheckouts|TestDoctor_CISkips|TestCreate_RefusesUnrunnableFamily|TestReviewer_ModelOnlyWarn)$' -v -count=1` prints a `--- PASS:` line for each of the 10 names, and the last two show a doctor subtest passing
+- [ ] Stay green: `go test ./internal/doctor/...` and `go test ./cmd/mindspec/... -run '^TestDoctor'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
@@ -390,33 +441,35 @@ Scope: R11.1–R11.8, and the doctor legs of the R4.7 Error and Warn.
 - [ ] AC-6: `doctor` gives the Error for a family with no runner and one Warn for a model-only entry
 
 **Depends on**
-Bead 1 (runners, local file, probe data, load errors), Bead 2 (rule ids for markers), Bead 3 (slot layout for the stale-checkout walk)
+Bead 1 (runners, local file, probe data, load errors, `LsFiles`), Bead 2 (rule ids for markers), Bead 3 (slot layout for the stale-checkout walk)
 
 ## Bead 9: Harness adapter skills, cross tests and documents
 
-Scope: R10.6 (`ms-bead-fix` prompt), R12.1–R12.4, R12.7, R13.6, R13.7, and the AC-8 dispatch-then-submit items.
+Scope: R10.6 (`ms-bead-fix` prompt), R12.1–R12.4, R12.7, R13.6, R13.7, the Windows lifecycle item of AC-10, and one end-to-end dispatch-then-submit leg.
 
 **Steps**
-1. Rewrite both copies of `ms-panel-run` (80 lines or fewer) per spec "R12 — Skill and workflow slimming" R12.1, with one status-table row per non-final status and the R9.5 model pass-through. Rewrite both copies of `ms-panel-tally` (80 lines or fewer) per the R12.2 section table.
-2. Edit both copies of `ms-bead-fix`, `ms-spec-final-review`, `ms-bead-cycle` and `ms-bead-impl` per R12.3 and R12.4: no `/tmp`, no tool family name, rule ids for conduct, `panel checkout --slot` and `--fixer`, a family-neutral `ms-bead-cycle` table. `ms-bead-fix` puts `mindspec rules --scope fixer` output in the fixer prompt (R10.6).
-3. Add the replaced versions of every R12.3 skill to `internal/setup/historical_skills/` (R12.7). Update the fragment rows in `internal/setup/review_discipline_test.go` and any skill pins that the rewrite changes.
-4. Add the Go-driven adapter fixture `TestPanelRun_SilentHarnessRedispatchOnce`. Add the AC-8 dispatch-then-submit tests and the Windows harness-slot lock lifecycle test (build-tagged).
-5. Update `interfaces.md` § Panel Artifact Schema and `CHANGELOG.md` per R13.6, including the before-and-after example. Update `review-panels.md`, the panel paragraphs of `README.md`, and `plugins/mindspec/README.md` per R13.7.
+1. Before any skill edit, snapshot each R12.3 skill from the v0.17.0 tag, never from the spec branch: `git show v0.17.0:plugins/mindspec/skills/<name>/SKILL.md > internal/setup/historical_skills/<name>.pre131.md` for `ms-panel-run`, `ms-panel-tally`, `ms-bead-fix`, `ms-bead-cycle`, `ms-spec-final-review` and `ms-bead-impl`. (The `ms-bead-impl` body on the spec branch already has the Bead 2 marker; that body is not a snapshot.)
+2. Add `TestSetup_RefreshesSpec130Skills` in `internal/setup/upgrade_refresh_spec131_test.go`, in the pinned-digest form of `upgrade_refresh_presurface_test.go`: it pins the sha256 of each v0.17.0 body (computed from `git show v0.17.0:...` when the bead runs, written as literals), checks each snapshot file matches its pin, and checks that `mindspec setup claude` over an install with those bodies writes the new bodies, and keeps a user-modified copy.
+3. Rewrite both copies of `ms-panel-run` (80 lines or fewer) per spec "R12 — Skill and workflow slimming" R12.1, with one status-table row per non-final status, the harness redispatch row and the R9.5 model pass-through. Rewrite both copies of `ms-panel-tally` (80 lines or fewer) per the R12.2 section table.
+4. Edit both copies of `ms-bead-fix`, `ms-spec-final-review`, `ms-bead-cycle` and `ms-bead-impl` per R12.3 and R12.4: no `/tmp`, no tool family name, rule ids for conduct, `panel checkout --slot` and `--fixer`, a family-neutral `ms-bead-cycle` table. `ms-bead-fix` puts `mindspec rules --scope fixer` output in the fixer prompt (R10.6). Update the fragment rows in `internal/setup/review_discipline_test.go` and any skill pins that the rewrite changes.
+5. Add `TestSlotLock_WindowsLifecycle` in `cmd/mindspec/slot_lock_windows_test.go` (`//go:build windows`) per the AC-10 Windows item: 20 cycles of `checkout --dispatch`, verify probes, `submit`, a redispatch and `--prune`. Add `TestPanelSubmit_DispatchThenSubmitE2E` (Unix): `checkout --dispatch` on a real slot, then a short-form submit from `attempt-1/`, then `--dispatch --replace` and a refused submit from `attempt-1/`.
+6. Update `interfaces.md` § Panel Artifact Schema and `CHANGELOG.md` per R13.6, including the before-and-after example. Update `review-panels.md`, the panel paragraphs of `README.md`, and `plugins/mindspec/README.md` per R13.7.
 
 **Verification**
 - [ ] `wc -l plugins/mindspec/skills/ms-panel-run/SKILL.md .claude/skills/ms-panel-run/SKILL.md plugins/mindspec/skills/ms-panel-tally/SKILL.md .claude/skills/ms-panel-tally/SKILL.md` shows 80 or less for each
-- [ ] `go test ./internal/setup/... ./plugins/mindspec/... -run 'TestPanelSkills_AdapterShape|TestPanelRun_StatusTable|TestSkills_NoFamilyNoTmp|TestBeadFix_FixerRules|TestSetup_RefreshesSpec130Skills|TestReviewDiscipline_|TestSurfaceRefs_|TestProductSurface_NoInternalRefs|TestMsBeadImplSkill_|TestLifecycleGateStep_'` passes
-- [ ] `go test ./cmd/mindspec/... -run 'TestPanelRun_SilentHarnessRedispatchOnce|TestPanelSubmit_SupersededAttemptRefused|TestPanelSubmit_SameAttemptDraftThenFinal|TestPanelSubmit_SameAttemptRerunRepairs|TestPanelSubmit_EndedAttemptRefused|TestPanelSubmit_LongFormSuperseded'` passes
-- [ ] `go test ./cmd/mindspec/... -run TestSlotLock_WindowsLifecycle` passes on a Windows runner (build-tagged)
-- [ ] `go test ./internal/validate/... ./cmd/mindspec/... -run 'TestADRAmendments_Spec131|TestUserDocs_NoRetiredPanelClaims'` passes
+- [ ] For each of the six names, `git show v0.17.0:plugins/mindspec/skills/<name>/SKILL.md | cmp - internal/setup/historical_skills/<name>.pre131.md` exits 0
+- [ ] Owned tests (presence rule): `go test ./internal/setup/... ./plugins/mindspec/... ./cmd/mindspec/... ./internal/validate/... -run '^(TestPanelSkills_AdapterShape|TestPanelRun_StatusTable|TestSkills_NoFamilyNoTmp|TestBeadFix_FixerRules|TestSetup_RefreshesSpec130Skills|TestPanelSubmit_DispatchThenSubmitE2E|TestUserDocs_NoRetiredPanelClaims)$' -v -count=1` prints a `--- PASS:` line for each of the 7 names
+- [ ] All ADR pins: `go test ./internal/validate/... -run '^(TestADRAmendments_Spec131ADR0040|TestADRAmendments_Spec131ADR0044|TestADRAmendments_Spec131ADR0045Rules|TestADRAmendments_Spec131ADR0045Templates|TestADRAmendments_Spec131ADR0043|TestADRAmendments_Spec131ADR0037)$' -v -count=1` prints a `--- PASS:` line for each of the 6 names
+- [ ] `TestSlotLock_WindowsLifecycle` exists in a `//go:build windows` file (`grep -l 'func TestSlotLock_WindowsLifecycle(' cmd/mindspec/*_test.go`), and `GOOS=windows go vet ./...` passes
+- [ ] Stay green: `go test ./internal/setup/... -run '^(TestReviewDiscipline_|TestSurfaceRefs_|TestProductSurface_NoInternalRefs|TestMsBeadImplSkill_|TestLifecycleGateStep_|TestUpgradeRefreshPresurface_)'`
 - [ ] `go build ./... && go test ./... -short` passes
 
 **Acceptance Criteria**
-- [ ] AC-15: line limits; the R12.3 grep is clean for every skill copy; one status row per non-final status; exactly one redispatch for a silent harness agent; `mindspec setup claude` over an unmodified spec-130 install replaces every R12.3 skill
+- [ ] AC-15: line limits; the R12.3 grep is clean for every skill copy; one status row per non-final status; `mindspec setup claude` over an unmodified v0.17.0 install replaces every R12.3 skill
 - [ ] AC-13: `ms-bead-fix` renders the fixer-scope rules into its prompt
-- [ ] AC-8: the dispatch-then-submit items (superseded attempt, same-attempt draft then final, same-attempt rerun repair, ended attempt, long-form superseded)
-- [ ] AC-10: the Windows harness-slot lock lifecycle item
-- [ ] AC-16: `interfaces.md`, `CHANGELOG.md`, `review-panels.md` and both READMEs; `TestADRAmendments_Spec131` (all five ADR pins from Beads 1–4 and 6) passes
+- [ ] AC-8: one end-to-end dispatch-then-submit leg through `checkout --dispatch`
+- [ ] AC-10: the Windows harness-slot lock lifecycle test compiles (execution is the named gap)
+- [ ] AC-16: `interfaces.md`, `CHANGELOG.md`, `review-panels.md` and both READMEs; all six ADR pin functions from Beads 1, 2, 3, 4 and 6 pass
 
 **Depends on**
 Bead 2 (rule ids and `mindspec rules`), Bead 4 (submit CLI and `verify --json`), Bead 5 (`checkout --dispatch` and `--fixer`), Bead 6 (`panel prompt`)
@@ -425,23 +478,23 @@ Bead 2 (rule ids and `mindspec rules`), Bead 4 (submit CLI and `verify --json`),
 
 | Acceptance Criterion | Verified By |
 |---------------------|-------------|
-| AC-1 (R1) | Bead 3 verification: `TestVerdictV2_Accepts`, `_Refusals`, `_TransportLayer`, `_SchemaMatchesValidator` |
+| AC-1 (R1) | Bead 3: `TestVerdictV2_Accepts`, `_Refusals`, `_TransportLayer`, `_SchemaMatchesValidator` |
 | AC-2 (R1.6) | Bead 4: `TestVerdictV2_FindingProjection` (projection code from Bead 3) |
 | AC-3 (R2) | Bead 3: `TestPanelSubmit_Writes`, `_Replace`, `_CrashRepair`, `_Race`, `TestDispositionAppend_RefusesV2Kinds`; Bead 4: `TestPanelSubmit_Refusals`, `_ABA`, `_NoViaFlag`, `_LandedBindingRefused`, `TestPanelVerify_AnnotationsFromRecords` |
-| AC-4 (R3) | Bead 4: `TestGateV2_*`, `TestGate_VerdictSchemaPinned`, `TestGate_PreV2RoundKeepsV1Rules`, `TestCreate_AlwaysV2` |
-| AC-5 (R4.1–R4.5, R4.9) | Bead 1: `TestModelValue_Refusals`, `TestRunners_*`, `TestSubstitution_Retired`, `TestNoFamilyLiterals` |
-| AC-6 (R4.6–R4.13) | Bead 1: `TestSlotModelResolution`, `TestReviewer_ModelOnlyIsHarness`, `TestSubstituteModel`, `TestLocalConfig_*`, `TestConfigResolve_*`, `TestRepoConfig_Resolves`, create and resolve legs of `TestCreate_RefusesUnrunnableFamily` and `TestReviewer_ModelOnlyWarn`; Bead 4: `TestRoster_Family`, `TestCreate_FirstV2RoundFamily`; Bead 8: doctor legs |
+| AC-4 (R3) | Bead 4: `TestGateV2_SubmittedOnly`, `_DigestBinding`, `_DraftAndVoidMissing`, `_ReplacementAndDischarge`, `_DischargePositional`, `TestGate_VerdictSchemaPinned`, `TestGate_PreV2RoundKeepsV1Rules`, `TestCreate_AlwaysV2` |
+| AC-5 (R4.1–R4.5, R4.9) | Bead 1: `TestModelValue_Refusals`, `TestRunners_Validate`, `_TimeoutDefault`, `_ZeroConfigHarness`, `_MergeByFamily`, `TestSubstitution_Retired`, `TestNoFamilyLiterals` |
+| AC-6 (R4.6–R4.13) | Bead 1: `TestSlotModelResolution`, `TestReviewer_ModelOnlyIsHarness`, `TestSubstituteModel`, `TestLocalConfig_Merge`, `_Refusals`, `TestConfigResolve_Provenance`, `_ToolSuggestion`, `TestRepoConfig_Resolves`, create and resolve legs of `TestCreate_RefusesUnrunnableFamily` and `TestReviewer_ModelOnlyWarn`; Bead 4: `TestRoster_Family`, `TestCreate_FirstV2RoundFamily`; Bead 8: doctor legs |
 | AC-7 (R5) | Bead 1: `TestLenses_GateDefaults`, `_LensOnlyGateEntry`, `_UnknownRefused`; Bead 6: `TestBrief_AcceptanceRegion` |
-| AC-8 (R6) | Bead 1: `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`; Bead 5: `TestPanelCheckout_*`, `TestPanelDispatch_StaleFileRefused`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`; Bead 7: `TestSlotLock_StableAcrossPrune`, `TestPanelCleanup_RefusesHeldLock`; Bead 9: `TestPanelSubmit_SupersededAttemptRefused`, `_SameAttemptDraftThenFinal`, `_SameAttemptRerunRepairs`, `_EndedAttemptRefused`, `_LongFormSuperseded` |
-| AC-9 (R6.9) | Bead 4: `TestSlotRoot_SubmitFromFilePath`, `_SubmitFromClone`, `_Refusals`, `_Rules` |
-| AC-10 (R7) | Bead 7: `TestPanelLaunch_*`, `TestPanelRecover_*`, `TestLedger_NoScratchPaths`, `TestPanelDispatch_IdenticalFinalReplacement`; Bead 9: `TestSlotLock_WindowsLifecycle` |
+| AC-8 (R6) | Bead 1: `TestIsolationRoot_Validate`, `TestBootstrap_ScratchIgnoredExisting`; Bead 4: `TestPanelSubmit_SupersededAttemptRefused`, `_SameAttemptDraftThenFinal`, `_SameAttemptRerunRepairs`, `_EndedAttemptRefused`, `_LongFormSuperseded`; Bead 5: the twelve `TestPanelCheckout_*` names of AC-8, `TestPanelDispatch_StaleFileRefused`, `TestBootstrap_CustomRootIgnored`, `TestWalks_SkipIsolationRoot`, plus `TestPanelCleanup_HeldLockNoChange` and `TestPanelCheckout_PruneKeepsLockFile`; Bead 7: `TestSlotLock_StableAcrossPrune`, `TestPanelCleanup_RefusesHeldLock`; Bead 9: `TestPanelSubmit_DispatchThenSubmitE2E` |
+| AC-9 (R6.9) | Bead 3: `TestFindSlotRoot`; Bead 4: `TestSlotRoot_SubmitFromFilePath`, `_SubmitFromClone`, `_Refusals`, `_Rules`; Bead 7: `TestSlotRoot_EveryPanelVerb` |
+| AC-10 (R7) | Bead 3: `TestSlotLock_StaleLogic`; Bead 7: the 28 `TestPanelLaunch_*` names of AC-10 (`_WindowsRefuses` compiled only), `TestPanelRecover_Stdout`, `_File`, `TestLedger_NoScratchPaths`, `TestPanelDispatch_IdenticalFinalReplacement`; Bead 9: `TestSlotLock_WindowsLifecycle` (compiled only; Windows execution is the named gap) |
 | AC-11 (R8) | Bead 4: `TestPanelVerify_SlotStatus`, `_DispatchedUnsubmitted`, `_HarnessTimeout`, `_Replaced`, `_ExitCodes`, `_V1Round`, `_JSONRoster`, `_Termsafe`; Bead 7: `_KilledLaunchLiveSupervisor`, `_KilledLaunchBothLocksFree`, `_ReplacementInFlight` |
 | AC-12 (R9) | Bead 6: `TestBrief_QuotedACs`, `_Regions`, `_PathCheck`, `TestPanelPrompt_Render`, `_PriorRound`, `_PriorRoundV1` |
 | AC-13 (R10) | Bead 2: `TestRuleTable_MinimumSet`, `TestRulesCmd`, `TestInstruct_RulesSection`, `TestStagedMarker_Parse`, `TestProductSurface_NoInternalRefs`; Bead 9: `TestBeadFix_FixerRules` |
-| AC-14 (R11) | Bead 8: `TestDoctor_*` (eight named tests) |
-| AC-15 (R12) | Bead 7: `TestMsPanelWorkflow_AllowedCLIExactSet`, `TestMsPanelWorkflow_HarnessSubmits`; Bead 9: `TestPanelSkills_AdapterShape`, `TestPanelRun_StatusTable`, `TestSkills_NoFamilyNoTmp`, `TestPanelRun_SilentHarnessRedispatchOnce`, `TestSetup_RefreshesSpec130Skills` |
-| AC-16 (R13) | Beads 1, 2, 3, 4, 6: `TestADRAmendments_Spec131<ADR>` per ADR; Bead 9: `TestUserDocs_NoRetiredPanelClaims` and the full `-run TestADRAmendments_Spec131` |
-| AC-17 (method) | Every bead: `go build ./... && go test ./... -short`, incl. `TestPanelLeafImports_StdlibPlusTermsafeOnly` and `TestEnforcementHasNoGitLeaks` |
+| AC-14 (R11) | Bead 8: the eight `TestDoctor_*` names of AC-14 |
+| AC-15 (R12) | Bead 7: `TestMsPanelWorkflow_AllowedCLIExactSet`, `TestMsPanelWorkflow_HarnessSubmits`, `TestPanelRun_SilentHarnessRedispatchOnce`; Bead 9: `TestPanelSkills_AdapterShape`, `TestPanelRun_StatusTable`, `TestSkills_NoFamilyNoTmp`, `TestSetup_RefreshesSpec130Skills` |
+| AC-16 (R13) | Beads 1, 2, 3, 4, 6: `TestADRAmendments_Spec131<ADR>` per ADR; Bead 9: `TestUserDocs_NoRetiredPanelClaims` and the six-name ADR pin run |
+| AC-17 (method) | Every bead: `go build ./... && go test ./... -short`, incl. `TestPanelLeafImports_StdlibPlusTermsafeOnly` and `TestEnforcementHasNoGitLeaks`; Bead 5: `TestPanelCheckout_GitOnlyViaExecutor`; Bead 7: `TestPanelLaunch_NoGitCalls` |
 
 provenance: default=model-protocol.md override=absent | drafting=default implementation=default orchestrator=default codex-effort=default codex-impl-effort=default spec=default plan=default bead=default final=default
 
