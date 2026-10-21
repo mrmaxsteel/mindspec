@@ -530,8 +530,8 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | Symbol | Purpose |
 |:-------|:--------|
 | `complete.runMaterialization` (`materialize.go`) | Orchestrates the M/R/S/G/T staged sequence over the execution domain's eight `Executor` seam methods — no `internal/gitutil` import (ADR-0030). |
-| `validate.ValidateDocsSnapshot(root, base, treeOID, wtPath, exec)` | The doc-sync gate's tree-vs-tree leg: measures `base..T` (a candidate tree, not a committed ref) instead of a committed range; unchanged `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. |
-| `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate's equivalent tree-vs-tree leg — `ownerRef` is FORCED to the same `treeOID` so attribution and diffed content come from the identical candidate. |
+| `validate.ValidateDocsSnapshot(root, base, treeOID, ownerRef, wtPath, exec)` | The doc-sync gate diffs `base..T` in `wtPath` and reads ownership at the separate landing-tree `ownerRef`; unchanged `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. |
+| `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate diffs candidate `treeOID` in `wtPath`. Both functions take a separate `ownerRef` for all ownership reads at the landing tree. |
 
 **Proportional claim guard (`internal/next/guard.go`, R5):**
 

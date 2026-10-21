@@ -418,6 +418,14 @@ func runMaterialization(in materializationInput) error {
 		}
 	}
 
+	// A staged materialization resume can also resume a preserved merge.
+	// Recheck ownership at the resolved spec index before any stage resumes.
+	if in.opts.ResolveMerge && in.resumeStage != "" {
+		if err := runCommittedRangeGate(in.root, beadID, beadHead, in.specDir, in.base, exec, in.opts, in.warnWriter); err != nil {
+			return err
+		}
+	}
+
 	currentTip := ""
 	if in.resumeStage == "" {
 		// --- Normal run: snapshot once, gate, then materialize. -------
@@ -426,13 +434,17 @@ func runMaterialization(in materializationInput) error {
 			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
 		}
 
-		docResult := validate.ValidateDocsSnapshot(in.root, in.base, tree, wtPath, exec)
+		ownerRef, err := ownershipLandingTree(in.root, in.specDir, tree, beadHead, exec)
+		if err != nil {
+			return &landingOwnershipError{beadID: beadID, cause: err}
+		}
+		docResult := validate.ValidateDocsSnapshot(in.root, in.base, tree, ownerRef, wtPath, exec)
 		printResultWarnings(in.warnWriter, docResult)
 		if docResult.HasFailures() && in.opts.AllowDocSkew == "" {
 			return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
 		}
 
-		adrResult, adrFindings := validate.CheckADRDivergenceSnapshot(in.root, in.base, exec, in.specDir, beadID, tree, wtPath)
+		adrResult, adrFindings := validate.CheckADRDivergenceSnapshot(in.root, in.base, exec, in.specDir, beadID, tree, ownerRef, wtPath)
 		printResultWarnings(in.warnWriter, adrResult)
 		beadScopeWarnAdvisory(exec, in.root, in.specDir, beadID, beadHead, in.base, beadHead, in.warnWriter)
 

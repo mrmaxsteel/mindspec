@@ -2000,3 +2000,50 @@ func withWorkingDir(dir string, fn func() error) error {
 	}()
 	return fn()
 }
+
+// IsPreservedMergeError reports whether err wraps a preserved-merge refusal.
+func IsPreservedMergeError(err error) bool {
+	return isPreservedMergeError(err)
+}
+
+// PreservedMergeReentryRefusal renders the unresolved resumeAwareMerge refusal.
+// It checks the source binding before it gives conflict resolution steps.
+// It changes no merge, ref, index entry, or worktree file.
+// A cause that is not a preserved-merge refusal is returned unchanged.
+func PreservedMergeReentryRefusal(cause error, expectedSource, reentryHint string) error {
+	var preserved *preservedMergeError
+	if !errors.As(cause, &preserved) {
+		return cause
+	}
+	workdir := preserved.workdir
+	class, preservedTip, sourceTip, err := classifyPreservedMergeBinding(workdir, expectedSource)
+	if err != nil {
+		return bindingIndeterminateRefusal(workdir, expectedSource, err, reentryHint)
+	}
+	if class == bindingForeign {
+		return foreignMergeRefusal(workdir, expectedSource, preservedTip, sourceTip, reentryHint)
+	}
+	return stillConflictedRefusal(workdir, reentryHint)
+}
+
+// LandingTree reads ownership from the prospective merge result.
+func (g *MindspecExecutor) LandingTree(workdir, base, specTip, beadRef string) (string, []string, error) {
+	if gitutil.MergeInProgress(workdir) {
+		if paths := gitutil.ConflictedFiles(workdir); len(paths) > 0 {
+			return "", paths, preservedMergeRefusal(workdir, paths, mergeReentryHint(workdir))
+		}
+		tree, err := gitutil.LandingIndexTree(workdir)
+		return tree, nil, err
+	}
+	tree, err := gitutil.TreeSHA(workdir, beadRef)
+	if err != nil {
+		return "", nil, err
+	}
+	if tree == beadRef {
+		beadRef, err = gitutil.MaterializeStageCommit(workdir, tree, base, "", "ownership landing preview")
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return gitutil.MergeTreeLanding(workdir, base, specTip, beadRef)
+}

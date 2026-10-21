@@ -771,3 +771,43 @@ func PreviewDeletedPaths(workdir, target, branch string) ([]string, error) {
 	}
 	return deleted, nil
 }
+
+// MergeTreeLanding returns the prospective tree and all conflicted paths.
+// Exit 1 carries a usable tree. Other failures return an error.
+func MergeTreeLanding(workdir, base, ours, theirs string) (tree string, conflicted []string, err error) {
+	for _, ref := range []string{base, ours, theirs} {
+		if err := rejectOptionLike(ref); err != nil {
+			return "", nil, err
+		}
+	}
+	cmd := execCommand("git", gitArgs(workdir, "merge-tree", "--write-tree", "--name-only", "-z", "--merge-base="+base, ours, theirs)...)
+	out, runErr := cmd.Output()
+	if runErr != nil {
+		exitErr, ok := runErr.(*exec.ExitError)
+		if !ok || exitErr.ExitCode() != 1 {
+			return "", nil, fmt.Errorf("git merge-tree landing: %w", runErr)
+		}
+	}
+	fields := strings.Split(string(out), "\x00")
+	if len(fields) < 2 || fields[0] == "" {
+		return "", nil, fmt.Errorf("git merge-tree landing returned no tree")
+	}
+	for _, path := range fields[1:] {
+		if path == "" {
+			break
+		}
+		conflicted = append(conflicted, path)
+	}
+	return fields[0], conflicted, nil
+}
+
+// LandingIndexTree writes the resolved index as an unreferenced tree.
+// Unmerged entries make git refuse the write.
+func LandingIndexTree(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "write-tree")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("writing landing index tree: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}

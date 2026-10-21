@@ -1458,3 +1458,29 @@ lines) in the same disclosed-residual vocabulary the registry already
 uses for unprovable ID-substitution positions. `internal/bootstrap/
 bootstrap.go`'s `starterGitignore` gained `.mindspec/phase.lock` so
 greenfield projects gitignore the new lockfile from their first commit.
+
+
+### Ownership at the landing tree
+
+Both per-bead content gates use one landing-tree `ownerRef`. The diff
+stays at the bead's fork-to-tip range or prospective snapshot `T`.
+`Executor.LandingTree` previews the merge into the current spec tip.
+The gate reads all ownership inputs at that result: Impacted-Domains
+normalization, domain enumeration, path attribution, ADR domain
+resolution, internal-package doc-sync, and the unclaimed-source advisory.
+Claims added at the spec tip apply. Claims revoked there do not apply.
+A claim must belong to a resolved Impacted Domain. Readers do not combine
+claims from two refs.
+
+A source conflict leaves clean ownership manifests readable in the
+preview tree. The executor keeps the merge conflict for resolution.
+`complete.OwnershipLandingConflict` returns the tree and conflicted
+paths when a manifest itself conflicts. No ownership reader runs on that
+preview. During preserved-merge re-entry, ownership comes from the spec
+worktree's resolved index. Unmerged entries keep the executor's resumption
+refusal unchanged. A bound merge shows the edit, stage, and re-run steps.
+A foreign or indeterminate binding shows its own refusal. The re-run hint
+uses the actual ID and `--resolve-merge`. A
+materialization resume with `--resolve-merge` also runs this gate before
+it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
+diff and reads ownership at the landed merge.

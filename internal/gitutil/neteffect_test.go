@@ -984,3 +984,77 @@ func TestDiffNameStatusBuckets_UnhandledStatusFailsClosed(t *testing.T) {
 // itself is stubbed) — any string works, but rejectOptionLike still runs
 // first, so it must not look option-like.
 const unhandledStatusTestWorkdir = "/tmp/mindspec-unhandled-status-test-workdir"
+
+func TestMergeTreeLanding_CleanReturnsTree(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "spec")
+	neWriteFile(t, dir, "claim", "spec claim\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "claim")
+	neRunGit(t, dir, "checkout", "-b", "bead", base)
+	neWriteFile(t, dir, "source", "bead content\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "source")
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	tree, conflicts, err := MergeTreeLanding(dir, base, "spec", "bead")
+	if err != nil || tree == "" || len(conflicts) != 0 {
+		t.Fatalf("landing: %q %v %v", tree, conflicts, err)
+	}
+	for path, want := range map[string]string{"claim": "spec claim\n", "source": "bead content\n"} {
+		data, err := FileAtRef(dir, tree, path)
+		if err != nil || string(data) != want {
+			t.Fatalf("%s: %q %v", path, data, err)
+		}
+	}
+	if after := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD")); after != before {
+		t.Fatal("preview moved HEAD")
+	}
+	if status := neRunGit(t, dir, "status", "--porcelain"); status != "" {
+		t.Fatalf("preview changed index or files: %s", status)
+	}
+}
+
+func TestMergeTreeLanding_ConflictListsPaths(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	path := "source\twith\ncontrols"
+	neWriteFile(t, dir, path, "base\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "base source")
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "spec")
+	neWriteFile(t, dir, path, "spec\n")
+	neWriteFile(t, dir, "OWNERSHIP.yaml", "paths: [source]\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "spec")
+	neRunGit(t, dir, "checkout", "-b", "bead", base)
+	neWriteFile(t, dir, path, "bead\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "bead")
+	tree, conflicts, err := MergeTreeLanding(dir, base, "spec", "bead")
+	if err != nil || tree == "" || len(conflicts) != 1 || conflicts[0] != path {
+		t.Fatalf("landing: %q %q %v", tree, conflicts, err)
+	}
+	data, err := FileAtRef(dir, tree, "OWNERSHIP.yaml")
+	if err != nil || string(data) != "paths: [source]\n" {
+		t.Fatalf("clean ownership lost: %q %v", data, err)
+	}
+	if MergeInProgress(dir) {
+		t.Fatal("preview started a merge")
+	}
+}
+
+func TestMergeTreeLanding_InvalidOperandsRefuse(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	for _, args := range [][3]string{{"--bad", "HEAD", "HEAD"}, {"HEAD", "--bad", "HEAD"}, {"HEAD", "HEAD", "--bad"}, {"HEAD", "HEAD", "missing"}} {
+		if tree, _, err := MergeTreeLanding(dir, args[0], args[1], args[2]); err == nil || tree != "" {
+			t.Fatalf("%v: tree=%q err=%v", args, tree, err)
+		}
+	}
+}

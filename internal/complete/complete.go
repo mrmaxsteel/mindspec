@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -990,7 +991,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
 		}
 	}
-	if reconcile != nil || wtPath == "" {
+	if reconcile != nil {
+		if err := runRangeGateWithOwner(root, beadID, beadHead, specDir, base, beadHead, exec, opts, warnWriter); err != nil {
+			return nil, err
+		}
+	} else if wtPath == "" {
 		if err := runCommittedRangeGate(root, beadID, beadHead, specDir, base, exec, opts, warnWriter); err != nil {
 			return nil, err
 		}
@@ -1665,17 +1670,86 @@ func adrDivergenceFailure(beadID, findings string) error {
 		fmt.Sprintf("mindspec complete %s --supersede-adr ADR-NNNN", safeBeadID))
 }
 
-// runCommittedRangeGate runs the pre-bead-6 committed-range doc-sync +
-// ADR-divergence gates (base..beadHead, ownerRef=beadHead) — the leg
-// reconcile mode has always used, now shared with the "no bead worktree
-// matched" case (spec 128 Bead 6): with no worktree to snapshot, the
-// gates measure the branch's own committed tip instead.
+// OwnershipLandingConflict carries a preview whose ownership cannot be read.
+// The completion path must decide how to preserve and resolve this merge.
+type OwnershipLandingConflict struct {
+	Tree       string
+	Conflicted []string
+}
+
+func (e *OwnershipLandingConflict) Error() string {
+	return "ownership manifests have merge conflicts; resolve the merge before checking ownership"
+}
+
+// landingOwnershipError keeps the preview outcome available to the caller.
+type landingOwnershipError struct {
+	beadID string
+	cause  error
+}
+
+func (e *landingOwnershipError) Unwrap() error { return e.cause }
+
+func (e *landingOwnershipError) Error() string {
+	if executor.IsPreservedMergeError(e.cause) {
+		if branch, err := workspace.BeadBranch(e.beadID); err == nil {
+			return executor.PreservedMergeReentryRefusal(e.cause, branch, fmt.Sprintf("mindspec complete %s --resolve-merge", idrender.Bead(e.beadID))).Error()
+		}
+	}
+	return guard.NewFailure(
+		"cannot check landing-tree ownership for "+idrender.Bead(e.beadID)+": "+termsafe.Escape(e.cause.Error()),
+		fmt.Sprintf("mindspec complete %s", idrender.Bead(e.beadID)),
+	).Error()
+}
+
+// ownershipLandingTree uses one ref for every ownership reader.
+func ownershipLandingTree(root, specDir, beadRef, beadHead string, exec executor.Executor) (string, error) {
+	specID := filepath.Base(specDir)
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return "", err
+	}
+	base, err := exec.MergeBase(specBranch, beadHead)
+	if err != nil {
+		return "", err
+	}
+	workdir := root
+	cfg, err := config.Load(root)
+	if err != nil {
+		return "", err
+	}
+	specWorktree, err := workspace.SpecWorktreePath(root, cfg, specID)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(specWorktree); err == nil {
+		workdir = specWorktree
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	tree, conflicted, err := exec.LandingTree(workdir, base, specBranch, beadRef)
+	if err != nil {
+		return "", err
+	}
+	for _, path := range conflicted {
+		if filepath.Base(path) == "OWNERSHIP.yaml" {
+			return "", &OwnershipLandingConflict{Tree: tree, Conflicted: conflicted}
+		}
+	}
+	return tree, nil
+}
+
+// runCommittedRangeGate measures base..beadHead and reads ownership at
+// the prospective landing tree. The measured range stays bead-local.
 func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec executor.Executor, opts CompleteOpts, warnWriter io.Writer) error {
-	// OWNERSHIP attribution (manifests + domain enumeration) is read
-	// from beadHead — the SAME ref the gate diffs — so an OWNERSHIP
-	// claim committed on the bead branch satisfies its own gate with
-	// no override (spec 095 / mindspec-vvs9).
-	docResult := validate.ValidateDocsRange(root, base, beadHead, beadHead, exec)
+	ownerRef, err := ownershipLandingTree(root, specDir, beadHead, beadHead, exec)
+	if err != nil {
+		return &landingOwnershipError{beadID: beadID, cause: err}
+	}
+	return runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef, exec, opts, warnWriter)
+}
+
+func runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef string, exec executor.Executor, opts CompleteOpts, warnWriter io.Writer) error {
+	docResult := validate.ValidateDocsRange(root, base, beadHead, ownerRef, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run.
 	printResultWarnings(warnWriter, docResult)
@@ -1683,8 +1757,8 @@ func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec ex
 		return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
 	}
 	// The gate runs EXACTLY ONCE. Same bead-branch anchoring as doc-sync
-	// above: base..beadHead. Ownership ref = beadHead.
-	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, beadHead)
+	// above: base..beadHead. Ownership uses the landing tree.
+	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, ownerRef)
 	printResultWarnings(warnWriter, adrResult)
 	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
 	// WARN — never affects the pass/fail decision.

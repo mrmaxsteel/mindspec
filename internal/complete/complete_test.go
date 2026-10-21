@@ -3876,6 +3876,7 @@ func TestPerBeadGatesAnchorOwnershipRefAndRangeToBeadHead(t *testing.T) {
 
 	mock := newMockExec()
 	mock.MergeBaseResult = "fork-sha"
+	mock.LandingTreeResult = "LANDING-TREE"
 	// A source touch in the BEAD diff so attribution (the ref reads)
 	// actually runs; any other range is main-side drift.
 	mock.ChangedFilesFn = func(base, head string) ([]string, error) {
@@ -3932,8 +3933,8 @@ func TestPerBeadGatesAnchorOwnershipRefAndRangeToBeadHead(t *testing.T) {
 		t.Fatal("expected OWNERSHIP ref reads (FileAtRefOrAbsent / TreeDirsAtRef) from the gates")
 	}
 	for _, ref := range refReads {
-		if ref != "bead/bead-1" {
-			t.Errorf("OWNERSHIP ref read used %q; must anchor to bead/bead-1 (spec 095), never ambient HEAD", ref)
+		if ref != "LANDING-TREE" {
+			t.Errorf("OWNERSHIP ref read used %q; must anchor to LANDING-TREE, never ambient HEAD", ref)
 		}
 	}
 }

@@ -83,7 +83,7 @@ type DivergenceFinding struct {
 // empty-impacted-domains directory enumeration — is read from. It is
 // INDEPENDENT of base/head: the diff range and the attribution tree are
 // separate inputs. A non-empty ownerRef reads attribution from that git
-// ref (the per-bead lane passes beadHead; impl approve passes the
+// ref (the per-bead lane passes the landing tree; impl approve passes the
 // spec-branch tip); "" preserves the on-disk working-tree read.
 func ValidateDivergence(
 	exec executor.Executor,
@@ -94,23 +94,15 @@ func ValidateDivergence(
 	return validateDivergence(exec, root, specDir, beadID, base, head, ownerRef, implApprove, "")
 }
 
-// ValidateDivergenceSnapshot is bead 6's prospective-snapshot leg (spec
-// 128, OQ-1(a)): head is a candidate tree T (from
-// gitutil.SnapshotWorktreeTree, via the executor's SnapshotWorktreeTree
-// seam), NOT a committed ref; ownerRef is FORCED to the same treeOID, so
-// attribution and diffed content come from the identical candidate the
-// eventual commit will contain; wtPath is the bead worktree the
-// tree-vs-tree diff (ChangedFilesTree) runs in. The per-bead gate's
-// normal (non-reconcile) path is this leg's only caller — reconcile mode
-// and the impl-approve whole-branch backstop keep calling
-// ValidateDivergence unchanged.
+// ValidateDivergenceSnapshot diffs candidate tree T in wtPath. All
+// ownership reads use ownerRef, the prospective landing tree.
 func ValidateDivergenceSnapshot(
 	exec executor.Executor,
 	root, specDir, beadID string,
-	base, treeOID, wtPath string,
+	base, treeOID, ownerRef, wtPath string,
 	implApprove bool,
 ) (*Result, []DivergenceFinding) {
-	return validateDivergence(exec, root, specDir, beadID, base, treeOID, treeOID, implApprove, wtPath)
+	return validateDivergence(exec, root, specDir, beadID, base, treeOID, ownerRef, implApprove, wtPath)
 }
 
 // validateDivergence is the shared implementation behind
