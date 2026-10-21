@@ -127,3 +127,19 @@ failure MODE portably.
 
 - **Finding outcomes (R7, R13.4).** Every finding is fixed, evidence-refuted or deferred to a validated follow-up bead. Deferral is the third outcome: an effective deferral to a validated follow-up bead discharges its finding, and `complete` and `impl approve` re-check that bead. Refutations are round- and `finding_sha256`-pinned; slot-level refutations pin the full ordered list or fallback rationale.
 - **Pass rule (R7).** The approval threshold floor is retired. Complete, no veto, fresh, discharged and intact are all required; APPROVE count is not a decision input. REJECT, hard_block, INVALID, staleness and incompleteness cannot be discharged. Zero APPROVE with all findings discharged passes and reports resolved slots separately.
+
+## Amendment (Spec 131)
+
+The embedded rule table holds the operational conduct text. Each Decision has these rule ids:
+
+| Decision | Rule ids |
+|:---------|:---------|
+| 1. Reviewer mutation-isolation | `panel.isolated-checkout`, `review.reproduce` |
+| 2. Verify-never-confirm | `review.reproduce`, `review.no-vote`, `review.classifier-redispatch` |
+| 3. Findings-never-out-voted | `review.no-vote` |
+| 4. Absolute scratch + clean worktree | `panel.scratch-in-slot`, `panel.clean-before-complete` |
+| 5. CI-parity kernel | `review.ci-parity` |
+
+`review.mutation`, `review.property`, `review.stated-limit` and `review.basis` come from the review bar and map to no Decision of this ADR.
+
+Decision 4 requires an absolute scratch path in the slot or fixer directory. A system temp directory is not a scratch location. The target worktree must be clean before completion. `review.ci-parity` applies only to the `final_review` gate. `mindspec rules` and `mindspec instruct` render the table. Advisory rows state conduct; they do not add gate enforcement.

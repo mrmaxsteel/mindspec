@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -260,6 +261,30 @@ func Render(ctx *Context) (string, error) {
 	}
 
 	result := buf.String()
+	// Keep the indeterminate guidance's recovery command as its final line.
+	var recovery string
+	if ctx.Mode == state.ModeIndeterminate {
+		if i := strings.LastIndex(result, "\nrecovery:"); i >= 0 {
+			result, recovery = result[:i], result[i:]
+		}
+	}
+
+	conduct, err := rules.Load()
+	if err != nil {
+		return "", err
+	}
+	result += "\n## Rules\n\n"
+	for _, rule := range conduct {
+		applies := false
+		for _, scope := range rule.Scope {
+			if scope == "orchestrator" || (ctx.Mode == state.ModeImplement && scope == "implementer") {
+				applies = true
+			}
+		}
+		if applies {
+			result += fmt.Sprintf("- %s: %s — %s\n", rule.ID, rule.Prohibition, rule.Replacement)
+		}
+	}
 
 	// Append bead primer if available (implement mode with active bead)
 	if ctx.BeadPrimer != "" {
@@ -280,7 +305,7 @@ func Render(ctx *Context) (string, error) {
 		}
 	}
 
-	return result, nil
+	return result + recovery, nil
 }
 
 // IsProtectedCheckout reports whether the current branch is protected

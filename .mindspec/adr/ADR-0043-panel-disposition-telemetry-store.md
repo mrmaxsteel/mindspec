@@ -211,3 +211,9 @@ unaffected by panel SIZE):
 - **Consequences — lifecycle completeness (R11).** `complete` and `impl approve` gate on completeness of the required store, manifest and covering disposition rows. This supersedes the decision-inert and "No lifecycle verb reads the store" claims and the Related line's "consumes none of them" claim for these coverage reads.
 
 - **Canonical writers — discharge verbs (R9.1).** This supersedes "Writes go through ONE canonical Go verb". `refute`, `defer` and `tally` also write the store. Refute and defer append their event and disposition row in one lock hold. The verbs own `audited-refuted` and `confirmed-deferred` rows. Agents do not hand-append these rows.
+
+## Amendment (Spec 131)
+
+- **Submission records.** The ledger accepts three more record kinds: `verdict`, `launch` and `substitution`. Each record carries `spec` and `panel`. Only the panel verbs write these records. Disposition validation, checks and queries accept them.
+- **Submission keys.** A `verdict` key is `slot, round, seq`. The first submission has `seq: 1`. Each later submission adds one. The ledger keeps every submission. The latest submission replaces the prior submission for the gate. A same-bytes retry against the latest submission adds no record and repairs the verdict file.
+- **Attempt keys.** A `launch` key is `slot, round, attempt, status`. A `substitution` key is `slot, round`.

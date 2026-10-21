@@ -18,7 +18,7 @@ func passFixture(t *testing.T, n int, verdict string) (string, Panel) {
 	p := Panel{Spec: "130", Target: "bead/mindspec-test.1", BeadID: ptr("mindspec-test.1"), Gate: "bead", Round: 1, ExpectedReviewers: n, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:baseline"}
 	for i := 1; i <= n; i++ {
 		slot := fmt.Sprintf("R%d", i)
-		p.Roster = append(p.Roster, RosterSlot{slot, "model", "correctness"})
+		p.Roster = append(p.Roster, RosterSlot{Slot: slot, Model: "model", Lens: "correctness"})
 		writePassJSON(t, dir, slot+"-round-1.json", FindingVerdict{Verdict: verdict, ConcreteChangesRequired: []string{"first", "second", "third"}})
 	}
 	writePassJSON(t, dir, FileName, p)

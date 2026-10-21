@@ -44,6 +44,26 @@ func BuildContext(root string) *Context
 func Render(ctx *Context) (string, error)
 ```
 
+### Conduct Rule Table (Spec 131)
+
+`internal/rules` embeds the conduct rule table from `internal/rules/rules.yaml`.
+
+- `Load` reads and validates the table.
+- `Filter` selects rules by scope and gate in table order.
+  Empty filters select all rules. A gate filter includes rules with no gate limit.
+- `Lookup` finds a rule by its exact ID.
+- `GateKeys` returns a copy of the accepted gate keys.
+
+`cmd/mindspec/rules.go` provides `mindspec rules [--scope <s>] [--json]`.
+The command lists all rules or selects rules by scope.
+The `--json` flag selects JSON output.
+`mindspec rules show <id>` prints one rule and its fields.
+An unknown ID or scope returns an error with a `recovery:` line.
+
+`internal/instruct` adds a `## Rules` section to mode guidance.
+It lists orchestrator rules in every mode.
+It also lists implementer rules in implement mode.
+
 ### Beads Adapter (`internal/bead/`)
 
 ```go
@@ -189,7 +209,7 @@ The optional registration fields at the end of `panel.Panel` are:
 | Field | Shape |
 |:------|:------|
 | `subject_digest` | `sha256:` plus the subject-tree digest, recorded beside `reviewed_head_sha` |
-| `roster` | ordered `[{slot, model, lens}]`, with ids `R1..Rn` |
+| `roster` | ordered `[{slot, model, lens}]`, with optional `family` and ids `R1..Rn` |
 | `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
 | `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
 | `telemetry` | `"required"` on new registrations |
@@ -267,7 +287,7 @@ round 0 is a bug, not a valid first round.
 `consolidated-round-1.md` for round 1 (the general shape is
 consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
-**Verdict JSON payload.** Every verdict file's top-level shape:
+**Verdict JSON payload for the existing tally reader.** The top-level shape is:
 
 - `verdict` (required): a non-empty string. A reviewer MUST write one
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
@@ -306,6 +326,47 @@ are the runner's concern; the schema itself makes no allowance for a
 partial or alternate shape.
 
 Coverage manifests are written only by binary `tally`, from roster slots only and latest-round verdict files, when every pass-rule row except freshness holds. A stale non-bead panel can therefore record coverage. The append key is `spec, panel, round, created_at`; tally appends unless the last manifest of that round equals the derivation. Earlier manifests remain after abandonment. Every manifest reader, including `ComputeQ4`, uses only the last manifest per spec/panel. Core 3 validates all ledger records, requires the current round's manifest to equal the roster/verdict derivation, and requires covering disposition rows for REQUEST_CHANGES and REJECT slots.
+
+### Panel Submission Core
+
+`panel.VerdictV2` requires `schema: 2`, `slot`, `round`, `reviewed_sha`, `status`,
+`verdict`, `model`, `rationale`, `concrete_changes_required` and `commands_run`.
+Status is `draft` or `final`. Verdict is `APPROVE`, `REQUEST_CHANGES`, `REJECT` or `VOID`.
+Change items have `text`, `basis` and an executed-only command index. Commands have `cmd`, `exit` and `tail`.
+The parser rejects unknown fields, files over 1 MiB and command tails over 4096 UTF-8 bytes.
+It requires change items only for REQUEST_CHANGES and `void_reason` only for VOID.
+Other verdicts require a non-empty rationale. Finding projection uses item texts for `ccr[i]` hashes.
+
+`panel.Submit` checks the panel, current v2 round, roster slot, effective model and verdict bytes.
+It holds `dispositions.lock` through the checks, ledger append and verdict-file rename.
+It refuses abandoned or landed rounds, target mismatches and direct submissions for process slots.
+A new submission must match the reviewed head. Its sequence starts at 1 and increases per slot and round.
+A retry with the latest submission's exact bytes repairs the file without another verdict record.
+Direct attempt files must match the latest started or dispatched attempt. Older, unknown or failed attempts refuse.
+An open dispatched attempt receives a `submitted` outcome after the verdict file is written.
+The slot lock API is separate from this ledger transaction.
+
+`panel.NewSlotLayout` uses `<main_root>/<isolation_root>/<spec-or-adhoc>/<slug>/r<N>/<slot>/`.
+It supplies `slot.json`, `tree/` and `attempt-<k>/` paths. Lock paths use `.locks/<spec-or-adhoc>/<slug>/r<N>/<slot>.lock` under the isolation root.
+It requires an absolute main root, a safe relative isolation root, safe identity parts and a positive round.
+`AttemptFromPath` resolves directory symlinks and rejects attempt paths that cannot bind to the target slot.
+`NextAttemptNumber` uses the selected round's slot events and that slot directory's attempt directories.
+
+`TrySlotLock` does not wait. `AcquireSlotLock` retries for up to one second. Holders call `Release`.
+Unix uses `flock` and retains the lock file. Windows uses exclusive creation and a PID file.
+Windows stale-lock recovery renames and reads the file again before removal. Live PIDs or invalid lock contents keep the slot held.
+`ProbeSlotLock` does not wait and does not create or remove a file.
+
+The ledger validates `verdict`, `launch` and `substitution` records with `spec` and `panel` identities.
+Their keys are `slot, round, seq`; `slot, round, attempt, status`; and `slot, round`, respectively.
+`LatestSubmissions` selects the highest sequence per slot in one round. `SlotAttempts` returns that round's launch events in ledger order.
+These readers take no lock. `SlotAttempts` marks events after the latest submission.
+
+`mindspec panel schema` prints the v2 JSON Schema. Transport and relation checks remain in the parser.
+`panel disposition append` refuses these three record kinds and names the owning verb in its recovery line.
+Disposition validate, check and query accept these record kinds.
+The CLI helper `findPanelRoot` returns the verified slot's main root or falls back to `findRoot` when no slot is found.
+`landedBindingFor` checks the exact panel-round metadata value. It returns false for an empty bead identity and propagates read errors.
 
 ### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
 

@@ -64,6 +64,11 @@ func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers
 
 Used by context-system (for glossary location) and workflow (for spec/bead resolution).
 
+`workspace.FindSlotRoot` finds the nearest ancestor with `slot.json` and `tree/`.
+It returns the slot identity, absolute main root and verified slot directory.
+It checks the exact path against the main root's current isolation-root setting.
+It refuses invalid metadata, unsafe path parts and a path that does not match.
+
 ### Health Check Report
 
 ```go
@@ -107,6 +112,12 @@ fails the same way (spec 124 registered `ready-check` and `clarify` for
 the new `bead ready-check`/`bead clarify` verbs).
 
 The `rebind`, `refute`, `abandon` and `defer` panel verbs register telemetry tokens in `internal/redact/redact.go`.
+
+`rules` is registered in `internal/redact.CommandTokens`.
+Redaction keeps this verb name in accepted journal events.
+
+`internal/redact.SubcommandTokens` also contains `schema`, `submit`, `checkout`,
+`prompt`, `launch` and `recover` for panel telemetry.
 
 Spec 127 made both registrations: `adopt` joined `SubcommandTokens` for
 the new `mindspec impl adopt` verb (R1's audited, merge-free terminal

@@ -118,6 +118,7 @@ var CommandTokens = map[string]struct{}{
 	"record":    {},
 	"release":   {}, // spec 101 bead 3cj0.2: `mindspec release <bead-id>` verb
 	"repair":    {},
+	"rules":     {},
 	"report":    {}, // spec 094 Bead 3: the owner-invoked friction report loop
 
 	"setup":     {},
@@ -148,6 +149,12 @@ var CommandTokens = map[string]struct{}{
 // show, set, start, status, …) appear once.
 var SubcommandTokens = map[string]struct{}{
 	"resolve":          {},
+	"schema":           {},
+	"submit":           {},
+	"checkout":         {},
+	"prompt":           {},
+	"launch":           {},
+	"recover":          {},
 	"defer":            {}, // panel defer
 	"refute":           {}, // panel refute
 	"abandon":          {}, // panel abandon
