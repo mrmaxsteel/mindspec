@@ -20,16 +20,19 @@ work_chunks:
       internal/validate/ownership_ref_test.go, internal/executor/executor.go,
       internal/executor/mindspec_executor.go, internal/executor/mock.go,
       internal/gitutil/neteffect.go, internal/gitutil/neteffect_test.go,
-      .mindspec/adr/ADR-0036-ownership-discovery.md,
+      internal/lint/ratchet_argv_table_test.go, .mindspec/adr/ADR-0036-ownership-discovery.md,
       .mindspec/specs/129-readiness-tracker-honesty/spec.md,
+      .mindspec/specs/129-readiness-tracker-honesty/plan.md,
       .mindspec/domains/workflow/architecture.md, .mindspec/domains/execution/interfaces.md,
       internal/validate/adr_spec132_ownership_test.go]
   - id: 2
     depends_on: []
     key_file_paths: [internal/approve/impl.go, internal/approve/impl_preflight_test.go,
-      internal/lifecycle/gitquery.go, internal/gitutil/gitops.go, internal/gitutil/gitops_test.go,
-      internal/executor/executor.go, internal/executor/mindspec_executor.go,
-      internal/executor/mock.go, internal/executor/finalize_hasremote_test.go,
+      internal/approve/impl_test.go, internal/approve/main_test.go,
+      internal/approve/merge_preflight_ac5_test.go, internal/lifecycle/gitquery.go,
+      internal/gitutil/gitops.go, internal/gitutil/gitops_test.go, internal/executor/executor.go,
+      internal/executor/mindspec_executor.go, internal/executor/mock.go,
+      internal/executor/finalize_hasremote_test.go, internal/executor/hasremote_callsite_test.go,
       internal/executor/finalize_fault_test.go, internal/executor/finalize_worktree_only_test.go,
       internal/executor/executor_test.go, internal/executor/neteffect_probe_test.go,
       internal/executor/finalize_scoping_test.go, internal/executor/layout_guard_test.go,
@@ -51,19 +54,22 @@ work_chunks:
   - id: 4
     depends_on: []
     key_file_paths: [internal/lifecycle/merge_state.go, internal/lifecycle/merge_state_test.go,
-      internal/lifecycle/stale_open.go, internal/lifecycle/scan.go, internal/doctor/doctor.go,
-      internal/doctor/doctor_test.go, internal/doctor/lifecycle_integrity.go,
-      internal/doctor/lifecycle_integrity_test.go, cmd/mindspec/doctor.go,
-      cmd/mindspec/doctor_info_test.go, .mindspec/domains/workflow/architecture.md,
-      .mindspec/domains/workflow/interfaces.md]
+      internal/lifecycle/stale_open.go, internal/lifecycle/scan.go, internal/gitutil/gitops.go,
+      internal/gitutil/gitops_test.go, internal/lint/ratchet_argv_table_test.go,
+      internal/guard/registries.go, internal/doctor/doctor.go, internal/doctor/doctor_test.go,
+      internal/doctor/lifecycle_integrity.go, internal/doctor/lifecycle_integrity_test.go,
+      cmd/mindspec/doctor.go, cmd/mindspec/doctor_info_test.go,
+      .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/interfaces.md,
+      .mindspec/domains/execution/interfaces.md]
   - id: 5
     depends_on: [1, 4]
     key_file_paths: [internal/complete/complete.go, internal/complete/merge_only.go, internal/complete/closing.go,
       internal/complete/merge_only_test.go, internal/complete/closing_test.go,
       internal/complete/ownership_conflict_test.go, internal/complete/panel_advisory.go,
-      cmd/mindspec/complete.go, internal/executor/executor.go,
+      cmd/mindspec/complete.go, cmd/mindspec/merge_only_loop_test.go, internal/executor/executor.go,
       internal/executor/mindspec_executor.go, internal/executor/mock.go,
-      internal/guard/registries.go, internal/lint/ratchet_argv_table_test.go,
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      internal/lint/ratchet_argv_table_test.go,
       .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/domains/workflow/architecture.md,
       .mindspec/domains/workflow/runbook.md, .mindspec/domains/workflow/interfaces.md,
       .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md,
@@ -82,7 +88,7 @@ work_chunks:
       .mindspec/adr/ADR-0006.md, .mindspec/adr/ADR-0019.md,
       internal/validate/adr_spec132_mergestrategy_test.go]
   - id: 7
-    depends_on: []
+    depends_on: [4]
     key_file_paths: [internal/lifecycle/landed.go, internal/lifecycle/landed_reviewed_tree_test.go,
       internal/complete/reviewed_tree_reconcile_test.go,
       .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/domains/workflow/architecture.md,
@@ -92,40 +98,45 @@ work_chunks:
     key_file_paths: [internal/lifecycle/reattest.go, internal/lifecycle/reattest_ancestor_test.go,
       internal/lifecycle/fallback.go, internal/lifecycle/fallback_test.go,
       internal/lifecycle/scan.go, internal/gitutil/neteffect.go, internal/gitutil/neteffect_test.go,
-      cmd/mindspec/reattest.go, cmd/mindspec/reattest_test.go, internal/doctor/ancestor.go,
+      internal/lint/ratchet_argv_table_test.go, cmd/mindspec/reattest.go,
+      cmd/mindspec/reattest_test.go, internal/doctor/ancestor.go,
       internal/doctor/lifecycle_integrity.go, internal/doctor/ancestor_test.go,
-      internal/guard/registries.go, .mindspec/domains/workflow/architecture.md,
-      .mindspec/domains/workflow/runbook.md, .mindspec/domains/execution/interfaces.md,
-      project-docs/user/guides/merge-safety.md]
+      internal/guard/registries.go, internal/guard/registries_test.go,
+      .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/runbook.md,
+      .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md]
   - id: 9
     depends_on: []
-    key_file_paths: [internal/phase/derive.go, internal/phase/lineage.go, internal/phase/lineage_test.go,
+    key_file_paths: [internal/phase/derive.go, internal/phase/cache.go, internal/phase/cache_test.go,
+      internal/phase/lineage.go, internal/phase/lineage_test.go,
       internal/phase/resolve_spec_test.go, internal/approve/spec.go, internal/approve/spec_test.go,
       internal/next/beads.go, internal/next/readyset_test.go,
       internal/validate/readiness/readiness.go, internal/validate/readiness/readiness_test.go,
       internal/doctor/lineage.go, internal/doctor/lineage_test.go, cmd/mindspec/spec.go,
       cmd/mindspec/spec_create_lettered_test.go, cmd/mindspec/lettered_spec_test.go,
-      internal/guard/registries.go, .mindspec/domains/core/interfaces.md,
-      .mindspec/domains/core/architecture.md, .mindspec/domains/workflow/interfaces.md]
+      internal/guard/registries.go, .mindspec/adr/ADR-0023.md,
+      .mindspec/domains/core/interfaces.md, .mindspec/domains/core/architecture.md,
+      .mindspec/domains/workflow/interfaces.md, internal/validate/adr_spec132_lineage_test.go]
 ---
 # Plan: 132-readiness-followon
 
 ## ADR Fitness
 
-- **ADR-0041 (gate before mutate)**: stays fit. Amended. Beads 2, 3, 5 and 7 each add one subsection under a new `## Amendment (Spec 132)` section. Bead 2: the early guard copies, the push probe and the one has-remote decision. Bead 3: the state line, `mindspec_finalize_tip` and stage resume. Bead 5: `--merge-only` is a commit phase with no close, and the closing call publishes the close. Bead 7: the reviewed-tree rule in amendment (ii) is a confirming datum and never vetoes. The pinned text of the Spec 125, Spec 129 and Spec 130 sections does not change (`TestADR0041_Spec129Amendment`, `cmd/mindspec/adr0041_amendment_test.go`).
+- **ADR-0041 (gate before mutate)**: stays fit. Amended. Beads 2, 3, 5 and 7 each add one subsection under a new `## Amendment (Spec 132)` section. Bead 2: the early guard copies, the push probe and the one has-remote decision. Bead 3: the state line, `mindspec_finalize_tip` and stage resume. Bead 5: `--merge-only` is a commit phase with no close, and the closing call publishes the close. Bead 7: the reviewed-tree rule changes amendment (ii); it confirms and never vetoes. Bead 7 also adds an inline back-pointer in the Spec 129 section (ii). Every phrase that `TestADR0041_Spec129Amendment` and `cmd/mindspec/adr0041_amendment_test.go` pin stays in place.
 - **ADR-0036 (ownership discovery)**: stays fit. Amended by Bead 1: `complete` reads ownership at the landing tree. One ref feeds all six readers.
 - **ADR-0025 (JSONL as build artifact)**: applied, no edit. Bead 5 closing step 4 commits the export on the spec branch before step 6 deletes the branch and worktree. The export shows the close before evidence goes.
-- **ADR-0023 (lineage is a parent-child dependency)**: applied, no edit. Bead 9 removes the bead-title fallback. Only a parent-child edge to an epic is lineage.
-- **ADR-0030 (executor boundary)**: applied, no edit. `internal/complete` and `internal/approve` do not import `internal/gitutil`. The landing tree (Bead 1), the push probe (Bead 2) and the stage git work (Bead 3) go through Executor methods. The has-remote probe stays behind the gitutil seam through the `lifecycle` wrapper and `implHasRemoteFn`. `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` stays green in every bead.
-- **ADR-0035 (agent error contract)**: applied, no edit. Every new refusal ends with one or more `recovery:` lines. A bead that adds a recovery with a substituted operand registers it in `guard.OpaqueOperandRegistry` (`internal/guard/registries.go`).
+- **ADR-0023 (lineage is a parent-child dependency)**: stays fit. Amended by Bead 9 with an `#### Amendment (spec 132-readiness-followon)` subsection, in the form of the spec 095 and spec 128 amendments. It states: only a parent-child edge to an epic is lineage, and the bead-title fallback is gone; epic-to-spec binding reads the stored `spec_id` key first, `spec_num` plus `spec_title` second, and the `[SPEC <id>]` epic title third, so a lettered ID resolves to its own spec. The `%03d` derivation stays the rule for the second source only.
+- **ADR-0030 (executor boundary)**: applied, no edit. `internal/complete` and `internal/approve` do not import `internal/gitutil`. The landing tree (Bead 1), the early guards and the push probe (Bead 2) and the stage git work (Bead 3) go through Executor methods. `internal/lifecycle` calls `internal/gitutil` as today. `go test ./internal/lint/... -run TestEnforcementHasNoGitLeaks` stays green in every bead.
+- **ADR-0035 (agent error contract)**: applied, no edit. Every new refusal ends with one or more `recovery:` lines. A recovery with a substituted operand is registered in `guard.OpaqueOperandRegistry` (`internal/guard/registries.go`). The R3.7 path-scoped restore line (`git -C <spec worktree> checkout <M> -- <paths>`) is in the floor family `FamilyGitCheckoutPathspecDiscard`. Per the Spec 127 amendment, clause 1(a), it is built only through `guard.NewDestructiveCommand` with an evaluated `guard.DestructionOutcome` (Bead 4). Its guidance copy in `merge-safety.md` gets a `KnownSitesExemptionList` entry (Bead 5).
 - **ADR-0019, ADR-0006**: noted. Bead 6 adds a dated removal note at their `merge_strategy` guidance. The decisions stay.
 
-No ADR needs a superseding ADR. Each pin file is `internal/validate/adr_spec132_<topic>_test.go`. Each pin function name starts with `TestDocs_Spec132Amendments`, so `go test ./internal/validate/... -run TestDocs_Spec132Amendments` runs all pins (AC-26). Each pin asserts only the text of its own bead.
+No ADR needs a superseding ADR. Each pin file is `internal/validate/adr_spec132_<topic>_test.go`. Each pin function name has the form `TestDocs_Spec132Amendments_<Topic>`. Each pin asserts only the text of its own bead.
 
 ## Operator Rulings and Lane Constraints
 
-- **OQ-1..OQ-4 are fixed.** OQ-1: Bead 6 deletes `merge_strategy`; Bead 2 keeps the has-remote rule. OQ-2 (a): Beads 4 and 5 build `--merge-only` and the git-state severity rule. OQ-3: R8–R12 are out of scope; no bead implements them. OQ-4: Bead 2 makes a failed has-remote probe refuse before any mutation. It never selects local merge.
-- **Parallel lane 131.** Both lanes touch `internal/config/**` and `internal/executor/**`. No bead rebases on or merges spec 131's unmerged branch. No bead changes panel config loading, panel verbs or panel skills. Beads 5 and 7 read `panel.ToolArtifactPaths` and the existing panel gate only. If spec 131 reaches `main` first, the after-all-beads merge of `origin/main` takes it in as a clause union.
+- **Spec open questions are fixed.** `merge_strategy`: delete it and keep the has-remote rule (Bead 6 deletes; Bead 2 keeps the rule). #250 shape (a): `--merge-only` plus the git-state severity rule (Beads 4 and 5). Split: R8–R12 go to a follow-on spec; no bead implements them. Freshness warning: ruled (a) and implemented by the follow-on spec; no bead implements it.
+- **Has-remote probe failure (lane ruling, R4.4a).** A failed probe refuses before any mutation and never selects local merge (Bead 2).
+- **Parallel lane 131.** Both lanes touch `internal/config/**` and `internal/executor/**`. No bead rebases on or merges spec 131's unmerged branch. Spec 131 landing on `main` is not a prerequisite of any bead. No bead changes panel config loading, panel verbs or panel skills. Beads 5 and 7 read `panel.ToolArtifactPaths` and the existing panel gate only.
+- **When `origin/main` comes in.** The spec branch takes `origin/main` one time: after all nine beads complete and before the final review. If spec 131 is on `main` then, that merge takes it in as a clause union. After that merge, the full suite runs on the merged spec branch: `go build ./... && go test ./... -short -timeout 20m`, plus `go test ./internal/config/... ./cmd/mindspec/... -run 'Config|Ceremony'`, `go test ./internal/lint/... -run TestNoMergeStrategyWriters` and `mindspec validate docs` (doc-sync). Before that point, each bead's checks run against the spec branch that the bead merges into.
 - **R4 scheduling.** The R4 key removal is Bead 6. The lane starts Bead 6 after the other beads are in flight. This is a scheduling note, not an edge. Bead 6 has one real edge, to Bead 4: it uses the doctor Info status that Bead 4 adds.
 - **R4 split.** R4.3, R4.4 and R4.4a (the one has-remote decision and its error-returning probe) are in Bead 2. The early guards (R2.1) and the push probe (R2.3) consume that one value. Thus Bead 2 needs no edge to Bead 6, and Bead 6 holds only the config key removal.
 - **Docs ride with code.** Each bead updates the docs of every domain whose code it changes, in the same commit. No bead defers a doc to a later bead. No bead uses `--allow-doc-skew`.
@@ -136,30 +147,33 @@ No ADR needs a superseding ADR. Each pin file is `internal/validate/adr_spec132_
 - **Dogfood boundary.** This spec changes `complete`, `impl approve`, `doctor` and reattest, which the lane itself uses. Every lifecycle command of this lane runs on the installed v0.17.0 binary (`~/.local/bin/mindspec`), never a spec-branch build. No bead installs a branch build. Tests exercise the branch code through `go test` only.
 - **Unit tests** use fake `bd` on PATH and `executor.MockExecutor`. They set no real environment variables and start no model CLI.
 - **Integration tests** use real temp git repos. `internal/complete` tests reuse `setupPanelGateRepo` (`internal/complete/panel_gate_e2e_test.go`) and `fakeBdOnPath` (`internal/complete/fault_injection_realgit_test.go`). Tests in other packages copy that pattern into a local helper. Remote tests use a `file://` bare remote with `GIT_CONFIG_GLOBAL=/dev/null`.
-- **Fault seams.** Finalize stages use `finalizeStepHookFn` (`internal/executor/mindspec_executor.go`). The has-remote probe uses `implHasRemoteFn`. Bead 2 adds a push-probe seam. Bead 5 adds a seam per closing step. Bead 8 adds a read seam for each `fallbackSafety` read.
-- **Argv ratchet.** Each new git exec site adds one row to `internal/lint/ratchet_argv_table_test.go` (`go test ./internal/lint/... -run TestArgvIDOperandGated`).
-- **Recovery operands.** `go test ./internal/lint/... -run TestProductDiagnosticScan_UnprovableCommandOperandsAreGoverned` passes in every bead that adds a recovery line.
-- **Doc-sync.** `checkInternalPackages` (`internal/validate/docsync.go`) maps each changed non-test source under `internal/` or `cmd/` to its domain through `OWNERSHIP.yaml`. It refuses unless a doc under `.mindspec/domains/<domain>/` changes in the same range. Domains: core (`internal/config`, `internal/phase`), execution (`internal/executor`, `internal/gitutil`, `internal/harness`), workflow (`cmd/`, `internal/complete`, `internal/approve`, `internal/lifecycle`, `internal/validate`, `internal/doctor`, `internal/next`, `internal/guard`). Each bead names its doc per domain. Bead 1 edits spec 129 `spec.md` together with ADR-0036, so `validateSpecArtifactSync` passes.
-- **Union merge.** Parallel beads add rows to the argv ratchet table and the operand registry, subsections to the ADR-0041 `## Amendment (Spec 132)` section, entries to the Executor interface and `MockExecutor`, and sections to the workflow and execution domain docs, `runbook.md` and `merge-safety.md`. A merge conflict in these keeps every row, entry and section, and one `## Amendment (Spec 132)` heading. A bead that creates that heading checks first whether it exists at the spec tip.
-- **Real verification.** A Verification line counts only when `go test <pkg> -list '<regex>'` prints each test that the bead names. `[no tests to run]` is a failure.
+- **Cross-package tests.** `internal/approve` imports `internal/complete`, so a `package complete` test cannot call `approve.ApproveImpl`. A test that runs both `complete` and `impl approve` lives in `cmd/mindspec` (package `main`), which imports both.
+- **Fault seams.** Finalize stages use `finalizeStepHookFn` (`internal/executor/mindspec_executor.go`). Bead 3 exports a test setter for it, so `internal/approve` tests drive the real `MindspecExecutor`. The has-remote probe uses `implHasRemoteFn`, which returns `(bool, error)` after Bead 2. Bead 2 adds a push-probe seam. Bead 5 adds a seam per closing step. Bead 8 adds a read seam for each `fallbackSafety` read.
+- **Argv ratchet.** Each new git exec site adds one row to `internal/lint/ratchet_argv_table_test.go` (`go test ./internal/lint/... -run TestArgvIDOperandGated`). New sites: merge-tree with conflicted paths (Bead 1), `RemoteConfigured` and `PushProbe` (Bead 2), stage-resume reads (Bead 3), `DiffNameOnlyNoRenames` (Bead 4), the range revert check (Bead 8).
+- **Recovery operands and destructive guidance.** Every bead that adds a recovery line runs `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList`. A guidance line with a floor-family command adds one `KnownSitesExemptionList` entry and raises `wantKnownSitesLiveCount` by one.
+- **Doc-sync.** `checkInternalPackages` (`internal/validate/docsync.go`) maps each changed non-test source under `internal/` or `cmd/` to its domain through `OWNERSHIP.yaml`. It refuses unless a doc under `.mindspec/domains/<domain>/` changes in the same range. Domains: core (`internal/config`, `internal/phase`), execution (`internal/executor`, `internal/gitutil`, `internal/harness`), workflow (`cmd/`, `internal/complete`, `internal/approve`, `internal/lifecycle`, `internal/validate`, `internal/doctor`, `internal/next`, `internal/guard`). Each bead names its doc per domain. Bead 1 edits spec 129 `spec.md` and `plan.md` together with ADR-0036, so `validateSpecArtifactSync` passes.
+- **Union merge.** Parallel beads add rows to the argv ratchet table, the operand registry and `KnownSitesExemptionList`, subsections to the ADR-0041 `## Amendment (Spec 132)` section, entries to the Executor interface and `MockExecutor`, and sections to the domain docs, `runbook.md` and `merge-safety.md`. A merge conflict in these keeps every row, entry and section, and one `## Amendment (Spec 132)` heading. A conflict on `wantKnownSitesLiveCount` takes the base value plus each bead's added entries. A bead that creates the amendment heading checks first whether it exists at the spec tip.
+- **Integration with `origin/main`.** See § Operator Rulings and Lane Constraints, "When `origin/main` comes in". Per-bead checks run on the spec branch; the full suite runs again after that one merge.
+- **Real verification.** A Verification line counts only when `go test <pkg> -list '<regex>'` prints each test that the bead names. `[no tests to run]` is a failure. A scanner test has a positive control: a planted violation turns it red.
 - **Every bead** ends with `gofmt -l .` (empty output), `go build ./...`, `go test ./internal/lint/... -run 'TestEnforcementHasNoGitLeaks|TestArgvIDOperandGated'` and `go test ./... -short -timeout 20m`.
 - **Opt-in, separate:** the live-agent harness suite for the finalize scenarios. It is not a bead gate.
 
 ## Bead 1: Ownership at the landing tree
 
 **Steps**
-1. Add Executor method `LandingTree(workdir, base, specTip, beadRef string) (tree string, conflicted []string, err error)`. It runs `git merge-tree --write-tree --merge-base=<B>` through the net-effect primitive (`runMergeTreeWriteTree`, `internal/gitutil/neteffect.go`). It returns the output tree also when paths conflict. For the materialize leg, wrap tree T in a dangling commit (no ref update) when merge-tree needs a commit. Add it to `MockExecutor`.
+1. Add `gitutil.MergeTreeLanding(workdir, base, ours, theirs string) (tree string, conflicted []string, err error)` in `internal/gitutil/neteffect.go`. It runs `git merge-tree --write-tree --name-only -z --merge-base=<B>` and returns the output tree and the conflicted paths, also when paths conflict. Add its argv ratchet row. Wrap it in Executor method `LandingTree(workdir, base, specTip, beadRef string)` and in `MockExecutor`. For the materialize leg, wrap tree T in a commit that no ref names when merge-tree needs a commit.
 2. In `runCommittedRangeGate` (`internal/complete/complete.go`), compute B as `git merge-base <spec tip> <bead HEAD>` and pass the landing tree as `ownerRef` to `ValidateDocsRange` and `CheckADRDivergence`. Do the same in the materialize leg (`internal/complete/materialize.go`) for `ValidateDocsSnapshot` and `CheckADRDivergenceSnapshot` (R1.1).
-3. Make all six readers use that one ref: Impacted-Domains normalization and domain enumeration and path attribution (`internal/validate/divergence.go`), the ADR domain-resolving store (`adr_domain_resolve.go`), `checkInternalPackages` and `checkUnclaimedSource` (`docsync.go`). Remove any reader that reads a second ref (R1.2, R1.3).
-4. When paths conflict and `OWNERSHIP.yaml` is not conflicted, read it from the merge-tree output tree. `MergeInto` then runs and keeps the conflict as today (R1.4, first half). Bead 5 owns the refusal for a conflicted `OWNERSHIP.yaml`.
+3. Make all six readers use that one ref: Impacted-Domains normalization, domain enumeration and path attribution (`internal/validate/divergence.go`), the ADR domain-resolving store (`adr_domain_resolve.go`), `checkInternalPackages` and `checkUnclaimedSource` (`docsync.go`). Remove any reader that reads a second ref (R1.2, R1.3).
+4. When paths conflict and `OWNERSHIP.yaml` is not in the conflicted list, read it from the merge-tree output tree; `MergeInto` then runs and keeps the conflict (R1.4). When `OWNERSHIP.yaml` is in the conflicted list, the pre-merge gate does not read it: return the conflict to the caller. Bead 5 decides per path: path 7 refuses; `--merge-only` and path 5 run `MergeInto`, which keeps the conflict, and the gate runs at re-entry (step 5).
 5. On `--resolve-merge` re-entry, use `git write-tree` of the spec worktree index as the landing tree. Keep today's unresolved-conflict refusal while unmerged entries remain (R1.5). Bead 5 owns the hand-committed-merge case (R3.13).
 6. Remove any ADR number or bead ID left in `materialize.go` refusal text (AC-21).
-7. Docs: append `## Amendment (Spec 132)` to ADR-0036 (landing-tree ownership). Add dated status notes to spec 129 `spec.md` per R13.2. Update `.mindspec/domains/workflow/architecture.md` (ownership ref) and `.mindspec/domains/execution/interfaces.md` (`LandingTree`). Add `internal/validate/adr_spec132_ownership_test.go` (`TestDocs_Spec132Amendments_Ownership`): it pins the ADR-0036 section and each spec 129 note.
+7. Docs: append `## Amendment (Spec 132)` to ADR-0036 (landing-tree ownership). Add the R13.2 dated status notes to spec 129 `spec.md`. In spec 129 `plan.md`, set `-timeout=20m` on every `go test ./... -short` suite command. Update `.mindspec/domains/workflow/architecture.md` (ownership ref) and `.mindspec/domains/execution/interfaces.md` (`MergeTreeLanding`, `LandingTree`). Add `internal/validate/adr_spec132_ownership_test.go` (`TestDocs_Spec132Amendments_Ownership`). It pins the ADR-0036 section and each spec 129 note. It also asserts that spec 129 `plan.md` has no `go test ./... -short` command without `-timeout=20m`.
 
 **Verification**
 - [ ] `go test ./internal/complete/... -run 'TestCommittedRangeGate_SpecTipClaimOwns|TestMaterialize_SpecTipClaimOwns|TestCommittedRangeGate_RevokedAtSpecTipRefuses|TestCommittedRangeGate_SourceConflictPassesThenResolves|TestMaterializeText_NoHistoricalCitations'` passes
 - [ ] `go test ./internal/validate/... -run 'TestCheckUnclaimedSource_LandingTree|TestDocs_Spec132Amendments_Ownership'` passes
-- [ ] `go test ./internal/gitutil/... ./internal/executor/...` passes
+- [ ] `go test ./internal/gitutil/... -run 'TestMergeTreeLanding_CleanReturnsTree|TestMergeTreeLanding_ConflictListsPaths'` passes
+- [ ] `go test ./internal/executor/...` passes
 - [ ] `mindspec validate spec 129-readiness-tracker-honesty` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
@@ -167,7 +181,7 @@ No ADR needs a superseding ADR. Each pin file is `internal/validate/adr_spec132_
 - [ ] AC-1 (R1.1–R1.3): `TestCommittedRangeGate_SpecTipClaimOwns`, `TestMaterialize_SpecTipClaimOwns`, `TestCommittedRangeGate_RevokedAtSpecTipRefuses`, `TestCheckUnclaimedSource_LandingTree` pass.
 - [ ] AC-2 (R1.4 source-conflict leg, R1.5): `TestCommittedRangeGate_SourceConflictPassesThenResolves` passes.
 - [ ] AC-21 (materialize part): `TestMaterializeText_NoHistoricalCitations` passes.
-- [ ] AC-26 (R13.1 ADR-0036, R13.2): the pin passes and `mindspec validate spec 129-readiness-tracker-honesty` passes.
+- [ ] AC-26 (R13.1 ADR-0036, R13.2): the pin passes for the ADR section, the spec 129 notes and the spec 129 plan timeout.
 
 **Depends on**
 None.
@@ -175,25 +189,28 @@ None.
 ## Bead 2: `impl approve` preflight and one has-remote decision
 
 **Steps**
-1. Add `gitutil.RemoteConfigured() (bool, error)`. Expose it through a `lifecycle` wrapper and make `implHasRemoteFn` return `(bool, error)`. `gitutil.HasRemote()` and its other callers do not change (R4.4a).
-2. In `ApproveImpl` (`internal/approve/impl.go`), decide has-remote one time in preflight, after the EnsureMigrated exemption and before the `--supersede-adr` placeholder write, the phase-reconcile write and MUTATION 1/3. A probe error refuses: `cannot tell whether a git remote is configured: <err>`, then `recovery: git remote -v`. An error never selects local merge (R4.3, R4.4a).
-3. Add a `hasRemote bool` parameter to `FinalizeEpic` in the Executor interface, `MindspecExecutor` and `MockExecutor`. Remove the `gitutil.HasRemote()` call in `FinalizeEpic`. `result.MergeStrategy` follows the passed value. Update every `FinalizeEpic` call site, test files included. Update the two-probe comments on `HasRemote` (`internal/lifecycle/gitquery.go`) and on `implHasRemoteFn` and the preflight gate (R4.4).
-4. Run an early copy of the merge-layout guard and of the work-destruction preflight for the decided path, before the phase-reconcile write, the placeholder write and MUTATION 1/3. Keep the executor guards in front of every `MergeInto` and `MergeBranch` call (R2.1, R2.2).
+1. Add `gitutil.RemoteConfigured() (bool, error)`: a failing `git remote` returns `(false, err)`. Expose it through a `lifecycle` wrapper and make `implHasRemoteFn` return `(bool, error)`. Migrate the bool-only stubs in `internal/approve/main_test.go` and `merge_preflight_ac5_test.go`. `gitutil.HasRemote()` and its other callers do not change (R4.4a).
+2. In `ApproveImpl` (`internal/approve/impl.go`), decide has-remote one time, after the EnsureMigrated exemption and before the branch-existence switch (`implSpecBranchExistsFn`, `implBranchMissingRefusal`). Thus the decision also precedes the `--supersede-adr` placeholder write, the phase-reconcile write and MUTATION 1/3, and Bead 3's "already landed" path reuses it. A probe error refuses: `cannot tell whether a git remote is configured: <err>`, then `recovery: git remote -v`. An error never selects local merge (R4.3, R4.4a).
+3. Append a `hasRemote bool` parameter to `FinalizeEpic` in the Executor interface, `MindspecExecutor` and `MockExecutor`. Remove the `gitutil.HasRemote()` call in `FinalizeEpic`; `result.MergeStrategy` follows the passed value. Update every call site and the argument-count assertions (`len(calls[0].Args) != 6` in `impl_test.go` and `merge_preflight_ac5_test.go`) to 7. Update the two-probe comments on `HasRemote` (`internal/lifecycle/gitquery.go`) and on `implHasRemoteFn` (R4.4).
+4. Add Executor method `PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error`. It enumerates the merges that `FinalizeEpic` will make, with the same helper. Push path: every pending bead-to-spec auto-merge. Direct path: those, plus spec-to-main. For each merge it calls `guardMergeLayout` and `preflightMergeDestruction` with the same (branch, target, allow-set, override) arguments as `FinalizeEpic`, and it mutates nothing. `ApproveImpl` calls it in preflight, in place of today's direct-only `implWorkDestructionPreflightFn` call. The executor guards stay in front of every `MergeInto` and `MergeBranch` call (R2.1, R2.2).
 5. Add Executor method `PushProbe(branch string) error`. It runs `git push --dry-run --no-verify` to the remote and refspec of `PushBranch`, with `GIT_TERMINAL_PROMPT=0`. When has-remote is true, `ApproveImpl` calls it before MUTATION 1/3. Only a failed probe refuses. Add a credential-helper hint only for an authentication error on an HTTP(S) remote (R2.3–R2.5).
-6. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for early guards, the push probe and the one has-remote decision. Update `.mindspec/domains/workflow/architecture.md` (`impl approve` preflight order), `.mindspec/domains/execution/interfaces.md` (`FinalizeEpic` parameter, `PushProbe`, `RemoteConfigured`) and `.mindspec/domains/execution/architecture.md` (finalize no longer probes). Add `internal/validate/adr_spec132_preflight_test.go` (`TestDocs_Spec132Amendments_Preflight`).
+6. Add `internal/executor/hasremote_callsite_test.go` (`TestExecutor_HasRemoteOnlyInSpecBranchBase`). It parses the non-test sources of `internal/executor` and fails on any `gitutil.HasRemote` or `gitutil.RemoteConfigured` call outside `specBranchBase`. Its positive control is a planted call in a parsed fixture.
+7. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for early guards, the push probe and the one has-remote decision. Update `.mindspec/domains/workflow/architecture.md` (`impl approve` preflight order), `.mindspec/domains/execution/interfaces.md` (`FinalizeEpic` parameter, `PreflightFinalizeMerges`, `PushProbe`, `RemoteConfigured`) and `.mindspec/domains/execution/architecture.md` (finalize no longer probes). Add `internal/validate/adr_spec132_preflight_test.go` (`TestDocs_Spec132Amendments_Preflight`).
 
 **Verification**
-- [ ] `go test ./internal/approve/... -run 'TestApproveImpl_EarlyLayoutGuardRefuses|TestApproveImpl_EarlyDestructionRefuses|TestApproveImpl_EarlyGuardBeforePhaseReconcile|TestApproveImpl_PushProbeAuthFailureNamesHelper|TestApproveImpl_PushProbeNonFastForwardNoHelperHint|TestApproveImpl_PushProbeFileRemoteNoHelperPasses|TestApproveImpl_OneHasRemoteDecision|TestApproveImpl_HasRemoteProbeErrorRefuses'` passes
-- [ ] `go test ./internal/executor/... -run 'TestFinalizeEpic_ExecutorGuardAfterAutoMerge|TestPushProbe_ArgvMatchesPushBranch|TestFinalizeEpic_WithRemotePushes|TestFinalizeEpic_NoRemoteMergesLocally|TestFinalizeEpic_PassedFalseWithRemoteMergesLocally|TestFinalizeEpic_PassedTrueNoRemoteTakesPushLeg'` passes
-- [ ] `go test ./internal/gitutil/... ./internal/lifecycle/... -run 'RemoteConfigured|HasRemote'` passes
+- [ ] `go test ./internal/approve/... -run 'TestApproveImpl_EarlyLayoutGuardRefuses|TestApproveImpl_EarlyDestructionRefuses|TestApproveImpl_EarlyGuardBeforePhaseReconcile|TestApproveImpl_PushProbeAuthFailureNamesHelper|TestApproveImpl_PushProbeNonFastForwardNoHelperHint|TestApproveImpl_PushProbeFileRemoteNoHelperPasses|TestApproveImpl_OneHasRemoteDecision|TestApproveImpl_HasRemoteProbeErrorRefuses|TestApproveImpl_AC5|TestApproveImpl_AC7|TestApproveImpl_FinalizeEpicReceivesIntersectedAllowSet'` passes
+- [ ] `TestApproveImpl_EarlyLayoutGuardRefuses` and `TestApproveImpl_EarlyDestructionRefuses` each have a push-path subtest (has-remote true, a bead-to-spec merge fails the guard) and a direct-path subtest; each asserts zero mutations: no close, no phase write, no placeholder ADR, no `FinalizeEpic` call
+- [ ] `TestApproveImpl_OneHasRemoteDecision` counts `implHasRemoteFn` calls as exactly one on the push path, the direct path and the spec-branch-missing refusal path
+- [ ] `go test ./internal/executor/... -run 'TestFinalizeEpic_ExecutorGuardAfterAutoMerge|TestPushProbe_ArgvMatchesPushBranch|TestPreflightFinalizeMerges_MatchesFinalizeMerges|TestFinalizeEpic_WithRemotePushes|TestFinalizeEpic_NoRemoteMergesLocally|TestFinalizeEpic_PassedFalseWithRemoteMergesLocally|TestFinalizeEpic_PassedTrueNoRemoteTakesPushLeg|TestExecutor_HasRemoteOnlyInSpecBranchBase'` passes
+- [ ] `go test ./internal/gitutil/... -run 'TestRemoteConfigured_WithRemote|TestRemoteConfigured_NoRemote|TestRemoteConfigured_GitErrorReturnsError'` passes, and `-list 'TestRemoteConfigured_'` prints those three tests. The error case runs outside a git repository and asserts `(false, non-nil)`.
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Preflight` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
-- [ ] AC-3 (R2.1): a layout-guard failure and a destruction failure each exit non-zero with the epic open and the phase unchanged, also from a stale-phase fixture.
+- [ ] AC-3 (R2.1): a layout-guard failure and a destruction failure each exit non-zero with the epic open and the phase unchanged, on the push path and on the direct path, also from a stale-phase fixture.
 - [ ] AC-4 (R2.2): `TestFinalizeEpic_ExecutorGuardAfterAutoMerge` passes.
-- [ ] AC-5 (R2.3–R2.5): the four push-probe tests pass.
-- [ ] AC-15 (R4.3, R4.4, R4.4a): the six tests pass. The probe runs exactly one time. An injected probe error with `--supersede-adr` leaves the epic open, the phase unchanged and no placeholder ADR.
+- [ ] AC-5 (R2.3–R2.5): the three push-probe approve tests and `TestPushProbe_ArgvMatchesPushBranch` pass.
+- [ ] AC-15 (R4.3, R4.4, R4.4a): the four `TestFinalizeEpic_` remote tests, `TestApproveImpl_OneHasRemoteDecision` and `TestApproveImpl_HasRemoteProbeErrorRefuses` pass. An injected probe error with `--supersede-adr` leaves the epic open, the phase unchanged and no placeholder ADR. A real `git remote` failure returns an error (`TestRemoteConfigured_GitErrorReturnsError`).
 - [ ] AC-21 (R4.4a part): `TestApproveImpl_HasRemoteProbeErrorRefuses` asserts that the refusal matches none of `ADR-[0-9]`, `q9ea`, `[Ss]pec [0-9]{3}`.
 
 **Depends on**
@@ -206,42 +223,47 @@ None.
 2. In `FinalizeEpic`, write epic metadata `mindspec_finalize_tip` after the export commit and all bead auto-merges, immediately before the spec-to-main merge or the spec-branch push. Every run overwrites it. Keep the pre-finalize tip record separate (R2.9).
 3. Make each stage converge on re-run, on both paths, per the R2.10 table: idempotent close; skip merged beads; push no-op; reuse `chore/finalize-<id>` and push it with `--force-with-lease` on the SHA that `git ls-remote` reads just before the push; skip a direct merge when the spec tip is an ancestor of main; finish remaining cleanup. Open no PR (R2.10).
 4. While the spec branch exists, a re-run runs every pre-close gate again on the current spec tip (R2.11).
-5. Add the "already landed" re-run per R2.12. Use the has-remote value from Bead 2 to pick the target: main (direct), the remote spec branch (push), or remote main when the host deleted the spec branch. Fetch the target into a temporary ref. A fetch failure, a missing object, or a squash or rebase merge refuses with today's branch-missing recovery. Cleanup runs the destruction guard again and deletes only bead branches whose tips are ancestors of the target.
-6. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for the state line, `mindspec_finalize_tip` and stage resume. Update `.mindspec/domains/workflow/architecture.md` and `runbook.md` (re-run recovery), and `.mindspec/domains/execution/architecture.md` and `interfaces.md` (finalize tip, stage resume). Add `internal/validate/adr_spec132_finalize_test.go` (`TestDocs_Spec132Amendments_Finalize`).
+5. Add the "already landed" re-run per R2.12, in the branch-missing case of the branch-existence switch. It reuses the one has-remote value that Bead 2 decides before that switch, with no second probe, to pick the target: main (direct), the remote spec branch (push), or remote main when the host deleted the spec branch. Fetch the target into a temporary ref. A fetch failure, a missing object, or a squash or rebase merge refuses with today's branch-missing recovery. Cleanup runs the destruction guard again and deletes only bead branches whose tips are ancestors of the target.
+6. Export a test setter `executor.SetFinalizeStepHookForTest(fn func(stage string) error) (restore func())` in `mindspec_executor.go`. `TestApproveImpl_RerunConvergesFromEachStage` uses it with the real `MindspecExecutor`, real git and a `file://` remote, not `MockExecutor.FinalizeEpicErr`.
+7. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for the state line, `mindspec_finalize_tip` and stage resume. Update `.mindspec/domains/workflow/architecture.md` and `runbook.md` (re-run recovery), and `.mindspec/domains/execution/architecture.md` and `interfaces.md` (finalize tip, stage resume, the test setter). Add `internal/validate/adr_spec132_finalize_test.go` (`TestDocs_Spec132Amendments_Finalize`).
 
 **Verification**
 - [ ] `go test ./internal/approve/... -run 'TestApproveImpl_PostCloseConflictKeepsInnerRecovery|TestApproveImpl_StateLineReadsEpicStatus|TestApproveImpl_PostCloseBareErrorGetsRerun|TestApproveImpl_RerunConvergesFromEachStage|TestApproveImpl_RerunReRunsGates|TestApproveImpl_AfterDeletionAlreadyLanded|TestApproveImpl_RemoteSpecBranchDeletedUsesMain|TestApproveImpl_TargetFetchFailureRefuses|TestApproveImpl_ForgedFinalizeTipRefuses'` passes
+- [ ] `TestApproveImpl_AfterDeletionAlreadyLanded` and `TestApproveImpl_RemoteSpecBranchDeletedUsesMain` assert exactly one `implHasRemoteFn` call
 - [ ] `go test ./internal/executor/... -run TestFinalizeEpic_FinalizeTipIsPublishedTip` passes
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Finalize` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
 - [ ] AC-6 (R2.7, R2.8): the three state-line tests pass.
-- [ ] AC-7 (R2.9, R2.10): `TestApproveImpl_RerunConvergesFromEachStage` covers every `finalizeStepHook` stage, `orphan_finalize` included, on both paths, with one close, exit 0 and at most one push per remote ref per converged state. `TestFinalizeEpic_FinalizeTipIsPublishedTip` passes.
+- [ ] AC-7 (R2.9, R2.10): `TestApproveImpl_RerunConvergesFromEachStage` covers every `finalizeStepHookFn` stage, `orphan_finalize` included, on both paths, with one close, exit 0 and at most one push per remote ref per converged state. `TestFinalizeEpic_FinalizeTipIsPublishedTip` passes.
 - [ ] AC-8 (R2.11, R2.12): the five re-run tests pass. A forged `mindspec_finalize_tip` refuses and the bead branch survives.
 
 **Depends on**
-Bead 2. It needs the `FinalizeEpic` has-remote parameter and the one has-remote value to pick the R2.12 target.
+Bead 2. It needs the `FinalizeEpic` has-remote parameter and the one has-remote value, decided before the branch-existence switch, to pick the R2.12 target.
 
 ## Bead 4: Merge-state rules and doctor severity
 
 **Steps**
-1. Add `internal/lifecycle/merge_state.go`. It finds the bead's naming merges on the spec branch's first-parent chain, decides a valid merge M (spec Terms), and runs the R3.5 presence check: paths M changes against M^1, minus tool-artifact paths; reverted when equal to M^1 content at the spec tip or added by M and absent; exempt when a later naming merge for another bead changed the path.
-2. Add the R3.7 restore-recovery builder: each later commit that changed a reverted path, newest first, with full SHA, escaped subject and M paths; `git -C <spec worktree> revert <commit>` with `-m 1` for a merge; the path-scoped `checkout <M> -- <paths>` choice; then the R3.6 lines from step 2 on. Bead 5 reuses it.
-3. Add doctor status `Info` (`internal/doctor/doctor.go`). It does not count in `HasFailures` and does not change the exit code. `Fix` takes no action on Info. `cmd/mindspec/doctor.go` renders it as `[INFO]` (R3.11).
-4. Make the stale-open finding (`internal/lifecycle/stale_open.go`, `internal/doctor/lifecycle_integrity.go`) Info with no FixFunc and recovery `mindspec complete <bead>` when a valid merge exists. Without one it stays Error. The merge-only marker does not change severity (R3.11).
-5. Report, at Error, an open bead whose naming merge is fully or partly reverted, with the R3.7 recovery. Report no stale-open finding for that bead, give it no FixFunc, and give no finding for a closed bead (R3.12).
-6. Docs: update `.mindspec/domains/workflow/architecture.md` (git-state severity rule) and `interfaces.md` (doctor Info status).
+1. Add `gitutil.DiffNameOnlyNoRenames(workdir, base, head string) ([]string, error)` in `internal/gitutil/gitops.go`. It runs `git diff --no-renames --name-only -z <base> <head>` and splits on NUL. Add its argv ratchet row. Beads 4 and 7 use it.
+2. Add `internal/lifecycle/merge_state.go`. It finds the bead's naming merges on the spec branch's first-parent chain and decides a valid merge M (spec Terms). It runs the R3.5 presence check over `DiffNameOnlyNoRenames(M^1, M)`, minus tool-artifact paths. A path is reverted when its content at the spec tip equals M^1, or when M added it and it is absent at the spec tip. A later naming merge for another bead that changed the path exempts it. The valid-merge test and the presence check are separate functions, so a caller can use one without the other.
+3. Add the R3.7 restore-recovery builder: each later commit that changed a reverted path, newest first, with full SHA, escaped subject and M paths; `git -C <spec worktree> revert <commit>`, with `-m 1` for a merge; the path-scoped checkout choice; then the R3.6 lines from step 2 on. The builder takes a `guard.DestructionOutcome` from its caller and builds the checkout line only through `guard.NewDestructiveCommand(cmd, outcome)`. The outcome comes from the spec-worktree user-changes check (R3.4): no user changes gives `DestructionClean`; a read error gives `DestructionEvidenceError`. When that check finds user changes or gives an error, the builder leaves out the checkout choice and keeps the revert lines. Register substituted operands in `guard.OpaqueOperandRegistry`.
+4. Add doctor status `Info` (`internal/doctor/doctor.go`). It does not count in `HasFailures` and does not change the exit code. `Fix` takes no action on Info. `cmd/mindspec/doctor.go` renders it as `[INFO]` (R3.11).
+5. Make the stale-open finding (`internal/lifecycle/stale_open.go`, `internal/doctor/lifecycle_integrity.go`) Info with no FixFunc and recovery `mindspec complete <bead>` when a valid merge exists. Without one it stays Error. The merge-only marker does not change severity (R3.11).
+6. Report, at Error, an open bead whose naming merge is fully or partly reverted, with the R3.7 recovery (the doctor evaluates the user-changes outcome read-only). Report no stale-open finding for that bead, give it no FixFunc, and give no finding for a closed bead (R3.12).
+7. Docs: update `.mindspec/domains/workflow/architecture.md` (git-state severity rule), `interfaces.md` (doctor Info status) and `.mindspec/domains/execution/interfaces.md` (`DiffNameOnlyNoRenames`).
 
 **Verification**
 - [ ] `go test ./internal/doctor/... -run 'TestDoctor_StaleOpenSeverityFromGitState|TestDoctor_RevertedMergeOnlyOneFinding|TestDoctor_FixSkipsRevertedMergeOnly|TestDoctor_ClosedRevertedNoFinding|TestDoctor_FixSkipsStaleOpenInfo'` passes
 - [ ] `go test ./cmd/mindspec/... -run TestDoctorStatusTag_Info` passes
-- [ ] `go test ./internal/lifecycle/... -run 'TestMergeState_'` passes
+- [ ] `go test ./internal/lifecycle/... -run 'TestMergeState_LaterMergeExemptsPath|TestMergeState_LaterEditNotRevert|TestMergeState_RenamedAwayPathIsReverted|TestMergeState_RestoreCheckoutFromConstructor|TestMergeState_RestoreOmitsCheckoutOnUserChanges'` passes. The rename fixture moves an M path away after M; with `--no-renames` the presence check reports it reverted.
+- [ ] `go test ./internal/gitutil/... -run 'TestDiffNameOnlyNoRenames_RenameListsBothPaths|TestDiffNameOnlyNoRenames_NULSeparated'` passes
+- [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
 - [ ] AC-13 (R3.11, R3.12): the six AC-13 tests pass. A stale-open bead with a valid merge gives Info, and `doctor --fix` leaves it open.
-- [ ] The R3.5 presence check and the valid-merge rule exist as one lifecycle API that Bead 5 calls. `TestMergeState_LaterMergeExemptsPath` and `TestMergeState_LaterEditNotRevert` pass.
+- [ ] The R3.5 presence check and the valid-merge rule exist as separate lifecycle functions that Bead 5 calls. `TestMergeState_RestoreCheckoutFromConstructor` fails when the checkout line is built by string concatenation outside `guard.NewDestructiveCommand`.
 
 **Depends on**
 None.
@@ -251,28 +273,33 @@ None.
 **Steps**
 1. Add `--merge-only` to `mindspec complete` (`cmd/mindspec/complete.go`, `CompleteOpts`). Implement R3.0 path selection in the stated order (paths 1–7), with the marker check on paths 2, 4 and 6 and recovery `bd update <bead> --unset-metadata mindspec_merge_only_sha`.
 2. Merge-only path (`internal/complete/merge_only.go`): run every gate, materialize, write `mindspec_merge_only=pending`, merge, print the merge SHA and both parents, then replace the pending key with `mindspec_merge_only_sha=<merge>`. Keep the bead open with no binding, ledger commit or cleanup. A conflict recovery is `mindspec complete <bead> --merge-only --resolve-merge`. A repeated run with a valid merge for the tip writes the marker only. Refuse a second naming merge (R3.1–R3.4, R3.10).
-3. When `OWNERSHIP.yaml` conflicts in the Bead 1 landing tree, plain `complete` on an open bead (path 7) refuses before the close with `recovery: mindspec complete <bead> --merge-only`. `--merge-only` and path 5 do not refuse here (R1.4).
-4. Closing path (`internal/complete/closing.go`, paths 4 and 6): refuse on a busy spec worktree, a moved tip, user changes, an invalid merge or a failed presence check (Bead 4 API). Run the panel gate at the bead tip and the doc-sync, ADR and ownership gates on M (base M^1, head M, `ownerRef` M's tree). Then run steps 1–6 of R3.8, each a no-op when its done signal holds. Step 4 is a path-scoped commit of the export and panel ledger in the spec worktree (R3.4, R3.8, R3.13).
-5. Implement the path-4 cleanup guard for a layout that is not flat, the refusal texts of R3.6 and R3.7 (Bead 4 builder), the step 1–4 failure recovery that repeats `--allow-doc-skew` or `--override-adr` with its reason, and the R3.13 exits (R3.6, R3.7, R3.9, R3.13).
-6. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for `--merge-only` as a commit phase with no close and the closing call. Update `.mindspec/domains/workflow/architecture.md`, `interfaces.md` (`--merge-only`, metadata keys) and `runbook.md`, and `project-docs/user/guides/merge-safety.md`: `--merge-only`, the one-naming-merge rule, "do not revert a `--merge-only` merge by hand" and the restore-then-close recovery (R13.3). If the bead adds an Executor method, update `.mindspec/domains/execution/interfaces.md`. Add `internal/validate/adr_spec132_mergeonly_test.go` (`TestDocs_Spec132Amendments_MergeOnly`).
+3. Use Bead 1's conflicted-path list. When it has `OWNERSHIP.yaml`: plain `complete` on an open bead (path 7) refuses before the close with `recovery: mindspec complete <bead> --merge-only`. `--merge-only` and path 5 do not run the pre-merge ownership read and do not refuse: `MergeInto` keeps the conflict, and the gate runs on `--resolve-merge` re-entry against the `write-tree` of the resolved index (R1.4, R1.5).
+4. Open closing path (path 6, `internal/complete/closing.go`): refuse on a busy spec worktree, a moved tip, user changes, an invalid merge, or a failed presence check (Bead 4). Closed resume (path 4): keep naming-merge identity, the tip and user-changes checks, the full panel gate at the bead tip and the R3.13 gates, but do not call the presence check (R3.0 path 4). Both paths run the doc-sync, ADR and ownership gates on M (base M^1, head M, `ownerRef` M's tree), then steps 1–6 of R3.8, each a no-op when its done signal holds. Step 4 is a path-scoped commit of the export and panel ledger in the spec worktree (R3.4, R3.8, R3.13).
+5. Implement the path-4 cleanup guard for a layout that is not flat, the refusal texts of R3.6 and R3.7 (Bead 4 builder, with the outcome from this path's user-changes check), the step 1–4 failure recovery that repeats `--allow-doc-skew` or `--override-adr` with its reason, and the R3.13 exits (R3.6, R3.7, R3.9, R3.13).
+6. Put the AC-10 loop tests in `cmd/mindspec/merge_only_loop_test.go`, because `internal/approve` imports `internal/complete`. They call `complete.Run`, `next`, `doctor` and `approve.ApproveImpl` in one real temp repo with fake `bd` and a local helper.
+7. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection for `--merge-only` as a commit phase with no close, and for the closing call. Update `.mindspec/domains/workflow/architecture.md`, `interfaces.md` (`--merge-only`, metadata keys) and `runbook.md`, and `project-docs/user/guides/merge-safety.md`: `--merge-only`, the one-naming-merge rule, "do not revert a `--merge-only` merge by hand" and the restore-then-close recovery (R13.3). Each `merge-safety.md` line with the path-scoped checkout gets a `KnownSitesExemptionList` entry, and `wantKnownSitesLiveCount` rises by the same number. If the bead adds an Executor method, update `.mindspec/domains/execution/interfaces.md`. Add `internal/validate/adr_spec132_mergeonly_test.go` (`TestDocs_Spec132Amendments_MergeOnly`).
 
 **Verification**
-- [ ] `go test ./internal/complete/... -run 'TestComplete_OwnershipConflictRefusesBeforeClose|TestComplete_OwnershipConflictMergeOnlyLoop|TestComplete_OwnershipResolutionRevokesClaimRefuses'` passes
+- [ ] `go test ./internal/complete/... -run 'TestComplete_OwnershipConflictRefusesBeforeClose|TestComplete_OwnershipConflictMergeOnlyLoop|TestComplete_OwnershipResolutionRevokesClaimRefuses|TestComplete_ClosedNoMergeOwnershipConflictDefersToReentry'` passes
 - [ ] `go test ./internal/complete/... -run 'TestComplete_ClosedBeadMovedTipRefuses|TestComplete_ClosedBeadUserDirtRefuses|TestComplete_ClosedMergedForeignMergeInProgressRefuses|TestComplete_ClosingPathGatesMergeRange|TestComplete_ClosedHandMergeStalePanelRefuses|TestComplete_ClosedHandMergeNoPanelFailsOpen|TestComplete_ClosedHandMergeForgedReviewedKeyRefuses|TestComplete_ClosedNonFlatAbsentWorktreeRefuses|TestComplete_ClosedNonFlatAbsentWorktreeGateOffAllows|TestComplete_ClosedOwnMergeInProgressAborts|TestComplete_MergeOnlyBranchlessRefuses|TestComplete_PendingKeyPlainCompleteStaysOpen|TestComplete_MergeOnlyKeepsBeadOpen|TestComplete_MergeOnlyHandCommitStaysOpen|TestComplete_PlainConflictResolveFinishes|TestComplete_ClosedUnmergedRerunMerges|TestComplete_HandMergeTakesClosingPath|TestComplete_ForeignMarkerRefuses|TestComplete_BranchlessReconcileUnchanged|TestComplete_ClosedBeadResumesAllSteps|TestComplete_MergeOnlyConflictStaysMergeOnly'` passes
-- [ ] `go test ./internal/complete/... -run 'TestComplete_BeadAdvancedAfterMergeOnlyRefuses|TestComplete_UserDirtAfterMergeOnlyRefuses|TestComplete_RevertedMergeOnlyRefuses|TestComplete_PartlyRevertedMergeOnlyRefuses|TestComplete_PresenceCheckLaterMergeExemptsPath|TestComplete_PresenceCheckLaterEditNotRevert|TestComplete_SecondMergeOnlyRefuses|TestComplete_MergeOnlyRefusalEscapes|TestComplete_MergeOnlyFollowUpLoop|TestComplete_MergeOnlyRestoreLoop'` passes
+- [ ] `go test ./internal/complete/... -run TestComplete_ClosedBeadLaterRevertResumesCleanup` passes
+- [ ] `go test ./internal/complete/... -run 'TestComplete_BeadAdvancedAfterMergeOnlyRefuses|TestComplete_UserDirtAfterMergeOnlyRefuses|TestComplete_RevertedMergeOnlyRefuses|TestComplete_PartlyRevertedMergeOnlyRefuses|TestComplete_PresenceCheckLaterMergeExemptsPath|TestComplete_PresenceCheckLaterEditNotRevert|TestComplete_SecondMergeOnlyRefuses|TestComplete_MergeOnlyRefusalEscapes'` passes
+- [ ] `go test ./cmd/mindspec/... -run 'TestComplete_MergeOnlyFollowUpLoop|TestComplete_MergeOnlyRestoreLoop'` passes
 - [ ] `go test ./internal/complete/... -run 'TestComplete_AfterMergeOnlyPublishesClose|TestComplete_ClosingPathSpecWorktreeBusyRefuses|TestComplete_AfterMergeOnlyExportFailureConverges|TestComplete_ClosedBeadFinishesCleanup|TestComplete_OverrideRunRecoveryRepeatsFlag|TestComplete_RepeatedMergeOnlyNoNewMerge'` passes
+- [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList` pass
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_MergeOnly` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
-- [ ] AC-2 (R1.4 ownership-conflict leg, R3.13): the three ownership-conflict tests pass. The bead stays open on the refusal, and the amend exit passes.
+- [ ] AC-2 (R1.4 ownership-conflict leg, R3.13): the three ownership-conflict tests pass. The bead stays open on the refusal, and the amend exit passes. `TestComplete_ClosedNoMergeOwnershipConflictDefersToReentry` shows that path 5 does not refuse on a conflicted `OWNERSHIP.yaml`.
 - [ ] AC-9 (R3.0–R3.3, R3.13): the 21 AC-9 tests pass.
 - [ ] AC-10 (R3.4–R3.7): the 10 AC-10 tests pass. The follow-up and restore loops end with `doctor` clean for the bead, dependents passing MF-3, and `impl approve` exit 0.
 - [ ] AC-11 (R3.8, R3.9): the five AC-11 tests pass.
 - [ ] AC-12 (R3.10): `TestComplete_RepeatedMergeOnlyNoNewMerge` passes.
+- [ ] Closed resume skips the presence check: `TestComplete_ClosedBeadLaterRevertResumesCleanup` (a closed bead, cleanup interrupted at step 6, then a later commit reverts an M path) exits 0 and finishes steps 2–6.
 
 **Depends on**
-Bead 1 (the landing tree and its conflicted-path list for the R1.4 refusal) and Bead 4 (the valid-merge, presence-check and restore-recovery API).
+Bead 1 (the landing tree and its conflicted-path list for the R1.4 decisions) and Bead 4 (the valid-merge, presence-check and restore-recovery functions).
 
 ## Bead 6: Remove `merge_strategy`
 
@@ -281,7 +308,7 @@ Bead 1 (the landing tree and its conflicted-path list for the R1.4 refusal) and 
 2. Update the field assertions in `internal/config/config_test.go` and `internal/config/feedback_remote_test.go`. Use `worktree_root` with two valid relative values in `TestLoadCaches_DiskMutationIgnored`, and a retained project-config field in the feedback-remote scope test. Remove `merge_strategy` from `TestCeremonyNonInflation_ConfigKeys` (R4.1).
 3. Remove the key from `internal/harness/sandbox.go`, `internal/harness/lifecycle_scenario_test.go`, `cmd/mindspec/verb_output_test.go`, `internal/doctor/config_test.go` and `internal/doctor/models_commands_test.go`. Keep it only in named legacy-key fixtures. Remove `merge_strategy: pr` from `.mindspec/config.yaml`. Keep the `scenario_finalize_pr` push leg (R4.2, R4.7).
 4. Add a doctor check in `internal/doctor/config.go`: one Info (Bead 4 status) when `.mindspec/config.yaml` has a top-level `merge_strategy` key, by line regex like the existing key checks. A commented or indented key gives nothing (R4.5, R4.6).
-5. Add `internal/lint/no_merge_strategy_writers_test.go` (`TestNoMergeStrategyWriters`). It scans Go sources, test fixtures and `.mindspec/config.yaml`. Its exemptions are named test functions or fixture constants, not files.
+5. Add `internal/lint/no_merge_strategy_writers_test.go` (`TestNoMergeStrategyWriters`). It scans Go sources, test fixtures and `.mindspec/config.yaml`. Its exemptions are named test functions or fixture constants, not files. Its positive control, `TestNoMergeStrategyWriters_PlantedWriterFails`, runs the scanner over a temp tree with one planted writer in a Go source, one in a fixture and one in `config.yaml`, and asserts three findings.
 6. Docs: update the config example in `.mindspec/core/GIT-WORKFLOW.md`, the Config description in `.mindspec/domains/core/interfaces.md`, `.mindspec/domains/workflow/interfaces.md` (`config show`, the doctor Info) and `.mindspec/domains/execution/architecture.md` (sandbox config). Add dated removal notes at the `merge_strategy` guidance in ADR-0006 and ADR-0019. Add `internal/validate/adr_spec132_mergestrategy_test.go` (`TestDocs_Spec132Amendments_MergeStrategy`).
 
 **Verification**
@@ -289,7 +316,7 @@ Bead 1 (the landing tree and its conflicted-path list for the R1.4 refusal) and 
 - [ ] `go test ./cmd/mindspec/... -run 'TestConfigShow_NoMergeStrategyRow|TestCeremonyNonInflation_ConfigKeys'` passes
 - [ ] `go test ./internal/harness/... -run TestHarnessSandbox_NoMergeStrategy` passes
 - [ ] `go test ./internal/doctor/... -run 'TestDoctor_LegacyMergeStrategyInfo|TestDoctor_LegacyMergeStrategyCommentedOrNested'` passes
-- [ ] `go test ./internal/lint/... -run TestNoMergeStrategyWriters` passes
+- [ ] `go test ./internal/lint/... -run 'TestNoMergeStrategyWriters|TestNoMergeStrategyWriters_PlantedWriterFails'` passes
 - [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_MergeStrategy` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
@@ -305,39 +332,42 @@ Bead 4 (the doctor Info status). Lane note: start after the other beads are in f
 
 **Steps**
 1. In `internal/lifecycle/landed.go`, build the reviewed set R from the panel registrations (`reviewedHeadSHAForBead`). Count `mindspec_landed_reviewed_sha` only when it is in R. Otherwise the provenance calls it unverified (R5.1).
-2. In `FindLandedMerge`, confirm a candidate with second parent D when D is in R, or when some r in R is an ancestor of D and `git diff --no-renames --name-only -z r D` lists no path or only paths in `panel.ToolArtifactPaths` for the spec directory of the bead's own epic (R5.2).
+2. In `FindLandedMerge`, confirm a candidate with second parent D when D is in R, or when some r in R is an ancestor of D and `gitutil.DiffNameOnlyNoRenames(r, D)` (Bead 4) lists no path or only paths in `panel.ToolArtifactPaths` for the spec directory of the bead's own epic (R5.2).
 3. Keep tip and binding contradictions and the revert check in force after the datum. Do not evaluate the datum on the reachable-fallback path (R5.3, R5.4).
 4. Name the matching rule in the provenance string: `exact` or `reviewed-tree` (R5.5).
-5. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection that changes amendment (ii): the reviewed-tree rule confirms and never vetoes. Update `.mindspec/domains/workflow/architecture.md`. Add `internal/validate/adr_spec132_reviewedtree_test.go` (`TestDocs_Spec132Amendments_ReviewedTree`).
+5. Docs: under ADR-0041 `## Amendment (Spec 132)`, add the subsection that changes amendment (ii): the reviewed-tree rule confirms and never vetoes. In the Spec 129 section (ii), add the inline back-pointer `See [Amendment (Spec 132)](#amendment-spec-132)` next to "The set alone never confirms an ancestor or a fallback." and next to "the panel leg is normally non-corroborating", as the Spec 130 back-pointer in that paragraph does. Keep every pinned phrase. Update `.mindspec/domains/workflow/architecture.md`. Add `internal/validate/adr_spec132_reviewedtree_test.go` (`TestDocs_Spec132Amendments_ReviewedTree`); it pins the new subsection and both back-pointers.
 
 **Verification**
 - [ ] `go test ./internal/lifecycle/... -run 'TestFindLandedMerge_ReviewedTreeEmptyWrapperConfirms|TestFindLandedMerge_ReviewedTreeSourceDiffNoConfirm|TestFindLandedMerge_ReviewedTreeRenameNoConfirm|TestFindLandedMerge_ReviewedTreeOtherSpecDirNoConfirm|TestFindLandedMerge_UnregisteredKeyNoConfirm|TestReattestFallback_IgnoresPanelDatum'` passes
 - [ ] `go test ./internal/complete/... -run TestFindLandedMerge_ReviewedTreeConfirms` passes (the `complete` reconcile path on a branch-less bead; it fails on the old code)
-- [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_ReviewedTree` passes
+- [ ] `go test ./internal/validate/... -run 'TestDocs_Spec132Amendments_ReviewedTree|TestADR0041_Spec129Amendment'` and `go test ./cmd/mindspec/... -run ADR0041` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
 - [ ] AC-16 (R5.1–R5.5): the seven AC-16 tests pass, with provenance `reviewed-tree` on the confirming case.
+- [ ] AC-26 (R13.1, ADR-0041 (ii)): the new subsection and both back-pointers are pinned, and the Spec 129 pins stay green.
 
 **Depends on**
-None.
+Bead 4 (`gitutil.DiffNameOnlyNoRenames`).
 
 ## Bead 8: Ancestor without a naming merge
 
 **Steps**
-1. Add a base-taking revert check in `internal/gitutil/neteffect.go`: given base, head and target, it reports whether the target reverts any change in base..head (R6.5).
+1. Add `gitutil.RangeRevertedAt(workdir, base, head, target string) (bool, error)` in `internal/gitutil/neteffect.go`. It reports whether the target reverts any change in base..head. Add its argv ratchet row (R6.5).
 2. In `internal/lifecycle/reattest.go`, evaluate R6 only after the primary scan and the reachable fallback find no candidate. Apply R6.2–R6.4: absent branch, non-ancestor tip, empty range, unknown base B, and "not P's own work" when P's tip equals another bead's naming-merge second parent. A git read error refuses as indeterminate (R6.1–R6.4).
-3. Check B..P-tip at the spec tip with `ContentSubsumedOutcome` and the new revert check. Content present and not reverted: state `ancestor-without-naming-merge` with the person-must-verify sentence and one `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>` line per open dependent in the epic, or `recovery: mindspec doctor` with zero dependents. Otherwise keep `no-owned-exact-merge` with the history line and no "present" claim (R6.5–R6.8, R6.10).
+3. Check B..P-tip at the spec tip with `ContentSubsumedOutcome` and `RangeRevertedAt`. Content present and not reverted: state `ancestor-without-naming-merge` with the person-must-verify sentence and one `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>` line per open dependent in the epic, or `recovery: mindspec doctor` with zero dependents. Otherwise keep `no-owned-exact-merge` with the history line and no "present" claim (R6.5–R6.8, R6.10).
 4. Add a read seam to each of the three `fallbackSafety` reads (`internal/lifecycle/fallback.go`). Each read error refuses (R6.11).
 5. Add the R6 finding to the lifecycle scan (`internal/lifecycle/scan.go`). Render it in a new `internal/doctor/ancestor.go` at Warn, naming P, with the R6.8 recovery lines (R6.9).
 6. Rewrite the `no-owned-exact-merge` text, its render in `cmd/mindspec/reattest.go` and the reattest `Short` text with no ADR number or bead ID. The no-owned refusal says "attested restore" and that a person must verify the merge first. Recovery lines are commands with no parentheses.
-7. Docs: update `.mindspec/domains/workflow/architecture.md` and `runbook.md`, `.mindspec/domains/execution/interfaces.md` (the revert check), and `project-docs/user/guides/merge-safety.md` with the attested-restore exit and the R6 states (R13.3).
+7. Docs: update `.mindspec/domains/workflow/architecture.md` and `runbook.md`, `.mindspec/domains/execution/interfaces.md` (`RangeRevertedAt`), and `project-docs/user/guides/merge-safety.md` with the attested-restore exit and the R6 states (R13.3). A guidance line with a floor-family command gets a `KnownSitesExemptionList` entry.
 
 **Verification**
-- [ ] `go test ./internal/lifecycle/... -run 'TestReattest_Ancestor|TestFallbackSafety_ForwardContentErrorRefuses|TestFallbackSafety_ReverseContentErrorRefuses|TestFallbackSafety_BranchTipErrorRefuses'` passes, and `-list 'TestReattest_Ancestor'` prints the 14 AC-17, AC-18 and AC-19 reattest tests
+- [ ] `go test ./internal/lifecycle/... -run 'TestReattest_Ancestor|TestFallbackSafety_ForwardContentErrorRefuses|TestFallbackSafety_ReverseContentErrorRefuses|TestFallbackSafety_BranchTipErrorRefuses'` passes
+- [ ] `go test ./internal/lifecycle/... -list 'TestReattest_Ancestor'` prints these 13 tests: `TestReattest_AncestorWithoutNamingMerge` (AC-17); `TestReattest_AncestorZeroCommitsNoClaim`, `TestReattest_AncestorFirstParentRestoreNoClaim`, `TestReattest_AncestorDeletedBranch`, `TestReattest_AncestorNotInSpecTip`, `TestReattest_AncestorInsideOtherRangeChecksContent`, `TestReattest_AncestorOtherBeadTipNotOwn`, `TestReattest_AncestorEarlierCommitReverted`, `TestReattest_AncestorRevertedHistoryOnly`, `TestReattest_AncestorNoBaseUnknown`, `TestReattest_AncestorReadErrorIndeterminate` (AC-18); `TestReattest_AncestorRecoveryPerDependent`, `TestReattest_AncestorZeroDependents` (AC-19)
 - [ ] `go test ./internal/doctor/... -run TestDoctor_AncestorNamesPrerequisite` passes
 - [ ] `go test ./cmd/mindspec/... -run 'TestReattestText_NoHistoricalCitations|TestReattestText_OperandsRender'` passes
-- [ ] `go test ./internal/gitutil/... -run Revert` passes
+- [ ] `go test ./internal/gitutil/... -run 'TestRangeRevertedAt_DetectsRevertOfRangeChange|TestRangeRevertedAt_LaterEditNotRevert|TestRangeRevertedAt_BaseExcludesEarlierCommits'` passes
+- [ ] `go test ./internal/lint/... -run 'TestProductDiagnosticScan|TestDestructiveGuidanceSweep'` and `go test ./internal/guard/... -run TestKnownSitesExemptionList` pass
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
@@ -354,27 +384,29 @@ None.
 
 **Steps**
 1. In `internal/phase`, add `FindEpicLineageWithCache`. It returns the epic, the spec ID and the lineage provenance. Lineage is the one `parent-child` dependency on an epic. A `blocks` edge is not lineage. Two parent-child epics refuse with `recovery: bd dep remove <bead> <epic>`. Remove the bead-title fallback. Keep the signatures of `FindEpicForBead` and `FindEpicForBeadWithCache`; they call the new function (R7.1–R7.3).
-2. Resolve epic to spec from three sources in order: `spec_id`, then `spec_num` plus `spec_title`, then the epic's `[SPEC <id>]` title as a full spec ID. Apply the R7.6 rules: a valid `spec_id` decides; an invalid one refuses; `spec_num` 0 or an empty title is absent; a disagreement or no source refuses with `recovery: bd update <epic> --set-metadata spec_id=<id>`; two epics on one spec refuse in a verb that resolves that spec and name both (R7.6).
-3. `spec approve` writes the full spec ID to epic metadata `spec_id` (`internal/approve/spec.go`) (R7.5).
-4. `next` uses the returned provenance and runs no second `bd show` per plan row (`internal/next/beads.go`) (R7.4).
+2. Add one full-ID resolver for epic to spec, with three sources in order: `spec_id`, then `spec_num` plus `spec_title`, then the epic's `[SPEC <id>]` title as a full spec ID. Apply the R7.6 rules: a valid `spec_id` decides; an invalid one refuses; `spec_num` 0 or an empty title is absent; a disagreement or no source refuses with `recovery: bd update <epic> --set-metadata spec_id=<id>` (R7.6).
+3. Route `(*Cache).FindEpicBySpecID` (`internal/phase/cache.go`) through that resolver. It scans every epic that `AllEpics` returns, closed epics included, before it memoizes. Two epics on one spec refuse in a verb that resolves that spec and name both; the refusal is memoized as an error, never as the first match (R7.6).
+4. `spec approve` writes the full spec ID to epic metadata `spec_id` (`internal/approve/spec.go`) (R7.5). `next` uses the returned lineage provenance and runs no second `bd show` per plan row (`internal/next/beads.go`) (R7.4).
 5. `beadIndex` (`internal/validate/readiness/readiness.go`) accepts a bead ID only when it equals `<epicID>.<N>` (R7.7). `spec create` refuses a new lettered ID such as `129b-x` (`cmd/mindspec/spec.go`); existing lettered directories stay valid (R7.9).
 6. Add `internal/doctor/lineage.go`: a Warn for each open bead that resolves only through the removed title rule, with `recovery: bd update <bead> --parent <epic>`, and a report for two epics on one spec that continues (R7.6, R7.8).
-7. Docs: update `.mindspec/domains/core/interfaces.md` and `architecture.md` (lineage API, spec-ID resolution) and `.mindspec/domains/workflow/interfaces.md` (`spec_id` metadata, doctor lineage check, `spec create` refusal).
+7. Docs: add `#### Amendment (spec 132-readiness-followon)` to ADR-0023 (see § ADR Fitness). Update `.mindspec/domains/core/interfaces.md` and `architecture.md` (lineage API, spec-ID resolution, cache) and `.mindspec/domains/workflow/interfaces.md` (`spec_id` metadata, doctor lineage check, `spec create` refusal). Add `internal/validate/adr_spec132_lineage_test.go` (`TestDocs_Spec132Amendments_Lineage`).
 
 **Verification**
-- [ ] `go test ./internal/phase/... -run 'TestFindEpicForBead_BlocksDepIgnored|TestFindEpicForBead_TwoParentsRefuse|TestFindEpicForBead_NoTitleFallback|TestResolveSpec_'` passes
-- [ ] `go test ./internal/next/... -run TestBuildReadySet_OneShowPerPlanRow` passes
+- [ ] `go test ./internal/phase/... -run 'TestFindEpicForBead_BlocksDepIgnored|TestFindEpicForBead_TwoParentsRefuse|TestFindEpicForBead_NoTitleFallback|TestResolveSpec_|TestCacheFindEpicBySpecID_SpecIDOnlyLettered|TestCacheFindEpicBySpecID_DuplicateWithClosedEpicRefuses'` passes
+- [ ] `go test ./internal/next/... -run 'TestBuildReadySet_OneShowPerPlanRow|TestBuildReadySet_ScopedLetteredSpecResolves|TestBuildReadySet_ScopedDuplicateEpicsRefuse'` passes (the `--spec` path through `rs.Cache.FindEpicBySpecID`)
 - [ ] `go test ./internal/validate/readiness/... -run TestBeadIndex_RequiresEpicPrefix` passes
 - [ ] `go test ./internal/doctor/... -run TestDoctor_TitleOnlyLineage` passes
 - [ ] `go test ./cmd/mindspec/... -run 'TestSpecCreate_RefusesLetteredID|TestLifecycle_LetteredSpecResolves'` passes
 - [ ] `go test ./internal/approve/... -run TestSpecApprove_WritesSpecID` passes
+- [ ] `go test ./internal/validate/... -run TestDocs_Spec132Amendments_Lineage` passes
 - [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout 20m` passes
 
 **Acceptance Criteria**
 - [ ] AC-22 (R7.1–R7.3): the three `TestFindEpicForBead_` tests pass.
 - [ ] AC-23 (R7.4): `TestBuildReadySet_OneShowPerPlanRow` passes.
-- [ ] AC-24 (R7.5, R7.6): `TestResolveSpec_PlainAndLetteredBothPresent`, `TestLifecycle_LetteredSpecResolves`, `TestResolveSpec_LegacyPairRepairResolves`, `TestResolveSpec_TitleWithoutIDRefuses`, `TestResolveSpec_SpecNumZeroAbsent`, `TestResolveSpec_InvalidSpecIDRefuses`, `TestResolveSpec_TwoEpicsScopedRefusal` pass.
+- [ ] AC-24 (R7.5, R7.6): `TestResolveSpec_PlainAndLetteredBothPresent`, `TestLifecycle_LetteredSpecResolves`, `TestResolveSpec_LegacyPairRepairResolves`, `TestResolveSpec_TitleWithoutIDRefuses`, `TestResolveSpec_SpecNumZeroAbsent`, `TestResolveSpec_InvalidSpecIDRefuses`, `TestResolveSpec_TwoEpicsScopedRefusal` pass. The cached scoped `next` path resolves a `spec_id`-only lettered epic and refuses duplicates, a closed duplicate included.
 - [ ] AC-25 (R7.7–R7.9): `TestBeadIndex_RequiresEpicPrefix`, `TestDoctor_TitleOnlyLineage`, `TestSpecCreate_RefusesLetteredID` pass, and `idvalidate` accepts `008b-human-gates`.
+- [ ] AC-26 (ADR-0023): the amendment is pinned.
 
 **Depends on**
 None.
@@ -384,20 +416,20 @@ None.
 | Acceptance Criterion | Verified By |
 |---------------------|-------------|
 | AC-1 (R1.1–R1.3) | Bead 1 verification: `go test ./internal/complete/...` and `./internal/validate/...` landing-tree tests |
-| AC-2 (R1.4, R1.5, R3.13) | Bead 1 verification (`TestCommittedRangeGate_SourceConflictPassesThenResolves`); Bead 5 verification (three ownership-conflict tests) |
-| AC-3 (R2.1) | Bead 2 verification: `TestApproveImpl_Early*` |
+| AC-2 (R1.4, R1.5, R3.13) | Bead 1 verification (`TestCommittedRangeGate_SourceConflictPassesThenResolves`); Bead 5 verification (ownership-conflict tests, path-5 deferral) |
+| AC-3 (R2.1) | Bead 2 verification: `TestApproveImpl_Early*`, push-path and direct-path subtests |
 | AC-4 (R2.2) | Bead 2 verification: `TestFinalizeEpic_ExecutorGuardAfterAutoMerge` |
 | AC-5 (R2.3–R2.5) | Bead 2 verification: push-probe tests and `TestPushProbe_ArgvMatchesPushBranch` |
 | AC-6 (R2.7, R2.8) | Bead 3 verification: state-line tests |
-| AC-7 (R2.9, R2.10) | Bead 3 verification: `TestApproveImpl_RerunConvergesFromEachStage`, `TestFinalizeEpic_FinalizeTipIsPublishedTip` |
+| AC-7 (R2.9, R2.10) | Bead 3 verification: `TestApproveImpl_RerunConvergesFromEachStage` on the real executor, `TestFinalizeEpic_FinalizeTipIsPublishedTip` |
 | AC-8 (R2.11, R2.12) | Bead 3 verification: five re-run tests |
 | AC-9 (R3.0–R3.3, R3.13) | Bead 5 verification: 21 AC-9 tests |
-| AC-10 (R3.4–R3.7) | Bead 5 verification: 10 AC-10 tests; Bead 4 verification (`TestMergeState_`) |
+| AC-10 (R3.4–R3.7) | Bead 5 verification: eight `internal/complete` tests and two `cmd/mindspec` loop tests; Bead 4 verification (`TestMergeState_`) |
 | AC-11 (R3.8, R3.9) | Bead 5 verification: five AC-11 tests |
 | AC-12 (R3.10) | Bead 5 verification: `TestComplete_RepeatedMergeOnlyNoNewMerge` |
 | AC-13 (R3.11, R3.12) | Bead 4 verification: five doctor tests and `TestDoctorStatusTag_Info` |
 | AC-14 (R4.1, R4.2, R4.5, R4.6) | Bead 6 verification: six AC-14 tests |
-| AC-15 (R4.3, R4.4, R4.4a) | Bead 2 verification: four `TestFinalizeEpic_` remote tests, `TestApproveImpl_OneHasRemoteDecision`, `TestApproveImpl_HasRemoteProbeErrorRefuses` |
+| AC-15 (R4.3, R4.4, R4.4a) | Bead 2 verification: four `TestFinalizeEpic_` remote tests, `TestApproveImpl_OneHasRemoteDecision`, `TestApproveImpl_HasRemoteProbeErrorRefuses`, `TestRemoteConfigured_GitErrorReturnsError` |
 | AC-16 (R5.1–R5.5) | Bead 7 verification: seven AC-16 tests |
 | AC-17 (R6.1–R6.6) | Bead 8 verification: `TestReattest_AncestorWithoutNamingMerge` |
 | AC-18 (R6.2–R6.5, R6.7) | Bead 8 verification: ten AC-18 tests |
@@ -406,7 +438,7 @@ None.
 | AC-21 (internal refs) | Bead 8 (`TestReattestText_*`), Bead 1 (`TestMaterializeText_NoHistoricalCitations`), Bead 2 (R4.4a text in `TestApproveImpl_HasRemoteProbeErrorRefuses`), Bead 6 (R4.6 text in `TestDoctor_LegacyMergeStrategyInfo`) |
 | AC-22 (R7.1–R7.3) | Bead 9 verification: three `TestFindEpicForBead_` tests |
 | AC-23 (R7.4) | Bead 9 verification: `TestBuildReadySet_OneShowPerPlanRow` |
-| AC-24 (R7.5, R7.6) | Bead 9 verification: seven resolution tests |
+| AC-24 (R7.5, R7.6) | Bead 9 verification: seven resolution tests and the cached scoped-`next` tests |
 | AC-25 (R7.7–R7.9) | Bead 9 verification: `TestBeadIndex_RequiresEpicPrefix`, `TestDoctor_TitleOnlyLineage`, `TestSpecCreate_RefusesLetteredID` |
-| AC-26 (R13) | `go test ./internal/validate/... -run TestDocs_Spec132Amendments` over the pins of Beads 1, 2, 3, 5, 6 and 7; Bead 1 `mindspec validate spec 129-readiness-tracker-honesty`; R13.3 doc text in Beads 5 and 8 |
-| Validation proofs | Every bead: `gofmt -l .`, `go build ./...`, `go test ./... -short -timeout 20m`; `golangci-lint run` at final review |
+| AC-26 (R13) | AC-26 names `TestDocs_Spec132Amendments`; the plan delivers it as the prefix set. `go test ./internal/validate/... -run '^TestDocs_Spec132Amendments'` passes, and `-list '^TestDocs_Spec132Amendments'` prints these seven: `_Ownership` (Bead 1), `_Preflight` (Bead 2), `_Finalize` (Bead 3), `_MergeOnly` (Bead 5), `_MergeStrategy` (Bead 6), `_ReviewedTree` (Bead 7), `_Lineage` (Bead 9). Bead 1 also runs `mindspec validate spec 129-readiness-tracker-honesty`; R13.3 doc text is in Beads 5 and 8 |
+| Validation proofs | Every bead: `gofmt -l .`, `go build ./...`, `go test ./... -short -timeout 20m`; after the `origin/main` merge: the full suite again; `golangci-lint run` at final review |
