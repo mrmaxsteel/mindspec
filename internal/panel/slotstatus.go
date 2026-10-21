@@ -63,11 +63,11 @@ func RoundSchema(dir string) (RoundRecord, error) {
 		if r.Record != RecordRound {
 			continue
 		}
-		if seenV2 && r.VerdictSchema != 2 {
-			return r, fmt.Errorf("round registration removed the verdict schema; recovery: create a new round")
-		}
 		seenV2 = seenV2 || r.VerdictSchema == 2
 		latest = r
+	}
+	if seenV2 && latest.VerdictSchema != 2 {
+		return latest, fmt.Errorf("round registration removed the verdict schema; recovery: create a new round")
 	}
 	return latest, nil
 }

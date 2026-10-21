@@ -171,6 +171,28 @@ func TestPanelSubmit_Refusals(t *testing.T) {
 	}
 }
 
+func TestPanelSubmit_SlotDirectoryRefusals(t *testing.T) {
+	for _, state := range []string{"explicit_round", "current_round"} {
+		t.Run(state, func(t *testing.T) {
+			f := newCLIV2(t)
+			file := f.shortSetup(t, 1)
+			f.launch(t, "dispatched", 1)
+			args := []string{"submit", "--file", file}
+			want := "explicit target differs from the slot directory"
+			if state == "explicit_round" {
+				args = append(args, "--round", "2")
+			} else {
+				p := f.p
+				if err := panel.Create(f.dir, panel.CreateInput{Spec: p.Spec, Target: p.Target, Gate: p.Gate, Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Roster: p.Roster}); err != nil {
+					t.Fatal(err)
+				}
+				want = "slot directory differs from the current panel"
+			}
+			cliV2Refusal(t, f, want, args...)
+		})
+	}
+}
+
 // seedCLIV1 creates a historical registration, without rewriting a round record.
 func seedCLIV1(t *testing.T, f cliV2Fixture) cliV2Fixture {
 	t.Helper()

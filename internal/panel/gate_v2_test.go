@@ -230,6 +230,31 @@ func TestGateV2_RoundSchemaDowngrade(t *testing.T) {
 	if r.IntegrityErr == nil || r.PassRule(true) {
 		t.Fatal("schema downgrade did not block the gate")
 	}
+	if err := Create(dir, CreateInput{Spec: round.Spec, Target: round.Target, Gate: round.Gate, Round: 3, ReviewedHeadSHA: round.ReviewedHeadSHA, SubjectDigest: round.SubjectDigest, Roster: round.Roster}); err != nil {
+		t.Fatal(err)
+	}
+	round, err = RoundSchema(dir)
+	if err != nil || round.Round != 3 || round.VerdictSchema != 2 {
+		t.Fatalf("want recovered v2 round 3, got %+v: %v", round, err)
+	}
+	target.Round, v.Round = 3, 3
+	for _, slot := range round.Roster {
+		v.Slot = slot.Slot
+		gateV2Submit(t, target, v)
+	}
+	r = gateV2Read(t, dir)
+	statuses, err := ReadSlotStatuses(r, nil, time.Now())
+	if err != nil || len(statuses) != len(round.Roster) {
+		t.Fatalf("recovered slot statuses: %+v: %v", statuses, err)
+	}
+	for _, status := range statuses {
+		if status.Status != "final" {
+			t.Fatalf("recovered slot is not final: %+v", status)
+		}
+	}
+	if r.IntegrityErr != nil || !r.PassRule(true) {
+		t.Fatalf("recovered round did not pass: %+v", r)
+	}
 }
 
 func TestGateV2_LaterAttemptSubmissionSequence(t *testing.T) {
