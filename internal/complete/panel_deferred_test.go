@@ -314,7 +314,7 @@ func TestGateTime_DeferThenCloseBlocks(t *testing.T) {
 			fake := deferralBD(t, "epic-130-core3")
 			writeFile(t, root, ".mindspec/config.yaml", "version: 1\n")
 			dir := filepath.Join(root, "review", "deferred")
-			if err := panel.Create(dir, panel.CreateInput{Spec: "130-core3", Gate: "bead", Target: "bead/mindspec-core3.1", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:abc", ExpectedReviewers: 2, Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
+			if err := createV1TestPanel(dir, panel.CreateInput{Spec: "130-core3", Gate: "bead", Target: "bead/mindspec-core3.1", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:abc", ExpectedReviewers: 2, Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
 				t.Fatal(err)
 			}
 			core3JSON(t, dir, "R1-round-1.json", panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x"}})

@@ -73,7 +73,7 @@ func newRulesCmd() *cobra.Command {
 }
 
 func rulesWorkspace() error {
-	root, err := findRoot()
+	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return err
 	}

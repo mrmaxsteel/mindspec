@@ -237,7 +237,7 @@ func TestCreate_ArchivesBriefOnBump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.LatestRound != 2 || len(res.Verdicts) != 1 {
+	if res.LatestRound != 2 || len(res.Verdicts) != 0 || len(res.Unsubmitted) != 1 {
 		t.Fatalf("archive counted as verdict: %+v", res)
 	}
 	if !strings.HasSuffix(createRead(t, dir, "BRIEF.md"), "\r\noperator notes\r\n") {

@@ -370,6 +370,14 @@ func appendRecordsLocked(dir string, records ...[]byte) error {
 // submitLockHeldHook runs before Submit reads any mutable state. Tests only.
 var submitLockHeldHook func()
 
+// RecordSpec returns the portable spec label for a panel ledger record.
+func RecordSpec(p Panel) string {
+	if p.Spec == "" {
+		return "adhoc"
+	}
+	return p.Spec
+}
+
 // SubmissionRecord binds one version of a slot verdict to exact file bytes.
 type SubmissionRecord struct {
 	Record       string `json:"record"`
@@ -389,6 +397,7 @@ type SubmissionRecord struct {
 	Reason       string `json:"reason"`
 	FileSHA256   string `json:"file_sha256"`
 	CreatedAt    string `json:"created_at"`
+	HardBlock    bool   `json:"hard_block,omitempty"`
 }
 
 type LaunchRecord struct {
@@ -495,6 +504,11 @@ func validateExecutionRecord(m map[string]interface{}, kind string) error {
 		return err
 	}
 	if kind == RecordVerdict {
+		if value, exists := m["hard_block"]; exists {
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("verdict hard_block must be a boolean")
+			}
+		}
 		if err := positive("seq", false); err != nil {
 			return err
 		}

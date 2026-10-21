@@ -51,6 +51,7 @@ const FileName = "panel.json"
 // Round/verdict-filename disagreement as a writer error to report
 // (see Result.RoundMismatch), never as something to silently repair.
 type Panel struct {
+	VerdictSchema     int     `json:"verdict_schema,omitempty"`
 	BeadID            *string `json:"bead_id"`
 	Spec              string  `json:"spec"`
 	Target            string  `json:"target"`

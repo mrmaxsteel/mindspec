@@ -15,6 +15,27 @@ import (
 const ledgerTime = "2026-10-20T10:00:00Z"
 const ledgerLater = "2026-10-20T11:00:00Z"
 
+func TestLedger_SubmissionHardBlockOptional(t *testing.T) {
+	legacy := []byte(`{"record":"verdict","spec":"test","panel":"p","slot":"R1","round":1,"seq":1,"status":"final","verdict":"APPROVE","family":"harness","model":"m","runner_kind":"harness","runner_source":"default","via":"direct","attempt":0,"reason":"","file_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","created_at":"2026-10-20T10:00:00Z"}`)
+	if err := Validate(legacy); err != nil {
+		t.Fatalf("old record refused: %v", err)
+	}
+	var record SubmissionRecord
+	if err := json.Unmarshal(legacy, &record); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustMarshal(t, record); !bytes.Equal(got, legacy) {
+		t.Fatalf("old record bytes changed:\n%s\n%s", legacy, got)
+	}
+	for _, value := range []any{true, false, "true", nil, 1} {
+		raw := changeLedger(t, legacy, "hard_block", value)
+		_, valid := value.(bool)
+		if err := Validate(raw); (err == nil) != valid {
+			t.Fatalf("hard_block=%v validation: %v", value, err)
+		}
+	}
+}
+
 func ledgerFixtures(t *testing.T, name string) [][]byte {
 	t.Helper()
 	ref := Refutation{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "a finding", Ground: "disproven", AC: "AC-13", Reason: "covered", Evidence: "abc123", By: "operator", CreatedAt: ledgerTime}

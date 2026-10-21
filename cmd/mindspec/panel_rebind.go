@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +47,7 @@ func panelRebindRunE(cmd *cobra.Command, args []string) error {
 	if strings.TrimSpace(reason) == "" {
 		return guard.NewFailure("panel rebind requires a non-empty reason", "supply --reason '<who>: <why>'")
 	}
-	root, err := findRoot()
+	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return err
 	}

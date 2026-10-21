@@ -86,9 +86,12 @@ type Result struct {
 	// PanelErr records a panel.json read/parse failure (the file
 	// exists but is unusable). A registered-but-malformed panel must
 	// not be treated as "no panel" by gating consumers.
-	PanelErr     error
-	IntegrityErr error
-	Unexpected   []Verdict
+	PanelErr      error
+	IntegrityErr  error
+	Unexpected    []Verdict
+	Unsubmitted   []string
+	NotIn         []ExcludedVerdict
+	VerdictSchema int
 
 	// LatestRound is the FILENAME-derived latest round: max(N) over
 	// `*-round-<N>.json` in the directory. 0 when no verdict files
@@ -127,6 +130,9 @@ type Result struct {
 	// exists (the /ms-bead-fix input for this round).
 	HasConsolidated bool
 }
+
+// ExcludedVerdict identifies a parsed roster file that cannot count.
+type ExcludedVerdict struct{ File, Reason string }
 
 // ExpectedReviewers returns the registered reviewer count, 0 when
 // unregistered/malformed.
@@ -361,6 +367,24 @@ func Tally(dir string) (*Result, error) {
 		res.RoundMismatch = res.Panel.Round != res.LatestRound
 	}
 
+	round, schemaErr := RoundSchema(dir)
+	if schemaErr != nil {
+		res.IntegrityErr = schemaErr
+	}
+	res.VerdictSchema = round.VerdictSchema
+	var submissions map[string]SubmissionRecord
+	var attempts map[string][]SlotAttempt
+	if round.VerdictSchema == 2 {
+		res.RoundMismatch = res.RoundMismatch || res.Panel != nil && res.Panel.Round != round.Round
+		submissions, err = LatestSubmissions(dir, res.LatestRound)
+		if err != nil {
+			return nil, err
+		}
+		attempts, err = SlotAttempts(dir, res.LatestRound)
+		if err != nil {
+			return nil, err
+		}
+	}
 	roster := map[string]bool{}
 	if res.Panel != nil {
 		for _, slot := range res.Panel.Roster {
@@ -378,6 +402,28 @@ func Tally(dir string) (*Result, error) {
 			res.Malformed = append(res.Malformed, vf.name)
 			continue
 		}
+		if round.VerdictSchema == 2 && !offRoster {
+			sub := submissions[vf.slot]
+			if sub.Seq == 0 {
+				res.Unsubmitted = append(res.Unsubmitted, vf.name)
+				continue
+			}
+			reason := ""
+			switch {
+			case findingHash(data) != sub.FileSHA256:
+				reason = "file digest differs from the latest submission"
+			case sub.Verdict == "VOID":
+				reason = "void"
+			case sub.Status != "final":
+				reason = "draft"
+			case !submissionClosed(sub, attempts[vf.slot]):
+				reason = "later attempt is not closed"
+			}
+			if reason != "" {
+				res.NotIn = append(res.NotIn, ExcludedVerdict{File: vf.name, Reason: reason})
+				continue
+			}
+		}
 		var vj verdictJSON
 		if err := json.Unmarshal(data, &vj); err != nil {
 			res.Malformed = append(res.Malformed, vf.name)
@@ -391,7 +437,16 @@ func Tally(dir string) (*Result, error) {
 			HardBlock: vj.HardBlock,
 		}
 		var payload FindingVerdict
-		if err := json.Unmarshal(data, &payload); err != nil {
+		payloadErr := json.Unmarshal(data, &payload)
+		if round.VerdictSchema == 2 {
+			if parsed, parseErr := ParseVerdictV2(data); parseErr == nil {
+				payload, payloadErr = parsed.FindingVerdict(), nil
+			} else if !offRoster {
+				res.Malformed = append(res.Malformed, vf.name)
+				continue
+			}
+		}
+		if payloadErr != nil {
 			v.Invalid = v.Verdict == VerdictRequestChanges
 		} else {
 			findings, err := Findings(payload)
@@ -427,4 +482,30 @@ func Tally(dir string) (*Result, error) {
 	}
 
 	return res, nil
+}
+
+// ReadSubmittedFindingVerdict reads only a counted v2 submission. Historical
+// rounds retain their file-based finding contract.
+func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, error) {
+	res, err := Tally(dir)
+	if err != nil {
+		return FindingVerdict{}, err
+	}
+	if res.VerdictSchema != 2 {
+		return ReadFindingVerdict(dir, slot, round)
+	}
+	if res.IntegrityErr != nil {
+		return FindingVerdict{}, res.IntegrityErr
+	}
+	for _, v := range res.Verdicts {
+		if v.Slot == slot && v.Round == round {
+			data, err := os.ReadFile(filepath.Join(dir, v.File))
+			if err != nil {
+				return FindingVerdict{}, err
+			}
+			parsed, err := ParseVerdictV2(data)
+			return parsed.FindingVerdict(), err
+		}
+	}
+	return FindingVerdict{}, fmt.Errorf("slot has no counted submission in this round")
 }

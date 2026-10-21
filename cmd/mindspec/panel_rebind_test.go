@@ -78,7 +78,7 @@ func setupRebind(t *testing.T, gates ...string) (root, dir, from string) {
 		t.Fatal(err)
 	}
 	dir = filepath.Join(root, "review", "demo")
-	err = panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: target, Gate: gate, BeadID: beadID, Round: 1,
+	err = createV1TestPanel(dir, panel.CreateInput{Spec: "900-demo", Target: target, Gate: gate, BeadID: beadID, Round: 1,
 		ExpectedReviewers: 2, ReviewedHeadSHA: from, SubjectDigest: digest,
 		Roster: []panel.RosterSlot{{Slot: "R1", Model: "codex", Lens: "correctness"}, {Slot: "R2", Model: "claude", Lens: "coverage"}}})
 	if err != nil {
