@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,6 +68,36 @@ func TestRulesCmd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var objects []map[string]any
+	if err := json.Unmarshal([]byte(text), &objects); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id   string
+		keys []string
+	}{
+		{"panel.submit", []string{"enforced_by", "id", "prohibition", "replacement", "scope"}},
+		{"review.ci-parity", []string{"enforced_by", "gates", "id", "prohibition", "replacement", "scope"}},
+		{"sequence.bead-impl-prompt", []string{"enforced_by", "id", "prohibition", "replacement", "scope", "target"}},
+	} {
+		t.Run("json-keys/"+tc.id, func(t *testing.T) {
+			for _, object := range objects {
+				if object["id"] != tc.id {
+					continue
+				}
+				var keys []string
+				for key := range object {
+					keys = append(keys, key)
+				}
+				slices.Sort(keys)
+				if !reflect.DeepEqual(keys, tc.keys) {
+					t.Fatalf("JSON keys = %v, want %v", keys, tc.keys)
+				}
+				return
+			}
+			t.Fatalf("JSON missing rule %q", tc.id)
+		})
+	}
 	got = nil
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
@@ -91,5 +122,15 @@ func TestRulesCmd(t *testing.T) {
 		if _, err := run(args...); err == nil || !strings.Contains(err.Error(), "recovery:") {
 			t.Errorf("%v must refuse with recovery: %v", args, err)
 		}
+	}
+}
+
+func TestRulesGateKeys_MatchConfig(t *testing.T) {
+	got := rules.GateKeys()
+	want := slices.Clone(config.PanelGateKeys)
+	slices.Sort(got)
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules gate keys = %v, want config.PanelGateKeys %v", got, want)
 	}
 }

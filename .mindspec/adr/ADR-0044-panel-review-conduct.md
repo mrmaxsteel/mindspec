@@ -140,4 +140,6 @@ The embedded rule table holds the operational conduct text. Each Decision has th
 | 4. Absolute scratch + clean worktree | `panel.scratch-in-slot`, `panel.clean-before-complete` |
 | 5. CI-parity kernel | `review.ci-parity` |
 
+`review.mutation`, `review.property`, `review.stated-limit` and `review.basis` come from the review bar and map to no Decision of this ADR.
+
 Decision 4 requires an absolute scratch path in the slot or fixer directory. A system temp directory is not a scratch location. The target worktree must be clean before completion. `review.ci-parity` applies only to the `final_review` gate. `mindspec rules` and `mindspec instruct` render the table. Advisory rows state conduct; they do not add gate enforcement.

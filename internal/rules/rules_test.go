@@ -77,6 +77,9 @@ func TestRuleTable_MinimumSet(t *testing.T) {
 		if slices.Contains(ids, "review.ci-parity") != (gate == "final_review") {
 			t.Errorf("CI parity selection for %s: %v", gate, ids)
 		}
+		if !slices.Contains(ids, "review.basis") {
+			t.Errorf("ungated rule excluded for %s: %v", gate, ids)
+		}
 	}
 	for _, query := range [][2]string{{"nope", ""}, {"reviewer", "nope"}} {
 		if _, err := Filter(query[0], query[1]); err == nil || !strings.Contains(err.Error(), "recovery:") {
@@ -86,6 +89,29 @@ func TestRuleTable_MinimumSet(t *testing.T) {
 	if _, err := Lookup("nope"); err == nil || !strings.Contains(err.Error(), "recovery:") {
 		t.Errorf("unknown id must refuse with recovery: %v", err)
 	}
+	t.Run("exact-id-only", func(t *testing.T) {
+		if _, err := Lookup("panel.submi"); err == nil {
+			t.Fatal("prefix of panel.submit matched an exact-id lookup")
+		}
+	})
+	t.Run("duplicate-id", func(t *testing.T) {
+		bad := strings.Replace(string(table), "id: panel.submit", "id: panel.verbs-only", 1)
+		if bad == string(table) {
+			t.Fatal("duplicate-id mutation did not apply")
+		}
+		if _, err := parseTable([]byte(bad)); err == nil {
+			t.Fatal("duplicate id passed validation")
+		}
+	})
+	t.Run("unknown-key", func(t *testing.T) {
+		bad := strings.Replace(string(table), "id: panel.submit", "id: panel.submit\n  unknown_key: true", 1)
+		if bad == string(table) {
+			t.Fatal("unknown-key mutation did not apply")
+		}
+		if _, err := parseTable([]byte(bad)); err == nil {
+			t.Fatal("unknown YAML key passed validation")
+		}
+	})
 	// Mutate a required scope in the same YAML decoder used by Load.
 	bad := strings.Replace(string(table), "scope: [reviewer]", "scope: [reader]", 1)
 	if bad == string(table) {

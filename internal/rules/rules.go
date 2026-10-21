@@ -32,6 +32,11 @@ var scopes = []string{"orchestrator", "implementer", "reviewer", "fixer"}
 var gates = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
 var ruleID = regexp.MustCompile(`^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$`)
 
+// GateKeys returns the gate keys accepted by rule filters and table validation.
+func GateKeys() []string {
+	return slices.Clone(gates)
+}
+
 // Load reads and validates the embedded table. Each call returns independent data.
 func Load() ([]Rule, error) {
 	return parseTable(table)

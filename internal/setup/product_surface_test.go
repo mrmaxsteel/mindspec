@@ -52,10 +52,11 @@ func productSurfaceEmbeddedFiles(root string) ([]string, error) {
 			}
 			for _, group := range parsed.Comments {
 				for _, comment := range group.List {
-					body, ok := strings.CutPrefix(comment.Text, "//go:embed ")
-					if !ok {
+					body, ok := strings.CutPrefix(comment.Text, "//go:embed")
+					if !ok || len(body) == 0 || (body[0] != ' ' && body[0] != '\t') {
 						continue
 					}
+					body = strings.TrimLeft(body, " \t")
 					for _, word := range productSurfaceEmbedWord.FindAllString(body, -1) {
 						if strings.HasPrefix(word, "\"") || strings.HasPrefix(word, "`") {
 							word, err = strconv.Unquote(word)
@@ -122,27 +123,36 @@ func productSurfaceEmbeddedFiles(root string) ([]string, error) {
 
 func TestProductSurface_NoInternalRefs(t *testing.T) {
 	t.Run("planted-R7.3", func(t *testing.T) {
-		root := t.TempDir()
-		for _, dir := range []string{"internal/data", "plugins"} {
-			if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
-				t.Fatal(err)
-			}
-		}
-		path := filepath.Join(root, "internal/data/fixture.txt")
-		if err := os.WriteFile(path, []byte("The planted reference is R7.3."), 0644); err != nil {
-			t.Fatal(err)
-		}
-		source := "package data\nimport _ \"embed\"\n//go:embed \"fixture.txt\"\nvar fixture string\n"
-		if err := os.WriteFile(filepath.Join(root, "internal/data/data.go"), []byte(source), 0644); err != nil {
-			t.Fatal(err)
-		}
-		files, err := productSurfaceEmbeddedFiles(root)
-		if err != nil || len(files) != 1 || files[0] != path {
-			t.Fatalf("planted embed not discovered: %v, %v", files, err)
-		}
-		hits, err := productSurfaceScanFile(files[0])
-		if err != nil || len(hits) != 1 || hits[0] != "R7.3" {
-			t.Fatalf("planted reference not detected: %v, %v", hits, err)
+		for _, tc := range []struct {
+			name, whitespace string
+		}{
+			{"space", " "},
+			{"tab", "\t"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				for _, dir := range []string{"internal/data", "plugins"} {
+					if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				path := filepath.Join(root, "internal/data/fixture.txt")
+				if err := os.WriteFile(path, []byte("The planted reference is R7.3."), 0644); err != nil {
+					t.Fatal(err)
+				}
+				source := "package data\nimport _ \"embed\"\n//go:embed" + tc.whitespace + "\"fixture.txt\"\nvar fixture string\n"
+				if err := os.WriteFile(filepath.Join(root, "internal/data/data.go"), []byte(source), 0644); err != nil {
+					t.Fatal(err)
+				}
+				files, err := productSurfaceEmbeddedFiles(root)
+				if err != nil || len(files) != 1 || files[0] != path {
+					t.Fatalf("planted embed not discovered: %v, %v", files, err)
+				}
+				hits, err := productSurfaceScanFile(files[0])
+				if err != nil || len(hits) != 1 || hits[0] != "R7.3" {
+					t.Fatalf("planted reference not detected: %v, %v", hits, err)
+				}
+			})
 		}
 	})
 	t.Run("all-embedded-data", func(t *testing.T) {
