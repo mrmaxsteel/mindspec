@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -211,7 +212,7 @@ func TestReattestNoLinkageNoFlagRefuses(t *testing.T) {
 
 // TestReattestRefusalRendering: every engine refusal state renders as an
 // ADR-0035 guard failure with a final recovery line; the truly-bare
-// state names the audited ADR-0035 q9ea human attested-restore exit BY
+// state names the audited ADR-0035 q9ea attested restore exit BY
 // NAME, with its explicit verify-first marker.
 func TestReattestRefusalRendering(t *testing.T) {
 	states := []string{
@@ -243,8 +244,8 @@ func TestReattestRefusalRendering(t *testing.T) {
 				t.Errorf("refusal for %s lacks a final recovery line (ADR-0035): %v", state, err)
 			}
 			if state == lifecycle.ReattestStateNoOwnedMerge {
-				if !strings.Contains(err.Error(), "human attested-restore") {
-					t.Errorf("truly-bare refusal must name the human attested-restore exit, got %v", err)
+				if !strings.Contains(err.Error(), "attested restore") {
+					t.Errorf("truly-bare refusal must name the attested restore exit, got %v", err)
 				}
 				if !strings.Contains(strings.ToLower(err.Error()), "verify") {
 					t.Errorf("the q9ea exit is deliberately non-mechanical — the message must demand verification first, got %v", err)
@@ -462,5 +463,64 @@ func TestADR0041ReattestAmendment_Anchored(t *testing.T) {
 		if !strings.Contains(string(src), "ADR-0041") || !strings.Contains(string(src), "§2(ii)") {
 			t.Errorf("%s must cite ADR-0041 §2(ii) (the amendment it implements)", rel)
 		}
+	}
+}
+
+func TestReattestText_NoHistoricalCitations(t *testing.T) {
+	const beadID = "mindspec-ab12"
+	root := t.TempDir()
+	rebindGit(t, root, "init", "-b", "main")
+	rebindGit(t, root, "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "initial")
+	rebindGit(t, root, "branch", "spec/132-test")
+	_, err := lifecycle.ReattestLandedMerge(root, "spec/132-test", beadID, "tester")
+	var bare *lifecycle.ReattestRefusal
+	if !errors.As(err, &bare) || bare.State != lifecycle.ReattestStateNoOwnedMerge {
+		t.Fatalf("expected the real no-owned refusal, got %v", err)
+	}
+	historical := regexp.MustCompile(`ADR-[0-9]|q9ea|[Ss]pec [0-9]{3}`)
+	for _, known := range []string{"ADR-0041", "q9ea", "spec 132", "Spec 125"} {
+		if !historical.MatchString(known) {
+			t.Fatalf("citation detector missed %q", known)
+		}
+	}
+	for _, state := range []string{lifecycle.ReattestStateNoOwnedMerge, lifecycle.ReattestStateAncestor, lifecycle.ReattestStateIndeterminate, lifecycle.ReattestStateUnknown,
+		lifecycle.ReattestStateAmbiguous, lifecycle.ReattestStateTipContradiction, lifecycle.ReattestStatePanelContradiction,
+		lifecycle.ReattestStateReverted, lifecycle.ReattestStateMultipleFallbackCandidates} {
+		r := &lifecycle.ReattestRefusal{BeadID: beadID, State: state, Detail: bare.Detail, Recovery: []string{"mindspec doctor"}}
+		text := reattestCmd.Short + "\n" + reattestCmd.Long + "\n" + reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
+		if match := historical.FindString(text); match != "" {
+			t.Errorf("state %s cites %q: %s", state, match, text)
+		}
+		for _, forbidden := range []string{"R6.", "#251"} {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("state %s cites %q: %s", state, forbidden, text)
+			}
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "recovery:") && strings.ContainsAny(line, "()") {
+				t.Errorf("recovery contains prose: %s", line)
+			}
+		}
+	}
+}
+
+func TestReattestText_OperandsRender(t *testing.T) {
+	const beadID = "mindspec-ab12"
+	r := &lifecycle.ReattestRefusal{State: lifecycle.ReattestStateNoOwnedMerge, Detail: "No naming merge."}
+	text := reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
+	for _, want := range []string{"cannot re-attest bead " + beadID, "recovery: git log --first-parent --merges spec/132-test", "recovery: git branch bead/" + beadID + " <verified-second-parent-sha>", "attested restore", "person must verify"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q: %s", want, text)
+		}
+	}
+	r = &lifecycle.ReattestRefusal{State: lifecycle.ReattestStateAncestor, Detail: "A person must verify the work before using the override.", Recovery: []string{"mindspec next mindspec-dep1 --allow-not-ready=MF-3 --evidence <file>", "mindspec next mindspec-dep2 --allow-not-ready=MF-3 --evidence <file>"}}
+	text = reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
+	for _, command := range r.Recovery {
+		if !strings.Contains(text, "recovery: "+command) {
+			t.Errorf("operand missing: %s", text)
+		}
+	}
+	if strings.Contains(text, "git branch") {
+		t.Fatal("ancestor diagnosis recommended a branch restore")
 	}
 }

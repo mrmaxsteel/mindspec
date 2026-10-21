@@ -6,9 +6,8 @@
 // this repo) and resolved each one's epic + status + open children through
 // per-spec, uncached `bd` subprocesses — measured at minutes-to-never for
 // a full `doctor --ci` run, on EVERY SessionStart once wired into idle
-// instruct. This scan replaces that shape with a semantic, tracker-driven
-// enumeration whose bd cost is exactly TWO subprocesses — O(1),
-// independent of both the on-disk spec count and the epic count:
+// instruct. The base scan uses two tracker enumerations. The ancestor
+// check adds lineage and dependency reads for surviving bead branches:
 //
 //   - `cache.AllEpics()` is called exactly ONCE; the specID for each epic
 //     comes from its own metadata (phase.ExtractSpecMetadata /
@@ -37,11 +36,13 @@ package lifecycle
 import (
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
-// IntegrityFindings aggregates every lifecycle-divergence finding the
-// shared scan produces, in the order both consumers render them.
+// IntegrityFindings holds the shared lifecycle scan results. Existing
+// fields keep their consumer order. Doctor also renders Ancestors.
 type IntegrityFindings struct {
 	// FinalizeBranches are outstanding, provably-unmerged
 	// chore/finalize-<specID> carriers (Kind == "finalize_branch").
@@ -51,6 +52,8 @@ type IntegrityFindings struct {
 	StaleOpen []StaleOpenBead
 	// RevertedMerges are open beads whose naming merge lost changed paths.
 	RevertedMerges []RevertedMergeBead
+	// Ancestors have content but no naming merge or landed binding.
+	Ancestors []ReattestRefusal
 	// StaleTrackers are live-closed epics whose committed status on main
 	// is still non-terminal (Kind == "stale_tracker").
 	StaleTrackers []FinalizeOrphan
@@ -147,7 +150,7 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 		}
 	}
 
-	// stale-OPEN leg: the whole scan's SECOND (and last) bd subprocess —
+	// stale-OPEN leg: the base scan's second tracker enumeration —
 	// one global open/in_progress enumeration, grouped per owning spec
 	// in-process via each bead's Parent, then confirmed git-side by the
 	// single-home classifier (staleOpenLanded → MergedUnclosed). Grouping
@@ -182,5 +185,57 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 			out.RevertedMerges = append(out.RevertedMerges, reverted...)
 		}
 	}
+	out.Ancestors = scanAncestorFindings(root, cache, specEpic)
 	return out
+}
+
+// Surviving bead branches nominate prerequisites, including closed beads.
+// The epic cache keeps lineage reads in this scan. Doctor never invokes
+// the reattest writer. No extra tracker read runs without a bead branch.
+func scanAncestorFindings(root string, cache *phase.Cache, specEpic map[string]string) []ReattestRefusal {
+	branches, err := localBranchRefsFn(root)
+	if err != nil {
+		return nil
+	}
+	var findings []ReattestRefusal
+	for _, branch := range branches {
+		if !strings.HasPrefix(branch, workspace.BeadBranchPrefix) {
+			continue
+		}
+		id := strings.TrimPrefix(branch, workspace.BeadBranchPrefix)
+		if idvalidate.BeadID(id) != nil {
+			continue
+		}
+		epicID, specID, err := phase.FindEpicForBeadWithCache(cache, id)
+		if err != nil || specEpic[specID] != epicID {
+			continue
+		}
+		specBranch, err := workspace.SpecBranch(specID)
+		if err != nil {
+			continue
+		}
+		merges, err := firstParentMergesFn(root, specBranch)
+		if err != nil || len(ownedMergeCandidates(merges, branch)) != 0 {
+			continue
+		}
+		reachable, err := reachableCandidates(root, specBranch, branch)
+		if err != nil || len(reachable) != 0 {
+			continue
+		}
+		r := ancestorWithoutNamingMerge(root, specBranch, id, branch, merges)
+		if r.State != ReattestStateAncestor {
+			continue
+		}
+		meta, err := landedBindingMetadataFn(id)
+		if err != nil || meta["mindspec_landed_merge_sha"] != nil && meta["mindspec_landed_merge_sha"] != "" {
+			continue
+		}
+		dependents, err := ancestorDependentsFn(id)
+		if err != nil {
+			continue
+		}
+		setAncestorRecovery(r, dependents)
+		findings = append(findings, *r)
+	}
+	return findings
 }

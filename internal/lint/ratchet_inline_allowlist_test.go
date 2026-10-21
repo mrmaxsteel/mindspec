@@ -73,6 +73,7 @@ var rootEnumerationAllowlist = map[string]rootEnumEntry{
 // renders raw (correct class behavior — "validated IDs stay raw"),
 // each naming its covering gate.
 var rawIDRenderAllowlist = map[string]renderEntry{
+	"internal/lifecycle/reattest.go ancestorWithoutNamingMerge fmt.Sprintf(...beadID...)":                           {Count: 3, Gate: "The caller validates the bead ID before this classifier. All display values use termsafe.Escape."},
 	"cmd/mindspec/bead.go beadWorktreeCmd fmt.Sprintf(...beadID...)":                                                {Count: 1, Gate: "in-func R3 early gate: idvalidate.BeadID on args[0] before any render or composition (AC-6)"},
 	"cmd/mindspec/bead_clarify.go beadClarifyCmd fmt.Sprintf(...beadID...)":                                         {Count: 1, Gate: "in-func early gate: idvalidate.BeadID on args[0] before any file read or evaluation, rendered via termsafe.Escape (the bead.go beadWorktreeCmd / bead_ready.go pattern, spec 124 R8)"},
 	"cmd/mindspec/bead_ready.go beadReadyCheckCmd fmt.Sprintf(...beadID...)":                                        {Count: 1, Gate: "in-func early gate: idvalidate.BeadID on args[0] before any render or evaluation, rendered via termsafe.Escape (the bead.go beadWorktreeCmd pattern, spec 124 AC-1)"},

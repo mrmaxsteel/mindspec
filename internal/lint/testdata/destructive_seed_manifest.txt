@@ -164,6 +164,7 @@ cmd/mindspec/panel.go	tallyExitAction	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable
 cmd/mindspec/reattest.go	reattestRefusalFailure	arg1:unprovable
 cmd/mindspec/reattest.go	reattestRefusalFailure	arg2:unprovable
+cmd/mindspec/reattest.go	reattestRefusalFailure	variadic-spread:recovery
 cmd/mindspec/reattest.go	runReattest	arg1:unprovable
 cmd/mindspec/release.go	runRelease	arg1:unprovable
 cmd/mindspec/repair.go	repairPhaseRunE	arg1:unprovable

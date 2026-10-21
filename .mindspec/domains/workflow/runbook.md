@@ -163,19 +163,24 @@ independent exact-second-parent git scan of the spec branch (resolved
 from the bead's epic linkage; pass `--spec-branch spec/<id>` only when
 the linkage is underivable) and writes the scan-derived SHAs plus a
 `mindspec_landed_reattest_*` audit record — inspect with
-`bd show <bead-id> --json`. It is fail-closed: on no owned exact merge
-it refuses and names the audited ADR-0035 `mindspec-q9ea` human
-attested-restore as the only exit (inspect
-`git log --first-parent --merges <spec-branch>`, VERIFY the candidate's
-diff, then `git branch bead/<id> <verified-second-parent-sha>` — never
-blind); on ambiguity, a contradicting datum, or reverted content it
-refuses and writes nothing. A merge whose subject names NO bead is not
-auto-identifiable anywhere (fail-closed by design — the binding alone is
-never an ownership authority), and `reattest` CANNOT recover it either:
-it too requires a subject-nominated merge. The honest recovery there is
-to re-merge the work under a bead-naming subject (mindspec's own merges
-always name the bead), or accept the safe fail-closed; the audited
-q9ea attested-restore above is the last-resort exit.
+`bd show <bead-id> --json`. Ambiguity, a contradictory tip, or reverted
+content refuses and writes nothing.
+
+When neither merge scan finds a candidate, reattest checks the bead's full
+work range. `ancestor-without-naming-merge` means the changes are present,
+but no merge names the prerequisite. A re-merge cannot help. A person must
+verify the work before using the printed override for each open dependent:
+`mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>`.
+With no dependent, it prints `mindspec doctor`. Doctor names the prerequisite
+at Warn and makes no automatic fix.
+
+`no-owned-exact-merge` with a history line means the tool cannot show that
+the changes remain present. An unknown base or another bead's exact tip
+also gets no override recommendation. An absent branch, a non-ancestor tip,
+or an empty range makes no history claim. The attested restore exit
+requires a person to verify the merge and its diff first. Only then restore
+the bead branch at the verified second parent. Re-run reattest after the
+restore. An anonymous merge cannot provide ownership by itself.
 
 Also: if `mindspec complete` refuses with "has landed … but the
 landed-merge commit could not be located by identity", that is the spec
@@ -362,3 +367,12 @@ enumeration):
   evolved-but-present content identifies while true reverts refuse, and
   the new `mindspec reattest <bead-id>` verb is the explicit audited
   recovery (troubleshooting entry above).
+
+### Verify a merge before closing the bead
+
+`mindspec complete <bead-id> --merge-only` merges and keeps the bead open.
+A bead has one naming merge. Do not revert a `--merge-only` merge by hand.
+Send rejected work to a follow-up bead. If the merge was reverted, restore
+its content with the refusal's scoped recovery first. Then run the panel
+at the bead tip and `mindspec complete <bead-id>` to close the bead.
+The restore commit does not create a second naming merge.

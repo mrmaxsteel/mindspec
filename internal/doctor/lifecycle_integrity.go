@@ -19,8 +19,8 @@ import (
 var scanIntegrityFindingsFn = lifecycle.ScanIntegrityFindings
 
 // checkLifecycleIntegrity reports every lifecycle-divergence finding the
-// shared aggregate scan produces, in the same order the generated
-// `mindspec instruct` idle guidance renders them (AC-15):
+// shared aggregate scan produces. Existing findings keep the order used
+// by idle guidance. Ancestor diagnoses are also rendered here:
 //
 //   - outstanding chore/finalize-<specID> carriers (bug wu7t residue),
 //   - stale-open beads: valid merges give Info with no automatic close;
@@ -28,7 +28,8 @@ var scanIntegrityFindingsFn = lifecycle.ScanIntegrityFindings
 //   - reverted naming merges on open beads: one Error with restore
 //     guidance and no automatic fix,
 //   - stale-committed-tracker epics (closed in bd, still non-terminal in
-//     main's committed .beads/issues.jsonl).
+//     main's committed .beads/issues.jsonl),
+//   - prerequisites with present work but no naming merge or binding, at Warn.
 //
 // One phase.Cache supplies one epic list and one global open-bead list.
 func checkLifecycleIntegrity(r *Report, root string) {
@@ -60,6 +61,9 @@ func checkLifecycleIntegrity(r *Report, root string) {
 	}
 	for _, o := range findings.StaleTrackers {
 		addFinalizeOrphanCheck(r, o)
+	}
+	for _, ancestor := range findings.Ancestors {
+		addAncestorCheck(r, ancestor)
 	}
 }
 

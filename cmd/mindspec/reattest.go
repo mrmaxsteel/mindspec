@@ -46,36 +46,28 @@ import (
 
 var reattestCmd = &cobra.Command{
 	Use:   "reattest <bead-id>",
-	Short: "Re-attest an already-merged bead's landed-binding from independent git topology",
-	Long: `Explicit, operator-invoked, fail-closed recovery for an already-merged
-bead whose merge-time landed-binding is missing or stale (for example,
-a bead merged before landed-bindings were recorded): DERIVES the binding from an independent git scan of the
-spec branch — a two-parent first-parent merge whose subject names this
-bead (ownership) and whose topology proves it landed (landed-ness) —
-and writes ONLY the scan-derived SHAs, together with an inspectable
-audit record (actor, before/after values, timestamp, operation,
-corroborating datum, scanned branch) in bd metadata.
+	Short: "Derive a landed binding from an independent git scan",
+	Long: `Recover a missing or stale landed binding from an independent git scan.
+The scan checks two-parent first-parent merges whose subjects name the bead.
+With no candidate, it checks reachable source-named merges. That fallback
+requires one candidate, no contradictory surviving tip, and content that
+was not reverted. Read errors refuse. Review registrations are advisory.
+An accepted merge writes its derived SHAs and an audit record in metadata.
 
-With zero owned first-parent candidates, a reachable, source-named
-fallback is available. It requires exactly one candidate, no contradicting
-surviving tip, and content not reverted at the current tip; read errors
-refuse. Registrations are advisory only. Acceptance writes an audited
-tuple, checked again with git safety on subsequent reads. Fallback
-refusals offer the dependent's evidenced MF-3 override, never the
-human attested-restore.
+When neither scan finds a candidate, the tool checks the bead's full work
+range at the spec tip. Present content with no naming merge writes no
+binding. A re-merge cannot help. A person must verify the work before using
+the printed readiness override for each open dependent. With no dependent,
+the recovery is mindspec doctor. Reverted content, an unknown base, and
+another bead's exact tip receive no override recommendation.
 
-Fail-closed: with no owned exact merge it REFUSES (no guess, no write)
-to the audited human attested-restore exit. There is no
-bypass flag, and no way to assert a merge/second-parent pair — an
-operator-asserted pair corroborating itself is circular and
-inadmissible.
+An attested restore requires a person to verify the merge and its diff
+first. The tool accepts no operator-supplied merge or second-parent SHA.
+There is no bypass flag or batch mode.
 
---spec-branch names WHERE to scan when the bead has NO epic linkage
-recorded; the linkage wins whenever derivable, and a FAILED linkage
-lookup (indeterminate ownership) refuses even with the flag — fix the
-lookup and re-run. It is scoping input only — never a corroboration
-substitute — and the branch actually scanned is recorded in the
-audit.`,
+--spec-branch selects the scan branch only when the bead has no epic
+linkage. A known lineage decides the branch. A failed lineage lookup
+refuses even with the flag. The audit records the branch scanned.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		beadID := strings.TrimSpace(args[0])
@@ -84,7 +76,7 @@ audit.`,
 		if err := idvalidate.BeadID(beadID); err != nil {
 			return guard.NewFailure(
 				fmt.Sprintf("%s is not a valid bead ID: %v", termsafe.Escape(beadID), err),
-				"bd list --status closed   (pick the bead ID to re-attest and re-run)",
+				"bd list --status closed",
 			)
 		}
 
@@ -209,7 +201,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 		// branch). The forward exit is fixing the lookup, not the flag.
 		return guard.NewFailure(
 			fmt.Sprintf("cannot resolve the spec branch for bead %s: the epic-linkage lookup FAILED (%s). This is an indeterminate-ownership state, so --spec-branch is refused too — the flag scopes only a bead whose lineage is cleanly absent, never one whose lookup errored.", safeBeadID, termsafe.Escape(deriveErr.Error())),
-			fmt.Sprintf("bd show %s --json   (verify the bead and its epic linkage, fix the lookup failure, then re-run mindspec reattest %s)", safeBeadID, safeBeadID),
+			fmt.Sprintf("bd show %s --json", safeBeadID),
 		)
 	case derived != "":
 		// Epic linkage derivable — it WINS. --spec-branch is consulted
@@ -235,7 +227,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 	default:
 		return guard.NewFailure(
 			fmt.Sprintf("cannot derive the spec branch for bead %s from its epic linkage (no lineage recorded)", safeBeadID),
-			fmt.Sprintf("mindspec reattest %s --spec-branch spec/<spec-id>   (name the branch to scan explicitly)", safeBeadID),
+			fmt.Sprintf("mindspec reattest %s --spec-branch spec/<spec-id>", safeBeadID),
 		)
 	}
 
@@ -269,25 +261,28 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 // an ADR-0035 guard failure with a genuine forward exit (§2(i): never a
 // bare re-invocation that cannot change the refused fact).
 func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle.ReattestRefusal) error {
+	if r.State == lifecycle.ReattestStateAncestor || r.NoRestore || r.State == lifecycle.ReattestStateIndeterminate {
+		recovery := r.Recovery
+		if len(recovery) == 0 {
+			recovery = []string{"mindspec doctor"}
+		}
+		return guard.NewFailure("cannot re-attest bead "+safeBeadID+": "+r.Detail, recovery...)
+	}
 	if r.Fallback || r.State == lifecycle.ReattestStateMultipleFallbackCandidates {
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s\nThe single-candidate, branch-tip, not-reverted and read checks must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
-			fmt.Sprintf("git log --merges --topo-order %s   (inspect the reachable candidates)", scanned),
+			fmt.Sprintf("git log --merges --topo-order %s", scanned),
 			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
 		)
 	}
-	inspect := fmt.Sprintf("git log --first-parent --merges %s   (inspect the candidate merges before any recovery)", scanned)
+	inspect := fmt.Sprintf("git log --first-parent --merges %s", scanned)
 	switch r.State {
 	case lifecycle.ReattestStateNoOwnedMerge:
-		// Truly-bare: the audited ADR-0035 mindspec-q9ea human
-		// attested-restore is the ONLY exit — named explicitly, and
-		// deliberately non-mechanical (verify before running, never blind).
+		// ADR-0041 §2(ii): verify the merge before an attested restore.
 		return guard.NewFailure(
-			fmt.Sprintf("cannot re-attest bead %s: %s.\n"+
-				"this is the genuinely-no-mechanical-corroboration state — the blessed exit is the audited human attested-restore: locate the merge you believe carried this bead's work, VERIFY it by inspecting its diff, then restore the branch ref at its second parent (`git branch %s <verified-second-parent-sha>`) — never run it blindly.",
-				safeBeadID, r.Detail, beadBranch),
+			fmt.Sprintf("cannot re-attest bead %s: %s\nUse an attested restore. A person must verify the merge and its diff first. Then restore the bead branch at that merge's second parent.", safeBeadID, r.Detail),
 			inspect,
-			fmt.Sprintf("git branch %s <verified-second-parent-sha>   (attested-restore — human verification REQUIRED first)", beadBranch),
+			fmt.Sprintf("git branch %s <verified-second-parent-sha>", beadBranch),
 		)
 	case lifecycle.ReattestStateAmbiguous:
 		return guard.NewFailure(

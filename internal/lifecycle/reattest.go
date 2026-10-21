@@ -9,6 +9,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -60,9 +64,12 @@ var ErrReattestRefused = errors.New("reattest refused: no git-corroborated exact
 const (
 	// ReattestStateNoOwnedMerge: no first-parent or admitted reachable
 	// two-parent merge on the scanned branch names this bead (truly-bare, or only an anonymous/
-	// decoy/descendant merge exists). Forward exit: the audited ADR-0035
-	// mindspec-q9ea human attested-restore.
-	ReattestStateNoOwnedMerge = "no-owned-exact-merge"
+	// decoy/descendant merge exists). The ancestor check can give more
+	// evidence. An attested restore requires a verified merge.
+	ReattestStateNoOwnedMerge  = "no-owned-exact-merge"
+	ReattestStateAncestor      = "ancestor-without-naming-merge"
+	ReattestStateUnknown       = "unknown"
+	ReattestStateIndeterminate = "indeterminate"
 	// ReattestStateAmbiguous: owned candidates exist but carry DIFFERENT
 	// second parents — genuine ambiguity about which landing is this
 	// bead's tip; refused, never guessed (spec 125 R4 fail-closed rule).
@@ -93,10 +100,14 @@ type ReattestRefusal struct {
 	State      string
 	Detail     string
 	Fallback   bool
+	// NoRestore suppresses branch restoration when it cannot resolve the
+	// diagnosed state. Recovery holds commands for the read-only diagnosis.
+	NoRestore bool
+	Recovery  []string
 }
 
 func (e *ReattestRefusal) Error() string {
-	return fmt.Sprintf("%s %s on %s [%s]: %s", ErrReattestRefused.Error(), e.BeadID, e.SpecBranch, e.State, e.Detail)
+	return fmt.Sprintf("%s %s on %s [%s]: %s", ErrReattestRefused.Error(), termsafe.Escape(e.BeadID), termsafe.Escape(e.SpecBranch), e.State, e.Detail)
 }
 
 // Unwrap makes errors.Is(err, ErrReattestRefused) succeed.
@@ -186,10 +197,17 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, &ReattestRefusal{
-			BeadID: beadID, SpecBranch: specBranch, State: ReattestStateNoOwnedMerge,
-			Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited human attested-restore", specBranch, beadBranch),
+		r := ancestorWithoutNamingMerge(root, specBranch, beadID, beadBranch, merges)
+		if r.State == ReattestStateAncestor {
+			dependents, err := ancestorDependentsFn(beadID)
+			if err != nil {
+				r.State = ReattestStateIndeterminate
+				r.Detail = "cannot read dependent beads: " + termsafe.Escape(err.Error())
+			} else {
+				setAncestorRecovery(r, dependents)
+			}
 		}
+		return nil, r
 	}
 
 	// LANDED-NESS: all owned candidates must agree on ONE second parent.
@@ -359,4 +377,151 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 		PriorMergeSHA:     priorMerge,
 		PriorSecondParent: priorSecond,
 	}, nil
+}
+
+var (
+	ancestorRangeRevertedFn = gitutil.RangeRevertedAt
+	ancestorContentFn       = gitutil.ContentSubsumedOutcome
+	ancestorDependentsFn    = ancestorDependents
+	ancestorChildrenFn      = phase.FetchChildren
+	ancestorIssueFn         = bead.RunBD
+)
+
+// ancestorWithoutNamingMerge only reads git. Callers must first exclude
+// candidates in both the first-parent and reachable merge scans.
+func ancestorWithoutNamingMerge(root, specBranch, beadID, beadBranch string, merges []gitutil.MergeCommit) *ReattestRefusal {
+	r := &ReattestRefusal{BeadID: beadID, SpecBranch: specBranch, State: ReattestStateNoOwnedMerge,
+		Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject. Use an attested restore only after a person verifies the merge.", termsafe.Escape(specBranch), termsafe.Escape(beadBranch))}
+	indeterminate := func(err error) *ReattestRefusal {
+		r.State, r.NoRestore = ReattestStateIndeterminate, true
+		r.Detail = "git evidence is indeterminate: " + termsafe.Escape(err.Error())
+		return r
+	}
+	tip, exists, err := resolveBranchTip(root, beadBranch)
+	if err != nil {
+		return indeterminate(err)
+	}
+	if !exists {
+		return r
+	}
+	specTip, err := landedRevParseRefFn(root, specBranch)
+	if err != nil {
+		return indeterminate(err)
+	}
+	ancestor, err := isAncestorFn(root, tip, specTip)
+	if err != nil {
+		return indeterminate(err)
+	}
+	if !ancestor {
+		return r
+	}
+	base := specTip
+	for {
+		isBase, err := isAncestorFn(root, base, tip)
+		if err != nil {
+			return indeterminate(err)
+		}
+		if isBase {
+			break
+		}
+		base, err = landedRevParseRefFn(root, base+"^1")
+		if errors.Is(err, gitutil.ErrRefNotFound) {
+			r.State = ReattestStateUnknown
+			r.NoRestore = true
+			r.Detail = fmt.Sprintf("work range is unknown for tip %s at spec tip %s: no first-parent base exists.", termsafe.Escape(tip), termsafe.Escape(specTip))
+			return r
+		}
+		if err != nil {
+			return indeterminate(err)
+		}
+	}
+	if base == tip {
+		return r
+	}
+	// A naming merge belongs to the spec's first-parent chain.
+	for _, m := range merges {
+		name, named := parseMergeSubjectBeadBranch(m.Subject)
+		if len(m.Parents) == 2 && named && name != beadBranch && m.Parents[1] == tip {
+			r.NoRestore = true
+			r.Detail = fmt.Sprintf("tip %s is the second parent of merge %s (%s). This is not %s's own work.", termsafe.Escape(tip), termsafe.Escape(m.SHA), termsafe.Escape(m.Subject), termsafe.Escape(beadID))
+			return r
+		}
+	}
+	r.NoRestore = true
+	outcome, contentErr := ancestorContentFn(root, base, tip, specTip)
+	reverted, revertErr := ancestorRangeRevertedFn(root, base, tip, specTip)
+	if contentErr != nil || revertErr != nil || outcome != gitutil.SubsumptionLanded || reverted {
+		r.Detail = fmt.Sprintf("commits in %s..%s are in the spec history at %s. The tool cannot show that their changes are present.", termsafe.Escape(base), termsafe.Escape(tip), termsafe.Escape(specTip))
+		for _, err := range []error{contentErr, revertErr} {
+			if err != nil {
+				r.Detail += " Evidence is indeterminate: " + termsafe.Escape(err.Error())
+			}
+		}
+		return r
+	}
+	r.State = ReattestStateAncestor
+	r.Detail = fmt.Sprintf("%s's changes are present on the spec branch at %s (range %s..%s), but no merge names %s. A re-merge cannot help. A person must verify the work before using the override.", termsafe.Escape(beadID), termsafe.Escape(specTip), termsafe.Escape(base), termsafe.Escape(tip), termsafe.Escape(beadID))
+	return r
+}
+
+func setAncestorRecovery(r *ReattestRefusal, dependents []string) {
+	if len(dependents) == 0 {
+		r.Detail += " No bead waits on " + termsafe.Escape(r.BeadID) + "."
+		r.Recovery = []string{"mindspec doctor"}
+		return
+	}
+	for _, dependent := range dependents {
+		r.Recovery = append(r.Recovery, fmt.Sprintf("mindspec next %s --allow-not-ready=MF-3 --evidence <file>", idrender.Bead(dependent)))
+	}
+}
+
+// ancestorDependents reads open children of the same epic. Each dependency
+// comes from show, since list output need not include dependency edges.
+func ancestorDependents(beadID string) ([]string, error) {
+	epic, _, err := phase.FindEpicForBead(beadID)
+	if errors.Is(err, phase.ErrNoEpicLineage) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	children, err := ancestorChildrenFn(epic)
+	if err != nil {
+		return nil, err
+	}
+	var dependents []string
+	seen := map[string]bool{}
+	for _, child := range children {
+		if child.ID == beadID || child.Parent != "" && child.Parent != epic || strings.EqualFold(child.Status, "closed") || seen[child.ID] {
+			continue
+		}
+		if err := idvalidate.BeadID(child.ID); err != nil {
+			return nil, err
+		}
+		data, err := ancestorIssueFn("show", child.ID, "--json")
+		if err != nil {
+			return nil, err
+		}
+		var rows []struct {
+			ID           string `json:"id"`
+			Dependencies []struct {
+				ID   string `json:"id"`
+				Type string `json:"dependency_type"`
+			} `json:"dependencies"`
+		}
+		if err := json.Unmarshal(data, &rows); err != nil {
+			return nil, err
+		}
+		if len(rows) != 1 || rows[0].ID != child.ID {
+			return nil, fmt.Errorf("dependent bead read did not match the requested bead")
+		}
+		for _, dep := range rows[0].Dependencies {
+			if dep.ID == beadID && dep.Type == "blocks" {
+				dependents = append(dependents, child.ID)
+				seen[child.ID] = true
+				break
+			}
+		}
+	}
+	return dependents, nil
 }
