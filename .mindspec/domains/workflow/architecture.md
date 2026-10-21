@@ -1432,7 +1432,8 @@ preview tree. The executor keeps the merge conflict for resolution.
 `complete.OwnershipLandingConflict` returns the tree and conflicted
 paths when a manifest itself conflicts. No ownership reader runs on that
 preview. During preserved-merge re-entry, ownership comes from the spec
-worktree's resolved index. Unmerged entries still refuse. A
+worktree's resolved index. Unmerged entries keep the executor's refusal
+text and add a recovery command with the actual ID and `--resolve-merge`. A
 materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.

@@ -40,9 +40,8 @@ const missingSourceGlobsMsg = "source_globs not set in .mindspec/config.yaml —
 // The OWNERSHIP attribution input (manifests + domain enumeration) is
 // read from the working tree (ownerRef ""), matching the working-tree
 // diff semantics. The per-bead and impl-approve gates do NOT route
-// through this wrapper: they call ValidateDocsRange directly with an
-// explicit ownerRef so attribution follows the diffed ref (spec 095 /
-// mindspec-vvs9).
+// through this wrapper. The per-bead gate passes the landing tree as
+// ownerRef; impl approve passes the spec-branch tip.
 func ValidateDocs(root, diffRef string, exec executor.Executor) *Result {
 	return ValidateDocsRange(root, diffRef, "", "", exec)
 }
@@ -133,8 +132,7 @@ func validateDocsRange(root, base, head, ownerRef string, exec executor.Executor
 	}
 
 	// Check specific mapping heuristics. Attribution (manifests + domain
-	// enumeration) follows ownerRef so the blocking lane reads the same
-	// tree the gate diffs (spec 095 / mindspec-vvs9).
+	// enumeration) follows ownerRef, independent of the diff range.
 	checkInternalPackages(r, exec, root, ownerRef, sourceChanges, docChanges)
 	checkCmdChanges(r, sourceChanges, docChanges)
 

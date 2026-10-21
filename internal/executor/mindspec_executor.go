@@ -1955,6 +1955,11 @@ func withWorkingDir(dir string, fn func() error) error {
 	return fn()
 }
 
+// IsPreservedMergeError reports whether err wraps a preserved-merge refusal.
+func IsPreservedMergeError(err error) bool {
+	return isPreservedMergeError(err)
+}
+
 // LandingTree reads ownership from the prospective merge result.
 func (g *MindspecExecutor) LandingTree(workdir, base, specTip, beadRef string) (string, []string, error) {
 	if gitutil.MergeInProgress(workdir) {

@@ -147,6 +147,7 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/complete/complete.go	landingOwnershipError.Error	arg1:unprovable
 # Spec 130 R6.6: shell-quoted ledger recoveries, registered with TestLedger_RecoveryOperands obligations.
 internal/approve/impl.go	implLedgerPreflight	arg1:unprovable
 internal/complete/panel_ledger.go	CheckPanelLedgers	arg1:unprovable

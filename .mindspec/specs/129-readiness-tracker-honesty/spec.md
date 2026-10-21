@@ -840,7 +840,7 @@ Also not goals:
 - [ ] **AC-11 (R4.2)**: Real-git fixtures extending `initLandedRepo`/`mergeBead` (`internal/lifecycle/landed_test.go`).
   - **The "#239 topology":** spec/S's content reaches `main` through a sibling branch's PR merge, and then spec/S is fast-forwarded to `main`, so earlier landings become reachable only through a second parent.
   - **"Refuses":** writes nothing; MF-3 names the candidate; the recovery lists `reattest`, then the dependent's `--allow-not-ready=MF-3 --evidence <path-to-justification>`, and never q9ea.
-  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`. Status note (2026-10-21): advisories change printed lines only. They never change the exit code, the binding, or the audited tuple.
+  - **Panel registrations** are written as separate registration dirs, each with an explicit `round`. In every leg they are advisory: they change printed lines, never the exit code or the writes. Status note (2026-10-21): advisories change printed lines only. They never change the exit code, the binding, or the audited tuple.
 
   *Acceptance and its exits*
   - (i) **#239 recoverable, not auto-passed.** X lands on spec/S by its own `Merge bead/X`, then the #239 topology follows. Registration: `{round 1: B}`, where B is the second parent.

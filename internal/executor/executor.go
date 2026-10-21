@@ -158,7 +158,8 @@ type Executor interface {
 
 	// LandingTree previews beadRef into specTip from base. A bare tree is
 	// wrapped in an unreferenced commit. During a preserved merge in workdir,
-	// it reads the resolved index instead. It never updates a ref or index.
+	// it reads the resolved index instead. It never updates a ref or staged
+	// entries. git write-tree can update the index cache-tree extension.
 	LandingTree(workdir, base, specTip, beadRef string) (tree string, conflicted []string, err error)
 
 	// RevParseRef resolves ref to its commit SHA in workdir (wraps

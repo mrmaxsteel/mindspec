@@ -17,6 +17,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -31,7 +33,9 @@ func landingFixture(t *testing.T, claimAtBase bool) (root, specDir, base string,
 	specDir = filepath.Join(root, ".mindspec/docs/specs/132-landing")
 	writeFile(t, root, ".mindspec/docs/adr/ADR-9001.md", "# ADR-9001: Ownership\n\n- **Status**: Accepted\n- **Domain(s)**: core\n\n## Decision\nOwn core.\n")
 	manifest := ".mindspec/docs/domains/core/OWNERSHIP.yaml"
-	if !claimAtBase {
+	if claimAtBase {
+		writeFile(t, root, manifest, "paths:\n  - internal/core/**\n")
+	} else {
 		writeFile(t, root, manifest, "paths:\n  - internal/old/**\n")
 	}
 	writeFile(t, root, "internal/core/core.go", "package core\n\nconst Value = 0\n")
@@ -69,7 +73,7 @@ func TestCommittedRangeGate_SpecTipClaimOwns(t *testing.T) {
 func TestCommittedRangeGate_RevokedAtSpecTipRefuses(t *testing.T) {
 	root, specDir, base, ex := landingFixture(t, true)
 	err := runCommittedRangeGate(root, "landing-1", "bead/landing-1", specDir, base, ex, CompleteOpts{}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "internal/core/core.go") {
+	if err == nil || !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "internal/core/core.go") {
 		t.Fatalf("revoked landing claim must refuse: %v", err)
 	}
 }
@@ -97,6 +101,25 @@ func TestMaterialize_SpecTipClaimOwns(t *testing.T) {
 	}
 }
 
+func TestMaterialize_LandingClaimRequiresDomainDocs(t *testing.T) {
+	root, specDir, base, ex := landingFixture(t, false)
+	// Keep generic docs in the diff, but no core domain docs.
+	if err := os.Rename(filepath.Join(root, ".mindspec/docs/domains/core/architecture.md"), filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-qm", "generic docs only")
+	checkDirtyTreeFn = func(string, string) ([]string, []string, error) { return nil, nil, nil }
+	completeMergeMetadataFn = func(string, map[string]interface{}) error { return nil }
+	err := runMaterialization(materializationInput{
+		exec: ex, root: root, beadID: "landing-1", beadHead: "bead/landing-1",
+		wtPath: root, specDir: specDir, base: base, warnWriter: io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "internal-docs") {
+		t.Fatalf("landing-owned source without domain docs must refuse with internal-docs: %v", err)
+	}
+}
+
 func TestCommittedRangeGate_SourceConflictPassesThenResolves(t *testing.T) {
 	root, specDir, base, ex := landingFixture(t, false)
 	cfg, err := config.Load(root)
@@ -120,8 +143,36 @@ func TestCommittedRangeGate_SourceConflictPassesThenResolves(t *testing.T) {
 	if !gitutil.MergeInProgress(specWorktree) {
 		t.Fatal("merge conflict was not preserved")
 	}
-	if err := runCommittedRangeGate(root, "landing-1", "bead/landing-1", specDir, base, ex, CompleteOpts{ResolveMerge: true}, io.Discard); err == nil {
+	_, _, preservedErr := ex.LandingTree(specWorktree, base, "spec/132-landing", "bead/landing-1")
+	if preservedErr == nil {
+		t.Fatal("unmerged index must produce a preserved-merge refusal")
+	}
+	err = runCommittedRangeGate(root, "landing-1", "bead/landing-1", specDir, base, ex, CompleteOpts{ResolveMerge: true}, io.Discard)
+	if err == nil {
 		t.Fatal("unmerged index must still refuse")
+	}
+	refusal := err.Error()
+	for _, want := range []string{
+		"a merge is already in progress",
+		"\nconflicted files:\n  internal/core/core.go",
+		"\nrecovery: mindspec complete " + idrender.Bead("landing-1") + " --resolve-merge",
+	} {
+		if !strings.Contains(refusal, want) {
+			t.Errorf("unmerged-index refusal lacks %q: %s", want, refusal)
+		}
+	}
+	if strings.Contains(refusal, "<bead>") {
+		t.Errorf("unmerged-index refusal has a placeholder: %s", refusal)
+	}
+	if want := preservedErr.Error() + "\nrecovery: mindspec complete " + idrender.Bead("landing-1") + " --resolve-merge"; refusal != want {
+		t.Errorf("preserved refusal changed: got %q, want %q", refusal, want)
+	}
+	_, recovery, found := strings.Cut(refusal, "\nrecovery: ")
+	if !found {
+		t.Fatal("unmerged-index refusal has no recovery line")
+	}
+	if matches := guard.FindFloorMatches(recovery); len(matches) != 0 {
+		t.Errorf("preserved-merge recovery matches the destructive floor: %+v", matches)
 	}
 	writeFile(t, specWorktree, "internal/core/core.go", "package core\n\nconst Value = 4\n")
 	gitRun(t, specWorktree, "add", "internal/core/core.go")
@@ -217,7 +268,32 @@ func TestLandingTree_OperationalErrorRefuses(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot preview") {
 		t.Fatalf("expected landing error: %v", err)
 	}
+	if want := "\nrecovery: mindspec complete " + idrender.Bead("landing-1"); !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("recovery must name the real bead: %v", err)
+	}
 	if len(mock.CallsTo("ChangedFiles")) != 0 {
 		t.Fatal("gate ran after preview failure")
+	}
+}
+
+func TestLandingOwnershipError_RendersBeadID(t *testing.T) {
+	if len(guard.FindFloorMatches("git reset --hard HEAD")) == 0 {
+		t.Fatal("destructive-floor detector did not fire")
+	}
+	for _, beadID := range []string{"mindspec-ab12.1", "bad;id\ngit reset --hard HEAD"} {
+		err := &landingOwnershipError{beadID: beadID, cause: errors.New("cannot preview\nretry")}
+		if want := "\nrecovery: mindspec complete " + idrender.Bead(beadID); !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("recovery must render the bead ID: %q", err.Error())
+		}
+		if strings.Contains(err.Error(), "<bead>") || strings.Contains(err.Error(), "cannot preview\nretry") {
+			t.Errorf("unsafe landing error: %q", err.Error())
+		}
+		_, recovery, found := strings.Cut(err.Error(), "\nrecovery: ")
+		if !found {
+			t.Fatal("landing error has no recovery line")
+		}
+		if matches := guard.FindFloorMatches(recovery); len(matches) != 0 {
+			t.Errorf("recovery matches the destructive floor: %+v", matches)
+		}
 	}
 }

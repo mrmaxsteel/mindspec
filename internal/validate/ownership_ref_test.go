@@ -261,6 +261,64 @@ func TestCheckUnclaimedSource_LandingTree(t *testing.T) {
 	}
 }
 
+func TestValidateDocsSnapshot_UnclaimedSourceUsesOwnershipRef(t *testing.T) {
+	for _, claimed := range []bool{true, false} {
+		t.Run(fmt.Sprint(claimed), func(t *testing.T) {
+			root := t.TempDir()
+			writeSourceGlobsConfig(t, root, []string{"web/**"})
+			mock := &executor.MockExecutor{
+				ChangedFilesTreeResult: []string{"web/app.js", ".mindspec/docs/domains/core/architecture.md"},
+				TreeDirsAtRefFn: func(ref, dir string) ([]string, error) {
+					if ref != "LANDING" {
+						t.Errorf("domain enumeration used %q, want ownership ref LANDING", ref)
+					}
+					if dir == ".mindspec/docs/domains" {
+						return []string{"core"}, nil
+					}
+					return nil, nil
+				},
+				FileAtRefOrAbsentFn: func(ref, path string) ([]byte, bool, error) {
+					if ref != "LANDING" {
+						t.Errorf("manifest read used %q, want ownership ref LANDING", ref)
+					}
+					if path != coreManifestRel {
+						return nil, false, nil
+					}
+					// The candidate has the opposite claim to the landing tree.
+					if (ref == "LANDING") == claimed {
+						return []byte("paths:\n  - web/**\n"), true, nil
+					}
+					return []byte("paths:\n  - internal/old/**\n"), true, nil
+				},
+			}
+			r := ValidateDocsSnapshot(root, "BASE", "CANDIDATE", "LANDING", "/bead", mock)
+			if r.HasFailures() {
+				t.Fatalf("doc-sync: %+v", r.Issues)
+			}
+			warned := false
+			for _, issue := range r.Issues {
+				if issue.Name == "unclaimed-source" {
+					warned = true
+					if !strings.Contains(issue.Message, "web/app.js") {
+						t.Errorf("advisory omits the source path: %+v", issue)
+					}
+				}
+			}
+			if warned == claimed {
+				t.Errorf("claimed=%v: unclaimed-source warning=%v, issues=%+v", claimed, warned, r.Issues)
+			}
+			if len(mock.CallsTo("TreeDirsAtRef")) == 0 || len(mock.CallsTo("FileAtRefOrAbsent")) == 0 {
+				t.Fatal("ownership inputs were not read")
+			}
+			for _, call := range mock.CallsTo("ChangedFilesTree") {
+				if call.Args[1] != "BASE" || call.Args[2] != "CANDIDATE" {
+					t.Errorf("diff range changed: %+v", call.Args)
+				}
+			}
+		})
+	}
+}
+
 // Both gates resolve path-shaped spec and ADR domains through the same
 // ref used by attribution, package doc-sync, and source advisories.
 func TestLandingTree_AllOwnershipReaders(t *testing.T) {
