@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-10-21T18:42:25Z"
+approved_by: user
+status: Approved
 ---
 # Spec 132-readiness-followon: Readiness Followon
 
@@ -301,7 +301,7 @@ These items move to one follow-on spec. Each carries the round-1 corrections bel
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-10-21
+- **Notes**: Approved via mindspec approve spec
