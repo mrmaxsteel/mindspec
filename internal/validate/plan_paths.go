@@ -144,7 +144,7 @@ var planAdjacencyStops = wordSet(
 	"of", "from", "for", "as", "on", "next", "beside", "alongside", "via",
 	"using", "per", "following", "like", "after", "than", "by", "around",
 	"against", "that", "which", "whose", "where", "calls", "called", "uses",
-	"such", "sure", "call", "link", "pointer", "reference", "import", "into",
+	"such", "sure", "call", "link", "pointer", "reference", "import",
 )
 
 // planFreeWords describe the file itself ("its own new test file"), so
