@@ -1503,7 +1503,10 @@ func (g *MindspecExecutor) CheckSlotTree(tree, reviewedSHA string) error {
 			return fmt.Errorf("slot repository file is not a regular file: %s", rel)
 		}
 	}
-	for _, key := range []string{"core.worktree", "core.bare"} {
+	if _, err := os.Lstat(filepath.Join(tree, ".git", "config.worktree")); !os.IsNotExist(err) {
+		return fmt.Errorf("slot repository has a worktree config")
+	}
+	for _, key := range []string{"core.worktree", "core.bare", "extensions.worktreeConfig"} {
 		_, err := slotGit(tree, "config", "--file", filepath.Join(tree, ".git", "config"), "--no-includes", "--get-all", key)
 		if err == nil {
 			return fmt.Errorf("slot repository sets %s", key)
@@ -1543,8 +1546,13 @@ func (g *MindspecExecutor) CheckSlotTree(tree, reviewedSHA string) error {
 	return nil
 }
 
-// CheckIgnore uses the same isolated environment as slot operations.
+// CheckIgnore uses the operator configuration for the ledger preflight.
 func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
+	return gitutil.CheckIgnore(workdir, file)
+}
+
+// CheckSlotIgnore checks the isolation root with the slot environment.
+func (g *MindspecExecutor) CheckSlotIgnore(workdir, file string) error {
 	_, err := slotGit(workdir, "check-ignore", "--quiet", "--", file)
 	return err
 }

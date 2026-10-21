@@ -171,6 +171,9 @@ type Executor interface {
 	// CheckIgnore returns nil for an ignored path, exit 1 for a non-ignored path.
 	CheckIgnore(workdir, file string) error
 
+	// CheckSlotIgnore checks ignored paths with the isolated slot environment.
+	CheckSlotIgnore(workdir, file string) error
+
 	// LsFiles reports whether the index tracks path or a file under it.
 	LsFiles(workdir, path string) (bool, error)
 

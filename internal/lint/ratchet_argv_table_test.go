@@ -7,6 +7,8 @@ package lint
 // non-id); caller-audited is the mechanical wrapper marker that
 // promotes a function's CALL SITES into this same table.
 var argvAuditTable = map[string]argvEntry{
+	"internal/executor/mindspec_executor.go slotGit exec-git exec.Command": {Count: 1, Disp: dispNonID, Class: opClassRevParseSHA, Note: "Non-ID operands: slotAlternates passes the root as the -C value and literal rev-parse object-store flags. CloneSlotTree passes absolute root/tree paths after clone --, then literal config keys, a registration-pinned reviewed SHA for detached checkout, and literal origin. CheckSlotTree passes a tree-local config file, literal redirect keys/regex and literal HEAD; it checks directory/file types, config redirects, alternates and HEAD before reuse. CheckSlotIgnore passes the config-validated isolation path after check-ignore --. LsFiles passes its path after -- with --literal-pathspecs. checkoutLayout/NewSlotLayout validate slot paths; checkoutRegistration/CheckHandEdits compare the reviewed SHA with the round ledger. Git resolves the checkout ref; CheckSlotTree compares HEAD with that value. No bead or spec ID is a Git operand."},
+
 	"cmd/mindspec/panel_refute.go panelEvidenceResolves exec-git exec.Command": {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Evidence is a commit ref, not an ID; leading dash is refused before cat-file -e and the commit type suffix excludes blob evidence."},
 	// exec-unresolved sites: command operands the round-11 FAIL-CLOSED
 	// resolution could not prove non-bd/non-git (mindspec

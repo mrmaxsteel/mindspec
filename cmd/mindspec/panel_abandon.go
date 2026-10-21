@@ -34,7 +34,7 @@ var panelAbandonCmd = &cobra.Command{
 		}
 		releaseCheckouts, err := cleanupPanelCheckouts(root, reg, isolation, 0, "")
 		if err != nil {
-			return panelVerbFailure(err)
+			return checkoutError(err, "mindspec panel verify "+shellQuoteTarget(reg.Slug())+checkoutSpecFlag(reg))
 		}
 		defer releaseCheckouts()
 		event := panel.AbandonRecord{Record: panel.RecordAbandon, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Reason: reason, By: by, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}

@@ -231,7 +231,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
 			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },
 		}
-		releaseCheckouts, err := cleanupPriorRound(root, dir, specID, slug, round)
+		releaseCheckouts, err := cleanupPriorRound(root, dir, round)
 		if err != nil {
 			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
 		}

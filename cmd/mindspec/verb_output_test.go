@@ -99,6 +99,8 @@ var mutatingVerbRows = map[string]bool{
 	"mindspec impl adopt":   true,
 	"mindspec release":      true,
 	"mindspec repair phase": true,
+
+	"mindspec panel checkout": true,
 }
 
 // mutatingVerbAliases maps a HIDDEN backward-compat alias's full command
@@ -263,6 +265,7 @@ func TestVerbOutput_TotalCobraTreeClassification(t *testing.T) {
 		"mindspec spec create", "mindspec spec approve", "mindspec plan approve",
 		"mindspec next", "mindspec complete", "mindspec impl approve",
 		"mindspec impl adopt", "mindspec release", "mindspec repair phase",
+		"mindspec panel checkout",
 	}
 	if len(mutatingVerbRows) != len(wantRows) {
 		t.Fatalf("mutatingVerbRows has %d entries, want exactly R2.1's %d", len(mutatingVerbRows), len(wantRows))

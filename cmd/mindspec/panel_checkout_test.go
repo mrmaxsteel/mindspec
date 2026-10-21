@@ -145,12 +145,13 @@ func checkoutOK(t *testing.T, args ...string) string {
 	}
 	return out
 }
-func checkoutRefused(t *testing.T, want string, args ...string) {
+func checkoutRefused(t *testing.T, want string, args ...string) string {
 	t.Helper()
 	out, err := checkoutRun(t, args...)
 	if err == nil || !strings.Contains(err.Error()+out, want) {
 		t.Fatalf("checkout %v: wanted refusal %q, got %v\n%s", args, want, err, out)
 	}
+	return err.Error()
 }
 func seedSlotFinal(t *testing.T, f slotFixture, verdict string) {
 	t.Helper()
@@ -265,11 +266,28 @@ func TestPanelCheckout_Refusals(t *testing.T) {
 	})
 	t.Run("abandoned", func(t *testing.T) {
 		f := newCheckoutFixture(t, ".mindspec-scratch")
-		f.p.Abandoned, f.p.AbandonReason = true, "operator ended review"
+		if out, err := runPanelCmd("abandon", "p", "--reason", "operator ended review", "--by", "operator"); err != nil {
+			t.Fatalf("abandon fixture: %v %s", err, out)
+		}
+		if _, err := checkoutRegistration(f.dir); err == nil || !strings.Contains(err.Error(), "panel is abandoned") {
+			t.Fatalf("registration accepted an abandoned panel: %v", err)
+		}
+		checkoutRefused(t, "panel is abandoned", "--all")
+	})
+	t.Run("registration hand edit", func(t *testing.T) {
+		f := newCheckoutFixture(t, ".mindspec-scratch")
+		f.p.ExpectedReviewers++
 		if err := panel.WriteSnapshot(f.dir, f.p); err != nil {
 			t.Fatal(err)
 		}
-		checkoutRefused(t, "abandoned", "--all")
+		before := slotSnapshot(t, f.dir)
+		if _, err := checkoutRegistration(f.dir); err == nil || !strings.Contains(err.Error(), "panel registration differs from its ledger: expected_reviewers") {
+			t.Fatalf("registration accepted changed reviewer count: %v", err)
+		}
+		checkoutRefused(t, "panel registration differs from its ledger: expected_reviewers", "--all")
+		if !reflect.DeepEqual(before, slotSnapshot(t, f.dir)) {
+			t.Fatal("registration refusal changed the panel")
+		}
 	})
 	t.Run("held lock", func(t *testing.T) {
 		f := newCheckoutFixture(t, ".mindspec-scratch")
@@ -284,7 +302,7 @@ func TestPanelCheckout_Refusals(t *testing.T) {
 }
 
 func TestPanelCheckout_GitRedirectRefused(t *testing.T) {
-	for _, redirect := range []string{"commondir", "core.worktree", "core.bare", "alternates"} {
+	for _, redirect := range []string{"commondir", "core.worktree", "core.bare", "alternates", "worktree config", "worktree extension", "worktree config file", "include", "includeIf"} {
 		t.Run(redirect, func(t *testing.T) {
 			f := newCheckoutFixture(t, ".mindspec-scratch")
 			checkoutOK(t, "--slot", "R1")
@@ -296,12 +314,40 @@ func TestPanelCheckout_GitRedirectRefused(t *testing.T) {
 				slotTestGit(t, tree, "config", "--local", redirect, f.root)
 			case "core.bare":
 				slotTestGit(t, tree, "config", "--local", redirect, "false")
+			case "worktree config", "worktree extension":
+				slotTestGit(t, tree, "config", "--local", "extensions.worktreeConfig", "true")
+				if redirect == "worktree config" {
+					slotTestGit(t, tree, "config", "--worktree", "core.worktree", f.root)
+					if got := slotTestGit(t, tree, "rev-parse", "--show-toplevel"); got != f.root {
+						t.Fatalf("worktree redirect control: got %q, want %q", got, f.root)
+					}
+				}
+			case "worktree config file":
+				slotWrite(t, filepath.Join(tree, ".git", "config.worktree"), "[core]\nworktree = "+f.root+"\n")
+			case "include", "includeIf":
+				included := filepath.Join(f.root, "redirect.config")
+				slotWrite(t, included, "[core]\nworktree = "+f.root+"\n")
+				key := "include.path"
+				if redirect == "includeIf" {
+					gitdir, err := filepath.EvalSymlinks(filepath.Join(tree, ".git"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					key = "includeIf.gitdir:" + filepath.ToSlash(gitdir) + ".path"
+				}
+				slotTestGit(t, tree, "config", "--local", key, included)
+				if got := slotTestGit(t, tree, "config", "--includes", "--get", "core.worktree"); got != f.root {
+					t.Fatalf("include redirect control: got %q, want %q", got, f.root)
+				}
 			case "alternates":
 				path := filepath.Join(tree, ".git", "objects", "info", "alternates")
 				slotWrite(t, path, string(slotRead(t, path))+filepath.Join(f.root, ".git", "objects")+"\n")
 			}
 			before := slotSnapshot(t, filepath.Join(f.root, ".git"))
 			checkoutRefused(t, "--prune --slot", "--slot", "R1")
+			if got := slotTestGit(t, tree, "rev-parse", "HEAD"); got != f.p.ReviewedHeadSHA {
+				t.Fatalf("redirect refusal changed reviewed HEAD: %s", got)
+			}
 			if after := slotSnapshot(t, filepath.Join(f.root, ".git")); !reflect.DeepEqual(before, after) {
 				t.Fatal("redirect refusal changed main repository")
 			}
@@ -426,7 +472,8 @@ func TestPanelCheckout_HarnessDispatched(t *testing.T) {
 	}
 	seedSlotFinal(t, f, "APPROVE")
 	before := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
-	checkoutRefused(t, "--replace", "--slot", "R1", "--dispatch")
+	refusal := checkoutRefused(t, "--replace", "--slot", "R1", "--dispatch")
+	assertCheckoutRecovery(t, refusal, "mindspec panel checkout "+shellQuoteTarget("p")+" --slot "+shellQuoteTarget("R1")+" --dispatch --replace")
 	if !bytes.Equal(before, slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))) {
 		t.Fatal("refused dispatch appended")
 	}
@@ -436,7 +483,8 @@ func TestPanelCheckout_HarnessDispatched(t *testing.T) {
 		slotWrite(t, filepath.Join(f.root, ".mindspec", "config.yaml"), "panel:\n  runners:\n    - {family: harness, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}\n")
 		config.ResetCache()
 		before := slotSnapshot(t, f.dir)
-		checkoutRefused(t, "panel launch", "--slot", "R1", "--dispatch")
+		refusal := checkoutRefused(t, "panel launch", "--slot", "R1", "--dispatch")
+		assertCheckoutRecovery(t, refusal, "mindspec panel launch "+shellQuoteTarget("p")+" "+shellQuoteTarget("R1"))
 		if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(before, after) {
 			t.Fatal("process refusal appended")
 		}
@@ -543,14 +591,17 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 		t.Run(verb, func(t *testing.T) {
 			f := newCheckoutFixture(t, ".mindspec-scratch")
 			checkoutOK(t, "--all")
-			lock, err := panel.AcquireSlotLock(f.layout(t, "R2").Lock)
-			if err != nil {
-				t.Fatal(err)
+			for _, slot := range []string{"R2", "R3"} {
+				lock, err := panel.AcquireSlotLock(f.layout(t, slot).Lock)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer lock.Release()
 			}
-			defer lock.Release()
 			beforePanel := slotSnapshot(t, f.dir)
 			beforeScratch := slotSnapshot(t, filepath.Join(f.root, f.isolation))
 			var out string
+			var err error
 			switch verb {
 			case "prune":
 				out, err = checkoutRun(t, "--prune")
@@ -563,6 +614,7 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error()+out, "R2") {
 				t.Fatalf("held-slot refusal: %v %s", err, out)
 			}
+			assertCheckoutRecovery(t, err.Error(), "mindspec panel verify "+shellQuoteTarget("p")+" # wait for slot locks: "+shellQuoteTarget(f.layout(t, "R2").Lock)+", "+shellQuoteTarget(f.layout(t, "R3").Lock))
 			if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) || !reflect.DeepEqual(beforeScratch, slotSnapshot(t, filepath.Join(f.root, f.isolation))) {
 				t.Fatal("held-lock refusal changed panel, ledger or scratch files")
 			}
@@ -636,4 +688,34 @@ func TestWalks_SkipIsolationRoot(t *testing.T) {
 			t.Fatalf("canonical scan: %v %v", canonical, err)
 		}
 	})
+}
+
+func assertCheckoutRecovery(t *testing.T, refusal, want string) {
+	t.Helper()
+	if strings.Count(refusal, "recovery:") != 1 || !strings.HasSuffix(refusal, "\nrecovery: "+want) {
+		t.Fatalf("want one runnable recovery %q, got %q", want, refusal)
+	}
+	cmd := exec.Command("/bin/sh", "-n", "-c", want)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("recovery shell syntax: %v %s", err, out)
+	}
+}
+
+func TestVerbOutput_PanelCheckout(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	out := checkoutOK(t, "--slot", "R1", "--dispatch")
+	resultBeforeGuidance(t, "panel checkout", out, f.layout(t, "R1").Dir+"\n", mindspecGuidanceMarkers...)
+}
+
+func TestPanelCheckout_ProcessRecoverySpec(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	slotWrite(t, filepath.Join(f.root, ".mindspec", "config.yaml"), "panel:\n  runners:\n    - {family: harness, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}\n")
+	config.ResetCache()
+	f.p.Spec = "901-review"
+	reg := panel.Registration{Dir: f.dir, Panel: f.p}
+	_, _, _, err := checkoutDispatchResolution(f.root, reg, f.p.Roster[0], false)
+	if err == nil {
+		t.Fatal("process dispatch accepted")
+	}
+	assertCheckoutRecovery(t, err.Error(), "mindspec panel launch "+shellQuoteTarget("p")+" "+shellQuoteTarget("R1")+" --spec "+shellQuoteTarget(f.p.Spec))
 }

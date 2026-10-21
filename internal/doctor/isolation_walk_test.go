@@ -57,3 +57,37 @@ func TestWalks_SkipIsolationRoot(t *testing.T) {
 		t.Fatal("links must use relative paths")
 	}
 }
+
+// enumerateWorkspaceFiles keeps the file-list helper for existing walk tests.
+// A config error fails the test instead of returning an empty list.
+func enumerateWorkspaceFiles(root string) []string {
+	files, err := enumerateWorkspaceFilesChecked(root)
+	if err != nil {
+		panic(err)
+	}
+	return files
+}
+
+func TestOwnership_IsolationConfigError(t *testing.T) {
+	root := t.TempDir()
+	writeFileAt(t, root, ".mindspec/config.yaml", "panel: {isolation_root: ../outside}\n")
+	writeFileAt(t, root, ".mindspec/domains/x/OWNERSHIP.yaml", "paths: [internal/x/**]\n")
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+	_, wantErr := config.IsolationRootFor(root)
+	if wantErr == nil {
+		t.Fatal("invalid isolation root was accepted")
+	}
+	if _, err := enumerateWorkspaceFilesChecked(root); err == nil || err.Error() != wantErr.Error() {
+		t.Fatalf("ownership walk lost the config error: %v", err)
+	}
+	var report Report
+	checkOwnershipManifests(&report, root)
+	want := []Check{{Name: "ownership", Status: Error, Message: wantErr.Error()}}
+	if !reflect.DeepEqual(report.Checks, want) {
+		t.Fatalf("want one ownership config error and no dead-manifest warning: got %+v", report.Checks)
+	}
+	if links := LinksReport(root); len(links) != 1 || links[0].Status != Error || links[0].Message != wantErr.Error() {
+		t.Fatalf("links and ownership must report the same config error: %+v", links)
+	}
+}

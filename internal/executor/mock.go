@@ -87,6 +87,9 @@ type MockExecutor struct {
 	CheckSlotTreeErr  error
 	IsRefNotFoundFn   func(error) bool
 
+	CheckSlotIgnoreFn  func(workdir, file string) error
+	CheckSlotIgnoreErr error
+
 	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when
 	// non-nil, fully drive the corresponding method so tests can inject
 	// ref-discovery / fingerprint facts and per-call errors; otherwise the
@@ -447,6 +450,18 @@ func (m *MockExecutor) CheckIgnore(workdir, file string) error {
 	}
 	if m.CheckIgnoreErr != nil {
 		return m.CheckIgnoreErr
+	}
+	return mockNotIgnored{}
+}
+
+// CheckSlotIgnore records an isolated ignore check.
+func (m *MockExecutor) CheckSlotIgnore(workdir, file string) error {
+	m.record("CheckSlotIgnore", workdir, file)
+	if m.CheckSlotIgnoreFn != nil {
+		return m.CheckSlotIgnoreFn(workdir, file)
+	}
+	if m.CheckSlotIgnoreErr != nil {
+		return m.CheckSlotIgnoreErr
 	}
 	return mockNotIgnored{}
 }

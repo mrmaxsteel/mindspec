@@ -28,13 +28,14 @@ func layoutComponent(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00")
 }
 func NewSlotLayout(mainRoot, isolationRoot, spec, slug string, round int, slot string) (SlotLayout, error) {
+	isolationRoot = strings.TrimSuffix(filepath.ToSlash(isolationRoot), "/")
 	if spec == "" {
 		spec = "adhoc"
 	}
 	if !filepath.IsAbs(mainRoot) || isolationRoot == "" || filepath.IsAbs(isolationRoot) || filepath.Clean(isolationRoot) == "." {
 		return SlotLayout{}, submitRefusal("invalid slot root", "select an absolute main root and a relative isolation root")
 	}
-	for _, part := range strings.Split(filepath.ToSlash(isolationRoot), "/") {
+	for _, part := range strings.Split(isolationRoot, "/") {
 		if !layoutComponent(part) {
 			return SlotLayout{}, submitRefusal("invalid isolation root", "select an isolation root within the main root")
 		}

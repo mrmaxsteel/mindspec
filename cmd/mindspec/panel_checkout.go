@@ -35,6 +35,13 @@ func checkoutError(err error, recovery string) error {
 	return checkoutFailure(err.Error(), recovery)
 }
 
+func checkoutSpecFlag(reg panel.Registration) string {
+	if reg.Panel.Spec == "" || reg.Panel.Spec == "adhoc" {
+		return ""
+	}
+	return " --spec " + shellQuoteTarget(reg.Panel.Spec)
+}
+
 func checkoutPruneRecovery(slug, slot string) string {
 	return "mindspec panel checkout " + shellQuoteTarget(slug) + " --prune --slot " + shellQuoteTarget(slot)
 }
@@ -71,7 +78,7 @@ func checkoutIsolation(root string) (string, error) {
 	if err := checkCheckoutPath(root, filepath.Join(root, isolation)); err != nil {
 		return "", checkoutFailure(err.Error(), "use a real, ignored directory for panel.isolation_root, then run mindspec init")
 	}
-	if err := newExecutor(root).CheckIgnore(root, isolation); err != nil {
+	if err := newExecutor(root).CheckSlotIgnore(root, isolation); err != nil {
 		return "", checkoutFailure("panel isolation root is not ignored or cannot be checked", "mindspec init")
 	}
 	return isolation, nil
@@ -170,14 +177,15 @@ func checkoutDispatchResolution(root string, reg panel.Registration, slot panel.
 		return runner, "", "", checkoutFailure("slot family has no runner", "add a runner for the family to panel.runners")
 	}
 	if runner.Kind != "harness" {
-		return runner, "", "", checkoutFailure("slot uses a process runner", "mindspec panel launch "+shellQuoteTarget(reg.Slug())+" "+shellQuoteTarget(slot.Slot))
+		recovery := "mindspec panel launch " + shellQuoteTarget(reg.Slug()) + " " + shellQuoteTarget(slot.Slot) + checkoutSpecFlag(reg)
+		return runner, "", "", checkoutFailure("slot uses a process runner", recovery)
 	}
 	latest, err := panel.LatestSubmissions(reg.Dir, reg.Panel.Round)
 	if err != nil {
 		return runner, "", "", err
 	}
 	if submission, ok := latest[slot.Slot]; ok && submission.Status == "final" && submission.Verdict != "VOID" && !replace {
-		return runner, "", "", checkoutFailure("slot already has a final submission", "repeat checkout --dispatch with --replace")
+		return runner, "", "", checkoutFailure("slot already has a final submission", "mindspec panel checkout "+shellQuoteTarget(reg.Slug())+" --slot "+shellQuoteTarget(slot.Slot)+" --dispatch --replace"+checkoutSpecFlag(reg))
 	}
 	beadID := ""
 	if reg.Panel.BeadID != nil {
@@ -429,7 +437,7 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 			_ = locks[i].Release()
 		}
 	}
-	var failures []string
+	var failures, held []string
 	for _, entry := range affected {
 		if err := checkCheckoutPath(root, filepath.Dir(entry.Lock)); err != nil {
 			release()
@@ -437,14 +445,17 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 		}
 		lock, err := panel.AcquireSlotLock(entry.Lock)
 		if err != nil {
-			failures = append(failures, err.Error())
+			message, _, _ := strings.Cut(err.Error(), "\nrecovery:")
+			failures = append(failures, message)
+			held = append(held, shellQuoteTarget(entry.Lock))
 			continue
 		}
 		locks = append(locks, lock)
 	}
 	if len(failures) > 0 {
 		release()
-		return nil, fmt.Errorf("%s", strings.Join(failures, "\n"))
+		recovery := "mindspec panel verify " + shellQuoteTarget(reg.Slug()) + checkoutSpecFlag(reg) + " # wait for slot locks: " + strings.Join(held, ", ")
+		return nil, checkoutFailure(strings.Join(failures, "\n"), recovery)
 	}
 	for _, entry := range affected {
 		if err := panelCheckoutOrphanCheck(root, reg, entry); err != nil {
@@ -479,7 +490,7 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 	return release, nil
 }
 
-func cleanupPriorRound(root, dir, spec, slug string, round int) (func(), error) {
+func cleanupPriorRound(root, dir string, round int) (func(), error) {
 	data, err := os.ReadFile(filepath.Join(dir, panel.FileName))
 	if os.IsNotExist(err) {
 		return func() {}, nil

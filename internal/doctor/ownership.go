@@ -48,7 +48,11 @@ func checkOwnershipManifests(r *Report, root string) {
 	// Enumerate the live workspace file list ONCE per ownership check
 	// (spec 108 Req 9), then test every domain's paths globs against this
 	// cached list instead of re-walking the tree per domain.
-	files := enumerateWorkspaceFiles(root)
+	files, err := enumerateWorkspaceFilesChecked(root)
+	if err != nil {
+		r.Checks = append(r.Checks, Check{Name: "ownership", Status: Error, Message: err.Error()})
+		return
+	}
 
 	// Per-domain dead-manifest, plus collect loaded paths for the
 	// cross-domain hygiene checks.
@@ -72,17 +76,17 @@ func checkOwnershipManifests(r *Report, root string) {
 	checkHygiene(r, domains, loaded)
 }
 
-// enumerateWorkspaceFiles walks the workspace tree ONCE via the
+// enumerateWorkspaceFilesChecked walks the workspace tree ONCE via the
 // walkWorkspaceFn seam and returns every non-directory file path relative
 // to root (slash-separated). The walk skips the walkExclusions trees
 // (.git/, .worktrees/, .beads/, V2-6) so a stray match inside those trees
 // cannot mask a dead manifest. The result is consumed by every domain's
 // dead-manifest check within a single ownership check, replacing the
 // former per-domain full walk.
-func enumerateWorkspaceFiles(root string) []string {
+func enumerateWorkspaceFilesChecked(root string) ([]string, error) {
 	isolation, err := config.IsolationRootFor(root)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var files []string
 	_ = walkWorkspaceFn(root, func(p string, d fs.DirEntry, err error) error {
@@ -109,7 +113,7 @@ func enumerateWorkspaceFiles(root string) []string {
 		files = append(files, rel)
 		return nil
 	})
-	return files
+	return files, nil
 }
 
 // canonicalDomains returns the lexicographically-sorted domain
@@ -167,7 +171,7 @@ func checkDeadManifest(r *Report, files []string, domain string, o *validate.Own
 
 // manifestResolvesAny reports whether any of the manifest's paths globs
 // matches at least one file in the pre-enumerated workspace file list
-// (the slash-separated relative paths from enumerateWorkspaceFiles, which
+// (the slash-separated relative paths from enumerateWorkspaceFilesChecked, which
 // already excludes the .git/, .worktrees/, and .beads/ trees per V2-6). An
 // empty paths set trivially resolves to nothing. Matching delegates to the
 // shared validate.GlobMatch.
