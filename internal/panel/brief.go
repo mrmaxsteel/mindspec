@@ -136,11 +136,12 @@ func escapeBriefText(text string) string {
 }
 
 var briefInternalReference = regexp.MustCompile(`ADR-[0-9]+|[Ss]pec [0-9]{3}|\bR[0-9]+\.[0-9]+|#[0-9]{3}|mindspec-[a-z0-9]+(?:\.[0-9]+)?|§`)
-var briefPath = regexp.MustCompile(`\.[A-Za-z0-9]+$`)
+var briefPath = regexp.MustCompile(`\.[a-z][a-z0-9]*$`)
 
 // briefRepositoryPaths selects tokens inside backtick code spans. A repository
-// path has no space and contains a slash or ends in a dot followed by letters
-// and digits. A command that starts with "mindspec " is not a path.
+// path has no space and contains a slash. Without a slash, its last dot part
+// must start with a lowercase letter and contain only lowercase letters and
+// digits. A command that starts with "mindspec " is not a path.
 // Bare words outside code spans are not paths.
 func briefRepositoryPaths(text string) []string {
 	var paths []string
@@ -155,7 +156,8 @@ func briefRepositoryPaths(text string) []string {
 		for cursor := 0; ; {
 			relative := strings.IndexByte(text[cursor:], '`')
 			if relative < 0 {
-				return paths
+				// An unmatched opening run is literal text. Scan later runs.
+				break
 			}
 			end := cursor + relative
 			length := len(text[end:]) - len(strings.TrimLeft(text[end:], "`"))

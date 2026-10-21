@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -54,6 +56,37 @@ func promptRun(t *testing.T, root, slot string) string {
 
 func TestPanelPrompt_Render(t *testing.T) {
 	const processConfig = "panel:\n  runners:\n    - {family: worker, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}\n"
+	for _, name := range []string{"review-é", "review-é 'quoted' \"path\" $value `literal`"} {
+		t.Run("harness-path/"+name, func(t *testing.T) {
+			slotDir := filepath.Join(t.TempDir(), name)
+			out := panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: slotDir, Attempt: 1})
+			_, argument, ok := strings.Cut(out, "mindspec panel submit --file ")
+			if !ok {
+				t.Fatalf("missing submission command:\n%s", out)
+			}
+			argument, _, _ = strings.Cut(argument, "\n")
+			// Let a POSIX shell parse the word without running the command.
+			parsed, err := exec.Command("sh", "-c", "set -- "+argument+"; printf '%s\\n' \"$#\" \"$1\"").CombinedOutput()
+			if err != nil {
+				t.Fatalf("parse submission argument: %v\n%s", err, parsed)
+			}
+			want := "1\n" + filepath.Join(slotDir, "attempt-1", "verdict.json") + "\n"
+			if string(parsed) != want {
+				t.Fatalf("wrong --file shell argument: got %q, want %q", parsed, want)
+			}
+		})
+	}
+	for _, suffix := range []string{"\x1b", "\n", "\x7f", "\u202e", "\xff"} {
+		t.Run(fmt.Sprintf("harness-unsafe-path/%x", suffix), func(t *testing.T) {
+			out := panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: filepath.Join(t.TempDir(), "review"+suffix), Attempt: 1})
+			if strings.Contains(out, "mindspec panel submit --file ") || !strings.Contains(out, "Cannot render the submission command:") {
+				t.Fatalf("unsafe path must refuse the command:\n%s", out)
+			}
+			if strings.Contains(out, "review"+suffix) {
+				t.Fatalf("unsafe path bytes in prompt: %q", out)
+			}
+		})
+	}
 	for _, tc := range []struct{ name, brief, want string }{
 		{"brief-printable", "check.rule: check this — use that\n", "check.rule: check this — use that\n"},
 		{"brief-control", "Escape \x1b[31mtext\n", "Escape \\x1b[31mtext\n"},

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -65,8 +67,14 @@ func RenderSlotPrompt(in PromptInput) string {
 	if in.Kind == "process" {
 		b.WriteString(RenderProcessOutput(in.Output, in.Nonce, verdictPath))
 	} else if in.Attempt > 0 {
-		b.WriteString("Submit the verdict JSON through this command:\n")
-		b.WriteString("mindspec panel submit --file " + promptShellQuote(termsafe.Escape(verdictPath)) + "\n")
+		// Refuse non-printable or invalid path bytes. Display escapes change
+		// the shell argument. Keep printable Unicode and quote characters.
+		if !utf8.ValidString(verdictPath) || strings.IndexFunc(verdictPath, func(r rune) bool { return !strconv.IsPrint(r) }) >= 0 {
+			b.WriteString("Cannot render the submission command: the verdict path contains a non-printable character or invalid UTF-8.\n")
+		} else {
+			b.WriteString("Submit the verdict JSON through this command:\n")
+			b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + "\n")
+		}
 	} else {
 		b.WriteString("Use mindspec panel checkout with --slot and --dispatch. Then run mindspec panel prompt again for the submission command.\n")
 	}

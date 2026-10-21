@@ -271,7 +271,7 @@ func Create(dir string, in CreateInput) error {
 		prior = termsafe.Escape(string(priorData))
 		// Quoted prose must not become region syntax or toggle fence scanning.
 		trimmed := strings.TrimSpace(prior)
-		if strings.HasPrefix(trimmed, "```") || markerLookalikeRE.MatchString(trimmed) ||
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
 			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
 			prior = "> " + prior
 		}
