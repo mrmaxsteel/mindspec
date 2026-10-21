@@ -22,7 +22,7 @@ All agent operating guidance is emitted dynamically by `mindspec instruct` (run 
 
 If the project has not been set up yet, run `mindspec init` to scaffold the full flat directory structure, starter files (CLAUDE.md, AGENTS.md, state), and domain templates. All creation is additive — existing files are never overwritten. After init, `mindspec doctor` should report zero errors.
 
-Since spec 123, `init` also scaffolds the `.mindspec/context-map.md` skeleton (so the first `mindspec domain add <name>` succeeds and maps the domain) and ensures the runtime files (`.mindspec/session.json`, `.mindspec/focus`) are gitignored even when the repo already has a `.gitignore` — as does every `mindspec setup <agent>` verb. The scaffolded `AGENTS.md` is framework-generic: its title is a neutral `# AGENTS.md`, and the "Build & Test" section renders YOUR declared `commands:` from `.mindspec/config.yaml` — or is omitted entirely while unset (run `mindspec commands populate` for the declaration prompt; `mindspec models populate` similarly nudges the per-phase `models:` protocol, a declared-but-inert key). Two doctor Warns on a fresh repo — `missing-models`, `missing-commands` — are deliberate nudges to make those declarations, not failures. `mindspec adr create "<title>"` writes slugged `ADR-NNNN-<slug>.md` filenames (a `--slug` flag overrides the derivation) while every surface keeps reporting and accepting the canonical `ADR-NNNN` ID. `mindspec panel create <slug> --gate adhoc --target <ref>` (no `--spec`) creates a standalone review panel under `.mindspec/reviews/<slug>/` — talliable with `panel tally`, never consulted by the lifecycle gate.
+Since spec 123, `init` also scaffolds the `.mindspec/context-map.md` skeleton (so the first `mindspec domain add <name>` succeeds and maps the domain) and ensures the runtime files (`.mindspec/session.json`, `.mindspec/focus`) are gitignored even when the repo already has a `.gitignore` — as does every `mindspec setup <agent>` verb. The scaffolded `AGENTS.md` is framework-generic: its title is a neutral `# AGENTS.md`, and the "Build & Test" section renders YOUR declared `commands:` from `.mindspec/config.yaml` — or is omitted entirely while unset (run `mindspec commands populate` for the declaration prompt; `mindspec models populate` similarly nudges the per-phase `models:` protocol, a key whose reviewer.<family> entries select reviewer models). Two doctor Warns on a fresh repo — `missing-models`, `missing-commands` — are deliberate nudges to make those declarations, not failures. `mindspec adr create "<title>"` writes slugged `ADR-NNNN-<slug>.md` filenames (a `--slug` flag overrides the derivation) while every surface keeps reporting and accepting the canonical `ADR-NNNN` ID. `mindspec panel create <slug> --gate adhoc --target <ref>` (no `--spec`) creates a standalone review panel under `.mindspec/reviews/<slug>/` — talliable with `panel tally`, never consulted by the lifecycle gate.
 
 ## Phase 0.5: Idle
 
@@ -342,5 +342,15 @@ Work is not complete until changes are committed.
 | `mindspec domain add <name>` | Scaffold a domain + its context-map entry; re-run to backfill any partial state (spec 123) |
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create a slugged ADR file; canonical `ADR-NNNN` stays the ID everywhere (spec 123) |
 | `mindspec models populate` | Print the prompt for declaring the per-phase `models:` protocol (writes nothing) |
+| `mindspec config show` | Print effective config from defaults, `.mindspec/config.yaml` and `.mindspec/config.local.yaml`. Show runners, lenses and the isolation root. |
+| `mindspec config show --gate <name> [--json]` | Print slots, expected reviewer count and the raw approval threshold for one gate. The output has no `substitution` member. |
+| `mindspec config resolve --gate <name> [--json]` | Preview a new panel's slots with family, model, lens, runner kind and the source of each value. This command writes no files. |
 | `mindspec commands populate` | Print the prompt for declaring your build/test `commands:` (writes nothing) |
 | `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc (no owning spec) review panel at `.mindspec/reviews/<slug>/` |
+
+For `config show --gate` and `config resolve --gate`, use `spec_approve`, `plan_approve`, `bead`, `final_review` or `adhoc`.
+`config resolve` warns when a model-only reviewer uses the harness runner.
+It suggests process runners for supported commands it finds installed but unused by the configured runners.
+The preview uses the current config. It does not read an existing panel roster.
+The local config file may set only `panel.runners` and `models`.
+`panel.substitution` is refused. Set `on_quota` on a runner to name another declared family.
