@@ -1249,18 +1249,26 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// R4: beadID is an ID-typed position — idrender.Bead. specBranch
 		// is the spine-derived `spec/<id>` branch operand and stays RAW
 		// per the established convention.
+		//
+		// rerunSuffix: a failed --resolve-merge invocation must re-issue
+		// the SAME command — a plain re-run refuses over the staged,
+		// resolved merge it left in place.
+		rerunSuffix := ""
+		if opts.ResolveMerge {
+			rerunSuffix = " " + executor.ResolveMergeFlag
+		}
 		msg := fmt.Sprintf(
 			"bead %s is CLOSED in Dolt but completion did NOT finish — its branch may not be merged into %s (closed-but-unmerged).\n"+
-				"this state is recoverable: fix the cause below, then re-run `mindspec complete %s` — the close step is idempotent and completion converges.\n"+
+				"this state is recoverable: fix the cause below, then re-run `mindspec complete %s%s` — the close step is idempotent and completion converges.\n"+
 				"cause: %v",
-			safeBeadID, specBranch, safeBeadID, completeErr)
+			safeBeadID, specBranch, safeBeadID, rerunSuffix, completeErr)
 		if guard.HasFinalRecoveryLine(msg) {
 			// The executor failure already carries Req 12 recovery
 			// lines (e.g. the conflict-abort failures) — keep them
 			// final instead of stacking a redundant generic one.
 			return nil, errors.New(msg)
 		}
-		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s", safeBeadID))
+		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s%s", safeBeadID, rerunSuffix))
 	}
 
 	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
@@ -1499,7 +1507,15 @@ func FormatResult(r *Result) string {
 	}
 	switch r.NextMode {
 	case state.ModeImplement:
-		fmt.Fprintf(&sb, "Next bead ready: %s\n", idrender.Bead(r.NextBead))
+		// advanceState returns implement with an EMPTY next bead when no
+		// ready bead was found (peers in progress, blocked, not yet
+		// propagated, or an unreadable ready list) — never print an empty
+		// "Next bead ready:" line or a claim instruction then.
+		if r.NextBead != "" {
+			fmt.Fprintf(&sb, "Next bead ready: %s\n", idrender.Bead(r.NextBead))
+		} else {
+			sb.WriteString("No bead is ready now.\n")
+		}
 		fmt.Fprintf(&sb, "Mode: implement (spec: %s)\n", idrender.Spec(r.NextSpec))
 		// Spec 092 Req 4 (mindspec-qxsy): the implement branch carries
 		// the same cd hint as plan/review — the removed bead worktree
@@ -1507,7 +1523,11 @@ func FormatResult(r *Result) string {
 		if r.WorktreeRemoved && r.SpecWorktree != "" {
 			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
-		sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
+		if r.NextBead != "" {
+			sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
+		} else {
+			sb.WriteString("\nSTOP HERE. Do NOT claim a bead now.\nTell the user: run `mindspec next` once a bead is ready.\n")
+		}
 	case state.ModePlan:
 		// R2.3 (spec 128 bead 5, round-4/round-5 tally): reworded to fit
 		// the TWO triggers that actually survive AC-4b's fix — the

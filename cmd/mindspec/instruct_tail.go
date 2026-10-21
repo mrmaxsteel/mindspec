@@ -20,8 +20,33 @@ import (
 // root is the main repo root (for spec dirs and guard).
 func emitInstruct(root string) error {
 	// ADR-0023: derive state from beads, not focus files.
-	ctx, _ := phase.ResolveContext(root)
+	ctx, _ := resolveContextFn(root)
+	return renderInstructTail(root, ctx, true)
+}
 
+// resolveContextFn is a test seam for emitInstruct's cwd-based read.
+var resolveContextFn = phase.ResolveContext
+
+// Seams for worktreeRedirect (tests stub the bd-backed guard reads).
+var (
+	activeWorktreePathFn = guard.ActiveWorktreePath
+	isMainCWDFn          = guard.IsMainCWD
+)
+
+// worktreeRedirect returns the "you are in the main worktree" redirect
+// block, or "" when none applies. It reads the process cwd.
+func worktreeRedirect(root string) string {
+	wtPath := activeWorktreePathFn(root)
+	if wtPath == "" || !isMainCWDFn(root) {
+		return ""
+	}
+	return fmt.Sprintf("\n## Worktree Redirect\n\nYou are in the main worktree. Switch to:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
+}
+
+// renderInstructTail renders guidance for an already-resolved ctx.
+// allowRedirect is false for a caller whose cwd is not the user's (see
+// emitCompleteTail).
+func renderInstructTail(root string, ctx *phase.Context, allowRedirect bool) error {
 	// Spec 128 R2.3: a genuine bd/Dolt derivation failure, or an empty
 	// Phase (multi-active-spec ambiguity — the only non-error way Phase
 	// stays "" per ResolveContextFromDirWithCache), renders the honest
@@ -64,9 +89,11 @@ func emitInstruct(root string) error {
 	}
 
 	// CWD redirect: if on main with active worktree, emit redirect only.
-	if wtPath := guard.ActiveWorktreePath(root); wtPath != "" && guard.IsMainCWD(root) {
-		fmt.Fprintf(os.Stdout, "\n## Worktree Redirect\n\nYou are in the main worktree. Switch to:\n\n  %s\n\nThen run `mindspec instruct` for mode-appropriate guidance.\n", containment.EmitCd(wtPath))
-		return nil
+	if allowRedirect {
+		if redirect := worktreeRedirect(root); redirect != "" {
+			fmt.Fprint(os.Stdout, redirect)
+			return nil
+		}
 	}
 
 	iCtx := instruct.BuildContext(root, mc)

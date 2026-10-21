@@ -404,12 +404,17 @@ func mergeResumptionStep(workdir string) resumeOutcome {
 	if len(gitutil.ConflictedFiles(workdir)) > 0 {
 		return resumeStillConflicted
 	}
+	// A file staged with its conflict markers still in it is not
+	// resolved: never commit it.
+	if len(gitutil.StagedConflictMarkerFiles(workdir)) > 0 {
+		return resumeStillConflicted
+	}
 	return resumeReadyToComplete
 }
 
 // resolutionSteps renders the R5(d)(vii)/E-r5-3 pinned resolution-step
 // template: edit, `git add <path>...` over EXACTLY the conflicted set
-// (never -A/./−u), then `git commit --no-edit` (subject pre-seeded).
+// (never -A/./−u), then a --resolve-merge re-run, which concludes it.
 // AC-9(v)(η) asserts the emitted add-step operands equal the emitter-
 // computed conflicted set.
 func resolutionSteps(workdir string, conflicted []string, reentryHint string) string {
@@ -421,8 +426,10 @@ func resolutionSteps(workdir string, conflicted []string, reentryHint string) st
 	fmt.Fprintf(&b, "merge conflict preserved in %s — resolve it:", workdir)
 	fmt.Fprintf(&b, "\n  1. edit the conflicted file(s):\n     %s", strings.Join(escaped, "\n     "))
 	fmt.Fprintf(&b, "\n  2. git add %s", strings.Join(escaped, " "))
-	b.WriteString("\n  3. git commit --no-edit")
-	fmt.Fprintf(&b, "\n  4. re-run %s", reentryHint)
+	// No `git commit` step: re-running with --resolve-merge concludes
+	// the merge (an operator commit on a spec branch is refused by the
+	// pre-commit gate in implement mode).
+	fmt.Fprintf(&b, "\n  3. re-run %s", reentryHint)
 	return b.String()
 }
 
@@ -431,7 +438,26 @@ func resolutionSteps(workdir string, conflicted []string, reentryHint string) st
 // no new merge, no checkout, no abort.
 func stillConflictedRefusal(workdir string, reentryHint string) error {
 	conflicted := gitutil.ConflictedFiles(workdir)
+	if len(conflicted) == 0 {
+		// Staged, but the resolution left conflict markers in.
+		return guard.NewFailure(leftoverMarkerSteps(workdir, gitutil.StagedConflictMarkerFiles(workdir), reentryHint), reentryHint)
+	}
 	return guard.NewFailure(resolutionSteps(workdir, conflicted, reentryHint), reentryHint)
+}
+
+// leftoverMarkerSteps is the refusal for files that are staged but still
+// hold conflict markers the resolution added.
+func leftoverMarkerSteps(workdir string, files []string, reentryHint string) string {
+	escaped := make([]string, len(files))
+	for i, f := range files {
+		escaped[i] = termsafe.Escape(f)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "leftover conflict markers in: %s (merge in %s) — remove them:", strings.Join(escaped, ", "), workdir)
+	fmt.Fprintf(&b, "\n  1. delete the marker lines from:\n     %s", strings.Join(escaped, "\n     "))
+	fmt.Fprintf(&b, "\n  2. git add %s", strings.Join(escaped, " "))
+	fmt.Fprintf(&b, "\n  3. re-run %s", reentryHint)
+	return b.String()
 }
 
 // completeResumedMerge is the R5(d)(iii)/(iv) completion leg: the index
@@ -1115,6 +1141,10 @@ func attemptFreshMerge(workdir string, mergeFn func() error, conflictFailure fun
 		if !gitutil.MergeInProgress(workdir) {
 			return worktreeStateRefusal(workdir, blockingPaths(workdir), mergeErr)
 		}
+		// Record git's own conflicted-path list while it still exists, so
+		// --resolve-merge later scans exactly those files for leftover
+		// markers. Best effort: without it, every staged path is scanned.
+		_ = gitutil.RecordMergeConflicts(workdir)
 		return conflictFailure(mergeErr)
 	}
 	return nil

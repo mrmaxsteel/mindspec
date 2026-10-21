@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -389,6 +390,7 @@ func AbortMerge(workdir string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("aborting merge in %s: %s", workdir, strings.TrimSpace(string(out)))
 	}
+	ClearMergeConflictRecord(workdir)
 	return nil
 }
 
@@ -951,12 +953,233 @@ func CommitAll(workdir, message string) error {
 // survives unchanged, which is the identity mechanism the R5(d) re-entry
 // surface depends on (spec 125's parseMergeSubjectBeadBranch), not a
 // courtesy.
+//
+// This commit concludes a merge the tool itself started, so mindspec's
+// own pre-commit gate (which blocks spec-branch and protected-branch
+// commits in implement mode) must not refuse it. The gate's escape is
+// set on this one subprocess only. No `--no-verify`: the user's own
+// pre-commit and commit-msg hooks still run on the hand-resolved
+// content.
 func CommitNoEdit(workdir string) error {
 	cmd := execCommand("git", "-C", workdir, "commit", "--no-edit")
+	cmd.Env = append(os.Environ(), "MINDSPEC_ALLOW_MAIN=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing (--no-edit) in %s: %s", workdir, escapeLines(strings.TrimSpace(string(out))))
 	}
+	ClearMergeConflictRecord(workdir)
 	return nil
+}
+
+// StagedConflictMarkerFiles lists the files that the merge resolution
+// left conflict markers in. A file resolved by `git add` with its
+// markers still in it has no unmerged index entry, so ConflictedFiles
+// misses it.
+//
+// Git does the marker detection. The files scanned are the ones git
+// reported as conflicted when the merge stopped (RecordMergeConflicts),
+// so a file changed by one side only (for example a Markdown file with a
+// '=======' setext underline) is never scanned. If that record is
+// missing, unreadable, or belongs to another merge, every path staged
+// against HEAD is scanned. For each file,
+// `git diff --cached --check HEAD` reports leftover marker lines; it
+// honors the conflict-marker-size attribute and CRLF endings.
+func StagedConflictMarkerFiles(workdir string) []string {
+	candidates, ok := MergeConflictRecord(workdir)
+	if !ok {
+		out, err := markerGit(workdir, "diff", "--cached", "--name-only", "-z", "--no-renames", "HEAD", "--")
+		if err != nil {
+			return nil
+		}
+		candidates = splitNUL(out)
+	}
+	var files []string
+	for _, path := range candidates {
+		lines := leftoverMarkerLines(workdir, path)
+		if len(lines) == 0 {
+			continue
+		}
+		staged, err := markerGit(workdir, "show", ":"+path)
+		if err != nil {
+			// Cannot read the staged content: fail closed.
+			files = append(files, path)
+			continue
+		}
+		content := strings.Split(string(staged), "\n")
+		// A file is flagged only if a reported line starts with '<' or
+		// '>': a lone `=======` or `|||||||` line is not a conflict block.
+		// Marker lines already committed in a parent are earlier damage,
+		// not leftovers of this merge, and are out of scope.
+		for _, n := range lines {
+			if n >= 1 && n <= len(content) {
+				if l := content[n-1]; strings.HasPrefix(l, "<") || strings.HasPrefix(l, ">") {
+					files = append(files, path)
+					break
+				}
+			}
+		}
+	}
+	return files
+}
+
+// mergeConflictRecordName is the file, in the worktree's git dir, that
+// holds the paths a mindspec-started merge stopped with as conflicted.
+const mergeConflictRecordName = "MINDSPEC_MERGE_CONFLICTS"
+
+func mergeConflictRecordPath(workdir string) (string, error) {
+	out, err := markerGit(workdir, "rev-parse", "--git-path", mergeConflictRecordName)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s path in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workdir, path)
+	}
+	return path, nil
+}
+
+// RecordMergeConflicts saves the unmerged paths of the merge in progress
+// in workdir, while git still has them. The header line is
+// "<MERGE_HEAD sha> <HEAD sha>"; the paths follow, each ended by NUL.
+// The record applies only while both SHAs match: a rerun of the same
+// merge from the same HEAD gives git the same conflict set, so a match
+// is safe. No record is written when git reports no unmerged path, so a
+// valid record is never empty.
+func RecordMergeConflicts(workdir string) error {
+	ClearMergeConflictRecord(workdir)
+	mergeHead, head, err := mergeConflictRecordHeads(workdir)
+	if err != nil {
+		return err
+	}
+	out, err := markerGit(workdir, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return fmt.Errorf("listing unmerged paths in %s: %w", workdir, err)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	path, err := mergeConflictRecordPath(workdir)
+	if err != nil {
+		return err
+	}
+	// Write a temp file in the same git dir, then rename it into place,
+	// so a crash never leaves a cut-off record that still parses.
+	tmp, err := os.CreateTemp(filepath.Dir(path), mergeConflictRecordName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	data := append([]byte(mergeHead+" "+head+"\n"), out...)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing %s in %s: %w", mergeConflictRecordName, workdir, err)
+	}
+	return nil
+}
+
+func mergeConflictRecordHeads(workdir string) (mergeHead, head string, err error) {
+	if mergeHead, err = RevParseRef(workdir, "MERGE_HEAD"); err != nil {
+		return "", "", err
+	}
+	if head, err = RevParseRef(workdir, "HEAD"); err != nil {
+		return "", "", err
+	}
+	return mergeHead, head, nil
+}
+
+// ClearMergeConflictRecord removes the conflict record, if any.
+func ClearMergeConflictRecord(workdir string) {
+	if path, err := mergeConflictRecordPath(workdir); err == nil {
+		_ = os.Remove(path)
+	}
+}
+
+// MergeConflictRecord returns the recorded conflicted paths. ok is false
+// if the record is missing or unreadable, if its MERGE_HEAD or HEAD is
+// not the current one, or if it is malformed in any way: a header
+// without exactly two SHAs, no paths, an empty path, or no NUL after
+// the last path (a truncated record).
+// Limit: after a raw abort, a hand re-merge of the same tip from the same
+// HEAD with other merge options can reuse the record; that is out of scope.
+func MergeConflictRecord(workdir string) (paths []string, ok bool) {
+	path, err := mergeConflictRecordPath(workdir)
+	if err != nil {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	header, rest, found := strings.Cut(string(data), "\n")
+	if !found || rest == "" || !strings.HasSuffix(rest, "\x00") {
+		return nil, false
+	}
+	shas := strings.Split(header, " ")
+	if len(shas) != 2 {
+		return nil, false
+	}
+	mergeHead, head, err := mergeConflictRecordHeads(workdir)
+	if err != nil || shas[0] != mergeHead || shas[1] != head {
+		return nil, false
+	}
+	for _, p := range strings.Split(strings.TrimSuffix(rest, "\x00"), "\x00") {
+		if p == "" {
+			return nil, false
+		}
+		paths = append(paths, p)
+	}
+	return paths, true
+}
+
+// leftoverMarkerLines runs `git diff --cached --check HEAD` on one path
+// and returns the staged line numbers git reports as leftover conflict
+// markers. Whitespace problems are ignored. One path per call, so the
+// path never has to be parsed back out of the output.
+func leftoverMarkerLines(workdir, path string) []int {
+	// Exit status 2 only means problems were found; the output is valid.
+	out, _ := markerGit(workdir, "diff", "--cached", "--check", "--no-ext-diff", "HEAD", "--", path)
+	const marker = ": leftover conflict marker"
+	var lines []int
+	for _, line := range strings.Split(string(out), "\n") {
+		i := strings.LastIndex(line, marker)
+		if i < 0 {
+			continue
+		}
+		loc := line[:i] // "<path>:<line>"
+		j := strings.LastIndex(loc, ":")
+		if j < 0 {
+			continue
+		}
+		if n, err := strconv.Atoi(loc[j+1:]); err == nil {
+			lines = append(lines, n)
+		}
+	}
+	return lines
+}
+
+// markerGit runs one git command for the conflict-marker check, with
+// literal pathspecs so a path is never read as pathspec magic.
+func markerGit(workdir string, args ...string) ([]byte, error) {
+	full := append([]string{"--literal-pathspecs"}, args...)
+	cmd := execCommand("git", gitArgs(workdir, full...)...)
+	return cmd.Output()
+}
+
+func splitNUL(b []byte) []string {
+	var out []string
+	for _, p := range strings.Split(string(b), "\x00") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // TreeSHA resolves ref's tree object SHA in workdir (`git rev-parse

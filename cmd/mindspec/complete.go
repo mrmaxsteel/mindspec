@@ -13,7 +13,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 	"github.com/spf13/cobra"
@@ -140,11 +142,53 @@ The bead ID is required as the first argument.`,
 			AllowNetDeletion: allowNetDeletion,
 			ResolveMerge:     resolveMerge,
 		})
-		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, emitInstruct) != nil {
+		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, completeInstructFn(result)) != nil {
 			os.Exit(1)
 		}
 		return nil
 	},
+}
+
+// completeInstructFn picks the instruct tail for complete. Run moves
+// this process to the repo root, so the tail must never derive bead or
+// worktree context from the process cwd (that read claimed "main
+// worktree" and could name a peer's bead worktree).
+func completeInstructFn(result *complete.Result) func(string) error {
+	if result == nil {
+		return emitInstruct
+	}
+	return func(root string) error { return emitCompleteTail(root, result) }
+}
+
+// resolveContextFromDirFn is a test seam for emitCompleteTail.
+var resolveContextFromDirFn = phase.ResolveContextFromDir
+
+// completeTailDir returns the directory the post-complete tail resolves
+// context from, or ok=false for no tail. Implement mode prints no tail:
+// the summary already carries the next-bead line, cd, and STOP guidance,
+// and implement guidance would tell the agent to claim a bead.
+func completeTailDir(r *complete.Result) (dir string, ok bool) {
+	if r == nil || r.NextMode == state.ModeImplement || r.SpecWorktree == "" {
+		return "", false
+	}
+	if fi, err := os.Stat(r.SpecWorktree); err != nil || !fi.IsDir() {
+		return "", false
+	}
+	return r.SpecWorktree, true
+}
+
+// emitCompleteTail renders plan/review guidance resolved from the spec
+// worktree, never the process cwd, and with no worktree redirect.
+func emitCompleteTail(root string, r *complete.Result) error {
+	dir, ok := completeTailDir(r)
+	if !ok {
+		return nil
+	}
+	ctx, _ := resolveContextFromDirFn(root, dir)
+	if ctx != nil && ctx.Phase == state.ModeImplement {
+		return nil
+	}
+	return renderInstructTail(root, ctx, false)
 }
 
 // completeOutput preserves the normal tail after a completed merge even when

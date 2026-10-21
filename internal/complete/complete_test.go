@@ -1622,6 +1622,44 @@ func TestFormatResult_Implement(t *testing.T) {
 	}
 }
 
+// TestFormatResult_Implement_NextBeadPresenceDrivesLines pins both
+// implement-mode renderings: a ready bead prints its ID and the claim
+// instruction; no ready bead (advanceState's empty-ID implement return)
+// prints an honest no-ready line and never an empty "Next bead ready:"
+// line or a claim instruction.
+func TestFormatResult_Implement_NextBeadPresenceDrivesLines(t *testing.T) {
+	ready := FormatResult(&Result{
+		BeadID: "bead-1", BeadClosed: true,
+		NextMode: state.ModeImplement, NextBead: "bead-2", NextSpec: "008-test",
+	})
+	if !strings.Contains(ready, "Next bead ready: bead-2\n") {
+		t.Errorf("ready case must name the next bead; got:\n%s", ready)
+	}
+	if strings.Contains(ready, "No bead is ready now.") {
+		t.Errorf("ready case must not print the no-ready line; got:\n%s", ready)
+	}
+
+	none := FormatResult(&Result{
+		BeadID: "bead-1", BeadClosed: true,
+		NextMode: state.ModeImplement, NextBead: "", NextSpec: "008-test",
+	})
+	if strings.Contains(none, "Next bead ready:") {
+		t.Errorf("empty next bead must not print a \"Next bead ready:\" line; got:\n%s", none)
+	}
+	if !strings.Contains(none, "No bead is ready now.\n") {
+		t.Errorf("empty next bead must print the no-ready line; got:\n%s", none)
+	}
+	if !strings.Contains(none, "Mode: implement (spec: 008-test)") {
+		t.Errorf("empty next bead must still report implement mode; got:\n%s", none)
+	}
+	if strings.Contains(none, "then `mindspec next` to continue") {
+		t.Errorf("empty next bead must not tell the user to claim the next bead now; got:\n%s", none)
+	}
+	if !strings.Contains(none, "Do NOT claim a bead now.") || !strings.Contains(none, "run `mindspec next` once a bead is ready.") {
+		t.Errorf("empty next bead must print the neutral stop guidance; got:\n%s", none)
+	}
+}
+
 func TestFormatResult_Review(t *testing.T) {
 	r := &Result{
 		BeadID:     "bead-last",
