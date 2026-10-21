@@ -477,6 +477,9 @@ func TestUnlistedPlanPaths_CreateStepWithLaterUnchangedWarns(t *testing.T) {
 // TestValidatePlan_LongSentenceIsFast pins that the check is linear in
 // the length of a sentence: one sentence of about 300 KB with many code
 // spans, interleaved paths and a long run of paths validates fast.
+// The bound is 20 s because it has to absorb -race and coverage
+// instrumentation on CI runners; the quadratic implementation takes well
+// over a minute on this input, so the bound still catches a regression.
 func TestValidatePlan_LongSentenceIsFast(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("\nEdit `internal/q/a.go` ")
@@ -501,8 +504,8 @@ func TestValidatePlan_LongSentenceIsFast(t *testing.T) {
 	}
 	start := time.Now()
 	r := ValidatePlan(root, "999-test")
-	if d := time.Since(start); d > 2*time.Second {
-		t.Fatalf("ValidatePlan on a %d-byte sentence took %v, want well under 2s", b.Len(), d)
+	if d := time.Since(start); d > 20*time.Second {
+		t.Fatalf("ValidatePlan on a %d-byte sentence took %v, want under 20s (linear check; quadratic takes over a minute)", b.Len(), d)
 	}
 	if r.HasFailures() {
 		t.Fatalf("want no failure, got %+v", r.Issues)
