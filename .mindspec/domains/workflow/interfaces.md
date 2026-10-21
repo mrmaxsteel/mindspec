@@ -2,6 +2,24 @@
 
 ## Provided Interfaces
 
+### Doctor status and merge state
+
+`doctor.Info` renders as `[INFO]`. `Report.HasFailures` counts only Error
+and Missing. `Report.Fix` never runs an Info fix function.
+
+| Lifecycle function | Contract |
+|:-------------------|:---------|
+| `FindNamingMerges(root, specBranch, beadID)` | Returns two-parent naming merges on the first-parent chain, newest first. It does not check content or the bead tip. |
+| `CheckMergePresence(root, specBranch, specDir, merge)` | Returns changed paths, reverted paths and later commits that changed reverted paths. It runs independently of bead branch survival. |
+| `FindValidMerge(root, specBranch, beadID)` | Requires one naming merge, an exact second-parent match to the current bead tip, and no reverted path. Nil with no error means no valid merge. |
+| `MergeRestoreOutcome(specWorktree, specDir)` | Reads status. Tool artifacts do not count as user changes. A clean checkout returns `DestructionClean`; read errors return `DestructionEvidenceError`; user changes return `DestructionStaleDeletion`. |
+| `RestoreMergeRecovery(specWorktree, beadID, epicID, merge, presence, outcome)` | Builds restore and follow-up guidance. Only `DestructionClean` permits the path-scoped checkout choice. The choice uses the destructive command constructor. |
+
+`ScanIntegrityFindings` returns valid merges in `StaleOpen`, with
+`ValidMerge: true`. Doctor renders these at Info with no `FixFunc`.
+`RevertedMerges` holds open beads with reverted paths. Doctor renders these
+at Error with no `FixFunc`. These beads do not also appear in `StaleOpen`.
+
 ### Phase Derivation (ADR-0023)
 
 ```go

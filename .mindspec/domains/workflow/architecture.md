@@ -432,6 +432,29 @@ epic close, NO phase write, NO merge, NO push on a refusal.
 
 ### `mindspec doctor` + `mindspec next`: shared lifecycle-divergence predicates
 
+Doctor uses git state to classify an open bead after a naming merge.
+One first-parent naming merge must have the current bead tip as its second
+parent. Its changes must remain present at the spec tip. This state gives
+Info and a `mindspec complete <bead>` recovery. The finding has no fix
+function. The operator verifies the merge before closing the bead.
+Metadata markers do not change severity. Other stale-open findings stay Error.
+
+The presence check lists both sides of renames. It excludes tool artifacts.
+A path is reverted when its content equals the content before the merge,
+including absence for an added path. A later naming merge for another bead
+exempts the paths it changes. Other later edits do not count as reverts.
+An open bead with a reverted path gets one Error with restore guidance.
+It gets no stale-open finding and no automatic fix. Closed beads get no
+reverted-merge finding.
+
+Restore guidance lists later first-parent commits that changed the reverted
+paths, newest first. It shows full commit IDs and escaped subjects. It warns
+that a revert affects the whole commit. A clean spec checkout also permits
+a path-scoped restore through `guard.NewDestructiveCommand`. User changes
+or a status read error remove that choice. The remaining recovery restores
+the merge, closes the bead after verification, and puts rejected work in a
+follow-up bead.
+
 `internal/lifecycle.FindOrphanedClosedBeads`/`ScanOrphanedClosedBeads`/
 `StaleOpenBeads`/`FindLandedMerge`/`MergedUnclosed` are the single-sourced
 predicates `mindspec complete`, `mindspec impl approve`, `mindspec next`,
@@ -441,8 +464,8 @@ whose Dolt status disagrees with its landed-merge git evidence, reads the
 same way from every surface. `internal/doctor`'s `stale_open.go` and
 `finalize_orphans.go` wire these predicates into `mindspec doctor`'s CI
 mode (`--ci`, `SkipLocalEnv`) — now gated in `.github/workflows/ci.yml` —
-so a lifecycle divergence fails CI the same way a stale-schema drift
-already did.
+so Error and Missing lifecycle findings fail CI. Info and Warn findings
+do not change the exit code.
 
 ### Fault-injection regression suite (spec 119 Bead 6, AC-26)
 

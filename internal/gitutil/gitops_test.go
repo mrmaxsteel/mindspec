@@ -5,12 +5,103 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
+
+func TestDiffNameOnlyNoRenames_RenameListsBothPaths(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("same\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "a")
+	runGit(t, dir, "commit", "-m", "before rename")
+	base := runGitOut(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "mv", "a", "b")
+	runGit(t, dir, "commit", "-m", "rename")
+	paths, err := DiffNameOnlyNoRenames(dir, base, "HEAD")
+	if err != nil || !reflect.DeepEqual(paths, []string{"a", "b"}) {
+		t.Fatalf("rename paths = %q, %v", paths, err)
+	}
+}
+
+func TestDiffNameOnlyNoRenames_NULSeparated(t *testing.T) {
+	calls := swapMergeStateExec(t, "space name\x00line\nbreak\x00tab\tname\x00quote\"name\x00", 0)
+	paths, err := DiffNameOnlyNoRenames("/repo", "base", "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"space name", "line\nbreak", "tab\tname", "quote\"name"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("paths = %q, want %q", paths, want)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/repo", "diff", "--no-renames", "--name-only", "-z", "base", "head", "--")
+}
+
+func TestMergeStateGitReads(t *testing.T) {
+	t.Run("later commits", func(t *testing.T) {
+		calls := swapMergeStateExec(t, "new\x00first second\x00subject\nold\x00parent\x00older\n", 0)
+		commits, err := FirstParentCommitsAfter("/repo", "base", "head")
+		if err != nil || len(commits) != 2 || commits[0].Subject != "subject" || len(commits[0].Parents) != 2 {
+			t.Fatalf("commits = %+v, %v", commits, err)
+		}
+		assertArgs(t, (*calls)[0].args, "-C", "/repo", "log", "--first-parent", "--topo-order", "--format=%H%x00%P%x00%s", "base..head", "--")
+	})
+	t.Run("path entry", func(t *testing.T) {
+		calls := swapMergeStateExec(t, "100644 blob oid\ta\x00", 0)
+		entry, err := TreePathEntry("/repo", "ref", "a")
+		if err != nil || string(entry) != "100644 blob oid\ta\x00" {
+			t.Fatalf("entry = %q, %v", entry, err)
+		}
+		assertArgs(t, (*calls)[0].args, "-C", "/repo", "ls-tree", "-z", "--full-tree", "ref", "--", "a")
+	})
+	t.Run("worktree path", func(t *testing.T) {
+		swapMergeStateExec(t, "worktree /main\x00HEAD abc\x00branch refs/heads/main\x00\x00worktree /spec path\x00HEAD def\x00branch refs/heads/spec/132-test\x00\x00", 0)
+		wt, err := WorktreeForBranch("/repo", "spec/132-test")
+		if err != nil || wt != "/spec path" {
+			t.Fatalf("worktree = %q, %v", wt, err)
+		}
+	})
+	t.Run("errors", func(t *testing.T) {
+		swapExec(t, "failure", 1)
+		if _, err := DiffNameOnlyNoRenames("/repo", "base", "head"); err == nil {
+			t.Error("diff read must fail")
+		}
+		if _, err := FirstParentCommitsAfter("/repo", "base", "head"); err == nil {
+			t.Error("commit read must fail")
+		}
+		if _, err := TreePathEntry("/repo", "head", "a"); err == nil {
+			t.Error("tree read must fail")
+		}
+		if _, err := WorktreeForBranch("/repo", "spec/132-test"); err == nil {
+			t.Error("worktree read must fail")
+		}
+	})
+}
+
+// The output file preserves NUL bytes without putting them in process argv.
+func swapMergeStateExec(t *testing.T, stdout string, exitCode int) *[]capturedCall {
+	t.Helper()
+	fixture := filepath.Join(t.TempDir(), "stdout")
+	if err := os.WriteFile(fixture, []byte(stdout), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := &[]capturedCall{}
+	original := execCommand
+	t.Cleanup(func() { execCommand = original })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cmd := exec.Command("/bin/sh", "-c", "cat \"$1\"; exit \"$2\"", "fake", fixture, itoa(exitCode))
+		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...), cmd: cmd})
+		return cmd
+	}
+	return calls
+}
 
 // TestRevParseRef_DistinguishesAbsentFromTransient pins the round-2 hardening
 // (Spec 093): a genuinely-absent ref returns ErrRefNotFound (exit 1), while a

@@ -1,19 +1,7 @@
-// Spec 119 Bead 2 (R5): the stale-OPEN cross-check — the inverse of
-// FindOrphanedClosedBeads (orphans.go). Where an orphaned-closed bead is
-// Dolt racing AHEAD of git (closed without `mindspec complete`), a
-// stale-OPEN bead is Dolt lagging BEHIND git: the tracker still shows the
-// bead open/in_progress even though its bead/<id> branch has already been
-// merged into the spec branch via the in-binary CompleteBead merge path.
-//
-// Detection reuses Bead 1's exported landed-merge-commit-identity predicate
-// (MergedUnclosed, landed.go) rather than a private reimplementation or any
-// fork-point computation of its own (P8). This is load-bearing for the
-// fresh-claim negative (R5): a freshly claimed bead branch has zero own
-// commits, so `git merge --no-ff` of it is a no-op that produces no merge
-// commit — MergedUnclosed correctly reports false for it BY CONSTRUCTION,
-// even when the spec branch has since advanced past the fork point via
-// OTHER beads' `--no-ff` merges (the round-1 false-flag scenario this
-// predicate must never reproduce).
+// The stale-open cross-check finds open beads whose work has landed.
+// A valid naming merge permits verification before close. Reverted merges
+// need restoration. Other landed evidence retains the existing reconcile
+// finding. A fresh branch with no naming merge gets no finding.
 package lifecycle
 
 import (
@@ -22,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -59,11 +49,12 @@ type StaleOpenBead struct {
 	SpecBranch string
 	// LandedSHA is the identified bead->spec merge commit.
 	LandedSHA string
+	// ValidMerge means git proves one naming merge at the current bead tip
+	// with its changes still present. The operator must verify before close.
+	ValidMerge bool
 }
 
-// RecoveryCommand names the forward re-invocation that clears the stale
-// state (ADR-0035 recovery-line convention): re-running `mindspec complete`
-// converges Dolt to the already-landed state.
+// RecoveryCommand names completion after the operator verifies the merge.
 func (s StaleOpenBead) RecoveryCommand() string {
 	// R4: BeadID is an ID-typed position — idrender.Bead.
 	return "mindspec complete " + idrender.Bead(s.BeadID)
@@ -79,6 +70,9 @@ func (s StaleOpenBead) RecoveryCommand() string {
 // stays RAW; LandedSHA is a git-produced hex commit SHA, not agent-writable
 // free text.
 func (s StaleOpenBead) Message() string {
+	if s.ValidMerge {
+		return guard.FormatFailure(fmt.Sprintf("bead %s remains open after valid merge %s on %s. Verify the merged work before you close the bead.", idrender.Bead(s.BeadID), s.LandedSHA, s.SpecBranch), s.RecoveryCommand())
+	}
 	return fmt.Sprintf(
 		"bead %s is OPEN/in_progress in the tracker but its work already landed as merge %s on %s — the tracker never converged. Run `%s` to recover.",
 		idrender.Bead(s.BeadID), s.LandedSHA, s.SpecBranch, s.RecoveryCommand(),
@@ -88,16 +82,12 @@ func (s StaleOpenBead) Message() string {
 // FindStaleOpenBeads scans specID's epic for OPEN/in_progress beads whose
 // work already landed on the spec branch (Spec 119 R5, Bead 2 Step 1).
 //
-// A bead is flagged iff MergedUnclosed(workdir, specBranch, beadID)
-// positively reports merged-unclosed: Bead 1's FindLandedMerge predicate
-// identifies a landed bead->spec merge commit AND — when bead/<id> still
-// exists — it carries no unlanded commits on top (IsAncestor holds against
-// the spec branch's CURRENT tip). This is the exact same reconcile-
-// eligibility state `mindspec complete`'s forward reconcile path consumes,
-// so the doctor/instruct check and the gate can never disagree.
+// A valid merge sets ValidMerge. Otherwise MergedUnclosed supplies the
+// existing reconcile evidence. Reverted merges do not enter this list;
+// ScanIntegrityFindings reports them in RevertedMerges.
 //
 // Detection is best-effort and read-only, mirroring FindOrphanedClosedBeads:
-// an absent epic, a `bd` failure, or a per-bead MergedUnclosed error yields
+// an absent epic, a tracker failure, or a per-bead git read error yields
 // fewer findings rather than a hard error, so a transient infra problem
 // never masks `mindspec doctor`'s other checks.
 func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
@@ -125,21 +115,69 @@ func FindStaleOpenBeads(specID, workdir string) ([]StaleOpenBead, error) {
 	return staleOpenLanded(workdir, specID, ids), nil
 }
 
-// staleOpenLanded is the pure classification core shared by
-// FindStaleOpenBeads and ScanIntegrityFindings (spec 119 final-review F1):
-// given the ALREADY-ENUMERATED open/in_progress bead IDs of specID's epic,
-// it runs MergedUnclosed per bead — no bd calls of its own — and returns
-// the beads whose work provably landed. Best-effort: an ancestry/read
-// error on one bead must not abort the scan for the rest.
+// staleOpenLanded returns the stale-open subset of the shared classifier.
+// The aggregate scan also uses its reverted-merge findings.
 func staleOpenLanded(workdir, specID string, beadIDs []string) []StaleOpenBead {
+	stale, _ := openMergeFindings(workdir, specID, "", beadIDs)
+	return stale
+}
+
+// RevertedMergeBead is an open bead whose naming merge lost one or more
+// changed paths. Message contains the read-only restore guidance.
+type RevertedMergeBead struct {
+	BeadID  string
+	Message string
+}
+
+// openMergeFindings classifies the open enumeration once. Reverted beads
+// never enter the stale-open list. No marker metadata affects severity.
+func openMergeFindings(workdir, specID, epicID string, beadIDs []string) ([]StaleOpenBead, []RevertedMergeBead) {
 	specBranch, err := workspace.SpecBranch(specID)
 	if err != nil {
 		// Best-effort ambient scan: an invalid specID yields no findings
 		// rather than a hard error (ADR-0042 degrade-vs-error policy).
-		return nil
+		return nil, nil
 	}
 	var out []StaleOpenBead
+	var reverted []RevertedMergeBead
 	for _, id := range beadIDs {
+		merges, err := FindNamingMerges(workdir, specBranch, id)
+		if err == nil && len(merges) > 0 {
+			specDir, dirErr := mergeSpecDir(workdir, specBranch)
+			if dirErr != nil {
+				continue
+			}
+			m := namingMergeIdentity(merges[0])
+			presence, presenceErr := CheckMergePresence(workdir, specBranch, specDir, m)
+			if presenceErr != nil {
+				continue
+			}
+			if len(presence.RevertedPaths) > 0 {
+				wt, wtErr := gitutil.WorktreeForBranch(workdir, specBranch)
+				outcome := guard.DestructionEvidenceError
+				if wtErr == nil && wt != "" {
+					outcome = MergeRestoreOutcome(wt, specDir)
+				}
+				if wt == "" {
+					wt = "<spec worktree>"
+				}
+				parent := epicID
+				if parent == "" {
+					parent = "<epic>"
+				}
+				message, recoveryErr := RestoreMergeRecovery(wt, id, parent, m, presence, outcome)
+				if recoveryErr != nil {
+					continue
+				}
+				reverted = append(reverted, RevertedMergeBead{BeadID: id, Message: message})
+				continue
+			}
+			valid, validErr := FindValidMerge(workdir, specBranch, id)
+			if validErr == nil && valid != nil {
+				out = append(out, StaleOpenBead{BeadID: id, SpecBranch: specBranch, LandedSHA: valid.SHA, ValidMerge: true})
+				continue
+			}
+		}
 		landed, ok, mErr := MergedUnclosed(workdir, specBranch, id)
 		if mErr != nil || !ok {
 			continue
@@ -150,5 +188,5 @@ func staleOpenLanded(workdir, specID string, beadIDs []string) []StaleOpenBead {
 			LandedSHA:  landed.SHA,
 		})
 	}
-	return out
+	return out, reverted
 }

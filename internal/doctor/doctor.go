@@ -11,6 +11,7 @@ const (
 	Error          // something is wrong and needs action
 	Warn           // advisory, not a failure
 	Fixed          // was broken, auto-repaired by --fix
+	Info           // information only; never auto-repaired
 )
 
 // Check represents a single health check result.

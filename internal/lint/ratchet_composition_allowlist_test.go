@@ -9,6 +9,9 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/lifecycle/merge_state.go FindNamingMerges workspace.BeadBranch":                                           {Count: 1, Gate: "waist: BeadBranch validates the bead ID before the merge scan"},
+	"internal/lifecycle/merge_state.go FindValidMerge workspace.BeadBranch":                                             {Count: 1, Gate: "waist: BeadBranch validates the bead ID before tip resolution"},
+	"internal/lifecycle/merge_state.go mergeSpecDir workspace.SpecDir":                                                  {Count: 1, Gate: "waist: SpecDir validates the spec ID before path composition"},
 	"internal/approve/impl.go implPanelDeferralPreflight workspace.SpecDir":                                             {Count: 1, Gate: "waist: SpecDir validates specID and fails closed before the plan path is composed; ApproveImpl validates specID at ingress"},
 	"cmd/mindspec/panel_refute.go panelAcceptanceExists workspace.SpecDir":                                              {Count: 1, Gate: "waist: SpecDir validates the recorded owning spec id before path composition; errors refuse the acceptance-scope refutation"},
 	"internal/complete/panel_ledger.go SpecLedgerPaths workspace.SpecDir":                                               {Count: 1, Gate: "waist: SpecDir validates specID before any path composition and returns an error on malformed IDs (spec 130 R6.6); callers also validate at Run/ApproveImpl ingress"},
@@ -84,7 +87,7 @@ var compositionCallAllowlist = map[string]compEntry{
 	"internal/lifecycle/orphans.go IsBeadSelfOrphaned workspace.SpecBranch":                                             {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"internal/lifecycle/orphans.go ScanOrphanedClosedBeads workspace.BeadBranch":                                        {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"internal/lifecycle/orphans.go ScanOrphanedClosedBeads workspace.SpecBranch":                                        {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
-	"internal/lifecycle/stale_open.go staleOpenLanded workspace.SpecBranch":                                             {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
+	"internal/lifecycle/stale_open.go openMergeFindings workspace.SpecBranch":                                           {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"internal/next/ready_gate.go GateReadiness workspace.SpecBranch":                                                    {Count: 1, Gate: "waist: helper validates lineage-derived spec ID before git preflight (spec 129 R1.8)"},
 	"internal/next/planread.go readPlanForSpec workspace.SpecDir":                                                       {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"internal/next/planread.go readPlanForSpec workspace.SpecBranch":                                                    {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},

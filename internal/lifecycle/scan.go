@@ -49,6 +49,8 @@ type IntegrityFindings struct {
 	// StaleOpen are open/in_progress beads whose work already landed as a
 	// bead→spec merge (the tracker never converged).
 	StaleOpen []StaleOpenBead
+	// RevertedMerges are open beads whose naming merge lost changed paths.
+	RevertedMerges []RevertedMergeBead
 	// StaleTrackers are live-closed epics whose committed status on main
 	// is still non-terminal (Kind == "stale_tracker").
 	StaleTrackers []FinalizeOrphan
@@ -111,6 +113,7 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 	// a semantic filter; a stale-OPEN child must surface even under a
 	// closed epic).
 	epicSpec := make(map[string]string, len(epics))
+	specEpic := make(map[string]string, len(epics))
 
 	for _, epic := range epics {
 		num, title := phase.ExtractSpecMetadata(epic)
@@ -124,6 +127,7 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 			continue
 		}
 		epicSpec[epic.ID] = specID
+		specEpic[specID] = epic.ID
 
 		if strings.ToLower(strings.TrimSpace(epic.Status)) == "closed" {
 			if committed == nil {
@@ -170,7 +174,9 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 			bySpec[specID] = append(bySpec[specID], id)
 		}
 		for _, specID := range specOrder {
-			out.StaleOpen = append(out.StaleOpen, staleOpenLanded(root, specID, bySpec[specID])...)
+			stale, reverted := openMergeFindings(root, specID, specEpic[specID], bySpec[specID])
+			out.StaleOpen = append(out.StaleOpen, stale...)
+			out.RevertedMerges = append(out.RevertedMerges, reverted...)
 		}
 	}
 	return out

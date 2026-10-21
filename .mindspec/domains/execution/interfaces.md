@@ -72,6 +72,16 @@ Low-level git operations used by `MindspecExecutor`; `internal/next` also consum
 
 ### Landed-merge identity primitives (spec 125, ADR-0041 §2(ii))
 
+The merge-state reader also uses these read-only helpers in
+`internal/gitutil/gitops.go`:
+
+| Function | Contract |
+|:---------|:---------|
+| `DiffNameOnlyNoRenames(workdir, base, head)` | Runs `git diff --no-renames --name-only -z`. Returns both sides of a rename. Splits on NUL to preserve path bytes. |
+| `FirstParentCommitsAfter(workdir, base, head)` | Returns later commits on the first-parent chain, newest first, with full IDs, parents and subjects. |
+| `TreePathEntry(workdir, ref, path)` | Reads the path's mode, type and object ID. An empty result means absence. A read failure returns an error. |
+| `WorktreeForBranch(workdir, branch)` | Finds the branch checkout from NUL-separated worktree records. Returns an empty path when no checkout exists. |
+
 Unlike the executor-only helpers above, these two are ALSO consumed by
 the workflow domain's landed-merge read side
 (`internal/lifecycle.FindLandedMerge` / `ReattestLandedMerge`) — they
