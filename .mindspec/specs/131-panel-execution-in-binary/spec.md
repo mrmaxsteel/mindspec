@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-10-21T13:10:40Z"
+approved_by: user
+status: Approved
 ---
 # Spec 131-panel-execution-in-binary: Panel Execution In Binary
 
@@ -637,7 +637,7 @@ Each amendment is an appended `## Amendment (Spec 131)` section. It lands with t
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: user
+- **Approval Date**: 2026-10-21
+- **Notes**: Approved via mindspec approve spec
