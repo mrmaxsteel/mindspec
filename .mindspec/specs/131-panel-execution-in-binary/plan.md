@@ -1,192 +1,224 @@
 ---
-status: Draft
-spec_id: 131-panel-execution-in-binary
-version: "1"
 adr_citations:
-  - ADR-0045
-  - ADR-0044
-  - ADR-0037
-  - ADR-0043
-  - ADR-0040
-  - ADR-0036
-  - ADR-0030
-  - ADR-0035
+    - ADR-0045
+    - ADR-0044
+    - ADR-0037
+    - ADR-0043
+    - ADR-0040
+    - ADR-0036
+    - ADR-0030
+    - ADR-0035
+approved_at: "2026-10-21T15:06:34Z"
+approved_by: user
+bead_ids:
+    - mindspec-zadp.1
+    - mindspec-zadp.2
+    - mindspec-zadp.3
+    - mindspec-zadp.4
+    - mindspec-zadp.5
+    - mindspec-zadp.6
+    - mindspec-zadp.7
+    - mindspec-zadp.8
+    - mindspec-zadp.9
+spec_id: 131-panel-execution-in-binary
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - internal/config/config.go
-      - internal/config/runners.go
-      - internal/config/lenses.go
-      - internal/config/local.go
-      - internal/config/review_tools.yaml
-      - internal/config/family_literals_test.go
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - cmd/mindspec/config.go
-      - internal/bootstrap/bootstrap.go
-      - internal/redact/redact.go
-      - internal/config/config_test.go
-      - cmd/mindspec/config_test.go
-      - cmd/mindspec/ceremony_guard_test.go
-      - cmd/mindspec/panel_create_round_test.go
-      - internal/setup/review_discipline_test.go
-      - .mindspec/config.yaml
-      - .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md
-  - id: 2
-    depends_on: []
-    key_file_paths:
-      - internal/rules/rules.yaml
-      - internal/rules/rules.go
-      - cmd/mindspec/rules.go
-      - internal/instruct/instruct.go
-      - plugins/mindspec/skills/ms-bead-impl/SKILL.md
-      - .claude/skills/ms-bead-impl/SKILL.md
-      - internal/setup/readiness_skill_pin_test.go
-      - internal/setup/review_discipline_test.go
-      - internal/setup/product_surface_test.go
-      - internal/redact/redact.go
-      - .mindspec/adr/ADR-0044-panel-review-conduct.md
-      - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
-  - id: 3
-    depends_on: []
-    key_file_paths:
-      - internal/panel/panel.go
-      - internal/panel/verdict_v2.go
-      - internal/panel/submit.go
-      - internal/panel/ledger.go
-      - internal/panel/slotlayout.go
-      - internal/panel/slot_lock_logic.go
-      - internal/panel/slot_lock_unix.go
-      - internal/panel/slot_lock_windows.go
-      - internal/panel/paneltest
-      - internal/panel/create_round_test.go
-      - internal/panel/handedit_test.go
-      - internal/panel/ledger_test.go
-      - internal/panel/passrule_test.go
-      - internal/workspace/slotroot.go
-      - cmd/mindspec/root.go
-      - cmd/mindspec/panel_landed.go
-      - cmd/mindspec/panel_schema.go
-      - cmd/mindspec/panel_disposition_store.go
-      - internal/redact/redact.go
-      - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
-  - id: 4
-    depends_on: [1, 2, 3]
-    key_file_paths:
-      - internal/panel/panel.go
-      - internal/panel/gate.go
-      - internal/panel/tally.go
-      - internal/panel/slotstatus.go
-      - internal/panel/create.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_submit.go
-      - cmd/mindspec/panel_refute.go
-      - cmd/mindspec/panel_rebind.go
-      - cmd/mindspec/panel_defer.go
-      - cmd/mindspec/panel_abandon.go
-      - cmd/mindspec/panel_disposition_store.go
-      - cmd/mindspec/panel_disposition_query.go
-      - cmd/mindspec/rules.go
-      - cmd/mindspec/panel_create_integrity_test.go
-      - cmd/mindspec/panel_defer_test.go
-      - cmd/mindspec/panel_rebind_test.go
-      - cmd/mindspec/panel_subject_test.go
-      - cmd/mindspec/panel_test.go
-      - cmd/mindspec/panel_verbs_test.go
-      - internal/complete/panel_deferred_test.go
-      - internal/complete/panel_gate_e2e_test.go
-      - internal/complete/panel_resume_test.go
-      - internal/panel/subject_test.go
-      - internal/panel/create_round_test.go
-      - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
-  - id: 5
-    depends_on: [1, 3]
-    key_file_paths:
-      - cmd/mindspec/panel_checkout.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_abandon.go
-      - cmd/mindspec/git_boundary_test.go
-      - internal/executor/executor.go
-      - internal/executor/mindspec_executor.go
-      - internal/executor/mock.go
-      - internal/panel/panel.go
-      - cmd/mindspec/migrate.go
-      - internal/bootstrap/bootstrap.go
-      - internal/doctor/ownership.go
-      - internal/doctor/links.go
-  - id: 6
-    depends_on: [1, 2, 3]
-    key_file_paths:
-      - internal/panel/brief.go
-      - internal/panel/prompt.go
-      - internal/panel/create.go
-      - internal/panel/create_test.go
-      - cmd/mindspec/panel.go
-      - cmd/mindspec/panel_prompt.go
-      - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
-  - id: 7
-    depends_on: [1, 3, 4, 5, 6]
-    key_file_paths:
-      - internal/panellaunch/launch.go
-      - internal/panellaunch/supervisor_unix.go
-      - internal/panellaunch/launch_windows.go
-      - internal/panellaunch/boundary_test.go
-      - cmd/mindspec/panel_launch.go
-      - cmd/mindspec/panel_recover.go
-      - cmd/mindspec/panel_checkout.go
-      - plugins/mindspec/workflows/ms-panel.js
-      - .claude/workflows/ms-panel.js
-      - plugins/mindspec/workflow_test.go
-      - plugins/mindspec/scripts/codex_verdict_extract.sh
-      - internal/setup/surface_refs_test.go
-      - internal/setup/historical_workflows
-      - internal/setup/upgrade_refresh_workflow_test.go
-  - id: 8
-    depends_on: [1, 2, 3]
-    key_file_paths:
-      - internal/doctor/panel_runners.go
-      - internal/doctor/staged_markers.go
-      - internal/doctor/stale_checkouts.go
-      - internal/doctor/panel_runners_test.go
-      - internal/doctor/doctor.go
-      - internal/doctor/config.go
-      - internal/doctor/config_test.go
-      - internal/doctor/models_commands_test.go
-      - cmd/mindspec/doctor.go
-  - id: 9
-    depends_on: [2, 4, 5, 6]
-    key_file_paths:
-      - plugins/mindspec/skills/ms-panel-run/SKILL.md
-      - plugins/mindspec/skills/ms-panel-tally/SKILL.md
-      - plugins/mindspec/skills/ms-bead-fix/SKILL.md
-      - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
-      - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
-      - plugins/mindspec/skills/ms-bead-impl/SKILL.md
-      - .claude/skills/ms-panel-run/SKILL.md
-      - .claude/skills/ms-panel-tally/SKILL.md
-      - .claude/skills/ms-bead-fix/SKILL.md
-      - .claude/skills/ms-bead-cycle/SKILL.md
-      - .claude/skills/ms-spec-final-review/SKILL.md
-      - .claude/skills/ms-bead-impl/SKILL.md
-      - internal/setup/historical_skills
-      - internal/setup/upgrade_refresh_spec131_test.go
-      - internal/setup/review_discipline_test.go
-      - internal/setup/adhoc_panel_skill_test.go
-      - internal/setup/panel_tally_skill_bead_test.go
-      - internal/setup/panel_skills_test.go
-      - internal/setup/skills_test.go
-      - internal/lint/destructive_guidance_test.go
-      - internal/setup/readiness_skill_pin_test.go
-      - cmd/mindspec/bead_ready_test.go
-      - internal/setup/upgrade_refresh_pre126_test.go
-      - cmd/mindspec/slot_lock_windows_test.go
-      - .mindspec/domains/workflow/interfaces.md
-      - CHANGELOG.md
-      - project-docs/user/guides/review-panels.md
-      - README.md
-      - plugins/mindspec/README.md
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/config/config.go
+        - internal/config/runners.go
+        - internal/config/lenses.go
+        - internal/config/local.go
+        - internal/config/review_tools.yaml
+        - internal/config/family_literals_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - cmd/mindspec/config.go
+        - internal/bootstrap/bootstrap.go
+        - internal/redact/redact.go
+        - internal/config/config_test.go
+        - cmd/mindspec/config_test.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - cmd/mindspec/panel_create_round_test.go
+        - internal/setup/review_discipline_test.go
+        - .mindspec/config.yaml
+        - .mindspec/adr/ADR-0040-orchestration-layering-ratchet.md
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/rules/rules.yaml
+        - internal/rules/rules.go
+        - cmd/mindspec/rules.go
+        - internal/instruct/instruct.go
+        - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+        - .claude/skills/ms-bead-impl/SKILL.md
+        - internal/setup/readiness_skill_pin_test.go
+        - internal/setup/review_discipline_test.go
+        - internal/setup/product_surface_test.go
+        - internal/redact/redact.go
+        - .mindspec/adr/ADR-0044-panel-review-conduct.md
+        - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - internal/panel/panel.go
+        - internal/panel/verdict_v2.go
+        - internal/panel/submit.go
+        - internal/panel/ledger.go
+        - internal/panel/slotlayout.go
+        - internal/panel/slot_lock_logic.go
+        - internal/panel/slot_lock_unix.go
+        - internal/panel/slot_lock_windows.go
+        - internal/panel/paneltest
+        - internal/panel/create_round_test.go
+        - internal/panel/handedit_test.go
+        - internal/panel/ledger_test.go
+        - internal/panel/passrule_test.go
+        - internal/workspace/slotroot.go
+        - cmd/mindspec/root.go
+        - cmd/mindspec/panel_landed.go
+        - cmd/mindspec/panel_schema.go
+        - cmd/mindspec/panel_disposition_store.go
+        - internal/redact/redact.go
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+    - depends_on:
+        - 1
+        - 2
+        - 3
+      id: 4
+      key_file_paths:
+        - internal/panel/panel.go
+        - internal/panel/gate.go
+        - internal/panel/tally.go
+        - internal/panel/slotstatus.go
+        - internal/panel/create.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_submit.go
+        - cmd/mindspec/panel_refute.go
+        - cmd/mindspec/panel_rebind.go
+        - cmd/mindspec/panel_defer.go
+        - cmd/mindspec/panel_abandon.go
+        - cmd/mindspec/panel_disposition_store.go
+        - cmd/mindspec/panel_disposition_query.go
+        - cmd/mindspec/rules.go
+        - cmd/mindspec/panel_create_integrity_test.go
+        - cmd/mindspec/panel_defer_test.go
+        - cmd/mindspec/panel_rebind_test.go
+        - cmd/mindspec/panel_subject_test.go
+        - cmd/mindspec/panel_test.go
+        - cmd/mindspec/panel_verbs_test.go
+        - internal/complete/panel_deferred_test.go
+        - internal/complete/panel_gate_e2e_test.go
+        - internal/complete/panel_resume_test.go
+        - internal/panel/subject_test.go
+        - internal/panel/create_round_test.go
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+    - depends_on:
+        - 1
+        - 3
+      id: 5
+      key_file_paths:
+        - cmd/mindspec/panel_checkout.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_abandon.go
+        - cmd/mindspec/git_boundary_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/panel/panel.go
+        - cmd/mindspec/migrate.go
+        - internal/bootstrap/bootstrap.go
+        - internal/doctor/ownership.go
+        - internal/doctor/links.go
+    - depends_on:
+        - 1
+        - 2
+        - 3
+      id: 6
+      key_file_paths:
+        - internal/panel/brief.go
+        - internal/panel/prompt.go
+        - internal/panel/create.go
+        - internal/panel/create_test.go
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_prompt.go
+        - .mindspec/adr/ADR-0045-binary-owns-sequence-and-rules.md
+    - depends_on:
+        - 1
+        - 3
+        - 4
+        - 5
+        - 6
+      id: 7
+      key_file_paths:
+        - internal/panellaunch/launch.go
+        - internal/panellaunch/supervisor_unix.go
+        - internal/panellaunch/launch_windows.go
+        - internal/panellaunch/boundary_test.go
+        - cmd/mindspec/panel_launch.go
+        - cmd/mindspec/panel_recover.go
+        - cmd/mindspec/panel_checkout.go
+        - plugins/mindspec/workflows/ms-panel.js
+        - .claude/workflows/ms-panel.js
+        - plugins/mindspec/workflow_test.go
+        - plugins/mindspec/scripts/codex_verdict_extract.sh
+        - internal/setup/surface_refs_test.go
+        - internal/setup/historical_workflows
+        - internal/setup/upgrade_refresh_workflow_test.go
+    - depends_on:
+        - 1
+        - 2
+        - 3
+      id: 8
+      key_file_paths:
+        - internal/doctor/panel_runners.go
+        - internal/doctor/staged_markers.go
+        - internal/doctor/stale_checkouts.go
+        - internal/doctor/panel_runners_test.go
+        - internal/doctor/doctor.go
+        - internal/doctor/config.go
+        - internal/doctor/config_test.go
+        - internal/doctor/models_commands_test.go
+        - cmd/mindspec/doctor.go
+    - depends_on:
+        - 2
+        - 4
+        - 5
+        - 6
+      id: 9
+      key_file_paths:
+        - plugins/mindspec/skills/ms-panel-run/SKILL.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - plugins/mindspec/skills/ms-bead-fix/SKILL.md
+        - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+        - plugins/mindspec/skills/ms-spec-final-review/SKILL.md
+        - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+        - .claude/skills/ms-panel-run/SKILL.md
+        - .claude/skills/ms-panel-tally/SKILL.md
+        - .claude/skills/ms-bead-fix/SKILL.md
+        - .claude/skills/ms-bead-cycle/SKILL.md
+        - .claude/skills/ms-spec-final-review/SKILL.md
+        - .claude/skills/ms-bead-impl/SKILL.md
+        - internal/setup/historical_skills
+        - internal/setup/upgrade_refresh_spec131_test.go
+        - internal/setup/review_discipline_test.go
+        - internal/setup/adhoc_panel_skill_test.go
+        - internal/setup/panel_tally_skill_bead_test.go
+        - internal/setup/panel_skills_test.go
+        - internal/setup/skills_test.go
+        - internal/lint/destructive_guidance_test.go
+        - internal/setup/readiness_skill_pin_test.go
+        - cmd/mindspec/bead_ready_test.go
+        - internal/setup/upgrade_refresh_pre126_test.go
+        - cmd/mindspec/slot_lock_windows_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - CHANGELOG.md
+        - project-docs/user/guides/review-panels.md
+        - README.md
+        - plugins/mindspec/README.md
 ---
 # Plan: 131-panel-execution-in-binary
 
