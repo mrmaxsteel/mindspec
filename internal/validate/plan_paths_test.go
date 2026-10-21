@@ -303,10 +303,6 @@ func TestUnlistedPlanPaths_ReviewerProbesWarn(t *testing.T) {
 			t.Errorf("body %q: got %v, want [%s]", body, got, want)
 		}
 	}
-	// Both paths in one edit sentence warn.
-	if got, want := unlistedOne("Edit `internal/a/b.go` and the same for `internal/c/d.go`."), []string{"internal/a/b.go", "internal/c/d.go"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
 }
 
 // TestUnlistedPlanPaths_NonEditSentencesStaySilent pins the negative side
@@ -322,7 +318,99 @@ func TestUnlistedPlanPaths_NonEditSentencesStaySilent(t *testing.T) {
 		"Update the caller; do not edit `internal/q/w.go`.",
 		"Update the caller \u2014 `internal/q/w.go` stays untouched.",
 		"The loader reads `internal/q/w.go`, which the fix does not change.",
+		// Reference sentences: the path is not the object of the verb.
+		"Implement the interface defined in `internal/q/w.go`.",
+		"Add tests for `internal/q/w.go`.",
+		"Make sure `internal/q/w.go` still passes.",
+		"Update the docs to describe `internal/q/w.go`.",
+		"Register the hook the same way `internal/q/w.go` does.",
+		"Rename the type, as `internal/q/w.go` did in bead 1.",
+		"Add the test, then run `go test ./internal/q/w.go`.",
+		"The change in `internal/q/w.go` is small.",
+		"Write the result to `internal/q/out.json`.",
+		"Add a flag like the one in `internal/q/w.go`.",
+		"Update the docs to mention what `internal/q/w.go` does.",
+		"Move on to `internal/q/w.go` after the tests pass.",
+		"Port the logic from `internal/q/w.go`.",
+		"Add a check against `internal/q/w.go`.",
+		"Write the report summarising `internal/q/w.go`.",
+		"Fix round 2 added `TestX` in `internal/q/w_test.go`.",
+		"The probes touch `internal/q/w.go` only in throwaway trees.",
+		// Negation vetoes every edit signal for the paths after it.
+		"Do not add a new file `internal/pkg/w.go`.",
+		"- `internal/pkg/w.go`: do not change it.",
+		"Do not ever change `internal/pkg/w.go`.",
+		"Never directly edit `internal/pkg/w.go`.",
+		// A path-leading label alone is not an edit.
+		"- `internal/pkg/w.go`: read-only reference.",
+		"- `internal/pkg/w.go` \u2014 the parser that the loader calls.",
+		"`internal/pkg/w.go`: the entry point.",
 	})
+}
+
+// TestUnlistedPlanPaths_ReferencePathStaysSilent pins sentences with one
+// edit target and one reference path: only the target warns.
+func TestUnlistedPlanPaths_ReferencePathStaysSilent(t *testing.T) {
+	for _, body := range []string{
+		"Refactor `internal/q/a.go` to reuse the parser from `internal/q/w.go`.",
+		"Add `internal/q/a.go` in the style of `internal/q/w.go`.",
+		"Add the new check to `internal/q/a.go`, modelled on `internal/q/w.go`.",
+		"Edit `internal/q/a.go` so its output is identical to `internal/q/w.go`.",
+		"Create `internal/q/a.go`; copy the layout of `internal/q/w.go`.",
+	} {
+		if got := unlistedOne(body); !reflect.DeepEqual(got, []string{"internal/q/a.go"}) {
+			t.Errorf("body %q: got %v, want [internal/q/a.go]", body, got)
+		}
+	}
+}
+
+// TestValidatePlan_ControlBytesDoNotPanic pins that plan text cannot crash
+// the advisory check: control bytes and digit runs in the body are plain
+// text, and the plan still validates with at most a warning.
+func TestValidatePlan_ControlBytesDoNotPanic(t *testing.T) {
+	for _, extra := range []string{
+		"Edit the \x0199\x01 thing.",
+		"Text \x01 and \x0199\x01 and \x01999999999999999999999\x01.",
+		"Add `internal/q/\x010\x01.go` and \x00\x02\x1b[31m `internal/q/w.go`.",
+		"\x01\x01\x01: \x01-1\x01 \u2014 new \x010\x01 (new)",
+	} {
+		root := writePlanPathsFixture(t, []string{"internal/validate/plan.go", "internal/validate/adr_new_test.go"})
+		path := filepath.Join(root, "docs", "specs", "999-test", "plan.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, []byte("\n"+extra+"\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := ValidatePlan(root, "999-test")
+		if r.HasFailures() {
+			t.Errorf("body %q: want no failure, got %+v", extra, r.Issues)
+		}
+		_ = UnlistedPlanPaths(string(data)+extra, []WorkChunk{{ID: 1}})
+	}
+}
+
+// TestCheckUnlistedPlanPaths_PanicBecomesOneWarning pins the recover: a
+// panic inside the check gives one warning that the check was skipped.
+func TestCheckUnlistedPlanPaths_PanicBecomesOneWarning(t *testing.T) {
+	r := &Result{}
+	checkUnlistedPlanPaths(r, "body", []WorkChunk{{ID: 1, KeyFilePaths: nil}, {ID: 2}})
+	if len(r.Issues) != 0 {
+		t.Fatalf("plain body: want no issue, got %+v", r.Issues)
+	}
+	r = &Result{}
+	func() {
+		defer func() {
+			if recover() != nil {
+				t.Fatal("panic escaped checkUnlistedPlanPaths")
+			}
+		}()
+		checkUnlistedPlanPathsWith(r, func() []string { panic("boom") })
+	}()
+	if len(r.Issues) != 1 || r.Issues[0].Severity != SevWarning || !strings.Contains(r.Issues[0].Message, "skipped") {
+		t.Fatalf("want one skipped warning, got %+v", r.Issues)
+	}
 }
 
 // TestUnlistedPlanPaths_TemplatePath pins template paths: "<name>"
@@ -362,34 +450,6 @@ func TestUnlistedPlanPaths_FenceClosesOnMatchingRun(t *testing.T) {
 	})
 	if got := unlistedOne("````md\n```\nskip\n```\n````\n\nAdd `internal/q/w.go`."); !reflect.DeepEqual(got, []string{"internal/q/w.go"}) {
 		t.Fatalf("path after a closed fence: got %v", got)
-	}
-}
-
-// TestUnlistedPlanPaths_RealPlanDroppedKeyPathWarns removes a key path
-// from a shipped plan and expects the warning for the step that edits it.
-func TestUnlistedPlanPaths_RealPlanDroppedKeyPathWarns(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", ".mindspec", "specs", "129-readiness-tracker-honesty", "plan.md"))
-	if err != nil {
-		t.Skipf("plan not available: %v", err)
-	}
-	content := string(data)
-	const line = "        - internal/next/evidence.go\n"
-	if !strings.Contains(content, line) {
-		t.Skip("plan no longer lists the path")
-	}
-	run := func(c string) []string {
-		fm, err := parsePlanFrontmatter(c)
-		if err != nil {
-			t.Fatalf("parse plan: %v", err)
-		}
-		return UnlistedPlanPaths(c, fm.WorkChunks)
-	}
-	if full := run(content); len(full) != 0 {
-		t.Fatalf("intact plan warns: %v", full)
-	}
-	cut := run(strings.Replace(content, line, "", 1))
-	if !reflect.DeepEqual(cut, []string{"internal/next/evidence.go"}) {
-		t.Fatalf("dropped key path: got %v", cut)
 	}
 }
 

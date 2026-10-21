@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
@@ -13,17 +12,26 @@ import (
 
 // The unlisted-plan-path rule prefers precision over recall. A plan names
 // many files only as context (files it reads, cites or must leave alone),
-// so a path counts only when its own clause says to change it. A sentence
-// is split into clauses at ";", ":", dashes and ", which/so/but/while/
-// because". Paths and code spans are masked before the word checks, so a
-// word inside a file name is never a verb or a marker. A path is an edit
-// target when one of these is true:
-//   - an edit verb comes shortly before it in its clause, with only filler
-//     words between, and no negation directly before the verb;
-//   - its clause has an edit verb and no negation or read-only marker;
-//   - it has a "(new)" tag;
+// so a path counts only when the words next to it say to change it. Each
+// sentence becomes a list of tokens (words, code spans, paths and clause
+// breaks), so a word inside a file name is never a verb or a marker. A
+// clause ends at ";", ":", a dash or ", which/so/but/while/because". A
+// path is an edit target when no negation comes before it in its clause
+// and one of these is true:
+//   - an edit verb comes before it with at most three words between, and
+//     no stop word ("of", "from", "for", ...) or read-only marker between
+//     (other paths, code spans and "new", "own", "file" are not counted);
+//   - it is the subject of an edit ("a.go gains a field"), or it follows
+//     "In" at the start of an imperative clause ("In a.go, add X");
+//   - it has a "(new)" or "new file" tag;
+//   - its clause uses passive edit phrasing ("is updated") and has no
+//     read-only marker, or it is in a table row whose clause has an edit
+//     verb and no marker;
 //   - it leads a list item under a "Files" heading or label, or it is in
-//     the File column of a table, and its clause has no read-only marker.
+//     the File column of a table, and no marker is in the item or row;
+//   - it starts a unit as a label ("a.go: add the helper") and the clause
+//     after the label is an edit instruction;
+//   - it starts the clause after "Add two files:".
 // Paths in fenced code blocks, paths with a line or anchor reference
 // (citations), globs, placeholders and conventional example paths never
 // count. A template path whose file name has "<name>" placeholders is
@@ -36,9 +44,6 @@ var planPathTokenSplit = regexp.MustCompile("[\\s`\"]+")
 
 // planPathSubSplit splits an accepted raw token on list punctuation.
 var planPathSubSplit = regexp.MustCompile(`[,;|()]+`)
-
-// planMarkdownLinkRe matches a markdown link "[text](target)".
-var planMarkdownLinkRe = regexp.MustCompile(`\[([^\]\n]*)\]\(([^)\s]*)\)`)
 
 // planPathPrefixRe matches a "label:path" token such as "file:internal/a.go".
 var planPathPrefixRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*:(.+)$`)
@@ -54,63 +59,64 @@ const planPathGlobChars = "[]{}*?<>$=@~\\"
 // planFileExts is the set of file extensions that mark a token as a file
 // path. A fixed set keeps Go qualified names ("internal/panel.Scan") and
 // prose ("and/or.") out of the result.
-var planFileExts = map[string]bool{
-	"go": true, "mod": true, "sum": true, "md": true, "txt": true,
-	"yaml": true, "yml": true, "json": true, "jsonl": true, "toml": true,
-	"js": true, "mjs": true, "cjs": true, "ts": true, "tsx": true, "jsx": true,
-	"py": true, "sh": true, "bash": true, "rb": true, "rs": true,
-	"java": true, "kt": true, "c": true, "h": true, "cc": true, "cpp": true,
-	"swift": true, "proto": true, "sql": true, "html": true, "css": true,
-	"tmpl": true, "tpl": true, "cfg": true, "ini": true, "xml": true,
-	"csv": true, "svg": true, "lock": true,
-}
+var planFileExts = wordSet(
+	"go", "mod", "sum", "md", "txt", "yaml", "yml", "json", "jsonl", "toml",
+	"js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "sh", "bash", "rb", "rs",
+	"java", "kt", "c", "h", "cc", "cpp", "swift", "proto", "sql", "html",
+	"css", "tmpl", "tpl", "cfg", "ini", "xml", "csv", "svg", "lock",
+)
 
 // planPathRootFiles are file names without an extension. As a directory
 // segment ("Makefile/go.mod") they mark prose for "one or the other".
-var planPathRootFiles = map[string]bool{
-	"Makefile": true, "Dockerfile": true, "Gemfile": true, "Rakefile": true,
-	"Procfile": true, "Justfile": true, "Vagrantfile": true,
-	"README": true, "LICENSE": true, "CHANGELOG": true,
-}
+var planPathRootFiles = wordSet(
+	"Makefile", "Dockerfile", "Gemfile", "Rakefile", "Procfile", "Justfile",
+	"Vagrantfile", "README", "LICENSE", "CHANGELOG",
+)
 
 // planPathPlaceholderStems are segment names (before any extension) that
 // mark a conventional example path such as internal/foo/bar.go or x.go.
-var planPathPlaceholderStems = map[string]bool{
-	"foo": true, "bar": true, "baz": true, "qux": true,
-	"example": true, "x": true, "y": true, "z": true,
-}
+var planPathPlaceholderStems = wordSet("foo", "bar", "baz", "qux", "example", "x", "y", "z")
 
 // planPathToolDirs are tool-state trees that a plan names for context but
 // that no bead lists as a file it edits.
 var planPathToolDirs = []string{".mindspec/", ".beads/"}
 
-// planEditVerbs mark a request to change a file. Words match whole and
-// case-insensitively, after paths and code spans are masked.
+// planEditVerbs mark a request to change a file. Generic verbs that
+// mostly mean something else in plans ("write the result to", "port the
+// logic from", "probes touch these files") are not in the list.
 var planEditVerbs = wordSet(
-	"create", "creates", "creating",
-	"add", "adds", "adding",
-	"write", "writes", "rewrite", "rewrites",
-	"edit", "edits", "editing",
-	"modify", "modifies", "update", "updates", "updating",
-	"change", "changes", "extend", "extends",
-	"rename", "renames", "delete", "deletes",
-	"remove", "removes", "move", "moves",
+	"create", "creates", "add", "adds", "rewrite", "rewrites",
+	"edit", "edits", "modify", "modifies", "update", "updates",
+	"change", "changes", "extend", "extends", "rename", "renames",
+	"delete", "deletes", "remove", "removes", "move", "moves",
 	"implement", "implements", "refactor", "refactors",
-	"replace", "replaces", "fix", "fixes",
-	"introduce", "introduces", "wire", "wires", "rewire", "rewires",
-	"port", "ports", "split", "splits",
-	"append", "appends", "insert", "inserts", "extract", "extracts",
-	"make", "makes", "touch", "touches", "restructure", "restructures",
-	"rework", "reworks", "harden", "hardens", "export", "exports",
-	"register", "registers", "sweep", "sweeps",
-	"regenerate", "regenerates", "route", "routes",
+	"replace", "replaces", "fix", "fixes", "introduce", "introduces",
+	"wire", "wires", "append", "appends", "insert", "inserts",
+	"extract", "extracts", "rework", "reworks",
+	"rewire", "rewires", "restructure", "restructures",
+	"harden", "hardens", "regenerate", "regenerates",
+	"register", "registers", "make", "makes",
 )
 
-// planPassiveEdit matches passive edit phrasing such as "is created" or
-// "gets a new". Past-tense narration ("Bead 1 added") does not match.
-var planPassiveEdit = regexp.MustCompile(`(?i)\b(?:is|are|be|gets?)\s+(?:(?:newly|also|now)\s+)?(?:created|added|written|rewritten|edited|modified|updated|changed|extended|renamed|deleted|removed|moved|implemented|refactored|replaced|fixed|introduced|wired|ported|split|extracted)\b|\bgets?\s+an?\s+new\b`)
+// planArticles before a verb word make it a noun: "the change in a.go".
+var planArticles = wordSet("the", "a", "an", "this", "that", "each", "any", "its")
 
-// planNegations, directly before an edit verb, cancel it.
+// planSubjectEdits, directly after a path, say the file changes: "a.go
+// gains a field".
+var planSubjectEdits = wordSet("gains", "gain", "gets", "grows", "learns", "loses")
+
+// planEditParticiples follow "is", "are", "be" or "gets" in passive edit
+// phrasing ("a.go is updated"). Before a path they narrate earlier work
+// ("fix round 1 added a.go"), so they end the search for a verb.
+var planEditParticiples = wordSet(
+	"created", "added", "written", "rewritten", "edited", "modified",
+	"updated", "changed", "extended", "renamed", "deleted", "removed",
+	"moved", "implemented", "refactored", "replaced", "fixed", "introduced",
+	"wired", "extracted",
+)
+
+// planNegations cancel an edit: before a verb they cancel the verb, and
+// before a path in its clause they cancel every edit signal for the path.
 var planNegations = wordSet(
 	"not", "never", "no", "don't", "doesn't", "didn't", "won't", "cannot",
 	"can't", "shouldn't", "mustn't",
@@ -125,55 +131,47 @@ var planReadOnlyWords = wordSet(
 	"leave", "leaves", "left", "keep", "keeps", "read", "reads", "reading",
 	"inspect", "inspects", "inspection", "unrelated", "already", "example",
 	"examples", "mirror", "mirrors", "mirroring", "pattern", "precedent",
-	"see", "cf", "eg", "neither", "nor", "unless", "would", "grep",
+	"see", "cf", "e.g", "neither", "nor", "unless", "would", "grep",
 	"checked", "fixture", "fixtures", "match", "matches", "matching",
-	"nothing", "throwaway",
+	"nothing", "throwaway", "follow-up",
 )
 
 // planAdjacencyStops end the search back from a path to its edit verb:
-// a word that makes the path a reference ("the caller of", "next to the
-// one in") rather than the object of the verb.
+// a word that makes the path a reference ("the caller of", "tests for",
+// "next to the one in") rather than the object of the verb.
 var planAdjacencyStops = wordSet(
-	"of", "from", "next", "beside", "alongside", "via", "using", "per",
-	"following", "like", "after", "than", "by", "around", "against",
-	"that", "which", "whose", "where", "calls", "called", "uses", "such",
+	"of", "from", "for", "as", "on", "next", "beside", "alongside", "via",
+	"using", "per", "following", "like", "after", "than", "by", "around",
+	"against", "that", "which", "whose", "where", "calls", "called", "uses",
+	"such", "sure",
 )
 
-// planAdjacencyWords is the most filler words allowed between an edit
-// verb and its path ("adds its own pin test file").
-const planAdjacencyWords = 6
+// planFreeWords describe the file itself ("its own new test file"), so
+// they do not count toward the adjacency limit.
+var planFreeWords = wordSet("new", "own", "file", "files")
 
-// planReadOnlyPhrases are read-only markers that are not single words.
-var planReadOnlyPhrases = regexp.MustCompile(`(?i)\be\.g\b|\bsuch as\b|\bout of scope\b|\bfollow-up\b`)
+// planAdjacencyWords is the most words allowed between an edit verb and
+// its path ("add a test in a_test.go").
+const planAdjacencyWords = 3
 
-// planSlotMark wraps the index of a masked path or code span.
-const planSlotMark = "\x01"
+// planTokRe finds the tokens of a sentence. The groups are: 1-2 a link's
+// text and target, 3 a code span, 4 a clause break, 5 a bare path, and 6
+// a word.
+var planTokRe = regexp.MustCompile(`\[([^\]\n]*)\]\(([^)\s]*)\)` +
+	"|`([^`]*)`" +
+	`|([;:](?:\s|$)|\s*[\x{2014}\x{2013}]\s*|\s--\s|,\s+(?:which|so|but|while|because)\b)` +
+	"|([^\\s\"()`]*/[^\\s\"()`]*[^\\s\"()`.,;:!?])" +
+	`|((?i:e\.g|i\.e)\b|[A-Za-z][A-Za-z'\x{2019}-]*)`)
 
-// planSlotRe finds a masked slot.
-var planSlotRe = regexp.MustCompile(planSlotMark + `(\d+)` + planSlotMark)
+// planLinkWordRe finds the words of a link's text.
+var planLinkWordRe = regexp.MustCompile(`[A-Za-z][A-Za-z'-]*`)
 
-// planItemRe finds the words and slots of a masked clause.
-var planItemRe = regexp.MustCompile(planSlotMark + `\d+` + planSlotMark + "|[A-Za-z][A-Za-z'\u2019-]*")
-
-// planCodeSpanRe matches an inline code span.
-var planCodeSpanRe = regexp.MustCompile("`[^`]*`")
-
-// planBarePathRe matches a token outside code spans that may be a path.
-var planBarePathRe = regexp.MustCompile(`[^\s"()` + "`" + `]*/[^\s"()` + "`" + `]*`)
-
-// planNewTagRes mark a slot as a new or changed file: "x.go (new)",
-// "**NEW** x.go" and "New file: x.go".
-var planNewTagRes = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)` + planSlotMark + `(\d+)` + planSlotMark + `[*_]*\s*[*_]*\(\s*new\b`),
-	regexp.MustCompile(`(?i)\(\s*new\b[^()]*?` + planSlotMark + `(\d+)` + planSlotMark),
-	regexp.MustCompile(`(?i)\*\*(?:new|modified|changed|updated)\*\*\s*` + planSlotMark + `(\d+)` + planSlotMark),
-	regexp.MustCompile(`(?i)\bnew\s+(?:test\s+)?files?\s*[*_]*\s*:\s*[*_]*\s*` + planSlotMark + `(\d+)` + planSlotMark),
-	regexp.MustCompile(`(?i)\bnew\s+(?:test\s+)?(?:file\s+)?[*_]*\s*` + planSlotMark + `(\d+)` + planSlotMark),
-}
-
-// planClauseSplit ends a clause: ";" or ":" before a space, a dash, or
-// ", which/so/but/while/because".
-var planClauseSplit = regexp.MustCompile(`[;:](?:\s|$)|\s*[\x{2014}\x{2013}]\s*|\s--\s|,\s+(?:which|so|but|while|because)\b`)
+// planNewAfterRe and planNewBeforeRe find a "(new)" tag after a path and
+// a "new file" or "**NEW**" tag before it.
+var (
+	planNewAfterRe  = regexp.MustCompile(`(?i)^[*_]*\s*\(\s*new\b`)
+	planNewBeforeRe = regexp.MustCompile(`(?i)\bnew\b[*_]*\s*(?:test\s+)?(?:files?\b)?[*_\s:,]*$`)
+)
 
 // planFilesLabel is a "Files" label: "Files:", "Changed files", "Key
 // files", "Files touched", "Files to create/modify".
@@ -232,9 +230,7 @@ func planFenceRun(trimmed string) (byte, int) {
 
 // planTableCells splits a table row into trimmed cells.
 func planTableCells(row string) []string {
-	row = strings.TrimSpace(row)
-	row = strings.TrimPrefix(row, "|")
-	row = strings.TrimSuffix(row, "|")
+	row = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(row), "|"), "|")
 	cells := strings.Split(row, "|")
 	for i := range cells {
 		cells[i] = strings.TrimSpace(cells[i])
@@ -354,11 +350,12 @@ func planIntroducesEdits(text string) bool {
 	if len(sents) == 0 {
 		return false
 	}
-	masked, slots := maskPlanText(sents[len(sents)-1])
-	slotPaths := make([][]planPath, len(slots))
-	clauses := planClauseSplit.Split(strings.TrimRight(strings.TrimSpace(masked), ":"), -1)
-	c := planClauseInfo(clauses[len(clauses)-1], slotPaths)
-	return c.firstVerb >= 0 && !c.hasMarker
+	clauses := planClauses(sents[len(sents)-1])
+	last := clauses[len(clauses)-1]
+	if len(last.toks) == 0 && len(clauses) > 1 {
+		last = clauses[len(clauses)-2]
+	}
+	return last.verb && !last.marker
 }
 
 // planSentences splits a unit's text into sentences.
@@ -376,198 +373,170 @@ func planSentences(u string) []string {
 	return out
 }
 
-// maskPlanText replaces link targets, code spans and path-like tokens with
-// numbered slots, so a word inside a file name or identifier is never read
-// as a verb or a marker. It returns the masked text and the slot contents.
-func maskPlanText(s string) (string, []string) {
-	var slots []string
-	slot := func(raw string) string {
-		slots = append(slots, raw)
-		return " " + planSlotMark + strconv.Itoa(len(slots)-1) + planSlotMark + " "
-	}
-	s = planMarkdownLinkRe.ReplaceAllStringFunc(s, func(m string) string {
-		sub := planMarkdownLinkRe.FindStringSubmatch(m)
-		text := sub[1]
-		// Link text that is one token, such as a file name, is not prose.
-		if !strings.ContainsAny(strings.TrimSpace(text), " \t") {
-			text = ""
-		}
-		return text + slot(sub[2])
-	})
-	s = planCodeSpanRe.ReplaceAllStringFunc(s, func(m string) string {
-		return slot(strings.Trim(m, "`"))
-	})
-	s = planBarePathRe.ReplaceAllStringFunc(s, func(m string) string {
-		core := strings.TrimRight(m, ".,;:!?")
-		return slot(core) + m[len(core):]
-	})
-	return s, slots
+// planTok is one token of a clause: a lower-case word, or a code span,
+// link target or bare path (span set). paths holds the file paths of a
+// span; a span with no paths, such as an identifier, counts as a word.
+type planTok struct {
+	word   string
+	span   bool
+	paths  []planPath
+	newTag bool
 }
 
-// planItem is a word (lower case) or a slot index of a masked clause.
-type planItem struct {
-	word string
-	slot int
-}
-
-// planAbbrevRe matches "e.g" and "i.e", which become the words "eg" and
-// "ie".
-var planAbbrevRe = regexp.MustCompile(`(?i)\b(?:e\.g|i\.e)\b`)
-
-func planClauseItems(clause string) []planItem {
-	var items []planItem
-	clause = planAbbrevRe.ReplaceAllStringFunc(clause, func(m string) string { return strings.ReplaceAll(m, ".", "") })
-	for _, m := range planItemRe.FindAllString(clause, -1) {
-		if strings.HasPrefix(m, planSlotMark) {
-			n, _ := strconv.Atoi(strings.Trim(m, planSlotMark))
-			items = append(items, planItem{slot: n})
-			continue
-		}
-		w := strings.Trim(strings.ReplaceAll(strings.ToLower(m), "\u2019", "'"), "-'")
-		items = append(items, planItem{word: w, slot: -1})
-	}
-	return items
-}
-
-func planIsMarker(w string) bool {
-	return planReadOnlyWords[w] || strings.HasSuffix(w, "-unchanged")
-}
-
-// planVerbNegated reports whether the edit verb at items[j] is directly
-// negated: "not change", "never edit", "no edit", "no need to update".
-func planVerbNegated(items []planItem, j int) bool {
-	if planNegations[planWordAt(items, j-1)] {
-		return true
-	}
-	return planWordAt(items, j-1) == "to" && planWordAt(items, j-2) == "need" && planWordAt(items, j-3) == "no"
-}
-
-// planWordAt returns the word at items[k], or "" for a slot or an index
-// out of range.
-func planWordAt(items []planItem, k int) string {
-	if k < 0 || k >= len(items) || items[k].slot >= 0 {
-		return ""
-	}
-	return items[k].word
-}
-
-// planIsEditVerb reports whether items[j] is an edit verb. "fix" before
-// "round" or "up" is a noun ("fix round 2").
-func planIsEditVerb(items []planItem, j int) bool {
-	w := planWordAt(items, j)
-	if !planEditVerbs[w] {
-		return false
-	}
-	if w == "fix" || w == "fixes" {
-		switch planWordAt(items, j+1) {
-		case "round", "rounds", "up", "pass", "cycle", "commit":
-			return false
-		}
-	}
-	return true
-}
-
-// planVerbBefore reports whether an edit verb comes shortly before the
-// slot at items[i], with only filler words between it and the slot.
-func planVerbBefore(items []planItem, i int, slotPaths [][]planPath) bool {
-	n := 0
-	for j := i - 1; j >= 0; j-- {
-		it := items[j]
-		if it.slot >= 0 {
-			if len(slotPaths[it.slot]) > 0 {
-				continue // a list of paths: "Edit a.go, b.go and c.go"
-			}
-			n++
-		} else {
-			if planIsEditVerb(items, j) {
-				return !planVerbNegated(items, j)
-			}
-			if planIsMarker(it.word) || planAdjacencyStops[it.word] || planPastEdits[it.word] {
-				return false
-			}
-			n++
-		}
-		if n > planAdjacencyWords {
-			return false
-		}
-	}
-	return false
-}
-
-// planSubjectEdits, directly after a path, say the file changes:
-// "a.go gains a field".
-var planSubjectEdits = wordSet("gains", "gain", "gets", "grows", "learns", "loses")
-
-// planVerbAfter reports whether the slot at items[i] is the subject of an
-// edit ("a.go gains a field") or follows "In" at the start of an
-// imperative clause ("In a.go, add the helper").
-func planVerbAfter(items []planItem, i int, slotPaths [][]planPath) bool {
-	k := i + 1
-	for k < len(items) && items[k].slot >= 0 && len(slotPaths[items[k].slot]) > 0 {
-		k++
-	}
-	next := planWordAt(items, k)
-	if planSubjectEdits[next] {
-		return true
-	}
-	j := i - 1
-	for j >= 0 && (items[j].slot >= 0 && len(slotPaths[items[j].slot]) > 0 || planWordAt(items, j) == "and") {
-		j--
-	}
-	if j != 0 {
-		return false
-	}
-	switch planWordAt(items, 0) {
-	case "in", "inside", "within":
-		return planIsEditVerb(items, k) && !planVerbNegated(items, k)
-	}
-	return false
-}
-
-// planPastEdits are past-tense edit verbs. They narrate earlier work
-// ("Bead 1 added x.go"), so they end the search for an edit verb.
-var planPastEdits = wordSet(
-	"added", "created", "wrote", "written", "edited", "modified", "updated",
-	"changed", "extended", "renamed", "deleted", "removed", "moved",
-	"implemented", "refactored", "replaced", "fixed", "introduced", "shipped",
-	"landed", "merged",
-)
-
-// planClause holds the word checks of one masked clause.
+// planClause is a clause of a sentence and the break text that ends it.
 type planClause struct {
-	items     []planItem
-	passive   bool
-	hasMarker bool
-	firstVerb int // index of the first edit verb that is not negated, or -1
-	words     int
+	toks    []planTok
+	brk     string
+	marker  bool // a read-only word or phrase, or a negated edit verb
+	verb    bool // an edit verb that is not negated
+	passive bool // passive edit phrasing such as "is updated"
+	words   int
 }
 
-// planClauseInfo runs the word checks on a masked clause. A negated edit
-// verb counts as a read-only marker.
-func planClauseInfo(clause string, slotPaths [][]planPath) planClause {
-	c := planClause{
-		items:     planClauseItems(clause),
-		passive:   planPassiveEdit.MatchString(clause),
-		hasMarker: planReadOnlyPhrases.MatchString(clause),
-		firstVerb: -1,
+// planClauses splits a sentence into clauses of tokens. The tokens hold
+// the paths as data, so no text in the sentence can stand in for a path.
+func planClauses(s string) []planClause {
+	var out []planClause
+	var cur planClause
+	for _, m := range planTokRe.FindAllStringSubmatchIndex(s, -1) {
+		group := func(g int) (string, bool) {
+			if m[2*g] < 0 {
+				return "", false
+			}
+			return s[m[2*g]:m[2*g+1]], true
+		}
+		raw, isSpan := group(3)
+		if target, ok := group(2); ok {
+			// Link text that is one token, such as a file name, is not prose.
+			if text, _ := group(1); strings.ContainsAny(strings.TrimSpace(text), " \t") {
+				for _, w := range planLinkWordRe.FindAllString(text, -1) {
+					cur.toks = append(cur.toks, planTok{word: strings.ToLower(w)})
+				}
+			}
+			raw, isSpan = target, true
+		} else if p, ok := group(5); ok {
+			raw, isSpan = p, true
+		}
+		switch {
+		case isSpan:
+			cur.toks = append(cur.toks, planTok{span: true, paths: planTokenPaths(raw),
+				newTag: planNewAfterRe.MatchString(s[m[1]:]) || planNewBeforeRe.MatchString(s[:m[0]])})
+		case m[8] >= 0:
+			cur.brk = s[m[8]:m[9]]
+			out = append(out, cur)
+			cur = planClause{}
+		default:
+			w := strings.Trim(strings.ReplaceAll(strings.ToLower(s[m[0]:m[1]]), "\u2019", "'"), "-'")
+			cur.toks = append(cur.toks, planTok{word: w})
+		}
 	}
-	for j, it := range c.items {
-		if it.slot >= 0 {
+	out = append(out, cur)
+	for i := range out {
+		out[i].classify()
+	}
+	return out
+}
+
+// classify sets the word checks of a clause. A negated edit verb counts as
+// a read-only marker.
+func (c *planClause) classify() {
+	words := []string{}
+	for j, t := range c.toks {
+		if t.span {
 			continue
 		}
 		c.words++
-		if planIsMarker(it.word) {
-			c.hasMarker = true
+		words = append(words, t.word)
+		if planReadOnlyWords[t.word] || strings.HasSuffix(t.word, "-unchanged") {
+			c.marker = true
 		}
-		if planIsEditVerb(c.items, j) {
-			if planVerbNegated(c.items, j) {
-				c.hasMarker = true
-			} else if c.firstVerb < 0 {
-				c.firstVerb = j
+		if planIsVerb(c.toks, j) {
+			if planVerbNegated(c.toks, j) {
+				c.marker = true
+			} else {
+				c.verb = true
+			}
+		}
+		if planEditParticiples[t.word] {
+			switch planWordAt(c.toks, j-1) {
+			case "is", "are", "be", "gets", "newly", "also", "now":
+				c.passive = true
 			}
 		}
 	}
-	return c
+	joined := " " + strings.Join(words, " ") + " "
+	if strings.Contains(joined, " such as ") || strings.Contains(joined, " out of scope ") {
+		c.marker = true
+	}
+}
+
+// planWordAt returns the word at toks[k], or "" for a span or an index out
+// of range.
+func planWordAt(toks []planTok, k int) string {
+	if k < 0 || k >= len(toks) {
+		return ""
+	}
+	return toks[k].word
+}
+
+// planIsVerb reports whether toks[j] is an edit verb and not a noun.
+func planIsVerb(toks []planTok, j int) bool {
+	return planEditVerbs[planWordAt(toks, j)] && !planArticles[planWordAt(toks, j-1)]
+}
+
+// planVerbNegated reports whether the edit verb at toks[j] is directly
+// negated: "not change", "never edit", "no need to update".
+func planVerbNegated(toks []planTok, j int) bool {
+	return planNegations[planWordAt(toks, j-1)] ||
+		planWordAt(toks, j-1) == "to" && planWordAt(toks, j-2) == "need" && planWordAt(toks, j-3) == "no"
+}
+
+// planIsPath reports whether toks[k] is a span that holds a file path.
+func planIsPath(toks []planTok, k int) bool {
+	return k >= 0 && k < len(toks) && len(toks[k].paths) > 0
+}
+
+// planVerbBefore reports whether an edit verb comes shortly before the
+// path at toks[i], with no stop word or marker between. Code spans and
+// other paths between ("Edit a.go, b.go and c.go") do not count.
+func planVerbBefore(toks []planTok, i int) bool {
+	n := 0
+	for j := i - 1; j >= 0 && n <= planAdjacencyWords; j-- {
+		w := toks[j].word
+		switch {
+		case toks[j].span || planFreeWords[w]:
+			continue
+		case planIsVerb(toks, j):
+			return !planVerbNegated(toks, j)
+		case planReadOnlyWords[w] || planAdjacencyStops[w] || planEditParticiples[w]:
+			return false
+		}
+		n++
+	}
+	return false
+}
+
+// planVerbAfter reports whether the path at toks[i] is the subject of an
+// edit ("a.go gains a field") or follows "In" at the start of an
+// imperative clause ("In a.go, add the helper").
+func planVerbAfter(toks []planTok, i int) bool {
+	k := i + 1
+	for planIsPath(toks, k) || planWordAt(toks, k) == "and" {
+		k++
+	}
+	if planSubjectEdits[planWordAt(toks, k)] {
+		return true
+	}
+	for j := 1; j < i; j++ {
+		if !planIsPath(toks, j) && planWordAt(toks, j) != "and" {
+			return false
+		}
+	}
+	switch planWordAt(toks, 0) {
+	case "in", "inside", "within":
+		return planIsVerb(toks, k) && !planVerbNegated(toks, k)
+	}
+	return false
 }
 
 // planSentenceEditPaths returns the paths that sentence s names in an
@@ -579,62 +548,35 @@ func planSentenceEditPaths(s string, filesCtx, tableRow, unitStart bool) []planP
 		s = s[loc[1]:]
 		filesCtx = true
 	}
-	masked, slots := maskPlanText(s)
-	slotPaths := make([][]planPath, len(slots))
-	for i, raw := range slots {
-		slotPaths[i] = planTokenPaths(raw)
+	clauses := planClauses(s)
+	sentenceMarker := false
+	for _, c := range clauses {
+		sentenceMarker = sentenceMarker || c.marker
 	}
-	tagged := map[int]bool{}
-	for _, re := range planNewTagRes {
-		for _, m := range re.FindAllStringSubmatch(masked, -1) {
-			n, _ := strconv.Atoi(m[1])
-			tagged[n] = true
-		}
-	}
-
-	sentenceMarker := planClauseInfo(masked, slotPaths).hasMarker
 	var out []planPath
-	start := 0
-	bounds := append(planClauseSplit.FindAllStringIndex(masked, -1), []int{len(masked), len(masked)})
-	prevColonEdit, prevHadPath := false, false
-	for ci, b := range bounds {
-		clause := masked[start:b[0]]
-		delim := masked[b[0]:b[1]]
-		start = b[1]
-		c := planClauseInfo(clause, slotPaths)
-		items, passive, hasMarker, firstVerb := c.items, c.passive, c.hasMarker, c.firstVerb
-		hasVerb := passive || firstVerb >= 0
-		// Under a Files heading, the first clause names a file to change,
-		// unless a marker anywhere in the sentence says otherwise.
-		lead := filesCtx && ci == 0 && !hasMarker && !sentenceMarker
-		// "Add two files: a.go and b.go" carries the verb past the colon
-		// into a short list of paths.
-		inherit := prevColonEdit && !hasVerb && !hasMarker && (!prevHadPath || c.words <= 3) &&
-			len(items) > 0 && items[0].slot >= 0 && len(slotPaths[items[0].slot]) > 0
-		// A unit that opens with a path and then ":" or a dash names the
-		// file it is about: "- a.go: add the helper".
-		if ci == 0 && unitStart && !hasMarker && c.words <= 3 && len(items) > 0 &&
-			items[0].slot >= 0 && len(slotPaths[items[0].slot]) > 0 && delim != "" &&
-			!strings.HasPrefix(strings.TrimSpace(delim), ";") && !strings.HasPrefix(strings.TrimSpace(delim), ",") {
-			lead = true
-		}
-		for i, it := range items {
-			if it.slot < 0 || len(slotPaths[it.slot]) == 0 {
+	for ci, c := range clauses {
+		startsWithPath := planIsPath(c.toks, 0)
+		// A unit that opens with a path label names the file it is about
+		// when the next clause asks for an edit: "- a.go: add the helper".
+		brk := strings.TrimSpace(c.brk)
+		label := ci == 0 && unitStart && startsWithPath && !c.marker && c.words <= 3 &&
+			(brk == ":" || brk == "--" || brk == "\u2014" || brk == "\u2013") &&
+			clauses[ci+1].verb && !clauses[ci+1].marker
+		// "Add two files: a.go and b.go" carries the verb past the colon.
+		inherit := ci > 0 && strings.HasPrefix(clauses[ci-1].brk, ":") && clauses[ci-1].verb && !clauses[ci-1].marker &&
+			startsWithPath && !c.verb && !c.marker && c.words <= 3
+		lead := filesCtx && ci == 0 && !sentenceMarker
+		clauseEdit := !c.marker && (c.passive || tableRow && c.verb)
+		negated := false
+		for i, t := range c.toks {
+			if planNegations[t.word] {
+				negated = true
+			}
+			if len(t.paths) == 0 || negated {
 				continue
 			}
-			// A clause-wide edit needs no marker in the clause and an
-			// active verb before the path (any verb in a table row), or
-			// passive edit phrasing anywhere in the clause.
-			clauseEdit := !hasMarker && (passive || (firstVerb >= 0 && (firstVerb < i || tableRow)))
-			if clauseEdit || inherit || lead || tagged[it.slot] || planVerbBefore(items, i, slotPaths) || planVerbAfter(items, i, slotPaths) {
-				out = append(out, slotPaths[it.slot]...)
-			}
-		}
-		prevColonEdit = hasVerb && !hasMarker && strings.HasPrefix(delim, ":")
-		prevHadPath = false
-		for _, it := range items {
-			if it.slot >= 0 && len(slotPaths[it.slot]) > 0 {
-				prevHadPath = true
+			if label || inherit || lead || clauseEdit || t.newTag || planVerbBefore(c.toks, i) || planVerbAfter(c.toks, i) {
+				out = append(out, t.paths...)
 			}
 		}
 	}
@@ -732,20 +674,15 @@ func editContextPlanPaths(body string) []planPath {
 		for i, s := range planSentences(u.text) {
 			add(planSentenceEditPaths(s, u.filesCtx && i == 0, strings.HasPrefix(strings.TrimSpace(u.text), "|"), i == 0))
 		}
-		if u.fileCell != "" {
-			masked, _ := maskPlanText(u.text)
-			marker := planReadOnlyPhrases.MatchString(masked)
-			for _, it := range planClauseItems(masked) {
-				if it.slot < 0 && planIsMarker(it.word) {
-					marker = true
-				}
-			}
-			if !marker {
-				_, slots := maskPlanText(u.fileCell)
-				for _, raw := range slots {
-					add(planTokenPaths(raw))
-				}
-			}
+		if u.fileCell == "" {
+			continue
+		}
+		marker := false
+		for _, c := range planClauses(u.text) {
+			marker = marker || c.marker
+		}
+		if !marker {
+			add(planTokenPaths(u.fileCell))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
@@ -911,10 +848,28 @@ func UnlistedPlanPathsMessage(paths []string) string {
 		len(paths), strings.Join(esc, ", "))
 }
 
+// planPathsSkippedMessage is the warning text when the check fails on the
+// plan text. The check is advisory, so a failure must not stop the verb.
+const planPathsSkippedMessage = "the check for plan file paths missing from key_file_paths was skipped: it could not read the plan text."
+
 // checkUnlistedPlanPaths adds one advisory warning (never an error) that
 // lists the plan-body file paths absent from every bead's key_file_paths.
+// A panic in the check becomes a single warning that the check was
+// skipped.
 func checkUnlistedPlanPaths(r *Result, content string, chunks []WorkChunk) {
-	if missing := UnlistedPlanPaths(content, chunks); len(missing) > 0 {
+	checkUnlistedPlanPathsWith(r, func() []string { return UnlistedPlanPaths(content, chunks) })
+}
+
+// checkUnlistedPlanPathsWith runs find and adds the warning. A panic in
+// find never reaches the caller: it becomes one warning that the check
+// was skipped.
+func checkUnlistedPlanPathsWith(r *Result, find func() []string) {
+	defer func() {
+		if recover() != nil {
+			r.AddWarning(PlanPathsWarningName, planPathsSkippedMessage)
+		}
+	}()
+	if missing := find(); len(missing) > 0 {
 		r.AddWarning(PlanPathsWarningName, UnlistedPlanPathsMessage(missing))
 	}
 }
