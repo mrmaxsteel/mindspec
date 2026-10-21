@@ -6,6 +6,8 @@ MindSpec is a spec-driven development framework. See [USAGE.md](.mindspec/core/U
 
 Run `mindspec instruct` for mode-appropriate operating guidance.
 
+This step and the `bd` steps below are for the top-level session only. A subagent that works from a dispatch brief does not run `mindspec instruct`, `bd prime` or any other `bd` command: its brief and the context from `mindspec next --emit-only` replace them.
+
 ## Build & Test
 
 ```bash
@@ -20,6 +22,8 @@ make test     # Run all tests
 This project uses [MindSpec](https://github.com/mindspec/mindspec), a spec-driven development framework.
 
 Run `mindspec instruct` for mode-appropriate operating guidance.
+
+This step and the `bd` steps below are for the top-level session only. A subagent that works from a dispatch brief does not run `mindspec instruct`, `bd prime` or any other `bd` command: its brief and the context from `mindspec next --emit-only` replace them.
 
 ### Build & Test
 

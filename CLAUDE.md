@@ -5,6 +5,8 @@
 
 Run `mindspec instruct` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
+This step and the `bd` steps below are for the top-level session only. A subagent that works from a dispatch brief does not run `mindspec instruct`, `bd prime` or any other `bd` command: its brief and the context from `mindspec next --emit-only` replace them.
+
 ## Skills
 
 ### Spec lifecycle gates
