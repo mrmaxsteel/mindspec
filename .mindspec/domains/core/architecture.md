@@ -274,3 +274,21 @@ other mode uses, instead of fabricating `idle.md` guidance for a failure it
 never actually observed. The workflow domain's `internal/instruct` and
 `internal/resolve` packages are this sentinel's only producers/consumers;
 core's role is limited to defining and excluding it from the valid-mode set.
+
+### Lineage and spec binding
+
+The phase package owns bead lineage and epic-to-spec resolution.
+One parent-child dependency on an epic supplies lineage. Blocks edges and
+bead titles do not supply lineage. The resolver returns edge provenance
+with the epic and full spec ID. Callers can classify a row without a second
+bead read.
+
+Full spec IDs retain optional letters. Resolution uses `spec_id` first,
+the legacy numeric/title pair second, and the full epic title ID third.
+A stored full ID decides after validation. A bad full ID refuses. A legacy
+pair that conflicts with the title ID requires repair. Zero numeric metadata
+or an empty legacy title means that pair is absent.
+
+The invocation cache checks every epic, including closed epics, before it
+stores a scoped binding. Duplicate bindings block only their spec.
+Listings warn and skip bad bindings. Epics with no ID source remain silent.

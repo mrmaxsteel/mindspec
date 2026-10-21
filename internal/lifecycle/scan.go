@@ -11,8 +11,7 @@
 // independent of both the on-disk spec count and the epic count:
 //
 //   - `cache.AllEpics()` is called exactly ONCE; the specID for each epic
-//     comes from its own metadata (phase.ExtractSpecMetadata /
-//     phase.SpecIDFromMetadata) — never a per-spec-dir FindEpicBySpecID.
+//     comes from phase.ResolveSpec(epic) — never a per-spec-dir FindEpicBySpecID.
 //   - stale-OPEN candidates come from ONE global open/in_progress
 //     enumeration (`cache.OpenBeads()`), attributed to their owning spec
 //     via the bead's own Parent against the epic list — REGARDLESS of the
@@ -113,13 +112,7 @@ func ScanIntegrityFindings(root string, cache *phase.Cache) IntegrityFindings {
 	epicSpec := make(map[string]string, len(epics))
 
 	for _, epic := range epics {
-		num, title := phase.ExtractSpecMetadata(epic)
-		if num <= 0 || title == "" {
-			continue // no spec lineage — not a lifecycle epic
-		}
-		// D1 ambient-enumeration degrade (ADR-0042): a malformed
-		// derivation skips this one epic — never brick the whole scan.
-		specID, err := phase.SpecIDFromMetadata(num, title)
+		specID, err := phase.ResolveSpec(epic)
 		if err != nil {
 			continue
 		}

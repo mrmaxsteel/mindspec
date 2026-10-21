@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
@@ -512,13 +513,14 @@ func TestNext_BareAllowNotReady_Refuses(t *testing.T) {
 			want := "recovery: mindspec next epic-129.1"
 			switch leg {
 			case "foreign-dotted":
-				f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "", "task", "open")}
+				f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "epic-129", "task", "open")}
 				f.write(t)
 				args[0] = "other-epic.1"
 				want = "recovery: mindspec bead ready-check other-epic.1"
 				report, err := readiness.EvaluateReadiness(f.root, args[0])
-				if err != nil || !report.AllPass() {
-					t.Fatalf("foreign fixture must pass every signal: %+v %v", report, err)
+				var nonplan *readiness.NonPlanFormError
+				if report != nil || !errors.As(err, &nonplan) {
+					t.Fatalf("foreign prefix must refuse plan form: %+v %v", report, err)
 				}
 			case "nothing-failing-missing-branch":
 				honestyGit(t, f.root, "branch", "-D", "spec/129-fixture")
@@ -839,7 +841,7 @@ if os.environ.get("SCOPED_LINEAGE_CHANGED"):
 
 func TestNext_ForeignDottedTitleRefuses(t *testing.T) {
 	f := newScopedNextFixture(t)
-	f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "", "task", "open")}
+	f.rows = []map[string]interface{}{nextHonestyRow("other-epic.1", "[129] foreign dotted bead", "epic-129", "task", "open")}
 	f.epics[0]["status"] = "closed"
 	f.write(t)
 	before := f.audit(t)

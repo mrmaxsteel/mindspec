@@ -184,7 +184,7 @@ func wireEpicFixture(t *testing.T, epic phase.EpicInfo, children []phase.ChildIn
 				return json.Marshal([]map[string]interface{}{{
 					"title": bead.Title,
 					"dependencies": []map[string]interface{}{
-						{"id": epic.ID, "issue_type": "epic"},
+						{"id": epic.ID, "issue_type": "epic", "dependency_type": "parent-child"},
 					},
 				}})
 			}

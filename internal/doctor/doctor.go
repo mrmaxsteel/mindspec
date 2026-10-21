@@ -125,6 +125,7 @@ func RunWithOptions(root string, opts Options) *Report {
 	// symbol the generated `mindspec instruct` guidance invokes
 	// (P8/AC-12/AC-15).
 	checkLifecycleIntegrity(r, root)
+	checkLineage(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)

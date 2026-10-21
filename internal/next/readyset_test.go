@@ -623,10 +623,10 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.3", "epic-129.2", "epic-129.1"}) {
+	if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.3", "epic-129.2", "epic-129.1", "epic-129.8"}) {
 		t.Fatalf("members: %v", ids(rs.Filtered))
 	}
-	want := map[string]string{"epic-129.4": "N1", "epic-129.5": "N2a", "epic-129.7": "N2b", "epic-129.8": "N2c", "epic-129.12": "N2c", "nonplan-r": "N3", "epic-129.9": "N4", "epic-129.10": "N4", "epic-129.11": "N4", "nonplan-f": "N3", "nonplan-m": "N3", "nonplan-t": "N3"}
+	want := map[string]string{"epic-129.4": "N1", "epic-129.5": "N2a", "epic-129.7": "N1", "epic-129.12": "N2c", "nonplan-r": "N3", "epic-129.9": "N4", "epic-129.10": "N4", "epic-129.11": "N4", "nonplan-f": "N3", "nonplan-m": "N3", "nonplan-t": "N3"}
 	if len(rs.NearMisses) != len(want) {
 		t.Fatalf("near misses: %+v", rs.NearMisses)
 	}
@@ -676,9 +676,6 @@ func TestBuildReadySet_PlanBeadPredicate(t *testing.T) {
 	for _, row := range f.rows {
 		if _, form := bead.PlanBeadIndex("epic-129", row.ID); form {
 			count := 1
-			if want[row.ID] == "N2b" || want[row.ID] == "N2c" {
-				count = 2 // Resolver read plus foreign-lineage provenance read.
-			}
 			if shows[row.ID] != count {
 				t.Errorf("bd show %s called %d times; want %d for class %s", row.ID, shows[row.ID], count, want[row.ID])
 			}
@@ -717,7 +714,7 @@ func TestBuildReadySet_LazyMapping(t *testing.T) {
 				if mapped {
 					want = "N1"
 					if foreign {
-						want = "N2b"
+						want = "N1"
 					}
 				}
 				if (err != nil) != mapped || missByID(t, rs, "epic-129.1").Class != want {
@@ -729,7 +726,7 @@ func TestBuildReadySet_LazyMapping(t *testing.T) {
 }
 
 func TestBuildReadySet_PlanReadOnlyWhenNeeded(t *testing.T) {
-	for _, id := range []string{"nonplan-r", "epic-129.5", "epic-129.8"} {
+	for _, id := range []string{"nonplan-r", "epic-129.5", "epic-129.12"} {
 		t.Run(id, func(t *testing.T) {
 			f := newNearMissFixture(t, false)
 			for _, r := range f.rows {
@@ -746,7 +743,7 @@ func TestBuildReadySet_PlanReadOnlyWhenNeeded(t *testing.T) {
 			if err == nil || len(rs.NearMisses) != 1 {
 				t.Fatalf("lazy bypass classification: %+v %v", rs, err)
 			}
-			want := map[string]string{"nonplan-r": "N3", "epic-129.5": "N2a", "epic-129.8": "N2c"}[id]
+			want := map[string]string{"nonplan-r": "N3", "epic-129.5": "N2a", "epic-129.12": "N2c"}[id]
 			if rs.NearMisses[0].Class != want {
 				t.Fatalf("lazy bypass: got %s want %s", rs.NearMisses[0].Class, want)
 			}
@@ -810,10 +807,10 @@ func TestBuildReadySet_PlanSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.1", "epic-129.2", "epic-129.3"}) {
+			if !reflect.DeepEqual(ids(rs.Filtered), []string{"epic-129.1", "epic-129.2", "epic-129.3", "epic-129.8"}) {
 				t.Fatalf("%s members: %v", source, ids(rs.Filtered))
 			}
-			for id, class := range map[string]string{"epic-129.4": "N1", "epic-129.5": "N2a", "epic-129.7": "N2b", "epic-129.8": "N2c", "epic-129.12": "N2c", "epic-129.9": "N4", "epic-129.10": "N4", "epic-129.11": "N4", "nonplan-r": "N3", "nonplan-f": "N3", "nonplan-m": "N3", "nonplan-t": "N3"} {
+			for id, class := range map[string]string{"epic-129.4": "N1", "epic-129.5": "N2a", "epic-129.7": "N1", "epic-129.12": "N2c", "epic-129.9": "N4", "epic-129.10": "N4", "epic-129.11": "N4", "nonplan-r": "N3", "nonplan-f": "N3", "nonplan-m": "N3", "nonplan-t": "N3"} {
 				if got := missByID(t, rs, id).Class; got != class {
 					t.Fatalf("%s: %s class %s want %s", source, id, got, class)
 				}
@@ -822,8 +819,7 @@ func TestBuildReadySet_PlanSources(t *testing.T) {
 				t.Fatalf("%s notice: %q", source, rs.PlanNotice)
 			}
 			if source == "stale-checkout" {
-				// The missing eighth section changes mapping even though X's
-				// dependency makes its main-fixture classification mapping-free.
+				// The committed eighth section must still map the child.
 				f.rows = []BeadInfo{f.row("epic-129.8", "neutral", "epic-129", "task")}
 				f.deps = map[string][]map[string]string{}
 				f.save(t)
@@ -982,6 +978,63 @@ func TestWorkflowSelectionDocs_Contracts(t *testing.T) {
 				if !strings.Contains(text, contract) {
 					t.Errorf("workflow %s omits contract %q", tc.path, contract)
 				}
+			}
+		})
+	}
+}
+
+func TestBuildReadySet_OneShowPerPlanRow(t *testing.T) {
+	f := newNearMissFixture(t, false)
+	f.rows = []BeadInfo{f.row("epic-129.12", "foreign", "epic-777", "task")}
+	f.save(t)
+	rs, err := BuildReadySet(f.root, "129-fixture")
+	if err == nil || missByID(t, rs, "epic-129.12").Class != "N2c" {
+		t.Fatalf("foreign row: %+v %v", rs, err)
+	}
+	raw, err := os.ReadFile(f.path + ".argv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var args []string
+		if err := json.Unmarshal([]byte(line), &args); err != nil {
+			t.Fatal(err)
+		}
+		if len(args) > 1 && args[0] == "show" && args[1] == "epic-129.12" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("plan row show count=%d, want 1", count)
+	}
+}
+func TestBuildReadySet_ScopedLetteredSpecResolves(t *testing.T) {
+	f := newNearMissFixture(t, false)
+	f.epics = []phase.EpicInfo{{ID: "epic-letter", Status: "open", IssueType: "epic", Metadata: map[string]interface{}{"spec_id": "008b-human-gates"}}}
+	f.rows = []BeadInfo{f.row("epic-letter.1", "work", "epic-letter", "task")}
+	f.save(t)
+	dir := filepath.Join(f.root, ".mindspec/specs/008b-human-gates")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plan.md"), []byte(fixturePlan(1, 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := BuildReadySet(f.root, "008b-human-gates")
+	if err != nil || rs.EpicID != "epic-letter" || len(rs.Filtered) != 1 {
+		t.Fatalf("lettered scope: %+v %v", rs, err)
+	}
+}
+func TestBuildReadySet_ScopedDuplicateEpicsRefuse(t *testing.T) {
+	for _, status := range []string{"open", "closed"} {
+		t.Run(status, func(t *testing.T) {
+			f := newNearMissFixture(t, false)
+			f.epics = append(f.epics, phase.EpicInfo{ID: "epic-duplicate", Status: status, IssueType: "epic", Metadata: map[string]interface{}{"spec_id": "129-fixture"}})
+			f.save(t)
+			_, err := BuildReadySet(f.root, "129-fixture")
+			if err == nil || !strings.Contains(err.Error(), "epic-129, epic-duplicate") {
+				t.Fatalf("duplicate scope: %v", err)
 			}
 		})
 	}
