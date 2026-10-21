@@ -108,6 +108,9 @@ the new `bead ready-check`/`bead clarify` verbs).
 
 The `rebind`, `refute`, `abandon` and `defer` panel verbs register telemetry tokens in `internal/redact/redact.go`.
 
+`rules` is registered in `internal/redact.CommandTokens`.
+Redaction keeps this verb name in accepted journal events.
+
 Spec 127 made both registrations: `adopt` joined `SubcommandTokens` for
 the new `mindspec impl adopt` verb (R1's audited, merge-free terminal
 transition), and `allow-net-deletion` joined the third closed set,

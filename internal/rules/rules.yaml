@@ -1,0 +1,102 @@
+- id: panel.verbs-only
+  scope: [orchestrator, implementer, reviewer, fixer]
+  prohibition: Do not hand edit panel.json or a verdict file.
+  replacement: Use the panel verbs to record panel state and verdicts.
+  enforced_by: complete
+- id: panel.submit
+  scope: [reviewer]
+  prohibition: Do not write a verdict file directly.
+  replacement: Use mindspec panel submit or the output channel in the slot prompt.
+  enforced_by: panel submit
+- id: panel.isolated-checkout
+  scope: [reviewer]
+  prohibition: Do not run tests or edit files in a shared worktree.
+  replacement: Use the slot tree at the reviewed commit.
+  enforced_by: advisory
+- id: panel.scratch-in-slot
+  scope: [reviewer, fixer]
+  prohibition: Do not write scratch files in a system temp directory or at a bare relative path.
+  replacement: Use an absolute path in the slot or fixer directory.
+  enforced_by: advisory
+- id: panel.fix-after-final
+  scope: [orchestrator]
+  prohibition: Do not start a fix agent before mindspec panel verify exits 0.
+  replacement: Wait for all slots to be final before you dispatch a fix agent.
+  enforced_by: advisory
+- id: panel.one-fixer
+  scope: [orchestrator]
+  prohibition: Do not start more than one fix agent per panel round or run it in a slot tree.
+  replacement: Run one fix agent per round in the target's own worktree.
+  enforced_by: advisory
+- id: panel.artifact-gate
+  scope: [orchestrator]
+  prohibition: Do not close a finding about a missing measurement artifact with a text edit.
+  replacement: Keep the finding open until the measurement artifact exists.
+  enforced_by: advisory
+- id: panel.clean-before-complete
+  scope: [orchestrator]
+  prohibition: Do not run mindspec complete on a dirty worktree.
+  replacement: Check that the target worktree is clean before completion.
+  enforced_by: complete
+- id: review.basis
+  scope: [reviewer]
+  prohibition: Do not report a finding without its basis or omit the command for an executed finding.
+  replacement: State executed, traced or hypothesis as the basis and name the command for an executed finding.
+  enforced_by: panel submit
+- id: review.property
+  scope: [reviewer]
+  prohibition: Do not state only a remedy for a finding.
+  replacement: State the property that the change violates.
+  enforced_by: advisory
+- id: review.mutation
+  scope: [reviewer]
+  prohibition: Do not accept a guard without a mutation that makes it fail.
+  replacement: Substitute a named wrong value and show that the guard fails.
+  enforced_by: advisory
+- id: review.stated-limit
+  scope: [reviewer]
+  prohibition: Do not claim checks that you did not perform.
+  replacement: State what you did not check beside each conclusion that it limits.
+  enforced_by: advisory
+- id: review.ci-parity
+  scope: [reviewer]
+  gates: [final_review]
+  prohibition: Do not omit the project's declared CI command from final review or silently skip an undeclared command.
+  replacement: Run commands.ci verbatim, else commands.test. When neither is set, state this in the rationale.
+  enforced_by: advisory
+- id: review.reproduce
+  scope: [orchestrator]
+  prohibition: Do not dispatch a fix agent or refute a blocking finding before you reproduce it in isolation.
+  replacement: Reproduce each blocking finding in an isolated checkout and give more weight to the deeper trace.
+  enforced_by: advisory
+- id: review.no-vote
+  scope: [orchestrator, implementer, reviewer, fixer]
+  prohibition: Do not use an APPROVE count to resolve a finding.
+  replacement: Fix, evidence-refute or defer each finding through the panel verbs.
+  enforced_by: complete
+- id: review.classifier-redispatch
+  scope: [orchestrator]
+  prohibition: Do not drop a slot when its reviewer refuses a security-framed lens.
+  replacement: Dispatch the same slot again with a correctness framing.
+  enforced_by: advisory
+- id: review.derive
+  scope: [implementer, fixer]
+  prohibition: Do not restate a value or rule that has a source of truth.
+  replacement: Derive the value or rule from its source of truth.
+  enforced_by: advisory
+- id: lifecycle.no-probe-complete
+  scope: [orchestrator]
+  prohibition: Do not run mindspec complete to test a gate.
+  replacement: Use mindspec panel verify and mindspec validate to check the gate.
+  enforced_by: advisory
+- id: lifecycle.complete-by-orchestrator
+  scope: [implementer, fixer]
+  prohibition: A subagent must not run mindspec complete, bd close or a raw bead merge.
+  replacement: Return the implementation or fix to the orchestrator for completion.
+  enforced_by: advisory
+- id: sequence.bead-impl-prompt
+  scope: [orchestrator]
+  prohibition: Do not dispatch an implementer before the implementation prompt is staged.
+  replacement: Stage the implementation prompt before dispatch.
+  enforced_by: advisory
+  target: next-action
