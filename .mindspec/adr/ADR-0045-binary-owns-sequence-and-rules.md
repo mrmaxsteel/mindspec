@@ -96,3 +96,11 @@ The Context claims above were checked against the tree when this ADR was added b
 ## Amendment (Spec 130)
 
 - **Implementation status (R13.5).** Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131. The staged-rule marker is `<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->`. It names no spec or ADR, because it ships to consumers; the spec-131 rule table may revise it. Refute and abandon procedures are binary verbs; skills invoke them and never edit the panel snapshot or append coverage manifests.
+
+## Amendment (Spec 131)
+
+Implementation order step 1 is implemented by one embedded YAML rule table. Each row has `id`, `scope`, `prohibition`, `replacement` and `enforced_by`. A row can also have `gates` and `target`. `mindspec rules` lists the rows. `mindspec rules show <id>` prints one row. Unknown ids and scopes are refused.
+
+Implementation order step 5 starts with the `## Rules` section in `mindspec instruct`. Every mode includes orchestrator rules. Implement mode also includes implementer rules. The table is the source of this text. `next-action` remains outside this amendment.
+
+The staged-rule marker is `<!-- staged-rule: id=<rule-id>; remove-by=YYYY-MM-DD -->`. The `ms-bead-impl` marker uses `id=sequence.bead-impl-prompt`. Its table row has `target: next-action`. The marker parser retains invalid markers for diagnosis. A marker names the rule id; it does not repeat the planned target.
