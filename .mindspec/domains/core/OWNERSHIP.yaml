@@ -17,3 +17,7 @@ paths:
   # owns internal/phase/** and the lock (phaselock.go) whose lockfile
   # path that entry ignores — the machinery that motivated the entry.
   - .gitignore
+  # Core claims the repository config file because it owns
+  # internal/config/**, which loads this file.
+  # Spec 131 Bead 1 adds the panel.runners block to this file.
+  - .mindspec/config.yaml

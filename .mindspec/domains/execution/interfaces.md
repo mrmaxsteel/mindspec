@@ -18,6 +18,7 @@ type Executor interface {
 
     // Query methods
     CheckIgnore(workdir, file string) error
+    LsFiles(workdir, path string) (bool, error)
     IsTreeClean(path string) error
     LsTree(workdir, rev string) (string, error)
     DiffStat(base, head string) (string, error)
@@ -42,6 +43,13 @@ consumers select roots and exclusions in Go and hash the retained listing.
 
 `CheckIgnore` delegates to `gitutil.CheckIgnore`: nil means ignored, exit 1
 means not ignored; all other errors fail the ledger preflight closed.
+
+`LsFiles(workdir, path)` reports whether the index tracks the literal path or a file under it.
+`MindspecExecutor` calls `gitutil.LsFiles` with `--literal-pathspecs`, `-z` and `--`.
+Git failures return an error. `MockExecutor` records the call and supports `LsFilesFn`,
+`LsFilesResult` and `LsFilesErr`. The command layer uses this query to reject a tracked isolation root.
+In `gitops.go`, `gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.
+This sets Git's global option and keeps path arguments after `--` literal.
 
 The two merge-producing methods gained paired parameters in spec 127
 (R4(b)/R5(d)): `overrideReason` is the operator's audited
@@ -96,6 +104,13 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | `ReviewIgnoreEntries` | Optional local panel artifacts: `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` (spec 129 R8). Separate from runtime entries so already-tracked reviews do not become doctor runtime-file findings. The following negations retain the flat spec ledger: `!.mindspec/specs/*/reviews/*/` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl` (spec 130 R6). Bootstrap writes the ledger negations by exact-line presence only, preserving bytes on a second init; adhoc ledgers remain ignored. |
 | `EnsureGitignoreEntriesWithHeader(root, header, entries...)` | The same append and ignore-check semantics as `EnsureGitignoreEntries`, with a caller-supplied header. Runtime callers use this ignore-check helper; bootstrap uses this for the plain review patterns and writes their ledger negations separately by exact-line presence because negations cannot be checked as ignored paths. `EnsureGitignoreEntries` delegates with the runtime header. |
 | `EnsureGitignoreEntries(root, entries...)` | Entry-granular, negation-aware `.gitignore` ensure (final review G1): guarantees each entry is ACTUALLY ignored by git, not merely present as a line. Existing bytes are never reordered or rewritten; entries needing a fresh line are appended under a shared header comment; creates the file if absent. An entry needs a fresh line when its exact line is absent (delimiter-stripped comparison only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence), OR when the line IS present but `git check-ignore` reports the path un-ignored anyway — a LATER negation rule (`!entry`) defeats it under git's last-match-wins ordering, so the plain entry is RE-APPENDED (a harmless duplicate line) to make the last match the ignore rule again. So the same entry can legitimately appear more than once, and a converged call still shells out to `git check-ignore` per line-present entry before concluding nothing needs writing (no write happens in that case). On an indeterminate git verdict (no repository / exit status outside {0,1}, e.g. 128) it falls back to line-presence alone rather than force a spurious re-append. Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
+
+`EnsureGitignoreLiteralEntriesWithHeader(root, header, paths...)` writes literal path patterns.
+It escapes backslashes, `*`, `?`, `[`, leading `#` or `!`, and trailing spaces.
+It checks every path for bytes below `0x20` before it writes any entry.
+It returns an error on these bytes and leaves `.gitignore` unchanged.
+It uses the shared append rules, but checks ignore status with the original paths.
+Bootstrap uses it for `.mindspec/config.local.yaml` and the effective isolation root.
 
 ### Merge-safety primitives (spec 127, `internal/gitutil`)
 

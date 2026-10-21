@@ -2,6 +2,15 @@ package executor
 
 import "sync"
 
+// LsFiles records the tracked-path query.
+func (m *MockExecutor) LsFiles(workdir, path string) (bool, error) {
+	m.record("LsFiles", workdir, path)
+	if m.LsFilesFn != nil {
+		return m.LsFilesFn(workdir, path)
+	}
+	return m.LsFilesResult, m.LsFilesErr
+}
+
 // MockExecutor implements Executor for testing. It records all method calls
 // and returns configurable results. Safe for concurrent use.
 type MockExecutor struct {
@@ -69,6 +78,9 @@ type MockExecutor struct {
 	StatusErr         error
 	CheckIgnoreFn     func(workdir, file string) error
 	CheckIgnoreErr    error
+	LsFilesFn         func(workdir, path string) (bool, error)
+	LsFilesResult     bool
+	LsFilesErr        error
 	IsRefNotFoundFn   func(error) bool
 
 	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when

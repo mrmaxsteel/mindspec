@@ -822,6 +822,23 @@ func TestLsFiles_PassesArgs(t *testing.T) {
 	assertArgs(t, (*calls)[0].args, "-C", "/r", "ls-files", ".beads/")
 }
 
+func TestLsFiles_LiteralPathspecs(t *testing.T) {
+	for _, workdir := range []string{"/r", ""} {
+		t.Run(workdir, func(t *testing.T) {
+			calls := swapExec(t, "tracked\n", 0)
+			out, err := LsFiles(workdir, "--literal-pathspecs", "-z", "--", "--literal-pathspecs")
+			if err != nil || out != "tracked\n" {
+				t.Fatalf("literal ls-files: %q %v", out, err)
+			}
+			want := []string{"--literal-pathspecs", "ls-files", "-z", "--", "--literal-pathspecs"}
+			if workdir != "" {
+				want = append([]string{"-C", workdir}, want...)
+			}
+			assertArgs(t, (*calls)[0].args, want...)
+		})
+	}
+}
+
 func TestLsFilesErrorUnmatch_NilOnTracked(t *testing.T) {
 	calls := swapExec(t, "", 0)
 	if err := LsFilesErrorUnmatch("/r", "tracked.txt"); err != nil {

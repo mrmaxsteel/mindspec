@@ -15,6 +15,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"gopkg.in/yaml.v3"
 )
 
 // bp returns a pointer to s, for building panel.Panel.BeadID fixtures.
@@ -71,10 +72,9 @@ func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
 		t.Errorf("expected runner: claude-code-skills, got:\n%s", out)
 	}
 
-	// The three inert blocks (models/loop/runner) are each annotated; panel
-	// (which DOES drive behavior today) is not one of them.
-	if got := strings.Count(out, "declared, not yet enforced"); got < 3 {
-		t.Errorf("expected the \"declared, not yet enforced\" annotation on all three inert blocks (models/loop/runner), got %d occurrences:\n%s", got, out)
+	// Only the loop and adapter selection remain advisory blocks.
+	if got := strings.Count(out, "declared, not yet enforced"); got != 2 {
+		t.Errorf("expected the \"declared, not yet enforced\" annotation on both inert blocks (loop/runner), got %d occurrences:\n%s", got, out)
 	}
 }
 
@@ -154,9 +154,9 @@ func TestConfigShow_EscapesHostileControlBytes(t *testing.T) {
 	// Sanity: confirm the YAML source actually decodes to the exact raw
 	// bytes this test targets, so a future change to the fixture text can't
 	// silently stop exercising the hostile path.
-	cfg, err := config.Load(root)
-	if err != nil {
-		t.Fatalf("config.Load(hostile fixture): %v", err)
+	cfg := config.DefaultConfig()
+	if err := yaml.Unmarshal([]byte(hostileYAML), cfg); err != nil {
+		t.Fatal(err)
 	}
 	if got := cfg.Panel.Reviewers[0].Family; got != hostileFamily {
 		t.Fatalf("fixture family did not decode to the expected raw bytes: got %q, want %q", got, hostileFamily)
@@ -169,13 +169,12 @@ func TestConfigShow_EscapesHostileControlBytes(t *testing.T) {
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
 
-	var stdout, stderr bytes.Buffer
-	rootCmd.SetOut(&stdout)
-	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"config", "show"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("mindspec config show: %v\nstderr=%s", err, stderr.String())
+	rendered, err := renderConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var stdout bytes.Buffer
+	stdout.WriteString(rendered)
 	outBytes := stdout.Bytes()
 	out := stdout.String()
 
@@ -260,10 +259,6 @@ func TestConfigShow_GatesSubstitutesAndModelAdvisory(t *testing.T) {
 			{Model: "made-up-model-9000", Count: &three},
 		}},
 	}
-	cfg.Panel.Substitution.Substitutes = map[string]string{
-		"gpt-5.5":        "claude-sonnet-5",
-		"claude-fable-5": "claude-opus-4-8",
-	}
 
 	out1, err := renderConfig(cfg)
 	if err != nil {
@@ -304,32 +299,9 @@ func TestConfigShow_GatesSubstitutesAndModelAdvisory(t *testing.T) {
 		t.Errorf("expected final_review's resolved sum (12), got:\n%s", out1)
 	}
 
-	// substitutes: sorted-key order (claude-fable-5 before gpt-5.5) plus
-	// the slot-id-preservation convention line.
-	cfIdx := strings.Index(out1, "claude-fable-5: claude-opus-4-8")
-	gptIdx := strings.Index(out1, "gpt-5.5: claude-sonnet-5")
-	if cfIdx == -1 || gptIdx == -1 || cfIdx > gptIdx {
-		t.Errorf("expected substitutes in sorted-key order (claude-fable-5 before gpt-5.5), got:\n%s", out1)
-	}
-	if !strings.Contains(out1, `reviewer_id "<slot> <substitute-model>-sub"`) {
-		t.Errorf("expected the slot-id-preservation convention line, got:\n%s", out1)
-	}
-
 	// note echoed verbatim.
 	if !strings.Contains(out1, "note: fable-window 2026-07, codex-enabled") {
 		t.Errorf("expected the note echoed, got:\n%s", out1)
-	}
-
-	// Known-model advisory: the made-up id warns; none of the seeded ids
-	// or legacy family strings (claude, codex, and the four protocol
-	// model ids used above) ever warn (negative control).
-	if !strings.Contains(out1, "made-up-model-9000") || !strings.Contains(out1, "not in the known-model list") {
-		t.Errorf("expected a known-model warning for the made-up id, got:\n%s", out1)
-	}
-	for _, seeded := range []string{"claude", "codex", "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "gpt-5.5"} {
-		if idx := strings.Index(out1, seeded+" not in the known-model list"); idx != -1 {
-			t.Errorf("seeded id/family %q must never warn, got:\n%s", seeded, out1)
-		}
 	}
 
 	// Deterministic output: two renders of the SAME config are byte-identical.
@@ -426,10 +398,6 @@ panel:
     - {family: claude, count: 3}
     - {family: codex, count: 3}
   approve_threshold: "n-1"
-  substitution:
-    claude_sub_on_quota: true
-    substitutes:
-      gpt-5.5: claude-sonnet-5
   gates:
     bead:
       reviewers:
@@ -463,7 +431,7 @@ panel:
 	if err := json.Unmarshal(stdout.Bytes(), &generic); err != nil {
 		t.Fatalf("unmarshal JSON output: %v\noutput: %s", err, stdout.String())
 	}
-	wantKeys := []string{"gate", "slots", "expected_reviewers", "approve_threshold", "substitution"}
+	wantKeys := []string{"gate", "slots", "expected_reviewers", "approve_threshold"}
 	if len(generic) != len(wantKeys) {
 		t.Errorf("expected exactly %d members, got %d: %v", len(wantKeys), len(generic), generic)
 	}
@@ -482,20 +450,15 @@ panel:
 		} `json:"slots"`
 		ExpectedReviewers int    `json:"expected_reviewers"`
 		ApproveThreshold  string `json:"approve_threshold"`
-		Substitution      struct {
-			Substitutes      map[string]string `json:"substitutes"`
-			ClaudeSubOnQuota bool              `json:"claude_sub_on_quota"`
-			InForce          string            `json:"in_force"`
-		} `json:"substitution"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal typed JSON output: %v", err)
 	}
 
-	// Agrees with the R3 resolvers over the SAME config.
+	// Agrees with the config resolvers.
 	cfg, err := config.Load(root)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatal(err)
 	}
 	wantSlots, err := cfg.PanelGateReviewerSlots("bead")
 	if err != nil {
@@ -528,52 +491,6 @@ panel:
 		}
 	}
 
-	// substitution.in_force: non-empty substitutes map -> "substitutes".
-	if doc.Substitution.InForce != "substitutes" {
-		t.Errorf("in_force: got %q, want %q (non-empty substitutes map)", doc.Substitution.InForce, "substitutes")
-	}
-	if !reflect.DeepEqual(doc.Substitution.Substitutes, map[string]string{"gpt-5.5": "claude-sonnet-5"}) {
-		t.Errorf("substitutes: got %v", doc.Substitution.Substitutes)
-	}
-	if !doc.Substitution.ClaudeSubOnQuota {
-		t.Error("claude_sub_on_quota: want true")
-	}
-
-	// in_force flips when substitutes is empty (R5 supersession) — checked
-	// directly against gateResolvedJSON (pure) over a config copy with an
-	// emptied substitutes map, isolating this assertion from a second CLI run.
-	cfgNoSub := *cfg
-	cfgNoSub.Panel.Substitution.Substitutes = nil
-	data, err := gateResolvedJSON(&cfgNoSub, "bead")
-	if err != nil {
-		t.Fatalf("gateResolvedJSON: %v", err)
-	}
-
-	// A nil (unconfigured) substitutes map must marshal to "{}", never
-	// "null" — checked on the RAW JSON STRING, not via unmarshal-into-struct,
-	// since both nil and {} decode to an equivalent empty Go map and would
-	// hide a "null" regression. A "null" here breaks jq consumers doing
-	// `.substitution.substitutes|keys` and contradicts the never-null
-	// treatment slots and the text path (renderSubstitutes) already give.
-	if !bytes.Contains(data, []byte(`"substitutes":{}`)) {
-		t.Errorf("expected raw JSON to contain %q for an unconfigured substitutes map, got: %s", `"substitutes":{}`, data)
-	}
-	if bytes.Contains(data, []byte(`"substitutes":null`)) {
-		t.Errorf("substitutes must never marshal to null, got: %s", data)
-	}
-
-	var flipped struct {
-		Substitution struct {
-			InForce string `json:"in_force"`
-		} `json:"substitution"`
-	}
-	if err := json.Unmarshal(data, &flipped); err != nil {
-		t.Fatalf("unmarshal flipped JSON: %v", err)
-	}
-	if flipped.Substitution.InForce != "claude_sub_on_quota" {
-		t.Errorf("in_force with empty substitutes: got %q, want %q", flipped.Substitution.InForce, "claude_sub_on_quota")
-	}
-
 	// Unknown --gate exits non-zero with the five-key recovery line.
 	var stdout2, stderr2 bytes.Buffer
 	rootCmd.SetOut(&stdout2)
@@ -599,127 +516,65 @@ panel:
 	}
 }
 
-// TestConfigShow_HostileStringsEscaped covers spec 112 AC10/R8: a hostile
-// panel.note, gate reviewer model, gate reviewer lens, and a substitutes
-// key/value — each carrying ESC/BEL and an embedded newline shaped like a
-// forged config line — never reach `config show` or
-// `config show --gate <name>` text output as raw control bytes or a forged
-// extra line, and round-trip byte-exactly through `--gate <name> --json`
-// under a real encoding/json decode.
+// TestConfigShow_HostileStringsEscaped covers spec 112 AC10/R8: text formatters
+// escape ESC, BEL and forged config lines in notes, models and lenses.
+// Resolution and Load refuse hostile models, so only direct formatters get them.
+// CLI checks cover hostile notes and lenses; JSON preserves the lens bytes.
 func TestConfigShow_HostileStringsEscaped(t *testing.T) {
-	resetConfigShowGateFlags(t)
-	hostileNote := "note\x1b[31mESC\x07BEL\ninjected_key: forged_note"
-	hostileModel := "model\x1bwith\x07control\ninjected_key: forged_model"
-	hostileLens := "lens\x1bwith\x07control\ninjected_key: forged_lens"
-	hostileSubKey := "subkey\x1bwith\x07control\ninjected_key: forged_subkey"
-	hostileSubVal := "subval\x1bwith\x07control\ninjected_key: forged_subval"
-
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0o755); err != nil {
-		t.Fatalf("mkdir .mindspec: %v", err)
-	}
-	hostileYAML := "panel:\n" +
-		"  note: \"note\\x1B[31mESC\\x07BEL\\ninjected_key: forged_note\"\n" +
-		"  gates:\n" +
-		"    bead:\n" +
-		"      reviewers:\n" +
-		"        - model: \"model\\x1Bwith\\x07control\\ninjected_key: forged_model\"\n" +
-		"          lens: \"lens\\x1Bwith\\x07control\\ninjected_key: forged_lens\"\n" +
-		"          count: 1\n" +
-		"        - model: claude-sonnet-5\n" +
-		"          count: 1\n" +
-		"  substitution:\n" +
-		"    substitutes:\n" +
-		"      \"subkey\\x1Bwith\\x07control\\ninjected_key: forged_subkey\": \"subval\\x1Bwith\\x07control\\ninjected_key: forged_subval\"\n"
-	if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(hostileYAML), 0o644); err != nil {
-		t.Fatalf("write hostile config.yaml: %v", err)
-	}
-
-	// Sanity: confirm the fixture decodes to the exact raw bytes targeted.
-	cfg, err := config.Load(root)
+	cfg := config.DefaultConfig()
+	hostile := "lens\x1bwith\x07control\ninjected_key: forged"
+	hostileModel := "model\x1bwith\x07control\ninjected_key: forged"
+	cfg.Panel.Note = "note\x1bwith\x07control\ninjected_key: forged"
+	cfg.Panel.Gates = map[string]config.GatePanel{"bead": {Reviewers: []config.Reviewer{{Model: hostileModel, Lens: hostile, Count: func() *int { n := 2; return &n }()}}}}
+	out, err := renderConfig(cfg)
 	if err != nil {
-		t.Fatalf("config.Load(hostile fixture): %v", err)
+		t.Fatal(err)
 	}
-	if cfg.Panel.Note != hostileNote {
-		t.Fatalf("fixture note did not decode as expected: got %q", cfg.Panel.Note)
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(hostileModel)) || !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
+		t.Fatalf("unsafe output: %q", out)
 	}
-	gp := cfg.Panel.Gates["bead"]
-	if len(gp.Reviewers) != 2 || gp.Reviewers[0].Model != hostileModel || gp.Reviewers[0].Lens != hostileLens {
-		t.Fatalf("fixture bead reviewer did not decode as expected: got %+v", gp.Reviewers)
+	// Resolution also refuses hostile models. Exercise its text formatter
+	// directly, then use a model-safe value for resolution and the CLI.
+	cfg.Panel.Gates["bead"].Reviewers[0].Model = "m1"
+	resolved, err := buildGateResolvedDoc(cfg, "bead")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, ok := cfg.Panel.Substitution.Substitutes[hostileSubKey]; !ok || got != hostileSubVal {
-		t.Fatalf("fixture substitutes did not decode as expected: got %v", cfg.Panel.Substitution.Substitutes)
+	for i := range resolved.Slots {
+		resolved.Slots[i].Model = hostileModel
 	}
-
-	withTestChdir(t, root)
-	config.ResetCache()
-	t.Cleanup(config.ResetCache)
-
-	checkTextOutput := func(t *testing.T, args []string) string {
-		t.Helper()
-		var stdout, stderr bytes.Buffer
-		rootCmd.SetOut(&stdout)
-		rootCmd.SetErr(&stderr)
-		rootCmd.SetArgs(args)
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("mindspec %s: %v\nstderr=%s", strings.Join(args, " "), err, stderr.String())
+	out = renderGateResolvedText(resolved)
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(hostileModel)) {
+		t.Fatalf("unsafe gate output: %q", out)
+	}
+	data, err := gateResolvedJSON(cfg, "bead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc gateResolvedDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Slots) != 2 || doc.Slots[0].Lens != hostile {
+		t.Fatalf("lens did not round trip: %+v", doc)
+	}
+	fixture, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolveFixture(t, string(fixture), "")
+	for _, args := range [][]string{{"show"}, {"show", "--gate", "bead"}} {
+		resetConfigShowGateFlags(t)
+		out, _, err := runConfigCLI(t, args...)
+		if err != nil {
+			t.Fatalf("config %v: %v", args, err)
 		}
-		outBytes := stdout.Bytes()
-		out := stdout.String()
-
-		if bytes.IndexByte(outBytes, 0x1b) != -1 {
-			t.Errorf("raw ESC byte (0x1b) reached stdout for %v:\n%q", args, out)
+		if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || strings.HasPrefix(out, "injected_key:") || !strings.Contains(out, strconv.Quote(hostile)) {
+			t.Fatalf("unsafe CLI output for %v: %q", args, out)
 		}
-		if bytes.IndexByte(outBytes, 0x07) != -1 {
-			t.Errorf("raw BEL byte (0x07) reached stdout for %v:\n%q", args, out)
+		if len(args) == 1 && !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
+			t.Fatalf("CLI note missing: %q", out)
 		}
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "injected_key:") {
-				t.Errorf("hostile newline forged a display line for %v: %q\nfull output:\n%s", args, line, out)
-			}
-		}
-		return out
-	}
-
-	out := checkTextOutput(t, []string{"config", "show"})
-	for _, want := range []string{hostileNote, hostileModel, hostileLens, hostileSubKey, hostileSubVal} {
-		if lit := strconv.Quote(want); !strings.Contains(out, lit) {
-			t.Errorf("expected the escaped literal %s in `config show` stdout, got:\n%s", lit, out)
-		}
-	}
-
-	outGate := checkTextOutput(t, []string{"config", "show", "--gate", "bead"})
-	for _, want := range []string{hostileModel, hostileLens, hostileSubKey, hostileSubVal} {
-		if lit := strconv.Quote(want); !strings.Contains(outGate, lit) {
-			t.Errorf("expected the escaped literal %s in `config show --gate bead` stdout, got:\n%s", lit, outGate)
-		}
-	}
-
-	// --gate --json: byte-exact round trip under a real encoding/json decode.
-	var stdoutJSON, stderrJSON bytes.Buffer
-	rootCmd.SetOut(&stdoutJSON)
-	rootCmd.SetErr(&stderrJSON)
-	rootCmd.SetArgs([]string{"config", "show", "--gate", "bead", "--json"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("mindspec config show --gate bead --json: %v\nstderr=%s", err, stderrJSON.String())
-	}
-	var doc struct {
-		Slots []struct {
-			Model string `json:"model"`
-			Lens  string `json:"lens"`
-		} `json:"slots"`
-		Substitution struct {
-			Substitutes map[string]string `json:"substitutes"`
-		} `json:"substitution"`
-	}
-	if err := json.Unmarshal(stdoutJSON.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal --gate --json output: %v\noutput: %s", err, stdoutJSON.String())
-	}
-	if len(doc.Slots) != 2 || doc.Slots[0].Model != hostileModel || doc.Slots[0].Lens != hostileLens {
-		t.Errorf("expected the hostile model/lens to round-trip byte-exactly through JSON, got: %+v", doc.Slots)
-	}
-	if got, ok := doc.Substitution.Substitutes[hostileSubKey]; !ok || got != hostileSubVal {
-		t.Errorf("expected the hostile substitutes entry to round-trip byte-exactly through JSON, got: %v", doc.Substitution.Substitutes)
 	}
 }
 

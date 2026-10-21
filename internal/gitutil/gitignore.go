@@ -2,6 +2,7 @@ package gitutil
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +66,34 @@ func EnsureGitignoreEntries(root string, entries ...string) error {
 // EnsureGitignoreEntriesWithHeader applies EnsureGitignoreEntries' append and
 // ignore-check semantics, using header above any appended entries.
 func EnsureGitignoreEntriesWithHeader(root, header string, entries ...string) error {
+	return ensureGitignoreEntriesWithHeader(root, header, entries, entries)
+}
+
+// EnsureGitignoreLiteralEntriesWithHeader ignores literal paths and checks those
+// paths rather than their escaped patterns. Plain paths keep their original bytes.
+// It refuses control bytes below 0x20 before it writes any entries.
+func EnsureGitignoreLiteralEntriesWithHeader(root, header string, paths ...string) error {
+	entries := make([]string, len(paths))
+	for i, path := range paths {
+		var b strings.Builder
+		trailingSpaces := len(strings.TrimRight(path, " "))
+		for j := 0; j < len(path); j++ {
+			c := path[j]
+			if c < 0x20 {
+				return fmt.Errorf("cannot ignore literal path %q: control bytes are not supported", path)
+			}
+			if c == '\\' || c == '*' || c == '?' || c == '[' ||
+				(j == 0 && (c == '#' || c == '!')) || (c == ' ' && j >= trailingSpaces) {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(c)
+		}
+		entries[i] = b.String()
+	}
+	return ensureGitignoreEntriesWithHeader(root, header, entries, paths)
+}
+
+func ensureGitignoreEntriesWithHeader(root, header string, entries, paths []string) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -118,12 +147,12 @@ func EnsureGitignoreEntriesWithHeader(root, header string, entries ...string) er
 	// `mindspec doctor` (R4c) to Warn on, since only doctor's git-lane
 	// check can see the deeper file's effective precedence.
 	var toAppend []string
-	for _, e := range entries {
+	for i, e := range entries {
 		if !present[e] {
 			toAppend = append(toAppend, e)
 			continue
 		}
-		ignored, ok := checkIgnored(root, e)
+		ignored, ok := checkIgnored(root, paths[i])
 		if !ok || ignored {
 			continue
 		}

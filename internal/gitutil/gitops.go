@@ -1660,14 +1660,22 @@ func LsTree(workdir, rev string) (string, error) {
 
 // LsFiles runs `git ls-files <args...>` in workdir (workdir=="" → cwd) and
 // returns stdout. Caller is responsible for adding `--` separators where
-// untrusted paths are passed (SEC-5).
+// untrusted paths are passed (SEC-5). A leading --literal-pathspecs argument
+// sets git's global literal-pathspec mode.
 func LsFiles(workdir string, args ...string) (string, error) {
-	cmd := execCommand("git", gitArgs(workdir, append([]string{"ls-files"}, args...)...)...)
+	cmd := execCommand("git", gitArgs(workdir, lsFilesArgs(args)...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("ls-files: %w", err)
 	}
 	return string(out), nil
+}
+
+func lsFilesArgs(args []string) []string {
+	if len(args) > 0 && args[0] == "--literal-pathspecs" {
+		return append([]string{"--literal-pathspecs", "ls-files"}, args[1:]...)
+	}
+	return append([]string{"ls-files"}, args...)
 }
 
 // LsFilesErrorUnmatch runs `git ls-files --error-unmatch -- <file>`. Returns

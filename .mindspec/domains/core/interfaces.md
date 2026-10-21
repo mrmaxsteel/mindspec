@@ -145,10 +145,8 @@ type Config struct {
     // creation-time defaults for a fresh panel.json (the spec-110 writer
     // consumes the resolvers below); it never overrides an already-recorded
     // panel's decision inputs — internal/panel stays a config-free leaf.
-    // Models, Loop, and Runner are declared, defaulted, validated, and
-    // surfaced by `mindspec config show` (Bead 4), but every key in them is
-    // INERT in this spec: nothing reads them to change behavior until a
-    // later spec wires enforcement.
+    // Models selects reviewer models through reviewer.<family> keys.
+    // Other model keys, Loop, and Runner supply orchestration guidance.
     Panel  Panel             `yaml:"panel"`
     Models map[string]string `yaml:"models"` // phase -> model id; free-form (runner-specific); default {}
     Loop   Loop              `yaml:"loop"`
@@ -157,7 +155,7 @@ type Config struct {
     // Commands is the CONSUMER's declared build/test guidance (spec 123
     // R7, ADR-0040 consumer-identity clause): a free-form task -> shell
     // command map (documented vocabulary keys: "build", "test"). NOT
-    // inert, unlike Models/Loop/Runner: `mindspec init` and every
+    // inert: `mindspec init` and every
     // `mindspec setup <agent>` verb render populated entries as the
     // managed AGENTS.md "Build & Test" section via
     // RenderBuildTestSection; unset means the section is OMITTED (ZFC —
@@ -176,7 +174,9 @@ func (c *Config) RenderBuildTestSection(level int) string // "" when Commands un
 type Panel struct {
     Reviewers        []Reviewer   `yaml:"reviewers"`         // explicit ALL-GATES list; default empty (per-gate sizes)
     ApproveThreshold string       `yaml:"approve_threshold"` // RAW "n-1" or integer string; default "n-1"; never resolved here
-    Substitution     Substitution `yaml:"substitution"`
+    Runners          []Runner          `yaml:"runners"`
+    Lenses           map[string]string `yaml:"lenses"`
+    IsolationRoot    string            `yaml:"isolation_root"`
     // Gates is the optional per-gate override map (spec 112 R1), keyed by
     // one of PanelGateKeys. Absent and present-but-empty (`gates: {}`) are
     // EQUIVALENT everywhere — every "gates is configured" predicate keys
@@ -191,11 +191,12 @@ type Panel struct {
 }
 
 // GatePanel is one panel.gates entry: a per-gate override of the reviewer
-// mix and/or approve_threshold. A configured gate must set at least one of
-// the two (Load refuses an entry that sets neither).
+// mix, approve_threshold, lenses or acceptance. A gate must set at least one.
 type GatePanel struct {
     Reviewers        []Reviewer `yaml:"reviewers"`
     ApproveThreshold string     `yaml:"approve_threshold"` // RAW expression, same grammar as Panel's
+    Lenses           []string   `yaml:"lenses"`
+    Acceptance       *Acceptance `yaml:"acceptance"`
 }
 
 // PanelGateKeys is the closed, ordered enum of panel.gates keys (spec 112
@@ -206,12 +207,10 @@ type GatePanel struct {
 // recovery lines, and config-show's enum-order rendering.
 var PanelGateKeys = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
 
-// Reviewer is one entry of a reviewer mix (global or per-gate). Model and
-// Lens are open-vocabulary strings — NO name-membership validation exists
-// anywhere in Load (spec 112 R1, ADR-0040): model ids are runner-specific
-// and ship faster than any enum could track (e.g. claude-fable-5). Family
-// is the legacy 109 field, still parseable; Model wins for slot expansion
-// when an entry sets both. Count is a POINTER so an absent count (nil) is
+// Reviewer is one entry of a reviewer mix (global or per-gate).
+// Family selects a declared runner. Model overrides the family model.
+// Model and reviewer lens names use an open vocabulary.
+// Count is a POINTER so an absent count (nil) is
 // distinguishable from an explicit `count: 0`/negative: nil resolves to 1
 // via CountValue() (spec 112 R2's one deliberate monotone relaxation over
 // 109, which refused count < 1 wholesale); non-nil non-positive is refused.
@@ -228,24 +227,6 @@ type Reviewer struct {
 // (validation, resolvers, slot expansion, that renderer) goes through this
 // one accessor.
 func (r Reviewer) CountValue() int
-
-type Substitution struct {
-    ClaudeSubOnQuota bool `yaml:"claude_sub_on_quota"` // default true; INERT while Substitutes is non-empty
-    // Substitutes is the model-level, one-step substitution map (spec 112
-    // R5): unavailable-model -> substitute-model, both non-empty and
-    // key != value (chains are not followed; a mutual A<->B pair is
-    // legal). Global, not per-gate. Non-empty Substitutes IS the
-    // substitution policy and supersedes ClaudeSubOnQuota; empty means
-    // ClaudeSubOnQuota keeps its 109 meaning.
-    Substitutes map[string]string `yaml:"substitutes"`
-}
-
-// KnownModels returns a copy of the curated, deliberately non-exhaustive
-// advisory model-id list (spec 112 R8) — seeded with claude-fable-5,
-// claude-opus-4-8, claude-sonnet-5, gpt-5.5, claude, codex. Consumed ONLY
-// by `config show`'s warning annotation; NEVER by Load or
-// validateOrchestration — an unseeded id must never fail to load.
-func KnownModels() []string
 
 // Loop is the orchestration-loop governance skeleton (research §3.2 L3 /
 // §3.3). Every key is parsed, defaulted, validated, and surfaced — none is
@@ -284,6 +265,7 @@ func (c *Config) PanelApproveThresholdExpr() string
 // deterministic, declaration-ordered, ids "R1".."Rn".
 type ReviewerSlot struct {
     Slot  string
+    Family string
     Model string
     Lens  string
 }
@@ -297,7 +279,7 @@ type ReviewerSlot struct {
 // approve_threshold resolve independently: the gate's own configured value
 // -> (for "adhoc" only) an explicit "bead" list -> the explicit global
 // reviewers -> per-gate default sizes 6/6/4/6 for spec/plan/bead/final;
-// adhoc defaults to 6. Default families alternate claude, codex.
+// adhoc defaults to 6. Default families cycle through the merged runner order.
 // Thresholds independently inherit adhoc -> bead -> global -> "n-1".
 // PanelGateApproveThresholdExpr returns the RAW expression, NEVER a
 // resolved integer — resolution to an int stays single-homed in
@@ -328,29 +310,57 @@ slots. It selects resolved reviewer entries round-robin in list order,
 ignores their configured counts, and preserves model and lens selection.
 With no count argument, the configured expansion is unchanged.
 
-**Deterministic slot expansion** (spec 112 R3): `PanelGateReviewerSlots` flattens a gate's resolved reviewer list into slots `"R1".."Rn"` in declaration order, expanding each entry's `CountValue()`. An entry's explicit `lens` applies to every slot it produces and does NOT advance the default-lens cursor. A lens-less slot takes `defaultLenses[cursor % 6]` from the interleaved ordering `author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability, integration` (structural/sharp alternating); **one global cursor per expansion, starting at index 0**, advances only over lens-less slots. Normative worked example — a 9-reviewer, all-lens-less, 3-entries-of-`count: 3` panel expands to exactly: `R1` author-of-record, `R2` empirical-prober, `R3` codebase-pin, `R4` adversarial, `R5` contract-stability, `R6` integration, `R7` author-of-record, `R8` empirical-prober, `R9` codebase-pin.
+**Deterministic slot expansion:** `PanelGateReviewerSlots` expands each entry's `CountValue()` in declaration order. Slots have IDs `R1` through `Rn`. An explicit reviewer `lens` applies to all slots from that entry. Other slots cycle through `GateLenses(gate)`. One cursor starts at zero and advances only for slots without an explicit lens.
 
 `Load` refuses (guard-style error with a `recovery: <command>` line, ADR-0035), and never panics, on: a `panel_skip` key anywhere under `loop.gate_authority` (panel-skip is permanently human, `MINDSPEC_SKIP_PANEL` is env-only, ADR-0037 §7); a `loop.halt.on_reject` other than `halt`; a `gate_authority` value outside `{panel, human}`; a `controller_handoff` outside `{per-spec, at-usage-threshold}`; an unknown `runner`; an explicit global `panel.reviewers` list with `panel.approve_threshold` neither `"n-1"` nor an integer in `[1, sum(reviewers.count)]`; a `reviewers[].count < 1`; or an explicit reviewer list with `sum(reviewers.count) < 2` (a one-reviewer panel cannot pass). Without a global list, the global threshold is not range-checked. An absent/empty `panel:`/`models:`/`loop:`/`runner:` block round-trips to its documented default.
 
-**Per-gate refusals (spec 112 R4)**, same guard-style/never-panic contract: a `panel.gates` key outside `PanelGateKeys` (the recovery line enumerates all five valid keys and disambiguates from `loop.gate_authority`'s different vocabulary); a configured gate entry setting neither `reviewers` nor `approve_threshold`; a reviewer entry (global or per-gate) with neither `model` nor `family`; an explicit non-positive `count` (`Count != nil && *Count < 1`; an ABSENT count is fine, defaulting to 1); a per-gate `reviewers` list whose expanded sum is `< 2`; and a `substitutes` entry with an empty key or value, or key == value. Legacy per-gate `approve_threshold` values are not range-checked against reviewer counts (spec 130 R2.1). **No model or lens name-membership check exists on any `Load` path** — an unknown model id alone never errors; the curated `KnownModels()` list drives only a `config show` warning (a later bead).
+**Per-gate refusals:** `Load` refuses a gate key outside `PanelGateKeys`. A gate must set `reviewers`, `approve_threshold`, `lenses` or `acceptance`. Each reviewer must set `model` or `family`. An explicit count must be positive. An explicit reviewer list must produce at least two slots. Legacy per-gate thresholds are not range-checked against reviewer counts. Model IDs have no name list, but must pass `ValidateModel`. Reviewer lens names remain open vocabulary. Gate lens lists must name entries in `panel.lenses`.
 
 Used by workflow: `internal/panel` stays a config-free leaf and never imports this package. Panel create resolves `PanelGateReviewerSlots()` here and passes the roster as plain values. It does not use `PanelApproveThresholdExpr()` or write `approve_threshold`. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render the legacy config values alongside `panel.ReviewerCountNote`.
 
+### Panel runners, local config and lenses
+
+`panel.runners` declares reviewer families with kind `harness` or `process`.
+The default is `{family: harness, kind: harness}`. A process timeout defaults to 60 minutes.
+Process `argv` permits `{prompt}`, `{prompt_file}`, `{model}`, `{slot_dir}` and `{tree}` as whole arguments after the command.
+Runner lists merge by family. A later entry replaces the whole entry in place. A new family is appended.
+Slot models resolve from reviewer `model`, then `models.reviewer.<family>`, then the family name.
+A model-only reviewer uses the harness family. Slot expansion refuses a family without a runner.
+`ValidateModel` refuses empty values, whitespace, control characters and a leading dash.
+`Load` refuses `panel.substitution`. Use a runner's `on_quota` to name another declared family.
+`SubstituteModel(toFamily)` uses the target family's model key, then its family name.
+
+`.mindspec/config.local.yaml` may set only `panel.runners` and `models`.
+Merge order is defaults, `.mindspec/config.yaml`, then the local file. Model keys merge individually.
+The local reader refuses files over 65536 bytes, unknown keys and extra YAML documents.
+It also refuses invalid runner entries and empty or duplicate runner families in one layer.
+
+`panel.isolation_root` defaults to `.mindspec-scratch`. `IsolationRootFor(mainRoot)` returns this relative path.
+Validation requires a non-empty, clean relative path with `/` separators. One trailing slash is allowed.
+It refuses `.`, paths under `.git`, `.worktrees` or `.mindspec`, `..` anywhere, colons and backslashes.
+It also refuses bytes below `0x20` and the byte `0x7f`. The command layer supplies a tracked-path check to `Load`.
+That check refuses a root that the index tracks, or that contains tracked files.
+
+`panel.lenses` maps lens names to focus text. `GateLenses` returns the configured list or these defaults:
+
+| Gates | Default lenses, in order |
+|:------|:-------------------------|
+| `spec_approve`, `plan_approve` | `falsifiability`, `scope-honesty`, `contradiction`, `feasibility` |
+| `bead`, `final_review`, `adhoc` | `author-of-record`, `empirical-prober`, `codebase-pin`, `adversarial`, `contract-stability`, `integration` |
+
+`GateAcceptance` returns the gate's `acceptance.question` and `acceptance.not_blocking`, or its default data.
+`ResolveSlots(gate)` previews slots and the source of each value. `resolve` is in `SubcommandTokens`.
+
 ### Per-gate panel config example (spec 112)
 
-The operator's standing review protocol (rev 2026-07-07) is the DOCUMENTED EXAMPLE for `panel.gates` — never the shipped default (`DefaultConfig` has no global reviewer list and resolves 6/6/4/6 per gate, adhoc 6, with `gates`/`substitutes` empty). An operator commits this shape to their own `.mindspec/config.yaml` to enable it:
+This example sets an explicit review protocol. The defaults have no global reviewer list and an empty `gates` map. Default sizes are 6/6/4/6 for spec/plan/bead/final, and 6 for adhoc.
 
 ```yaml
 panel:
   note: "fable-window 2026-07, codex-enabled"   # optional free-text; echoed by `config show`, never consumed
   reviewers:                       # 109 global list — the default for any gate not configured below
-    - {family: claude, count: 3}
-    - {family: codex, count: 3}
+    - {family: harness, count: 6}
   approve_threshold: "n-1"
-  substitution:
-    claude_sub_on_quota: true      # legacy family-level knob; superseded while substitutes is non-empty
-    substitutes:
-      gpt-5.5: claude-sonnet-5     # quota wall -> Sonnet, slot id kept: reviewer_id "R7 claude-sonnet-5-sub"
   gates:
     spec_approve:                  # 9 reviewers, pass >= 8 ("n-1")
       reviewers:

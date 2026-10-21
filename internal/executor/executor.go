@@ -171,6 +171,9 @@ type Executor interface {
 	// CheckIgnore returns nil for an ignored path, exit 1 for a non-ignored path.
 	CheckIgnore(workdir, file string) error
 
+	// LsFiles reports whether the index tracks path or a file under it.
+	LsFiles(workdir, path string) (bool, error)
+
 	// IsRefNotFound reports whether err is the genuine "ref absent" case
 	// (branch already deleted) from RevParseRef vs a transient/structural git
 	// failure — the panel gate's missing-ref pass-through distinction. Routing
