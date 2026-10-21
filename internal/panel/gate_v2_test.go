@@ -8,20 +8,23 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func gateV2Fixture(t *testing.T) (string, SubmitTarget, VerdictV2) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "p")
-	in := CreateInput{Spec: "test", Target: "main", Gate: "adhoc", Round: 1, ReviewedHeadSHA: strings.Repeat("a", 40), SubjectDigest: "sha256:test", Roster: []RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "one"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "two"}}}
+	in := CreateInput{Spec: "test", Target: "main", Gate: "adhoc", Round: 1, ReviewedHeadSHA: strings.Repeat("a", 40), SubjectDigest: "sha256:test", Roster: []RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "one"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "two"}, {Slot: "R3", Family: "harness", Model: "m", Lens: "three"}, {Slot: "R4", Family: "harness", Model: "m", Lens: "four"}}}
 	if err := Create(dir, in); err != nil {
 		t.Fatal(err)
 	}
 	v := VerdictV2{Schema: 2, Slot: "R1", Round: 1, ReviewedSHA: in.ReviewedHeadSHA, Status: "final", Verdict: "APPROVE", Model: "m", Rationale: "reviewed", ConcreteChangesRequired: []ChangeRequired{}, CommandsRun: []CommandRun{}}
 	target := SubmitTarget{Dir: dir, Panel: "p", Spec: "test", Slot: "R1", Round: 1}
 	other := v
-	other.Slot = "R2"
-	gateV2Submit(t, target, other)
+	for _, slot := range in.Roster[1:] {
+		other.Slot = slot.Slot
+		gateV2Submit(t, target, other)
+	}
 	return dir, target, v
 }
 func gateV2Resolve(_ Panel, slot RosterSlot) (SubmitResolution, error) {
@@ -58,7 +61,7 @@ func gateV2File(t *testing.T, dir string, v VerdictV2) {
 func gateV2AssertOut(t *testing.T, dir string, unsubmitted bool) {
 	t.Helper()
 	r := gateV2Read(t, dir)
-	if r.Complete() || r.PassRule(true) || len(r.Verdicts) != 1 || r.Approves != 1 || r.Rejects != 0 || len(r.HardBlocks) != 0 {
+	if r.Complete() || r.PassRule(true) || len(r.Verdicts) != 3 || r.Approves != 3 || r.Rejects != 0 || len(r.HardBlocks) != 0 {
 		t.Fatalf("excluded slot counted: %+v", r)
 	}
 	if unsubmitted && !reflect.DeepEqual(r.Unsubmitted, []string{"R1-round-1.json"}) {
@@ -180,6 +183,11 @@ func TestGateV2_ReplacementAndDischarge(t *testing.T) {
 	if !gateV2Read(t, dir).PassRule(true) {
 		t.Fatal("refutation did not discharge")
 	}
+	v.Rationale = "replacement"
+	gateV2Submit(t, target, v)
+	if !gateV2Read(t, dir).PassRule(true) {
+		t.Fatal("same item text lost its refutation after replacement")
+	}
 	v.ConcreteChangesRequired[0].Text = "b"
 	gateV2Submit(t, target, v)
 	if gateV2Read(t, dir).PassRule(true) {
@@ -189,12 +197,99 @@ func TestGateV2_ReplacementAndDischarge(t *testing.T) {
 	v.ConcreteChangesRequired = []ChangeRequired{}
 	gateV2Submit(t, target, v)
 	if !gateV2Read(t, dir).PassRule(true) {
-		t.Fatal("latest approve did not replace request")
+		t.Fatal("four submitted approvals did not pass after replacement")
+	}
+	v.Verdict = "REQUEST_CHANGES"
+	v.ConcreteChangesRequired = []ChangeRequired{{Text: "b", Basis: "traced"}}
+	gateV2Submit(t, target, v)
+	if gateV2Read(t, dir).PassRule(true) {
+		t.Fatal("an APPROVE replaced by a REQUEST_CHANGES must block")
 	}
 	v.Verdict = "REJECT"
+	v.ConcreteChangesRequired = []ChangeRequired{}
 	gateV2Submit(t, target, v)
 	if gateV2Read(t, dir).PassRule(true) {
 		t.Fatal("latest reject did not veto")
+	}
+}
+
+func TestGateV2_RoundSchemaDowngrade(t *testing.T) {
+	dir, target, v := gateV2Fixture(t)
+	gateV2Submit(t, target, v)
+	round, err := RoundSchema(dir)
+	if err != nil || round.VerdictSchema != 2 {
+		t.Fatalf("want v2 round, got %+v: %v", round, err)
+	}
+	round.Round++
+	round.VerdictSchema = 0
+	seedTestRecords(t, dir, round)
+	if _, err := RoundSchema(dir); err == nil || !strings.Contains(err.Error(), "removed the verdict schema") {
+		t.Fatalf("want schema downgrade error, got %v", err)
+	}
+	r := gateV2Read(t, dir)
+	if r.IntegrityErr == nil || r.PassRule(true) {
+		t.Fatal("schema downgrade did not block the gate")
+	}
+}
+
+func TestGateV2_LaterAttemptSubmissionSequence(t *testing.T) {
+	for _, matching := range []bool{false, true} {
+		t.Run(fmt.Sprint(matching), func(t *testing.T) {
+			dir, target, v := gateV2Fixture(t)
+			old := gateV2Submit(t, target, v)
+			v.Rationale = "replacement"
+			latest := gateV2Submit(t, target, v)
+			outcome := submitLaunch(1, 1, "submitted")
+			outcome.Seq = old.Seq
+			if matching {
+				outcome.Seq = latest.Seq
+			}
+			seedTestRecords(t, dir, submitLaunch(1, 1, "dispatched"), outcome)
+			r := gateV2Read(t, dir)
+			if r.Complete() != matching || r.PassRule(true) != matching {
+				t.Fatalf("submitted seq %d, latest seq %d: complete=%v pass=%v", outcome.Seq, latest.Seq, r.Complete(), r.PassRule(true))
+			}
+			if !matching && (len(r.NotIn) != 1 || r.NotIn[0].Reason != "later attempt is not closed") {
+				t.Fatalf("wrong exclusion: %+v", r.NotIn)
+			}
+		})
+	}
+}
+
+func TestGateV2_SubmittedOutcomeUsesNamedSubmission(t *testing.T) {
+	for _, state := range []string{"draft", "void"} {
+		t.Run(state, func(t *testing.T) {
+			dir, target, v := gateV2Fixture(t)
+			if state == "draft" {
+				v.Status = "draft"
+			} else {
+				v.Verdict = "VOID"
+				reason := "cannot review"
+				v.VoidReason = &reason
+			}
+			named := gateV2Submit(t, target, v)
+			v.Status, v.Verdict, v.VoidReason = "final", "APPROVE", nil
+			latest := gateV2Submit(t, target, v)
+			if named.Seq == latest.Seq {
+				t.Fatal("fixture needs distinct submissions")
+			}
+			// Submit cannot close a later attempt with an older sequence.
+			// Seed this valid record sequence to test the reader directly.
+			outcome := submitLaunch(1, 1, "submitted")
+			outcome.Seq = named.Seq
+			seedTestRecords(t, dir, submitLaunch(1, 1, "dispatched"), outcome)
+			r := gateV2Read(t, dir)
+			slots, err := ReadSlotStatuses(r, nil, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(slots) != 4 || slots[0].Slot != "R1" || slots[0].Status != state {
+				t.Fatalf("outcome names seq %d, latest is %d: want %s, got %+v", named.Seq, latest.Seq, state, slots)
+			}
+			if r.PassRule(true) {
+				t.Fatal("older submitted sequence closed the latest final")
+			}
+		})
 	}
 }
 func TestGateV2_DischargePositional(t *testing.T) {

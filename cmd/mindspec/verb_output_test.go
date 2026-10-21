@@ -128,6 +128,7 @@ var nonMutatingAllowlist = map[string]string{
 	"mindspec panel defer":    "records a panel deferral and disposition; no lifecycle phase mutation",
 	"mindspec panel refute":   "records a panel refutation and disposition; not lifecycle-phase state",
 	"mindspec panel abandon":  "records audited panel abandonment; not lifecycle-phase state",
+	"mindspec panel submit":   "records a reviewer verdict and its ledger submission; no lifecycle-phase state",
 	"mindspec":                "root command: prints help or an unknown-command error, never mutates",
 
 	// --- cobra's own auto-registered built-ins (lazily added by

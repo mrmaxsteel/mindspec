@@ -285,7 +285,10 @@ final, 1 while a slot is pending, and 2 for other incomplete states.`,
 		facts := resolvePanelGateFacts(root, reg)
 		slots, err := panelSlotStatuses(root, facts.Res)
 		if err != nil {
-			return err
+			fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
+			line, _ := renderPanelVerify(facts.Res, facts)
+			fmt.Fprintln(cmd.OutOrStdout(), line)
+			return exitErr(2, err)
 		}
 		asJSON, _ := cmd.Flags().GetBool("json")
 		if asJSON {
@@ -344,11 +347,10 @@ and prints a recovery line.`,
 			return panelCoverageWriteFailure(reg, err)
 		}
 		slots, err := panelSlotStatuses(root, facts.Res)
-		if err != nil {
-			return err
-		}
-		for _, annotation := range panel.ReplacementAnnotations(slots) {
-			fmt.Fprintln(cmd.OutOrStdout(), termsafe.Escape(annotation))
+		if err == nil {
+			for _, annotation := range panel.ReplacementAnnotations(slots) {
+				fmt.Fprintln(cmd.OutOrStdout(), termsafe.Escape(annotation))
+			}
 		}
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)

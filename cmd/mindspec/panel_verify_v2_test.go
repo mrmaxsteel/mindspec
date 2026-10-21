@@ -134,6 +134,32 @@ func TestPanelVerify_ExitCodes(t *testing.T) {
 		}
 	})
 }
+
+func TestPanelVerify_DamagedRegistration(t *testing.T) {
+	for _, state := range []string{"malformed", "downgraded"} {
+		t.Run(state, func(t *testing.T) {
+			f := newCLIV2(t)
+			if state == "malformed" {
+				rebindWrite(t, f.dir, "panel.json", "{")
+			} else {
+				paneltest.Seed(t, f.dir, panel.RoundRecord{Record: panel.RecordRound, Spec: f.p.Spec, Panel: "p", Round: 2, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Target: f.p.Target, Gate: f.p.Gate, Roster: f.p.Roster, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)})
+			}
+			out, code := verifyV2(t, f, false)
+			if code != 2 || !strings.Contains(out, "panel directory:") || !strings.Contains(out, "resolved round:") || !strings.Contains(out, "rule: PASS iff") || !strings.Contains(out, "BLOCK:") {
+				t.Fatalf("want BLOCK preview and exit 2, got exit %d:\n%s", code, out)
+			}
+		})
+	}
+}
+
+func TestPanelTally_DamagedRegistration(t *testing.T) {
+	f := newCLIV2(t)
+	rebindWrite(t, f.dir, "panel.json", "{")
+	out, err := runPanelVerbCmd("tally", "p")
+	if err == nil || !strings.Contains(out, "decision: BLOCK") || strings.Count(out, "recovery:") != 1 {
+		t.Fatalf("want BLOCK decision and one recovery line, got %v:\n%s", err, out)
+	}
+}
 func TestPanelVerify_V1Round(t *testing.T) {
 	f := seedCLIV1(t, newCLIV2(t))
 	for _, slot := range []string{"R1", "R2"} {

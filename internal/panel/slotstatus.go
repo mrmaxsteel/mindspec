@@ -141,6 +141,21 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 					}
 				} else {
 					switch e.Status {
+					case "submitted":
+						for _, line := range lines {
+							var named SubmissionRecord
+							if err := json.Unmarshal(line, &named); err != nil {
+								return nil, err
+							}
+							if named.Record == RecordVerdict && named.Round == p.Round && named.Slot == roster.Slot && named.Seq == e.Seq {
+								if named.Verdict == "VOID" {
+									s.Status = "void"
+								} else if named.Status == "draft" {
+									s.Status = "draft"
+								}
+								break
+							}
+						}
 					case "started":
 						s.Status = "launch_failed"
 						if rt.SlotLockHeld || rt.RunLockHeld[e.Attempt] {
