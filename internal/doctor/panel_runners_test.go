@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -175,6 +176,30 @@ func TestDoctor_TrackedLocalProbe(t *testing.T) {
 	assertDoctorMarker(t, filepath.Join(root, "tracked-probe-marker"), true)
 }
 
+func TestDoctor_UntrackedMainProbe(t *testing.T) {
+	root := doctorRunnerRoot(t, "")
+	probe := doctorScript(t, root, "probe", ": > untracked-probe-marker")
+	writeConfig(t, root, doctorConfigBase+doctorProbeConfig("/bin/sh", probe))
+	config.ResetCache()
+	if files := doctorGit(t, root, "ls-files", "--", ".mindspec/config.yaml"); files != "" {
+		t.Fatalf("fixture config must be untracked: %q", files)
+	}
+	for _, probe := range []bool{false, true} {
+		t.Run(fmt.Sprintf("probe=%v", probe), func(t *testing.T) {
+			r := doctorConfigReport(root, Options{Probe: probe})
+			assertDoctorMarker(t, filepath.Join(root, "untracked-probe-marker"), probe)
+			if probe {
+				requireDoctorCheck(t, r, "Panel probe", OK, "probe passed")
+				return
+			}
+			requireDoctorCheck(t, r, "Panel probe", Info, "was not run")
+			if len(doctorChecks(r, "Panel probe")) != 1 {
+				t.Fatal("a skipped probe must have exactly one Info line")
+			}
+		})
+	}
+}
+
 func TestDoctor_LoadErrorReported(t *testing.T) {
 	for _, tc := range []struct{ name, main, local, recovery string }{
 		{"retired", "panel:\n  substitution: {}\n", "", "set on_quota on the runner in panel.runners"},
@@ -270,17 +295,19 @@ func doctorSlot(t *testing.T, root, spec, slug string, round int) panel.SlotLayo
 func TestDoctor_StaleCheckouts(t *testing.T) {
 	for _, tc := range []struct {
 		name, spec, reason string
+		isolationRoot      string
 		round              int
 		abandoned, missing bool
 	}{
-		{"abandoned", "adhoc", "panel is abandoned", 1, true, false},
-		{"missing", "adhoc", "panel is missing", 1, false, true},
-		{"later", "adhoc", "panel is at a later round", 2, false, false},
-		{"current", "adhoc", "", 1, false, false},
-		{"spec abandoned", "131-test", "panel is abandoned", 1, true, false},
+		{"abandoned", "adhoc", "panel is abandoned", ".mindspec-scratch", 1, true, false},
+		{"missing", "adhoc", "panel is missing", ".mindspec-scratch", 1, false, true},
+		{"later", "adhoc", "panel is at a later round", ".mindspec-scratch", 2, false, false},
+		{"current", "adhoc", "", ".mindspec-scratch", 1, false, false},
+		{"spec abandoned", "131-test", "panel is abandoned", ".mindspec-scratch", 1, true, false},
+		{"trailing slash", "adhoc", "panel is missing", ".mindspec-scratch/", 1, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := doctorRunnerRoot(t, "")
+			root := doctorRunnerRoot(t, "panel:\n  isolation_root: "+tc.isolationRoot+"\n")
 			layout := doctorSlot(t, root, tc.spec, "p", 1)
 			if !tc.missing {
 				dir := filepath.Join(root, "review", "p")
@@ -306,6 +333,29 @@ func TestDoctor_StaleCheckouts(t *testing.T) {
 			}
 			if _, err := os.Stat(layout.Metadata); err != nil {
 				t.Fatalf("doctor must not prune: %v", err)
+			}
+		})
+	}
+}
+
+func TestDoctor_StaleCheckoutsInvalidSpec(t *testing.T) {
+	for _, spec := range []string{"../x", "invalid-spec"} {
+		t.Run(spec, func(t *testing.T) {
+			root := doctorRunnerRoot(t, "")
+			layout := doctorSlot(t, root, "131-test", "p", 1)
+			metadata := panel.SlotMetadata{Spec: spec, Slug: "p", Round: 1, Slot: "R1", MainRoot: root}
+			data, err := json.Marshal(metadata)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, layout.Metadata, string(data))
+			r := doctorConfigReport(root, Options{})
+			requireDoctorCheck(t, r, "Panel checkouts", Warn, "invalid spec ID")
+			if len(doctorChecks(r, "Panel checkouts")) != 1 || len(doctorChecks(r, "Stale panel checkout")) != 0 {
+				t.Fatalf("invalid metadata must warn once and skip panel path lookup: %+v", r.Checks)
+			}
+			if len(doctorChecks(r, "MindSpec config")) != 0 {
+				t.Fatalf("fixture config must load: %+v", r.Checks)
 			}
 		})
 	}

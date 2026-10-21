@@ -38,7 +38,7 @@ func checkStagedMarkers(r *Report, root string) {
 			if entry.IsDir() || entry.Name() != "SKILL.md" {
 				return nil
 			}
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //nolint:gosec // Go 1.23 has no root-scoped read API. This check only parses local text.
 			if err != nil {
 				r.Checks = append(r.Checks, Check{Name: "Staged rules", Status: Warn, Message: err.Error()})
 				return nil

@@ -7,7 +7,8 @@ package lint
 // non-id); caller-audited is the mechanical wrapper marker that
 // promotes a function's CALL SITES into this same table.
 var argvAuditTable = map[string]argvEntry{
-	"cmd/mindspec/panel_refute.go panelEvidenceResolves exec-git exec.Command": {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Evidence is a commit ref, not an ID; leading dash is refused before cat-file -e and the commit type suffix excludes blob evidence."},
+	"internal/doctor/panel_runners.go checkRunnerProbe exec-unresolved exec.CommandContext": {Count: 1, Disp: dispNonID, Class: opClassFreeText, Note: "The argv comes from the validated panel.runners probe in tracked config. Doctor runs it only with --probe; an untracked config.local.yaml override can also run it. These are operator-defined command operands, not framework ID operands."},
+	"cmd/mindspec/panel_refute.go panelEvidenceResolves exec-git exec.Command":              {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Evidence is a commit ref, not an ID; leading dash is refused before cat-file -e and the commit type suffix excludes blob evidence."},
 	// exec-unresolved sites: command operands the round-11 FAIL-CLOSED
 	// resolution could not prove non-bd/non-git (mindspec
 	// self-invocations and the operator-delegated record workload).

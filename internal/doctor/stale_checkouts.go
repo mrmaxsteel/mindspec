@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -36,7 +37,7 @@ func checkStaleCheckouts(r *Report, root string, cfg *config.Config) {
 		if len(parts) != 5 || entry.Name() != "slot.json" || entry.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // Go 1.23 has no root-scoped read API. This check only reads local metadata.
 		if err != nil {
 			return nil
 		}
@@ -44,7 +45,13 @@ func checkStaleCheckouts(r *Report, root string, cfg *config.Config) {
 		if json.Unmarshal(data, &metadata) != nil {
 			return nil
 		}
-		layout, err := panel.NewSlotLayout(root, cfg.Panel.IsolationRoot, metadata.Spec, metadata.Slug, metadata.Round, metadata.Slot)
+		if metadata.Spec != "" && metadata.Spec != "adhoc" {
+			if err := idvalidate.SpecID(metadata.Spec); err != nil {
+				r.Checks = append(r.Checks, Check{Name: "Panel checkouts", Status: Warn, Message: fmt.Sprintf("%s: %v\nrecovery: repair the slot metadata", path, err)})
+				return nil
+			}
+		}
+		layout, err := panel.NewSlotLayout(root, strings.TrimSuffix(cfg.Panel.IsolationRoot, "/"), metadata.Spec, metadata.Slug, metadata.Round, metadata.Slot)
 		if err != nil || layout.Metadata != path || filepath.Clean(metadata.MainRoot) != filepath.Clean(root) {
 			return nil
 		}
