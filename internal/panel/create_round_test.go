@@ -258,7 +258,7 @@ func TestCreate_NeverOverwritesArchive(t *testing.T) {
 }
 func TestCreate_PriorRoundRegion(t *testing.T) {
 	for _, payload := range []string{briefHeaderOpen, briefHeaderClose,
-		"<!-- mindspec:prior-round -->", "<!-- /mindspec:prior-round -->", "```", "```text",
+		"<!-- mindspec:prior-round -->", "<!-- /mindspec:prior-round -->", "```", "```text", "~~~", "~~~text",
 		"<!--  /mindspec:panel-header -->"} {
 		t.Run(payload, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "p")

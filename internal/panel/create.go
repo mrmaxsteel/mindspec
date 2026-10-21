@@ -36,9 +36,9 @@ const briefStubBody = `## Summary
 
 <!-- TODO(skill): the files/paths this review covers -->
 
-## Acceptance Criteria (verbatim from spec.md)
+## Acceptance Criteria
 
-<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->
+Use the quoted acceptance criteria in the managed region above.
 
 ## Prior-Round Asks
 
@@ -52,6 +52,7 @@ const briefStubBody = `## Summary
 // CreateInput contains caller-resolved registration values. The caller resolves
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
+	BriefRegions      BriefRegions
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -270,14 +271,14 @@ func Create(dir string, in CreateInput) error {
 		prior = termsafe.Escape(string(priorData))
 		// Quoted prose must not become region syntax or toggle fence scanning.
 		trimmed := strings.TrimSpace(prior)
-		if strings.HasPrefix(trimmed, "```") || markerLookalikeRE.MatchString(trimmed) ||
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
 			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
 			prior = "> " + prior
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read prior round: %w", err)
 	}
-	header := renderCreateBriefHeader(filepath.Base(dir), p, prior)
+	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
 	if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)
@@ -324,8 +325,9 @@ func Create(dir string, in CreateInput) error {
 	return nil
 }
 
-func renderCreateBriefHeader(slug string, p Panel, prior string) string {
+func renderCreateBriefHeader(slug string, p Panel, prior string, regions BriefRegions) string {
 	header := renderBriefHeader(slug, p.Round, p.Target, p.ReviewedHeadSHA)
+	header = renderBriefRegions(header, regions)
 	var b strings.Builder
 	b.WriteString("## Reviewer roster\n\n")
 	for _, slot := range p.Roster {
@@ -417,34 +419,10 @@ func renderBriefHeader(slug string, round int, target, sha string) string {
 // marker constant is a corrupt marker, never legacy body text.
 var markerLookalikeRE = regexp.MustCompile(`^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
 
-// scanNonFenceLines calls fn once per line of s, in file order,
-// skipping every line inside a fenced code block — a region bracketed
-// by lines whose trimmed content starts with "```" (a Markdown fence
-// used, e.g., to quote the header syntax for documentation). offset is
-// the byte offset of the line's first character in s; content is the
-// line with its terminator removed (a trailing "\r" is stripped too,
-// so CRLF files scan the same as LF ones).
+// scanNonFenceLines visits lines outside code fences in file order.
+// A shorter fence cannot close a longer fence. The offset is in bytes.
 func scanNonFenceLines(s string, fn func(offset int, content string)) {
-	inFence := false
-	start := 0
-	for start <= len(s) {
-		lineEnd := len(s)
-		hasNL := false
-		if i := strings.IndexByte(s[start:], '\n'); i >= 0 {
-			lineEnd = start + i
-			hasNL = true
-		}
-		content := strings.TrimSuffix(s[start:lineEnd], "\r")
-		if strings.HasPrefix(strings.TrimSpace(content), "```") {
-			inFence = !inFence
-		} else if !inFence {
-			fn(start, content)
-		}
-		if !hasNL {
-			break
-		}
-		start = lineEnd + 1
-	}
+	scanMarkdownLines(s, fn)
 }
 
 // findMarkerLines returns the byte offsets of every GENUINE occurrence

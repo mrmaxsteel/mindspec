@@ -348,6 +348,7 @@ Work is not complete until changes are committed.
 | `mindspec config resolve --gate <name> [--json]` | Preview a new panel's slots with family, model, lens, runner kind and the source of each value. This command writes no files. |
 | `mindspec commands populate` | Print the prompt for declaring your build/test `commands:` (writes nothing) |
 | `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc (no owning spec) review panel at `.mindspec/reviews/<slug>/` |
+| `mindspec panel prompt <slug> --slot S [--spec <id>]` | Print the slot's review prompt and verdict output instructions. This command writes no files. |
 | `mindspec panel schema` | Print the verdict JSON Schema. The verdict parser also checks file size and field relations. |
 
 For `config show --gate` and `config resolve --gate`, use `spec_approve`, `plan_approve`, `bead`, `final_review` or `adhoc`.
