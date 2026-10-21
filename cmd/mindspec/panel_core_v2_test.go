@@ -123,6 +123,13 @@ func TestDispositionAppend_RefusesV2Kinds(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			cmd := panelDispositionAppendCmd
 			for key, value := range map[string]string{"spec": "999-test", "panel": "p", "data": `{"record":"` + tc.kind + `"}`} {
+				flag := cmd.Flags().Lookup(key)
+				t.Cleanup(func() {
+					if err := cmd.Flags().Set(flag.Name, flag.DefValue); err != nil {
+						t.Error(err)
+					}
+					flag.Changed = false
+				})
 				if err := cmd.Flags().Set(key, value); err != nil {
 					t.Fatal(err)
 				}
@@ -179,6 +186,13 @@ func TestDispositionReadPaths_ExecutionKinds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "check" {
 				for key, value := range map[string]string{"spec": specID, "panel": "p"} {
+					flag := tc.cmd.Flags().Lookup(key)
+					t.Cleanup(func() {
+						if err := tc.cmd.Flags().Set(flag.Name, flag.DefValue); err != nil {
+							t.Error(err)
+						}
+						flag.Changed = false
+					})
 					if err := tc.cmd.Flags().Set(key, value); err != nil {
 						t.Fatal(err)
 					}
@@ -188,9 +202,8 @@ func TestDispositionReadPaths_ExecutionKinds(t *testing.T) {
 				queryDir, querySpec, queryMetric = filepath.Dir(dir), "", "Q1"
 			}
 			var out bytes.Buffer
-			oldOut := tc.cmd.OutOrStdout()
 			tc.cmd.SetOut(&out)
-			t.Cleanup(func() { tc.cmd.SetOut(oldOut) })
+			t.Cleanup(func() { tc.cmd.SetOut(nil) })
 			if err := tc.cmd.RunE(tc.cmd, tc.args); err != nil || !strings.Contains(out.String(), tc.want) {
 				t.Fatalf("%s: %v; output: %s", tc.name, err, out.String())
 			}

@@ -76,6 +76,9 @@ func attemptNumber(name string) int {
 }
 
 // AttemptFromPath binds only files under the target slot's attempt directory.
+// Ancestors of the slot do not count as attempt directories. An attempt path
+// that cannot bind to the slot is refused. If the slot is absent or cannot
+// resolve, only an immediate attempt-<n> parent causes refusal.
 func AttemptFromPath(slotDir, file string) (int, error) {
 	if file == "" || file == "-" {
 		return 0, nil
@@ -92,23 +95,35 @@ func AttemptFromPath(slotDir, file string) (int, error) {
 		}
 		return false
 	}
-	pathHasAttempt := hasAttempt(filepath.Dir(abs))
-	unbound := func() (int, error) {
-		if pathHasAttempt || hasAttempt(filepath.Dir(abs)) {
+	unbound := func(hasAttempt bool) (int, error) {
+		if hasAttempt {
 			return 0, submitRefusal("cannot bind attempt path to the target slot", "submit a file from the target slot's attempt directory")
 		}
 		return 0, nil
 	}
+	immediateAttempt := attemptNumber(filepath.Base(filepath.Dir(abs))) > 0
 	if slotDir == "" {
-		return unbound()
+		return unbound(immediateAttempt)
 	}
 	root, err := filepath.EvalSymlinks(slotDir)
 	if err != nil {
-		return unbound()
+		return unbound(immediateAttempt)
+	}
+	slotAbs, err := filepath.Abs(slotDir)
+	if err != nil {
+		return 0, err
+	}
+	inside := func(rel string) bool {
+		return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	// Keep the slot-local path check if a symlink leaves an attempt directory.
+	lexicalAttempt := false
+	if rel, err := filepath.Rel(slotAbs, abs); err == nil && inside(rel) {
+		lexicalAttempt = hasAttempt(filepath.Dir(rel))
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
 	if err != nil {
-		return unbound()
+		return unbound(lexicalAttempt || immediateAttempt)
 	}
 	// Canonicalize directories, since a caller can supply verdict bytes before
 	// the verdict file exists. Slot discovery also resolves directory symlinks.
@@ -119,13 +134,13 @@ func AttemptFromPath(slotDir, file string) (int, error) {
 	abs = filepath.Join(dir, filepath.Base(abs))
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
-		return unbound()
+		return unbound(lexicalAttempt || immediateAttempt)
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) > 1 && attemptNumber(parts[0]) > 0 {
 		return attemptNumber(parts[0]), nil
 	}
-	return unbound()
+	return unbound(lexicalAttempt || hasAttempt(filepath.Dir(rel)) || (!inside(rel) && immediateAttempt))
 }
 
 // NextAttemptNumber inspects this slot directory and this round only.

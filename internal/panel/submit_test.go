@@ -244,7 +244,7 @@ func TestPanelSubmit_AttemptBindingUnderLock(t *testing.T) {
 }
 
 func testSubmitAttemptPathBinding(t *testing.T) {
-	for _, name := range []string{"symlink", "outside slot", "missing directory", "no slot", "symlink outside slot"} {
+	for _, name := range []string{"symlink", "outside slot", "nested outside slot", "missing directory", "no slot", "missing slot", "symlink outside slot"} {
 		t.Run(name, func(t *testing.T) {
 			target, b, resolve := submitFixture(t)
 			seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"), submitLaunch(1, 1, "launch_failed"), submitLaunch(1, 2, "dispatched"))
@@ -268,10 +268,18 @@ func testSubmitAttemptPathBinding(t *testing.T) {
 				want = "attempt 1 was superseded by 2"
 			case "outside slot":
 				target.SlotDir = t.TempDir()
+			case "nested outside slot":
+				target.SlotDir = t.TempDir()
+				target.File = filepath.Join(realSlot, "attempt-1", "nested", "verdict.json")
+				if err := os.MkdirAll(filepath.Dir(target.File), 0o700); err != nil {
+					t.Fatal(err)
+				}
 			case "missing directory":
 				target.File = filepath.Join(realSlot, "attempt-9", "verdict.json")
 			case "no slot":
 				target.SlotDir = ""
+			case "missing slot":
+				target.SlotDir = filepath.Join(t.TempDir(), "missing")
 			case "symlink outside slot":
 				alias := filepath.Join(realSlot, "attempt-3")
 				if err := os.Symlink(t.TempDir(), alias); err != nil {
@@ -298,6 +306,30 @@ func testSubmitAttemptPathBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelSubmit_AttemptNamedAncestor(t *testing.T) {
+	for _, name := range []string{"slot", "no slot", "missing slot"} {
+		t.Run(name, func(t *testing.T) {
+			target, b, resolve := submitFixture(t)
+			target.SlotDir = filepath.Join(t.TempDir(), "attempt-1", "p", "r1", "R1")
+			target.File = filepath.Join(target.SlotDir, "verdict.json")
+			if err := os.MkdirAll(target.SlotDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			switch name {
+			case "no slot":
+				target.SlotDir = ""
+			case "missing slot":
+				target.SlotDir = filepath.Join(t.TempDir(), "missing")
+			}
+			if _, err := Submit(target, b, resolve); err != nil {
+				t.Fatalf("valid non-attempt submission refused: %v", err)
+			}
+			assertStoredBytes(t, target, b)
+		})
+	}
+}
+
 func TestLatestSubmissions(t *testing.T) {
 	target, x, resolve := submitFixture(t)
 	if _, err := Submit(target, x, resolve); err != nil {
@@ -388,6 +420,12 @@ func TestSlotAttempts(t *testing.T) {
 	}
 }
 func TestPanelSubmit_CoreRefusals(t *testing.T) {
+	t.Run("terminal safe", func(t *testing.T) {
+		want := "\"message\\x1b[31m\"\nrecovery: \"retry\\x1b[0m\""
+		if got := submitRefusal("message\x1b[31m", "retry\x1b[0m").Error(); got != want {
+			t.Fatalf("unsafe refusal: want %q, got %q", want, got)
+		}
+	})
 	for _, name := range []string{"process", "landed", "non-v2", "sha", "model", "round", "slot", "not dispatched", "ended", "abandoned"} {
 		t.Run(name, func(t *testing.T) {
 			target, b, resolve := submitFixture(t)
@@ -396,7 +434,7 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 			wantRecovery := ""
 			switch name {
 			case "process":
-				wantRecovery = "recovery: mindspec panel launch"
+				wantRecovery = "recovery: mindspec panel launch or mindspec panel recover"
 				resolve = func(p Panel, s RosterSlot) (SubmitResolution, error) {
 					return SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "process", RunnerSource: "default"}, nil
 				}

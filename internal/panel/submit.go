@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // SubmitTarget is resolved by the adapter. File binds a direct submission to
@@ -35,7 +37,7 @@ type SubmitResolution struct {
 type SubmitResolver func(Panel, RosterSlot) (SubmitResolution, error)
 
 func submitRefusal(message, recovery string) error {
-	return fmt.Errorf("%s\nrecovery: %s", message, recovery)
+	return fmt.Errorf("%s\nrecovery: %s", termsafe.Escape(message), termsafe.Escape(recovery))
 }
 func modelSafe(model string) bool {
 	if model == "" || strings.HasPrefix(model, "-") {
@@ -136,7 +138,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			return submitRefusal("invalid submission source", "select direct, launch or recover as the submission source")
 		}
 		if via == "direct" && effective.RunnerKind == "process" {
-			return submitRefusal("process slot requires mindspec panel launch or mindspec panel recover", "mindspec panel launch")
+			return submitRefusal("process slot requires mindspec panel launch or mindspec panel recover", "mindspec panel launch or mindspec panel recover")
 		}
 		latest, err := LatestSubmissions(target.Dir, target.Round)
 		if err != nil {
