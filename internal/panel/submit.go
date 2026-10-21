@@ -34,7 +34,9 @@ type SubmitResolution struct {
 }
 type SubmitResolver func(Panel, RosterSlot) (SubmitResolution, error)
 
-func submitRefusal(message string) error { return verdictError("", message) }
+func submitRefusal(message, recovery string) error {
+	return fmt.Errorf("%s\nrecovery: %s", message, recovery)
+}
 func modelSafe(model string) bool {
 	if model == "" || strings.HasPrefix(model, "-") {
 		return false
@@ -56,34 +58,25 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			submitLockHeldHook()
 		}
 		if !layoutComponent(target.Slot) {
-			return submitRefusal("invalid slot name")
-		}
-		v, err := ParseVerdictV2(data)
-		if err != nil {
-			return err
+			return submitRefusal("invalid slot name", "select a slot from the panel roster")
 		}
 		reg := load(target.Dir)
 		if reg.Err != nil {
 			return reg.Err
 		}
 		p := reg.Panel
+		newRound := fmt.Sprintf("mindspec panel create %s --round %d", filepath.Base(target.Dir), p.Round+1)
 		if p.Abandoned {
-			return submitRefusal("panel is abandoned; create a new round")
+			return submitRefusal("panel is abandoned", newRound)
 		}
 		if target.Panel != "" && target.Panel != filepath.Base(target.Dir) {
-			return submitRefusal("panel target disagrees with its directory")
+			return submitRefusal("panel target disagrees with its directory", "select the panel that owns the target directory")
 		}
 		if target.Spec != "" && target.Spec != p.Spec {
-			return submitRefusal("spec differs from the panel")
+			return submitRefusal("spec differs from the panel", "select the panel's spec")
 		}
 		if target.Round != p.Round {
-			return submitRefusal("round differs from the panel's current round")
-		}
-		if v.Slot != target.Slot {
-			return verdictError("/slot", "differs from the target slot")
-		}
-		if v.Round != target.Round {
-			return verdictError("/round", "differs from the target round")
+			return submitRefusal("round differs from the panel's current round", "select the panel's current round")
 		}
 		var roster *RosterSlot
 		for i := range p.Roster {
@@ -93,7 +86,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			}
 		}
 		if roster == nil {
-			return submitRefusal("slot is not on the roster")
+			return submitRefusal("slot is not on the roster", "select a slot from the panel roster")
 		}
 		lines, err := ReadLedger(target.Dir)
 		if err != nil {
@@ -110,17 +103,27 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			}
 		}
 		if round.Round != target.Round || round.VerdictSchema != 2 {
-			return submitRefusal(fmt.Sprintf("round does not accept submissions; use mindspec panel create %s --round %d", filepath.Base(target.Dir), p.Round+1))
+			return submitRefusal("round does not accept submissions", newRound)
+		}
+		v, err := ParseVerdictV2(data)
+		if err != nil {
+			return err
+		}
+		if v.Slot != target.Slot {
+			return verdictError("/slot", "differs from the target slot")
+		}
+		if v.Round != target.Round {
+			return verdictError("/round", "differs from the target round")
 		}
 		if resolve == nil {
-			return submitRefusal("runner resolver is required")
+			return submitRefusal("runner resolver is required", "supply the panel runner resolver")
 		}
 		effective, err := resolve(p, *roster)
 		if err != nil {
 			return err
 		}
 		if effective.Landed {
-			return submitRefusal(fmt.Sprintf("panel round has landed; use mindspec panel create %s --round %d", filepath.Base(target.Dir), p.Round+1))
+			return submitRefusal("panel round has landed", newRound)
 		}
 		if !modelSafe(v.Model) || v.Model != effective.Model {
 			return verdictError("/model", "must be the slot's effective model and contain no whitespace, control byte or leading dash")
@@ -130,10 +133,10 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			via = "direct"
 		}
 		if via != "direct" && via != "launch" && via != "recover" {
-			return submitRefusal("invalid submission source")
+			return submitRefusal("invalid submission source", "select direct, launch or recover as the submission source")
 		}
 		if via == "direct" && effective.RunnerKind == "process" {
-			return submitRefusal("process slot requires mindspec panel launch or mindspec panel recover")
+			return submitRefusal("process slot requires mindspec panel launch or mindspec panel recover", "mindspec panel launch")
 		}
 		latest, err := LatestSubmissions(target.Dir, target.Round)
 		if err != nil {
@@ -164,6 +167,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			}
 		}
 		attempt := target.Attempt
+		replaceAttempt := fmt.Sprintf("mindspec panel checkout --slot %s --dispatch --replace", target.Slot)
 		if via == "direct" {
 			attempt = 0
 			j, err := AttemptFromPath(target.SlotDir, target.File)
@@ -172,13 +176,13 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			}
 			if j > 0 {
 				if j < k {
-					return submitRefusal(fmt.Sprintf("attempt %d was superseded by %d", j, k))
+					return submitRefusal(fmt.Sprintf("attempt %d was superseded by %d", j, k), "submit the verdict from the latest dispatched attempt")
 				}
 				if j > k || k == 0 {
-					return submitRefusal(fmt.Sprintf("attempt %d was not dispatched", j))
+					return submitRefusal(fmt.Sprintf("attempt %d was not dispatched", j), replaceAttempt)
 				}
 				if outcome, ok := outcomes[j]; ok && outcome.Status != "submitted" {
-					return submitRefusal(fmt.Sprintf("attempt %d ended with %s; use mindspec panel checkout --slot %s --dispatch --replace", j, outcome.Status, target.Slot))
+					return submitRefusal(fmt.Sprintf("attempt %d ended with %s", j, outcome.Status), replaceAttempt)
 				}
 			}
 			if start.Status == "dispatched" {
@@ -223,7 +227,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 func writeVerdictBytes(dir, slot string, round int, data []byte) error {
 	// A slot comes from the roster but is still repo-authored input.
 	if !layoutComponent(slot) {
-		return submitRefusal("invalid slot name")
+		return submitRefusal("invalid slot name", "select a slot from the panel roster")
 	}
 	f, err := os.CreateTemp(dir, ".verdict-*.json")
 	if err != nil {

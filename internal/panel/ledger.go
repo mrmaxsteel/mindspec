@@ -98,7 +98,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	case RecordLaunch:
 		fields = append(fields, "slot", "family", "model", "status", "runner_kind", "runner_source")
 	case RecordSubstitution:
-		fields = append(fields, "slot", "from_family", "to_family", "model")
+		fields = append(fields, "slot", "model")
 	case RecordRound:
 		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "telemetry")
 	case RecordRefutation, RecordDeferral:
@@ -125,7 +125,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	if _, err := time.Parse(time.RFC3339, m["created_at"].(string)); err != nil {
 		return fmt.Errorf("%s created_at must be RFC-3339", kind)
 	}
-	if kind != RecordAbandon {
+	if kind != RecordAbandon && kind != RecordSubstitution {
 		if err := requireInt(m, "round", kind); err != nil {
 			return err
 		}
@@ -477,7 +477,16 @@ func validateExecutionRecord(m map[string]interface{}, kind string) error {
 		return nil
 	}
 	if kind == RecordSubstitution {
-		return nil
+		for _, field := range []string{"from_family", "to_family"} {
+			s, err := requireString(m, field, kind)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("%s field %s must not be blank", kind, field)
+			}
+		}
+		return positive("round", false)
 	}
 	if err := in("runner_kind", "process", "harness"); err != nil {
 		return err

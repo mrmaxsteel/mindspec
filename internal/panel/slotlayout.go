@@ -32,15 +32,15 @@ func NewSlotLayout(mainRoot, isolationRoot, spec, slug string, round int, slot s
 		spec = "adhoc"
 	}
 	if !filepath.IsAbs(mainRoot) || isolationRoot == "" || filepath.IsAbs(isolationRoot) || filepath.Clean(isolationRoot) == "." {
-		return SlotLayout{}, submitRefusal("invalid slot root")
+		return SlotLayout{}, submitRefusal("invalid slot root", "select an absolute main root and a relative isolation root")
 	}
 	for _, part := range strings.Split(filepath.ToSlash(isolationRoot), "/") {
 		if !layoutComponent(part) {
-			return SlotLayout{}, submitRefusal("invalid isolation root")
+			return SlotLayout{}, submitRefusal("invalid isolation root", "select an isolation root within the main root")
 		}
 	}
 	if !layoutComponent(spec) || !layoutComponent(slug) || !layoutComponent(slot) || round < 1 {
-		return SlotLayout{}, submitRefusal("invalid slot identity")
+		return SlotLayout{}, submitRefusal("invalid slot identity", "select a panel, positive round and roster slot")
 	}
 	base := filepath.Join(mainRoot, isolationRoot)
 	suffix := filepath.Join(spec, slug, fmt.Sprintf("r%d", round))
@@ -84,24 +84,48 @@ func AttemptFromPath(slotDir, file string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if slotDir != "" {
-		root, err := filepath.Abs(slotDir)
-		if err != nil {
-			return 0, err
+	hasAttempt := func(path string) bool {
+		for _, part := range strings.Split(path, string(filepath.Separator)) {
+			if attemptNumber(part) > 0 {
+				return true
+			}
 		}
-		rel, err := filepath.Rel(root, abs)
-		if err != nil {
-			return 0, err
-		}
-		parts := strings.Split(rel, string(filepath.Separator))
-		if len(parts) > 1 {
-			return attemptNumber(parts[0]), nil
+		return false
+	}
+	pathHasAttempt := hasAttempt(filepath.Dir(abs))
+	unbound := func() (int, error) {
+		if pathHasAttempt || hasAttempt(filepath.Dir(abs)) {
+			return 0, submitRefusal("cannot bind attempt path to the target slot", "submit a file from the target slot's attempt directory")
 		}
 		return 0, nil
 	}
-	// Without a verified target slot directory, an arbitrary attempt-named
-	// ancestor does not establish attempt ownership.
-	return 0, nil
+	if slotDir == "" {
+		return unbound()
+	}
+	root, err := filepath.EvalSymlinks(slotDir)
+	if err != nil {
+		return unbound()
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return unbound()
+	}
+	// Canonicalize directories, since a caller can supply verdict bytes before
+	// the verdict file exists. Slot discovery also resolves directory symlinks.
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return 0, err
+	}
+	abs = filepath.Join(dir, filepath.Base(abs))
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return unbound()
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) > 1 && attemptNumber(parts[0]) > 0 {
+		return attemptNumber(parts[0]), nil
+	}
+	return unbound()
 }
 
 // NextAttemptNumber inspects this slot directory and this round only.

@@ -12,8 +12,7 @@
 //     panel, capturing every verdict-file slot's token/model/terminal
 //     verdict (CoverageManifest).
 //
-//   - round, refutation, deferral, rebind, abandon, verdict, launch and
-//     substitution — panel-verb events
+//   - round, refutation, deferral, rebind and abandon — panel-verb events
 //     (Spec 130 R5.1; shapes and validation in ledger.go).
 //
 // All are agent-writable, forgeable-by-content repo data (ADR-0037 §8):
@@ -372,6 +371,7 @@ func jsonTypeName(v interface{}) string {
 // no path-hygiene check (see HygienePredicate) — the two are separate,
 // composable gates, exactly as R6(b)'s append op runs both before any
 // mutation.
+// Verdict, launch and substitution records use the execution schemas in ledger.go.
 func Validate(data []byte) error {
 	m, err := decodeRecord(data)
 	if err != nil {

@@ -92,16 +92,19 @@ func TestSlotLayoutAndFixture(t *testing.T) {
 		t.Fatalf("wrong metadata %+v %v", meta, err)
 	}
 	for _, file := range []string{filepath.Join(layout.AttemptDir(4), "verdict.json"), filepath.Join(layout.AttemptDir(4), "nested", "v.json")} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
 		k, err := panel.AttemptFromPath(layout.Dir, file)
 		if err != nil || k != 4 {
 			t.Fatalf("attempt %d %v", k, err)
 		}
 	}
-	if k, err := panel.AttemptFromPath(layout.Dir, filepath.Join(root, "attempt-9", "v.json")); err != nil || k != 0 {
-		t.Fatalf("outside attempt binds: %d %v", k, err)
+	if k, err := panel.AttemptFromPath(layout.Dir, filepath.Join(root, "attempt-9", "v.json")); err == nil || k != 0 || !strings.Contains(err.Error(), "cannot bind attempt path") {
+		t.Fatalf("outside attempt must refuse: %d %v", k, err)
 	}
-	if k, err := panel.AttemptFromPath("", filepath.Join(root, "attempt-9", "v.json")); err != nil || k != 0 {
-		t.Fatalf("unowned attempt binds: %d %v", k, err)
+	if k, err := panel.AttemptFromPath("", filepath.Join(root, "attempt-9", "v.json")); err == nil || k != 0 || !strings.Contains(err.Error(), "cannot bind attempt path") {
+		t.Fatalf("unowned attempt must refuse: %d %v", k, err)
 	}
 	f := paneltest.NewLegacy(t)
 	lines, err := panel.ReadLedger(f.Dir)

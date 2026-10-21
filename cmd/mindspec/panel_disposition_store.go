@@ -98,7 +98,13 @@ never interpolated into a shell-quoted argument.`,
 			return err
 		}
 		if panel.IsVerbRecord(discriminator.Record) {
-			return fmt.Errorf("record %s is reserved to the panel verbs; use the corresponding panel command\nrecovery: use panel submit for a verdict, or panel launch for a process attempt", termsafe.Escape(discriminator.Record))
+			verb := map[string]string{
+				panel.RecordRound: "create", panel.RecordRefutation: "refute",
+				panel.RecordDeferral: "defer", panel.RecordRebind: "rebind",
+				panel.RecordAbandon: "abandon", panel.RecordVerdict: "submit",
+				panel.RecordLaunch: "launch", panel.RecordSubstitution: "launch",
+			}[discriminator.Record]
+			return fmt.Errorf("record %s is reserved to the panel verbs\nrecovery: use panel %s", termsafe.Escape(discriminator.Record), verb)
 		}
 		if discriminator.Record == panel.RecordPanelManifest {
 			dir := filepath.Join(specDir, "reviews", panelName)

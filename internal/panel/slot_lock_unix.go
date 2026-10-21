@@ -18,7 +18,7 @@ func TrySlotLock(path string) (*SlotLock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: fd is a small process-local descriptor
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return nil, heldSlotError(path)
@@ -26,7 +26,7 @@ func TrySlotLock(path string) (*SlotLock, error) {
 		return nil, err
 	}
 	return &SlotLock{release: func() error {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:gosec // G115: fd is a small process-local descriptor
 		closeErr := f.Close()
 		if err != nil {
 			return err
@@ -45,11 +45,11 @@ func ProbeSlotLock(path string) (bool, error) {
 		return false, err
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: fd is a small process-local descriptor
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return true, nil
 		}
 		return false, err
 	}
-	return false, syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false, syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:gosec // G115: fd is a small process-local descriptor
 }

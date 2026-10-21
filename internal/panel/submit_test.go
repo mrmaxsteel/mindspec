@@ -15,13 +15,18 @@ import (
 // The in-package tests cannot import paneltest because that package imports panel.
 func submitFixture(t *testing.T) (SubmitTarget, []byte, SubmitResolver) {
 	t.Helper()
+	return submitFixtureSchema(t, 2)
+}
+
+func submitFixtureSchema(t *testing.T, schema int) (SubmitTarget, []byte, SubmitResolver) {
+	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "p")
 	p := Panel{Spec: "test", Target: "main", Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: strings.Repeat("a", 40), SubjectDigest: "sha256:test", Telemetry: "required", Gate: "adhoc", Roster: []RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "a"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "b"}}}
 	if err := WriteSnapshot(dir, p); err != nil {
 		t.Fatal(err)
 	}
-	seedTestRecords(t, dir, RoundRecord{Record: RecordRound, VerdictSchema: 2, Spec: p.Spec, Panel: "p", Round: 1, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, Roster: p.Roster, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: ledgerTime})
+	seedTestRecords(t, dir, RoundRecord{Record: RecordRound, VerdictSchema: schema, Spec: p.Spec, Panel: "p", Round: 1, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, Roster: p.Roster, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: ledgerTime})
 	v := VerdictV2{Schema: 2, Slot: "R1", Round: 1, ReviewedSHA: p.ReviewedHeadSHA, Status: "final", Verdict: "APPROVE", Model: "m", Rationale: "reviewed", ConcreteChangesRequired: []ChangeRequired{}, CommandsRun: []CommandRun{}}
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -207,9 +212,13 @@ func TestPanelSubmit_Race(t *testing.T) {
 	}
 }
 func TestPanelSubmit_AttemptBindingUnderLock(t *testing.T) {
+	t.Run("paths", testSubmitAttemptPathBinding)
 	target, b, resolve := submitFixture(t)
 	seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"))
 	target.File = filepath.Join(target.SlotDir, "attempt-1", "verdict.json")
+	if err := os.MkdirAll(filepath.Dir(target.File), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	old := submitLockHeldHook
@@ -231,6 +240,62 @@ func TestPanelSubmit_AttemptBindingUnderLock(t *testing.T) {
 	events, err := SlotAttempts(target.Dir, 1)
 	if err != nil || len(events["R1"]) != 3 {
 		t.Fatalf("submit appended an outcome: %+v %v", events, err)
+	}
+}
+
+func testSubmitAttemptPathBinding(t *testing.T) {
+	for _, name := range []string{"symlink", "outside slot", "missing directory", "no slot", "symlink outside slot"} {
+		t.Run(name, func(t *testing.T) {
+			target, b, resolve := submitFixture(t)
+			seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"), submitLaunch(1, 1, "launch_failed"), submitLaunch(1, 2, "dispatched"))
+			if err := os.MkdirAll(filepath.Join(target.SlotDir, "attempt-1"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			realSlot, err := filepath.EvalSymlinks(target.SlotDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target.SlotDir = realSlot
+			target.File = filepath.Join(realSlot, "attempt-1", "verdict.json")
+			want := "cannot bind attempt path"
+			switch name {
+			case "symlink":
+				alias := filepath.Join(t.TempDir(), "slot-link")
+				if err := os.Symlink(realSlot, alias); err != nil {
+					t.Fatal(err)
+				}
+				target.File = filepath.Join(alias, "attempt-1", "verdict.json")
+				want = "attempt 1 was superseded by 2"
+			case "outside slot":
+				target.SlotDir = t.TempDir()
+			case "missing directory":
+				target.File = filepath.Join(realSlot, "attempt-9", "verdict.json")
+			case "no slot":
+				target.SlotDir = ""
+			case "symlink outside slot":
+				alias := filepath.Join(realSlot, "attempt-3")
+				if err := os.Symlink(t.TempDir(), alias); err != nil {
+					t.Fatal(err)
+				}
+				target.File = filepath.Join(alias, "verdict.json")
+			}
+			if name != "missing directory" {
+				if err := os.WriteFile(target.File, b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(filepath.Join(target.Dir, dispositionsFileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Submit(target, b, resolve); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("attempt path refusal: want %q, got %v", want, err)
+			}
+			after, err := os.ReadFile(filepath.Join(target.Dir, dispositionsFileName))
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("attempt path refusal mutated ledger: %v", err)
+			}
+		})
 	}
 }
 func TestLatestSubmissions(t *testing.T) {
@@ -323,20 +388,33 @@ func TestSlotAttempts(t *testing.T) {
 	}
 }
 func TestPanelSubmit_CoreRefusals(t *testing.T) {
-	for _, name := range []string{"process", "landed", "sha", "model", "round", "slot", "not dispatched", "ended", "abandoned"} {
+	for _, name := range []string{"process", "landed", "non-v2", "sha", "model", "round", "slot", "not dispatched", "ended", "abandoned"} {
 		t.Run(name, func(t *testing.T) {
 			target, b, resolve := submitFixture(t)
 			var v VerdictV2
 			_ = json.Unmarshal(b, &v)
+			wantRecovery := ""
 			switch name {
 			case "process":
+				wantRecovery = "recovery: mindspec panel launch"
 				resolve = func(p Panel, s RosterSlot) (SubmitResolution, error) {
 					return SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "process", RunnerSource: "default"}, nil
 				}
 			case "landed":
+				wantRecovery = "recovery: mindspec panel create p --round 2"
 				resolve = func(p Panel, s RosterSlot) (SubmitResolution, error) {
 					return SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "harness", RunnerSource: "default", Landed: true}, nil
 				}
+			case "non-v2":
+				p := load(target.Dir).Panel
+				p.Round = 2
+				target.Round = 2
+				v.Round = 2
+				if err := WriteSnapshot(target.Dir, p); err != nil {
+					t.Fatal(err)
+				}
+				seedTestRecords(t, target.Dir, RoundRecord{Record: RecordRound, Spec: p.Spec, Panel: "p", Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, Roster: p.Roster, ExpectedReviewers: 2, Telemetry: p.Telemetry, CreatedAt: ledgerTime})
+				wantRecovery = "recovery: mindspec panel create p --round 3"
 			case "sha":
 				v.ReviewedSHA = strings.Repeat("b", 40)
 			case "model":
@@ -348,6 +426,7 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 			case "not dispatched":
 				target.File = filepath.Join(target.SlotDir, "attempt-1", "v.json")
 			case "ended":
+				wantRecovery = "recovery: mindspec panel checkout --slot R1 --dispatch --replace"
 				target.File = filepath.Join(target.SlotDir, "attempt-1", "v.json")
 				seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"), submitLaunch(1, 1, "launch_failed"))
 			case "abandoned":
@@ -357,17 +436,64 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if target.File != "" {
+				if err := os.MkdirAll(filepath.Dir(target.File), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			b, _ = json.Marshal(v)
 			before, err := os.ReadFile(filepath.Join(target.Dir, dispositionsFileName))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Submit(target, b, resolve); err == nil {
+			_, err = Submit(target, b, resolve)
+			if err == nil {
 				t.Fatal("accepted forbidden submit")
+			}
+			lines := strings.Split(err.Error(), "\n")
+			if strings.Count(err.Error(), "recovery:") != 1 {
+				t.Fatalf("want one recovery line: %v", err)
+			}
+			if wantRecovery != "" && (lines[len(lines)-1] != wantRecovery || strings.HasPrefix(err.Error(), "/")) {
+				t.Fatalf("want final line %q without pointer prefix, got %q", wantRecovery, err)
 			}
 			after, _ := os.ReadFile(filepath.Join(target.Dir, dispositionsFileName))
 			if !bytes.Equal(before, after) {
 				t.Fatal("refusal mutated ledger")
+			}
+		})
+	}
+}
+
+func TestPanelSubmit_LegacyRoundBeforeVerdict(t *testing.T) {
+	for _, name := range []string{"valid v2", "legacy verdict", "malformed"} {
+		t.Run(name, func(t *testing.T) {
+			target, b, resolve := submitFixtureSchema(t, 0)
+			switch name {
+			case "legacy verdict":
+				b = []byte(`{"verdict":"APPROVE"}`)
+			case "malformed":
+				b = []byte(`{`)
+			}
+			path := filepath.Join(target.Dir, dispositionsFileName)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(before, []byte(`"verdict_schema"`)) {
+				t.Fatal("legacy fixture has a schema pin")
+			}
+			_, err = Submit(target, b, resolve)
+			want := "round does not accept submissions\nrecovery: mindspec panel create p --round 2"
+			if err == nil || err.Error() != want {
+				t.Fatalf("legacy round refusal: want %q, got %v", want, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("legacy refusal mutated ledger: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(target.Dir, "R1-round-1.json")); !os.IsNotExist(err) {
+				t.Fatalf("legacy refusal wrote verdict: %v", err)
 			}
 		})
 	}

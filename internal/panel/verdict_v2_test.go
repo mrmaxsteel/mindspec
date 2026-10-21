@@ -116,8 +116,8 @@ func TestVerdictV2_TransportLayer(t *testing.T) {
 	if err := panel.ValidateVerdictV2Schema(padding); err != nil {
 		t.Fatal(err)
 	}
-	if err := panel.ValidateVerdictV2(padding); err == nil {
-		t.Fatal("accepted padding beyond 1 MiB")
+	if err := panel.ValidateVerdictV2(padding); err == nil || !strings.HasPrefix(err.Error(), "/:") {
+		t.Fatalf("padding beyond 1 MiB must name root pointer: %v", err)
 	}
 	m := baseObject(t)
 	m["rationale"] = strings.Repeat("x", panel.MaxVerdictBytes-len(b)+len("reviewed")+1)
@@ -125,8 +125,8 @@ func TestVerdictV2_TransportLayer(t *testing.T) {
 	if len(compact) != panel.MaxVerdictBytes+1 {
 		t.Fatalf("size %d", len(compact))
 	}
-	if err := panel.ValidateVerdictV2(compact); err == nil {
-		t.Fatal("accepted oversized compact file")
+	if err := panel.ValidateVerdictV2(compact); err == nil || !strings.HasPrefix(err.Error(), "/:") {
+		t.Fatalf("oversized compact file must name root pointer: %v", err)
 	}
 	exact := padding[:panel.MaxVerdictBytes]
 	if err := panel.ValidateVerdictV2(exact); err != nil {
