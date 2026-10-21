@@ -1,160 +1,287 @@
 ---
-status: Draft
-spec_id: 132-readiness-followon
-version: "1"
 adr_citations:
-  - ADR-0041
-  - ADR-0036
-  - ADR-0025
-  - ADR-0023
-  - ADR-0030
-  - ADR-0035
-  - ADR-0019
-  - ADR-0006
+    - ADR-0041
+    - ADR-0036
+    - ADR-0025
+    - ADR-0023
+    - ADR-0030
+    - ADR-0035
+    - ADR-0019
+    - ADR-0006
+approved_at: "2026-10-21T21:47:24Z"
+approved_by: user
+bead_ids:
+    - mindspec-pvi7.1
+    - mindspec-pvi7.2
+    - mindspec-pvi7.3
+    - mindspec-pvi7.4
+    - mindspec-pvi7.5
+    - mindspec-pvi7.6
+    - mindspec-pvi7.7
+    - mindspec-pvi7.8
+    - mindspec-pvi7.9
+spec_id: 132-readiness-followon
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths: [internal/complete/complete.go, internal/complete/materialize.go,
-      internal/complete/landing_tree_test.go, internal/validate/divergence.go,
-      internal/validate/adr_domain_resolve.go, internal/validate/docsync.go,
-      internal/validate/ownership_ref_test.go, internal/executor/executor.go,
-      internal/executor/mindspec_executor.go, internal/executor/mock.go,
-      internal/gitutil/neteffect.go, internal/gitutil/neteffect_test.go,
-      internal/lint/ratchet_argv_table_test.go, .mindspec/adr/ADR-0036-ownership-discovery.md,
-      .mindspec/specs/129-readiness-tracker-honesty/spec.md,
-      .mindspec/specs/129-readiness-tracker-honesty/plan.md,
-      .mindspec/domains/workflow/architecture.md, .mindspec/domains/execution/interfaces.md,
-      internal/validate/adr_spec132_ownership_test.go, internal/validate/adr_divergence.go,
-      internal/validate/snapshot_leg_test.go, internal/complete/complete_test.go,
-      .mindspec/domains/workflow/interfaces.md,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 2
-    depends_on: []
-    key_file_paths: [internal/approve/impl.go, internal/approve/impl_preflight_test.go,
-      internal/approve/impl_test.go, internal/approve/main_test.go,
-      internal/approve/merge_preflight_ac5_test.go, internal/lifecycle/gitquery.go,
-      internal/gitutil/gitops.go, internal/gitutil/gitops_test.go, internal/executor/executor.go,
-      internal/executor/mindspec_executor.go, internal/executor/mock.go,
-      internal/executor/finalize_hasremote_test.go, internal/executor/hasremote_callsite_test.go,
-      internal/executor/finalize_fault_test.go, internal/executor/finalize_worktree_only_test.go,
-      internal/executor/executor_test.go, internal/executor/neteffect_probe_test.go,
-      internal/executor/finalize_scoping_test.go, internal/executor/layout_guard_test.go,
-      internal/executor/finalize_orphan_test.go, internal/executor/merge_binding_test.go,
-      internal/executor/merge_conflict_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt,
-      .mindspec/adr/ADR-0041-gate-before-mutate.md,
-      .mindspec/domains/workflow/architecture.md, .mindspec/domains/execution/interfaces.md,
-      .mindspec/domains/execution/architecture.md, internal/validate/adr_spec132_preflight_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 3
-    depends_on: [2]
-    key_file_paths: [internal/approve/impl.go, internal/approve/impl_rerun_test.go,
-      internal/executor/mindspec_executor.go, internal/executor/executor.go,
-      internal/executor/mock.go, internal/executor/finalize_tip_test.go, internal/gitutil/gitops.go,
-      internal/gitutil/gitops_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt,
-      .mindspec/adr/ADR-0041-gate-before-mutate.md,
-      .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/runbook.md,
-      .mindspec/domains/execution/architecture.md, .mindspec/domains/execution/interfaces.md,
-      internal/validate/adr_spec132_finalize_test.go, internal/approve/impl_test.go,
-      internal/approve/main_test.go, internal/executor/finalize_fault_test.go,
-      internal/executor/finalize_orphan_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 4
-    depends_on: []
-    key_file_paths: [internal/lifecycle/merge_state.go, internal/lifecycle/merge_state_test.go,
-      internal/lifecycle/stale_open.go, internal/lifecycle/scan.go, internal/gitutil/gitops.go,
-      internal/gitutil/gitops_test.go, internal/lint/ratchet_argv_table_test.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt,
-      internal/doctor/doctor.go, internal/doctor/doctor_test.go,
-      internal/doctor/lifecycle_integrity.go, internal/doctor/lifecycle_integrity_test.go,
-      cmd/mindspec/doctor.go, cmd/mindspec/doctor_info_test.go,
-      .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/interfaces.md,
-      .mindspec/domains/execution/interfaces.md, internal/doctor/skip_local_env_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 5
-    depends_on: [1, 4]
-    key_file_paths: [internal/complete/complete.go, internal/complete/merge_only.go, internal/complete/closing.go,
-      internal/complete/merge_only_test.go, internal/complete/closing_test.go,
-      internal/complete/ownership_conflict_test.go, internal/complete/panel_advisory.go,
-      cmd/mindspec/complete.go, cmd/mindspec/merge_only_loop_test.go, internal/executor/executor.go,
-      internal/executor/mindspec_executor.go, internal/executor/mock.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt,
-      internal/lint/destructive_guidance_test.go, internal/lint/ratchet_argv_table_test.go,
-      .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/domains/workflow/architecture.md,
-      .mindspec/domains/workflow/runbook.md, .mindspec/domains/workflow/interfaces.md,
-      .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md,
-      internal/validate/adr_spec132_mergeonly_test.go, cmd/mindspec/ceremony_guard_test.go,
-      cmd/mindspec/named_invocation_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 6
-    depends_on: [4]
-    key_file_paths: [internal/config/config.go, internal/config/config_test.go,
-      internal/config/feedback_remote_test.go, cmd/mindspec/config.go, cmd/mindspec/config_test.go,
-      cmd/mindspec/ceremony_guard_test.go, cmd/mindspec/verb_output_test.go,
-      internal/harness/sandbox.go, internal/harness/sandbox_test.go,
-      internal/harness/lifecycle_scenario_test.go, internal/doctor/config.go,
-      internal/doctor/config_test.go, internal/doctor/models_commands_test.go,
-      internal/lint/no_merge_strategy_writers_test.go, .mindspec/config.yaml,
-      .mindspec/core/GIT-WORKFLOW.md, .mindspec/domains/core/interfaces.md,
-      .mindspec/domains/workflow/interfaces.md, .mindspec/domains/execution/architecture.md,
-      .mindspec/adr/ADR-0006.md, .mindspec/adr/ADR-0019.md,
-      internal/validate/adr_spec132_mergestrategy_test.go]
-  - id: 7
-    depends_on: [4]
-    key_file_paths: [internal/lifecycle/landed.go, internal/lifecycle/landed_reviewed_tree_test.go,
-      internal/complete/reviewed_tree_reconcile_test.go,
-      .mindspec/adr/ADR-0041-gate-before-mutate.md, .mindspec/domains/workflow/architecture.md,
-      internal/validate/adr_spec132_reviewedtree_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 8
-    depends_on: []
-    key_file_paths: [internal/lifecycle/reattest.go, internal/lifecycle/reattest_ancestor_test.go,
-      internal/lifecycle/fallback.go, internal/lifecycle/fallback_test.go,
-      internal/lifecycle/scan.go, internal/gitutil/neteffect.go, internal/gitutil/neteffect_test.go,
-      internal/lint/ratchet_argv_table_test.go, cmd/mindspec/reattest.go,
-      cmd/mindspec/reattest_test.go, internal/doctor/ancestor.go,
-      internal/doctor/lifecycle_integrity.go, internal/doctor/ancestor_test.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt,
-      internal/lint/destructive_guidance_test.go,
-      .mindspec/domains/workflow/architecture.md, .mindspec/domains/workflow/runbook.md,
-      .mindspec/domains/execution/interfaces.md, project-docs/user/guides/merge-safety.md,
-      internal/lifecycle/reattest_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
-  - id: 9
-    depends_on: []
-    key_file_paths: [internal/phase/derive.go, internal/phase/cache.go, internal/phase/cache_test.go,
-      internal/phase/lineage.go, internal/phase/lineage_test.go,
-      internal/phase/lineage_error_test.go, internal/phase/agreement_table_test.go,
-      internal/phase/resolve_spec_test.go, internal/approve/spec.go, internal/approve/spec_test.go,
-      internal/next/beads.go, internal/next/readyset_test.go,
-      internal/validate/readiness/readiness.go, internal/validate/readiness/readiness_test.go,
-      internal/doctor/doctor.go, internal/doctor/lineage.go, internal/doctor/lineage_test.go,
-      cmd/mindspec/spec.go, cmd/mindspec/spec_create_lettered_test.go,
-      cmd/mindspec/lettered_spec_test.go, cmd/mindspec/verb_output_test.go,
-      internal/guard/registries.go, internal/guard/registries_test.go,
-      internal/lint/testdata/destructive_seed_manifest.txt, .mindspec/adr/ADR-0023.md,
-      .mindspec/domains/core/interfaces.md, .mindspec/domains/core/architecture.md,
-      .mindspec/domains/workflow/interfaces.md, internal/validate/adr_spec132_lineage_test.go,
-      internal/next/nearmiss.go, internal/next/nearmiss_test.go, internal/lifecycle/scan.go,
-      .mindspec/domains/workflow/architecture.md,
-      internal/approve/plan.go, cmd/mindspec/next_phase_advance_test.go,
-      cmd/mindspec/next_positional_test.go, cmd/mindspec/next_ready_gate_test.go,
-      cmd/mindspec/next_selection_test.go,
-      internal/lint/ratchet_inline_allowlist_test.go,
-      internal/lint/ratchet_composition_allowlist_test.go]
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/complete/complete.go
+        - internal/complete/materialize.go
+        - internal/complete/landing_tree_test.go
+        - internal/validate/divergence.go
+        - internal/validate/adr_domain_resolve.go
+        - internal/validate/docsync.go
+        - internal/validate/ownership_ref_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/gitutil/neteffect.go
+        - internal/gitutil/neteffect_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - .mindspec/adr/ADR-0036-ownership-discovery.md
+        - .mindspec/specs/129-readiness-tracker-honesty/spec.md
+        - .mindspec/specs/129-readiness-tracker-honesty/plan.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/execution/interfaces.md
+        - internal/validate/adr_spec132_ownership_test.go
+        - internal/validate/adr_divergence.go
+        - internal/validate/snapshot_leg_test.go
+        - internal/complete/complete_test.go
+        - .mindspec/domains/workflow/interfaces.md
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/approve/impl.go
+        - internal/approve/impl_preflight_test.go
+        - internal/approve/impl_test.go
+        - internal/approve/main_test.go
+        - internal/approve/merge_preflight_ac5_test.go
+        - internal/lifecycle/gitquery.go
+        - internal/gitutil/gitops.go
+        - internal/gitutil/gitops_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/executor/finalize_hasremote_test.go
+        - internal/executor/hasremote_callsite_test.go
+        - internal/executor/finalize_fault_test.go
+        - internal/executor/finalize_worktree_only_test.go
+        - internal/executor/executor_test.go
+        - internal/executor/neteffect_probe_test.go
+        - internal/executor/finalize_scoping_test.go
+        - internal/executor/layout_guard_test.go
+        - internal/executor/finalize_orphan_test.go
+        - internal/executor/merge_binding_test.go
+        - internal/executor/merge_conflict_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/execution/interfaces.md
+        - .mindspec/domains/execution/architecture.md
+        - internal/validate/adr_spec132_preflight_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on:
+        - 2
+      id: 3
+      key_file_paths:
+        - internal/approve/impl.go
+        - internal/approve/impl_rerun_test.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/executor.go
+        - internal/executor/mock.go
+        - internal/executor/finalize_tip_test.go
+        - internal/gitutil/gitops.go
+        - internal/gitutil/gitops_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/runbook.md
+        - .mindspec/domains/execution/architecture.md
+        - .mindspec/domains/execution/interfaces.md
+        - internal/validate/adr_spec132_finalize_test.go
+        - internal/approve/impl_test.go
+        - internal/approve/main_test.go
+        - internal/executor/finalize_fault_test.go
+        - internal/executor/finalize_orphan_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on: []
+      id: 4
+      key_file_paths:
+        - internal/lifecycle/merge_state.go
+        - internal/lifecycle/merge_state_test.go
+        - internal/lifecycle/stale_open.go
+        - internal/lifecycle/scan.go
+        - internal/gitutil/gitops.go
+        - internal/gitutil/gitops_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - internal/doctor/doctor.go
+        - internal/doctor/doctor_test.go
+        - internal/doctor/lifecycle_integrity.go
+        - internal/doctor/lifecycle_integrity_test.go
+        - cmd/mindspec/doctor.go
+        - cmd/mindspec/doctor_info_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+        - internal/doctor/skip_local_env_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on:
+        - 1
+        - 4
+      id: 5
+      key_file_paths:
+        - internal/complete/complete.go
+        - internal/complete/merge_only.go
+        - internal/complete/closing.go
+        - internal/complete/merge_only_test.go
+        - internal/complete/closing_test.go
+        - internal/complete/ownership_conflict_test.go
+        - internal/complete/panel_advisory.go
+        - cmd/mindspec/complete.go
+        - cmd/mindspec/merge_only_loop_test.go
+        - internal/executor/executor.go
+        - internal/executor/mindspec_executor.go
+        - internal/executor/mock.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - internal/lint/destructive_guidance_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/runbook.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/interfaces.md
+        - project-docs/user/guides/merge-safety.md
+        - internal/validate/adr_spec132_mergeonly_test.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - cmd/mindspec/named_invocation_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on:
+        - 4
+      id: 6
+      key_file_paths:
+        - internal/config/config.go
+        - internal/config/config_test.go
+        - internal/config/feedback_remote_test.go
+        - cmd/mindspec/config.go
+        - cmd/mindspec/config_test.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - cmd/mindspec/verb_output_test.go
+        - internal/harness/sandbox.go
+        - internal/harness/sandbox_test.go
+        - internal/harness/lifecycle_scenario_test.go
+        - internal/doctor/config.go
+        - internal/doctor/config_test.go
+        - internal/doctor/models_commands_test.go
+        - internal/lint/no_merge_strategy_writers_test.go
+        - .mindspec/config.yaml
+        - .mindspec/core/GIT-WORKFLOW.md
+        - .mindspec/domains/core/interfaces.md
+        - .mindspec/domains/workflow/interfaces.md
+        - .mindspec/domains/execution/architecture.md
+        - .mindspec/adr/ADR-0006.md
+        - .mindspec/adr/ADR-0019.md
+        - internal/validate/adr_spec132_mergestrategy_test.go
+    - depends_on:
+        - 4
+      id: 7
+      key_file_paths:
+        - internal/lifecycle/landed.go
+        - internal/lifecycle/landed_reviewed_tree_test.go
+        - internal/complete/reviewed_tree_reconcile_test.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+        - .mindspec/domains/workflow/architecture.md
+        - internal/validate/adr_spec132_reviewedtree_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on: []
+      id: 8
+      key_file_paths:
+        - internal/lifecycle/reattest.go
+        - internal/lifecycle/reattest_ancestor_test.go
+        - internal/lifecycle/fallback.go
+        - internal/lifecycle/fallback_test.go
+        - internal/lifecycle/scan.go
+        - internal/gitutil/neteffect.go
+        - internal/gitutil/neteffect_test.go
+        - internal/lint/ratchet_argv_table_test.go
+        - cmd/mindspec/reattest.go
+        - cmd/mindspec/reattest_test.go
+        - internal/doctor/ancestor.go
+        - internal/doctor/lifecycle_integrity.go
+        - internal/doctor/ancestor_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - internal/lint/destructive_guidance_test.go
+        - .mindspec/domains/workflow/architecture.md
+        - .mindspec/domains/workflow/runbook.md
+        - .mindspec/domains/execution/interfaces.md
+        - project-docs/user/guides/merge-safety.md
+        - internal/lifecycle/reattest_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
+    - depends_on: []
+      id: 9
+      key_file_paths:
+        - internal/phase/derive.go
+        - internal/phase/cache.go
+        - internal/phase/cache_test.go
+        - internal/phase/lineage.go
+        - internal/phase/lineage_test.go
+        - internal/phase/lineage_error_test.go
+        - internal/phase/agreement_table_test.go
+        - internal/phase/resolve_spec_test.go
+        - internal/approve/spec.go
+        - internal/approve/spec_test.go
+        - internal/next/beads.go
+        - internal/next/readyset_test.go
+        - internal/validate/readiness/readiness.go
+        - internal/validate/readiness/readiness_test.go
+        - internal/doctor/doctor.go
+        - internal/doctor/lineage.go
+        - internal/doctor/lineage_test.go
+        - cmd/mindspec/spec.go
+        - cmd/mindspec/spec_create_lettered_test.go
+        - cmd/mindspec/lettered_spec_test.go
+        - cmd/mindspec/verb_output_test.go
+        - internal/guard/registries.go
+        - internal/guard/registries_test.go
+        - internal/lint/testdata/destructive_seed_manifest.txt
+        - .mindspec/adr/ADR-0023.md
+        - .mindspec/domains/core/interfaces.md
+        - .mindspec/domains/core/architecture.md
+        - .mindspec/domains/workflow/interfaces.md
+        - internal/validate/adr_spec132_lineage_test.go
+        - internal/next/nearmiss.go
+        - internal/next/nearmiss_test.go
+        - internal/lifecycle/scan.go
+        - .mindspec/domains/workflow/architecture.md
+        - internal/approve/plan.go
+        - cmd/mindspec/next_phase_advance_test.go
+        - cmd/mindspec/next_positional_test.go
+        - cmd/mindspec/next_ready_gate_test.go
+        - cmd/mindspec/next_selection_test.go
+        - internal/lint/ratchet_inline_allowlist_test.go
+        - internal/lint/ratchet_composition_allowlist_test.go
 ---
 # Plan: 132-readiness-followon
 
