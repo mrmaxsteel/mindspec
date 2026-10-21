@@ -1715,6 +1715,89 @@ func DiffNameOnly(workdir, base, head string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
+// DiffNameOnlyNoRenames lists both sides of renames and preserves path bytes.
+func DiffNameOnlyNoRenames(workdir, base, head string) ([]string, error) {
+	if err := rejectOptionLike(base); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(head); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--no-renames", "--name-only", "-z", base, head, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("diff paths: %w", err)
+	}
+	return splitNUL(out), nil
+}
+
+// FirstParentCommitsAfter lists commits after base on head's first-parent
+// chain, newest first. Merge records include all parents.
+func FirstParentCommitsAfter(workdir, base, head string) ([]MergeCommit, error) {
+	if err := rejectOptionLike(base); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(head); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "log", "--first-parent", "--topo-order", "--format=%H%x00%P%x00%s", base+".."+head, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading later commits: %w", err)
+	}
+	var commits []MergeCommit
+	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\x00", 3)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("invalid commit record")
+		}
+		commits = append(commits, MergeCommit{SHA: fields[0], Parents: strings.Fields(fields[1]), Subject: fields[2]})
+	}
+	return commits, nil
+}
+
+// TreePathEntry reads a path's mode, type and object ID at ref. An empty
+// result means the path is absent. Read errors stay distinct from absence.
+func TreePathEntry(workdir, ref, path string) ([]byte, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "ls-tree", "-z", "--full-tree", ref, "--", path)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading tree path: %w", err)
+	}
+	return out, nil
+}
+
+// WorktreeForBranch returns the checkout of branch, or empty if absent.
+func WorktreeForBranch(workdir, branch string) (string, error) {
+	if err := rejectOptionLike(branch); err != nil {
+		return "", err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "worktree", "list", "--porcelain", "-z")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("listing worktrees: %w", err)
+	}
+	var wt string
+	for _, field := range strings.Split(string(out), "\x00") {
+		if field == "" {
+			wt = ""
+		}
+		if strings.HasPrefix(field, "worktree ") {
+			wt = strings.TrimPrefix(field, "worktree ")
+		}
+		if field == "branch refs/heads/"+branch {
+			return wt, nil
+		}
+	}
+	return "", nil
+}
+
 // DiffNameOnlyRef runs `git diff --name-only <ref>` in workdir (single-ref
 // form, comparing against the working tree). workdir=="" → cwd.
 func DiffNameOnlyRef(workdir, ref string) ([]string, error) {
