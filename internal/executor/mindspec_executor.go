@@ -1428,18 +1428,21 @@ func (g *MindspecExecutor) Status(workdir string) (string, error) {
 	return gitutil.Status(workdir)
 }
 
-// slotGit removes all Git environment overrides, including the complete set
-// reported by rev-parse --local-env-vars. Do not read the operator's global
-// config. Command-line settings override even a clone's local config.
-func slotGit(workdir string, args ...string) ([]byte, error) {
+// slotGit removes repository overrides, including rev-parse --local-env-vars.
+// Main repository calls keep global config for safe.directory. Slot tree calls
+// disable global config. Command options override local and global settings.
+func slotGit(workdir string, keepGlobal bool, args ...string) ([]byte, error) {
 	flags := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", workdir}
 	cmd := exec.Command("git", append(flags, args...)...)
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") {
+		if !strings.HasPrefix(entry, "GIT_") || (keepGlobal && strings.HasPrefix(entry, "GIT_CONFIG_GLOBAL=")) {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	if !keepGlobal {
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null")
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -1450,7 +1453,7 @@ func slotGit(workdir string, args ...string) ([]byte, error) {
 }
 
 func (g *MindspecExecutor) slotAlternates() ([]byte, error) {
-	out, err := slotGit(g.Root, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+	out, err := slotGit(g.Root, true, "rev-parse", "--path-format=absolute", "--git-path", "objects")
 	if err != nil {
 		return nil, err
 	}
@@ -1465,7 +1468,7 @@ func (g *MindspecExecutor) slotAlternates() ([]byte, error) {
 // source object store is shared. The clone-generated bare=false is removed so
 // any later core.bare setting can be detected before reuse.
 func (g *MindspecExecutor) CloneSlotTree(tree, reviewedSHA string) error {
-	if _, err := slotGit(g.Root, "clone", "--shared", "--no-checkout", "--", g.Root, tree); err != nil {
+	if _, err := slotGit(g.Root, true, "clone", "--shared", "--no-checkout", "--", g.Root, tree); err != nil {
 		return err
 	}
 	for _, args := range [][]string{
@@ -1473,7 +1476,7 @@ func (g *MindspecExecutor) CloneSlotTree(tree, reviewedSHA string) error {
 		{"checkout", "--detach", reviewedSHA, "--"},
 		{"remote", "remove", "origin"},
 	} {
-		if _, err := slotGit(tree, args...); err != nil {
+		if _, err := slotGit(tree, false, args...); err != nil {
 			return err
 		}
 	}
@@ -1507,7 +1510,7 @@ func (g *MindspecExecutor) CheckSlotTree(tree, reviewedSHA string) error {
 		return fmt.Errorf("slot repository has a worktree config")
 	}
 	for _, key := range []string{"core.worktree", "core.bare", "extensions.worktreeConfig"} {
-		_, err := slotGit(tree, "config", "--file", filepath.Join(tree, ".git", "config"), "--no-includes", "--get-all", key)
+		_, err := slotGit(tree, false, "config", "--file", filepath.Join(tree, ".git", "config"), "--no-includes", "--get-all", key)
 		if err == nil {
 			return fmt.Errorf("slot repository sets %s", key)
 		}
@@ -1517,7 +1520,7 @@ func (g *MindspecExecutor) CheckSlotTree(tree, reviewedSHA string) error {
 		}
 	}
 	// Includes can hide the same redirects outside the checked config file.
-	if _, err := slotGit(tree, "config", "--file", filepath.Join(tree, ".git", "config"), "--no-includes", "--get-regexp", "^(include|includeif)\\."); err == nil {
+	if _, err := slotGit(tree, false, "config", "--file", filepath.Join(tree, ".git", "config"), "--no-includes", "--get-regexp", "^(include|includeif)\\."); err == nil {
 		return fmt.Errorf("slot repository config has an include redirect")
 	} else {
 		var exit *exec.ExitError
@@ -1536,7 +1539,7 @@ func (g *MindspecExecutor) CheckSlotTree(tree, reviewedSHA string) error {
 	if string(alternates) != string(expected) {
 		return fmt.Errorf("slot repository alternates changed")
 	}
-	head, err := slotGit(tree, "rev-parse", "--verify", "HEAD")
+	head, err := slotGit(tree, false, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return err
 	}
@@ -1551,9 +1554,9 @@ func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
 	return gitutil.CheckIgnore(workdir, file)
 }
 
-// CheckSlotIgnore checks the isolation root with the slot environment.
+// CheckSlotIgnore checks the isolation root with global repository trust.
 func (g *MindspecExecutor) CheckSlotIgnore(workdir, file string) error {
-	_, err := slotGit(workdir, "check-ignore", "--quiet", "--", file)
+	_, err := slotGit(workdir, true, "check-ignore", "--quiet", "--", file)
 	return err
 }
 

@@ -478,6 +478,19 @@ func TestPanelCheckout_HarnessDispatched(t *testing.T) {
 		t.Fatal("refused dispatch appended")
 	}
 	checkoutOK(t, "--slot", "R1", "--dispatch", "--replace")
+	t.Run("final VOID", func(t *testing.T) {
+		f := newCheckoutFixture(t, ".mindspec-scratch")
+		seedSlotFinal(t, f, "VOID")
+		latest, err := panel.LatestSubmissions(f.dir, 1)
+		if err != nil || latest["R1"].Status != "final" || latest["R1"].Verdict != "VOID" {
+			t.Fatalf("final VOID fixture: %+v %v", latest, err)
+		}
+		checkoutOK(t, "--slot", "R1", "--dispatch")
+		events, err := panel.SlotAttempts(f.dir, 1)
+		if err != nil || len(events["R1"]) != 1 || events["R1"][0].Status != "dispatched" {
+			t.Fatalf("dispatch after final VOID: %+v %v", events, err)
+		}
+	})
 	t.Run("process", func(t *testing.T) {
 		f := newCheckoutFixture(t, ".mindspec-scratch")
 		slotWrite(t, filepath.Join(f.root, ".mindspec", "config.yaml"), "panel:\n  runners:\n    - {family: harness, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}\n")
@@ -612,6 +625,35 @@ func TestPanelCreate_RoundConflictKeepsDirtyCheckout(t *testing.T) {
 	}
 	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
 		t.Fatal("round conflict changed panel bytes")
+	}
+}
+
+func TestPanelCreate_BadBriefKeepsDirtyCheckout(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	resetPanelCreateFlags(t)
+	if out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "1"); err != nil {
+		t.Fatalf("create round 1: %v %s", err, out)
+	}
+	checkoutOK(t, "--slot", "R1")
+	layout := f.layout(t, "R1")
+	slotWrite(t, filepath.Join(layout.Tree, "README.md"), "dirty tracked file\n")
+	slotWrite(t, filepath.Join(layout.Tree, "untracked", "notes.txt"), "keep these notes\n")
+	slotWrite(t, filepath.Join(f.dir, "BRIEF.md"), "<!-- mindspec:panel-header -->\nmissing closing marker\n")
+	before := slotSnapshot(t, layout.Dir)
+	beforePanel := slotSnapshot(t, f.dir)
+	resetPanelCreateFlags(t)
+	out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+	if err == nil || !strings.Contains(err.Error(), "1 opening and 0 closing") {
+		t.Fatalf("BRIEF header refusal: %v %s", err, out)
+	}
+	if _, err := os.Stat(layout.Dir); err != nil {
+		t.Fatalf("BRIEF refusal removed dirty slot directory: %v", err)
+	}
+	if after := slotSnapshot(t, layout.Dir); !reflect.DeepEqual(before, after) {
+		t.Fatal("BRIEF refusal changed dirty slot bytes")
+	}
+	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
+		t.Fatal("BRIEF refusal changed panel bytes")
 	}
 }
 
