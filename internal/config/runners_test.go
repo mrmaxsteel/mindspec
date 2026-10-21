@@ -80,6 +80,14 @@ func TestRunners_Validate(t *testing.T) {
 	}
 }
 
+func TestRunnerAdapter_RefusalListsValidValues(t *testing.T) {
+	_, err := Load(panelConfigFixture(t, "runner: unknown-adapter\n", ""))
+	want := "recovery: set runner to one of claude-code-skills, claude-code-workflow, external in .mindspec/config.yaml"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("adapter recovery does not list valid values: %v", err)
+	}
+}
+
 func TestRunners_TimeoutDefault(t *testing.T) {
 	c := mustPanelConfig(t, "panel:\n  runners: [{family: a, kind: process, argv: [run], prompt: stdin, output: stdout}, {family: b, kind: harness, timeout_minutes: 2}]\n", "")
 	a, _ := c.RunnerFor("a")
@@ -107,6 +115,25 @@ func TestRunners_ZeroConfigHarness(t *testing.T) {
 }
 
 func TestRunners_MergeByFamily(t *testing.T) {
+	t.Run("local replacement keeps position", func(t *testing.T) {
+		c := mustPanelConfig(t, "panel:\n  runners: [{family: a, kind: harness}, {family: b, kind: harness}]\n", "panel:\n  runners: [{family: a, kind: harness, timeout_minutes: 7}]\n")
+		var got []string
+		for _, r := range c.Panel.Runners {
+			got = append(got, r.Family)
+		}
+		if !reflect.DeepEqual(got, []string{"harness", "a", "b"}) {
+			t.Fatalf("runner order = %v; want [harness a b]", got)
+		}
+		if timeout := c.Panel.Runners[1].TimeoutMinutes; timeout == nil || *timeout != 7 {
+			t.Fatal("local replacement was not applied")
+		}
+	})
+	t.Run("config replacement keeps default position", func(t *testing.T) {
+		c := mustPanelConfig(t, "panel:\n  runners: [{family: a, kind: harness}, {family: harness, kind: harness, timeout_minutes: 7}]\n", "")
+		if len(c.Panel.Runners) != 2 || c.Panel.Runners[0].Family != "harness" || c.Panel.Runners[1].Family != "a" || c.Panel.Runners[0].TimeoutMinutes == nil || *c.Panel.Runners[0].TimeoutMinutes != 7 {
+			t.Fatalf("replacement moved the default runner: %+v", c.Panel.Runners)
+		}
+	})
 	c := mustPanelConfig(t, "panel:\n  runners: [{family: a, kind: harness}, {family: b, kind: harness}]\n", "")
 	slots, err := c.PanelGateReviewerSlots("bead")
 	if err != nil {
@@ -123,6 +150,46 @@ func TestRunners_MergeByFamily(t *testing.T) {
 	if len(c.Panel.Runners) != 2 || c.Panel.Runners[0].Family != "harness" || c.Panel.Runners[0].Kind != "process" {
 		t.Fatal(c.Panel.Runners)
 	}
+}
+
+func TestRunners_ExplicitCountUsesMergedOrder(t *testing.T) {
+	c := mustPanelConfig(t, "panel:\n  runners: [{family: a, kind: harness}, {family: b, kind: harness}, {family: c, kind: harness}, {family: d, kind: harness}, {family: e, kind: harness}]\n", "")
+	for _, tc := range []struct {
+		name  string
+		count int
+		want  []string
+	}{
+		{"all runners", 6, []string{"harness", "a", "b", "c", "d", "e"}},
+		{"partial second cycle", 8, []string{"harness", "a", "b", "c", "d", "e", "harness", "a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			slots, err := c.PanelGateReviewerSlots("bead", tc.count)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, slot := range slots {
+				got = append(got, slot.Family)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("override families = %v; want %v", got, tc.want)
+			}
+		})
+	}
+	t.Run("explicit list keeps its order", func(t *testing.T) {
+		c.Panel.Reviewers = []Reviewer{{Family: "e", Count: intp(3)}, {Family: "b"}}
+		slots, err := c.PanelGateReviewerSlots("bead", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, slot := range slots {
+			got = append(got, slot.Family)
+		}
+		if !reflect.DeepEqual(got, []string{"e", "b", "e"}) {
+			t.Fatal(got)
+		}
+	})
 }
 
 func TestSubstitution_Retired(t *testing.T) {
@@ -208,6 +275,16 @@ func TestLocalConfig_Merge(t *testing.T) {
 }
 
 func TestLocalConfig_Refusals(t *testing.T) {
+	t.Run("dangling symlink", func(t *testing.T) {
+		root := panelConfigFixture(t, "", "")
+		if err := os.Symlink(filepath.Join(root, "absent.yaml"), filepath.Join(root, ".mindspec", "config.local.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "config.local.yaml") || !strings.Contains(err.Error(), "recovery: set only panel.runners and models in .mindspec/config.local.yaml") {
+			t.Fatalf("dangling local file accepted or no recovery: %v", err)
+		}
+	})
 	for name, local := range map[string]string{"loop": "loop: {}", "other panel": "panel: {isolation_root: scratch}", "large": strings.Repeat(" ", 65537), "parse": "panel: [", "unknown runner": "panel: {runners: [{family: a, kind: harness, surprise: yes}]}", "multiple": "models: {}\n---\nmodels: {}"} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(panelConfigFixture(t, "", local))
@@ -284,8 +361,16 @@ func TestIsolationRoot_Validate(t *testing.T) {
 			t.Fatalf("root %q accepted: %v", root, err)
 		}
 	}
-	if _, err := Load(panelConfigFixture(t, "panel: {isolation_root: null}\n", "")); err == nil {
-		t.Fatal("null isolation root accepted")
+	for name, body := range map[string]string{
+		"direct null":  "panel: {isolation_root: null}\n",
+		"aliased null": "empty: &empty null\npanel: {isolation_root: *empty}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(panelConfigFixture(t, body, ""))
+			if err == nil || !strings.Contains(err.Error(), "panel.isolation_root") || !strings.HasSuffix(err.Error(), "\nrecovery: set panel.isolation_root to an untracked relative directory outside .git, .worktrees and .mindspec") {
+				t.Fatalf("null isolation root accepted or no recovery: %v", err)
+			}
+		})
 	}
 	for _, root := range []string{"review-scratch", "nested/reviews"} {
 		c := mustPanelConfig(t, fmt.Sprintf("panel: {isolation_root: %q}\n", root), "")

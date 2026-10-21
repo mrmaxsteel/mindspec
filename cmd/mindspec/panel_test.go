@@ -173,7 +173,7 @@ func buildResult(p *panel.Panel, approves, rejects, total, round int, hardBlocks
 // --- TestPanelCreate_StampsResolversAndCoBumpsRoundSHA ----------------------
 
 func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
-	cfgYAML := "panel:\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
+	cfgYAML := "panel:\n  runners: [{family: claude, kind: harness}, {family: codex, kind: harness}]\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
 	root := mkPanelTestRoot(t, cfgYAML)
 	withTestChdir(t, root)
 	config.ResetCache()
@@ -2068,7 +2068,7 @@ func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {
 // global reviewer list overrides the built-in per-gate size defaults.
 func TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold(t *testing.T) {
 	resetPanelCreateFlags(t)
-	cfgYAML := "panel:\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
+	cfgYAML := "panel:\n  runners: [{family: claude, kind: harness}, {family: codex, kind: harness}]\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
 	root := mkPanelTestRoot(t, cfgYAML)
 	withTestChdir(t, root)
 	config.ResetCache()

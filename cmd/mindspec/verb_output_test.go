@@ -123,11 +123,12 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
-	"mindspec panel rebind":  "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
-	"mindspec panel defer":   "records a panel deferral and disposition; no lifecycle phase mutation",
-	"mindspec panel refute":  "records a panel refutation and disposition; not lifecycle-phase state",
-	"mindspec panel abandon": "records audited panel abandonment; not lifecycle-phase state",
-	"mindspec":               "root command: prints help or an unknown-command error, never mutates",
+	"mindspec config resolve": "read-only: previews resolved panel slots and their config sources",
+	"mindspec panel rebind":   "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
+	"mindspec panel defer":    "records a panel deferral and disposition; no lifecycle phase mutation",
+	"mindspec panel refute":   "records a panel refutation and disposition; not lifecycle-phase state",
+	"mindspec panel abandon":  "records audited panel abandonment; not lifecycle-phase state",
+	"mindspec":                "root command: prints help or an unknown-command error, never mutates",
 
 	// --- cobra's own auto-registered built-ins (lazily added by
 	// Execute()/InitDefaultHelpCmd/InitDefaultCompletionCmd — present in

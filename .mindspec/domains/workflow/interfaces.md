@@ -569,7 +569,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
-| `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved creation-time defaults — expanded slots, expected reviewer count, raw `approve_threshold` expression, effective substitution policy — as text or JSON; read-only (spec 112 R8/R9) |
+| `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved defaults: slots, expected reviewer count, and raw `approve_threshold`. Output is text or JSON. The `substitution` member is removed. This command is read-only. |
 | `mindspec models populate` | Print the ZFC agent prompt for declaring the per-phase `models:` protocol in `.mindspec/config.yaml`; writes nothing (spec 123 R6, mirrors `mindspec source populate`) |
 | `mindspec commands populate` | Print the ZFC agent prompt for declaring the consumer's build/test guidance under `commands:`; writes nothing — once populated, `init`/`setup` render the entries as the managed AGENTS.md "Build & Test" section (spec 123 R7) |
 | `mindspec adr create "<title>" [--slug <kebab>]` | Create an ADR with a slugged filename `ADR-NNNN-<slug>.md` derived from the title (or `--slug` override); every surface reports/accepts the canonical `ADR-NNNN` ID (spec 123 R5) |
@@ -744,14 +744,10 @@ Core 3 runs in `complete` before materialization for every required matched regi
   delegating to a shared `buildGateResolvedDoc` that calls ONLY the R3
   config resolvers (`PanelGateReviewerSlots`/`PanelGateExpectedReviewers`/
   `PanelGateApproveThresholdExpr`) — so `--gate` output cannot disagree
-  with them. The JSON document's five members —`gate`, `slots` (`{slot,
-  model, lens}` in R3 expansion order), `expected_reviewers`,
-  `approve_threshold` (the raw expression string), and `substitution`
-  (`substitutes` map, the legacy `claude_sub_on_quota` bool, and
-  `in_force`: `"substitutes"` when the map is non-empty, else
-  `"claude_sub_on_quota"`, per R5's supersession rule) — are a STABLE,
-  ADDITIVE-ONLY CONTRACT (spec 112 R9): the surface the spec-110
-  `panel.json` writer and the spec-111 orchestration runner build on.
+  with them. The JSON document has `gate`, `slots` (`{slot, model, lens}`
+  in expansion order), `expected_reviewers`, and `approve_threshold`
+  (the raw expression string). These members are a stable, additive-only
+  contract. The `substitution` member is removed.
   Renaming, retyping, or removing a documented member is a breaking change
   no follow-up may make silently — same stability guarantee as the
   recorded `gate` field on `panel.json` (Bead 2). An unknown `--gate` value

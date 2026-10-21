@@ -14,6 +14,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	runnerSkillsAdapter   = "claude-code-skills"
+	runnerWorkflowAdapter = "claude-code-workflow"
+	runnerExternalAdapter = "external"
+)
+
 // Config represents .mindspec/config.yaml settings.
 type Config struct {
 	ProtectedBranches []string `yaml:"protected_branches"`
@@ -420,7 +426,7 @@ func DefaultConfig() *Config {
 			Context:    LoopContext{ControllerHandoff: "per-spec"},
 			HandoffLog: "AUTOPILOT-LOG.md",
 		},
-		Runner: "claude-code-skills",
+		Runner: runnerSkillsAdapter,
 	}
 }
 
@@ -577,7 +583,7 @@ func loadUncached(root string) (*Config, error) {
 		cfg.Loop.HandoffLog = "AUTOPILOT-LOG.md"
 	}
 	if cfg.Runner == "" {
-		cfg.Runner = "claude-code-skills"
+		cfg.Runner = runnerSkillsAdapter
 	}
 
 	if err := validateOrchestration(cfg); err != nil {
@@ -623,9 +629,9 @@ func validateOrchestration(cfg *Config) error {
 		return fmt.Errorf("loop.context.controller_handoff must be \"per-spec\" or \"at-usage-threshold\" (got %q)\nrecovery: set loop.context.controller_handoff to per-spec or at-usage-threshold in .mindspec/config.yaml", ch)
 	}
 	switch cfg.Runner {
-	case "claude-code-skills", "claude-code-workflow", "external":
+	case runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter:
 	default:
-		return fmt.Errorf("runner %q is not a recognized orchestration adapter\nrecovery: set runner to an available orchestration adapter in .mindspec/config.yaml", cfg.Runner)
+		return fmt.Errorf("runner %q is not a recognized orchestration adapter\nrecovery: set runner to one of %s in .mindspec/config.yaml", cfg.Runner, strings.Join([]string{runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter}, ", "))
 	}
 
 	if err := validateReviewerEntries(cfg.Panel.Reviewers, "panel.reviewers"); err != nil {
@@ -783,6 +789,17 @@ func gateKeyError(gate string) error {
 // default size is filled round-robin over the configured runner order.
 // gate is assumed already validated against PanelGateKeys by the caller.
 func (c *Config) resolveGateReviewers(gate string) []Reviewer {
+	if reviewers := c.explicitGateReviewers(gate); len(reviewers) > 0 {
+		return reviewers
+	}
+	size := 6
+	if gate == "bead" {
+		size = 4
+	}
+	return c.runnerReviewers(size)
+}
+
+func (c *Config) explicitGateReviewers(gate string) []Reviewer {
 	if gp, ok := c.Panel.Gates[gate]; ok && len(gp.Reviewers) > 0 {
 		return gp.Reviewers
 	}
@@ -794,10 +811,10 @@ func (c *Config) resolveGateReviewers(gate string) []Reviewer {
 	if len(c.Panel.Reviewers) > 0 {
 		return c.Panel.Reviewers
 	}
-	size := 6
-	if gate == "bead" {
-		size = 4
-	}
+	return nil
+}
+
+func (c *Config) runnerReviewers(size int) []Reviewer {
 	runners := c.runners()
 	families := make([]string, len(runners))
 	for i, runner := range runners {
@@ -857,7 +874,8 @@ func (c *Config) PanelGateApproveThresholdExpr(gate string) (string, error) {
 }
 
 // PanelGateReviewerSlots optionally fills an explicit count round-robin over
-// the resolved reviewer entries, ignoring their counts. Without an override it
+// the resolved reviewer entries, ignoring their counts. With no explicit list,
+// it fills directly over the merged runner order. Without an override it
 // returns gate's deterministic, expanded reviewer
 // slots (spec 112 R3), resolved through the same per-field chain as
 // PanelGateExpectedReviewers. Returns an error for a gate name outside
@@ -872,6 +890,9 @@ func (c *Config) PanelGateReviewerSlots(gate string, count ...int) ([]ReviewerSl
 			return nil, fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
 		}
 		resized := make([]Reviewer, count[0])
+		if len(c.explicitGateReviewers(gate)) == 0 {
+			reviewers = c.runnerReviewers(count[0])
+		}
 		for i := range resized {
 			resized[i] = reviewers[i%len(reviewers)]
 			resized[i].Count = nil

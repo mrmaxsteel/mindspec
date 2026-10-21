@@ -761,7 +761,7 @@ func TestReviewDiscipline_AC1PanelSizeConsistency(t *testing.T) {
 			families[slot.Model]++
 		}
 		if len(families) != 1 || families["harness"] != want {
-			t.Errorf("%s families = %v; want %d of each claude, codex", gate, families, want/2)
+			t.Errorf("%s families = %v; want %d harness slots", gate, families, want)
 		}
 	}
 }

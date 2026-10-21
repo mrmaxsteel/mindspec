@@ -1435,8 +1435,7 @@ func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
 
 // LsFiles checks the index without interpreting path as a pathspec pattern.
 func (g *MindspecExecutor) LsFiles(workdir, path string) (bool, error) {
-	cmd := exec.Command("git", "-C", workdir, "--literal-pathspecs", "ls-files", "-z", "--", path)
-	out, err := cmd.Output()
+	out, err := gitutil.LsFiles(workdir, "--literal-pathspecs", "-z", "--", path)
 	if err != nil {
 		return false, fmt.Errorf("git ls-files: %w", err)
 	}

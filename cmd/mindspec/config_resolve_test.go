@@ -76,6 +76,20 @@ func TestConfigResolve_Provenance(t *testing.T) {
 	if after := listAllFiles(t, root); !reflect.DeepEqual(before, after) {
 		t.Fatal("resolve wrote files")
 	}
+	t.Run("runner family without reviewer list", func(t *testing.T) {
+		resolveFixture(t, "panel:\n  runners: [{family: b, kind: harness}]\n", "")
+		out, _, err := runConfigCLI(t, "resolve", "--gate", "bead", "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var slots []config.ResolvedSlot
+		if err := json.Unmarshal([]byte(out), &slots); err != nil {
+			t.Fatal(err)
+		}
+		if len(slots) != 4 || slots[0].Family != "harness" || slots[0].Sources["family"] != "default" || slots[1].Family != "b" || slots[1].Sources["family"] != "config.yaml" || slots[3].Sources["family"] != "config.yaml" {
+			t.Fatalf("runner family sources: %s", out)
+		}
+	})
 }
 
 func TestReviewer_ModelOnlyWarn(t *testing.T) {
@@ -135,10 +149,9 @@ func TestCreate_RefusesUnrunnableFamily(t *testing.T) {
 
 func TestConfigResolve_ToolSuggestion(t *testing.T) {
 	tools := config.ReviewTools()
-	if len(tools) == 0 {
-		t.Fatal("empty tool table")
+	if len(tools) < 2 {
+		t.Fatal("tool table needs two tools for the suggestion check")
 	}
-	tool := tools[0]
 	resolveFixture(t, "", "")
 	bin := t.TempDir()
 	t.Setenv("PATH", bin)
@@ -149,18 +162,25 @@ func TestConfigResolve_ToolSuggestion(t *testing.T) {
 	if strings.Contains(warnings, "Suggestion:") {
 		t.Fatal(warnings)
 	}
-	if err := os.WriteFile(filepath.Join(bin, tool.Command), []byte("#!/bin/sh\nexit 99\n"), 0755); err != nil {
-		t.Fatal(err)
+	for _, tool := range tools[:2] {
+		if err := os.WriteFile(filepath.Join(bin, tool.Command), []byte("#!/bin/sh\nexit 99\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_, warnings, err = runConfigCLI(t, "resolve", "--gate", "bead")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(warnings, "Suggestion:") != 1 || !strings.Contains(warnings, "configure a process runner for "+tool.Name) || !strings.Contains(warnings, "review diversity") {
+	if strings.Count(warnings, "Suggestion:") != 1 || len(strings.Split(strings.TrimSpace(warnings), "\n")) != 1 || !strings.Contains(warnings, "configure a process runner for ") || !strings.Contains(warnings, "review diversity") {
 		t.Fatal(warnings)
 	}
 	c := config.DefaultConfig()
-	c.Panel.Runners = append(c.Panel.Runners, config.Runner{Family: "other", Kind: "process", Argv: []string{tool.Command}})
+	for _, tool := range tools[:2] {
+		if !strings.Contains(warnings, tool.Name) {
+			t.Fatalf("missing tool %s: %s", tool.Name, warnings)
+		}
+		c.Panel.Runners = append(c.Panel.Runners, config.Runner{Family: tool.Name, Kind: "process", Argv: []string{tool.Command}})
+	}
 	if got := c.ToolSuggestions(); len(got) != 0 {
 		t.Fatalf("configured command suggested: %v", got)
 	}

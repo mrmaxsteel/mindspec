@@ -28,8 +28,14 @@ func TestExecutor_LsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	git("add", "tracked/file")
+	for _, name := range []string{"-dash", "literal*", ":(glob)magic"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		git("--literal-pathspecs", "add", "--", name)
+	}
 	e := NewMindspecExecutor(root)
-	for path, want := range map[string]bool{"tracked": true, "tracked/file": true, "absent": false, "track*": false} {
+	for path, want := range map[string]bool{"tracked": true, "tracked/file": true, "absent": false, "track*": false, "-dash": true, "literal*": true, ":(glob)magic": true} {
 		got, err := e.LsFiles(root, path)
 		if err != nil || got != want {
 			t.Fatalf("%s: %v %v; want %v", path, got, err, want)

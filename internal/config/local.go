@@ -41,13 +41,16 @@ func (c *Config) ToolSuggestions() []string {
 			used[r.Argv[0]] = true
 		}
 	}
-	var lines []string
+	var names []string
 	for _, tool := range ReviewTools() {
 		if _, err := exec.LookPath(tool.Command); err == nil && !used[tool.Command] {
-			lines = append(lines, fmt.Sprintf("configure a process runner for %s in panel.runners for review diversity", tool.Name))
+			names = append(names, tool.Name)
 		}
 	}
-	return lines
+	if len(names) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("configure a process runner for %s in panel.runners for review diversity", strings.Join(names, ", "))}
 }
 
 func loadPanelLayers(root string, data []byte, c *Config) error {
@@ -72,9 +75,12 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 		return err
 	}
 	c.Panel.Runners = merged
-	f, err := os.Open(filepath.Join(root, ".mindspec", "config.local.yaml"))
+	localPath := filepath.Join(root, ".mindspec", "config.local.yaml")
+	f, err := os.Open(localPath)
 	if os.IsNotExist(err) {
-		return nil
+		if _, statErr := os.Lstat(localPath); os.IsNotExist(statErr) {
+			return nil
+		}
 	}
 	if err != nil {
 		return localError(err)
@@ -171,8 +177,14 @@ func recordSourcesActive(n *yaml.Node, path, source string, c *Config, active ma
 					return fmt.Errorf("%s: %w", next, err)
 				}
 			}
-			if next == "panel.isolation_root" && (n.Content[i+1].Value == "" || n.Content[i+1].Tag == "!!null") {
-				c.Panel.IsolationRoot = ""
+			if next == "panel.isolation_root" {
+				var root string
+				if err := n.Content[i+1].Decode(&root); err != nil {
+					return err
+				}
+				if root == "" {
+					c.Panel.IsolationRoot = ""
+				}
 			}
 			c.sources[next] = source
 			if err := recordSourcesActive(n.Content[i+1], next, source, c, active); err != nil {

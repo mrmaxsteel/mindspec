@@ -517,8 +517,7 @@ panel:
 }
 
 // TestConfigShow_HostileStringsEscaped covers spec 112 AC10/R8: a hostile
-// panel.note, gate reviewer model, gate reviewer lens, and a substitutes
-// key/value — each carrying ESC/BEL and an embedded newline shaped like a
+// panel.note and gate reviewer lens, each carrying ESC/BEL and a newline shaped like a
 // forged config line — never reach `config show` or
 // `config show --gate <name>` text output as raw control bytes or a forged
 // extra line, and round-trip byte-exactly through `--gate <name> --json`
@@ -526,20 +525,20 @@ panel:
 func TestConfigShow_HostileStringsEscaped(t *testing.T) {
 	cfg := config.DefaultConfig()
 	hostile := "lens\x1bwith\x07control\ninjected_key: forged"
-	cfg.Panel.Note = hostile
+	cfg.Panel.Note = "note\x1bwith\x07control\ninjected_key: forged"
 	cfg.Panel.Gates = map[string]config.GatePanel{"bead": {Reviewers: []config.Reviewer{{Model: "m1", Lens: hostile, Count: func() *int { n := 2; return &n }()}}}}
 	out, err := renderConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, strconv.Quote(hostile)) {
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
 		t.Fatalf("unsafe output: %q", out)
 	}
 	out, err = renderGateResolved(cfg, "bead")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, strconv.Quote(hostile)) {
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) {
 		t.Fatalf("unsafe gate output: %q", out)
 	}
 	data, err := gateResolvedJSON(cfg, "bead")
@@ -552,6 +551,24 @@ func TestConfigShow_HostileStringsEscaped(t *testing.T) {
 	}
 	if len(doc.Slots) != 2 || doc.Slots[0].Lens != hostile {
 		t.Fatalf("lens did not round trip: %+v", doc)
+	}
+	fixture, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolveFixture(t, string(fixture), "")
+	for _, args := range [][]string{{"show"}, {"show", "--gate", "bead"}} {
+		resetConfigShowGateFlags(t)
+		out, _, err := runConfigCLI(t, args...)
+		if err != nil {
+			t.Fatalf("config %v: %v", args, err)
+		}
+		if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || strings.HasPrefix(out, "injected_key:") || !strings.Contains(out, strconv.Quote(hostile)) {
+			t.Fatalf("unsafe CLI output for %v: %q", args, out)
+		}
+		if len(args) == 1 && !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
+			t.Fatalf("CLI note missing: %q", out)
+		}
 	}
 }
 
