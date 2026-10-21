@@ -807,7 +807,6 @@ self-consistency provide no authentication of agent-writable metadata.
   rebind entries through the same fail-closed pre-close metadata stage as
   `panel_refuted`. A failed audit write refuses completion before close.
 
-
 ## Amendment (Spec 132)
 
 ### Implementation approval preflight

@@ -396,7 +396,6 @@ the reordered materialization sequence end-to-end as fault-injection
 scenarios (the KILL-TESTED/DOCUMENTED-FORWARD-SAFE classification, ADR-0041
 §3, § M→R→S→G→T staged boundary, §3(i)).
 
-
 ## Finalization preflight and remote decision
 
 Approval reads the remote configuration once through the error-returning

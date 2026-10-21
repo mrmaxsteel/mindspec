@@ -145,6 +145,47 @@ func TestPreflightFinalizeMerges_MatchesFinalizeMerges(t *testing.T) {
 	})
 }
 
+func TestPreflightFinalizeMerges_AllowNetDeletionOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name, branch, target string
+		hasRemote            bool
+	}{
+		{"push-bead-to-spec", "bead/bead-1", "spec/077-test", true},
+		{"direct-bead-to-spec", "bead/bead-1", "spec/077-test", false},
+		{"direct-spec-to-main", "spec/077-test", "main", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, _, _ := finalizePreflightFixture(t)
+			var merges []string
+			stubWorkDestructionFn(t, func(_ string, branch, target string) (guard.DestructionOutcome, gitutil.WorkDestructionEvidence, error) {
+				merges = append(merges, branch+" -> "+target)
+				if branch == tc.branch && target == tc.target {
+					return guard.DestructionSuperseded, gitutil.WorkDestructionEvidence{SupersededVia: target}, nil
+				}
+				return guard.DestructionClean, gitutil.WorkDestructionEvidence{}, nil
+			})
+			err := g.PreflightFinalizeMerges("epic-1", "077-test", "spec/077-test", []string{"bead-1"}, "", tc.hasRemote)
+			if err == nil || !strings.Contains(err.Error(), "refusing to merge "+tc.branch+" into "+tc.target) {
+				t.Fatalf("want destruction refusal for %s -> %s, got %v", tc.branch, tc.target, err)
+			}
+			if !strings.Contains(err.Error(), AllowNetDeletionFlag) {
+				t.Fatalf("refusal must name %s: %v", AllowNetDeletionFlag, err)
+			}
+			merges = nil
+			if err := g.PreflightFinalizeMerges("epic-1", "077-test", "spec/077-test", []string{"bead-1"}, "reviewed safe by inspection", tc.hasRemote); err != nil {
+				t.Fatalf("non-empty override must permit %s -> %s: %v", tc.branch, tc.target, err)
+			}
+			want := []string{"bead/bead-1 -> spec/077-test"}
+			if !tc.hasRemote {
+				want = append(want, "spec/077-test -> main")
+			}
+			if !reflect.DeepEqual(merges, want) {
+				t.Fatalf("override checks=%v want=%v", merges, want)
+			}
+		})
+	}
+}
+
 func TestFinalizeEpic_ExecutorGuardAfterAutoMerge(t *testing.T) {
 	for _, kind := range []string{"layout", "destruction"} {
 		t.Run(kind, func(t *testing.T) {

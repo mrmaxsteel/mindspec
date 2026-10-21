@@ -273,7 +273,6 @@ architecture doc, § Merge safety layer (spec 127).
 - `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
 - `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.
 
-
 ## Finalization preflight
 
 `PreflightFinalizeMerges` checks layout and work destruction for each pending
@@ -288,6 +287,7 @@ A file remote needs no credential helper. The real push still runs its hooks.
 
 `gitutil.RemoteConfigured() (bool, error)` reads `git remote` in the process cwd.
 A failed read returns `(false, err)`. `lifecycle.RemoteConfigured` exposes this
-query to the workflow layer. `HasRemote` retains its bool-only contract for its
-other callers. Approval makes one decision and passes it to `FinalizeEpic`:
+query to the workflow layer. `gitutil.HasRemote` retains its bool-only contract
+for its other callers. `lifecycle.HasRemote` has no production caller left.
+Approval makes one decision and passes it to `FinalizeEpic`:
 true selects push; false selects local merge. Finalization does not probe again.

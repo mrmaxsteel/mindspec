@@ -1,10 +1,12 @@
 package approve
 
 import (
+	"os"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 )
 
 func approvePreflightFixture(t *testing.T) (string, *executor.MockExecutor) {
@@ -28,10 +30,40 @@ func TestApproveImpl_AC5_StaleSpecBranchRefusesBeforeMutation(t *testing.T) {
 }
 
 func TestApproveImpl_AC5_StillAppliesWithNoRemoteConfigured(t *testing.T) {
-	root, mock := approvePreflightFixture(t)
-	mock.PreflightFinalizeMergesErr = guard.NewFailure("stale deletion", "inspect the branch")
-	assertEarlyRefusal(t, root, mock, "stale deletion")
-	assertPreflightRemote(t, mock, false)
+	root, e := earlyGuardFixture(t, "destruction", false)
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(before); err != nil {
+			t.Error(err)
+		}
+	})
+	preflightGit(t, root, "remote", "add", "origin", "file://"+t.TempDir())
+	if configured, err := lifecycle.RemoteConfigured(); err != nil || !configured {
+		t.Fatalf("remote positive control: configured=%v err=%v", configured, err)
+	}
+	preflightGit(t, root, "remote", "remove", "origin")
+	if remotes := preflightGit(t, root, "remote"); remotes != "" {
+		t.Fatalf("repository must have no remote: %q", remotes)
+	}
+	probes := 0
+	implHasRemoteFn = func() (bool, error) {
+		probes++
+		return lifecycle.RemoteConfigured()
+	}
+	assertEarlyRefusal(t, root, e, "content already landed")
+	if probes != 1 {
+		t.Fatalf("remote decisions = %d, want 1", probes)
+	}
+	assertPreflightRemote(t, e.MockExecutor, false)
+	if len(e.CallsTo("PushProbe")) != 0 {
+		t.Fatal("repository without a remote must not probe a push")
+	}
 }
 
 func TestApproveImpl_AC5_PushPathPreflightsBeadMergesOnly(t *testing.T) {
