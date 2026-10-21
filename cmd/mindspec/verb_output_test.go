@@ -100,6 +100,7 @@ var mutatingVerbRows = map[string]bool{
 	"mindspec release":      true,
 	"mindspec repair phase": true,
 
+	// This verb is added after the original nine.
 	"mindspec panel checkout": true,
 }
 
