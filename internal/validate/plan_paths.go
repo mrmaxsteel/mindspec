@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -138,12 +139,12 @@ var planReadOnlyWords = wordSet(
 
 // planAdjacencyStops end the search back from a path to its edit verb:
 // a word that makes the path a reference ("the caller of", "tests for",
-// "next to the one in") rather than the object of the verb.
+// "next to the one in", "a link to") rather than the object of the verb.
 var planAdjacencyStops = wordSet(
 	"of", "from", "for", "as", "on", "next", "beside", "alongside", "via",
 	"using", "per", "following", "like", "after", "than", "by", "around",
 	"against", "that", "which", "whose", "where", "calls", "called", "uses",
-	"such", "sure",
+	"such", "sure", "call", "link", "pointer", "reference", "import", "into",
 )
 
 // planFreeWords describe the file itself ("its own new test file"), so
@@ -153,6 +154,10 @@ var planFreeWords = wordSet("new", "own", "file", "files")
 // planAdjacencyWords is the most words allowed between an edit verb and
 // its path ("add a test in a_test.go").
 const planAdjacencyWords = 3
+
+// planScanTokens is the most tokens that the search for a path's verb
+// reads, so a long run of paths keeps the check linear.
+const planScanTokens = 64
 
 // planTokRe finds the tokens of a sentence. The groups are: 1-2 a link's
 // text and target, 3 a code span, 4 a clause break, 5 a bare path, and 6
@@ -172,6 +177,24 @@ var (
 	planNewAfterRe  = regexp.MustCompile(`(?i)^[*_]*\s*\(\s*new\b`)
 	planNewBeforeRe = regexp.MustCompile(`(?i)\bnew\b[*_]*\s*(?:test\s+)?(?:files?\b)?[*_\s:,]*$`)
 )
+
+// planTagWindow is how many bytes before and after a path the "new" tag
+// search reads. A tag is at most about 30 bytes, and the bound keeps the
+// check linear in the length of a sentence.
+const planTagWindow = 64
+
+// planNewTag reports whether a "new" tag stands next to the path at
+// s[start:end]. The windows are cut on UTF-8 boundaries.
+func planNewTag(s string, start, end int) bool {
+	lo, hi := max(0, start-planTagWindow), min(len(s), end+planTagWindow)
+	for lo < start && !utf8.RuneStart(s[lo]) {
+		lo++
+	}
+	for hi < len(s) && hi > end && !utf8.RuneStart(s[hi]) {
+		hi--
+	}
+	return planNewAfterRe.MatchString(s[end:hi]) || planNewBeforeRe.MatchString(s[lo:start])
+}
 
 // planFilesLabel is a "Files" label: "Files:", "Changed files", "Key
 // files", "Files touched", "Files to create/modify".
@@ -419,8 +442,9 @@ func planClauses(s string) []planClause {
 		}
 		switch {
 		case isSpan:
-			cur.toks = append(cur.toks, planTok{span: true, paths: planTokenPaths(raw),
-				newTag: planNewAfterRe.MatchString(s[m[1]:]) || planNewBeforeRe.MatchString(s[:m[0]])})
+			paths := planTokenPaths(raw)
+			cur.toks = append(cur.toks, planTok{span: true, paths: paths,
+				newTag: len(paths) > 0 && planNewTag(s, m[0], m[1])})
 		case m[8] >= 0:
 			cur.brk = s[m[8]:m[9]]
 			out = append(out, cur)
@@ -501,7 +525,7 @@ func planIsPath(toks []planTok, k int) bool {
 // other paths between ("Edit a.go, b.go and c.go") do not count.
 func planVerbBefore(toks []planTok, i int) bool {
 	n := 0
-	for j := i - 1; j >= 0 && n <= planAdjacencyWords; j-- {
+	for j := i - 1; j >= max(0, i-planScanTokens) && n <= planAdjacencyWords; j-- {
 		w := toks[j].word
 		switch {
 		case toks[j].span || planFreeWords[w]:
@@ -521,11 +545,14 @@ func planVerbBefore(toks []planTok, i int) bool {
 // imperative clause ("In a.go, add the helper").
 func planVerbAfter(toks []planTok, i int) bool {
 	k := i + 1
-	for planIsPath(toks, k) || planWordAt(toks, k) == "and" {
+	for k <= i+planScanTokens && (planIsPath(toks, k) || planWordAt(toks, k) == "and") {
 		k++
 	}
 	if planSubjectEdits[planWordAt(toks, k)] {
 		return true
+	}
+	if i > planScanTokens {
+		return false
 	}
 	for j := 1; j < i; j++ {
 		if !planIsPath(toks, j) && planWordAt(toks, j) != "and" {

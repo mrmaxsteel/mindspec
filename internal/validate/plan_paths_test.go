@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // planWithPaths builds a plan whose frontmatter declares one work chunk
@@ -336,6 +337,9 @@ func TestUnlistedPlanPaths_NonEditSentencesStaySilent(t *testing.T) {
 		"Write the report summarising `internal/q/w.go`.",
 		"Fix round 2 added `TestX` in `internal/q/w_test.go`.",
 		"The probes touch `internal/q/w.go` only in throwaway trees.",
+		"Add a link to `docs/q/w.md`.",
+		"Remove the call to `internal/q/w.go`.",
+		"Add a reference to `docs/adr/w.md` in the README.",
 		// Negation vetoes every edit signal for the paths after it.
 		"Do not add a new file `internal/pkg/w.go`.",
 		"- `internal/pkg/w.go`: do not change it.",
@@ -357,6 +361,8 @@ func TestUnlistedPlanPaths_ReferencePathStaysSilent(t *testing.T) {
 		"Add the new check to `internal/q/a.go`, modelled on `internal/q/w.go`.",
 		"Edit `internal/q/a.go` so its output is identical to `internal/q/w.go`.",
 		"Create `internal/q/a.go`; copy the layout of `internal/q/w.go`.",
+		"Update `internal/q/a.go` to import `internal/q/w.go`.",
+		"Update `internal/q/a.go` to call into `internal/q/w.go`.",
 	} {
 		if got := unlistedOne(body); !reflect.DeepEqual(got, []string{"internal/q/a.go"}) {
 			t.Errorf("body %q: got %v, want [internal/q/a.go]", body, got)
@@ -464,5 +470,40 @@ func TestUnlistedPlanPaths_CreateStepWithLaterUnchangedWarns(t *testing.T) {
 		"   `strconv.Quote(s)`; else return `s` unchanged."
 	if got := unlistedOne(body); !reflect.DeepEqual(got, []string{"internal/termsafe/termsafe.go"}) {
 		t.Fatalf("got %v, want [internal/termsafe/termsafe.go]", got)
+	}
+}
+
+// TestValidatePlan_LongSentenceIsFast pins that the check is linear in
+// the length of a sentence: one sentence of about 300 KB with many code
+// spans, interleaved paths and a long run of paths validates fast.
+func TestValidatePlan_LongSentenceIsFast(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("\nEdit `internal/q/a.go` ")
+	for i := 0; i < 15500; i++ {
+		if i%200 == 0 {
+			b.WriteString("`internal/q/p" + strings.Repeat("x", i%7) + ".go` ")
+		}
+		b.WriteString("`SomeIdentifier` ")
+	}
+	for i := 0; i < 2000; i++ {
+		b.WriteString("`internal/q/r.go` ")
+	}
+	b.WriteString("new (new) file.\n")
+	root := writePlanPathsFixture(t, []string{"internal/validate/plan.go", "internal/validate/adr_new_test.go"})
+	path := filepath.Join(root, "docs", "specs", "999-test", "plan.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, b.String()...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	r := ValidatePlan(root, "999-test")
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("ValidatePlan on a %d-byte sentence took %v, want well under 2s", b.Len(), d)
+	}
+	if r.HasFailures() {
+		t.Fatalf("want no failure, got %+v", r.Issues)
 	}
 }
