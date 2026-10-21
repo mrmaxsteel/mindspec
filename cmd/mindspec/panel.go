@@ -283,10 +283,10 @@ final, 1 while a slot is pending, and 2 for other incomplete states.`,
 			return err
 		}
 		facts := resolvePanelGateFacts(root, reg)
+		line, _ := renderPanelVerify(facts.Res, facts)
 		slots, err := panelSlotStatuses(root, facts.Res)
 		if err != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
-			line, _ := renderPanelVerify(facts.Res, facts)
 			fmt.Fprintln(cmd.OutOrStdout(), line)
 			return exitErr(2, err)
 		}
@@ -304,7 +304,6 @@ final, 1 while a slot is pending, and 2 for other incomplete states.`,
 				}
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
-			line, _ := renderPanelVerify(facts.Res, facts)
 			fmt.Fprintln(cmd.OutOrStdout(), line)
 		}
 		if code := panel.VerifyExitCode(slots); code != 0 {
