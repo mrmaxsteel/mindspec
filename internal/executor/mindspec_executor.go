@@ -1428,17 +1428,27 @@ func (g *MindspecExecutor) Status(workdir string) (string, error) {
 	return gitutil.Status(workdir)
 }
 
+// slotGitEnv removes inherited GIT_* variables and disables system config.
+// readGlobal keeps GIT_CONFIG_GLOBAL, HOME and XDG_CONFIG_HOME for the trust query.
+func slotGitEnv(readGlobal bool) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") || (readGlobal && strings.HasPrefix(entry, "GIT_CONFIG_GLOBAL=")) {
+			env = append(env, entry)
+		}
+	}
+	if !readGlobal {
+		env = append(env, "GIT_CONFIG_GLOBAL=/dev/null")
+	}
+	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+}
+
 // slotGit removes inherited GIT_* variables and disables global and system config.
 // Command options disable hooks and fsmonitor, including local settings.
 func slotGit(workdir string, args ...string) ([]byte, error) {
 	flags := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", workdir}
 	cmd := exec.Command("git", append(flags, args...)...)
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") {
-			cmd.Env = append(cmd.Env, entry)
-		}
-	}
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	cmd.Env = slotGitEnv(false)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -1448,11 +1458,12 @@ func slotGit(workdir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// slotMainGit passes only global safe.directory values to the isolated command.
-// Git accepts these command options as protected configuration.
+// slotMainGit reads global safe.directory values, including config includes.
+// The query removes inherited GIT_* variables except GIT_CONFIG_GLOBAL.
+// It passes the values in order as protected config to the isolated command.
 func slotMainGit(workdir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "config", "--global", "--null", "--get-all", "safe.directory")
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	cmd := exec.Command("git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "config", "--global", "--includes", "--null", "--get-all", "safe.directory")
+	cmd.Env = slotGitEnv(true)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -1573,9 +1584,9 @@ func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
 	return gitutil.CheckIgnore(workdir, file)
 }
 
-// CheckSlotIgnore uses global safe.directory trust, but no global ignore rules.
+// CheckSlotIgnore uses global safe.directory trust and disables global ignore files.
 func (g *MindspecExecutor) CheckSlotIgnore(workdir, file string) error {
-	_, err := slotMainGit(workdir, "check-ignore", "--quiet", "--", file)
+	_, err := slotMainGit(workdir, "-c", "core.excludesFile=/dev/null", "check-ignore", "--quiet", "--", file)
 	return err
 }
 

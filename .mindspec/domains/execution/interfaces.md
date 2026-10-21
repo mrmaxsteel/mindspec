@@ -63,7 +63,10 @@ architecture doc.)
 It removes all inherited `GIT_*` variables.
 It sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_SYSTEM=/dev/null`.
 It sets `GIT_CONFIG_GLOBAL=/dev/null` for every call.
-`slotMainGit` reads only global `safe.directory` values with the operator environment.
+`slotGitEnv` builds the environment for both Git paths.
+For the `slotMainGit` trust query, it keeps `HOME`, `XDG_CONFIG_HOME` and an explicit `GIT_CONFIG_GLOBAL`.
+It removes all other inherited `GIT_*` variables and disables system configuration and prompts.
+`slotMainGit` reads only global `safe.directory` values, including config includes.
 It passes each value as a `-c safe.directory=<value>` command option, in order.
 These calls check the isolation root, clone the source, and read the source object-store path.
 Calls inside the slot tree do not read global configuration.
@@ -81,7 +84,8 @@ It refuses `commondir`, `config.worktree`, config includes, and settings for `co
 It requires exact alternates bytes for the resolved source object store and a HEAD equal to the reviewed SHA.
 Missing paths, invalid file types and Git errors refuse reuse.
 
-`CheckSlotIgnore` uses `slotGit` for `check-ignore --quiet -- <path>`.
+`CheckSlotIgnore` uses `slotMainGit` for `check-ignore --quiet -- <path>`.
+It sets `core.excludesFile=/dev/null` to disable explicit and default global ignore files.
 `CheckIgnore` retains the operator configuration for ledger checks.
 `LsFiles` calls `gitutil.LsFiles` with the operator's Git configuration.
 `gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.

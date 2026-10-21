@@ -151,6 +151,71 @@ func TestExecutor_SlotIgnoreRejectsGlobalExcludes(t *testing.T) {
 	}
 }
 
+func TestExecutor_SlotTrustQueryScrubsConfigEnvironment(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	poison := filepath.Join(t.TempDir(), "caller.config")
+	if err := os.WriteFile(poison, []byte("[invalid\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"count", "parameters"} {
+		t.Run(source, func(t *testing.T) {
+			if source == "count" {
+				t.Setenv("GIT_CONFIG_COUNT", "1")
+				t.Setenv("GIT_CONFIG_KEY_0", "include.path")
+				t.Setenv("GIT_CONFIG_VALUE_0", poison)
+			} else {
+				t.Setenv("GIT_CONFIG_PARAMETERS", "'"+strings.ReplaceAll("include.path="+poison, "'", "'\\''")+"'")
+			}
+			if out, err := exec.Command("git", "config", "--global", "--get-all", "safe.directory").CombinedOutput(); err == nil || !strings.Contains(string(out), "bad config line") {
+				t.Fatalf("config environment control did not refuse: %v %s", err, out)
+			}
+			if _, err := slotGit(f.root, "-c", "safe.directory="+f.root, "check-ignore", "--quiet", "--", "ignored"); err != nil {
+				t.Fatalf("isolated control: %v", err)
+			}
+			if err := NewMindspecExecutor(f.root).CheckSlotIgnore(f.root, "ignored"); err != nil {
+				t.Fatalf("trust query inherited repository config environment: %v", err)
+			}
+		})
+	}
+}
+
+func TestExecutor_SlotIgnoreRejectsDefaultGlobalExcludes(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if err := os.Mkdir(filepath.Join(xdg, "git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "git", "ignore"), []byte("global-only\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", f.root, "check-ignore", "--quiet", "--", "global-only").CombinedOutput(); err != nil {
+		t.Fatalf("default global exclude control did not pass: %v %s", err, out)
+	}
+	err := NewMindspecExecutor(f.root).CheckSlotIgnore(f.root, "global-only")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("CheckSlotIgnore must reject a default global-only ignore: %v", err)
+	}
+}
+
+func TestExecutor_SlotIgnorePreservesIncludedSafeDirectory(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	included := filepath.Join(t.TempDir(), "trust.config")
+	if err := os.WriteFile(included, []byte("[safe]\n\tdirectory =\n\tdirectory = "+strconv.Quote(f.root)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.global, []byte("[include]\n\tpath = "+strconv.Quote(included)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", f.root, "check-ignore", "--quiet", "--", "ignored").CombinedOutput(); err != nil {
+		t.Fatalf("included trust control did not pass: %v %s", err, out)
+	}
+	if err := NewMindspecExecutor(f.root).CheckSlotIgnore(f.root, "ignored"); err != nil {
+		t.Fatalf("CheckSlotIgnore with included safe.directory: %v", err)
+	}
+}
+
 func TestExecutor_SlotTreeIgnoresGlobalConfig(t *testing.T) {
 	f := newSlotTrustFixture(t)
 	template := t.TempDir()
