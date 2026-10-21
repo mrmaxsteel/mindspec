@@ -9,7 +9,7 @@ import (
 func TestADRAmendments_Spec130_Verbs(t *testing.T) {
 	for file, pins := range map[string][]string{
 		"adr/ADR-0037-panel-gate-enforced-contract.md":   {"§7 — Abandon verb (R9.4)", "`mindspec panel abandon` requires a reason and a name", "appends an `abandon` event", "sets `abandoned` and `abandon_reason`", "writes no manifest and removes none", "Abandonment stays the audited exit", "`panel_abandoned` audit at complete is unchanged"},
-		"adr/ADR-0045-binary-owns-sequence-and-rules.md": {"Implementation status (R13.5)", "Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131", "staged-rule marker names the spec-131 rule table", "Refute and abandon procedures are binary verbs"},
+		"adr/ADR-0045-binary-owns-sequence-and-rules.md": {"Implementation status (R13.5)", "Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131", "staged-rule marker is `<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->`", "Refute and abandon procedures are binary verbs"},
 	} {
 		raw, err := os.ReadFile("../../.mindspec/" + file)
 		if err != nil {

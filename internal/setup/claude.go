@@ -225,20 +225,17 @@ func RunClaude(root string, check bool) (*Result, error) {
 // workflowsRel is the repo-relative form of workflowsDir, used for Result
 // reporting.
 //
-// Per-workflow disposition mirrors installSkills' create/skip/notice shape:
+// Per-workflow disposition mirrors installSkills:
 //   - absent → create.
 //   - present and byte-identical to the canonical content → skip (current).
+//   - present and byte-identical to a previously shipped body
+//     (previouslyShippedWorkflows) → refresh in place.
 //   - present and different → user-modified: leave it, notice (HC-6).
-//
-// There is no refresh case yet: ms-panel.js is the first workflow MindSpec
-// ships, so there is no previously-shipped-workflows snapshot set to
-// byte-match against (installSkills' previouslyShippedSkills() precedent). A
-// future revision needing to refresh an existing install in place would add
-// that snapshot set the same way skills did.
 //
 // In check mode nothing is written; the Result still records what WOULD
 // happen.
 func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]string, check bool, r *Result) error {
+	shipped := previouslyShippedWorkflows()
 	for name, content := range wanted {
 		relPath := filepath.Join(workflowsRel, name)
 		absPath := filepath.Join(workflowsDir, name)
@@ -263,6 +260,16 @@ func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]strin
 
 		if string(data) == content {
 			r.Skipped = append(r.Skipped, relPath)
+			continue
+		}
+
+		if matchesShippedWorkflow(string(data), shipped[name]) {
+			r.Refreshed = append(r.Refreshed, relPath)
+			if !check {
+				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
 			continue
 		}
 

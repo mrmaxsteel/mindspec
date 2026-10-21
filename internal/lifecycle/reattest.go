@@ -306,7 +306,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 		advisory, count, roots := advisoryRegistrationReport(root, specBranch, beadID)
 		lines = append(lines, fmt.Sprintf("candidate %s reached %s's tip off the first-parent chain; its subject names no target", termsafe.Escape(newest.SHA), termsafe.Escape(specBranch)))
 		lines = append(lines, advisory...)
-		corroboration = fmt.Sprintf("off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: %d; panel roots scanned: %s", count, roots)
+		corroboration = fmt.Sprintf("off-first-parent fallback; single-candidate, branch-tip, not-reverted and read checks passed; advisory registrations outside tip: %d; panel roots scanned: %s", count, roots)
 		for _, report := range reports {
 			if report != nil {
 				for _, line := range lines {

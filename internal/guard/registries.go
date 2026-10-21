@@ -953,7 +953,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    ".claude/skills/ms-impl-approve/SKILL.md",
-		Text:       "Disclosed residual: a bead branch already raw-`git merge`d and then",
+		Text:       "bead branch already raw-`git merge`d and then `bd close`d,",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "documented guidance naming a residual failure MODE (a branch already raw-merged by some prior, out-of-band action) as a known disclosed limitation of the recovery procedure — not an instruction to raw-merge.",

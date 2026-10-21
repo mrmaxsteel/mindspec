@@ -271,7 +271,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle.ReattestRefusal) error {
 	if r.Fallback || r.State == lifecycle.ReattestStateMultipleFallbackCandidates {
 		return guard.NewFailure(
-			fmt.Sprintf("cannot re-attest bead %s: %s\nF1, F3, F4 and F5 must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
+			fmt.Sprintf("cannot re-attest bead %s: %s\nThe single-candidate, branch-tip, not-reverted and read checks must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
 			fmt.Sprintf("git log --merges --topo-order %s   (inspect the reachable candidates)", scanned),
 			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
 		)

@@ -701,8 +701,12 @@ call: `mindspec_landed_reattest_merge_sha`,
 keys. The fallback-provenance corroboration string is:
 
 ```
-off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>
+off-first-parent fallback; single-candidate, branch-tip, not-reverted and read checks passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>
 ```
+
+The string and the reattest refusal name the checks, not their labels,
+because a consumer cannot look up F1–F5: single-candidate is F1,
+branch-tip is F3, not-reverted is F4, and read is F5.
 
 The validity contract requires `op == "mindspec reattest"`, RFC-3339 `at`,
 non-empty `actor`, `scanned_branch` equal to the scanned spec branch, and

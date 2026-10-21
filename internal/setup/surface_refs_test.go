@@ -61,9 +61,9 @@ var beadIDWords = map[string]bool{"root": true, "otel": true, "plan": true, "spe
 
 var surfaceRefClasses = []surfaceRefClass{
 	{name: "adr", re: regexp.MustCompile(`\bADR-?[0-9]{4}\b`)},
-	{name: "spec-id", re: regexp.MustCompile(`(?i)\bspec[\s-]+[0-9]{2,3}\b`), skip: followedBySlug},
+	{name: "spec-id", re: regexp.MustCompile(`(?i)\bspecs?[\s-]+[0-9]{2,3}\b`), skip: followedBySlug},
 	{name: "spec-number-cite", re: regexp.MustCompile(`\b[01][0-9]{2}\s+(?:R[0-9]+|Req\s*[0-9]+|AC-?[0-9]+|[Bb]ead\s+[0-9]+)\b`)},
-	{name: "requirement-id", re: regexp.MustCompile(`\bR[0-9]+(?:\.[0-9]+)+\b|\bR[0-9]+\([a-z]+\)|\bR[0-9]+[a-e]\b|\bReq\s+[0-9]+\b|\b(?:AC|HC)-[0-9]+\b`)},
+	{name: "requirement-id", re: regexp.MustCompile(`\bR[0-9]+(?:\.[0-9]+)+\b|\bR[0-9]+\([a-z]+\)|\bR[0-9]+[a-e]\b|\bReq\s+[0-9]+\b|\b(?:AC|HC)-[0-9]+\b|\bF[0-9](?:(?:,\s*|,?\s+and\s+)F[0-9])+\b`)},
 	{name: "bead-id", re: regexp.MustCompile(`\bmindspec-([a-z0-9]{4})(?:\.[0-9]+)?\b`), skip: func(content string, loc []int) bool {
 		return followedBySlug(content, loc) || beadIDWords[content[loc[0]+len("mindspec-"):loc[0]+len("mindspec-")+4]]
 	}},
@@ -233,9 +233,17 @@ func surfaceRefGoSurfaces(t *testing.T, root string) map[string]string {
 	return out
 }
 
+// surfaceRefExcludedRepoSkills are .claude/skills directories that setup
+// never installs in a consumer repo. Each entry carries its reason.
+var surfaceRefExcludedRepoSkills = map[string]string{
+	"llm-test":        "contributor tool that runs this repo's LLM harness; setup never installs it",
+	"llm-test-fix":    "contributor tool that fixes this repo's LLM harness; setup never installs it",
+	"llm-test-review": "contributor tool that reviews this repo's LLM harness; setup never installs it",
+}
+
 // surfaceRefFileSurfaces reads the tracked consumer-visible files. Prose
-// manuals get the "doc:" prefix; shipped scripts, assets, and templates get
-// "file:".
+// manuals get the "doc:" prefix; shipped scripts, assets, templates, and
+// the repo's own .claude/skills copies get "file:".
 func surfaceRefFileSurfaces(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -261,6 +269,11 @@ func surfaceRefFileSurfaces(t *testing.T, root string) map[string]string {
 			if strings.HasSuffix(rel, ".go") {
 				return nil
 			}
+			for ex := range surfaceRefExcludedRepoSkills {
+				if strings.HasPrefix(filepath.ToSlash(rel), ".claude/skills/"+ex+"/") {
+					return nil
+				}
+			}
 			add(prefix, filepath.ToSlash(rel))
 			return nil
 		})
@@ -271,6 +284,8 @@ func surfaceRefFileSurfaces(t *testing.T, root string) map[string]string {
 	walk("file:", "plugins/mindspec/scripts")
 	walk("file:", "internal/bootstrap/assets")
 	walk("file:", "internal/instruct/templates")
+	walk("file:", ".claude/skills")
+	walk("file:", ".claude/workflows")
 	add("doc:", "README.md")
 	add("doc:", "plugins/mindspec/README.md")
 	walk("doc:", "project-docs/user")
@@ -393,6 +408,8 @@ func TestSurfaceRefs_ScansEverySurfaceKind(t *testing.T) {
 		"file:plugins/mindspec/scripts/codex_verdict_extract.sh",
 		"file:internal/bootstrap/assets/bd-jsonl-merge-driver.sh",
 		"file:internal/instruct/templates/idle.md",
+		"file:.claude/skills/ms-spec-final-review/SKILL.md",
+		"file:.claude/workflows/ms-panel.js",
 		"doc:README.md", "doc:plugins/mindspec/README.md", "doc:project-docs/user/guides/merge-safety.md",
 		"go:cmd/mindspec/repair.go", "go:internal/bootstrap/bootstrap.go", "go:internal/setup/claude.go",
 	} {
@@ -405,6 +422,14 @@ func TestSurfaceRefs_ScansEverySurfaceKind(t *testing.T) {
 			t.Errorf("excluded Go file %s was scanned", rel)
 		}
 	}
+	for name := range surfaceRefExcludedRepoSkills {
+		if _, err := os.Stat(filepath.Join(repoRoot(t), ".claude", "skills", name)); err != nil {
+			t.Errorf("excluded repo skill %s no longer exists; remove its entry: %v", name, err)
+		}
+		if _, ok := skillFiles()[name]; ok {
+			t.Errorf("excluded repo skill %s is installed by setup; it must be scanned", name)
+		}
+	}
 }
 
 // TestSurfaceRefs_NegativeEachClass injects one sample per class into a
@@ -415,12 +440,16 @@ func TestSurfaceRefs_NegativeEachClass(t *testing.T) {
 		{"adr-unhyphenated", "see ADR0045 step 4"},
 		{"spec-id", "the readiness gate (spec 124) refuses"},
 		{"spec-id-hyphen", "the spec-130 rule table"},
+		{"spec-id-plural-slash", "orchestration blocks (specs 109/123)"},
+		{"spec-id-plural-and", "added in specs 109 and 123"},
 		{"spec-number-cite", "092 Bead 5's user-dirt blocking"},
 		{"requirement-dotted", "not blocked — R5.1"},
 		{"requirement-lettered", "anti-browbeat, R8c"},
 		{"requirement-paren", "the R1(b) completeness floor"},
 		{"ac-id", "covered by AC-4"},
 		{"hc-id", "the HC-3 git-tree guard"},
+		{"check-id-list", "F1, F3, F4 and F5 must pass"},
+		{"check-id-list-comma", "F1, F3, F4, F5 passed"},
 		{"req-id", "(Req 12)"},
 		{"bead-id", "not reflected in bd list, mindspec-bk5t"},
 		{"bead-id-child", "claimed mindspec-icaz.6"},

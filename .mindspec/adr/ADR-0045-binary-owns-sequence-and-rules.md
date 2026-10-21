@@ -95,4 +95,4 @@ The Context claims above were checked against the tree when this ADR was added b
 
 ## Amendment (Spec 130)
 
-- **Implementation status (R13.5).** Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131. The staged-rule marker names the spec-131 rule table. Refute and abandon procedures are binary verbs; skills invoke them and never edit the panel snapshot or append coverage manifests.
+- **Implementation status (R13.5).** Implementation order step 1 (the rule table) and the step-3 `panel brief` template move to spec 131. The staged-rule marker is `<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->`. It names no spec or ADR, because it ships to consumers; the spec-131 rule table may revise it. Refute and abandon procedures are binary verbs; skills invoke them and never edit the panel snapshot or append coverage manifests.

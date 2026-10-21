@@ -97,7 +97,7 @@ func acceptFallback(t *testing.T, f fallbackFixture) map[string]interface{} {
 	if !auditMatches(meta, fallbackSpec, f.merge, f.second) {
 		t.Fatalf("invalid audit written: %+v", meta)
 	}
-	if !strings.HasPrefix(res.Corroboration, "off-first-parent fallback; F1, F3, F4, F5 passed;") {
+	if !strings.HasPrefix(res.Corroboration, "off-first-parent fallback; single-candidate, branch-tip, not-reverted and read checks passed;") {
 		t.Fatalf("missing provenance: %q", res.Corroboration)
 	}
 	stubBindingRead(t, meta)

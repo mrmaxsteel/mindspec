@@ -30,7 +30,7 @@ var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
 	Long: `Print the effective config — including the panel:, models:, commands:,
-loop:, and runner: orchestration blocks (specs 109/123) alongside the
+loop:, and runner: orchestration blocks alongside the
 pre-existing keys — to stdout. Read-only: it writes no file and exits 0
 on a valid config. The models:, loop:, and runner: blocks are annotated
 "` + inertAnnotation + `" because only panel: and the pre-existing keys
