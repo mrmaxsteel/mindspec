@@ -11,6 +11,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
+// ErrSpecResolution marks a spec binding that needs repair, not a tracker read failure.
+var ErrSpecResolution = errors.New("spec resolution failed")
+
 // ErrNoSpecID marks an epic with no spec ID source.
 var ErrNoSpecID = errors.New("epic has no spec ID source")
 
@@ -55,10 +58,12 @@ func legacySpecID(epic EpicInfo) (string, error) {
 }
 
 func specRepair(epic EpicInfo, id string, cause error) error {
+	hint := ""
 	if idvalidate.SpecID(id) != nil {
 		id = "<spec-directory-name>"
+		hint = "; use the spec directory name as the ID"
 	}
-	return fmt.Errorf("cannot resolve spec for epic %s: %w; use the spec directory name as the ID\nrecovery: bd update %s --set-metadata spec_id=%s", idrender.Bead(epic.ID), &lineageReadError{cause: cause}, idrender.Bead(epic.ID), idrender.Spec(id))
+	return fmt.Errorf("%w: cannot resolve spec for epic %s: %w%s\nrecovery: bd update %s --set-metadata spec_id=%s", ErrSpecResolution, idrender.Bead(epic.ID), &lineageReadError{cause: cause}, hint, idrender.Bead(epic.ID), idrender.Spec(id))
 }
 
 // ResolveSpec resolves an epic through spec_id, the legacy pair, then its title.

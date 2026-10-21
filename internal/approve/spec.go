@@ -73,13 +73,12 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	}
 
 	specNum, _ := parseSpecID(specID)
-	var existingEpicID string
-	if specNum > 0 {
-		var lookupErr error
-		existingEpicID, lookupErr = phase.FindEpicBySpecID(specID)
-		if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
-			return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
+	existingEpicID, lookupErr := phase.FindEpicBySpecID(specID)
+	if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
+		if errors.Is(lookupErr, phase.ErrSpecResolution) {
+			return nil, lookupErr
 		}
+		return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
 	}
 
 	// Step 2: Update spec frontmatter + markdown Approval section.

@@ -212,7 +212,7 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		}
 	}
 	if len(matches) > 1 {
-		resolutionErr = fmt.Errorf("multiple epics resolve to spec %s: %s; keep one epic bound to this spec\nrecovery: bd show %s --json", idrender.Spec(specID), strings.Join(matches, ", "), idrender.Bead(matches[0]))
+		resolutionErr = fmt.Errorf("%w: multiple epics resolve to spec %s: %s; keep one epic bound to this spec\nrecovery: bd show %s --json", ErrSpecResolution, idrender.Spec(specID), strings.Join(matches, ", "), idrender.Bead(matches[0]))
 	}
 	if resolutionErr != nil {
 		if c != nil {

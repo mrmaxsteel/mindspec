@@ -3,6 +3,8 @@ package doctor
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
@@ -27,6 +29,17 @@ func lineageTitleNumber(title string) (int, bool) {
 }
 
 func checkLineage(r *Report, root string) {
+	// An export or config alone does not provide a queryable store.
+	store := false
+	for _, name := range []string{"metadata.json", "redirect", "beads.db", "bd.db", "dolt"} {
+		if _, err := os.Stat(filepath.Join(root, ".beads", name)); err == nil {
+			store = true
+			break
+		}
+	}
+	if !store {
+		return
+	}
 	c := phase.NewCache()
 	epics, err := c.AllEpics()
 	if err != nil {

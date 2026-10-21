@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
@@ -263,30 +264,33 @@ func TestSpecApprove_WritesSpecID(t *testing.T) {
 }
 
 func TestSpecApprove_DuplicateRefusesBeforeApproval(t *testing.T) {
-	root := t.TempDir()
-	const specID = "129-linkage"
-	dir := filepath.Join(root, ".mindspec/specs", specID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "spec.md")
-	before := specE2EValidSpecMD(specID)
-	if err := os.WriteFile(path, []byte(before), 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) {
-		return []byte(`[{"id":"epic-a","metadata":{"spec_id":"129-linkage"}},{"id":"epic-b","status":"closed","metadata":{"spec_id":"129-linkage"}}]`), nil
-	}))
-	mock := &executor.MockExecutor{}
-	_, err := ApproveSpec(root, specID, "test", mock)
-	if err == nil || !strings.Contains(err.Error(), "epic-a, epic-b") {
-		t.Fatalf("duplicate approval: %v", err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != before || len(mock.Calls) != 0 {
-		t.Fatal("duplicate refusal changed approval or executor state")
+	for _, specID := range []string{"129-linkage", "129b-linkage"} {
+		t.Run(specID, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".mindspec/specs", specID)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "spec.md")
+			before := specE2EValidSpecMD(specID)
+			if err := os.WriteFile(path, []byte(before), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) {
+				return []byte(fmt.Sprintf(`[{"id":"epic-a","metadata":{"spec_id":%q}},{"id":"epic-b","status":"closed","metadata":{"spec_id":%q}}]`, specID, specID)), nil
+			}))
+			mock := &executor.MockExecutor{}
+			_, err := ApproveSpec(root, specID, "test", mock)
+			if err == nil || !strings.Contains(err.Error(), "epic-a, epic-b") {
+				t.Fatalf("duplicate approval: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != before || len(mock.Calls) != 0 {
+				t.Fatal("duplicate refusal changed approval or executor state")
+			}
+		})
 	}
 }

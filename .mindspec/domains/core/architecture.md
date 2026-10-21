@@ -292,3 +292,8 @@ or an empty legacy title means that pair is absent.
 The invocation cache checks every epic, including closed epics, before it
 stores a scoped binding. Duplicate bindings block only their spec.
 Listings warn and skip bad bindings. Epics with no ID source remain silent.
+
+Spec binding refusals wrap `ErrSpecResolution`. This sentinel is distinct
+from tracker read failures and missing bead lineage. The resolver escapes
+external data and supplies the final recovery command. Callers preserve
+that command as an unquoted line.

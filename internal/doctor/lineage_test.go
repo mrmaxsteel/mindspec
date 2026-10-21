@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,9 @@ func lineageDoctorFixture(t *testing.T) string {
 	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".beads", "metadata.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 	script := `#!/bin/sh
@@ -73,5 +78,28 @@ func TestDoctor_TitleNumberDiagnosisMatchesRemovedRule(t *testing.T) {
 	}
 	if _, ok := lineageTitleNumber("[first] [129]"); ok {
 		t.Fatal("diagnosis parsed a later tag that the old rule ignored")
+	}
+}
+
+func TestDoctor_LineageWithoutStoreDoesNotQuery(t *testing.T) {
+	for _, exported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exported=%t", exported), func(t *testing.T) {
+			root := t.TempDir()
+			if exported {
+				if err := os.MkdirAll(filepath.Join(root, ".beads"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, ".beads", "issues.jsonl"), []byte(`{}`), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { calls++; return []byte(`[]`), nil }))
+			r := &Report{}
+			checkLineage(r, root)
+			if calls != 0 || len(r.Checks) != 0 {
+				t.Fatalf("lineage queried a repo without a store: calls=%d checks=%+v", calls, r.Checks)
+			}
+		})
 	}
 }

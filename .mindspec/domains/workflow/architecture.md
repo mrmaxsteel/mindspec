@@ -1418,14 +1418,19 @@ greenfield projects gitignore the new lockfile from their first commit.
 
 The workflow uses one parent-child epic as bead lineage. The phase resolver
 returns its provenance with the full spec ID. Scoped next selection uses
-this result without a second bead read. Readiness requires the exact
-`<epic>.<N>` form for positional mapping.
+this result without a second bead read. A foreign parent with no spec ID
+stays an inspection-only N2a near-miss. A foreign spec-bound parent stays
+N2c even when its binding needs repair. Both use `bd show <bead> --json`;
+only the scoped spec's own binding can refuse selection. Readiness requires
+the exact `<epic>.<N>` form for positional mapping.
 
-Spec approval writes `spec_id` on each new epic. Plan approval and lifecycle
-scans use full-ID resolution. The stored ID takes priority over legacy
+Spec approval checks the full ID for duplicate bindings before it writes
+approval, including for existing lettered specs. It writes `spec_id` on
+each new epic. Plan approval and lifecycle scans use full-ID resolution. The stored ID takes priority over legacy
 numeric metadata and epic title IDs. Conflicting legacy and title IDs
 require an explicit stored-ID repair. Lettered IDs retain their letter.
 A scoped lookup checks closed epics too. Duplicate bindings block that
 spec only. Doctor reports duplicate bindings and open title-only beads at
-Warn, then runs the remaining checks. New spec creation refuses lettered IDs;
+Warn, then runs the remaining checks. The lineage check skips projects
+without a Beads store or redirect. An export alone does not enable the check. New spec creation refuses lettered IDs;
 existing lettered directories stay valid.

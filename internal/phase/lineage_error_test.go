@@ -126,3 +126,26 @@ func TestFindEpicForBead_ResolvesViaEpicDependency(t *testing.T) {
 		t.Errorf("got (%q, %q), want (epic-x, 119-test)", epicID, specID)
 	}
 }
+
+func TestFindEpicForBead_AllEpicScanFailureIsRealError(t *testing.T) {
+	cause := errors.New("all-epic read failed")
+	stubBeadShow(t, map[string]string{
+		"bead-1": `[{"dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`,
+		"epic-x": `[{"id":"epic-x","metadata":{"spec_id":"119-test"}}]`,
+	}, nil, "", cause)
+	epic, spec, err := FindEpicForBead("bead-1")
+	if epic != "epic-x" || spec != "119-test" || !errors.Is(err, cause) || errors.Is(err, ErrNoEpicLineage) {
+		t.Fatalf("all-epic scan must preserve cause and refuse fallback: %s %s %v", epic, spec, err)
+	}
+}
+
+func TestFindEpicForBead_DuplicateBindingIsRealError(t *testing.T) {
+	stubBeadShow(t, map[string]string{
+		"bead-1": `[{"dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`,
+		"epic-x": `[{"id":"epic-x","metadata":{"spec_id":"119-test"}}]`,
+	}, nil, `[{"id":"epic-x","metadata":{"spec_id":"119-test"}},{"id":"epic-y","status":"closed","metadata":{"spec_id":"119-test"}}]`, nil)
+	epic, spec, _, err := FindEpicLineageWithCache(NewCache(), "bead-1")
+	if epic != "epic-x" || spec != "119-test" || err == nil || errors.Is(err, ErrNoEpicLineage) || !strings.Contains(err.Error(), "epic-x, epic-y") {
+		t.Fatalf("duplicate binding must refuse fallback: %s %s %v", epic, spec, err)
+	}
+}

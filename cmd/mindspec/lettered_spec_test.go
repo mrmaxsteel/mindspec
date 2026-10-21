@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -39,19 +41,62 @@ func TestLifecycle_LetteredSpecResolves(t *testing.T) {
 			plan := strings.Replace(validVerbFixturePlanMD(specID), "bead_ids: []", "bead_ids: []\nwork_chunks:\n  - id: 1\n    key_file_paths: [internal/fixture.go]", 1)
 			writeVerbFixtureFile(t, f.root, filepath.Join(".mindspec/specs", specID, "plan.md"), plan)
 			writeVerbFixtureFile(t, f.root, ".mindspec/adr/ADR-9999.md", "# ADR-9999: Fixture\n\n- **Status**: Accepted\n- **Domain(s)**: core\n\n## Decision\n\nUse this fixture.\n")
+
+			assertRepair := func(t *testing.T, err error) {
+				t.Helper()
+				want := "recovery: bd update epic-letter --set-metadata spec_id=" + specID
+				if err == nil {
+					t.Fatal("expected spec resolution refusal")
+				}
+				lines := strings.Split(err.Error(), "\n")
+				if !guard.HasFinalRecoveryLine(err.Error()) || lines[len(lines)-1] != want || strings.Contains(err.Error(), "repair spec-title") {
+					t.Fatalf("expected final spec_id repair %q: %v", want, err)
+				}
+			}
 			if legacy {
-				if _, err := next.BuildReadySet(f.root, specID); err == nil || !strings.Contains(err.Error(), "--set-metadata spec_id="+specID) {
-					t.Fatalf("legacy next did not require repair: %v", err)
-				}
-				if _, err := complete.Run(f.root, "epic-letter.1", "", "", &executor.MockExecutor{}, complete.CompleteOpts{}); err == nil || !strings.Contains(err.Error(), "--set-metadata spec_id="+specID) {
-					t.Fatalf("legacy complete did not require repair: %v", err)
-				}
-				if _, err := approve.ApprovePlan(f.root, specID, "test", &executor.MockExecutor{}); err == nil || !strings.Contains(err.Error(), "--set-metadata spec_id="+specID) {
-					t.Fatalf("legacy plan did not require repair: %v", err)
-				}
+				t.Run("next-repair", func(t *testing.T) { _, err := next.BuildReadySet(f.root, specID); assertRepair(t, err) })
+				t.Run("complete-repair", func(t *testing.T) {
+					_, err := complete.Run(f.root, "epic-letter.1", "", "", &executor.MockExecutor{}, complete.CompleteOpts{})
+					assertRepair(t, err)
+				})
+				t.Run("plan-repair", func(t *testing.T) {
+					_, err := approve.ApprovePlan(f.root, specID, "test", &executor.MockExecutor{})
+					assertRepair(t, err)
+				})
+				meta["spec_id"] = "Bad_ID"
+				f.write(t)
+				t.Run("complete-invalid-id", func(t *testing.T) {
+					_, err := complete.Run(f.root, "epic-letter.1", "", "", &executor.MockExecutor{}, complete.CompleteOpts{})
+					assertRepair(t, err)
+				})
 				meta["spec_id"] = specID
 				f.write(t)
 			}
+
+			f.epics = append(f.epics, map[string]interface{}{"id": "epic-duplicate", "status": "closed", "issue_type": "epic", "metadata": map[string]interface{}{"spec_id": specID}})
+			f.write(t)
+			for _, verb := range []string{"next", "complete", "plan"} {
+				t.Run(verb+"-duplicate", func(t *testing.T) {
+					var err error
+					switch verb {
+					case "next":
+						_, err = next.BuildReadySet(f.root, specID)
+					case "complete":
+						_, err = complete.Run(f.root, "epic-letter.1", "", "", &executor.MockExecutor{}, complete.CompleteOpts{})
+					case "plan":
+						_, err = approve.ApprovePlan(f.root, specID, "test", &executor.MockExecutor{})
+					}
+					if !errors.Is(err, phase.ErrSpecResolution) {
+						t.Fatalf("expected a typed duplicate refusal: %v", err)
+					}
+					lines := strings.Split(err.Error(), "\n")
+					if !guard.HasFinalRecoveryLine(err.Error()) || lines[len(lines)-1] != "recovery: bd show epic-letter --json" {
+						t.Fatalf("expected final duplicate inspection: %v", err)
+					}
+				})
+			}
+			f.epics = f.epics[:len(f.epics)-1]
+			f.write(t)
 			rs, err := next.BuildReadySet(f.root, specID)
 			if err != nil || rs.EpicID != "epic-letter" || len(rs.Filtered) != 1 || rs.Filtered[0].ID != "epic-letter.1" {
 				t.Fatalf("next: %+v %v", rs, err)

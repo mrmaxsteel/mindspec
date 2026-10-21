@@ -551,7 +551,12 @@ func DiscoverActiveSpecsWithCache(c *Cache) ([]ActiveSpec, error) {
 			_, err = c.FindEpicBySpecID(specID)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: epic %s has malformed spec metadata (%s); skipping this spec\n", idrender.Bead(epic.ID), termsafe.Escape(err.Error()))
+			detail := termsafe.Escape(err.Error())
+			if errors.Is(err, ErrSpecResolution) {
+				// Resolver errors contain escaped data and trusted recovery lines.
+				detail = err.Error()
+			}
+			fmt.Fprintf(os.Stderr, "warning: epic %s has an invalid spec binding; skipping this spec\n%s\n", idrender.Bead(epic.ID), detail)
 			continue
 		}
 

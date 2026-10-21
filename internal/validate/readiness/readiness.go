@@ -222,7 +222,7 @@ func beadIndex(beadID, epicID string) (int, error) {
 		return 0, fmt.Errorf("bead %s has an invalid epic-child index", idrender.Bead(beadID))
 	}
 	if beadID != epicID+"."+m[1] {
-		return 0, fmt.Errorf("bead %s has no dotted epic-child index (expected <epic>.<N>)", idrender.Bead(beadID))
+		return 0, fmt.Errorf("bead %s has a different epic prefix (expected %s.<N>)", idrender.Bead(beadID), idrender.Bead(epicID))
 	}
 	return n, nil
 }

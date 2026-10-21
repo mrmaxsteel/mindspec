@@ -1039,3 +1039,29 @@ func TestBuildReadySet_ScopedDuplicateEpicsRefuse(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildReadySet_ForeignSpecResolutionDoesNotRefuseScope(t *testing.T) {
+	for _, kind := range []string{"duplicate", "invalid", "legacy-conflict"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newNearMissFixture(t, false)
+			switch kind {
+			case "duplicate":
+				f.epics = append(f.epics, phase.EpicInfo{ID: "epic-777b", Status: "closed", IssueType: "epic", Metadata: map[string]interface{}{"spec_id": "777-other"}})
+			case "invalid":
+				f.epics[1].Metadata["spec_id"] = "Bad_ID"
+			case "legacy-conflict":
+				f.epics[1].Title = "[SPEC 777b-other] foreign"
+			}
+			f.rows = []BeadInfo{f.row("epic-129.1", "valid", "epic-129", "task"), f.row("epic-129.12", "foreign", "epic-777", "task")}
+			f.save(t)
+			rs, err := BuildReadySet(f.root, "129-fixture")
+			if err != nil || len(rs.Filtered) != 1 || rs.Filtered[0].ID != "epic-129.1" || len(rs.NearMisses) != 1 {
+				t.Fatalf("foreign spec blocked scope: %+v %v", rs, err)
+			}
+			m := missByID(t, rs, "epic-129.12")
+			if m.Class != "N2c" || !m.Blocking || !strings.Contains(m.String(), "recovery: bd show epic-129.12 --json") || strings.Contains(m.String(), "bd update") {
+				t.Fatalf("foreign near-miss: %+v", m)
+			}
+		})
+	}
+}

@@ -144,6 +144,15 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 			info.epic, info.spec, provenance, err = findEpicForBeadFn(rs.Cache, item.ID)
 			info.nonEpicParent = provenance.NonEpicParent
 			info.dependency = provenance.ParentChild && info.epic != rs.EpicID
+			if errors.Is(err, phase.ErrSpecResolution) && info.epic != "" && info.epic != rs.EpicID {
+				// A foreign binding needs inspection, not a write on another spec.
+				info.nonEpicParent = errors.Is(err, phase.ErrNoSpecID)
+				info.dependency = !info.nonEpicParent
+				err = nil
+			}
+			if errors.Is(err, phase.ErrSpecResolution) {
+				return rs, fmt.Errorf("could not resolve the lineage of %s: %w", idrender.Bead(item.ID), err)
+			}
 			if err != nil && !errors.Is(err, phase.ErrNoEpicLineage) {
 				return rs, fmt.Errorf("could not resolve the lineage of %s: %w\nrecovery: bd show %s --json", idrender.Bead(item.ID), RenderBDError(err), idrender.Bead(item.ID))
 			}
@@ -224,6 +233,9 @@ func (rs ReadySet) HasBlockingNearMisses() bool {
 // Never falls back to the global `bd ready` query — the caller returns
 // this error directly (AC-15).
 func scopeResolutionRefusal(root, specFlag string, epicErr error) error {
+	if errors.Is(epicErr, phase.ErrSpecResolution) {
+		return fmt.Errorf("resolving --spec %s: %w", idrender.Spec(specFlag), epicErr)
+	}
 	// Final-review round 1 (R5/G3): all three chained errors below can
 	// carry wrapBDError'd raw bd stderr (AllEpics / draft discovery /
 	// FindEpicBySpecID) — wrap each in bdRenderedError so the rendered

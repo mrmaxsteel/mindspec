@@ -3,6 +3,8 @@ package phase
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,7 +35,7 @@ func TestResolveSpec_PlainAndLetteredBothPresent(t *testing.T) {
 func TestResolveSpec_LegacyPairRepairResolves(t *testing.T) {
 	e := EpicInfo{ID: "epic-letter", Title: "[SPEC 008b-human-gates] gates", Metadata: map[string]interface{}{"spec_num": 8, "spec_title": "human-gates"}}
 	_, err := ResolveSpec(e)
-	if err == nil || !strings.Contains(err.Error(), "recovery: bd update epic-letter --set-metadata spec_id=008b-human-gates") {
+	if !errors.Is(err, ErrSpecResolution) || !strings.Contains(err.Error(), "recovery: bd update epic-letter --set-metadata spec_id=008b-human-gates") || strings.Contains(err.Error(), "use the spec directory name") {
 		t.Fatalf("repair: %v", err)
 	}
 	e.Metadata["spec_id"] = "008b-human-gates"
@@ -44,7 +46,7 @@ func TestResolveSpec_LegacyPairRepairResolves(t *testing.T) {
 }
 func TestResolveSpec_TitleWithoutIDRefuses(t *testing.T) {
 	_, err := ResolveSpec(EpicInfo{ID: "epic-old", Title: "[PLAN old] work"})
-	if !errors.Is(err, ErrNoSpecID) || !strings.Contains(err.Error(), "use the spec directory name as the ID") || !strings.Contains(err.Error(), "recovery: bd update epic-old --set-metadata spec_id=") {
+	if !errors.Is(err, ErrSpecResolution) || !errors.Is(err, ErrNoSpecID) || !strings.Contains(err.Error(), "use the spec directory name as the ID") || !strings.Contains(err.Error(), "recovery: bd update epic-old --set-metadata spec_id=") {
 		t.Fatalf("missing ID: %v", err)
 	}
 }
@@ -87,9 +89,26 @@ func TestResolveSpec_TwoEpicsScopedRefusal(t *testing.T) {
 	if id, err := c.FindEpicBySpecID("130-y"); err != nil || id != "epic-good" {
 		t.Fatalf("unrelated spec blocked: %s %v", id, err)
 	}
+	logPath := filepath.Join(t.TempDir(), "listing.stderr")
+	log, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stderr
+	t.Cleanup(func() { os.Stderr = original; log.Close() })
+	os.Stderr = log
 	active, err := DiscoverActiveSpecsWithCache(c)
+	os.Stderr = original
 	if err != nil || len(active) != 1 || active[0].EpicID != "epic-good" {
 		t.Fatalf("listing: %+v %v", active, err)
+	}
+	warning, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	text := string(warning)
+	if !strings.Contains(text, "warning: epic epic-a") || !strings.Contains(text, "multiple epics resolve to spec 129-x: epic-a, epic-b") || !strings.Contains(text, "\nrecovery: bd show epic-a --json\n") || strings.Contains(text, "malformed spec metadata") || strings.Contains(text, "epic-historical") {
+		t.Fatalf("listing warning must name duplicate and repair, and skip historical epics silently: %s", text)
 	}
 }
 func TestCacheFindEpicBySpecID_SpecIDOnlyLettered(t *testing.T) {

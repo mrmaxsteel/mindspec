@@ -2,6 +2,7 @@ package next
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -278,8 +279,16 @@ func TestNearMissN2a_NamedEpicParentWithoutMetadata(t *testing.T) {
 	}
 	f.save(t)
 	rs, err := BuildReadySet(f.root, "129-fixture")
-	if err == nil || len(rs.Filtered) != 0 || !strings.Contains(err.Error(), "cannot resolve spec for epic plain-epic") || !strings.Contains(err.Error(), "--set-metadata spec_id=") || strings.Contains(err.Error(), "--parent") {
-		t.Fatalf("missing epic ID must refuse without reparenting: %+v %v", rs, err)
+	var empty *EmptyAfterFilterError
+	if !errors.As(err, &empty) || len(rs.Filtered) != 0 || len(rs.NearMisses) != len(f.rows) {
+		t.Fatalf("expected inspection-only near-misses: %+v %v", rs, err)
+	}
+	for _, row := range f.rows {
+		m := missByID(t, rs, row.ID)
+		want := fmt.Sprintf("bead %s has the plan-bead form for epic epic-129, but its parent is plain-epic\nrecovery: bd show %s --json", row.ID, row.ID)
+		if m.Class != "N2a" || !m.Blocking || m.String() != want || strings.Contains(m.String(), "bd update") {
+			t.Fatalf("unexpected near-miss: %+v", m)
+		}
 	}
 }
 func TestExclusionNotice_NamesIDs(t *testing.T) {
