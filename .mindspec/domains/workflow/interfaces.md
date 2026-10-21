@@ -44,6 +44,26 @@ func BuildContext(root string) *Context
 func Render(ctx *Context) (string, error)
 ```
 
+### Conduct Rule Table (Spec 131)
+
+`internal/rules` embeds the conduct rule table from `internal/rules/rules.yaml`.
+
+- `Load` reads and validates the table.
+- `Filter` selects rules by scope and gate in table order.
+  Empty filters select all rules. A gate filter includes rules with no gate limit.
+- `Lookup` finds a rule by its exact ID.
+- `GateKeys` returns a copy of the accepted gate keys.
+
+`cmd/mindspec/rules.go` provides `mindspec rules [--scope <s>] [--json]`.
+The command lists all rules or selects rules by scope.
+The `--json` flag selects JSON output.
+`mindspec rules show <id>` prints one rule and its fields.
+An unknown ID or scope returns an error with a `recovery:` line.
+
+`internal/instruct` adds a `## Rules` section to mode guidance.
+It lists orchestrator rules in every mode.
+It also lists implementer rules in implement mode.
+
 ### Beads Adapter (`internal/bead/`)
 
 ```go

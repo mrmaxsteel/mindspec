@@ -408,6 +408,10 @@ func ac10Surfaces() map[string]string {
 }
 
 func TestReviewDiscipline_AC10StagedRuleMarkerOnly(t *testing.T) {
+	content := ac10Surfaces()["ms-bead-impl"]
+	if !strings.Contains(content, readinessStagedRule) {
+		t.Fatal("ms-bead-impl must carry the rule-id staged marker")
+	}
 	for _, token := range []string{"spec 133", "spec-131"} {
 		t.Run(token, func(t *testing.T) {
 			surfaces := ac10Surfaces()

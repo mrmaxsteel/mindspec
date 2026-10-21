@@ -113,6 +113,9 @@ the new `bead ready-check`/`bead clarify` verbs).
 
 The `rebind`, `refute`, `abandon` and `defer` panel verbs register telemetry tokens in `internal/redact/redact.go`.
 
+`rules` is registered in `internal/redact.CommandTokens`.
+Redaction keeps this verb name in accepted journal events.
+
 `internal/redact.SubcommandTokens` also contains `schema`, `submit`, `checkout`,
 `prompt`, `launch` and `recover` for panel telemetry.
 
