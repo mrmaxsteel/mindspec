@@ -12,7 +12,8 @@
 //     panel, capturing every verdict-file slot's token/model/terminal
 //     verdict (CoverageManifest).
 //
-//   - round, refutation, deferral, rebind, abandon — panel-verb events
+//   - round, refutation, deferral, rebind, abandon, verdict, launch and
+//     substitution — panel-verb events
 //     (Spec 130 R5.1; shapes and validation in ledger.go).
 //
 // All are agent-writable, forgeable-by-content repo data (ADR-0037 §8):
@@ -391,7 +392,7 @@ func Validate(data []byte) error {
 		return validateDispositionMap(m)
 	case RecordPanelManifest:
 		return validateManifestMap(m)
-	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
 		return validateLedgerMap(m, record)
 	default:
 		return fmt.Errorf("unknown disposition record kind %s", termsafe.Escape(record))

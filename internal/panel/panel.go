@@ -128,9 +128,10 @@ type Refutation struct {
 
 // RosterSlot is one ordered reviewer identity in a round.
 type RosterSlot struct {
-	Slot  string `json:"slot"`
-	Model string `json:"model"`
-	Lens  string `json:"lens"`
+	Slot   string `json:"slot"`
+	Family string `json:"family,omitempty"`
+	Model  string `json:"model"`
+	Lens   string `json:"lens"`
 }
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
