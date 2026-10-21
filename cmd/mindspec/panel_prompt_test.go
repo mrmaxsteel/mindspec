@@ -54,6 +54,19 @@ func promptRun(t *testing.T, root, slot string) string {
 
 func TestPanelPrompt_Render(t *testing.T) {
 	const processConfig = "panel:\n  runners:\n    - {family: worker, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}\n"
+	for _, tc := range []struct{ name, brief, want string }{
+		{"brief-printable", "check.rule: check this — use that\n", "check.rule: check this — use that\n"},
+		{"brief-control", "Escape \x1b[31mtext\n", "Escape \\x1b[31mtext\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, f := promptFixture(t, 2, "")
+			subjectCLIWrite(t, f.Dir, "BRIEF.md", tc.brief)
+			out := promptRun(t, root, "R1")
+			if !strings.HasPrefix(out, tc.want+"\n\n## Slot\n") || strings.ContainsRune(out, '\x1b') {
+				t.Fatalf("stored BRIEF changed or contains a control byte:\n%s", out)
+			}
+		})
+	}
 	t.Run("harness", func(t *testing.T) {
 		root, f := promptFixture(t, 2, "")
 		paneltest.Seed(t, f.Dir, f.Launch("dispatched", 1, 1), f.Launch("launch_failed", 1, 1), f.Launch("dispatched", 1, 3))
@@ -166,6 +179,44 @@ func TestPanelPrompt_PriorRound(t *testing.T) {
 				t.Errorf("missing prior-round grade %s", grade)
 			}
 		}
+		other := promptRun(t, root, "R2")
+		if !strings.Contains(other, "1. other slot item\n") || strings.Contains(other, "X prior item") || strings.Contains(other, "Y current item") {
+			t.Fatalf("wrong prior-round items for the other slot:\n%s", other)
+		}
+	}
+}
+
+func TestPanelPrompt_PriorRoundUnavailable(t *testing.T) {
+	for _, tc := range []struct{ name, reason string }{
+		{"absent", "file is absent"},
+		{"digest", "file digest differs from the latest submission"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, f := promptFixture(t, 2, "")
+			promptSubmit(t, f, "R1", "final", "verified prior item")
+			path := filepath.Join(f.Dir, "R1-round-1.json")
+			if tc.name == "absent" {
+				if err := os.Rename(path, filepath.Join(t.TempDir(), "saved-verdict.json")); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				subjectCLIWrite(t, f.Dir, "R1-round-1.json", strings.Replace(string(data), "verified prior item", "untrusted prior item", 1))
+			}
+			f.Panel.Round = 2
+			if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
+				t.Fatal(err)
+			}
+			f.Round(t, 2)
+			out := promptRun(t, root, "R1")
+			want := "Prior-round items could not be read: " + tc.reason + ".\n"
+			if !strings.Contains(out, "## Prior-round items\n\n"+want) || strings.Contains(out, "no prior-round items") || strings.Contains(out, "verified prior item") || strings.Contains(out, "untrusted prior item") {
+				t.Fatalf("missing prior-round read warning:\n%s", out)
+			}
+		})
 	}
 }
 

@@ -667,7 +667,7 @@ func TestBriefStubBody_ContainsAcceptanceCriteriaHeading(t *testing.T) {
 	if briefInternalReference.MatchString(briefStubBody) {
 		t.Errorf("briefStubBody names an internal reference:\n%s", briefStubBody)
 	}
-	for _, path := range briefPath.FindAllString(briefStubBody, -1) {
+	for _, path := range briefRepositoryPaths(briefStubBody) {
 		if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".rst") || strings.HasSuffix(path, ".adoc") || strings.Contains(path, "/domains/") {
 			t.Errorf("briefStubBody names a documentation path: %s", path)
 		}

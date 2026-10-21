@@ -3,7 +3,10 @@ package panel
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -109,18 +112,67 @@ func renderBriefRegions(header string, r BriefRegions) string {
 	return b.String()
 }
 
-// Preserve document lines while escaping each line through the shared terminal
-// encoder. Quoted controls cannot alter the enclosing Markdown structure.
+// escapeBriefText keeps printable text and line breaks unchanged.
+// It escapes control runes and invalid UTF-8 bytes without quoting the line.
 func escapeBriefText(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = termsafe.Escape(line)
+	var b strings.Builder
+	for len(text) > 0 {
+		r, size := utf8.DecodeRuneInString(text)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, "\\x%02x", text[0])
+		case r == '\n' || strconv.IsPrint(r):
+			b.WriteString(text[:size])
+		case r <= 0xff:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		case r <= 0xffff:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		default:
+			fmt.Fprintf(&b, "\\U%08x", r)
+		}
+		text = text[size:]
 	}
-	return strings.Join(lines, "\n")
+	return b.String()
 }
 
 var briefInternalReference = regexp.MustCompile(`ADR-[0-9]+|[Ss]pec [0-9]{3}|\bR[0-9]+\.[0-9]+|#[0-9]{3}|mindspec-[a-z0-9]+(?:\.[0-9]+)?|§`)
-var briefPath = regexp.MustCompile("[A-Za-z0-9_./-]+/[A-Za-z0-9_./-]+|[A-Za-z0-9_-]+\\.(?:go|js|ts|tsx|jsx|py|sh|yaml|yml|json|md|rst|adoc|txt|toml|html|css|proto)\\b")
+var briefPath = regexp.MustCompile(`\.[A-Za-z0-9]+$`)
+
+// briefRepositoryPaths selects tokens inside backtick code spans. A repository
+// path has no space and contains a slash or ends in a dot followed by letters
+// and digits. A command that starts with "mindspec " is not a path.
+// Bare words outside code spans are not paths.
+func briefRepositoryPaths(text string) []string {
+	var paths []string
+	for len(text) > 0 {
+		start := strings.IndexByte(text, '`')
+		if start < 0 {
+			break
+		}
+		text = text[start:]
+		n := len(text) - len(strings.TrimLeft(text, "`"))
+		text = text[n:]
+		for cursor := 0; ; {
+			relative := strings.IndexByte(text[cursor:], '`')
+			if relative < 0 {
+				return paths
+			}
+			end := cursor + relative
+			length := len(text[end:]) - len(strings.TrimLeft(text[end:], "`"))
+			if length == n {
+				token := text[:end]
+				if !strings.HasPrefix(token, "mindspec ") && strings.IndexFunc(token, unicode.IsSpace) < 0 &&
+					(strings.Contains(token, "/") || briefPath.MatchString(token)) {
+					paths = append(paths, token)
+				}
+				text = text[end+length:]
+				break
+			}
+			cursor = end + length
+		}
+	}
+	return paths
+}
 
 // ValidateBriefRegions checks only binary-authored guidance. The callback reads
 // paths at the reviewed commit through the executor. Generated panel artifacts
@@ -131,8 +183,7 @@ func ValidateBriefRegions(r BriefRegions, fileAtRef func(string) ([]byte, bool, 
 		return submitRefusal("review guidance contains an internal reference", "remove the internal reference from the gate acceptance or conduct text")
 	}
 	seen := map[string]bool{}
-	for _, path := range briefPath.FindAllString(authored, -1) {
-		path = strings.TrimRight(path, ".")
+	for _, path := range briefRepositoryPaths(authored) {
 		if path == "panel.json" || seen[path] {
 			continue
 		}

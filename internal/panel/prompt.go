@@ -25,7 +25,17 @@ type PromptInput struct {
 	Output     string
 	Nonce      string
 	Attempt    int
-	PriorItems []string
+	PriorItems PriorItemsResult
+}
+
+// PriorItemsResult holds verified items or a warning about unavailable evidence.
+type PriorItemsResult struct {
+	Items   []string
+	Warning string
+}
+
+func unavailablePriorItems(reason string) PriorItemsResult {
+	return PriorItemsResult{Warning: "Prior-round items could not be read: " + reason + "."}
 }
 
 // RenderProcessOutput is shared by the read-only prompt and the launcher.
@@ -43,6 +53,7 @@ func promptShellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'",
 // RenderSlotPrompt renders without writes or process calls.
 func RenderSlotPrompt(in PromptInput) string {
 	var b strings.Builder
+	// Keep stored printable text unchanged. Escape any added control bytes.
 	b.WriteString(escapeBriefText(in.Brief))
 	b.WriteString("\n\n## Slot\n\n")
 	fmt.Fprintf(&b, "Slot: %s\nFamily: %s\nModel (the verdict model value): %s\nLens: %s\nFocus: %s\n",
@@ -60,11 +71,13 @@ func RenderSlotPrompt(in PromptInput) string {
 		b.WriteString("Use mindspec panel checkout with --slot and --dispatch. Then run mindspec panel prompt again for the submission command.\n")
 	}
 	b.WriteString("\n## Prior-round items\n\n")
-	if len(in.PriorItems) == 0 {
+	if in.PriorItems.Warning != "" {
+		b.WriteString(termsafe.Escape(in.PriorItems.Warning) + "\n")
+	} else if len(in.PriorItems.Items) == 0 {
 		b.WriteString("no prior-round items\n")
 	} else {
 		b.WriteString("Grade each item ADDRESSED, PARTIAL, MISSED or NEW_ISSUE.\n")
-		for i, item := range in.PriorItems {
+		for i, item := range in.PriorItems.Items {
 			fmt.Fprintf(&b, "%d. %s\n", i+1, termsafe.Escape(item))
 		}
 	}
@@ -74,19 +87,19 @@ func RenderSlotPrompt(in PromptInput) string {
 
 // PriorRoundItems selects N-1 before reading any submission or verdict. A file
 // without the latest submission's digest cannot supply v2 reviewer evidence.
-func PriorRoundItems(dir, slot string, round int) ([]string, error) {
+func PriorRoundItems(dir, slot string, round int) (PriorItemsResult, error) {
 	if round < 2 {
-		return nil, nil
+		return PriorItemsResult{}, nil
 	}
 	lines, err := ReadLedger(dir)
 	if err != nil {
-		return nil, err
+		return PriorItemsResult{}, err
 	}
 	var prior RoundRecord
 	for _, line := range lines {
 		var r RoundRecord
 		if err := json.Unmarshal(line, &r); err != nil {
-			return nil, err
+			return PriorItemsResult{}, err
 		}
 		if r.Record == RecordRound && r.Round == round-1 {
 			prior = r
@@ -94,33 +107,39 @@ func PriorRoundItems(dir, slot string, round int) ([]string, error) {
 	}
 	data, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round-1)))
 	if os.IsNotExist(err) {
-		return nil, nil
+		if prior.VerdictSchema == 2 {
+			return unavailablePriorItems("file is absent"), nil
+		}
+		return PriorItemsResult{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return PriorItemsResult{}, err
 	}
 	if prior.VerdictSchema == 2 {
 		latest, err := LatestSubmissions(dir, round-1)
 		if err != nil {
-			return nil, err
+			return PriorItemsResult{}, err
 		}
 		submission, ok := latest[slot]
-		if !ok || submission.FileSHA256 != findingHash(data) {
-			return nil, nil
+		if !ok {
+			return unavailablePriorItems("no latest submission is recorded"), nil
+		}
+		if submission.FileSHA256 != findingHash(data) {
+			return unavailablePriorItems("file digest differs from the latest submission"), nil
 		}
 		v, err := ParseVerdictV2(data)
 		if err != nil {
-			return nil, nil
+			return unavailablePriorItems("file does not contain a valid verdict"), nil
 		}
 		items := make([]string, len(v.ConcreteChangesRequired))
 		for i, item := range v.ConcreteChangesRequired {
 			items[i] = item.Text
 		}
-		return items, nil
+		return PriorItemsResult{Items: items}, nil
 	}
 	var v FindingVerdict
 	if json.Unmarshal(data, &v) != nil {
-		return nil, nil
+		return PriorItemsResult{}, nil
 	}
-	return v.ConcreteChangesRequired, nil
+	return PriorItemsResult{Items: v.ConcreteChangesRequired}, nil
 }

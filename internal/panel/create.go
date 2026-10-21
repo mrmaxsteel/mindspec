@@ -419,34 +419,10 @@ func renderBriefHeader(slug string, round int, target, sha string) string {
 // marker constant is a corrupt marker, never legacy body text.
 var markerLookalikeRE = regexp.MustCompile(`^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
 
-// scanNonFenceLines calls fn once per line of s, in file order,
-// skipping every line inside a fenced code block — a region bracketed
-// by lines whose trimmed content starts with "```" (a Markdown fence
-// used, e.g., to quote the header syntax for documentation). offset is
-// the byte offset of the line's first character in s; content is the
-// line with its terminator removed (a trailing "\r" is stripped too,
-// so CRLF files scan the same as LF ones).
+// scanNonFenceLines visits lines outside code fences in file order.
+// A shorter fence cannot close a longer fence. The offset is in bytes.
 func scanNonFenceLines(s string, fn func(offset int, content string)) {
-	inFence := false
-	start := 0
-	for start <= len(s) {
-		lineEnd := len(s)
-		hasNL := false
-		if i := strings.IndexByte(s[start:], '\n'); i >= 0 {
-			lineEnd = start + i
-			hasNL = true
-		}
-		content := strings.TrimSuffix(s[start:lineEnd], "\r")
-		if strings.HasPrefix(strings.TrimSpace(content), "```") {
-			inFence = !inFence
-		} else if !inFence {
-			fn(start, content)
-		}
-		if !hasNL {
-			break
-		}
-		start = lineEnd + 1
-	}
+	scanMarkdownLines(s, fn)
 }
 
 // findMarkerLines returns the byte offsets of every GENUINE occurrence

@@ -79,7 +79,8 @@ func TestBrief_QuotedACs(t *testing.T) {
 	for _, tc := range []struct{ name, spec, want string }{
 		{"verbatim", "# Spec\n\n## Acceptance Criteria\n\n- Cite ADR-0045 and R9.3.\n- Read .mindspec/domains/x.md.\n- Create pkg/new.go.\n- Delete pkg/deleted.go.\n\n## Other\nnot quoted\n", "## Acceptance Criteria\n\n- Cite ADR-0045 and R9.3.\n- Read .mindspec/domains/x.md.\n- Create pkg/new.go.\n- Delete pkg/deleted.go.\n\n"},
 		{"absent", "# Spec\n\n## Goal\nreview me\n", "no acceptance criteria section found"},
-		{"control", "## Acceptance Criteria\n- Escape \x1b[31mtext\n", "## Acceptance Criteria\n\"- Escape \\x1b[31mtext\"\n"},
+		{"printable", "## Acceptance Criteria\n- [ ] AC-1: say \"hi\" — ok\n", "## Acceptance Criteria\n- [ ] AC-1: say \"hi\" — ok\n"},
+		{"control", "## Acceptance Criteria\n- Escape \x1b[31m \u202e \u200b \xff\n", "## Acceptance Criteria\n- Escape \\x1b[31m \\u202e \\u200b \\xff\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := newBriefFixture(t, tc.spec, "")
@@ -196,9 +197,13 @@ func TestBrief_AcceptanceRegion(t *testing.T) {
 
 func TestBrief_PathCheck(t *testing.T) {
 	for _, tc := range []struct{ name, question, want string }{
-		{"present", "Check pkg/required.go.", ""},
-		{"absent", "Check pkg/missing.go.", "absent at the reviewed commit: pkg/missing.go"},
-		{"documentation", "Read .mindspec/domains/x.md.", "documentation path"},
+		{"present", "Check `pkg/required.go`.", ""},
+		{"absent", "Check `pkg/missing.go`.", "absent at the reviewed commit: pkg/missing.go"},
+		{"root-extension", "Check `missing.sql`.", "absent at the reviewed commit: missing.sql"},
+		{"non-paths", "Check and/or CI/CD.", ""},
+		{"bare-file", "Check missing.sql.", ""},
+		{"command", "Use `mindspec panel/schema`.", ""},
+		{"documentation", "Read `.mindspec/domains/x.md`.", "documentation path"},
 		{"internal", "Follow ADR-0045.", "internal reference"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,11 +227,21 @@ func TestBrief_PathCheck(t *testing.T) {
 		})
 	}
 	// The checker must propagate executor failures, not treat them as absence.
-	err := panel.ValidateBriefRegions(panel.BriefRegions{Question: "Check pkg/required.go."}, func(string) ([]byte, bool, error) {
+	err := panel.ValidateBriefRegions(panel.BriefRegions{Question: "Check `pkg/required.go`."}, func(string) ([]byte, bool, error) {
 		return nil, false, os.ErrPermission
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot check review guidance path") {
 		t.Fatalf("lost path check failure: %v", err)
+	}
+	for _, regions := range []panel.BriefRegions{
+		{NotBlocking: []string{"Check `missing.sql`."}},
+		{Conduct: []panel.BriefRule{{ID: "check", Prohibition: "Read `missing.sql`."}}},
+	} {
+		if err := panel.ValidateBriefRegions(regions, func(string) ([]byte, bool, error) {
+			return nil, false, nil
+		}); err == nil || !strings.Contains(err.Error(), "absent at the reviewed commit: missing.sql") {
+			t.Fatalf("path outside the question was not checked: %v", err)
+		}
 	}
 }
 
