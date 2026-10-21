@@ -252,3 +252,157 @@ func TestValidatePlan_UnlistedPlanPathWarnsNotFails(t *testing.T) {
 		t.Fatalf("fixture plan should pass validation, got %+v", r.Issues)
 	}
 }
+
+// unlistedOne runs UnlistedPlanPaths on body with one unrelated key path.
+func unlistedOne(body string, keys ...string) []string {
+	if len(keys) == 0 {
+		keys = []string{"other/w.go"}
+	}
+	return UnlistedPlanPaths(planWithPaths(keys, body+"\n"), []WorkChunk{{ID: 1, KeyFilePaths: keys}})
+}
+
+// TestUnlistedPlanPaths_ReviewerProbesWarn pins edit sentences that a
+// whole-sentence marker test used to hide: each path is judged by its
+// own clause, and a marker word elsewhere in the sentence does not veto
+// a verb that stands right before the path.
+func TestUnlistedPlanPaths_ReviewerProbesWarn(t *testing.T) {
+	cases := map[string]string{
+		"Update `internal/q/w.go`.":                                                         "internal/q/w.go",
+		"Update the existing `internal/q/w.go`.":                                            "internal/q/w.go",
+		"Update `internal/q/w.go` in the same bead.":                                        "internal/q/w.go",
+		"Update `internal/q/w.go` so no missing path is lost.":                              "internal/q/w.go",
+		"Update `internal/q/w.go` to behave like the spec validator.":                       "internal/q/w.go",
+		"`internal/q/w.go` is updated to detect missing paths.":                             "internal/q/w.go",
+		"Add `internal/q/readiness/fixtures.go`.":                                           "internal/q/readiness/fixtures.go",
+		"Add `cmd/q/config.go`: a `config` command with a read-only `show` subcommand.":     "cmd/q/config.go",
+		"4. Add `internal/q/evidence.go`, read before any mutation:":                        "internal/q/evidence.go",
+		"Create `internal/q/w.go`, a no-op shim.":                                           "internal/q/w.go",
+		"Add a test in `internal/q/w_test.go` that the command does not panic.":             "internal/q/w_test.go",
+		"Update `internal/q/w.go` so existing callers keep working.":                        "internal/q/w.go",
+		"Extend `internal/q/w.go` to read the new config key.":                              "internal/q/w.go",
+		"Implement `internal/q/w.go`.":                                                      "internal/q/w.go",
+		"Replace the loop in `internal/q/w.go`.":                                            "internal/q/w.go",
+		"Fix the bug in `internal/q/w.go`.":                                                 "internal/q/w.go",
+		"Refactor `internal/q/w.go` to use the helper.":                                     "internal/q/w.go",
+		"Update `internal/q/w.go` to match the new schema.":                                 "internal/q/w.go",
+		"Create `internal/q/w.go` (no new deps).":                                           "internal/q/w.go",
+		"Add `internal/q/w.go` following the existing pattern.":                             "internal/q/w.go",
+		"- New file: `internal/q/w.go`":                                                     "internal/q/w.go",
+		"- **Files:** `internal/q/w.go`":                                                    "internal/q/w.go",
+		"| File | Change |\n|---|---|\n| `internal/q/w.go` | new |":                         "internal/q/w.go",
+		"| File | Change |\n|---|---|\n| `internal/q/w.go` | New |":                         "internal/q/w.go",
+		"**Create `internal/q/w.go`** - exported `Sanitize`; callers stay unchanged.":       "internal/q/w.go",
+		"**Create `internal/q/w.go`** \u2014 exported `Sanitize`, other callers unchanged.": "internal/q/w.go",
+		"### Files to modify\n\n- `internal/q/w.go`":                                        "internal/q/w.go",
+		"Add these tests:\n\n- `internal/q/w_test.go` covers the empty case":                "internal/q/w_test.go",
+		"Add two files: `internal/q/w.go`.":                                                 "internal/q/w.go",
+		"In `internal/q/w.go`, add the flag.":                                               "internal/q/w.go",
+	}
+	for body, want := range cases {
+		if got := unlistedOne(body); !reflect.DeepEqual(got, []string{want}) {
+			t.Errorf("body %q: got %v, want [%s]", body, got, want)
+		}
+	}
+	// Both paths in one edit sentence warn.
+	if got, want := unlistedOne("Edit `internal/a/b.go` and the same for `internal/c/d.go`."), []string{"internal/a/b.go", "internal/c/d.go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestUnlistedPlanPaths_NonEditSentencesStaySilent pins the negative side
+// of the clause rule: citations, narration in the past tense, a negated
+// verb, and verbs that only occur inside file names do not warn.
+func TestUnlistedPlanPaths_NonEditSentencesStaySilent(t *testing.T) {
+	assertNoPlanPathWarning(t, []string{
+		"The implementation lives in `internal/q/w.go`.",
+		"Bead 1 added `internal/q/w.go`.",
+		"The `internal/q/create_update.go` helper is described in `docs/fix-add.md`.",
+		"See internal/q/add_fix.go and internal/q/remove_edit.go for the layout.",
+		"[create.go](internal/q/create.go) holds the parser.",
+		"Update the caller; do not edit `internal/q/w.go`.",
+		"Update the caller \u2014 `internal/q/w.go` stays untouched.",
+		"The loader reads `internal/q/w.go`, which the fix does not change.",
+	})
+}
+
+// TestUnlistedPlanPaths_TemplatePath pins template paths: "<name>"
+// segments match key_file_paths as a glob in both directions, and an
+// uncovered template is reported as written.
+func TestUnlistedPlanPaths_TemplatePath(t *testing.T) {
+	body := "Each bead adds its own pin test file `internal/validate/adr_spec131_<adr>_test.go` with a function named `TestADRAmendments_Spec131<ADR>`."
+	want := []string{"internal/validate/adr_spec131_<adr>_test.go"}
+	if got := unlistedOne(body, "internal/approve/plan.go"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("uncovered template: got %v, want %v", got, want)
+	}
+	for _, key := range []string{
+		"internal/validate/adr_spec131_*_test.go",
+		"internal/validate/adr_spec131_0040_test.go",
+		"internal/validate/",
+		"internal/validate/**",
+	} {
+		if got := unlistedOne(body, key); len(got) != 0 {
+			t.Errorf("key %q: want no warning, got %v", key, got)
+		}
+	}
+	// A placeholder in a directory segment, or a stem that is only a
+	// placeholder, is too vague to check.
+	assertNoPlanPathWarning(t, []string{
+		"Edit internal/<pkg>/file.go.",
+		"Add `internal/q/<name>.go`.",
+	})
+}
+
+// TestUnlistedPlanPaths_FenceClosesOnMatchingRun pins fence closing: a
+// shorter or different run inside a fence does not end it.
+func TestUnlistedPlanPaths_FenceClosesOnMatchingRun(t *testing.T) {
+	assertNoPlanPathWarning(t, []string{
+		"````md\n```\nAdd internal/q/w.go\n````",
+		"~~~\n```\nAdd internal/q/w.go\n```\n~~~",
+		"```\n~~~\n```\nx\n```\nAdd internal/q/v.go\n```",
+	})
+	if got := unlistedOne("````md\n```\nskip\n```\n````\n\nAdd `internal/q/w.go`."); !reflect.DeepEqual(got, []string{"internal/q/w.go"}) {
+		t.Fatalf("path after a closed fence: got %v", got)
+	}
+}
+
+// TestUnlistedPlanPaths_RealPlanDroppedKeyPathWarns removes a key path
+// from a shipped plan and expects the warning for the step that edits it.
+func TestUnlistedPlanPaths_RealPlanDroppedKeyPathWarns(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".mindspec", "specs", "129-readiness-tracker-honesty", "plan.md"))
+	if err != nil {
+		t.Skipf("plan not available: %v", err)
+	}
+	content := string(data)
+	const line = "        - internal/next/evidence.go\n"
+	if !strings.Contains(content, line) {
+		t.Skip("plan no longer lists the path")
+	}
+	run := func(c string) []string {
+		fm, err := parsePlanFrontmatter(c)
+		if err != nil {
+			t.Fatalf("parse plan: %v", err)
+		}
+		return UnlistedPlanPaths(c, fm.WorkChunks)
+	}
+	if full := run(content); len(full) != 0 {
+		t.Fatalf("intact plan warns: %v", full)
+	}
+	cut := run(strings.Replace(content, line, "", 1))
+	if !reflect.DeepEqual(cut, []string{"internal/next/evidence.go"}) {
+		t.Fatalf("dropped key path: got %v", cut)
+	}
+}
+
+// TestUnlistedPlanPaths_CreateStepWithLaterUnchangedWarns pins a shipped
+// step whose sentence says "unchanged" about a value, far from the file
+// the step creates.
+func TestUnlistedPlanPaths_CreateStepWithLaterUnchangedWarns(t *testing.T) {
+	body := "1. **Create `internal/termsafe/termsafe.go`** \u2014 exported\n" +
+		"   `Escape(s string) string` carrying the EXACT relocated implementation from\n" +
+		"   `escapeConfigValue` (`cmd/mindspec/config.go:114-121`): iterate runes; if\n" +
+		"   any rune is outside printable ASCII `[0x20, 0x7e]`, return\n" +
+		"   `strconv.Quote(s)`; else return `s` unchanged."
+	if got := unlistedOne(body); !reflect.DeepEqual(got, []string{"internal/termsafe/termsafe.go"}) {
+		t.Fatalf("got %v, want [internal/termsafe/termsafe.go]", got)
+	}
+}
