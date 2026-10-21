@@ -277,3 +277,19 @@ func silencePanelUsage(cmd *cobra.Command) {
 		silencePanelUsage(child)
 	}
 }
+
+// findPanelRoot resolves slot clones through verified slot metadata.
+func findPanelRoot(isolationRoot func(mainRoot string) (string, error)) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	slot, found, err := workspace.FindSlotRoot(cwd, isolationRoot)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return slot.MainRoot, nil
+	}
+	return findRoot()
+}

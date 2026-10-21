@@ -344,3 +344,4 @@ Work is not complete until changes are committed.
 | `mindspec models populate` | Print the prompt for declaring the per-phase `models:` protocol (writes nothing) |
 | `mindspec commands populate` | Print the prompt for declaring your build/test `commands:` (writes nothing) |
 | `mindspec panel create <slug> --gate adhoc --target <ref>` | Create an ad-hoc (no owning spec) review panel at `.mindspec/reviews/<slug>/` |
+| `mindspec panel schema` | Print the verdict JSON Schema. The verdict parser also checks file size and field relations. |

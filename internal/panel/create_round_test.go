@@ -15,7 +15,7 @@ import (
 func createRoster(n int) []RosterSlot {
 	slots := make([]RosterSlot, n)
 	for i := range slots {
-		slots[i] = RosterSlot{fmt.Sprintf("R%d", i+1), fmt.Sprintf("model-%d", i%2), "correctness"}
+		slots[i] = RosterSlot{Slot: fmt.Sprintf("R%d", i+1), Model: fmt.Sprintf("model-%d", i%2), Lens: "correctness"}
 	}
 	return slots
 }
