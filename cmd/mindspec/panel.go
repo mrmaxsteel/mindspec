@@ -225,8 +225,13 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		for i, slot := range slots {
 			roster[i] = panel.RosterSlot{Slot: slot.Slot, Model: slot.Model, Lens: slot.Lens}
 		}
+		regions, err := resolvePanelBriefRegions(root, specDir, specID, sha, rosterGate, cfg)
+		if err != nil {
+			return err
+		}
 		in := panel.CreateInput{
-			BeadID: beadPtr, Spec: specID, Target: target, Round: round,
+			BriefRegions: regions,
+			BeadID:       beadPtr, Spec: specID, Target: target, Round: round,
 			Roster: roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
 			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
 			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },

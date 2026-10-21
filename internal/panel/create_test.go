@@ -154,7 +154,7 @@ func TestCreate_BRIEFMarkerEdgeCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := renderCreateBriefHeader(filepath.Base(dir), load(dir).Panel, "none recorded") + "\n\n" + original
+		want := renderCreateBriefHeader(filepath.Base(dir), load(dir).Panel, "none recorded", BriefRegions{}) + "\n\n" + original
 		if string(got) != want {
 			t.Fatalf("legacy BRIEF.md not prepended byte-identically:\ngot:  %q\nwant: %q", got, want)
 		}
@@ -655,20 +655,22 @@ func TestPanelSchemaDoc_SectionScoped_RejectsRenamedNormativeName(t *testing.T) 
 	}
 }
 
-// TestBriefStubBody_ContainsAcceptanceCriteriaHeading pins spec 126 R5/AC-15:
-// briefStubBody (create.go:26) — the skeleton a first `create` writes below
-// the machine-managed header — must carry an
-// "## Acceptance Criteria (verbatim from spec.md)" heading with its
-// TODO(skill) stub comment, so a fresh install's very first BRIEF skeleton
-// demands the verbatim ACs. In-package (package panel) because the constant
-// is unexported and internal/setup does not import internal/panel. Reverting
-// the create.go:26 heading edit REDs this test.
+// TestBriefStubBody_ContainsAcceptanceCriteriaHeading checks R9.3. The skeleton
+// uses the managed quotation and names no documentation path or internal record.
 func TestBriefStubBody_ContainsAcceptanceCriteriaHeading(t *testing.T) {
-	if !strings.Contains(briefStubBody, "## Acceptance Criteria (verbatim from spec.md)") {
-		t.Fatalf("briefStubBody missing the '## Acceptance Criteria (verbatim from spec.md)' heading:\n%s", briefStubBody)
+	if !strings.Contains(briefStubBody, "## Acceptance Criteria\n") {
+		t.Fatalf("briefStubBody missing the acceptance heading:\n%s", briefStubBody)
 	}
-	if !strings.Contains(briefStubBody, "<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->") {
-		t.Errorf("briefStubBody missing the AC-heading's TODO(skill) stub comment:\n%s", briefStubBody)
+	if !strings.Contains(briefStubBody, "Use the quoted acceptance criteria in the managed region above.") {
+		t.Errorf("briefStubBody must use the managed quotation:\n%s", briefStubBody)
+	}
+	if briefInternalReference.MatchString(briefStubBody) {
+		t.Errorf("briefStubBody names an internal reference:\n%s", briefStubBody)
+	}
+	for _, path := range briefPath.FindAllString(briefStubBody, -1) {
+		if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".rst") || strings.HasSuffix(path, ".adoc") || strings.Contains(path, "/domains/") {
+			t.Errorf("briefStubBody names a documentation path: %s", path)
+		}
 	}
 }
 

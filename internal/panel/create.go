@@ -36,9 +36,9 @@ const briefStubBody = `## Summary
 
 <!-- TODO(skill): the files/paths this review covers -->
 
-## Acceptance Criteria (verbatim from spec.md)
+## Acceptance Criteria
 
-<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->
+Use the quoted acceptance criteria in the managed region above.
 
 ## Prior-Round Asks
 
@@ -52,6 +52,7 @@ const briefStubBody = `## Summary
 // CreateInput contains caller-resolved registration values. The caller resolves
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
+	BriefRegions      BriefRegions
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -277,7 +278,7 @@ func Create(dir string, in CreateInput) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read prior round: %w", err)
 	}
-	header := renderCreateBriefHeader(filepath.Base(dir), p, prior)
+	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
 	if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)
@@ -324,8 +325,9 @@ func Create(dir string, in CreateInput) error {
 	return nil
 }
 
-func renderCreateBriefHeader(slug string, p Panel, prior string) string {
+func renderCreateBriefHeader(slug string, p Panel, prior string, regions BriefRegions) string {
 	header := renderBriefHeader(slug, p.Round, p.Target, p.ReviewedHeadSHA)
+	header = renderBriefRegions(header, regions)
 	var b strings.Builder
 	b.WriteString("## Reviewer roster\n\n")
 	for _, slot := range p.Roster {
