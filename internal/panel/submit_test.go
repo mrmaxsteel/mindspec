@@ -305,6 +305,27 @@ func testSubmitAttemptPathBinding(t *testing.T) {
 			}
 		})
 	}
+	t.Run("nested symlink outside slot", func(t *testing.T) {
+		target, b, resolve := submitFixture(t)
+		outside := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(outside, "sub"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(target.SlotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		alias := filepath.Join(target.SlotDir, "attempt-1")
+		if err := os.Symlink(outside, alias); err != nil {
+			t.Skipf("cannot create symlink: %v", err)
+		}
+		target.File = filepath.Join(alias, "sub", "verdict.json")
+		if err := os.WriteFile(target.File, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Submit(target, b, resolve); err == nil || !strings.Contains(err.Error(), "cannot bind attempt path") {
+			t.Fatalf("attempt path refusal: want %q, got %v", "cannot bind attempt path", err)
+		}
+	})
 }
 
 func TestPanelSubmit_AttemptNamedAncestor(t *testing.T) {
