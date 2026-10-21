@@ -1559,7 +1559,7 @@ func (g *MindspecExecutor) CheckSlotIgnore(workdir, file string) error {
 
 // LsFiles checks the index without interpreting path as a pathspec pattern.
 func (g *MindspecExecutor) LsFiles(workdir, path string) (bool, error) {
-	out, err := slotGit(workdir, "--literal-pathspecs", "ls-files", "-z", "--", path)
+	out, err := gitutil.LsFiles(workdir, "--literal-pathspecs", "-z", "--", path)
 	if err != nil {
 		return false, fmt.Errorf("git ls-files: %w", err)
 	}

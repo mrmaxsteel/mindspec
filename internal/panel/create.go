@@ -69,6 +69,19 @@ type CreateInput struct {
 	ReportDropped func(string)
 }
 
+// CheckCreateRound refuses a round at or before the latest verdict round.
+// Call it before scratch cleanup. Create also calls it before writing.
+func CheckCreateRound(dir string, round int) error {
+	res, err := Tally(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if res != nil && res.LatestRound > 0 && round <= res.LatestRound {
+		return &CreateRoundConflict{Round: round, LatestRound: res.LatestRound}
+	}
+	return nil
+}
+
 // Create validates and computes the snapshot and BRIEF before writing. It
 // archives the previous BRIEF without replacing an existing archive, appends
 // the round event before the snapshot, then writes the new BRIEF. These writes
@@ -104,12 +117,8 @@ func Create(dir string, in CreateInput) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read panel.json: %w", err)
 	}
-	res, err := Tally(dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := CheckCreateRound(dir, in.Round); err != nil {
 		return err
-	}
-	if res != nil && res.LatestRound > 0 && in.Round <= res.LatestRound {
-		return &CreateRoundConflict{Round: in.Round, LatestRound: res.LatestRound}
 	}
 	lines, err := ReadLedger(dir)
 	if err != nil {

@@ -78,7 +78,8 @@ Missing paths, invalid file types and Git errors refuse reuse.
 
 `CheckSlotIgnore` uses `slotGit` for `check-ignore --quiet -- <path>`.
 `CheckIgnore` retains the operator configuration for ledger checks.
-`LsFiles` uses `slotGit` with `--literal-pathspecs ls-files -z -- <path>`.
+`LsFiles` calls `gitutil.LsFiles` with the operator's Git configuration.
+`gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.
 It reports whether the index tracks the literal path or a file under it.
 Git errors propagate. The command layer uses this query to refuse a tracked isolation root.
 `MockExecutor` records these calls and provides function and error hooks.

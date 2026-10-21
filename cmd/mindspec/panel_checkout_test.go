@@ -586,6 +586,35 @@ func TestPanelCheckout_Prune(t *testing.T) {
 	})
 }
 
+func TestPanelCreate_RoundConflictKeepsDirtyCheckout(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	resetPanelCreateFlags(t)
+	if out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "1"); err != nil {
+		t.Fatalf("create round 1: %v %s", err, out)
+	}
+	checkoutOK(t, "--slot", "R1")
+	layout := f.layout(t, "R1")
+	slotWrite(t, filepath.Join(layout.Tree, "README.md"), "dirty tracked file\n")
+	slotWrite(t, filepath.Join(layout.Tree, "untracked", "notes.txt"), "keep these notes\n")
+	slotWrite(t, filepath.Join(f.dir, "R1-round-2.json"), `{"verdict":"APPROVE"}`)
+	before := slotSnapshot(t, layout.Dir)
+	beforePanel := slotSnapshot(t, f.dir)
+	resetPanelCreateFlags(t)
+	out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+	if err == nil || !strings.Contains(err.Error(), "cannot create round 2: verdict files already reach round 2") {
+		t.Fatalf("round conflict refusal: %v %s", err, out)
+	}
+	if _, err := os.Stat(layout.Dir); err != nil {
+		t.Fatalf("round conflict removed dirty slot directory: %v", err)
+	}
+	if after := slotSnapshot(t, layout.Dir); !reflect.DeepEqual(before, after) {
+		t.Fatal("round conflict changed dirty slot bytes")
+	}
+	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
+		t.Fatal("round conflict changed panel bytes")
+	}
+}
+
 func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 	for _, verb := range []string{"prune", "create", "abandon"} {
 		t.Run(verb, func(t *testing.T) {
