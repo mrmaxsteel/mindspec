@@ -60,11 +60,13 @@ architecture doc.)
 ### Slot Git Operations (`internal/executor/mindspec_executor.go`)
 
 `slotGit` runs Git with an explicit working directory.
-It removes inherited `GIT_*` variables, except `GIT_CONFIG_GLOBAL` for main repository calls.
+It removes all inherited `GIT_*` variables.
 It sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_SYSTEM=/dev/null`.
-Main repository calls keep global config so `safe.directory` applies.
+It sets `GIT_CONFIG_GLOBAL=/dev/null` for every call.
+`slotMainGit` reads only global `safe.directory` values with the operator environment.
+It passes each value as a `-c safe.directory=<value>` command option, in order.
 These calls check the isolation root, clone the source, and read the source object-store path.
-Calls inside the slot tree set `GIT_CONFIG_GLOBAL=/dev/null`.
+Calls inside the slot tree do not read global configuration.
 It sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=/usr/bin/false`.
 Command options set `core.fsmonitor=false` and `core.hooksPath=/dev/null`.
 Errors include escaped Git stderr.

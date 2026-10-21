@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -32,11 +33,6 @@ var panelAbandonCmd = &cobra.Command{
 		if err != nil {
 			return panelVerbFailure(err)
 		}
-		releaseCheckouts, err := cleanupPanelCheckouts(root, reg, isolation, 0, "")
-		if err != nil {
-			return checkoutError(err, "mindspec panel verify "+shellQuoteTarget(reg.Slug())+checkoutSpecFlag(reg))
-		}
-		defer releaseCheckouts()
 		event := panel.AbandonRecord{Record: panel.RecordAbandon, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Reason: reason, By: by, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 		// Reuse the event key on retries, including a crash before snapshot rename.
 		lines, err := panel.ReadLedger(reg.Dir)
@@ -68,6 +64,33 @@ var panelAbandonCmd = &cobra.Command{
 		if err != nil {
 			return panelVerbFailure(err)
 		}
+		if err := panel.Validate(raw); err != nil {
+			return panelVerbFailure(err)
+		}
+		if err := panel.HygienePredicate(raw); err != nil {
+			return panelVerbFailure(err)
+		}
+		var pending, prior map[string]interface{}
+		if err := json.Unmarshal(raw, &pending); err != nil {
+			return panelVerbFailure(err)
+		}
+		for _, line := range lines {
+			var old map[string]interface{}
+			if err := json.Unmarshal(line, &old); err != nil {
+				return panelVerbFailure(err)
+			}
+			if old["record"] == panel.RecordAbandon && old["created_at"] == event.CreatedAt {
+				prior = old
+			}
+		}
+		if prior != nil && !reflect.DeepEqual(pending, prior) {
+			return panelVerbFailure(fmt.Errorf("abandon record already exists with different content"))
+		}
+		releaseCheckouts, err := cleanupPanelCheckouts(root, reg, isolation, 0, "")
+		if err != nil {
+			return checkoutError(err, "mindspec panel verify "+shellQuoteTarget(reg.Slug())+checkoutSpecFlag(reg))
+		}
+		defer releaseCheckouts()
 		if err := panel.AppendRecordsWithCheck(reg.Dir, func() error {
 			current, err := panelAbandonSnapshot(reg.Dir, reason)
 			if err != nil {

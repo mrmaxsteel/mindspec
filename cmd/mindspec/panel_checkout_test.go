@@ -580,6 +580,57 @@ func TestPanelCheckout_Prune(t *testing.T) {
 			}
 		}
 	})
+	for _, field := range []string{"reason", "by", "conflict"} {
+		t.Run("abandon refuses "+field, func(t *testing.T) {
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			checkoutOK(t, "--slot", "R1")
+			layout := f.layout(t, "R1")
+			slotWrite(t, filepath.Join(layout.Tree, "README.md"), "dirty tracked file\n")
+			slotWrite(t, filepath.Join(layout.Tree, "untracked", "notes.txt"), "keep these notes\n")
+			reason, by := "review ended", "operator"
+			if field == "reason" {
+				reason = "/private/tmp/operator-notes"
+			} else if field == "by" {
+				by = "/private/tmp/operator-notes"
+			} else {
+				event := panel.AbandonRecord{Record: panel.RecordAbandon, Spec: "other", Panel: "p", Reason: reason, By: by, CreatedAt: "2026-01-01T00:00:00Z"}
+				raw, err := json.Marshal(event)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := panel.AppendRecords(f.dir, raw); err != nil {
+					t.Fatal(err)
+				}
+				f.p.Abandoned, f.p.AbandonReason = true, reason
+				if err := panel.WriteSnapshot(f.dir, f.p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := slotSnapshot(t, layout.Dir)
+			beforePanel := slotSnapshot(t, f.dir)
+			beforeLedger := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
+			want := "$." + field + " contains a forbidden path token"
+			if field == "conflict" {
+				want = "already exists with different content"
+			}
+			out, err := runPanelCmd("abandon", "p", "--reason", reason, "--by", by)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("audit record refusal: %v %s", err, out)
+			}
+			if _, err := os.Stat(layout.Dir); err != nil {
+				t.Fatalf("refused abandonment removed dirty slot directory: %v", err)
+			}
+			if !reflect.DeepEqual(before, slotSnapshot(t, layout.Dir)) {
+				t.Fatal("refused abandonment changed dirty checkout bytes")
+			}
+			if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
+				t.Fatal("refused abandonment changed panel bytes")
+			}
+			if !bytes.Equal(beforeLedger, slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))) {
+				t.Fatal("refused abandonment changed ledger bytes")
+			}
+		})
+	}
 	t.Run("symlink leaf", func(t *testing.T) {
 		f := newCheckoutFixture(t, ".mindspec-scratch")
 		checkoutOK(t, "--slot", "R1")
