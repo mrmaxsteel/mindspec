@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -79,6 +80,10 @@ func checkOwnershipManifests(r *Report, root string) {
 // dead-manifest check within a single ownership check, replacing the
 // former per-domain full walk.
 func enumerateWorkspaceFiles(root string) []string {
+	isolation, err := config.IsolationRootFor(root)
+	if err != nil {
+		return nil
+	}
 	var files []string
 	_ = walkWorkspaceFn(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -93,6 +98,9 @@ func enumerateWorkspaceFiles(root string) []string {
 			return nil
 		}
 		if d.IsDir() {
+			if rel == filepath.ToSlash(filepath.Clean(isolation)) {
+				return fs.SkipDir
+			}
 			if _, skip := walkExclusions[rel]; skip {
 				return fs.SkipDir
 			}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/layout"
@@ -211,17 +212,37 @@ func init() {
 	migrateCmd.AddCommand(migrateLayoutCmd)
 }
 
+// Migration also works before init, in a directory with no repository or config.
+// Resolve existing config files normally, including local-file refusals.
+func migrateIsolationRoot(root string) (string, error) {
+	for _, name := range []string{"config.yaml", "config.local.yaml"} {
+		if _, err := os.Stat(filepath.Join(root, ".mindspec", name)); err == nil {
+			return config.IsolationRootFor(root)
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	return config.DefaultConfig().Panel.IsolationRoot, nil
+}
+
 // scanSourceMarkdown walks the repo for .md files outside the canonical docs area.
 func scanSourceMarkdown(root string) ([]string, error) {
+	isolation, err := migrateIsolationRoot(root)
+	if err != nil {
+		return nil, err
+	}
 	ignored := newMigrateIgnoreChecker(root)
 	var files []string
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 
 		if d.IsDir() {
+			if filepath.Clean(path) == filepath.Join(root, isolation) {
+				return filepath.SkipDir
+			}
 			name := d.Name()
 			switch name {
 			case ".git", ".beads", ".claude", "docs_archive", "node_modules", "vendor":
@@ -278,17 +299,24 @@ func scanSourceMarkdown(root string) ([]string, error) {
 
 // scanCanonicalDocs lists existing files under .mindspec/docs/.
 func scanCanonicalDocs(root string) ([]string, error) {
+	isolation, err := migrateIsolationRoot(root)
+	if err != nil {
+		return nil, err
+	}
 	docsDir := filepath.Join(root, ".mindspec", "docs")
 	if _, err := os.Stat(docsDir); os.IsNotExist(err) {
 		return nil, nil
 	}
 
 	var files []string
-	err := filepath.WalkDir(docsDir, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(docsDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
+			if filepath.Clean(path) == filepath.Join(root, isolation) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)

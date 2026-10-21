@@ -81,6 +81,10 @@ type MockExecutor struct {
 	LsFilesFn         func(workdir, path string) (bool, error)
 	LsFilesResult     bool
 	LsFilesErr        error
+	CloneSlotTreeFn   func(tree, reviewedSHA string) error
+	CloneSlotTreeErr  error
+	CheckSlotTreeFn   func(tree, reviewedSHA string) error
+	CheckSlotTreeErr  error
 	IsRefNotFoundFn   func(error) bool
 
 	// Layout-mover git primitives (spec 106 Bead 3). The *Fn hooks, when
@@ -128,6 +132,22 @@ type MockExecutor struct {
 	AdvanceBranchExpectedOldErr  error
 	ResetIndexToHeadFn           func(wtPath string) error
 	ResetIndexToHeadErr          error
+}
+
+func (m *MockExecutor) CloneSlotTree(tree, reviewedSHA string) error {
+	m.record("CloneSlotTree", tree, reviewedSHA)
+	if m.CloneSlotTreeFn != nil {
+		return m.CloneSlotTreeFn(tree, reviewedSHA)
+	}
+	return m.CloneSlotTreeErr
+}
+
+func (m *MockExecutor) CheckSlotTree(tree, reviewedSHA string) error {
+	m.record("CheckSlotTree", tree, reviewedSHA)
+	if m.CheckSlotTreeFn != nil {
+		return m.CheckSlotTreeFn(tree, reviewedSHA)
+	}
+	return m.CheckSlotTreeErr
 }
 
 // MockCall records a single method invocation.

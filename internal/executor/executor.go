@@ -174,6 +174,11 @@ type Executor interface {
 	// LsFiles reports whether the index tracks path or a file under it.
 	LsFiles(workdir, path string) (bool, error)
 
+	// CloneSlotTree makes a shared, detached clone with no origin remote.
+	CloneSlotTree(tree, reviewedSHA string) error
+	// CheckSlotTree checks a reusable clone's repository configuration and HEAD.
+	CheckSlotTree(tree, reviewedSHA string) error
+
 	// IsRefNotFound reports whether err is the genuine "ref absent" case
 	// (branch already deleted) from RevParseRef vs a transient/structural git
 	// failure — the panel gate's missing-ref pass-through distinction. Routing

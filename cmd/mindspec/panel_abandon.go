@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,7 @@ var panelAbandonCmd = &cobra.Command{
 	Use: "abandon <slug>", Short: "Abandon a panel with an audited reason and name",
 	Args: cobra.ExactArgs(1), SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, reg, err := resolvePanelVerb(cmd, args[0])
+		root, reg, err := resolvePanelVerb(cmd, args[0])
 		if err != nil {
 			return panelVerbFailure(err)
 		}
@@ -27,6 +28,15 @@ var panelAbandonCmd = &cobra.Command{
 		if err != nil {
 			return panelVerbFailure(err)
 		}
+		isolation, err := config.IsolationRootFor(root)
+		if err != nil {
+			return panelVerbFailure(err)
+		}
+		releaseCheckouts, err := cleanupPanelCheckouts(root, reg, isolation, 0, "")
+		if err != nil {
+			return panelVerbFailure(err)
+		}
+		defer releaseCheckouts()
 		event := panel.AbandonRecord{Record: panel.RecordAbandon, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Reason: reason, By: by, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 		// Reuse the event key on retries, including a crash before snapshot rename.
 		lines, err := panel.ReadLedger(reg.Dir)
