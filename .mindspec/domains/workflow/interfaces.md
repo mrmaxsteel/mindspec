@@ -64,6 +64,36 @@ An unknown ID or scope returns an error with a `recovery:` line.
 It lists orchestrator rules in every mode.
 It also lists implementer rules in implement mode.
 
+### Doctor Panel and Rule Checks
+
+`mindspec doctor` shares one config load for source, model, command, and panel checks.
+A load failure gives one `MindSpec config` Error with a `recovery:` line.
+The command exits 1 if an Error or Missing result remains. Warn and Info do not fail it.
+
+Doctor reports an Error for a reviewer family with no runner.
+It reports a Warn for a reviewer entry that specifies only a model.
+For each process runner used by a resolved gate roster, it checks `argv[0]` with `LookPath`.
+A missing command gives an Error. Available review tools can produce Info suggestions.
+A process runner's `probe` runs with `--probe`, regardless of its config source.
+Without `--probe`, it runs only if the runner comes from untracked `.mindspec/config.local.yaml`.
+If the tracking check fails, doctor requires `--probe`. A skipped probe gives Info.
+Each probe runs at the workspace root with a 10-second limit. Failure gives an Error.
+
+Doctor warns if the local config is tracked or if an existing local config is not ignored.
+It also warns if the panel isolation root is not ignored.
+
+Doctor checks staged-rule markers in `SKILL.md` files under `.claude/skills/` and `.agents/skills/`.
+It warns for invalid markers, missing or unknown rule IDs, and past `remove-by` dates.
+It compares dates in UTC. An Info result lists rules with non-advisory enforcement.
+
+Doctor checks slot metadata under the configured panel isolation root.
+It warns if the slot's panel is missing, abandoned, or at a later round.
+The recovery line is `mindspec panel checkout <slug> --prune`.
+For a spec panel, the line adds `--spec <spec-id>`. Doctor does not prune the slot.
+
+`--ci` skips launcher checks, probes, tool suggestions, and stale checkout checks.
+It retains config checks, reviewer resolution checks, and staged-marker checks.
+
 ### Beads Adapter (`internal/bead/`)
 
 ```go

@@ -326,7 +326,8 @@ Work is not complete until changes are committed.
 | `mindspec state show --spec <id>` | Show derived mode for a specific spec |
 | `mindspec validate spec <id>` | Pre-check spec quality before approval |
 | `mindspec validate plan <id>` | Pre-check plan quality before approval |
-| `mindspec doctor` | Project health check (includes molecule binding warnings) |
+| `mindspec doctor` | Check project health, including molecule bindings, config loading, panel runners, staged-rule markers, and stale panel checkouts. |
+| `mindspec doctor --probe` | Run configured process runner probes from any config source with a 10-second limit per probe. Without this flag, only probes from untracked `.mindspec/config.local.yaml` runners run. `--ci` skips all probes. |
 | `/spec-init` | Start a new specification |
 | `/spec-approve` | Approve spec → plan transition |
 | `/plan-approve` | Approve plan → implement transition |
