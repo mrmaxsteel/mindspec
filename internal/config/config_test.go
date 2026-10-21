@@ -371,9 +371,6 @@ func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
 	if cfg.Panel.ApproveThreshold != "n-1" {
 		t.Errorf("panel.approve_threshold: got %q, want \"n-1\"", cfg.Panel.ApproveThreshold)
 	}
-	if !cfg.Panel.Substitution.ClaudeSubOnQuota {
-		t.Error("panel.substitution.claude_sub_on_quota: want true by default")
-	}
 
 	// models: (empty map, each phase inherits the ambient model)
 	if len(cfg.Models) != 0 {
@@ -577,8 +574,6 @@ panel:
     - family: codex
       count: 2
   approve_threshold: "3"
-  substitution:
-    claude_sub_on_quota: false
 models:
   implement: opus
   review: fable
@@ -620,9 +615,6 @@ runner: claude-code-workflow
 	}
 	if cfg.Panel.ApproveThreshold != "3" {
 		t.Errorf("panel.approve_threshold: got %q, want \"3\"", cfg.Panel.ApproveThreshold)
-	}
-	if cfg.Panel.Substitution.ClaudeSubOnQuota {
-		t.Error("panel.substitution.claude_sub_on_quota: want false (explicit override)")
 	}
 
 	wantModels := map[string]string{
@@ -708,14 +700,8 @@ func TestLoad_GatesAbsentByteIdentical109(t *testing.T) {
 	if cfg.Panel.ApproveThreshold != "n-1" {
 		t.Errorf("panel.approve_threshold: got %q, want \"n-1\"", cfg.Panel.ApproveThreshold)
 	}
-	if !cfg.Panel.Substitution.ClaudeSubOnQuota {
-		t.Error("panel.substitution.claude_sub_on_quota: want true by default")
-	}
 	if len(cfg.Panel.Gates) != 0 {
 		t.Errorf("panel.gates: want empty by default, got %v", cfg.Panel.Gates)
-	}
-	if len(cfg.Panel.Substitution.Substitutes) != 0 {
-		t.Errorf("panel.substitution.substitutes: want empty by default, got %v", cfg.Panel.Substitution.Substitutes)
 	}
 	if cfg.Panel.Note != "" {
 		t.Errorf("panel.note: want empty by default, got %q", cfg.Panel.Note)
@@ -735,8 +721,6 @@ panel:
     - family: codex
       count: 2
   approve_threshold: "3"
-  substitution:
-    claude_sub_on_quota: false
 runner: claude-code-workflow
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
@@ -754,14 +738,8 @@ runner: claude-code-workflow
 	if fixtureCfg.Panel.ApproveThreshold != "3" {
 		t.Errorf("109 fixture approve_threshold: got %q, want \"3\"", fixtureCfg.Panel.ApproveThreshold)
 	}
-	if fixtureCfg.Panel.Substitution.ClaudeSubOnQuota {
-		t.Error("109 fixture claude_sub_on_quota: want false (explicit override)")
-	}
 	if fixtureCfg.Runner != "claude-code-workflow" {
 		t.Errorf("109 fixture runner: got %q, want \"claude-code-workflow\"", fixtureCfg.Runner)
-	}
-	if len(fixtureCfg.Panel.Gates) != 0 || len(fixtureCfg.Panel.Substitution.Substitutes) != 0 {
-		t.Errorf("109 fixture gates/substitutes must stay empty: gates=%v substitutes=%v", fixtureCfg.Panel.Gates, fixtureCfg.Panel.Substitution.Substitutes)
 	}
 
 	// Gates absent: resolve per-gate defaults for zero config and preserve
@@ -867,10 +845,6 @@ panel:
     - {family: claude, count: 3}
     - {family: codex, count: 3}
   approve_threshold: "n-1"
-  substitution:
-    claude_sub_on_quota: true
-    substitutes:
-      gpt-5.5: claude-sonnet-5
   gates:
     spec_approve:
       reviewers:
@@ -921,13 +895,6 @@ panel:
 	}
 	if cfg.Panel.ApproveThreshold != "n-1" {
 		t.Errorf("panel.approve_threshold: got %q", cfg.Panel.ApproveThreshold)
-	}
-	if !cfg.Panel.Substitution.ClaudeSubOnQuota {
-		t.Error("claude_sub_on_quota: want true")
-	}
-	wantSubstitutes := map[string]string{"gpt-5.5": "claude-sonnet-5"}
-	if !reflect.DeepEqual(cfg.Panel.Substitution.Substitutes, wantSubstitutes) {
-		t.Errorf("substitutes: got %v, want %v", cfg.Panel.Substitution.Substitutes, wantSubstitutes)
 	}
 
 	if len(cfg.Panel.Gates) != 4 {
@@ -1347,13 +1314,13 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 	// The 9-reviewer, all-lens-less, 3-entries-of-count-3 worked example
 	// (spec 112 R3) — normative, not illustrative.
 	worked := &Config{Panel: Panel{Gates: map[string]GatePanel{
-		"spec_approve": {Reviewers: []Reviewer{
+		"bead": {Reviewers: []Reviewer{
 			{Model: "claude-fable-5", Count: intp(3)},
 			{Model: "claude-opus-4-8", Count: intp(3)},
 			{Model: "gpt-5.5", Count: intp(3)},
 		}},
 	}}}
-	workedSlots, err := worked.PanelGateReviewerSlots("spec_approve")
+	workedSlots, err := worked.PanelGateReviewerSlots("bead")
 	if err != nil {
 		t.Fatalf("PanelGateReviewerSlots(worked): %v", err)
 	}
@@ -1381,7 +1348,7 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 	for _, s := range workedSlots {
 		seen[s.Lens] = true
 	}
-	for _, l := range defaultLenses {
+	for _, l := range defaultLensData().Gates["bead"].Lenses {
 		if !seen[l] {
 			t.Errorf("worked example missing default lens %q: %+v", l, workedSlots)
 		}
@@ -1404,7 +1371,7 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 	}
 
 	// Two loads (resolutions) of identical config yield identical slot lists.
-	workedSlots2, err := worked.PanelGateReviewerSlots("spec_approve")
+	workedSlots2, err := worked.PanelGateReviewerSlots("bead")
 	if err != nil {
 		t.Fatalf("PanelGateReviewerSlots(worked, second call): %v", err)
 	}
@@ -1423,7 +1390,7 @@ func TestPanelGateSlots_DeterministicExpansion(t *testing.T) {
 	cursorReset := &Config{Panel: Panel{Gates: map[string]GatePanel{
 		"final_review": {Reviewers: []Reviewer{
 			{Model: "claude-fable-5", Count: intp(1)},
-			{Family: "legacy-family-should-lose", Model: "claude-opus-4-8", Lens: "adversarial", Count: intp(1)},
+			{Family: "harness", Model: "claude-opus-4-8", Lens: "adversarial", Count: intp(1)},
 			{Model: "claude-sonnet-5", Count: intp(1)},
 		}},
 	}}}
@@ -1505,34 +1472,10 @@ func TestPanelGateAdvisoryDefault_SelectionRule(t *testing.T) {
 // refuses it via validateReviewerEntries's original branch, naming the
 // offending index and carrying the ADR-0035 recovery line.
 func TestLoad_EmptyStringModel(t *testing.T) {
-	t.Run("empty model with family resolves to family", func(t *testing.T) {
-		ResetCache()
-		defer ResetCache()
-
-		root := t.TempDir()
-		dir := filepath.Join(root, ".mindspec")
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		content := "panel:\n  reviewers:\n    - {model: \"\", family: codex, count: 1}\n    - {family: claude, count: 1}\n"
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		cfg, err := Load(root)
-		if err != nil {
-			t.Fatalf("expected Load to accept {model: \"\", family: codex}, got error: %v", err)
-		}
-
-		slots, err := cfg.PanelGateReviewerSlots("bead")
-		if err != nil {
-			t.Fatalf("PanelGateReviewerSlots: %v", err)
-		}
-		if len(slots) != 2 {
-			t.Fatalf("expected 2 slots, got %d: %+v", len(slots), slots)
-		}
-		if slots[0].Model != "codex" {
-			t.Errorf("slots[0].Model = %q, want %q (empty model must resolve to family)", slots[0].Model, "codex")
+	t.Run("explicit empty model with family is refused", func(t *testing.T) {
+		root := panelConfigFixture(t, "panel:\n  reviewers: [{model: \"\", family: harness, count: 2}]\n", "")
+		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "invalid model") {
+			t.Fatalf("empty model accepted: %v", err)
 		}
 	})
 
@@ -1558,13 +1501,8 @@ func TestLoad_EmptyStringModel(t *testing.T) {
 		if !strings.Contains(msg, "panel.reviewers[0]") {
 			t.Errorf("error message missing %q: %v", "panel.reviewers[0]", msg)
 		}
-		// Uniquely pin the neither-set branch: the count-must-be->=1 branch
-		// also emits panel.reviewers[0] + a recovery line, so require the
-		// distinctive neither-set phrase (byte-for-byte from config.go's
-		// validateReviewerEntries) so a fall-through to a different branch
-		// cannot pass this test spuriously.
-		if !strings.Contains(msg, `sets neither "model" nor "family"`) {
-			t.Errorf("error message missing the neither-set phrase %q: %v", `sets neither "model" nor "family"`, msg)
+		if !strings.Contains(msg, "invalid model") {
+			t.Errorf("error message missing the model refusal: %v", msg)
 		}
 		if !strings.Contains(msg, "recovery:") {
 			t.Errorf("error message missing ADR-0035 recovery line: %v", msg)
@@ -1604,20 +1542,21 @@ func TestPanelGateDefaults_RoundRobinFamilies(t *testing.T) {
 		}
 		families := map[string]int{}
 		for i, slot := range slots {
-			want := []string{"claude", "codex"}[i%2]
-			if slot.Model != want || slot.Slot != fmt.Sprintf("R%d", i+1) || slot.Lens != defaultLenses[i%len(defaultLenses)] {
+			want := "harness"
+			if slot.Model != want || slot.Slot != fmt.Sprintf("R%d", i+1) || slot.Lens != cfg.GateLenses(gate)[i%len(cfg.GateLenses(gate))] {
 				t.Errorf("%s slot %d = %+v; want family %s, ordered id and default lens", gate, i, slot, want)
 			}
 			families[slot.Model]++
 		}
-		if gate == "bead" && (families["claude"] != 2 || families["codex"] != 2) {
-			t.Errorf("bead families = %v; want 2+2", families)
+		if gate == "bead" && (families["harness"] != 4) {
+			t.Errorf("bead families = %v; want four harness slots", families)
 		}
 	}
 }
 
 func TestPanelGateDefaults_ExplicitGlobalWins(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.Panel.Runners = append(cfg.Panel.Runners, Runner{Family: "claude", Kind: "harness"}, Runner{Family: "codex", Kind: "harness"})
 	cfg.Panel.Reviewers = []Reviewer{{Family: "claude", Count: intp(3)}}
 	for _, gate := range PanelGateKeys {
 		slots, err := cfg.PanelGateReviewerSlots(gate)

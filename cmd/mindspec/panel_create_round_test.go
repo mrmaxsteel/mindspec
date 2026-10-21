@@ -51,14 +51,14 @@ func TestPanelCreate_ReviewersN(t *testing.T) {
 		name, config, n string
 		models          []string
 	}{
-		{"defaults", "", "3", []string{"claude", "codex", "claude"}},
+		{"defaults", "", "3", []string{"harness", "harness", "harness"}},
 		{"explicit global", "panel:\n  reviewers:\n    - family: claude\n      count: 3\n", "4", []string{"claude", "claude", "claude", "claude"}},
 		{"gate entry order", "panel:\n  gates:\n    bead:\n      reviewers:\n        - family: codex\n          count: 3\n          lens: security\n        - family: claude\n          count: 1\n", "3", []string{"codex", "claude", "codex"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := setupCreateIntegrity(t)
 			if tc.config != "" {
-				if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(tc.config), 0644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte(strings.Replace(tc.config, "panel:\n", "panel:\n  runners: [{family: claude, kind: harness}, {family: codex, kind: harness}]\n", 1)), 0644); err != nil {
 					t.Fatal(err)
 				}
 				config.ResetCache()

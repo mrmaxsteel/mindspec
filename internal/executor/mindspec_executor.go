@@ -1433,6 +1433,16 @@ func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
 	return gitutil.CheckIgnore(workdir, file)
 }
 
+// LsFiles checks the index without interpreting path as a pathspec pattern.
+func (g *MindspecExecutor) LsFiles(workdir, path string) (bool, error) {
+	cmd := exec.Command("git", "-C", workdir, "--literal-pathspecs", "ls-files", "-z", "--", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git ls-files: %w", err)
+	}
+	return len(out) > 0, nil
+}
+
 // IsRefNotFound reports whether err is gitutil.ErrRefNotFound (the genuine
 // branch-deleted case). Exposing the sentinel test through the executor keeps
 // the gitutil.ErrRefNotFound errors.Is check out of internal/complete
