@@ -90,7 +90,7 @@ degrades to local + remote-tracking refs and warns that hosted PRs could not
 be consulted.
 
 --abort hard-resets a pre-publish run to its pre-run ref (refused after
-publish; the lifecycle is forward-only, ADR-0023).`,
+publish; the lifecycle is forward-only).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		abort, _ := cmd.Flags().GetBool("abort")
 		runID, _ := cmd.Flags().GetString("run-id")

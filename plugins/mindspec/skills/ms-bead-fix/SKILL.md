@@ -11,13 +11,13 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-s
 
 ## Inputs
 
-- `bead-id` (required) — e.g. `lola-8gbp.2`.
+- `bead-id` (required) — e.g. `proj-a1b2.2`.
 - `bead-worktree` (required) — absolute path.
 - `panel-slug` (required).
 - `round` (required) — the round whose verdicts you're acting on; the fix commit goes into round-<N+1>'s review scope.
 - `consolidated-path` — usually `<spec-dir>/reviews/<panel-slug>/consolidated-round-<N>.md`.
 
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel artifacts are co-located under `<spec-dir>/reviews/` (spec 106 flat layout).
+> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel artifacts are co-located under `<spec-dir>/reviews/`.
 
 ## Steps
 
@@ -31,7 +31,7 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-s
    - The standard guardrails pointer (AGENTS.md § Bead-loop guardrails).
    - **Explicit deviation policy**: if the subagent can't address an item literally (e.g. a test requires editing a different bead's data, or the requested refactor breaks a downstream contract), it should flag the deviation in its report and document it in the commit message under `Deviations:`. The next-round panel BRIEF surfaces these as "Fix-author deviations (assess these)".
 
-   **Artifact-gate rule (do NOT mark a HARD-block finding ADDRESSED via a PR-body edit alone).** If a consolidated item names a measurement artifact that does not exist at its stated path, the fix subagent MUST NOT mark it ADDRESSED until the artifact actually exists — PR-body precision is necessary but not sufficient. If it can't produce the artifact in scope, it lands any body-precision improvements, returns the artifact-gate findings UNCHANGED, and flags "PARTIAL — artifact at `<path>` still missing; HARD block stands". The orchestrator then commissions the artifact run separately. See `/ms-panel-tally` § Artifact gates for the full rule and the lola-f4a8 case.
+   **Artifact-gate rule (do NOT mark a HARD-block finding ADDRESSED via a PR-body edit alone).** If a consolidated item names a measurement artifact that does not exist at its stated path, the fix subagent MUST NOT mark it ADDRESSED until the artifact actually exists — PR-body precision is necessary but not sufficient. If it can't produce the artifact in scope, it lands any body-precision improvements, returns the artifact-gate findings UNCHANGED, and flags "PARTIAL — artifact at `<path>` still missing; HARD block stands". The orchestrator then commissions the artifact run separately. See `/ms-panel-tally` § Artifact gates for the full rule.
 
 2. **Commit message template:**
    ```
@@ -51,11 +51,11 @@ Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in the fix-s
    - Test summary (pass/fail/skip)
    - Any flagged deviations — these go into the next BRIEF's deviations section
 
-## Scratch discipline (ADR-0044)
+## Scratch discipline
 
-Every scratch file the fix subagent writes — notes, throwaway diffs, temp scripts, reproduction checkouts — lives at an ABSOLUTE path under `/tmp`, never a relative path: harness cwd-resets turn a relative write into sibling-worktree corruption. See ADR-0044 for the full reviewer/fixer-conduct doctrine.
+Every scratch file the fix subagent writes — notes, throwaway diffs, temp scripts, reproduction checkouts — lives at an ABSOLUTE path under `/tmp`, never a relative path: harness cwd-resets turn a relative write into sibling-worktree corruption.
 
-## Commit-gate coverage (C2-1)
+## Commit-gate coverage
 
 mindspec blocks direct commits to **protected branches** (any mode) and to `spec/<slug>` branches **during implement mode** — `bead/<id>` branches always pass, so the fix subagent's single commit on the bead branch lands without any escape hatch. The CLI's own block message carries the full when-is-it-legitimate context (point-of-use); no skill prose duplicates the workaround. For panel-driven bead fix-ups, the commit lands on the bead branch and merges through `mindspec complete` — the gate is not in your way.
 

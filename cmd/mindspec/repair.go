@@ -44,9 +44,8 @@ var repairPhaseCmd = &cobra.Command{
 	Use:   "phase <spec-id>",
 	Short: "Re-derive the spec's lifecycle phase and merge-write it to the epic",
 	Long: `Re-derives the lifecycle phase for the given spec from its child bead
-statuses (bead statuses are the ground truth — ADR-0023 §3/§5; the
-epic's mindspec_phase metadata is a cache of that derivation, see the
-ADR-0034 amendment) and writes the derived value back to the epic's
+statuses (bead statuses are the ground truth; the
+epic's mindspec_phase metadata is a cache of that derivation) and writes the derived value back to the epic's
 mindspec_phase metadata.
 
 The write is a MERGE (read-merge-write, the same path lifecycle
@@ -64,13 +63,13 @@ already correct.`,
 
 var repairSpecTitleCmd = &cobra.Command{
 	Use:   "spec-title <epic-id> <title>",
-	Short: "Repair a spec epic's spec_title metadata (the D1 malformed-metadata lever)",
-	Long: `Merge-writes a corrected spec_title onto the given epic's metadata (Spec
-120 R3/AC-8) — the convergent recovery lever every D1 malformed-lineage
+	Short: "Repair a spec epic's spec_title metadata (the malformed-metadata lever)",
+	Long: `Merge-writes a corrected spec_title onto the given epic's metadata
+— the convergent recovery lever every malformed-lineage
 refusal names (see "mindspec repair spec-title <epic-id> <title>" in
 those refusal messages).
 
-The write is a MERGE (bead.MergeMetadata, the same HC-5 discipline as
+The write is a MERGE (read-merge-write, the same discipline as
 'mindspec repair phase'): unrelated metadata keys are preserved, and a
 raw 'bd update --metadata' replace is never emitted.
 
@@ -91,7 +90,7 @@ func init() {
 	// Spec 128 R3.3: the backward-move guard's force flag. Empty means
 	// "not forcing"; an explicit empty reason (--force-backward="") is
 	// rejected below, same discipline as --allow-doc-skew/--override-adr.
-	repairPhaseCmd.Flags().String("force-backward", "", "Record a reason and force a backward mindspec_phase move (refused by default, spec 128 R3.3)")
+	repairPhaseCmd.Flags().String("force-backward", "", "Record a reason and force a backward mindspec_phase move (refused by default)")
 }
 
 // repairSpecTitleRunE implements `mindspec repair spec-title <epic-id>

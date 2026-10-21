@@ -122,10 +122,10 @@ func GlobalConfigDir() (string, error) {
 	if resolved, err := CanonicalPath(candidate); err == nil {
 		guardTarget = resolved
 	} else {
-		return "", fmt.Errorf("refusing global config dir %q: cannot canonicalize it for the HC-3 git-tree guard (fail closed): %w", candidate, err)
+		return "", fmt.Errorf("refusing global config dir %q: cannot canonicalize it for the git-tree guard (fail closed): %w", candidate, err)
 	}
 	if root := enclosingGitTree(guardTarget); root != "" {
-		return "", fmt.Errorf("refusing global config dir %q: it resolves inside the git work tree at %q (HC-3: the global store must never be under a committable tree); unset or repoint XDG_CONFIG_HOME/HOME", candidate, root)
+		return "", fmt.Errorf("refusing global config dir %q: it resolves inside the git work tree at %q (the global store must never be under a committable tree); unset or repoint XDG_CONFIG_HOME/HOME", candidate, root)
 	}
 	return candidate, nil
 }

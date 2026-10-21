@@ -530,7 +530,7 @@ func (m *Mover) checkpoint(s stage, group int) error {
 // published cut.
 func (m *Mover) rollback() error {
 	if m.state.Published {
-		return fmt.Errorf("migrate layout: refusing to auto-roll-back a PUBLISHED run (ADR-0023 forward-only)\nrecovery: roll forward — fix the tree on a new branch and rebase onto post-flatten main")
+		return fmt.Errorf("migrate layout: refusing to auto-roll-back a PUBLISHED run (the layout migration is forward-only)\nrecovery: roll forward — fix the tree on a new branch and rebase onto post-flatten main")
 	}
 	if m.state.PreRunRef == "" {
 		return fmt.Errorf("migrate layout: cannot roll back — no pre-run ref recorded")

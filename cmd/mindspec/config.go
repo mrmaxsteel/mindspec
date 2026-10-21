@@ -30,15 +30,15 @@ var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
 	Long: `Print the effective config — including the panel:, models:, commands:,
-loop:, and runner: orchestration blocks (specs 109/123) alongside the
+loop:, and runner: orchestration blocks alongside the
 pre-existing keys — to stdout. Read-only: it writes no file and exits 0
 on a valid config. The models:, loop:, and runner: blocks are annotated
 "` + inertAnnotation + `" because only panel: and the pre-existing keys
-drive in-binary behavior in this release; commands: (spec 123 R7b) is
+drive in-binary behavior in this release; commands: is
 NOT annotated inert — a populated commands: key changes the managed
 AGENTS.md "Build & Test" section init/setup render today.
 
-With --gate <name> (spec 112 R8/R9), prints that single gate's resolved
+With --gate <name>, prints that single gate's resolved
 creation-time defaults instead — the expanded reviewer slots, expected
 reviewer count, raw approve_threshold expression, and effective
 substitution policy — as text, or as JSON with --json. --gate accepts one

@@ -655,7 +655,7 @@ func loadUncached(root string) (*Config, error) {
 // `recovery: <command>` line (ADR-0035), never a panic.
 func validateOrchestration(cfg *Config) error {
 	if _, ok := cfg.Loop.GateAuthority["panel_skip"]; ok {
-		return fmt.Errorf("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only, ADR-0037 §7)\nrecovery: remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
+		return fmt.Errorf("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only)\nrecovery: remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
 	}
 	if cfg.Loop.Halt.OnReject != "halt" {
 		return fmt.Errorf("loop.halt.on_reject must be \"halt\" (got %q): a REJECT halts the track, auto-fixing a rejection is verification debt\nrecovery: set loop.halt.on_reject: halt in .mindspec/config.yaml", cfg.Loop.Halt.OnReject)

@@ -2964,7 +2964,7 @@ var backgroundExpectedExemptions = []backgroundExpectedExemption{
 	{".claude/skills/ms-bead-cycle/SKILL.md", "Never merge a bead branch with raw `git merge bead/<id>`"},
 	{"plugins/mindspec/skills/ms-bead-cycle/SKILL.md", "stopped between bd-close and the actual git merge"},
 	{".claude/skills/ms-bead-cycle/SKILL.md", "stopped between bd-close and the actual git merge"},
-	{".claude/skills/ms-impl-approve/SKILL.md", "a bead branch already raw-`git merge`d"},
+	{".claude/skills/ms-impl-approve/SKILL.md", "bead branch already raw-`git merge`d"},
 	{"ms-impl-approve", "bead branch already raw-`git merge`d"},
 	{"claudeMDManagedBlock", "never raw `git merge bead/<id>`"},
 	{"agentsMDBlockTemplate", "Never merge a bead branch with raw `git merge bead/<id>`"},

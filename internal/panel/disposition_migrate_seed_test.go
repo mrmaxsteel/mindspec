@@ -1,4 +1,4 @@
-// disposition_migrate.go: spec 117 Bead 4 — migrates the spec-116 seed
+// disposition_migrate_seed_test.go: spec 117 Bead 4 — migrates the spec-116 seed
 // dataset (R4) into the live per-panel disposition store.
 //
 // Two source artifacts, both outside this repo, feed the migration:
@@ -26,8 +26,6 @@ package panel
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -211,20 +209,6 @@ func slotModel(slot string) (string, error) {
 	default:
 		return "", fmt.Errorf("panel: migrate: slot token %s has no known model-prefix mapping", termsafe.Escape(slot))
 	}
-}
-
-// DispositionRowID derives a disposition row's canonical DispositionRow.ID:
-// a stable content hash of {spec, panel, reviewer, summary} (R2's id
-// contract — a row carries no round, so round is deliberately excluded
-// from the key). The same four inputs always mint the same id, so both
-// the Bead-4 migration replay AND the live `panel disposition append`
-// leaf are retry-idempotent through AppendRecord's own id-keyed dedup
-// (R6). This is the SINGLE derivation shared by both writers — the CLI
-// append leaf overrides any operator-supplied id with this value so live
-// capture enforces the same stable-content-id contract the migration does.
-func DispositionRowID(spec, panelName, reviewer, summary string) string {
-	h := sha256.Sum256([]byte(spec + "\x00" + panelName + "\x00" + reviewer + "\x00" + summary))
-	return "d-" + hex.EncodeToString(h[:])[:16]
 }
 
 // splitJSONLLinesBufCap bounds one seed JSONL line: the largest raw

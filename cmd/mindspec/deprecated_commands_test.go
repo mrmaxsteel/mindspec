@@ -29,32 +29,32 @@ func TestDeprecatedCommands_ExitCodeAndMessage(t *testing.T) {
 		{
 			name:     "bench-run",
 			argv:     []string{"bench", "run"},
-			wantLine: "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0028 for rationale)",
+			wantLine: "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (it is now a standalone tool)",
 		},
 		{
 			name:     "bench-bare",
 			argv:     []string{"bench"},
-			wantLine: "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0028 for rationale)",
+			wantLine: "bench moved: install agentmind from https://github.com/mrmaxsteel/agentmind (it is now a standalone tool)",
 		},
 		{
 			name:     "agentmind-serve",
 			argv:     []string{"agentmind", "serve"},
-			wantLine: "agentmind serve moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind serve' (see ADR-0027)",
+			wantLine: "agentmind serve moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind serve'",
 		},
 		{
 			name:     "agentmind-replay",
 			argv:     []string{"agentmind", "replay"},
-			wantLine: "agentmind replay moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind replay' (see ADR-0027)",
+			wantLine: "agentmind replay moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind replay'",
 		},
 		{
 			name:     "agentmind-setup",
 			argv:     []string{"agentmind", "setup"},
-			wantLine: "agentmind setup renamed: use 'mindspec otel setup' (see ADR-0027 for rationale)",
+			wantLine: "agentmind setup renamed: use 'mindspec otel setup'",
 		},
 		{
 			name:     "viz",
 			argv:     []string{"viz"},
-			wantLine: "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz' (see ADR-0027)",
+			wantLine: "viz moved: install agentmind from https://github.com/mrmaxsteel/agentmind and run 'agentmind viz'",
 		},
 		// Pin the parent-Run dispatch contract for `mindspec agentmind`
 		// (bare) and `mindspec agentmind <unknown-sub>`. cobra dispatches
@@ -67,12 +67,12 @@ func TestDeprecatedCommands_ExitCodeAndMessage(t *testing.T) {
 		{
 			name:     "agentmind-bare",
 			argv:     []string{"agentmind"},
-			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)",
+			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind",
 		},
 		{
 			name:     "agentmind-unknown-sub",
 			argv:     []string{"agentmind", "nosuchcmd"},
-			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind (see ADR-0027)",
+			wantLine: "agentmind moved: install agentmind from https://github.com/mrmaxsteel/agentmind",
 		},
 	}
 

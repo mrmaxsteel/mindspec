@@ -4,8 +4,7 @@
 > (`<path>`, `bead/<id>`, `<fingerprint>`) — this file is git-committed
 > OUTSIDE the redaction sink, so never paste a real captured string here.
 
-The owner-local friction self-improvement loop (spec 094, see
-[ADR-0038](../../../.mindspec/adr/ADR-0038-friction-reporter.md)) captures friction from a
+The owner-local friction self-improvement loop captures friction from a
 **working** mindspec install: the always-on `PersistentPostRunE` sink records
 escape-hatch overrides and `repair phase` invocations to a local journal, which
 `mindspec report` consolidates and `mindspec report list` triages.
@@ -28,11 +27,6 @@ out-of-band channels:
 2. **A manual GitHub issue** — the human fallback for reporting an install
    that never produced a working binary.
 
-A future enabler may wire the installer path; doing so does not change any
-decision in ADR-0038. Until then this is a documented, deliberate boundary —
+A future enabler may wire the installer path; doing so does not change this
+boundary. Until then this is a documented, deliberate boundary —
 NOT an oversight.
-
-## See also
-
-- [ADR-0038 §11 — Bootstrap paradox (Req 9)](../../../.mindspec/adr/ADR-0038-friction-reporter.md)
-- [ADR-0038 §9 — owner-local v1 scope](../../../.mindspec/adr/ADR-0038-friction-reporter.md)

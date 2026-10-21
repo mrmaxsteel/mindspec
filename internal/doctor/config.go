@@ -173,9 +173,7 @@ const modelsBlock = `# models: a free-form phase -> model-id map (advisory
 # authoritative consumers of the model protocol remain
 # the orchestration skills (ms-bead-impl, ms-panel-run,
 # ...), not the mindspec binary. Wiring in-binary
-# enforcement is a named follow-up (ADR-0040's
-# consumer-identity clause: a declared-but-inert key
-# must say so everywhere it is surfaced). The framework
+# enforcement is a named follow-up. The framework
 # proposes no model ids — operator/agent declares them
 # (run ` + "`mindspec models populate`" + ` for an agent prompt).
 models: {}
@@ -195,8 +193,7 @@ const commandsBlock = `# commands: your build/test guidance (task -> shell
 # ` + "`mindspec setup <agent>`" + ` verb. Vocabulary keys: build,
 # test (documented, not an enforced enum). While unset,
 # the Build & Test section is OMITTED entirely — mindspec
-# never guesses your build system (ADR-0036 ZFC;
-# ADR-0040's consumer-identity clause: managed content
+# never guesses your build system (managed content
 # carries only framework-generic guidance or your own
 # declared values, never mindspec-the-framework's own
 # build). Populate via ` + "`mindspec commands populate`" + `.
@@ -206,12 +203,12 @@ commands: {}
 // builtinModelsDisclosure is the human-readable description the
 // missing-models Warn (R6c) uses to disclose the key's inert status —
 // mirroring builtinSourceDefaultDisclosure's role for source_globs.
-const builtinModelsDisclosure = "models: is declared-and-inert today — nothing in the binary reads it; the orchestration skills remain the authoritative consumers of the model protocol (ADR-0040)"
+const builtinModelsDisclosure = "models: is declared-and-inert today — nothing in the binary reads it; the orchestration skills remain the authoritative consumers of the model protocol"
 
 // buildTestGuidanceDisclosure is the human-readable description the
 // missing-commands Warn (R7c) uses to disclose why the managed AGENTS.md
 // documents carry no Build & Test section yet.
-const buildTestGuidanceDisclosure = "the managed AGENTS.md \"Build & Test\" section is omitted until commands: is declared — mindspec never guesses your build system (ADR-0036 ZFC)"
+const buildTestGuidanceDisclosure = "the managed AGENTS.md \"Build & Test\" section is omitted until commands: is declared — mindspec never guesses your build system"
 
 // modelsKeyRE matches a top-level (unindented, uncommented) models: key
 // in raw config.yaml bytes, mirroring sourceGlobsKeyRE's rationale: the

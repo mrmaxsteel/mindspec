@@ -1,21 +1,21 @@
 # Merge Safety, Conflict Recovery, and Adopting an Externally-Merged Spec
 
-Spec 127 changed what `mindspec` does when a lifecycle merge would
-destroy work, when it conflicts, and when a spec's content reached
-`main` outside the lifecycle entirely. Spec 128 changed what happens when
-`mindspec complete`'s own content gates refuse. This guide covers the
-operator surfaces that shipped: the gate-refusal retry contract, the
+This guide covers what `mindspec` does when a lifecycle merge would
+destroy work, when it conflicts, when a spec's content reached
+`main` outside the lifecycle entirely, and when
+`mindspec complete`'s own content gates refuse. It covers these
+operator surfaces: the gate-refusal retry contract, the
 work-destruction preflight and its `--allow-net-deletion` override, the
 `--resolve-merge` conflict re-entry, and the `mindspec impl adopt` verb.
 See [lifecycle-modes.md](lifecycle-modes.md) for the per-verb mode
 agreement table these verbs' success states feed.
 
-## Gate-refused `mindspec complete` converges on a plain retry (spec 128)
+## Gate-refused `mindspec complete` converges on a plain retry
 
 `mindspec complete`'s content gates (doc-sync, ADR-divergence) now run
 against a **prospective snapshot** of the bead worktree's content, taken
 after the panel gate but **before any `complete`-authored commit
-exists**. This closes the #186 wedge by construction rather than working
+exists**. This prevents a wedged retry by construction rather than working
 around it: a refused run never advances the bead branch tip past the
 already-reviewed SHA, so the retry can never find a false
 panel-staleness block or masked dirt.
@@ -56,7 +56,7 @@ panel-staleness block or masked dirt.
 - **A POST-gate failure** — a bead→spec merge conflict, a `bd close`
   failure, anything that happens AFTER a full gate pass has already
   materialized the real commits — is a **different class**, unchanged by
-  this reorder: it is spec 127's preserved-merge and forward-reconcile
+  this reorder: it is preserved-merge and forward-reconcile
   territory. See "Conflicted merges: preserved, never aborted" below for
   the `--resolve-merge` recovery; a `bd close` failure's recovery is
   named in its own refusal text. Do not reach for `--allow-doc-skew`/
@@ -136,7 +136,7 @@ Semantics worth knowing:
 
 ## `mindspec impl adopt` — the externally-merged spec
 
-For the GH #218 case: a spec's implementation reached `main` via an
+For this case: a spec's implementation reached `main` via an
 external route (a GitHub PR, a hand merge), the spec branch may be
 deleted or stale, and `impl approve` would either fail or re-merge
 stale content. Adopt is the audited, **merge-free** terminal

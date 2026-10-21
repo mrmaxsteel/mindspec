@@ -291,7 +291,7 @@ func checkStaleFocusLifecycle(r *Report, root string) {
 		r.Checks = append(r.Checks, Check{
 			Name:    "Stale focus file",
 			Status:  Warn,
-			Message: "stale .mindspec/focus detected; lifecycle state is now derived from beads (ADR-0023). Safe to delete.",
+			Message: "stale .mindspec/focus detected; lifecycle state is now derived from beads. Safe to delete.",
 		})
 	}
 
@@ -317,7 +317,7 @@ func checkStaleFocusLifecycle(r *Report, root string) {
 		r.Checks = append(r.Checks, Check{
 			Name:    "Stale lifecycle.yaml files",
 			Status:  Warn,
-			Message: fmt.Sprintf("%d specs have stale lifecycle.yaml: %s. Lifecycle state is now derived from beads (ADR-0023).", len(stale), strings.Join(stale, ", ")),
+			Message: fmt.Sprintf("%d specs have stale lifecycle.yaml: %s. Lifecycle state is now derived from beads.", len(stale), strings.Join(stale, ", ")),
 		})
 	}
 }

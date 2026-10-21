@@ -20,7 +20,7 @@ Use --fix to auto-repair fixable issues (e.g. tracked runtime files).
 Use --fix --force to also replace user-authored values for mindspec-required
 beads config keys (not just add missing ones).
 Use --dry-run-migration to report which specs would migrate on their next
-lifecycle command (per ADR-0034) without writing any state. Exits 0 even
+lifecycle command without writing any state. Exits 0 even
 when legacy specs are surfaced.
 Use --ci to skip developer-local-environment checks (Beads merge driver,
 bd version floor, bd schema drift, multiple-bd-on-PATH, stale hooks) that

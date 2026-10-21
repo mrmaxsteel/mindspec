@@ -2,7 +2,7 @@
 
 A Claude Code skills package that takes a `mindspec`-approved plan and drives it to completion bead-by-bead, with a 6-reviewer (3 Claude + 3 Codex) panel gating each bead before merge. The orchestrator's main context stays small; every step is delegated to subagents.
 
-Proven on `lola` (specs 044-050) across ~25 beads. The pattern reliably catches asymmetric defects — a Claude reviewer approving while a Codex reviewer empirically tests and finds the routing bug, or vice versa.
+Proven in use across ~25 beads. The pattern reliably catches asymmetric defects — a Claude reviewer approving while a Codex reviewer empirically tests and finds the routing bug, or vice versa.
 
 ## What this plugin replaces
 
@@ -18,7 +18,7 @@ Proven on `lola` (specs 044-050) across ~25 beads. The pattern reliably catches 
 ## Skills
 
 Eleven skills total: four lifecycle gates + seven plugin skills. This is the
-post-thin-down inventory (spec 093) — orchestration only; operational
+post-thin-down inventory — orchestration only; operational
 knowledge (recovery recipes, gate semantics) lives in CLI point-of-use output
 and hook messages, not in skill prose. Following the Anthropic agent-skills
 pattern, each skill is a thin, composable orchestration unit.
@@ -89,14 +89,14 @@ merge terminal      → mindspec complete <bead-id> "<summary>" (hook-gated)
 > NEW_ISSUE) plus the deviations the fix author explicitly
 > flagged. That structure catches the failure mode one-shot
 > review cannot: defects introduced *while addressing feedback*.
-> On lola, the Bead 2 round-2 panel caught a routing bug that the
+> In practice, a round-2 panel caught a routing bug that the
 > round-1 panel had approved — it didn't exist in round 1; the
 > round-1 fix created it. The cost is bounded — round 2 is scoped
 > to deltas, so it runs faster than round 1, and most beads
 > converge in exactly one fix round. The corollary is the
 > artifact-gate rule: a round-2 APPROVE earned by *describing* a
 > fix (PR-body precision) instead of *making* it is the known
-> bypass (lola-f4a8, $417), which is why missing-artifact
+> bypass, which is why missing-artifact
 > findings HARD-block regardless of vote count.
 
 ## Why six reviewers, mixed families
@@ -108,7 +108,7 @@ Single-LLM gating misses defects asymmetrically:
 
 A six-slot panel with 3+3 lets you weight convergence: if all three Claudes APPROVE and all three Codex REQUEST_CHANGES, that's a different signal from a unanimous APPROVE. The orchestrator's tally pays attention to family asymmetry.
 
-Empirically (lola, ~25 beads): unanimous APPROVE on round 1 is rare. Most beads need exactly one fix round. The reviewers that flag changes are usually one Claude and two Codex, or two Claudes and three Codex — different lenses landing on different defects.
+Empirically (~25 beads): unanimous APPROVE on round 1 is rare. Most beads need exactly one fix round. The reviewers that flag changes are usually one Claude and two Codex, or two Claudes and three Codex — different lenses landing on different defects.
 
 > **Why six reviewers.** The default panel uses three reviewers from
 > each model family. Each reviewer has a separate lens. Adjust the panel
@@ -143,7 +143,7 @@ When codex hits its usage limit mid-panel, the orchestrator detects the empty/tr
 
 ```
 <repo>/
-  .mindspec/specs/<spec-id>/                # flat layout (spec 106 / ADR-0039)
+  .mindspec/specs/<spec-id>/                # flat layout
     spec.md
     plan.md
     reviews/                                # panel artifacts co-located with the spec they review
@@ -166,7 +166,7 @@ full autonomous-loop skill set by default — no opt-in copy step. Setup
 refreshes a mindspec-shipped skill file in place when its content
 byte-matches a previously-shipped version, and removes retired skill dirs on
 the same provenance check; a user-modified file is left untouched with a
-notice (HC-6).
+notice.
 
 - **Lifecycle gate skills** are defined inline in
   `internal/setup/claude.go::lifecycleSkillFiles()` (the 4 spec lifecycle

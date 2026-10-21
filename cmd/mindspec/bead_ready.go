@@ -26,7 +26,7 @@ var readyCheckBeadFn = next.FetchBeadByID
 var beadReadyCheckCmd = &cobra.Command{
 	Use:   "ready-check <bead-id>",
 	Short: "Evaluate a bead's mechanical readiness floor (read-only)",
-	Long: `Evaluates the four mechanical readiness signals (spec 124, MF-1..MF-4)
+	Long: `Evaluates the four mechanical readiness signals (MF-1..MF-4)
 for a bead: its plan section is concrete-by-structure; its claimed R/AC
 tokens resolve in spec.md; its declared dependencies are closed AND
 landed-merged; and it carries no genuine blocking marker.

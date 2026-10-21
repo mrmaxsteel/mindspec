@@ -728,7 +728,7 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 // divergent escaping path.
 func readinessOverrideFailure(beadID string, err error) error {
 	return guard.NewFailure(
-		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker, spec 124 AC-4)", idrender.Bead(beadID), next.RenderBDError(err)),
+		fmt.Sprintf("recording the --allow-not-ready override marker for %s failed: %v (nothing was claimed — the readiness gate refuses rather than claim without a durable override marker)", idrender.Bead(beadID), next.RenderBDError(err)),
 		"re-run this exact `mindspec next` invocation with --allow-not-ready=<ids> --evidence <path-to-justification> once bd metadata writes are healthy",
 	)
 }

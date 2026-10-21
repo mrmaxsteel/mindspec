@@ -102,8 +102,8 @@ The exit code is the workload's exit code, propagated verbatim.
 
 Examples:
 
-  mindspec record start --spec 084-mindspec-otel-only -- claude --dangerously-skip-permissions
-  mindspec record start --spec 084-mindspec-otel-only -- bash -c 'echo hi'
+  mindspec record start --spec 001-my-feature -- claude --dangerously-skip-permissions
+  mindspec record start --spec 001-my-feature -- bash -c 'echo hi'
 
 If '-- <workload-cmd>' is omitted, the command exits non-zero with
 a usage error.`,

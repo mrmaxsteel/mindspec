@@ -261,7 +261,7 @@ var panelVerifyCmd = &cobra.Command{
 	Long: `panel verify prints, for the named panel: verdicts present vs
 expected_reviewers, per-slot parse status (malformed files named),
 reviewed_head_sha vs the live target tip, and a PASS/BLOCK preview
-computed by panel.PanelGateDecision over panel.ResolveGateFacts — the
+computed by the gate decision function — the
 SAME decision ` + "`mindspec complete`" + `'s gate enforces, never a second
 implementation. It writes no file and always exits 0 (a read-only report
 is not itself a gate).`,

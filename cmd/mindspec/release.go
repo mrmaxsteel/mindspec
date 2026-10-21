@@ -356,7 +356,7 @@ func runRelease(deps releaseDeps, beadID string, force bool) error {
 			msg := fmt.Sprintf(
 				"cannot release bead %s: its worktree has uncommitted user changes:\n  %s\n"+
 					"these may be your work in progress — release did NOT remove the worktree.\n"+
-					"(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)\n\n"+
+					"(.beads/issues.jsonl is auto-handled and never blocks)\n\n"+
 					"Operator choice — discard instead: this is YOUR call, not one evidence can "+
 					"make for you. To permanently DISCARD the uncommitted changes above rather "+
 					"than keep them, re-run with `mindspec release %s --force`.",

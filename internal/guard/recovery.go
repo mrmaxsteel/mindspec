@@ -45,20 +45,20 @@ const RecoveryPrefix = "recovery: "
 // errors, see the package convention comment above.
 func FormatFailure(msg string, commands ...string) string {
 	if len(commands) == 0 {
-		panic("guard: FormatFailure requires at least one recovery command (spec 092 Req 12)")
+		panic("guard: FormatFailure requires at least one recovery command")
 	}
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(msg, "\n"))
 	for _, command := range commands {
 		command = strings.TrimSpace(command)
 		if command == "" {
-			panic("guard: FormatFailure recovery command must not be empty (spec 092 Req 12)")
+			panic("guard: FormatFailure recovery command must not be empty")
 		}
 		if strings.Contains(command, "\n") {
-			panic(fmt.Sprintf("guard: FormatFailure recovery command must be a single line (spec 092 Req 12): %q", command))
+			panic(fmt.Sprintf("guard: FormatFailure recovery command must be a single line: %q", command))
 		}
 		if IsBannedRecoveryCommand(command) {
-			panic(fmt.Sprintf("guard: recovery command %q is banned: raw `bd update --metadata` REPLACES the whole metadata map; emit `mindspec repair phase <spec-id>` instead (spec 092 Req 19, HC-5)", command))
+			panic(fmt.Sprintf("guard: recovery command %q is banned: raw `bd update --metadata` REPLACES the whole metadata map; emit `mindspec repair phase <spec-id>` instead", command))
 		}
 		b.WriteString("\n")
 		b.WriteString(RecoveryPrefix)

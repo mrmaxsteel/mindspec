@@ -734,7 +734,7 @@ func evaluateMF3(root string, report *Report, planContent string, deps []depende
 			f.extraExits = "recovery (if reattest refuses): " + dependencyOverride(report.BeadID)
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeNoCandidate):
 			f.class = FailureNoCandidate
-			f.detail = fmt.Sprintf("no two-parent merge reachable from %s's tip lands bead/%s (first-parent scan, then the reachable-landing fallback) — either it was never merged (the 2u0u split), or its merge subject does not name the bead", specBranch, dep.ID)
+			f.detail = fmt.Sprintf("no two-parent merge reachable from %s's tip lands bead/%s (first-parent scan, then the reachable-landing fallback) — either it was never merged, or its merge subject does not name the bead", specBranch, dep.ID)
 			f.recovery = fmt.Sprintf("if %s was never merged, run `mindspec complete %s`; if a real merge exists under an anonymous subject, re-merge under a bead-naming subject or use the audited attested-restore (`mindspec reattest` cannot adopt an anonymous merge)", dep.ID, dep.ID)
 		case errors.Is(lmErr, lifecycle.ErrLandedMergeContradiction):
 			f.class = FailureContradiction

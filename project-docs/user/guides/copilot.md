@@ -6,7 +6,7 @@ A guide to using MindSpec's spec-driven development workflow with GitHub Copilot
 
 MindSpec's core is a standalone Go CLI. All workflow logic lives in CLI commands, not IDE-specific hooks. Copilot can use MindSpec by calling the CLI directly — from the terminal (Copilot CLI) or from VS Code's integrated terminal (Copilot Chat).
 
-Both surfaces share `.github/copilot-instructions.md` as the workspace instruction file, which points to `AGENTS.md` for project-wide conventions (per [ADR-0017](../../../.mindspec/adr/ADR-0017.md)).
+Both surfaces share `.github/copilot-instructions.md` as the workspace instruction file, which points to `AGENTS.md` for project-wide conventions.
 
 ## Prerequisites
 
@@ -152,7 +152,7 @@ Or use `/ms-impl-approve` in Copilot Chat.
 
 ## Instruction Layering
 
-The instruction chain follows [ADR-0017](../../../.mindspec/adr/ADR-0017.md):
+The instruction chain is:
 
 ```
 .github/copilot-instructions.md  →  AGENTS.md  →  mindspec instruct

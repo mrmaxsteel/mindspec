@@ -7,7 +7,7 @@
 // every file write below is performed by an agent() step, never by this
 // script's own code.
 //
-// Input (the documented `args` global — spec 111 R1):
+// Input (the documented `args` global):
 //   {
 //     slug,               // required, path-element-safe
 //     spec,               // required, path-element-safe
@@ -16,32 +16,32 @@
 //     round,              // required, positive integer
 //     sha,                // optional, ADVISORY ONLY — never used to set the
 //                         // recorded SHA; `panel create` self-resolves it
-//                         // from `target` (110 R1)
+//                         // from `target`
 //     lenses,             // array of per-slot lens strings the invoking
-//                         // skill composed (judgment, R6/R7 — out of scope
+//                         // skill composed (judgment — out of scope
 //                         // here)
 //     mix,                // required, non-empty [{family, count}] resolved
 //                         // by the invoking skill from config `panel:`
-//                         // (spec 109) — this workflow NEVER derives its
+//                         // — this workflow NEVER derives its
 //                         // reviewer mix from anywhere else
 //     claude_sub_on_quota, // optional boolean, resolved by the invoking
 //                         // skill from config `panel.substitution.
-//                         // claude_sub_on_quota` (spec 109). This script has
+//                         // claude_sub_on_quota`. This script has
 //                         // no filesystem/shell access, so it cannot read
 //                         // .mindspec/config.yaml itself, and reading config
 //                         // is intentionally outside ALLOWED_CLI (below) —
 //                         // the invoking skill resolves the flag and passes
 //                         // it in. Absent/not-exactly-true is treated as
-//                         // false (fail-closed — R4).
+//                         // false (fail-closed).
 //   }
 
 // ---------------------------------------------------------------------------
 // ALLOWED_CLI — the exact, exhaustive set of shell commands any /ms-panel
 // agent step may exec. Adding a command here (or building one dynamically)
-// is a gate-integrity change; TestMsPanelWorkflow_AllowedCLIExactSet enforces
-// this set is exactly these four. The lifecycle merge-terminal verb is
+// is a gate-integrity change; a guard test enforces that this set is exactly
+// these four. The lifecycle merge-terminal verb is
 // intentionally absent from this set and from this file entirely — this
-// workflow is an adapter, never a lifecycle mutator (ADR-0037/0040).
+// workflow is an adapter, never a lifecycle mutator.
 const ALLOWED_CLI = [
   "mindspec panel create",
   "codex exec --sandbox read-only --skip-git-repo-check",
@@ -107,7 +107,7 @@ function buildCommand(verb, ...values) {
 
 const CONTROL_BYTE_RE = /[\x00-\x1f\x7f]/;
 
-// The clean-single-path-element contract 110's CLI validators apply: reject
+// The clean-single-path-element contract the CLI's validators apply: reject
 // empty, ".", "..", "/", "\", control bytes, and whitespace (every value this
 // validator guards ends up as a bare token in a built command line, and a
 // space would word-split it into extra argv tokens even without a
@@ -135,7 +135,7 @@ function validatePathElement(label, value) {
 // regex-literal awareness) cannot mistake it for the start of a template
 // literal and desync its string-boundary tracking for the remainder of the
 // file — functionally identical match, verified against a literal backtick.
-// spec-113-R2: a bare `$` is folded into the character class (not just the
+// A bare `$` is folded into the character class (not just the
 // `$(` digraph) so `$HOME`/`${x}`/`$x` variable-expansion can no longer
 // survive validateShellSafe; `$(` is subsumed since it always contains `$`.
 const SHELL_METACHAR_RE = /[\x60;|&\n$]/;
@@ -237,7 +237,7 @@ function validateArgs(a) {
 }
 
 // ---------------------------------------------------------------------------
-// Verdict shapes (the 110 contract, mirrored here for the `schema` option —
+// Verdict shapes (the verdict contract, mirrored here for the `schema` option —
 // this constrains an agent step's in-memory RETURN value only; it is not an
 // on-disk-artifact guarantee, which is why `mindspec panel verify` still runs
 // deterministic post-hoc validation in Step 5 below).
@@ -302,7 +302,7 @@ function lensLine(descriptor) {
 
 // ---------------------------------------------------------------------------
 // Step 3a — a claude slot: an agent() step that reads the BRIEF, renders a
-// verdict, and writes it to the 110 contract path itself.
+// verdict, and writes it to the verdict contract path itself.
 async function runClaudeSlot(descriptor, round, panelDir, reviewerId) {
   const verdictPath = `${panelDir}/${descriptor.slotId}-round-${round}.json`;
   await agent(
@@ -374,7 +374,7 @@ async function execCodexOnce(descriptor, round, panelDir, reviewerId, priorRawSt
   return agent(prompt, { schema: CODEX_WRAPPER_SCHEMA, label: descriptor.slotId });
 }
 
-// The anti-laundering ladder (R3, R3b):
+// The anti-laundering ladder:
 //   (a) parse failure on a rendered verdict -> re-prompt the SAME reviewer
 //       exactly once, asking only for a re-serialize (never a fresh review,
 //       never claude-sub);
@@ -457,9 +457,9 @@ validateArgs(args);
 const round = args.round;
 const claudeSubOnQuota = args.claude_sub_on_quota === true; // fail-closed default
 
-// Step 2 (R2) — registration through the create verb only. panel.json (round
+// Step 2 — registration through the create verb only. panel.json (round
 // + reviewed_head_sha co-bumped by construction, expected_reviewers /
-// approve_threshold stamped from the 109 resolvers) is written by the binary,
+// approve_threshold stamped from the config resolvers) is written by the binary,
 // never hand-typed here. `args.sha` is deliberately never read below — it is
 // advisory-only display text, not the source of the recorded SHA.
 const registerCmd = buildCommand(CMD_PANEL_CREATE, args.slug, args.spec, args.target, args.bead_id, round);
@@ -487,13 +487,13 @@ const registration = await agent(
 // no slot recomputes this independently from raw spec/slug.
 const panelDir = registration.panelDir;
 
-// Step 3 (R3, R3b) — fan out one agent step per mix slot via pipeline(), the
+// Step 3 — fan out one agent step per mix slot via pipeline(), the
 // documented concurrent fan-out primitive (bounded by the runtime's
 // 16-concurrent-agent cap).
 const descriptors = flattenMix(args.mix, args.lenses);
 const slotResults = await pipeline(descriptors, (descriptor) => runSlot(descriptor, round, panelDir));
 
-// Step 4 (R4) — quota-wall substitution over the fan-out results.
+// Step 4 — quota-wall substitution over the fan-out results.
 const finalResults = [];
 for (const result of slotResults) {
   if (result.outcome !== "quota_wall") {
@@ -511,7 +511,7 @@ for (const result of slotResults) {
   }
 }
 
-// Step 5 (R5) — return verify + tally output verbatim. Never runs the
+// Step 5 — return verify + tally output verbatim. Never runs the
 // lifecycle merge-terminal command, never consolidates, never authors a
 // consolidated-round file, never mutates panel.json beyond what the create
 // verb above wrote.

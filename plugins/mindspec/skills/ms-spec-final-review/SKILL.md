@@ -46,7 +46,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
    | Slot | Lens | Focus |
    |:-----|:-----|:------|
    | F1 | Cumulative scope | Does the merged diff stay within spec.md scope? Any beads land work spec.md didn't authorize? |
-   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD — in your own isolated checkout (`git worktree add --detach /tmp/rev-<panel-slug>-F2 <reviewed_head_sha>`, ADR-0044), never the shared spec worktree; remove the worktree (`git worktree remove`) when you're done. Then, in that same checkout and before sign-off, reproduce the project's declared CI invocation VERBATIM: run `commands.ci` when the project's config declares it, falling back to `commands.test` when `commands.ci` is undeclared. When the project's config declares NEITHER key, do not skip the check silently — record the explicit advisory finding "no declared CI invocation — CI parity not reproduced". |
+   | F2 | Inter-bead coherence | Did any round-2 fix break a contract a later bead approved against? Run the FULL regression suite on the spec branch HEAD — in your own isolated checkout (`git worktree add --detach /tmp/rev-<panel-slug>-F2 <reviewed_head_sha>`), never the shared spec worktree; remove the worktree (`git worktree remove`) when you're done. Then, in that same checkout and before sign-off, reproduce the project's declared CI invocation VERBATIM: run `commands.ci` when the project's config declares it, falling back to `commands.test` when `commands.ci` is undeclared. When the project's config declares NEITHER key, do not skip the check silently — record the explicit advisory finding "no declared CI invocation — CI parity not reproduced". |
    | F3 | Main integration | Does the branch merge cleanly into current `main` HEAD? Any conflicts? Any post-cut main commits that should have been rebased through the spec branch? |
    | F4 | PR description accuracy | Does the PR body match the actual diff? Are claimed bead numbers right, file counts correct, follow-ups all filed in `bd`? |
    | F5 | AC release-gate readiness | For each AC the spec.md claims, identify the expected gate-evidence artifact path and check `[ -f <path> ]` on the spec branch. If the artifact does NOT exist at the path: emit a `concrete_changes_required` item `"materialize <artifact-name> at <path>"` with `"hard_block": true`. PR-body naming the path is necessary but not sufficient (see `/ms-panel-tally` § Artifact gates). |
@@ -58,7 +58,7 @@ Per-bead panels see one commit at a time. They reliably catch unit defects but c
 
 ## Reviewer conduct
 
-Per **ADR-0044** (the normative doctrine home; this section states only the role-local operational fragments a final-review participant acts on).
+This section states the role-local operational fragments a final-review participant acts on.
 
 **Mutation-isolation** (the F2 full-regression run above): any execution or mutation happens in an isolated detached checkout (`git worktree add --detach`), never the shared spec worktree, removed when the reviewer is done; read-only inspection stays fine.
 
@@ -80,7 +80,7 @@ Final-review fix-ups land on the spec branch directly (not on a fresh bead branc
 MINDSPEC_ALLOW_MAIN=1 git commit -m "..."
 ```
 
-Do NOT use the escape hatch to land feature code outside a bead branch. (The CLI's own block message carries this same legitimacy context at point-of-use.) Surfaced by lola spec-050 final-review fix commits `1bb9751` (revert stray files + PR body precision) and `04d26f5` (lola-90pp test fix to unblock CI).
+Do NOT use the escape hatch to land feature code outside a bead branch. (The CLI's own block message carries this same legitimacy context at point-of-use.)
 
 ## Anti-patterns
 

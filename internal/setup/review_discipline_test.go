@@ -97,14 +97,17 @@ var reviewDisciplineFragmentRows = []fragmentRow{
 	{ac: "AC-9", desc: "ms-bead-cycle clean-worktree check before mindspec complete", surface: "ms-bead-cycle", want: "git status --porcelain"},
 	{ac: "AC-9", desc: "ms-panel-run no longer names the operator's literal home path", surface: "ms-panel-run", want: "/Users/Max", negate: true},
 
-	// AC-13 (partial) — every touched skill cites ADR-0044 (the ADR-file
+	// AC-13 (partial) — inverted: no shipped skill cites ADR-0044. A consumer's
+	// own .mindspec/adr/ holds a different ADR under that number. (The ADR-file
 	// existence + Accepted-marker half is TestReviewDiscipline_ADR0044ExistsAccepted
 	// below; Bead 3 appends the two lifecycle-literal citation rows).
 	{ac: "AC-13", desc: "ms-panel-run states reviewer conduct", surface: "ms-panel-run", want: "Reviewers apply these conduct rules at every gate."},
 	{ac: "AC-13", desc: "ms-panel-tally states contested-finding conduct", surface: "ms-panel-tally", want: "verify, never confirmed"},
-	{ac: "AC-13", desc: "ms-bead-cycle cites ADR-0044", surface: "ms-bead-cycle", want: "ADR-0044"},
-	{ac: "AC-13", desc: "ms-bead-fix cites ADR-0044", surface: "ms-bead-fix", want: "ADR-0044"},
-	{ac: "AC-13", desc: "ms-spec-final-review cites ADR-0044", surface: "ms-spec-final-review", want: "ADR-0044"},
+	{ac: "AC-13", desc: "ms-panel-run cites no mindspec ADR-0044", surface: "ms-panel-run", want: "ADR-0044", negate: true},
+	{ac: "AC-13", desc: "ms-panel-tally cites no mindspec ADR-0044", surface: "ms-panel-tally", want: "ADR-0044", negate: true},
+	{ac: "AC-13", desc: "ms-bead-cycle cites no mindspec ADR-0044", surface: "ms-bead-cycle", want: "ADR-0044", negate: true},
+	{ac: "AC-13", desc: "ms-bead-fix cites no mindspec ADR-0044", surface: "ms-bead-fix", want: "ADR-0044", negate: true},
+	{ac: "AC-13", desc: "ms-spec-final-review cites no mindspec ADR-0044", surface: "ms-spec-final-review", want: "ADR-0044", negate: true},
 }
 
 // TestReviewDiscipline_Fragments is the table-driven [CI] guard for
@@ -321,119 +324,13 @@ func acTenResolveLocator(content, locator string) (line int, diag string, ok boo
 	}
 }
 
-// reviewDisciplineAC10Allowlist is the FULL retained allowlist. Hyphenated
-// half, verified at base commit 7ec96295 (plan.md's AC-10 inventory table):
-// 8 base spec-[0-9]+ occurrences at that commit, one of which
-// (ms-panel-run's retry-note "lola spec-050" citation) Bead 1 GENERALIZED
-// away in the R7 sweep, leaving 7 retained occurrences across five
-// surfaces. Unhyphenated half (final-review S3 widening): the widened
-// acTenSpecIDRE surfaced 17 additional "spec NNN"/"Spec NNN" prose hits,
-// enumerated one-by-one at fix time — 15 PRE-EXISTING feature-provenance
-// cross-refs (each allowlisted below; prose generalization tracked in
-// mindspec-dtnj), 1 legitimate verbatim citation of ADR-0043's
-// `## Amendment (Spec 126)` heading (allowlisted), and 1 that spec 126
-// itself ADDED (ms-spec-final-review's "spec 106 flat layout") which was
-// GENERALIZED to portable wording instead of allowlisted, so 126 ships no
-// new leak. Pattern classes (i) model values, (ii) lore markers, and (iii)
-// home paths all scan ZERO hits across the real embedded surfaces
-// (verified) — their categorical enforcement burden is carried entirely by
-// the negative mutation tests below, not by any allowlist entry. Each
-// `locator` below is a verbatim substring of the REAL line adjacent to the
-// allowed token(s), deliberately chosen to EXCLUDE the token itself so the
-// anchor keeps resolving even if the token is later mutated in place (see
-// TestReviewDiscipline_AC10NegativeLocatorMismatch).
-var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
-	{
-		surface: "ms-bead-impl",
-		locator: readinessStagedRule,
-		matched: "spec 133",
-		count:   1,
-		reason:  "spec 129 R6.5 staged-rule marker: mandated target spec in the verbatim marker line",
-	},
-	{
-		surface: "ms-bead-impl",
-		locator: readinessStagedRule,
-		matched: "spec-131",
-		count:   1,
-		reason:  "spec 129 R6.5 staged-rule marker: mandated rule-table spec in the verbatim marker line",
-	},
-	{
-		surface: "ms-bead-cycle",
-		locator: "showed Bead 5 ready while the plan said it depended on Beads 1-4",
-		matched: "spec-050",
-		count:   1,
-		reason:  "deliberately kept cross-project case history (R7); not a mindspec incident ID",
-	},
-	{
-		surface: "ms-spec-final-review",
-		locator: "revert stray files + PR body precision",
-		matched: "spec-050",
-		count:   1,
-		reason:  "cross-project provenance for the escape-hatch legitimacy rule",
-	},
-	{
-		surface: "ms-bead-impl",
-		locator: "single biggest quality lever on impl-subagent output",
-		matched: "spec-050",
-		count:   1,
-		reason:  "pre-existing case history in a skill this spec does not edit, but the AC-10 scan runs over ALL embedded skills, so it still needs its own entry",
-	},
-
-	// --- Unhyphenated "spec NNN" hits surfaced by the S3-widened pattern.
-	// Every entry below is a PRE-EXISTING feature-provenance cross-ref
-	// (present at base 7ec96295, untouched by spec 126) unless its reason
-	// says otherwise; prose generalization of the pre-existing set is
-	// tracked in mindspec-dtnj.
-	{
-		surface: "ms-bead-fix",
-		locator: "panel artifacts are co-located under",
-		matched: "spec 106",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-bead-impl",
-		locator: "prep prompts and panel artifacts are co-located",
-		matched: "spec 106",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-bead-impl",
-		locator: "None of those paths may bypass this check",
-		matched: "spec 124",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (readiness-gate provenance); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-spec-autopilot",
-		locator: "Halt at the bead level",
-		matched: "spec 124",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (NOT-READY halt row); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-bead-cycle",
-		locator: "panel and prep artifacts are co-located",
-		matched: "spec 106",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (flat-layout note); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-bead-cycle",
-		locator: "pre-damage triage (",
-		matched: "spec 124",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (NOT-READY triage heading); prose generalization tracked in mindspec-dtnj",
-	},
-	{
-		surface: "ms-bead-cycle",
-		locator: "superseded by CLI checks",
-		matched: "Spec 093",
-		count:   1,
-		reason:  "pre-existing feature-provenance cross-ref (complete-gate provenance); prose generalization tracked in mindspec-dtnj",
-	},
-}
+// reviewDisciplineAC10Allowlist is empty. The shipped skills once carried
+// spec-number cross-refs and cross-project case history, all allowlisted
+// here; those citations were removed from the shipped text (consumers have
+// no copy of mindspec's specs), so no entry remains. The negative tests
+// below build their own synthetic entries to keep the location-keyed
+// accounting covered.
+var reviewDisciplineAC10Allowlist = []acTenAllowEntry{}
 
 // acTenValidate checks hits against the allowlist, resolving each entry's
 // locator to a concrete (surface, line) key against the LIVE surfaces map
@@ -450,6 +347,13 @@ var reviewDisciplineAC10Allowlist = []acTenAllowEntry{
 // passing — and (c) any allowlist entry left unconsumed (its resolved line
 // never saw the expected count of hits).
 func acTenValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[string]string) []string {
+	return scanAllowlistValidate("AC-10", hits, allowlist, surfaces)
+}
+
+// scanAllowlistValidate is acTenValidate's logic with the problem-message
+// label as a parameter, so other scans (surface_refs_test.go) reuse the
+// same location-keyed accounting under their own label.
+func scanAllowlistValidate(label string, hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[string]string) []string {
 	type key struct {
 		surface string
 		line    int
@@ -461,12 +365,12 @@ func acTenValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[st
 	for _, e := range allowlist {
 		content, ok := surfaces[e.surface]
 		if !ok {
-			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unresolvable: surface=%s locator=%q matched=%s: surface not present among scanned surfaces", e.surface, e.locator, e.matched))
+			problems = append(problems, fmt.Sprintf("%s allowlist entry unresolvable: surface=%s locator=%q matched=%s: surface not present among scanned surfaces", label, e.surface, e.locator, e.matched))
 			continue
 		}
 		line, diag, ok := acTenResolveLocator(content, e.locator)
 		if !ok {
-			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unresolvable: surface=%s locator=%q matched=%s: %s", e.surface, e.locator, e.matched, diag))
+			problems = append(problems, fmt.Sprintf("%s allowlist entry unresolvable: surface=%s locator=%q matched=%s: %s", label, e.surface, e.locator, e.matched, diag))
 			continue
 		}
 		remaining[key{e.surface, line, e.matched}] += e.count
@@ -478,11 +382,11 @@ func acTenValidate(hits []acTenHit, allowlist []acTenAllowEntry, surfaces map[st
 			remaining[k]--
 			continue
 		}
-		problems = append(problems, fmt.Sprintf("AC-10 scan: unallowlisted hit in %s at line %d: %s", h.surface, h.line, h.matched))
+		problems = append(problems, fmt.Sprintf("%s scan: unallowlisted hit in %s at line %d: %s", label, h.surface, h.line, h.matched))
 	}
 	for k, n := range remaining {
 		if n > 0 {
-			problems = append(problems, fmt.Sprintf("AC-10 allowlist entry unused (or under-consumed): surface=%s line=%d matched=%s", k.surface, k.line, k.matched))
+			problems = append(problems, fmt.Sprintf("%s allowlist entry unused (or under-consumed): surface=%s line=%d matched=%s", label, k.surface, k.line, k.matched))
 		}
 	}
 	return problems
@@ -508,7 +412,7 @@ func TestReviewDiscipline_AC10StagedRuleMarkerOnly(t *testing.T) {
 		t.Run(token, func(t *testing.T) {
 			surfaces := ac10Surfaces()
 			if problems := acTenValidate(acTenScanSurfaces(surfaces), reviewDisciplineAC10Allowlist, surfaces); len(problems) != 0 {
-				t.Fatalf("shipped marker must be allowed: %v", problems)
+				t.Fatalf("shipped surfaces (incl. the staged-rule marker) must scan clean: %v", problems)
 			}
 			content := surfaces["ms-bead-impl"] + "\nUnrelated " + token + " reference elsewhere in this skill.\n"
 			surfaces["ms-bead-impl"] = content
@@ -792,13 +696,14 @@ type literalFragmentRow struct {
 	desc    string
 	surface string // lifecycleSkillFiles() key
 	want    string
+	negate  bool // true => surface must NOT contain want
 }
 
 var reviewDisciplineLiteralFragmentRows = []literalFragmentRow{
 	{ac: "AC-6", desc: "ms-spec-approve literal names --gate spec_approve", surface: "ms-spec-approve", want: "--gate spec_approve"},
 	{ac: "AC-6", desc: "ms-plan-approve literal names --gate plan_approve", surface: "ms-plan-approve", want: "--gate plan_approve"},
-	{ac: "AC-13", desc: "ms-spec-approve literal cites ADR-0044", surface: "ms-spec-approve", want: "ADR-0044"},
-	{ac: "AC-13", desc: "ms-plan-approve literal cites ADR-0044", surface: "ms-plan-approve", want: "ADR-0044"},
+	{ac: "AC-13", desc: "ms-spec-approve literal cites no mindspec ADR-0044", surface: "ms-spec-approve", want: "ADR-0044", negate: true},
+	{ac: "AC-13", desc: "ms-plan-approve literal cites no mindspec ADR-0044", surface: "ms-plan-approve", want: "ADR-0044", negate: true},
 }
 
 func TestReviewDiscipline_LiteralFragments(t *testing.T) {
@@ -810,7 +715,11 @@ func TestReviewDiscipline_LiteralFragments(t *testing.T) {
 			if !ok {
 				t.Fatalf("lifecycleSkillFiles() has no %q entry", row.surface)
 			}
-			if !strings.Contains(content, row.want) {
+			has := strings.Contains(content, row.want)
+			switch {
+			case row.negate && has:
+				t.Errorf("%s: %s must NOT contain %q, but it does", row.surface, row.ac, row.want)
+			case !row.negate && !has:
 				t.Errorf("%s: %s is missing the required fragment %q", row.surface, row.ac, row.want)
 			}
 		})

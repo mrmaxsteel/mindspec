@@ -225,20 +225,17 @@ func RunClaude(root string, check bool) (*Result, error) {
 // workflowsRel is the repo-relative form of workflowsDir, used for Result
 // reporting.
 //
-// Per-workflow disposition mirrors installSkills' create/skip/notice shape:
+// Per-workflow disposition mirrors installSkills:
 //   - absent → create.
 //   - present and byte-identical to the canonical content → skip (current).
+//   - present and byte-identical to a previously shipped body
+//     (previouslyShippedWorkflows) → refresh in place.
 //   - present and different → user-modified: leave it, notice (HC-6).
-//
-// There is no refresh case yet: ms-panel.js is the first workflow MindSpec
-// ships, so there is no previously-shipped-workflows snapshot set to
-// byte-match against (installSkills' previouslyShippedSkills() precedent). A
-// future revision needing to refresh an existing install in place would add
-// that snapshot set the same way skills did.
 //
 // In check mode nothing is written; the Result still records what WOULD
 // happen.
 func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]string, check bool, r *Result) error {
+	shipped := previouslyShippedWorkflows()
 	for name, content := range wanted {
 		relPath := filepath.Join(workflowsRel, name)
 		absPath := filepath.Join(workflowsDir, name)
@@ -263,6 +260,16 @@ func installWorkflows(workflowsDir, workflowsRel string, wanted map[string]strin
 
 		if string(data) == content {
 			r.Skipped = append(r.Skipped, relPath)
+			continue
+		}
+
+		if matchesShippedWorkflow(string(data), shipped[name]) {
+			r.Refreshed = append(r.Refreshed, relPath)
+			if !check {
+				if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", relPath, err)
+				}
+			}
 			continue
 		}
 
@@ -819,7 +826,7 @@ managed-by: mindspec
    against the spec DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
    ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
-   assignments (ADR-0044). This step is guidance, not a mechanized
+   assignments. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
 3. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
@@ -844,7 +851,7 @@ managed-by: mindspec
    against the plan DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow — see
    ` + "`/ms-panel-run`" + `'s document-gate lens defaults for the review lens
-   assignments (ADR-0044). This step is guidance, not a mechanized
+   assignments. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
 3. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
@@ -891,7 +898,7 @@ the branch ref (or settle the obligation out-of-band) so
 Skip/abandon hatches do not bypass this refusal. Disclosed residual: a
 bead branch already raw-` + "`git merge`" + `d and then ` + "`bd close`" + `d,
 carrying no durable refutation obligation, leaves nothing for this gate
-to detect — see ADR-0037.
+to detect.
 `,
 	}
 }

@@ -28,12 +28,12 @@ var panelDispositionCmd = &cobra.Command{
 
 var panelDispositionValidateCmd = &cobra.Command{
 	Use:   "validate <file|glob>...",
-	Short: "Validate JSONL disposition/coverage-manifest files against the R2/R6(a) schema + R5 hygiene",
+	Short: "Validate JSONL disposition/coverage-manifest files against the record schema + hygiene rules",
 	Long: `validate reads each JSON line of every file matched by the given
 path(s)/glob(s) (a bare path with no glob metacharacter is read as a
-single file) and runs internal/panel.Validate followed by
-internal/panel.HygienePredicate on it — the SAME two pure functions
-Bead 2's transactional append op gates every write on. It writes
+single file) and runs the schema check followed by
+the hygiene check on it — the SAME two checks
+the transactional append op gates every write on. It writes
 nothing and makes no filesystem change beyond reading the named files.
 Accepted kinds: disposition, panel (coverage manifest), round, refutation,
 deferral, rebind and abandon.

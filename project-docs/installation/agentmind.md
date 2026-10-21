@@ -9,8 +9,7 @@ runtime via the documented lookup order
 
 This page documents the **supported install path for AgentMind v1.0.0**:
 documented manual download with checksum verification. A first-party
-`mindspec install agentmind` subcommand is deferred to a follow-up spec
-(see spec 083 Non-Goals).
+`mindspec install agentmind` subcommand is deferred to later work.
 
 > **Status (current).** AgentMind v1.0.0 has not yet been published
 > upstream. The URLs and checksums below describe the **release plan**
@@ -128,8 +127,8 @@ in `agentmind/client.findBinary`):
    root, not the current working directory).
 3. The first `agentmind` on `PATH`.
 
-If none resolves, mindspec consumers fall into the spec's three command
-classes (see spec 083 Hard Constraint #4):
+If none resolves, mindspec consumers fall into three command
+classes:
 
 - **Telemetry-as-output** (`mindspec record start`) and **interactive**
   (`mindspec viz`, `mindspec agentmind serve`, `mindspec agentmind replay`)
@@ -156,9 +155,3 @@ is executable.
 To uninstall AgentMind: remove the binary file. mindspec's batch commands
 remain functional with the warn-line contract; interactive and
 telemetry-as-output commands stop working until the binary returns.
-
-## See also
-
-- Spec 083 (AgentMind Extraction v2): `.mindspec/specs/083-agentmind-extraction-v2/spec.md`
-- ADR-0011 (One-way mindspec -> agentmind dependency)
-- ADR-0026 (AgentMind extracted to standalone repo)

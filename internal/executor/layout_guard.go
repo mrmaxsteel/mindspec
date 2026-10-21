@@ -142,7 +142,7 @@ func mergeLayoutRegressionFailure(sourceRef, targetRef string, sourceLayout, tar
 	msg := fmt.Sprintf(
 		"layout regression: refusing to merge %s (%s layout) into %s (%s layout) — "+
 			"this would resurrect the pre-flatten .mindspec/docs/... paths on top of the already-flattened tree. "+
-			"The layout flatten is forward-only (ADR-0023): rebase the source onto the post-flatten target instead of merging it back.",
+			"The layout flatten is forward-only: rebase the source onto the post-flatten target instead of merging it back.",
 		sourceRef, sourceLayout, targetRef, targetLayout)
 	return guard.NewFailure(msg,
 		fmt.Sprintf("git rebase %s %s", targetRef, sourceRef),

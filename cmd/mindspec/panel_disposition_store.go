@@ -27,13 +27,13 @@ import (
 
 var panelDispositionAppendCmd = &cobra.Command{
 	Use:   "append --spec <id> --panel <name> --data <literal|-|@file>",
-	Short: "Append one disposition row or coverage manifest via the R6(b) transactional op",
+	Short: "Append one disposition row or coverage manifest via the transactional op",
 	Long: `append writes disposition rows and legacy coverage manifests. It refuses
 round, refutation, deferral, rebind and abandon events, which only the panel
 verbs write. A manifest on a non-legacy panel is reserved to panel tally. It
 dispatches to the panel ledger store, which — under ONE lock held
 on that panel's dedicated dispositions.lock file — validates the
-record (schema + R5 hygiene) BEFORE touching the data file, checks it
+record (schema + hygiene) BEFORE touching the data file, checks it
 for uniqueness against the file's current content (a disposition row
 keyed on its own "id"; a coverage manifest keyed on
 {spec, panel, round, created_at}), and either no-ops (the key already exists) or
@@ -124,8 +124,8 @@ never interpolated into a shell-quoted argument.`,
 
 var panelDispositionCheckCmd = &cobra.Command{
 	Use:   "check --spec <id> [--panel <name>]",
-	Short: "Run the R1(b) completeness floor against the durable per-panel store",
-	Long: `check dispatches to internal/panel.CheckCompleteness, which reads
+	Short: "Run the completeness floor against the durable per-panel store",
+	Long: `check reads
 ONLY a panel's dispositions.jsonl (its coverage manifest plus its
 disposition rows) — never a raw verdict file — and, for every manifest
 slot whose terminal verdict is REQUEST_CHANGES or REJECT, requires at

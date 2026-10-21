@@ -6,6 +6,8 @@ package panel
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -468,4 +470,18 @@ type UncoveredSlotError struct{ Panel, Slot, Verdict string }
 
 func (e *UncoveredSlotError) Error() string {
 	return fmt.Sprintf("panel %s: completeness floor violated — slot %s (terminal verdict %s) has no covering disposition row (reviewer or convergent_with)", termsafe.Escape(e.Panel), termsafe.Escape(e.Slot), termsafe.Escape(e.Verdict))
+}
+
+// DispositionRowID derives a disposition row's canonical DispositionRow.ID:
+// a stable content hash of {spec, panel, reviewer, summary} (R2's id
+// contract — a row carries no round, so round is deliberately excluded
+// from the key). The same four inputs always mint the same id, so both
+// the Bead-4 migration replay AND the live `panel disposition append`
+// leaf are retry-idempotent through AppendRecord's own id-keyed dedup
+// (R6). This is the SINGLE derivation shared by both writers — the CLI
+// append leaf overrides any operator-supplied id with this value so live
+// capture enforces the same stable-content-id contract the migration does.
+func DispositionRowID(spec, panelName, reviewer, summary string) string {
+	h := sha256.Sum256([]byte(spec + "\x00" + panelName + "\x00" + reviewer + "\x00" + summary))
+	return "d-" + hex.EncodeToString(h[:])[:16]
 }

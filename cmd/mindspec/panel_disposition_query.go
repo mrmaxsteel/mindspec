@@ -28,7 +28,7 @@ var (
 
 var panelDispositionQueryCmd = &cobra.Command{
 	Use:   "query",
-	Short: "Run one of the R3 Q1-Q5 disposition-telemetry queries over the per-panel JSONL store",
+	Short: "Run one of the Q1-Q5 disposition-telemetry queries over the per-panel JSONL store",
 	Long: `query loads every dispositions.jsonl file matched by the resolved
 glob (by default ` + "`" + panel.DefaultGlobPattern + "`" + `, every
 panel of every spec). It accepts disposition, panel (coverage manifest),
@@ -44,7 +44,7 @@ contribute no telemetry rows or slot coverage. It reports one of five metrics:
 --dir overrides the glob root entirely, pointing directly at a
 self-contained "reviews"-shaped directory (one dispositions.jsonl per
 subdirectory, no .mindspec/specs/<spec>/reviews nesting) — the shape of
-a checked-in testdata fixture such as internal/panel/testdata/seed116.
+a checked-in test fixture.
 --spec narrows the default root to one spec's live store
 (.mindspec/specs/<spec>/reviews/*/dispositions.jsonl). --dir and --spec
 are mutually exclusive.`,

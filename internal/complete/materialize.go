@@ -600,7 +600,7 @@ func sExitContract(in materializationInput, wtPath, beadID string) error {
 		return sExitGenuineDirtRefusal(beadID, userDirt)
 	}
 	if len(artifactDirt) > 0 {
-		fmt.Fprintf(in.warnWriter, "WARN residual-artifact-dirt: %v (survived materialization; non-blocking per ADR-0025)\n", termsafeEscapeEach(artifactDirt))
+		fmt.Fprintf(in.warnWriter, "WARN residual-artifact-dirt: %v (survived materialization; non-blocking)\n", termsafeEscapeEach(artifactDirt))
 	}
 	return nil
 }
@@ -633,7 +633,7 @@ func dirtCheckPath(wtPath, root string) string {
 // user changes" refusal, byte-compatible with the pre-bead-6 message
 // shape (complete_test.go pins substrings of this text).
 func userDirtRefusal(beadID, root string, userDirt []string, wtPath string) error {
-	msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled per ADR-0025 and never blocks)",
+	msg := fmt.Sprintf("workspace has uncommitted user changes:\n  %s\n(.beads/issues.jsonl is auto-handled and never blocks)",
 		strings.Join(termsafeEscapeEach(userDirt), "\n  "))
 	checkPath := dirtCheckPath(wtPath, root)
 	if wtPath == "" {

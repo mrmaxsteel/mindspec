@@ -689,8 +689,7 @@ func TestRenderBriefHeader_GoldenUnchanged(t *testing.T) {
 		"\n## Your job\n\n" +
 		"Review the diff at the reviewed commit above and write your verdict as\n" +
 		"a single JSON file named `<your-slot>-round-1.json` beside this BRIEF\n" +
-		"(the panel artifact schema — see `.mindspec/domains/workflow/interfaces.md`\n" +
-		"Panel Artifact Schema). Required and optional top-level fields:\n\n" +
+		"(the panel artifact schema). Required and optional top-level fields:\n\n" +
 		"- `verdict` (required): one of `APPROVE`, `REQUEST_CHANGES`, `REJECT`.\n" +
 		"- `hard_block` (optional boolean, a top-level sibling of `verdict` — never\n" +
 		"  a per-finding field): set `true` only for an evidence-bearing halt that\n" +

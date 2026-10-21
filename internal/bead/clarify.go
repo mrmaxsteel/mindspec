@@ -180,18 +180,18 @@ func validateAttemptRecord(record AttemptRecord) error {
 		}
 		clarified[c.Ordinal] = true
 		if c.Reason != paired.Reason {
-			return fmt.Errorf("clarification for ordinal %d does not repeat the paired report reason VERBATIM (spec 124 R8b — the re-dispatch renders this pairing; a paraphrased or substituted reason breaks the anti-browbeat judgment)", c.Ordinal)
+			return fmt.Errorf("clarification for ordinal %d does not repeat the paired report reason VERBATIM (the re-dispatch renders this pairing; a paraphrased or substituted reason breaks the anti-browbeat judgment)", c.Ordinal)
 		}
 		if strings.TrimSpace(c.Answer) == "" {
-			return fmt.Errorf("clarification for ordinal %d carries no answer — every clarification must actually answer its cited reason (spec 124 R8b)", c.Ordinal)
+			return fmt.Errorf("clarification for ordinal %d carries no answer — every clarification must actually answer its cited reason", c.Ordinal)
 		}
 		if strings.TrimSpace(c.Span) == "" {
-			return fmt.Errorf("clarification for ordinal %d carries no source span — every clarification must cite an authoritative span (spec 124 R8b)", c.Ordinal)
+			return fmt.Errorf("clarification for ordinal %d carries no source span — every clarification must cite an authoritative span", c.Ordinal)
 		}
 	}
 	for ordinal := range reportByOrdinal {
 		if !clarified[ordinal] {
-			return fmt.Errorf("cited reason ordinal %d has no paired clarification — every cited NOT-READY reason must be answered (or the disposition is ACCEPT, not clarify; final-review r1 G2-R8-01)", ordinal)
+			return fmt.Errorf("cited reason ordinal %d has no paired clarification — every cited NOT-READY reason must be answered (or the disposition is ACCEPT, not clarify)", ordinal)
 		}
 	}
 	return nil

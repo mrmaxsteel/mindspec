@@ -1,7 +1,7 @@
 #!/bin/sh
-# git merge driver for .beads/issues.jsonl — ADR-0025: the jsonl is a
+# git merge driver for .beads/issues.jsonl: the jsonl is a
 # deterministic projection of the Dolt DB, so the semantically correct merge
-# is to regenerate it from the DB (ADR-0023: Dolt is the single state
+# is to regenerate it from the DB (Dolt is the single state
 # authority). Replaces the orphaned `bd merge` driver removed in bd 1.0.x.
 #
 # Args (configured as %A %O %B):
@@ -15,7 +15,7 @@
 #
 # NOTE: keep the export invocation in lockstep with bd's own auto-export
 # profile (bd export defaults exclude infrastructure beads and memories);
-# a doctor assertion should guard this (incident panel 3/3, 2026-06-11).
+# a doctor assertion should guard this.
 set -eu
 
 fail() {

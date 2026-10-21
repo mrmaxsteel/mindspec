@@ -29,7 +29,7 @@ func TestADR0041_Spec129Amendment(t *testing.T) {
 		"surviving bead tip must equal", "CURRENT tip", "any git or metadata read error is a plain error",
 		"F2 is retired", "Registrations are advisory output only", "(not determinable locally)", "not read by automatic read-back",
 		"ONE `MergeMetadata`", "mindspec_landed_reattest_merge_sha", "mindspec_landed_reattest_second_parent", "mindspec_landed_reattest_scanned_branch",
-		"off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>",
+		"off-first-parent fallback; single-candidate, branch-tip, not-reverted and read checks passed; advisory registrations outside tip: <n>; panel roots scanned: <roots>",
 		"op == \"mindspec reattest\"", "RFC-3339", "non-empty `actor`", "well-formed git object IDs", "validity-qualified no-op",
 		"equals both the binding and the single scan-derived candidate", "stale audit that confirms nothing",
 		"ErrLandedMergeContradiction", "ErrLandedMergeReverted", "q9ea attested-restore is excluded from fallback exits",

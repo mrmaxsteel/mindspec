@@ -1,6 +1,6 @@
 # AgentMind Phase 6 soak gate — deferral record
 
-Spec 083 Bead 6 step 5 converts the spec-mentioned "7-day soak before
+This gate converts the planned "7-day soak before
 v1.0.0 pin" into a verifiable, date-stamped CI check. This document
 records the current state of that gate and the mechanism by which it
 becomes armed.
@@ -40,7 +40,7 @@ The soak gate prerequisites are unmet on every axis:
    `replace` directive against a non-existent upstream.
 
 The soak gate is therefore **"not yet armed"**: the deferral mechanism
-is the same one the spec uses for the Test G / Test A / Test B
+is the same one used for the Test G / Test A / Test B
 preconditions — a single command flips the state once upstream is
 ready.
 
@@ -61,7 +61,7 @@ ready.
 
 ## Deferral path (alternative to nightly soak)
 
-The plan (Bead 6 step 5) explicitly allows a documented alternative if
+The release plan explicitly allows a documented alternative if
 nightly CI is not wired in time:
 
 > if the nightly soak artifact is not yet wired (depends on
@@ -84,6 +84,3 @@ binary. The PR description must link to the run.
 - `.github/workflows/ci.yml` — `live-capture` and `test-e-continuity`
   jobs; the nightly cron trigger will be added when the soak gate is
   armed.
-- Spec 083 spec.md line 397 ("7 days of nightly runs") — original
-  spec language; this document is the implementation.
-- Plan 083 Bead 6 step 5 — verification mechanism.

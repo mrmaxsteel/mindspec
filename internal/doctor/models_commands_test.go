@@ -485,19 +485,19 @@ func TestScaffoldConfigBlock_ThreeStates_AllKeys(t *testing.T) {
 	}
 }
 
-// TestADR0040ConsumerIdentityClauseCited pins spec 123 AC-18's
-// config-block half: the models: and commands: schema blocks each cite
-// ADR-0040 by name, so the ADR-divergence gate sees the declared
-// touchpoint at these config-block sites (R9's citation requirement).
-// The ADR text itself, and the managed-content citation sites in
-// internal/bootstrap and internal/setup, are pinned by
-// cmd/mindspec's TestADR0040ConsumerIdentityClause_Anchored (the
-// cross-package anchor test).
-func TestADR0040ConsumerIdentityClauseCited(t *testing.T) {
-	if !strings.Contains(modelsBlock+builtinModelsDisclosure, "ADR-0040") {
-		t.Error("modelsBlock/builtinModelsDisclosure must cite ADR-0040")
-	}
-	if !strings.Contains(commandsBlock, "ADR-0040") {
-		t.Error("commandsBlock must cite ADR-0040")
+// TestConfigBlocksCiteNoInternalADR pins that the models: and commands:
+// schema blocks, which land in a consumer's .mindspec/config.yaml, state
+// their rule in plain words and cite no mindspec ADR: a consumer's own
+// .mindspec/adr/ holds different ADRs under the same numbers.
+func TestConfigBlocksCiteNoInternalADR(t *testing.T) {
+	for name, block := range map[string]string{
+		"modelsBlock":                 modelsBlock,
+		"builtinModelsDisclosure":     builtinModelsDisclosure,
+		"commandsBlock":               commandsBlock,
+		"buildTestGuidanceDisclosure": buildTestGuidanceDisclosure,
+	} {
+		if strings.Contains(block, "ADR-") {
+			t.Errorf("%s must not cite a mindspec ADR:\n%s", name, block)
+		}
 	}
 }

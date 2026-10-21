@@ -182,13 +182,13 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 			}
 			return nil, &ReattestRefusal{BeadID: beadID, SpecBranch: specBranch, Fallback: true,
 				State:  ReattestStateMultipleFallbackCandidates,
-				Detail: "multiple admitted reachable candidates (" + strings.Join(pairs, "; ") + "); F1 requires exactly one candidate, even when second parents agree"}
+				Detail: "multiple admitted reachable candidates (" + strings.Join(pairs, "; ") + "); the fallback requires exactly one candidate, even when second parents agree"}
 		}
 	}
 	if len(candidates) == 0 {
 		return nil, &ReattestRefusal{
 			BeadID: beadID, SpecBranch: specBranch, State: ReattestStateNoOwnedMerge,
-			Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited ADR-0035 mindspec-q9ea human attested-restore", specBranch, beadBranch),
+			Detail: fmt.Sprintf("no first-parent or admitted reachable merge on %s names %s in its subject — nothing is git-corroborable here, and neither an operator-asserted SHA pair (circular) nor an anonymous-subject merge (no ownership nominator) is admissible; the only remaining exit is the audited human attested-restore", specBranch, beadBranch),
 		}
 	}
 
@@ -306,7 +306,7 @@ func ReattestLandedMerge(root, specBranch, beadID, actor string, reports ...func
 		advisory, count, roots := advisoryRegistrationReport(root, specBranch, beadID)
 		lines = append(lines, fmt.Sprintf("candidate %s reached %s's tip off the first-parent chain; its subject names no target", termsafe.Escape(newest.SHA), termsafe.Escape(specBranch)))
 		lines = append(lines, advisory...)
-		corroboration = fmt.Sprintf("off-first-parent fallback; F1, F3, F4, F5 passed; advisory registrations outside tip: %d; panel roots scanned: %s", count, roots)
+		corroboration = fmt.Sprintf("off-first-parent fallback; single-candidate, branch-tip, not-reverted and read checks passed; advisory registrations outside tip: %d; panel roots scanned: %s", count, roots)
 		for _, report := range reports {
 			if report != nil {
 				for _, line := range lines {

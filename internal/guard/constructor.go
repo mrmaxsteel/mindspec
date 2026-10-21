@@ -146,9 +146,9 @@ func NewDestructiveCommand(command string, outcome DestructionOutcome) (Destruct
 	}
 	if !IsFloorMatch(trimmed) {
 		return DestructiveCommand{}, fmt.Errorf(
-			"guard: NewDestructiveCommand: %q matches no family on the reviewed destructive floor (spec 127 R5a). "+
+			"guard: NewDestructiveCommand: %q matches no family on the reviewed destructive floor. "+
 				"This is NOT a claim that it is safe: the floor is a reviewed finite set. If the command IS "+
-				"destructive, extend AllFamilies in this same change (the ADR-0035 in-diff extension obligation); "+
+				"destructive, extend AllFamilies in this same change; "+
 				"if it is genuinely non-destructive, pass it to FormatFailure/NewFailure as a plain string",
 			trimmed)
 	}
