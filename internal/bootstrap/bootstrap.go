@@ -235,7 +235,7 @@ func Run(root string, dryRun bool) (*Result, error) {
 		if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
 			return nil, fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
 		}
-		if err := gitutil.EnsureGitignoreEntriesWithHeader(root, "# MindSpec local review files (not version-controlled)", ".mindspec/config.local.yaml", cfg.Panel.IsolationRoot); err != nil {
+		if err := gitutil.EnsureGitignoreLiteralEntriesWithHeader(root, "# MindSpec local review files (not version-controlled)", ".mindspec/config.local.yaml", cfg.Panel.IsolationRoot); err != nil {
 			return nil, fmt.Errorf("ensuring local review ignores: %w", err)
 		}
 		if err := ensureReviewIgnoreEntries(root); err != nil {

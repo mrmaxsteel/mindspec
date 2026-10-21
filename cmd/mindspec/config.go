@@ -509,7 +509,10 @@ func renderGateResolved(cfg *config.Config, gate string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return renderGateResolvedText(doc), nil
+}
 
+func renderGateResolvedText(doc gateResolvedDoc) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gate: %s\n", escapeConfigValue(doc.Gate))
 	fmt.Fprintln(&b, "slots:")
@@ -521,7 +524,7 @@ func renderGateResolved(cfg *config.Config, gate string) (string, error) {
 	fmt.Fprintf(&b, "expected_reviewers: %d\n", doc.ExpectedReviewers)
 	fmt.Fprintf(&b, "approve_threshold: %s\n", escapeConfigValue(doc.ApproveThreshold))
 
-	return b.String(), nil
+	return b.String()
 }
 
 // reviewerCountNotesFor scans registered panels under root's review roots

@@ -721,22 +721,13 @@ Core 3 runs in `complete` before materialization for every required matched regi
   `Allow`/`Block` decision is touched by any of this — the gate's outcome
   is fully computed before the advisory call site runs.
 
-  `renderConfig` (`cmd/mindspec/config.go`) now also echoes a set
-  `panel.note` verbatim (escaped), renders `panel.gates` — only configured
-  gates, in `config.PanelGateKeys` enum declaration order, never map
-  iteration order — each with its as-configured reviewer entries, its
-  resolved reviewer sum (`PanelGateExpectedReviewers`), and its raw
-  `approve_threshold` expression (`PanelGateApproveThresholdExpr`); renders
-  `panel.substitution.substitutes` in sorted-key order beside the
-  slot-id-preservation convention line (a substituted reviewer writes
-  `reviewer_id "<slot> <substitute-model>-sub"`, keeping the slot id); and
-  annotates any model id (from the global reviewers, any gate's reviewers,
-  or either side of `substitutes`) absent from `config.KnownModels()` with
-  an advisory warning that never affects the exit code. The `gates:` and
-  `substitutes:` keys are never omitted — an unconfigured/empty map still
-  renders `gates: {}` / `substitutes: {}`. Every config-controlled string
-  this bead adds to a text-render path passes through the existing
-  `escapeConfigValue`.
+  `renderConfig` (`cmd/mindspec/config.go`) shows a set `panel.note` and
+  configured `panel.gates` in `config.PanelGateKeys` order. Each gate shows
+  its configured reviewers, resolved reviewer sum
+  (`PanelGateExpectedReviewers`), and raw `approve_threshold` expression
+  (`PanelGateApproveThresholdExpr`). An empty gate map renders `gates: {}`.
+  The output has no substitution map or known-model warning. Config strings
+  in text output pass through `escapeConfigValue`.
 
   `mindspec config show` gained `--gate <name> [--json]` (R8/R9): two pure
   functions, `renderGateResolved` (text) and `gateResolvedJSON` (a typed

@@ -1,12 +1,70 @@
 package gitutil
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestEnsureGitignoreLiteralEntriesWithHeader(t *testing.T) {
+	for _, tc := range []struct {
+		path, entry, other string
+	}{
+		{".mindspec-scratch", ".mindspec-scratch", "other"},
+		{"review[1]", `review\[1]`, "review1"},
+		{"#review", `\#review`, "review"},
+		{"!review", `\!review`, "review"},
+		{"review*", `review\*`, "review-other"},
+		{"review?", `review\?`, "review1"},
+		{`review\files`, `review\\files`, "reviewfiles"},
+		{"review  ", `review\ \ `, "review"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			root := t.TempDir()
+			runGitignoreTestGit(t, root, "init", "-q")
+			if err := os.MkdirAll(filepath.Join(root, tc.path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			ensure := func() {
+				t.Helper()
+				if err := EnsureGitignoreLiteralEntriesWithHeader(root, "# local paths", tc.path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ensure()
+			path := filepath.Join(root, ".gitignore")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != "# local paths\n"+tc.entry+"\n" {
+				t.Fatalf("literal entry = %q; want %q", data, tc.entry)
+			}
+			if ignored, ok := checkIgnored(root, tc.path+"/probe"); !ok || !ignored {
+				t.Fatal("literal directory is not ignored")
+			}
+			if ignored, ok := checkIgnored(root, tc.other+"/probe"); !ok || ignored {
+				t.Fatal("unrelated directory is ignored or check failed")
+			}
+			// A later unrelated rule must not cause a duplicate escaped entry.
+			before := append(data, []byte("other-file\n")...)
+			if err := os.WriteFile(path, before, 0644); err != nil {
+				t.Fatal(err)
+			}
+			ensure()
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("second ensure changed ignores: %q", after)
+			}
+		})
+	}
+}
 
 func TestReviewIgnoreEntries_NotRuntimeEntries(t *testing.T) {
 	for _, review := range ReviewIgnoreEntries {

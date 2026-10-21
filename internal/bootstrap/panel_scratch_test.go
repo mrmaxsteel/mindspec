@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,14 +12,14 @@ import (
 )
 
 func TestBootstrap_ScratchIgnoredExisting(t *testing.T) {
-	for _, isolation := range []string{".mindspec-scratch", "review-scratch"} {
+	for _, isolation := range []string{".mindspec-scratch", "review-scratch", "review[1]", "#review", "!review", "review*", "review?", `review\files`, "review  "} {
 		t.Run(isolation, func(t *testing.T) {
 			root := reviewBootstrapRepo(t)
 			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
 				t.Fatal(err)
 			}
 			if isolation != ".mindspec-scratch" {
-				if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte("panel: {isolation_root: "+isolation+"}\n"), 0644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte("panel: {isolation_root: "+strconv.Quote(isolation)+"}\n"), 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -38,8 +39,11 @@ func TestBootstrap_ScratchIgnoredExisting(t *testing.T) {
 			if !strings.HasPrefix(string(before), seed) {
 				t.Fatal("existing ignore text changed")
 			}
+			if err := os.MkdirAll(filepath.Join(root, isolation), 0755); err != nil {
+				t.Fatal(err)
+			}
 			for _, path := range []string{isolation, ".mindspec/config.local.yaml"} {
-				if !strings.Contains(string(before), "\n"+path+"\n") {
+				if (path == ".mindspec-scratch" || path == "review-scratch" || path == ".mindspec/config.local.yaml") && !strings.Contains(string(before), "\n"+path+"\n") {
 					t.Fatalf("missing ignore %s: %s", path, before)
 				}
 				mustGit(t, root, "check-ignore", "--", path+"/probe")

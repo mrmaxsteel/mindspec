@@ -281,7 +281,7 @@ func TestLocalConfig_Refusals(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "config.local.yaml") || !strings.Contains(err.Error(), "recovery: set only panel.runners and models in .mindspec/config.local.yaml") {
+		if err == nil || !strings.Contains(err.Error(), "config.local.yaml") || !strings.HasSuffix(err.Error(), "\nrecovery: repair or remove the broken link at .mindspec/config.local.yaml") || strings.Count(err.Error(), "recovery:") != 1 {
 			t.Fatalf("dangling local file accepted or no recovery: %v", err)
 		}
 	})

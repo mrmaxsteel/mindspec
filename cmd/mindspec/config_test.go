@@ -516,29 +516,35 @@ panel:
 	}
 }
 
-// TestConfigShow_HostileStringsEscaped covers spec 112 AC10/R8: a hostile
-// panel.note and gate reviewer lens, each carrying ESC/BEL and a newline shaped like a
-// forged config line — never reach `config show` or
-// `config show --gate <name>` text output as raw control bytes or a forged
-// extra line, and round-trip byte-exactly through `--gate <name> --json`
-// under a real encoding/json decode.
+// TestConfigShow_HostileStringsEscaped covers spec 112 AC10/R8: text formatters
+// escape ESC, BEL and forged config lines in notes, models and lenses.
+// Resolution and Load refuse hostile models, so only direct formatters get them.
+// CLI checks cover hostile notes and lenses; JSON preserves the lens bytes.
 func TestConfigShow_HostileStringsEscaped(t *testing.T) {
 	cfg := config.DefaultConfig()
 	hostile := "lens\x1bwith\x07control\ninjected_key: forged"
+	hostileModel := "model\x1bwith\x07control\ninjected_key: forged"
 	cfg.Panel.Note = "note\x1bwith\x07control\ninjected_key: forged"
-	cfg.Panel.Gates = map[string]config.GatePanel{"bead": {Reviewers: []config.Reviewer{{Model: "m1", Lens: hostile, Count: func() *int { n := 2; return &n }()}}}}
+	cfg.Panel.Gates = map[string]config.GatePanel{"bead": {Reviewers: []config.Reviewer{{Model: hostileModel, Lens: hostile, Count: func() *int { n := 2; return &n }()}}}}
 	out, err := renderConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(hostileModel)) || !strings.Contains(out, strconv.Quote(cfg.Panel.Note)) {
 		t.Fatalf("unsafe output: %q", out)
 	}
-	out, err = renderGateResolved(cfg, "bead")
+	// Resolution also refuses hostile models. Exercise its text formatter
+	// directly, then use a model-safe value for resolution and the CLI.
+	cfg.Panel.Gates["bead"].Reviewers[0].Model = "m1"
+	resolved, err := buildGateResolvedDoc(cfg, "bead")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) {
+	for i := range resolved.Slots {
+		resolved.Slots[i].Model = hostileModel
+	}
+	out = renderGateResolvedText(resolved)
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\ninjected_key:") || !strings.Contains(out, strconv.Quote(hostile)) || !strings.Contains(out, strconv.Quote(hostileModel)) {
 		t.Fatalf("unsafe gate output: %q", out)
 	}
 	data, err := gateResolvedJSON(cfg, "bead")

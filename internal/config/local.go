@@ -78,8 +78,12 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 	localPath := filepath.Join(root, ".mindspec", "config.local.yaml")
 	f, err := os.Open(localPath)
 	if os.IsNotExist(err) {
-		if _, statErr := os.Lstat(localPath); os.IsNotExist(statErr) {
+		info, statErr := os.Lstat(localPath)
+		if os.IsNotExist(statErr) {
 			return nil
+		}
+		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("config.local.yaml: %s\nrecovery: repair or remove the broken link at .mindspec/config.local.yaml", err)
 		}
 	}
 	if err != nil {
