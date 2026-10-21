@@ -38,12 +38,18 @@ func TestADRAmendments_Spec130_Sizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, unreleased, ok := strings.Cut(string(changelog), "## [Unreleased]\n")
+	_, release, ok := strings.Cut(string(changelog), "## [0.17.0]")
 	if !ok {
-		t.Fatal("missing Unreleased heading")
+		t.Fatal("missing 0.17.0 heading")
 	}
-	unreleased, _, _ = strings.Cut(unreleased, "\n## [")
-	if !strings.Contains(unreleased, "Default panel sizes are 6/6/4/6 for spec/plan/bead/final review, with adhoc defaulting to 6 (spec 130 R2.1).") {
-		t.Error("missing Unreleased panel-size line")
+	release, _, _ = strings.Cut(release, "\n## [")
+	for _, phrase := range []string{
+		"Default panel size is set per gate",
+		"6 slots",
+		"bead panels have 4",
+	} {
+		if !strings.Contains(release, phrase) {
+			t.Errorf("0.17.0 panel-size note missing %q", phrase)
+		}
 	}
 }
