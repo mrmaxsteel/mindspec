@@ -26,7 +26,7 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkModels(r, root)
+		checkModels(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, modelsCheckName)
 		if c == nil || c.Status != Warn {
@@ -49,7 +49,7 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkModels(r, root)
+		checkModels(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, modelsCheckName)
 		if c == nil || c.Status != Warn {
@@ -63,7 +63,7 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkModels(r, root)
+		checkModels(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, modelsCheckName)
 		if c == nil || c.Status != Warn {
@@ -71,18 +71,18 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 		}
 	})
 
-	t.Run("config present with blank-valued key still warns (FX-2)", func(t *testing.T) {
+	t.Run("config present with blank-valued model reports load Error", func(t *testing.T) {
 		root := t.TempDir()
-		// map-length 1 but the model id is blank → NOT declared.
+		// Model safety now rejects an explicitly blank model at load time.
 		writeConfig(t, root, "models:\n  authoring: \"\"\n")
 		config.ResetCache()
 
 		r := &Report{}
-		checkModels(r, root)
+		checkConfiguration(r, root, Options{})
 
-		c := findCheck(r, modelsCheckName)
-		if c == nil || c.Status != Warn {
-			t.Fatalf("expected missing-models Warn for a blank-valued models key, got %+v", c)
+		c := findCheck(r, "MindSpec config")
+		if len(r.Checks) != 1 || c == nil || c.Status != Error || !strings.Contains(c.Message, "invalid model") {
+			t.Fatalf("expected one load Error for a blank model, got %+v", r.Checks)
 		}
 	})
 
@@ -92,7 +92,7 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkModels(r, root)
+		checkModels(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, modelsCheckName)
 		if c == nil {
@@ -186,7 +186,7 @@ func TestModelsFixWiring(t *testing.T) {
 	config.ResetCache()
 
 	r := &Report{}
-	checkModels(r, root)
+	checkModels(r, root, loadDoctorTestConfig(t, root))
 	c := findCheck(r, modelsCheckName)
 	if c == nil || c.FixFunc == nil {
 		t.Fatal("expected a fixable missing-models check")
@@ -236,7 +236,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkCommands(r, root)
+		checkCommands(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, commandsCheckName)
 		if c == nil || c.Status != Warn {
@@ -256,7 +256,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkCommands(r, root)
+		checkCommands(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, commandsCheckName)
 		if c == nil || c.Status != Warn {
@@ -270,7 +270,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkCommands(r, root)
+		checkCommands(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, commandsCheckName)
 		if c == nil || c.Status != Warn {
@@ -286,7 +286,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkCommands(r, root)
+		checkCommands(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, commandsCheckName)
 		if c == nil || c.Status != Warn {
@@ -300,7 +300,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkCommands(r, root)
+		checkCommands(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, commandsCheckName)
 		if c == nil {
@@ -392,7 +392,7 @@ func TestCommandsFixWiring(t *testing.T) {
 	config.ResetCache()
 
 	r := &Report{}
-	checkCommands(r, root)
+	checkCommands(r, root, loadDoctorTestConfig(t, root))
 	c := findCheck(r, commandsCheckName)
 	if c == nil || c.FixFunc == nil {
 		t.Fatal("expected a fixable missing-commands check")
