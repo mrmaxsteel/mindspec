@@ -156,6 +156,7 @@ var nonMutatingAllowlist = map[string]string{
 	"mindspec otel status":             "read-only: prints OTEL config status",
 	"mindspec panel disposition query": "read-only: prints a panel disposition",
 	"mindspec panel schema":            "read-only: prints the verdict JSON schema",
+	"mindspec panel prompt":            "read-only: prints the slot prompt; writes nothing",
 	"mindspec report":                  "read-only: consolidates the friction journal into a local report",
 	"mindspec report list":             "read-only: lists reports",
 	"mindspec rules":                   "read-only: lists the embedded rule table",
