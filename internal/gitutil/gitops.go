@@ -417,6 +417,16 @@ func HasRemote() bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
+// RemoteConfigured reports whether any remote is configured. A failed
+// git read returns an error, not a local-only decision.
+func RemoteConfigured() (bool, error) {
+	out, err := execCommand("git", "remote").Output()
+	if err != nil {
+		return false, fmt.Errorf("reading git remotes: %w", err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
 // RemoteExistsIn reports whether a remote named name is configured in
 // workdir (`git config --get remote.<name>.url`), without attempting any
 // network I/O. Spec 127 R1b(i) needs this distinction: a repository with
@@ -593,6 +603,42 @@ func PushBranch(branch string) error {
 		return fmt.Errorf("pushing %s: %s", branch, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// PushProbe checks the same remote and refspec as PushBranch. It skips
+// hooks and disables terminal prompts. Only a failed push probe refuses.
+func PushProbe(workdir, branch string) error {
+	if err := rejectOptionLike(branch); err != nil {
+		return err
+	}
+	cmd := noPrompt(execCommand("git", "push", "--dry-run", "--no-verify", "-u", "origin", branch))
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		detail = err.Error()
+	}
+	msg := "push preflight failed: " + termsafe.Escape(detail)
+	text := strings.ToLower(string(out))
+	authFailure := strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "could not read username") ||
+		strings.Contains(text, "could not read password") ||
+		strings.Contains(text, "invalid username or password") ||
+		strings.Contains(text, "http basic: access denied") ||
+		strings.Contains(text, "error: 401")
+	if authFailure {
+		urlCmd := execCommand("git", "remote", "get-url", "--push", "origin")
+		urlCmd.Dir = workdir
+		url, urlErr := urlCmd.Output()
+		remoteURL := strings.ToLower(strings.TrimSpace(string(url)))
+		if urlErr == nil && (strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://")) {
+			msg += "\nhint: configure a git credential helper for this HTTP remote"
+		}
+	}
+	return guard.NewFailure(msg, "check remote access, then retry implementation approval")
 }
 
 // RemoteHeadSHA returns the SHA of refs/heads/<branch> on remote via

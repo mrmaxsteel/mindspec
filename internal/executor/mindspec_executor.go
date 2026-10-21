@@ -562,6 +562,79 @@ func finalizeStepHook(stage string) error {
 	return finalizeStepHookFn(stage)
 }
 
+// finalizeBeadWorktrees scopes both early preflight and finalization to the
+// same worktree candidates. An explicit empty allow-set admits no beads.
+func (g *MindspecExecutor) finalizeBeadWorktrees(epicID string, lifecycleAllowSet []string) ([]bead.WorktreeListEntry, error) {
+	entries, err := g.WorktreeOps.List()
+	if err != nil {
+		return nil, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %s", idrender.Bead(epicID), termsafe.Escape(err.Error()))
+	}
+	allow := make(map[string]bool, len(lifecycleAllowSet))
+	for _, id := range lifecycleAllowSet {
+		allow[id] = true
+	}
+	var candidates []bead.WorktreeListEntry
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
+			continue
+		}
+		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if idvalidate.BeadID(beadID) != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
+			continue
+		}
+		if lifecycleAllowSet == nil {
+			return nil, fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to merge without an explicit scope", idrender.Bead(epicID), termsafe.Escape(e.Branch))
+		}
+		if allow[beadID] {
+			candidates = append(candidates, e)
+		}
+	}
+	return candidates, nil
+}
+
+// PreflightFinalizeMerges checks every pending bead merge and, for a local
+// finalization, the spec-to-main merge. It writes no lifecycle or git state.
+func (g *MindspecExecutor) PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return err
+	}
+	entries, err := g.finalizeBeadWorktrees(epicID, lifecycleAllowSet)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		merged, err := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+		if err != nil {
+			return guard.NewFailure("cannot check pending merge for "+termsafe.Escape(e.Branch)+": "+termsafe.Escape(err.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if merged {
+			continue
+		}
+		if err := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); err != nil {
+			return err
+		}
+		if err := g.preflightMergeDestruction(e.Branch, specBranch, overrideReason, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+			return err
+		}
+	}
+	if !hasRemote {
+		if err := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); err != nil {
+			return err
+		}
+		if err := g.preflightMergeDestruction(specBranch, "main", overrideReason, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PushProbe checks remote publication before lifecycle writes.
+func (g *MindspecExecutor) PushProbe(branch string) error {
+	return gitutil.PushProbe(g.Root, branch)
+}
+
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
 // branches. Handles bead branch auto-merge into the spec branch before
 // cleanup, ensuring all bead work is integrated.
@@ -581,8 +654,11 @@ func finalizeStepHook(stage string) error {
 // (ADR-0041 §1) with no existing seam separating its internal steps;
 // finalizeStepHook is invoked at five stages so each can be individually
 // fault-injected (finalize_fault_test.go).
-func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error) {
-	result := FinalizeResult{}
+func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error) {
+	result := FinalizeResult{MergeStrategy: "direct"}
+	if hasRemote {
+		result.MergeStrategy = "pr"
+	}
 
 	if !gitutil.BranchExists(specBranch) {
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
@@ -645,39 +721,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// enumeration failure, which could leave real merge candidates
 	// entirely unmerged with no signal. Abort with a named error instead
 	// (AC-14).
-	entries, listErr := g.WorktreeOps.List()
+	entries, listErr := g.finalizeBeadWorktrees(epicID, lifecycleAllowSet)
 	if listErr != nil {
-		return result, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %w", epicID, listErr)
+		return result, listErr
 	}
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
-			continue
-		}
-		// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): beadID is
-		// parsed back OUT of an agent-creatable local git branch name. A
-		// malformed candidate is skipped entirely — never auto-merged,
-		// never embedded in an ID role — rather than trusted by its
-		// bead/-prefix shape alone.
 		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
-		if idvalidate.BeadID(beadID) != nil {
-			// ADR-0042 degrade policy: name the skipped branch (escaped) so a
-			// malformed reverse-derivation candidate is not silently dropped.
-			fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
-			continue
-		}
-		if lifecycleAllowSet == nil {
-			// AC-14: a nil allow-set alongside a real bead/<id> candidate
-			// means the caller never computed a scope — abort rather
-			// than silently skip (today's bug) or silently admit
-			// (a scope bypass).
-			return result, fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to merge without an explicit scope", epicID, e.Branch)
-		}
-		if !allow[beadID] {
-			// R6: the exclusion boundary is lifecycle identity — a
-			// foreign-epic bead or a same-epic NON-lifecycle follow-up
-			// (open or closed) is left exactly alone.
-			continue
-		}
 		// Auto-commit any remaining bead artifacts.
 		if e.Path != "" {
 			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil && isPreservedMergeError(err) {
@@ -818,9 +867,8 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		result.DiffStat = stat
 	}
 
-	// Push to remote if available.
-	if gitutil.HasRemote() {
-		result.MergeStrategy = "pr"
+	// Publish with the caller's one preflight decision.
+	if hasRemote {
 
 		// Push the spec branch FIRST, unconditionally — the baseline
 		// contract every "pr" finalize has always had. Bug wu7t panel
@@ -910,8 +958,6 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				return result, err
 			}
 		}
-	} else {
-		result.MergeStrategy = "direct"
 	}
 
 	// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard for the

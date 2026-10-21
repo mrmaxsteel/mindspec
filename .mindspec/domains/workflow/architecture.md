@@ -417,6 +417,24 @@ dep add` failure is now named in `result.Warnings` (both bead IDs) instead
 of a silent `continue` (AC-20); a missing `work_chunks` block warns loudly
 instead of silently wiring zero edges (AC-19).
 
+### `mindspec impl approve`: early merge and push checks
+
+After the migration exemption, approval makes one error-returning has-remote
+decision before the spec-branch existence switch. A probe error refuses with
+`recovery: git remote -v`. It never selects local merge on a read error.
+
+After the plan and lifecycle allow-set are resolved, `PreflightFinalizeMerges`
+checks layout and work destruction for each pending bead-to-spec merge. On the
+direct path it also checks spec-to-main. On the push path, `PushProbe` tests the
+same remote and refspec as the real push, with a dry run that skips hooks and
+disables terminal prompts. Only a failed probe refuses. Only an HTTP(S)
+authentication failure adds a credential-helper hint.
+
+These checks run before the placeholder ADR write, the stale-phase reconcile,
+and the epic close. `FinalizeEpic` receives the same has-remote value and never
+probes again. The executor repeats both merge guards on the current tips after
+auto-merges. Both early and live checks must pass.
+
 ### `mindspec impl approve`: epic-scoped finalize + the pre-terminal orphan/obligation gate
 
 The FinalizeEpic lifecycle allow-set (`phase.LifecycleChildIDsForEpic` ∩
