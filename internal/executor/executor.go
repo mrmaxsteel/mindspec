@@ -71,6 +71,13 @@ type Executor interface {
 	// steps (never a new merge, never a checkout, never an abort).
 	CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
 
+	// PreflightFinalizeMerges checks pending bead merges, plus spec-to-main
+	// when hasRemote is false. It does not mutate state.
+	PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error
+
+	// PushProbe tests publication with a dry run that skips pre-push hooks.
+	PushProbe(branch string) error
+
 	// FinalizeEpic merges the spec branch to main (or pushes for PR),
 	// cleans up all workspaces and branches for the spec lifecycle.
 	//
@@ -98,7 +105,9 @@ type Executor interface {
 	// this method's own merge sites (the per-bead auto-merge loop's spec
 	// worktree, and the direct spec→main leg's main checkout) — only
 	// whichever site actually has a preserved merge acts on it.
-	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error)
+	// hasRemote is the caller's one preflight decision. Finalization does
+	// not probe again: true pushes the spec branch, false merges locally.
+	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error)
 
 	// Cleanup removes stale workspaces and branches for a spec.
 	// If force is true, skips lifecycle state checks.

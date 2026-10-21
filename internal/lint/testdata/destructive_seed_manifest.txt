@@ -219,6 +219,7 @@ internal/executor/merge_resumption.go	resumeAwareMerge	arg1:unprovable
 internal/executor/merge_resumption.go	stillConflictedRefusal	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.CompleteBead	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.FinalizeEpic	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.PreflightFinalizeMerges	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
 internal/guard/guard.go	checkCWDWithCache	arg1:unprovable

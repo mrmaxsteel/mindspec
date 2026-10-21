@@ -395,3 +395,21 @@ paths a sandbox fixture must gitignore/tolerate alongside `session.json`
 the reordered materialization sequence end-to-end as fault-injection
 scenarios (the KILL-TESTED/DOCUMENTED-FORWARD-SAFE classification, ADR-0041
 §3, § M→R→S→G→T staged boundary, §3(i)).
+
+## Finalization preflight and remote decision
+
+Approval reads the remote configuration once through the error-returning
+`RemoteConfigured` query. A read error refuses before lifecycle writes.
+`FinalizeEpic` receives that value and does not probe again. Its `MergeStrategy`
+is `pr` for true and `direct` for false, regardless of later remote configuration.
+
+`PreflightFinalizeMerges` and `FinalizeEpic` use the same scoped candidate helper.
+The early check covers pending bead-to-spec merges on both paths. It also covers
+spec-to-main on the direct path. Both layout and work-destruction checks run
+without writes. Live guards remain at each merge and read the tips after artifact
+commits and auto-merges. A passed early check cannot replace a live check.
+
+The push path runs `PushProbe` before the epic close. This probe skips hooks and
+disables terminal prompts. It uses the real push's remote and refspec. A missing
+credential helper alone does not refuse. Only a failed HTTP(S) authentication
+probe gets a credential-helper hint. The real push still runs pre-push hooks.

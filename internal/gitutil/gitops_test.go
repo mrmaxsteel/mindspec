@@ -2333,3 +2333,48 @@ func TestFetchRemoteBranchIn_RealGitNarrowRefspecPoisonedTrackingRef(t *testing.
 		t.Fatalf("fixture sanity: expected the ambient tracking ref to remain poisoned at the OLD tip %q, got %q (narrow-refspec clone setup did not reproduce the poisoned-cache shape)", oldTip, staleRef)
 	}
 }
+
+func TestRemoteConfigured_WithRemote(t *testing.T) {
+	dir := initGitRepo(t)
+	cmd := exec.Command("git", "-C", dir, "remote", "add", "origin", "file:///unused.git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("remote add: %v: %s", err, out)
+	}
+	testRemoteConfiguredIn(t, dir, true, false)
+}
+
+func TestRemoteConfigured_NoRemote(t *testing.T) {
+	testRemoteConfiguredIn(t, initGitRepo(t), false, false)
+}
+
+func TestRemoteConfigured_GitErrorReturnsError(t *testing.T) {
+	testRemoteConfiguredIn(t, t.TempDir(), false, true)
+}
+
+func testRemoteConfiguredIn(t *testing.T, dir string, want, wantError bool) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(old); err != nil {
+			t.Error(err)
+		}
+	})
+	got, err := RemoteConfigured()
+	if got != want || (err != nil) != wantError {
+		t.Fatalf("RemoteConfigured = (%v, %v), want (%v, error=%v)", got, err, want, wantError)
+	}
+}
+
+func TestPushProbe_EmptyFailureOutputNamesError(t *testing.T) {
+	swapExec(t, "", 1)
+	err := PushProbe("", "spec/077-test")
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("probe must name process error: %v", err)
+	}
+}

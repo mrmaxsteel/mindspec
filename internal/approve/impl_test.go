@@ -1349,8 +1349,8 @@ func TestApproveImpl_FinalizeEpicReceivesIntersectedAllowSet(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 FinalizeEpic call, got %d", len(calls))
 	}
-	if len(calls[0].Args) != 6 {
-		t.Fatalf("FinalizeEpic call recorded %d args, want 6 (epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge)", len(calls[0].Args))
+	if len(calls[0].Args) != 7 {
+		t.Fatalf("FinalizeEpic call recorded %d args, want 7 (epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge, hasRemote)", len(calls[0].Args))
 	}
 	allowSet, ok := calls[0].Args[3].([]string)
 	if !ok {

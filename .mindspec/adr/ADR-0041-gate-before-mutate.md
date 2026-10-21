@@ -806,3 +806,29 @@ self-consistency provide no authentication of agent-writable metadata.
 - **Pre-close audit (R4.5).** `panel_rebound_entries` copies the bead panel's
   rebind entries through the same fail-closed pre-close metadata stage as
   `panel_refuted`. A failed audit write refuses completion before close.
+
+## Amendment (Spec 132)
+
+### Implementation approval preflight
+
+`ApproveImpl` makes one error-returning has-remote decision after the migration
+exemption and before the spec-branch existence switch. A read error refuses with
+`cannot tell whether a git remote is configured`, then `recovery: git remote -v`.
+An error never selects a local merge.
+
+`PreflightFinalizeMerges` checks the layout guard and work-destruction predicate
+for every pending bead-to-spec merge in the lifecycle allow-set. On the direct
+path it also checks the spec-to-main merge. It uses the same candidate helper as
+`FinalizeEpic` and writes no state. Both early guards run before the placeholder
+ADR write, the stale-phase reconcile write, and the epic close.
+
+On the push path, `PushProbe` runs `git push --dry-run --no-verify` with the same
+remote and refspec as `PushBranch`, with `GIT_TERMINAL_PROMPT=0`. Only a failed
+probe refuses. A missing credential helper alone does not refuse. The refusal
+adds a credential-helper hint only for an authentication error on an HTTP(S)
+remote. The real push still runs its pre-push hooks.
+
+`FinalizeEpic` receives the has-remote value as a parameter and does not probe
+again. The early guards, push probe, and finalization use this one value.
+The executor keeps both live guards before each merge. It reads the current tips
+after artifact commits and bead auto-merges. Both early and live guards must pass.

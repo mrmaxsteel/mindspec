@@ -525,10 +525,9 @@ func TestOpaqueOperandRegistry_RerunCallers(t *testing.T) {
 // that point, never a literal expression), and would wrongly report
 // zero provable calls. This test instead proves provenance one level
 // up, at the REAL entry points production code calls
-// (preflightMergeDestruction's three real callers in
-// mindspec_executor.go; EvaluateWorkDestructionPreflight's two real
-// callers in internal/complete/complete.go and internal/approve/
-// impl.go) — the same recoveryTemplate fold this file's
+// (preflightMergeDestruction's real callers in
+// mindspec_executor.go; EvaluateWorkDestructionPreflight's real
+// caller in internal/complete/complete.go) — the same recoveryTemplate fold this file's
 // TestOpaqueOperandRegistry_RerunCallers already applies to
 // beadToSpecConflictFailure — and asserts no floor match, proving the
 // runtime string inventory that ultimately reaches the four registered
@@ -553,13 +552,6 @@ func TestOpaqueOperandRegistry_MergePreflightRerunCallers(t *testing.T) {
 			funcName: "completeWorkDestructionPreflightFn",
 			argIdx:   4,
 		},
-		{
-			// impl.go calls its own seam var (implWorkDestructionPreflightFn),
-			// same pointer-pinned default, same reasoning.
-			relPath:  filepath.Join("internal", "approve", "impl.go"),
-			funcName: "implWorkDestructionPreflightFn",
-			argIdx:   4,
-		},
 	}
 	for _, c := range cases {
 		path := filepath.Join(root, c.relPath)
@@ -577,10 +569,8 @@ func TestOpaqueOperandRegistry_MergePreflightRerunCallers(t *testing.T) {
 			// preflightMergeDestruction is called as a method
 			// (g.preflightMergeDestruction(...)); EvaluateWorkDestruction
 			// Preflight is called as a package-qualified function
-			// (lifecycle.EvaluateWorkDestructionPreflight(...) /
-			// implWorkDestructionPreflightFn(...) — the SEAM VAR's
-			// production default IS this function, so this probe targets
-			// the function name directly via its qualified-selector form).
+			// or the completeWorkDestructionPreflightFn seam. The seam
+			// points to lifecycle.EvaluateWorkDestructionPreflight.
 			var name string
 			switch fn := call.Fun.(type) {
 			case *ast.SelectorExpr:

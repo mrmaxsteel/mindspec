@@ -777,6 +777,14 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: mindspecVerbTemplateObligation,
 	},
 
+	{
+		File:       "internal/executor/mindspec_executor.go",
+		Func:       "MindspecExecutor.PreflightFinalizeMerges",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The ancestry-read refusal uses a fixed implementation-approval command with an idrender.Spec operand.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+
 	// Spec 127 bead 6 (R4): the merge-destruction preflight's own refusal
 	// builders, one pair per boundary layer (internal/executor's own
 	// backstop and internal/lifecycle's ADR-0030 wrapper the §1-phase
@@ -794,7 +802,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/executor/merge_preflight.go",
 		Func:       "evidenceErrorRefusal",
 		Detail:     "arg1:unprovable",
-		Rationale:  "the recovery line's `rerun` operand is a plain string parameter supplied by this function's two callers (preflightMergeDestruction's own two callers, CompleteBead and FinalizeEpic) — no fold can prove it here.",
+		Rationale:  "the recovery line's `rerun` operand is a plain string parameter supplied by preflightMergeDestruction's three callers (CompleteBead, FinalizeEpic and PreflightFinalizeMerges) — no fold can prove it here.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument, the same shape beadToSpecConflictFailure's entry above already registers via TestOpaqueOperandRegistry_RerunCallers.",
 	},
 	{
@@ -808,7 +816,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/lifecycle/merge_preflight.go",
 		Func:       "workDestructionEvidenceErrorRefusal",
 		Detail:     "arg1:unprovable",
-		Rationale:  "the §1-phase (verb-layer) counterpart of internal/executor's evidenceErrorRefusal above — same shape, a plain string `rerun` parameter supplied by this function's two callers (internal/complete and internal/approve's own §1 preflights).",
+		Rationale:  "the §1-phase (verb-layer) counterpart of internal/executor's evidenceErrorRefusal above — same shape, a plain string `rerun` parameter supplied by this function's caller (internal/complete's preflight).",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument.",
 	},
 	{

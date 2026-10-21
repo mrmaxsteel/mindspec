@@ -9,23 +9,25 @@ type MockExecutor struct {
 	Calls []MockCall
 
 	// Return values (set before test).
-	InitSpecWorkspaceResult WorkspaceInfo
-	InitSpecWorkspaceErr    error
-	HandoffEpicErr          error
-	DispatchBeadResult      WorkspaceInfo
-	DispatchBeadErr         error
-	CompleteBeadErr         error
-	FinalizeEpicResult      FinalizeResult
-	FinalizeEpicErr         error
-	CleanupErr              error
-	IsTreeCleanErr          error
-	DiffStatResult          string
-	DiffStatErr             error
-	CommitCountResult       int
-	CommitCountErr          error
-	CommitAllErr            error
-	ChangedFilesResult      []string
-	ChangedFilesErr         error
+	InitSpecWorkspaceResult    WorkspaceInfo
+	InitSpecWorkspaceErr       error
+	HandoffEpicErr             error
+	DispatchBeadResult         WorkspaceInfo
+	DispatchBeadErr            error
+	CompleteBeadErr            error
+	FinalizeEpicResult         FinalizeResult
+	FinalizeEpicErr            error
+	PreflightFinalizeMergesErr error
+	PushProbeErr               error
+	CleanupErr                 error
+	IsTreeCleanErr             error
+	DiffStatResult             string
+	DiffStatErr                error
+	CommitCountResult          int
+	CommitCountErr             error
+	CommitAllErr               error
+	ChangedFilesResult         []string
+	ChangedFilesErr            error
 
 	// ChangedFilesOptionsFn lets rebind tests inspect the diff options.
 	ChangedFilesOptionsFn func(base, head string, options []ChangedFilesOptions) ([]string, error)
@@ -163,8 +165,18 @@ func (m *MockExecutor) CompleteBead(beadID, specBranch, msg, overrideReason stri
 	return m.CompleteBeadErr
 }
 
-func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error) {
-	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge)
+func (m *MockExecutor) PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error {
+	m.record("PreflightFinalizeMerges", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, hasRemote)
+	return m.PreflightFinalizeMergesErr
+}
+
+func (m *MockExecutor) PushProbe(branch string) error {
+	m.record("PushProbe", branch)
+	return m.PushProbeErr
+}
+
+func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error) {
+	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge, hasRemote)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
 }
 
