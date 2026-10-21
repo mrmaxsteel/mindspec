@@ -2,6 +2,7 @@ package gitutil
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +71,7 @@ func EnsureGitignoreEntriesWithHeader(root, header string, entries ...string) er
 
 // EnsureGitignoreLiteralEntriesWithHeader ignores literal paths and checks those
 // paths rather than their escaped patterns. Plain paths keep their original bytes.
+// It refuses control bytes below 0x20 before it writes any entries.
 func EnsureGitignoreLiteralEntriesWithHeader(root, header string, paths ...string) error {
 	entries := make([]string, len(paths))
 	for i, path := range paths {
@@ -77,6 +79,9 @@ func EnsureGitignoreLiteralEntriesWithHeader(root, header string, paths ...strin
 		trailingSpaces := len(strings.TrimRight(path, " "))
 		for j := 0; j < len(path); j++ {
 			c := path[j]
+			if c < 0x20 {
+				return fmt.Errorf("cannot ignore literal path %q: control bytes are not supported", path)
+			}
 			if c == '\\' || c == '*' || c == '?' || c == '[' ||
 				(j == 0 && (c == '#' || c == '!')) || (c == ' ' && j >= trailingSpaces) {
 				b.WriteByte('\\')

@@ -12,7 +12,7 @@ import (
 )
 
 func TestBootstrap_ScratchIgnoredExisting(t *testing.T) {
-	for _, isolation := range []string{".mindspec-scratch", "review-scratch", "review[1]", "#review", "!review", "review*", "review?", `review\files`, "review  "} {
+	for _, isolation := range []string{".mindspec-scratch", "review-scratch", "review/", "review[1]", "#review", "!review", "review*", "review?", "review  "} {
 		t.Run(isolation, func(t *testing.T) {
 			root := reviewBootstrapRepo(t)
 			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
@@ -57,6 +57,39 @@ func TestBootstrap_ScratchIgnoredExisting(t *testing.T) {
 			}
 			if !bytes.Equal(before, after) {
 				t.Fatal("second init changed ignores")
+			}
+		})
+	}
+}
+
+func TestBootstrap_ScratchRootRefused(t *testing.T) {
+	for _, isolation := range []string{"scratch\n!.mindspec/config.local.yaml", "review\r", "./review", "review//x", `review\files`} {
+		t.Run(strconv.Quote(isolation), func(t *testing.T) {
+			root := reviewBootstrapRepo(t)
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".mindspec", "config.yaml"), []byte("panel: {isolation_root: "+strconv.Quote(isolation)+"}\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			seed := []byte("# existing project\n*.log\n")
+			path := filepath.Join(root, ".gitignore")
+			if err := os.WriteFile(path, seed, 0644); err != nil {
+				t.Fatal(err)
+			}
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+			_, err := Run(root, false)
+			want := "\nrecovery: set panel.isolation_root to an untracked relative directory outside .git, .worktrees and .mindspec"
+			if err == nil || !strings.Contains(err.Error(), "invalid panel.isolation_root "+strconv.Quote(isolation)) || !strings.HasSuffix(err.Error(), want) || strings.Count(err.Error(), "recovery:") != 1 {
+				t.Errorf("init accepted root or returned wrong recovery: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(seed, after) {
+				t.Errorf("refused init changed .gitignore: before %q; after %q", seed, after)
 			}
 		})
 	}

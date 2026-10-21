@@ -5,9 +5,54 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestEnsureGitignoreLiteralEntriesWithHeader_RefusesControlBytes(t *testing.T) {
+	paths := []string{"a\nb", "a\rb", "review\r", "scratch\n!.mindspec/config.local.yaml"}
+	for c := byte(0); c < 0x20; c++ {
+		paths = append(paths, "a"+string(c)+"b")
+	}
+	for _, invalid := range paths {
+		t.Run(strconv.Quote(invalid), func(t *testing.T) {
+			for _, existing := range []bool{false, true} {
+				name := "absent"
+				if existing {
+					name = "existing"
+				}
+				t.Run(name, func(t *testing.T) {
+					root := t.TempDir()
+					path := filepath.Join(root, ".gitignore")
+					before := []byte("# existing ignores\r\n*.log\nlast-entry")
+					if existing {
+						if err := os.WriteFile(path, before, 0644); err != nil {
+							t.Fatal(err)
+						}
+					}
+					err := EnsureGitignoreLiteralEntriesWithHeader(root, "# local paths", "valid", invalid, "also-valid")
+					if err == nil || !strings.Contains(err.Error(), strconv.Quote(invalid)) {
+						t.Errorf("literal helper accepted control byte or returned wrong error: %v", err)
+					}
+					after, err := os.ReadFile(path)
+					if !existing {
+						if !os.IsNotExist(err) {
+							t.Fatalf("literal helper created .gitignore: %q; err=%v", after, err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Errorf("literal helper changed .gitignore: before %q; after %q", before, after)
+					}
+				})
+			}
+		})
+	}
+}
 
 func TestEnsureGitignoreLiteralEntriesWithHeader(t *testing.T) {
 	for _, tc := range []struct {

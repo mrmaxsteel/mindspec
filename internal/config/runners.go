@@ -199,10 +199,16 @@ func validatePanelConfig(c *Config) error {
 	return validateIsolationRoot(c.Panel.IsolationRoot)
 }
 
+// validateIsolationRoot requires a clean relative path with / separators.
+// It permits one trailing slash. It refuses backslashes and control bytes.
 func validateIsolationRoot(root string) error {
-	normal := strings.ReplaceAll(root, "\\", "/")
-	invalid := root == "" || filepath.IsAbs(root) || strings.HasPrefix(normal, "/") || strings.Contains(normal, "..") || strings.Contains(normal, ":")
-	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(normal)), "./")
+	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(root)), "./")
+	invalid := root == "" || filepath.IsAbs(root) || strings.HasPrefix(root, "/") || strings.Contains(root, "..") || strings.ContainsAny(root, ":\\") || strings.TrimSuffix(root, "/") != clean
+	for i := 0; i < len(root); i++ {
+		if root[i] < 0x20 || root[i] == 0x7f {
+			invalid = true
+		}
+	}
 	for _, reserved := range []string{".", ".git", ".worktrees", ".mindspec"} {
 		if clean == reserved || strings.HasPrefix(clean, reserved+"/") {
 			invalid = true

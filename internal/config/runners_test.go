@@ -355,11 +355,20 @@ func TestLenses_UnknownRefused(t *testing.T) {
 }
 
 func TestIsolationRoot_Validate(t *testing.T) {
-	for _, root := range []string{"", "/absolute", ".", ".git/x", ".worktrees/x", ".mindspec/x", "a/../b", "./.git/x", "C:\\scratch"} {
-		_, err := Load(panelConfigFixture(t, fmt.Sprintf("panel: {isolation_root: %q}\n", root), ""))
-		if err == nil || !strings.Contains(err.Error(), "recovery:") {
-			t.Fatalf("root %q accepted: %v", root, err)
-		}
+	refused := []string{"", "/absolute", ".", ".git/x", ".worktrees/x", ".mindspec/x", "a/../b", "./.git/x", "C:\\scratch",
+		"./review", "review//x", `review\x`, "a\nb", "a\rb", "review\r", "scratch\n!.mindspec/config.local.yaml", "review//"}
+	for c := byte(0); c < 0x20; c++ {
+		refused = append(refused, "review"+string(c))
+	}
+	refused = append(refused, "review\x7f")
+	for _, root := range refused {
+		t.Run(fmt.Sprintf("refuse_%q", root), func(t *testing.T) {
+			_, err := Load(panelConfigFixture(t, fmt.Sprintf("panel: {isolation_root: %q}\n", root), ""))
+			want := fmt.Sprintf("invalid panel.isolation_root %q\nrecovery: set panel.isolation_root to an untracked relative directory outside .git, .worktrees and .mindspec", root)
+			if err == nil || !strings.HasSuffix(err.Error(), want) || strings.Count(err.Error(), "recovery:") != 1 {
+				t.Fatalf("root %q accepted or wrong recovery: %v", root, err)
+			}
+		})
 	}
 	for name, body := range map[string]string{
 		"direct null":  "panel: {isolation_root: null}\n",
@@ -372,7 +381,7 @@ func TestIsolationRoot_Validate(t *testing.T) {
 			}
 		})
 	}
-	for _, root := range []string{"review-scratch", "nested/reviews"} {
+	for _, root := range []string{"review-scratch", "nested/reviews", "review/"} {
 		c := mustPanelConfig(t, fmt.Sprintf("panel: {isolation_root: %q}\n", root), "")
 		if c.Panel.IsolationRoot != root {
 			t.Fatal(c.Panel.IsolationRoot)
