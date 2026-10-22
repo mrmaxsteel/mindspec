@@ -205,6 +205,26 @@ func TestCheckCompleteness_NoManifest_Errors(t *testing.T) {
 	}
 }
 
+// TestCheckCompleteness_PreTallyNamesTally: a check before the first
+// tally (no file yet, or rows but no manifest) tells the caller to run
+// panel tally first. The old errors named only the missing manifest.
+func TestCheckCompleteness_PreTallyNamesTally(t *testing.T) {
+	specDir := t.TempDir()
+	const name = "pre-tally"
+	want := "run mindspec panel tally " + name + " first"
+	if err := CheckCompleteness(specDir, name); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("empty panel: error %v, want it to contain %q", err, want)
+	}
+	row := []byte(`{"record":"disposition","id":"d-1","spec":"130","gate":"bead","panel":"pre-tally","reviewer":"R1","model":"opus","severity":"minor","summary":"x","convergent_with":[],"disposition":"confirmed-fixed","created_at":"2026-10-20T10:00:00Z","backfilled":false}`)
+	if err := AppendRecords(panelStoreDir(specDir, name), CanonicalizeDispositionRowID(row)); err != nil {
+		t.Fatal(err)
+	}
+	err := CheckCompleteness(specDir, name)
+	if err == nil || !strings.Contains(err.Error(), "coverage manifest") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("rows without a manifest: error %v, want it to contain %q", err, want)
+	}
+}
+
 // --- AC7b: finding-less all-APPROVE panel still gets its manifest --------
 
 func TestWriteTerminalManifest_FindingLessPanel(t *testing.T) {

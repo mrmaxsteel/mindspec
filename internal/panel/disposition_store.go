@@ -298,7 +298,7 @@ func CheckCompletenessAt(dir, panelName string) error {
 		return err
 	}
 	if len(lines) == 0 {
-		return fmt.Errorf("panel %s: no dispositions.jsonl found (no terminal coverage manifest recorded)", termsafe.Escape(panelName))
+		return fmt.Errorf("panel %s: no dispositions.jsonl found (no terminal coverage manifest recorded)%s", termsafe.Escape(panelName), tallyFirstHint(panelName))
 	}
 
 	var manifest *CoverageManifest
@@ -339,7 +339,7 @@ func CheckCompletenessAt(dir, panelName string) error {
 	}
 
 	if manifest == nil {
-		return fmt.Errorf("panel %s: dispositions.jsonl has no record:\"panel\" coverage manifest", termsafe.Escape(panelName))
+		return fmt.Errorf("panel %s: dispositions.jsonl has no record:\"panel\" coverage manifest%s", termsafe.Escape(panelName), tallyFirstHint(panelName))
 	}
 
 	for _, slot := range manifest.Slots {
@@ -422,6 +422,13 @@ func WriteCoverageManifest(res *Result) error {
 
 }
 
+// tallyFirstHint tells the caller how to write the missing coverage
+// manifest: only panel tally writes it, so a check before the first tally
+// has none.
+func tallyFirstHint(panelName string) string {
+	return fmt.Sprintf("; run mindspec panel tally %s first (only tally writes the coverage manifest)", termsafe.Escape(panelName))
+}
+
 // CheckCore3 checks required coverage, without a gate decision or git reads.
 // Callers decide which registrations to skip before invoking it.
 func CheckCore3(reg Registration) error {
@@ -440,7 +447,7 @@ func CheckCore3(reg Registration) error {
 		return err
 	}
 	if len(manifests) == 0 {
-		return fmt.Errorf("no coverage manifest recorded")
+		return fmt.Errorf("no coverage manifest recorded%s", tallyFirstHint(reg.Slug()))
 	}
 	last := manifests[len(manifests)-1]
 	derived := DeriveCoverageManifest(res)
