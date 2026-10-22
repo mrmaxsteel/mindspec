@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,7 +110,7 @@ func TestPanelCheckout_PruneTerminalSafeAttemptPath(t *testing.T) {
 		t.Fatalf("missing held-attempt refusal: output=%q error=%v", out, err)
 	}
 	for _, text := range []string{out, err.Error()} {
-		if !strings.Contains(text, termsafe.Escape(attempt)) || !strings.Contains(text, "\nrecovery: inspect the attempt directory and its live supervisor") {
+		if !strings.Contains(text, termsafe.Escape("cannot stop attempt "+attempt)) || !strings.Contains(text, "\nrecovery: inspect the attempt directory and its live supervisor") {
 			t.Errorf("missing safe path or recovery: %q", text)
 		}
 		if strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
@@ -1193,5 +1194,74 @@ exit `+fmt.Sprint(exit))
 				})
 			}
 		}
+	}
+}
+
+func TestPanelLaunch_WindowsProducerRecovery(t *testing.T) {
+	newLaunchFixture(t)
+	old := panelLaunchSupported
+	t.Cleanup(func() { panelLaunchSupported = old })
+	panelLaunchSupported = func() error { return panellaunch.SupportedOn("windows") }
+	out, err := runPanelVerbCmd("launch", "run", "R1")
+	assertProducerRecovery(t, err, "process runners need a Unix host", "use a harness runner")
+	if strings.Count(out, "\nrecovery:") != 1 || !strings.Contains(out, err.Error()) {
+		t.Fatalf("Cobra lost refusal: %q", out)
+	}
+}
+
+func TestPanelLaunch_HeldSlotProducerRecovery(t *testing.T) {
+	f := newLaunchFixture(t)
+	lock, err := panel.AcquireSlotLock(f.layout(t).Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	out, err := runPanelVerbCmd("launch", "run", "R1")
+	assertProducerRecovery(t, err, "slot lock is held: "+f.layout(t).Lock, "run mindspec panel verify; delete the lock file only after you make sure no mindspec process uses the slot")
+	if !errors.Is(err, panel.ErrSlotLocked) {
+		t.Fatalf("held-lock cause lost: %v", err)
+	}
+	if strings.Count(out, "\nrecovery:") != 1 || !strings.Contains(out, err.Error()) {
+		t.Fatalf("Cobra lost refusal: %q", out)
+	}
+}
+
+func TestPanelCheckout_CleanupEscapesFailureOnce(t *testing.T) {
+	newCheckoutFixture(t, ".mindspec-scratch")
+	old := panelCheckoutOrphanCheck
+	t.Cleanup(func() { panelCheckoutOrphanCheck = old })
+	message := "cannot stop attempt /Users/José/hostile\x1b\nrecovery: forged"
+	panelCheckoutOrphanCheck = func(string, panel.Registration, panel.SlotLayout) error {
+		return termsafe.NewFailure(message, "inspect the attempt directory and its live supervisor")
+	}
+	_, err := runPanelVerbCmd("checkout", "p", "--prune", "--slot", "R1")
+	assertProducerRecovery(t, err, termsafe.Escape(message), "inspect the attempt directory and its live supervisor")
+}
+
+func TestPanelLaunch_PgidReadRecovery(t *testing.T) {
+	for _, kind := range []string{"directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newLaunchFixture(t)
+			path := filepath.Join(f.layout(t).AttemptDir(1), "pgid")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "directory" {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Symlink(f.script, path); err != nil {
+				t.Fatal(err)
+			}
+			_, readErr := panellaunch.ReadAttemptFile(filepath.Dir(path), "pgid", 64)
+			if readErr == nil {
+				t.Fatal("pgid read must refuse")
+			}
+			out, err := runPanelVerbCmd("launch", "run", "R1")
+			assertProducerRecovery(t, err, termsafe.Escape(readErr.Error()), "inspect the attempt directory and its live supervisor")
+			if strings.Count(out, "\nrecovery:") != 1 || !strings.Contains(out, err.Error()) {
+				t.Fatalf("Cobra changed recovery: %q", out)
+			}
+		})
 	}
 }

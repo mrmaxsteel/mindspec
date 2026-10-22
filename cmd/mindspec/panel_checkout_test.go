@@ -1113,13 +1113,16 @@ func TestPanelCheckout_ErrorTrustBoundary(t *testing.T) {
 	}
 	for _, err := range []error{
 		fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED"),
-		fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED: %w", trusted),
 	} {
 		got := checkoutError(err, "inspect the slot").Error()
 		want := termsafe.Escape(err.Error()) + "\nrecovery: inspect the slot"
 		if got != want || strings.Contains(got, "\x1b") || strings.Count(got, "\nrecovery:") != 1 {
 			t.Errorf("untrusted error bypassed escaping: got %q want %q", got, want)
 		}
+	}
+	wrapped := fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED: %w", trusted)
+	if got := checkoutError(wrapped, "fallback"); got != trusted {
+		t.Fatalf("wrapped trusted failure lost its recovery: %v", got)
 	}
 	if got := checkoutError(nil, "fallback"); got != nil {
 		t.Fatalf("nil error changed: %v", got)

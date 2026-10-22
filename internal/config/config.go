@@ -510,25 +510,9 @@ func loadUncached(root string) (*Config, error) {
 	if cfg.WorktreeRoot == "" {
 		cfg.WorktreeRoot = ".worktrees"
 	}
-	// R5 ingress predicate (ADR-0042 §4, AC-10/AC-13): worktree_root is
-	// agent-writable and participates in every composed worktree path, so
-	// it is validated HERE, at the same site its default is backfilled.
-	// This is a PURELY LEXICAL charset/relative/no-".." check — see
-	// containment.ValidateWorktreeRoot's doc comment for why symlink-aware
-	// containment is deliberately NOT done here (it lives at check-at-use,
-	// closer to each composed path's actual use). A failing value fails
-	// Load closed with a "recovery: " line (the ZFC/ADR-0035 convergent
-	// lever: rewrite worktree_root to the default). internal/config cannot
-	// import internal/guard (guard already imports config — a cycle), so
-	// the recovery line is assembled locally here rather than via
-	// guard.NewFailure; its wire format ("...\nrecovery: <command>") is
-	// what guard.HasFinalRecoveryLine parses, and every caller further up
-	// the stack that CAN import guard should prefer
-	// guard.NewFailure(msg, containment.RejectionLever) instead of
-	// duplicating this pattern (this is the one place that must, because
-	// of the import-graph constraint).
+	// Validate relative worktree paths before path composition.
 	if err := containment.ValidateWorktreeRoot(cfg.WorktreeRoot); err != nil {
-		return nil, fmt.Errorf("invalid worktree_root: %s\nrecovery: %s", err.Error(), containment.RejectionLever)
+		return nil, termsafe.NewFailure(fmt.Sprintf("invalid worktree_root: %s", err.Error()), containment.RejectionLever)
 	}
 
 	// Decomposition thresholds: per-field zero-value backfill. Explicit `0`
@@ -596,10 +580,10 @@ func loadUncached(root string) (*Config, error) {
 	if isolationTracked != nil {
 		tracked, err := isolationTracked(root, cfg.Panel.IsolationRoot)
 		if err != nil {
-			return nil, fmt.Errorf("checking panel.isolation_root: %w\nrecovery: check the repository index", err)
+			return nil, termsafe.NewWrappedFailure(err, fmt.Sprintf("checking panel.isolation_root: %v", err), "check the repository index")
 		}
 		if tracked {
-			return nil, fmt.Errorf("panel.isolation_root %q is tracked\nrecovery: set panel.isolation_root to an untracked directory", cfg.Panel.IsolationRoot)
+			return nil, termsafe.NewFailure(fmt.Sprintf("panel.isolation_root %q is tracked", cfg.Panel.IsolationRoot), "set panel.isolation_root to an untracked directory")
 		}
 	}
 	return cfg, nil
@@ -611,10 +595,10 @@ func loadUncached(root string) (*Config, error) {
 // `recovery: <command>` line (ADR-0035), never a panic.
 func validateOrchestration(cfg *Config) error {
 	if _, ok := cfg.Loop.GateAuthority["panel_skip"]; ok {
-		return fmt.Errorf("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only)\nrecovery: remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
+		return termsafe.NewFailure("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only)", "remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
 	}
 	if cfg.Loop.Halt.OnReject != "halt" {
-		return fmt.Errorf("loop.halt.on_reject must be \"halt\" (got %q): a REJECT halts the track, auto-fixing a rejection is verification debt\nrecovery: set loop.halt.on_reject: halt in .mindspec/config.yaml", cfg.Loop.Halt.OnReject)
+		return termsafe.NewFailure(fmt.Sprintf("loop.halt.on_reject must be \"halt\" (got %q): a REJECT halts the track, auto-fixing a rejection is verification debt", cfg.Loop.Halt.OnReject), "set loop.halt.on_reject: halt in .mindspec/config.yaml")
 	}
 	for k, v := range cfg.Loop.GateAuthority {
 		if v != "panel" && v != "human" {
@@ -622,16 +606,16 @@ func validateOrchestration(cfg *Config) error {
 			// quote at BOTH interpolation points (the :592-area
 			// panel.gates precedent), so control bytes can never reach
 			// the message or recovery clause raw.
-			return fmt.Errorf("loop.gate_authority.%s must be \"panel\" or \"human\" (got %q)\nrecovery: set loop.gate_authority.%s to panel or human in .mindspec/config.yaml", strconv.Quote(k), v, strconv.Quote(k))
+			return termsafe.NewFailure(fmt.Sprintf("loop.gate_authority.%s must be \"panel\" or \"human\" (got %q)", strconv.Quote(k), v), fmt.Sprintf("set loop.gate_authority.%s to panel or human in .mindspec/config.yaml", strconv.Quote(k)))
 		}
 	}
 	if ch := cfg.Loop.Context.ControllerHandoff; ch != "per-spec" && ch != "at-usage-threshold" {
-		return fmt.Errorf("loop.context.controller_handoff must be \"per-spec\" or \"at-usage-threshold\" (got %q)\nrecovery: set loop.context.controller_handoff to per-spec or at-usage-threshold in .mindspec/config.yaml", ch)
+		return termsafe.NewFailure(fmt.Sprintf("loop.context.controller_handoff must be \"per-spec\" or \"at-usage-threshold\" (got %q)", ch), "set loop.context.controller_handoff to per-spec or at-usage-threshold in .mindspec/config.yaml")
 	}
 	switch cfg.Runner {
 	case runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter:
 	default:
-		return fmt.Errorf("runner %q is not a recognized orchestration adapter\nrecovery: set runner to one of %s in .mindspec/config.yaml", cfg.Runner, strings.Join([]string{runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter}, ", "))
+		return termsafe.NewFailure(fmt.Sprintf("runner %q is not a recognized orchestration adapter", cfg.Runner), fmt.Sprintf("set runner to one of %s in .mindspec/config.yaml", strings.Join([]string{runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter}, ", ")))
 	}
 
 	if err := validateReviewerEntries(cfg.Panel.Reviewers, "panel.reviewers"); err != nil {
@@ -645,13 +629,13 @@ func validateOrchestration(cfg *Config) error {
 			total += r.CountValue()
 		}
 		if total < 2 {
-			return fmt.Errorf("panel.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass\nrecovery: add at least one more reviewer under panel.reviewers in .mindspec/config.yaml", total)
+			return termsafe.NewFailure(fmt.Sprintf("panel.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass", total), "add at least one more reviewer under panel.reviewers in .mindspec/config.yaml")
 		}
 		expr := strings.TrimSpace(cfg.Panel.ApproveThreshold)
 		if !strings.EqualFold(expr, "n-1") {
 			n, err := strconv.Atoi(expr)
 			if err != nil || n < 1 || n > total {
-				return fmt.Errorf("panel.approve_threshold %q must be \"n-1\" or an integer in [1, %d] (sum of reviewers.count)\nrecovery: set panel.approve_threshold to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", cfg.Panel.ApproveThreshold, total, total)
+				return termsafe.NewFailure(fmt.Sprintf("panel.approve_threshold %q must be \"n-1\" or an integer in [1, %d] (sum of reviewers.count)", cfg.Panel.ApproveThreshold, total), fmt.Sprintf("set panel.approve_threshold to \"n-1\" or an integer between 1 and %d in .mindspec/config.yaml", total))
 			}
 		}
 	}
@@ -669,10 +653,10 @@ func validateReviewerEntries(reviewers []Reviewer, label string) error {
 			}
 		}
 		if r.model() == "" {
-			return fmt.Errorf("%s[%d] sets neither \"model\" nor \"family\": every reviewer entry needs an open-vocabulary model identity\nrecovery: add a model or family value to %s[%d] in .mindspec/config.yaml", label, i, label, i)
+			return termsafe.NewFailure(fmt.Sprintf("%s[%d] sets neither \"model\" nor \"family\": every reviewer entry needs an open-vocabulary model identity", label, i), fmt.Sprintf("add a model or family value to %s[%d] in .mindspec/config.yaml", label, i))
 		}
 		if r.Count != nil && *r.Count < 1 {
-			return fmt.Errorf("%s[%d].count must be >= 1 (got %d)\nrecovery: set %s[%d].count to at least 1, or remove the count key to default to 1, in .mindspec/config.yaml", label, i, *r.Count, label, i)
+			return termsafe.NewFailure(fmt.Sprintf("%s[%d].count must be >= 1 (got %d)", label, i, *r.Count), fmt.Sprintf("set %s[%d].count to at least 1, or remove the count key to default to 1, in .mindspec/config.yaml", label, i))
 		}
 	}
 	return nil
@@ -699,7 +683,7 @@ func validateGates(cfg *Config) error {
 		// exactly the terminal-injection hole a control-byte-carrying key
 		// (ESC/BEL/embedded newline) would otherwise punch through the
 		// guard-recovery line (round-1 panel G1.1).
-		return fmt.Errorf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events\nrecovery: rename the panel.gates key %s to one of %s in .mindspec/config.yaml", unknown[0], strings.Join(PanelGateKeys, ", "), strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", "))
+		return termsafe.NewFailure(fmt.Sprintf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events", unknown[0], strings.Join(PanelGateKeys, ", ")), fmt.Sprintf("rename the panel.gates key %s to one of %s in .mindspec/config.yaml", strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", ")))
 	}
 
 	for _, gate := range PanelGateKeys {
@@ -710,7 +694,7 @@ func validateGates(cfg *Config) error {
 		hasReviewers := len(gp.Reviewers) > 0
 		hasThreshold := strings.TrimSpace(gp.ApproveThreshold) != ""
 		if !hasReviewers && !hasThreshold && len(gp.Lenses) == 0 && gp.Acceptance == nil {
-			return fmt.Errorf("panel.gates.%s sets none of reviewers, approve_threshold, lenses or acceptance\nrecovery: set at least one field under panel.gates.%s in .mindspec/config.yaml, or remove the empty panel.gates.%s entry", gate, gate, gate)
+			return termsafe.NewFailure(fmt.Sprintf("panel.gates.%s sets none of reviewers, approve_threshold, lenses or acceptance", gate), fmt.Sprintf("set at least one field under panel.gates.%s in .mindspec/config.yaml, or remove the empty panel.gates.%s entry", gate, gate))
 		}
 
 		if hasReviewers {
@@ -722,7 +706,7 @@ func validateGates(cfg *Config) error {
 				ownSum += r.CountValue()
 			}
 			if ownSum < 2 {
-				return fmt.Errorf("panel.gates.%s.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass\nrecovery: add at least one more reviewer under panel.gates.%s.reviewers in .mindspec/config.yaml", gate, ownSum, gate)
+				return termsafe.NewFailure(fmt.Sprintf("panel.gates.%s.reviewers must sum to at least 2 (got %d): a one-reviewer panel cannot pass", gate, ownSum), fmt.Sprintf("add at least one more reviewer under panel.gates.%s.reviewers in .mindspec/config.yaml", gate))
 			}
 		}
 	}
@@ -781,7 +765,7 @@ func isValidGateKey(gate string) bool {
 // typo (e.g. "final" for "final_review") must fail loud, never silently
 // fall back to defaults.
 func gateKeyError(gate string) error {
-	return fmt.Errorf("gate %q is not one of the five valid panel gate keys (%s)\nrecovery: pass one of %s to the gate-scoped config resolver, or fix the panel.gates key spelling in .mindspec/config.yaml", gate, strings.Join(PanelGateKeys, ", "), strings.Join(PanelGateKeys, ", "))
+	return termsafe.NewFailure(fmt.Sprintf("gate %q is not one of the five valid panel gate keys (%s)", gate, strings.Join(PanelGateKeys, ", ")), fmt.Sprintf("pass one of %s to the gate-scoped config resolver, or fix the panel.gates key spelling in .mindspec/config.yaml", strings.Join(PanelGateKeys, ", ")))
 }
 
 // resolveGateReviewers selects an explicit gate list, an explicit bead list
@@ -913,7 +897,7 @@ func (c *Config) expandSlots(gate string, reviewers []Reviewer) ([]ReviewerSlot,
 			family = "harness"
 		}
 		if _, ok := c.RunnerFor(family); !ok {
-			return nil, fmt.Errorf("%s[%d] names family %q with no runner\nrecovery: add a runner for the family to panel.runners", c.reviewerLabel(gate), i, family)
+			return nil, termsafe.NewFailure(fmt.Sprintf("%s[%d] names family %q with no runner", c.reviewerLabel(gate), i, family), "add a runner for the family to panel.runners")
 		}
 		model := r.Model
 		if model == "" {

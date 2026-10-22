@@ -23,6 +23,7 @@ var panelLaunchCmd = &cobra.Command{
 	Args: cobra.ExactArgs(2), SilenceUsage: true, RunE: runPanelLaunch,
 }
 
+var panelLaunchSupported = panellaunch.Supported
 var panelLaunchProcessFn = panellaunch.Run
 var panelLaunchAcquireSlotLock = panel.AcquireSlotLock
 
@@ -92,7 +93,7 @@ func launchResolution(root string, reg panel.Registration, slotID string, replac
 	if runner.Kind != "process" {
 		return cfg, resolved, runner, checkoutFailure("slot uses a harness runner", "mindspec panel prompt "+shellQuoteTarget(reg.Slug())+" --slot "+shellQuoteTarget(slotID)+checkoutSpecFlag(reg))
 	}
-	if err := panellaunch.Supported(); err != nil {
+	if err := panelLaunchSupported(); err != nil {
 		return cfg, resolved, runner, err
 	}
 	if checkFinal && !replace {

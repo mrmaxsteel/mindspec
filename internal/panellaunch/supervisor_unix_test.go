@@ -398,7 +398,7 @@ func TestPanelLaunch_UnsafeOrphanGroup(t *testing.T) {
 }
 
 func TestPanelLaunch_OrphanRemainsLockedTerminalSafe(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "hostile\x1bc\nrecovery: printf INJECTED")
+	dir := filepath.Join(t.TempDir(), "José-hostile\x1bc\nrecovery: printf INJECTED")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -419,15 +419,44 @@ func TestPanelLaunch_OrphanRemainsLockedTerminalSafe(t *testing.T) {
 		return nil
 	}
 	err = StopOrphan(dir, pgid)
-	if err == nil || !strings.HasPrefix(err.Error(), "attempt remains locked: ") || calls != 1 {
+	if err == nil || !strings.Contains(err.Error(), "attempt remains locked: ") || calls != 1 {
 		t.Fatalf("missing held-lock timeout: error=%v signals=%d", err, calls)
 	}
 	text := err.Error()
-	if !strings.Contains(text, termsafe.Escape(dir)) || strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
+	want := termsafe.Escape("attempt remains locked: "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
+	if text != want {
+		t.Errorf("path must be escaped once: got %q want %q", text, want)
+	}
+	if strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
 		t.Errorf("unsafe held-lock refusal: %q", text)
 	}
 	const recovery = "\nrecovery: inspect the attempt directory and its live supervisor"
 	if strings.Count(text, "\nrecovery:") != 1 || !strings.HasSuffix(text, recovery) {
 		t.Errorf("held-lock refusal must end with one real recovery line: %q", text)
+	}
+}
+
+func TestPanelLaunch_OrphanSmallPGIDRefusal(t *testing.T) {
+	for _, pgid := range []int{0, 1} {
+		t.Run(strconv.Itoa(pgid), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "José-hostile\x1b\nrecovery: forged")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			holder, err := takeRunLock(filepath.Join(dir, "run.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer holder.Close()
+			old := stopOrphanSignal
+			t.Cleanup(func() { stopOrphanSignal = old })
+			calls := 0
+			stopOrphanSignal = func(int, syscall.Signal) error { calls++; return holder.Close() }
+			err = StopOrphan(dir, pgid)
+			want := termsafe.Escape("cannot stop attempt "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
+			if err == nil || err.Error() != want || calls != 0 {
+				t.Fatalf("small pgid must refuse without a signal: error=%v want=%q signals=%d", err, want, calls)
+			}
+		})
 	}
 }

@@ -103,7 +103,7 @@ func verdictError(pointer, message string) error {
 	if pointer == "" {
 		pointer = "/"
 	}
-	return fmt.Errorf("%s: %s\nrecovery: correct the verdict and submit it again", termsafe.Escape(pointer), termsafe.Escape(message))
+	return termsafe.NewFailure(fmt.Sprintf("%s: %s", pointer, message), "correct the verdict and submit it again")
 }
 func pointerChild(p, key string) string {
 	return p + "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")

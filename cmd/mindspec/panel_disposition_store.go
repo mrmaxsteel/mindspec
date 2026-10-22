@@ -105,7 +105,7 @@ never interpolated into a shell-quoted argument.`,
 				panel.RecordAbandon: "abandon", panel.RecordVerdict: "submit",
 				panel.RecordLaunch: "launch", panel.RecordSubstitution: "launch",
 			}[discriminator.Record]
-			return fmt.Errorf("record %s is reserved to the panel verbs\nrecovery: use panel %s", termsafe.Escape(discriminator.Record), verb)
+			return termsafe.NewFailure(fmt.Sprintf("record %s is reserved to the panel verbs", discriminator.Record), fmt.Sprintf("use panel %s", verb))
 		}
 		if discriminator.Record == panel.RecordPanelManifest {
 			dir := filepath.Join(specDir, "reviews", panelName)

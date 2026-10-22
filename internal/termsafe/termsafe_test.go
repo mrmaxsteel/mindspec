@@ -1,6 +1,8 @@
 package termsafe
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -138,11 +140,43 @@ func TestFailure_EscapesMessageAndRecovery(t *testing.T) {
 	message := "path\x1bc\nrecovery: printf INJECTED"
 	recovery := "inspect\x1b\nrecovery: forged"
 	failure := NewFailure(message, recovery)
-	want := Escape(message) + "\nrecovery: " + Escape(recovery)
+	want := Escape(message) + "\nrecovery: " + EscapeRecovery(recovery)
 	if got := failure.Error(); got != want || strings.Count(got, "\nrecovery:") != 1 || strings.Contains(got, "\x1b") {
 		t.Fatalf("unsafe failure: got %q want %q", got, want)
 	}
 	if got := failure.Message(); got != Escape(message) {
 		t.Fatalf("unsafe message: %q", got)
+	}
+}
+
+func TestFailure_RecoveryPreservesShellQuotesAndUnicode(t *testing.T) {
+	command := "mindspec panel checkout 'réview$(printf INJECTED)' --path '/Users/José'"
+	if got := NewFailure("message", command).Error(); got != "message\nrecovery: "+command {
+		t.Fatalf("command quotes changed: %q", got)
+	}
+	for _, r := range []rune{0, 0x1b, '\n', '\r', 0x7f, 0x9b, 0x2028, 0x2029, 0x202e, 0x2066, 0x200b, 0x200d, 0xfeff} {
+		command := "inspect 'José" + string(r) + "'"
+		text := NewFailure("message", command).Error()
+		if strings.ContainsRune(strings.TrimPrefix(text, "message\nrecovery: "), r) || strings.Count(text, "\n") != 1 || !strings.HasPrefix(text, "message\nrecovery: inspect 'José") || !strings.HasSuffix(text, "'") {
+			t.Errorf("unsafe rune or damaged quotes for %U: %q", r, text)
+		}
+	}
+}
+
+func TestFailure_WrappedCauseAndSafeJoin(t *testing.T) {
+	cause := errors.New("held")
+	failure := NewWrappedFailure(cause, "José\x1b\nrecovery: forged", "inspect")
+	wrapped := fmt.Errorf("hostile\x1b\nrecovery: forged: %w", failure)
+	if !errors.Is(wrapped, cause) {
+		t.Fatal("wrapped cause lost")
+	}
+	var found *Failure
+	if !errors.As(wrapped, &found) || found != failure {
+		t.Fatal("typed failure lost")
+	}
+	joined := JoinFailures([]error{wrapped, errors.New("plain\x1b\nrecovery: forged")}, "inspect")
+	want := failure.Message() + "; " + Escape("plain\x1b\nrecovery: forged") + "\nrecovery: inspect"
+	if joined.Error() != want {
+		t.Fatalf("join changed escaped messages: got %q want %q", joined.Error(), want)
 	}
 }

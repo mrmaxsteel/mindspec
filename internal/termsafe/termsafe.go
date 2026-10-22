@@ -5,7 +5,11 @@
 // extra, attacker-chosen display lines when it reaches a terminal raw.
 package termsafe
 
-import "strconv"
+import (
+	"errors"
+	"strconv"
+	"strings"
+)
 
 // Escape renders s safely for terminal-facing output.
 //
@@ -43,19 +47,58 @@ func Escape(s string) string {
 	return s
 }
 
-// Failure holds a safe message and one recovery line. Only NewFailure sets
+// Failure holds a safe message and one recovery line. Only constructors set
 // its fields, so callers can trust its formatting without checking error text.
 type Failure struct {
 	message  string
 	recovery string
+	cause    error
 }
 
-// NewFailure escapes both fields before it adds the recovery line.
+// EscapeRecovery escapes unsafe runes without changing shell quotes or
+// printable Unicode. Callers must shell-quote each command argument first.
+func EscapeRecovery(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if strconv.IsPrint(r) {
+			b.WriteRune(r)
+		} else {
+			quoted := strconv.QuoteRuneToASCII(r)
+			b.WriteString(quoted[1 : len(quoted)-1])
+		}
+	}
+	return b.String()
+}
+
+// NewFailure escapes raw message and recovery text once.
 func NewFailure(message, recovery string) *Failure {
-	return &Failure{message: Escape(message), recovery: Escape(recovery)}
+	return &Failure{message: Escape(message), recovery: EscapeRecovery(recovery)}
+}
+
+// NewWrappedFailure retains cause for errors.Is and errors.As.
+func NewWrappedFailure(cause error, message, recovery string) *Failure {
+	f := NewFailure(message, recovery)
+	f.cause = cause
+	return f
+}
+
+// JoinFailures joins safe messages under one recovery line. Plain errors are
+// escaped once. Typed failures keep their already escaped messages.
+func JoinFailures(failures []error, recovery string) *Failure {
+	messages := make([]string, 0, len(failures))
+	for _, err := range failures {
+		var failure *Failure
+		if errors.As(err, &failure) {
+			messages = append(messages, failure.Message())
+		} else {
+			messages = append(messages, Escape(err.Error()))
+		}
+	}
+	return &Failure{message: strings.Join(messages, "; "), recovery: EscapeRecovery(recovery)}
 }
 
 func (f *Failure) Error() string { return f.message + "\nrecovery: " + f.recovery }
+func (f *Failure) Unwrap() error { return f.cause }
 
 // Message returns the safe message without the recovery line.
 func (f *Failure) Message() string { return f.message }

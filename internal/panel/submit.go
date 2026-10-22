@@ -37,7 +37,7 @@ type SubmitResolution struct {
 type SubmitResolver func(Panel, RosterSlot) (SubmitResolution, error)
 
 func submitRefusal(message, recovery string) error {
-	return fmt.Errorf("%s\nrecovery: %s", termsafe.Escape(message), termsafe.Escape(recovery))
+	return termsafe.NewFailure(message, recovery)
 }
 func modelSafe(model string) bool {
 	if model == "" || strings.HasPrefix(model, "-") {

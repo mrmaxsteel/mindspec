@@ -36,8 +36,9 @@ func checkoutError(err error, recovery string) error {
 	if err == nil {
 		return err
 	}
-	if _, ok := err.(*termsafe.Failure); ok {
-		return err
+	var failure *termsafe.Failure
+	if errors.As(err, &failure) {
+		return failure
 	}
 	return checkoutFailure(err.Error(), recovery)
 }
@@ -488,19 +489,17 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 		recovery := "mindspec panel verify " + shellQuoteTarget(reg.Slug()) + checkoutSpecFlag(reg) + " # wait for slot locks: " + strings.Join(held, ", ")
 		return nil, checkoutFailure(strings.Join(failures, "\n"), recovery)
 	}
+	var orphanFailures []error
 	for _, entry := range affected {
 		if err := panelCheckoutOrphanCheck(root, reg, entry); err != nil {
-			message := err.Error()
-			if failure, ok := err.(*termsafe.Failure); ok {
-				message = failure.Message()
-			}
-			failures = append(failures, message)
+			orphanFailures = append(orphanFailures, err)
 		}
 	}
-	if len(failures) > 0 {
+	if len(orphanFailures) > 0 {
 		release()
-		return nil, checkoutFailure(strings.Join(failures, "; "), "inspect the attempt directory and its live supervisor")
+		return nil, termsafe.JoinFailures(orphanFailures, "inspect the attempt directory and its live supervisor")
 	}
+
 	// This is the same lock inode as the panel writer. Release it before the
 	// writer runs; the slot locks stay held through the caller's operation.
 	if len(affected) > 0 {

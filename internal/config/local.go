@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 
 	"gopkg.in/yaml.v3"
 )
@@ -87,7 +90,7 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 			_, targetErr := os.Stat(localPath)
 			if os.IsNotExist(targetErr) {
-				return fmt.Errorf("config.local.yaml: %s\nrecovery: repair or remove the broken link at .mindspec/config.local.yaml", err)
+				return termsafe.NewFailure(fmt.Sprintf("config.local.yaml: %s", err), "repair or remove the broken link at .mindspec/config.local.yaml")
 			}
 		}
 	}
@@ -138,7 +141,11 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 }
 
 func localError(err error) error {
-	return fmt.Errorf("config.local.yaml: %s\nrecovery: set only panel.runners and models in .mindspec/config.local.yaml", err)
+	var failure *termsafe.Failure
+	if errors.As(err, &failure) {
+		return fmt.Errorf("config.local.yaml: %w", failure)
+	}
+	return termsafe.NewFailure(fmt.Sprintf("config.local.yaml: %s", err), "set only panel.runners and models in .mindspec/config.local.yaml")
 }
 
 func recordSources(n *yaml.Node, path, source string, c *Config) error {
@@ -147,7 +154,7 @@ func recordSources(n *yaml.Node, path, source string, c *Config) error {
 
 func recordSourcesActive(n *yaml.Node, path, source string, c *Config, active map[*yaml.Node]bool) error {
 	if active[n] {
-		return fmt.Errorf("cyclic config alias\nrecovery: remove the alias cycle from the config")
+		return termsafe.NewFailure("cyclic config alias", "remove the alias cycle from the config")
 	}
 	active[n] = true
 	defer delete(active, n)
@@ -175,7 +182,7 @@ func recordSourcesActive(n *yaml.Node, path, source string, c *Config, active ma
 				next = path + "." + key
 			}
 			if next == "panel.substitution" {
-				return fmt.Errorf("panel.substitution is retired\nrecovery: set on_quota on the runner in panel.runners")
+				return termsafe.NewFailure("panel.substitution is retired", "set on_quota on the runner in panel.runners")
 			}
 			if key == "model" && strings.Contains(path, "reviewers[") {
 				var model string

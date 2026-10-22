@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,12 +34,12 @@ func (r *Runner) UnmarshalYAML(n *yaml.Node) error {
 	value.present = map[string]bool{}
 	allowed := map[string]bool{"family": true, "kind": true, "argv": true, "prompt": true, "output": true, "quota_signals": true, "on_quota": true, "probe": true, "timeout_minutes": true}
 	if n.Kind != yaml.MappingNode {
-		return fmt.Errorf("runner must be a mapping\nrecovery: set family and kind on each panel.runners entry")
+		return termsafe.NewFailure("runner must be a mapping", "set family and kind on each panel.runners entry")
 	}
 	for i := 0; i < len(n.Content); i += 2 {
 		key := n.Content[i].Value
 		if !allowed[key] {
-			return fmt.Errorf("unknown runner key %q\nrecovery: remove the unknown key from panel.runners", key)
+			return termsafe.NewFailure(fmt.Sprintf("unknown runner key %q", key), "remove the unknown key from panel.runners")
 		}
 		value.present[key] = true
 	}
@@ -50,7 +52,7 @@ func mergeRunners(base, overlay []Runner) ([]Runner, error) {
 	seen := map[string]bool{}
 	for _, r := range overlay {
 		if r.Family == "" || seen[r.Family] {
-			return nil, fmt.Errorf("empty or duplicate runner family %q\nrecovery: give each panel.runners entry a unique family", r.Family)
+			return nil, termsafe.NewFailure(fmt.Sprintf("empty or duplicate runner family %q", r.Family), "give each panel.runners entry a unique family")
 		}
 		seen[r.Family] = true
 		found := false
@@ -99,7 +101,7 @@ func (c *Config) SubstituteModel(toFamily string) string {
 // ValidateModel checks whether a model can be passed as one command argument.
 func ValidateModel(model string) error {
 	if model == "" || strings.HasPrefix(model, "-") || strings.ContainsFunc(model, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return fmt.Errorf("invalid model %q: use a non-empty value without whitespace, control bytes or a leading dash\nrecovery: set a model-safe value in reviewers or models", model)
+		return termsafe.NewFailure(fmt.Sprintf("invalid model %q: use a non-empty value without whitespace, control bytes or a leading dash", model), "set a model-safe value in reviewers or models")
 	}
 	return nil
 }
@@ -121,7 +123,7 @@ func validatePanelConfig(c *Config) error {
 	for i := range c.Panel.Runners {
 		r := &c.Panel.Runners[i]
 		fail := func(msg string) error {
-			return fmt.Errorf("runner %q: %s\nrecovery: fix the entry in panel.runners", r.Family, msg)
+			return termsafe.NewFailure(fmt.Sprintf("runner %q: %s", r.Family, msg), "fix the entry in panel.runners")
 		}
 		switch r.Kind {
 		case "harness":
@@ -192,7 +194,7 @@ func validatePanelConfig(c *Config) error {
 	for _, gate := range PanelGateKeys {
 		for _, lens := range c.GateLenses(gate) {
 			if _, ok := c.Panel.Lenses[lens]; !ok {
-				return fmt.Errorf("panel.gates.%s.lenses names unknown lens %q\nrecovery: define the lens in panel.lenses", gate, lens)
+				return termsafe.NewFailure(fmt.Sprintf("panel.gates.%s.lenses names unknown lens %q", gate, lens), "define the lens in panel.lenses")
 			}
 		}
 	}
@@ -215,7 +217,7 @@ func validateIsolationRoot(root string) error {
 		}
 	}
 	if invalid {
-		return fmt.Errorf("invalid panel.isolation_root %q\nrecovery: set panel.isolation_root to an untracked relative directory outside .git, .worktrees and .mindspec", root)
+		return termsafe.NewFailure(fmt.Sprintf("invalid panel.isolation_root %q", root), "set panel.isolation_root to an untracked relative directory outside .git, .worktrees and .mindspec")
 	}
 	return nil
 }

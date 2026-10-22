@@ -28,7 +28,7 @@ func (l *SlotLock) Release() error {
 var ErrSlotLocked = errors.New("slot lock is held")
 
 func heldSlotError(path string) error {
-	return fmt.Errorf("%w: %s\nrecovery: run mindspec panel verify; delete the lock file only after you make sure no mindspec process uses the slot", ErrSlotLocked, termsafe.Escape(path))
+	return termsafe.NewWrappedFailure(ErrSlotLocked, fmt.Sprintf("%v: %s", ErrSlotLocked, path), "run mindspec panel verify; delete the lock file only after you make sure no mindspec process uses the slot")
 }
 func AcquireSlotLock(path string) (*SlotLock, error) {
 	deadline := time.Now().Add(time.Second)
@@ -119,5 +119,5 @@ func decideStaleLock(path string, pid int, ops staleLockOps) (bool, error) {
 	if valid && !ops.live(current) {
 		return false, ops.remove(moved)
 	}
-	return false, fmt.Errorf("lock files %s and %s need inspection\nrecovery: delete a file only after you make sure no mindspec process uses it", termsafe.Escape(path), termsafe.Escape(moved))
+	return false, termsafe.NewFailure(fmt.Sprintf("lock files %s and %s need inspection", path, moved), "delete a file only after you make sure no mindspec process uses it")
 }
