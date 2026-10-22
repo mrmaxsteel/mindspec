@@ -28,6 +28,7 @@ Workflow **uses** context packs (from context-system) to provide mode-appropriat
 |:--------|:--------|
 | `internal/approve/` | Spec, plan, and impl approval enforcement |
 | `internal/complete/` | Bead close-out orchestration |
+| `internal/mergefollowup/` | Recovery guidance shared by merge and completion gates |
 | `internal/next/` | Work selection, claiming, worktree dispatch |
 | `internal/spec/` | Spec creation (worktree-first flow) |
 | `internal/cleanup/` | Post-lifecycle worktree/branch cleanup |

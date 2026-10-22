@@ -80,18 +80,8 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if tip != row.Parents[1] {
 		return nil, movedTipFailure(root, beadID, epicID, beadHead, wtPath, tip, row, exec)
 	}
-	if wtPath != "" {
-		if _, statErr := os.Stat(wtPath); statErr == nil {
-			_, dirt, err := checkDirtyTreeFn(wtPath, wtPath)
-			if err != nil {
-				return nil, completionFailure(beadID, opts, "reading bead user changes", err)
-			}
-			if len(dirt) > 0 {
-				return nil, userDirtRefusal(beadID, root, dirt, wtPath)
-			}
-		} else if !os.IsNotExist(statErr) {
-			return nil, completionFailure(beadID, opts, "reading bead worktree", statErr)
-		}
+	if err := checkMergedBeadUserChanges(root, beadID, wtPath, opts); err != nil {
+		return nil, err
 	}
 	roots := panelGateRoots(root, wtPath, specID)
 	if closed && !mergeOnly && cfg.Enforcement.PanelGate && !panelSkipEnvFn() {
@@ -155,10 +145,10 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}
-	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, row, decisions, ledgers, closed, exec, opts)
+	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, ledgers, closed, exec, opts)
 }
 
-func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT string, row executor.MergeIdentity, decisions []PanelGateResult, ledgers []string, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
+func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, ledgers []string, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
 	for step := 1; step <= 6; step++ {
 		if closingStepHook != nil {
 			if err := closingStepHook(step); err != nil {
@@ -223,6 +213,10 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT string, ro
 				err = deleteMergeOnlyKeys(beadID, mergeOnlyPendingKey, mergeOnlySHAKey)
 			}
 		case 6:
+			// Close publication can run hooks that create new user work.
+			if err := checkMergedBeadUserChanges(root, beadID, wtPath, opts); err != nil {
+				return nil, err
+			}
 			// The caller may run from the worktree that is about to disappear.
 			err = os.Chdir(root)
 			if err == nil {
@@ -245,6 +239,26 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT string, ro
 		_ = completeSyncPhase(root, epicID, mode, beadID)
 	}
 	return result, nil
+}
+
+// checkMergedBeadUserChanges keeps the same artifact exemption before
+// closing and after publication, immediately before cleanup.
+func checkMergedBeadUserChanges(root, beadID, wtPath string, opts CompleteOpts) error {
+	if wtPath == "" {
+		return nil
+	}
+	if _, statErr := os.Stat(wtPath); statErr == nil {
+		_, dirt, err := checkDirtyTreeFn(wtPath, wtPath)
+		if err != nil {
+			return completionFailure(beadID, opts, "reading bead user changes", err)
+		}
+		if len(dirt) > 0 {
+			return userDirtRefusal(beadID, root, dirt, wtPath)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return completionFailure(beadID, opts, "reading bead worktree", statErr)
+	}
+	return nil
 }
 
 // mergeMissingMetadata preserves timestamps on idempotent retries.

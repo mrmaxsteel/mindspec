@@ -394,18 +394,32 @@ failure or missing ancestry retains the adopt recovery. A host squash or rebase
 merge needs that recovery too. A retry does not recreate a deleted remote head.
 
 After publication and its hooks, approval checks every scoped bead worktree and
-the spec worktree before any forced removal. A retry after local spec-branch
+the spec worktree before forced removal of those worktrees. A retry after local spec-branch
 deletion checks all remaining worktrees too. Pending changes, an unreadable
 status, or a worktree inspection error stop cleanup. The state line names the
 cleanup stage. All remaining worktrees and branches survive. Preserve pending
 changes in a follow-up branch, or move them to a safe path. Leave the original
 worktree clean and readable. Then run `mindspec impl approve <spec>` again.
 
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
+
 ## Verify a merge before close
 
 Run `mindspec complete <bead> --merge-only`. Inspect the printed merge SHA
 and both parents. Run the verification commands on the spec branch.
 Then run `mindspec complete <bead>` until it exits 0.
+
+After close publication and its hooks, completion reads bead user changes again
+before removal. Tool artifacts stay exempt. New user changes or a status or stat
+read error stop cleanup. The pending file, worktree, and branch remain. Preserve
+the changes at a safe path. Leave the worktree clean and readable, then run the
+printed completion command again.
 
 A bead can have only one naming merge. Send later fixes to a follow-up
 bead. If the tip moved, preserve the fix branch and use the printed

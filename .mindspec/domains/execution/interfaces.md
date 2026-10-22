@@ -350,12 +350,20 @@ A stale worktree row for an absent bead branch requires the recorded publication
 tip and that bead's binding in the spec history before finalization can continue.
 
 `FinalizeEpic` checks every scoped bead worktree and the spec worktree after
-publication and its hooks, before any forced removal. `ResumeFinalizedEpic` runs
+publication and its hooks, before forced removal of those worktrees. `ResumeFinalizedEpic` runs
 the same check on all remaining worktrees before its first removal. A dirty
 worktree, a failed status read, or a worktree inspection error returns
 `FinalizeStageError` at `cleanup`. No worktree or branch is removed. The caller
 prints the epic state and the pending-work recovery. An absent worktree can
 continue through the remaining cleanup.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
 
 An export or artifact-commit failure in the spec worktree or a pending bead
 returns `FinalizeStageError` before publication or cleanup. Its recovery is
@@ -384,7 +392,10 @@ The workflow layer selects the naming merge and decides whether to close.
 
 `PublishBeadClose` exports the tracker in the spec worktree and commits
 only the paths it is given. The caller includes the export path.
-`CleanupBead` checks ancestry, removes the bead worktree, and deletes the
-branch. A read or removal error
-refuses; a retry finishes the remaining work. `MockExecutor` exposes the
+`CleanupBead` checks ancestry and reads bead user changes immediately before
+forced removal. `CompleteBead` uses the same check after its commits and merge
+hooks. Tool artifacts stay exempt. New user changes or a status or stat read
+error refuse with a completion retry command. A worktree list read error also
+refuses before the executor can remove a checkout by name. The pending file, worktree, and
+branch remain. A removal error also refuses. A retry finishes the remaining work. `MockExecutor` exposes the
 same methods and records calls.

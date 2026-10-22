@@ -856,7 +856,7 @@ artifact commit to run. An absent pending bead worktree also has no artifact
 commit to run; its branch can still merge through the spec worktree.
 
 After publication and its hooks, finalization checks every scoped bead worktree
-and the spec worktree before any forced removal. Pending changes or a read error
+and the spec worktree before forced removal of those worktrees. Pending changes or a read error
 return a cleanup-stage failure. No worktree or branch is removed. Approval prints
 the epic state line and keeps the inner recovery commands. Preserve the pending
 changes, leave the worktree clean, and retry approval.
@@ -875,6 +875,14 @@ The executor opens no PR. The finalize-PR automation (§4) adopts an open PR
 for the same carrier head and base, so a retry opens no second PR while the first is
 open or merged.
 This also applies after local spec-branch deletion.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
 
 While the spec branch exists, approval runs every pre-close gate again on its
 current tip. A closed epic does not bypass a gate. After local branch deletion,
@@ -937,7 +945,11 @@ remain available exits.
 The closing call checks spec-worktree merge state and staged paths first.
 It then closes, writes the binding and reviewed identity, records overrides,
 publishes the close with a path-scoped export and ledger commit in the spec worktree,
-clears the stage and merge-only markers, and removes the bead workspace.
+clears the stage and merge-only markers, and reads bead user changes again
+immediately before removal. The executor repeats this check at removal, including
+the older combined commit and merge path. Tool artifacts stay exempt. New user
+changes or a status or stat read error refuse with a completion retry command.
+The pending file, worktree, and branch remain.
 A failed step keeps the later steps pending. Retry recovery repeats any
 doc-skew or ADR override flag and its reason.
 

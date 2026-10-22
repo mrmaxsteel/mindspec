@@ -896,6 +896,11 @@ Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.
 | `mindspec_merge_only=pending` | Retain merge-only mode across interruptions, including a plain re-entry. |
 | `mindspec_merge_only_sha` | Name the recorded merge. A foreign or non-naming marker refuses. Git state decides validity. |
 
+The closing call reads bead user changes again after publication and before
+removal. The executor repeats this check at removal. Tool artifacts stay exempt.
+New user changes or a status or stat read error refuse with a completion retry
+command. The pending file, worktree, and branch remain.
+
 The closing call clears both merge-only keys after publication. No key
 replaces the panel gate. A closed resume checks the same merge and tip,
 skips presence, and finishes the binding, override, export, marker, and
@@ -913,6 +918,15 @@ Other merge guard failures keep their recovery.
 
 ## Implementation approval finalization
 
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
+
+
 Implementation approval checks pending beads for an existing naming merge before
 its first write. A moved tip refuses with the same follow-up recovery as
 `complete`. Finalization repeats the check before each live merge. An export or
@@ -922,7 +936,7 @@ bead worktree has no artifact commit to run. A pending bead branch can still
 merge through the spec worktree.
 
 After publication and its hooks, finalization checks all scoped bead worktrees
-and the spec worktree before any forced removal. The branch-missing resume uses
+and the spec worktree before forced removal of those worktrees. The branch-missing resume uses
 the same check before its first removal. Pending changes or a read error return
 a cleanup-stage failure with the epic state and recovery commands. No worktree
 or branch is removed.

@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/mergefollowup"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -368,8 +369,9 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 	// Find bead worktree.
 	var wtPath string
 	entries, listErr := g.WorktreeOps.List()
-	if listErr != nil && g.completeMode != "" {
-		return listErr
+	if listErr != nil {
+		return guard.NewFailure("cannot read bead worktrees: "+termsafe.Escape(listErr.Error()),
+			fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
 	}
 	if listErr == nil {
 		for _, e := range entries {
@@ -523,6 +525,9 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 	// worktree being removed). Matches the pattern in FinalizeEpic().
 	if err := withWorkingDir(g.Root, func() error {
 		if wtName != "" && (g.completeMode == "" || wtPath != "") {
+			if err := checkBeadCleanupWorktree(wtPath, beadID); err != nil {
+				return err
+			}
 			if err := g.WorktreeOps.Remove(wtName); err != nil {
 				if g.completeMode != "" {
 					return err
@@ -1468,6 +1473,35 @@ func checkMergedFinalizeWorktree(path, specID string) error {
 	return nil
 }
 
+// checkBeadCleanupWorktree is the executor backstop after commits and merge
+// hooks. Tool artifacts have the same exemption as the workflow dirt check.
+func checkBeadCleanupWorktree(wtPath, beadID string) error {
+	if wtPath == "" {
+		return nil
+	}
+	retry := fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return guard.NewFailure("cannot inspect bead worktree: "+termsafe.Escape(err.Error()), retry)
+	}
+	status, err := gitutil.StatusWithStderr(wtPath)
+	if err != nil {
+		return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(err.Error()), retry)
+	}
+	for _, line := range strings.Split(status, "\n") {
+		p, parseErr := panel.PorcelainPath(line)
+		if parseErr != nil {
+			return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(parseErr.Error()), retry)
+		}
+		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
+			return guard.NewFailure("bead worktree has uncommitted user changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
+				"preserve the pending changes, then leave this worktree clean", retry)
+		}
+	}
+	return nil
+}
+
 func finalizeFullSHA(sha string) bool {
 	if len(sha) != 40 && len(sha) != 64 {
 		return false
@@ -1511,8 +1545,9 @@ func (g *MindspecExecutor) requireFinalizeAncestor(ancestor, target string) erro
 // A retry removes a leftover temporary checkout, then reuses the local carrier
 // branch. An unchanged export makes no commit and no push. A changed export
 // appends a commit and uses a lease pinned to the remote head read just before
-// the push. The temporary checkout is removed after each attempt. No PR opens.
-func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (string, error) {
+// the push. A clean temporary checkout is removed after each attempt. Pending
+// changes or an inspection error preserve it for recovery. No PR opens.
+func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (branch string, retErr error) {
 	choreBranch, err := workspace.FinalizeBranch(specID)
 	if err != nil {
 		return "", err
@@ -1536,15 +1571,15 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", err
 	}
 
-	// Self-heal leftovers from a crashed prior run BEFORE touching the
-	// branch: a leftover temp worktree fails WorktreeAdd below, and one
-	// with choreBranch still checked out also blocks DeleteBranch. All
-	// best-effort — force-remove a registered worktree, fall back to
-	// clearing an unregistered directory, and prune any dangling
-	// registration whose directory is already gone.
+	// A leftover can hold hook output from a previous publication.
+	// Refuse on pending changes or an unreadable checkout before removal.
+	if err := checkMergedFinalizeWorktree(wtPath, specID); err != nil {
+		return "", err
+	}
 	if _, statErr := os.Stat(wtPath); statErr == nil {
-		if remErr := gitutil.WorktreeRemoveForce(g.Root, wtPath); remErr != nil {
-			_ = os.RemoveAll(wtPath)
+		if err := gitutil.WorktreeRemoveForce(g.Root, wtPath); err != nil {
+			return "", guard.NewFailure("cannot remove temporary finalize worktree: "+termsafe.Escape(err.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
 	}
 	_ = gitutil.WorktreePrune(g.Root)
@@ -1574,8 +1609,15 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", fmt.Errorf("creating temporary worktree for %s: %w", choreBranch, err)
 	}
 	defer func() {
+		// This also runs after a failed commit or push. Hooks can write
+		// files even when the publication itself fails.
+		if err := checkMergedFinalizeWorktree(wtPath, specID); err != nil {
+			retErr = errors.Join(retErr, err)
+			return
+		}
 		if err := gitutil.WorktreeRemoveForce(g.Root, wtPath); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not remove temporary finalize worktree %s: %v\n", wtPath, err)
+			retErr = errors.Join(retErr, guard.NewFailure("cannot remove temporary finalize worktree: "+termsafe.Escape(err.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
 		}
 	}()
 

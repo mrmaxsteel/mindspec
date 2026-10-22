@@ -448,6 +448,14 @@ status, or a worktree inspection error returns a cleanup-stage failure before
 the first removal. All remaining worktrees and branches survive. It can finish
 when a prior run removed a worktree but left its branch.
 
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
+
 `FinalizeStageError` carries the failed stage without changing the inner error.
 `SetFinalizeStepHookForTest` lets approval tests inject faults into real executor
 runs. Tests use temporary git repos, fake tracker commands, and file remotes.

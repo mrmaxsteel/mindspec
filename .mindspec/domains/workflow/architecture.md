@@ -1578,11 +1578,19 @@ returns the `already landed` message and completes safe cleanup.
 
 The executor checks a remaining bead worktree before it skips an already merged
 branch. After publication and its hooks, it checks every scoped bead worktree
-and the spec worktree before any forced removal. The branch-missing resume runs
+and the spec worktree before forced removal of those worktrees. The branch-missing resume runs
 the same check before its first removal. Pending changes, an unreadable status,
 or a worktree inspection error return a cleanup-stage failure. Approval prints
 the epic state and preserves the recovery commands. All remaining worktrees and
 branches survive for recovery.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
 
 An export or artifact-commit failure in the spec worktree or a pending bead
 stops finalization before publication and cleanup. The error names the failed
@@ -1613,7 +1621,10 @@ The closing path runs the panel gate at the bead tip and the content gates
 over M^1..M. Ownership comes from M's tree. It closes the bead, writes its
 landed binding and review identity, records overrides, and publishes the
 close with a path-scoped export and ledger commit in the spec worktree.
-Only then does it clear markers and remove the bead workspace.
+After publication, it clears markers and reads bead user changes again before
+removal. The executor repeats this read at removal. Tool artifacts stay exempt.
+New user changes or a status or stat read error stop cleanup. The pending file,
+worktree, and branch remain. The error gives a completion retry command.
 Each step resumes from its own done signal.
 
 A closed resume keeps all gates and tip checks. It skips the presence check.

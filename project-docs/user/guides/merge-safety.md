@@ -189,8 +189,16 @@ epic state and failed stage. Fix the fault, then run the printed
 worktree has no artifact commit to run. A pending bead branch can still merge
 through the spec worktree.
 
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. Pending changes or a status or stat read error
+stop removal. The pending file, worktree, and carrier branch remain. The error
+gives an approval retry command. Preserve the changes at a safe path. Leave the
+worktree clean and readable, then retry approval. An unreadable or unregistered
+directory is not deleted as a fallback.
+
 After publication and its hooks, approval checks all scoped bead worktrees and
-the spec worktree before any forced removal. A retry after local spec-branch
+the spec worktree before forced removal of those worktrees. A retry after local spec-branch
 deletion checks all remaining worktrees too. Pending changes or a read error
 stop cleanup. No worktree or branch is removed. The error gives the epic state,
 the cleanup stage, and recovery commands. Preserve pending changes in a follow-up
@@ -241,6 +249,11 @@ The command prints the merge SHA and both parents. It keeps the bead open
 and retains its branch and worktree. After verification, run
 `mindspec complete <bead-id>` until it exits 0. The closing call publishes
 the tracker export and panel ledger before it removes the workspace.
+After publication and its hooks, it reads bead user changes again before removal.
+Tool artifacts stay exempt. New user changes or a status or stat read error stop
+cleanup. The pending file, worktree, and branch remain. Preserve the changes at a
+safe path. Leave the worktree clean and readable, then run the printed completion
+command again.
 
 A bead can have only one naming merge. A repeated merge-only call records
 the same valid merge. Put later fixes in a follow-up bead. If the bead tip
