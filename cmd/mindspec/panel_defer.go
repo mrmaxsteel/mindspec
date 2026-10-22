@@ -43,9 +43,13 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, err := refuteFinding(reg.Dir, slot, round, finding)
+	f, verdict, err := deferFinding(reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
+	}
+	severity := "blocking"
+	if verdict == panel.VerdictApprove {
+		severity = "minor"
 	}
 	model := ""
 	for _, s := range res.Panel.Roster {
@@ -59,7 +63,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	check := func() error {
 		texts := []string{f.Text}
 		if f.ID == "slot" {
-			v, err := panel.ReadSubmittedFindingVerdict(reg.Dir, slot, round)
+			v, _, err := deferVerdict(reg.Dir, slot, round)
 			if err != nil {
 				return err
 			}
@@ -93,7 +97,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		gate = "adhoc"
 	}
 	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: fmt.Sprintf("%s:%s:r%d:%s:%s:deferral", args[0], slot, round, f.ID, f.SHA256[:12]),
-		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: "blocking",
+		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: severity,
 		Summary: termsafe.Escape(f.Text), ConvergentWith: []string{}, Disposition: "confirmed-deferred", EvidenceRef: beadID, CreatedAt: now, Round: &round})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -106,7 +110,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, err := refuteFinding(reg.Dir, slot, round, finding)
+		latest, _, err := deferFinding(reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}

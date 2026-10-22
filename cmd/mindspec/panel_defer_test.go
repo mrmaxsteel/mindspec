@@ -308,3 +308,48 @@ func TestPanelDefer_RechecksInsideLock(t *testing.T) {
 		t.Fatal("in-lock refusal wrote panel files")
 	}
 }
+
+// TestPanelDefer_ApproveSlotMinorFinding: a MINOR item on an APPROVE verdict
+// can go to a follow-up bead. The old verb refused it with refute wording.
+func TestPanelDefer_ApproveSlotMinorFinding(t *testing.T) {
+	_, dir := setupDischarge(t)
+	fake := fakeDeferralBD(t)
+	writeDischargeVerdict(t, dir, "R2", panel.FindingVerdict{Verdict: panel.VerdictApprove, ConcreteChangesRequired: []string{"minor nit"}})
+	rebindWrite(t, fake, "follow-up.json", `[{"id":"follow-up","status":"open","description":"minor nit","dependencies":[{"id":"epic-x","dependency_type":"discovered-from"}]}]`)
+	args := replaceRefuteArg(deferArgs(), "--slot", "R2")
+	args = append(args, "--finding", "ccr[0]")
+	requirePanelVerb(t, args...)
+	lines, err := panel.ReadLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event panel.DeferralRecord
+	var row panel.DispositionRow
+	if len(lines) != 3 {
+		t.Fatalf("want round, deferral, disposition: %s", lines)
+	}
+	if err := json.Unmarshal(lines[1], &event); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(lines[2], &row); err != nil {
+		t.Fatal(err)
+	}
+	if event.Slot != "R2" || event.Finding != "ccr[0]" || event.FindingText != "minor nit" || event.Bead != "follow-up" {
+		t.Fatalf("bad deferral event: %+v", event)
+	}
+	if row.Disposition != "confirmed-deferred" || row.Severity != "minor" || row.Model != "codex" {
+		t.Fatalf("bad disposition row: %+v", row)
+	}
+}
+
+// TestPanelDefer_RefusalNamesDefer: a defer refusal names the defer verb,
+// not refute.
+func TestPanelDefer_RefusalNamesDefer(t *testing.T) {
+	root, dir := setupDischarge(t)
+	fakeDeferralBD(t)
+	writeDischargeVerdict(t, dir, "R1", panel.FindingVerdict{Verdict: panel.VerdictReject, Rationale: "no"})
+	msg := assertPanelRefusal(t, root, deferArgs()...)
+	if !strings.Contains(msg, "can be deferred") || strings.Contains(msg, "refuted") {
+		t.Fatalf("defer refusal must name defer: %s", msg)
+	}
+}
