@@ -1042,16 +1042,15 @@ sufficient:
   equality check) and is never collapsed into the names-no-bead state.
 - **LANDED-NESS** ("did it land") is git TOPOLOGY: a two-parent
   first-parent merge on the spec branch whose second parent EQUALS the
-  bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
-  (panel `reviewed_head_sha`, surviving branch tip, binding second
-  parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
-  every corroboration is exact-equality only. A surviving-tip or binding
-  mismatch is a fail-closed contradiction. Panel evidence is a SET of
-  all well-formed SHAs across registrations: an exact member confirms;
-  a non-matching set is non-corroborating and never vetoes another leg.
+  bead's landed tip. Surviving tips and bindings require exact equality.
+  A surviving-tip or binding mismatch is a fail-closed contradiction.
+  Panel evidence is a set of well-formed SHAs from registrations and
+  ledger-backed rebinds. An exact member confirms. A reviewed ancestor
+  also confirms when its diff to the second parent is empty or contains
+  only allowed tool artifacts. See [Reviewed-tree confirmation](#reviewed-tree-confirmation).
+  A set with neither match confirms nothing and never vetoes another leg.
   Empty, placeholder and malformed values never reach git. With no
-  exact-and-owned match the function REFUSES rather
-  than picking the newest ancestor-consistent merge.
+  corroboration for an owned candidate, the function refuses.
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
 over an already-subject-owned candidate — never an ownership authority
@@ -1482,6 +1481,27 @@ uses the actual ID and `--resolve-merge`. A
 materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.
+
+### Reviewed-tree confirmation
+
+`FindLandedMerge` builds its reviewed set from panel registrations and
+ledger-backed rebinds. A reviewed-SHA metadata key confirms nothing unless
+the set contains it. An unregistered key is unverified in the provenance.
+
+A subject-named first-parent merge can match a registered review exactly.
+It can also match a reviewed ancestor when the second parent's tree differs
+only by tool artifacts. The path diff disables rename detection and keeps
+both sides of a rename. It accepts an empty wrapper commit. It accepts
+tracker exports and panel ledgers for the bead's own spec. A source edit,
+a source-to-artifact rename, or another spec's ledger does not qualify.
+The artifact set comes from `panel.ToolArtifactPaths`; its review glob is
+limited to the lifecycle spec directory. Registration fields do not widen it.
+
+The returned provenance names `exact` or `reviewed-tree`. An unavailable
+review object or failed review read confirms nothing. This datum never
+vetoes a matching tip or binding. Tip and binding contradictions still
+refuse, and the revert check still runs after confirmation. Reachable
+fallback does not evaluate the datum and still needs its audited git checks.
 
 ### Ancestor without a naming merge
 

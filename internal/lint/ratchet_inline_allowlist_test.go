@@ -5,6 +5,7 @@ package lint
 // inlineCompositionAllowlist: audited inline-composition concat
 // chains outside the waist, each with its justification.
 var inlineCompositionAllowlist = map[string]inlineEntry{
+	"internal/lifecycle/landed.go reviewedTreeProvenance concat lit:reviews/-with-id":                                 {Count: 1, Justification: "idvalidate.SpecID validates the lifecycle spec ID before narrowing the artifact review glob"},
 	"internal/approve/impl.go implObligationRefusal concat const:workspace.BeadBranchPrefix":                          {Count: 1, Justification: "display-only concat of the idrender.Bead-quoted copy (safeBeadID); beadID itself is gated by readPlanBeadIDs (AC-25) and functional branch composition routes the waist above"},
 	"internal/harness/scenario_bead_lifecycle.go ScenarioBeadsArtifactPassthrough concat lit:.mindspec/specs/":        {Count: 2, Justification: "mindspec-authored provenance: the scenario mints its own literal spec/bead ids in-file (harness fixture composition, spec 120 round-4 F2); no agent-writable value reaches the concat"},
 	"internal/harness/scenario_bead_lifecycle.go ScenarioBlockedBeadTransition concat lit:.mindspec/specs/":           {Count: 2, Justification: "mindspec-authored provenance: the scenario mints its own literal spec/bead ids in-file (harness fixture composition, spec 120 round-4 F2); no agent-writable value reaches the concat"},
