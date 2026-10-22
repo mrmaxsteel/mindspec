@@ -322,7 +322,10 @@ exclusively through eight new `Executor` interface methods
   use to measure `base..T` directly, so "committed tree ≡ measured tree"
   is mechanical once materialization runs. It uses
   `--no-renames --name-only -z` to list both rename endpoints and preserve
-  exact filename bytes.
+  exact filename bytes. Committed ranges through `ChangedFiles` with
+  `ExactPaths: true` and working-tree reads through `DiffNameOnlyRef`
+  use the same path rules.
+  `TreeDirsAtRef` also uses NUL separators for exact domain names.
 - **`MaterializeStageCommit(wtPath, tree, parent, stage, subject)`** builds
   a commit object via plumbing (`git commit-tree`, no hooks) carrying a
   pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`,

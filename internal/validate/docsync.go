@@ -318,7 +318,7 @@ func getChangedFiles(exec executor.Executor, base, head, snapshotWorktree string
 		}
 		return files, nil
 	}
-	files, err := exec.ChangedFiles(base, head)
+	files, err := exec.ChangedFiles(base, head, executor.ChangedFilesOptions{ExactPaths: true})
 	if err != nil {
 		return nil, fmt.Errorf("changed files for %s..%s: %w", base, head, err)
 	}

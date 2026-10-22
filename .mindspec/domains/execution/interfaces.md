@@ -284,7 +284,8 @@ architecture doc, § Merge safety layer (spec 127).
 ### Deferral reads and rename paths
 
 - `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
-- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.
+- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option. Committed ranges return git's quoted paths by default, also with `NoRenames` alone.
+- `ChangedFilesOptions{ExactPaths: true}` selects `--no-renames --name-only -z` for committed ranges. Doc-sync and ADR divergence use this option. Working-tree reads use the same path rules. These reads list both rename endpoints and preserve exact filename bytes. Domain enumeration through `TreeDirsAtRef` also preserves exact name bytes with NUL separators.
 
 ## Finalization preflight
 

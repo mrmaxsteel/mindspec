@@ -1771,10 +1771,14 @@ func (g *MindspecExecutor) CommitAll(path, msg string) error {
 // the exact semantics (working tree vs head) the docsync.go call site relies
 // on. When both refs are set, shells out to `git diff --name-only base..head`
 // directly and parses the newline-separated output inline (the executor must
-// not import enforcement packages to reuse a parser).
+// not import enforcement packages to reuse a parser). ExactPaths selects
+// a NUL-separated range read that lists both rename endpoints.
 func (g *MindspecExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
 	if base == "" {
 		return gitutil.DiffNameOnlyRef("", head)
+	}
+	if len(options) > 0 && options[0].ExactPaths {
+		return gitutil.DiffNameOnlyNoRenames(g.Root, base, head)
 	}
 	// SEC-5 (spec 097 R1, executor gap): guard both range operands before
 	// they reach git argv — a `-`-prefixed ref would otherwise be reparsed
@@ -1916,13 +1920,13 @@ func (g *MindspecExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) 
 	if err := gitutil.RejectOptionLike(ref); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, dirPath+"/")
+	cmd := exec.Command("git", "-C", g.Root, "ls-tree", "-z", ref, "--", dirPath+"/")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-tree %s %s/: %w", ref, dirPath, err)
 	}
 	var dirs []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+	for _, line := range strings.Split(string(out), "\x00") {
 		if line == "" {
 			continue
 		}

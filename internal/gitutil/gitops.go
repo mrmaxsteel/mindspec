@@ -1896,20 +1896,20 @@ func WorktreeForBranch(workdir, branch string) (string, error) {
 	return "", nil
 }
 
-// DiffNameOnlyRef runs `git diff --name-only <ref>` in workdir (single-ref
-// form, comparing against the working tree). workdir=="" → cwd.
+// DiffNameOnlyRef compares ref against the working tree. It lists both rename
+// endpoints and preserves exact filename bytes. workdir=="" → cwd.
 func DiffNameOnlyRef(workdir, ref string) ([]string, error) {
 	if err := rejectOptionLike(ref); err != nil {
 		return nil, err
 	}
 	// Trailing `--` separates the single ref from any pathspec
 	// interpretation (single-ref form, not a range).
-	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-only", ref, "--")...)
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--no-renames", "--name-only", "-z", ref, "--")...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("diff --name-only %s: %w", ref, err)
 	}
-	return splitLines(string(out)), nil
+	return splitNUL(out), nil
 }
 
 // DiffPathspec runs `git diff <base> <head> -- <pathspecs...>` and returns

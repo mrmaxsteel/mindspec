@@ -1029,7 +1029,7 @@ func TestDiffNameOnly_Empty(t *testing.T) {
 }
 
 func TestDiffNameOnlyRef_NoWorkdir(t *testing.T) {
-	calls := swapExec(t, "x.go\n", 0)
+	calls := swapMergeStateExec(t, "x.go\x00", 0)
 	files, err := DiffNameOnlyRef("", "HEAD~1")
 	if err != nil {
 		t.Fatal(err)
@@ -1037,7 +1037,7 @@ func TestDiffNameOnlyRef_NoWorkdir(t *testing.T) {
 	if len(files) != 1 || files[0] != "x.go" {
 		t.Errorf("unexpected files: %v", files)
 	}
-	assertArgs(t, (*calls)[0].args, "diff", "--name-only", "HEAD~1", "--")
+	assertArgs(t, (*calls)[0].args, "diff", "--no-renames", "--name-only", "-z", "HEAD~1", "--")
 }
 
 func TestDiffPathspec_InsertsSeparator(t *testing.T) {

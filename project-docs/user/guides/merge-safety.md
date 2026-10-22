@@ -299,6 +299,9 @@ also stays merge-only while pending mode exists. Run complete again after
 it records the merge to close the bead.
 
 Content gates on a committed merge measure that merge's own change.
+Doc-sync and ADR-divergence checks list both rename endpoints and keep
+exact filename bytes. A source moved to a tool-artifact path still needs
+its domain documentation update.
 A later doc commit does not change it. If the merge is still the spec tip
 and has no landed binding, stage only the ownership manifests or doc paths
 named by the refusal. Amend the merge, clear the old merge-only SHA with

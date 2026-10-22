@@ -1313,11 +1313,13 @@ against that snapshot BEFORE any commit exists
 (`internal/validate/docsync.go`'s `ValidateDocsSnapshot` and
 `internal/validate/adr_divergence.go`'s `CheckADRDivergenceSnapshot` /
 `divergence.go`'s `ValidateDivergenceSnapshot` — new tree-vs-tree legs
-alongside the unchanged committed-range functions reconcile mode and
+alongside the committed-range functions reconcile mode and
 `impl approve`'s whole-branch backstop still call), and only on a full
 gate pass materializes the snapshot into the bead branch's real commits.
-The snapshot diff lists both rename endpoints and preserves filename bytes.
-Doc-sync and divergence use this same reader.
+Doc-sync and divergence use snapshot and committed-range diffs that list
+both rename endpoints and preserve exact filename bytes. Committed-range
+calls select `ExactPaths: true`. The working-tree doc-sync reader has the
+same path rules.
 Because no complete-authored commit exists before the gates run, a gate
 refusal now ALWAYS leaves the bead branch tip at `reviewed_head_sha` —
 the retry meets the identical gate, never a false panel-staleness block

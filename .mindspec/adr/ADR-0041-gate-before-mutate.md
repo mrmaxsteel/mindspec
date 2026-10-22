@@ -947,6 +947,9 @@ records the same valid merge and makes no new merge. Metadata is a hint.
 
 The closing call runs the full panel gate at the bead tip. It measures
 doc-sync, ADR divergence, and ownership over M^1..M, with M as ownerRef.
+Doc-sync and ADR-divergence path reads disable rename detection and use
+NUL separators. Both endpoints and exact filename bytes reach classification.
+Domain enumeration preserves exact name bytes too.
 A later commit does not change M. An ownership or doc-only repair can
 amend M when M is the spec tip and no landed binding exists. Stage only
 the named repair paths. Clear the old merge-only SHA after the amend.

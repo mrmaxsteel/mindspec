@@ -213,7 +213,7 @@ func validateDivergence(
 	if snapshotWorktree != "" {
 		changed, err = exec.ChangedFilesTree(snapshotWorktree, base, head)
 	} else {
-		changed, err = exec.ChangedFiles(base, head)
+		changed, err = exec.ChangedFiles(base, head, executor.ChangedFilesOptions{ExactPaths: true})
 	}
 	if err != nil {
 		r.AddError("adr-divergence-diff", err.Error())

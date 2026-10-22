@@ -14,6 +14,8 @@ package executor
 type ChangedFilesOptions struct {
 	// NoRenames lists both sides of a rename for rebind checks and records.
 	NoRenames bool
+	// ExactPaths lists both rename endpoints with exact filename bytes.
+	ExactPaths bool
 }
 
 // MergeBeadOptions selects the re-entry command for a merge without cleanup.
@@ -153,9 +155,10 @@ type Executor interface {
 	CommitAll(path, msg string) error
 
 	// ChangedFiles returns the list of paths changed between two git refs.
-	// Passing base == "" means working tree vs head, matching
-	// gitutil.DiffNameOnlyRef("", ref) semantics. With both refs set it is
-	// equivalent to `git diff --name-only <base>..<head>`.
+	// Passing base == "" means working tree vs head, with exact path bytes
+	// and both rename endpoints. With both refs set, the default returns
+	// git's newline-separated, quoted paths. NoRenames lists both rename
+	// endpoints; ExactPaths also returns exact bytes without git quoting.
 	ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error)
 
 	// LsTree returns a full recursive, repository-relative tree listing.

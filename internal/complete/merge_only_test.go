@@ -228,6 +228,63 @@ func TestComplete_HandMergeTakesClosingPath(t *testing.T) {
 		t.Fatalf("close failed: %+v %v %v", r, err, f.meta)
 	}
 }
+
+type handMergeGateExecutor struct {
+	*windowExecutor
+	merges, cleanups int
+}
+
+func (e *handMergeGateExecutor) MergeBead(id, target, reason string, resolve bool, opts executor.MergeBeadOptions) error {
+	e.merges++
+	return e.windowExecutor.MergeBead(id, target, reason, resolve, opts)
+}
+
+func (e *handMergeGateExecutor) CleanupBead(id, target string) error {
+	e.cleanups++
+	return e.windowExecutor.CleanupBead(id, target)
+}
+
+func TestComplete_HandMergedSourceRenameRefusesBeforeClose(t *testing.T) {
+	f := newWindowFixture(t)
+	gitRun(t, f.root, "config", "diff.renames", "true")
+	const source = "internal/widget/widget.go"
+	const contents = "package widget\n\nconst Value = 1\n"
+	writeFile(t, f.root, source, contents)
+	writeFile(t, f.root, ".mindspec/domains/widget/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
+	writeFile(t, f.root, ".mindspec/domains/widget/architecture.md", "Widget owns its source.\n")
+	gitRun(t, f.root, "add", "-A")
+	gitRun(t, f.root, "commit", "-qm", "shared owned source")
+	gitRun(t, f.specWT, "merge", "--no-edit", "main")
+	gitRun(t, f.beadWT, "merge", "--no-edit", "main")
+	destination := ".mindspec/specs/" + closingSpec + "/reviews/rename/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(f.beadWT, destination)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, f.beadWT, "mv", source, destination)
+	gitRun(t, f.beadWT, "commit", "-qm", "move source to review artifact")
+	f.tip = gateRevParse(t, f.root, "bead/"+closingBead)
+	merge := f.merge()
+	ex := &handMergeGateExecutor{windowExecutor: f.ex}
+	result, err := Run(f.root, closingBead, closingSpec, "", ex, CompleteOpts{})
+	t.Logf("close_calls=%d merge_calls=%d cleanup_calls=%d closed=%v result=%+v err=%v", f.closeCalls, ex.merges, ex.cleanups, f.closed, result, err)
+	requireWindowRefusal(t, err, "internal sources in domain")
+	requireWindowRefusal(t, err, source)
+	if f.closeCalls != 0 || ex.merges != 0 || ex.cleanups != 0 || f.closed {
+		t.Fatal("content gate must refuse before close, merge, or cleanup")
+	}
+	if gateRevParse(t, f.root, "bead/"+closingBead) != f.tip || gateRevParse(t, f.root, "spec/"+closingSpec) != merge {
+		t.Fatal("refusal moved a branch tip")
+	}
+	for _, wt := range []string{f.beadWT, f.specWT} {
+		data, readErr := os.ReadFile(filepath.Join(wt, destination))
+		if readErr != nil || string(data) != contents {
+			t.Fatalf("refusal lost committed bytes in %s: %q, %v", wt, data, readErr)
+		}
+	}
+	if f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatal("refusal bound the bead as landed")
+	}
+}
 func TestComplete_ForeignMarkerRefuses(t *testing.T) {
 	f := newWindowFixture(t)
 	f.merge()

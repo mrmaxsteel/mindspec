@@ -40,7 +40,7 @@ type MockExecutor struct {
 	ChangedFilesResult         []string
 	ChangedFilesErr            error
 
-	// ChangedFilesOptionsFn lets rebind tests inspect the diff options.
+	// ChangedFilesOptionsFn lets tests inspect path-listing options.
 	ChangedFilesOptionsFn func(base, head string, options []ChangedFilesOptions) ([]string, error)
 
 	// ChangedFilesFn, when non-nil, takes precedence over
@@ -230,7 +230,11 @@ func (m *MockExecutor) CommitAll(path, msg string) error {
 }
 
 func (m *MockExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
-	m.record("ChangedFiles", base, head)
+	args := []any{base, head}
+	for _, option := range options {
+		args = append(args, option)
+	}
+	m.record("ChangedFiles", args...)
 	if m.ChangedFilesOptionsFn != nil {
 		return m.ChangedFilesOptionsFn(base, head, options)
 	}

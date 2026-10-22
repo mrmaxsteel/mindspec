@@ -540,7 +540,7 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | Symbol | Purpose |
 |:-------|:--------|
 | `complete.runMaterialization` (`materialize.go`) | Orchestrates the M/R/S/G/T staged sequence over the execution domain's eight `Executor` seam methods — no `internal/gitutil` import (ADR-0030). |
-| `validate.ValidateDocsSnapshot(root, base, treeOID, ownerRef, wtPath, exec)` | The doc-sync gate diffs `base..T` in `wtPath` and reads ownership at the separate landing-tree `ownerRef`; unchanged `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. |
+| `validate.ValidateDocsSnapshot(root, base, treeOID, ownerRef, wtPath, exec)` | The doc-sync gate diffs `base..T` in `wtPath` and reads ownership at the separate landing-tree `ownerRef`; `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. Both readers list both rename endpoints and preserve exact filename bytes. |
 | `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate diffs candidate `treeOID` in `wtPath`. Both functions take a separate `ownerRef` for all ownership reads at the landing tree. |
 
 **Proportional claim guard (`internal/next/guard.go`, R5):**
