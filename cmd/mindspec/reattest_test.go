@@ -550,24 +550,58 @@ func TestReattestText_NoHistoricalCitations(t *testing.T) {
 			t.Fatalf("citation detector missed %q", known)
 		}
 	}
+	assertNoCitations := func(t *testing.T, r *lifecycle.ReattestRefusal) {
+		t.Helper()
+		text := reattestCmd.Short + "\n" + reattestCmd.Long + "\n" + reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
+		if match := historical.FindString(text); match != "" {
+			t.Errorf("state %s cites %q: %s", r.State, match, text)
+		}
+		for _, forbidden := range []string{"R6.", "#251"} {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("state %s cites %q: %s", r.State, forbidden, text)
+			}
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "recovery:") && strings.ContainsAny(line, "()") {
+				t.Errorf("recovery contains prose: %s", line)
+			}
+		}
+	}
 	for _, scenario := range []string{"bare", "ancestor", "history", "not-own-work", "unknown-base", "indeterminate-git", "indeterminate-dependents"} {
 		t.Run(scenario, func(t *testing.T) {
-			r := reattestTextRefusal(t, scenario)
-			text := reattestCmd.Short + "\n" + reattestCmd.Long + "\n" + reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
-			if match := historical.FindString(text); match != "" {
-				t.Errorf("state %s cites %q: %s", r.State, match, text)
-			}
-			for _, forbidden := range []string{"R6.", "#251"} {
-				if strings.Contains(text, forbidden) {
-					t.Errorf("state %s cites %q: %s", r.State, forbidden, text)
-				}
-			}
-			for _, line := range strings.Split(text, "\n") {
-				if strings.HasPrefix(line, "recovery:") && strings.ContainsAny(line, "()") {
-					t.Errorf("recovery contains prose: %s", line)
-				}
-			}
+			assertNoCitations(t, reattestTextRefusal(t, scenario))
 		})
+	}
+	for _, state := range []string{
+		lifecycle.ReattestStateAmbiguous,
+		lifecycle.ReattestStateTipContradiction,
+		lifecycle.ReattestStatePanelContradiction,
+		lifecycle.ReattestStateReverted,
+		lifecycle.ReattestStateMultipleFallbackCandidates,
+		lifecycle.ReattestStateUnknown,
+	} {
+		t.Run(state, func(t *testing.T) {
+			assertNoCitations(t, &lifecycle.ReattestRefusal{State: state, Detail: "fixture detail"})
+		})
+	}
+	t.Run("fallback", func(t *testing.T) {
+		assertNoCitations(t, &lifecycle.ReattestRefusal{State: lifecycle.ReattestStateTipContradiction, Fallback: true, Detail: "fixture detail"})
+	})
+}
+
+func TestReattestText_UnknownBaseRecovery(t *testing.T) {
+	r := reattestTextRefusal(t, "unknown-base")
+	if !r.NoRestore || len(r.Recovery) != 0 {
+		t.Fatalf("unknown-base fixture must require a default recovery without a restore: %+v", r)
+	}
+	text := reattestRefusalFailure("mindspec-ab12", "bead/mindspec-ab12", "spec/132-test", r).Error()
+	if want := "recovery: git log --first-parent --merges spec/132-test"; !strings.Contains(text, want) {
+		t.Errorf("missing %q: %s", want, text)
+	}
+	for _, forbidden := range []string{"recovery: mindspec doctor", "recovery: git branch", "--allow-not-ready"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("ineffective recovery %q: %s", forbidden, text)
+		}
 	}
 }
 

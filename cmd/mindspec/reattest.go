@@ -265,9 +265,9 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 	if r.State == lifecycle.ReattestStateAncestor || r.NoRestore || r.State == lifecycle.ReattestStateIndeterminate {
 		recovery := r.Recovery
 		if len(recovery) == 0 {
-			if r.State == lifecycle.ReattestStateNoOwnedMerge {
-				// R6.4 and R6.7 keep the no-owned exit, without an override
-				// or a branch restore that cannot fix this diagnosed state.
+			if r.State == lifecycle.ReattestStateNoOwnedMerge || r.State == lifecycle.ReattestStateUnknown {
+				// Inspect merges for no-owned and unknown-base refusals.
+				// Offer no override or branch restore here.
 				recovery = []string{inspect}
 			} else {
 				recovery = []string{"mindspec doctor"}

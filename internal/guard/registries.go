@@ -155,7 +155,7 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
-	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for a no-owned refusal or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
+	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/lifecycle/merge_state.go", Func: "RestoreMergeRecovery", Detail: "variadic-spread:commands",
 		Rationale:  "Restore guidance uses escaped, shell-quoted operands. A clean spec checkout permits the path restore only through the destructive command constructor. Other outcomes retain whole-commit revert guidance.",
 		Obligation: "internal/lifecycle TestMergeState_RestoreCheckoutFromConstructor pins the constructor and rendered restore. TestMergeState_RestoreOmitsCheckoutOnUserChanges pins the omitted choice for unsafe or unreadable checkouts."},
