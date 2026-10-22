@@ -188,16 +188,21 @@ func GateReadiness(root, beadID string, opts GateOptions) (*GateResult, error)
 func RecordReadinessOverride(beadID string, result *GateResult) error
 ```
 
-### Panel Artifact Schema (Spec 110 Bead 1, ADR-0040 portability contract)
+### Panel Artifact Schema
 
-The review-panel lifecycle's on-disk shapes are the agent-neutral
-surface a non-Claude-Code runner targets (ADR-0040's portability
-principle: agents integrate at the artifact + CLI contract level,
-never at the prompt-format level). `internal/panel` is the single home
-of these shapes; this section must not name a pattern the constants
-below reject.
+`internal/panel` owns the panel artifact shapes. Every new round uses verdict schema v2.
+A reviewer submits through `mindspec panel submit`. A file alone does not count.
+Process reviewers use the output channel in their slot prompt. Launch submits their verdicts.
+The latest submission replaces the earlier submission for that slot and round.
+The ledger retains every submission. See Panel Submission Core and Panel Gate v2 below.
 
-**Tool artifacts and ledger commits (spec 130 R4.6/R6).**
+`mindspec panel verify` reports one status for each roster slot:
+`final`, `damaged`, `void`, `draft`, `running`, `quota_wall`, `launch_failed`, `malformed`, `unsubmitted` or `missing`.
+It exits 0 when all slots are final.
+It exits 1 for running or missing slots, harness drafts, or a quota handoff that is pending.
+It exits 2 in every other case. A final status does not imply a passing gate.
+
+**Tool artifacts and ledger commits.**
 `panel.ToolArtifactPaths` is the single home for `.beads/issues.jsonl` and
 `<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
 The gate, next guard and complete materialization share it. The ledger is
@@ -224,7 +229,7 @@ spec worktree; the uncommitted-path and commit-failure recoveries name
 hatch skips these checks or the ledger commit. Adhoc ledgers stay ignored.
 
 **Registration.** Every panel directory (`review/<slug>`, or the
-co-located `<spec-dir>/reviews/<slug>` on a flat tree, ADR-0039) holds
+co-located `<spec-dir>/reviews/<slug>` on a flat tree) holds
 exactly one `panel.json` — the literal filename `panel.FileName`. The
 snapshot writer `panel.WriteSnapshot` exists (temp file and rename); `create`, `rebind`, `refute`, `defer` and `abandon` call it after their ledger events are appended.
 `panel.AppendRecords` accepts the
@@ -239,7 +244,8 @@ The optional registration fields at the end of `panel.Panel` are:
 | Field | Shape |
 |:------|:------|
 | `subject_digest` | `sha256:` plus the subject-tree digest, recorded beside `reviewed_head_sha` |
-| `roster` | ordered `[{slot, model, lens}]`, with optional `family` and ids `R1..Rn` |
+| `roster` | ordered `[{slot, family, model, lens}]` on new rounds, with ids `R1..Rn` |
+| `verdict_schema` | `2` on every new round; pinned to the round event |
 | `deferrals` | `[{slot, round, finding, finding_sha256, finding_text, bead, by, created_at}]` |
 | `rebinds` | `[{round, from_sha, to_sha, paths, reason, created_at}]` |
 | `telemetry` | `"required"` on new registrations |
@@ -250,12 +256,12 @@ Refutations have `slot`, `round`, `reason`, `evidence` and optional
 Absent new fields are omitted on serialization, preserving legacy JSON shapes.
 
 The panel directory's `dispositions.jsonl` stores these verb events in addition
-to spec-117 `disposition` rows and `panel` coverage manifests. Every event carries
+to `disposition` rows and `panel` coverage manifests. Every event carries
 `spec`, `panel` and `created_at`; adhoc events use `spec: "adhoc"`.
 
 | Kind | Payload | Key within the panel directory |
 |:-----|:--------|:-------------------------------|
-| `round` | round, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
+| `round` | round, verdict_schema, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
 | `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
 | `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
 | `rebind` | round, from_sha, to_sha, subject_digest, paths, reason | to_sha |
@@ -271,8 +277,8 @@ reject malformed records. Events contribute no telemetry rows or slot coverage.
 panels; only `tally` writes those manifests.
 
 A legacy panel has neither a `telemetry` field nor a `round` ledger event.
-Exactly one marker is a registration error. `panel.CheckHandEdits` is the R5.3
-library matcher: it returns the first snapshot field without a backing event,
+Exactly one marker is a registration error. `panel.CheckHandEdits` is the snapshot-to-ledger
+matcher: it returns the first snapshot field without a backing event,
 using the latest round, subsequent rebind/abandon events, and payload equality
 for entry arrays (ignoring `created_at`). The first round event's `carried`
 object supplies baselines for legacy refutations, deferrals and rebinds.
@@ -288,10 +294,10 @@ Equal SHAs are fresh without a subject read. On a SHA mismatch a recorded
 digest is compared to the live subject: equality is fresh, a difference stale.
 A legacy panel without a digest retains the original stale message.
 `complete`, `verify`, `tally` and instruct panel state use the same gate facts.
-The R5.3 matcher pins `subject_digest` to the later of the latest round and
+The snapshot-to-ledger matcher pins `subject_digest` to the later of the latest round and
 rebind events, alongside `reviewed_head_sha`.
 
-A Finding is `ccr[i]` from the latest-round verdict's
+On historical file-based rounds, a Finding is `ccr[i]` from the latest-round verdict's
 `concrete_changes_required`, with the sha256 of its raw text. Empty lists use
 `ccr[0]` with the rationale; an empty rationale too is INVALID. Reviewer
 `findings[]` is evidence only. Storage text replaces each `/tmp/` or `/Users/`
@@ -305,19 +311,18 @@ neither marker remain exempt. The check detects accidental desync, not forgery.
 
 `panel.Create` reads and parses the existing `panel.json` first and merges forward (see the Create paragraph below). A re-panel of an abandoned panel revives it, clears `abandoned`, and appends `{reason, abandoned_at, revived_at}` to `abandon_history` (`TestCreate_RepanelOfAbandonedPanelRevivesIt`).
 
-**Verdict files.** Each reviewer writes one `<slot>-round-<N>.json`
-file beside the registration, with `N` starting at 1 (`panel.verdictFileRE`).
-A conforming example is `R1-round-1.json`; `codex-correctness-round-2.json`
-is another. The filename `R1-round-0.json` (nonconforming — rejected)
-never appears — round numbering is 1-based, and a writer that emits
-round 0 is a bug, not a valid first round.
+**Verdict files.** Submit writes `<slot>-round-<N>.json` beside the registration.
+The first round is 1. `R1-round-1.json` is a valid filename.
+The filename `R1-round-0.json` (nonconforming — rejected) is refused.
+On v2 rounds, the gate checks the file hash against the latest submission.
+Reviewers must not write this destination by hand.
 
 **Consolidated change list.** `mindspec panel tally`'s aggregated
 `concrete_changes_required`, once deduped and ranked, is authored to
 `consolidated-round-1.md` for round 1 (the general shape is
 consolidated-round-N.md, `panel.ConsolidatedName(N)`).
 
-**Verdict JSON payload for the existing tally reader.** The top-level shape is:
+**Historical verdict JSON payload.** Rounds without a v2 round event use this reader. The top-level shape is:
 
 - `verdict` (required): a non-empty string. A reviewer MUST write one
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
@@ -355,7 +360,7 @@ Degraded modes (a slow reviewer, a runner that cannot render Markdown)
 are the runner's concern; the schema itself makes no allowance for a
 partial or alternate shape.
 
-Coverage manifests are written only by binary `tally`, from roster slots only and latest-round verdict files, when every pass-rule row except freshness holds. A stale non-bead panel can therefore record coverage. The append key is `spec, panel, round, created_at`; tally appends unless the last manifest of that round equals the derivation. Earlier manifests remain after abandonment. Every manifest reader, including `ComputeQ4`, uses only the last manifest per spec/panel. Core 3 validates all ledger records, requires the current round's manifest to equal the roster/verdict derivation, and requires covering disposition rows for REQUEST_CHANGES and REJECT slots.
+Coverage manifests are written only by binary `tally`, from roster slots that count in the latest round, when every pass-rule row except freshness holds. A stale non-bead panel can therefore record coverage. The append key is `spec, panel, round, created_at`; tally appends unless the last manifest of that round equals the derivation. Earlier manifests remain after abandonment. Every manifest reader, including `ComputeQ4`, uses only the last manifest per spec/panel. Core 3 validates all ledger records, requires the current round's manifest to equal the roster/verdict derivation, and requires covering disposition rows for REQUEST_CHANGES and REJECT slots.
 
 ### Panel Submission Core
 

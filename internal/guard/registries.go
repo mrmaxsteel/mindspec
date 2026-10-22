@@ -921,7 +921,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	// entries below, found by running the scan.
 	{
 		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).",
+		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "documented guidance PROHIBITING raw merge and directing the reader to `mindspec complete` instead — reviewed at spec time (R5a's Background inventory) as a known instance of the design principle that a guard on destructive guidance must not penalize the text that warns against the destructive act.",
@@ -929,7 +929,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "documented guidance DESCRIBING the partial-failure recovery path (mentions 'the actual git merge' in the course of explaining when to stop, never instructing a raw merge) — reviewed at spec time as a known descriptive instance.",
@@ -937,7 +937,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).",
+		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md prohibition above — same reviewed text, a distinct swept surface (plugins/*/skills/**).",
@@ -945,7 +945,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md partial-failure description above — same reviewed text, a distinct swept surface.",
@@ -969,7 +969,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "ms-bead-cycle",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).",
+		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "one of the TWO entries this spec's own Background inventory missed (found by RUNNING the scan, not recall, H-r6-4's own lesson recurring): the canonical skill-map builder key \"ms-bead-cycle\" is NOT one of the four inlined lifecycle-gate skills in claude.go, so its setup.CanonicalGuidanceSurfaces() entry comes purely from the go:embed'd plugin source and mirrors plugins/mindspec/skills/ms-bead-cycle/SKILL.md byte-for-byte — but R5(c)'s canonical-surface leg sweeps skillFiles()'s FULL returned map, not only the four inlined entries, so this surface key needs its own entry.",
@@ -977,7 +977,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "ms-bead-cycle",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the second of the two scan-found \"ms-bead-cycle\" skill-map entries above — same reasoning, the partial-failure description mirrored through the canonical builder.",

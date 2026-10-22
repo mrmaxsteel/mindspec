@@ -9,7 +9,7 @@ Land one PR-sized implementation for a single claimed bead. You orchestrate; the
 
 **Why staged prompts matter.** Pre-staged prompts are the biggest quality lever on impl-subagent output. A subagent given a structured prompt with explicit files, helpers, ACs, and boundaries usually passes on the first round; the same subagent given a one-line "implement this bead" usually needs rework.
 
-Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in every subagent prompt — do not re-transcribe them here.
+Include the repository guardrails from AGENTS.md in every subagent prompt. Apply `review.derive`, `lifecycle.complete-by-orchestrator` and `sequence.bead-impl-prompt`.
 
 ## Inputs
 
@@ -67,8 +67,8 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - Spec branch: spec/<spec-slug>
 
    ## Read first
-   - `.mindspec/specs/<spec-slug>/spec.md` §R<n> + §AC<n>
-   - `.mindspec/specs/<spec-slug>/plan.md` §Bead <N>
+   - `.mindspec/specs/<spec-slug>/spec.md` acceptance criteria
+   - `.mindspec/specs/<spec-slug>/plan.md` bead section
 
    ## Phase 0 — readiness review (before any edit)
 
@@ -109,7 +109,7 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - ...
 
    ## Guardrails
-   Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the
+   Include the standard guardrails (AGENTS.md, Bead-loop guardrails) — the
    subagent prompt fences (no `mindspec complete`, no `git push`, no scope
    creep, no reimplementing helpers, exactly ONE commit ending
    `Deviations: <list or "none">`, tests must PASS, report SHA + counts).
