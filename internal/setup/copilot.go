@@ -162,6 +162,8 @@ const copilotManagedBlock = `
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
+
 ## Skills
 
 MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
