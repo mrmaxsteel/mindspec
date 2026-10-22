@@ -256,7 +256,9 @@ and retains its branch and worktree. After verification, run
 `mindspec complete <bead-id>` until it exits 0. The closing call publishes
 the tracker export and panel ledger before it removes the workspace.
 After publication and its hooks, it reads bead user changes again before removal.
-Tool artifacts stay exempt.
+Tool artifacts stay exempt. The exemption preserves filename whitespace.
+A lookalike path with a whitespace suffix blocks the close. Move the file to a
+safe path, then retry.
 Status reads disable rename and copy detection.
 New user changes or a status or stat read error stop
 cleanup. The pending file, worktree, and branch remain. Preserve the changes at a

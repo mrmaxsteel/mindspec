@@ -297,10 +297,9 @@ func defaultStatusPorcelainZ(cwd string) (string, error) {
 
 // classifyDirty partitions a list of repo-relative dirty paths into co-managed
 // artifact dirt (safe to ignore per ADR-0025) and user dirt (must block).
-// Empty inputs are skipped.
+// Empty inputs are skipped. Decoded filename bytes, including whitespace, stay exact.
 func classifyDirty(paths []string, specsDir ...string) (artifactDirt, userDirt []string) {
 	for _, p := range paths {
-		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
@@ -428,13 +427,11 @@ func parsePorcelainZ(out string) []dirtyEntry {
 }
 
 // classifyDirtyZ partitions parsed -z entries into co-managed artifact
-// dirt and user dirt, matching classifyDirty's exact-new-path-only rule
-// (a rename's OrigPath is not consulted for artifact classification —
-// unchanged scope from the pre-round-1 behavior; only entanglement
-// matching below considers both sides of a rename).
+// dirt and user dirt. A rename or copy is artifact dirt only when both
+// endpoints match artifact paths. Filename bytes stay exact.
 func classifyDirtyZ(entries []dirtyEntry, specsDir ...string) (artifactEntries, userEntries []dirtyEntry) {
 	for _, e := range entries {
-		if isArtifactPath(e.Path, specsDir...) {
+		if isArtifactPath(e.Path, specsDir...) && (e.OrigPath == "" || isArtifactPath(e.OrigPath, specsDir...)) {
 			artifactEntries = append(artifactEntries, e)
 		} else {
 			userEntries = append(userEntries, e)
@@ -495,8 +492,8 @@ func renderDirtyEntry(e dirtyEntry) string {
 // feeds ComputeEntangleablePaths' per-spec recording-path class
 // (round-1 panel G1/F1).
 //
-// The artifact/user-dirt classification itself is unchanged (ADR-0025);
-// this reclassifies what happens to the USER-dirt half: dirt on a path
+// Artifact classification uses exact paths (ADR-0025). Every rename or copy
+// endpoint must qualify for the exemption. User dirt on a path that
 // ComputeEntangleablePaths names is blockingDirt; every other user dirt
 // is ignoredDirt, so the caller can print an informational notice naming
 // it (Max's standing directive, 2026-09-02: visibility without the

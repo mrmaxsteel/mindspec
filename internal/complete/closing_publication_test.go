@@ -2,6 +2,7 @@ package complete
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,4 +204,59 @@ func TestComplete_MergedBeadSourceRenameRefusesBeforeClose(t *testing.T) {
 		t.Fatalf("saved edit lost: %q %v", data, err)
 	}
 	t.Log("retry_converged=true saved_edit_preserved=true")
+}
+
+func TestComplete_ArtifactWhitespaceLookalikeRefusesBeforeCloseAndRetries(t *testing.T) {
+	for _, artifact := range []string{".beads/issues.jsonl", ".mindspec/specs/" + closingSpec + "/reviews/cleanup/dispositions.jsonl"} {
+		for _, suffix := range []string{" ", "\t", "\n"} {
+			rel := artifact + suffix
+			t.Run(fmt.Sprintf("%q", rel), func(t *testing.T) {
+				f := newWindowFixture(t)
+				f.mergedOnly()
+				remover := &closingRemovalRecorder{windowWorktrees: windowWorktrees{f}}
+				f.ex.WorktreeOps = remover
+				const content = "user work with a significant filename suffix\n"
+				writeFile(t, f.beadWT, rel, content)
+				specTip := gateRevParse(t, f.root, "spec/"+closingSpec)
+
+				result, err := f.run(CompleteOpts{})
+				if err == nil || !strings.Contains(err.Error(), "uncommitted user changes") || !strings.Contains(err.Error(), "recovery: mindspec complete "+closingBead) {
+					t.Errorf("want user-dirt refusal with retry: result=%+v error=%v", result, err)
+				}
+				if f.closed || f.closeCalls != 0 || remover.calls != 0 {
+					t.Errorf("lookalike reached mutation: closed=%v closes=%d removals=%d", f.closed, f.closeCalls, remover.calls)
+				}
+				pending := filepath.Join(f.beadWT, rel)
+				if data, readErr := os.ReadFile(pending); readErr != nil || string(data) != content {
+					t.Errorf("user bytes lost: %q %v", data, readErr)
+				}
+				for branch, tip := range map[string]string{"bead/" + closingBead: f.tip, "spec/" + closingSpec: specTip} {
+					if got := gateRevParse(t, f.root, branch); got != tip {
+						t.Errorf("branch changed: %s got=%s want=%s", branch, got, tip)
+					}
+				}
+				for _, wt := range []string{f.beadWT, f.specWT} {
+					if info, statErr := os.Stat(wt); statErr != nil || !info.IsDir() {
+						t.Errorf("worktree lost: %s %v", wt, statErr)
+					}
+				}
+				t.Logf("path=%q close_calls=%d removal_calls=%d error=%v", rel, f.closeCalls, remover.calls, err)
+				if t.Failed() {
+					return
+				}
+				saved := filepath.Join(t.TempDir(), "preserved-user-work")
+				if err := os.Rename(pending, saved); err != nil {
+					t.Fatal(err)
+				}
+				result, err = f.run(CompleteOpts{})
+				if err != nil || result == nil || !result.WorktreeRemoved || !result.BeadClosed || f.closeCalls != 1 || remover.calls != 1 {
+					t.Fatalf("retry did not converge: %+v %v closes=%d removals=%d", result, err, f.closeCalls, remover.calls)
+				}
+				if data, readErr := os.ReadFile(saved); readErr != nil || string(data) != content {
+					t.Fatalf("preserved bytes lost on retry: %q %v", data, readErr)
+				}
+				t.Log("retry_converged=true saved_bytes_preserved=true")
+			})
+		}
+	}
 }

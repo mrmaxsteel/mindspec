@@ -178,6 +178,9 @@ artifact dirt; other panel files retain their ordinary classification. The gate,
 next guard and impl approve share `panel.PorcelainPath` to decode git porcelain
 C-style quoted paths and rename destinations before matching, including
 non-ASCII spec and panel directory names and literal arrows in path names.
+The next guard matches decoded filename bytes exactly, including whitespace.
+Its proportional claim check exempts a rename or copy only when both endpoints
+match artifact paths. It names both endpoints of user renames and copies.
 On flat layouts complete checks each existing matched ledger with
 `exec.CheckIgnore` in the spec worktree before any side effect. After the
 bead merge, it commits all matched ledgers once with `exec.CommitPaths`
@@ -898,6 +901,7 @@ Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.
 
 The closing call reads bead user changes again after publication and before
 removal. The executor repeats this check at removal. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
 Status reads disable rename and copy detection.
 New user changes or a status or stat read error refuse with a completion retry
 command. The pending file, worktree, and branch remain.

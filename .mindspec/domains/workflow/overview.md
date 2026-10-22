@@ -50,7 +50,9 @@ Mode system is implemented. Beads is the single state store (ADR-0023) — no fi
 - **Executor commits** (`approve spec`, `approve plan`, `approve impl`, `complete`) refresh the JSONL via `bd export` before `git add -A`, so every mindspec-driven commit carries current beads state. In projects without a Dolt remote, this makes `git push` the off-machine durability guarantee.
 
 Completion dirt checks disable rename and copy detection. An artifact
-destination cannot hide a changed source.
+destination cannot hide a changed source. The exemption preserves decoded
+filename whitespace. A whitespace suffix makes a lookalike path user dirt.
+The claim guard exempts a rename or copy only when both endpoints are artifacts.
 
 Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.
 

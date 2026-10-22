@@ -400,7 +400,8 @@ The workflow layer selects the naming merge and decides whether to close.
 only the paths it is given. The caller includes the export path.
 `CleanupBead` checks ancestry and reads bead user changes immediately before
 forced removal. `CompleteBead` uses the same check after its commits and merge
-hooks. Tool artifacts stay exempt.
+hooks. Tool artifacts stay exempt. The exemption preserves decoded filename
+whitespace. A lookalike path is user work.
 Status reads disable rename and copy detection.
 New user changes or a status or stat read
 error refuse with a completion retry command. A worktree list read error also

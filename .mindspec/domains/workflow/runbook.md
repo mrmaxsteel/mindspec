@@ -422,7 +422,8 @@ and both parents. Run the verification commands on the spec branch.
 Then run `mindspec complete <bead>` until it exits 0.
 
 After close publication and its hooks, completion reads bead user changes again
-before removal. Tool artifacts stay exempt.
+before removal. Tool artifacts stay exempt. The exemption preserves decoded
+filename whitespace. A lookalike path blocks the close.
 Status reads disable rename and copy detection.
 New user changes or a status or stat
 read error stop cleanup. The pending file, worktree, and branch remain. Preserve

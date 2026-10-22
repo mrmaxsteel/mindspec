@@ -100,6 +100,7 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   into artifact dirt vs user dirt; only user dirt blocks, and the
   failure names the offending paths and the active worktree. The status read
   disables rename and copy detection before it applies artifact exemptions.
+  It matches decoded filename bytes exactly, including whitespace.
 - Operator-facing command forms are noun-verb (`mindspec spec
   approve`, `mindspec plan approve`, `mindspec impl approve`) across
   instruct templates and skipped-gate warnings.
@@ -1360,7 +1361,9 @@ refusal machinery (`DirtyTreeFailure`'s worktree-context +
 final-recovery-line contract, unchanged) stays exercised by a
 seam-injected leg (AC-8(iii)) independent of which conditional classes
 happen to be live in a given fixture. `CheckDirtyTreeProportional`
-narrows the guard to this rule for the claim path only.
+narrows the guard to this rule for the claim path only. It treats a rename
+or copy as artifact dirt only when both endpoints match artifact paths.
+It preserves filename whitespace and names both endpoints for user dirt.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
@@ -1630,6 +1633,7 @@ landed binding and review identity, records overrides, and publishes the
 close with a path-scoped export and ledger commit in the spec worktree.
 After publication, it clears markers and reads bead user changes again before
 removal. The executor repeats this read at removal. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
 Status reads disable rename and copy detection.
 New user changes or a status or stat read error stop cleanup. The pending file,
 worktree, and branch remain. The error gives a completion retry command.

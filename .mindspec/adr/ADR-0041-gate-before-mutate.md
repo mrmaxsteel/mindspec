@@ -954,11 +954,15 @@ publishes the close with a path-scoped export and ledger commit in the spec work
 clears the stage and merge-only markers, and reads bead user changes again
 immediately before removal. The executor repeats this check at removal, including
 the older combined commit and merge path. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
 Status reads disable rename and copy detection.
 New user changes or a status or stat read error refuse with a completion retry command.
 The pending file, worktree, and branch remain.
 A failed step keeps the later steps pending. Retry recovery repeats any
 doc-skew or ADR override flag and its reason.
+
+The proportional claim guard exempts a rename or copy only when both endpoints
+match artifact paths. It names both endpoints when either is user dirt.
 
 A closed resume re-runs the full panel gate and M's content gates, checks
 the tip and user changes, and resumes every remaining step. It skips the
