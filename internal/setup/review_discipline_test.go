@@ -1487,6 +1487,7 @@ func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) 
 
 var reviewDisciplineBead4FragmentRows = []fragmentRow{
 	{ac: "AC-11", desc: "CI parity rule", surface: "ms-spec-final-review", want: "review.ci-parity"},
+	{ac: "AC-11", desc: "no configured command limit", surface: "ms-spec-final-review", want: "If neither key is set, state that limit in the rationale."},
 	{ac: "AC-11", desc: "CI separate result", surface: "ms-spec-final-review", want: "A local result does not replace the PR's CI result."},
 	{ac: "AC-11", desc: "no test command", surface: "ms-spec-final-review", want: "go test", negate: true},
 	{ac: "AC-11", desc: "no npm command", surface: "ms-spec-final-review", want: "npm test", negate: true},
@@ -1560,7 +1561,7 @@ var reviewDisciplineAC11F2SlotFragments = []struct {
 }{
 	{"names commands.ci", "commands.ci"},
 	{"names the commands.test fallback", "commands.test"},
-	{"records the verbatim invocation rule", "verbatim"},
+	{"records the full invocation rule", "run the project's `commands.ci` verbatim, else `commands.test`, in the slot tree."},
 }
 
 // TestReviewDiscipline_AC11F2SlotBinding is the F2-slot-bound half of the

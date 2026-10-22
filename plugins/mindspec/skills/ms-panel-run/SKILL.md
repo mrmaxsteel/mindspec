@@ -58,5 +58,5 @@ Run verify again after each process or agent ends. On exit 0, invoke `/ms-panel-
 
 Apply `panel.isolated-checkout`, `panel.scratch-in-slot`, `panel.submit`, `review.classifier-redispatch` and `review.no-vote`.
 Use `mindspec rules show <id>` for conduct. Use `panel.verbs-only` for panel artifacts.
-`mindspec panel tally` writes the coverage manifest. PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES.
+`mindspec panel tally` writes the coverage manifest only when the panel passes. PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES.
 Resolve findings with fixes, `mindspec panel refute` or `mindspec panel defer`. Use `mindspec panel abandon` when work leaves the panel flow.

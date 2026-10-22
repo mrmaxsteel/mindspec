@@ -313,6 +313,7 @@ neither marker remain exempt. The check detects accidental desync, not forgery.
 
 **Verdict files.** Submit writes `<slot>-round-<N>.json` beside the registration.
 The first round is 1. `R1-round-1.json` is a valid filename.
+The filename `R1-round-0.json` (nonconforming — rejected) is refused.
 On v2 rounds, the gate checks the file hash against the latest submission.
 Reviewers must not write this destination by hand.
 

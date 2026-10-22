@@ -42,7 +42,7 @@ func retiredPanelClaimProblems(body string) []string {
 				problems = append(problems, line)
 			}
 		}
-		if regexp.MustCompile(`(?i)two model families|3 claude \+ 3 codex`).MatchString(line) {
+		if regexp.MustCompile(`(?i)two model families|second model famil|second family|3 claude \+ 3 codex`).MatchString(line) {
 			problems = append(problems, line)
 		}
 	}
@@ -69,7 +69,7 @@ func TestUserDocs_NoRetiredPanelClaims(t *testing.T) {
 					requirePanelDoc(t, body, "| `"+status+"` |")
 				}
 			}
-			for _, wrong := range []string{"panel.substitution enables quota fallback", "claude_sub_on_quota: true", "two model families", "3 Claude + 3 Codex"} {
+			for _, wrong := range []string{"panel.substitution enables quota fallback", "claude_sub_on_quota: true", "two model families", "3 Claude + 3 Codex", "Codex additionally serves as the second model family on review panels.", "SECOND MODEL FAMILY", "second family", "SECOND FAMILY"} {
 				if len(retiredPanelClaimProblems(body+"\n"+wrong)) == 0 {
 					t.Fatalf("scanner accepted %q", wrong)
 				}

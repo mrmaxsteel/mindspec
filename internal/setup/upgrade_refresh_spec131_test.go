@@ -8,8 +8,11 @@ import (
 	"testing"
 )
 
-// Pins are from git show v0.17.0:plugins/mindspec/skills/<name>/SKILL.md.
+// Pins are from v0.17.0: plugin SKILL.md files and the approval literals
+// in internal/setup/claude.go, rendered as installed SKILL.md files.
 var spec131SkillDigests = map[string]string{
+	"ms-spec-approve":      "0e88a01dace276e7b233c5bd70d427a064fc2af1dc10ab46719ba2b1d018d199",
+	"ms-plan-approve":      "6d74973b26753c5ea83008496bdbcbaad889e80dfcb978d3c326ac3d6579494c",
 	"ms-panel-run":         "f84762a328e4e3f9e2ec8dd75a14eb801a49ae4fda9abd44787457e99ca0d8ca",
 	"ms-panel-tally":       "7fdc52ed89d0ccffe093c1ef0e66b157cd32f9dacbeb65cf914d319056f1e0d4",
 	"ms-bead-fix":          "c525fd6b6d59d8a54d09b6405f75d899877604ce4426e06294abe2c1fd871b7b",

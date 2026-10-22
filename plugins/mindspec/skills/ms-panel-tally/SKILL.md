@@ -8,7 +8,7 @@ description: Read the panel decision, consolidate findings and report recovery a
 ## Steps
 
 1. Run `mindspec panel tally <panel-slug>` or read its output from the workflow.
-The binary resolves the current round and roster. It writes the coverage manifest.
+The binary resolves the current round and roster.
 PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES.
 `mindspec panel tally` writes the coverage manifest only when the panel passes.
 2. Consolidate `concrete_changes_required` by defect and criticality for `/ms-bead-fix`.

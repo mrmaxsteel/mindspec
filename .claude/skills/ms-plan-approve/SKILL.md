@@ -10,9 +10,8 @@ managed-by: mindspec
 2. Run a pre-approve review panel: invoke `/ms-panel-run` with
    `mindspec panel create <slug> --spec <id> --gate plan_approve --target <ref>`
    against the plan DOCUMENT (not a code diff), and do NOT run
-   `mindspec plan approve` until `/ms-panel-tally` returns Allow — see
-   `/ms-panel-run`'s document-gate lens defaults for the review lens
-   assignments. This step is guidance, not a mechanized
+   `mindspec plan approve` until `/ms-panel-tally` returns Allow.
+   The binary resolves the review lenses. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
 3. Run `mindspec plan approve <id>` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
