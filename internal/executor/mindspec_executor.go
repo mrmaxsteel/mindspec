@@ -576,7 +576,7 @@ func finalizeStepHook(stage string) error {
 
 // finalizeBeadWorktrees scopes both early preflight and finalization to the
 // same worktree candidates. An explicit empty allow-set admits no beads.
-func (g *MindspecExecutor) finalizeBeadWorktrees(epicID, specBranch string, lifecycleAllowSet []string) ([]bead.WorktreeListEntry, error) {
+func (g *MindspecExecutor) finalizeBeadWorktrees(epicID, specID, specBranch string, lifecycleAllowSet []string) ([]bead.WorktreeListEntry, error) {
 	entries, err := g.WorktreeOps.List()
 	if err != nil {
 		return nil, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %s", idrender.Bead(epicID), termsafe.Escape(err.Error()))
@@ -601,12 +601,12 @@ func (g *MindspecExecutor) finalizeBeadWorktrees(epicID, specBranch string, life
 		if allow[beadID] {
 			exists, err := gitutil.BranchExistsIn(g.Root, e.Branch)
 			if err != nil {
-				return nil, guard.NewFailure("cannot check bead branch: "+termsafe.Escape(err.Error()), "retry implementation approval")
+				return nil, guard.NewFailure("cannot check bead branch: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 			}
 			if exists {
 				candidates = append(candidates, e)
 			} else if err := g.verifyRemovedFinalizeBead(epicID, beadID, specBranch); err != nil {
-				return nil, guard.NewFailure("cannot use an absent bead branch without published landing evidence: "+termsafe.Escape(err.Error()), "restore the bead branch, then retry implementation approval")
+				return nil, guard.NewFailure("cannot use an absent bead branch without published landing evidence: "+termsafe.Escape(err.Error()), "restore the bead branch", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 			}
 		}
 	}
@@ -649,7 +649,7 @@ func (g *MindspecExecutor) PreflightFinalizeMerges(epicID, specID, specBranch st
 	if err := idvalidate.SpecID(specID); err != nil {
 		return err
 	}
-	entries, err := g.finalizeBeadWorktrees(epicID, specBranch, lifecycleAllowSet)
+	entries, err := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
 	if err != nil {
 		return err
 	}
@@ -797,7 +797,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// entirely unmerged with no signal. Abort with a named error instead
 	// (AC-14).
 	stage = "auto_merge"
-	entries, listErr := g.finalizeBeadWorktrees(epicID, specBranch, lifecycleAllowSet)
+	entries, listErr := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
 	if listErr != nil {
 		return result, listErr
 	}
@@ -806,7 +806,26 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// Auto-commit any remaining bead artifacts.
 		alreadyMerged, ancestorErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
 		if ancestorErr != nil {
-			return result, guard.NewFailure("cannot read bead branch ancestry: "+termsafe.Escape(ancestorErr.Error()), "retry implementation approval")
+			return result, guard.NewFailure("cannot read bead branch ancestry: "+termsafe.Escape(ancestorErr.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if e.Path != "" && alreadyMerged {
+			// Committed ancestry does not cover pending work. A retry skips
+			// merged beads, but must not let forced cleanup discard changes.
+			if _, statErr := os.Stat(e.Path); statErr == nil {
+				status, statusErr := gitutil.Status(e.Path)
+				if statusErr != nil {
+					return result, guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
+						fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+				}
+				if strings.TrimSpace(status) != "" {
+					return result, guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(e.Path)+":\n"+escapeLines(strings.TrimSpace(status)),
+						"preserve the pending changes in a follow-up branch, then leave this worktree clean",
+						fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+				}
+			} else if !os.IsNotExist(statErr) {
+				return result, guard.NewFailure("cannot inspect already merged worktree: "+termsafe.Escape(statErr.Error()),
+					fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+			}
 		}
 		if e.Path != "" && !alreadyMerged {
 			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil && isPreservedMergeError(err) {
@@ -1150,10 +1169,13 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				continue
 			}
 			landed, err := gitutil.IsAncestor(g.Root, e.Branch, publicationTip)
-			if err != nil || !landed {
-				return fmt.Errorf("cannot clean up branch %s: tip is not an ancestor of %s: %v", termsafe.Escape(e.Branch), publicationTip, err)
+			if err != nil {
+				return fmt.Errorf("cannot check cleanup ancestry for branch %s: %s", termsafe.Escape(e.Branch), termsafe.Escape(err.Error()))
 			}
-			if err := g.preflightMergeDestruction(e.Branch, publicationTip, "", "retry implementation approval"); err != nil {
+			if !landed {
+				return fmt.Errorf("cannot clean up branch %s: tip is not an ancestor of %s", termsafe.Escape(e.Branch), publicationTip)
+			}
+			if err := g.preflightMergeDestruction(e.Branch, publicationTip, "", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
 				return err
 			}
 			if err := g.WorktreeOps.Remove(e.Name); err != nil && !isAlreadyRemovedErr(err) {
@@ -1305,7 +1327,7 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 			if err := g.requireFinalizeAncestor(branch, target); err != nil {
 				return err
 			}
-			if err := g.preflightMergeDestruction(branch, target, "", "retry implementation approval"); err != nil {
+			if err := g.preflightMergeDestruction(branch, target, "", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
 				return err
 			}
 			for _, entry := range entries {

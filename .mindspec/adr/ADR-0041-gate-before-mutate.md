@@ -846,10 +846,15 @@ has no recovery line. A failed real pre-push hook follows this post-close rule.
 bead auto-merges, immediately before publication. Every run overwrites this key.
 The pre-finalize routing checkpoint stays separate. A retry uses one close,
 skips merged beads and a completed direct merge, and skips a push when the
-remote already has the same tip. It completes remaining cleanup. A protected-main
+remote already has the same tip. Before it skips a merged bead, it checks the
+remaining worktree. Pending changes or an unreadable status stop the run before
+cleanup. The branch and worktree remain for recovery. It completes remaining
+cleanup only after these checks pass. A protected-main
 retry uses the same carrier branch. When that remote head differs, it pushes with
 `--force-with-lease` on the SHA that `git ls-remote` reads just before the push.
-It opens no PR. This also applies after local spec-branch deletion.
+The executor opens no PR. The finalize-PR automation (§4) adopts an open PR
+for the same carrier head and base, so a retry never opens a second PR.
+This also applies after local spec-branch deletion.
 
 While the spec branch exists, approval runs every pre-close gate again on its
 current tip. A closed epic does not bypass a gate. After local branch deletion,

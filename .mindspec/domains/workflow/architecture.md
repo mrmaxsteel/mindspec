@@ -1473,3 +1473,7 @@ phase `done`, the final publication tip, and all lifecycle child bindings in the
 target history. The executor fetches remote evidence before checking ancestry.
 A failed check retains the branch-missing adopt recovery. A successful check
 returns the `already landed` message and completes safe cleanup.
+
+The executor checks a remaining bead worktree before it skips an already merged
+branch. Pending changes or an unreadable status stop finalization before cleanup.
+The worktree and branch remain for recovery.

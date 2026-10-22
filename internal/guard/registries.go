@@ -155,6 +155,15 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",
+		Rationale:  "The recovery substitutes idrender.Spec(specID). Both callers validate specID before this helper runs. The command repeats implementation approval and does not remove work.",
+		Obligation: "internal/executor TestFinalizeEpic_RefusalsHaveRunnableRecovery pins the branch-probe refusal and its runnable approval command."},
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg2:unprovable",
+		Rationale:  "The absent-branch refusal first asks for branch restoration, then substitutes idrender.Spec(specID) into the approval command. Both callers validate specID before this helper runs.",
+		Obligation: "internal/executor TestFinalizeEpic_RefusalsHaveRunnableRecovery pins the absent-branch refusal and its runnable approval command."},
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.FinalizeEpic", Detail: "arg2:unprovable",
+		Rationale:  "The dirty merged-worktree refusal asks for pending work to be preserved, then substitutes idrender.Spec(specID) into the approval command. FinalizeEpic validates specID before this refusal.",
+		Obligation: "internal/approve TestApproveImpl_RerunKeepsDirtyMergedBead pins the approval command and preservation of the dirty worktree on both publication paths."},
 	{File: "internal/approve/impl.go", Func: "implFinalizeFailure", Detail: "arg1:unprovable",
 		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
 		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},

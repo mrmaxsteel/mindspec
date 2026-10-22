@@ -51,7 +51,7 @@ func (w *rerunWorktrees) Remove(name string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", w.root, "worktree", "remove", path)
+	cmd := exec.Command("git", "-C", w.root, "worktree", "remove", "--force", path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return errors.New(string(out))
@@ -500,6 +500,46 @@ func TestApproveImpl_RerunReRunsGates(t *testing.T) {
 	}
 }
 
+func TestApproveImpl_RerunKeepsDirtyMergedBead(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "push"}[remote], func(t *testing.T) {
+			f := newRerunFixture(t, remote, false)
+			wt := filepath.Join(f.root, ".worktrees", "worktree-bead-1")
+			preflightGit(t, f.root, "worktree", "add", wt, "bead/bead-1")
+			f.worktrees.entries[0].Path = wt
+			t.Cleanup(executor.SetFinalizeStepHookForTest(func(stage string) error {
+				if stage == "auto_merge" {
+					return errors.New("stop after auto-merge")
+				}
+				return nil
+			}))
+			if _, err := f.approve(); err == nil || !strings.Contains(err.Error(), "stage auto_merge") {
+				t.Fatalf("expected auto-merge failure: %v", err)
+			}
+			preflightGit(t, f.root, "merge-base", "--is-ancestor", "bead/bead-1", "spec/010-test")
+			executor.SetFinalizeStepHookForTest(nil)
+			path := filepath.Join(wt, "feature.txt")
+			const correction = "pending correction\n"
+			if err := os.WriteFile(path, []byte(correction), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.approve()
+			if err == nil || !strings.Contains(err.Error(), "already merged worktree has pending changes") {
+				t.Errorf("retry must refuse dirty merged worktree: %v", err)
+			}
+			if err != nil && !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") {
+				t.Errorf("missing runnable recovery: %v", err)
+			}
+			if content, readErr := os.ReadFile(path); readErr != nil || string(content) != correction {
+				t.Fatalf("retry lost pending correction: content=%q error=%v", content, readErr)
+			}
+			if exists, _ := lifecycle.BranchExistsIn(f.root, "bead/bead-1"); !exists {
+				t.Fatal("refusal removed bead branch")
+			}
+		})
+	}
+}
+
 func TestApproveImpl_AfterDeletionAlreadyLanded(t *testing.T) {
 	for _, remote := range []bool{false, true} {
 		t.Run(map[bool]string{false: "direct", true: "push"}[remote], func(t *testing.T) {
@@ -589,6 +629,69 @@ func TestApproveImpl_ForgedFinalizeTipRefuses(t *testing.T) {
 				t.Fatal("forged tip removed bead branch")
 			}
 		})
+	}
+}
+
+func TestApproveImpl_UnlandedChildBindingRefusesAfterBeadDeletion(t *testing.T) {
+	for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent"} {
+		t.Run(key, func(t *testing.T) {
+			f := newRerunFixture(t, false, false)
+			landed := preflightGit(t, f.root, "rev-parse", "main")
+			unlanded := preflightGit(t, f.root, "rev-parse", "bead/bead-1")
+			f.setResumeEvidence(landed, landed)
+			if err := f.metadata("bead-1", map[string]interface{}{key: unlanded}); err != nil {
+				t.Fatal(err)
+			}
+			preflightGit(t, f.root, "worktree", "remove", f.specWT)
+			preflightGit(t, f.root, "branch", "-D", "spec/010-test", "bead/bead-1")
+			f.assertBranchMissingRefusal()
+		})
+	}
+}
+
+func TestApproveImpl_UnlandedFinalizeTipRefusesWithLandedBindings(t *testing.T) {
+	f := newRerunFixture(t, false, false)
+	// Every binding and the surviving bead branch are landed. Only the
+	// publication tip points outside main, so cleanup cannot cause the refusal.
+	preflightGit(t, f.root, "merge", "--no-ff", "-m", "land bead", "bead/bead-1")
+	landed := preflightGit(t, f.root, "rev-parse", "main")
+	preflightGit(t, f.specWT, "commit", "--allow-empty", "-m", "unpublished export")
+	unlanded := preflightGit(t, f.root, "rev-parse", "spec/010-test")
+	f.setResumeEvidence(unlanded, landed)
+	preflightGit(t, f.root, "worktree", "remove", f.specWT)
+	preflightGit(t, f.root, "branch", "-D", "spec/010-test")
+	f.assertBranchMissingRefusal()
+	if exists, _ := lifecycle.BranchExistsIn(f.root, "bead/bead-1"); !exists {
+		t.Fatal("unlanded publication tip removed bead branch")
+	}
+}
+
+func (f *rerunFixture) setResumeEvidence(tip, binding string) {
+	f.t.Helper()
+	records := f.read()
+	r := records["epic-parent"]
+	r.Status = "closed"
+	r.Metadata["mindspec_phase"] = "done"
+	r.Metadata["mindspec_finalize_tip"] = tip
+	records["epic-parent"] = r
+	r = records["bead-1"]
+	if r.Metadata == nil {
+		r.Metadata = map[string]interface{}{}
+	}
+	r.Metadata["mindspec_landed_merge_sha"] = binding
+	r.Metadata["mindspec_landed_second_parent"] = binding
+	records["bead-1"] = r
+	f.write(records)
+}
+
+func (f *rerunFixture) assertBranchMissingRefusal() {
+	f.t.Helper()
+	result, err := f.approve()
+	if err == nil || !strings.HasSuffix(err.Error(), implBranchMissingRefusal("010-test", "spec/010-test").Error()) {
+		f.t.Errorf("unlanded evidence must give branch-missing refusal: %v", err)
+	}
+	if result != nil && strings.Contains(strings.Join(result.Warnings, "\n"), "already landed") {
+		f.t.Error("unlanded evidence printed already landed")
 	}
 }
 

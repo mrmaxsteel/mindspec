@@ -2,6 +2,7 @@ package executor
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -59,6 +60,24 @@ func TestFinalizeEpic_FinalizeTipIsPublishedTip(t *testing.T) {
 				}
 			} else if !isAncestorIn(t, root, published, "main") {
 				t.Fatal("finalize tip did not reach main")
+			}
+
+			// The first run wrote the tip and stopped after publication. A
+			// new spec commit must replace that record on the next run.
+			specWT := filepath.Join(root, ".worktrees", "worktree-spec-077-test")
+			runGitIn(t, specWT, "commit", "--allow-empty", "-m", "spec advances between retries")
+			newTip := refHash(t, root, "spec/077-test")
+			if newTip == published {
+				t.Fatal("fixture did not move the spec tip")
+			}
+			if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", []string{"bead-1"}, "", false, remote); !errors.Is(err, stop) {
+				t.Fatalf("second finalize: %v", err)
+			}
+			if got := metadata["epic-1"]["mindspec_finalize_tip"]; got != newTip {
+				t.Fatalf("retry kept stale finalize tip: got %v, want %s", got, newTip)
+			}
+			if metadata["epic-1"]["mindspec_pre_finalize_tip"] != before {
+				t.Fatal("retry overwrote routing checkpoint")
 			}
 		})
 	}

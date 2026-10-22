@@ -419,7 +419,9 @@ probe gets a credential-helper hint. The real push still runs pre-push hooks.
 `FinalizeEpic` records `mindspec_finalize_tip` after export and bead auto-merges,
 immediately before publication. It keeps `mindspec_pre_finalize_tip` as a separate
 routing checkpoint. A retry at the recorded tip with a clean spec checkout skips
-the export commit. It does not create new artifacts on an already merged bead.
+the export commit. Before it skips an already merged bead, it checks any remaining
+worktree. Pending changes or an unreadable status stop the run before cleanup.
+The branch and worktree remain. It does not create new artifacts on that bead.
 It skips a push when the remote has the same tip and skips a completed direct
 merge. The carrier branch is reused. A changed carrier head uses a lease on the
 remote SHA read just before the push. No PR is opened by the executor.
