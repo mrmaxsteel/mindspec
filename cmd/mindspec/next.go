@@ -138,22 +138,16 @@ team lead spawns fresh agents per bead.`,
 			fmt.Fprintf(os.Stderr, "Note: you're in a bead worktree. Run `mindspec complete <bead-id>` when done.\n")
 		}
 
-		// Step 0c: Session freshness gate
-		if sess, readErr := state.ReadSession(root); readErr == nil && sess.SessionStartedAt != "" {
-			stale := false
-			reason := ""
-			if sess.SessionSource == "resume" || sess.SessionSource == "compact" {
-				stale = true
-				reason = "session was " + sess.SessionSource + " (not fresh)"
-			} else if sess.BeadClaimedAt != "" && sess.BeadClaimedAt >= sess.SessionStartedAt {
-				stale = true
-				reason = "a bead was already claimed in this session"
+		// Step 0c: Session freshness gate. A claim by explicit bead ID only
+		// warns: the caller chose the bead, and a gate that every such
+		// caller overrides with --force protects nothing.
+		if sess, readErr := state.ReadSession(root); readErr == nil {
+			warn, gateErr := sessionFreshnessGate(sess, force, len(args) > 0)
+			if gateErr != nil {
+				return gateErr
 			}
-			if stale {
-				if !force {
-					return fmt.Errorf("session freshness gate: %s.\nYou MUST run /clear to reset your context, then retry.\nDo NOT attempt workarounds — /clear is required.", reason)
-				}
-				fmt.Fprintf(os.Stderr, "warning: bypassing session freshness gate (%s)\n", reason)
+			if warn != "" {
+				fmt.Fprintln(os.Stderr, warn)
 			}
 		}
 
@@ -898,4 +892,29 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 		return fmt.Errorf("no ready plan bead for spec %s; blocking near-misses are named above", idrender.Spec(rs.SpecFlag))
 	}
 	return nil
+}
+
+// sessionFreshnessGate decides the session freshness gate. It returns a
+// warning line to print, or an error that stops the claim. A stale session
+// blocks an unselected claim unless force is set; a claim by explicit bead ID
+// gets a warning only.
+func sessionFreshnessGate(sess *state.Session, force, explicitID bool) (string, error) {
+	if sess == nil || sess.SessionStartedAt == "" {
+		return "", nil
+	}
+	reason := ""
+	if sess.SessionSource == "resume" || sess.SessionSource == "compact" {
+		reason = "session was " + sess.SessionSource + " (not fresh)"
+	} else if sess.BeadClaimedAt != "" && sess.BeadClaimedAt >= sess.SessionStartedAt {
+		reason = "a bead was already claimed in this session"
+	}
+	switch {
+	case reason == "":
+		return "", nil
+	case force:
+		return fmt.Sprintf("warning: bypassing session freshness gate (%s)", reason), nil
+	case explicitID:
+		return fmt.Sprintf("warning: session freshness gate (%s); claiming the named bead anyway", reason), nil
+	}
+	return "", fmt.Errorf("session freshness gate: %s.\nYou MUST run /clear to reset your context, then retry.\nDo NOT attempt workarounds — /clear is required.", reason)
 }
