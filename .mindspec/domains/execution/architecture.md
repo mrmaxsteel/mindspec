@@ -413,3 +413,24 @@ The push path runs `PushProbe` before the epic close. This probe skips hooks and
 disables terminal prompts. It uses the real push's remote and refspec. A missing
 credential helper alone does not refuse. Only a failed HTTP(S) authentication
 probe gets a credential-helper hint. The real push still runs pre-push hooks.
+
+## Final publication and stage resume
+
+`FinalizeEpic` records `mindspec_finalize_tip` after export and bead auto-merges,
+immediately before publication. It keeps `mindspec_pre_finalize_tip` as a separate
+routing checkpoint. A retry at the recorded tip with a clean spec checkout skips
+the export commit. It does not create new artifacts on an already merged bead.
+It skips a push when the remote has the same tip and skips a completed direct
+merge. The carrier branch is reused. A changed carrier head uses a lease on the
+remote SHA read just before the push. No PR is opened by the executor.
+
+`ResumeFinalizedEpic` handles a missing local spec branch. It checks the final tip
+and all lifecycle child binding SHAs against the target. Remote evidence comes
+from an exact head fetched into a temporary ref. A missing remote spec head
+selects remote main. A failed fetch or ancestry check stops cleanup. Cleanup
+repeats the destruction guard and requires branch-tip ancestry. It can finish
+when a prior run removed a worktree but left its branch.
+
+`FinalizeStageError` carries the failed stage without changing the inner error.
+`SetFinalizeStepHookForTest` lets approval tests inject faults into real executor
+runs. Tests use temporary git repos, fake tracker commands, and file remotes.

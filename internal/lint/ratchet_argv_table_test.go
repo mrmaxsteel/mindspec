@@ -7,6 +7,7 @@ package lint
 // non-id); caller-audited is the mechanical wrapper marker that
 // promotes a function's CALL SITES into this same table.
 var argvAuditTable = map[string]argvEntry{
+	"internal/gitutil/gitops.go FetchFinalizeTarget exec-git execCommand":      {Count: 2, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "The remote head rejects option-like values. The temporary ref is generated locally. Fetch and ref deletion carry refs, not IDs."},
 	"internal/gitutil/gitops.go DiffNameOnlyNoRenames exec-git execCommand":    {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Both revisions reject option-like values. The trailing separator keeps paths out of revision parsing. No ID operand is composed here."},
 	"internal/gitutil/gitops.go FirstParentCommitsAfter exec-git execCommand":  {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Both range endpoints reject option-like values. The range contains git revisions, not IDs."},
 	"internal/gitutil/gitops.go TreePathEntry exec-git execCommand":            {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "The revision rejects option-like values. The path follows the option separator. No ID operand reaches this argv."},

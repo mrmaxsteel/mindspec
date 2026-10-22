@@ -13,6 +13,50 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
 
+func TestFetchFinalizeTarget_ExactHeadAndRelease(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	root := initGitRepo(t)
+	remote := t.TempDir()
+	runGit(t, remote, "init", "--bare", "-b", "main")
+	runGit(t, root, "remote", "add", "origin", "file://"+remote)
+	runGit(t, root, "push", "origin", "HEAD:refs/heads/spec/010-test")
+	sha, release, err := FetchFinalizeTarget(root, "spec/010-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha != runGitOut(t, root, "rev-parse", "HEAD") {
+		t.Fatalf("fetched tip = %s", sha)
+	}
+	refs := runGitOut(t, root, "for-each-ref", "--format=%(refname)", "refs/mindspec/finalize/")
+	if !strings.HasPrefix(refs, "refs/mindspec/finalize/") {
+		t.Fatalf("temporary ref missing: %q", refs)
+	}
+	release()
+	if refs := runGitOut(t, root, "for-each-ref", "--format=%(refname)", "refs/mindspec/finalize/"); refs != "" {
+		t.Fatalf("temporary ref survived: %q", refs)
+	}
+}
+
+func TestFetchFinalizeTarget_RefusesBadOperandAndFetchFailure(t *testing.T) {
+	calls := swapExec(t, "fetch failed", 1)
+	if _, _, err := FetchFinalizeTarget("/repo", "--upload-pack=x"); err == nil || len(*calls) != 0 {
+		t.Fatalf("bad operand reached git: %v", err)
+	}
+	root := t.TempDir()
+	if _, release, err := FetchFinalizeTarget(root, "spec/010-test"); err == nil || release != nil {
+		t.Fatalf("fetch failure accepted: %v", err)
+	}
+	call := (*calls)[0]
+	if call.cmd.Dir != root || !strings.Contains(strings.Join(call.cmd.Env, "\n"), "GIT_TERMINAL_PROMPT=0") {
+		t.Fatal("fetch lost workdir or prompt control")
+	}
+	if len(call.args) != 4 || call.args[0] != "fetch" || call.args[1] != "--no-tags" || call.args[2] != "origin" || !strings.HasPrefix(call.args[3], "refs/heads/spec/010-test:refs/mindspec/finalize/") {
+		t.Fatalf("fetch argv: %q", call.args)
+	}
+
+}
+
 func TestDiffNameOnlyNoRenames_RenameListsBothPaths(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")

@@ -362,3 +362,18 @@ enumeration):
   evolved-but-present content identifies while true reverts refuse, and
   the new `mindspec reattest <bead-id>` verb is the explicit audited
   recovery (troubleshooting entry above).
+
+## Resume implementation approval
+
+Read the state line after an approval failure. It shows the current epic status
+and the failed stage. Follow the final recovery commands in order. Resolve a
+merge when the recovery command includes `--resolve-merge`. A bare failure gives
+`mindspec impl approve <spec>` as its recovery command.
+
+Re-run approval after the fault is fixed. It checks all pre-close gates again
+while the spec branch exists. New source changes must include their domain docs.
+After local branch deletion, `already landed` means the final publication tip and
+all lifecycle child bindings are ancestors of the target. A push path reads the
+remote spec branch, or remote main if the host deleted the spec branch. A fetch
+failure or missing ancestry retains the adopt recovery. A host squash or rebase
+merge needs that recovery too. A retry does not recreate a deleted remote head.

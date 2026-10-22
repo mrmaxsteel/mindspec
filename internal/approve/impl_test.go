@@ -309,7 +309,7 @@ func TestApproveImpl_WrongSpec(t *testing.T) {
 	}
 }
 
-func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
+func TestApproveImpl_EpicCloseFailureRefuses(t *testing.T) {
 	tmp := t.TempDir()
 	writeSpecDir(t, tmp, "010-test")
 	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
@@ -318,8 +318,11 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 	saveAndRestore(t)
 
 	implRunBDFn = func(args ...string) ([]byte, error) {
-		payload := []map[string]string{{"status": "closed"}}
-		return json.Marshal(payload)
+		status := "closed"
+		if len(args) >= 2 && args[1] == "epic-parent" {
+			status = "open"
+		}
+		return json.Marshal([]map[string]string{{"status": status}})
 	}
 
 	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
@@ -334,21 +337,12 @@ func TestApproveImpl_EpicCloseFailureWarns(t *testing.T) {
 		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
 	}
 
-	result, err := ApproveImpl(tmp, "010-test", mock)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := ApproveImpl(tmp, "010-test", mock)
+	if err == nil || !strings.Contains(err.Error(), "epic still open; finalize stage close") || !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") {
+		t.Fatalf("expected close failure with actual state and recovery: %v", err)
 	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("expected warning for failed epic close")
-	}
-	foundEpicWarning := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "epic-parent") {
-			foundEpicWarning = true
-		}
-	}
-	if !foundEpicWarning {
-		t.Errorf("expected warning to mention epic: %v", result.Warnings)
+	if len(mock.CallsTo("FinalizeEpic")) != 0 {
+		t.Fatal("close failure must stop finalization")
 	}
 }
 

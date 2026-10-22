@@ -109,6 +109,12 @@ type Executor interface {
 	// not probe again: true pushes the spec branch, false merges locally.
 	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error)
 
+	// ResumeFinalizedEpic verifies publication evidence after local spec-branch
+	// deletion. The caller requires a closed epic and a stored done phase.
+	// Every lifecycle child's binding and the finalize tip must be ancestors
+	// of the fetched target. Cleanup repeats the destruction guard.
+	ResumeFinalizedEpic(epicID, specID string, lifecycleChildren []string, hasRemote bool) (FinalizeResult, error)
+
 	// Cleanup removes stale workspaces and branches for a spec.
 	// If force is true, skips lifecycle state checks.
 	Cleanup(specID string, force bool) error
@@ -339,6 +345,15 @@ type FinalizeResult struct {
 	// merge/FF until then. Always empty on the no-remote "direct" path.
 	FinalizeBranch string
 }
+
+// FinalizeStageError identifies the durable stage that failed.
+type FinalizeStageError struct {
+	Stage string
+	Err   error
+}
+
+func (e *FinalizeStageError) Error() string { return e.Err.Error() }
+func (e *FinalizeStageError) Unwrap() error { return e.Err }
 
 // LandedReviewSetter optionally supplies the first Allow panel's reviewed identity
 // for the next CompleteBead binding write (Spec 130 R12).

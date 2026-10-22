@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl.go", Func: "implFinalizeFailure", Detail: "arg1:unprovable",
+		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
+		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},
 	{File: "internal/lifecycle/merge_state.go", Func: "RestoreMergeRecovery", Detail: "variadic-spread:commands",
 		Rationale:  "Restore guidance uses escaped, shell-quoted operands. A clean spec checkout permits the path restore only through the destructive command constructor. Other outcomes retain whole-commit revert guidance.",
 		Obligation: "internal/lifecycle TestMergeState_RestoreCheckoutFromConstructor pins the constructor and rendered restore. TestMergeState_RestoreOmitsCheckoutOnUserChanges pins the omitted choice for unsafe or unreadable checkouts."},

@@ -303,3 +303,29 @@ query to the workflow layer. `gitutil.HasRemote` retains its bool-only contract
 for its other callers. `lifecycle.HasRemote` has no production caller left.
 Approval makes one decision and passes it to `FinalizeEpic`:
 true selects push; false selects local merge. Finalization does not probe again.
+
+## Finalize resume interfaces
+
+- `FinalizeStageError{Stage, Err}` preserves the inner error and identifies the
+  failed stage. `Unwrap` keeps error matching available.
+- `SetFinalizeStepHookForTest(fn)` installs a stage fault hook and returns its
+  restore function. Tests must restore it. The production hook is nil.
+- `ResumeFinalizedEpic(epicID, specID, lifecycleChildren, hasRemote)` requires a
+  closed epic and stored `done` phase at the workflow boundary. It checks the
+  final publication tip and every lifecycle child's landed binding against the
+  target. It returns an error before cleanup when evidence is absent or unreadable.
+- `FetchFinalizeTarget(workdir, branch)` fetches an exact origin head into a unique
+  temporary ref. It returns the commit SHA and a release function. The caller
+  holds the ref through the ancestry checks and then releases it.
+
+`mindspec_finalize_tip` records the spec tip after export and all auto-merges.
+Every finalize run overwrites it before publication. `mindspec_pre_finalize_tip`
+keeps the routing checkpoint. `mindspec_finalize_branch` records use of the
+protected-main carrier so a retry can finish that carrier after local spec-branch
+deletion. The carrier reuses its local branch and skips an unchanged remote tip.
+A changed tip uses a lease pinned to the remote head read just before the push.
+
+`RemoteHeadSHA`, `PushBranch`, and `DeleteBranch` accept an optional working
+directory. Resume reads, pushes, and branch removals use the explicit repo root.
+A stale worktree row for an absent bead branch requires the recorded publication
+tip and that bead's binding in the spec history before finalization can continue.

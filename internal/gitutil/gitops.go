@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -395,11 +396,14 @@ func AbortMerge(workdir string) error {
 }
 
 // DeleteBranch deletes a local branch.
-func DeleteBranch(name string) error {
+func DeleteBranch(name string, workdirs ...string) error {
 	if err := rejectOptionLike(name); err != nil {
 		return err
 	}
 	cmd := execCommand("git", "branch", "-D", "--", name)
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("deleting branch %s: %s", name, strings.TrimSpace(string(out)))
@@ -550,6 +554,33 @@ func FetchRemoteBranchIn(workdir, remote, branch string) (string, error) {
 	return sha, nil
 }
 
+// FetchFinalizeTarget fetches one exact remote head into a temporary ref.
+// The caller owns the ref until release runs. It never reads a tracking ref.
+func FetchFinalizeTarget(workdir, branch string) (sha string, release func(), err error) {
+	if err := rejectOptionLike(branch); err != nil {
+		return "", nil, err
+	}
+	// A unique ref prevents concurrent runs from replacing this evidence.
+	ref := fmt.Sprintf("refs/mindspec/finalize/%d-%d", os.Getpid(), time.Now().UnixNano())
+	cmd := noPrompt(execCommand("git", "fetch", "--no-tags", "origin", "refs/heads/"+branch+":"+ref))
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", nil, fmt.Errorf("fetching finalize target: %s", termsafe.Escape(strings.TrimSpace(string(out))))
+	}
+	release = func() {
+		cmd := execCommand("git", "update-ref", "-d", ref)
+		cmd.Dir = workdir
+		_ = cmd.Run()
+	}
+	sha, err = RevParseRef(workdir, ref+"^{commit}")
+	if err != nil {
+		release()
+		return "", nil, err
+	}
+	return sha, release, nil
+}
+
 // DetectDefaultBranch returns the default branch name of remote (e.g. "main",
 // "develop") WITHOUT hardcoding (Spec 101 R4). It tries the cheap cached
 // `git symbolic-ref refs/remotes/<remote>/HEAD` first; if that output is empty
@@ -593,11 +624,14 @@ func DetectDefaultBranch(remote string) (string, error) {
 }
 
 // PushBranch pushes a branch to origin.
-func PushBranch(branch string) error {
+func PushBranch(branch string, workdirs ...string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
 	}
 	cmd := noPrompt(execCommand("git", "push", "-u", "origin", branch))
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pushing %s: %s", branch, strings.TrimSpace(string(out)))
@@ -659,7 +693,7 @@ func PushProbe(workdir, branch string) error {
 // Every returned line is scanned and ONLY the one whose refname column is
 // EXACTLY "refs/heads/<branch>" is accepted; a decoy-only result yields ""
 // (absent), never the decoy's SHA.
-func RemoteHeadSHA(remote, branch string) (string, error) {
+func RemoteHeadSHA(remote, branch string, workdirs ...string) (string, error) {
 	if err := rejectOptionLike(remote); err != nil {
 		return "", err
 	}
@@ -667,6 +701,9 @@ func RemoteHeadSHA(remote, branch string) (string, error) {
 		return "", err
 	}
 	cmd := noPrompt(execCommand("git", "ls-remote", "--heads", remote, branch))
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("ls-remote %s %s: %w", remote, branch, err)
