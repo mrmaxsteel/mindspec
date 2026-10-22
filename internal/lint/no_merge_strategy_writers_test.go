@@ -76,6 +76,25 @@ func scanMergeStrategyWriters(root string) ([]string, error) {
 				continue
 			}
 			ast.Inspect(decl, func(node ast.Node) bool {
+				checkMapKey := func(expr ast.Expr) {
+					lit, ok := expr.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						return
+					}
+					if value, err := strconv.Unquote(lit.Value); err == nil && value == "merge_strategy" {
+						findings = append(findings, fmt.Sprintf("%s:%d", rel, fset.Position(lit.Pos()).Line))
+					}
+				}
+				switch node := node.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range node.Lhs {
+						if index, ok := lhs.(*ast.IndexExpr); ok {
+							checkMapKey(index.Index)
+						}
+					}
+				case *ast.KeyValueExpr:
+					checkMapKey(node.Key)
+				}
 				lit, ok := node.(*ast.BasicLit)
 				if !ok || lit.Kind != token.STRING {
 					return true
@@ -108,6 +127,7 @@ func TestNoMergeStrategyWriters_PlantedWriterFails(t *testing.T) {
 	// A permitted legacy test does not exempt another writer in the same file.
 	files := map[string]string{
 		"internal/config/config_test.go":        "package config\nfunc TestConfigLoad_LegacyMergeStrategyIgnored() { _ = \"merge_strategy: pr\\n\" }\nconst ordinaryConfig = \"merge_strategy: direct\\n\"\n",
+		"internal/example/map.go":               "package example\nfunc writeConfig() {\n cfg := map[string]any{\"merge_strategy\": \"pr\"}\n cfg[\"merge_strategy\"] = \"direct\"\n _ = cfg[\"merge_strategy\"]\n}\n",
 		"internal/example/testdata/config.yaml": "merge_strategy: pr\n",
 		".mindspec/config.yaml":                 "merge_strategy: auto\n",
 	}
@@ -124,8 +144,14 @@ func TestNoMergeStrategyWriters_PlantedWriterFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{".mindspec/config.yaml:1", "internal/config/config_test.go:3", "internal/example/testdata/config.yaml:1"}
+	want := []string{
+		".mindspec/config.yaml:1",
+		"internal/config/config_test.go:3",
+		"internal/example/map.go:3",
+		"internal/example/map.go:4",
+		"internal/example/testdata/config.yaml:1",
+	}
 	if !reflect.DeepEqual(findings, want) {
-		t.Fatalf("want three planted writers %v, got %v", want, findings)
+		t.Fatalf("want planted writers %v, got %v", want, findings)
 	}
 }

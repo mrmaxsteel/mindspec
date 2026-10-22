@@ -10,8 +10,16 @@ import (
 )
 
 func TestHarnessSandbox_NoMergeStrategy(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSandboxConfig(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var cfg map[string]any
-	if err := yaml.Unmarshal([]byte(sandboxConfig), &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := cfg["merge_strategy"]; ok {

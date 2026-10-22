@@ -23,6 +23,10 @@ enforcement:
   agent_hooks: false
 `
 
+func writeSandboxConfig(mindspecDir string) error {
+	return os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(sandboxConfig), 0o644)
+}
+
 // Sandbox is an isolated git repository with recording shims installed,
 // ready for running agent sessions or deterministic lifecycle tests.
 type Sandbox struct {
@@ -67,7 +71,7 @@ func NewSandbox(t *testing.T) *Sandbox {
 
 	// Write sandbox-specific config (overrides any bootstrap defaults).
 	mindspecDir := filepath.Join(root, ".mindspec")
-	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(sandboxConfig), 0o644); err != nil {
+	if err := writeSandboxConfig(mindspecDir); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
 
