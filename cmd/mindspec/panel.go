@@ -236,6 +236,14 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
 			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },
 		}
+		if err := panel.CheckCreate(dir, in); err != nil {
+			return panelCreateFailure(err, slug, in)
+		}
+		releaseCheckouts, err := cleanupPriorRound(root, dir, round)
+		if err != nil {
+			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
+		}
+		defer releaseCheckouts()
 		if err := panel.Create(dir, in); err != nil {
 			return panelCreateFailure(err, slug, in)
 		}
@@ -475,7 +483,12 @@ func panelDirFor(root, specID, slug, gate string) (dir, specDir string, err erro
 // panelSlugMatches collects every registration, preserving ambiguity.
 func panelSlugMatches(root, slug string) []panel.Registration {
 	var matches []panel.Registration
-	for _, reg := range panel.Scan(configShowReviewRoots(root)...) {
+	isolation, _ := config.IsolationRootFor(root)
+	var skip []string
+	if isolation != "" {
+		skip = []string{filepath.Join(root, isolation)}
+	}
+	for _, reg := range panel.ScanSkipping(skip, configShowReviewRoots(root)...) {
 		if reg.Slug() == slug {
 			matches = append(matches, reg)
 		}

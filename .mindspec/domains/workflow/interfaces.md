@@ -398,6 +398,37 @@ Disposition validate, check and query accept these record kinds.
 The CLI helper `findPanelRoot` returns the verified slot's main root or falls back to `findRoot` when no slot is found.
 `landedBindingFor` checks the exact panel-round metadata value. It returns false for an empty bead identity and propagates read errors.
 
+### Panel Checkout (`cmd/mindspec/panel_checkout.go`)
+
+`mindspec panel checkout <slug> --slot S` creates or reuses a reviewer clone at the reviewed SHA.
+`--all` selects every roster slot. `--spec` selects the owning spec when a slug is ambiguous.
+`panel.NewSlotLayout` places each slot at `<main_root>/<isolation_root>/<spec-or-adhoc>/<slug>/r<N>/<slot>/`.
+`slot.json` records the spec, slug, round, slot and main root. `tree/` holds the clone.
+Locks use `<isolation_root>/.locks/<spec-or-adhoc>/<slug>/r<N>/<slot>.lock`.
+The layout accepts one trailing slash on the isolation root and refuses unsafe path components.
+`--fixer` creates only the fixer scratch directory, without metadata or a tree.
+Plain checkout writes no ledger record, including after a final submission.
+
+Checkout refuses paths outside the main root, symlink components, and an isolation root that is not ignored.
+It refuses abandoned panels, registration edits without ledger records, slots outside the roster, and changed rounds or reviewed SHAs while it waits for a lock.
+It refuses mismatched slot metadata and clones that fail `CheckSlotTree`.
+Refusals include a `recovery:` line. Root ignore failures name `mindspec init`.
+Metadata or clone failures name `mindspec panel checkout <slug> --prune --slot S`.
+`--dispatch` requires `--slot` and a harness runner. Process slots name `mindspec panel launch` for recovery.
+It refuses a final non-VOID submission without `--replace` and refuses a landed round.
+It reserves `attempt-<k>/`, marks earlier open dispatched attempts `launch_failed`, and appends a `dispatched` event.
+It checks the round and ledger again under the ledger lock before it appends.
+
+`--prune` removes slot scratch, including dirty files. `--slot` limits removal to that slot across rounds.
+Cleanup takes all affected slot locks in sorted order before the ledger lock and retains the slot locks through the caller's writes.
+A held slot lock prevents removal and names `panel verify` plus the lock paths. Unix lock files remain.
+`panel create --round N` removes scratch for earlier rounds before it writes the new round.
+`panel abandon` removes scratch for all rounds before it records abandonment.
+Panel registration lookup excludes the isolation root through `panel.ScanSkipping`.
+Doctor's ownership walk and moved-tree link walk skip the configured isolation root and return isolation config errors.
+The source Markdown and canonical-doc walks in `migrate` also skip that root.
+Before config exists, these migration walks use the default isolation root.
+
 ### Panel BRIEF Regions
 
 `mindspec panel create` renders managed acceptance, quoted criteria, conduct and verdict-contract regions.

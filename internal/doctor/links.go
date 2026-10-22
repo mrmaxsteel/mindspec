@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/config"
 )
 
 // DanglingLink describes a markdown link whose local target does not resolve
@@ -93,6 +95,10 @@ func repoRootMarkdown(root string) ([]string, error) {
 // mailto, protocol-relative), pure `#anchor` targets, and empty targets are
 // not filesystem-resolvable and are skipped.
 func CheckMovedTreeLinks(root string) ([]DanglingLink, error) {
+	isolation, err := config.IsolationRootFor(root)
+	if err != nil {
+		return nil, err
+	}
 	var files []string
 	for _, rel := range movedTreeRoots {
 		abs := filepath.Join(root, rel)
@@ -106,6 +112,9 @@ func CheckMovedTreeLinks(root string) ([]DanglingLink, error) {
 				return walkErr
 			}
 			if d.IsDir() {
+				if filepath.Clean(path) == filepath.Join(root, isolation) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if strings.EqualFold(filepath.Ext(d.Name()), ".md") {
