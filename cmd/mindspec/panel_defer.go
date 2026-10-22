@@ -59,7 +59,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	check := func() error {
 		texts := []string{f.Text}
 		if f.ID == "slot" {
-			v, err := panel.ReadFindingVerdict(reg.Dir, slot, round)
+			v, err := panel.ReadSubmittedFindingVerdict(reg.Dir, slot, round)
 			if err != nil {
 				return err
 			}

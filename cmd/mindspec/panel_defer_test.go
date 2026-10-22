@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
 
 // fakeDeferralBD is mutable between the write and the lifecycle re-check.
@@ -102,7 +103,7 @@ func TestPanelDefer_SharedRefusals(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := panel.Create(dir, panel.CreateInput{Spec: res.Panel.Spec, Gate: res.Panel.Gate, Target: res.Panel.Target, Round: 2, ReviewedHeadSHA: res.Panel.ReviewedHeadSHA, SubjectDigest: res.Panel.SubjectDigest, Roster: res.Panel.Roster, ExpectedReviewers: 2}); err != nil {
+				if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: res.Panel.Spec, Gate: res.Panel.Gate, Target: res.Panel.Target, Round: 2, ReviewedHeadSHA: res.Panel.ReviewedHeadSHA, SubjectDigest: res.Panel.SubjectDigest, Roster: res.Panel.Roster, ExpectedReviewers: 2}); err != nil {
 					t.Fatal(err)
 				}
 				for _, slot := range []string{"R1", "R2"} {
@@ -268,7 +269,7 @@ func TestLedger_RecordKinds(t *testing.T) {
 	t.Run("adhoc", func(t *testing.T) {
 		root := setupCreateIntegrity(t)
 		dir := filepath.Join(root, "review", "adhoc")
-		if err := panel.Create(dir, panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", ExpectedReviewers: 2, Roster: []panel.RosterSlot{{Slot: "R1", Model: "model", Lens: "correctness"}, {Slot: "R2", Model: "model", Lens: "tests"}}}); err != nil {
+		if err := paneltest.CreateV1(dir, panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", ExpectedReviewers: 2, Roster: []panel.RosterSlot{{Slot: "R1", Model: "model", Lens: "correctness"}, {Slot: "R2", Model: "model", Lens: "tests"}}}); err != nil {
 			t.Fatal(err)
 		}
 		lines, err := panel.ReadLedger(dir)

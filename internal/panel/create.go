@@ -66,6 +66,8 @@ type CreateInput struct {
 	Roster               []RosterSlot
 	// ReviewersOverride replaces the previous roster when --reviewers was supplied.
 	ReviewersOverride bool
+	// HasRunner validates a family carried from a round without family fields.
+	HasRunner func(string) bool
 	// ReportDropped receives each unbacked entry after the snapshot is written.
 	ReportDropped func(string)
 }
@@ -286,18 +288,37 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		}
 	}
 	roster := in.Roster
+	carrying := false
 	if !in.ReviewersOverride {
 		if latest != nil {
 			roster = latest.Roster
+			carrying = true
 		} else if legacy && len(old.Roster) > 0 {
 			roster = old.Roster
+			carrying = true
 		}
 	}
 	if len(roster) < 2 {
 		return nil, fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
 	}
+	roster = append([]RosterSlot(nil), roster...)
+	for i := range roster {
+		if roster[i].Family == "" {
+			if carrying {
+				if in.HasRunner == nil || !in.HasRunner(roster[i].Model) {
+					return nil, submitRefusal(fmt.Sprintf("cannot carry slot %s without a matching runner", roster[i].Slot), fmt.Sprintf("mindspec panel create %s --round %d --reviewers %d", filepath.Base(dir), in.Round, len(in.Roster)))
+				}
+				roster[i].Family = roster[i].Model
+			} else {
+				roster[i].Family = "harness"
+			}
+		}
+		if !modelSafe(roster[i].Model) {
+			return nil, submitRefusal("invalid slot model", "set a non-empty model without whitespace, control bytes or a leading dash")
+		}
+	}
 	gate := in.Gate
-	p := Panel{BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
+	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
 		ExpectedReviewers: len(roster), Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
 		Refutations: carried.Refutations, Deferrals: carried.Deferrals, Rebinds: carried.Rebinds,
@@ -314,7 +335,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	if spec == "" {
 		spec = "adhoc"
 	}
-	event := RoundRecord{Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
+	event := RoundRecord{VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
 		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
 		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
 		Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}

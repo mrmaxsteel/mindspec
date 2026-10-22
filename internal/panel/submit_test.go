@@ -125,6 +125,59 @@ func TestPanelSubmit_Writes(t *testing.T) {
 		t.Fatalf("missing outcome: %+v", events)
 	}
 }
+
+func TestPanelSubmit_AdHocLedger(t *testing.T) {
+	target, data, resolve := submitFixture(t)
+	dir := filepath.Join(t.TempDir(), "adhoc")
+	p := load(target.Dir).Panel
+	in := CreateInput{Target: p.Target, Gate: "adhoc", Round: 1, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Roster: p.Roster}
+	if err := Create(dir, in); err != nil {
+		t.Fatal(err)
+	}
+	target.Dir, target.Spec, target.Panel = dir, "", "adhoc"
+	record, err := Submit(target, data, resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Spec != "adhoc" || load(dir).Panel.Spec != "" {
+		t.Fatalf("ad hoc identity changed: record=%+v panel=%+v", record, load(dir).Panel)
+	}
+	lines, err := ReadLedger(dir)
+	if err != nil || len(lines) != 2 {
+		t.Fatalf("ledger records: %d %v", len(lines), err)
+	}
+	if err := Validate(lines[1]); err != nil {
+		t.Fatalf("invalid submission: %v", err)
+	}
+	assertStoredBytes(t, target, data)
+}
+
+func TestPanelSubmit_HardBlockRecord(t *testing.T) {
+	target, data, resolve := submitFixture(t)
+	var verdict VerdictV2
+	if err := json.Unmarshal(data, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	verdict.HardBlock = true
+	data, err := json.Marshal(verdict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Submit(target, data, resolve); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ReadLedger(target.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(lines[len(lines)-1], &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["hard_block"] != true {
+		t.Fatalf("submission lost hard_block: %s", lines[len(lines)-1])
+	}
+}
 func TestPanelSubmit_Replace(t *testing.T) {
 	target, a, resolve := submitFixture(t)
 	if _, err := Submit(target, a, resolve); err != nil {

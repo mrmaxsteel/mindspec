@@ -195,7 +195,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 		if same {
 			selected = previous
 		} else {
-			selected = SubmissionRecord{Record: RecordVerdict, Spec: p.Spec, Panel: filepath.Base(target.Dir), Slot: target.Slot, Round: target.Round, Seq: previous.Seq + 1, Status: v.Status, Verdict: v.Verdict, Family: effective.Family, Model: effective.Model, RunnerKind: effective.RunnerKind, RunnerSource: effective.RunnerSource, Via: via, Attempt: attempt, Reason: target.Reason, FileSHA256: hash, CreatedAt: now}
+			selected = SubmissionRecord{Record: RecordVerdict, Spec: RecordSpec(p), Panel: filepath.Base(target.Dir), Slot: target.Slot, Round: target.Round, Seq: previous.Seq + 1, Status: v.Status, Verdict: v.Verdict, Family: effective.Family, Model: effective.Model, RunnerKind: effective.RunnerKind, RunnerSource: effective.RunnerSource, Via: via, Attempt: attempt, Reason: target.Reason, FileSHA256: hash, CreatedAt: now, HardBlock: v.HardBlock}
 			raw, err := json.Marshal(selected)
 			if err != nil {
 				return err

@@ -21,6 +21,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/spf13/cobra"
 )
 
 // --- shared fixture helpers -------------------------------------------------
@@ -986,6 +987,15 @@ func stubNonBeadRevParse(t *testing.T, fn func(root, ref string) (string, error)
 // runPanelVerbCmd runs `mindspec panel <args...>` against rootCmd and
 // returns combined stdout+stderr and the error.
 func runPanelVerbCmd(args ...string) (string, error) {
+	for _, command := range []*cobra.Command{panelSubmitCmd, panelVerifyCmd} {
+		for _, name := range []string{"file", "slot", "round", "spec", "json"} {
+			if f := command.Flags().Lookup(name); f != nil {
+				_ = f.Value.Set(f.DefValue)
+				f.Changed = false
+			}
+		}
+	}
+
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)

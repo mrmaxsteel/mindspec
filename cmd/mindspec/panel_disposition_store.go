@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"io"
 	"os"
 	"path/filepath"
@@ -194,7 +195,7 @@ naming every failing panel + slot, otherwise.`,
 // directory via the same layout-aware workspace.SpecDir logic every
 // other panel subcommand uses (panelDirFor, panel.go).
 func resolveDispositionSpecDir(specID string) (string, error) {
-	root, err := findRoot()
+	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return "", err
 	}

@@ -107,7 +107,7 @@ func newCheckoutFixture(t *testing.T, isolation string) slotFixture {
 	slotWrite(t, filepath.Join(root, ".mindspec", "config.yaml"), "panel: {isolation_root: "+isolation+"}\n")
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
-	p := panel.Panel{Spec: "adhoc", Target: "main", Round: 1, ExpectedReviewers: 4, ReviewedHeadSHA: slotTestGit(t, root, "rev-parse", "HEAD"), SubjectDigest: "sha256:fixture", Gate: "adhoc", Telemetry: "required"}
+	p := panel.Panel{VerdictSchema: 2, Spec: "adhoc", Target: "main", Round: 1, ExpectedReviewers: 4, ReviewedHeadSHA: slotTestGit(t, root, "rev-parse", "HEAD"), SubjectDigest: "sha256:fixture", Gate: "adhoc", Telemetry: "required"}
 	for i := 1; i <= 4; i++ {
 		p.Roster = append(p.Roster, panel.RosterSlot{Slot: fmt.Sprintf("R%d", i), Family: "harness", Model: "m", Lens: "adversarial"})
 	}
@@ -678,6 +678,37 @@ func TestPanelCreate_RoundConflictKeepsDirtyCheckout(t *testing.T) {
 	}
 	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
 		t.Fatal("round conflict changed panel bytes")
+	}
+}
+
+func TestPanelCreate_CarryRefusalKeepsDirtyCheckout(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	f.p.Round = 2
+	f.p.Roster[0].Family = ""
+	f.p.Roster[0].Model = "missing-runner"
+	if err := panel.WriteSnapshot(f.dir, f.p); err != nil {
+		t.Fatal(err)
+	}
+	paneltest.Fixture{Dir: f.dir, Panel: f.p}.Round(t, 2)
+	checkoutOK(t, "--slot", "R1")
+	layout := f.layout(t, "R1")
+	slotWrite(t, filepath.Join(layout.Tree, "README.md"), "dirty tracked file\n")
+	slotWrite(t, filepath.Join(layout.Tree, "untracked", "notes.txt"), "keep these notes\n")
+	before := slotSnapshot(t, layout.Dir)
+	beforePanel := slotSnapshot(t, f.dir)
+	resetPanelCreateFlags(t)
+	out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "3")
+	if err == nil || !strings.Contains(err.Error(), "cannot carry slot R1 without a matching runner") {
+		t.Fatalf("carry refusal: %v %s", err, out)
+	}
+	if _, err := os.Stat(layout.Dir); err != nil {
+		t.Fatalf("carry refusal removed dirty slot directory: %v", err)
+	}
+	if after := slotSnapshot(t, layout.Dir); !reflect.DeepEqual(before, after) {
+		t.Fatal("carry refusal changed dirty slot bytes")
+	}
+	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
+		t.Fatal("carry refusal changed panel bytes")
 	}
 }
 

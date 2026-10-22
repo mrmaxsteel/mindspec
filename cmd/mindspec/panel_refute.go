@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"net/url"
 	"os"
 	"os/exec"
@@ -32,7 +33,7 @@ func resolvePanelVerb(cmd *cobra.Command, slug string) (string, panel.Registrati
 	if err := validatePanelSlug(slug); err != nil {
 		return "", panel.Registration{}, err
 	}
-	root, err := findRoot()
+	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return "", panel.Registration{}, err
 	}
@@ -68,10 +69,7 @@ func panelVerbSnapshot(dir string) (*panel.Result, error) {
 }
 
 func panelRecordSpec(p panel.Panel) string {
-	if p.Spec == "" {
-		return "adhoc"
-	}
-	return p.Spec
+	return panel.RecordSpec(p)
 }
 
 // panelEvidenceResolves accepts an HTTPS reference, an existing path inside
@@ -118,7 +116,7 @@ func panelAcceptanceExists(root, spec, ac string) bool {
 }
 
 func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error) {
-	v, err := panel.ReadFindingVerdict(dir, slot, round)
+	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
 	if err != nil {
 		return panel.Finding{}, err
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,7 +120,17 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 						t.Fatalf("create did not record digest: %+v", reg.Panel)
 					}
 					for i := 1; i <= reg.Panel.ExpectedReviewers; i++ {
-						subjectCLIWrite(t, reg.Dir, fmt.Sprintf("R%d-round-1.json", i), `{"verdict":"APPROVE"}`)
+						slot := reg.Panel.Roster[i-1]
+						verdict := panel.VerdictV2{Schema: 2, Slot: slot.Slot, Round: 1, ReviewedSHA: reg.Panel.ReviewedHeadSHA, Status: "final", Verdict: "APPROVE", Model: slot.Model, Rationale: "reviewed", ConcreteChangesRequired: []panel.ChangeRequired{}, CommandsRun: []panel.CommandRun{}}
+						raw, err := json.Marshal(verdict)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := panel.Submit(panel.SubmitTarget{Dir: reg.Dir, Slot: slot.Slot, Round: 1}, raw, func(_ panel.Panel, s panel.RosterSlot) (panel.SubmitResolution, error) {
+							return panel.SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "harness", RunnerSource: "default"}, nil
+						}); err != nil {
+							t.Fatal(err)
+						}
 					}
 					file := ""
 					wantStale := change != "archive"

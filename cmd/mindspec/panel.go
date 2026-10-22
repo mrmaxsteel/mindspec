@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -181,7 +182,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return guard.NewFailure(err.Error(), recovery)
 		}
 
-		root, err := findRoot()
+		root, err := findPanelRoot(config.IsolationRootFor)
 		if err != nil {
 			return err
 		}
@@ -223,7 +224,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		}
 		roster := make([]panel.RosterSlot, len(slots))
 		for i, slot := range slots {
-			roster[i] = panel.RosterSlot{Slot: slot.Slot, Model: slot.Model, Lens: slot.Lens}
+			roster[i] = panel.RosterSlot{Slot: slot.Slot, Family: slot.Family, Model: slot.Model, Lens: slot.Lens}
 		}
 		regions, err := resolvePanelBriefRegions(root, specDir, specID, sha, rosterGate, cfg)
 		if err != nil {
@@ -232,7 +233,8 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		in := panel.CreateInput{
 			BriefRegions: regions,
 			BeadID:       beadPtr, Spec: specID, Target: target, Round: round,
-			Roster: roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
+			HasRunner: func(family string) bool { _, ok := cfg.RunnerFor(family); return ok },
+			Roster:    roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
 			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
 			ReportDropped: func(message string) { fmt.Fprintln(cmd.OutOrStdout(), message) },
 		}
@@ -276,15 +278,15 @@ expected_reviewers, per-slot parse status (malformed files named),
 reviewed_head_sha vs the live target tip, and a PASS/BLOCK preview
 computed by the gate decision function — the
 SAME decision ` + "`mindspec complete`" + `'s gate enforces, never a second
-implementation. It writes no file and always exits 0 (a read-only report
-is not itself a gate).`,
+implementation. It writes no file. Exit codes are 0 when every slot is
+final, 1 while a slot is pending, and 2 for other incomplete states.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
 		if err := validatePanelSlug(slug); err != nil {
 			return err
 		}
-		root, err := findRoot()
+		root, err := findPanelRoot(config.IsolationRootFor)
 		if err != nil {
 			return err
 		}
@@ -293,10 +295,33 @@ is not itself a gate).`,
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
 		facts := resolvePanelGateFacts(root, reg)
 		line, _ := renderPanelVerify(facts.Res, facts)
-		fmt.Fprintln(cmd.OutOrStdout(), line)
+		slots, err := panelSlotStatuses(root, facts.Res)
+		if err != nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
+			fmt.Fprintln(cmd.OutOrStdout(), line)
+			return exitErr(2, err)
+		}
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(slots); err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
+			for _, slot := range slots {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s family=%s model=%s lens=%s kind=%s", termsafe.Escape(slot.Slot), slot.Status, termsafe.Escape(slot.Family), termsafe.Escape(slot.Model), termsafe.Escape(slot.Lens), termsafe.Escape(slot.Kind))
+				for _, annotation := range slot.Annotations {
+					fmt.Fprintf(cmd.OutOrStdout(), "; %s", termsafe.Escape(annotation))
+				}
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), line)
+		}
+		if code := panel.VerifyExitCode(slots); code != 0 {
+			return exitErr(code, fmt.Errorf("panel has incomplete slots"))
+		}
 		return nil
 	},
 }
@@ -318,7 +343,7 @@ and prints a recovery line.`,
 		if err := validatePanelSlug(slug); err != nil {
 			return err
 		}
-		root, err := findRoot()
+		root, err := findPanelRoot(config.IsolationRootFor)
 		if err != nil {
 			return err
 		}
@@ -332,6 +357,12 @@ and prints a recovery line.`,
 		changes := collectSlotChanges(reg, facts.Res)
 		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
 			return panelCoverageWriteFailure(reg, err)
+		}
+		slots, err := panelSlotStatuses(root, facts.Res)
+		if err == nil {
+			for _, annotation := range panel.ReplacementAnnotations(slots) {
+				fmt.Fprintln(cmd.OutOrStdout(), termsafe.Escape(annotation))
+			}
 		}
 		body, d := renderPanelTally(facts.Res, facts, changes)
 		fmt.Fprintln(cmd.OutOrStdout(), body)
@@ -372,6 +403,7 @@ and prints a recovery line.`,
 }
 
 func init() {
+	panelVerifyCmd.Flags().Bool("json", false, "Print the slot roster and statuses as JSON")
 	panelVerifyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelTallyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelCreateCmd.Flags().String("spec", "", "Owning spec ID")
@@ -851,6 +883,18 @@ func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges
 			continue
 		}
 		var items []string
+		if res.VerdictSchema == 2 {
+			v2, err := panel.ParseVerdictV2(data)
+			if err != nil {
+				sc.DecodeErr = err.Error()
+			} else {
+				for _, item := range v2.ConcreteChangesRequired {
+					sc.Changes = append(sc.Changes, item.Text)
+				}
+			}
+			out = append(out, sc)
+			continue
+		}
 		if err := json.Unmarshal(parsed.ConcreteChangesRequired, &items); err != nil {
 			sc.DecodeErr = fmt.Sprintf("%s's concrete_changes_required is not an array of strings", v.File)
 			out = append(out, sc)
@@ -1222,4 +1266,54 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target, gate string, gitErr
 func panelCoverageWriteFailure(reg panel.Registration, err error) error {
 	return guard.NewFailure("could not record panel coverage: "+termsafe.Escape(err.Error()),
 		fmt.Sprintf("mindspec panel tally %s%s", shellQuoteTarget(reg.Slug()), panelCreateScope(reg.Panel.Spec, reg.Panel.Gate)))
+}
+
+// panelSlotStatuses supplies config and non-blocking lock probes to the leaf.
+func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, error) {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || res.Panel == nil {
+		return nil, fmt.Errorf("panel registration unreadable")
+	}
+	p := *res.Panel
+	attempts, err := panel.SlotAttempts(res.Dir, p.Round)
+	if err != nil {
+		return nil, err
+	}
+	runtime := map[string]panel.SlotRuntime{}
+	for _, slot := range p.Roster {
+		resolved, err := resolveEffectivePanelSlot(cfg, res.Dir, p, slot)
+		if err != nil {
+			return nil, err
+		}
+		runner, _ := cfg.RunnerFor(resolved.Family)
+		originalFamily := slot.Family
+		if originalFamily == "" {
+			originalFamily = "harness"
+		}
+		original, _ := cfg.RunnerFor(originalFamily)
+		layout, err := panel.NewSlotLayout(root, cfg.Panel.IsolationRoot, p.Spec, filepath.Base(res.Dir), p.Round, slot.Slot)
+		if err != nil {
+			return nil, err
+		}
+		held, err := panel.ProbeSlotLock(layout.Lock)
+		if err != nil {
+			return nil, err
+		}
+		rt := panel.SlotRuntime{Family: resolved.Family, Model: resolved.Model, Kind: resolved.RunnerKind, TimeoutMinutes: runner.TimeoutMinutes, OriginalKind: original.Kind, SlotLockHeld: held, RunLockHeld: map[int]bool{}}
+		for _, event := range attempts[slot.Slot] {
+			if event.Status != "started" {
+				continue
+			}
+			held, err := panel.ProbeSlotLock(filepath.Join(layout.AttemptDir(event.Attempt), "run.lock"))
+			if err != nil {
+				return nil, err
+			}
+			rt.RunLockHeld[event.Attempt] = held
+		}
+		runtime[slot.Slot] = rt
+	}
+	return panel.ReadSlotStatuses(res, runtime, time.Now())
 }
