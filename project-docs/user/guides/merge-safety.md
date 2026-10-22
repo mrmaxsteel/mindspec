@@ -195,6 +195,7 @@ of a leftover checkout on retry. The check first confirms that the path is a
 registered worktree of this repository. An unregistered directory stays in place.
 Move that directory to a safe path, then retry approval.
 
+Status reads disable rename and copy detection before artifact checks.
 Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
 are exempt in this temporary checkout. Other pending changes or a status or stat
 read error stop removal. A registration read error also stops removal. The pending
@@ -255,7 +256,9 @@ and retains its branch and worktree. After verification, run
 `mindspec complete <bead-id>` until it exits 0. The closing call publishes
 the tracker export and panel ledger before it removes the workspace.
 After publication and its hooks, it reads bead user changes again before removal.
-Tool artifacts stay exempt. New user changes or a status or stat read error stop
+Tool artifacts stay exempt.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read error stop
 cleanup. The pending file, worktree, and branch remain. Preserve the changes at a
 safe path. Leave the worktree clean and readable, then run the printed completion
 command again.

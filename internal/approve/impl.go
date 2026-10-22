@@ -1196,7 +1196,8 @@ func implLedgerPreflight(root, specID string, exec executor.Executor) error {
 	if err != nil {
 		return guard.NewFailure("could not verify panel ledgers are committed: "+termsafe.Escape(err.Error()), complete.LedgerCommitRecovery(wt, paths))
 	}
-	// Decode porcelain quoted paths and rename destinations. A collapsed untracked parent also contains dirt.
+	// Status lists rename endpoints separately. Decode quoted paths.
+	// A collapsed untracked parent also contains dirt.
 	for _, line := range strings.Split(status, "\n") {
 		dirty, err := panel.PorcelainPath(line)
 		if err != nil {

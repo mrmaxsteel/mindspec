@@ -24,8 +24,9 @@ import (
 // when an artifact path is dirty.
 //
 // statusPorcelainFn (newline `--porcelain`) backs CheckDirtyTree/
-// CheckDirtyTreeDetail only — unchanged. statusPorcelainZFn (`-z`,
-// round-1 panel G3/G6) backs CheckDirtyTreeProportional only. Both share
+// CheckDirtyTreeDetail only, with rename detection disabled.
+// statusPorcelainZFn (`-z`, round-1 panel G3/G6) backs
+// CheckDirtyTreeProportional only. Both share
 // exportBeadsFn for the artifact-normalization retry.
 var (
 	statusPorcelainFn  = defaultStatusPorcelain
@@ -273,10 +274,9 @@ func resolveContainingDirs(p string) string {
 }
 
 func defaultStatusPorcelain(cwd string) (string, error) {
-	// Use StatusWithStderr (CombinedOutput-based) so stderr is preserved on
-	// failure — a missing `-C` target or corrupt index otherwise exits with
-	// an opaque *ExitError whose message the caller cannot surface.
-	out, err := gitutil.StatusWithStderr(cwd)
+	// List source changes separately so an artifact destination cannot hide
+	// user dirt. Preserve stderr on failure.
+	out, err := gitutil.StatusNoRenamesWithStderr(cwd)
 	if err != nil {
 		return "", fmt.Errorf("checking working tree: %w", err)
 	}
@@ -286,7 +286,7 @@ func defaultStatusPorcelain(cwd string) (string, error) {
 // defaultStatusPorcelainZ is statusPorcelainZFn's default implementation
 // — the NUL-terminated `-z` form CheckDirtyTreeProportional parses
 // (round-1 panel G3/G6). CheckDirtyTree/CheckDirtyTreeDetail keep using
-// the newline form above unchanged.
+// the newline form above with rename detection disabled.
 func defaultStatusPorcelainZ(cwd string) (string, error) {
 	out, err := gitutil.StatusZWithStderr(cwd)
 	if err != nil {
@@ -342,8 +342,8 @@ func isArtifactPath(p string, specsDir ...string) bool {
 // (v1) output.
 //
 // Each non-empty line is "XY <path>" where XY is a 2-char status field.
-// Rename/copy entries are "XY orig -> new"; the new path is what matters for
-// classification. Git C-style quoted paths are decoded before classification,
+// The production reader disables rename/copy detection so each changed
+// endpoint has its own line. Git C-style quoted paths are decoded,
 // including non-ASCII bytes escaped by core.quotePath.
 func parsePorcelain(out string) []string {
 	var paths []string
@@ -360,7 +360,7 @@ func parsePorcelain(out string) []string {
 // per ADR-0025.
 //
 // Flow:
-//  1. Snapshot `git status --porcelain` at cwd.
+//  1. Snapshot `git status --porcelain --no-renames` at cwd.
 //  2. If any artifact path is dirty, run `bd export` from repoRoot to
 //     normalize the JSONL against stale throttled exports, then re-snapshot.
 //  3. Return the user-authored dirt that remains. Callers treat a non-empty

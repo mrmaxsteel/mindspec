@@ -1504,7 +1504,7 @@ func checkTemporaryFinalizeWorktree(root, wtPath, specID string) error {
 		return guard.NewFailure("temporary finalization path is not a registered worktree of this repository: "+termsafe.Escape(wtPath),
 			"move the directory to a safe path, then retry approval", retry)
 	}
-	status, err := gitutil.StatusWithStderr(wtPath)
+	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
 	if err != nil {
 		return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(err.Error()), retry)
 	}
@@ -1533,7 +1533,7 @@ func checkBeadCleanupWorktree(wtPath, beadID string) error {
 	} else if err != nil {
 		return guard.NewFailure("cannot inspect bead worktree: "+termsafe.Escape(err.Error()), retry)
 	}
-	status, err := gitutil.StatusWithStderr(wtPath)
+	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
 	if err != nil {
 		return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(err.Error()), retry)
 	}
@@ -1972,11 +1972,11 @@ func (g *MindspecExecutor) LsTree(workdir, rev string) (string, error) {
 	return gitutil.LsTree(workdir, rev)
 }
 
-// Status returns `git status --porcelain` for workdir. Thin pass-through to
-// gitutil.Status — the panel gate's worktree dirty-check seam routed through
-// the executor (ADR-0030).
+// Status lists each changed path separately for artifact-aware callers.
+// Disabling rename/copy detection keeps source changes visible to the panel
+// gate and ledger preflight without changing their path decoder.
 func (g *MindspecExecutor) Status(workdir string) (string, error) {
-	return gitutil.Status(workdir)
+	return gitutil.StatusNoRenamesWithStderr(workdir)
 }
 
 // CheckIgnore delegates the ledger preflight to gitutil.

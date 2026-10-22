@@ -898,6 +898,7 @@ Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.
 
 The closing call reads bead user changes again after publication and before
 removal. The executor repeats this check at removal. Tool artifacts stay exempt.
+Status reads disable rename and copy detection.
 New user changes or a status or stat read error refuse with a completion retry
 command. The pending file, worktree, and branch remain.
 
@@ -924,6 +925,7 @@ of a leftover checkout on retry. The check first confirms that the path is a
 registered worktree of this repository. An unregistered directory stays in place.
 Move that directory to a safe path, then retry approval.
 
+Status reads disable rename and copy detection before artifact checks.
 Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
 are exempt in this temporary checkout. Other pending changes or a status or stat
 read error stop removal. A registration read error also stops removal. The pending

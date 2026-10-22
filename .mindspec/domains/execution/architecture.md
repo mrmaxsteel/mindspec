@@ -454,6 +454,7 @@ of a leftover checkout on retry. The check first confirms that the path is a
 registered worktree of this repository. An unregistered directory stays in place.
 Move that directory to a safe path, then retry approval.
 
+Status reads disable rename and copy detection before artifact checks.
 Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
 are exempt in this temporary checkout. Other pending changes or a status or stat
 read error stop removal. A registration read error also stops removal. The pending

@@ -882,6 +882,7 @@ of a leftover checkout on retry. The check first confirms that the path is a
 registered worktree of this repository. An unregistered directory stays in place.
 Move that directory to a safe path, then retry approval.
 
+Status reads disable rename and copy detection before artifact checks.
 Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
 are exempt in this temporary checkout. Other pending changes or a status or stat
 read error stop removal. A registration read error also stops removal. The pending
@@ -952,8 +953,9 @@ It then closes, writes the binding and reviewed identity, records overrides,
 publishes the close with a path-scoped export and ledger commit in the spec worktree,
 clears the stage and merge-only markers, and reads bead user changes again
 immediately before removal. The executor repeats this check at removal, including
-the older combined commit and merge path. Tool artifacts stay exempt. New user
-changes or a status or stat read error refuse with a completion retry command.
+the older combined commit and merge path. Tool artifacts stay exempt.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read error refuse with a completion retry command.
 The pending file, worktree, and branch remain.
 A failed step keeps the later steps pending. Retry recovery repeats any
 doc-skew or ADR override flag and its reason.

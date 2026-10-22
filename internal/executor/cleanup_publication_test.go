@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func installCleanupHook(t *testing.T, root, kind, pending string) string {
@@ -423,4 +425,215 @@ func TestCleanupBead_ReadFailurePreservesWork(t *testing.T) {
 			t.Logf("failure=%s removal_calls=%v error=%v", failure, fake.removeCalls, err)
 		})
 	}
+}
+
+func requireCleanupRenameGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+}
+
+// installCleanupRenameHook changes a tracked source after the publication
+// command has committed it. git mv stages the rename while the new bytes stay
+// in the worktree. The captured status proves rename detection is active.
+func installCleanupRenameHook(t *testing.T, root, wt, kind, source string) (string, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "rename-hook-fired")
+	destination := ".mindspec/specs/077-test/reviews/cleanup/dispositions.jsonl"
+	t.Setenv("RENAME_HOOK_WORKTREE", wt)
+	t.Setenv("RENAME_HOOK_SOURCE", source)
+	t.Setenv("RENAME_HOOK_DESTINATION", destination)
+	t.Setenv("RENAME_HOOK_MARKER", marker)
+	hook := `#!/bin/sh
+set -eu
+if [ ! -f "$RENAME_HOOK_MARKER" ]; then
+ cd "$RENAME_HOOK_WORKTREE"
+ unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX
+ printf '\nhook-only user edit\n' >> "$RENAME_HOOK_SOURCE"
+ mkdir -p "$(dirname "$RENAME_HOOK_DESTINATION")"
+ git mv -- "$RENAME_HOOK_SOURCE" "$RENAME_HOOK_DESTINATION"
+ git status --porcelain > "$RENAME_HOOK_MARKER"
+fi
+`
+	if err := os.WriteFile(filepath.Join(root, ".git/hooks", kind), []byte(hook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return marker, filepath.Join(wt, destination)
+}
+
+func assertCleanupRenameHook(t *testing.T, marker, pending, source string) {
+	t.Helper()
+	status, err := os.ReadFile(marker)
+	if err != nil || !strings.Contains(string(status), "R") || !strings.Contains(string(status), source+" -> ") {
+		t.Fatalf("hook must fire and stage a detected rename: %q %v", status, err)
+	}
+	if data, err := os.ReadFile(pending); err != nil || !strings.HasSuffix(string(data), "\nhook-only user edit\n") {
+		t.Errorf("hook-written user content lost: %q %v", data, err)
+	}
+	t.Logf("hook_fired=true detected_status=%q", status)
+}
+
+// Resolve the rename without a commit: retain the edited bytes at a safe path,
+// put the committed source back, and undo only this test's index changes.
+func resolveCleanupRename(t *testing.T, wt, pending, source string) string {
+	t.Helper()
+	saved := filepath.Join(t.TempDir(), "saved-user-edit")
+	if err := os.Rename(pending, saved); err != nil {
+		t.Fatal(err)
+	}
+	original, err := exec.Command("git", "-C", wt, "show", "HEAD:"+source).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, source), original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, wt, "add", "-A", "--", source, filepath.ToSlash(strings.TrimPrefix(pending, wt+string(os.PathSeparator))))
+	return saved
+}
+
+func TestFinalizeOrphanedSpecBranch_PrePushRenamePreservesWorkAndRetry(t *testing.T) {
+	requireCleanupRenameGit(t)
+	g, _, root := newRepoExecutor(t)
+	stubBeadExport(t)
+	origin := setupOrphanOrigin(t, root, true)
+	wt := filepath.Join(root, ".worktrees/worktree-finalize-077-test")
+	marker, pending := installCleanupRenameHook(t, root, wt, "pre-push", "a.txt")
+	// Record the actual forced-removal subprocess, independently of whether
+	// its target still exists when the command returns.
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	removals := filepath.Join(bin, "removals")
+	t.Setenv("RENAME_REAL_GIT", realGit)
+	t.Setenv("RENAME_REMOVALS", removals)
+	shim := `#!/bin/sh
+if [ "$3" = worktree ] && [ "$4" = remove ]; then
+ printf 'removal attempted\n' >> "$RENAME_REMOVALS"
+fi
+exec "$RENAME_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err = g.finalizeOrphanedSpecBranch(config.DefaultConfig(), "epic-1", "077-test")
+	assertCleanupRenameHook(t, marker, pending, "a.txt")
+	if data, readErr := os.ReadFile(removals); !os.IsNotExist(readErr) {
+		t.Errorf("forced removal ran before resolution: %q %v", data, readErr)
+	}
+	assertTemporaryFinalizeRecovery(t, err, wt)
+	if _, statErr := os.Stat(wt); statErr != nil {
+		t.Errorf("forced removal ran: %v", statErr)
+	}
+	if !branchExistsIn(t, root, "chore/finalize-077-test") || !branchExistsIn(t, origin, "chore/finalize-077-test") {
+		t.Error("publication must succeed and retain the local carrier")
+	}
+	t.Logf("cleanup_error=%v", err)
+	if t.Failed() {
+		return
+	}
+	_, err = g.finalizeOrphanedSpecBranch(config.DefaultConfig(), "epic-1", "077-test")
+	assertTemporaryFinalizeRecovery(t, err, wt)
+	assertCleanupRenameHook(t, marker, pending, "a.txt")
+	if data, readErr := os.ReadFile(removals); !os.IsNotExist(readErr) {
+		t.Fatalf("leftover retry attempted forced removal: %q %v", data, readErr)
+	}
+	saved := resolveCleanupRename(t, wt, pending, "a.txt")
+	if _, err := g.finalizeOrphanedSpecBranch(config.DefaultConfig(), "epic-1", "077-test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("resolved retry left worktree: %v", err)
+	}
+	if data, err := os.ReadFile(saved); err != nil || !strings.HasSuffix(string(data), "\nhook-only user edit\n") {
+		t.Fatalf("saved edit lost: %q %v", data, err)
+	}
+	if data, err := os.ReadFile(removals); err != nil || !strings.Contains(string(data), "removal attempted") {
+		t.Fatalf("removal recorder did not fire on resolved retry: %q %v", data, err)
+	}
+	t.Log("removal_before_resolution=false retry_converged=true saved_edit_preserved=true")
+}
+
+func TestCleanupBead_PostCommitRenamePreservesWorkAndRetry(t *testing.T) {
+	requireCleanupRenameGit(t)
+	g, fake, root := finalizePreflightFixture(t)
+	fake.listEntries = fake.listEntries[:1]
+	wt := fake.listEntries[0].Path
+	specWT := filepath.Join(root, ".worktrees/worktree-spec-077-test")
+	runGitIn(t, specWT, "merge", "--no-ff", "-m", "Merge bead/bead-1", "bead/bead-1")
+	marker, pending := installCleanupRenameHook(t, root, wt, "post-commit", "feature.txt")
+	// PublishBeadClose makes a real path-scoped commit and runs post-commit.
+	if err := g.PublishBeadClose(specWT, []string{".beads/issues.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	fake.onRemove = func(string) { runGitIn(t, root, "worktree", "remove", "--force", wt) }
+	err := g.CleanupBead("bead-1", "spec/077-test")
+	assertCleanupRenameHook(t, marker, pending, "feature.txt")
+	if err == nil || !strings.Contains(err.Error(), "uncommitted user changes") || !strings.Contains(err.Error(), "recovery: mindspec complete bead-1") {
+		t.Errorf("want cleanup refusal with existing recovery: %v", err)
+	}
+	if len(fake.removeCalls) != 0 || !branchExistsIn(t, root, "bead/bead-1") {
+		t.Errorf("cleanup removed user work: %v", fake.removeCalls)
+	}
+	t.Logf("removal_calls=%v cleanup_error=%v", fake.removeCalls, err)
+	if t.Failed() {
+		return
+	}
+	saved := resolveCleanupRename(t, wt, pending, "feature.txt")
+	if err := g.CleanupBead("bead-1", "spec/077-test"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.removeCalls) != 1 || branchExistsIn(t, root, "bead/bead-1") {
+		t.Fatalf("retry did not converge: %v", fake.removeCalls)
+	}
+	if data, err := os.ReadFile(saved); err != nil || !strings.HasSuffix(string(data), "\nhook-only user edit\n") {
+		t.Fatalf("saved edit lost: %q %v", data, err)
+	}
+	t.Log("retry_converged=true saved_edit_preserved=true")
+}
+
+// Status is the shared input for completion's panel facts and approval's
+// ledger preflight. Both decode paths with panel.PorcelainPath.
+func TestMindspecExecutor_StatusKeepsRenameSource(t *testing.T) {
+	requireCleanupRenameGit(t)
+	g, _, root := newRepoExecutor(t)
+	if err := os.WriteFile(filepath.Join(root, "owned.txt"), []byte("owned content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, root, "add", "owned.txt")
+	runGitIn(t, root, "commit", "-m", "tracked source")
+	destination := ".mindspec/specs/077-test/reviews/cleanup/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, destination)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, root, "mv", "--", "owned.txt", destination)
+	status, err := g.Status(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userPaths []string
+	for _, line := range strings.Split(status, "\n") {
+		p, err := panel.PorcelainPath(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(root)) {
+			userPaths = append(userPaths, p)
+		}
+	}
+	if len(userPaths) != 1 || userPaths[0] != "owned.txt" {
+		t.Fatalf("shared status hid rename source from artifact classifier: paths=%v status=%q", userPaths, status)
+	}
+	t.Logf("user_paths=%v status=%q", userPaths, status)
 }

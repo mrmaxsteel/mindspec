@@ -202,7 +202,7 @@ type Executor interface {
 	// staleness rev-parse, keeping internal/complete off gitutil (ADR-0030).
 	RevParseRef(workdir, ref string) (string, error)
 
-	// Status returns `git status --porcelain` for workdir (the worktree
+	// Status returns `git status --porcelain --no-renames` for workdir (the worktree
 	// dirty-check seam for the panel gate). Empty output means a clean tree.
 	Status(workdir string) (string, error)
 

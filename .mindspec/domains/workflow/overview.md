@@ -49,6 +49,9 @@ Mode system is implemented. Beads is the single state store (ADR-0023) — no fi
 - **`mindspec next`** classifies dirty paths. If the only dirty path is `.beads/issues.jsonl`, the guard runs `bd export` from the main repo root to normalize the diff against stale throttled exports, then re-checks. User-authored dirt still blocks — the guard's purpose is to protect user code, not to enforce hygiene on derived files (`internal/next/guard.go`, citing ADR-0025).
 - **Executor commits** (`approve spec`, `approve plan`, `approve impl`, `complete`) refresh the JSONL via `bd export` before `git add -A`, so every mindspec-driven commit carries current beads state. In projects without a Dolt remote, this makes `git push` the off-machine durability guarantee.
 
+Completion dirt checks disable rename and copy detection. An artifact
+destination cannot hide a changed source.
+
 Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.
 
 ## Cleanup notes

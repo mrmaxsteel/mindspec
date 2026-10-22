@@ -151,3 +151,56 @@ func TestComplete_CloseCleanupReadFailurePreservesWorkAndRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestComplete_MergedBeadSourceRenameRefusesBeforeClose(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatal(err)
+	}
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	remover := &closingRemovalRecorder{windowWorktrees: windowWorktrees{f}}
+	f.ex.WorktreeOps = remover
+	destination := ".mindspec/specs/" + closingSpec + "/reviews/cleanup/dispositions.jsonl"
+	writeFile(t, f.beadWT, "feature.txt", "feature\nuser edit\n")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(f.beadWT, destination)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, f.beadWT, "mv", "--", "feature.txt", destination)
+	status, err := exec.Command("git", "-C", f.beadWT, "status", "--porcelain").Output()
+	if err != nil || !strings.Contains(string(status), "feature.txt -> "+destination) {
+		t.Fatalf("fixture must contain a detected rename: %q %v", status, err)
+	}
+	// This seam is used both before the close and after publication.
+	if err := checkMergedBeadUserChanges(f.root, closingBead, f.beadWT, CompleteOpts{}); err == nil {
+		t.Error("merged-bead classifier hid a non-artifact rename source")
+	}
+	result, err := f.run(CompleteOpts{})
+	if err == nil || !strings.Contains(err.Error(), "feature.txt") || !strings.Contains(err.Error(), "recovery:") {
+		t.Errorf("want dirty-worktree refusal: result=%+v error=%v", result, err)
+	}
+	if f.closed || f.closeCalls != 0 || remover.calls != 0 {
+		t.Errorf("dirty rename reached mutation: closed=%v closes=%d removals=%d", f.closed, f.closeCalls, remover.calls)
+	}
+	pending := filepath.Join(f.beadWT, destination)
+	if data, err := os.ReadFile(pending); err != nil || string(data) != "feature\nuser edit\n" {
+		t.Errorf("rename edit lost: %q %v", data, err)
+	}
+	t.Logf("detected_status=%q close_calls=%d removal_calls=%d error=%v", status, f.closeCalls, remover.calls, err)
+	if t.Failed() {
+		return
+	}
+	saved := filepath.Join(t.TempDir(), "saved-user-edit")
+	if err := os.Rename(pending, saved); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, f.beadWT, "feature.txt", "feature\n")
+	gitRun(t, f.beadWT, "add", "-A", "--", "feature.txt", destination)
+	result, err = f.run(CompleteOpts{})
+	if err != nil || result == nil || !result.WorktreeRemoved || remover.calls != 1 || f.closeCalls != 1 {
+		t.Fatalf("resolved retry did not converge: %+v %v closes=%d removals=%d", result, err, f.closeCalls, remover.calls)
+	}
+	if data, err := os.ReadFile(saved); err != nil || string(data) != "feature\nuser edit\n" {
+		t.Fatalf("saved edit lost: %q %v", data, err)
+	}
+	t.Log("retry_converged=true saved_edit_preserved=true")
+}

@@ -363,6 +363,7 @@ of a leftover checkout on retry. The check first confirms that the path is a
 registered worktree of this repository. An unregistered directory stays in place.
 Move that directory to a safe path, then retry approval.
 
+Status reads disable rename and copy detection before artifact checks.
 Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
 are exempt in this temporary checkout. Other pending changes or a status or stat
 read error stop removal. A registration read error also stops removal. The pending
@@ -399,7 +400,9 @@ The workflow layer selects the naming merge and decides whether to close.
 only the paths it is given. The caller includes the export path.
 `CleanupBead` checks ancestry and reads bead user changes immediately before
 forced removal. `CompleteBead` uses the same check after its commits and merge
-hooks. Tool artifacts stay exempt. New user changes or a status or stat read
+hooks. Tool artifacts stay exempt.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read
 error refuse with a completion retry command. A worktree list read error also
 refuses before the executor can remove a checkout by name. The pending file, worktree, and
 branch remain. A removal error also refuses. A retry finishes the remaining work. `MockExecutor` exposes the

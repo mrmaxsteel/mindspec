@@ -1692,6 +1692,21 @@ func StatusWithStderr(workdir string) (string, error) {
 	return string(out), nil
 }
 
+// StatusNoRenamesWithStderr lists each pending path separately. Disabling
+// rename and copy detection exposes source changes before artifact exemptions.
+// Untracked files are listed individually. Successful status bytes come only
+// from stdout; stderr is included in errors.
+func StatusNoRenamesWithStderr(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "--no-renames", "--untracked-files=all")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("status --porcelain --no-renames: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 // StatusZWithStderr runs `git status --porcelain -z` and returns stdout
 // on success, with stderr folded into the error on failure. The
 // NUL-terminated `-z` form is unambiguous where the newline form is not:
