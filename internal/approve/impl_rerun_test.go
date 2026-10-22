@@ -131,6 +131,8 @@ func newRerunFixture(t *testing.T, remote, orphan bool) *rerunFixture {
 path = os.environ['FINALIZE_TEST_DB']
 with open(path) as f: records = json.load(f)
 args = sys.argv[1:]
+if args[0] == 'export' and os.getcwd() == os.environ.get('FINALIZE_FAIL_EXPORT_DIR'):
+    sys.exit('injected tracker export failure')
 if args[0] == 'show':
     print(json.dumps([records[args[1]]]))
 elif args[0] == 'update':
@@ -771,5 +773,49 @@ func TestApproveImpl_PostCloseBareErrorGetsRerun(t *testing.T) {
 	_, err := ApproveImpl(root, "010-test", mock)
 	if err == nil || !strings.Contains(err.Error(), "epic closed") || !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") || strings.ContainsRune(err.Error(), '\x1b') {
 		t.Fatalf("missing safe re-run recovery: %v", err)
+	}
+}
+
+func TestApproveImpl_ExportFailureStateAndRetry(t *testing.T) {
+	for _, site := range []string{"spec", "bead"} {
+		t.Run(site, func(t *testing.T) {
+			f := newRerunFixture(t, false, false)
+			faultWT, stage := f.specWT, "export"
+			if site == "bead" {
+				faultWT, stage = filepath.Join(f.root, ".worktrees", "worktree-bead-1"), "auto_merge"
+				preflightGit(t, f.root, "worktree", "add", faultWT, "bead/bead-1")
+				f.worktrees.entries[0].Path = faultWT
+			}
+			// Git resolves temporary-directory symlinks before the fake tracker runs.
+			realWT, err := filepath.EvalSymlinks(faultWT)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(faultWT, "pending-artifact.txt")
+			const content = "keep this pending artifact\n"
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("FINALIZE_FAIL_EXPORT_DIR", realWT)
+			_, err = f.approve()
+			if err == nil || !strings.Contains(err.Error(), "epic closed; finalize stage "+stage) || !strings.Contains(err.Error(), "injected tracker export failure") || !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") || strings.Count(err.Error(), "epic closed;") != 1 {
+				t.Fatalf("export failure lacks state and recovery: %v", err)
+			}
+			if got, err := os.ReadFile(path); err != nil || string(got) != content {
+				t.Fatalf("pending artifact lost: %q %v", got, err)
+			}
+			if len(f.worktrees.removeCalls) != 0 {
+				t.Fatalf("failure reached cleanup: %v", f.worktrees.removeCalls)
+			}
+			t.Setenv("FINALIZE_FAIL_EXPORT_DIR", "")
+			if _, err := f.approve(); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			f.assertConverged()
+			got := preflightGit(t, f.root, "show", "main:pending-artifact.txt")
+			if got != strings.TrimSpace(content) {
+				t.Fatalf("pending artifact did not land: %q", got)
+			}
+		})
 	}
 }

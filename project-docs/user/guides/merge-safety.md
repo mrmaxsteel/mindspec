@@ -180,6 +180,17 @@ propose inspection (never `mindspec complete`, never a pasteable
 force-delete) when merge provenance is not positively established.
 
 
+## Retry an approval after an export failure
+
+An export or artifact-commit failure stops approval before publication and
+cleanup. Pending files, worktrees, and branches remain. The error shows the
+epic state and failed stage. Fix the fault, then run the printed
+`mindspec impl approve <spec>` command again.
+
+Approval also checks each pending bead before any write. If its branch moved
+after its naming merge, approval gives the same follow-up recovery as
+`complete`. It cannot create a second naming merge for that bead.
+
 ## Work in history without a naming merge
 
 `mindspec reattest <bead-id>` first checks first-parent merges. It then

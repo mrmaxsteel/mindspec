@@ -326,6 +326,12 @@ func TestReattest_AncestorZeroDependents(t *testing.T) {
 
 func stubAncestorTracker(t *testing.T) {
 	t.Helper()
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "--type=epic") {
+			return []byte(`[{"id":"mindspec-epic","issue_type":"epic","metadata":{"spec_num":132,"spec_title":"test"}}]`), nil
+		}
+		return nil, fmt.Errorf("unexpected list read %v", args)
+	}))
 	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		switch args[1] {
 		case ancestorBead:

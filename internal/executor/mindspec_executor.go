@@ -676,10 +676,9 @@ func (g *MindspecExecutor) PreflightFinalizeMerges(epicID, specID, specBranch st
 		return err
 	}
 	for _, e := range entries {
-		merged, err := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+		merged, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e)
 		if err != nil {
-			return guard.NewFailure("cannot check pending merge for "+termsafe.Escape(e.Branch)+": "+termsafe.Escape(err.Error()),
-				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+			return err
 		}
 		if merged {
 			continue
@@ -700,6 +699,64 @@ func (g *MindspecExecutor) PreflightFinalizeMerges(epicID, specID, specBranch st
 		}
 	}
 	return nil
+}
+
+// checkFinalizeBeadMerge shares the naming-merge query with lifecycle. The
+// git query lives below both packages to preserve the execution boundary.
+func (g *MindspecExecutor) checkFinalizeBeadMerge(epicID, specID, specBranch string, e bead.WorktreeListEntry) (bool, error) {
+	rerun := fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))
+	merged, err := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+	if err != nil {
+		return false, guard.NewFailure("cannot check pending merge for "+termsafe.Escape(e.Branch)+": "+termsafe.Escape(err.Error()), rerun)
+	}
+	if merged {
+		return true, nil
+	}
+	beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return false, guard.NewFailure("invalid pending bead branch", rerun)
+	}
+	rows, err := gitutil.FindNamingMerges(g.Root, specBranch, beadID)
+	if err != nil {
+		return false, guard.NewFailure("cannot read naming merges: "+termsafe.Escape(err.Error()), rerun)
+	}
+	if len(rows) == 0 {
+		return false, nil
+	}
+	row := rows[0]
+	tip, err := gitutil.RevParseRef(g.Root, e.Branch)
+	if err != nil {
+		return false, guard.NewFailure("cannot read bead tip: "+termsafe.Escape(err.Error()), rerun)
+	}
+	state, err := g.CompletionState(g.Root, row.Parents[1], e.Branch)
+	if err != nil {
+		return false, guard.NewFailure("cannot read new bead commits: "+termsafe.Escape(err.Error()), rerun)
+	}
+	var body strings.Builder
+	fmt.Fprintf(&body, "bead tip moved from merge parent %s to %s. Put later fixes in a follow-up bead.\n", termsafe.Escape(row.Parents[1]), termsafe.Escape(tip))
+	for _, commit := range state.NewCommits {
+		fmt.Fprintf(&body, "commit %s: %s\n", termsafe.Escape(commit.SHA), termsafe.Escape(commit.Subject))
+	}
+	body.WriteString("A panel round at the fix tip does not carry over. The new bead needs its own panel.")
+	wt := e.Path
+	if wt == "" {
+		wt = "<bead worktree>"
+	}
+	// Match complete's moved-tip recovery. Quote the worktree as a shell operand.
+	quotedWT := "'" + strings.ReplaceAll(termsafe.Escape(wt), "'", "'\"'\"'") + "'"
+	id, epic := idrender.Bead(beadID), idrender.Bead(epicID)
+	commands := []string{
+		"git branch " + id + "-followup " + termsafe.Escape(tip),
+		"git -C " + quotedWT + " reset --keep " + termsafe.Escape(row.Parents[1]),
+		"run a new panel round for the bead at its tip if the latest round did not review that tip",
+		"mindspec complete " + id,
+		"bd create \"<title>\" --parent " + epic + " --deps " + id,
+		"edit plan.md on the spec branch: append the Nth ## Bead heading with a concrete acceptance criterion; add work_chunks id N and key_file_paths; commit plan.md",
+		"mindspec next <new bead>",
+		"git -C '<new bead worktree>' cherry-pick " + termsafe.Escape(row.Parents[1]) + ".." + id + "-followup",
+		"git branch -D " + id + "-followup",
+	}
+	return false, guard.NewFailure(body.String(), commands...)
 }
 
 // PushProbe checks remote publication before lifecycle writes.
@@ -751,6 +808,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		return result, fmt.Errorf("finalize epic %s: invalid spec id %s: %w", epicID, idrender.Spec(specID), err)
 	}
 
+	// Refuse a moved bead tip before the first finalize mutation. Repeat the
+	// check at the live merge because artifact commits can advance a branch.
+	candidates, candidateErr := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
+	if candidateErr != nil {
+		return result, candidateErr
+	}
+	for _, e := range candidates {
+		if _, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e); err != nil {
+			return result, err
+		}
+	}
+
 	allow := make(map[string]bool, len(lifecycleAllowSet))
 	for _, id := range lifecycleAllowSet {
 		allow[id] = true
@@ -795,18 +864,14 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	savedTip, _ := meta["mindspec_finalize_tip"].(string)
 	currentTip, _ := gitutil.RevParseRef(g.Root, specBranch)
 	status, statusErr := gitutil.Status(specWtPath)
-	if savedTip == "" || savedTip != currentTip || statusErr != nil || strings.TrimSpace(status) != "" {
+	if _, statErr := os.Stat(specWtPath); !os.IsNotExist(statErr) && (savedTip == "" || savedTip != currentTip || statusErr != nil || strings.TrimSpace(status) != "") {
 		if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
-			// Spec 127 R5(d)(v)/E-r5-2: a preserved-merge precondition failure
-			// is NOT an ordinary commit hiccup this leg may warn-and-continue
-			// past — committing over a preserved conflict here is exactly the
-			// two-parent `chore:` resurrection this spec exists to prevent, so
-			// THIS class hard-refuses; every other commitWithExport failure at
-			// this site keeps today's warn-and-continue behavior unchanged.
+			// A failed export or commit must preserve pending work. A
+			// preserved merge keeps its specific resolution recovery.
 			if isPreservedMergeError(err) {
 				return result, err
 			}
-			fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
+			return result, guard.NewFailure("cannot commit remaining spec artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
 	}
 
@@ -836,13 +901,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			}
 		}
 		if e.Path != "" && !alreadyMerged {
-			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil && isPreservedMergeError(err) {
-				// Spec 127 R5(d)(v)/E-r5-2: same discipline as the spec-
-				// worktree leg above — a preserved-merge precondition
-				// failure is never silently swallowed, even though every
-				// OTHER commitWithExport failure at this site stays
-				// swallowed (unchanged pre-existing behavior).
-				return result, err
+			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil {
+				// Stop before merge, publication, or cleanup on every failure.
+				if isPreservedMergeError(err) {
+					return result, err
+				}
+				return result, guard.NewFailure("cannot commit remaining bead artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 			}
 		}
 		// Merge bead branch into spec branch if not already an ancestor.
@@ -899,6 +963,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				)
 			}
 		default:
+			if _, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e); err != nil {
+				return result, err
+			}
 			// Genuinely unmerged — the only leg that truly needs the spec
 			// worktree (MergeInto runs inside it). G1-1: when it is
 			// missing, refuse recoverably — proceeding would skip the

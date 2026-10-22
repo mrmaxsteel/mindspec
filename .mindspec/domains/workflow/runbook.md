@@ -375,6 +375,14 @@ and the failed stage. Follow the final recovery commands in order. Resolve a
 merge when the recovery command includes `--resolve-merge`. A bare failure gives
 `mindspec impl approve <spec>` as its recovery command.
 
+An export or artifact-commit failure keeps pending files, worktrees, and
+branches. It stops before publication and cleanup. Fix the export or commit
+fault, then run the printed approval command again.
+
+A pending bead whose tip moved after its naming merge stops approval before
+any write. Use the printed follow-up recovery from `complete`. Approval cannot
+make a second naming merge for that bead.
+
 Re-run approval after the fault is fixed. It checks all pre-close gates again
 while the spec branch exists. New source changes must include their domain docs.
 After local branch deletion, `already landed` means the final publication tip and

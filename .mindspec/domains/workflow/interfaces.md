@@ -14,7 +14,7 @@ the exit code. `doctor --fix` leaves the key in place.
 
 | Lifecycle function | Contract |
 |:-------------------|:---------|
-| `FindNamingMerges(root, specBranch, beadID)` | Returns two-parent naming merges on the first-parent chain, newest first. It does not check content or the bead tip. |
+| `FindNamingMerges(root, specBranch, beadID)` | Delegates to the shared `gitutil.FindNamingMerges` query used by finalization. Returns two-parent naming merges on the first-parent chain, newest first. It does not check content or the bead tip. |
 | `CheckMergePresence(root, specBranch, specDir, merge)` | Returns changed paths, reverted paths and later commits that changed reverted paths. It runs independently of bead branch survival. |
 | `FindValidMerge(root, specBranch, beadID)` | Requires one naming merge, an exact second-parent match to the current bead tip, and no reverted path. Nil with no error means no valid merge. |
 | `MergeRestoreOutcome(specWorktree, specDir)` | Reads status. Tool artifacts do not count as user changes. A clean checkout returns `DestructionClean`; read errors return `DestructionEvidenceError`; user changes return `DestructionStaleDeletion`. |
@@ -910,3 +910,11 @@ or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`
 recovery. The executor omits `--merge-only` from every re-entry hint on this path.
 Other merge guard failures keep their recovery.
+
+## Implementation approval finalization
+
+Implementation approval checks pending beads for an existing naming merge before
+its first write. A moved tip refuses with the same follow-up recovery as
+`complete`. Finalization repeats the check before each live merge. An export or
+artifact-commit failure stops publication and cleanup. The error gives the epic
+state, the failed stage, and the approval retry command.

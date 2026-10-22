@@ -119,6 +119,11 @@ func newRepoExecutor(t *testing.T) (*MindspecExecutor, *fakeWorktreeOps, string)
 		WorktreeOps: fake,
 	}
 	stubMergeBindingSeams(t)
+	// Generic executor fixtures have no tracker store. Export tests install
+	// their own fake exporter after this default.
+	oldExport := execBeadExportFn
+	execBeadExportFn = func(string) error { return nil }
+	t.Cleanup(func() { execBeadExportFn = oldExport })
 	return g, fake, dir
 }
 
@@ -657,47 +662,27 @@ func TestCommitCount_AgainstRealRepo(t *testing.T) {
 
 // --- CommitAll / Export ordering ---
 //
-// TestCommitAll_ExportedJSONLLandsInCommit verifies the AC (ADR-0025, spec
-// 082): every mindspec-driven commit refreshes .beads/issues.jsonl from Dolt
-// before staging, so the committed blob matches Dolt at commit time. After the
-// ARCH-11 refactor `bead.Export` is called directly (no DI), so this test
-// gates on `bd` being on PATH and asserts that what `bd export` actually
-// wrote ends up in the committed tree.
+// TestCommitAll_ExportedJSONLLandsInCommit uses a fake tracker export and
+// real git. The exported content must replace the stale tracked snapshot.
 func TestCommitAll_ExportedJSONLLandsInCommit(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not available; export step shells out to bd")
-	}
-
 	dir := newTempRepo(t)
 	g := &MindspecExecutor{Root: dir, WorktreeOps: defaultWorktreeOps{}}
-
-	// Seed .beads/issues.jsonl so the staged blob has known content if bd has
-	// nothing to export from a Dolt store. The AC we assert here is that
-	// .beads/issues.jsonl lands in the commit — its exact contents depend on
-	// whether bd reaches a Dolt server.
-	sentinel := `{"id":"sentinel","title":"pre-commit marker"}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, ".beads", "issues.jsonl"), []byte(sentinel), 0o644); err != nil {
-		t.Fatalf("write sentinel: %v", err)
+	const exported = `{"id":"sentinel","title":"fresh export"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".beads", "issues.jsonl"), []byte("stale export\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
-
-	err := g.CommitAll(dir, "chore: commit with export")
-	if err != nil {
-		// bd may fail without a Dolt-initialized .beads store; the
-		// ordering-invariant test below covers the failure path. Skip when
-		// bd can't export from a virgin temp repo.
-		t.Skipf("CommitAll requires a bd-initialized .beads store: %v", err)
+	bin := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$1\" != export ]; then exit 1; fi\nprintf '%s\\n' '{\"id\":\"sentinel\",\"title\":\"fresh export\"}' > .beads/issues.jsonl\n"
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
 	}
-
-	statCmd := exec.Command("git", "-C", dir, "show", "--stat", "--format=", "HEAD")
-	statOut, err := statCmd.Output()
-	if err != nil {
-		t.Fatalf("git show --stat: %v", err)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := g.CommitAll(dir, "chore: commit with export"); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(statOut), ".beads/issues.jsonl") {
-		t.Errorf("git show --stat did not include .beads/issues.jsonl:\n%s", string(statOut))
+	out, err := exec.Command("git", "-C", dir, "show", "HEAD:.beads/issues.jsonl").Output()
+	if err != nil || string(out) != exported {
+		t.Fatalf("committed export = %q, want %q; error: %v", out, exported, err)
 	}
 }
 

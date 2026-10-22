@@ -409,9 +409,11 @@ is `pr` for true and `direct` for false, regardless of later remote configuratio
 
 `PreflightFinalizeMerges` and `FinalizeEpic` use the same scoped candidate helper.
 The early check covers pending bead-to-spec merges on both paths. It also covers
-spec-to-main on the direct path. Both layout and work-destruction checks run
-without writes. Live guards remain at each merge and read the tips after artifact
-commits and auto-merges. A passed early check cannot replace a live check.
+spec-to-main on the direct path. Layout, work-destruction, and existing
+naming-merge checks run without writes. A pending bead with an existing naming merge refuses with
+`complete`'s moved-tip text and follow-up recovery. Finalization checks all
+candidates before its first write and repeats the check before each live merge.
+Live guards read the tips after artifact commits and auto-merges. A passed early check cannot replace a live check.
 
 The push path runs `PushProbe` before the epic close. This probe skips hooks and
 disables terminal prompts. It uses the real push's remote and refspec. A missing
@@ -422,7 +424,11 @@ probe gets a credential-helper hint. The real push still runs pre-push hooks.
 
 `FinalizeEpic` records `mindspec_finalize_tip` after export and bead auto-merges,
 immediately before publication. It keeps `mindspec_pre_finalize_tip` as a separate
-routing checkpoint. A retry at the recorded tip with a clean spec checkout skips
+routing checkpoint. An export or artifact-commit failure in the spec worktree
+or a pending bead returns `FinalizeStageError` with a runnable approval recovery.
+It stops publication and cleanup. Pending files, worktrees, and branches remain.
+A missing spec worktree has no artifact commit to run.
+A retry at the recorded tip with a clean spec checkout skips
 the export commit. Before it skips an already merged bead, it checks any remaining
 worktree. Pending changes or an unreadable status stop the run before cleanup.
 The branch and worktree remain. It does not create new artifacts on that bead.

@@ -53,7 +53,7 @@ func TestFinalizeEpic_RefusalsHaveRunnableRecovery(t *testing.T) {
 				message = "cannot check bead branch"
 				if fault == "ancestry" {
 					pattern = "merge-base --is-ancestor bead/bead-1 spec/077-test"
-					message = "cannot read bead branch ancestry"
+					message = "cannot check pending merge for bead/bead-1"
 				}
 				bin := t.TempDir()
 				script := "#!/bin/sh\ncase \" $* \" in *\" " + pattern + " \"*) exit 128;; esac\nexec '" + git + "' \"$@\"\n"

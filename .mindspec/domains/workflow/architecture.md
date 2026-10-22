@@ -424,7 +424,8 @@ decision before the spec-branch existence switch. A probe error refuses with
 `recovery: git remote -v`. It never selects local merge on a read error.
 
 After the plan and lifecycle allow-set are resolved, `PreflightFinalizeMerges`
-checks layout and work destruction for each pending bead-to-spec merge. On the
+checks layout and work destruction for each pending bead-to-spec merge.
+It also checks for an existing naming merge before it permits a new merge. On the
 direct path it also checks spec-to-main. On the push path, `PushProbe` tests the
 same remote and refspec as the real push, with a dry run that skips hooks and
 disables terminal prompts. Only a failed probe refuses. Only an HTTP(S)
@@ -1457,7 +1458,7 @@ uses for unprovable ID-substitution positions. `internal/bootstrap/
 bootstrap.go`'s `starterGitignore` gained `.mindspec/phase.lock` so
 greenfield projects gitignore the new lockfile from their first commit.
 
-### Ownership at the landing tree
+## Ownership at the landing tree
 
 Both per-bead content gates use one landing-tree `ownerRef`. The diff
 stays at the bead's fork-to-tip range or prospective snapshot `T`.
@@ -1482,7 +1483,7 @@ materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.
 
-### Reviewed-tree confirmation
+## Reviewed-tree confirmation
 
 `FindLandedMerge` builds its reviewed set from panel registrations and
 ledger-backed rebinds. A reviewed-SHA metadata key confirms nothing unless
@@ -1503,7 +1504,7 @@ vetoes a matching tip or binding. Tip and binding contradictions still
 refuse, and the revert check still runs after confirmation. Reachable
 fallback does not evaluate the datum and still needs its audited git checks.
 
-### Ancestor without a naming merge
+## Ancestor without a naming merge
 
 Reattest checks this state only after both merge scans find no candidate.
 The bead branch must exist, and its tip must be an ancestor of the spec tip.
@@ -1539,7 +1540,7 @@ uses the invocation cache to resolve each surviving bead branch to its epic.
 The dependent read uses uncached tracker reads, with one `bd show` per
 eligible child.
 
-### Full spec binding and lineage checks
+## Full spec binding and lineage checks
 
 The workflow uses one parent-child epic as bead lineage. The phase resolver
 returns its provenance with the full spec ID. Scoped next selection uses
@@ -1579,6 +1580,17 @@ The executor checks a remaining bead worktree before it skips an already merged
 branch and before it removes that worktree after local spec-branch deletion.
 Pending changes, an unreadable status, or a worktree inspection error stop cleanup.
 The worktree and branch remain for recovery.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+stops finalization before publication and cleanup. The error names the failed
+stage and gives `mindspec impl approve <spec>` as recovery. Pending files,
+worktrees, and branches remain. A retry can finish after the fault is fixed.
+An absent spec worktree has no artifact commit to run.
+
+Before any finalization write, the executor checks all pending bead branches
+for an existing naming merge. A moved tip refuses with the same follow-up
+recovery as `complete`. The live merge repeats this check after artifact
+commits. It cannot create a second naming merge.
 
 ## Verification between merge and close
 

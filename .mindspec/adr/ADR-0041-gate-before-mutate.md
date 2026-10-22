@@ -821,7 +821,11 @@ An error never selects a local merge.
 `PreflightFinalizeMerges` checks the layout guard and work-destruction predicate
 for every pending bead-to-spec merge in the lifecycle allow-set. On the direct
 path it also checks the spec-to-main merge. It uses the same candidate helper as
-`FinalizeEpic` and writes no state. Both early guards run before the placeholder
+`FinalizeEpic` and writes no state. It also checks for an existing naming merge.
+A pending bead with one refuses with `complete`'s moved-tip text and follow-up
+recovery. `FinalizeEpic` checks all candidates before its first write and repeats
+this check after artifact commits, before each live merge.
+Both early guards run before the placeholder
 ADR write, the stale-phase reconcile write, and the epic close.
 
 On the push path, `PushProbe` runs `git push --dry-run --no-verify` with the same
@@ -843,6 +847,12 @@ finalize chain. It prints one state line before the error: `epic closed` or
 reported as unknown. The inner recovery lines stay unchanged and come last.
 Approval adds `recovery: mindspec impl approve <spec>` only when the inner error
 has no recovery line. A failed real pre-push hook follows this post-close rule.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+returns a stage error and stops before publication or cleanup. Pending files,
+worktrees, and branches remain. The error ends with the approval retry command.
+A retry can finish after the fault is fixed. An absent spec worktree has no
+artifact commit to run.
 
 `FinalizeEpic` writes `mindspec_finalize_tip` after the export commit and all
 bead auto-merges, immediately before publication. Every run overwrites this key.

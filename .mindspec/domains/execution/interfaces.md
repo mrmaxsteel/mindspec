@@ -291,6 +291,10 @@ architecture doc, § Merge safety layer (spec 127).
 `PreflightFinalizeMerges` checks layout and work destruction for each pending
 bead-to-spec merge in the lifecycle allow-set. It also checks spec-to-main when
 `hasRemote` is false. It uses the finalizer's candidate helper and writes no state.
+It also checks for existing naming merges through `gitutil.FindNamingMerges`,
+the shared implementation of `lifecycle.FindNamingMerges`. A moved bead tip
+refuses with the follow-up recovery from `complete`. The finalizer checks all
+candidates before its first write and repeats the check at each live merge.
 The executor repeats both guards at each live merge with the current tips.
 
 `PushProbe` tests the `PushBranch` remote and refspec with
@@ -349,6 +353,12 @@ tip and that bead's binding in the spec history before finalization can continue
 in a remaining merged bead worktree. A dirty worktree, a failed status read, or a
 worktree inspection error refuses before removal and preserves the branch and
 worktree. An absent worktree can continue through the remaining cleanup.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+returns `FinalizeStageError` before publication or cleanup. Its recovery is
+`mindspec impl approve <spec>`. The caller adds the epic state line. The pending
+file, worktree, and branch remain for a retry. An absent spec worktree has no
+artifact commit to run.
 
 ## Separate bead merge, publication, and cleanup
 

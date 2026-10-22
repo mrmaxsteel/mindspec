@@ -31,22 +31,7 @@ type MergePathChange struct {
 // FindNamingMerges finds two-parent merges that name this bead on the spec
 // branch's first-parent chain. It does not check the bead tip or content.
 func FindNamingMerges(root, specBranch, beadID string) ([]gitutil.MergeCommit, error) {
-	branch, err := workspace.BeadBranch(beadID)
-	if err != nil {
-		return nil, err
-	}
-	merges, err := gitutil.FirstParentMerges(root, specBranch)
-	if err != nil {
-		return nil, err
-	}
-	var found []gitutil.MergeCommit
-	for _, m := range merges {
-		name, namesBead := parseMergeSubjectBeadBranch(m.Subject)
-		if len(m.Parents) == 2 && namesBead && name == branch {
-			found = append(found, m)
-		}
-	}
-	return found, nil
+	return gitutil.FindNamingMerges(root, specBranch, beadID)
 }
 
 // CheckMergePresence checks a naming merge independently of branch survival

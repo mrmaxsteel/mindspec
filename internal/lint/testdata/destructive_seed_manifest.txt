@@ -226,7 +226,8 @@ internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg1:unprovab
 internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg2:unprovable
-internal/executor/mindspec_executor.go	MindspecExecutor.PreflightFinalizeMerges	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.checkFinalizeBeadMerge	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.checkFinalizeBeadMerge	variadic-spread:commands
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
 internal/guard/guard.go	checkCWDWithCache	arg1:unprovable
