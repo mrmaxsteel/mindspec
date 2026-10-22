@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const checkoutFixerSlot = "fixer"
+
 var checkoutReadMetadataFn = bead.GetMetadata
 
 // Bead 7 connects the process orphan check here. Callers hold all affected slot
@@ -320,7 +322,7 @@ var panelCheckoutCmd = &cobra.Command{
 		}
 		var slots []panel.RosterSlot
 		if fixer {
-			slots = []panel.RosterSlot{{Slot: "fixer"}}
+			slots = []panel.RosterSlot{{Slot: checkoutFixerSlot}}
 		} else {
 			for _, s := range reg.Panel.Roster {
 				if all || s.Slot == slotName {
@@ -384,7 +386,8 @@ var panelCheckoutCmd = &cobra.Command{
 // them until the calling verb completes its ledger and snapshot writes.
 // beforeRound == 0 selects every round. Lock files live outside these trees.
 func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string, beforeRound int, onlySlot string) (func(), error) {
-	layout, err := checkoutLayout(root, isolation, reg, "fixer")
+	ignored := newExecutor(root).CheckSlotIgnore(root, isolation) == nil
+	layout, err := checkoutLayout(root, isolation, reg, checkoutFixerSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +423,7 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
-		slotSet := make(map[string]bool)
+		slotSet := map[string]bool{checkoutFixerSlot: true}
 		for _, slot := range reg.Panel.Roster {
 			slotSet[slot.Slot] = true
 		}
@@ -434,6 +437,21 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 			entry, err := panel.NewSlotLayout(root, isolation, reg.Panel.Spec, reg.Slug(), n, slot)
 			if err != nil {
 				return nil, err
+			}
+			if !ignored {
+				// Checkout checks ignore rules before it takes a lock.
+				// A refused root cannot have a new checkout in progress.
+				// Use only existing slot paths and lock files in this case.
+				if _, err := os.Lstat(entry.Dir); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return nil, err
+				}
+				if _, err := os.Lstat(entry.Lock); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return nil, err
+				}
 			}
 			affected = append(affected, entry)
 		}

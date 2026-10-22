@@ -321,3 +321,46 @@ func TestExecutor_CloneSlotTreeIgnoresDefaultGlobalAttributes(t *testing.T) {
 		t.Fatalf("CloneSlotTree must keep LF bytes: %q %v", raw, err)
 	}
 }
+
+func TestExecutor_SlotTrustQueryCeilingAndRemoval(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	host, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", host, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("temp repository: %v %s", err, out)
+	}
+	tmp := filepath.Join(host, "tmp")
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	included := filepath.Join(t.TempDir(), "conditional-trust.config")
+	if err := os.WriteFile(included, []byte("[safe]\n\tdirectory = "+strconv.Quote(f.root)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.global, []byte("[includeIf "+strconv.Quote("gitdir:"+filepath.ToSlash(filepath.Join(host, ".git")))+"]\n\tpath = "+strconv.Quote(included)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Prove that a query below TMPDIR reads the conditional trust without a ceiling.
+	control := exec.Command("git", "config", "--global", "--includes", "--get-all", "safe.directory")
+	control.Dir = tmp
+	control.Env = slotGitEnv(true)
+	if out, err := control.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != f.root {
+		t.Fatalf("conditional trust control did not match: %v %s", err, out)
+	}
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+	if err := NewMindspecExecutor(f.root).CheckSlotIgnore(f.root, "ignored"); err == nil || !strings.Contains(err.Error(), "dubious ownership") {
+		t.Errorf("CheckSlotIgnore accepted trust from the TMPDIR repository: %v", err)
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "mindspec-slot-trust-") {
+			t.Errorf("trust query left a temporary directory: %s", entry.Name())
+		}
+	}
+}

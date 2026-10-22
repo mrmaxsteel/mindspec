@@ -709,7 +709,7 @@ func TestPanelCreate_BadBriefKeepsDirtyCheckout(t *testing.T) {
 }
 
 func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
-	for _, state := range []string{"existing", "missing slot", "missing base"} {
+	for _, state := range []string{"existing", "missing slot", "missing base", "missing fixer", "missing fixer base"} {
 		for _, verb := range []string{"prune", "create", "abandon"} {
 			t.Run(state+"/"+verb, func(t *testing.T) {
 				f := newCheckoutFixture(t, ".mindspec-scratch")
@@ -718,8 +718,21 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 				case "existing":
 					checkoutOK(t, "--all")
 					heldSlots = append(heldSlots, "R3")
-				case "missing slot":
+				case "missing slot", "missing fixer":
 					checkoutOK(t, "--slot", "R1")
+				}
+				if strings.HasPrefix(state, "missing fixer") {
+					heldSlots = []string{"fixer"}
+				}
+				// Make all persistent lock files before the byte snapshot.
+				for _, slot := range []string{"R1", "R2", "R3", "R4", "fixer"} {
+					lock, err := panel.AcquireSlotLock(f.layout(t, slot).Lock)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := lock.Release(); err != nil {
+						t.Fatal(err)
+					}
 				}
 				for _, slot := range heldSlots {
 					lock, err := panel.AcquireSlotLock(f.layout(t, slot).Lock)
@@ -729,8 +742,8 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 					defer lock.Release()
 				}
 				if state != "existing" {
-					missing := f.layout(t, "R2").Dir
-					if state == "missing base" {
+					missing := f.layout(t, heldSlots[0]).Dir
+					if strings.HasSuffix(state, "base") {
 						missing = filepath.Dir(filepath.Dir(missing))
 					}
 					if _, err := os.Lstat(missing); !os.IsNotExist(err) {
@@ -739,13 +752,7 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 				}
 				beforePanel := slotSnapshot(t, f.dir)
 				scratch := filepath.Join(f.root, f.isolation)
-				if state == "missing slot" {
-					scratch = f.layout(t, "R1").Dir
-				}
-				var beforeScratch map[string]string
-				if state != "missing base" {
-					beforeScratch = slotSnapshot(t, scratch)
-				}
+				beforeScratch := slotSnapshot(t, scratch)
 				var out string
 				var err error
 				switch verb {
@@ -757,7 +764,7 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 				case "abandon":
 					out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
 				}
-				if err == nil || !strings.Contains(err.Error()+out, "R2") {
+				if err == nil || !strings.Contains(err.Error()+out, heldSlots[0]) {
 					t.Fatalf("held-slot refusal: %v %s", err, out)
 				}
 				var heldPaths []string
@@ -768,11 +775,45 @@ func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
 				if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
 					t.Fatal("held-lock refusal changed panel or ledger bytes")
 				}
-				if state != "missing base" && !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
+				if !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
 					t.Fatal("held-lock refusal changed panel, ledger or scratch files")
 				}
 			})
 		}
+	}
+}
+
+func TestPanelCleanup_UnignoredRootNoCheckout(t *testing.T) {
+	for _, verb := range []string{"create", "abandon"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+			t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			slotWrite(t, filepath.Join(f.root, ".gitignore"), "review/\n.mindspec/\n")
+			scratch := filepath.Join(f.root, f.isolation)
+			if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+				t.Fatalf("scratch must be absent before cleanup: %v", err)
+			}
+			var out string
+			var err error
+			switch verb {
+			case "create":
+				resetPanelCreateFlags(t)
+				out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+			case "abandon":
+				out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
+			}
+			if err != nil {
+				t.Fatalf("%s without checkout: %v %s", verb, err, out)
+			}
+			status := slotTestGit(t, f.root, "status", "--porcelain", "--untracked-files=all")
+			if strings.Contains(status, f.isolation+"/") {
+				t.Errorf("cleanup left untracked isolation files:\n%s", status)
+			}
+			if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+				t.Errorf("cleanup created the isolation root: %v", err)
+			}
+		})
 	}
 }
 
