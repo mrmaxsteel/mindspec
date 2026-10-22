@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/spec"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -97,6 +99,10 @@ auto-numbered to <NNN>-<slug> as max(existing spec numbers)+1
 func resolveSpecCreateID(root, arg string) (string, error) {
 	argErr := validate.SpecID(arg)
 	if argErr == nil {
+		number := strings.SplitN(arg, "-", 2)[0]
+		if last := number[len(number)-1]; last >= 'a' && last <= 'z' {
+			return "", fmt.Errorf("new spec IDs must use digits before the slug\nrecovery: mindspec spec create %s", termsafe.Escape(strings.SplitN(arg, "-", 2)[1]))
+		}
 		return arg, nil
 	}
 	candidate := fmt.Sprintf("%03d-%s", nextSpecNumber(root), arg)

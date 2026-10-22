@@ -14,6 +14,14 @@ package executor
 type ChangedFilesOptions struct {
 	// NoRenames lists both sides of a rename for rebind checks and records.
 	NoRenames bool
+	// ExactPaths lists both rename endpoints with exact filename bytes.
+	ExactPaths bool
+}
+
+// MergeBeadOptions selects the re-entry command for a merge without cleanup.
+type MergeBeadOptions struct {
+	// Closed omits --merge-only from re-entry hints for an already closed bead.
+	Closed bool
 }
 
 // Executor abstracts workspace lifecycle operations. Implementations include
@@ -23,6 +31,17 @@ type ChangedFilesOptions struct {
 // MindspecExecutor, no-op directory in MockExecutor). "Epic" is a group of beads
 // (implementation tasks) belonging to a single spec lifecycle.
 type Executor interface {
+	// MergeBead merges without closing, binding or removing the bead workspace.
+	MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error
+	// CleanupBead removes only a bead whose tip is an ancestor of the spec.
+	CleanupBead(beadID, specBranch string) error
+	// FirstParentMerges reads merge identities without ownership inference.
+	FirstParentMerges(ref string) ([]MergeIdentity, error)
+	// CompletionState reads merge state, staged paths and new commits.
+	CompletionState(workdir, base, head string) (CompletionState, error)
+	// PublishBeadClose exports the tracker and commits only the supplied paths.
+	PublishBeadClose(workdir string, paths []string) error
+
 	// InitSpecWorkspace creates a workspace for spec authoring.
 	// Creates branch, worktree, and ensures gitignore entries.
 	InitSpecWorkspace(specID string) (WorkspaceInfo, error)
@@ -71,6 +90,13 @@ type Executor interface {
 	// steps (never a new merge, never a checkout, never an abort).
 	CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
 
+	// PreflightFinalizeMerges checks pending bead merges, plus spec-to-main
+	// when hasRemote is false. It does not mutate state.
+	PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error
+
+	// PushProbe tests publication with a dry run that skips pre-push hooks.
+	PushProbe(branch string) error
+
 	// FinalizeEpic merges the spec branch to main (or pushes for PR),
 	// cleans up all workspaces and branches for the spec lifecycle.
 	//
@@ -98,7 +124,15 @@ type Executor interface {
 	// this method's own merge sites (the per-bead auto-merge loop's spec
 	// worktree, and the direct spec→main leg's main checkout) — only
 	// whichever site actually has a preserved merge acts on it.
-	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error)
+	// hasRemote is the caller's one preflight decision. Finalization does
+	// not probe again: true pushes the spec branch, false merges locally.
+	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error)
+
+	// ResumeFinalizedEpic verifies publication evidence after local spec-branch
+	// deletion. The caller requires a closed epic and a stored done phase.
+	// Every lifecycle child's binding and the finalize tip must be ancestors
+	// of the fetched target. Cleanup repeats the destruction guard.
+	ResumeFinalizedEpic(epicID, specID string, lifecycleChildren []string, hasRemote bool) (FinalizeResult, error)
 
 	// Cleanup removes stale workspaces and branches for a spec.
 	// If force is true, skips lifecycle state checks.
@@ -121,9 +155,10 @@ type Executor interface {
 	CommitAll(path, msg string) error
 
 	// ChangedFiles returns the list of paths changed between two git refs.
-	// Passing base == "" means working tree vs head, matching
-	// gitutil.DiffNameOnlyRef("", ref) semantics. With both refs set it is
-	// equivalent to `git diff --name-only <base>..<head>`.
+	// Passing base == "" means working tree vs head, with exact path bytes
+	// and both rename endpoints. With both refs set, the default returns
+	// git's newline-separated, quoted paths. NoRenames lists both rename
+	// endpoints; ExactPaths also returns exact bytes without git quoting.
 	ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error)
 
 	// LsTree returns a full recursive, repository-relative tree listing.
@@ -156,6 +191,12 @@ type Executor interface {
 	// `git merge-base <a> <b>`).
 	MergeBase(a, b string) (string, error)
 
+	// LandingTree previews beadRef into specTip from base. A bare tree is
+	// wrapped in an unreferenced commit. During a preserved merge in workdir,
+	// it reads the resolved index instead. It never updates a ref or staged
+	// entries. git write-tree can update the index cache-tree extension.
+	LandingTree(workdir, base, specTip, beadRef string) (tree string, conflicted []string, err error)
+
 	// RevParseRef resolves ref to its commit SHA in workdir (wraps
 	// `git rev-parse --verify <ref>^{commit}`). A genuinely-absent ref
 	// returns an error satisfying IsRefNotFound; any other failure (not-a-
@@ -164,7 +205,7 @@ type Executor interface {
 	// staleness rev-parse, keeping internal/complete off gitutil (ADR-0030).
 	RevParseRef(workdir, ref string) (string, error)
 
-	// Status returns `git status --porcelain` for workdir (the worktree
+	// Status returns `git status --porcelain --no-renames` for workdir (the worktree
 	// dirty-check seam for the panel gate). Empty output means a clean tree.
 	Status(workdir string) (string, error)
 
@@ -254,7 +295,8 @@ type Executor interface {
 	// commit-ish) and treeOID (typically a bare tree object from
 	// SnapshotWorktreeTree), diffed `-C workdir` — never a hardcoded root,
 	// never the caller's cwd, so the per-bead content gates always measure
-	// the SAME bead worktree the snapshot was taken in.
+	// the SAME bead worktree the snapshot was taken in. Rename/copy detection
+	// stays off. Returned filename bytes are exact, with no quoting or trim.
 	ChangedFilesTree(workdir, base, treeOID string) ([]string, error)
 
 	// MaterializeStageCommit builds (via plumbing, no hooks) a write-ahead
@@ -342,8 +384,31 @@ type FinalizeResult struct {
 	FinalizeBranch string
 }
 
+// FinalizeStageError identifies the durable stage that failed.
+type FinalizeStageError struct {
+	Stage string
+	Err   error
+}
+
+func (e *FinalizeStageError) Error() string { return e.Err.Error() }
+func (e *FinalizeStageError) Unwrap() error { return e.Err }
+
 // LandedReviewSetter optionally supplies the first Allow panel's reviewed identity
 // for the next CompleteBead binding write (Spec 130 R12).
 type LandedReviewSetter interface {
 	SetLandedReview(sha, panel string)
+}
+
+// MergeIdentity is a full commit identity from the first-parent chain.
+type MergeIdentity struct {
+	SHA     string
+	Parents []string
+	Subject string
+}
+
+// CompletionState contains only read-only closing facts.
+type CompletionState struct {
+	MergeHead   string
+	StagedPaths []string
+	NewCommits  []MergeIdentity
 }

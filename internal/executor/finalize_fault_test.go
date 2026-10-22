@@ -7,12 +7,8 @@ package executor
 // below sets the hook to fail at ONE stage, confirms the REAL mutations up
 // to that stage genuinely landed (a real merge, a real push, a real
 // branch/worktree removal), then clears the hook and re-invokes FinalizeEpic
-// to confirm convergence — to completion for stages (a)/(b)/(c)/(d), and to
-// a clean named refusal for stage (e), whose kill point is the LAST
-// mutation in the chain (nothing is left to converge TO — the state is
-// already fully finalized, and FinalizeEpic's own first check, "spec branch
-// does not exist", is the honest recoverable refusal a second invocation
-// hits).
+// to confirm convergence. After local spec-branch deletion, the caller uses
+// ResumeFinalizedEpic with the stored publication evidence.
 
 import (
 	"errors"
@@ -93,7 +89,7 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = failAtStage("auto_merge")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false, false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the auto_merge kill, got: %v", err)
 	}
@@ -102,7 +98,7 @@ func TestFinalizeFault_AutoMerge_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false, false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge to completion, got: %v", err)
 	}
@@ -124,7 +120,7 @@ func TestFinalizeFault_Push_KillThenConverge(t *testing.T) {
 	fake.listEntries = nil
 
 	finalizeStepHookFn = failAtStage("push")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the push kill, got: %v", err)
 	}
@@ -134,7 +130,7 @@ func TestFinalizeFault_Push_KillThenConverge(t *testing.T) {
 	preKillTip := refHash(t, origin, "spec/077-test")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge (the push is idempotent), got: %v", err)
 	}
@@ -156,7 +152,7 @@ func TestFinalizeFault_OrphanFinalize_KillThenConverge(t *testing.T) {
 	fake.listEntries = nil
 
 	finalizeStepHookFn = failAtStage("orphan_finalize")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the orphan_finalize kill, got: %v", err)
 	}
@@ -170,7 +166,7 @@ func TestFinalizeFault_OrphanFinalize_KillThenConverge(t *testing.T) {
 	*exportContent = []byte(`{"id":"epic-1","status":"closed","retry":2}` + "\n")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge (retry-idempotent chore flow), got: %v", err)
 	}
@@ -230,7 +226,7 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	}
 
 	finalizeStepHookFn = failAtStage("pre_cleanup")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false, false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the pre_cleanup kill, got: %v", err)
 	}
@@ -253,7 +249,7 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	beadTip := refHash(t, dir, "bead/bead-1")
 
 	finalizeStepHookFn = nil
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", allowSet, "", false, false)
 	if err != nil {
 		t.Fatalf("expected re-invocation to converge to completion, got: %v", err)
 	}
@@ -271,27 +267,28 @@ func TestFinalizeFault_PreCleanup_KillThenConverge(t *testing.T) {
 	}
 }
 
-// --- stage (e): after the cleanup leg's mutations complete -----------------
-//
-// This is the LAST mutation in the chain: by the time this hook fires,
-// every cleanup mutation (worktree/branch removals, the direct spec→main
-// merge, spec-branch deletion) has already landed for real. There is
-// nothing left to converge TO by re-invoking FinalizeEpic — the spec branch
-// genuinely no longer exists — so the honest re-invocation outcome is
-// FinalizeEpic's own first-line refusal ("spec branch does not exist"), a
-// clean, named, recoverable message rather than a second attempt at
-// mutations that already succeeded. This is the AC-26-accepted "clean
-// recoverable refusal" convergence outcome, not "completion" (there is
-// nothing left to complete).
-func TestFinalizeFault_PostCleanup_KillThenCleanRefusal(t *testing.T) {
+// --- stage (e): after all cleanup mutations -------------------------------
+
+func TestFinalizeFault_PostCleanup_KillThenConverge(t *testing.T) {
 	clearFinalizeStepHook(t)
 	g, fake, dir := newRepoExecutor(t)
 	stubBeadExport(t)
 	runGitIn(t, dir, "branch", "spec/077-test", "main")
 	fake.listEntries = nil
 
+	oldRead, oldWrite := finalizeMetadataReadFn, finalizeMetadataWriteFn
+	t.Cleanup(func() { finalizeMetadataReadFn, finalizeMetadataWriteFn = oldRead, oldWrite })
+	metadata := map[string]interface{}{}
+	finalizeMetadataWriteFn = func(_ string, updates map[string]interface{}) error {
+		for key, value := range updates {
+			metadata[key] = value
+		}
+		return nil
+	}
+	finalizeMetadataReadFn = func(string) (map[string]interface{}, error) { return metadata, nil }
+
 	finalizeStepHookFn = failAtStage("post_cleanup")
-	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	_, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, false)
 	if err == nil || !errors.Is(err, errFinalizeFault) {
 		t.Fatalf("expected the post_cleanup kill, got: %v", err)
 	}
@@ -302,11 +299,7 @@ func TestFinalizeFault_PostCleanup_KillThenCleanRefusal(t *testing.T) {
 	}
 
 	finalizeStepHookFn = nil
-	_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
-	if err == nil {
-		t.Fatal("expected the re-invocation to hit FinalizeEpic's own clean 'spec branch does not exist' refusal")
-	}
-	if got := err.Error(); got != "spec branch spec/077-test does not exist" {
-		t.Errorf("expected the clean named refusal, got: %q", got)
+	if _, err := g.ResumeFinalizedEpic("epic-1", "077-test", nil, false); err != nil {
+		t.Fatalf("publication evidence must converge after deletion: %v", err)
 	}
 }

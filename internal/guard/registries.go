@@ -155,6 +155,55 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",
+		Rationale:  "The recovery substitutes idrender.Spec(specID). Both callers validate specID before this helper runs. The command repeats implementation approval and does not remove work.",
+		Obligation: "internal/executor TestFinalizeEpic_RefusalsHaveRunnableRecovery pins the branch-probe refusal and its runnable approval command."},
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg2:unprovable",
+		Rationale:  "The absent-branch refusal first asks for branch restoration, then substitutes idrender.Spec(specID) into the approval command. Both callers validate specID before this helper runs.",
+		Obligation: "internal/executor TestFinalizeEpic_RefusalsHaveRunnableRecovery pins the absent-branch refusal and its runnable approval command."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkBeadCleanupWorktree", Detail: "arg1:unprovable",
+		Rationale:  "The status and inspection refusals retry completion with idrender.Bead(beadID). CompleteBead validates the ID before cleanup. The command removes no work by itself.",
+		Obligation: "internal/executor TestCleanupBead_ReadFailurePreservesWork pins the retry command and no removal on read errors."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkBeadCleanupWorktree", Detail: "arg2:unprovable",
+		Rationale:  "The user-change refusal asks for pending work to be preserved, then retries completion with the validated, ID-rendered bead ID.",
+		Obligation: "internal/executor TestCompleteBead_MergeHookPreservesWorkAndRetry pins the retry command, preserved hook output, and convergence after preservation."},
+	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeOrphanedSpecBranch", Detail: "arg1:unprovable",
+		Rationale:  "Temporary-worktree removal failures retry implementation approval with idrender.Spec(specID). Both finalization callers validate specID before this helper runs.",
+		Obligation: "internal/executor TestFinalizeOrphanedSpecBranch_HookWorkPreservedAndRetry pins the approval retry and preservation before leftover and post-publication cleanup."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkMergedFinalizeWorktree", Detail: "arg1:unprovable",
+		Rationale:  "The worktree read-error refusals substitute idrender.Spec(specID) into the approval command. Both finalization callers validate specID before this helper runs.",
+		Obligation: "internal/executor TestFinalizeMergedWorktree_ReadFailuresKeepWork pins the runnable command and no removal on status and inspection errors in both finalization paths."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkMergedFinalizeWorktree", Detail: "arg2:unprovable",
+		Rationale:  "The dirty merged-worktree refusal asks for pending work to be preserved, then substitutes idrender.Spec(specID) into the approval command. Both finalization callers validate specID before this helper runs.",
+		Obligation: "internal/approve TestApproveImpl_RerunKeepsDirtyMergedBead and TestApproveImpl_BranchMissingKeepsDirtyMergedBead pin the approval command and preservation of the dirty worktree on both publication paths."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkTemporaryFinalizeWorktree", Detail: "arg1:unprovable",
+		Rationale:  "Read refusals retry implementation approval with idrender.Spec(specID). Both finalization callers validate specID before this temporary-checkout helper runs.",
+		Obligation: "internal/executor TestFinalizeOrphanedSpecBranch_LeftoverReadFailurePreservedAndRetry pins the retry command and checkout preservation on registration and status read errors."},
+	{File: "internal/executor/mindspec_executor.go", Func: "checkTemporaryFinalizeWorktree", Detail: "arg2:unprovable",
+		Rationale:  "Pending-work recovery preserves changes at a safe path. An unregistered-directory refusal asks the user to move it aside. Both then retry approval with the ID-rendered spec ID.",
+		Obligation: "internal/executor TestFinalizeOrphanedSpecBranch_HookWorkPreservedAndRetry and TestFinalizeOrphanedSpecBranch_UnregisteredDirectoryPreservedAndRetry pin preservation, recovery text, and convergence."},
+	{File: "internal/approve/impl.go", Func: "implFinalizeFailure", Detail: "arg1:unprovable",
+		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
+		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "variadic-spread:commands", Rationale: "Busy-worktree recovery names status, merge repair, and complete. An own-branch merge offers abort before the follow-up sequence.", Obligation: "TestComplete_ClosedOwnMergeInProgressAborts and TestComplete_ClosedMergedForeignMergeInProgressRefuses pin identity and state preservation."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg1:unprovable", Rationale: "The command is a status read in the validated spec worktree.", Obligation: "TestComplete_ClosingPathSpecWorktreeBusyRefuses pins the pre-close refusal."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg2:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted override reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},
+	{File: "internal/mergefollowup/recovery.go", Func: "MovedTipFailure", Detail: "variadic-spread:commands", Rationale: "The shared recovery preserves the tip before reset-with-keep, then cherry-picks before deleting the saved branch. It executes no command. IDs use idrender and the worktree path is shell-quoted.", Obligation: "TestComplete_FollowupRecoveryOrder and TestFinalizeMerges_MovedBeadTipRefusesBeforeMutation pin preservation and recovery order in both callers."},
+	{File: "internal/complete/closing.go", Func: "mergedRangeFailure", Detail: "variadic-spread:commands", Rationale: "Repair guidance contains a scoped amend, marker removal, complete retry and audited overrides.", Obligation: "TestComplete_ClosingPathGatesMergeRange pins the measured range and later-commit refusal."},
+	{File: "internal/complete/merge_only.go", Func: "checkMergeMarker", Detail: "arg1:unprovable", Rationale: "The recovery removes a fixed metadata key from a validated bead.", Obligation: "TestComplete_ForeignMarkerRefuses pins refusal before close."},
+	{File: "internal/complete/merge_only.go", Func: "completionFailure", Detail: "arg1:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},
+	{File: "internal/complete/merge_only.go", Func: "ownershipCompletionFailure", Detail: "arg1:unprovable", Rationale: "The retry is complete with merge-only for the validated bead.", Obligation: "TestComplete_OwnershipConflictRefusesBeforeClose pins refusal before close."},
+	{File: "internal/complete/merge_only.go", Func: "runMergeOnly", Detail: "arg1:unprovable", Rationale: "The retry is complete merge-only with resolve-merge and shell-quoted reasons when needed.", Obligation: "TestComplete_MergeOnlyConflictStaysMergeOnly pins re-entry and open state."},
+	{File: "internal/lifecycle/merge_state.go", Func: "RestoreMergeRecovery", Detail: "variadic-spread:commands",
+		Rationale:  "Restore guidance uses escaped, shell-quoted operands. A clean spec checkout permits the path restore only through the destructive command constructor. Other outcomes retain whole-commit revert guidance.",
+		Obligation: "internal/lifecycle TestMergeState_RestoreCheckoutFromConstructor pins the constructor and rendered restore. TestMergeState_RestoreOmitsCheckoutOnUserChanges pins the omitted choice for unsafe or unreadable checkouts."},
+	{File: "internal/lifecycle/stale_open.go", Func: "StaleOpenBead.Message", Detail: "arg1:unprovable",
+		Rationale:  "The informational finding uses the shared recovery builder. Its only command is mindspec complete with an ID-rendered bead operand.",
+		Obligation: "internal/doctor TestDoctor_StaleOpenSeverityFromGitState checks the valid-merge recovery and Info status. TestDoctor_FixSkipsStaleOpenInfo proves that the finding has no automatic close."},
+	{File: "internal/complete/complete.go", Func: "landingOwnershipError.Error", Detail: "arg1:unprovable",
+		Rationale:  "The recovery renders the actual ID with idrender.Bead. Preserved-merge refusals add --resolve-merge. The scan cannot fold the rendered operand.",
+		Obligation: "internal/complete TestLandingOwnershipError_RendersBeadID checks emitted recovery operands and terminal escaping against the destructive floor. TestCommittedRangeGate_SourceConflictPassesThenResolves pins the preserved refusal and its recovery."},
 	{File: "internal/approve/impl.go", Func: "implLedgerPreflight", Detail: "arg1:unprovable",
 		Rationale:  "Ledger recovery is constructed by LedgerCommitRecovery or CheckPanelLedgers using shell-quoted checkout and ledger paths. The commands are git add, commit or check-ignore, plus mindspec init; none is a destructive floor command. Terminal controls are escaped before shell quoting. The scan cannot fold these helper calls.",
 		Obligation: "internal/complete TestLedger_RecoveryOperands checks the actual recovery builders against the destructive floor and shell operand round trips, including metacharacter-bearing paths. TestImplApprove_IgnoredLedgerRefuses and TestImplApprove_UncommittedLedgerRefuses pin the actual approval callers; TestLedger_IgnoredPathRefuses and TestComplete_CommitsLedgerFailureRecovery pin the completion callers."},
@@ -771,6 +820,14 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Obligation: mindspecVerbTemplateObligation,
 	},
 
+	{
+		File:       "internal/executor/mindspec_executor.go",
+		Func:       "MindspecExecutor.checkFinalizeBeadMerge",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The ancestry-read refusal uses a fixed implementation-approval command with an idrender.Spec operand.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+
 	// Spec 127 bead 6 (R4): the merge-destruction preflight's own refusal
 	// builders, one pair per boundary layer (internal/executor's own
 	// backstop and internal/lifecycle's ADR-0030 wrapper the §1-phase
@@ -788,7 +845,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/executor/merge_preflight.go",
 		Func:       "evidenceErrorRefusal",
 		Detail:     "arg1:unprovable",
-		Rationale:  "the recovery line's `rerun` operand is a plain string parameter supplied by this function's two callers (preflightMergeDestruction's own two callers, CompleteBead and FinalizeEpic) — no fold can prove it here.",
+		Rationale:  "the recovery line's `rerun` operand is a plain string parameter supplied by preflightMergeDestruction's three callers (CompleteBead, FinalizeEpic and PreflightFinalizeMerges) — no fold can prove it here.",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument, the same shape beadToSpecConflictFailure's entry above already registers via TestOpaqueOperandRegistry_RerunCallers.",
 	},
 	{
@@ -802,7 +859,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "internal/lifecycle/merge_preflight.go",
 		Func:       "workDestructionEvidenceErrorRefusal",
 		Detail:     "arg1:unprovable",
-		Rationale:  "the §1-phase (verb-layer) counterpart of internal/executor's evidenceErrorRefusal above — same shape, a plain string `rerun` parameter supplied by this function's two callers (internal/complete and internal/approve's own §1 preflights).",
+		Rationale:  "the §1-phase (verb-layer) counterpart of internal/executor's evidenceErrorRefusal above — same shape, a plain string `rerun` parameter supplied by this function's caller (internal/complete's preflight).",
 		Obligation: "registries_test.go's TestOpaqueOperandRegistry_MergePreflightRerunCallers asserts the classifier finds no floor match in every real caller's actual rerun argument.",
 	},
 	{
@@ -915,6 +972,8 @@ const exemptionHollowObligation = "internal/lint's TestDestructiveGuidanceSweep_
 // len(KnownSitesExemptionList) against the derived total, never a
 // hand-typed number.
 var KnownSitesExemptionList = []KnownSiteExemptionEntry{
+	{Surface: "project-docs/user/guides/merge-safety.md", Text: "git -C \"<spec worktree>\" checkout <merge> -- <paths>", Count: 1, Family: FamilyGitCheckoutPathspecDiscard, Rationale: "The restore is an explicit path-scoped choice in a clean spec worktree. It follows inspection of the named merge and paths.", Obligation: "TestKnownSitesExemptionList_MergeOnlyRestore pins the clean-worktree limit and restore-then-close order."},
+
 	// The ten LIVE entries — reconciled against this spec's
 	// Background inventory at quoted-string grain (the eight
 	// Background named) plus the two "ms-bead-cycle" skill-map-key

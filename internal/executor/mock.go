@@ -1,6 +1,9 @@
 package executor
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // LsFiles records the tracked-path query.
 func (m *MockExecutor) LsFiles(workdir, path string) (bool, error) {
@@ -14,29 +17,39 @@ func (m *MockExecutor) LsFiles(workdir, path string) (bool, error) {
 // MockExecutor implements Executor for testing. It records all method calls
 // and returns configurable results. Safe for concurrent use.
 type MockExecutor struct {
+	MergeBeadFn         func(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error
+	CleanupBeadFn       func(beadID, specBranch string) error
+	FirstParentMergesFn func(ref string) ([]MergeIdentity, error)
+	CompletionStateFn   func(workdir, base, head string) (CompletionState, error)
+	PublishBeadCloseFn  func(workdir string, paths []string) error
+
 	mu    sync.Mutex
 	Calls []MockCall
 
 	// Return values (set before test).
-	InitSpecWorkspaceResult WorkspaceInfo
-	InitSpecWorkspaceErr    error
-	HandoffEpicErr          error
-	DispatchBeadResult      WorkspaceInfo
-	DispatchBeadErr         error
-	CompleteBeadErr         error
-	FinalizeEpicResult      FinalizeResult
-	FinalizeEpicErr         error
-	CleanupErr              error
-	IsTreeCleanErr          error
-	DiffStatResult          string
-	DiffStatErr             error
-	CommitCountResult       int
-	CommitCountErr          error
-	CommitAllErr            error
-	ChangedFilesResult      []string
-	ChangedFilesErr         error
+	InitSpecWorkspaceResult    WorkspaceInfo
+	InitSpecWorkspaceErr       error
+	HandoffEpicErr             error
+	DispatchBeadResult         WorkspaceInfo
+	DispatchBeadErr            error
+	CompleteBeadErr            error
+	FinalizeEpicResult         FinalizeResult
+	FinalizeEpicErr            error
+	ResumeFinalizedEpicResult  FinalizeResult
+	ResumeFinalizedEpicErr     error
+	PreflightFinalizeMergesErr error
+	PushProbeErr               error
+	CleanupErr                 error
+	IsTreeCleanErr             error
+	DiffStatResult             string
+	DiffStatErr                error
+	CommitCountResult          int
+	CommitCountErr             error
+	CommitAllErr               error
+	ChangedFilesResult         []string
+	ChangedFilesErr            error
 
-	// ChangedFilesOptionsFn lets rebind tests inspect the diff options.
+	// ChangedFilesOptionsFn lets tests inspect path-listing options.
 	ChangedFilesOptionsFn func(base, head string, options []ChangedFilesOptions) ([]string, error)
 
 	// ChangedFilesFn, when non-nil, takes precedence over
@@ -58,11 +71,16 @@ type MockExecutor struct {
 	// TreeDirsAtRefFn, when non-nil, fully drives TreeDirsAtRef so tests
 	// can return ref-dependent domain-directory enumerations. When nil,
 	// the simple result fields below are returned.
-	TreeDirsAtRefFn     func(ref, dirPath string) ([]string, error)
-	TreeDirsAtRefResult []string
-	TreeDirsAtRefErr    error
-	MergeBaseResult     string
-	MergeBaseErr        error
+	TreeDirsAtRefFn       func(ref, dirPath string) ([]string, error)
+	TreeDirsAtRefResult   []string
+	TreeDirsAtRefErr      error
+	LandingTreeFn         func(workdir, base, specTip, beadRef string) (string, []string, error)
+	LandingTreeResult     string
+	LandingTreeConflicted []string
+	LandingTreeErr        error
+
+	MergeBaseResult string
+	MergeBaseErr    error
 	// Panel-gate git seams (spec 099). RevParseRefFn / StatusFn / IsRefNotFoundFn,
 	// when non-nil, fully drive the corresponding method so tests can inject
 	// staleness / dirty-tree / ref-not-found facts; otherwise the simple result
@@ -198,9 +216,27 @@ func (m *MockExecutor) CompleteBead(beadID, specBranch, msg, overrideReason stri
 	return m.CompleteBeadErr
 }
 
-func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error) {
-	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge)
+func (m *MockExecutor) PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error {
+	m.record("PreflightFinalizeMerges", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, hasRemote)
+	return m.PreflightFinalizeMergesErr
+}
+
+func (m *MockExecutor) PushProbe(branch string) error {
+	m.record("PushProbe", branch)
+	return m.PushProbeErr
+}
+
+func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error) {
+	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge, hasRemote)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
+}
+
+func (m *MockExecutor) ResumeFinalizedEpic(epicID, specID string, children []string, hasRemote bool) (FinalizeResult, error) {
+	m.record("ResumeFinalizedEpic", epicID, specID, children, hasRemote)
+	if m.ResumeFinalizedEpicErr == nil && m.ResumeFinalizedEpicResult == (FinalizeResult{}) {
+		return FinalizeResult{}, errors.New("no publication evidence")
+	}
+	return m.ResumeFinalizedEpicResult, m.ResumeFinalizedEpicErr
 }
 
 func (m *MockExecutor) Cleanup(specID string, force bool) error {
@@ -229,7 +265,11 @@ func (m *MockExecutor) CommitAll(path, msg string) error {
 }
 
 func (m *MockExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
-	m.record("ChangedFiles", base, head)
+	args := []any{base, head}
+	for _, option := range options {
+		args = append(args, option)
+	}
+	m.record("ChangedFiles", args...)
 	if m.ChangedFilesOptionsFn != nil {
 		return m.ChangedFilesOptionsFn(base, head, options)
 	}
@@ -470,3 +510,51 @@ type mockNotIgnored struct{}
 
 func (mockNotIgnored) Error() string { return "exit status 1" }
 func (mockNotIgnored) ExitCode() int { return 1 }
+
+func (m *MockExecutor) LandingTree(workdir, base, specTip, beadRef string) (string, []string, error) {
+	m.record("LandingTree", workdir, base, specTip, beadRef)
+	if m.LandingTreeFn != nil {
+		return m.LandingTreeFn(workdir, base, specTip, beadRef)
+	}
+	tree := m.LandingTreeResult
+	if tree == "" {
+		tree = "mock-landing-tree"
+	}
+	return tree, m.LandingTreeConflicted, m.LandingTreeErr
+}
+
+func (m *MockExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error {
+	m.record("MergeBead", beadID, specBranch, overrideReason, resolveMerge, opts)
+	if m.MergeBeadFn != nil {
+		return m.MergeBeadFn(beadID, specBranch, overrideReason, resolveMerge, opts)
+	}
+	return nil
+}
+func (m *MockExecutor) CleanupBead(beadID, specBranch string) error {
+	m.record("CleanupBead", beadID, specBranch)
+	if m.CleanupBeadFn != nil {
+		return m.CleanupBeadFn(beadID, specBranch)
+	}
+	return nil
+}
+func (m *MockExecutor) FirstParentMerges(ref string) ([]MergeIdentity, error) {
+	m.record("FirstParentMerges", ref)
+	if m.FirstParentMergesFn != nil {
+		return m.FirstParentMergesFn(ref)
+	}
+	return nil, nil
+}
+func (m *MockExecutor) CompletionState(workdir, base, head string) (CompletionState, error) {
+	m.record("CompletionState", workdir, base, head)
+	if m.CompletionStateFn != nil {
+		return m.CompletionStateFn(workdir, base, head)
+	}
+	return CompletionState{}, nil
+}
+func (m *MockExecutor) PublishBeadClose(workdir string, paths []string) error {
+	m.record("PublishBeadClose", workdir, paths)
+	if m.PublishBeadCloseFn != nil {
+		return m.PublishBeadCloseFn(workdir, paths)
+	}
+	return nil
+}

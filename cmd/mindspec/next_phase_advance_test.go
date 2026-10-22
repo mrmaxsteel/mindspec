@@ -43,7 +43,7 @@ func wireAdvancePhaseFixtureWithChildren(t *testing.T, beadID, epicID string, ep
 	beadShowJSON, _ := json.Marshal([]map[string]interface{}{{
 		"title": "[010-test] a bead",
 		"dependencies": []map[string]interface{}{
-			{"id": epicID, "issue_type": "epic"},
+			{"id": epicID, "issue_type": "epic", "dependency_type": "parent-child"},
 		},
 	}})
 	epicJSON, _ := json.Marshal([]phase.EpicInfo{{
@@ -293,7 +293,7 @@ func (f *mutableInterleaveFixture) stub(t *testing.T) {
 	t.Helper()
 	beadShowJSON, _ := json.Marshal([]map[string]interface{}{{
 		"title":        "[010-test] a bead",
-		"dependencies": []map[string]interface{}{{"id": f.epicID, "issue_type": "epic"}},
+		"dependencies": []map[string]interface{}{{"id": f.epicID, "issue_type": "epic", "dependency_type": "parent-child"}},
 	}})
 	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "show" && args[1] == f.beadID {

@@ -131,7 +131,10 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
      current tip (`ChangedFilesTree(currentTip, T')`, where `T'` is the
      S-stage's own snapshot), the run REFUSES — named paths, before
      `MaterializeStageCommit`/the marker publication for `D` — if that
-     delta contains ANY path outside the named-artifact set. Because the
+     delta contains ANY path outside the named-artifact set. Normal and
+     merge-only completion use `--no-renames --name-only -z` for this
+     delta. Both rename endpoints and exact filename bytes reach the
+     artifact classifier. Because the
      check inspects the SAME data the commit is built from rather than a
      prior read, the classification-to-snapshot race is closed by
      construction, not narrowed: there is no window left in which a
@@ -315,7 +318,9 @@ forward-reconcile contract rather than a new one:
   item-1 squash blind spot at both of its consumers (the protected-main
   already-merged probe and the doctor merged-carrier suppression), which
   route through one shared exported predicate so neither consumer can drift
-  into its own reimplementation.
+  into its own reimplementation. The tracker-only fallback uses
+  `--no-renames --name-only -z`. Both rename endpoints must qualify, and
+  filename bytes stay exact.
 
 ### 3. The kill/forward-safe classification (AC-26's fault-injection matrix)
 
@@ -749,6 +754,7 @@ is non-corroborating, never a contradiction or a veto. Empty, placeholder
 and malformed values are non-corroborating and never git operands.
 Reattest records a non-matching set as non-corroborating and can proceed
 on datum (a). The set alone never confirms an ancestor or a fallback.
+See [Amendment (Spec 132)](#amendment-spec-132) for the reviewed-tree rule on first-parent candidates.
 
 These semantics reach the CLOSE paths through `FindLandedMerge`:
 `MergedUnclosed`, `complete`'s reconcile and `stale_open`, as well as
@@ -757,7 +763,8 @@ evidence Spec 125 did not admit: an exact tip, binding or panel match
 confirms; a non-matching set alone yields `LandedMergeNoEvidence`, which
 `MergedUnclosed` propagates as an error and never a close. On the normal
 completion path, complete lands a commit no panel reviewed (OQ-3), so
-the panel leg is normally non-corroborating; binding review to landing
+the panel leg is normally non-corroborating. See [Amendment (Spec 132)](#amendment-spec-132).
+Binding review to landing
 belongs to the panel substrate.
 
 **Binding veto versus audited repair:** a contradictory surviving tip or
@@ -806,3 +813,178 @@ self-consistency provide no authentication of agent-writable metadata.
 - **Pre-close audit (R4.5).** `panel_rebound_entries` copies the bead panel's
   rebind entries through the same fail-closed pre-close metadata stage as
   `panel_refuted`. A failed audit write refuses completion before close.
+
+## Amendment (Spec 132)
+
+### Implementation approval preflight
+
+`ApproveImpl` makes one error-returning has-remote decision after the migration
+exemption and before the spec-branch existence switch. A read error refuses with
+`cannot tell whether a git remote is configured`, then `recovery: git remote -v`.
+An error never selects a local merge.
+
+`PreflightFinalizeMerges` checks the layout guard and work-destruction predicate
+for every pending bead-to-spec merge in the lifecycle allow-set. On the direct
+path it also checks the spec-to-main merge. It uses the same candidate helper as
+`FinalizeEpic` and writes no state. It also checks for an existing naming merge.
+A pending bead with one refuses with `complete`'s moved-tip text and follow-up
+recovery. `FinalizeEpic` checks all candidates before its first write and repeats
+this check after artifact commits, before each live merge.
+These early checks run before the placeholder ADR write, the stale-phase
+reconcile write, and the epic close.
+
+On the push path, `PushProbe` runs `git push --dry-run --no-verify` with the same
+remote and refspec as `PushBranch`, with `GIT_TERMINAL_PROMPT=0`. Only a failed
+probe refuses. A missing credential helper alone does not refuse. The refusal
+adds a credential-helper hint only for an authentication error on an HTTP(S)
+remote. The real push still runs its pre-push hooks.
+
+`FinalizeEpic` receives the has-remote value as a parameter and does not probe
+again. The early guards, push probe, and finalization use this one value.
+The executor keeps both live guards before each merge. It reads the current tips
+after artifact commits and bead auto-merges. Both early and live guards must pass.
+
+### Implementation approval recovery
+
+Implementation approval reads the epic status after a failure in the close or
+finalize chain. It prints one state line before the error: `epic closed` or
+`epic still open`, with the failed finalize stage. An unreadable status is
+reported as unknown. The inner recovery lines stay unchanged and come last.
+Approval adds `recovery: mindspec impl approve <spec>` only when the inner error
+has no recovery line. A failed real pre-push hook follows this post-close rule.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+returns a stage error and stops before publication or cleanup. Pending files,
+worktrees, and branches remain. The error ends with the approval retry command.
+A retry can finish after the fault is fixed. An absent spec worktree has no
+artifact commit to run. An absent pending bead worktree also has no artifact
+commit to run; its branch can still merge through the spec worktree.
+
+After publication and its hooks, finalization checks every scoped bead worktree
+and the spec worktree before forced removal of those worktrees. Pending changes or a read error
+return a cleanup-stage failure. No worktree or branch is removed. Approval prints
+the epic state line and keeps the inner recovery commands. Preserve the pending
+changes, leave the worktree clean, and retry approval.
+
+`FinalizeEpic` writes `mindspec_finalize_tip` after the export commit and all
+bead auto-merges, immediately before publication. Every run overwrites this key.
+The pre-finalize routing checkpoint stays separate. A retry uses one close,
+skips merged beads and a completed direct merge, and skips a push when the
+remote already has the same tip. Before it skips a merged bead, it checks the
+remaining worktree. Pending changes or an unreadable status stop the run before
+cleanup. The branch and worktree remain for recovery. It completes remaining
+cleanup only after these checks pass. A protected-main
+retry uses the same carrier branch. When that remote head differs, it pushes with
+`--force-with-lease` on the SHA that `git ls-remote` reads just before the push.
+The executor opens no PR. The finalize-PR automation (§4) adopts an open PR
+for the same carrier head and base, so a retry opens no second PR while the first is
+open or merged.
+This also applies after local spec-branch deletion.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+While the spec branch exists, approval runs every pre-close gate again on its
+current tip. A closed epic does not bypass a gate. After local branch deletion,
+`already landed` requires that the epic is closed and the stored phase is done.
+The final publication tip and every lifecycle child's landed binding must be
+ancestors of the target. The target is local main on the direct path. On the
+push path, approval reads the remote spec head, then fetches it into a temporary
+ref. If the host deleted that head, it fetches remote main instead. A fetch
+failure, missing object, or squash or rebase merge refuses with the branch-missing
+adopt recovery. Approval does not recreate a deleted remote spec branch. Cleanup
+runs the destruction guard again and removes only bead branches whose tips are
+ancestors of the target. Before its first removal, it checks all scoped bead
+worktrees and the spec worktree with the same check as `FinalizeEpic`. Pending
+changes, an unreadable status, or a worktree inspection error return a
+cleanup-stage failure. All remaining worktrees and branches survive for recovery.
+
+### Reviewed-tree confirmation
+
+This subsection changes Amendment (Spec 129), part (ii), for
+`FindLandedMerge`. The reviewed set R comes from panel registrations and
+ledger-backed rebinds. The `mindspec_landed_reviewed_sha` key counts only
+when it is in R. An unregistered key is unverified and confirms nothing.
+
+A subject-named first-parent candidate has second parent D. The panel datum
+confirms when D is in R (`exact`). It also confirms when some r in R is an
+ancestor of D and `git diff --no-renames --name-only -z r D` lists no paths
+or only tool-artifact paths (`reviewed-tree`). The tool-artifact set comes
+from `panel.ToolArtifactPaths` for the spec directory of the spec branch
+that the caller names. On the close path, this is the bead's own spec.
+The review glob is limited to that spec. Another spec's artifacts
+do not qualify. Rename detection stays off so both paths must qualify.
+An unavailable review object or failed review read confirms nothing.
+
+The datum confirms and never vetoes. A tip or binding contradiction still
+refuses. The revert check still runs after confirmation. The provenance
+string names `exact` or `reviewed-tree`. The reachable-fallback path does
+not evaluate this datum. Its audited git checks remain in force.
+
+### Merge-only commit and closing call
+
+`complete --merge-only` is a commit phase with no close. It runs the panel
+and content gates, materializes the bead, records pending mode, and merges.
+It prints the merge SHA and both parents and records the SHA.
+It leaves the bead open, with no landed binding, ledger commit, marker clear,
+or workspace removal.
+
+Git state selects the closing call. A bead has at most one naming merge.
+The merge's second parent must equal the bead tip. An open bead also needs
+its merged changes present at the spec tip. A repeated merge-only call
+records the same valid merge and makes no new merge. Metadata is a hint.
+
+The closing call runs the full panel gate at the bead tip. It measures
+doc-sync, ADR divergence, and ownership over M^1..M, with M as ownerRef.
+Doc-sync and ADR-divergence path reads disable rename detection and use
+NUL separators. Both endpoints and exact filename bytes reach classification.
+Domain enumeration preserves exact name bytes too.
+A later commit does not change M. An ownership or doc-only repair can
+amend M when M is the spec tip and no landed binding exists. Stage only
+the named repair paths. Clear the old merge-only SHA after the amend.
+Adding an owning domain to Impacted Domains and the audited gate overrides
+remain available exits.
+
+The closing call checks spec-worktree merge state and staged paths first.
+It then closes, writes the binding and reviewed identity, records overrides,
+publishes the close with a path-scoped export and ledger commit in the spec worktree,
+clears the stage and merge-only markers, and reads bead user changes again
+immediately before removal. The executor repeats this check at removal, including
+the older combined commit and merge path. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read error refuse with a completion retry command.
+The pending file, worktree, and branch remain.
+A failed step keeps the later steps pending. Retry recovery repeats any
+doc-skew or ADR override flag and its reason.
+
+The proportional claim guard exempts a rename or copy only when both endpoints
+match artifact paths. It names both endpoints when either is user dirt.
+
+A closed resume re-runs the full panel gate and M's content gates, checks
+the tip and user changes, and resumes every remaining step. It skips the
+presence check. In a non-flat layout, an absent bead worktree with no
+surviving panel registration refuses when the panel gate is enforced.
+A closed child of the spec epic without a naming merge runs the merge
+recovery without a second close. It publishes the export and ledger before cleanup.
+An epic, phase, or child-status read failure refuses before close, merge,
+or cleanup. The recovery retries completion. A closed-unmerged conflict
+keeps its line boundaries and ends with one `--resolve-merge` recovery,
+and the executor omits `--merge-only` from every re-entry hint on this path.
+Other merge guard failures keep their recovery.
+
+When an ownership manifest conflicts, an open plain completion refuses
+before close. Merge-only and closed-unmerged recovery preserve the merge.
+Re-entry reads ownership from the resolved index. A hand-committed merge
+is checked over M^1..M before recording or close.

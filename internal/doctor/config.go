@@ -53,6 +53,21 @@ const builtinSourceDefaultDisclosure = "doc-sync is classifying source with the 
 // (`extra_source_globs:`) keys correctly classified as NON-matches.
 var sourceGlobsKeyRE = regexp.MustCompile(`(?m)^source_globs[ \t]*:`)
 
+// Match only an unindented, uncommented key. Permit spaces before the colon.
+var legacyMergeStrategyKeyRE = regexp.MustCompile(`(?m)^merge_strategy[ \t]*:`)
+
+func checkLegacyMergeStrategy(r *Report, root string) {
+	data, err := os.ReadFile(filepath.Join(root, ".mindspec", "config.yaml"))
+	if err != nil || !legacyMergeStrategyKeyRE.Match(data) {
+		return
+	}
+	r.Checks = append(r.Checks, Check{
+		Name:    ".mindspec/config.yaml merge_strategy",
+		Status:  Info,
+		Message: "merge_strategy is no longer used; remove it from .mindspec/config.yaml",
+	})
+}
+
 // checkSourceGlobs emits the missing-source-globs Warn (spec 091
 // Req 18) when .mindspec/config.yaml is absent, lacks the
 // source_globs: field, or declares it empty. The Warn discloses the

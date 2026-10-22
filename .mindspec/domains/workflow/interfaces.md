@@ -2,6 +2,29 @@
 
 ## Provided Interfaces
 
+### Doctor status and merge state
+
+`doctor.Info` renders as `[INFO]`. `Report.HasFailures` counts only Error
+and Missing. `Report.Fix` never runs an Info fix function.
+
+Doctor reports one Info for a top-level `merge_strategy` key in
+`.mindspec/config.yaml`: `merge_strategy is no longer used; remove it from .mindspec/config.yaml`.
+A commented or indented key gives no finding. This Info does not change
+the exit code. `doctor --fix` leaves the key in place.
+
+| Lifecycle function | Contract |
+|:-------------------|:---------|
+| `FindNamingMerges(root, specBranch, beadID)` | Delegates to the shared `gitutil.FindNamingMerges` query used by finalization. Returns two-parent naming merges on the first-parent chain, newest first. It does not check content or the bead tip. |
+| `CheckMergePresence(root, specBranch, specDir, merge)` | Returns changed paths, reverted paths and later commits that changed reverted paths. It runs independently of bead branch survival. |
+| `FindValidMerge(root, specBranch, beadID)` | Requires one naming merge, an exact second-parent match to the current bead tip, and no reverted path. Nil with no error means no valid merge. |
+| `MergeRestoreOutcome(specWorktree, specDir)` | Reads status. Tool artifacts do not count as user changes. A clean checkout returns `DestructionClean`; read errors return `DestructionEvidenceError`; user changes return `DestructionStaleDeletion`. |
+| `RestoreMergeRecovery(specWorktree, beadID, epicID, merge, presence, outcome)` | Builds restore and follow-up guidance. Only `DestructionClean` permits the path-scoped checkout choice. The choice uses the destructive command constructor. |
+
+`ScanIntegrityFindings` returns valid merges in `StaleOpen`, with
+`ValidMerge: true`. Doctor renders these at Info with no `FixFunc`.
+`RevertedMerges` holds open beads with reverted paths. Doctor renders these
+at Error with no `FixFunc`. These beads do not also appear in `StaleOpen`.
+
 ### Phase Derivation (ADR-0023)
 
 ```go
@@ -210,6 +233,11 @@ artifact dirt; other panel files retain their ordinary classification. The gate,
 next guard and impl approve share `panel.PorcelainPath` to decode git porcelain
 C-style quoted paths and rename destinations before matching, including
 non-ASCII spec and panel directory names and literal arrows in path names.
+The next guard matches decoded filename bytes exactly, including whitespace.
+Its proportional claim check exempts a rename or copy only when both endpoints
+match artifact paths. It names both endpoints of user renames and copies.
+Normal and merge-only completion read the artifact-sync snapshot delta with
+rename detection off and NUL separators. Filename bytes stay exact.
 On flat layouts complete checks each existing matched ledger with
 `exec.CheckIgnore` in the spec worktree before any side effect. After the
 bead merge, it commits all matched ledgers once with `exec.CommitPaths`
@@ -748,8 +776,8 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | Symbol | Purpose |
 |:-------|:--------|
 | `complete.runMaterialization` (`materialize.go`) | Orchestrates the M/R/S/G/T staged sequence over the execution domain's eight `Executor` seam methods — no `internal/gitutil` import (ADR-0030). |
-| `validate.ValidateDocsSnapshot(root, base, treeOID, wtPath, exec)` | The doc-sync gate's tree-vs-tree leg: measures `base..T` (a candidate tree, not a committed ref) instead of a committed range; unchanged `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. |
-| `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate's equivalent tree-vs-tree leg — `ownerRef` is FORCED to the same `treeOID` so attribution and diffed content come from the identical candidate. |
+| `validate.ValidateDocsSnapshot(root, base, treeOID, ownerRef, wtPath, exec)` | The doc-sync gate diffs `base..T` in `wtPath` and reads ownership at the separate landing-tree `ownerRef`; `ValidateDocsRange` still serves reconcile mode and `impl approve`'s whole-branch backstop. Both readers list both rename endpoints and preserve exact filename bytes. |
+| `validate.CheckADRDivergenceSnapshot` / `ValidateDivergenceSnapshot` | The ADR-divergence gate diffs candidate `treeOID` in `wtPath`. Both functions take a separate `ownerRef` for all ownership reads at the landing tree. |
 
 **Proportional claim guard (`internal/next/guard.go`, R5):**
 
@@ -801,7 +829,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
-| `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
+| `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
 | `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
@@ -1064,3 +1092,87 @@ refutation removes each covered item whose round and raw-text hash still match.
 It replays the recorded landed identity through `SetLandedReview` before
 `CompleteBead`. A resume with no recorded identity supplies none. Each new marker
 attestation overwrites both identity fields, including when there was no Allow.
+
+### Lineage health and spec IDs
+
+Spec approval writes the full spec ID to epic metadata `spec_id`.
+Legacy `spec_num` and `spec_title` stay available for numeric queries.
+Plan approval, lifecycle scans and scoped next selection use the phase
+package's full-ID resolver. A lettered ID resolves to its own directory.
+Scoped lookup refuses duplicate epic bindings, including closed duplicates.
+
+`mindspec spec create` accepts a bare slug or a numeric full ID. It refuses
+a new lettered full ID. Existing lettered spec directories remain valid.
+
+Doctor runs `checkLineage` after the lifecycle integrity check. It reports
+each open bead that only the old title rule would resolve, at Warn, with
+`bd update <bead> --parent <epic>` recovery. It also reports duplicate epic
+bindings at Warn. It continues to the remaining checks.
+
+Scoped next selection uses `phase.FindEpicLineageWithCache`. Its returned
+provenance replaces the second bead read. A foreign parent-child epic stays
+inspection-only. A mapped title-only row has no lineage and is N1.
+Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.
+
+## Merge-only completion
+
+| Surface | Contract |
+|:--|:--|
+| `mindspec complete <bead> --merge-only` | Run all gates and merge for verification. Print the full merge SHA and both parents. Keep the bead open. |
+| `--merge-only --resolve-merge` | Resume the preserved merge. Check ownership from the resolved index. Keep the bead open. |
+| Plain `complete` after a naming merge | Check the bead tip, user changes, panel, and M^1..M content. Publish the close before cleanup. |
+| `mindspec_merge_only=pending` | Retain merge-only mode across interruptions, including a plain re-entry. |
+| `mindspec_merge_only_sha` | Name the recorded merge. A foreign or non-naming marker refuses. Git state decides validity. |
+
+The closing call reads bead user changes again after publication and before
+removal. The executor repeats this check at removal. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read error refuse with a completion retry
+command. The pending file, worktree, and branch remain.
+
+The closing call clears both merge-only keys after publication. No key
+replaces the panel gate. A closed resume checks the same merge and tip,
+skips presence, and finishes the binding, override, export, marker, and
+cleanup steps. Step 1–4 recovery repeats the supplied doc-skew and ADR
+override flags with their reasons. A repeated merge-only call records the
+existing valid merge and makes no second merge.
+
+A closed child of the spec epic without a naming merge runs the merge
+recovery without a second close. It publishes the closed export and panel ledger before cleanup.
+An epic, phase, or child-status read failure refuses before close, merge,
+or cleanup. Retry completion when the read succeeds. A closed-unmerged
+conflict keeps its line boundaries and ends with one `--resolve-merge`
+recovery. The executor omits `--merge-only` from every re-entry hint on this path.
+Other merge guard failures keep their recovery.
+
+## Implementation approval finalization
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+
+Implementation approval checks pending beads for an existing naming merge before
+its first write. A moved tip refuses with the same follow-up recovery as
+`complete`. Finalization repeats the check before each live merge. An export or
+artifact-commit failure stops publication and cleanup. The error gives the epic
+state, the failed stage, and the approval retry command. An absent spec or pending
+bead worktree has no artifact commit to run. A pending bead branch can still
+merge through the spec worktree.
+
+After publication and its hooks, finalization checks all scoped bead worktrees
+and the spec worktree before forced removal of those worktrees. The branch-missing resume uses
+the same check before its first removal. Pending changes or a read error return
+a cleanup-stage failure with the epic state and recovery commands. No worktree
+or branch is removed.

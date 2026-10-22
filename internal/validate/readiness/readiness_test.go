@@ -1238,3 +1238,12 @@ func TestReadiness_DescriptionLegDefectsRefuse(t *testing.T) {
 		}
 	})
 }
+
+func TestBeadIndex_RequiresEpicPrefix(t *testing.T) {
+	if _, err := beadIndex("mindspec-x.3", "mindspec-y"); err == nil || !strings.Contains(err.Error(), "expected mindspec-y.<N>") {
+		t.Fatalf("foreign prefix must name the expected epic prefix: %v", err)
+	}
+	if n, err := beadIndex("mindspec-y.3", "mindspec-y"); err != nil || n != 3 {
+		t.Fatalf("valid prefix: %d %v", n, err)
+	}
+}

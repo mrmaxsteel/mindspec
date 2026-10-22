@@ -28,6 +28,7 @@ Workflow **uses** context packs (from context-system) to provide mode-appropriat
 |:--------|:--------|
 | `internal/approve/` | Spec, plan, and impl approval enforcement |
 | `internal/complete/` | Bead close-out orchestration |
+| `internal/mergefollowup/` | Recovery guidance shared by merge and completion gates |
 | `internal/next/` | Work selection, claiming, worktree dispatch |
 | `internal/spec/` | Spec creation (worktree-first flow) |
 | `internal/cleanup/` | Post-lifecycle worktree/branch cleanup |
@@ -47,6 +48,13 @@ Mode system is implemented. Beads is the single state store (ADR-0023) — no fi
 
 - **`mindspec next`** classifies dirty paths. If the only dirty path is `.beads/issues.jsonl`, the guard runs `bd export` from the main repo root to normalize the diff against stale throttled exports, then re-checks. User-authored dirt still blocks — the guard's purpose is to protect user code, not to enforce hygiene on derived files (`internal/next/guard.go`, citing ADR-0025).
 - **Executor commits** (`approve spec`, `approve plan`, `approve impl`, `complete`) refresh the JSONL via `bd export` before `git add -A`, so every mindspec-driven commit carries current beads state. In projects without a Dolt remote, this makes `git push` the off-machine durability guarantee.
+
+Completion dirt checks disable rename and copy detection. An artifact
+destination cannot hide a changed source. The exemption preserves decoded
+filename whitespace. A whitespace suffix makes a lookalike path user dirt.
+Normal and merge-only completion also check the artifact-sync snapshot delta
+with `--no-renames --name-only -z`. Filename bytes stay exact.
+The claim guard exempts a rename or copy only when both endpoints are artifacts.
 
 Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.
 

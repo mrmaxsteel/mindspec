@@ -122,7 +122,7 @@ func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, er
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ChangedFilesTree runs `git diff --name-only <base> <treeOID> --` in
+// ChangedFilesTree runs `git diff --no-renames --name-only -z <base> <treeOID> --` in
 // workdir — the tree-vs-tree leg of the prospective-snapshot protocol
 // (spec 128 bead 6): unlike DiffNameOnly's `base..head` RANGE-string
 // form, this passes base and treeOID as two SEPARATE revision operands
@@ -134,7 +134,8 @@ func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, er
 // cwd) so this is always measured against the SAME bead worktree the
 // snapshot itself was taken in — closing the g.Root-rooted
 // (ChangedFiles) and cwd-rooted (DiffNameOnlyRef("", ref)) holes the
-// OQ-1 mechanism names.
+// OQ-1 mechanism names. Rename and copy detection stay off so both endpoints
+// reach path classification. NUL splitting preserves exact filename bytes.
 func ChangedFilesTree(workdir, base, treeOID string) ([]string, error) {
 	if err := rejectOptionLike(base); err != nil {
 		return nil, err
@@ -142,12 +143,12 @@ func ChangedFilesTree(workdir, base, treeOID string) ([]string, error) {
 	if err := rejectOptionLike(treeOID); err != nil {
 		return nil, err
 	}
-	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-only", base, treeOID, "--")...)
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--no-renames", "--name-only", "-z", base, treeOID, "--")...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("diff --name-only %s %s: %w", base, treeOID, err)
 	}
-	return splitLines(string(out)), nil
+	return splitNUL(out), nil
 }
 
 // buildStageCommitMessage appends the pinned Mindspec-Stage trailer

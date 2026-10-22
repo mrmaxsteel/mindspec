@@ -1,4 +1,3 @@
-merge_strategy: pr
 
 # Review panels for this repo (operator decision 2026-10-18: keep the larger panels).
 # Pass rule: every finding is fixed, refuted with evidence or deferred; never out-voted.

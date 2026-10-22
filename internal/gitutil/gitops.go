@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -395,11 +396,14 @@ func AbortMerge(workdir string) error {
 }
 
 // DeleteBranch deletes a local branch.
-func DeleteBranch(name string) error {
+func DeleteBranch(name string, workdirs ...string) error {
 	if err := rejectOptionLike(name); err != nil {
 		return err
 	}
 	cmd := execCommand("git", "branch", "-D", "--", name)
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("deleting branch %s: %s", name, strings.TrimSpace(string(out)))
@@ -415,6 +419,16 @@ func HasRemote() bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) != ""
+}
+
+// RemoteConfigured reports whether any remote is configured. A failed
+// git read returns an error, not a local-only decision.
+func RemoteConfigured() (bool, error) {
+	out, err := execCommand("git", "remote").Output()
+	if err != nil {
+		return false, fmt.Errorf("reading git remotes: %w", err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // RemoteExistsIn reports whether a remote named name is configured in
@@ -540,6 +554,33 @@ func FetchRemoteBranchIn(workdir, remote, branch string) (string, error) {
 	return sha, nil
 }
 
+// FetchFinalizeTarget fetches one exact remote head into a temporary ref.
+// The caller owns the ref until release runs. It never reads a tracking ref.
+func FetchFinalizeTarget(workdir, branch string) (sha string, release func(), err error) {
+	if err := rejectOptionLike(branch); err != nil {
+		return "", nil, err
+	}
+	// A unique ref prevents concurrent runs from replacing this evidence.
+	ref := fmt.Sprintf("refs/mindspec/finalize/%d-%d", os.Getpid(), time.Now().UnixNano())
+	cmd := noPrompt(execCommand("git", "fetch", "--no-tags", "origin", "refs/heads/"+branch+":"+ref))
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", nil, fmt.Errorf("fetching finalize target: %s", termsafe.Escape(strings.TrimSpace(string(out))))
+	}
+	release = func() {
+		cmd := execCommand("git", "update-ref", "-d", ref)
+		cmd.Dir = workdir
+		_ = cmd.Run()
+	}
+	sha, err = RevParseRef(workdir, ref+"^{commit}")
+	if err != nil {
+		release()
+		return "", nil, err
+	}
+	return sha, release, nil
+}
+
 // DetectDefaultBranch returns the default branch name of remote (e.g. "main",
 // "develop") WITHOUT hardcoding (Spec 101 R4). It tries the cheap cached
 // `git symbolic-ref refs/remotes/<remote>/HEAD` first; if that output is empty
@@ -583,16 +624,55 @@ func DetectDefaultBranch(remote string) (string, error) {
 }
 
 // PushBranch pushes a branch to origin.
-func PushBranch(branch string) error {
+func PushBranch(branch string, workdirs ...string) error {
 	if err := rejectOptionLike(branch); err != nil {
 		return err
 	}
 	cmd := noPrompt(execCommand("git", "push", "-u", "origin", branch))
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pushing %s: %s", branch, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// PushProbe checks the same remote and refspec as PushBranch. It skips
+// hooks and disables terminal prompts. Only a failed push probe refuses.
+func PushProbe(workdir, branch string) error {
+	if err := rejectOptionLike(branch); err != nil {
+		return err
+	}
+	cmd := noPrompt(execCommand("git", "push", "--dry-run", "--no-verify", "-u", "origin", branch))
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		detail = err.Error()
+	}
+	msg := "push preflight failed: " + termsafe.Escape(detail)
+	text := strings.ToLower(string(out))
+	authFailure := strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "could not read username") ||
+		strings.Contains(text, "could not read password") ||
+		strings.Contains(text, "invalid username or password") ||
+		strings.Contains(text, "http basic: access denied") ||
+		strings.Contains(text, "error: 401")
+	if authFailure {
+		urlCmd := execCommand("git", "remote", "get-url", "--push", "origin")
+		urlCmd.Dir = workdir
+		url, urlErr := urlCmd.Output()
+		remoteURL := strings.ToLower(strings.TrimSpace(string(url)))
+		if urlErr == nil && (strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://")) {
+			msg += "\nhint: configure a git credential helper for this HTTP remote"
+		}
+	}
+	return guard.NewFailure(msg, "check remote access, then retry implementation approval")
 }
 
 // RemoteHeadSHA returns the SHA of refs/heads/<branch> on remote via
@@ -613,7 +693,7 @@ func PushBranch(branch string) error {
 // Every returned line is scanned and ONLY the one whose refname column is
 // EXACTLY "refs/heads/<branch>" is accepted; a decoy-only result yields ""
 // (absent), never the decoy's SHA.
-func RemoteHeadSHA(remote, branch string) (string, error) {
+func RemoteHeadSHA(remote, branch string, workdirs ...string) (string, error) {
 	if err := rejectOptionLike(remote); err != nil {
 		return "", err
 	}
@@ -621,6 +701,9 @@ func RemoteHeadSHA(remote, branch string) (string, error) {
 		return "", err
 	}
 	cmd := noPrompt(execCommand("git", "ls-remote", "--heads", remote, branch))
+	if len(workdirs) > 0 {
+		cmd.Dir = workdirs[0]
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("ls-remote %s %s: %w", remote, branch, err)
@@ -1609,6 +1692,21 @@ func StatusWithStderr(workdir string) (string, error) {
 	return string(out), nil
 }
 
+// StatusNoRenamesWithStderr lists each pending path separately. Disabling
+// rename and copy detection exposes source changes before artifact exemptions.
+// Untracked files are listed individually. Successful status bytes come only
+// from stdout; stderr is included in errors.
+func StatusNoRenamesWithStderr(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "--no-renames", "--untracked-files=all")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("status --porcelain --no-renames: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 // StatusZWithStderr runs `git status --porcelain -z` and returns stdout
 // on success, with stderr folded into the error on failure. The
 // NUL-terminated `-z` form is unambiguous where the newline form is not:
@@ -1723,20 +1821,103 @@ func DiffNameOnly(workdir, base, head string) ([]string, error) {
 	return splitLines(string(out)), nil
 }
 
-// DiffNameOnlyRef runs `git diff --name-only <ref>` in workdir (single-ref
-// form, comparing against the working tree). workdir=="" → cwd.
+// DiffNameOnlyNoRenames lists both sides of renames and preserves path bytes.
+func DiffNameOnlyNoRenames(workdir, base, head string) ([]string, error) {
+	if err := rejectOptionLike(base); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(head); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--no-renames", "--name-only", "-z", base, head, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("diff paths: %w", err)
+	}
+	return splitNUL(out), nil
+}
+
+// FirstParentCommitsAfter lists commits after base on head's first-parent
+// chain, newest first. Merge records include all parents.
+func FirstParentCommitsAfter(workdir, base, head string) ([]MergeCommit, error) {
+	if err := rejectOptionLike(base); err != nil {
+		return nil, err
+	}
+	if err := rejectOptionLike(head); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "log", "--first-parent", "--topo-order", "--format=%H%x00%P%x00%s", base+".."+head, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading later commits: %w", err)
+	}
+	var commits []MergeCommit
+	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\x00", 3)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("invalid commit record")
+		}
+		commits = append(commits, MergeCommit{SHA: fields[0], Parents: strings.Fields(fields[1]), Subject: fields[2]})
+	}
+	return commits, nil
+}
+
+// TreePathEntry reads a path's mode, type and object ID at ref. An empty
+// result means the path is absent. Read errors stay distinct from absence.
+func TreePathEntry(workdir, ref, path string) ([]byte, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return nil, err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "ls-tree", "-z", "--full-tree", ref, "--", path)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading tree path: %w", err)
+	}
+	return out, nil
+}
+
+// WorktreeForBranch returns the checkout of branch, or empty if absent.
+func WorktreeForBranch(workdir, branch string) (string, error) {
+	if err := rejectOptionLike(branch); err != nil {
+		return "", err
+	}
+	cmd := execCommand("git", gitArgs(workdir, "worktree", "list", "--porcelain", "-z")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("listing worktrees: %w", err)
+	}
+	var wt string
+	for _, field := range strings.Split(string(out), "\x00") {
+		if field == "" {
+			wt = ""
+		}
+		if strings.HasPrefix(field, "worktree ") {
+			wt = strings.TrimPrefix(field, "worktree ")
+		}
+		if field == "branch refs/heads/"+branch {
+			return wt, nil
+		}
+	}
+	return "", nil
+}
+
+// DiffNameOnlyRef compares ref against the working tree. It lists both rename
+// endpoints and preserves exact filename bytes. workdir=="" → cwd.
 func DiffNameOnlyRef(workdir, ref string) ([]string, error) {
 	if err := rejectOptionLike(ref); err != nil {
 		return nil, err
 	}
 	// Trailing `--` separates the single ref from any pathspec
 	// interpretation (single-ref form, not a range).
-	cmd := execCommand("git", gitArgs(workdir, "diff", "--name-only", ref, "--")...)
+	cmd := execCommand("git", gitArgs(workdir, "diff", "--no-renames", "--name-only", "-z", ref, "--")...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("diff --name-only %s: %w", ref, err)
 	}
-	return splitLines(string(out)), nil
+	return splitNUL(out), nil
 }
 
 // DiffPathspec runs `git diff <base> <head> -- <pathspecs...>` and returns

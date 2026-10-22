@@ -107,7 +107,7 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // each assertion, so the three checks cannot silently drift apart from
 // one another even though the underlying "10" is still, unavoidably,
 // a hand-pinned sentinel value (that's what a sentinel is).
-const wantKnownSitesLiveCount = 10
+const wantKnownSitesLiveCount = 11
 
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {
@@ -525,10 +525,9 @@ func TestOpaqueOperandRegistry_RerunCallers(t *testing.T) {
 // that point, never a literal expression), and would wrongly report
 // zero provable calls. This test instead proves provenance one level
 // up, at the REAL entry points production code calls
-// (preflightMergeDestruction's three real callers in
-// mindspec_executor.go; EvaluateWorkDestructionPreflight's two real
-// callers in internal/complete/complete.go and internal/approve/
-// impl.go) — the same recoveryTemplate fold this file's
+// (preflightMergeDestruction's real callers in
+// mindspec_executor.go; EvaluateWorkDestructionPreflight's real
+// caller in internal/complete/complete.go) — the same recoveryTemplate fold this file's
 // TestOpaqueOperandRegistry_RerunCallers already applies to
 // beadToSpecConflictFailure — and asserts no floor match, proving the
 // runtime string inventory that ultimately reaches the four registered
@@ -553,13 +552,6 @@ func TestOpaqueOperandRegistry_MergePreflightRerunCallers(t *testing.T) {
 			funcName: "completeWorkDestructionPreflightFn",
 			argIdx:   4,
 		},
-		{
-			// impl.go calls its own seam var (implWorkDestructionPreflightFn),
-			// same pointer-pinned default, same reasoning.
-			relPath:  filepath.Join("internal", "approve", "impl.go"),
-			funcName: "implWorkDestructionPreflightFn",
-			argIdx:   4,
-		},
 	}
 	for _, c := range cases {
 		path := filepath.Join(root, c.relPath)
@@ -577,10 +569,8 @@ func TestOpaqueOperandRegistry_MergePreflightRerunCallers(t *testing.T) {
 			// preflightMergeDestruction is called as a method
 			// (g.preflightMergeDestruction(...)); EvaluateWorkDestruction
 			// Preflight is called as a package-qualified function
-			// (lifecycle.EvaluateWorkDestructionPreflight(...) /
-			// implWorkDestructionPreflightFn(...) — the SEAM VAR's
-			// production default IS this function, so this probe targets
-			// the function name directly via its qualified-selector form).
+			// or the completeWorkDestructionPreflightFn seam. The seam
+			// points to lifecycle.EvaluateWorkDestructionPreflight.
 			var name string
 			switch fn := call.Fun.(type) {
 			case *ast.SelectorExpr:
@@ -1319,4 +1309,23 @@ func repoRootFromGuardTestDir(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
+}
+
+func TestKnownSitesExemptionList_MergeOnlyRestore(t *testing.T) {
+	data, err := os.ReadFile("../../project-docs/user/guides/merge-safety.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	clean := strings.Index(text, "In a clean spec worktree")
+	restore := strings.Index(text, "git -C \"<spec worktree>\" checkout <merge> -- <paths>")
+	if clean < 0 || restore <= clean {
+		t.Fatal("path restore must require a clean spec worktree")
+	}
+	tail := text[restore:]
+	commit := strings.Index(tail, "commit -m")
+	close := strings.Index(tail, "mindspec complete")
+	if commit < 0 || close <= commit {
+		t.Fatal("restore must commit before complete")
+	}
 }
