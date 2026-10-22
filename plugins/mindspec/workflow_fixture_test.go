@@ -288,3 +288,40 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 		t.Fatalf("refused slot started a reviewer or tally: %s", out)
 	}
 }
+
+func TestMsPanelWorkflow_CreateGate(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve", "final_review", "adhoc", ""} {
+		t.Run(gate, func(t *testing.T) {
+			source := WorkflowFiles()["ms-panel.js"]
+			js := `const fs=require('fs'), assert=require('assert');
+const [source,gate]=process.argv.slice(1); let created;
+const agent=async(prompt,options)=>{
+ assert.equal(options.label,'panel-command');
+ const command=prompt.split('\n').at(-1);
+ if(command.startsWith('mindspec panel create ')){created=command;return {stdout:'registered',exit:0};}
+ if(command.startsWith('mindspec panel verify '))return {stdout:'[]',exit:0};
+ if(command.startsWith('mindspec panel tally '))return {stdout:'PASS',exit:0};
+ throw Error('unexpected command: '+command);
+};
+const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+(async()=>{
+ const args={slug:'p',target:'main',round:1};
+ if(gate){args.gate=gate;args.spec='example';}
+ await new AsyncFunction('args','agent','pipeline',source)(args,agent,async(items,fn)=>Promise.all(items.map(fn)));
+ const expected=gate ? " --gate '"+gate+"'" : ' --gate adhoc';
+ assert(created.includes(expected),'create dropped gate: '+created);
+ assert.equal((created.match(/ --gate /g)||[]).length,1,'duplicate gate: '+created);
+ console.log(created);
+})().catch(e=>{console.error(e);process.exitCode=1;});`
+			out, err := exec.Command("node", "-e", js, source, gate).CombinedOutput()
+			if err != nil {
+				t.Fatalf("gate %s: %v %s", gate, err, out)
+			}
+		})
+	}
+}
+
+func TestMsPanelWorkflow_ConflictingBeadGate(t *testing.T) {
+	source := "args.gate = 'final_review';\n" + WorkflowFiles()["ms-panel.js"]
+	workflowFixtureRejects(t, source, "gate conflicts with bead_id")
+}

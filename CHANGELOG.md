@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A binary older than this release refuses panel ledgers that contain the new record kinds.
 - Every new panel round uses verdict schema v2 with no opt-out. A verdict file without a submission no longer counts. Reviewers use `mindspec panel submit` or the process output channel in their prompt.
 - The latest submission replaces earlier submissions for a slot and round. The ledger retains all submissions.
 - Zero config runs every slot on the harness. No tool runner ships. Configure process runners in `panel.runners`.

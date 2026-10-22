@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,34 +36,58 @@ type Exit struct {
 
 func Hash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
+// ReadAttemptFile reads a bounded regular file without following its final path link.
+func ReadAttemptFile(dir, name string, limit int64) ([]byte, error) {
+	f, err := openAttemptFile(dir, name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%s exceeds size limit", name)
+	}
+	return raw, nil
+}
+
 // Digests binds all existing output files, including empty files.
 func Digests(dir string) (map[string]string, error) {
 	out := map[string]string{}
+	var readErr error
 	for _, name := range []string{"stdout.log", "stderr.log", "verdict.json"} {
-		f, err := os.Open(filepath.Join(dir, name))
+		f, err := openAttemptFile(dir, name)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			readErr = errors.Join(readErr, err)
+			continue
+		}
+		// Bound the read to the opened file's size. Appended bytes cannot extend it.
+		info, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			readErr = errors.Join(readErr, err)
+			continue
 		}
 		h := sha256.New()
-		_, err = io.Copy(h, f)
+		_, err = io.CopyN(h, f, info.Size())
 		closeErr := f.Close()
-		if err != nil {
-			return nil, err
-		}
-		if closeErr != nil {
-			return nil, closeErr
+		if err != nil || closeErr != nil {
+			readErr = errors.Join(readErr, err, closeErr)
+			continue
 		}
 		out[name] = hex.EncodeToString(h.Sum(nil))
 	}
-	return out, nil
+	return out, readErr
 }
 
 func ReadExit(dir string) (Exit, error) {
 	var out Exit
-	raw, err := os.ReadFile(filepath.Join(dir, "exit.json"))
+	raw, err := ReadAttemptFile(dir, "exit.json", 65536)
 	if err != nil {
 		return out, err
 	}
@@ -112,19 +137,11 @@ func Verdict(dir, output, nonceHash string) ([]byte, error) {
 	if output == "file" {
 		name = "verdict.json"
 	}
-	f, err := os.Open(filepath.Join(dir, name))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 	// A stdout transcript may include reviewer diagnostics around its block.
 	const maxChannelBytes = 16 << 20
-	raw, err := io.ReadAll(io.LimitReader(f, maxChannelBytes+1))
+	raw, err := ReadAttemptFile(dir, name, maxChannelBytes)
 	if err != nil {
 		return nil, err
-	}
-	if len(raw) > maxChannelBytes {
-		return nil, fmt.Errorf("verdict channel exceeds size limit")
 	}
 	if output == "file" {
 		return raw, nil
@@ -133,7 +150,7 @@ func Verdict(dir, output, nonceHash string) ([]byte, error) {
 }
 
 func Quota(dir string, signals []string) bool {
-	f, err := os.Open(filepath.Join(dir, "stderr.log"))
+	f, err := openAttemptFile(dir, "stderr.log")
 	if err != nil {
 		return false
 	}
@@ -147,7 +164,7 @@ func Quota(dir string, signals []string) bool {
 			return false
 		}
 	}
-	raw, err := io.ReadAll(f)
+	raw, err := io.ReadAll(io.LimitReader(f, 65536))
 	if err != nil {
 		return false
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panellaunch"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -128,16 +129,12 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	var reader io.Reader = cmd.InOrStdin()
-	if file != "-" {
-		f, err := os.Open(file)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		reader = f
+	var data []byte
+	if file == "-" {
+		data, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), panel.MaxVerdictBytes+1))
+	} else {
+		data, err = panellaunch.ReadAttemptFile(filepath.Dir(file), filepath.Base(file), panel.MaxVerdictBytes)
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, panel.MaxVerdictBytes+1))
 	if err != nil {
 		return err
 	}

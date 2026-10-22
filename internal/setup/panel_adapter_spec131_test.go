@@ -43,7 +43,7 @@ func TestPanelSkills_AdapterShape(t *testing.T) {
 		}
 		switch name {
 		case "ms-panel-run":
-			requireAdapterText(t, body, "runner: claude-code-workflow", "`/ms-panel` once", "{slug, spec, target, bead_id, round}", "runner: claude-code-skills", "runner: external", "mindspec panel create", "mindspec panel verify <panel-slug> --json", "mindspec panel checkout <panel-slug> --slot <slot> --dispatch", "--replace", "mindspec panel prompt", "mindspec panel submit", "effective model", "cannot run that model, report", "model equals family", "harness default model", "verdict label", "after each process or agent ends", "On exit 0, invoke `/ms-panel-tally`")
+			requireAdapterText(t, body, "runner: claude-code-workflow", "`/ms-panel` once", "{slug, spec, gate, target, bead_id, round}", "runner: claude-code-skills", "runner: external", "mindspec panel create", "mindspec panel verify <panel-slug> --json", "mindspec panel checkout <panel-slug> --slot <slot> --dispatch", "--replace", "mindspec panel prompt", "mindspec panel submit", "effective model", "cannot run that model, report", "model equals family", "harness default model", "verdict label", "after each process or agent ends", "On exit 0, invoke `/ms-panel-tally`")
 		case "ms-panel-tally":
 			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.artifact-gate", "--data - <<'JSON'", "mindspec panel disposition check", "replaced", "--json", "MINDSPEC_SKIP_PANEL=1", "mindspec panel rebind", "mindspec panel defer")
 			if strings.Contains(body, "confidence") {
@@ -52,7 +52,7 @@ func TestPanelSkills_AdapterShape(t *testing.T) {
 		case "ms-spec-final-review":
 			requireAdapterText(t, body, "mindspec panel checkout <panel-slug> --slot <slot>", "review.ci-parity", "commands.ci", "commands.test")
 		case "ms-bead-cycle":
-			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.fix-after-final", "panel.one-fixer")
+			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.fix-after-final", "panel.one-fixer", "Use one panel slug", "for all rounds", "Set `--round <R>` to the next round.")
 		case "ms-bead-impl":
 			requireAdapterText(t, body, "sequence.bead-impl-prompt", "review.derive", "lifecycle.complete-by-orchestrator")
 		}

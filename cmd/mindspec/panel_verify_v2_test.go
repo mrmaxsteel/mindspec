@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"github.com/spf13/cobra"
 )
 
 func verifyV2(t *testing.T, f cliV2Fixture, asJSON bool) (string, int) {
@@ -377,5 +378,42 @@ func TestPanelVerify_ReplacementInFlight(t *testing.T) {
 	res, err = panel.Tally(f.dir)
 	if err != nil || !res.PassRule(true) {
 		t.Fatalf("same-final repair not closed: %+v %v", res, err)
+	}
+}
+
+func TestPanelVerify_ResolutionErrors(t *testing.T) {
+	for _, name := range []string{"unknown", "bad-slug", "missing-root"} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%v", name, asJSON), func(t *testing.T) {
+				newCLIV2(t)
+				slug := "unknown"
+				if name == "bad-slug" {
+					slug = "../bad"
+				}
+				if name == "missing-root" {
+					withTestChdir(t, t.TempDir())
+				}
+				// Execute through Cobra to include its error rendering on stderr.
+				command := &cobra.Command{Use: "verify <slug>", Args: cobra.ExactArgs(1), RunE: panelVerifyCmd.RunE, SilenceUsage: true}
+				command.Flags().String("spec", "", "")
+				command.Flags().Bool("json", asJSON, "")
+				var out bytes.Buffer
+				command.SetOut(&out)
+				command.SetErr(&out)
+				command.SetArgs([]string{slug})
+				err := command.Execute()
+				if otelExitCode(err) != 2 {
+					t.Errorf("want exit 2, got %d: %v", otelExitCode(err), err)
+				}
+				if asJSON {
+					var result struct {
+						Error string `json:"error"`
+					}
+					if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Error == "" {
+						t.Errorf("want JSON error object, got %q: %v", out.String(), err)
+					}
+				}
+			})
+		}
 	}
 }

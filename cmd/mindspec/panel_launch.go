@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,15 +118,19 @@ func appendLaunchRecord(dir string, record interface{}) error {
 func attemptOutcome(dir string, start panel.LaunchRecord, status string) (panel.LaunchRecord, error) {
 	out := start
 	out.Status, out.CreatedAt = status, time.Now().UTC().Format(time.RFC3339Nano)
+	var outputErr error
 	if exit, err := panellaunch.ReadExit(dir); err == nil {
 		out.ExitCode = &exit.Code
+	} else if !os.IsNotExist(err) {
+		outputErr = err
 	}
 	digests, err := panellaunch.Digests(dir)
-	if err != nil {
-		return out, err
-	}
+	outputErr = errors.Join(outputErr, err)
 	out.StdoutSHA256, out.StderrSHA256, out.VerdictSHA256 = digests["stdout.log"], digests["stderr.log"], digests["verdict.json"]
-	return out, nil
+	if outputErr != nil {
+		out.Status = "malformed"
+	}
+	return out, outputErr
 }
 
 // checkProcessOrphans runs only under the slot lock. Completed attempts are
@@ -177,7 +182,7 @@ func checkProcessOrphans(root string, reg panel.Registration, layout panel.SlotL
 		start, registered := starts[k]
 		pgid := start.PGID
 		if !registered {
-			raw, err := os.ReadFile(filepath.Join(dir, "pgid"))
+			raw, err := panellaunch.ReadAttemptFile(dir, "pgid", 64)
 			if err == nil {
 				value := strings.TrimSpace(string(raw))
 				if value != "" && !strings.ContainsFunc(value, func(r rune) bool { return r < '0' || r > '9' }) {
@@ -191,10 +196,7 @@ func checkProcessOrphans(root string, reg panel.Registration, layout panel.SlotL
 			return err
 		}
 		if registered {
-			out, err := attemptOutcome(dir, start, "launch_failed")
-			if err != nil {
-				return err
-			}
+			out, _ := attemptOutcome(dir, start, "launch_failed")
 			if err := appendLaunchRecord(reg.Dir, out); err != nil {
 				return err
 			}
@@ -350,11 +352,16 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 		if err != nil {
 			return err
 		}
+		out, outputErr := attemptOutcome(dir, start, "launch_failed")
 		exit, exitErr := panellaunch.ReadExit(dir)
-		status := "launch_failed"
+		status := out.Status
 		var selected panel.SubmissionRecord
 		var verdict panel.VerdictV2
-		if exitErr == nil && exit.Code == 0 && !exit.Timeout {
+		if outputErr != nil {
+			status = "malformed"
+			refusal = retryRefusal(outputErr.Error())
+			fmt.Fprintln(cmd.OutOrStdout(), refusal)
+		} else if exitErr == nil && exit.Code == 0 && !exit.Timeout {
 			data, err := panellaunch.Verdict(dir, runner.Output, start.NonceSHA256)
 			if err == nil {
 				selected, err = launchSubmit(root, reg, args[1], in.Attempt, data, "launch", "")
@@ -370,11 +377,7 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 		} else if exitErr == nil && panellaunch.Quota(dir, runner.QuotaSignals) {
 			status = "quota_wall"
 		}
-		out, err := attemptOutcome(dir, start, status)
-		if err != nil {
-			return err
-		}
-		out.Seq = selected.Seq
+		out.Status, out.Seq = status, selected.Seq
 		if err := appendLaunchRecord(reg.Dir, out); err != nil {
 			return err
 		}

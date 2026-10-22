@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -804,6 +805,167 @@ func TestPanelRecover_RecoveryCommand(t *testing.T) {
 			want := "recovery: mindspec panel launch 'panel'\\''s review' 'R1' --spec '131-test'"
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("recovery command want %q: %v", want, err)
+			}
+		})
+	}
+}
+
+func TestPanelRecover_RepairsSubmittedAttempt(t *testing.T) {
+	f := newLaunchFixture(t)
+	if out, err := f.run(t, false); err != nil {
+		t.Fatalf("launch: %v %s", err, out)
+	}
+	f.status(t, "final")
+	before := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
+	seq := f.latest(t).Seq
+	slotWrite(t, filepath.Join(f.dir, "R1-round-1.json"), "damaged")
+	f.status(t, "damaged")
+	out, err := launchRun(t, panelRecoverCmd, "run", "R1")
+	if err != nil {
+		t.Fatalf("recover submitted attempt: %v; stdout=%s", err, out)
+	}
+	f.status(t, "final")
+	if !strings.Contains(out, fmt.Sprintf("seq %d", seq)) || f.latest(t).Seq != seq {
+		t.Fatalf("selected seq changed: %s", out)
+	}
+	if !bytes.Equal(before, slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))) {
+		t.Fatal("repair appended an immutable outcome or submission")
+	}
+}
+
+func TestPanelLaunch_RefusesEarlierAttemptSymlink(t *testing.T) {
+	f := newLaunchFixture(t)
+	f.configure(t, "file", "", "")
+	if out, err := f.run(t, false); err != nil {
+		t.Fatalf("first run: %v %s", err, out)
+	}
+	seq := f.latest(t).Seq
+	previous := filepath.Join(f.layout(t).AttemptDir(1), "verdict.json")
+	f.scriptBody(t, "ln -s "+shellQuoteTarget(previous)+` "$(dirname "$1")/verdict.json"`)
+	out, err := f.run(t, true)
+	if err == nil {
+		t.Fatalf("prior attempt symlink counted as final: %s", out)
+	}
+	f.status(t, "malformed")
+	if f.latest(t).Seq != seq {
+		t.Fatal("symlink produced a submission")
+	}
+	events := f.events(t)
+	if len(events) != 6 || events[3].Status != "malformed" || events[5].Status != "malformed" {
+		t.Fatalf("unsafe output outcomes: %+v", events)
+	}
+}
+
+func TestPanelLaunch_RefusesOutputFIFO(t *testing.T) {
+	for _, name := range []string{"verdict.json", "exit.json", "stderr.log"} {
+		t.Run(name, func(t *testing.T) {
+			f := newLaunchFixture(t)
+			f.configure(t, "file", "LIMIT", "")
+			f.runner(t, "", 0)
+			original := panelLaunchProcessFn
+			defer func() { panelLaunchProcessFn = original }()
+			pipes := make(chan string, 4)
+			panelLaunchProcessFn = func(in panellaunch.Request) error {
+				if err := panellaunch.Run(in); err != nil {
+					return err
+				}
+				path := filepath.Join(in.Dir, name)
+				if err := os.Rename(path, path+".saved"); err != nil {
+					return err
+				}
+				if err := syscall.Mkfifo(path, 0o600); err != nil {
+					return err
+				}
+				pipes <- path
+				return nil
+			}
+			done := make(chan error, 1)
+			go func() { _, err := f.run(t, false); done <- err }()
+			var runErr error
+			select {
+			case runErr = <-done:
+			case <-time.After(2 * time.Second):
+				// Release only this test's readers, including repeated digest reads.
+				var paths []string
+				deadline := time.After(3 * time.Second)
+				ticker := time.NewTicker(5 * time.Millisecond)
+				defer ticker.Stop()
+			releasing:
+				for {
+					select {
+					case path := <-pipes:
+						paths = append(paths, path)
+					case <-ticker.C:
+						for _, path := range paths {
+							pipe, err := os.OpenFile(path, os.O_RDWR|syscall.O_NONBLOCK, 0o600)
+							if err != nil {
+								t.Fatal(err)
+							}
+							_, _ = pipe.Write([]byte("{}"))
+							_ = pipe.Close()
+						}
+					case <-done:
+						break releasing
+					case <-deadline:
+						t.Fatal("FIFO reader did not stop")
+					}
+				}
+				t.Fatal("launch blocked on an attempt output FIFO")
+			}
+			if runErr == nil {
+				t.Fatal("FIFO counted as final")
+			}
+			f.status(t, "malformed")
+			if f.latest(t).Seq != 0 {
+				t.Fatal("unsafe output created a submission")
+			}
+			events := f.events(t)
+			if len(events) != 4 || events[1].Status != "malformed" || events[3].Status != "malformed" {
+				t.Fatalf("FIFO outcomes: %+v", events)
+			}
+		})
+	}
+}
+
+func TestPanelSubmit_RefusesUnsafeAttemptFile(t *testing.T) {
+	for _, kind := range []string{"symlink", "fifo"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newCLIV2(t)
+			file := f.shortSetup(t, 1)
+			if err := os.Rename(file, file+".saved"); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "symlink" {
+				if err := os.Symlink(file+".saved", file); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := syscall.Mkfifo(file, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { _, err := runPanelVerbCmd("submit", "--file", file); done <- err }()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("unsafe attempt file submitted")
+				}
+			case <-time.After(time.Second):
+				pipe, err := os.OpenFile(file, os.O_RDWR|syscall.O_NONBLOCK, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = pipe.Write(paneltest.Bytes(t, f.verdict()))
+				_ = pipe.Close()
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("submit reader did not stop")
+				}
+				t.Fatal("submit blocked on an attempt FIFO")
+			}
+			latest, err := panel.LatestSubmissions(f.dir, 1)
+			if err != nil || latest["R1"].Seq != 0 {
+				t.Fatalf("unsafe file counted: %+v %v", latest, err)
 			}
 		})
 	}

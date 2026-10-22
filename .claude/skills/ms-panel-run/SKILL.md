@@ -12,7 +12,7 @@ The binary resolves the roster, lenses, acceptance question and verdict contract
 
 ## Runner dispatch
 
-For `runner: claude-code-workflow`, invoke `/ms-panel` once with `{slug, spec, target, bead_id, round}`.
+For `runner: claude-code-workflow`, invoke `/ms-panel` once with `{slug, spec, gate, target, bead_id, round}`.
 Use the returned verify and tally output. If workflows are unavailable, use the steps below.
 For `runner: claude-code-skills` and `runner: external`, use the steps below.
 

@@ -122,7 +122,7 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
 
 ## Implementation notes
 
-- **Panel slugs**: `<spec-prefix>-bead<N>` for round 1, `<spec-prefix>-bead<N>-r<R>` for round R≥2. Keeps each round's verdicts in its own dir, easier to diff.
+- Use one panel slug, `<spec-prefix>-bead<N>`, for all rounds. Set `--round <R>` to the next round.
 - **Flagged deviations carry across rounds.** When the impl or fix subagent reports deviations from its prompt, those become "Fix-author deviations (assess these)" sections in the next BRIEF — the panel must explicitly assess whether the deviation is acceptable. Don't bury them.
 - Use `panel prompt` for each slot and round. The binary includes that slot's prior-round findings.
 - **Test-suite truth wins over reviewer opinion.** If the panel splits and one reviewer's REQUEST_CHANGES rests on a claim that tests pass disproves, the orchestrator should note the contradiction. Don't blindly trust either side; the synthesis is your job.

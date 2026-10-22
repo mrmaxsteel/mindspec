@@ -360,6 +360,7 @@ func TestRoster_Family(t *testing.T) {
 	}
 }
 func TestGate_VerdictSchemaPinned(t *testing.T) {
+	t.Run("round downgrade", assertRoundSchemaDowngradeBlocked)
 	dir, _, _ := gateV2Fixture(t)
 	p := load(dir).Panel
 	p.VerdictSchema = 0
@@ -393,18 +394,7 @@ func TestGate_PreV2RoundKeepsV1Rules(t *testing.T) {
 	if !gateV2Read(t, target.Dir).PassRule(true) {
 		t.Fatal("v1 no-submission files no longer pass")
 	}
-	// A later round must not silently remove the schema after v2.
-	dir, _, _ := gateV2Fixture(t)
-	round, err := RoundSchema(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	round.Round = 2
-	round.VerdictSchema = 0
-	seedTestRecords(t, dir, round)
-	if r := gateV2Read(t, dir); r.IntegrityErr == nil || r.PassRule(true) {
-		t.Fatal("schema downgrade accepted")
-	}
+	t.Run("round downgrade", assertRoundSchemaDowngradeBlocked)
 }
 func TestCreate_InvalidSlotModel(t *testing.T) {
 	for _, model := range []string{"", "-model", "bad model"} {
@@ -505,5 +495,28 @@ func TestCreate_FirstV2RoundDefaultFamily(t *testing.T) {
 		if slot.Family != "harness" {
 			t.Errorf("round slot %s family = %q, want harness", slot.Slot, slot.Family)
 		}
+	}
+}
+
+func assertRoundSchemaDowngradeBlocked(t *testing.T) {
+	t.Helper()
+	dir, _, _ := gateV2Fixture(t)
+	round, err := RoundSchema(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := load(dir).Panel
+	p.Round, p.VerdictSchema = 2, 0
+	if err := WriteSnapshot(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	round.Round, round.VerdictSchema = 2, 0
+	seedTestRecords(t, dir, round)
+	for _, slot := range round.Roster {
+		createWrite(t, dir, slot.Slot+"-round-2.json", `{"verdict":"APPROVE"}`)
+	}
+	r := gateV2Read(t, dir)
+	if r.IntegrityErr == nil || !strings.Contains(r.IntegrityErr.Error(), "removed the verdict schema") || r.PassRule(true) {
+		t.Fatalf("consistent schema downgrade accepted: integrity=%v pass=%v", r.IntegrityErr, r.PassRule(true))
 	}
 }

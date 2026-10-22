@@ -83,10 +83,12 @@ func runPanelRecover(cmd *cobra.Command, args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	outcome.Status, outcome.Seq = "submitted", selected.Seq
-	outcome.CreatedAt, outcome.PGID = time.Now().UTC().Format(time.RFC3339Nano), 0
-	if err := appendLaunchRecord(reg.Dir, outcome); err != nil {
-		return err
+	if outcome.Status != "submitted" || outcome.Seq != selected.Seq {
+		outcome.Status, outcome.Seq = "submitted", selected.Seq
+		outcome.CreatedAt, outcome.PGID = time.Now().UTC().Format(time.RFC3339Nano), 0
+		if err := appendLaunchRecord(reg.Dir, outcome); err != nil {
+			return err
+		}
 	}
 	exit := "unknown"
 	if outcome.ExitCode != nil {

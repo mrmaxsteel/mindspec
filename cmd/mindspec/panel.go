@@ -282,28 +282,39 @@ implementation. It writes no file. Exit codes are 0 when every slot is
 final, 1 while a slot is pending, and 2 for other incomplete states.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		asJSON, _ := cmd.Flags().GetBool("json")
+		cmd.SilenceErrors = asJSON
+		fail := func(err error) error {
+			if asJSON {
+				if encodeErr := json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"error": err.Error()}); encodeErr != nil {
+					return exitErr(2, encodeErr)
+				}
+			}
+			return exitErr(2, err)
+		}
 		slug := args[0]
 		if err := validatePanelSlug(slug); err != nil {
-			return err
+			return fail(err)
 		}
 		root, err := findPanelRoot(config.IsolationRootFor)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		specID, _ := cmd.Flags().GetString("spec")
 		reg, err := findPanelRegistration(root, slug, specID)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		facts := resolvePanelGateFacts(root, reg)
 		line, _ := renderPanelVerify(facts.Res, facts)
 		slots, err := panelSlotStatuses(root, facts.Res)
 		if err != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
-			fmt.Fprintln(cmd.OutOrStdout(), line)
-			return exitErr(2, err)
+			if !asJSON {
+				fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
+				fmt.Fprintln(cmd.OutOrStdout(), line)
+			}
+			return fail(err)
 		}
-		asJSON, _ := cmd.Flags().GetBool("json")
 		if asJSON {
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(slots); err != nil {
 				return err
