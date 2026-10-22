@@ -23,6 +23,15 @@ func findCheckContaining(r *Report, substr string) *Check {
 
 const sourceGlobsCheckName = ".mindspec/config.yaml source_globs"
 
+func loadDoctorTestConfig(t *testing.T, root string) *config.Config {
+	t.Helper()
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
 // TestMissingSourceGlobs_AllThreeStates exercises spec 091 Req 18: the
 // missing-source-globs Warn fires when config.yaml is absent, present
 // without the field, or present with an empty list; and clears once a
@@ -33,7 +42,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -59,7 +68,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -76,7 +85,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -90,7 +99,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil {
@@ -199,7 +208,7 @@ func TestSourceGlobsFixWiring(t *testing.T) {
 	config.ResetCache()
 
 	r := &Report{}
-	checkSourceGlobs(r, root)
+	checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 	c := findCheck(r, sourceGlobsCheckName)
 	if c == nil || c.FixFunc == nil {
 		t.Fatal("expected a fixable missing-source-globs check")

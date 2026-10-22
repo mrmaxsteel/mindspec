@@ -18,7 +18,10 @@ type Executor interface {
 
     // Query methods
     CheckIgnore(workdir, file string) error
+    CheckSlotIgnore(workdir, file string) error
     LsFiles(workdir, path string) (bool, error)
+    CloneSlotTree(tree, reviewedSHA string) error
+    CheckSlotTree(tree, reviewedSHA string) error
     IsTreeClean(path string) error
     LsTree(workdir, rev string) (string, error)
     DiffStat(base, head string) (string, error)
@@ -44,13 +47,6 @@ consumers select roots and exclusions in Go and hash the retained listing.
 `CheckIgnore` delegates to `gitutil.CheckIgnore`: nil means ignored, exit 1
 means not ignored; all other errors fail the ledger preflight closed.
 
-`LsFiles(workdir, path)` reports whether the index tracks the literal path or a file under it.
-`MindspecExecutor` calls `gitutil.LsFiles` with `--literal-pathspecs`, `-z` and `--`.
-Git failures return an error. `MockExecutor` records the call and supports `LsFilesFn`,
-`LsFilesResult` and `LsFilesErr`. The command layer uses this query to reject a tracked isolation root.
-In `gitops.go`, `gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.
-This sets Git's global option and keeps path arguments after `--` literal.
-
 The two merge-producing methods gained paired parameters in spec 127
 (R4(b)/R5(d)): `overrideReason` is the operator's audited
 `--allow-net-deletion "<reason>"` text ("" = no override), consulted by
@@ -60,6 +56,47 @@ re-entry flag, consulted only when a merge is ALREADY in progress with a
 fully resolved, staged index — see § Merge safety layer below.
 (`lifecycleAllowSet` is spec 119's finalize scoping — see the
 architecture doc.)
+
+### Slot Git Operations (`internal/executor/mindspec_executor.go`)
+
+`slotGit` runs Git with an explicit working directory.
+It removes all inherited `GIT_*` variables.
+It sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_SYSTEM=/dev/null`.
+It sets `GIT_CONFIG_GLOBAL=/dev/null` for every call.
+`slotGitEnv` builds the environment for both Git paths.
+For the `slotMainGit` trust query, it keeps `HOME`, `XDG_CONFIG_HOME` and an explicit `GIT_CONFIG_GLOBAL`.
+It removes all other inherited `GIT_*` variables and disables system configuration and prompts.
+`slotMainGit` reads only global `safe.directory` values and unconditional includes.
+The query runs in a new temporary directory with its parent as `GIT_CEILING_DIRECTORIES`.
+Git finds no repository, so conditional includes do not apply.
+It passes each value as a `-c safe.directory=<value>` command option, in order.
+These calls check the isolation root, clone the source, and read the source object-store path.
+Calls inside the slot tree do not read global configuration.
+It sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=/usr/bin/false`.
+Command options set `core.fsmonitor=false`, `core.hooksPath=/dev/null` and `core.attributesFile=/dev/null`.
+Errors include escaped Git stderr.
+
+`CloneSlotTree` creates a shared clone without an initial checkout.
+It removes the local `core.bare` setting, checks out the reviewed SHA in detached mode, and removes `origin`.
+It shares the source object store and keeps writable Git files in the slot tree.
+It calls `CheckSlotTree` before it returns success.
+`CheckSlotTree` requires real directories for the tree, `.git`, `objects` and `objects/info`.
+It requires regular `.git/config` and `objects/info/alternates` files.
+It refuses `commondir`, `config.worktree`, config includes, and settings for `core.worktree`, `core.bare` or `extensions.worktreeConfig`.
+It requires exact alternates bytes for the resolved source object store and a HEAD equal to the reviewed SHA.
+Missing paths, invalid file types and Git errors refuse reuse.
+
+`CheckSlotIgnore` uses `slotMainGit` for `check-ignore --quiet -- <path>`.
+It sets `core.excludesFile=/dev/null` to disable explicit and default global ignore files.
+Exit 1 returns an error that matches `executor.ErrSlotNotIgnored` with `errors.Is`.
+The error keeps the Git refusal text and exit code.
+If the ignore check returns an error, cleanup uses only existing lock files. It creates no lock file.
+`CheckIgnore` retains the operator configuration for ledger checks.
+`LsFiles` calls `gitutil.LsFiles` with the operator's Git configuration.
+`gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.
+It reports whether the index tracks the literal path or a file under it.
+Git errors propagate. The command layer uses this query to refuse a tracked isolation root.
+`MockExecutor` records these calls and provides function and error hooks.
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 

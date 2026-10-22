@@ -171,8 +171,16 @@ type Executor interface {
 	// CheckIgnore returns nil for an ignored path, exit 1 for a non-ignored path.
 	CheckIgnore(workdir, file string) error
 
+	// CheckSlotIgnore checks ignored paths with the isolated slot environment.
+	CheckSlotIgnore(workdir, file string) error
+
 	// LsFiles reports whether the index tracks path or a file under it.
 	LsFiles(workdir, path string) (bool, error)
+
+	// CloneSlotTree makes a shared, detached clone with no origin remote.
+	CloneSlotTree(tree, reviewedSHA string) error
+	// CheckSlotTree checks a reusable clone's repository configuration and HEAD.
+	CheckSlotTree(tree, reviewedSHA string) error
 
 	// IsRefNotFound reports whether err is the genuine "ref absent" case
 	// (branch already deleted) from RevParseRef vs a transient/structural git

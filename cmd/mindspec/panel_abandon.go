@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +16,7 @@ var panelAbandonCmd = &cobra.Command{
 	Use: "abandon <slug>", Short: "Abandon a panel with an audited reason and name",
 	Args: cobra.ExactArgs(1), SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, reg, err := resolvePanelVerb(cmd, args[0])
+		root, reg, err := resolvePanelVerb(cmd, args[0])
 		if err != nil {
 			return panelVerbFailure(err)
 		}
@@ -24,6 +26,10 @@ var panelAbandonCmd = &cobra.Command{
 			return panelVerbFailure(fmt.Errorf("--reason and --by must not be empty"))
 		}
 		res, err := panelAbandonSnapshot(reg.Dir, reason)
+		if err != nil {
+			return panelVerbFailure(err)
+		}
+		isolation, err := config.IsolationRootFor(root)
 		if err != nil {
 			return panelVerbFailure(err)
 		}
@@ -58,6 +64,33 @@ var panelAbandonCmd = &cobra.Command{
 		if err != nil {
 			return panelVerbFailure(err)
 		}
+		if err := panel.Validate(raw); err != nil {
+			return panelVerbFailure(err)
+		}
+		if err := panel.HygienePredicate(raw); err != nil {
+			return panelVerbFailure(err)
+		}
+		var pending, prior map[string]interface{}
+		if err := json.Unmarshal(raw, &pending); err != nil {
+			return panelVerbFailure(err)
+		}
+		for _, line := range lines {
+			var old map[string]interface{}
+			if err := json.Unmarshal(line, &old); err != nil {
+				return panelVerbFailure(err)
+			}
+			if old["record"] == panel.RecordAbandon && old["created_at"] == event.CreatedAt {
+				prior = old
+			}
+		}
+		if prior != nil && !reflect.DeepEqual(pending, prior) {
+			return panelVerbFailure(fmt.Errorf("abandon record already exists with different content"))
+		}
+		releaseCheckouts, err := cleanupPanelCheckouts(root, reg, isolation, 0, "")
+		if err != nil {
+			return checkoutError(err, "mindspec panel verify "+shellQuoteTarget(reg.Slug())+checkoutSpecFlag(reg))
+		}
+		defer releaseCheckouts()
 		if err := panel.AppendRecordsWithCheck(reg.Dir, func() error {
 			current, err := panelAbandonSnapshot(reg.Dir, reason)
 			if err != nil {

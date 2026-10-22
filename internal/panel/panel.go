@@ -271,6 +271,12 @@ var reviewSegments = []string{"review", "reviews"}
 // unregistered, which is exactly the fail-open contract (HC-4):
 // no panel.json, no gate.
 func Scan(roots ...string) []Registration {
+	return ScanSkipping(nil, roots...)
+}
+
+// ScanSkipping omits registrations under any excluded absolute directory.
+// Both lexical and resolved paths count, so a symlink cannot reintroduce a clone.
+func ScanSkipping(skip []string, roots ...string) []Registration {
 	seen := make(map[string]bool)
 	var regs []Registration
 	for _, root := range roots {
@@ -286,6 +292,18 @@ func Scan(roots ...string) []Registration {
 			for _, m := range matches {
 				dir := filepath.Dir(m)
 				key := canonicalPath(dir)
+				excluded := false
+				for _, base := range skip {
+					for _, paths := range [][2]string{{canonicalPath(base), key}, {base, dir}} {
+						rel, err := filepath.Rel(paths[0], paths[1])
+						if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+							excluded = true
+						}
+					}
+				}
+				if excluded {
+					continue
+				}
 				if seen[key] {
 					continue
 				}

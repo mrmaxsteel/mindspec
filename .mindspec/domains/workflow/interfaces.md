@@ -64,6 +64,36 @@ An unknown ID or scope returns an error with a `recovery:` line.
 It lists orchestrator rules in every mode.
 It also lists implementer rules in implement mode.
 
+### Doctor Panel and Rule Checks
+
+`mindspec doctor` shares one config load for source, model, command, and panel checks.
+A load failure gives one `MindSpec config` Error with a `recovery:` line.
+The command exits 1 if an Error or Missing result remains. Warn and Info do not fail it.
+
+Doctor reports an Error for a reviewer family with no runner.
+It reports a Warn for a reviewer entry that specifies only a model.
+For each process runner used by a resolved gate roster, it checks `argv[0]` with `LookPath`.
+A missing command gives an Error. Available review tools can produce Info suggestions.
+A process runner's `probe` runs with `--probe`, regardless of its config source.
+Without `--probe`, it runs only if the runner comes from untracked `.mindspec/config.local.yaml`.
+If the tracking check fails, doctor requires `--probe`. A skipped probe gives Info.
+Each probe runs at the workspace root with a 10-second limit. Failure gives an Error.
+
+Doctor warns if the local config is tracked or if an existing local config is not ignored.
+It also warns if the panel isolation root is not ignored.
+
+Doctor checks staged-rule markers in `SKILL.md` files under `.claude/skills/` and `.agents/skills/`.
+It warns for invalid markers, missing or unknown rule IDs, and past `remove-by` dates.
+It compares dates in UTC. An Info result lists rules with non-advisory enforcement.
+
+Doctor checks slot metadata under the configured panel isolation root.
+It warns if the slot's panel is missing, abandoned, or at a later round.
+The recovery line is `mindspec panel checkout <slug> --prune`.
+For a spec panel, the line adds `--spec <spec-id>`. Doctor does not prune the slot.
+
+`--ci` skips launcher checks, probes, tool suggestions, and stale checkout checks.
+It retains config checks, reviewer resolution checks, and staged-marker checks.
+
 ### Beads Adapter (`internal/bead/`)
 
 ```go
@@ -367,6 +397,85 @@ These readers take no lock. `SlotAttempts` marks events after the latest submiss
 Disposition validate, check and query accept these record kinds.
 The CLI helper `findPanelRoot` returns the verified slot's main root or falls back to `findRoot` when no slot is found.
 `landedBindingFor` checks the exact panel-round metadata value. It returns false for an empty bead identity and propagates read errors.
+
+### Panel Checkout (`cmd/mindspec/panel_checkout.go`)
+
+`mindspec panel checkout <slug> --slot S` creates or reuses a reviewer clone at the reviewed SHA.
+`--all` selects every roster slot. `--spec` selects the owning spec when a slug is ambiguous.
+`panel.NewSlotLayout` places each slot at `<main_root>/<isolation_root>/<spec-or-adhoc>/<slug>/r<N>/<slot>/`.
+`slot.json` records the spec, slug, round, slot and main root. `tree/` holds the clone.
+Locks use `<isolation_root>/.locks/<spec-or-adhoc>/<slug>/r<N>/<slot>.lock`.
+The layout accepts one trailing slash on the isolation root and refuses unsafe path components.
+`--fixer` creates only the fixer scratch directory, without metadata or a tree.
+Plain checkout writes no ledger record, including after a final submission.
+
+Checkout refuses paths outside the main root, symlink components, and an isolation root that is not ignored.
+It refuses abandoned panels, registration edits without ledger records, slots outside the roster, and changed rounds or reviewed SHAs while it waits for a lock.
+It refuses mismatched slot metadata and clones that fail `CheckSlotTree`.
+Refusals include a `recovery:` line. Root ignore failures name `mindspec init`.
+Metadata or clone failures name `mindspec panel checkout <slug> --prune --slot S`.
+`--dispatch` requires `--slot` and a harness runner. Process slots name `mindspec panel launch` for recovery.
+It refuses a final non-VOID submission without `--replace` and refuses a landed round.
+It reserves `attempt-<k>/`, marks earlier open dispatched attempts `launch_failed`, and appends a `dispatched` event.
+It checks the round and ledger again under the ledger lock before it appends.
+
+`--prune` removes slot scratch, including dirty files. `--slot` limits removal to that slot across rounds.
+Cleanup takes all affected slot locks in sorted order before the ledger lock and retains the slot locks through the caller's writes.
+A held slot lock prevents removal and names `panel verify` plus the lock paths. Unix lock files remain.
+`panel create --round N` removes scratch for earlier rounds before it writes the new round.
+`panel abandon` removes scratch for all rounds before it records abandonment.
+Panel registration lookup excludes the isolation root through `panel.ScanSkipping`.
+Doctor's ownership walk and moved-tree link walk skip the configured isolation root and return isolation config errors.
+The source Markdown and canonical-doc walks in `migrate` also skip that root.
+Before config exists, these migration walks use the default isolation root.
+
+### Panel BRIEF Regions
+
+`mindspec panel create` renders managed acceptance, quoted criteria, conduct and verdict-contract regions.
+The acceptance region uses the gate's configured question and `not_blocking` list.
+The quoted region uses the spec's `## Acceptance Criteria` section at the reviewed commit.
+It keeps printable text and line breaks, and escapes control characters and invalid UTF-8 bytes.
+Its backtick fence is longer than each backtick run in the quotation.
+Paths in the quotation are not checked.
+An absent section prints `no acceptance criteria section found`; an ad-hoc panel prints `none (adhoc panel)`.
+Conduct uses reviewer rules for the gate. The verdict contract names the schema and submission commands.
+
+The prior-round region reads `consolidated-round-<N-1>.md`, or prints `none recorded` if absent.
+It applies `termsafe.Escape` before insertion.
+It adds `> ` if the trimmed result starts with three backticks or three tildes.
+It also adds `> ` for a panel-header marker lookalike or an exact prior-round opening or closing marker.
+
+The path check applies to authored guidance, including acceptance and conduct text.
+A path is a code span with no whitespace and either `/` or a suffix that matches `\.[a-z][a-z0-9]*$`.
+Opening and closing backtick runs must have the same length.
+An unmatched opening run is literal text; the scanner still checks later runs.
+Bare text and code spans that start with `mindspec ` are not paths. The check skips `panel.json`.
+Create refuses a path that ends in `.md`, `.rst` or `.adoc`, or contains `/domains/`.
+It refuses any other checked path absent at the reviewed commit, and reports path-read errors.
+It also refuses internal references in authored guidance.
+
+The first-create skeleton names no documentation path or internal record.
+Its acceptance text says: "Use the quoted acceptance criteria in the managed region above."
+
+### Panel Slot Prompt
+
+`mindspec panel prompt <slug> --slot S [--spec <id>]` prints a prompt and writes no files.
+It prints the BRIEF, slot id, effective family and model, lens, focus, slot directory and tree.
+Current-round substitution records override the roster's family and model.
+For a process runner, it selects the next attempt and creates a fresh nonce for the printed prompt.
+For file output, it names that attempt's `verdict.json` path.
+For stdout output, it names the nonce-bearing `MINDSPEC-VERDICT-BEGIN` and `MINDSPEC-VERDICT-END` lines.
+For a harness runner, it prints `mindspec panel submit --file` for the latest dispatched attempt.
+It encloses the verdict path in single quotes and replaces each embedded single quote with `'"'"'`.
+For a non-printable character or invalid UTF-8 in that path, it prints this line instead of the command:
+
+> Cannot render the submission command: the verdict path contains a non-printable character or invalid UTF-8.
+
+With no dispatched attempt, it asks for `panel checkout` with `--slot` and `--dispatch`, then another prompt call.
+From round 2, it prints only that slot's prior-round items. For v2, the file must match the latest submission digest.
+It prints a warning if v2 evidence is unavailable; legacy rounds use the parsed verdict file.
+It asks for ADDRESSED, PARTIAL, MISSED or NEW_ISSUE grades when items exist.
+The scratch instruction limits writes to absolute paths in the slot directory.
 
 ### Panel CLI Verb Tree (Spec 110 Bead 4, ADR-0040 portability contract)
 

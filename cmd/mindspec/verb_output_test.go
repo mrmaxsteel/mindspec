@@ -99,6 +99,9 @@ var mutatingVerbRows = map[string]bool{
 	"mindspec impl adopt":   true,
 	"mindspec release":      true,
 	"mindspec repair phase": true,
+
+	// This verb is added after the original nine.
+	"mindspec panel checkout": true,
 }
 
 // mutatingVerbAliases maps a HIDDEN backward-compat alias's full command
@@ -154,6 +157,7 @@ var nonMutatingAllowlist = map[string]string{
 	"mindspec otel status":             "read-only: prints OTEL config status",
 	"mindspec panel disposition query": "read-only: prints a panel disposition",
 	"mindspec panel schema":            "read-only: prints the verdict JSON schema",
+	"mindspec panel prompt":            "read-only: prints the slot prompt; writes nothing",
 	"mindspec report":                  "read-only: consolidates the friction journal into a local report",
 	"mindspec report list":             "read-only: lists reports",
 	"mindspec rules":                   "read-only: lists the embedded rule table",
@@ -264,6 +268,7 @@ func TestVerbOutput_TotalCobraTreeClassification(t *testing.T) {
 		"mindspec spec create", "mindspec spec approve", "mindspec plan approve",
 		"mindspec next", "mindspec complete", "mindspec impl approve",
 		"mindspec impl adopt", "mindspec release", "mindspec repair phase",
+		"mindspec panel checkout",
 	}
 	if len(mutatingVerbRows) != len(wantRows) {
 		t.Fatalf("mutatingVerbRows has %d entries, want exactly R2.1's %d", len(mutatingVerbRows), len(wantRows))
