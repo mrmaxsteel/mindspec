@@ -324,3 +324,16 @@ would be speculative and likely to need reshaping once that consumer is real.
 Spec 109 declares and validates the `runner:` key; the adapter interface
 itself is deferred to spec 111, which supplies the second consumer that
 justifies its shape.
+
+## Amendment (Spec 131)
+
+`panel.runners` declares reviewer execution families. The default is one
+`harness` runner. No process runner or tool runner ships with the binary.
+The top-level `runner:` key still selects the orchestration adapter.
+
+Runner lists merge by family. A matching family replaces the earlier entry
+in its position. A new family is appended. The default list comes first.
+`.mindspec/config.yaml` comes next. `.mindspec/config.local.yaml` comes last.
+
+The local file can set only `panel.runners` and `models`. It is optional and
+machine-local. `mindspec init` adds it to `.gitignore`.

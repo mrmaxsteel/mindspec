@@ -438,7 +438,7 @@ func TestAdvancePhaseOnClaim_LockTimeoutSurfacesConvergentRecovery(t *testing.T)
 		advancePhaseOnClaim(root, next.BeadInfo{ID: "mindspec-bead1", IssueType: "task"})
 	})
 
-	if !strings.Contains(stderr, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(stderr, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("lock-timeout warning must name the convergent repair-phase recovery: %q", stderr)
 	}
 	if strings.Contains(stderr, "recovery: mindspec next") {
@@ -469,7 +469,7 @@ func TestAdvancePhaseOnClaim_MergeFailureSurfacesConvergentRecovery(t *testing.T
 		advancePhaseOnClaim(root, next.BeadInfo{ID: "mindspec-bead1", IssueType: "task"})
 	})
 
-	if !strings.Contains(stderr, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(stderr, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("merge-failure warning must name the convergent repair-phase recovery: %q", stderr)
 	}
 	if strings.Contains(stderr, "recovery: mindspec next") {

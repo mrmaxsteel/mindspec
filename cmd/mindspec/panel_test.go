@@ -21,6 +21,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/spf13/cobra"
 )
 
 // --- shared fixture helpers -------------------------------------------------
@@ -102,6 +103,11 @@ func snapshotTree(t *testing.T, root string) []string {
 // default and FAILS under `-shuffle` when it happens to run after one.
 // Same shared-mutable-singleton class as S2-1 itself, one flag set over.
 func resetPanelCreateFlags(t *testing.T) {
+	originalRead := fileAtRefForPanelBriefFn
+	fileAtRefForPanelBriefFn = func(_, _, _ string) ([]byte, bool, error) {
+		return nil, false, nil
+	}
+	t.Cleanup(func() { fileAtRefForPanelBriefFn = originalRead })
 	original := lsTreeForPanelFn
 	lsTreeForPanelFn = func(_, _ string) (string, error) {
 		spec, _ := panelCreateCmd.Flags().GetString("spec")
@@ -173,7 +179,7 @@ func buildResult(p *panel.Panel, approves, rejects, total, round int, hardBlocks
 // --- TestPanelCreate_StampsResolversAndCoBumpsRoundSHA ----------------------
 
 func TestPanelCreate_StampsResolversAndCoBumpsRoundSHA(t *testing.T) {
-	cfgYAML := "panel:\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
+	cfgYAML := "panel:\n  runners: [{family: claude, kind: harness}, {family: codex, kind: harness}]\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
 	root := mkPanelTestRoot(t, cfgYAML)
 	withTestChdir(t, root)
 	config.ResetCache()
@@ -398,6 +404,7 @@ func TestPanelCreate_RejectsUnsafeSlugAndControlBytes(t *testing.T) {
 		{"newline in slug", "demo\nEVIL", "", "bead/x"},
 		{"newline in --bead", "demo", "mindspec-x.1\nEVIL", "bead/x"},
 		{"newline in --target", "demo", "", "bead/x\nEVIL"},
+		{"bidi in --target", "demo", "", "bead/x\u202eEVIL"},
 		// C1 control range (U+0080-U+009F), valid-UTF8-encoded: the CSI
 		// U+009B terminal-injection vector report.go's stripControl
 		// already handles (the 'codex-render-leak #2' incident). These
@@ -981,6 +988,15 @@ func stubNonBeadRevParse(t *testing.T, fn func(root, ref string) (string, error)
 // runPanelVerbCmd runs `mindspec panel <args...>` against rootCmd and
 // returns combined stdout+stderr and the error.
 func runPanelVerbCmd(args ...string) (string, error) {
+	for _, command := range []*cobra.Command{panelSubmitCmd, panelVerifyCmd} {
+		for _, name := range []string{"file", "slot", "round", "spec", "json"} {
+			if f := command.Flags().Lookup(name); f != nil {
+				_ = f.Value.Set(f.DefValue)
+				f.Changed = false
+			}
+		}
+	}
+
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
@@ -2068,7 +2084,7 @@ func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {
 // global reviewer list overrides the built-in per-gate size defaults.
 func TestPanelCreate_GateOmittedUsesAdhocSizeAndGlobalThreshold(t *testing.T) {
 	resetPanelCreateFlags(t)
-	cfgYAML := "panel:\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
+	cfgYAML := "panel:\n  runners: [{family: claude, kind: harness}, {family: codex, kind: harness}]\n  reviewers:\n    - family: claude\n      count: 2\n    - family: codex\n      count: 1\n  approve_threshold: \"2\"\n"
 	root := mkPanelTestRoot(t, cfgYAML)
 	withTestChdir(t, root)
 	config.ResetCache()

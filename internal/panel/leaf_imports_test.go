@@ -24,6 +24,8 @@ import (
 // internal/lint/boundary_test.go rather than by convention, so any future
 // THIRD internal import fails a test immediately rather than drifting past
 // review.
+// The Spec 131 amendment to ADR-0037 adds the stdlib-only internal/safefile
+// leaf as the third permitted internal import.
 func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -40,6 +42,7 @@ func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 	wantOnly := map[string]bool{
 		modulePrefix + "internal/termsafe":   true,
 		modulePrefix + "internal/idvalidate": true,
+		modulePrefix + "internal/safefile":   true,
 	}
 
 	seen := map[string]bool{}
@@ -73,7 +76,7 @@ func TestPanelLeafImports_StdlibPlusTermsafeOnly(t *testing.T) {
 			}
 			seen[path] = true
 			if !wantOnly[path] {
-				t.Errorf("%s imports %s -- internal/panel's leaf invariant (ADR-0037 amendment + ADR-0042, spec 120) permits exactly the internal/termsafe and internal/idvalidate leaves, and no other", e.Name(), path)
+				t.Errorf("%s imports %s -- internal/panel permits only the termsafe, idvalidate and safefile leaves", e.Name(), path)
 			}
 		}
 	}

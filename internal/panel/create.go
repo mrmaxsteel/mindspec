@@ -36,9 +36,9 @@ const briefStubBody = `## Summary
 
 <!-- TODO(skill): the files/paths this review covers -->
 
-## Acceptance Criteria (verbatim from spec.md)
+## Acceptance Criteria
 
-<!-- TODO(skill): paste each claimed Rn/ACn verbatim from spec.md -->
+Use the quoted acceptance criteria in the managed region above.
 
 ## Prior-Round Asks
 
@@ -52,6 +52,7 @@ const briefStubBody = `## Summary
 // CreateInput contains caller-resolved registration values. The caller resolves
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
+	BriefRegions      BriefRegions
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -65,8 +66,40 @@ type CreateInput struct {
 	Roster               []RosterSlot
 	// ReviewersOverride replaces the previous roster when --reviewers was supplied.
 	ReviewersOverride bool
+	// HasRunner validates a family carried from a round without family fields.
+	HasRunner func(string) bool
 	// ReportDropped receives each unbacked entry after the snapshot is written.
 	ReportDropped func(string)
+}
+
+// CheckCreateRound refuses a round at or before the latest verdict round.
+// Call it before scratch cleanup. Create also calls it before writing.
+func CheckCreateRound(dir string, round int) error {
+	res, err := Tally(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if res != nil && res.LatestRound > 0 && round <= res.LatestRound {
+		return &CreateRoundConflict{Round: round, LatestRound: res.LatestRound}
+	}
+	return nil
+}
+
+// CheckCreate checks the input and existing panel files without writing.
+// Call it before scratch cleanup. Create uses the same preparation step.
+func CheckCreate(dir string, in CreateInput) error {
+	_, err := prepareCreate(dir, in)
+	return err
+}
+
+type preparedCreate struct {
+	panel         Panel
+	eventData     []byte
+	existingBrief []byte
+	briefExists   bool
+	brief         string
+	oldRound      int
+	dropped       []string
 }
 
 // Create validates and computes the snapshot and BRIEF before writing. It
@@ -75,13 +108,56 @@ type CreateInput struct {
 // are a single logical operation, not a crash-atomic multi-file transaction.
 // A retry can repair a stale snapshot or BRIEF; verdict files are never changed.
 func Create(dir string, in CreateInput) error {
+	prepared, err := prepareCreate(dir, in)
+	if err != nil {
+		return err
+	}
+	briefPath := filepath.Join(dir, "BRIEF.md")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if prepared.briefExists && prepared.oldRound > 0 && in.Round > prepared.oldRound {
+		archive := filepath.Join(dir, fmt.Sprintf("BRIEF-round-%d.md", prepared.oldRound))
+		f, err := os.OpenFile(archive, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("archive BRIEF: %w", err)
+		}
+		if err == nil {
+			_, writeErr := f.Write(prepared.existingBrief)
+			closeErr := f.Close()
+			if writeErr != nil {
+				return writeErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		}
+	}
+	if err := AppendRecords(dir, prepared.eventData); err != nil {
+		return err
+	}
+	if err := WriteSnapshot(dir, prepared.panel); err != nil {
+		return err
+	}
+	for _, name := range prepared.dropped {
+		if in.ReportDropped != nil {
+			in.ReportDropped("dropped unbacked " + termsafe.Escape(name))
+		}
+	}
+	if err := os.WriteFile(briefPath, []byte(prepared.brief), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", briefPath, err)
+	}
+	return nil
+}
+
+func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	beadID := ""
 	if in.BeadID != nil {
 		beadID = *in.BeadID
 	}
 	binding, err := CreateBeadID(in.Gate, in.Target, beadID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	in.BeadID = binding
 	var old Panel
@@ -89,31 +165,27 @@ func Create(dir string, in CreateInput) error {
 	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
 		reg := load(dir)
 		if reg.Err != nil {
-			return reg.Err
+			return nil, reg.Err
 		}
 		old = reg.Panel
 		data, err := os.ReadFile(filepath.Join(dir, FileName))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(data, &fields); err != nil {
-			return err
+			return nil, err
 		}
 		_, telemetryPresent = fields["telemetry"]
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read panel.json: %w", err)
+		return nil, fmt.Errorf("read panel.json: %w", err)
 	}
-	res, err := Tally(dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if res != nil && res.LatestRound > 0 && in.Round <= res.LatestRound {
-		return &CreateRoundConflict{Round: in.Round, LatestRound: res.LatestRound}
+	if err := CheckCreateRound(dir, in.Round); err != nil {
+		return nil, err
 	}
 	lines, err := ReadLedger(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var first, latest *RoundRecord
 	backed := CarriedEntries{}
@@ -121,13 +193,13 @@ func Create(dir string, in CreateInput) error {
 	for _, line := range lines {
 		var kind recordDiscriminator
 		if err := json.Unmarshal(line, &kind); err != nil {
-			return err
+			return nil, err
 		}
 		switch kind.Record {
 		case RecordRound:
 			var r RoundRecord
 			if err := json.Unmarshal(line, &r); err != nil {
-				return err
+				return nil, err
 			}
 			if first == nil {
 				first = &r
@@ -138,25 +210,25 @@ func Create(dir string, in CreateInput) error {
 		case RecordRefutation:
 			var r Refutation
 			if err := json.Unmarshal(line, &r); err != nil {
-				return err
+				return nil, err
 			}
 			backed.Refutations = append(backed.Refutations, r)
 		case RecordDeferral:
 			var d Deferral
 			if err := json.Unmarshal(line, &d); err != nil {
-				return err
+				return nil, err
 			}
 			backed.Deferrals = append(backed.Deferrals, d)
 		case RecordRebind:
 			var r Rebind
 			if err := json.Unmarshal(line, &r); err != nil {
-				return err
+				return nil, err
 			}
 			backed.Rebinds = append(backed.Rebinds, r)
 		case RecordAbandon:
 			var a AbandonRecord
 			if err := json.Unmarshal(line, &a); err != nil {
-				return err
+				return nil, err
 			}
 			abandonedAt = a.CreatedAt
 		}
@@ -177,17 +249,17 @@ func Create(dir string, in CreateInput) error {
 		}
 		for i, r := range old.Refutations {
 			if err := checkEntry(r, fmt.Sprintf("refutation[%d] slot %s finding %s", i, r.Slot, r.Finding)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		for i, d := range old.Deferrals {
 			if err := checkEntry(d, fmt.Sprintf("deferral[%d] slot %s finding %s", i, d.Slot, d.Finding)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		for i, r := range old.Rebinds {
 			if err := checkEntry(r, fmt.Sprintf("rebind[%d] round %d from %s to %s", i, r.Round, r.FromSHA, r.ToSHA)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -216,18 +288,37 @@ func Create(dir string, in CreateInput) error {
 		}
 	}
 	roster := in.Roster
+	carrying := false
 	if !in.ReviewersOverride {
 		if latest != nil {
 			roster = latest.Roster
+			carrying = true
 		} else if legacy && len(old.Roster) > 0 {
 			roster = old.Roster
+			carrying = true
 		}
 	}
 	if len(roster) < 2 {
-		return fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+		return nil, fmt.Errorf("a panel needs at least two reviewers; use --reviewers 2")
+	}
+	roster = append([]RosterSlot(nil), roster...)
+	for i := range roster {
+		if roster[i].Family == "" {
+			if carrying {
+				if in.HasRunner == nil || !in.HasRunner(roster[i].Model) {
+					return nil, submitRefusal(fmt.Sprintf("cannot carry slot %s without a matching runner", roster[i].Slot), fmt.Sprintf("mindspec panel create %s --round %d --reviewers %d", promptShellQuote(filepath.Base(dir)), in.Round, len(in.Roster)))
+				}
+				roster[i].Family = roster[i].Model
+			} else {
+				roster[i].Family = "harness"
+			}
+		}
+		if !modelSafe(roster[i].Model) {
+			return nil, submitRefusal("invalid slot model", "set a non-empty model without whitespace, control bytes or a leading dash")
+		}
 	}
 	gate := in.Gate
-	p := Panel{BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
+	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
 		ExpectedReviewers: len(roster), Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
 		Refutations: carried.Refutations, Deferrals: carried.Deferrals, Rebinds: carried.Rebinds,
@@ -244,25 +335,25 @@ func Create(dir string, in CreateInput) error {
 	if spec == "" {
 		spec = "adhoc"
 	}
-	event := RoundRecord{Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
+	event := RoundRecord{VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
 		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
 		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
 		Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := Validate(eventData); err != nil {
-		return err
+		return nil, err
 	}
 	if err := HygienePredicate(eventData); err != nil {
-		return err
+		return nil, err
 	}
 	briefPath := filepath.Join(dir, "BRIEF.md")
 	existing, readErr := os.ReadFile(briefPath)
 	briefExists := readErr == nil
 	if readErr != nil && !os.IsNotExist(readErr) {
-		return fmt.Errorf("read %s: %w", briefPath, readErr)
+		return nil, fmt.Errorf("read %s: %w", briefPath, readErr)
 	}
 	prior := "none recorded"
 	priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
@@ -270,62 +361,29 @@ func Create(dir string, in CreateInput) error {
 		prior = termsafe.Escape(string(priorData))
 		// Quoted prose must not become region syntax or toggle fence scanning.
 		trimmed := strings.TrimSpace(prior)
-		if strings.HasPrefix(trimmed, "```") || markerLookalikeRE.MatchString(trimmed) ||
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
 			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
 			prior = "> " + prior
 		}
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read prior round: %w", err)
+		return nil, fmt.Errorf("read prior round: %w", err)
 	}
-	header := renderCreateBriefHeader(filepath.Base(dir), p, prior)
+	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
 	if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)
 		if err != nil {
-			return fmt.Errorf("BRIEF.md header in %s: %w", briefPath, err)
+			return nil, fmt.Errorf("BRIEF.md header in %s: %w", briefPath, err)
 		}
 	} else {
 		newBrief = header + "\n\n" + briefStubBody
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if briefExists && old.Round > 0 && in.Round > old.Round {
-		archive := filepath.Join(dir, fmt.Sprintf("BRIEF-round-%d.md", old.Round))
-		f, err := os.OpenFile(archive, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if err != nil && !os.IsExist(err) {
-			return fmt.Errorf("archive BRIEF: %w", err)
-		}
-		if err == nil {
-			_, writeErr := f.Write(existing)
-			closeErr := f.Close()
-			if writeErr != nil {
-				return writeErr
-			}
-			if closeErr != nil {
-				return closeErr
-			}
-		}
-	}
-	if err := AppendRecords(dir, eventData); err != nil {
-		return err
-	}
-	if err := WriteSnapshot(dir, p); err != nil {
-		return err
-	}
-	for _, name := range dropped {
-		if in.ReportDropped != nil {
-			in.ReportDropped("dropped unbacked " + termsafe.Escape(name))
-		}
-	}
-	if err := os.WriteFile(briefPath, []byte(newBrief), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", briefPath, err)
-	}
-	return nil
+	return &preparedCreate{panel: p, eventData: eventData, existingBrief: existing, briefExists: briefExists, brief: newBrief, oldRound: old.Round, dropped: dropped}, nil
 }
 
-func renderCreateBriefHeader(slug string, p Panel, prior string) string {
+func renderCreateBriefHeader(slug string, p Panel, prior string, regions BriefRegions) string {
 	header := renderBriefHeader(slug, p.Round, p.Target, p.ReviewedHeadSHA)
+	header = renderBriefRegions(header, regions)
 	var b strings.Builder
 	b.WriteString("## Reviewer roster\n\n")
 	for _, slot := range p.Roster {
@@ -417,34 +475,10 @@ func renderBriefHeader(slug string, round int, target, sha string) string {
 // marker constant is a corrupt marker, never legacy body text.
 var markerLookalikeRE = regexp.MustCompile(`^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
 
-// scanNonFenceLines calls fn once per line of s, in file order,
-// skipping every line inside a fenced code block — a region bracketed
-// by lines whose trimmed content starts with "```" (a Markdown fence
-// used, e.g., to quote the header syntax for documentation). offset is
-// the byte offset of the line's first character in s; content is the
-// line with its terminator removed (a trailing "\r" is stripped too,
-// so CRLF files scan the same as LF ones).
+// scanNonFenceLines visits lines outside code fences in file order.
+// A shorter fence cannot close a longer fence. The offset is in bytes.
 func scanNonFenceLines(s string, fn func(offset int, content string)) {
-	inFence := false
-	start := 0
-	for start <= len(s) {
-		lineEnd := len(s)
-		hasNL := false
-		if i := strings.IndexByte(s[start:], '\n'); i >= 0 {
-			lineEnd = start + i
-			hasNL = true
-		}
-		content := strings.TrimSuffix(s[start:lineEnd], "\r")
-		if strings.HasPrefix(strings.TrimSpace(content), "```") {
-			inFence = !inFence
-		} else if !inFence {
-			fn(start, content)
-		}
-		if !hasNL {
-			break
-		}
-		start = lineEnd + 1
-	}
+	scanMarkdownLines(s, fn)
 }
 
 // findMarkerLines returns the byte offsets of every GENUINE occurrence

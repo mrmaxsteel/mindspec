@@ -26,22 +26,64 @@ var configCmd = &cobra.Command{
 	Short: "Inspect the effective mindspec orchestration config",
 }
 
+var configResolveCmd = &cobra.Command{
+	Use:   "resolve",
+	Short: "Preview a new panel roster and the source of each value",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := findRoot()
+		if err != nil {
+			return err
+		}
+		cfg, err := config.Load(root)
+		if err != nil {
+			return err
+		}
+		gate, _ := cmd.Flags().GetString("gate")
+		if gate == "" {
+			return fmt.Errorf("--gate is required\nrecovery: pass --gate with a panel gate name")
+		}
+		slots, err := cfg.ResolveSlots(gate)
+		if err != nil {
+			return err
+		}
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(slots); err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "Preview of a new panel:")
+			for _, s := range slots {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) %s (%s) %s (%s) %s (%s) %s (%s)\n", escapeConfigValue(s.Slot), s.Sources["slot"], escapeConfigValue(s.Family), s.Sources["family"], escapeConfigValue(s.Model), s.Sources["model"], escapeConfigValue(s.Lens), s.Sources["lens"], escapeConfigValue(s.Kind), s.Sources["kind"])
+			}
+		}
+		for _, line := range cfg.ModelOnlyWarnings() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warn: %s\n", termsafe.Escape(line))
+		}
+		for _, line := range cfg.ToolSuggestions() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Suggestion: %s\n", termsafe.Escape(line))
+		}
+		return nil
+	},
+}
+
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
 	Long: `Print the effective config — including the panel:, models:, commands:,
 loop:, and runner: orchestration blocks alongside the
 pre-existing keys — to stdout. Read-only: it writes no file and exits 0
-on a valid config. The models:, loop:, and runner: blocks are annotated
-"` + inertAnnotation + `" because only panel: and the pre-existing keys
-drive in-binary behavior in this release; commands: is
+on a valid config. The loop: and runner: blocks are annotated
+"` + inertAnnotation + `" because they supply orchestration guidance. Reviewer-family model keys
+select reviewer models. The commands: block is
 NOT annotated inert — a populated commands: key changes the managed
 AGENTS.md "Build & Test" section init/setup render today.
 
 With --gate <name>, prints that single gate's resolved
 creation-time defaults instead — the expanded reviewer slots, expected
-reviewer count, raw approve_threshold expression, and effective
-substitution policy — as text, or as JSON with --json. --gate accepts one
+reviewer count and raw approve_threshold expression — as text, or as JSON
+with --json. --gate accepts one
 of the five panel.gates keys (spec_approve, plan_approve, bead,
 final_review, adhoc); --json requires --gate. Both forms stay read-only.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,9 +130,23 @@ final_review, adhoc); --json requires --gate. Both forms stay read-only.`,
 }
 
 func init() {
+	configResolveCmd.Flags().String("gate", "", "panel gate to preview")
+	configResolveCmd.Flags().Bool("json", false, "print values and their sources as JSON")
 	configShowCmd.Flags().String("gate", "", "print the resolved creation-time defaults for one panel gate (spec_approve|plan_approve|bead|final_review|adhoc)")
 	configShowCmd.Flags().Bool("json", false, "with --gate, print the resolved view as JSON instead of text")
-	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configShowCmd, configResolveCmd)
+	config.SetIsolationTrackedChecker(func(root, path string) (bool, error) {
+		for dir := root; ; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				return newExecutor(root).LsFiles(root, path)
+			} else if !os.IsNotExist(err) {
+				return false, err
+			}
+			if filepath.Dir(dir) == dir {
+				return false, nil
+			}
+		}
+	})
 }
 
 // escapeConfigValue renders a config-controlled string, s, safely for
@@ -177,12 +233,7 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintln(&b, "panel:")
 	fmt.Fprintln(&b, "  reviewers:")
 	for _, r := range cfg.Panel.Reviewers {
-		fmt.Fprintf(&b, "    - family: %s\n", escapeConfigValue(r.Family))
-		// CountValue(), not the raw *int Count field: spec 112 pointerized
-		// Count so an absent count (nil, default 1) is distinguishable from
-		// an explicit `count: 0`; %d on the pointer itself would compile
-		// (go vet included) but print the address, not the count.
-		fmt.Fprintf(&b, "      count: %d\n", r.CountValue())
+		renderReviewerEntry(&b, "    ", r)
 	}
 	// PanelApproveThresholdExpr is the RAW approve_threshold expression,
 	// rendered verbatim (no trim/normalize) — its resolver contract is
@@ -191,24 +242,58 @@ func renderConfig(cfg *config.Config) (string, error) {
 	// escapeConfigValue is a no-op for the plain "n-1"/integer expressions
 	// validateOrchestration allows, so the R9 AC substring is unaffected.
 	fmt.Fprintf(&b, "  approve_threshold: %s\n", escapeConfigValue(cfg.PanelApproveThresholdExpr()))
-	fmt.Fprintln(&b, "  substitution:")
-	fmt.Fprintf(&b, "    claude_sub_on_quota: %t\n", cfg.Panel.Substitution.ClaudeSubOnQuota)
-	renderSubstitutes(&b, "    ", cfg.Panel.Substitution.Substitutes)
+	fmt.Fprintf(&b, "  isolation_root: %s\n", escapeConfigValue(cfg.Panel.IsolationRoot))
+	fmt.Fprintln(&b, "  runners:")
+	for _, r := range cfg.Panel.Runners {
+		fmt.Fprintf(&b, "    - family: %s\n      kind: %s\n", escapeConfigValue(r.Family), escapeConfigValue(r.Kind))
+		if len(r.Argv) > 0 {
+			data, _ := json.Marshal(r.Argv)
+			fmt.Fprintf(&b, "      argv: %s\n", data)
+		}
+		if r.Prompt != "" {
+			fmt.Fprintf(&b, "      prompt: %s\n", escapeConfigValue(r.Prompt))
+		}
+		if r.Output != "" {
+			fmt.Fprintf(&b, "      output: %s\n", escapeConfigValue(r.Output))
+		}
+		if r.TimeoutMinutes != nil {
+			fmt.Fprintf(&b, "      timeout_minutes: %d\n", *r.TimeoutMinutes)
+		}
+		if r.OnQuota != "" {
+			fmt.Fprintf(&b, "      on_quota: %s\n", escapeConfigValue(r.OnQuota))
+		}
+		if len(r.QuotaSignals) > 0 {
+			data, _ := json.Marshal(r.QuotaSignals)
+			fmt.Fprintf(&b, "      quota_signals: %s\n", data)
+		}
+		if len(r.Probe) > 0 {
+			data, _ := json.Marshal(r.Probe)
+			fmt.Fprintf(&b, "      probe: %s\n", data)
+		}
+	}
+	fmt.Fprintln(&b, "  lenses:")
+	lensNames := make([]string, 0, len(cfg.Panel.Lenses))
+	for name := range cfg.Panel.Lenses {
+		lensNames = append(lensNames, name)
+	}
+	sort.Strings(lensNames)
+	for _, name := range lensNames {
+		fmt.Fprintf(&b, "    %s: %s\n", escapeConfigValue(name), escapeConfigValue(cfg.Panel.Lenses[name]))
+	}
 	if cfg.Panel.Note != "" {
 		fmt.Fprintf(&b, "  note: %s\n", escapeConfigValue(cfg.Panel.Note))
 	}
 	if err := renderGates(&b, cfg); err != nil {
 		return "", err
 	}
-	renderKnownModelWarnings(&b, cfg)
 	fmt.Fprintln(&b)
 
-	// models: free-form phase -> model-id map, INERT (spec 109 R3). Map
+	// models: reviewer-family model selection plus other model guidance. Map
 	// keys are sorted for deterministic output.
 	if len(cfg.Models) == 0 {
-		fmt.Fprintf(&b, "models: {}  # %s\n", inertAnnotation)
+		fmt.Fprintln(&b, "models: {}  # reviewer.<family> selects reviewer models; other keys supply guidance")
 	} else {
-		fmt.Fprintf(&b, "models:  # %s\n", inertAnnotation)
+		fmt.Fprintln(&b, "models:  # reviewer.<family> selects reviewer models; other keys supply guidance")
 		phases := make([]string, 0, len(cfg.Models))
 		for k := range cfg.Models {
 			phases = append(phases, k)
@@ -277,30 +362,6 @@ func renderConfig(cfg *config.Config) (string, error) {
 	return b.String(), nil
 }
 
-// renderSubstitutes renders panel.substitution.substitutes (spec 112 R5) at
-// indent, in sorted-key order — Go map iteration order must never leak into
-// this command's output — followed by the slot-id-preservation convention
-// line: a substituted reviewer writes its verdict under reviewer_id "<slot>
-// <substitute-model>-sub", keeping the slot id, so verdicts stay comparable
-// across rounds. The substitutes key is never omitted (R8): an empty map
-// still renders "substitutes: {}".
-func renderSubstitutes(b *strings.Builder, indent string, substitutes map[string]string) {
-	if len(substitutes) == 0 {
-		fmt.Fprintf(b, "%ssubstitutes: {}\n", indent)
-	} else {
-		fmt.Fprintf(b, "%ssubstitutes:\n", indent)
-		keys := make([]string, 0, len(substitutes))
-		for k := range substitutes {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(b, "%s  %s: %s\n", indent, escapeConfigValue(k), escapeConfigValue(substitutes[k]))
-		}
-	}
-	fmt.Fprintf(b, "%s# a substituted reviewer writes reviewer_id \"<slot> <substitute-model>-sub\", keeping the slot id\n", indent)
-}
-
 // renderReviewerEntry renders one AS-CONFIGURED reviewer entry (spec 112
 // R8) — model/family/lens/count exactly as the operator set them, not the
 // resolved chain — at the given indent. Load's validateReviewerEntries
@@ -351,6 +412,16 @@ func renderGates(b *strings.Builder, cfg *config.Config) error {
 				renderReviewerEntry(b, "        ", r)
 			}
 		}
+		if len(gp.Lenses) > 0 {
+			data, _ := json.Marshal(gp.Lenses)
+			fmt.Fprintf(b, "      lenses: %s\n", data)
+		}
+		if gp.Acceptance != nil {
+			fmt.Fprintln(b, "      acceptance:")
+			fmt.Fprintf(b, "        question: %s\n", escapeConfigValue(gp.Acceptance.Question))
+			data, _ := json.Marshal(gp.Acceptance.NotBlocking)
+			fmt.Fprintf(b, "        not_blocking: %s\n", data)
+		}
 		sum, err := cfg.PanelGateExpectedReviewers(gate)
 		if err != nil {
 			return err
@@ -365,51 +436,6 @@ func renderGates(b *strings.Builder, cfg *config.Config) error {
 	return nil
 }
 
-// renderKnownModelWarnings appends one advisory comment per DISTINCT model
-// id — drawn from the global reviewers, every configured gate's reviewers,
-// and either side of substitutes — that is absent from config.KnownModels()
-// (spec 112 R8). Advisory-only by construction: never consulted by
-// validation, never affects the exit code (an unrecognized id still exits
-// 0); ids are deduplicated and sorted for deterministic output.
-func renderKnownModelWarnings(b *strings.Builder, cfg *config.Config) {
-	known := make(map[string]bool, len(config.KnownModels()))
-	for _, m := range config.KnownModels() {
-		known[m] = true
-	}
-	seen := make(map[string]bool)
-	var unknown []string
-	add := func(id string) {
-		if id == "" || known[id] || seen[id] {
-			return
-		}
-		seen[id] = true
-		unknown = append(unknown, id)
-	}
-	collect := func(reviewers []config.Reviewer) {
-		for _, r := range reviewers {
-			id := r.Model
-			if id == "" {
-				id = r.Family
-			}
-			add(id)
-		}
-	}
-	collect(cfg.Panel.Reviewers)
-	for _, gate := range config.PanelGateKeys {
-		if gp, ok := cfg.Panel.Gates[gate]; ok {
-			collect(gp.Reviewers)
-		}
-	}
-	for k, v := range cfg.Panel.Substitution.Substitutes {
-		add(k)
-		add(v)
-	}
-	sort.Strings(unknown)
-	for _, id := range unknown {
-		fmt.Fprintf(b, "  # model %s not in the known-model list — fine if intentional\n", escapeConfigValue(id))
-	}
-}
-
 // gateResolvedSlot is one member of gateResolvedDoc.Slots — the JSON/text
 // shape of a config.ReviewerSlot (spec 112 R9).
 type gateResolvedSlot struct {
@@ -418,30 +444,12 @@ type gateResolvedSlot struct {
 	Lens  string `json:"lens"`
 }
 
-// gateResolvedSubstitution is the "substitution" member of gateResolvedDoc
-// (spec 112 R9): the effective substitution policy. Substitutes marshals
-// through encoding/json, which emits map keys in sorted order — the same
-// ordering renderSubstitutes uses for the text path — so both paths agree.
-// InForce is "substitutes" when Substitutes is non-empty (R5: the map IS
-// the policy), else "claude_sub_on_quota" (the legacy field keeps its 109
-// meaning).
-type gateResolvedSubstitution struct {
-	Substitutes      map[string]string `json:"substitutes"`
-	ClaudeSubOnQuota bool              `json:"claude_sub_on_quota"`
-	InForce          string            `json:"in_force"`
-}
-
-// gateResolvedDoc is the R9 stable contract: config show --gate <name>
-// --json's exact five members. Evolution is additive-only (documented in
-// .mindspec/domains/workflow/interfaces.md) — renaming, retyping, or
-// removing a member here is a breaking change no follow-up may make
-// silently.
+// gateResolvedDoc is the resolved creation-time view for config show --gate.
 type gateResolvedDoc struct {
-	Gate              string                   `json:"gate"`
-	Slots             []gateResolvedSlot       `json:"slots"`
-	ExpectedReviewers int                      `json:"expected_reviewers"`
-	ApproveThreshold  string                   `json:"approve_threshold"`
-	Substitution      gateResolvedSubstitution `json:"substitution"`
+	Gate              string             `json:"gate"`
+	Slots             []gateResolvedSlot `json:"slots"`
+	ExpectedReviewers int                `json:"expected_reviewers"`
+	ApproveThreshold  string             `json:"approve_threshold"`
 }
 
 // buildGateResolvedDoc resolves gate's creation-time defaults entirely
@@ -470,37 +478,17 @@ func buildGateResolvedDoc(cfg *config.Config, gate string) (gateResolvedDoc, err
 		docSlots[i] = gateResolvedSlot{Slot: s.Slot, Model: s.Model, Lens: s.Lens}
 	}
 
-	inForce := "claude_sub_on_quota"
-	if len(cfg.Panel.Substitution.Substitutes) > 0 {
-		inForce = "substitutes"
-	}
-
-	// A config with no configured substitutes leaves this map nil; marshal
-	// it as "{}" (never "null") so JSON consumers (e.g. jq) can always
-	// index into .substitution.substitutes without a null-check, matching
-	// the never-null treatment renderSubstitutes already gives the text
-	// path and slots gives docSlots above.
-	substitutes := cfg.Panel.Substitution.Substitutes
-	if substitutes == nil {
-		substitutes = map[string]string{}
-	}
-
 	return gateResolvedDoc{
 		Gate:              gate,
 		Slots:             docSlots,
 		ExpectedReviewers: expected,
 		ApproveThreshold:  threshold,
-		Substitution: gateResolvedSubstitution{
-			Substitutes:      substitutes,
-			ClaudeSubOnQuota: cfg.Panel.Substitution.ClaudeSubOnQuota,
-			InForce:          inForce,
-		},
 	}, nil
 }
 
 // gateResolvedJSON marshals gate's resolved view (spec 112 R9) with the
 // real encoding/json encoder — never string concatenation — so a hostile
-// config-controlled string (a model id, a lens, a substitutes key/value)
+// config-controlled string (a model id or a lens)
 // round-trips as a properly escaped JSON string rather than forging
 // document structure.
 func gateResolvedJSON(cfg *config.Config, gate string) ([]byte, error) {
@@ -513,7 +501,7 @@ func gateResolvedJSON(cfg *config.Config, gate string) ([]byte, error) {
 
 // renderGateResolved renders gate's resolved view (spec 112 R8/R9) as
 // human-readable text: the expanded slots, expected reviewer count, raw
-// approve_threshold expression, and effective substitution policy — every
+// approve_threshold expression — every
 // config-controlled string escaped. Delegates to buildGateResolvedDoc so
 // this cannot disagree with gateResolvedJSON or the R3 resolvers.
 func renderGateResolved(cfg *config.Config, gate string) (string, error) {
@@ -521,7 +509,10 @@ func renderGateResolved(cfg *config.Config, gate string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return renderGateResolvedText(doc), nil
+}
 
+func renderGateResolvedText(doc gateResolvedDoc) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gate: %s\n", escapeConfigValue(doc.Gate))
 	fmt.Fprintln(&b, "slots:")
@@ -532,12 +523,8 @@ func renderGateResolved(cfg *config.Config, gate string) (string, error) {
 	}
 	fmt.Fprintf(&b, "expected_reviewers: %d\n", doc.ExpectedReviewers)
 	fmt.Fprintf(&b, "approve_threshold: %s\n", escapeConfigValue(doc.ApproveThreshold))
-	fmt.Fprintln(&b, "substitution:")
-	renderSubstitutes(&b, "  ", doc.Substitution.Substitutes)
-	fmt.Fprintf(&b, "  claude_sub_on_quota: %t\n", doc.Substitution.ClaudeSubOnQuota)
-	fmt.Fprintf(&b, "  in_force: %s\n", doc.Substitution.InForce)
 
-	return b.String(), nil
+	return b.String()
 }
 
 // reviewerCountNotesFor scans registered panels under root's review roots

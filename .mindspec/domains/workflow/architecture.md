@@ -200,24 +200,13 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   Warn and config-disabled registrations supply no identity. The gate's
   decision is fully computed before the advisory runs and is never affected
   by it.
-- **`config show` gates/substitutes/known-model rendering + `--gate`
-  resolved view (Spec 112 R8/R9).** `renderConfig` renders `panel.gates`
-  in `config.PanelGateKeys` enum declaration order (never map-iteration
-  order) and `panel.substitution.substitutes` in sorted-key order — both
-  keys always present in the output, even empty (`gates: {}` /
-  `substitutes: {}`) — alongside a warning-style, exit-code-inert note for
-  any model id absent from the curated `config.KnownModels()` advisory
-  list. `mindspec config show --gate <name> [--json]` exposes the R3
-  gate-scoped resolvers as a single per-gate view through two pure
-  functions sharing one `buildGateResolvedDoc` builder, so the text and
-  JSON renders and the resolvers themselves cannot disagree. The JSON
-  document's five members (`gate`, `slots`, `expected_reviewers`,
-  `approve_threshold`, `substitution`) are a stable, additive-only
-  contract (R9) — the surface the Spec 110 `panel.json` writer and the
-  Spec 111 orchestration runner consume — carrying the same
-  never-silently-changed guarantee as the recorded `gate` field above.
-  This bead adds no writer- or runner-side behavior; both remain out of
-  scope here.
+- **`config show` gate views.** `renderConfig` renders `panel.gates` in
+  `config.PanelGateKeys` order, including `gates: {}` when empty. It emits
+  no substitution map or known-model warning. `config show --gate <name>
+  [--json]` uses `buildGateResolvedDoc` for text and JSON output. The JSON
+  contract has `gate`, `slots`, `expected_reviewers`, and `approve_threshold`.
+  Slots carry `slot`, `model`, and `lens`. The threshold is the raw expression.
+  These members form a stable, additive-only contract.
 - **Doctor layout detection (Spec 106).** `mindspec doctor` reports the
   detected docs layout (reusing `workspace.DetectLayout`), emits a
   `would-migrate-layout` Warn when a canonical/legacy tree would flatten

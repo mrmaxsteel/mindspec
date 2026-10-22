@@ -23,16 +23,16 @@ func (r *Result) intactError() error {
 		return fmt.Errorf("panel registration unreadable")
 	}
 	p := r.Panel
-	scope := " --spec " + termsafe.Escape(p.Spec)
+	scope := " --spec " + promptShellQuote(p.Spec)
 	if p.Gate == "adhoc" {
 		scope = " --gate adhoc"
 	}
-	recovery := fmt.Sprintf("mindspec panel create %s%s --round %d", termsafe.Escape((&Registration{Dir: r.Dir}).Slug()), scope, p.Round+1)
+	recovery := fmt.Sprintf("mindspec panel create %s%s --round %d", promptShellQuote((&Registration{Dir: r.Dir}).Slug()), scope, p.Round+1)
 	if p.ExpectedReviewers < 2 {
-		return fmt.Errorf("panel registration requires at least 2 reviewers; recovery: %s --reviewers 2", recovery)
+		return termsafe.NewFailure("panel registration requires at least 2 reviewers", recovery+" --reviewers 2")
 	}
 	if r.IntegrityErr != nil {
-		return fmt.Errorf("panel.json changed outside the panel verbs (%s); recovery: %s", termsafe.Escape(r.IntegrityErr.Error()), recovery)
+		return termsafe.NewFailure(fmt.Sprintf("panel.json changed outside the panel verbs (%s)", r.IntegrityErr.Error()), recovery)
 	}
 	return nil
 }

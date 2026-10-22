@@ -3,6 +3,8 @@ package phase
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -571,5 +573,25 @@ func TestDerivePhaseFromChildrenStillPasses(t *testing.T) {
 				t.Errorf("DerivePhaseFromChildren = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEnsureMigrated_QuotedTimeoutRecovery(t *testing.T) {
+	root := t.TempDir()
+	epic := `{"id":"epic-7","title":"[SPEC 007-legacy] Legacy","status":"open","issue_type":"epic","metadata":{"spec_num":7,"spec_title":"legacy"}}`
+	defer stubFinders(t, epic, `[]`)()
+	path := filepath.Join(root, PhaseLockRelPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := acquirePhaseFileLock(path, time.Second, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	t.Cleanup(SetLockWaitForTest(0, time.Millisecond))
+	migrated, err := EnsureMigrated(root, "007-legacy")
+	if migrated || !errors.Is(err, ErrPhaseLockTimeout) || !strings.HasSuffix(err.Error(), "\nrecovery: mindspec repair phase '007-legacy'") {
+		t.Fatalf("timeout must quote the spec in recovery: migrated=%v err=%v", migrated, err)
 	}
 }

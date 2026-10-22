@@ -1,122 +1,153 @@
 # Review Panels
 
-The review panel is MindSpec's verifier: a parallel, multi-model, multi-lens review whose decision is computed by the `mindspec` binary — not negotiated in a chat window. This guide covers how panels work, how to configure them, and the rules that keep them honest.
+A panel reviews the work with separate reviewer slots. The binary computes the decision.
+Each slot has a family, model and lens. The implementer cannot approve its own work.
 
-The design premise is **maker ≠ verifier**. The agent that implements a bead makes exactly one commit and cannot merge, close, or approve its own work. The panel judges the diff; the binary tallies the verdicts; only then does the merge gate open.
+## Artifacts and verdicts
 
-## Anatomy of a panel
+A spec panel uses `.mindspec/specs/<spec-slug>/reviews/<panel-slug>/`.
+An adhoc panel uses `.mindspec/reviews/<panel-slug>/` on a flat layout.
+Other layouts use `review/<panel-slug>/`.
 
-A panel run produces a directory of artifacts that live in the repo, next to the work they judged:
+The directory holds `panel.json`, `BRIEF.md`, `dispositions.jsonl` and submitted verdict files.
+`panel.json` records the roster, round, reviewed SHA and subject digest.
+Every new round uses verdict schema v2. Historical rounds keep their file-based rules.
 
-```
-.mindspec/specs/<spec-slug>/reviews/<panel-slug>/
-├── panel.json                  # the gate's source of truth
-├── BRIEF.md                    # what reviewers were asked to judge
-├── <slot>-round-1.json                  # one verdict per reviewer per round
-│                                        # (e.g. R1-round-1.json, codex-r4-round-1.json)
-└── consolidated-round-1.md     # the merged change list, if a fix round is needed
-```
+Run `mindspec panel schema` for the JSON Schema.
+A verdict has `schema: 2`, `slot`, `round`, `reviewed_sha`, `status`, `verdict`, `model`, `rationale`, `concrete_changes_required` and `commands_run`.
+Status is `draft` or `final`. Verdict is `APPROVE`, `REQUEST_CHANGES`, `REJECT` or `VOID`.
+VOID requires `void_reason`. Other verdicts require a rationale.
+Only REQUEST_CHANGES has change items. Each item has `text` and a `basis` of `executed`, `traced` or `hypothesis`.
+An executed item also names its zero-based `commands_run` index in `command`.
+`hard_block` is an optional boolean. `findings` and `inputs_read` are optional string arrays for evidence.
 
-`panel.json` records the target (bead, spec, plan, final branch diff, or PR), the round number, `expected_reviewers`, the reviewer roster, `reviewed_head_sha`, and the subject digest. `reviewed_head_sha` identifies the commit the panel judged. Ad-hoc panels (repo reviews, pre-release checks) use `.mindspec/reviews/<panel-slug>/` on flat layouts. Other layouts use `review/<panel-slug>/`.
+Harness reviewers use `mindspec panel submit --file <absolute-attempt-path>/verdict.json`.
+The slot prompt gives the path. Submit validates the bytes and writes the panel verdict file.
+Process reviewers use the output channel in their prompt. Launch submits their verdicts.
+A verdict file without a submission does not count. The latest submission replaces earlier submissions for that slot and round.
+The ledger retains all submissions. A replacement in flight keeps the slot out of the gate.
 
-Each reviewer writes a verdict JSON: `reviewer_id`, a verdict (`APPROVE` / `REQUEST_CHANGES` / `REJECT`), `confidence`, `rationale`, `concrete_changes_required`, structured `findings`, and an optional `hard_block`.
+## Reviewers and lenses
 
-## Six lenses, two model families
+Zero config uses one harness family for every slot. No tool runner ships.
+Defaults are 4 reviewers for bead panels and 6 for spec, plan, final and adhoc panels.
+A one-family panel is valid. A panel needs at least two reviewers.
 
-The gate sets the default panel size: **6 reviewers for spec, plan, final, and adhoc reviews; 4 for bead reviews**. Slots alternate between Claude and Codex in round-robin order. Reviewers run in parallel. To override these defaults, set `panel.reviewers` in `.mindspec/config.yaml`, or set `panel.gates.<gate>.reviewers` for one gate. Cross-family review is deliberate: each model family has systematic blind spots, and a family split on a verdict (one family approves, the other doesn't) is itself reported as a signal.
+Code review lenses are author-of-record, empirical-prober, codebase-pin, adversarial, contract-stability and integration.
+Spec and plan approval use falsifiability, scope-honesty, contradiction and feasibility.
+Set focus text in `panel.lenses`. Set the ordered lens list and acceptance question under `panel.gates.<gate>`.
+`mindspec config resolve --gate bead --json` previews a new roster and each value's source.
+For an existing panel, use `mindspec panel verify <slug> --json`.
 
-Six reviewers would be pointless as six clones, so each slot carries a distinct lens:
+## Runners
 
-| Slot | Lens | The question it asks |
-|:-----|:-----|:---------------------|
-| R1 | Author-of-record | Does the diff actually do what the plan said this bead would do? |
-| R2 | Codebase pin | Do the files, functions, and tests named in the claims really exist — and pass? |
-| R3 | Contract stability | Do prompts, schemas, and public interfaces stay coherent for downstream consumers? |
-| R4 | Empirical prober | Run the validators and proofs by hand; believe nothing that wasn't executed. |
-| R5 | Schema/type correctness | Are the data shapes, types, and edge cases right? |
-| R6 | Next-bead integration | Will the *next* bead land cleanly on top of this one? |
-
-The final review of a whole spec branch (run once, after the last bead merges) swaps in branch-level lenses: cumulative scope drift, inter-bead coherence, clean integration with main, PR-description accuracy, acceptance-criteria release readiness, and operator readiness.
-
-## The decision matrix
-
-Tallying is not a judgment call. The decision is a pure function in the binary — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop.
-
-- **Pass rule.** A panel passes only when it is fresh and intact, every roster slot has a verdict, and it has 0 REJECT, 0 `hard_block`, 0 INVALID and 0 unresolved REQUEST_CHANGES verdicts. The APPROVE count is not a decision input.
-- **Each finding is fixed, refuted or deferred.** To fix findings, run a fix round. Consolidate the reviewers' `concrete_changes_required` lists into one change list. A fix agent applies it. Increase the round number and update `reviewed_head_sha` together. The panel reviews the new head. To refute a finding, record evidence with `mindspec panel refute`. To defer a finding, name an open follow-up bead with `mindspec panel defer`. Stale verdicts never count. If the panel passes apart from staleness and the new commits need no new review (for example, an ownership-only commit), run `mindspec panel rebind <slug> --reason '<who>: <why>'` instead. It moves the panel to the new tip with no new round and records the changed paths. It refuses a failing panel.
-- **Any REJECT → halt.** A REJECT stops the track for a human. It is never auto-fixed: a rejection that gets quietly patched over is precisely the verification debt the panel exists to prevent.
-- **Bounded rounds.** A bead that keeps failing its panel halts after a configured maximum rather than looping forever.
-
-### Artifact hard gates
-
-One rule outranks the vote count: if a finding names a **missing measurement artifact** — a benchmark that was promised, a cost projection, a drift report, a regression baseline — the panel blocks regardless of how many reviewers approved. The distinguishing test is: *could the missing artifact have caught a real defect?* If yes, no quantity of approvals substitutes for it. Agents can't vote evidence into existence, and neither can reviewers.
-
-## Configuration
-
-The panel machinery is configured in `.mindspec/config.yaml`:
+Configure `panel.runners` in `.mindspec/config.yaml`:
 
 ```yaml
 panel:
+  runners:
+    - family: local-review
+      kind: process
+      argv: [review-cli, "{prompt_file}"]
+      prompt: file
+      output: stdout
+      quota_signals: ["quota limit reached"]
+      on_quota: harness
   reviewers:
-    - {family: claude, count: 3}
-    - {family: codex,  count: 3}
-  substitution:
-    claude_sub_on_quota: true   # if a codex slot hits a quota wall, a claude
-                                # substitute fills the SAME slot id — the panel
-                                # never silently shrinks
-
-models:                          # optional per-phase model selection
-  implement: <model-id>          # phases: implement, review, authoring,
-  review: <model-id>             #         grill, final_review
-  final_review: <model-id>
-
-runner: claude-code-skills       # who executes the panel plumbing (see below)
+    - {family: harness, count: 2}
+    - {family: local-review, count: 2}
 ```
 
-Config load refuses a one-reviewer panel because it cannot pass. Panel skipping cannot be delegated to config.
+Replace `review-cli` with a command on your PATH. Match its output to the slot prompt.
+A process runner needs `argv`, `prompt` and `output`. Placeholders occupy whole argv elements.
+A harness runner uses the adapter's agent tool. It accepts an optional timeout.
+Set `on_quota` on a process runner to select a substitute family.
+A non-zero exit or timeout must match a configured signal in stderr before quota substitution occurs.
+`panel.substitution` and `claude_sub_on_quota` are retired; use `on_quota` on a runner.
 
-`mindspec config show` prints the effective merged configuration.
+Use `.mindspec/config.local.yaml` for machine-local `panel.runners` and `models` only.
+The local file merges after the project file. Runners replace the same family or append a new family.
+Do not track the local file. Run `mindspec init` to add ignore entries for local config and review scratch.
+A reviewer family without a runner refuses creation. A model-only reviewer runs on the harness with its model and produces a warning.
+When the effective model equals the family, the adapter uses its default model and retains the slot model as the verdict label.
+If the agent tool cannot run an explicit model, the adapter reports the slot.
 
-## The panel verbs
+The top-level `runner` selects the orchestration adapter:
 
-The panel lifecycle is a set of agent-neutral CLI verbs — the contract any orchestrator can drive:
+- `claude-code-skills`: dispatch through the panel skills.
+- `claude-code-workflow`: run `/ms-panel` once for the round.
+- `external`: use another orchestrator with the same CLI contract.
+
+## Dispatch and isolation
 
 ```bash
-mindspec panel create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N]
-                                 # writes the panel dir, BRIEF, panel.json in one
-                                 # operation; pins round, roster, reviewed_head_sha, subject digest
-mindspec panel verify <slug>     # read-only: completeness + staleness report,
-                                 # prints the same PASS/BLOCK the gate computes
-mindspec panel tally <slug>      # renders the decision from the binary:
-                                 # verdict table, decision, consolidated changes;
-                                 # exit 0 on allow, non-zero (with recovery) on block
-# Refute one finding with evidence. Omit --finding to cover the whole slot.
-mindspec panel refute <slug> --slot R2 --round N --finding 'ccr[0]' --ground disproven --reason '<why>' --evidence <reference> --by '<name>'
-# Defer a finding to an open follow-up bead.
-mindspec panel defer <slug> --slot R2 --round N --finding 'ccr[0]' --bead <follow-up> --by '<name>'
-# Move a passing panel to the new tip with no new round.
-mindspec panel rebind <slug> --reason '<who>: <why>'
-# Abandon a panel with an audited reason.
-mindspec panel abandon <slug> --reason '<why>' --by '<name>'
+mindspec panel create <slug> --spec <id> --gate bead --target bead/<id> --bead <id>
+mindspec panel verify <slug> --json
+# Harness slot:
+mindspec panel checkout <slug> --slot R1 --dispatch
+mindspec panel prompt <slug> --slot R1
+# Dispatch the prompt through the harness, then submit the named attempt file.
+mindspec panel submit --file <absolute-slot-dir>/attempt-1/verdict.json
+# Process slot:
+mindspec panel launch <slug> R2
+mindspec panel recover <slug> R2 --reason '<why>'
 ```
 
-The **runner** selects who executes the plumbing between those verbs — launching reviewers, collecting verdicts:
+Slot clones and scratch live under `.mindspec-scratch` by default.
+The slot contains `slot.json`, `tree/` and `attempt-<k>/` directories.
+Reviewers run tests in their slot tree. They keep scratch in the slot directory.
+A harness redispatch runs checkout with `--dispatch`, reads a new prompt and dispatches it once.
+Add `--replace` after a final verdict other than VOID. Old attempt files cannot submit for a new attempt.
+An agent that returns with no submission gets one redispatch. Report a second failure.
+Use the latest verify status to choose the next action. Wait while a slot runs.
+Run verify after each process or agent ends. Only dispatch a fixer when verify exits 0.
+Use `panel checkout <slug> --fixer` for fixer scratch. The fixer works in the target worktree.
+Use `panel checkout <slug> --prune` to remove the panel's slot directories.
 
-- `claude-code-skills` (default) — the `/ms-panel-run` and `/ms-panel-tally` skills orchestrate reviewers from your Claude Code session.
-- `claude-code-workflow` — the `/ms-panel` workflow runs the whole round as one deterministic fan-out and returns a single compact result, keeping six reviewers' transcripts out of your session's context. Recommended once you're running loops.
-- `external` — bring your own orchestrator; anything that can exec the panel verbs and write verdict JSONs can run a panel.
+## Slot status and exit codes
 
-Whatever the runner, it is an adapter, never a second decision authority: the decision stays in the binary, and a runner cannot merge, complete, or skip.
+Verify reports one status per slot:
 
-## Escape hatch
+| Status | Meaning |
+|:-------|:--------|
+| `final` | Latest final submission is complete and its file matches |
+| `damaged` | Latest submission is final, is not VOID, and is closed. Its file is missing, unreadable or changed. |
+| `void` | Latest submitted verdict is VOID |
+| `draft` | Latest submission is a draft |
+| `running` | Current attempt is pending or running |
+| `quota_wall` | Process attempt matched a configured quota signal |
+| `launch_failed` | Attempt failed or exceeded its timeout |
+| `malformed` | Process output failed verdict validation |
+| `unsubmitted` | File has no matching latest submission |
+| `missing` | Slot has no verdict or attempt |
 
-`MINDSPEC_SKIP_PANEL=1` skips the panel gate on a `complete`. It is environment-only (never a flag, never printed in error messages), intended for humans in exceptional circumstances, and every use is recorded as an audit entry on the bead it skipped (`panel_gate_skipped`, with a timestamp). If you find yourself reaching for it twice, the panel configuration — not the gate — is what needs fixing.
+Exit 0 means all slots are final. It does not mean the gate passes.
+Exit 1 means a slot is running or missing, a harness draft is pending, or a quota handoff is pending.
+Exit 2 applies in every other case. `--json` includes the effective family, model, lens, kind, annotations and `handoff_pending`.
+On a status-read error, verify exits 2. Text output includes a preview. With `--json`, output contains only a JSON error object.
+A slot can show `attempt <k> run.lock probe failed: ...` when its lock probe fails.
+On a v2 round, an unreadable verdict gives `damaged` only when the latest submission is final, is not VOID, and is closed. Otherwise the latest submission or attempt sets the status. With no such event, it gives `unsubmitted`.
+On a pre-v2 round, an unreadable verdict gives `malformed`.
+The slot includes `verdict read failed: ...`. Verify still reports all slots.
 
-## Cost and when to lighten the panel
+## Decision and recovery
 
-Six frontier-model reviewers per round is a real cost, and it's the right default for exactly the reason it's expensive: it's the thing standing between semi-autonomous merges and unreviewed slop. If you want to economize, do it explicitly — a smaller `reviewers:` mix in config on low-stakes repos — rather than by skipping. The pass rule, artifact hard gates and REJECT rules apply at every panel size.
+Run `mindspec panel tally <slug>` for the decision and findings.
+PASS requires a fresh, intact panel with every roster slot in, no REJECT, no hard block, no INVALID and no unresolved REQUEST_CHANGES.
+Approval counts do not discharge findings. Reproduce blocking claims before a fix dispatch or refutation.
+A missing required measurement artifact stays open until the artifact exists.
 
-## Related
+- Fix the findings, then use `panel create <slug> --round <N+1>` for a new review.
+- Refute a finding with `mindspec panel refute <slug> --slot R1 --round N --finding 'ccr[0]' --ground disproven --reason '<why>' --evidence <reference> --by '<name>'`.
+- Defer a finding with `mindspec panel defer <slug> --slot R1 --round N --finding 'ccr[0]' --bead <follow-up> --by '<name>'`. Spec approval and adhoc panels cannot defer.
+- Use `mindspec panel rebind <slug> --reason '<who>: <why>'` when a passing panel's changed paths need no new review.
+- Use `mindspec panel abandon <slug> --reason '<why>' --by '<name>'` to record an exit from the panel flow.
 
-- [Autonomy guide](autonomy.md) — panels as gate authority at levels 2+
-- [README § Review panels](../../../README.md#review-panels) — the short version
+At the first v2 round, a carried slot without a family needs a runner that matches its old model.
+If none exists, use `panel create <slug> --round <N+1> --reviewers <n>` for a fresh roster.
+Process runners need a Unix host. Use harness runners on Windows.
+
+Only a human can set `MINDSPEC_SKIP_PANEL=1` in the session environment before launch.
+Completion records the audited skip. An agent cannot set it on a command line.
+
+See the [autonomy guide](autonomy.md) for gate authority and loop budgets.

@@ -25,7 +25,9 @@ func TestHandEdit_FieldMatcher(t *testing.T) {
 		edit func(*Panel)
 	}{
 		{"round", func(p *Panel) { p.Round++ }},
-		{"roster", func(p *Panel) { p.Roster = []RosterSlot{{"R1", "changed", "lens"}, {"R2", "model-b", "architecture"}} }},
+		{"roster", func(p *Panel) {
+			p.Roster = []RosterSlot{{Slot: "R1", Model: "changed", Lens: "lens"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}
+		}},
 		{"gate", func(p *Panel) { p.Gate = "adhoc" }},
 		{"target", func(p *Panel) { p.Target = "main" }},
 		{"bead_id", func(p *Panel) { id := "different"; p.BeadID = &id }},

@@ -23,7 +23,7 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
       adversarially   decomposition    the bead loop, per work item:
       grilled until   checked against    • fresh agent, isolated git worktree
       falsifiable     published          • exactly one commit, tests must pass
-                      research           • 6-reviewer panel, two model families
+                      research           • panel size and runners from config
                                          • merge gate enforced in the binary
 ```
 
@@ -34,7 +34,7 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
 - **Specs that survive contact with an agent** — every spec is interrogated by an adversarial grill agent until each requirement is concrete, falsifiable, and grounded in the actual repo. Vague verbs, contradictions, and untestable claims don't make it past the first gate.
 - **Research-backed planning** — decomposition quality is among the strongest predictors of agent success. Plans are validated against published thresholds for bead count, scope overlap, and dependency-chain depth (see [Planning](#planning-is-research-backed)).
 - **A work graph, not a chat history** — work items live in [Beads](https://github.com/gastownhall/beads), a git-native issue tracker. Each bead is a self-contained work packet a fresh agent can pick up with zero session history.
-- **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A six-reviewer panel with six distinct lenses across two model families is the verifier; the tally is code, not conversation.
+- **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A panel with configured reviewers and distinct lenses verifies the work. The binary computes the decision.
 - **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
 - **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
 - **An autonomy ladder, not an autonomy switch** — run interactively, run a supervised autopilot, or grant a governed unattended loop with named halt conditions, budget ceilings, and a handoff log. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
@@ -70,11 +70,11 @@ Fresh context per work item isn't a suggestion, it's enforced: the session-fresh
 
 Every bead merge — and, on the higher autonomy rungs, every gate — is judged by a review panel:
 
-- **Six reviewers, two model families**, launched in parallel. Cross-family review catches what any single model family systematically misses.
-- **Six distinct lenses, not six clones**: author-of-record (does the diff match the plan?), codebase pin (do the files and tests actually exist and pass?), contract stability, empirical prober (runs the validators by hand), schema correctness, and next-bead integration.
+- **Configured reviewers**, launched in parallel. Zero config uses one harness family for every slot. Process reviewers need a configured runner.
+- **Distinct lenses**: author-of-record, empirical prober, codebase pin, adversarial, contract stability and integration. Spec and plan reviews use falsifiability, scope honesty, contradiction and feasibility.
 - **No unresolved findings** — every REQUEST_CHANGES finding must be fixed, refuted with evidence, or deferred to a follow-up bead before the panel passes.
 - **Artifact hard gates** — a finding that names a missing measurement artifact (a benchmark, a cost projection, a regression baseline) blocks regardless of the vote count. Agents can't vote evidence into existence.
-- **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | verify | tally | refute | defer | rebind | abandon` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel. `mindspec panel disposition validate | append | check | query` is the durable review-telemetry store behind them.
+- **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | checkout | prompt | launch | submit | recover | verify | tally | refute | defer | rebind | abandon` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel. `mindspec panel disposition validate | append | check | query` is the durable review-telemetry store behind them.
 - **A REJECT halts the track.** Auto-fixing a rejection is the definition of verification debt, so the loop never does it.
 
 Verdicts persist as JSON alongside the spec, so every merge carries its review history in the repo.
@@ -111,7 +111,7 @@ The governance profile lives in `.mindspec/config.yaml`, and it selects **who ho
 
 ```yaml
 panel:
-  reviewers: [{family: claude, count: 3}, {family: codex, count: 3}]
+  reviewers: [{family: harness, count: 4}]
 loop:
   enabled: true
   gate_authority:              # who may pass each gate unattended: panel | human
@@ -205,7 +205,7 @@ For repos you don't want to onboard at all, `/ms-fix-cycle` runs a governed fix 
 
 ## Works with your agent
 
-**Claude Code is the first-class integration** — `mindspec setup claude` installs the hooks, the `ms-*` skill family, and the gates. **OpenAI Codex CLI** and **GitHub Copilot** are supported the same way (`mindspec setup codex|copilot`), and Codex additionally serves as the second model family on review panels.
+**Claude Code is the first-class integration** — `mindspec setup claude` installs the hooks, the `ms-*` skill family, and the gates. **OpenAI Codex CLI** and **GitHub Copilot** are supported the same way (`mindspec setup codex|copilot`). Codex is one supported harness. A process reviewer needs a configured runner.
 
 Portability is a design principle, not an aspiration: agents integrate at the **artifact + CLI contract** level — beads, spec files, `panel.json`, and the `mindspec` verbs — never at the prompt-format level. Orchestration runners are adapters selected by one config key (`runner:`), so wiring up another agent (opencode, pi, your in-house harness) means writing an adapter behind existing contracts, not forking the framework. Contributions welcome.
 

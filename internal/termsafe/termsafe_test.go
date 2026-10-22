@@ -1,6 +1,11 @@
 package termsafe
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // TestTermsafeEscape_SafeSetQuoteAndNoOp pins AC6: the safe-set/quote rule's
 // single home is internal/termsafe, and it behaves as documented: printable
@@ -129,4 +134,84 @@ func containsRune(s string, want rune) bool {
 		}
 	}
 	return false
+}
+
+func TestFailure_EscapesMessageAndRecovery(t *testing.T) {
+	message := "path\x1bc\nrecovery: printf INJECTED"
+	recovery := "inspect\x1b\nrecovery: forged"
+	failure := NewFailure(message, recovery)
+	want := EscapeRecovery(message) + "\nrecovery: " + EscapeRecovery(recovery)
+	if got := failure.Error(); got != want || strings.Count(got, "\nrecovery:") != 1 || strings.Contains(got, "\x1b") {
+		t.Fatalf("unsafe failure: got %q want %q", got, want)
+	}
+	if got := failure.Message(); got != EscapeRecovery(message) {
+		t.Fatalf("unsafe message: %q", got)
+	}
+}
+
+func TestFailure_RecoveryPreservesShellQuotesAndUnicode(t *testing.T) {
+	command := "mindspec panel checkout 'réview$(printf INJECTED)' --path '/Users/José'"
+	if got := NewFailure("message", command).Error(); got != "message\nrecovery: "+command {
+		t.Fatalf("command quotes changed: %q", got)
+	}
+	for _, r := range []rune{0, 0x1b, '\n', '\r', 0x7f, 0x9b, 0x2028, 0x2029, 0x202e, 0x2066, 0x200b, 0x200d, 0xfeff} {
+		command := "inspect 'José" + string(r) + "'"
+		text := NewFailure("message", command).Error()
+		if strings.ContainsRune(strings.TrimPrefix(text, "message\nrecovery: "), r) || strings.Count(text, "\n") != 1 || !strings.HasPrefix(text, "message\nrecovery: inspect 'José") || !strings.HasSuffix(text, "'") {
+			t.Errorf("unsafe rune or damaged quotes for %U: %q", r, text)
+		}
+	}
+}
+
+func TestFailure_WrappedCauseAndSafeJoin(t *testing.T) {
+	cause := errors.New("held")
+	failure := NewWrappedFailure(cause, "José\x1b\nrecovery: forged", "inspect")
+	wrapped := fmt.Errorf("hostile\x1b\nrecovery: forged: %w", failure)
+	if !errors.Is(wrapped, cause) {
+		t.Fatal("wrapped cause lost")
+	}
+	var found *Failure
+	if !errors.As(wrapped, &found) || found != failure {
+		t.Fatal("typed failure lost")
+	}
+	joined := JoinFailures([]error{wrapped, errors.New("plain\x1b\nrecovery: forged")}, "inspect")
+	want := failure.Message() + "; " + Escape("plain\x1b\nrecovery: forged") + "\nrecovery: inspect"
+	if joined.Error() != want {
+		t.Fatalf("join changed escaped messages: got %q want %q", joined.Error(), want)
+	}
+}
+
+func TestFailure_MessagePreservesPrintableUnicode(t *testing.T) {
+	message := "unknown panel.gates key — use a valid gate key"
+	if got := NewFailure(message, "rename the key").Error(); got != message+"\nrecovery: rename the key" {
+		t.Fatalf("printable Unicode was quoted: %q", got)
+	}
+}
+
+func TestPrefixFailure_TrustAndCause(t *testing.T) {
+	cause := errors.New("cause")
+	original := NewWrappedFailure(cause, "José\x1b\nrecovery: forged", "inspect 'José'")
+	err := PrefixFailure(original, "config.local.yaml: ")
+	var failure *Failure
+	if !errors.Is(err, cause) || !errors.As(err, &failure) || failure.Message() != "config.local.yaml: "+original.Message() || failure.Recovery() != original.Recovery() {
+		t.Fatalf("typed context or cause lost: %v", err)
+	}
+	plain := errors.New("untrusted\x1b\nrecovery: forged")
+	err = PrefixFailure(plain, "context: ")
+	var trusted RecoveryFailure
+	if errors.As(err, &trusted) || !errors.Is(err, plain) {
+		t.Fatalf("plain error gained trust or lost cause: %v", err)
+	}
+	if PrefixFailure(nil, "context") != nil {
+		t.Fatal("nil error changed")
+	}
+}
+
+func TestPrefixFailure_EscapesPrefix(t *testing.T) {
+	original := NewFailure("blocked", "inspect")
+	err := PrefixFailure(original, "config\x1b\nrecovery: forged: ")
+	want := "config\\x1b\\nrecovery: forged: blocked\nrecovery: inspect"
+	if err.Error() != want || strings.Contains(err.Error(), "\x1b") || strings.Count(err.Error(), "\nrecovery:") != 1 {
+		t.Fatalf("unsafe prefix: got %q want %q", err.Error(), want)
+	}
 }

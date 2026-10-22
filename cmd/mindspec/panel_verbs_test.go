@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,7 @@ func setupDischarge(t *testing.T) (string, string) {
 	resetDischargeFlags(t)
 	dir := filepath.Join(root, "review", "p")
 	roster := []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "tests"}}
-	if err := panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: "bead/probe-x.1", Gate: "bead", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Roster: roster, ExpectedReviewers: 2}); err != nil {
+	if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: "900-demo", Target: "bead/probe-x.1", Gate: "bead", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Roster: roster, ExpectedReviewers: 2}); err != nil {
 		t.Fatal(err)
 	}
 	writeDischargeVerdict(t, dir, "R1", panel.FindingVerdict{Verdict: panel.VerdictRequestChanges, ConcreteChangesRequired: []string{"missing test", "second ask"}})
@@ -231,7 +232,7 @@ func TestPanelRefute_Refusals(t *testing.T) {
 	t.Run("stale round", func(t *testing.T) {
 		root, dir := setupDischarge(t)
 		roster := []panel.RosterSlot{{Slot: "R1", Model: "claude", Lens: "correctness"}, {Slot: "R2", Model: "codex", Lens: "tests"}}
-		if err := panel.Create(dir, panel.CreateInput{Spec: "900-demo", Target: "bead/probe-x.1", Gate: "bead", Round: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Roster: roster, ExpectedReviewers: 2}); err != nil {
+		if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: "900-demo", Target: "bead/probe-x.1", Gate: "bead", Round: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Roster: roster, ExpectedReviewers: 2}); err != nil {
 			t.Fatal(err)
 		}
 		for _, slot := range []string{"R1", "R2"} {

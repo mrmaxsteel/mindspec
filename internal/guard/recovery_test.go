@@ -1,8 +1,12 @@
 package guard
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func TestFormatFailure_SingleCommand(t *testing.T) {
@@ -152,5 +156,39 @@ func TestHasFinalRecoveryLine(t *testing.T) {
 		if got := HasFinalRecoveryLine(tc.msg); got != tc.want {
 			t.Errorf("%s: HasFinalRecoveryLine(%q) = %v, want %v", tc.name, tc.msg, got, tc.want)
 		}
+	}
+}
+
+func TestNewFailure_TypedRecoveryAndExactFormatting(t *testing.T) {
+	for _, message := range []string{"blocked", "José — blocked", "first\nsecond\n\n"} {
+		for _, commands := range [][]string{{" inspect "}, {"first command", "second command"}} {
+			err := NewFailure(message, commands...)
+			if err.Error() != FormatFailure(message, commands...) {
+				t.Fatalf("guard formatting changed: %q", err)
+			}
+			var trusted termsafe.RecoveryFailure
+			if !errors.As(fmt.Errorf("context: %w", err), &trusted) || trusted != err {
+				t.Fatalf("guard trust lost through wrapper: %v", err)
+			}
+		}
+	}
+}
+
+func TestNewFailure_TerminalSafe(t *testing.T) {
+	unsafe := "\x1b\u202e\u2028\u2029\u0085\u009b\u200b"
+	message := "José — blocked" + unsafe + "\nrecovery: forged\nlast line"
+	command := "inspect 'José" + unsafe + "'\nrecovery: forged"
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("unsafe command was not escaped: %v", recovered)
+		}
+	}()
+	got := NewFailure(message, command, "repeat").Error()
+	want := "José — blocked" + termsafe.EscapeRecovery(unsafe) + "\n recovery: forged\nlast line\nrecovery: " + termsafe.EscapeRecovery(command) + "\nrecovery: repeat"
+	if got != want {
+		t.Fatalf("unsafe guard formatting: got %q want %q", got, want)
+	}
+	if strings.ContainsAny(got, unsafe) || strings.Count(got, "\nrecovery:") != 2 {
+		t.Fatalf("unsafe runes or forged recovery: %q", got)
 	}
 }

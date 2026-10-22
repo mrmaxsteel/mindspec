@@ -80,17 +80,17 @@ func panelCreateGatePresent(content, gate string) bool {
 }
 
 // notBeforeTallyVerbRE ties "do NOT run `<verb>`" to "until
-// `/ms-panel-tally` returns Allow" as a BOUNDED single fragment (not
+// `/ms-panel-tally` returns PASS" as a BOUNDED single fragment (not
 // three independent strings.Contains calls) — a literal that names the
 // WRONG approve verb right after "do NOT run" (e.g. ms-spec-approve
 // telling the reader not to run `mindspec plan approve`) must fail this
 // check for the gate's correct verb, even though the literal still
-// contains "/ms-panel-tally" and "returns Allow" somewhere.
+// contains "/ms-panel-tally" and "returns PASS" somewhere.
 func notBeforeTallyVerbRE(verb string) *regexp.Regexp {
 	return regexp.MustCompile(
 		`do NOT run\s{1,10}` + "`" + regexp.QuoteMeta(verb) + "`" +
 			`\s{1,10}until\s{1,10}` + "`" + `/ms-panel-tally` + "`" +
-			`\s{1,10}returns Allow`,
+			`\s{1,10}returns PASS`,
 	)
 }
 
@@ -116,7 +116,7 @@ func enforcementNotePresent(content string) bool {
 // literal half: each literal names its own `--gate <gate>` flag INSIDE a
 // `mindspec panel create` invocation (bounded — codex G1), binds
 // "do NOT run <the CORRECT approve verb>" to the
-// "until `/ms-panel-tally` returns Allow" instruction (bounded, in the
+// "until `/ms-panel-tally` returns PASS" instruction (bounded, in the
 // SAME literal — a wrong-verb swap REDs this), cites no mindspec ADR, and
 // carries the portable "binary enforcement ... separate, tracked
 // enhancement" note.
@@ -132,7 +132,7 @@ func TestLifecycleGateStep_NamesGateVerbAndEnforcementNote(t *testing.T) {
 				t.Errorf("%s literal missing a `mindspec panel create ... --gate %s` invocation — the flag must be bound inside the panel-create command itself, not merely present somewhere in the document", tc.name, tc.gate)
 			}
 			if !notBeforeTallyVerbPresent(content, tc.verb) {
-				t.Errorf("%s literal missing the bounded \"do NOT run `%s` ... until `/ms-panel-tally` returns Allow\" fragment", tc.name, tc.verb)
+				t.Errorf("%s literal missing the bounded \"do NOT run `%s` ... until `/ms-panel-tally` returns PASS\" fragment", tc.name, tc.verb)
 			}
 			if strings.Contains(content, "ADR-0044") {
 				t.Errorf("%s literal must not cite mindspec's ADR-0044", tc.name)

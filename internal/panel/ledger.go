@@ -14,17 +14,20 @@ import (
 )
 
 const (
-	RecordRound      = "round"
-	RecordRefutation = "refutation"
-	RecordDeferral   = "deferral"
-	RecordRebind     = "rebind"
-	RecordAbandon    = "abandon"
+	RecordVerdict      = "verdict"
+	RecordLaunch       = "launch"
+	RecordSubstitution = "substitution"
+	RecordRound        = "round"
+	RecordRefutation   = "refutation"
+	RecordDeferral     = "deferral"
+	RecordRebind       = "rebind"
+	RecordAbandon      = "abandon"
 )
 
-// IsVerbRecord identifies the five event kinds reserved to panel verbs (R5.1).
+// IsVerbRecord identifies event kinds reserved to panel verbs.
 func IsVerbRecord(kind string) bool {
 	switch kind {
-	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
 		return true
 	}
 	return false
@@ -39,6 +42,7 @@ type CarriedEntries struct {
 
 // RoundRecord captures the registration established by create.
 type RoundRecord struct {
+	VerdictSchema     int            `json:"verdict_schema,omitempty"`
 	Record            string         `json:"record"`
 	Spec              string         `json:"spec"`
 	Panel             string         `json:"panel"`
@@ -89,6 +93,12 @@ type AbandonRecord struct {
 func validateLedgerMap(m map[string]interface{}, kind string) error {
 	fields := []string{"spec", "panel", "created_at"}
 	switch kind {
+	case RecordVerdict:
+		fields = append(fields, "slot", "status", "verdict", "family", "model", "runner_kind", "runner_source", "via", "file_sha256")
+	case RecordLaunch:
+		fields = append(fields, "slot", "family", "model", "status", "runner_kind", "runner_source")
+	case RecordSubstitution:
+		fields = append(fields, "slot", "model")
 	case RecordRound:
 		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "telemetry")
 	case RecordRefutation, RecordDeferral:
@@ -115,7 +125,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	if _, err := time.Parse(time.RFC3339, m["created_at"].(string)); err != nil {
 		return fmt.Errorf("%s created_at must be RFC-3339", kind)
 	}
-	if kind != RecordAbandon {
+	if kind != RecordAbandon && kind != RecordSubstitution {
 		if err := requireInt(m, "round", kind); err != nil {
 			return err
 		}
@@ -125,6 +135,8 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 		}
 	}
 	switch kind {
+	case RecordVerdict, RecordLaunch, RecordSubstitution:
+		return validateExecutionRecord(m, kind)
 	case RecordRound:
 		gate, ok := m["gate"].(string)
 		if !ok {
@@ -261,58 +273,7 @@ func AppendRecordsWithCheck(dir string, check func() error, records ...[]byte) e
 				return err
 			}
 		}
-		existing, err := ReadLedger(dir)
-		if err != nil {
-			return err
-		}
-		known := make(map[string]map[string]interface{}, len(existing)+len(records))
-		for _, line := range existing {
-			m, err := decodeRecord(line)
-			if err != nil {
-				return err
-			}
-			kind, key := recordKey(m)
-			known[kind+"\x00"+key] = m
-		}
-		var pending bytes.Buffer
-		for _, raw := range records {
-			if err := Validate(raw); err != nil {
-				return err
-			}
-			if err := HygienePredicate(raw); err != nil {
-				return err
-			}
-			m, err := decodeRecord(raw)
-			if err != nil {
-				return err
-			}
-			if m["panel"] != filepath.Base(filepath.Clean(dir)) {
-				return fmt.Errorf("panel: record's panel field does not match the destination panel")
-			}
-			if recSpec, _ := m["spec"].(string); strings.TrimSpace(recSpec) == "" {
-				return fmt.Errorf("panel: record for panel %s has an empty spec field (every record must carry a non-empty spec)", termsafe.Escape(filepath.Base(filepath.Clean(dir))))
-			}
-			kind, key := recordKey(m)
-			composite := kind + "\x00" + key
-			if old, exists := known[composite]; exists {
-				if recordsSemanticallyEqual(m, old) {
-					continue
-				}
-				return fmt.Errorf("panel: record key %s already exists with different content", termsafe.Escape(key))
-			}
-			known[composite] = m
-			// Compact each object: pretty-printed input must still be one JSONL line.
-			var line bytes.Buffer
-			if err := json.Compact(&line, raw); err != nil {
-				return err
-			}
-			pending.Write(line.Bytes())
-			pending.WriteByte('\n')
-		}
-		if pending.Len() == 0 {
-			return nil
-		}
-		return appendDispositionLine(filepath.Join(dir, dispositionsFileName), pending.Bytes())
+		return appendRecordsLocked(dir, records...)
 	})
 }
 
@@ -348,4 +309,318 @@ func WriteSnapshot(dir string, p Panel) error {
 		return err
 	}
 	return os.Rename(f.Name(), filepath.Join(dir, FileName))
+}
+
+// appendRecordsLocked requires the caller to hold the panel ledger lock.
+func appendRecordsLocked(dir string, records ...[]byte) error {
+	existing, err := ReadLedger(dir)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]map[string]interface{}, len(existing)+len(records))
+	for _, line := range existing {
+		m, err := decodeRecord(line)
+		if err != nil {
+			return err
+		}
+		kind, key := ledgerRecordKey(m)
+		known[kind+"\x00"+key] = m
+	}
+	var pending bytes.Buffer
+	for _, raw := range records {
+		if err := Validate(raw); err != nil {
+			return err
+		}
+		if err := HygienePredicate(raw); err != nil {
+			return err
+		}
+		m, err := decodeRecord(raw)
+		if err != nil {
+			return err
+		}
+		if m["panel"] != filepath.Base(filepath.Clean(dir)) {
+			return fmt.Errorf("panel: record's panel field does not match the destination panel")
+		}
+		if recSpec, _ := m["spec"].(string); strings.TrimSpace(recSpec) == "" {
+			return fmt.Errorf("panel: record for panel %s has an empty spec field (every record must carry a non-empty spec)", termsafe.Escape(filepath.Base(filepath.Clean(dir))))
+		}
+		kind, key := ledgerRecordKey(m)
+		composite := kind + "\x00" + key
+		if old, exists := known[composite]; exists {
+			if recordsSemanticallyEqual(m, old) {
+				continue
+			}
+			return fmt.Errorf("panel: record key %s already exists with different content", termsafe.Escape(key))
+		}
+		known[composite] = m
+		// Compact each object: pretty-printed input must still be one JSONL line.
+		var line bytes.Buffer
+		if err := json.Compact(&line, raw); err != nil {
+			return err
+		}
+		pending.Write(line.Bytes())
+		pending.WriteByte('\n')
+	}
+	if pending.Len() == 0 {
+		return nil
+	}
+	return appendDispositionLine(filepath.Join(dir, dispositionsFileName), pending.Bytes())
+}
+
+// submitLockHeldHook runs before Submit reads any mutable state. Tests only.
+var submitLockHeldHook func()
+
+// RecordSpec returns the portable spec label for a panel ledger record.
+func RecordSpec(p Panel) string {
+	if p.Spec == "" {
+		return "adhoc"
+	}
+	return p.Spec
+}
+
+// SubmissionRecord binds one version of a slot verdict to exact file bytes.
+type SubmissionRecord struct {
+	Record       string `json:"record"`
+	Spec         string `json:"spec"`
+	Panel        string `json:"panel"`
+	Slot         string `json:"slot"`
+	Round        int    `json:"round"`
+	Seq          int    `json:"seq"`
+	Status       string `json:"status"`
+	Verdict      string `json:"verdict"`
+	Family       string `json:"family"`
+	Model        string `json:"model"`
+	RunnerKind   string `json:"runner_kind"`
+	RunnerSource string `json:"runner_source"`
+	Via          string `json:"via"`
+	Attempt      int    `json:"attempt"`
+	Reason       string `json:"reason"`
+	FileSHA256   string `json:"file_sha256"`
+	CreatedAt    string `json:"created_at"`
+	HardBlock    bool   `json:"hard_block,omitempty"`
+}
+
+type LaunchRecord struct {
+	Record        string `json:"record"`
+	Spec          string `json:"spec"`
+	Panel         string `json:"panel"`
+	Slot          string `json:"slot"`
+	Round         int    `json:"round"`
+	Attempt       int    `json:"attempt"`
+	Family        string `json:"family"`
+	Model         string `json:"model"`
+	Status        string `json:"status"`
+	Seq           int    `json:"seq,omitempty"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
+	PGID          int    `json:"pgid,omitempty"`
+	RunnerKind    string `json:"runner_kind"`
+	RunnerSource  string `json:"runner_source"`
+	ArgvSHA256    string `json:"argv_sha256,omitempty"`
+	NonceSHA256   string `json:"nonce_sha256,omitempty"`
+	StdoutSHA256  string `json:"stdout_sha256,omitempty"`
+	StderrSHA256  string `json:"stderr_sha256,omitempty"`
+	VerdictSHA256 string `json:"verdict_sha256,omitempty"`
+	CreatedAt     string `json:"created_at"`
+}
+type SubstitutionRecord struct {
+	Record     string `json:"record"`
+	Spec       string `json:"spec"`
+	Panel      string `json:"panel"`
+	Slot       string `json:"slot"`
+	Round      int    `json:"round"`
+	FromFamily string `json:"from_family"`
+	ToFamily   string `json:"to_family"`
+	Model      string `json:"model"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func ledgerRecordKey(m map[string]interface{}) (string, string) {
+	kind, _ := m["record"].(string)
+	var fields []string
+	switch kind {
+	case RecordVerdict:
+		fields = []string{"slot", "round", "seq"}
+	case RecordLaunch:
+		fields = []string{"slot", "round", "attempt", "status"}
+	case RecordSubstitution:
+		fields = []string{"slot", "round"}
+	default:
+		return recordKey(m)
+	}
+	values := make([]any, len(fields))
+	for i, k := range fields {
+		values[i] = m[k]
+	}
+	b, _ := json.Marshal(values)
+	return kind, string(b)
+}
+func validateExecutionRecord(m map[string]interface{}, kind string) error {
+	positive := func(key string, zero bool) error {
+		if err := requireInt(m, key, kind); err != nil {
+			return err
+		}
+		n, _ := m[key].(json.Number).Int64()
+		if n < 0 || (!zero && n == 0) {
+			return fmt.Errorf("%s %s is out of range", kind, key)
+		}
+		return nil
+	}
+	in := func(key string, choices ...string) error {
+		for _, c := range choices {
+			if m[key] == c {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s %s is invalid", kind, key)
+	}
+	hash := func(key string, required bool) error {
+		v, exists := m[key]
+		if !exists && !required {
+			return nil
+		}
+		s, ok := v.(string)
+		b, err := hex.DecodeString(s)
+		if !ok || err != nil || len(b) != 32 || strings.ToLower(s) != s {
+			return fmt.Errorf("%s %s must be a lowercase sha256", kind, key)
+		}
+		return nil
+	}
+	if kind == RecordSubstitution {
+		for _, field := range []string{"from_family", "to_family"} {
+			s, err := requireString(m, field, kind)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("%s field %s must not be blank", kind, field)
+			}
+		}
+		return positive("round", false)
+	}
+	if err := in("runner_kind", "process", "harness"); err != nil {
+		return err
+	}
+	if err := in("runner_source", "default", "config.yaml", "config.local.yaml"); err != nil {
+		return err
+	}
+	if kind == RecordVerdict {
+		if value, exists := m["hard_block"]; exists {
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("verdict hard_block must be a boolean")
+			}
+		}
+		if err := positive("seq", false); err != nil {
+			return err
+		}
+		if err := positive("attempt", true); err != nil {
+			return err
+		}
+		if err := in("status", "draft", "final"); err != nil {
+			return err
+		}
+		if err := in("verdict", "APPROVE", "REQUEST_CHANGES", "REJECT", "VOID"); err != nil {
+			return err
+		}
+		if err := in("via", "direct", "launch", "recover"); err != nil {
+			return err
+		}
+		if err := optionalString(m, "reason", kind); err != nil {
+			return err
+		}
+		return hash("file_sha256", true)
+	}
+	if err := positive("attempt", false); err != nil {
+		return err
+	}
+	if err := in("status", "started", "dispatched", "submitted", "quota_wall", "launch_failed", "malformed"); err != nil {
+		return err
+	}
+	if m["status"] == "submitted" {
+		if err := positive("seq", false); err != nil {
+			return err
+		}
+	}
+	if m["status"] == "started" {
+		if err := positive("pgid", false); err != nil {
+			return err
+		}
+	}
+	for _, k := range []string{"argv_sha256", "nonce_sha256", "stdout_sha256", "stderr_sha256", "verdict_sha256"} {
+		if err := hash(k, m["status"] == "started" && (k == "argv_sha256" || k == "nonce_sha256")); err != nil {
+			return err
+		}
+	}
+	if _, exists := m["exit_code"]; exists {
+		return requireInt(m, "exit_code", kind)
+	}
+	return nil
+}
+
+// LatestSubmissions reads without a lock so a locked submit can reuse it.
+func LatestSubmissions(dir string, round int) (map[string]SubmissionRecord, error) {
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return nil, err
+	}
+	return latestSubmissions(lines, round)
+}
+
+func latestSubmissions(lines [][]byte, round int) (map[string]SubmissionRecord, error) {
+	out := map[string]SubmissionRecord{}
+	for _, line := range lines {
+		var r SubmissionRecord
+		if err := json.Unmarshal(line, &r); err != nil {
+			return nil, err
+		}
+		if r.Record == RecordVerdict && r.Round == round && r.Seq > out[r.Slot].Seq {
+			out[r.Slot] = r
+		}
+	}
+	return out, nil
+}
+
+// SlotAttempt preserves ledger order, including its position against submissions.
+type SlotAttempt struct {
+	LaunchRecord
+	LedgerIndex           int
+	AfterLatestSubmission bool
+}
+
+// SlotAttempts returns only this round's launch events. It takes no lock.
+func SlotAttempts(dir string, round int) (map[string][]SlotAttempt, error) {
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return nil, err
+	}
+	return slotAttempts(lines, round)
+}
+
+func slotAttempts(lines [][]byte, round int) (map[string][]SlotAttempt, error) {
+	out := map[string][]SlotAttempt{}
+	latest := map[string]int{}
+	seq := map[string]int{}
+	for i, line := range lines {
+		var r LaunchRecord
+		if err := json.Unmarshal(line, &r); err != nil {
+			return nil, err
+		}
+		if r.Round != round {
+			continue
+		}
+		if r.Record == RecordVerdict && r.Seq > seq[r.Slot] {
+			latest[r.Slot] = i
+			seq[r.Slot] = r.Seq
+		}
+		if r.Record == RecordLaunch {
+			out[r.Slot] = append(out[r.Slot], SlotAttempt{LaunchRecord: r, LedgerIndex: i})
+		}
+	}
+	for slot, events := range out {
+		for i := range events {
+			at, ok := latest[slot]
+			events[i].AfterLatestSubmission = !ok || events[i].LedgerIndex > at
+		}
+		out[slot] = events
+	}
+	return out, nil
 }

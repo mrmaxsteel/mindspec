@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -162,7 +163,12 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 					t.Fatal(err)
 				}
 				for i := 1; i <= 2; i++ {
-					if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("R%d-round-1.json", i)), []byte(`{"verdict":"APPROVE"}`), 0644); err != nil {
+					v := VerdictV2{Schema: 2, Slot: fmt.Sprintf("R%d", i), Round: 1, ReviewedSHA: reviewedSHA, Status: "final", Verdict: "APPROVE", Model: fmt.Sprintf("model-%d", (i-1)%2), Rationale: "reviewed", ConcreteChangesRequired: []ChangeRequired{}, CommandsRun: []CommandRun{}}
+					raw, err := json.Marshal(v)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := Submit(SubmitTarget{Dir: dir, Slot: v.Slot, Round: 1}, raw, gateV2Resolve); err != nil {
 						t.Fatal(err)
 					}
 				}

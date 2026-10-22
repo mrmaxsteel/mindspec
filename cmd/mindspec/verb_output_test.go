@@ -99,6 +99,9 @@ var mutatingVerbRows = map[string]bool{
 	"mindspec impl adopt":   true,
 	"mindspec release":      true,
 	"mindspec repair phase": true,
+
+	// This verb is added after the original nine.
+	"mindspec panel checkout": true,
 }
 
 // mutatingVerbAliases maps a HIDDEN backward-compat alias's full command
@@ -123,11 +126,15 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
-	"mindspec panel rebind":  "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
-	"mindspec panel defer":   "records a panel deferral and disposition; no lifecycle phase mutation",
-	"mindspec panel refute":  "records a panel refutation and disposition; not lifecycle-phase state",
-	"mindspec panel abandon": "records audited panel abandonment; not lifecycle-phase state",
-	"mindspec":               "root command: prints help or an unknown-command error, never mutates",
+	"mindspec panel launch":   "runs a reviewer and records its verdict; no lifecycle-phase state",
+	"mindspec panel recover":  "records a verdict from saved reviewer output; no lifecycle-phase state",
+	"mindspec config resolve": "read-only: previews resolved panel slots and their config sources",
+	"mindspec panel rebind":   "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
+	"mindspec panel defer":    "records a panel deferral and disposition; no lifecycle phase mutation",
+	"mindspec panel refute":   "records a panel refutation and disposition; not lifecycle-phase state",
+	"mindspec panel abandon":  "records audited panel abandonment; not lifecycle-phase state",
+	"mindspec panel submit":   "records a reviewer verdict and its ledger submission; no lifecycle-phase state",
+	"mindspec":                "root command: prints help or an unknown-command error, never mutates",
 
 	// --- cobra's own auto-registered built-ins (lazily added by
 	// Execute()/InitDefaultHelpCmd/InitDefaultCompletionCmd — present in
@@ -151,8 +158,12 @@ var nonMutatingAllowlist = map[string]string{
 	"mindspec instruct":                "read-only: prints mode-appropriate guidance (the tail itself)",
 	"mindspec otel status":             "read-only: prints OTEL config status",
 	"mindspec panel disposition query": "read-only: prints a panel disposition",
+	"mindspec panel schema":            "read-only: prints the verdict JSON schema",
+	"mindspec panel prompt":            "read-only: prints the slot prompt; writes nothing",
 	"mindspec report":                  "read-only: consolidates the friction journal into a local report",
 	"mindspec report list":             "read-only: lists reports",
+	"mindspec rules":                   "read-only: lists the embedded rule table",
+	"mindspec rules show":              "read-only: prints one embedded rule",
 	"mindspec spec list":               "read-only: lists specs",
 	"mindspec state show":              "read-only: prints derived state (its own honesty is bead 3's territory)",
 	"mindspec trace summary":           "read-only: summarizes a trace file",
@@ -259,6 +270,7 @@ func TestVerbOutput_TotalCobraTreeClassification(t *testing.T) {
 		"mindspec spec create", "mindspec spec approve", "mindspec plan approve",
 		"mindspec next", "mindspec complete", "mindspec impl approve",
 		"mindspec impl adopt", "mindspec release", "mindspec repair phase",
+		"mindspec panel checkout",
 	}
 	if len(mutatingVerbRows) != len(wantRows) {
 		t.Fatalf("mutatingVerbRows has %d entries, want exactly R2.1's %d", len(mutatingVerbRows), len(wantRows))

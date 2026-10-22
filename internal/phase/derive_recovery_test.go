@@ -2,7 +2,7 @@ package phase_test
 
 // Spec 092 Bead 3 (Req 2): the stored-vs-derived consistency warning
 // emitted by DerivePhaseWithStatus must end with a
-// `recovery: mindspec repair phase <spec-id>` line.
+// `recovery: mindspec repair phase '<spec-id>'` line.
 //
 // This is the per-site recovery-convention test for the phase package
 // (the Req 21 mirror described in
@@ -80,8 +80,8 @@ func TestConsistencyWarningEndsWithRepairRecoveryLine(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(warning) {
 		t.Errorf("consistency warning must end with a recovery line (Req 2/12): %q", warning)
 	}
-	if !strings.Contains(warning, "recovery: mindspec repair phase 010-test") {
-		t.Errorf("warning missing `recovery: mindspec repair phase 010-test`: %q", warning)
+	if !strings.Contains(warning, "recovery: mindspec repair phase '010-test'") {
+		t.Errorf("warning missing `recovery: mindspec repair phase '010-test'`: %q", warning)
 	}
 	// Req 19: never a raw bd metadata-update command.
 	if guard.IsBannedRecoveryCommand(warning) || strings.Contains(warning, "bd update --metadata") {
@@ -136,7 +136,7 @@ func TestConsistencyWarningPlaceholderWhenSpecUnresolvable(t *testing.T) {
 	if !strings.Contains(warning, "disagrees with child-derived phase") {
 		t.Fatalf("expected the consistency warning to fire; stderr=%q", stderr)
 	}
-	if !strings.Contains(warning, "recovery: mindspec repair phase <spec-id>") {
+	if !strings.Contains(warning, "recovery: mindspec repair phase '<spec-id>'") {
 		t.Errorf("warning missing the <spec-id> placeholder recovery line: %q", warning)
 	}
 	if !guard.HasFinalRecoveryLine(warning) {

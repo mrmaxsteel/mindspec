@@ -451,7 +451,7 @@ func TestPanelVerify_AdhocMissingRefRecoveryNoSpec(t *testing.T) {
 			stubNonBeadRevParse(t, func(string, string) (string, error) { return "", gitutil.ErrRefNotFound })
 			out, err := runPanelVerbCmd(verb, "demo")
 			if err != nil || !strings.Contains(out, "no longer exists") ||
-				!strings.Contains(out, "mindspec panel create demo --gate adhoc --target 'deleted'") || strings.Contains(out, "--spec") {
+				!strings.Contains(out, "mindspec panel create 'demo' --gate adhoc --target 'deleted'") || strings.Contains(out, "--spec") {
 				t.Fatalf("missing-ref adhoc advisory: %v %s", err, out)
 			}
 		})

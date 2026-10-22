@@ -56,6 +56,25 @@ func TestUpgradeRefreshWorkflow_DigestOracle(t *testing.T) {
 	}
 }
 
+func TestUpgradeRefreshWorkflow_V0170Refreshes(t *testing.T) {
+	prior, err := historicalWorkflowsFS.ReadFile("historical_workflows/ms-panel.pre131.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(prior)
+	if hex.EncodeToString(sum[:]) != "fa8d6e59a9b0893aa4f11f2685316177c1ffd6ddba84e2e49a59d768b54b6bec" {
+		t.Fatal("release snapshot digest differs")
+	}
+	want := pluginmindspec.WorkflowFiles()["ms-panel.js"]
+	if string(prior) == want {
+		t.Fatal("release snapshot equals current workflow")
+	}
+	got, result := installWorkflowWithPrior(t, string(prior))
+	if got != want || !containsPath(result.Refreshed, filepath.Join(".claude", "workflows", "ms-panel.js")) {
+		t.Fatalf("release workflow did not refresh: %+v", result)
+	}
+}
+
 func TestUpgradeRefreshWorkflow_UnmodifiedOldBodyRefreshes(t *testing.T) {
 	prior := readWorkflowPresurface(t)
 	want := pluginmindspec.WorkflowFiles()["ms-panel.js"]

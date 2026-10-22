@@ -51,6 +51,7 @@ const FileName = "panel.json"
 // Round/verdict-filename disagreement as a writer error to report
 // (see Result.RoundMismatch), never as something to silently repair.
 type Panel struct {
+	VerdictSchema     int     `json:"verdict_schema,omitempty"`
 	BeadID            *string `json:"bead_id"`
 	Spec              string  `json:"spec"`
 	Target            string  `json:"target"`
@@ -128,9 +129,10 @@ type Refutation struct {
 
 // RosterSlot is one ordered reviewer identity in a round.
 type RosterSlot struct {
-	Slot  string `json:"slot"`
-	Model string `json:"model"`
-	Lens  string `json:"lens"`
+	Slot   string `json:"slot"`
+	Family string `json:"family,omitempty"`
+	Model  string `json:"model"`
+	Lens   string `json:"lens"`
 }
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
@@ -269,6 +271,12 @@ var reviewSegments = []string{"review", "reviews"}
 // unregistered, which is exactly the fail-open contract (HC-4):
 // no panel.json, no gate.
 func Scan(roots ...string) []Registration {
+	return ScanSkipping(nil, roots...)
+}
+
+// ScanSkipping omits registrations under any excluded absolute directory.
+// Both lexical and resolved paths count, so a symlink cannot reintroduce a clone.
+func ScanSkipping(skip []string, roots ...string) []Registration {
 	seen := make(map[string]bool)
 	var regs []Registration
 	for _, root := range roots {
@@ -284,6 +292,18 @@ func Scan(roots ...string) []Registration {
 			for _, m := range matches {
 				dir := filepath.Dir(m)
 				key := canonicalPath(dir)
+				excluded := false
+				for _, base := range skip {
+					for _, paths := range [][2]string{{canonicalPath(base), key}, {base, dir}} {
+						rel, err := filepath.Rel(paths[0], paths[1])
+						if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+							excluded = true
+						}
+					}
+				}
+				if excluded {
+					continue
+				}
 				if seen[key] {
 					continue
 				}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -45,7 +46,7 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 		return SelectWorkByName(rs.Filtered, name)
 	}
 	if rs.EpicID != "" && name == rs.EpicID {
-		return BeadInfo{}, fmt.Errorf("bead %s is the epic of spec %s, not a bead to claim\nrecovery: mindspec next --spec %s", idrender.Bead(rs.EpicID), idrender.Spec(rs.SpecFlag), idrender.Spec(rs.SpecFlag))
+		return BeadInfo{}, fmt.Errorf("bead %s is the epic of spec %s, not a bead to claim\nrecovery: mindspec next --spec %s", idrender.Bead(rs.EpicID), idrender.Spec(rs.SpecFlag), shellquote.Quote(idrender.Spec(rs.SpecFlag)))
 	}
 	item, err := SelectWorkByName(rs.Raw, name)
 	if err != nil {
@@ -54,7 +55,7 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 			return BeadInfo{}, err
 		}
 		if len(rs.Filtered) == 0 {
-			return BeadInfo{}, fmt.Errorf("no ready plan bead for spec %s; positional %s cannot be claimed from an empty ready set\nrecovery: mindspec next --spec %s", idrender.Spec(rs.SpecFlag), idrender.Bead(name), idrender.Spec(rs.SpecFlag))
+			return BeadInfo{}, fmt.Errorf("no ready plan bead for spec %s; positional %s cannot be claimed from an empty ready set\nrecovery: mindspec next --spec %s", idrender.Spec(rs.SpecFlag), idrender.Bead(name), shellquote.Quote(idrender.Spec(rs.SpecFlag)))
 		}
 		return BeadInfo{}, err
 	}
@@ -69,7 +70,7 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 		}
 		if miss.Class == "N4" {
 			if miss.NoLineage {
-				return BeadInfo{}, fmt.Errorf("bead %s has no lineage, so readiness cannot evaluate it; no readiness override applies\nrecovery: bd show %s --json", idrender.Bead(item.ID), idrender.Bead(item.ID))
+				return BeadInfo{}, fmt.Errorf("bead %s has no lineage, so readiness cannot evaluate it; no readiness override applies\nrecovery: bd show %s --json", idrender.Bead(item.ID), shellquote.Quote(idrender.Bead(item.ID)))
 			}
 			if miss.Lineage == rs.EpicID {
 				return item, nil
@@ -81,7 +82,7 @@ func SelectNamedFromReadySet(rs ReadySet, name string) (BeadInfo, error) {
 	if item.Parent != "" {
 		parent = " (parent: " + idrender.Bead(item.Parent) + ")"
 	}
-	return BeadInfo{}, fmt.Errorf("bead %s is bd-ready but is not linked to spec %s%s\nrecovery: mindspec next --spec %s", idrender.Bead(item.ID), idrender.Spec(rs.SpecFlag), parent, idrender.Spec(rs.SpecFlag))
+	return BeadInfo{}, fmt.Errorf("bead %s is bd-ready but is not linked to spec %s%s\nrecovery: mindspec next --spec %s", idrender.Bead(item.ID), idrender.Spec(rs.SpecFlag), parent, shellquote.Quote(idrender.Spec(rs.SpecFlag)))
 }
 
 type ambiguousBeadNameError struct{ error }

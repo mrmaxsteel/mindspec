@@ -1,0 +1,4 @@
+- {name: claude, command: claude}
+- {name: codex, command: codex}
+- {name: copilot, command: copilot}
+- {name: gemini, command: gemini}

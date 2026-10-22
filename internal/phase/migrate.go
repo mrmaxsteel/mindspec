@@ -8,6 +8,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 )
 
 // mergeMetadataFn is the test seam for bead.MergeMetadata used by
@@ -111,7 +112,7 @@ func EnsureMigratedWithCache(root string, c *Cache, specID string) (bool, error)
 		// (which would re-run its OTHER preflight steps too).
 		var recoverySuffix string
 		if errors.Is(lockErr, ErrPhaseLockTimeout) {
-			recoverySuffix = fmt.Sprintf("\nrecovery: mindspec repair phase %s", idrender.Spec(specID))
+			recoverySuffix = fmt.Sprintf("\nrecovery: mindspec repair phase %s", shellquote.Quote(idrender.Spec(specID)))
 		}
 		return false, fmt.Errorf("ensure-migrated %s: %w%s", specID, lockErr, recoverySuffix)
 	}

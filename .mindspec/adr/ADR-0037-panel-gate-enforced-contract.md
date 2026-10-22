@@ -690,3 +690,28 @@ the gate exists for — the stale APPROVE honored at merge time.
 - **§8 — Deferred audit carve-out (R10.1).** The Spec-114 `panel_refuted` carve-out extends to the durable `panel_deferred` audit. Completion takes entries only from Allow decisions. It persists self-contained pending markers and settles them before close. Each panel can contribute any number of entries.
 - **Spec-115 contract reach — deferrals (R10.2).** A failed re-check voids that deferral. The `complete` and `impl approve` preflight leg blocks on a finding that no valid discharge covers. It honours `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`. The orphan/obligation refusal keeps its no-hatch rule. Bead panels use the completion audit at implementation approval. Later refutations do not alter that audit. Approval checks each identified audit entry once. Completion and approval refuse a panel identity registered at more than one path. A duplicate identity cannot replace or remove audit entries. Only a verb-backed abandonment of its exact spec and panel registration skips it. Missing and renamed registrations do not skip entries. Approval checks entries with no panel identity under each of the bead's registrations. It also checks a plan bead with no registration left. Non-bead panels use current effective deferrals. Integrity runs before abandonment skips.
 - **Complete preflight outside the cap — deferrals (R10.2).** The bd re-check runs before materialization and outside the gate subprocess cap. It checks existence, open status, every ancestor, the discovered-from edge and redacted description text. A failed read voids that deferral. A materialization retry keeps stored entry identities. It removes deferrals covered by an intact abandonment or an applicable refutation from pending and audit entries. A slot refutation covers each item with a matching round and raw-text hash. Both panel hatches skip this leg.
+
+## Amendment (Spec 131)
+
+Every new round uses verdict schema v2. The round event pins `verdict_schema`.
+The snapshot must keep the same value. A round without this field keeps the
+previous file-based rules. A later round cannot remove a v2 schema pin.
+
+The gate counts only the latest submission for each slot and round. The submission
+must be final and must not be `VOID`. The verdict file must match its recorded
+SHA-256 digest. A later attempt keeps the slot out until the highest later attempt
+has a `submitted` outcome that names the latest submission's `seq`.
+
+A new submission replaces the previous submission. The ledger keeps all submissions.
+A finding discharge binds to its position and text hash in the latest submission.
+A slot discharge binds to the hash of the ordered item texts.
+
+The trust boundary in §8 also applies to `panel submit`. Submit binds bytes to a
+ledger record. It does not authenticate a reviewer. Repository write access can
+change both the verdict file and the ledger.
+
+`internal/panel` may import a third internal package, the stdlib-only
+`internal/safefile`, to read reviewer-writable verdict files without following
+links and without blocking. The leaf rule's purpose does not change: no config,
+git or process code belongs in `internal/panel`.
+`TestPanelLeafImports_StdlibPlusTermsafeOnly` checks the exact import set.
