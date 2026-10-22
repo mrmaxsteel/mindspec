@@ -35,7 +35,10 @@ contextpack.Build(root, specID, mode string) (*ContextPack, error)
 
 // internal/contextpack/spec.go
 contextpack.ParseSpec(specDir string) (*SpecMeta, error)
-// Parses spec.md to extract goal and impacted domains
+// Parses spec.md to extract goal and impacted domains.
+// Impacted Domains: one domain per top-level bullet; a bullet's leading
+// code spans ("`a`, `b`") give one domain each; indented sub-bullets
+// under a top-level bullet (path globs, notes) are not domains.
 
 // internal/contextpack/domaindoc.go
 contextpack.ReadDomainDocs(root, domain string) (*DomainDoc, error)

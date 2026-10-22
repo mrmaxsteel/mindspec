@@ -327,3 +327,38 @@ func TestDispositionAppend_RefusesVerbKinds(t *testing.T) {
 		}
 	})
 }
+
+func resetDispositionCheckFlags(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		for _, name := range []string{"spec", "panel"} {
+			if f := panelDispositionCheckCmd.Flags().Lookup(name); f != nil {
+				_ = f.Value.Set(f.DefValue)
+				f.Changed = false
+			}
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// TestDispositionCheck_PositionalPanel: `panel disposition check <panel>`
+// checks that panel, like the other panel verbs that take the slug as an
+// argument. The old command refused the positional with "unknown command".
+func TestDispositionCheck_PositionalPanel(t *testing.T) {
+	const specID = "130-panel-substrate-integrity"
+	root := mkDispositionRoot(t, specID)
+	resetDispositionCheckFlags(t)
+	dir := filepath.Join(root, ".mindspec", "specs", specID, "reviews", "p")
+	manifest := []byte(`{"record":"panel","spec":"130","gate":"bead","panel":"p","round":1,"slots":[{"slot":"R1","model":"model-a","verdict":"APPROVE"}],"backfilled":false}`)
+	if err := panel.AppendRecords(dir, manifest); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runLedgerDisposition(t, "check", "p", "--spec", specID)
+	if err != nil || !strings.Contains(out, "for 1 panel(s)") {
+		t.Fatalf("positional panel check failed: %v %s", err, out)
+	}
+	if _, err := runLedgerDisposition(t, "check", "p", "--spec", specID, "--panel", "other"); err == nil || !strings.Contains(err.Error(), "differ") {
+		t.Fatalf("conflicting positional and --panel must refuse: %v", err)
+	}
+}

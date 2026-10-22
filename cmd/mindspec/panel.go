@@ -23,6 +23,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/shellquote"
@@ -147,7 +148,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		if gate == "adhoc" && cmd.Flags().Changed("spec") {
 			return guard.NewFailure(
 				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", specID),
-				fmt.Sprintf("use `panel create %s --spec <id> --target <ref>` for a gated panel, or `panel create %s --gate adhoc --target <ref>` for an ad-hoc panel", slug, slug))
+				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(specID, "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
 		}
 		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
@@ -173,7 +174,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 
 		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
 		if err != nil {
-			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec <id> --target bead/<id>", shellQuoteTarget(slug))
+			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec %s --target %s", shellQuoteTarget(slug), knownOr(specID, "<id>"), knownOr(beadRecoveryTarget(target, beadID), "bead/<id>"))
 			if beadID != "" && gate != "" && gate != "bead" {
 				recovery = fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(target)) + panelCreateScope(specID, gate)
 				if gate != "adhoc" {
@@ -574,7 +575,29 @@ func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registra
 	}
 	return panel.Registration{}, guard.NewFailure(
 		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, specID),
-		fmt.Sprintf("mindspec panel create %s --spec <id> --target <ref>", shellQuoteTarget(slug)))
+		fmt.Sprintf("mindspec panel create %s --spec %s --target <ref>", shellQuoteTarget(slug), knownOr(specID, "<id>")))
+}
+
+// knownOr renders a known value for a recovery line, shell-quoted and
+// terminal-safe, or the placeholder when the value is blank.
+func knownOr(value, placeholder string) string {
+	if strings.TrimSpace(value) == "" {
+		return placeholder
+	}
+	return shellQuoteTarget(escapeConfigValue(value))
+}
+
+// beadRecoveryTarget picks the bead/<id> target a bead-panel recovery line
+// can name: the given target when it is a valid bead/<id>, else the valid
+// --bead value, else "" (the caller prints the placeholder).
+func beadRecoveryTarget(target, beadID string) string {
+	if strings.HasPrefix(target, "bead/") && idvalidate.BeadID(strings.TrimPrefix(target, "bead/")) == nil {
+		return target
+	}
+	if idvalidate.BeadID(beadID) == nil {
+		return "bead/" + beadID
+	}
+	return ""
 }
 
 // checkPanelSlugOwner refuses cross-spec and adhoc collisions before any write.

@@ -1638,6 +1638,13 @@ func TestFormatResult_Implement_NextBeadPresenceDrivesLines(t *testing.T) {
 	if strings.Contains(ready, "No bead is ready now.") {
 		t.Errorf("ready case must not print the no-ready line; got:\n%s", ready)
 	}
+	// The stop guidance must suit an autonomous run too: it never tells
+	// the agent to address a user.
+	for _, out := range []string{ready, FormatResult(&Result{BeadID: "bead-1", BeadClosed: true, NextMode: state.ModeImplement, NextSpec: "008-test"})} {
+		if !strings.Contains(out, "STOP HERE.") || strings.Contains(out, "Tell the user") {
+			t.Errorf("stop guidance must not address a user; got:\n%s", out)
+		}
+	}
 
 	none := FormatResult(&Result{
 		BeadID: "bead-1", BeadClosed: true,

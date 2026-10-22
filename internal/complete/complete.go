@@ -1676,9 +1676,11 @@ func FormatResult(r *Result) string {
 			fmt.Fprintf(&sb, "Run: `%s`\n", containment.EmitCd(r.SpecWorktree))
 		}
 		if r.NextBead != "" {
-			sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead.\nTell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
+			// Worded for both a human-driven session and an autonomous
+			// run: no "Tell the user" (an orchestrator has none to tell).
+			sb.WriteString("\nSTOP HERE. Do NOT run `mindspec next` or claim another bead in this context.\nThe next bead needs a fresh context: run `/clear` (or start a fresh agent), then `mindspec next` to continue.\n")
 		} else {
-			sb.WriteString("\nSTOP HERE. Do NOT claim a bead now.\nTell the user: run `mindspec next` once a bead is ready.\n")
+			sb.WriteString("\nSTOP HERE. Do NOT claim a bead now.\nFrom a fresh context, run `mindspec next` once a bead is ready.\n")
 		}
 	case state.ModePlan:
 		// R2.3 (spec 128 bead 5, round-4/round-5 tally): reworded to fit

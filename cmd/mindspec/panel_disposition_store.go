@@ -131,7 +131,7 @@ never interpolated into a shell-quoted argument.`,
 }
 
 var panelDispositionCheckCmd = &cobra.Command{
-	Use:   "check --spec <id> [--panel <name>]",
+	Use:   "check [panel] --spec <id> [--panel <name>]",
 	Short: "Run the completeness floor against the durable per-panel store",
 	Long: `check reads
 ONLY a panel's dispositions.jsonl (its coverage manifest plus its
@@ -142,15 +142,26 @@ least one disposition row naming that slot (as "reviewer" or in
 
 With --panel, only that one panel is checked. Without it, every panel
 directory under <spec-dir>/reviews/ that has a dispositions.jsonl is
-checked. Exit code: 0 if every checked panel passes the floor; non-zero,
-naming every failing panel + slot, otherwise.`,
-	Args: cobra.NoArgs,
+checked. A positional panel name is the same as --panel; without --spec
+the spec comes from that panel's registration. Exit code: 0 if every
+checked panel passes the floor; non-zero, naming every failing panel +
+slot, otherwise.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID, _ := cmd.Flags().GetString("spec")
 		panelName, _ := cmd.Flags().GetString("panel")
+		if len(args) == 1 {
+			if panelName != "" && panelName != args[0] {
+				return fmt.Errorf("the positional panel %s and --panel %s differ; give one", termsafe.Escape(args[0]), termsafe.Escape(panelName))
+			}
+			panelName = args[0]
+		}
+		if specID == "" && panelName != "" {
+			specID = dispositionPanelSpec(panelName)
+		}
 
 		if specID == "" {
-			return fmt.Errorf("--spec is required")
+			return fmt.Errorf("--spec is required: mindspec panel disposition check --spec <id> [--panel <name>]")
 		}
 		if panelName != "" {
 			if err := validatePanelSlug(panelName); err != nil {
@@ -189,6 +200,24 @@ naming every failing panel + slot, otherwise.`,
 		fmt.Fprintf(cmd.OutOrStdout(), "OK: completeness floor satisfied for %d panel(s)\n", len(panels))
 		return nil
 	},
+}
+
+// dispositionPanelSpec returns the spec recorded in the panel's
+// registration, or "" when the slug is invalid or does not resolve to one
+// registration.
+func dispositionPanelSpec(slug string) string {
+	if validatePanelSlug(slug) != nil {
+		return ""
+	}
+	root, err := findPanelRoot(config.IsolationRootFor)
+	if err != nil {
+		return ""
+	}
+	reg, err := findPanelRegistration(root, slug)
+	if err != nil || reg.Err != nil {
+		return ""
+	}
+	return reg.Panel.Spec
 }
 
 // resolveDispositionSpecDir resolves --spec's value to an on-disk spec

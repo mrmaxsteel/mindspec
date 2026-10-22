@@ -300,7 +300,11 @@ difference refuses the entire batch. For `round` and `abandon`, a different
 timestamp is a different key. Coverage manifest keys are
 `spec, panel, round, created_at` (timestamp absent on legacy manifests).
 `panel disposition validate`, `check` and `query` accept all event kinds and
-reject malformed records. Events contribute no telemetry rows or slot coverage.
+reject malformed records. `panel disposition check` takes the panel as an
+optional positional (`check <panel>`, same as `--panel`; a conflicting pair
+refuses) and infers `--spec` from that panel's registration when omitted.
+`panel create` recovery lines fill in the spec and bead target the caller
+already gave, shell-quoted, instead of `<id>` placeholders. Events contribute no telemetry rows or slot coverage.
 `panel disposition append` refuses the verb kinds, and manifests on non-legacy
 panels; only `tally` writes those manifests.
 
