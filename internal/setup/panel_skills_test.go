@@ -28,8 +28,8 @@ func TestPanelSkills_NoHandEditInstructions(t *testing.T) {
 						t.Errorf("missing panel rule %q", want)
 					}
 				}
-				if name == "ms-panel-run" && (!strings.Contains(text, "roster ids `R1..Rn`") || !strings.Contains(text, "as verdict file prefixes")) {
-					t.Error("roster ids must supply verdict prefixes")
+				if name == "ms-panel-run" && !strings.Contains(text, "mindspec panel submit") {
+					t.Error("reviewers must use panel submit")
 				}
 				for _, pattern := range []string{`ADR-[0-9]+`, `(?i)spec[- ]+[0-9]+`, `§`, `\bR[0-9]+(?:\.[0-9]+|[a-z])\b`, `\b[a-z_]+\.go\b`, `\bmindspec-[a-z0-9]{4}\b`, `#[0-9]{2,}`} {
 					if regexp.MustCompile(pattern).MatchString(text) {

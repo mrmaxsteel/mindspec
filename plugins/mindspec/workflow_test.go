@@ -2,6 +2,7 @@ package pluginmindspec
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -92,158 +93,75 @@ func scanJSLiterals(src string) []jsLiteral {
 	return literals
 }
 
-// TestMsPanelWorkflow_AllowedCLIExactSet is the carry-forward floor-raise
-// (spec 111 AC4, R2/R4/R5): ALLOWED_CLI must admit EXACTLY the four
-// permitted commands (not merely include them), the lifecycle merge-terminal
-// command must appear nowhere in the file, exactly four verb identifiers
-// must be destructured from ALLOWED_CLI in one binding, buildCommand must be
-// the file's sole command-construction chokepoint (defined exactly once),
-// and a positive enumeration of every mindspec-/codex-bearing string literal
-// in the file must show it occurs ONLY inside the ALLOWED_CLI array
-// declaration itself, closing both the indirection class (a concatenation
-// fragment or template that doesn't equal one of the four exact strings) and
-// the exact-match-bypass class (a call site that reuses the literal text
-// directly rather than routing through buildCommand).
 func TestMsPanelWorkflow_AllowedCLIExactSet(t *testing.T) {
 	content := WorkflowFiles()["ms-panel.js"]
-	if content == "" {
-		t.Fatal(`WorkflowFiles()["ms-panel.js"] is empty`)
+	start := strings.Index(content, "const ALLOWED_CLI = [")
+	if start < 0 {
+		t.Fatal("allowed command array missing")
 	}
-
-	const (
-		verbPanelCreate = "mindspec panel create"
-		verbCodexExec   = "codex exec --sandbox read-only --skip-git-repo-check"
-		verbPanelVerify = "mindspec panel verify"
-		verbPanelTally  = "mindspec panel tally"
-	)
-	wantSet := map[string]bool{
-		verbPanelCreate: true,
-		verbCodexExec:   true,
-		verbPanelVerify: true,
-		verbPanelTally:  true,
+	end := strings.Index(content[start:], "];")
+	if end < 0 {
+		t.Fatal("allowed command array incomplete")
 	}
-	mindspecVerbs := map[string]bool{
-		verbPanelCreate: true,
-		verbPanelVerify: true,
-		verbPanelTally:  true,
+	for _, lit := range scanJSLiterals(content) {
+		if strings.Contains(lit.value, "mindspec") && (lit.start < start || lit.end > start+end+2) {
+			t.Fatalf("mindspec literal outside allowed command array: %q", lit.value)
+		}
 	}
-
-	// mindspec complete must appear NOWHERE — not as a command, not as a
-	// comment — checked over the WHOLE file content, not just extracted
-	// literals.
+	literals := scanJSLiterals(content[start : start+end+2])
+	want := map[string]bool{}
+	for _, verb := range []string{"create", "verify", "tally", "launch", "checkout", "prompt", "submit", "recover"} {
+		want["mindspec panel "+verb] = true
+	}
+	if len(literals) != len(want) {
+		t.Fatalf("allowed commands=%+v", literals)
+	}
+	for _, lit := range literals {
+		if !want[lit.value] {
+			t.Fatalf("unexpected or duplicate command %q", lit.value)
+		}
+		delete(want, lit.value)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing commands: %v", want)
+	}
 	if strings.Contains(content, "mindspec complete") {
-		t.Error(`"mindspec complete" must not appear anywhere in ms-panel.js`)
+		t.Fatal("lifecycle command in workflow")
 	}
-
-	// Locate the ALLOWED_CLI array literal's exact source span.
-	arrayDeclIdx := strings.Index(content, "const ALLOWED_CLI = [")
-	if arrayDeclIdx == -1 {
-		t.Fatal("could not find `const ALLOWED_CLI = [` in ms-panel.js")
+	if len(regexp.MustCompile(`function\s+buildCommand\s*\(`).FindAllString(content, -1)) != 1 {
+		t.Fatal("command construction must have one entry point")
 	}
-	closeRel := strings.Index(content[arrayDeclIdx:], "];")
-	if closeRel == -1 {
-		t.Fatal("could not find the closing `];` of the ALLOWED_CLI array in ms-panel.js")
+	binding := regexp.MustCompile(`const \[([A-Z, ]+)\] = ALLOWED_CLI;`).FindStringSubmatch(content)
+	if len(binding) != 2 || len(strings.Split(binding[1], ",")) != 8 {
+		t.Fatal("command identifiers are not bound to the allowed set")
 	}
-	arrayStart := arrayDeclIdx
-	arrayEnd := arrayDeclIdx + closeRel + len("];")
-	arraySpan := content[arrayStart:arrayEnd]
-
-	// The array's own literals must equal EXACTLY the four-element wanted set.
-	arrayLiterals := scanJSLiterals(arraySpan)
-	if len(arrayLiterals) != 4 {
-		t.Fatalf("ALLOWED_CLI array literal has %d string elements, want 4: %+v", len(arrayLiterals), arrayLiterals)
-	}
-	gotSet := make(map[string]bool, 4)
-	for _, lit := range arrayLiterals {
-		gotSet[lit.value] = true
-	}
-	if len(gotSet) != len(wantSet) {
-		t.Errorf("ALLOWED_CLI has duplicate or malformed entries: %+v", gotSet)
-	}
-	for verb := range wantSet {
-		if !gotSet[verb] {
-			t.Errorf("ALLOWED_CLI is missing required entry %q", verb)
+	for _, path := range []string{"workflows/ms-panel.js", "../../.claude/workflows/ms-panel.js"} {
+		raw, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
 		}
-	}
-	for verb := range gotSet {
-		if !wantSet[verb] {
-			t.Errorf("ALLOWED_CLI has an unexpected entry %q (must admit EXACTLY the four permitted commands)", verb)
+		if string(raw) != content {
+			t.Fatal("workflow copies differ")
 		}
-	}
-
-	// Exactly one destructuring binding of four identifiers from ALLOWED_CLI.
-	destructureRe := regexp.MustCompile(`const\s*\[\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*\]\s*=\s*ALLOWED_CLI\s*;`)
-	matches := destructureRe.FindAllStringSubmatch(content, -1)
-	if len(matches) != 1 {
-		t.Fatalf("expected exactly one `const [ID1, ID2, ID3, ID4] = ALLOWED_CLI;` destructuring binding, found %d", len(matches))
-	}
-	if len(matches[0]) != 5 {
-		t.Fatalf("destructuring binding did not capture exactly four identifiers: %v", matches[0])
-	}
-
-	// buildCommand is defined exactly once — the sole command-construction
-	// chokepoint.
-	buildCommandDefRe := regexp.MustCompile(`\bfunction\s+buildCommand\s*\(`)
-	if n := len(buildCommandDefRe.FindAllString(content, -1)); n != 1 {
-		t.Errorf("expected buildCommand to be defined exactly once, found %d definitions", n)
-	}
-
-	// Positive enumeration: every mindspec-/codex-bearing literal in the
-	// WHOLE file must be exactly one of the four allowed strings AND must
-	// occur ONLY inside the ALLOWED_CLI array span above — never routed
-	// around buildCommand by a call site that retypes or reuses the literal
-	// text.
-	allLiterals := scanJSLiterals(content)
-	for _, lit := range allLiterals {
-		trimmed := strings.TrimSpace(lit.value)
-		insideArray := lit.start >= arrayStart && lit.end <= arrayEnd
-
-		if strings.Contains(lit.value, "mindspec") {
-			if !insideArray {
-				t.Errorf("found a mindspec-bearing literal outside the ALLOWED_CLI array declaration: %q (byte offset %d) — command construction must route through buildCommand, never a retyped/reused literal", lit.value, lit.start)
-				continue
-			}
-			if !mindspecVerbs[trimmed] {
-				t.Errorf("mindspec-bearing literal inside the array is not one of the three allowed panel verbs: %q", trimmed)
-			}
+		if regexp.MustCompile(`(?i)/tmp|codex|copilot|gemini|claude`).Match(raw) {
+			t.Fatal("tool family or scratch literal in workflow")
 		}
-
-		if strings.Contains(lit.value, "codex exec") {
-			if !insideArray {
-				t.Errorf("found a codex-exec-bearing literal outside the ALLOWED_CLI array declaration: %q (byte offset %d)", lit.value, lit.start)
-				continue
-			}
-			if trimmed != verbCodexExec {
-				t.Errorf("codex-exec-bearing literal inside the array does not exactly match the allowed sandboxed form: %q", trimmed)
-			}
-		}
-	}
-
-	// Sanity-check the sandboxed codex entry and the claude-sub / .codex.log
-	// substrings the spec's own grep-based AC also pins.
-	if !strings.Contains(content, "claude-sub") {
-		t.Error(`"claude-sub" must appear in ms-panel.js (R4 substitution reviewer_id)`)
-	}
-	if !strings.Contains(content, ".codex.log") {
-		t.Error(`".codex.log" must appear in ms-panel.js (R3b audit artifact)`)
 	}
 }
 
-// TestMsPanelWorkflow_ShellMetacharRejectsBareDollar is the spec-113 R2 floor
-// pin: SHELL_METACHAR_RE must reject a bare `$` (not merely the `$(`
-// digraph), so `$HOME`/`${x}`/`$x` variable-expansion can no longer survive
-// validateShellSafe. Go cannot execute the JS regex, so this is a
-// string-level pin (same style as TestMsPanelWorkflow_AllowedCLIExactSet)
-// asserting the exact declaration line appears exactly once; the behavioral
-// match matrix (positive/negative rows) runs under node in verification.
-func TestMsPanelWorkflow_ShellMetacharRejectsBareDollar(t *testing.T) {
-	content := WorkflowFiles()["ms-panel.js"]
-	if content == "" {
-		t.Fatal(`WorkflowFiles()["ms-panel.js"] is empty`)
+func TestMsPanelWorkflow_Quote(t *testing.T) {
+	source := WorkflowFiles()["ms-panel.js"]
+	prefix, _, ok := strings.Cut(source, "async function cli(")
+	if !ok {
+		t.Fatal("command builder missing")
 	}
-
-	const wantDecl = `const SHELL_METACHAR_RE = /[\x60;|&\n$]/;`
-	if n := strings.Count(content, wantDecl); n != 1 {
-		t.Errorf("expected the exact declaration %q exactly once, found %d", wantDecl, n)
+	script := prefix + `
+ const value = "it's $HOME; echo bad";
+ const got = quote(value);
+ const expected = "'it'\"'\"'s $HOME; echo bad'";
+ if (got !== expected) throw Error("quote differs: " + got);
+ `
+	if out, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("quote: %v %s", err, out)
 	}
 }

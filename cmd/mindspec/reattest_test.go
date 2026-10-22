@@ -31,7 +31,7 @@ func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			err := reattestRefusalFailure("bead-one", "bead/bead-one", "spec/129-test", &lifecycle.ReattestRefusal{State: state, Fallback: true, Detail: "candidate refused"})
 			text := err.Error()
-			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order spec/129-test", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order 'spec/129-test'", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("refusal %q missing %q", text, want)
 				}
@@ -595,7 +595,7 @@ func TestReattestText_UnknownBaseRecovery(t *testing.T) {
 		t.Fatalf("unknown-base fixture must require a default recovery without a restore: %+v", r)
 	}
 	text := reattestRefusalFailure("mindspec-ab12", "bead/mindspec-ab12", "spec/132-test", r).Error()
-	if want := "recovery: git log --first-parent --merges spec/132-test"; !strings.Contains(text, want) {
+	if want := "recovery: git log --first-parent --merges 'spec/132-test'"; !strings.Contains(text, want) {
 		t.Errorf("missing %q: %s", want, text)
 	}
 	for _, forbidden := range []string{"recovery: mindspec doctor", "recovery: git branch", "--allow-not-ready"} {
@@ -610,7 +610,7 @@ func TestReattestText_NoOwnedRecovery(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			r := reattestTextRefusal(t, scenario)
 			text := reattestRefusalFailure("mindspec-ab12", "bead/mindspec-ab12", "spec/132-test", r).Error()
-			for _, want := range []string{"no first-parent or admitted reachable merge", "attested restore", "only after a person verifies the merge", "recovery: git log --first-parent --merges spec/132-test"} {
+			for _, want := range []string{"no first-parent or admitted reachable merge", "attested restore", "only after a person verifies the merge", "recovery: git log --first-parent --merges 'spec/132-test'"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("missing %q: %s", want, text)
 				}
@@ -628,7 +628,7 @@ func TestReattestText_OperandsRender(t *testing.T) {
 	const beadID = "mindspec-ab12"
 	r := &lifecycle.ReattestRefusal{State: lifecycle.ReattestStateNoOwnedMerge, Detail: "No naming merge."}
 	text := reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
-	for _, want := range []string{"cannot re-attest bead " + beadID, "recovery: git log --first-parent --merges spec/132-test", "recovery: git branch bead/" + beadID + " <verified-second-parent-sha>", "attested restore", "person must verify"} {
+	for _, want := range []string{"cannot re-attest bead " + beadID, "recovery: git log --first-parent --merges 'spec/132-test'", "recovery: git branch 'bead/" + beadID + "' <verified-second-parent-sha>", "attested restore", "person must verify"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q: %s", want, text)
 		}

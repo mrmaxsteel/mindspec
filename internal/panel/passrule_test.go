@@ -18,7 +18,7 @@ func passFixture(t *testing.T, n int, verdict string) (string, Panel) {
 	p := Panel{Spec: "130", Target: "bead/mindspec-test.1", BeadID: ptr("mindspec-test.1"), Gate: "bead", Round: 1, ExpectedReviewers: n, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:baseline"}
 	for i := 1; i <= n; i++ {
 		slot := fmt.Sprintf("R%d", i)
-		p.Roster = append(p.Roster, RosterSlot{slot, "model", "correctness"})
+		p.Roster = append(p.Roster, RosterSlot{Slot: slot, Model: "model", Lens: "correctness"})
 		writePassJSON(t, dir, slot+"-round-1.json", FindingVerdict{Verdict: verdict, ConcreteChangesRequired: []string{"first", "second", "third"}})
 	}
 	writePassJSON(t, dir, FileName, p)
@@ -78,10 +78,13 @@ func TestPassRule_ZeroApprovePasses(t *testing.T) {
 	}
 }
 func TestPassRule_EachTermBlocks(t *testing.T) {
-	for _, term := range []string{"complete", "veto", "fresh", "discharged", "intact"} {
+	for _, term := range []string{"complete", "veto", "fresh", "discharged", "intact", "round mismatch", "unexpected veto"} {
 		t.Run(term, func(t *testing.T) {
 			dir, p := passFixture(t, 2, VerdictApprove)
 			r := passTally(t, dir)
+			if !r.PassRule(true) {
+				t.Fatal("approval baseline must pass")
+			}
 			facts := GateFacts{Reg: &Registration{Dir: dir, Panel: p}, Res: r, HeadSHA: p.ReviewedHeadSHA, WorktreeAbsent: true}
 			switch term {
 			case "complete":
@@ -97,6 +100,10 @@ func TestPassRule_EachTermBlocks(t *testing.T) {
 				r.Approves--
 			case "intact":
 				r.IntegrityErr = fmt.Errorf("roster")
+			case "round mismatch":
+				r.RoundMismatch = true
+			case "unexpected veto":
+				r.Unexpected = []Verdict{{Slot: "outsider", Verdict: VerdictApprove, HardBlock: true}}
 			}
 			if d := PanelGateDecision(facts); d.Action != Block {
 				t.Fatalf("%s alone must block: %+v", term, d)
@@ -105,6 +112,19 @@ func TestPassRule_EachTermBlocks(t *testing.T) {
 				t.Fatalf("%s pass rule accepted", term)
 			}
 		})
+	}
+}
+
+func TestPassRule_HardBlockFails(t *testing.T) {
+	dir, _ := passFixture(t, 2, VerdictApprove)
+	r := passTally(t, dir)
+	if !r.PassRule(true) {
+		t.Fatal("approval baseline must pass")
+	}
+	r.HardBlocks = []string{"R1"}
+	r.Verdicts[0].HardBlock = true
+	if r.PassRule(true) {
+		t.Fatal("a hard block must fail PassRule even with all slots approved")
 	}
 }
 func TestPassRule_NeverDischarged(t *testing.T) {

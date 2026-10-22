@@ -8,6 +8,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
@@ -76,13 +77,17 @@ func resolveDispositionQueryGlob(dir, spec string) (string, error) {
 	if dir != "" {
 		return filepath.Join(dir, "*", "dispositions.jsonl"), nil
 	}
+	root, err := findPanelRoot(config.IsolationRootFor)
+	if err != nil {
+		return "", err
+	}
 	if spec != "" {
 		if err := idvalidate.SpecID(spec); err != nil {
 			return "", fmt.Errorf("invalid --spec %s: %s", idrender.Spec(spec), termsafe.Escape(err.Error()))
 		}
-		return filepath.Join(".mindspec", "specs", spec, "reviews", "*", "dispositions.jsonl"), nil
+		return filepath.Join(root, ".mindspec", "specs", spec, "reviews", "*", "dispositions.jsonl"), nil
 	}
-	return panel.DefaultGlobPattern, nil
+	return filepath.Join(root, panel.DefaultGlobPattern), nil
 }
 
 // runDispositionQuery dispatches on metric and renders the result to

@@ -1065,3 +1065,24 @@ func TestBuildReadySet_ForeignSpecResolutionDoesNotRefuseScope(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectNamedFromReadySet_QuotedRecoveryOperands(t *testing.T) {
+	item := BeadInfo{ID: "epic-test.1"}
+	for _, tc := range []struct {
+		name           string
+		rs             ReadySet
+		selector, want string
+	}{
+		{"epic", ReadySet{SpecFlag: "900-test", EpicID: "epic-test"}, "epic-test", "mindspec next --spec '900-test'"},
+		{"empty", ReadySet{SpecFlag: "900-test"}, "unknown", "mindspec next --spec '900-test'"},
+		{"no_lineage", ReadySet{SpecFlag: "900-test", EpicID: "epic-test", Raw: []BeadInfo{item}, NearMisses: []NearMiss{{Bead: item, Class: "N4", NoLineage: true}}}, item.ID, "bd show 'epic-test.1' --json"},
+		{"unlinked", ReadySet{SpecFlag: "900-test", EpicID: "epic-test", Raw: []BeadInfo{item}}, item.ID, "mindspec next --spec '900-test'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := SelectNamedFromReadySet(tc.rs, tc.selector)
+			if err == nil || !strings.HasSuffix(err.Error(), "\nrecovery: "+tc.want) {
+				t.Fatalf("recovery operand is not quoted: %v", err)
+			}
+		})
+	}
+}

@@ -15,7 +15,7 @@ import (
 func createRoster(n int) []RosterSlot {
 	slots := make([]RosterSlot, n)
 	for i := range slots {
-		slots[i] = RosterSlot{fmt.Sprintf("R%d", i+1), fmt.Sprintf("model-%d", i%2), "correctness"}
+		slots[i] = RosterSlot{Slot: fmt.Sprintf("R%d", i+1), Model: fmt.Sprintf("model-%d", i%2), Lens: "correctness"}
 	}
 	return slots
 }
@@ -237,7 +237,7 @@ func TestCreate_ArchivesBriefOnBump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.LatestRound != 2 || len(res.Verdicts) != 1 {
+	if res.LatestRound != 2 || len(res.Verdicts) != 0 || len(res.Unsubmitted) != 1 {
 		t.Fatalf("archive counted as verdict: %+v", res)
 	}
 	if !strings.HasSuffix(createRead(t, dir, "BRIEF.md"), "\r\noperator notes\r\n") {
@@ -258,7 +258,7 @@ func TestCreate_NeverOverwritesArchive(t *testing.T) {
 }
 func TestCreate_PriorRoundRegion(t *testing.T) {
 	for _, payload := range []string{briefHeaderOpen, briefHeaderClose,
-		"<!-- mindspec:prior-round -->", "<!-- /mindspec:prior-round -->", "```", "```text",
+		"<!-- mindspec:prior-round -->", "<!-- /mindspec:prior-round -->", "```", "```text", "~~~", "~~~text",
 		"<!--  /mindspec:panel-header -->"} {
 		t.Run(payload, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "p")
@@ -318,6 +318,14 @@ func TestCreate_RosterCarriedForward(t *testing.T) {
 	in := roundCreateInput()
 	createMust(t, dir, in)
 	want := load(dir).Panel.Roster
+	for i, slot := range want {
+		if in.Roster[i].Family != "" {
+			t.Fatal("fixture must omit the configured family")
+		}
+		if slot.Family != "harness" {
+			t.Fatalf("slot %s without a configured family: want harness, got %q", slot.Slot, slot.Family)
+		}
+	}
 	// Neither hand edits nor changed config choose the next roster.
 	p := load(dir).Panel
 	p.Roster[0].Model = "manual"

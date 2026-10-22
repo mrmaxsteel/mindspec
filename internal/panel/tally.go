@@ -41,7 +41,7 @@ func ConsolidatedName(round int) string {
 	return fmt.Sprintf("consolidated-round-%d.md", round)
 }
 
-// Verdict is one reviewer's parsed verdict file from the latest round.
+// Verdict is one reviewer's parsed verdict or read failure from the latest round.
 type Verdict struct {
 	// File is the basename, e.g. "codex-correctness-round-2.json".
 	File string
@@ -61,6 +61,8 @@ type Verdict struct {
 	Invalid    bool
 	Findings   []Finding
 	SlotSHA256 string
+	// ReadError marks an unreadable verdict as INVALID. It cannot supply findings.
+	ReadError string
 }
 
 // verdictJSON validates the core verdict fields before finding payload parsing.
@@ -86,9 +88,12 @@ type Result struct {
 	// PanelErr records a panel.json read/parse failure (the file
 	// exists but is unusable). A registered-but-malformed panel must
 	// not be treated as "no panel" by gating consumers.
-	PanelErr     error
-	IntegrityErr error
-	Unexpected   []Verdict
+	PanelErr      error
+	IntegrityErr  error
+	Unexpected    []Verdict
+	Unsubmitted   []string
+	NotIn         []ExcludedVerdict
+	VerdictSchema int
 
 	// LatestRound is the FILENAME-derived latest round: max(N) over
 	// `*-round-<N>.json` in the directory. 0 when no verdict files
@@ -105,9 +110,8 @@ type Result struct {
 	// the registered round's outcome.
 	RoundMismatch bool
 
-	// Verdicts are the successfully parsed verdicts of LatestRound,
-	// sorted by Slot. Verdict files from earlier rounds are never
-	// tallied.
+	// Verdicts are parsed verdicts and INVALID read failures of LatestRound,
+	// sorted by Slot. Verdict files from earlier rounds are never tallied.
 	Verdicts []Verdict
 	// Approves and Rejects count canonical APPROVE / REJECT verdicts
 	// in Verdicts. REQUEST_CHANGES (and anything unrecognized) is
@@ -118,7 +122,7 @@ type Result struct {
 	HardBlocks []string
 
 	// Malformed lists the basenames of LatestRound verdict files
-	// that exist but could not be read or parsed. They appear here by
+	// that could not be parsed, plus pre-v2 read failures. They appear here by
 	// name and contribute nothing to Verdicts or the counts. An
 	// unparseable roster verdict counts as MISSING.
 	Malformed []string
@@ -127,6 +131,9 @@ type Result struct {
 	// exists (the /ms-bead-fix input for this round).
 	HasConsolidated bool
 }
+
+// ExcludedVerdict identifies a parsed roster file that cannot count.
+type ExcludedVerdict struct{ File, Reason string }
 
 // ExpectedReviewers returns the registered reviewer count, 0 when
 // unregistered/malformed.
@@ -305,6 +312,10 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 // I/O-level only (the directory itself unreadable); per-file problems
 // are reported in the Result (PanelErr, Malformed).
 func Tally(dir string) (*Result, error) {
+	return tally(dir, ReadLedger)
+}
+
+func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -314,7 +325,8 @@ func Tally(dir string) (*Result, error) {
 		return nil, fmt.Errorf("tally panel dir: %w", err)
 	}
 
-	res := &Result{Dir: abs}
+	lines, ledgerErr := readLedger(dir)
+	res := &Result{Dir: abs, IntegrityErr: ledgerErr}
 
 	// Registration.
 	if _, statErr := os.Stat(filepath.Join(dir, FileName)); statErr == nil {
@@ -324,7 +336,10 @@ func Tally(dir string) (*Result, error) {
 		} else {
 			p := reg.Panel
 			res.Panel = &p
-			field, checkErr := CheckHandEdits(dir, p)
+			field, checkErr := "", ledgerErr
+			if checkErr == nil {
+				field, checkErr = checkHandEditsFromLedger(dir, p, lines)
+			}
 			if checkErr != nil {
 				res.IntegrityErr = checkErr
 			} else if field != "" {
@@ -333,16 +348,20 @@ func Tally(dir string) (*Result, error) {
 		}
 	}
 
-	// Filename-derived rounds.
+	roster := map[string]bool{}
+	if res.Panel != nil {
+		for _, slot := range res.Panel.Roster {
+			roster[slot.Slot] = true
+		}
+	}
+	// Filename-derived rounds. Unrelated directories do not supply rounds.
+	// A directory at a current roster verdict path is a damaged verdict.
 	type vfile struct {
 		name, slot string
 		round      int
 	}
 	var vfiles []vfile
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
 		m := verdictFileRE.FindStringSubmatch(e.Name())
 		if m == nil {
 			continue
@@ -350,6 +369,9 @@ func Tally(dir string) (*Result, error) {
 		round, err := strconv.Atoi(m[2])
 		if err != nil {
 			continue // unreachable for \d+ short of overflow
+		}
+		if e.IsDir() && (res.Panel == nil || round != res.Panel.Round || !roster[m[1]]) {
+			continue
 		}
 		vfiles = append(vfiles, vfile{name: e.Name(), slot: m[1], round: round})
 		if round > res.LatestRound {
@@ -361,10 +383,22 @@ func Tally(dir string) (*Result, error) {
 		res.RoundMismatch = res.Panel.Round != res.LatestRound
 	}
 
-	roster := map[string]bool{}
-	if res.Panel != nil {
-		for _, slot := range res.Panel.Roster {
-			roster[slot.Slot] = true
+	round, schemaErr := roundSchema(lines)
+	if schemaErr != nil {
+		res.IntegrityErr = schemaErr
+	}
+	res.VerdictSchema = round.VerdictSchema
+	var submissions map[string]SubmissionRecord
+	var attempts map[string][]SlotAttempt
+	if round.VerdictSchema == 2 {
+		res.RoundMismatch = res.RoundMismatch || res.Panel != nil && res.Panel.Round != round.Round
+		submissions, err = latestSubmissions(lines, res.LatestRound)
+		if err != nil {
+			return nil, err
+		}
+		attempts, err = slotAttempts(lines, res.LatestRound)
+		if err != nil {
+			return nil, err
 		}
 	}
 	// Tally the latest round only.
@@ -373,10 +407,41 @@ func Tally(dir string) (*Result, error) {
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
-		data, err := os.ReadFile(filepath.Join(dir, vf.name))
+		data, err := ReadVerdictFile(filepath.Join(dir, vf.name), round.VerdictSchema)
 		if err != nil {
-			res.Malformed = append(res.Malformed, vf.name)
+			if round.VerdictSchema != 2 {
+				res.Malformed = append(res.Malformed, vf.name)
+				continue
+			}
+			v := Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Verdict: "INVALID", Invalid: true, ReadError: err.Error()}
+			if offRoster {
+				res.Unexpected = append(res.Unexpected, v)
+			} else {
+				res.Verdicts = append(res.Verdicts, v)
+			}
 			continue
+		}
+		if round.VerdictSchema == 2 && !offRoster {
+			sub := submissions[vf.slot]
+			if sub.Seq == 0 {
+				res.Unsubmitted = append(res.Unsubmitted, vf.name)
+				continue
+			}
+			reason := ""
+			switch {
+			case findingHash(data) != sub.FileSHA256:
+				reason = "file digest differs from the latest submission"
+			case sub.Verdict == "VOID":
+				reason = "void"
+			case sub.Status != "final":
+				reason = "draft"
+			case !submissionClosed(sub, attempts[vf.slot]):
+				reason = "later attempt is not closed"
+			}
+			if reason != "" {
+				res.NotIn = append(res.NotIn, ExcludedVerdict{File: vf.name, Reason: reason})
+				continue
+			}
 		}
 		var vj verdictJSON
 		if err := json.Unmarshal(data, &vj); err != nil {
@@ -391,7 +456,16 @@ func Tally(dir string) (*Result, error) {
 			HardBlock: vj.HardBlock,
 		}
 		var payload FindingVerdict
-		if err := json.Unmarshal(data, &payload); err != nil {
+		payloadErr := json.Unmarshal(data, &payload)
+		if round.VerdictSchema == 2 {
+			if parsed, parseErr := ParseVerdictV2(data); parseErr == nil {
+				payload, payloadErr = parsed.FindingVerdict(), nil
+			} else if !offRoster {
+				res.Malformed = append(res.Malformed, vf.name)
+				continue
+			}
+		}
+		if payloadErr != nil {
 			v.Invalid = v.Verdict == VerdictRequestChanges
 		} else {
 			findings, err := Findings(payload)
@@ -427,4 +501,30 @@ func Tally(dir string) (*Result, error) {
 	}
 
 	return res, nil
+}
+
+// ReadSubmittedFindingVerdict reads only a counted v2 submission. Historical
+// rounds retain their file-based finding contract.
+func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, error) {
+	res, err := Tally(dir)
+	if err != nil {
+		return FindingVerdict{}, err
+	}
+	if res.VerdictSchema != 2 {
+		return ReadFindingVerdict(dir, slot, round)
+	}
+	if res.IntegrityErr != nil {
+		return FindingVerdict{}, res.IntegrityErr
+	}
+	for _, v := range res.Verdicts {
+		if v.Slot == slot && v.Round == round && v.ReadError == "" {
+			data, err := ReadVerdictFile(filepath.Join(dir, v.File), res.VerdictSchema)
+			if err != nil {
+				return FindingVerdict{}, err
+			}
+			parsed, err := ParseVerdictV2(data)
+			return parsed.FindingVerdict(), err
+		}
+	}
+	return FindingVerdict{}, fmt.Errorf("slot has no counted submission in this round")
 }

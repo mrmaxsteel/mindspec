@@ -31,12 +31,13 @@ func TestDoctor_LegacyMergeStrategyInfo(t *testing.T) {
 	} {
 		t.Run(content, func(t *testing.T) {
 			root := t.TempDir()
-			writeConfig(t, root, content+"source_globs: [cmd/**]\n")
+			fullConfig := content + "source_globs: [cmd/**]\nmodels: {implementation: test}\ncommands: {test: go test}\n"
+			writeConfig(t, root, fullConfig)
 			config.ResetCache()
 			t.Cleanup(config.ResetCache)
 			r := &Report{}
 			// This is the config entry point used by RunWithOptions.
-			checkSourceGlobs(r, root)
+			checkConfiguration(r, root, Options{SkipLocalEnv: true})
 			var infos []Check
 			for _, c := range r.Checks {
 				if c.Status == Info {
@@ -60,7 +61,7 @@ func TestDoctor_LegacyMergeStrategyInfo(t *testing.T) {
 			}
 			r.Fix()
 			after, err := os.ReadFile(filepath.Join(root, ".mindspec", "config.yaml"))
-			if err != nil || string(after) != content+"source_globs: [cmd/**]\n" {
+			if err != nil || string(after) != fullConfig {
 				t.Fatalf("doctor fix changed the legacy config: %q, %v", after, err)
 			}
 			if findCheck(r, c.Name).Status != Info || r.HasFailures() {
@@ -84,12 +85,21 @@ func TestDoctor_LegacyMergeStrategyCommentedOrNested(t *testing.T) {
 			config.ResetCache()
 			t.Cleanup(config.ResetCache)
 			r := &Report{}
-			checkSourceGlobs(r, root)
+			checkConfiguration(r, root, Options{SkipLocalEnv: true})
 			if c := findCheck(r, ".mindspec/config.yaml merge_strategy"); c != nil {
 				t.Fatalf("unexpected legacy-key finding: %+v", c)
 			}
 		})
 	}
+}
+
+func loadDoctorTestConfig(t *testing.T, root string) *config.Config {
+	t.Helper()
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
 }
 
 // TestMissingSourceGlobs_AllThreeStates exercises spec 091 Req 18: the
@@ -102,7 +112,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -128,7 +138,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -145,7 +155,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil || c.Status != Warn {
@@ -159,7 +169,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 		config.ResetCache()
 
 		r := &Report{}
-		checkSourceGlobs(r, root)
+		checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 
 		c := findCheck(r, sourceGlobsCheckName)
 		if c == nil {
@@ -268,7 +278,7 @@ func TestSourceGlobsFixWiring(t *testing.T) {
 	config.ResetCache()
 
 	r := &Report{}
-	checkSourceGlobs(r, root)
+	checkSourceGlobs(r, root, loadDoctorTestConfig(t, root))
 	c := findCheck(r, sourceGlobsCheckName)
 	if c == nil || c.FixFunc == nil {
 		t.Fatal("expected a fixable missing-source-globs check")

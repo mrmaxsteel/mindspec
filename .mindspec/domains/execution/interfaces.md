@@ -20,6 +20,10 @@ type Executor interface {
 
     // Query methods
     CheckIgnore(workdir, file string) error
+    CheckSlotIgnore(workdir, file string) error
+    LsFiles(workdir, path string) (bool, error)
+    CloneSlotTree(tree, reviewedSHA string) error
+    CheckSlotTree(tree, reviewedSHA string) error
     IsTreeClean(path string) error
     LsTree(workdir, rev string) (string, error)
     DiffStat(base, head string) (string, error)
@@ -54,6 +58,47 @@ re-entry flag, consulted only when a merge is ALREADY in progress with a
 fully resolved, staged index — see § Merge safety layer below.
 (`lifecycleAllowSet` is spec 119's finalize scoping — see the
 architecture doc.)
+
+### Slot Git Operations (`internal/executor/mindspec_executor.go`)
+
+`slotGit` runs Git with an explicit working directory.
+It removes all inherited `GIT_*` variables.
+It sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_SYSTEM=/dev/null`.
+It sets `GIT_CONFIG_GLOBAL=/dev/null` for every call.
+`slotGitEnv` builds the environment for both Git paths.
+For the `slotMainGit` trust query, it keeps `HOME`, `XDG_CONFIG_HOME` and an explicit `GIT_CONFIG_GLOBAL`.
+It removes all other inherited `GIT_*` variables and disables system configuration and prompts.
+`slotMainGit` reads only global `safe.directory` values and unconditional includes.
+The query runs in a new temporary directory with its parent as `GIT_CEILING_DIRECTORIES`.
+Git finds no repository, so conditional includes do not apply.
+It passes each value as a `-c safe.directory=<value>` command option, in order.
+These calls check the isolation root, clone the source, and read the source object-store path.
+Calls inside the slot tree do not read global configuration.
+It sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=/usr/bin/false`.
+Command options set `core.fsmonitor=false`, `core.hooksPath=/dev/null` and `core.attributesFile=/dev/null`.
+Errors include escaped Git stderr.
+
+`CloneSlotTree` creates a shared clone without an initial checkout.
+It removes the local `core.bare` setting, checks out the reviewed SHA in detached mode, and removes `origin`.
+It shares the source object store and keeps writable Git files in the slot tree.
+It calls `CheckSlotTree` before it returns success.
+`CheckSlotTree` requires real directories for the tree, `.git`, `objects` and `objects/info`.
+It requires regular `.git/config` and `objects/info/alternates` files.
+It refuses `commondir`, `config.worktree`, config includes, and settings for `core.worktree`, `core.bare` or `extensions.worktreeConfig`.
+It requires exact alternates bytes for the resolved source object store and a HEAD equal to the reviewed SHA.
+Missing paths, invalid file types and Git errors refuse reuse.
+
+`CheckSlotIgnore` uses `slotMainGit` for `check-ignore --quiet -- <path>`.
+It sets `core.excludesFile=/dev/null` to disable explicit and default global ignore files.
+Exit 1 returns an error that matches `executor.ErrSlotNotIgnored` with `errors.Is`.
+The error keeps the Git refusal text and exit code.
+If the ignore check returns an error, cleanup uses only existing lock files. It creates no lock file.
+`CheckIgnore` retains the operator configuration for ledger checks.
+`LsFiles` calls `gitutil.LsFiles` with the operator's Git configuration.
+`gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.
+It reports whether the index tracks the literal path or a file under it.
+Git errors propagate. The command layer uses this query to refuse a tracked isolation root.
+`MockExecutor` records these calls and provides function and error hooks.
 
 ### GitUtil Helpers (`internal/gitutil/gitutil.go`)
 
@@ -111,6 +156,13 @@ workflow domain's scaffolding verbs (`internal/bootstrap`,
 | `ReviewIgnoreEntries` | Optional local panel artifacts: `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**` (spec 129 R8). Separate from runtime entries so already-tracked reviews do not become doctor runtime-file findings. The following negations retain the flat spec ledger: `!.mindspec/specs/*/reviews/*/` and `!.mindspec/specs/*/reviews/*/dispositions.jsonl` (spec 130 R6). Bootstrap writes the ledger negations by exact-line presence only, preserving bytes on a second init; adhoc ledgers remain ignored. |
 | `EnsureGitignoreEntriesWithHeader(root, header, entries...)` | The same append and ignore-check semantics as `EnsureGitignoreEntries`, with a caller-supplied header. Runtime callers use this ignore-check helper; bootstrap uses this for the plain review patterns and writes their ledger negations separately by exact-line presence because negations cannot be checked as ignored paths. `EnsureGitignoreEntries` delegates with the runtime header. |
 | `EnsureGitignoreEntries(root, entries...)` | Entry-granular, negation-aware `.gitignore` ensure (final review G1): guarantees each entry is ACTUALLY ignored by git, not merely present as a line. Existing bytes are never reordered or rewritten; entries needing a fresh line are appended under a shared header comment; creates the file if absent. An entry needs a fresh line when its exact line is absent (delimiter-stripped comparison only — a leading-whitespace line is a DIFFERENT pattern git does not honor, so it never satisfies presence), OR when the line IS present but `git check-ignore` reports the path un-ignored anyway — a LATER negation rule (`!entry`) defeats it under git's last-match-wins ordering, so the plain entry is RE-APPENDED (a harmless duplicate line) to make the last match the ignore rule again. So the same entry can legitimately appear more than once, and a converged call still shells out to `git check-ignore` per line-present entry before concluding nothing needs writing (no write happens in that case). On an indeterminate git verdict (no repository / exit status outside {0,1}, e.g. 128) it falls back to line-presence alone rather than force a spurious re-append. Deliberately separate from the pre-existing directory-specialized `EnsureGitignoreEntry` (singular), which appends a trailing `/`. |
+
+`EnsureGitignoreLiteralEntriesWithHeader(root, header, paths...)` writes literal path patterns.
+It escapes backslashes, `*`, `?`, `[`, leading `#` or `!`, and trailing spaces.
+It checks every path for bytes below `0x20` before it writes any entry.
+It returns an error on these bytes and leaves `.gitignore` unchanged.
+It uses the shared append rules, but checks ignore status with the original paths.
+Bootstrap uses it for `.mindspec/config.local.yaml` and the effective isolation root.
 
 ### Merge-safety primitives (spec 127, `internal/gitutil`)
 

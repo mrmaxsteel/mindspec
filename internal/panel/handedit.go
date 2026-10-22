@@ -12,6 +12,14 @@ import (
 // explicitly empty telemetry field is not an absent marker). An unregistered
 // directory without round events is accepted here for legacy disposition tools.
 func LegacyPanel(dir string) (bool, error) {
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return false, err
+	}
+	return legacyPanelFromLedger(dir, lines)
+}
+
+func legacyPanelFromLedger(dir string, lines [][]byte) (bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil && !os.IsNotExist(err) {
 		return false, err
@@ -23,10 +31,6 @@ func LegacyPanel(dir string) (bool, error) {
 		}
 	}
 	_, telemetry := fields["telemetry"]
-	lines, err := ReadLedger(dir)
-	if err != nil {
-		return false, err
-	}
 	round := false
 	for _, line := range lines {
 		var disc recordDiscriminator
@@ -46,16 +50,20 @@ func LegacyPanel(dir string) (bool, error) {
 // CheckHandEdits is the library-only R5.3 check; the gate wires it in separately.
 // The first return value names the first unbacked field, deterministically.
 func CheckHandEdits(dir string, p Panel) (string, error) {
-	legacy, err := LegacyPanel(dir)
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return "", err
+	}
+	return checkHandEditsFromLedger(dir, p, lines)
+}
+
+func checkHandEditsFromLedger(dir string, p Panel, lines [][]byte) (string, error) {
+	legacy, err := legacyPanelFromLedger(dir, lines)
 	if err != nil {
 		return "", err
 	}
 	if legacy {
 		return "", nil
-	}
-	lines, err := ReadLedger(dir)
-	if err != nil {
-		return "", err
 	}
 	return FirstUnbackedField(p, lines)
 }
@@ -132,6 +140,7 @@ func FirstUnbackedField(p Panel, lines [][]byte) (string, error) {
 		{"target", p.Target, latest.Target},
 		{"bead_id", p.BeadID, latest.BeadID},
 		{"expected_reviewers", p.ExpectedReviewers, latest.ExpectedReviewers},
+		{"verdict_schema", p.VerdictSchema, latest.VerdictSchema},
 		{"telemetry", p.Telemetry, latest.Telemetry},
 	}
 	for _, c := range comparisons {

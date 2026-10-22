@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,7 +30,8 @@ var panelDispositionAppendCmd = &cobra.Command{
 	Use:   "append --spec <id> --panel <name> --data <literal|-|@file>",
 	Short: "Append one disposition row or coverage manifest via the transactional op",
 	Long: `append writes disposition rows and legacy coverage manifests. It refuses
-round, refutation, deferral, rebind and abandon events, which only the panel
+round, refutation, deferral, rebind, abandon, verdict, launch and substitution
+events, which only the panel
 verbs write. A manifest on a non-legacy panel is reserved to panel tally. It
 dispatches to the panel ledger store, which — under ONE lock held
 on that panel's dedicated dispositions.lock file — validates the
@@ -97,7 +99,13 @@ never interpolated into a shell-quoted argument.`,
 			return err
 		}
 		if panel.IsVerbRecord(discriminator.Record) {
-			return fmt.Errorf("record %s is reserved to the panel verbs; use panel create, refute, defer, rebind or abandon", termsafe.Escape(discriminator.Record))
+			verb := map[string]string{
+				panel.RecordRound: "create", panel.RecordRefutation: "refute",
+				panel.RecordDeferral: "defer", panel.RecordRebind: "rebind",
+				panel.RecordAbandon: "abandon", panel.RecordVerdict: "submit",
+				panel.RecordLaunch: "launch", panel.RecordSubstitution: "launch",
+			}[discriminator.Record]
+			return termsafe.NewFailure(fmt.Sprintf("record %s is reserved to the panel verbs", discriminator.Record), fmt.Sprintf("use panel %s", verb))
 		}
 		if discriminator.Record == panel.RecordPanelManifest {
 			dir := filepath.Join(specDir, "reviews", panelName)
@@ -187,7 +195,7 @@ naming every failing panel + slot, otherwise.`,
 // directory via the same layout-aware workspace.SpecDir logic every
 // other panel subcommand uses (panelDirFor, panel.go).
 func resolveDispositionSpecDir(specID string) (string, error) {
-	root, err := findRoot()
+	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return "", err
 	}

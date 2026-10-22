@@ -676,14 +676,14 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 		statuses              []string
 		arm                   string
 	}{
-		{"i", "implement", "review", []string{"closed"}, "recovery: mindspec impl approve 129-fixture"},
+		{"i", "implement", "review", []string{"closed"}, "recovery: mindspec impl approve '129-fixture'"},
 		{"ii", "implement", "implement", []string{"in_progress"}, "Recovering..."},
 		{"ii-b", "implement", "implement", []string{"in_progress", "open"}, "Recovering..."},
 		{"iii-a", "implement", "implement", []string{"closed", "open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
 		{"iii-b", "implement", "plan", []string{"open", "blocked"}, "2 open lifecycle bead(s), none selectable"},
-		{"iv", "plan", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
-		{"no-stored", "", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
-		{"invalid-stored", "unknown", "plan", nil, "recovery: mindspec plan approve 129-fixture"},
+		{"iv", "plan", "plan", nil, "recovery: mindspec plan approve '129-fixture'"},
+		{"no-stored", "", "plan", nil, "recovery: mindspec plan approve '129-fixture'"},
+		{"invalid-stored", "unknown", "plan", nil, "recovery: mindspec plan approve '129-fixture'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newNextHonestyFixture(t)
@@ -748,7 +748,7 @@ func TestNext_EmptyScoped_DerivedState(t *testing.T) {
 				t.Fatalf("empty ready set read plan %d times", reads)
 			}
 			if tc.name == "i" {
-				requireText(t, out, "recovery: mindspec repair phase 129-fixture")
+				requireText(t, out, "recovery: mindspec repair phase '129-fixture'")
 				if strings.Index(out, tc.arm) > strings.Index(out, "recovery: mindspec repair phase") {
 					t.Fatal("phase repair must follow the tally arm")
 				}
@@ -792,7 +792,7 @@ func TestNext_EmptyScoped_InformationalNearMissExitsZero(t *testing.T) {
 			if (err != nil) != blocking {
 				t.Fatalf("blocking=%t err=%v %s", blocking, err, out)
 			}
-			requireText(t, out, "bead epic-129.4", "bead nonplan-f", "bead nonplan-t", "lifecycle children: 1 closed / 0 in_progress / 0 open", "stored phase: review; child-derived phase: review", "recovery: mindspec impl approve 129-fixture")
+			requireText(t, out, "bead epic-129.4", "bead nonplan-f", "bead nonplan-t", "lifecycle children: 1 closed / 0 in_progress / 0 open", "stored phase: review; child-derived phase: review", "recovery: mindspec impl approve '129-fixture'")
 			if strings.Contains(out, "recovery: mindspec repair phase") {
 				t.Fatalf("equal phases must not offer phase repair: %s", out)
 			}
@@ -880,7 +880,7 @@ func TestNext_EmptyScoped_EmitOnlyInProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit-only empty state: %v %s", err, out)
 	}
-	requireText(t, out, "lifecycle children: 0 closed / 1 in_progress / 0 open", "recovery: mindspec next --spec 129-fixture")
+	requireText(t, out, "lifecycle children: 0 closed / 1 in_progress / 0 open", "recovery: mindspec next --spec '129-fixture'")
 	if calls != 0 || f.audit(t) != before {
 		t.Fatalf("emit-only mutated state or resolved active bead: calls=%d", calls)
 	}

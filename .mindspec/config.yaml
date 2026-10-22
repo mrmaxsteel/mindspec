@@ -2,6 +2,15 @@
 # Review panels for this repo (operator decision 2026-10-18: keep the larger panels).
 # Pass rule: every finding is fixed, refuted with evidence or deferred; never out-voted.
 panel:
+  runners:
+    - {family: claude, kind: harness}
+    - family: codex
+      kind: process
+      argv: [codex, exec, --skip-git-repo-check, -s, workspace-write, -m, "{model}", -C, "{slot_dir}", "-"]
+      prompt: stdin
+      output: stdout
+      quota_signals: ["ERROR: You've hit your usage limit"]
+      on_quota: claude
   approve_threshold: "n-1"
   gates:
     spec_approve:

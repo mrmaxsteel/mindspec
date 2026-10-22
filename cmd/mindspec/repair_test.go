@@ -197,6 +197,9 @@ func TestRepairPhase_BackwardMoveRefused(t *testing.T) {
 	if calls != 0 {
 		t.Errorf("merge seam calls = %d, want 0 — stored mindspec_phase must be left unchanged on refusal", calls)
 	}
+	if !strings.Contains(err.Error(), "bd show 'epic-92'") {
+		t.Errorf("inspection recovery must quote the epic: %v", err)
+	}
 	if !strings.Contains(err.Error(), "force-backward") {
 		t.Errorf("refusal should name the --force-backward escape: %v", err)
 	}
@@ -470,7 +473,7 @@ func TestRepairPhase_WriteFailureHasRecoveryLine(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("repair write failure must end with a recovery line: %v", err)
 	}
-	if !strings.Contains(err.Error(), "mindspec repair phase 092-agent-contract-hardening") {
+	if !strings.Contains(err.Error(), "mindspec repair phase '092-agent-contract-hardening'") {
 		t.Errorf("recovery should be the re-runnable repair command: %v", err)
 	}
 	if strings.Contains(err.Error(), "bd update --metadata") {

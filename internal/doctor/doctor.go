@@ -11,7 +11,7 @@ const (
 	Error          // something is wrong and needs action
 	Warn           // advisory, not a failure
 	Fixed          // was broken, auto-repaired by --fix
-	Info           // information only; never auto-repaired
+	Info           // information only; not a failure and never auto-repaired
 )
 
 // Check represents a single health check result.
@@ -91,6 +91,7 @@ type Options struct {
 	Force           bool
 	DryRunMigration bool
 	SkipLocalEnv    bool
+	Probe           bool // run probes from any config source
 }
 
 // RunWithOptions executes all doctor checks against the given project root.
@@ -112,11 +113,9 @@ func RunWithOptions(root string, opts Options) *Report {
 	// the "missing" state) is reported before dead-manifest (the
 	// existing-but-dead state) — one state, one Warn.
 	checkOwnershipManifests(r, root)
-	checkSourceGlobs(r, root)
-	// Spec 123 R6c/R7c: the models: and commands: ADR-0036 guidance-parity
-	// nudges, mirroring checkSourceGlobs — both advisory, neither gating.
-	checkModels(r, root)
-	checkCommands(r, root)
+	// Share config loading across the source, model, command and panel checks.
+	checkConfiguration(r, root, opts)
+	checkStagedMarkers(r, root)
 	checkBeads(r, root)
 	checkOrphanedBeads(r, root)
 	// Spec 119 Bead 2 (R5/R7), final-review F1: the stale-OPEN cross-check

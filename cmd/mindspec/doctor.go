@@ -19,18 +19,22 @@ var doctorCmd = &cobra.Command{
 Use --fix to auto-repair fixable issues (e.g. tracked runtime files).
 Use --fix --force to also replace user-authored values for mindspec-required
 beads config keys (not just add missing ones).
+Use --probe to run runner probes from any config source. Without this flag,
+only probes from an untracked local config file run.
 Use --dry-run-migration to report which specs would migrate on their next
 lifecycle command without writing any state. Exits 0 even
 when legacy specs are surfaced.
 Use --ci to skip developer-local-environment checks (Beads merge driver,
 bd version floor, bd schema drift, multiple-bd-on-PATH, stale hooks) that
 a fresh CI checkout structurally cannot satisfy, while still gating on
-every repo-integrity / lifecycle-divergence check.`,
+every repo-integrity / lifecycle-divergence check. It also skips runner
+command checks, probes, diversity suggestions, and stale slot checks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fix, _ := cmd.Flags().GetBool("fix")
 		force, _ := cmd.Flags().GetBool("force")
 		dryRun, _ := cmd.Flags().GetBool("dry-run-migration")
 		ci, _ := cmd.Flags().GetBool("ci")
+		probe, _ := cmd.Flags().GetBool("probe")
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -44,7 +48,7 @@ every repo-integrity / lifecycle-divergence check.`,
 
 		fmt.Printf("Workspace Root: %s\n", root)
 
-		report := doctor.RunWithOptions(root, doctor.Options{Force: force, DryRunMigration: dryRun, SkipLocalEnv: ci})
+		report := doctor.RunWithOptions(root, doctor.Options{Force: force, DryRunMigration: dryRun, SkipLocalEnv: ci, Probe: probe})
 
 		if fix {
 			report.Fix()
@@ -101,4 +105,5 @@ func init() {
 	doctorCmd.Flags().Bool("force", false, "With --fix, also replace user-authored values for mindspec-required beads config keys")
 	doctorCmd.Flags().Bool("dry-run-migration", false, "Report which specs would migrate on their next lifecycle command without writing any state")
 	doctorCmd.Flags().Bool("ci", false, "Skip developer-local-environment checks (merge driver, bd version/schema, bd-on-PATH, hooks) that a fresh CI checkout cannot satisfy")
+	doctorCmd.Flags().Bool("probe", false, "Run runner probes from any config source (skipped with --ci)")
 }

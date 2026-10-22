@@ -261,7 +261,7 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 // an ADR-0035 guard failure with a genuine forward exit (§2(i): never a
 // bare re-invocation that cannot change the refused fact).
 func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle.ReattestRefusal) error {
-	inspect := fmt.Sprintf("git log --first-parent --merges %s", scanned)
+	inspect := fmt.Sprintf("git log --first-parent --merges %s", shellQuoteTarget(termsafe.Escape(scanned)))
 	if r.State == lifecycle.ReattestStateAncestor || r.NoRestore || r.State == lifecycle.ReattestStateIndeterminate {
 		recovery := r.Recovery
 		if len(recovery) == 0 {
@@ -278,7 +278,7 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 	if r.Fallback || r.State == lifecycle.ReattestStateMultipleFallbackCandidates {
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s\nThe single-candidate, branch-tip, not-reverted and read checks must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
-			fmt.Sprintf("git log --merges --topo-order %s", scanned),
+			fmt.Sprintf("git log --merges --topo-order %s", shellQuoteTarget(termsafe.Escape(scanned))),
 			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
 		)
 	}
@@ -288,7 +288,7 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s\nUse an attested restore. A person must verify the merge and its diff first. Then restore the bead branch at that merge's second parent.", safeBeadID, r.Detail),
 			inspect,
-			fmt.Sprintf("git branch %s <verified-second-parent-sha>", beadBranch),
+			fmt.Sprintf("git branch %s <verified-second-parent-sha>", shellQuoteTarget(termsafe.Escape(beadBranch))),
 		)
 	case lifecycle.ReattestStateAmbiguous:
 		return guard.NewFailure(

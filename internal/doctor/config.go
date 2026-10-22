@@ -75,18 +75,7 @@ func checkLegacyMergeStrategy(r *Report, root string) {
 // is fixable: --fix scaffolds the literal source_globs block per the
 // three Req 11 states (file absent / field absent / field present),
 // never reordering or rewriting operator-authored content.
-func checkSourceGlobs(r *Report, root string) {
-	checkLegacyMergeStrategy(r, root)
-	cfg, err := config.Load(root)
-	if err != nil {
-		r.Checks = append(r.Checks, Check{
-			Name:    ".mindspec/config.yaml source_globs",
-			Status:  Warn,
-			Message: "could not load .mindspec/config.yaml: " + err.Error(),
-		})
-		return
-	}
-
+func checkSourceGlobs(r *Report, root string, cfg *config.Config) {
 	// Req 18 collapses all three states to len == 0; config.Load
 	// delivers that. A non-empty list clears the Warn.
 	if len(cfg.SourceGlobs) > 0 {
@@ -241,17 +230,7 @@ var commandsKeyRE = regexp.MustCompile(`(?m)^commands[ \t]*:`)
 // it empty — mirroring checkSourceGlobs. The Warn discloses the
 // declared-and-inert status and hints `mindspec models populate`. Fixed
 // via the shared three-state scaffolder.
-func checkModels(r *Report, root string) {
-	cfg, err := config.Load(root)
-	if err != nil {
-		r.Checks = append(r.Checks, Check{
-			Name:    ".mindspec/config.yaml models",
-			Status:  Warn,
-			Message: "could not load .mindspec/config.yaml: " + err.Error(),
-		})
-		return
-	}
-
+func checkModels(r *Report, root string, cfg *config.Config) {
 	// FX-2 (empty≠declared): a blank-valued entry (e.g. `models:\n
 	// authoring: ""`) has map-length 1 but declares no real model id, so
 	// HasDeclaredModels (non-blank key+value) — not a bare len() > 0 — is
@@ -290,17 +269,7 @@ func scaffoldModelsBlock(configPath string) error {
 // discloses why the managed AGENTS.md documents carry no Build & Test
 // section and hints `mindspec commands populate`. Fixed via the shared
 // three-state scaffolder.
-func checkCommands(r *Report, root string) {
-	cfg, err := config.Load(root)
-	if err != nil {
-		r.Checks = append(r.Checks, Check{
-			Name:    ".mindspec/config.yaml commands",
-			Status:  Warn,
-			Message: "could not load .mindspec/config.yaml: " + err.Error(),
-		})
-		return
-	}
-
+func checkCommands(r *Report, root string, cfg *config.Config) {
 	// FX-2 (empty≠declared): a blank-valued entry (e.g. `commands:\n
 	// build: ""`) has map-length 1 but declares no runnable command, so
 	// HasDeclaredCommands (non-blank key+value) — not a bare len() > 0 —

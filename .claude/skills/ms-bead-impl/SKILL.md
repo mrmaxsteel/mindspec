@@ -9,7 +9,7 @@ Land one PR-sized implementation for a single claimed bead. You orchestrate; the
 
 **Why staged prompts matter.** Pre-staged prompts are the biggest quality lever on impl-subagent output. A subagent given a structured prompt with explicit files, helpers, ACs, and boundaries usually passes on the first round; the same subagent given a one-line "implement this bead" usually needs rework.
 
-Include the standard guardrails (AGENTS.md § Bead-loop guardrails) in every subagent prompt — do not re-transcribe them here.
+Include the repository guardrails from AGENTS.md in every subagent prompt. Apply `review.derive`, `lifecycle.complete-by-orchestrator` and `sequence.bead-impl-prompt`.
 
 ## Inputs
 
@@ -28,7 +28,7 @@ mindspec bead ready-check <bead-id>
 
 This is not part of Phase A and it is not optional. It runs whether Phase A stages a fresh prompt, a `prompt-path` was supplied (which skips Phase A entirely), or the documented manual `bd update --claim --status in_progress` / `git worktree add` fallback was used instead of `mindspec next` (step 0's belt-and-braces path). None of those paths may bypass this check — a bead claimed before the readiness gate existed, or a plan/spec hand-edited after the claim, is caught here at dispatch time even if it slipped past `mindspec next`'s own gate.
 
-<!-- staged-rule: target=next-action; remove-by=2027-06-30 (provisional) -->
+<!-- staged-rule: id=sequence.bead-impl-prompt; remove-by=2027-06-30 -->
 Run `mindspec bead ready-check <id>`; proceed on exit 0; otherwise stop and surface its report.
 
 - **Re-dispatch** — if `bd show <bead-id>` reveals a `mindspec_readiness_attempt` metadata key (written by `mindspec bead clarify`), read the record and inject its entries, keyed by ordinal, into the staged prompt's `## Phase 0` / `## Readiness Clarification` sections below. The injection iterates the record's `report` array: EVERY originally-cited reason is rendered, never a subset. For EACH report ordinal you MUST render BOTH the original cited NOT-READY reason (verbatim from the record's `report` array — the `{ordinal, signal, reason}` entry) AND its paired clarification (from the record's `clarifications` array — the `{ordinal, reason, answer, span}` entry); a report ordinal with NO paired clarification MUST still be rendered, with `clarification: (none recorded)`, so the fresh Phase 0 sees the unaddressed reason and re-reports NOT READY for it — the anti-browbeat rule cannot be evaded by clarifying only some reasons. Pairing the original reason with its answer is load-bearing: the re-dispatched Phase 0 cannot apply the anti-browbeat rule (judging whether the clarification genuinely RESOLVES the reason) if it never sees the reason it is supposed to resolve. If the stored record is malformed (an empty `report` array, a clarification citing an ordinal absent from `report`, or a pairing that cannot be established), STOP — fail closed to the NOT-READY routing rather than dispatching with a partial injection. The injected record is SUPPLEMENTARY EVIDENCE for the fresh Phase 0's own review, never a substitute for it: the record's `report` array is operator-supplied and may itself omit originally-cited reasons, so it must NEVER be treated as the complete cited-set or as a bound on what Phase 0 re-reviews (see the independent re-derivation rule in the Phase 0 block).
@@ -67,8 +67,8 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - Spec branch: spec/<spec-slug>
 
    ## Read first
-   - `.mindspec/specs/<spec-slug>/spec.md` §R<n> + §AC<n>
-   - `.mindspec/specs/<spec-slug>/plan.md` §Bead <N>
+   - `.mindspec/specs/<spec-slug>/spec.md` acceptance criteria
+   - `.mindspec/specs/<spec-slug>/plan.md` bead section
 
    ## Phase 0 — readiness review (before any edit)
 
@@ -109,7 +109,7 @@ Skip this phase if `prompt-path` was supplied. Otherwise compose a structured pr
    - ...
 
    ## Guardrails
-   Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the
+   Include the standard guardrails (AGENTS.md, Bead-loop guardrails) — the
    subagent prompt fences (no `mindspec complete`, no `git push`, no scope
    creep, no reimplementing helpers, exactly ONE commit ending
    `Deviations: <list or "none">`, tests must PASS, report SHA + counts).
