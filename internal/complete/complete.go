@@ -617,6 +617,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
 	closedAtEntry := false
+	// The lookup also returns an error for a missing epic. Check the list
+	// read separately so an absent epic keeps its existing completion path.
+	if _, err := epicCache.AllEpics(); err != nil {
+		return nil, completionFailure(beadID, opts, "reading spec epic", err)
+	}
 	epicID, epicErr := phase.FindEpicBySpecIDWithCache(epicCache, specID)
 	if epicErr == nil && epicID != "" {
 		// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
@@ -627,22 +632,26 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, err
 		}
 		epicPhase, phaseErr := phase.DerivePhaseWithCache(epicCache, epicID)
-		if phaseErr == nil && epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
+		if phaseErr != nil {
+			return nil, completionFailure(beadID, opts, "reading implementation phase", phaseErr)
+		}
+		if epicPhase != state.ModeImplement && epicPhase != state.ModeReview {
 			// R4: beadID/specID are ID-typed positions (idrender);
 			// epicPhase is bd-metadata-sourced (mindspec_phase) and not
 			// re-validated against the enum here on the not-equal path
 			// — escape it as free text.
 			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", safeBeadID, idrender.Spec(specID), termsafe.Escape(epicPhase))
 		}
-		if phaseErr == nil {
-			// Reuse the phase query's cached child status when it is available.
-			// A new close keeps its existing durability checks below.
-			children, _ := epicCache.GetChildren(epicID)
-			for _, child := range children {
-				if child.ID == beadID {
-					closedAtEntry = strings.EqualFold(strings.TrimSpace(child.Status), "closed")
-					break
-				}
+		// Reuse the phase query's cached child status. A failed read must
+		// not route a closed bead through close and cleanup again.
+		children, err := epicCache.GetChildren(epicID)
+		if err != nil {
+			return nil, completionFailure(beadID, opts, "reading bead status", err)
+		}
+		for _, child := range children {
+			if child.ID == beadID {
+				closedAtEntry = strings.EqualFold(strings.TrimSpace(child.Status), "closed")
+				break
 			}
 		}
 	}
@@ -1156,6 +1165,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge); err != nil {
 			retry := opts
 			retry.ResolveMerge = true
+			// The executor escapes each conflict line. Keep those lines and
+			// replace its merge-only recovery with the closed-bead re-entry.
+			if message := strings.TrimRight(err.Error(), "\n"); guard.HasFinalRecoveryLine(message) {
+				lines := strings.Split(message, "\n")
+				return nil, guard.NewFailure(strings.Join(lines[:len(lines)-1], "\n"), completionCommand(beadID, retry))
+			}
 			return nil, completionFailure(beadID, retry, "merging closed bead", err)
 		}
 		rows, err := namingMerges(exec, specBranch, beadID)

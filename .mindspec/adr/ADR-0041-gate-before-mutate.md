@@ -867,6 +867,10 @@ presence check. In a non-flat layout, an absent bead worktree with no
 surviving panel registration refuses when the panel gate is enforced.
 A closed bead without a naming merge runs the merge recovery without a
 second close. It publishes the export and ledger before cleanup.
+An epic, phase, or child-status read failure refuses before close, merge,
+or cleanup. The recovery retries completion. A closed-unmerged conflict
+keeps its line boundaries and ends with one `--resolve-merge` recovery,
+without `--merge-only`.
 
 When an ownership manifest conflicts, an open plain completion refuses
 before close. Merge-only and closed-unmerged recovery preserve the merge.

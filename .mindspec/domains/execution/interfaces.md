@@ -323,6 +323,8 @@ Ownership conflicts return their path list for the caller's path decision.
 `Executor.MergeBead` keeps the layout guard, live work-destruction
 preflight, and preserved-merge dispatch. It makes no binding or cleanup
 write. Its mode selects the merge-only re-entry command.
+For closed-unmerged recovery, the workflow keeps the conflict lines and
+replaces the final recovery with plain `complete --resolve-merge`.
 
 `FirstParentMerges` returns full commit identities. `CompletionState`
 reads the merge head, staged paths, and a full-SHA commit range.

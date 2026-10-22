@@ -96,6 +96,8 @@ func TestComplete_OwnershipResolutionRevokesClaimRefuses(t *testing.T) {
 }
 func TestComplete_ClosedNoMergeOwnershipConflictDefersToReentry(t *testing.T) {
 	f := ownershipWindow(t)
+	stubClosedWindowChild(t)
+	ledger := f.registerLedger()
 	f.closed = true
 	_, err := f.run(CompleteOpts{})
 	if err == nil || !gitutil.MergeInProgress(f.specWT) {
@@ -104,10 +106,18 @@ func TestComplete_ClosedNoMergeOwnershipConflictDefersToReentry(t *testing.T) {
 	if strings.Contains(err.Error(), "ownership manifests have merge conflicts") {
 		t.Fatalf("closed path refused before merge: %v", err)
 	}
+	requireClosedConflictRecovery(t, err, windowManifest)
+	if f.closeCalls != 0 {
+		t.Fatalf("closed recovery called close again: %d", f.closeCalls)
+	}
 	writeFile(t, f.specWT, windowManifest, "paths:\n  - feature.txt\n  - internal/widget/**\n")
 	gitRun(t, f.specWT, "add", windowManifest)
 	r, err := f.run(CompleteOpts{ResolveMerge: true})
 	if err != nil || !r.BeadClosed {
 		t.Fatalf("closed ownership re-entry: %+v %v", r, err)
+	}
+	f.assertPublished(ledger)
+	if !r.WorktreeRemoved || f.closeCalls != 0 {
+		t.Fatalf("closed ownership cleanup or duplicate close: %+v closes=%d", r, f.closeCalls)
 	}
 }

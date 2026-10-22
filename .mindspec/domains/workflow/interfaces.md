@@ -879,3 +879,7 @@ existing valid merge and makes no second merge.
 
 A closed bead without a naming merge runs the merge recovery without a
 second close. It publishes the closed export and panel ledger before cleanup.
+An epic, phase, or child-status read failure refuses before close, merge,
+or cleanup. Retry completion when the read succeeds. A closed-unmerged
+conflict keeps its line boundaries and ends with one `--resolve-merge`
+recovery, without `--merge-only`.
