@@ -185,7 +185,17 @@ force-delete) when merge provenance is not positively established.
 An export or artifact-commit failure stops approval before publication and
 cleanup. Pending files, worktrees, and branches remain. The error shows the
 epic state and failed stage. Fix the fault, then run the printed
-`mindspec impl approve <spec>` command again.
+`mindspec impl approve <spec>` command again. An absent spec or pending bead
+worktree has no artifact commit to run. A pending bead branch can still merge
+through the spec worktree.
+
+After publication and its hooks, approval checks all scoped bead worktrees and
+the spec worktree before any forced removal. A retry after local spec-branch
+deletion checks all remaining worktrees too. Pending changes or a read error
+stop cleanup. No worktree or branch is removed. The error gives the epic state,
+the cleanup stage, and recovery commands. Preserve pending changes in a follow-up
+branch, or move them to a safe path. Leave the worktree clean and readable, then
+run the printed approval command again.
 
 Approval also checks each pending bead before any write. If its branch moved
 after its naming merge, approval gives the same follow-up recovery as

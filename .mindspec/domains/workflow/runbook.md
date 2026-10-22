@@ -377,7 +377,9 @@ merge when the recovery command includes `--resolve-merge`. A bare failure gives
 
 An export or artifact-commit failure keeps pending files, worktrees, and
 branches. It stops before publication and cleanup. Fix the export or commit
-fault, then run the printed approval command again.
+fault, then run the printed approval command again. An absent spec or pending
+bead worktree has no artifact commit to run. A pending bead branch can still
+merge through the spec worktree.
 
 A pending bead whose tip moved after its naming merge stops approval before
 any write. Use the printed follow-up recovery from `complete`. Approval cannot
@@ -391,11 +393,13 @@ remote spec branch, or remote main if the host deleted the spec branch. A fetch
 failure or missing ancestry retains the adopt recovery. A host squash or rebase
 merge needs that recovery too. A retry does not recreate a deleted remote head.
 
-A retry checks each remaining merged bead worktree, including after local
-spec-branch deletion. Pending changes, an unreadable status, or a worktree
-inspection error stop cleanup and keep the worktree and branch. Preserve pending
-changes in a follow-up branch. Make the original worktree clean and readable.
-Then run `mindspec impl approve <spec>` again.
+After publication and its hooks, approval checks every scoped bead worktree and
+the spec worktree before any forced removal. A retry after local spec-branch
+deletion checks all remaining worktrees too. Pending changes, an unreadable
+status, or a worktree inspection error stop cleanup. The state line names the
+cleanup stage. All remaining worktrees and branches survive. Preserve pending
+changes in a follow-up branch, or move them to a safe path. Leave the original
+worktree clean and readable. Then run `mindspec impl approve <spec>` again.
 
 ## Verify a merge before close
 

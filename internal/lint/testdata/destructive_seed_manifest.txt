@@ -227,7 +227,6 @@ internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg2:unprovab
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.checkFinalizeBeadMerge	arg1:unprovable
-internal/executor/mindspec_executor.go	MindspecExecutor.checkFinalizeBeadMerge	variadic-spread:commands
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable
 internal/guard/guard.go	checkCWDWithCache	arg1:unprovable
@@ -249,7 +248,7 @@ internal/complete/panel_deferred.go	PanelDeferredAuditFailure	arg1:unprovable
 internal/complete/closing.go	runMergedCompletion	variadic-spread:commands
 internal/complete/closing.go	runMergedCompletion	arg1:unprovable
 internal/complete/closing.go	runMergedCompletion	arg2:unprovable
-internal/complete/closing.go	movedTipFailure	variadic-spread:commands
+internal/mergefollowup/recovery.go	MovedTipFailure	variadic-spread:commands
 internal/complete/closing.go	mergedRangeFailure	variadic-spread:commands
 internal/complete/merge_only.go	checkMergeMarker	arg1:unprovable
 internal/complete/merge_only.go	completionFailure	arg1:unprovable

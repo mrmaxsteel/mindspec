@@ -825,8 +825,8 @@ path it also checks the spec-to-main merge. It uses the same candidate helper as
 A pending bead with one refuses with `complete`'s moved-tip text and follow-up
 recovery. `FinalizeEpic` checks all candidates before its first write and repeats
 this check after artifact commits, before each live merge.
-Both early guards run before the placeholder
-ADR write, the stale-phase reconcile write, and the epic close.
+These early checks run before the placeholder ADR write, the stale-phase
+reconcile write, and the epic close.
 
 On the push path, `PushProbe` runs `git push --dry-run --no-verify` with the same
 remote and refspec as `PushBranch`, with `GIT_TERMINAL_PROMPT=0`. Only a failed
@@ -852,7 +852,14 @@ An export or artifact-commit failure in the spec worktree or a pending bead
 returns a stage error and stops before publication or cleanup. Pending files,
 worktrees, and branches remain. The error ends with the approval retry command.
 A retry can finish after the fault is fixed. An absent spec worktree has no
-artifact commit to run.
+artifact commit to run. An absent pending bead worktree also has no artifact
+commit to run; its branch can still merge through the spec worktree.
+
+After publication and its hooks, finalization checks every scoped bead worktree
+and the spec worktree before any forced removal. Pending changes or a read error
+return a cleanup-stage failure. No worktree or branch is removed. Approval prints
+the epic state line and keeps the inner recovery commands. Preserve the pending
+changes, leave the worktree clean, and retry approval.
 
 `FinalizeEpic` writes `mindspec_finalize_tip` after the export commit and all
 bead auto-merges, immediately before publication. Every run overwrites this key.
@@ -879,9 +886,10 @@ ref. If the host deleted that head, it fetches remote main instead. A fetch
 failure, missing object, or squash or rebase merge refuses with the branch-missing
 adopt recovery. Approval does not recreate a deleted remote spec branch. Cleanup
 runs the destruction guard again and removes only bead branches whose tips are
-ancestors of the target. It uses the same worktree check as `FinalizeEpic` before
-removal. Pending changes, an unreadable status, or a worktree inspection error
-stop cleanup and preserve the worktree and branch for recovery.
+ancestors of the target. Before its first removal, it checks all scoped bead
+worktrees and the spec worktree with the same check as `FinalizeEpic`. Pending
+changes, an unreadable status, or a worktree inspection error return a
+cleanup-stage failure. All remaining worktrees and branches survive for recovery.
 
 ### Reviewed-tree confirmation
 

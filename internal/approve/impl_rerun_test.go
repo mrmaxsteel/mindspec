@@ -33,6 +33,97 @@ func TestApproveImpl_PostCloseConflictKeepsInnerRecovery(t *testing.T) {
 	}
 }
 
+func TestApproveImpl_PushHookPendingWorkStateAndRetry(t *testing.T) {
+	f := newRerunFixture(t, true, false)
+	pending := filepath.Join(f.specWT, "hook-output.txt")
+	marker := filepath.Join(t.TempDir(), "hook-fired")
+	t.Setenv("FINALIZE_HOOK_PENDING", pending)
+	t.Setenv("FINALIZE_HOOK_MARKER", marker)
+	hook := "#!/bin/sh\nif [ ! -f \"$FINALIZE_HOOK_MARKER\" ]; then\n  printf 'hook output\\n' > \"$FINALIZE_HOOK_PENDING\" || exit 1\n  printf fired > \"$FINALIZE_HOOK_MARKER\" || exit 1\nfi\n"
+	originalHook, err := os.ReadFile(filepath.Join(f.root, ".git", "hooks", "pre-push"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook += strings.TrimPrefix(string(originalHook), "#!/bin/sh\n")
+	if err := os.WriteFile(filepath.Join(f.root, ".git", "hooks", "pre-push"), []byte(hook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.approve()
+	if fired, readErr := os.ReadFile(marker); readErr != nil || string(fired) != "fired" {
+		t.Fatalf("real push hook did not fire: %q %v", fired, readErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "epic closed; finalize stage cleanup") || !strings.Contains(err.Error(), "pending changes") || !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") {
+		t.Errorf("missing state line or pending-work recovery: %v", err)
+	}
+	if len(f.worktrees.removeCalls) != 0 {
+		t.Errorf("approval removed work after the hook: %v", f.worktrees.removeCalls)
+	}
+	if content, readErr := os.ReadFile(pending); readErr != nil || string(content) != "hook output\n" {
+		t.Errorf("approval lost hook output: %q %v", content, readErr)
+	}
+	if t.Failed() {
+		return
+	}
+	preserved := filepath.Join(t.TempDir(), "hook-output.txt")
+	if err := os.Rename(pending, preserved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.approve(); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	f.assertConverged()
+	if content, err := os.ReadFile(preserved); err != nil || string(content) != "hook output\n" {
+		t.Fatalf("retry lost preserved work: %q %v", content, err)
+	}
+}
+
+func TestApproveImpl_BranchMissingPendingSpecStateAndRetry(t *testing.T) {
+	f := newRerunFixture(t, false, false)
+	wt := filepath.Join(f.root, ".worktrees", "worktree-bead-1")
+	preflightGit(t, f.root, "worktree", "add", wt, "bead/bead-1")
+	f.worktrees.entries[0].Path = wt
+	t.Cleanup(executor.SetFinalizeStepHookForTest(func(stage string) error {
+		if stage == "pre_cleanup" {
+			return errors.New("stop after publication")
+		}
+		return nil
+	}))
+	if _, err := f.approve(); err == nil || !strings.Contains(err.Error(), "stop after publication") {
+		t.Fatalf("expected publication before cleanup: %v", err)
+	}
+	executor.SetFinalizeStepHookForTest(nil)
+	preflightGit(t, f.specWT, "switch", "--detach")
+	preflightGit(t, f.root, "branch", "-D", "spec/010-test")
+	pending := filepath.Join(f.specWT, "pending.txt")
+	if err := os.WriteFile(pending, []byte("preserve resumed work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.approve()
+	if err == nil || !strings.Contains(err.Error(), "epic closed; finalize stage cleanup") || !strings.Contains(err.Error(), "pending changes") || !strings.HasSuffix(err.Error(), "recovery: mindspec impl approve 010-test") {
+		t.Errorf("missing state line or pending-work recovery: %v", err)
+	}
+	if len(f.worktrees.removeCalls) != 0 {
+		t.Errorf("resume removed work before checking all worktrees: %v", f.worktrees.removeCalls)
+	}
+	if content, readErr := os.ReadFile(pending); readErr != nil || string(content) != "preserve resumed work\n" {
+		t.Errorf("resume lost pending work: %q %v", content, readErr)
+	}
+	if t.Failed() {
+		return
+	}
+	preserved := filepath.Join(t.TempDir(), "pending.txt")
+	if err := os.Rename(pending, preserved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.approve(); err != nil {
+		t.Fatalf("resume retry: %v", err)
+	}
+	f.assertConverged()
+	if content, err := os.ReadFile(preserved); err != nil || string(content) != "preserve resumed work\n" {
+		t.Fatalf("retry lost preserved work: %q %v", content, err)
+	}
+}
+
 type rerunWorktrees struct {
 	t                   *testing.T
 	root                string

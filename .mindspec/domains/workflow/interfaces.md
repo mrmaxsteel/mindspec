@@ -917,4 +917,12 @@ Implementation approval checks pending beads for an existing naming merge before
 its first write. A moved tip refuses with the same follow-up recovery as
 `complete`. Finalization repeats the check before each live merge. An export or
 artifact-commit failure stops publication and cleanup. The error gives the epic
-state, the failed stage, and the approval retry command.
+state, the failed stage, and the approval retry command. An absent spec or pending
+bead worktree has no artifact commit to run. A pending bead branch can still
+merge through the spec worktree.
+
+After publication and its hooks, finalization checks all scoped bead worktrees
+and the spec worktree before any forced removal. The branch-missing resume uses
+the same check before its first removal. Pending changes or a read error return
+a cleanup-stage failure with the epic state and recovery commands. No worktree
+or branch is removed.

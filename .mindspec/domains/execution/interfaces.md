@@ -349,16 +349,23 @@ directory. Resume reads, pushes, and branch removals use the explicit repo root.
 A stale worktree row for an absent bead branch requires the recorded publication
 tip and that bead's binding in the spec history before finalization can continue.
 
-`FinalizeEpic` and `ResumeFinalizedEpic` use the same check for pending changes
-in a remaining merged bead worktree. A dirty worktree, a failed status read, or a
-worktree inspection error refuses before removal and preserves the branch and
-worktree. An absent worktree can continue through the remaining cleanup.
+`FinalizeEpic` checks every scoped bead worktree and the spec worktree after
+publication and its hooks, before any forced removal. `ResumeFinalizedEpic` runs
+the same check on all remaining worktrees before its first removal. A dirty
+worktree, a failed status read, or a worktree inspection error returns
+`FinalizeStageError` at `cleanup`. No worktree or branch is removed. The caller
+prints the epic state and the pending-work recovery. An absent worktree can
+continue through the remaining cleanup.
 
 An export or artifact-commit failure in the spec worktree or a pending bead
 returns `FinalizeStageError` before publication or cleanup. Its recovery is
 `mindspec impl approve <spec>`. The caller adds the epic state line. The pending
 file, worktree, and branch remain for a retry. An absent spec worktree has no
-artifact commit to run.
+artifact commit to run. An absent pending bead worktree also has no artifact
+commit to run; its branch can still merge through the spec worktree.
+
+`internal/mergefollowup` builds the moved-tip refusal and follow-up commands for
+both completion and finalization. It reads no state and executes no commands.
 
 ## Separate bead merge, publication, and cleanup
 

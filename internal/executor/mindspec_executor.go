@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/mergefollowup"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -732,31 +733,11 @@ func (g *MindspecExecutor) checkFinalizeBeadMerge(epicID, specID, specBranch str
 	if err != nil {
 		return false, guard.NewFailure("cannot read new bead commits: "+termsafe.Escape(err.Error()), rerun)
 	}
-	var body strings.Builder
-	fmt.Fprintf(&body, "bead tip moved from merge parent %s to %s. Put later fixes in a follow-up bead.\n", termsafe.Escape(row.Parents[1]), termsafe.Escape(tip))
+	commits := make([]mergefollowup.Commit, 0, len(state.NewCommits))
 	for _, commit := range state.NewCommits {
-		fmt.Fprintf(&body, "commit %s: %s\n", termsafe.Escape(commit.SHA), termsafe.Escape(commit.Subject))
+		commits = append(commits, mergefollowup.Commit{SHA: commit.SHA, Subject: commit.Subject})
 	}
-	body.WriteString("A panel round at the fix tip does not carry over. The new bead needs its own panel.")
-	wt := e.Path
-	if wt == "" {
-		wt = "<bead worktree>"
-	}
-	// Match complete's moved-tip recovery. Quote the worktree as a shell operand.
-	quotedWT := "'" + strings.ReplaceAll(termsafe.Escape(wt), "'", "'\"'\"'") + "'"
-	id, epic := idrender.Bead(beadID), idrender.Bead(epicID)
-	commands := []string{
-		"git branch " + id + "-followup " + termsafe.Escape(tip),
-		"git -C " + quotedWT + " reset --keep " + termsafe.Escape(row.Parents[1]),
-		"run a new panel round for the bead at its tip if the latest round did not review that tip",
-		"mindspec complete " + id,
-		"bd create \"<title>\" --parent " + epic + " --deps " + id,
-		"edit plan.md on the spec branch: append the Nth ## Bead heading with a concrete acceptance criterion; add work_chunks id N and key_file_paths; commit plan.md",
-		"mindspec next <new bead>",
-		"git -C '<new bead worktree>' cherry-pick " + termsafe.Escape(row.Parents[1]) + ".." + id + "-followup",
-		"git branch -D " + id + "-followup",
-	}
-	return false, guard.NewFailure(body.String(), commands...)
+	return false, mergefollowup.MovedTipFailure(beadID, epicID, e.Path, row.Parents[1], tip, commits)
 }
 
 // PushProbe checks remote publication before lifecycle writes.
@@ -901,12 +882,14 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			}
 		}
 		if e.Path != "" && !alreadyMerged {
-			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil {
-				// Stop before merge, publication, or cleanup on every failure.
-				if isPreservedMergeError(err) {
-					return result, err
+			if _, statErr := os.Stat(e.Path); !os.IsNotExist(statErr) {
+				if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil {
+					// Stop before merge, publication, or cleanup on every failure.
+					if isPreservedMergeError(err) {
+						return result, err
+					}
+					return result, guard.NewFailure("cannot commit remaining bead artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 				}
-				return result, guard.NewFailure("cannot commit remaining bead artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 			}
 		}
 		// Merge bead branch into spec branch if not already an ancestor.
@@ -1219,6 +1202,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		if listErr != nil {
 			return fmt.Errorf("finalize epic %s: enumerating worktrees for cleanup: %w", epicID, listErr)
 		}
+		// Publication can run hooks that create pending work. Check every
+		// scoped worktree before the first removal, so a dirty later entry
+		// also preserves earlier worktrees and their branches.
+		if err := checkFinalizeCleanupWorktrees(entries, specWtPath, specID, allow); err != nil {
+			return err
+		}
 		for _, e := range entries {
 			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
 				continue
@@ -1384,9 +1373,21 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 	}
 	entries, err := g.WorktreeOps.List()
 	if err != nil {
-		return result, err
+		return result, &FinalizeStageError{Stage: "cleanup", Err: err}
 	}
 	err = func() error {
+		cfg, cfgErr := config.Load(g.Root)
+		if cfgErr != nil {
+			cfg = config.DefaultConfig()
+		}
+		specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
+		allow := make(map[string]bool, len(children))
+		for _, child := range children {
+			allow[child] = true
+		}
+		if err := checkFinalizeCleanupWorktrees(entries, specWtPath, specID, allow); err != nil {
+			return err
+		}
 		for _, child := range children {
 			branch, err := workspace.BeadBranch(child)
 			if err != nil {
@@ -1407,9 +1408,6 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 			}
 			for _, entry := range entries {
 				if entry.Branch == branch {
-					if err := checkMergedFinalizeWorktree(entry.Path, specID); err != nil {
-						return err
-					}
 					if err := g.WorktreeOps.Remove(entry.Name); err != nil && !isAlreadyRemovedErr(err) {
 						return err
 					}
@@ -1425,7 +1423,25 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 		}
 		return nil
 	}()
-	return result, err
+	if err != nil {
+		return result, &FinalizeStageError{Stage: "cleanup", Err: err}
+	}
+	return result, nil
+}
+
+// checkFinalizeCleanupWorktrees checks the whole removal scope before any
+// forced removal. Branch ancestry does not protect uncommitted hook output.
+func checkFinalizeCleanupWorktrees(entries []bead.WorktreeListEntry, specWtPath, specID string, allow map[string]bool) error {
+	for _, entry := range entries {
+		id, ok := strings.CutPrefix(entry.Branch, workspace.BeadBranchPrefix)
+		if !ok || idvalidate.BeadID(id) != nil || !allow[id] {
+			continue
+		}
+		if err := checkMergedFinalizeWorktree(entry.Path, specID); err != nil {
+			return err
+		}
+	}
+	return checkMergedFinalizeWorktree(specWtPath, specID)
 }
 
 // checkMergedFinalizeWorktree protects pending work that branch ancestry

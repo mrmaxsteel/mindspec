@@ -427,7 +427,8 @@ immediately before publication. It keeps `mindspec_pre_finalize_tip` as a separa
 routing checkpoint. An export or artifact-commit failure in the spec worktree
 or a pending bead returns `FinalizeStageError` with a runnable approval recovery.
 It stops publication and cleanup. Pending files, worktrees, and branches remain.
-A missing spec worktree has no artifact commit to run.
+An absent spec or pending bead worktree has no artifact commit to run. A pending
+bead branch can still merge through the spec worktree.
 A retry at the recorded tip with a clean spec checkout skips
 the export commit. Before it skips an already merged bead, it checks any remaining
 worktree. Pending changes or an unreadable status stop the run before cleanup.
@@ -441,9 +442,11 @@ and all lifecycle child binding SHAs against the target. Remote evidence comes
 from an exact head fetched into a temporary ref. A missing remote spec head
 selects remote main. A failed fetch or ancestry check stops cleanup. Cleanup
 repeats the destruction guard and requires branch-tip ancestry. Before removal,
-it uses the same worktree check as `FinalizeEpic`. Pending changes, an unreadable
-status, or a worktree inspection error preserve the worktree and branch and stop
-cleanup. It can finish when a prior run removed a worktree but left its branch.
+it checks all scoped bead worktrees and the spec worktree. `FinalizeEpic` runs
+this check after publication and its hooks. A dirty worktree, an unreadable
+status, or a worktree inspection error returns a cleanup-stage failure before
+the first removal. All remaining worktrees and branches survive. It can finish
+when a prior run removed a worktree but left its branch.
 
 `FinalizeStageError` carries the failed stage without changing the inner error.
 `SetFinalizeStepHookForTest` lets approval tests inject faults into real executor

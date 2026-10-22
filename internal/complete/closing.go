@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/mergefollowup"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -55,7 +56,7 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		commands := []string{"git -C " + ledgerShellArg(specWT) + " status"}
 		if closed && state.MergeHead == tip {
 			commands = []string{"git -C " + ledgerShellArg(specWT) + " merge --abort"}
-			commands = append(commands, followupCommands(beadID, epicID)...)
+			commands = append(commands, mergefollowup.Commands(beadID, epicID)...)
 		} else {
 			commands = append(commands, completionCommand(beadID, opts))
 		}
@@ -270,35 +271,16 @@ func mergeMissingMetadata(beadID string, updates map[string]interface{}) error {
 	return completeMergeMetadataFn(beadID, updates)
 }
 
-func followupCommands(beadID, epicID string) []string {
-	return []string{
-		"run a new panel round for the bead at its tip if the latest round did not review that tip",
-		"mindspec complete " + idrender.Bead(beadID),
-		"bd create \"<title>\" --parent " + idrender.Bead(epicID) + " --deps " + idrender.Bead(beadID),
-		"edit plan.md on the spec branch: append the Nth ## Bead heading with a concrete acceptance criterion; add work_chunks id N and key_file_paths; commit plan.md",
-		"mindspec next <new bead>",
-	}
-}
-
 func movedTipFailure(root, beadID, epicID, beadHead, wtPath, tip string, row executor.MergeIdentity, exec executor.Executor) error {
 	state, err := exec.CompletionState(root, row.Parents[1], beadHead)
 	if err != nil {
 		return completionFailure(beadID, CompleteOpts{}, "reading new bead commits", err)
 	}
-	var body strings.Builder
-	fmt.Fprintf(&body, "bead tip moved from merge parent %s to %s. Put later fixes in a follow-up bead.\n", termsafe.Escape(row.Parents[1]), termsafe.Escape(tip))
+	commits := make([]mergefollowup.Commit, 0, len(state.NewCommits))
 	for _, commit := range state.NewCommits {
-		fmt.Fprintf(&body, "commit %s: %s\n", termsafe.Escape(commit.SHA), termsafe.Escape(commit.Subject))
+		commits = append(commits, mergefollowup.Commit{SHA: commit.SHA, Subject: commit.Subject})
 	}
-	body.WriteString("A panel round at the fix tip does not carry over. The new bead needs its own panel.")
-	if wtPath == "" {
-		wtPath = "<bead worktree>"
-	}
-	commands := []string{"git branch " + idrender.Bead(beadID) + "-followup " + termsafe.Escape(tip),
-		"git -C " + ledgerShellArg(wtPath) + " reset --keep " + termsafe.Escape(row.Parents[1])}
-	commands = append(commands, followupCommands(beadID, epicID)...)
-	commands = append(commands, "git -C '<new bead worktree>' cherry-pick "+termsafe.Escape(row.Parents[1])+".."+idrender.Bead(beadID)+"-followup", "git branch -D "+idrender.Bead(beadID)+"-followup")
-	return guard.NewFailure(body.String(), commands...)
+	return mergefollowup.MovedTipFailure(beadID, epicID, wtPath, row.Parents[1], tip, commits)
 }
 
 func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.MergeIdentity, exec executor.Executor, opts CompleteOpts, cause error) error {

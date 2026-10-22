@@ -1577,20 +1577,25 @@ A failed check retains the branch-missing adopt recovery. A successful check
 returns the `already landed` message and completes safe cleanup.
 
 The executor checks a remaining bead worktree before it skips an already merged
-branch and before it removes that worktree after local spec-branch deletion.
-Pending changes, an unreadable status, or a worktree inspection error stop cleanup.
-The worktree and branch remain for recovery.
+branch. After publication and its hooks, it checks every scoped bead worktree
+and the spec worktree before any forced removal. The branch-missing resume runs
+the same check before its first removal. Pending changes, an unreadable status,
+or a worktree inspection error return a cleanup-stage failure. Approval prints
+the epic state and preserves the recovery commands. All remaining worktrees and
+branches survive for recovery.
 
 An export or artifact-commit failure in the spec worktree or a pending bead
 stops finalization before publication and cleanup. The error names the failed
 stage and gives `mindspec impl approve <spec>` as recovery. Pending files,
 worktrees, and branches remain. A retry can finish after the fault is fixed.
-An absent spec worktree has no artifact commit to run.
+An absent spec or pending bead worktree has no artifact commit to run. A pending
+bead branch can still merge through the spec worktree.
 
 Before any finalization write, the executor checks all pending bead branches
 for an existing naming merge. A moved tip refuses with the same follow-up
 recovery as `complete`. The live merge repeats this check after artifact
-commits. It cannot create a second naming merge.
+commits. It cannot create a second naming merge. Both paths use the recovery
+builder in `internal/mergefollowup`.
 
 ## Verification between merge and close
 

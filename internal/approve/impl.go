@@ -338,6 +338,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 					result.EpicID = epicID
 					return result, nil
 				}
+				var failure *executor.FinalizeStageError
+				if errors.As(resumeErr, &failure) {
+					return nil, implFinalizeFailure(epicID, specID, failure.Stage, resumeErr)
+				}
 				return nil, fmt.Errorf("%s\n%w", termsafe.Escape(resumeErr.Error()), implBranchMissingRefusal(specID, specBranch))
 			}
 		}
