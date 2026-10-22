@@ -227,6 +227,8 @@ internal/executor/mindspec_executor.go	checkBeadCleanupWorktree	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeOrphanedSpecBranch	arg1:unprovable
 internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg1:unprovable
 internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg2:unprovable
+internal/executor/mindspec_executor.go	checkTemporaryFinalizeWorktree	arg1:unprovable
+internal/executor/mindspec_executor.go	checkTemporaryFinalizeWorktree	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.checkFinalizeBeadMerge	arg1:unprovable

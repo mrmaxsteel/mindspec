@@ -1473,6 +1473,54 @@ func checkMergedFinalizeWorktree(path, specID string) error {
 	return nil
 }
 
+// checkTemporaryFinalizeWorktree protects hook output in the disposable carrier
+// checkout. Only this checkout exempts tool artifacts, which a retry regenerates.
+func checkTemporaryFinalizeWorktree(root, wtPath, specID string) error {
+	retry := fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))
+	info, err := os.Stat(wtPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return guard.NewFailure("cannot inspect temporary finalization worktree: "+termsafe.Escape(err.Error()), retry)
+	}
+
+	// Status on a plain directory can report the enclosing repository's dirt.
+	// Check this repository's worktree registrations before reading status.
+	out, err := exec.Command("git", "-C", root, "worktree", "list", "--porcelain", "-z").Output()
+	if err != nil {
+		return guard.NewFailure("cannot read temporary finalization worktree registration: "+termsafe.Escape(err.Error()), retry)
+	}
+	registered := false
+	for _, field := range strings.Split(string(out), "\x00") {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok {
+			if entry, err := os.Stat(path); err == nil && os.SameFile(info, entry) {
+				registered = true
+				break
+			}
+		}
+	}
+	if !registered {
+		return guard.NewFailure("temporary finalization path is not a registered worktree of this repository: "+termsafe.Escape(wtPath),
+			"move the directory to a safe path, then retry approval", retry)
+	}
+	status, err := gitutil.StatusWithStderr(wtPath)
+	if err != nil {
+		return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(err.Error()), retry)
+	}
+	for _, line := range strings.Split(status, "\n") {
+		p, parseErr := panel.PorcelainPath(line)
+		if parseErr != nil {
+			return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(parseErr.Error()), retry)
+		}
+		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
+			return guard.NewFailure("temporary finalization worktree has pending changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
+				"preserve the changes at a safe path, then leave this worktree clean", retry)
+		}
+	}
+	return nil
+}
+
 // checkBeadCleanupWorktree is the executor backstop after commits and merge
 // hooks. Tool artifacts have the same exemption as the workflow dirt check.
 func checkBeadCleanupWorktree(wtPath, beadID string) error {
@@ -1545,8 +1593,9 @@ func (g *MindspecExecutor) requireFinalizeAncestor(ancestor, target string) erro
 // A retry removes a leftover temporary checkout, then reuses the local carrier
 // branch. An unchanged export makes no commit and no push. A changed export
 // appends a commit and uses a lease pinned to the remote head read just before
-// the push. A clean temporary checkout is removed after each attempt. Pending
-// changes or an inspection error preserve it for recovery. No PR opens.
+// the push. A temporary checkout with only tool artifacts is removed after each
+// attempt. User changes or an inspection error preserve it for recovery. An
+// unregistered directory must be moved aside before retrying. No PR opens.
 func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (branch string, retErr error) {
 	choreBranch, err := workspace.FinalizeBranch(specID)
 	if err != nil {
@@ -1572,8 +1621,8 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 	}
 
 	// A leftover can hold hook output from a previous publication.
-	// Refuse on pending changes or an unreadable checkout before removal.
-	if err := checkMergedFinalizeWorktree(wtPath, specID); err != nil {
+	// Refuse on user changes, an unreadable checkout, or an unregistered path.
+	if err := checkTemporaryFinalizeWorktree(g.Root, wtPath, specID); err != nil {
 		return "", err
 	}
 	if _, statErr := os.Stat(wtPath); statErr == nil {
@@ -1611,7 +1660,7 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 	defer func() {
 		// This also runs after a failed commit or push. Hooks can write
 		// files even when the publication itself fails.
-		if err := checkMergedFinalizeWorktree(wtPath, specID); err != nil {
+		if err := checkTemporaryFinalizeWorktree(g.Root, wtPath, specID); err != nil {
 			retErr = errors.Join(retErr, err)
 			return
 		}

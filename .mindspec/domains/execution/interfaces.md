@@ -359,11 +359,16 @@ continue through the remaining cleanup.
 
 The temporary finalization worktree has its own removal check. It runs after
 commit and push hooks, including failed publication attempts, and before removal
-of a leftover checkout on retry. Pending changes or a status or stat read error
-stop removal. The pending file, worktree, and carrier branch remain. The error
-gives an approval retry command. Preserve the changes at a safe path. Leave the
-worktree clean and readable, then retry approval. An unreadable or unregistered
-directory is not deleted as a fallback.
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
 
 An export or artifact-commit failure in the spec worktree or a pending bead
 returns `FinalizeStageError` before publication or cleanup. Its recovery is
