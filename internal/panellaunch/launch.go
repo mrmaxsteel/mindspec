@@ -118,9 +118,13 @@ func Verdict(dir, output, nonceHash string) ([]byte, error) {
 	}
 	defer f.Close()
 	// A stdout transcript may include reviewer diagnostics around its block.
-	raw, err := io.ReadAll(io.LimitReader(f, 16<<20))
+	const maxChannelBytes = 16 << 20
+	raw, err := io.ReadAll(io.LimitReader(f, maxChannelBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(raw) > maxChannelBytes {
+		return nil, fmt.Errorf("verdict channel exceeds size limit")
 	}
 	if output == "file" {
 		return raw, nil

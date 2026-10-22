@@ -336,9 +336,26 @@ func TestPanelLaunch_NoSignalStalePgid(t *testing.T) {
 		}
 	}
 }
+func TestLockDescriptorActor(t *testing.T) {
+	if os.Getenv("PANEL_LOCK_DESCRIPTOR_ACTOR") != "1" {
+		return
+	}
+	info, err := os.Stat(filepath.Join(os.Args[len(os.Args)-1], "run.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := info.Sys().(*syscall.Stat_t)
+	for fd := 3; fd < 1024; fd++ {
+		var stat syscall.Stat_t
+		if syscall.Fstat(fd, &stat) == nil && stat.Dev == want.Dev && stat.Ino == want.Ino {
+			t.Fatalf("reviewer inherited attempt lock on fd %d", fd)
+		}
+	}
+}
 func TestPanelLaunch_LocksNotInherited(t *testing.T) {
 	dir := makeAttempt(t)
-	if e := Run(Request{Dir: dir, SlotDir: dir, Argv: []string{"/bin/sh", "-c", `for f in /dev/fd/*; do if test "$f" -ef "$PWD/run.lock"; then exit 9; fi; done; exit 0`}, Timeout: time.Second}); e != nil {
+	t.Setenv("PANEL_LOCK_DESCRIPTOR_ACTOR", "1")
+	if e := Run(Request{Dir: dir, SlotDir: dir, Argv: []string{os.Args[0], "-test.run=^TestLockDescriptorActor$", "--", dir}, Timeout: 10 * time.Second}); e != nil {
 		t.Fatal(e)
 	}
 	if !lockFree(dir) {
@@ -346,6 +363,34 @@ func TestPanelLaunch_LocksNotInherited(t *testing.T) {
 	}
 	exit, e := ReadExit(dir)
 	if e != nil || exit.Code != 0 {
-		t.Fatalf("inherited descriptor check: %+v %v", exit, e)
+		t.Fatalf("inherited descriptor check: %+v %v\n%s", exit, e, mustRead(t, filepath.Join(dir, "stdout.log")))
+	}
+}
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+func TestPanelLaunch_UnsafeOrphanGroup(t *testing.T) {
+	for _, pgid := range []int{0, 1, syscall.Getpgrp()} {
+		t.Run(strconv.Itoa(pgid), func(t *testing.T) {
+			dir := makeAttempt(t)
+			holder, err := takeRunLock(filepath.Join(dir, "run.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer holder.Close()
+			old := stopOrphanSignal
+			defer func() { stopOrphanSignal = old }()
+			calls := 0
+			stopOrphanSignal = func(int, syscall.Signal) error { calls++; return holder.Close() }
+			err = StopOrphan(dir, pgid)
+			if err == nil || !strings.Contains(err.Error(), dir) || calls != 0 {
+				t.Fatalf("unsafe orphan group: error=%v signals=%d", err, calls)
+			}
+		})
 	}
 }

@@ -18,6 +18,8 @@ import (
 
 const supervisorMode = "__mindspec_panel_supervisor"
 
+var stopOrphanSignal = syscall.Kill
+
 var errRunLocked = errors.New("attempt lock is held")
 
 func Supported() error { return nil }
@@ -35,7 +37,7 @@ func takeRunLock(path string) (*os.File, error) {
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) //nolint:gosec // G115: fd is a small process-local descriptor
 		if err == nil {
 			return f, nil
 		}
@@ -115,8 +117,8 @@ func Run(in Request) error {
 // beforePgid is nil except in process fault tests.
 func supervise(dir string, lock, start *os.File, beforePgid func()) int {
 	defer func() { _ = syscall.Kill(-os.Getpid(), syscall.SIGKILL); runtime.KeepAlive(lock) }()
-	syscall.CloseOnExec(int(lock.Fd()))
-	syscall.CloseOnExec(int(start.Fd()))
+	syscall.CloseOnExec(int(lock.Fd()))  //nolint:gosec // G115: fd is a small process-local descriptor
+	syscall.CloseOnExec(int(start.Fd())) //nolint:gosec // G115: fd is a small process-local descriptor
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() { <-signals; _ = syscall.Kill(-os.Getpid(), syscall.SIGKILL) }()
@@ -206,7 +208,7 @@ func StopOrphan(dir string, pgid int) error {
 	if pgid <= 1 || pgid == syscall.Getpgrp() {
 		return fmt.Errorf("cannot stop attempt %s\nrecovery: inspect the attempt directory and its live supervisor", dir)
 	}
-	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := stopOrphanSignal(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
 	deadline := time.Now().Add(5 * time.Second)

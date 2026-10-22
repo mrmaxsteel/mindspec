@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panellaunch"
@@ -47,7 +48,7 @@ func runPanelRecover(cmd *cobra.Command, args []string) (runErr error) {
 		}
 	}
 	if start.Attempt == 0 {
-		return checkoutFailure("slot has no process attempt", "mindspec panel launch "+reg.Slug()+" "+args[1])
+		return checkoutFailure("slot has no process attempt", "mindspec panel launch "+shellQuoteTarget(reg.Slug())+" "+shellQuoteTarget(args[1])+checkoutSpecFlag(reg))
 	}
 	for _, event := range events[args[1]] {
 		if event.Attempt == start.Attempt && event.Status != "started" {
@@ -55,7 +56,7 @@ func runPanelRecover(cmd *cobra.Command, args []string) (runErr error) {
 		}
 	}
 	if outcome.Status == "" {
-		return checkoutFailure("latest attempt has no outcome", "mindspec panel launch "+reg.Slug()+" "+args[1])
+		return checkoutFailure("latest attempt has no outcome", "mindspec panel launch "+shellQuoteTarget(reg.Slug())+" "+shellQuoteTarget(args[1])+checkoutSpecFlag(reg))
 	}
 	dir := layout.AttemptDir(start.Attempt)
 	if err := checkCheckoutPath(root, dir); err != nil {
@@ -83,6 +84,7 @@ func runPanelRecover(cmd *cobra.Command, args []string) (runErr error) {
 		return err
 	}
 	outcome.Status, outcome.Seq = "submitted", selected.Seq
+	outcome.CreatedAt, outcome.PGID = time.Now().UTC().Format(time.RFC3339Nano), 0
 	if err := appendLaunchRecord(reg.Dir, outcome); err != nil {
 		return err
 	}

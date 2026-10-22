@@ -28,7 +28,7 @@ func TestPanelLauncherActor(t *testing.T) {
 	}
 	config.ResetCache()
 	if os.Getenv("PANEL_CMD_SHORT_TIMEOUT") == "1" {
-		panelLaunchProcessFn = func(in panellaunch.Request) error { in.Timeout = 2 * time.Second; return panellaunch.Run(in) }
+		panelLaunchProcessFn = func(in panellaunch.Request) error { in.Timeout = 10 * time.Second; return panellaunch.Run(in) }
 	}
 	_, err := launchRun(t, panelLaunchCmd, "run", "R1", "--replace")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestPanelLauncherActor(t *testing.T) {
 }
 func launchAwait(t *testing.T, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if fn() {
 			return

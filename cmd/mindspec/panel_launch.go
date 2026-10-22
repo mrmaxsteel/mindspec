@@ -23,6 +23,7 @@ var panelLaunchCmd = &cobra.Command{
 }
 
 var panelLaunchProcessFn = panellaunch.Run
+var panelLaunchAcquireSlotLock = panel.AcquireSlotLock
 
 func launchTarget(cmd *cobra.Command, args []string) (string, panel.Registration, panel.SlotLayout, error) {
 	root, err := findPanelRoot(config.IsolationRootFor)
@@ -128,7 +129,7 @@ func attemptOutcome(dir string, start panel.LaunchRecord, status string) (panel.
 }
 
 // checkProcessOrphans runs only under the slot lock. Completed attempts are
-// never probed or signalled, even if their old pid now belongs to another group.
+// never probed or signaled, even if their old pid now belongs to another group.
 func checkProcessOrphans(root string, reg panel.Registration, layout panel.SlotLayout) error {
 	round, err := strconv.Atoi(strings.TrimPrefix(filepath.Base(filepath.Dir(layout.Dir)), "r"))
 	if err != nil {
@@ -238,6 +239,24 @@ func launchStatus(cmd *cobra.Command, root string, reg panel.Registration, slot 
 	return nil
 }
 
+// retryRefusal bounds the JSON pointer while preserving the refusal and recovery.
+func retryRefusal(message string) string {
+	pointer, rest, ok := strings.Cut(message, ": ")
+	// Verdict errors may already contain a terminal-safe quoted pointer.
+	if strings.HasPrefix(message, `"`) {
+		if quoted, err := strconv.QuotedPrefix(message); err == nil {
+			if decoded, err := strconv.Unquote(quoted); err == nil {
+				pointer = decoded
+				rest, ok = strings.CutPrefix(message[len(quoted):], ": ")
+			}
+		}
+	}
+	if ok && strings.HasPrefix(pointer, "/") && len(pointer) > 200 {
+		message = strings.ToValidUTF8(pointer[:200], "") + ": " + rest
+	}
+	return termsafe.Escape(message)
+}
+
 func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 	defer func() { runErr = checkoutError(runErr, "run mindspec panel verify, then repeat panel launch") }()
 	root, reg, layout, err := launchTarget(cmd, args)
@@ -251,7 +270,7 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 	if err := checkCheckoutPath(root, filepath.Dir(layout.Lock)); err != nil {
 		return err
 	}
-	lock, err := panel.AcquireSlotLock(layout.Lock)
+	lock, err := panelLaunchAcquireSlotLock(layout.Lock)
 	if err != nil {
 		return err
 	}
@@ -342,18 +361,13 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 			}
 			if err != nil {
 				status = "malformed"
-				// Bound refusal output before escaping, without cutting UTF-8.
-				message := err.Error()
-				if len(message) > 200 {
-					message = strings.ToValidUTF8(message[:200], "")
-				}
-				refusal = termsafe.Escape(message)
+				refusal = retryRefusal(err.Error())
 				fmt.Fprintln(cmd.OutOrStdout(), refusal)
 			} else {
 				status = "submitted"
 				verdict, _ = panel.ParseVerdictV2(data)
 			}
-		} else if panellaunch.Quota(dir, runner.QuotaSignals) {
+		} else if exitErr == nil && panellaunch.Quota(dir, runner.QuotaSignals) {
 			status = "quota_wall"
 		}
 		out, err := attemptOutcome(dir, start, status)

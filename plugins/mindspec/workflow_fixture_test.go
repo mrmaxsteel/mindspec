@@ -30,6 +30,14 @@ func workflowGit(t *testing.T, root, input string, args ...string) string {
 }
 func workflowFixture(t *testing.T, silent, quota bool, source string) {
 	t.Helper()
+	runWorkflowFixture(t, silent, quota, source, "")
+}
+func workflowFixtureRejects(t *testing.T, source, want string) {
+	t.Helper()
+	runWorkflowFixture(t, false, false, source, want)
+}
+func runWorkflowFixture(t *testing.T, silent, quota bool, source, wantFailure string) {
+	t.Helper()
 	if _, e := exec.LookPath("node"); e != nil {
 		t.Fatal("node is required for the workflow fixture")
 	}
@@ -85,7 +93,7 @@ const silent=silentArg==='true'; let agents=0, creates=0, tallies=0;
 const commands=[];
 function execute(command) {
   commands.push(command);
-  if(command.startsWith('mindspec panel create ')){creates++;return {stdout:'registered',exit:0};}
+  if(command.startsWith('mindspec panel create ')){creates++;if(!command.includes(' --bead ')||!command.includes(' --gate bead'))throw Error('bead create needs --gate bead');return {stdout:'registered',exit:0};}
   if(command.startsWith('mindspec panel tally ')) tallies++;
   try {return {stdout:cp.execSync(command.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']}),exit:0};}
   catch(e){return {stdout:String(e.stdout||''),exit:e.status||1};}
@@ -107,9 +115,15 @@ async function agent(prompt,options){
   return {};
 }
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-(async()=>{const result=await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))({slug:'p',target:'main',round:1},agent,async(items,fn)=>Promise.all(items.map(fn)));process.stdout.write(JSON.stringify({result,agents,creates,tallies,commands}));})().catch(e=>{console.error(e);process.exit(1)});`
+(async()=>{const result=await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))({slug:'p',target:'main',round:1,bead_id:'test-bead'},agent,async(items,fn)=>Promise.all(items.map(fn)));process.stdout.write(JSON.stringify({result,agents,creates,tallies,commands}));})().catch(e=>{console.error(e);process.exit(1)});`
 	cmd := exec.Command("node", "-e", js, bin, root, workflowPath, sha, fmt.Sprint(silent))
 	out, e := cmd.CombinedOutput()
+	if wantFailure != "" {
+		if e == nil || !strings.Contains(string(out), wantFailure) {
+			t.Fatalf("wanted refusal %q: %v %s", wantFailure, e, out)
+		}
+		return
+	}
 	if e != nil {
 		t.Fatalf("workflow: %v %s", e, out)
 	}
@@ -123,6 +137,11 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 	}
 	if e := json.Unmarshal(out, &result); e != nil {
 		t.Fatalf("workflow JSON: %v %s", e, out)
+	}
+	for _, command := range result.Commands {
+		if (strings.HasPrefix(command, "mindspec panel checkout ") || strings.HasPrefix(command, "mindspec panel launch ")) && strings.Contains(command, " --replace") {
+			t.Fatalf("non-final slot relaunch has --replace: %s", command)
+		}
 	}
 	if result.Creates != 1 {
 		t.Fatal("workflow did not register once")
@@ -169,4 +188,103 @@ func TestMsPanelWorkflow_HarnessSubmits(t *testing.T) {
 }
 func TestPanelRun_SilentHarnessRedispatchOnce(t *testing.T) {
 	workflowFixture(t, true, false, WorkflowFiles()["ms-panel.js"])
+}
+
+func TestMsPanelWorkflow_SubmitCommandBinding(t *testing.T) {
+	// Change the command returned by prompt, retaining its absolute verdict path.
+	// The workflow must reject this line before it starts a reviewer.
+	source := WorkflowFiles()["ms-panel.js"]
+	prefix := `const checkedAgent = agent;
+ agent = async (prompt, options) => {
+  const result = await checkedAgent(prompt, options);
+  if (options.label === "panel-command" && prompt.includes(" panel prompt ")) {
+   result.stdout = result.stdout.replace(/^mindspec panel submit --file /m, "unrelated-path ");
+  }
+  return result;
+ };
+ `
+	workflowFixtureRejects(t, prefix+source, "slot prompt needs one bound submission command")
+}
+
+func TestMsPanelWorkflow_RefusedFinalReplacement(t *testing.T) {
+	for _, kind := range []string{"process", "harness"} {
+		t.Run(kind, func(t *testing.T) {
+			workflowRefusedFinalReplacement(t, WorkflowFiles()["ms-panel.js"], kind)
+		})
+	}
+}
+
+func workflowRefusedFinalReplacement(t *testing.T, source, kind string) {
+	t.Helper()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Fatal("node is required for the workflow fixture")
+	}
+	workflowPath := filepath.Join(t.TempDir(), "workflow.js")
+	if err := os.WriteFile(workflowPath, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	js := `const fs = require('fs');
+const [source, kind] = process.argv.slice(1);
+const slot = {slot:'R1',kind,status:'launch_failed',family:'fixture',model:'fixture'};
+const commands = [];
+let reviewers = 0;
+async function agent(prompt, options) {
+  if (options.label !== 'panel-command') { reviewers++; throw Error('refused slot started a reviewer'); }
+  const command = prompt.split('\n').at(-1);
+  commands.push(command);
+  if (commands.length > 20) throw Error('workflow did not stop after refusal');
+  if (command.startsWith('mindspec panel create ')) return {stdout:'registered',exit:0};
+  if (command.startsWith('mindspec panel verify ')) return {stdout:JSON.stringify([slot]),exit:1};
+  if (command.startsWith('mindspec panel launch ') || command.startsWith('mindspec panel checkout ')) {
+    return {stdout:'slot already has a final submission',exit:1};
+  }
+  throw Error('unexpected command after refusal: ' + command);
+}
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+(async()=>{
+  const result = await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))(
+    {slug:'p',target:'main',round:1},agent,async(items,fn)=>Promise.all(items.map(fn)));
+  process.stdout.write(JSON.stringify({result,commands,reviewers}));
+})().catch(e=>{console.error(e);process.exit(1)});`
+	out, err := exec.Command("node", "-e", js, workflowPath, kind).CombinedOutput()
+	if err != nil {
+		t.Fatalf("refusal workflow: %v %s", err, out)
+	}
+	var got struct {
+		Result struct {
+			SlotResults  []panel.SlotStatus `json:"slotResults"`
+			VerifyOutput string             `json:"verifyOutput"`
+			TallyOutput  string             `json:"tallyOutput"`
+		}
+		Commands  []string
+		Reviewers int
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("refusal workflow JSON: %v %s", err, out)
+	}
+	var attempts []string
+	for _, command := range got.Commands {
+		if strings.HasPrefix(command, "mindspec panel launch ") || strings.HasPrefix(command, "mindspec panel checkout ") {
+			attempts = append(attempts, command)
+		}
+	}
+	want := "mindspec panel launch 'p' 'R1'"
+	if kind == "harness" {
+		want = "mindspec panel checkout 'p' --slot 'R1' --dispatch"
+	}
+	if len(attempts) != 1 || attempts[0] != want {
+		t.Fatalf("refused %s slot needs exactly one attempt without --replace: %q", kind, attempts)
+	}
+	var verified []panel.SlotStatus
+	if err := json.Unmarshal([]byte(got.Result.VerifyOutput), &verified); err != nil {
+		t.Fatal(err)
+	}
+	for _, slots := range [][]panel.SlotStatus{got.Result.SlotResults, verified} {
+		if len(slots) != 1 || slots[0].Slot != "R1" || slots[0].Kind != kind || slots[0].Status != "launch_failed" {
+			t.Fatalf("refused slot missing from report: %s", out)
+		}
+	}
+	if got.Reviewers != 0 || got.Result.TallyOutput != "" {
+		t.Fatalf("refused slot started a reviewer or tally: %s", out)
+	}
 }

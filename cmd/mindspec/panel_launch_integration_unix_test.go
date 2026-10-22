@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panellaunch"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/spf13/cobra"
 )
 
@@ -227,7 +228,7 @@ func TestPanelLaunch_Outcomes(t *testing.T) {
 	}
 }
 func TestPanelLaunch_Channels(t *testing.T) {
-	for _, mode := range []string{"stderr", "nonce", "double"} {
+	for _, mode := range []string{"stderr", "nonce", "end_nonce", "double", "overflow"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newLaunchFixture(t)
 			body := ""
@@ -236,14 +237,25 @@ func TestPanelLaunch_Channels(t *testing.T) {
 				body = "exec 1>&2"
 			case "nonce":
 				body = "nonce=wrong"
-			case "double":
-				body = `printf 'MINDSPEC-VERDICT-BEGIN %s\n{}\nMINDSPEC-VERDICT-END %s\n' "$nonce" "$nonce"`
+			case "double", "overflow":
+				body = "printf 'MINDSPEC-VERDICT-BEGIN %s\\n' \"$nonce\"\ncat <<'FIRST'\n" + string(paneltest.Bytes(t, f.v)) + "\nFIRST\nprintf 'MINDSPEC-VERDICT-END %s\\n' \"$nonce\"\n"
+				if mode == "overflow" {
+					body += "dd if=/dev/zero bs=1048576 count=16 2>/dev/null | tr '\\000' 'x'\nprintf '\\n'\n"
+				}
 			}
 			f.runner(t, body, 0)
+			if mode == "end_nonce" {
+				script := string(slotRead(t, f.script))
+				script = strings.ReplaceAll(script, `printf 'MINDSPEC-VERDICT-END %s\n' "$nonce"`, `printf 'MINDSPEC-VERDICT-END %s\n' wrong`)
+				slotWrite(t, f.script, script)
+			}
 			if _, e := f.run(t, false); e == nil {
 				t.Fatal("invalid channel accepted")
 			}
 			f.status(t, "malformed")
+			if f.latest(t).Seq != 0 {
+				t.Fatal("malformed channel counted a verdict")
+			}
 			if len(f.events(t)) != 4 {
 				t.Fatal("must retry once")
 			}
@@ -462,6 +474,11 @@ func recoverCase(t *testing.T, output string) {
 	if s := f.latest(t); s.Via != "recover" || s.Reason != "test recovery" {
 		t.Fatal(s)
 	}
+	events := f.events(t)
+	recovered, previous := events[len(events)-1], events[len(events)-2]
+	if recovered.CreatedAt == previous.CreatedAt || recovered.CreatedAt <= previous.CreatedAt || recovered.PGID != 0 {
+		t.Fatalf("recovery outcome inherited creation time or pgid: previous=%+v recovered=%+v", previous, recovered)
+	}
 	name := "stdout.log"
 	if output == "file" {
 		name = "verdict.json"
@@ -613,13 +630,181 @@ func TestLedger_NoScratchPaths(t *testing.T) {
 }
 func TestPanelLaunch_AdapterE2E(t *testing.T) {
 	f := newLaunchFixture(t)
+	// Drive create and the roster query before choosing the process branch.
+	slotWrite(t, filepath.Join(f.root, ".mindspec", "config.yaml"), `panel:
+  isolation_root: .mindspec-scratch
+  reviewers:
+    - {family: a, model: m, count: 1, lens: adversarial}
+    - {family: harness, model: m, count: 1, lens: adversarial}
+`)
+	config.ResetCache()
+	resetPanelCreateFlags(t)
+	if out, err := runPanelCmd("create", "adapter", "--gate", "adhoc", "--target", "main", "--round", "1", "--reviewers", "2"); err != nil {
+		t.Fatalf("adapter create %v %s", err, out)
+	}
+	reg, err := findPanelRegistration(f.root, "adapter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.dir, f.p = reg.Dir, reg.Panel
+	f.v.ReviewedSHA = f.p.ReviewedHeadSHA
+	oldJSON := panelVerifyCmd.Flags().Lookup("json").Value.String()
+	defer panelVerifyCmd.Flags().Set("json", oldJSON)
+	_ = panelVerifyCmd.Flags().Set("json", "true")
+	out, err := launchRun(t, panelVerifyCmd, "adapter")
+	var slots []panel.SlotStatus
+	if err == nil || otelExitCode(err) != 1 || json.Unmarshal([]byte(out), &slots) != nil || len(slots) != 2 || slots[0].Kind != "process" || slots[0].Status != "missing" {
+		t.Fatalf("adapter roster %v %s", err, out)
+	}
+	other := f.v
+	other.Slot = "R2"
+	if _, err := panel.Submit(panel.SubmitTarget{Dir: f.dir, Panel: "adapter", Slot: "R2", Round: 1}, paneltest.Bytes(t, other), paneltest.Resolve); err != nil {
+		t.Fatal(err)
+	}
 	f.runner(t, `test "$(cat tree/README.md)" = hello
 test "$(git -C tree rev-parse HEAD)" = '`+f.p.ReviewedHeadSHA+`'`, 0)
-	if out, e := f.run(t, false); e != nil {
-		t.Fatalf("adapter launch %v %s", e, out)
+	if out, err := launchRun(t, panelLaunchCmd, "adapter", "R1"); err != nil {
+		t.Fatalf("adapter launch %v %s", err, out)
 	}
 	f.status(t, "final")
-	if out, e := runPanelVerbCmd("tally", "run"); e != nil {
-		t.Fatalf("tally %v %s", e, out)
+	if out, err := launchRun(t, panelVerifyCmd, "adapter"); err != nil {
+		t.Fatalf("adapter final verify %v %s", err, out)
+	}
+	if out, err := runPanelVerbCmd("tally", "adapter"); err != nil {
+		t.Fatalf("tally %v %s", err, out)
+	}
+}
+
+func TestPanelLaunch_MissingExitQuota(t *testing.T) {
+	f := newLaunchFixture(t)
+	f.configure(t, "stdout", "LIMIT", "")
+	old := panelLaunchProcessFn
+	defer func() { panelLaunchProcessFn = old }()
+	panelLaunchProcessFn = func(in panellaunch.Request) error {
+		if err := in.Register(func() (int, error) { return os.Getpid(), nil }); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(in.Dir, "stderr.log"), []byte("LIMIT"), 0o600)
+	}
+	if _, err := f.run(t, false); err == nil {
+		t.Fatal("absent exit accepted")
+	}
+	f.status(t, "launch_failed")
+	if len(f.events(t)) != 2 || f.events(t)[1].Status != "launch_failed" {
+		t.Fatal(f.events(t))
+	}
+}
+func TestPanelLaunch_RetryPointer(t *testing.T) {
+	rest := strings.Repeat("long refusal ", 30) + "\nrecovery: preserve this complete message"
+	for _, pointer := range []string{"/" + strings.Repeat("x", 240), "/" + strings.Repeat("é", 130), "/" + strings.Repeat("x", 240) + "\x1b"} {
+		for _, rendered := range []string{pointer, termsafe.Escape(pointer)} {
+			got := retryRefusal(rendered + ": " + rest)
+			wantPointer := strings.ToValidUTF8(pointer[:200], "")
+			if got != termsafe.Escape(wantPointer+": "+rest) {
+				t.Fatalf("only pointer should be cut: %q", got)
+			}
+		}
+	}
+	message := "a long refusal: " + rest
+	if got := retryRefusal(message); got != termsafe.Escape(message) {
+		t.Fatalf("non-pointer refusal cut: %q", got)
+	}
+}
+
+func TestPanelRecover_EmptyReason(t *testing.T) {
+	f := newLaunchFixture(t)
+	before := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
+	old := panelRecoverCmd.Flags().Lookup("reason").Value.String()
+	defer panelRecoverCmd.Flags().Set("reason", old)
+	_ = panelRecoverCmd.Flags().Set("reason", "")
+	err := runPanelRecover(panelRecoverCmd, []string{"run", "R1"})
+	if err == nil || !strings.Contains(err.Error(), "a recovery reason is required") {
+		t.Fatalf("empty reason: %v", err)
+	}
+	if !bytes.Equal(before, slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))) {
+		t.Fatal("empty reason appended")
+	}
+}
+func TestPanelLaunch_RoundSchemaGuard(t *testing.T) {
+	f := newLaunchFixture(t)
+	// Seed a genuine historical round without a verdict_schema.
+	f.dir = filepath.Join(f.root, "review", "legacy")
+	if err := paneltest.CreateV1(f.dir, panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Roster: f.p.Roster}); err != nil {
+		t.Fatal(err)
+	}
+	before := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
+	old := panelLaunchProcessFn
+	defer func() { panelLaunchProcessFn = old }()
+	called := false
+	panelLaunchProcessFn = func(panellaunch.Request) error { called = true; return fmt.Errorf("unexpected process") }
+	_, err := launchRun(t, panelLaunchCmd, "legacy", "R1")
+	if err == nil || !strings.Contains(err.Error(), "round does not accept process launches") || called {
+		t.Fatalf("legacy launch: %v called=%v", err, called)
+	}
+	if !bytes.Equal(before, slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))) {
+		t.Fatal("legacy launch appended")
+	}
+}
+func TestPanelLaunch_PostLockBinding(t *testing.T) {
+	for _, field := range []string{"round", "reviewed_sha"} {
+		t.Run(field, func(t *testing.T) {
+			f := newLaunchFixture(t)
+			old := panelLaunchAcquireSlotLock
+			defer func() { panelLaunchAcquireSlotLock = old }()
+			oldRun := panelLaunchProcessFn
+			defer func() { panelLaunchProcessFn = oldRun }()
+			called := false
+			panelLaunchProcessFn = func(panellaunch.Request) error { called = true; return fmt.Errorf("unexpected process") }
+			panelLaunchAcquireSlotLock = func(path string) (*panel.SlotLock, error) {
+				lock, err := panel.AcquireSlotLock(path)
+				if err != nil {
+					return nil, err
+				}
+				// Model the registration and ledger changing while the caller waits.
+				// Keep both consistent so the post-lock binding check must catch it.
+				for _, name := range []string{panel.FileName, "dispositions.jsonl"} {
+					raw := string(slotRead(t, filepath.Join(f.dir, name)))
+					if field == "round" {
+						raw = strings.ReplaceAll(raw, `"round": 1`, `"round": 2`)
+						raw = strings.ReplaceAll(raw, `"round":1`, `"round":2`)
+					} else {
+						raw = strings.ReplaceAll(raw, f.p.ReviewedHeadSHA, strings.Repeat("a", 40))
+					}
+					slotWrite(t, filepath.Join(f.dir, name), raw)
+				}
+				return lock, nil
+			}
+			_, err := f.run(t, false)
+			if err == nil || !strings.Contains(err.Error(), "panel changed while launch waited") || called {
+				t.Fatalf("post-lock %s: %v called=%v", field, err, called)
+			}
+			if len(f.events(t)) != 0 {
+				t.Fatal("changed binding appended launch")
+			}
+		})
+	}
+}
+
+func TestPanelRecover_RecoveryCommand(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprint(started), func(t *testing.T) {
+			f := newLaunchFixture(t)
+			slug := "panel's review"
+			f.dir = filepath.Join(f.root, "review", slug)
+			if err := panel.Create(f.dir, panel.CreateInput{Spec: "131-test", Gate: "final_review", Target: "main", Round: 1, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Roster: f.p.Roster}); err != nil {
+				t.Fatal(err)
+			}
+			if started {
+				err := appendLaunchRecord(f.dir, panel.LaunchRecord{Record: panel.RecordLaunch, Spec: "131-test", Panel: slug, Slot: "R1", Round: 1, Attempt: 1, Family: "a", Model: "m", Status: "started", RunnerKind: "process", RunnerSource: "default", NonceSHA256: strings.Repeat("a", 64), ArgvSHA256: strings.Repeat("b", 64), PGID: os.Getpid(), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := runPanelCmd("recover", slug, "R1", "--reason", "recorded output", "--spec", "131-test")
+			want := "recovery: mindspec panel launch 'panel'\\''s review' 'R1' --spec '131-test'"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("recovery command want %q: %v", want, err)
+			}
+		})
 	}
 }

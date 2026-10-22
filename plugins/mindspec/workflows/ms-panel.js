@@ -10,7 +10,6 @@ const ALLOWED_CLI = [
   "mindspec panel recover",
 ];
 const [CREATE, VERIFY, TALLY, LAUNCH, CHECKOUT, PROMPT, SUBMIT, RECOVER] = ALLOWED_CLI;
-const SHELL_METACHAR_RE = /[\x60;|&\n$]/;
 
 function quote(value) {
   if (typeof value !== "string" || !value || value.startsWith("-") || /[\x00-\x1f\x7f]/.test(value)) {
@@ -31,19 +30,17 @@ function buildCommand(verb, value = {}) {
   if (args.spec) command += " --spec " + quote(args.spec);
   switch (verb) {
     case CREATE:
-      if (!args.spec) command += " --gate adhoc";
+      if (!args.spec && !args.bead_id) command += " --gate adhoc";
       command += " --target " + quote(args.target) + " --round " + args.round;
-      if (args.bead_id) command += " --bead " + quote(args.bead_id);
+      if (args.bead_id) command += " --gate bead --bead " + quote(args.bead_id);
       break;
     case VERIFY: command += " --json"; break;
     case TALLY: break;
     case LAUNCH:
       command += " " + quote(value.slot);
-      if (value.replace) command += " --replace";
       break;
     case CHECKOUT:
       command += " --slot " + quote(value.slot) + " --dispatch";
-      if (value.replace) command += " --replace";
       break;
     case PROMPT: command += " --slot " + quote(value.slot); break;
     case RECOVER: command += " " + quote(value.slot) + " --reason " + quote("restore recorded reviewer output"); break;
@@ -67,7 +64,7 @@ async function roster() {
 }
 
 async function dispatch(slot) {
-  const checkout = await cli(CHECKOUT, { slot: slot.slot, replace: true });
+  const checkout = await cli(CHECKOUT, { slot: slot.slot });
   if (checkout.exit !== 0) return;
   const slotDir = checkout.stdout.trim();
   const prompt = await cli(PROMPT, { slot: slot.slot });
@@ -105,7 +102,7 @@ async function runSlot(initial) {
       if (!["missing", "draft", "unsubmitted", "void", "launch_failed", "malformed"].includes(slot.status)) return slot;
       if (acted) { if (retried) return slot; retried = true; }
       // The command agent waits for this background workflow branch.
-      await cli(LAUNCH, { slot: slot.slot, replace: true });
+      await cli(LAUNCH, { slot: slot.slot });
     } else if (slot.kind === "harness") {
       if (slot.status === "damaged" || slot.status === "quota_wall" && !slot.handoff_pending) return slot;
       if (!["missing", "running", "draft", "unsubmitted", "void", "launch_failed", "malformed", "quota_wall"].includes(slot.status)) return slot;

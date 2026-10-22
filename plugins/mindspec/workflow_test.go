@@ -2,6 +2,7 @@ package pluginmindspec
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -102,6 +103,11 @@ func TestMsPanelWorkflow_AllowedCLIExactSet(t *testing.T) {
 	if end < 0 {
 		t.Fatal("allowed command array incomplete")
 	}
+	for _, lit := range scanJSLiterals(content) {
+		if strings.Contains(lit.value, "mindspec") && (lit.start < start || lit.end > start+end+2) {
+			t.Fatalf("mindspec literal outside allowed command array: %q", lit.value)
+		}
+	}
 	literals := scanJSLiterals(content[start : start+end+2])
 	want := map[string]bool{}
 	for _, verb := range []string{"create", "verify", "tally", "launch", "checkout", "prompt", "submit", "recover"} {
@@ -143,21 +149,19 @@ func TestMsPanelWorkflow_AllowedCLIExactSet(t *testing.T) {
 	}
 }
 
-// TestMsPanelWorkflow_ShellMetacharRejectsBareDollar is the spec-113 R2 floor
-// pin: SHELL_METACHAR_RE must reject a bare `$` (not merely the `$(`
-// digraph), so `$HOME`/`${x}`/`$x` variable-expansion can no longer survive
-// validateShellSafe. Go cannot execute the JS regex, so this is a
-// string-level pin (same style as TestMsPanelWorkflow_AllowedCLIExactSet)
-// asserting the exact declaration line appears exactly once; the behavioral
-// match matrix (positive/negative rows) runs under node in verification.
-func TestMsPanelWorkflow_ShellMetacharRejectsBareDollar(t *testing.T) {
-	content := WorkflowFiles()["ms-panel.js"]
-	if content == "" {
-		t.Fatal(`WorkflowFiles()["ms-panel.js"] is empty`)
+func TestMsPanelWorkflow_Quote(t *testing.T) {
+	source := WorkflowFiles()["ms-panel.js"]
+	prefix, _, ok := strings.Cut(source, "async function cli(")
+	if !ok {
+		t.Fatal("command builder missing")
 	}
-
-	const wantDecl = `const SHELL_METACHAR_RE = /[\x60;|&\n$]/;`
-	if n := strings.Count(content, wantDecl); n != 1 {
-		t.Errorf("expected the exact declaration %q exactly once, found %d", wantDecl, n)
+	script := prefix + `
+ const value = "it's $HOME; echo bad";
+ const got = quote(value);
+ const expected = "'it'\"'\"'s $HOME; echo bad'";
+ if (got !== expected) throw Error("quote differs: " + got);
+ `
+	if out, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("quote: %v %s", err, out)
 	}
 }
