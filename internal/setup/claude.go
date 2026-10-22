@@ -916,6 +916,8 @@ const claudeMDManagedBlock = `
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
 
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
+
 ## Skills
 
 ### Spec lifecycle gates
