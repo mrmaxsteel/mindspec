@@ -147,6 +147,7 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands
 internal/lifecycle/stale_open.go	StaleOpenBead.Message	arg1:unprovable
 internal/complete/complete.go	landingOwnershipError.Error	arg1:unprovable
@@ -221,6 +222,10 @@ internal/executor/merge_resumption.go	resumeAwareMerge	arg1:unprovable
 internal/executor/merge_resumption.go	stillConflictedRefusal	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.CompleteBead	arg1:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.FinalizeEpic	arg1:unprovable
+internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg1:unprovable
+internal/executor/mindspec_executor.go	checkMergedFinalizeWorktree	arg2:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg1:unprovable
+internal/executor/mindspec_executor.go	MindspecExecutor.finalizeBeadWorktrees	arg2:unprovable
 internal/executor/mindspec_executor.go	MindspecExecutor.PreflightFinalizeMerges	arg1:unprovable
 internal/executor/mindspec_executor.go	beadToSpecConflictFailure	arg1:unprovable
 internal/executor/mindspec_executor.go	directMergeConflictFailure	arg1:unprovable

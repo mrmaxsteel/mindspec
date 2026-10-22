@@ -1539,3 +1539,23 @@ spec only. Doctor reports duplicate bindings and open title-only beads at
 Warn, then runs the remaining checks. The lineage check skips projects
 without a Beads store or redirect. An export alone does not enable the check. New spec creation refuses lettered IDs;
 existing lettered directories stay valid.
+
+## Implementation approval recovery
+
+A close, phase-write, or finalize failure stops approval. Approval reads the epic
+status after the failure. It places one state line before the inner error and
+names the failed stage. Inner recovery lines remain last. Approval adds a re-run
+command only when the inner error has no recovery command.
+
+A retry with a spec branch runs all pre-close gates on the current tip. The epic
+status does not bypass a gate. A closed epic skips the close write. A missing
+spec branch takes a separate evidence check. It requires a closed epic, stored
+phase `done`, the final publication tip, and all lifecycle child bindings in the
+target history. The executor fetches remote evidence before checking ancestry.
+A failed check retains the branch-missing adopt recovery. A successful check
+returns the `already landed` message and completes safe cleanup.
+
+The executor checks a remaining bead worktree before it skips an already merged
+branch and before it removes that worktree after local spec-branch deletion.
+Pending changes, an unreadable status, or a worktree inspection error stop cleanup.
+The worktree and branch remain for recovery.

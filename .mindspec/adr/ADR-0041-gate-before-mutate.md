@@ -832,3 +832,41 @@ remote. The real push still runs its pre-push hooks.
 again. The early guards, push probe, and finalization use this one value.
 The executor keeps both live guards before each merge. It reads the current tips
 after artifact commits and bead auto-merges. Both early and live guards must pass.
+
+### Implementation approval recovery
+
+Implementation approval reads the epic status after a failure in the close or
+finalize chain. It prints one state line before the error: `epic closed` or
+`epic still open`, with the failed finalize stage. An unreadable status is
+reported as unknown. The inner recovery lines stay unchanged and come last.
+Approval adds `recovery: mindspec impl approve <spec>` only when the inner error
+has no recovery line. A failed real pre-push hook follows this post-close rule.
+
+`FinalizeEpic` writes `mindspec_finalize_tip` after the export commit and all
+bead auto-merges, immediately before publication. Every run overwrites this key.
+The pre-finalize routing checkpoint stays separate. A retry uses one close,
+skips merged beads and a completed direct merge, and skips a push when the
+remote already has the same tip. Before it skips a merged bead, it checks the
+remaining worktree. Pending changes or an unreadable status stop the run before
+cleanup. The branch and worktree remain for recovery. It completes remaining
+cleanup only after these checks pass. A protected-main
+retry uses the same carrier branch. When that remote head differs, it pushes with
+`--force-with-lease` on the SHA that `git ls-remote` reads just before the push.
+The executor opens no PR. The finalize-PR automation (§4) adopts an open PR
+for the same carrier head and base, so a retry opens no second PR while the first is
+open or merged.
+This also applies after local spec-branch deletion.
+
+While the spec branch exists, approval runs every pre-close gate again on its
+current tip. A closed epic does not bypass a gate. After local branch deletion,
+`already landed` requires that the epic is closed and the stored phase is done.
+The final publication tip and every lifecycle child's landed binding must be
+ancestors of the target. The target is local main on the direct path. On the
+push path, approval reads the remote spec head, then fetches it into a temporary
+ref. If the host deleted that head, it fetches remote main instead. A fetch
+failure, missing object, or squash or rebase merge refuses with the branch-missing
+adopt recovery. Approval does not recreate a deleted remote spec branch. Cleanup
+runs the destruction guard again and removes only bead branches whose tips are
+ancestors of the target. It uses the same worktree check as `FinalizeEpic` before
+removal. Pending changes, an unreadable status, or a worktree inspection error
+stop cleanup and preserve the worktree and branch for recovery.

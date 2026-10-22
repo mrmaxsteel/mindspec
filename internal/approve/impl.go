@@ -326,6 +326,21 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	case existsErr != nil:
 		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)
 	case !exists:
+		status, statusErr := readBeadStatus(epicID)
+		if statusErr == nil && status == "closed" && phaseDetail.Stored == state.ModeDone {
+			children, childErr := phase.LifecycleChildIDsForEpic(epicID)
+			if childErr == nil {
+				fr, resumeErr := exec.ResumeFinalizedEpic(epicID, specID, children, hasRemote)
+				if resumeErr == nil {
+					result.Warnings = append(result.Warnings, "already landed")
+					result.Pushed = hasRemote
+					result.FinalizeBranch = fr.FinalizeBranch
+					result.EpicID = epicID
+					return result, nil
+				}
+				return nil, fmt.Errorf("%s\n%w", termsafe.Escape(resumeErr.Error()), implBranchMissingRefusal(specID, specBranch))
+			}
+		}
 		return nil, implBranchMissingRefusal(specID, specBranch)
 	}
 
@@ -546,11 +561,23 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				fmt.Sprintf("mindspec repair phase %s", specID),
 			)
 		}
-		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
-			if !isAlreadyClosedErr(err) {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
+		epics, statusErr := phase.NewCache().AllEpics()
+		status := ""
+		for _, epic := range epics {
+			if epic.ID == epicID {
+				status = epic.Status
+				break
 			}
 		}
+		if statusErr != nil || status == "" {
+			return nil, implFinalizeFailure(epicID, specID, "close", fmt.Errorf("cannot read epic status: %v", statusErr))
+		}
+		if status != "closed" {
+			if _, err := implRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
+				return nil, implFinalizeFailure(epicID, specID, "close", err)
+			}
+		}
+
 		// MUTATION (2/3): Spec 080 phase metadata write. Runs after
 		// (and supersedes) the Req 1 reconcile above — the end state
 		// of a fully successful ApproveImpl is mindspec_phase=done.
@@ -567,7 +594,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				"mindspec_done":  true,
 			}, nil
 		}); err != nil {
-			result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
+			return nil, implFinalizeFailure(epicID, specID, "phase", errors.New(phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))))
 		}
 	}
 
@@ -597,7 +624,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// above.
 	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge, hasRemote)
 	if err != nil {
-		return nil, fmt.Errorf("finalizing epic: %w", err)
+		stage := "finalize"
+		var failure *executor.FinalizeStageError
+		if errors.As(err, &failure) {
+			stage = failure.Stage
+		}
+		return nil, implFinalizeFailure(epicID, specID, stage, err)
 	}
 
 	// Spec 086 Bead 3: record doc-sync skew override ONLY after the
@@ -666,6 +698,32 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 
 	return result, nil
+}
+
+// implFinalizeFailure reads state after a failed write. Inner recovery lines
+// retain their order and remain last. Escape each line to keep its structure.
+func implFinalizeFailure(epicID, specID, stage string, inner error) error {
+	status, err := readBeadStatus(epicID)
+	stateLine := "epic status unknown"
+	if err == nil {
+		stateLine = "epic still open"
+		if status == "closed" {
+			stateLine = "epic closed"
+		}
+	}
+	lines := strings.Split(inner.Error(), "\n")
+	hasRecovery := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "recovery:") {
+			hasRecovery = true
+		}
+		lines[i] = termsafe.Escape(line)
+	}
+	message := fmt.Sprintf("%s; finalize stage %s\n%s", stateLine, termsafe.Escape(stage), strings.Join(lines, "\n"))
+	if !hasRecovery {
+		return guard.NewFailure(message, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+	}
+	return errors.New(message)
 }
 
 func readBeadStatus(id string) (string, error) {

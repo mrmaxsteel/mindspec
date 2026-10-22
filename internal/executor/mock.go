@@ -1,6 +1,9 @@
 package executor
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // MockExecutor implements Executor for testing. It records all method calls
 // and returns configurable results. Safe for concurrent use.
@@ -17,6 +20,8 @@ type MockExecutor struct {
 	CompleteBeadErr            error
 	FinalizeEpicResult         FinalizeResult
 	FinalizeEpicErr            error
+	ResumeFinalizedEpicResult  FinalizeResult
+	ResumeFinalizedEpicErr     error
 	PreflightFinalizeMergesErr error
 	PushProbeErr               error
 	CleanupErr                 error
@@ -183,6 +188,14 @@ func (m *MockExecutor) PushProbe(branch string) error {
 func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error) {
 	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge, hasRemote)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
+}
+
+func (m *MockExecutor) ResumeFinalizedEpic(epicID, specID string, children []string, hasRemote bool) (FinalizeResult, error) {
+	m.record("ResumeFinalizedEpic", epicID, specID, children, hasRemote)
+	if m.ResumeFinalizedEpicErr == nil && m.ResumeFinalizedEpicResult == (FinalizeResult{}) {
+		return FinalizeResult{}, errors.New("no publication evidence")
+	}
+	return m.ResumeFinalizedEpicResult, m.ResumeFinalizedEpicErr
 }
 
 func (m *MockExecutor) Cleanup(specID string, force bool) error {

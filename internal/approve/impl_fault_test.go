@@ -7,12 +7,12 @@ package approve
 // throughout: a package-level seam wrapper mutates real state (a real
 // on-disk ADR placeholder for i0, an in-memory phase-metadata store for
 // i1) then fails; each KILL test re-invokes ApproveImpl and asserts
-// convergence. i2/i3/i5 are DOCUMENTED-FORWARD-SAFE (ADR-0041 §3): their
-// errors are appended to result.Warnings and the run continues regardless
-// — pinned end-to-end below rather than merely asserted by code cite.
+// convergence. Close and phase-write failures stop the run. A re-run
+// resumes from the stored state. Override-metadata failures remain warnings.
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,76 +258,166 @@ func TestFaultInjection_ApproveImpl_I1_PhaseReconcileWrite_KillThenConverge(t *t
 	}
 }
 
-// --- i2/i3/i5: DOCUMENTED-FORWARD-SAFE post-preflight writes ---------------
+// --- i2/i3/i5: post-preflight write failures and recovery ------------------
 //
-// Three points swallow their own error and let ApproveImpl continue
-// regardless (ADR-0041 §3), each appending a message to result.Warnings
-// rather than failing the run:
-//
-//   - i2 — the epic-close mutation (`implRunBDCombinedFn("close", epicID)`,
-//     impl.go): a non-"already closed" failure appends
-//     "could not close lifecycle epic ...".
-//   - i3 — the phase=done write (`implPhaseMetadataFn`, the done branch):
-//     a failure appends "could not sync phase metadata ..." (spec 128
-//     round-2 panel G3: rendered via phase.DescribeLockFailure, which
-//     gives a lock TIMEOUT a copy-pastable recovery command and any
-//     other failure — like this fault injection — as-is).
-//   - i5 — the post-FinalizeEpic override-metadata writes
-//     (`implMergeMetadataFn`, the AllowDocSkew/OverrideADR/SupersedeADR
-//     branches): a failure appends "could not record ... metadata on ...".
-//
-// This test fails ALL THREE simultaneously and pins that ApproveImpl still
-// succeeds, with a Warning recorded for each — proving the swallow is real
-// forward-safety, not merely documented.
-func TestFaultInjection_ApproveImpl_I2I3I5_PostPreflightWritesSwallowed(t *testing.T) {
-	tmp := t.TempDir()
-	writeSpecDir(t, tmp, "010-test")
-	writePlanWithBeads(t, tmp, "010-test", []string{"bead-1"})
-	if err := os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	saveAndRestore(t)
-	// Stored phase already satisfies the review/done gate (implGateOK), so
-	// needsPhaseReconcile is FALSE and implPhaseMetadataFn is invoked ONLY
-	// for the (forward-safe) done-write below — never the mandatory,
-	// hard-failing Req-1 reconcile write (that is i1's own kill point,
-	// covered separately).
-	stubPhaseStoredChildren(t, "review", []phase.ChildInfo{
-		{ID: "bead-1", Status: "closed", IssueType: "task"},
-	})
+// Close and phase-write failures return the actual epic state, failed stage,
+// and re-run command. A re-run completes with one successful close. Override
+// metadata is written after FinalizeEpic; its failure remains a warning.
+func TestFaultInjection_ApproveImpl_I2I3I5_PostPreflightWritesRecover(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		stage                 string
+		state                 string
+		fault                 fiFakeErr
+		firstCloseAttempts    int
+		firstPhaseAttempts    int
+		firstOverrideAttempts int
+	}{
+		{"i2_close", "close", "epic still open", "fault-injection: simulated epic-close failure", 1, 0, 0},
+		{"i3_phase", "phase", "epic closed", "fault-injection: simulated phase-metadata failure", 1, 1, 0},
+		{"i5_override", "override", "epic closed", "fault-injection: simulated override-metadata failure", 1, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			const specID = "010-test"
+			writeSpecDir(t, tmp, specID)
+			writePlanWithBeads(t, tmp, specID, []string{"bead-1"})
+			if err := os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			saveAndRestore(t)
 
-	implRunBDCombinedFn = func(args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "close" {
-			return nil, fiFakeErr("fault-injection: simulated epic-close failure")
-		}
-		return []byte("ok"), nil
-	}
-	implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
-		return fiFakeErr("fault-injection: simulated phase-metadata failure")
-	}
-	implMergeMetadataFn = func(id string, updates map[string]interface{}) error {
-		return fiFakeErr("fault-injection: simulated override-metadata failure")
-	}
+			// Both status readers share the state changed by a successful close.
+			// A failed close leaves the epic open. Closed child beads stay closed.
+			epics := []phase.EpicInfo{{
+				ID: "epic-parent", Title: "[SPEC 010-test] Test", Status: "open",
+				IssueType: "epic", Metadata: map[string]interface{}{
+					"spec_num": float64(10), "spec_title": "test",
+					"mindspec_phase": "review", "mindspec_migrated_at": "2026-01-01T00:00:00Z",
+				},
+			}}
+			children := []phase.ChildInfo{{ID: "bead-1", Status: "closed", IssueType: "task"}}
+			t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+				if contains(args, "--type=epic") {
+					return json.Marshal(epics)
+				}
+				if contains(args, "--parent") {
+					return json.Marshal(children)
+				}
+				return []byte("[]"), nil
+			}))
+			t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) >= 2 && args[0] == "show" && args[1] == "epic-parent" {
+					return json.Marshal(epics)
+				}
+				return []byte("[]"), nil
+			}))
+			epicStatusReads := 0
+			implRunBDFn = func(args ...string) ([]byte, error) {
+				if len(args) >= 2 && args[0] == "show" {
+					switch args[1] {
+					case "epic-parent":
+						epicStatusReads++
+						return json.Marshal(epics)
+					case "bead-1":
+						return json.Marshal(children)
+					}
+				}
+				t.Fatalf("unexpected status read: %v", args)
+				return nil, nil
+			}
 
-	mock := &executor.MockExecutor{
-		CommitCountResult:  5,
-		FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
-	}
+			faultEnabled := true
+			closeAttempts, successfulCloses, phaseAttempts, overrideAttempts := 0, 0, 0, 0
+			implRunBDCombinedFn = func(args ...string) ([]byte, error) {
+				if len(args) != 2 || args[0] != "close" || args[1] != "epic-parent" {
+					t.Fatalf("unexpected close: %v", args)
+				}
+				closeAttempts++
+				if faultEnabled && tc.stage == "close" {
+					return nil, tc.fault
+				}
+				if epics[0].Status == "closed" {
+					t.Fatal("close called again after the epic closed")
+				}
+				epics[0].Status = "closed"
+				successfulCloses++
+				return []byte("ok"), nil
+			}
+			implPhaseMetadataFn = func(id string, updates map[string]interface{}) error {
+				phaseAttempts++
+				if id != "epic-parent" || updates["mindspec_phase"] != "done" || updates["mindspec_done"] != true {
+					t.Fatalf("unexpected phase write: %s %v", id, updates)
+				}
+				if faultEnabled && tc.stage == "phase" {
+					return tc.fault
+				}
+				for key, value := range updates {
+					epics[0].Metadata[key] = value
+				}
+				return nil
+			}
+			mock := &executor.MockExecutor{
+				CommitCountResult:  5,
+				FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5},
+			}
+			implMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+				overrideAttempts++
+				if id != "epic-parent" || updates["mindspec_impl_skew_reason"] != "test: write recovery" {
+					t.Fatalf("unexpected override write: %s %v", id, updates)
+				}
+				if len(mock.CallsTo("FinalizeEpic")) == 0 {
+					t.Fatal("override metadata written before FinalizeEpic")
+				}
+				if faultEnabled && tc.stage == "override" {
+					return tc.fault
+				}
+				return nil
+			}
 
-	result, err := ApproveImpl(tmp, "010-test", mock, ImplOpts{AllowDocSkew: "test: i2i3i5 forward-safety"})
-	if err != nil {
-		t.Fatalf("i2/i3/i5 failures must all be swallowed (forward-safe), got: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected a non-nil result despite every post-preflight write failing")
-	}
-	if len(mock.CallsTo("FinalizeEpic")) != 1 {
-		t.Errorf("expected FinalizeEpic to have run exactly once, got %d", len(mock.CallsTo("FinalizeEpic")))
-	}
-	joined := strings.Join(result.Warnings, " | ")
-	for _, want := range []string{"could not close lifecycle epic", "could not sync phase metadata", "could not record impl-skew override metadata"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("expected a warning containing %q, got warnings: %v", want, result.Warnings)
-		}
+			opts := ImplOpts{AllowDocSkew: "test: write recovery"}
+			result, err := ApproveImpl(tmp, specID, mock, opts)
+			if tc.stage == "override" {
+				if err != nil || result == nil {
+					t.Fatalf("override failure must remain a warning: result=%+v err=%v", result, err)
+				}
+				want := "could not record impl-skew override metadata on epic-parent: " + tc.fault.Error()
+				if len(result.Warnings) != 1 || result.Warnings[0] != want {
+					t.Fatalf("warnings = %v, want %q", result.Warnings, want)
+				}
+			} else {
+				inner := tc.fault.Error()
+				if tc.stage == "phase" {
+					inner = "could not sync phase metadata: " + inner
+				}
+				want := tc.state + "; finalize stage " + tc.stage + "\n" + inner + "\nrecovery: mindspec impl approve " + specID
+				if err == nil || err.Error() != want {
+					t.Fatalf("failure = %v, want exactly:\n%s", err, want)
+				}
+				if result != nil || epicStatusReads == 0 || len(mock.CallsTo("FinalizeEpic")) != 0 {
+					t.Fatalf("failure must read epic status and stop before finalize: result=%+v reads=%d calls=%v", result, epicStatusReads, mock.CallsTo("FinalizeEpic"))
+				}
+			}
+			if closeAttempts != tc.firstCloseAttempts || phaseAttempts != tc.firstPhaseAttempts || overrideAttempts != tc.firstOverrideAttempts {
+				t.Fatalf("write attempts = close:%d phase:%d override:%d, want %d/%d/%d", closeAttempts, phaseAttempts, overrideAttempts, tc.firstCloseAttempts, tc.firstPhaseAttempts, tc.firstOverrideAttempts)
+			}
+			finalizeCalls := len(mock.CallsTo("FinalizeEpic"))
+
+			// Remove the fault and re-run against the same stored state.
+			faultEnabled = false
+			result, err = ApproveImpl(tmp, specID, mock, opts)
+			if err != nil || result == nil || result.SpecID != specID {
+				t.Fatalf("re-run must converge: result=%+v err=%v", result, err)
+			}
+			if epics[0].Status != "closed" || epics[0].Metadata["mindspec_phase"] != "done" || epics[0].Metadata["mindspec_done"] != true || successfulCloses != 1 {
+				t.Fatalf("re-run state = %+v, successful closes = %d, want closed/done and one close", epics[0], successfulCloses)
+			}
+			if got := len(mock.CallsTo("FinalizeEpic")); got != finalizeCalls+1 {
+				t.Fatalf("FinalizeEpic calls = %d, want %d", got, finalizeCalls+1)
+			}
+			if phaseAttempts != tc.firstPhaseAttempts+1 || overrideAttempts != tc.firstOverrideAttempts+1 || len(result.Warnings) != 0 {
+				t.Fatalf("re-run writes = phase:%d override:%d, warnings=%v", phaseAttempts, overrideAttempts, result.Warnings)
+			}
+		})
 	}
 }
