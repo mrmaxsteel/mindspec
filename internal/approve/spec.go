@@ -112,7 +112,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 			}
 		}
 		// Spec 080: include mindspec_phase in initial epic metadata
-		metadataFields := map[string]interface{}{"spec_id": specID, "spec_title": titleFromSpecID(specID), "mindspec_phase": "plan"}
+		metadataFields := map[string]interface{}{"spec_id": specID, "spec_title": titleFromSpecID(specID)}
 		if specNum > 0 {
 			metadataFields["spec_num"] = specNum
 		}
@@ -120,8 +120,11 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		if err != nil {
 			return nil, err
 		}
+		// This is a creation seed, not an update to a stored phase. Keep
+		// variable fields JSON-escaped and add the constant phase to the object.
+		metadataJSON := fmt.Sprintf(`{"mindspec_phase":"plan",%s`, metadata[1:])
 		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
-		out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", string(metadata), "--json")
+		out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadataJSON, "--json")
 		if epicErr != nil {
 			// Final-review round 1 (R2/G3): epicErr carries
 			// wrapBDError'd raw bd stderr and this warning is printed
