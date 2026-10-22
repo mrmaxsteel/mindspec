@@ -393,31 +393,45 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 		return nil, err
 	}
 	rounds, err := os.ReadDir(base)
-	if os.IsNotExist(err) {
-		return func() {}, nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	var affected []panel.SlotLayout
+	// Checkout takes its lock before it creates the slot directory.
+	// Include each registered round even when its scratch path is absent.
+	roundSet := make(map[int]bool)
+	for n := 1; n <= reg.Panel.Round; n++ {
+		if beforeRound == 0 || n < beforeRound {
+			roundSet[n] = true
+		}
+	}
 	for _, round := range rounds {
 		n, err := strconv.Atoi(strings.TrimPrefix(round.Name(), "r"))
-		if err != nil || n < 1 || round.Name() != fmt.Sprintf("r%d", n) || (beforeRound > 0 && n >= beforeRound) {
-			continue
+		if err == nil && n > 0 && round.Name() == fmt.Sprintf("r%d", n) && (beforeRound == 0 || n < beforeRound) {
+			roundSet[n] = true
 		}
-		roundDir := filepath.Join(base, round.Name())
+	}
+	var affected []panel.SlotLayout
+	for n := range roundSet {
+		roundDir := filepath.Join(base, fmt.Sprintf("r%d", n))
 		if err := checkCheckoutPath(root, roundDir); err != nil {
 			return nil, err
 		}
 		slots, err := os.ReadDir(roundDir)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
+		slotSet := make(map[string]bool)
+		for _, slot := range reg.Panel.Roster {
+			slotSet[slot.Slot] = true
+		}
 		for _, slot := range slots {
-			if onlySlot != "" && slot.Name() != onlySlot {
+			slotSet[slot.Name()] = true
+		}
+		for slot := range slotSet {
+			if onlySlot != "" && slot != onlySlot {
 				continue
 			}
-			entry, err := panel.NewSlotLayout(root, isolation, reg.Panel.Spec, reg.Slug(), n, slot.Name())
+			entry, err := panel.NewSlotLayout(root, isolation, reg.Panel.Spec, reg.Slug(), n, slot)
 			if err != nil {
 				return nil, err
 			}

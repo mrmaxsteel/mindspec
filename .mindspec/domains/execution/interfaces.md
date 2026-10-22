@@ -66,12 +66,14 @@ It sets `GIT_CONFIG_GLOBAL=/dev/null` for every call.
 `slotGitEnv` builds the environment for both Git paths.
 For the `slotMainGit` trust query, it keeps `HOME`, `XDG_CONFIG_HOME` and an explicit `GIT_CONFIG_GLOBAL`.
 It removes all other inherited `GIT_*` variables and disables system configuration and prompts.
-`slotMainGit` reads only global `safe.directory` values, including config includes.
+`slotMainGit` reads only global `safe.directory` values and unconditional includes.
+The query runs in a new temporary directory with its parent as `GIT_CEILING_DIRECTORIES`.
+Git finds no repository, so conditional includes do not apply.
 It passes each value as a `-c safe.directory=<value>` command option, in order.
 These calls check the isolation root, clone the source, and read the source object-store path.
 Calls inside the slot tree do not read global configuration.
 It sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=/usr/bin/false`.
-Command options set `core.fsmonitor=false` and `core.hooksPath=/dev/null`.
+Command options set `core.fsmonitor=false`, `core.hooksPath=/dev/null` and `core.attributesFile=/dev/null`.
 Errors include escaped Git stderr.
 
 `CloneSlotTree` creates a shared clone without an initial checkout.

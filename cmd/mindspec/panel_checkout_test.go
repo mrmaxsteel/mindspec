@@ -709,38 +709,70 @@ func TestPanelCreate_BadBriefKeepsDirtyCheckout(t *testing.T) {
 }
 
 func TestPanelCleanup_HeldLockNoChange(t *testing.T) {
-	for _, verb := range []string{"prune", "create", "abandon"} {
-		t.Run(verb, func(t *testing.T) {
-			f := newCheckoutFixture(t, ".mindspec-scratch")
-			checkoutOK(t, "--all")
-			for _, slot := range []string{"R2", "R3"} {
-				lock, err := panel.AcquireSlotLock(f.layout(t, slot).Lock)
-				if err != nil {
-					t.Fatal(err)
+	for _, state := range []string{"existing", "missing slot", "missing base"} {
+		for _, verb := range []string{"prune", "create", "abandon"} {
+			t.Run(state+"/"+verb, func(t *testing.T) {
+				f := newCheckoutFixture(t, ".mindspec-scratch")
+				heldSlots := []string{"R2"}
+				switch state {
+				case "existing":
+					checkoutOK(t, "--all")
+					heldSlots = append(heldSlots, "R3")
+				case "missing slot":
+					checkoutOK(t, "--slot", "R1")
 				}
-				defer lock.Release()
-			}
-			beforePanel := slotSnapshot(t, f.dir)
-			beforeScratch := slotSnapshot(t, filepath.Join(f.root, f.isolation))
-			var out string
-			var err error
-			switch verb {
-			case "prune":
-				out, err = checkoutRun(t, "--prune")
-			case "create":
-				resetPanelCreateFlags(t)
-				out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
-			case "abandon":
-				out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
-			}
-			if err == nil || !strings.Contains(err.Error()+out, "R2") {
-				t.Fatalf("held-slot refusal: %v %s", err, out)
-			}
-			assertCheckoutRecovery(t, err.Error(), "mindspec panel verify "+shellQuoteTarget("p")+" # wait for slot locks: "+shellQuoteTarget(f.layout(t, "R2").Lock)+", "+shellQuoteTarget(f.layout(t, "R3").Lock))
-			if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) || !reflect.DeepEqual(beforeScratch, slotSnapshot(t, filepath.Join(f.root, f.isolation))) {
-				t.Fatal("held-lock refusal changed panel, ledger or scratch files")
-			}
-		})
+				for _, slot := range heldSlots {
+					lock, err := panel.AcquireSlotLock(f.layout(t, slot).Lock)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer lock.Release()
+				}
+				if state != "existing" {
+					missing := f.layout(t, "R2").Dir
+					if state == "missing base" {
+						missing = filepath.Dir(filepath.Dir(missing))
+					}
+					if _, err := os.Lstat(missing); !os.IsNotExist(err) {
+						t.Fatalf("checkout path must be absent: %v", err)
+					}
+				}
+				beforePanel := slotSnapshot(t, f.dir)
+				scratch := filepath.Join(f.root, f.isolation)
+				if state == "missing slot" {
+					scratch = f.layout(t, "R1").Dir
+				}
+				var beforeScratch map[string]string
+				if state != "missing base" {
+					beforeScratch = slotSnapshot(t, scratch)
+				}
+				var out string
+				var err error
+				switch verb {
+				case "prune":
+					out, err = checkoutRun(t, "--prune")
+				case "create":
+					resetPanelCreateFlags(t)
+					out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+				case "abandon":
+					out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
+				}
+				if err == nil || !strings.Contains(err.Error()+out, "R2") {
+					t.Fatalf("held-slot refusal: %v %s", err, out)
+				}
+				var heldPaths []string
+				for _, slot := range heldSlots {
+					heldPaths = append(heldPaths, shellQuoteTarget(f.layout(t, slot).Lock))
+				}
+				assertCheckoutRecovery(t, err.Error(), "mindspec panel verify "+shellQuoteTarget("p")+" # wait for slot locks: "+strings.Join(heldPaths, ", "))
+				if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
+					t.Fatal("held-lock refusal changed panel or ledger bytes")
+				}
+				if state != "missing base" && !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
+					t.Fatal("held-lock refusal changed panel, ledger or scratch files")
+				}
+			})
+		}
 	}
 }
 

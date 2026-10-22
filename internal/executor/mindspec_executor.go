@@ -1444,9 +1444,9 @@ func slotGitEnv(readGlobal bool) []string {
 }
 
 // slotGit removes inherited GIT_* variables and disables global and system config.
-// Command options disable hooks and fsmonitor, including local settings.
+// Command options disable hooks, fsmonitor and global attributes.
 func slotGit(workdir string, args ...string) ([]byte, error) {
-	flags := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", workdir}
+	flags := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null", "-C", workdir}
 	cmd := exec.Command("git", append(flags, args...)...)
 	cmd.Env = slotGitEnv(false)
 	var stderr strings.Builder
@@ -1458,12 +1458,19 @@ func slotGit(workdir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// slotMainGit reads global safe.directory values, including config includes.
+// slotMainGit reads global safe.directory values and unconditional includes.
+// The query runs outside a repository, so conditional includes do not apply.
 // The query removes inherited GIT_* variables except GIT_CONFIG_GLOBAL.
 // It passes the values in order as protected config to the isolated command.
 func slotMainGit(workdir string, args ...string) ([]byte, error) {
+	queryDir, err := os.MkdirTemp("", "mindspec-slot-trust-")
+	if err != nil {
+		return nil, fmt.Errorf("create repository trust query directory: %w", err)
+	}
+	defer os.RemoveAll(queryDir)
 	cmd := exec.Command("git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "config", "--global", "--includes", "--null", "--get-all", "safe.directory")
-	cmd.Env = slotGitEnv(true)
+	cmd.Dir = queryDir
+	cmd.Env = append(slotGitEnv(true), "GIT_CEILING_DIRECTORIES="+filepath.Dir(queryDir))
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

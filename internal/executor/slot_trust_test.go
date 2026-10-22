@@ -274,3 +274,50 @@ func TestExecutor_SlotTreeIgnoresGlobalConfig(t *testing.T) {
 		t.Fatalf("slot redirect control did not read global config: %v %s", err, out)
 	}
 }
+
+func TestExecutor_SlotIgnoreRejectsConditionalSafeDirectory(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	included := filepath.Join(t.TempDir(), "conditional-trust.config")
+	if err := os.WriteFile(included, []byte("[safe]\n\tdirectory = "+strconv.Quote(f.root)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.global, []byte("[includeIf \"gitdir:**/\"]\n\tpath = "+strconv.Quote(included)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+	if out, err := exec.Command("git", "-C", f.root, "check-ignore", "--quiet", "--", "ignored").CombinedOutput(); err == nil || !strings.Contains(string(out), "dubious ownership") {
+		t.Fatalf("conditional trust ownership control did not refuse: %v %s", err, out)
+	}
+	if err := NewMindspecExecutor(f.root).CheckSlotIgnore(f.root, "ignored"); err == nil || !strings.Contains(err.Error(), "dubious ownership") {
+		t.Fatalf("CheckSlotIgnore accepted conditional safe.directory: %v", err)
+	}
+}
+
+func TestExecutor_CloneSlotTreeIgnoresDefaultGlobalAttributes(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if err := os.Mkdir(filepath.Join(xdg, "git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "git", "attributes"), []byte("* text eol=crlf\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	control := filepath.Join(t.TempDir(), "control")
+	if out, err := exec.Command("git", "clone", "--shared", "--no-checkout", "--", f.root, control).CombinedOutput(); err != nil {
+		t.Fatalf("attributes control clone: %v %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", control, "checkout", "--detach", f.sha, "--").CombinedOutput(); err != nil {
+		t.Fatalf("attributes control checkout: %v %s", err, out)
+	}
+	if raw, err := os.ReadFile(filepath.Join(control, ".gitignore")); err != nil || string(raw) != "ignored\r\n" {
+		t.Fatalf("global attributes control must use CRLF: %q %v", raw, err)
+	}
+	tree := filepath.Join(t.TempDir(), "tree")
+	if err := NewMindspecExecutor(f.root).CloneSlotTree(tree, f.sha); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(tree, ".gitignore")); err != nil || string(raw) != "ignored\n" {
+		t.Fatalf("CloneSlotTree must keep LF bytes: %q %v", raw, err)
+	}
+}
