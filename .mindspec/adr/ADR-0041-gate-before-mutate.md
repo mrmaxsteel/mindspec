@@ -870,7 +870,7 @@ recovery without a second close. It publishes the export and ledger before clean
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. The recovery retries completion. A closed-unmerged conflict
 keeps its line boundaries and ends with one `--resolve-merge` recovery,
-without `--merge-only`.
+and the executor omits `--merge-only` from every re-entry hint on this path.
 Other merge guard failures keep their recovery.
 
 When an ownership manifest conflicts, an open plain completion refuses

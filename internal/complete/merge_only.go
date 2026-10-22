@@ -138,7 +138,7 @@ func runMergeOnly(root, beadID, specID, specBranch string, exec executor.Executo
 	if !opts.ResolveMerge {
 		reentry += " --resolve-merge"
 	}
-	if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge); err != nil {
+	if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge, executor.MergeBeadOptions{}); err != nil {
 		// The executor keeps its conflict steps and their line boundaries.
 		if guard.HasFinalRecoveryLine(err.Error()) {
 			return nil, err

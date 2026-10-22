@@ -882,5 +882,5 @@ recovery without a second close. It publishes the closed export and panel ledger
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`
-recovery, without `--merge-only`.
+recovery. The executor omits `--merge-only` from every re-entry hint on this path.
 Other merge guard failures keep their recovery.

@@ -1162,19 +1162,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// A closed, unmerged bead needs no second close. Keep its workspace until
 	// the merge binding, export and ledger are durable, then finish cleanup.
 	if branchPresent && reconcile == nil && closedAtEntry {
-		if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge); err != nil {
+		if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge, executor.MergeBeadOptions{Closed: true}); err != nil {
 			retry := opts
 			retry.ResolveMerge = true
-			// The executor escapes each conflict line. Keep those lines and
-			// replace its merge-only recovery with the closed-bead re-entry.
-			if message := strings.TrimRight(err.Error(), "\n"); guard.HasFinalRecoveryLine(message) {
-				lines := strings.Split(message, "\n")
-				mergeOnlyCommand := completionCommand(beadID, CompleteOpts{MergeOnly: true, ResolveMerge: true})
-				finalLine := lines[len(lines)-1]
-				if strings.HasSuffix(finalLine, " "+mergeOnlyCommand) {
-					recovery := strings.TrimPrefix(strings.TrimSuffix(finalLine, mergeOnlyCommand), guard.RecoveryPrefix) + completionCommand(beadID, retry)
-					return nil, guard.NewFailure(strings.Join(lines[:len(lines)-1], "\n"), recovery)
-				}
+			if guard.HasFinalRecoveryLine(err.Error()) {
 				return nil, err
 			}
 			return nil, completionFailure(beadID, retry, "merging closed bead", err)

@@ -5,7 +5,7 @@ import "sync"
 // MockExecutor implements Executor for testing. It records all method calls
 // and returns configurable results. Safe for concurrent use.
 type MockExecutor struct {
-	MergeBeadFn         func(beadID, specBranch, overrideReason string, resolveMerge bool) error
+	MergeBeadFn         func(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error
 	CleanupBeadFn       func(beadID, specBranch string) error
 	FirstParentMergesFn func(ref string) ([]MergeIdentity, error)
 	CompletionStateFn   func(workdir, base, head string) (CompletionState, error)
@@ -459,10 +459,10 @@ func (m *MockExecutor) LandingTree(workdir, base, specTip, beadRef string) (stri
 	return tree, m.LandingTreeConflicted, m.LandingTreeErr
 }
 
-func (m *MockExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool) error {
-	m.record("MergeBead", beadID, specBranch, overrideReason, resolveMerge)
+func (m *MockExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error {
+	m.record("MergeBead", beadID, specBranch, overrideReason, resolveMerge, opts)
 	if m.MergeBeadFn != nil {
-		return m.MergeBeadFn(beadID, specBranch, overrideReason, resolveMerge)
+		return m.MergeBeadFn(beadID, specBranch, overrideReason, resolveMerge, opts)
 	}
 	return nil
 }

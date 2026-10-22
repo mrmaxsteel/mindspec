@@ -16,6 +16,12 @@ type ChangedFilesOptions struct {
 	NoRenames bool
 }
 
+// MergeBeadOptions selects the re-entry command for a merge without cleanup.
+type MergeBeadOptions struct {
+	// Closed omits --merge-only from re-entry hints for an already closed bead.
+	Closed bool
+}
+
 // Executor abstracts workspace lifecycle operations. Implementations include
 // MindspecExecutor (local git+worktrees) and MockExecutor (testing).
 //
@@ -24,7 +30,7 @@ type ChangedFilesOptions struct {
 // (implementation tasks) belonging to a single spec lifecycle.
 type Executor interface {
 	// MergeBead merges without closing, binding or removing the bead workspace.
-	MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool) error
+	MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error
 	// CleanupBead removes only a bead whose tip is an ancestor of the spec.
 	CleanupBead(beadID, specBranch string) error
 	// FirstParentMerges reads merge identities without ownership inference.

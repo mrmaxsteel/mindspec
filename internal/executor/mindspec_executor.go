@@ -514,7 +514,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 			}
 		}
 	}
-	if g.completeMode == "merge-only" {
+	if g.completeMode == "merge-only" || g.completeMode == "closed-merge" {
 		return nil
 	}
 
@@ -2129,8 +2129,11 @@ func (g *MindspecExecutor) CompletionState(workdir, base, head string) (Completi
 }
 
 // MergeBead retains every existing merge guard and leaves cleanup to the caller.
-func (g *MindspecExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool) error {
+func (g *MindspecExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error {
 	g.completeMode = "merge-only"
+	if opts.Closed {
+		g.completeMode = "closed-merge"
+	}
 	defer func() { g.completeMode = "" }()
 	return g.CompleteBead(beadID, specBranch, "", overrideReason, resolveMerge)
 }

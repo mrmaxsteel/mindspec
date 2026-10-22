@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -84,6 +85,45 @@ func TestComplete_ClosedStagedResolutionRecovery(t *testing.T) {
 	}
 }
 
+func TestComplete_ClosedLeftoverMarkerRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts CompleteOpts
+	}{
+		{name: "plain"},
+		{name: "resolve", opts: CompleteOpts{ResolveMerge: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := sourceConflictWindow(t)
+			stubClosedWindowChild(t)
+			f.closed = true
+			_, err := f.run(CompleteOpts{})
+			requireClosedConflictRecovery(t, err, "README.md")
+			writeFile(t, f.specWT, "README.md", "<<<<<<< HEAD\nspec changed\n=======\nbead changed\n>>>>>>> bead/window-1\n")
+			gitRun(t, f.specWT, "add", "README.md")
+			before := gateRevParse(t, f.root, "spec/"+closingSpec)
+
+			_, err = f.run(tc.opts)
+			requireWindowRefusal(t, err, "leftover conflict markers in: README.md")
+			text := err.Error()
+			lines := strings.Split(text, "\n")
+			command := "mindspec complete " + closingBead + " --resolve-merge"
+			if strings.Contains(text, "--merge-only") || lines[len(lines)-1] != "recovery: "+command || strings.Count(text, "\nrecovery: ") != 1 {
+				t.Fatalf("want one final closed-bead recovery without --merge-only, got:\n%s", text)
+			}
+			if !strings.Contains(text, "\n  3. re-run "+command+"\n") {
+				t.Fatalf("leftover-marker steps must name the closed-bead re-entry:\n%s", text)
+			}
+			if !gitutil.MergeInProgress(f.specWT) || f.closeCalls != 0 || len(f.meta) != 0 || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+				t.Fatalf("marker refusal changed completion state: closes=%d metadata=%v", f.closeCalls, f.meta)
+			}
+			if _, err := os.Stat(f.beadWT); err != nil {
+				t.Fatalf("marker refusal removed bead worktree: %v", err)
+			}
+		})
+	}
+}
+
 func TestComplete_ClosedSourceConflictRecovery(t *testing.T) {
 	f := sourceConflictWindow(t)
 	stubClosedWindowChild(t)
@@ -115,7 +155,7 @@ type closedMergeFailureExecutor struct {
 	calls   int
 }
 
-func (e *closedMergeFailureExecutor) MergeBead(string, string, string, bool) error {
+func (e *closedMergeFailureExecutor) MergeBead(string, string, string, bool, executor.MergeBeadOptions) error {
 	e.calls++
 	return e.failure
 }

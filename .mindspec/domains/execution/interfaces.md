@@ -322,9 +322,11 @@ Ownership conflicts return their path list for the caller's path decision.
 
 `Executor.MergeBead` keeps the layout guard, live work-destruction
 preflight, and preserved-merge dispatch. It makes no binding or cleanup
-write. Its mode selects the merge-only re-entry command.
-For a closed child of the spec epic, the workflow keeps the conflict lines
-and replaces this bead's merge-only re-entry with plain `complete --resolve-merge`.
+write. `MergeBeadOptions.Closed` selects the re-entry command. For a closed
+child of the spec epic, the workflow sets `Closed: true`. The executor then
+omits `--merge-only` from every re-entry hint. The default keeps `--merge-only`.
+Both modes leave binding and cleanup to the caller. The workflow returns
+executor refusals with final recovery lines unchanged.
 Other merge guard failures keep their recovery.
 
 `FirstParentMerges` returns full commit identities. `CompletionState`
