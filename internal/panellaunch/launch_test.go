@@ -2,11 +2,14 @@ package panellaunch
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 func TestVerdictFileBytes(t *testing.T) {
@@ -130,6 +133,64 @@ func TestExtractMarkerBoundary(t *testing.T) {
 			got, err := Extract([]byte(raw), Hash([]byte(nonce)))
 			if err != nil || string(got) != "{}" {
 				t.Fatalf("marker at read boundary: %q %v", got, err)
+			}
+		})
+	}
+}
+
+func TestVerdictPayloadLimit(t *testing.T) {
+	v := panel.VerdictV2{Schema: 2, Slot: "R1", Round: 1, ReviewedSHA: strings.Repeat("a", 40), Status: "final", Verdict: "APPROVE", Model: "m", Rationale: "x", ConcreteChangesRequired: []panel.ChangeRequired{}, CommandsRun: []panel.CommandRun{}}
+	base, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []int{maxVerdictBytes, maxVerdictBytes + 1} {
+		v.Rationale = strings.Repeat("x", size-len(base)+1)
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(raw) != size {
+			t.Fatalf("payload size: %d, want %d", len(raw), size)
+		}
+		if err := panel.ValidateVerdictV2(raw); (err == nil) != (size == maxVerdictBytes) {
+			t.Fatalf("validator boundary: %v", err)
+		}
+		for _, output := range []string{"file", "stdout"} {
+			for _, newline := range []string{"\n", "\r\n"} {
+				t.Run(fmt.Sprintf("%s/%d/%q", output, size, newline), func(t *testing.T) {
+					dir := t.TempDir()
+					name, content := "verdict.json", raw
+					if output == "stdout" {
+						name = "stdout.log"
+						content = []byte("MINDSPEC-VERDICT-BEGIN n" + newline + string(raw) + newline + "MINDSPEC-VERDICT-END n" + newline)
+					}
+					if err := os.WriteFile(filepath.Join(dir, name), content, 0600); err != nil {
+						t.Fatal(err)
+					}
+					got, err := Verdict(dir, output, Hash([]byte("n")))
+					if size > maxVerdictBytes {
+						if err == nil || !strings.Contains(err.Error(), "size limit") {
+							t.Fatalf("oversize payload accepted: %v", err)
+						}
+					} else if err != nil || !bytes.Equal(got, raw) {
+						t.Fatalf("valid boundary payload refused or changed: %v (got %d bytes)", err, len(got))
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestExtractMarkerLimit(t *testing.T) {
+	for _, marker := range []string{"BEGIN", "END"} {
+		t.Run(marker, func(t *testing.T) {
+			line := "MINDSPEC-VERDICT-" + marker + " " + strings.Repeat("n", maxVerdictBytes) + "\n"
+			if marker == "END" {
+				line = "MINDSPEC-VERDICT-BEGIN n\n{}\n" + line
+			}
+			if _, err := Extract([]byte(line), Hash([]byte("n"))); err == nil || err.Error() != "verdict marker exceeds size limit" {
+				t.Fatalf("marker cap did not stop the line: %v", err)
 			}
 		})
 	}

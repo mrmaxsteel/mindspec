@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 )
 
@@ -103,7 +104,7 @@ func Extract(raw []byte, nonceHash string) ([]byte, error) {
 	return extractReader(bytes.NewReader(raw), nonceHash)
 }
 
-const maxVerdictBytes = 1 << 20
+const maxVerdictBytes = panel.MaxVerdictBytes
 
 // extractReader discards diagnostic lines as it reads them. Only the verdict
 // body and a possible marker line are retained, each with a fixed size bound.
@@ -128,7 +129,8 @@ func extractReader(input io.Reader, nonceHash string) ([]byte, error) {
 				}
 				marker.Write(fragment)
 			case started && !ended:
-				if body.Len()+len(fragment) > maxVerdictBytes {
+				// Keep room for the LF or CRLF before the end marker.
+				if body.Len()+len(fragment) > maxVerdictBytes+2 {
 					return nil, fmt.Errorf("verdict block exceeds size limit")
 				}
 				body.Write(fragment)
@@ -161,7 +163,13 @@ func extractReader(input io.Reader, nonceHash string) ([]byte, error) {
 	if !started || !ended {
 		return nil, fmt.Errorf("one complete verdict block is required")
 	}
-	return bytes.TrimSpace(body.Bytes()), nil
+	// The line break before the end marker frames the payload.
+	payload := bytes.TrimSuffix(body.Bytes(), []byte("\n"))
+	payload = bytes.TrimSuffix(payload, []byte("\r"))
+	if len(payload) > maxVerdictBytes {
+		return nil, fmt.Errorf("verdict block exceeds size limit")
+	}
+	return bytes.TrimSpace(payload), nil
 }
 
 // Verdict reads only the current attempt. File bytes are preserved exactly.

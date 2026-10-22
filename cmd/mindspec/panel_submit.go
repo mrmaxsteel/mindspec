@@ -133,14 +133,14 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if file != "-" {
 		f, err := safefile.Open(file)
 		if err != nil {
-			return guard.NewFailure(err.Error(), "select a readable regular verdict file")
+			return guard.NewFailure(termsafe.Escape(err.Error()), "select a readable regular verdict file")
 		}
 		defer f.Close()
 		input = f
 	}
 	data, err := io.ReadAll(io.LimitReader(input, panel.MaxVerdictBytes+1))
 	if err != nil {
-		return guard.NewFailure(err.Error(), "select a readable verdict file and submit it again")
+		return guard.NewFailure(termsafe.Escape(err.Error()), "select a readable verdict file and submit it again")
 	}
 	target := panel.SubmitTarget{Dir: reg.Dir, Spec: spec, Panel: slug, Slot: slot, Round: round, File: file, SlotDir: layout.Dir}
 	_, err = panel.Submit(target, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {

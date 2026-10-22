@@ -562,6 +562,10 @@ func LatestSubmissions(dir string, round int) (map[string]SubmissionRecord, erro
 	if err != nil {
 		return nil, err
 	}
+	return latestSubmissions(lines, round)
+}
+
+func latestSubmissions(lines [][]byte, round int) (map[string]SubmissionRecord, error) {
 	out := map[string]SubmissionRecord{}
 	for _, line := range lines {
 		var r SubmissionRecord
@@ -588,6 +592,10 @@ func SlotAttempts(dir string, round int) (map[string][]SlotAttempt, error) {
 	if err != nil {
 		return nil, err
 	}
+	return slotAttempts(lines, round)
+}
+
+func slotAttempts(lines [][]byte, round int) (map[string][]SlotAttempt, error) {
 	out := map[string][]SlotAttempt{}
 	latest := map[string]int{}
 	seq := map[string]int{}

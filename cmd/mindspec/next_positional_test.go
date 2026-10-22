@@ -81,10 +81,7 @@ func TestNext_SelectorOnEmptySet_Refuses(t *testing.T) {
 				t.Fatalf("empty selector succeeded: %s", out)
 			}
 			requireText(t, err.Error(), tc.sentence)
-			recovery := "\nrecovery: mindspec next --spec 129-fixture"
-			if tc.name == "pick" {
-				recovery = "\nrecovery: mindspec next --spec '129-fixture'"
-			}
+			recovery := "\nrecovery: mindspec next --spec '129-fixture'"
 			if !strings.HasSuffix(err.Error(), recovery) {
 				t.Fatalf("selector recovery must end refusal: %v", err)
 			}
@@ -132,8 +129,8 @@ func TestNext_UnlinkedReadyPositional_Refuses(t *testing.T) {
 			} else if strings.Contains(err.Error(), "(parent:") {
 				t.Fatalf("parentless refusal invents a parent: %v", err)
 			}
-			requireText(t, err.Error(), want+"\nrecovery: mindspec next --spec 129-fixture")
-			if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
+			requireText(t, err.Error(), want+"\nrecovery: mindspec next --spec '129-fixture'")
+			if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec '129-fixture'") {
 				t.Fatalf("unlinked recovery: %v", err)
 			}
 			if f.audit(t) != before {
@@ -164,7 +161,7 @@ func TestNext_N4NoLineagePositionalRefuses(t *testing.T) {
 			if err == nil {
 				t.Fatal("no-lineage N4 selected")
 			}
-			requireText(t, err.Error(), "bead epic-129.4 has no lineage, so readiness cannot evaluate it; no readiness override applies", "recovery: bd show epic-129.4 --json")
+			requireText(t, err.Error(), "bead epic-129.4 has no lineage, so readiness cannot evaluate it; no readiness override applies", "recovery: bd show 'epic-129.4' --json")
 			if calls != 0 || f.audit(t) != before {
 				t.Fatalf("no-lineage N4 reached gate (%d) or mutated", calls)
 			}

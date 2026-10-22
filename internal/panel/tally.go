@@ -312,6 +312,10 @@ func (r *Result) VoteDecision() (VoteVerdict, string) {
 // I/O-level only (the directory itself unreadable); per-file problems
 // are reported in the Result (PanelErr, Malformed).
 func Tally(dir string) (*Result, error) {
+	return tally(dir, ReadLedger)
+}
+
+func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -321,7 +325,8 @@ func Tally(dir string) (*Result, error) {
 		return nil, fmt.Errorf("tally panel dir: %w", err)
 	}
 
-	res := &Result{Dir: abs}
+	lines, ledgerErr := readLedger(dir)
+	res := &Result{Dir: abs, IntegrityErr: ledgerErr}
 
 	// Registration.
 	if _, statErr := os.Stat(filepath.Join(dir, FileName)); statErr == nil {
@@ -331,7 +336,10 @@ func Tally(dir string) (*Result, error) {
 		} else {
 			p := reg.Panel
 			res.Panel = &p
-			field, checkErr := CheckHandEdits(dir, p)
+			field, checkErr := "", ledgerErr
+			if checkErr == nil {
+				field, checkErr = checkHandEditsFromLedger(dir, p, lines)
+			}
 			if checkErr != nil {
 				res.IntegrityErr = checkErr
 			} else if field != "" {
@@ -375,7 +383,7 @@ func Tally(dir string) (*Result, error) {
 		res.RoundMismatch = res.Panel.Round != res.LatestRound
 	}
 
-	round, schemaErr := RoundSchema(dir)
+	round, schemaErr := roundSchema(lines)
 	if schemaErr != nil {
 		res.IntegrityErr = schemaErr
 	}
@@ -384,11 +392,11 @@ func Tally(dir string) (*Result, error) {
 	var attempts map[string][]SlotAttempt
 	if round.VerdictSchema == 2 {
 		res.RoundMismatch = res.RoundMismatch || res.Panel != nil && res.Panel.Round != round.Round
-		submissions, err = LatestSubmissions(dir, res.LatestRound)
+		submissions, err = latestSubmissions(lines, res.LatestRound)
 		if err != nil {
 			return nil, err
 		}
-		attempts, err = SlotAttempts(dir, res.LatestRound)
+		attempts, err = slotAttempts(lines, res.LatestRound)
 		if err != nil {
 			return nil, err
 		}

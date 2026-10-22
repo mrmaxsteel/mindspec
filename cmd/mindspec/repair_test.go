@@ -197,6 +197,9 @@ func TestRepairPhase_BackwardMoveRefused(t *testing.T) {
 	if calls != 0 {
 		t.Errorf("merge seam calls = %d, want 0 — stored mindspec_phase must be left unchanged on refusal", calls)
 	}
+	if !strings.Contains(err.Error(), "bd show 'epic-92'") {
+		t.Errorf("inspection recovery must quote the epic: %v", err)
+	}
 	if !strings.Contains(err.Error(), "force-backward") {
 		t.Errorf("refusal should name the --force-backward escape: %v", err)
 	}

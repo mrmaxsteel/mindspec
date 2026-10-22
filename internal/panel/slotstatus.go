@@ -56,6 +56,10 @@ func RoundSchema(dir string) (RoundRecord, error) {
 	if err != nil {
 		return RoundRecord{}, err
 	}
+	return roundSchema(lines)
+}
+
+func roundSchema(lines [][]byte) (RoundRecord, error) {
 	var latest RoundRecord
 	seenV2 := false
 	for _, line := range lines {
@@ -77,23 +81,27 @@ func RoundSchema(dir string) (RoundRecord, error) {
 
 // ReadSlotStatuses is read-only. Lock facts are probes taken by the adapter.
 func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time) ([]SlotStatus, error) {
+	return readSlotStatuses(res, runtime, now, ReadLedger)
+}
+
+func readSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time, readLedger func(string) ([][]byte, error)) ([]SlotStatus, error) {
 	if res == nil || res.Panel == nil {
 		return nil, fmt.Errorf("panel registration unreadable")
 	}
 	p := res.Panel
-	round, err := RoundSchema(res.Dir)
+	lines, err := readLedger(res.Dir)
 	if err != nil {
 		return nil, err
 	}
-	subs, err := LatestSubmissions(res.Dir, p.Round)
+	round, err := roundSchema(lines)
 	if err != nil {
 		return nil, err
 	}
-	attempts, err := SlotAttempts(res.Dir, p.Round)
+	subs, err := latestSubmissions(lines, p.Round)
 	if err != nil {
 		return nil, err
 	}
-	lines, err := ReadLedger(res.Dir)
+	attempts, err := slotAttempts(lines, p.Round)
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +136,12 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 				if matches {
 					s.Status = "final"
 				}
-			case (exists || readErr != nil && !os.IsNotExist(readErr)) && !matches:
+			case exists && !matches:
 				s.Status = "unsubmitted"
 			default:
+				if readErr != nil && !os.IsNotExist(readErr) {
+					s.Status = "unsubmitted"
+				}
 				e, later := latestLaterAttempt(events)
 				if !later || e.Status == "submitted" && e.Seq == sub.Seq {
 					if sub.Seq > 0 {

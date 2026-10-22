@@ -66,7 +66,7 @@ func TestDerivePhase_LegacyNoticeSubstitution(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(warning) {
 		t.Errorf("legacy notice must end with a recovery line: %q", warning)
 	}
-	if !strings.Contains(warning, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(warning, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("legacy notice recovery must be the re-runnable repair command: %q", warning)
 	}
 }
@@ -178,7 +178,7 @@ func TestDerivePhase_AC5iv_ForwardDisagreementKeepsRepairPhaseRecovery(t *testin
 	if !guard.HasFinalRecoveryLine(warning) {
 		t.Errorf("forward disagreement must end with a recovery line: %q", warning)
 	}
-	if !strings.Contains(warning, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(warning, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("forward disagreement must keep the repair-phase recovery: %q", warning)
 	}
 	if strings.Contains(warning, "bd show") {
@@ -226,7 +226,7 @@ func TestDerivePhase_AC5iv_BackwardDisagreementEmitsInspectionLineNeverRepairPha
 	if !guard.HasFinalRecoveryLine(warning) {
 		t.Errorf("backward disagreement must still end with a recovery line (ADR-0035): %q", warning)
 	}
-	if !strings.Contains(warning, "recovery: bd show") {
+	if !strings.Contains(warning, "recovery: bd show 'epic-9'") {
 		t.Errorf("backward disagreement must end with an inspection action, not a write command: %q", warning)
 	}
 	if strings.Contains(warning, "recovery: mindspec repair phase") {

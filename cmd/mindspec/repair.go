@@ -118,7 +118,7 @@ func repairSpecTitleRunE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return guard.NewFailure(
 			fmt.Sprintf("repair spec-title: reading epic %s metadata failed: %v", epicID, err),
-			fmt.Sprintf("bd show %s", epicID),
+			fmt.Sprintf("bd show %s", shellQuoteTarget(epicID)),
 		)
 	}
 	var specNum int
@@ -131,7 +131,7 @@ func repairSpecTitleRunE(cmd *cobra.Command, args []string) error {
 	if specNum <= 0 {
 		return guard.NewFailure(
 			fmt.Sprintf("repair spec-title: epic %s has no spec_num metadata to pair with the new title", epicID),
-			fmt.Sprintf("bd show %s", epicID),
+			fmt.Sprintf("bd show %s", shellQuoteTarget(epicID)),
 		)
 	}
 
@@ -315,7 +315,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	if lockErr != nil {
 		recovery := fmt.Sprintf("mindspec repair phase %s", shellQuoteTarget(idrender.Spec(specID)))
 		if errors.Is(lockErr, errRepairDerivationFailed) || errors.Is(lockErr, errRepairNoDerivedPhase) {
-			recovery = fmt.Sprintf("bd show %s", epicID)
+			recovery = fmt.Sprintf("bd show %s", shellQuoteTarget(epicID))
 		}
 		// Final-review round 1 (R5/G3): lockErr can chain bd stderr (the
 		// in-lock derivation and merge write) — render the escaped form.
@@ -325,7 +325,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		return guard.NewFailure(
 			fmt.Sprintf("repair phase: refusing backward move for spec %s (epic %s): stored phase %q is ahead of the re-derived phase %q in lifecycle order (spec < plan < implement < review < done) — the derivation may be stale, or the epic genuinely regressed",
 				idrender.Spec(specID), idrender.Bead(epicID), freshStored, freshDerived),
-			fmt.Sprintf("bd show %s   (inspect the epic before forcing a backward move)", idrender.Bead(epicID)),
+			fmt.Sprintf("bd show %s   (inspect the epic before forcing a backward move)", shellQuoteTarget(idrender.Bead(epicID))),
 			fmt.Sprintf("mindspec repair phase %s --force-backward \"<reason>\"   (only if the backward move is intentional)", shellQuoteTarget(idrender.Spec(specID))),
 		)
 	}

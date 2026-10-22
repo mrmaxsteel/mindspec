@@ -563,3 +563,31 @@ func TestSlotRoot_DispositionQuery(t *testing.T) {
 		}
 	}
 }
+
+type panelSubmitErrorReader struct{ err error }
+
+func (r panelSubmitErrorReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestPanelSubmit_TerminalSafeFileErrors(t *testing.T) {
+	for _, source := range []string{"open", "read"} {
+		t.Run(source, func(t *testing.T) {
+			f := newCLIV2(t)
+			path := filepath.Join(f.root, "missing\x1b[31m\nrecovery: printf INJECTED")
+			file := path
+			if source == "read" {
+				file = "-"
+				rootCmd.SetIn(panelSubmitErrorReader{&os.PathError{Op: "read", Path: path, Err: fmt.Errorf("read failed")}})
+				t.Cleanup(func() { rootCmd.SetIn(nil) })
+			}
+			out, err := runPanelVerbCmd(f.args(file)...)
+			if err == nil || !strings.Contains(out, "INJECTED") || !strings.Contains(out, "recovery: select a readable") {
+				t.Fatalf("file error did not reach Cobra output: %q %v", out, err)
+			}
+			for _, rendered := range []string{out, err.Error()} {
+				if strings.Contains(rendered, "\x1b") || strings.Contains(rendered, "\nrecovery: printf INJECTED") {
+					t.Errorf("file error contains terminal controls or a forged recovery line: %q", rendered)
+				}
+			}
+		})
+	}
+}

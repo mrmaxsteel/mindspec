@@ -1011,3 +1011,76 @@ func TestPanelLaunch_LargeDiagnosticTranscript(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelLaunch_VerdictPayloadLimit(t *testing.T) {
+	for _, size := range []int{panel.MaxVerdictBytes, panel.MaxVerdictBytes + 1} {
+		for _, ending := range []string{"\\n", "\\r\\n"} {
+			for _, exit := range []int{0, 7} {
+				t.Run(fmt.Sprintf("%d/%s/exit%d", size, ending, exit), func(t *testing.T) {
+					f := newLaunchFixture(t)
+					base := paneltest.Bytes(t, f.v)
+					f.v.Rationale = strings.Repeat("x", size-len(base)+len(f.v.Rationale))
+					raw := paneltest.Bytes(t, f.v)
+					if len(raw) != size {
+						t.Fatalf("payload size %d, want %d", len(raw), size)
+					}
+					payload := filepath.Join(f.root, "boundary.json")
+					slotWrite(t, payload, string(raw))
+					f.scriptBody(t, `prompt=$(cat)
+nonce=$(printf '%s\n' "$prompt" | sed -n 's/^MINDSPEC-VERDICT-BEGIN //p')
+printf 'MINDSPEC-VERDICT-BEGIN %s`+ending+`' "$nonce"
+cat `+shellQuoteTarget(payload)+`
+printf '`+ending+`MINDSPEC-VERDICT-END %s`+ending+`' "$nonce"
+exit `+fmt.Sprint(exit))
+					out, err := f.run(t, false)
+					if size > panel.MaxVerdictBytes {
+						if err == nil {
+							t.Fatal("oversize verdict submitted by launch")
+						}
+						status := "malformed"
+						if exit != 0 {
+							status = "launch_failed"
+						}
+						f.status(t, status)
+						if _, err := launchRun(t, panelRecoverCmd, "run", "R1"); err == nil || !strings.Contains(err.Error(), "size limit") {
+							t.Fatalf("oversize verdict accepted by recover: %v", err)
+						}
+					} else {
+						if exit == 0 {
+							if err != nil {
+								t.Fatalf("boundary verdict must submit on launch: %v; output: %s", err, out)
+							}
+							f.status(t, "final")
+						} else {
+							if err == nil {
+								t.Fatal("nonzero runner exit must refuse automatic submission")
+							}
+							f.status(t, "launch_failed")
+						}
+						if out, err := launchRun(t, panelRecoverCmd, "run", "R1"); err != nil {
+							t.Fatalf("boundary verdict must submit on recover: %v; output: %s", err, out)
+						}
+						f.status(t, "final")
+					}
+					subs, err := panel.LatestSubmissions(f.dir, 1)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if size > panel.MaxVerdictBytes {
+						if subs["R1"].Seq != 0 {
+							t.Fatalf("oversize verdict entered the ledger: %+v", subs["R1"])
+						}
+					} else {
+						via := "launch"
+						if exit != 0 {
+							via = "recover"
+						}
+						if subs["R1"].Seq != 1 || subs["R1"].Via != via || subs["R1"].FileSHA256 != panellaunch.Hash(raw) {
+							t.Fatalf("wrong boundary submission: %+v", subs["R1"])
+						}
+					}
+				})
+			}
+		}
+	}
+}

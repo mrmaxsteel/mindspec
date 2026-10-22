@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -206,7 +207,7 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 			if !hasV2MarkerWithCache(c, epicID) {
 				if children, cerr := c.GetChildren(epicID); cerr == nil && LegacyPhaseSignature(storedPhase, children) {
 					fmt.Fprintf(os.Stderr, "warning: epic %s: legacy phase semantics detected (pre-v2 stored implement)\nrecovery: mindspec repair phase %s\n",
-						epicID, specIDForEpicWithCache(c, epicID))
+						epicID, shellquote.Quote(specIDForEpicWithCache(c, epicID)))
 					return storedPhase, nil
 				}
 			}
@@ -229,10 +230,10 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 			// keeps the format aligned with guard.HasFinalRecoveryLine.
 			if IsBackwardMove(storedPhase, childPhase) {
 				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase) — the derived phase is BEHIND stored in lifecycle order; writing it would move the epic backward\nrecovery: bd show %s\n",
-					idrender.Bead(epicID), storedPhase, childPhase, idrender.Bead(epicID))
+					idrender.Bead(epicID), storedPhase, childPhase, shellquote.Quote(idrender.Bead(epicID)))
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: epic %s: stored phase %q disagrees with child-derived phase %q (trusting stored phase)\nrecovery: mindspec repair phase %s\n",
-					epicID, storedPhase, childPhase, specIDForEpicWithCache(c, epicID))
+					epicID, storedPhase, childPhase, shellquote.Quote(specIDForEpicWithCache(c, epicID)))
 			}
 		}
 		return storedPhase, nil

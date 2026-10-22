@@ -589,8 +589,11 @@ func TestGateV2_OversizeVerdictAfterClosedFinal(t *testing.T) {
 }
 
 func TestGateV2_UnreadableVerdictStatusOrder(t *testing.T) {
-	for _, state := range []string{"draft", "void", "replacement_dispatched", "replacement_failed"} {
-		t.Run(state, func(t *testing.T) {
+	for _, tc := range []struct{ state, want string }{
+		{"draft", "draft"}, {"void", "void"}, {"replacement_dispatched", "running"}, {"replacement_failed", "launch_failed"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			state := tc.state
 			target, data, resolve := submitFixture(t)
 			var v VerdictV2
 			if err := json.Unmarshal(data, &v); err != nil {
@@ -618,8 +621,8 @@ func TestGateV2_UnreadableVerdictStatusOrder(t *testing.T) {
 			}
 			createWrite(t, target.Dir, "R1-round-1.json", strings.Repeat("x", MaxVerdictBytes+1))
 			slots, err := ReadSlotStatuses(gateV2Read(t, target.Dir), nil, time.Now())
-			if err != nil || len(slots) != 2 || slots[0].Status != "unsubmitted" || len(slots[0].Annotations) == 0 {
-				t.Fatalf("unreadable file must follow unmatched-file rule: %+v %v", slots, err)
+			if err != nil || len(slots) != 2 || slots[0].Status != tc.want || len(slots[0].Annotations) == 0 || !strings.HasPrefix(slots[0].Annotations[0], "verdict read failed: ") {
+				t.Fatalf("unreadable file must keep the ordered status %s: %+v %v", tc.want, slots, err)
 			}
 		})
 	}
