@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/safefile"
 )
 
 // Request contains only values needed by the supervisor. Started runs before
@@ -38,7 +40,7 @@ func Hash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToS
 
 // ReadAttemptFile reads a bounded regular file without following its final path link.
 func ReadAttemptFile(dir, name string, limit int64) ([]byte, error) {
-	f, err := openAttemptFile(dir, name)
+	f, err := safefile.Open(filepath.Join(dir, name))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,7 @@ func Digests(dir string) (map[string]string, error) {
 	out := map[string]string{}
 	var readErr error
 	for _, name := range []string{"stdout.log", "stderr.log", "verdict.json"} {
-		f, err := openAttemptFile(dir, name)
+		f, err := safefile.Open(filepath.Join(dir, name))
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -150,7 +152,7 @@ func Verdict(dir, output, nonceHash string) ([]byte, error) {
 }
 
 func Quota(dir string, signals []string) bool {
-	f, err := openAttemptFile(dir, "stderr.log")
+	f, err := safefile.Open(filepath.Join(dir, "stderr.log"))
 	if err != nil {
 		return false
 	}

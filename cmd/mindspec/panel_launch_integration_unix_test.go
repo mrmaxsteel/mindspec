@@ -915,12 +915,16 @@ func TestPanelLaunch_RefusesOutputFIFO(t *testing.T) {
 			if runErr == nil {
 				t.Fatal("FIFO counted as final")
 			}
-			f.status(t, "malformed")
+			want, count := "malformed", 4
+			if name == "exit.json" {
+				want, count = "launch_failed", 2
+			}
+			f.status(t, want)
 			if f.latest(t).Seq != 0 {
 				t.Fatal("unsafe output created a submission")
 			}
 			events := f.events(t)
-			if len(events) != 4 || events[1].Status != "malformed" || events[3].Status != "malformed" {
+			if len(events) != count || events[len(events)-1].Status != want {
 				t.Fatalf("FIFO outcomes: %+v", events)
 			}
 		})
@@ -928,7 +932,7 @@ func TestPanelLaunch_RefusesOutputFIFO(t *testing.T) {
 }
 
 func TestPanelSubmit_RefusesUnsafeAttemptFile(t *testing.T) {
-	for _, kind := range []string{"symlink", "fifo"} {
+	for _, kind := range []string{"symlink", "fifo", "directory"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newCLIV2(t)
 			file := f.shortSetup(t, 1)
@@ -939,6 +943,10 @@ func TestPanelSubmit_RefusesUnsafeAttemptFile(t *testing.T) {
 				if err := os.Symlink(file+".saved", file); err != nil {
 					t.Fatal(err)
 				}
+			} else if kind == "directory" {
+				if err := os.Mkdir(file, 0o700); err != nil {
+					t.Fatal(err)
+				}
 			} else if err := syscall.Mkfifo(file, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -946,8 +954,8 @@ func TestPanelSubmit_RefusesUnsafeAttemptFile(t *testing.T) {
 			go func() { _, err := runPanelVerbCmd("submit", "--file", file); done <- err }()
 			select {
 			case err := <-done:
-				if err == nil {
-					t.Fatal("unsafe attempt file submitted")
+				if err == nil || !strings.Contains(err.Error(), "recovery:") {
+					t.Fatalf("unsafe attempt file needs recovery: %v", err)
 				}
 			case <-time.After(time.Second):
 				pipe, err := os.OpenFile(file, os.O_RDWR|syscall.O_NONBLOCK, 0o600)

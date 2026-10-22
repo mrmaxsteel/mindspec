@@ -4,6 +4,7 @@ package panel
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -37,7 +38,7 @@ func TrySlotLock(path string) (*SlotLock, error) {
 
 // ProbeSlotLock never waits and does not create or remove a file.
 func ProbeSlotLock(path string) (bool, error) {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
@@ -45,6 +46,13 @@ func ProbeSlotLock(path string) (bool, error) {
 		return false, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("%s is not a regular lock file", path)
+	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: fd is a small process-local descriptor
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return true, nil

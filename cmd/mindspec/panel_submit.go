@@ -11,7 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
-	"github.com/mrmaxsteel/mindspec/internal/panellaunch"
+	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -129,14 +129,18 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	var data []byte
-	if file == "-" {
-		data, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), panel.MaxVerdictBytes+1))
-	} else {
-		data, err = panellaunch.ReadAttemptFile(filepath.Dir(file), filepath.Base(file), panel.MaxVerdictBytes)
+	input := cmd.InOrStdin()
+	if file != "-" {
+		f, err := safefile.Open(file)
+		if err != nil {
+			return guard.NewFailure(err.Error(), "select a readable regular verdict file")
+		}
+		defer f.Close()
+		input = f
 	}
+	data, err := io.ReadAll(io.LimitReader(input, panel.MaxVerdictBytes+1))
 	if err != nil {
-		return err
+		return guard.NewFailure(err.Error(), "select a readable verdict file and submit it again")
 	}
 	target := panel.SubmitTarget{Dir: reg.Dir, Spec: spec, Panel: slug, Slot: slot, Round: round, File: file, SlotDir: layout.Dir}
 	_, err = panel.Submit(target, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {

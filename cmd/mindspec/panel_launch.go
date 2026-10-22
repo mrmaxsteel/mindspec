@@ -127,9 +127,6 @@ func attemptOutcome(dir string, start panel.LaunchRecord, status string) (panel.
 	digests, err := panellaunch.Digests(dir)
 	outputErr = errors.Join(outputErr, err)
 	out.StdoutSHA256, out.StderrSHA256, out.VerdictSHA256 = digests["stdout.log"], digests["stderr.log"], digests["verdict.json"]
-	if outputErr != nil {
-		out.Status = "malformed"
-	}
 	return out, outputErr
 }
 
@@ -357,12 +354,12 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 		status := out.Status
 		var selected panel.SubmissionRecord
 		var verdict panel.VerdictV2
-		if outputErr != nil {
-			status = "malformed"
-			refusal = retryRefusal(outputErr.Error())
-			fmt.Fprintln(cmd.OutOrStdout(), refusal)
-		} else if exitErr == nil && exit.Code == 0 && !exit.Timeout {
-			data, err := panellaunch.Verdict(dir, runner.Output, start.NonceSHA256)
+		if exitErr == nil && exit.Code == 0 && !exit.Timeout {
+			var data []byte
+			err := outputErr
+			if err == nil {
+				data, err = panellaunch.Verdict(dir, runner.Output, start.NonceSHA256)
+			}
 			if err == nil {
 				selected, err = launchSubmit(root, reg, args[1], in.Attempt, data, "launch", "")
 			}

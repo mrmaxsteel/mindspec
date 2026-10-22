@@ -1,16 +1,15 @@
 //go:build windows
 
-package panellaunch
+package safefile
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 )
 
-func openAttemptFile(dir, name string) (*os.File, error) {
-	path := filepath.Join(dir, name)
+// Open opens a regular file without following its final path link or waiting on a pipe.
+func Open(path string) (*os.File, error) {
 	ptr, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
@@ -27,7 +26,7 @@ func openAttemptFile(dir, name string) (*os.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%s is not a regular attempt file", path)
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	stat, err := f.Stat()
 	if err != nil {
@@ -36,7 +35,7 @@ func openAttemptFile(dir, name string) (*os.File, error) {
 	}
 	if !stat.Mode().IsRegular() {
 		_ = f.Close()
-		return nil, fmt.Errorf("%s is not a regular attempt file", path)
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	return f, nil
 }

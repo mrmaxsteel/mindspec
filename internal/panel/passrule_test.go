@@ -107,6 +107,19 @@ func TestPassRule_EachTermBlocks(t *testing.T) {
 		})
 	}
 }
+
+func TestPassRule_HardBlockFails(t *testing.T) {
+	dir, _ := passFixture(t, 2, VerdictApprove)
+	r := passTally(t, dir)
+	if !r.PassRule(true) {
+		t.Fatal("approval baseline must pass")
+	}
+	r.HardBlocks = []string{"R1"}
+	r.Verdicts[0].HardBlock = true
+	if r.PassRule(true) {
+		t.Fatal("a hard block must fail PassRule even with all slots approved")
+	}
+}
 func TestPassRule_NeverDischarged(t *testing.T) {
 	for _, kind := range []string{VerdictReject, "hard_block", "INVALID"} {
 		t.Run(kind, func(t *testing.T) {

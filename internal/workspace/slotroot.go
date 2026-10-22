@@ -3,11 +3,13 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -40,17 +42,20 @@ func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotR
 	for {
 		metadata := filepath.Join(dir, "slot.json")
 		tree := filepath.Join(dir, "tree")
-		_, metaErr := os.Stat(metadata)
+		_, metaErr := os.Lstat(metadata)
 		treeInfo, treeErr := os.Stat(tree)
 		if metaErr == nil && treeErr == nil && treeInfo.IsDir() {
 			refuse := func() (SlotRoot, bool, error) {
 				return SlotRoot{}, true, fmt.Errorf("invalid slot directory %s\nrecovery: use mindspec panel checkout to create the slot directory", termsafe.Escape(dir))
 			}
-			raw, err := os.ReadFile(metadata)
+			f, err := safefile.Open(metadata)
 			if err != nil {
-				return slot, true, err
+				return refuse()
 			}
-			if json.Unmarshal(raw, &slot) != nil {
+			const maxMetadataBytes = 64 << 10
+			raw, err := io.ReadAll(io.LimitReader(f, maxMetadataBytes+1))
+			closeErr := f.Close()
+			if err != nil || closeErr != nil || len(raw) > maxMetadataBytes || json.Unmarshal(raw, &slot) != nil {
 				return refuse()
 			}
 			if !filepath.IsAbs(slot.MainRoot) || !slotRootComponent(slot.Spec) || !slotRootComponent(slot.Slug) || !slotRootComponent(slot.Slot) || slot.Round < 1 {

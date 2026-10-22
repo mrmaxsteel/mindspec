@@ -30,6 +30,7 @@ function buildCommand(verb, value = {}) {
   if (args.spec) command += " --spec " + quote(args.spec);
   switch (verb) {
     case CREATE:
+      if (args.spec && args.gate === "adhoc") throw new Error("gate conflicts with spec");
       if (args.bead_id && args.gate && args.gate !== "bead") throw new Error("gate conflicts with bead_id");
       if (!args.bead_id) {
         if (args.gate) command += " --gate " + quote(args.gate);

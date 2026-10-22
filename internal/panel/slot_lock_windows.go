@@ -3,6 +3,8 @@
 package panel
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -64,10 +66,31 @@ func TrySlotLock(path string) (*SlotLock, error) {
 	}}, nil
 }
 func ProbeSlotLock(path string) (bool, error) {
-	raw, err := os.ReadFile(path)
+	ptr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return false, err
+	}
+	h, err := syscall.CreateFile(ptr, syscall.GENERIC_READ, syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE, nil, syscall.OPEN_EXISTING, syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
+	if err != nil {
+		return false, err
+	}
+	f := os.NewFile(uintptr(h), path)
+	defer f.Close()
+	var info syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(h, &info); err != nil {
+		return false, err
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 || !stat.Mode().IsRegular() {
+		return false, fmt.Errorf("%s is not a regular lock file", path)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 64))
 	if err != nil {
 		return false, err
 	}

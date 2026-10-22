@@ -290,11 +290,29 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 }
 
 func TestMsPanelWorkflow_CreateGate(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "mindspec")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/mindspec")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("fixture binary: %v %s", err, out)
+	}
 	for _, gate := range []string{"spec_approve", "plan_approve", "final_review", "adhoc", ""} {
 		t.Run(gate, func(t *testing.T) {
+			root := t.TempDir()
+			workflowGit(t, root, "", "init", "-q", "-b", "main")
+			spec := "# Example\n\n## Acceptance Criteria\n\n- The fixture accepts the command.\n"
+			specDir := filepath.Join(root, ".mindspec", "specs", "900-example")
+			if err := os.MkdirAll(specDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			input := fmt.Sprintf("commit refs/heads/main\ncommitter Workflow Test <workflow@example.invalid> 1760000000 +0000\ndata 7\ninitial\nM 100644 inline .mindspec/specs/900-example/spec.md\ndata %d\n%s\ndone\n", len(spec), spec)
+			workflowGit(t, root, input, "fast-import", "--quiet")
 			source := WorkflowFiles()["ms-panel.js"]
-			js := `const fs=require('fs'), assert=require('assert');
-const [source,gate]=process.argv.slice(1); let created;
+			js := `const cp=require('child_process'), assert=require('assert');
+const [source,gate,bin,root]=process.argv.slice(1); let created;
 const agent=async(prompt,options)=>{
  assert.equal(options.label,'panel-command');
  const command=prompt.split('\n').at(-1);
@@ -306,14 +324,17 @@ const agent=async(prompt,options)=>{
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 (async()=>{
  const args={slug:'p',target:'main',round:1};
- if(gate){args.gate=gate;args.spec='example';}
+ if(gate){args.gate=gate;if(gate!=='adhoc')args.spec='900-example';}
  await new AsyncFunction('args','agent','pipeline',source)(args,agent,async(items,fn)=>Promise.all(items.map(fn)));
  const expected=gate ? " --gate '"+gate+"'" : ' --gate adhoc';
  assert(created.includes(expected),'create dropped gate: '+created);
  assert.equal((created.match(/ --gate /g)||[]).length,1,'duplicate gate: '+created);
+ assert(!(created.includes(" --gate 'adhoc'") && created.includes(' --spec ')),'adhoc rejects a spec: '+created);
+ const accepted=cp.execSync(created.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']});
+ assert(accepted.includes('registered'),'binary did not accept create: '+accepted);
  console.log(created);
 })().catch(e=>{console.error(e);process.exitCode=1;});`
-			out, err := exec.Command("node", "-e", js, source, gate).CombinedOutput()
+			out, err := exec.Command("node", "-e", js, source, gate, bin, root).CombinedOutput()
 			if err != nil {
 				t.Fatalf("gate %s: %v %s", gate, err, out)
 			}
@@ -324,4 +345,21 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 func TestMsPanelWorkflow_ConflictingBeadGate(t *testing.T) {
 	source := "args.gate = 'final_review';\n" + WorkflowFiles()["ms-panel.js"]
 	workflowFixtureRejects(t, source, "gate conflicts with bead_id")
+}
+
+func TestMsPanelWorkflow_ConflictingSpecGate(t *testing.T) {
+	source := WorkflowFiles()["ms-panel.js"]
+	js := `const assert=require('assert');
+const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+let calls=0;
+(async()=>{
+ await assert.rejects(()=>new AsyncFunction('args','agent','pipeline',process.argv[1])(
+  {slug:'p',target:'main',round:1,spec:'example',gate:'adhoc'},
+  async()=>{calls++;return {stdout:'[]',exit:0};},
+  async(items,fn)=>Promise.all(items.map(fn))), /gate conflicts with spec/);
+ assert.equal(calls,0,'refusal must precede every command');
+})().catch(e=>{console.error(e);process.exitCode=1;});`
+	if out, err := exec.Command("node", "-e", js, source).CombinedOutput(); err != nil {
+		t.Fatalf("conflicting spec gate: %v %s", err, out)
+	}
 }

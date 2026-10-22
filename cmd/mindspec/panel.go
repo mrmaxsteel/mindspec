@@ -1320,7 +1320,8 @@ func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, erro
 			}
 			held, err := panel.ProbeSlotLock(filepath.Join(layout.AttemptDir(event.Attempt), "run.lock"))
 			if err != nil {
-				return nil, err
+				held = false
+				rt.LockErrors = append(rt.LockErrors, fmt.Sprintf("attempt %d run.lock probe failed: %s", event.Attempt, termsafe.Escape(err.Error())))
 			}
 			rt.RunLockHeld[event.Attempt] = held
 		}

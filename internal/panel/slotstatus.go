@@ -15,6 +15,7 @@ type SlotRuntime struct {
 	TimeoutMinutes      *int
 	SlotLockHeld        bool
 	RunLockHeld         map[int]bool
+	LockErrors          []string
 	OriginalKind        string
 }
 
@@ -103,7 +104,7 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 		if rt.Model == "" {
 			rt.Model = roster.Model
 		}
-		s := SlotStatus{Slot: roster.Slot, Family: rt.Family, Model: rt.Model, Lens: roster.Lens, Kind: rt.Kind, Status: "missing", Annotations: []string{}}
+		s := SlotStatus{Slot: roster.Slot, Family: rt.Family, Model: rt.Model, Lens: roster.Lens, Kind: rt.Kind, Status: "missing", Annotations: append([]string{}, rt.LockErrors...)}
 		sub := subs[roster.Slot]
 		events := attempts[roster.Slot]
 		file := fmt.Sprintf("%s-round-%d.json", roster.Slot, p.Round)

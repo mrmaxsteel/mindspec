@@ -824,7 +824,7 @@ managed-by: mindspec
 2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
    ` + "`mindspec panel create <slug> --spec <id> --gate spec_approve --target <ref>`" + `
    against the spec DOCUMENT (not a code diff), and do NOT run
-   ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow.
+   ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns PASS.
    The binary resolves the review lenses. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
@@ -848,7 +848,7 @@ managed-by: mindspec
 2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
    ` + "`mindspec panel create <slug> --spec <id> --gate plan_approve --target <ref>`" + `
    against the plan DOCUMENT (not a code diff), and do NOT run
-   ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns Allow.
+   ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns PASS.
    The binary resolves the review lenses. This step is guidance, not a mechanized
    preflight: binary enforcement of these gates is a separate, tracked
    enhancement.
