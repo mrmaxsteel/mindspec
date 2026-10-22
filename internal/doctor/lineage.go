@@ -31,7 +31,7 @@ func lineageTitleNumber(title string) (int, bool) {
 func checkLineage(r *Report, root string) {
 	// An export or config alone does not provide a queryable store.
 	store := false
-	for _, name := range []string{"metadata.json", "redirect", "beads.db", "bd.db", "dolt"} {
+	for _, name := range []string{"embeddeddolt", "redirect", "beads.db", "bd.db", "dolt"} {
 		if _, err := os.Stat(filepath.Join(root, ".beads", name)); err == nil {
 			store = true
 			break

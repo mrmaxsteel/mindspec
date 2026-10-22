@@ -463,6 +463,7 @@ spec_id=<title-id>`. No source requires the spec directory name as the ID.
 A lettered ID keeps its letter. The numeric format applies only to the legacy pair.
 `ErrNoSpecID` marks an absent source. `ErrNoEpicLineage` marks an absent edge.
 `ErrNoEpicForSpec` marks a successful scoped lookup with no match.
+`ErrSpecResolution` marks a spec binding refusal; callers use `errors.Is` to branch on it.
 
 `Cache.FindEpicBySpecID` checks all epics, including closed epics, before
 it stores a match. Duplicate bindings refuse that spec and name all matching

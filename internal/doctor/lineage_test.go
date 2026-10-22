@@ -1,12 +1,12 @@
 package doctor
 
 import (
-	"fmt"
-	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func lineageDoctorFixture(t *testing.T) string {
@@ -16,10 +16,7 @@ func lineageDoctorFixture(t *testing.T) string {
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")
 	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".beads", "metadata.json"), []byte(`{}`), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".beads", "embeddeddolt"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	script := `#!/bin/sh
@@ -82,14 +79,31 @@ func TestDoctor_TitleNumberDiagnosisMatchesRemovedRule(t *testing.T) {
 }
 
 func TestDoctor_LineageWithoutStoreDoesNotQuery(t *testing.T) {
-	for _, exported := range []bool{false, true} {
-		t.Run(fmt.Sprintf("exported=%t", exported), func(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		files     []string
+		store     bool
+		wantCalls int
+	}{
+		{name: "no-beads"},
+		{name: "export-only", files: []string{"issues.jsonl"}},
+		{name: "config-plus-export", files: []string{"metadata.json", "issues.jsonl"}},
+		{name: "embedded-store-only", store: true, wantCalls: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			if exported {
+			if len(tt.files) > 0 || tt.store {
 				if err := os.MkdirAll(filepath.Join(root, ".beads"), 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(root, ".beads", "issues.jsonl"), []byte(`{}`), 0644); err != nil {
+			}
+			for _, name := range tt.files {
+				if err := os.WriteFile(filepath.Join(root, ".beads", name), []byte(`{}`), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.store {
+				if err := os.Mkdir(filepath.Join(root, ".beads", "embeddeddolt"), 0755); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -97,8 +111,8 @@ func TestDoctor_LineageWithoutStoreDoesNotQuery(t *testing.T) {
 			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { calls++; return []byte(`[]`), nil }))
 			r := &Report{}
 			checkLineage(r, root)
-			if calls != 0 || len(r.Checks) != 0 {
-				t.Fatalf("lineage queried a repo without a store: calls=%d checks=%+v", calls, r.Checks)
+			if calls != tt.wantCalls || len(r.Checks) != 0 {
+				t.Fatalf("lineage queries: calls=%d want=%d checks=%+v", calls, tt.wantCalls, r.Checks)
 			}
 		})
 	}
