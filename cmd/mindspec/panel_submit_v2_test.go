@@ -493,6 +493,40 @@ func TestSlotRoot_Refusals(t *testing.T) {
 		})
 	}
 }
+func TestSlotRoot_SubmitTargetRefusals(t *testing.T) {
+	for _, state := range []string{"explicit_round", "registration_round", "registration_spec"} {
+		t.Run(state, func(t *testing.T) {
+			f := newCLIV2(t)
+			spec := f.p.Spec
+			args := []string{"submit", "--file", f.file(t, f.verdict())}
+			want := "slot directory differs from the current panel"
+			switch state {
+			case "explicit_round":
+				args = append(args, "--round", "2")
+				want = "explicit target differs from the slot directory"
+			case "registration_round":
+				p := f.p
+				if err := panel.Create(f.dir, panel.CreateInput{Spec: p.Spec, Target: p.Target, Gate: p.Gate, Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Roster: p.Roster}); err != nil {
+					t.Fatal(err)
+				}
+			case "registration_spec":
+				spec = ""
+			}
+			layout, err := panel.NewSlotLayout(f.root, ".mindspec-scratch", spec, "p", 1, "R1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(layout.Tree, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := panel.WriteSlotMetadata(layout, panel.SlotMetadata{Spec: spec, Slug: "p", Round: 1, Slot: "R1", MainRoot: f.root}); err != nil {
+				t.Fatal(err)
+			}
+			withTestChdir(t, layout.Tree)
+			cliV2Refusal(t, f, want, args...)
+		})
+	}
+}
 func TestSlotRoot_Rules(t *testing.T) {
 	f := realCloneFixture(t)
 	layout := cloneSlotV2(t, f, "R1")

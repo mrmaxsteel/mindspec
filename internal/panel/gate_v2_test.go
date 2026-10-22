@@ -406,6 +406,30 @@ func TestGate_PreV2RoundKeepsV1Rules(t *testing.T) {
 		t.Fatal("schema downgrade accepted")
 	}
 }
+func TestCreate_InvalidSlotModel(t *testing.T) {
+	for _, model := range []string{"", "-model", "bad model"} {
+		for name, create := range map[string]func(string, CreateInput) error{"Create": Create, "CheckCreate": CheckCreate} {
+			t.Run(fmt.Sprintf("%s/%q", name, model), func(t *testing.T) {
+				target, _, _ := submitFixture(t)
+				p := load(target.Dir).Panel
+				p.Roster[0].Model = model
+				in := CreateInput{Spec: p.Spec, Target: p.Target, Gate: p.Gate, Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Roster: p.Roster, ReviewersOverride: true}
+				beforePanel := createRead(t, target.Dir, FileName)
+				beforeLedger := createRead(t, target.Dir, dispositionsFileName)
+				if err := create(target.Dir, in); err == nil || !strings.Contains(err.Error(), "invalid slot model") {
+					t.Errorf("model refusal: %v", err)
+				}
+				if createRead(t, target.Dir, FileName) != beforePanel {
+					t.Error("model refusal changed panel bytes")
+				}
+				if createRead(t, target.Dir, dispositionsFileName) != beforeLedger {
+					t.Error("model refusal changed ledger bytes")
+				}
+			})
+		}
+	}
+}
+
 func TestCreate_FirstV2RoundFamily(t *testing.T) {
 	for _, matching := range []bool{true, false} {
 		t.Run(fmt.Sprint(matching), func(t *testing.T) {
@@ -452,5 +476,34 @@ func TestCreate_FirstV2RoundFamily(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCreate_FirstV2RoundDefaultFamily(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	in := CreateInput{Spec: "test", Target: "main", Gate: "adhoc", Round: 1, ReviewedHeadSHA: strings.Repeat("a", 40), SubjectDigest: "sha256:test", Roster: []RosterSlot{{Slot: "R1", Model: "m", Lens: "one"}, {Slot: "R2", Model: "m", Lens: "two"}}}
+	if err := Create(dir, in); err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range load(dir).Panel.Roster {
+		if slot.Family != "harness" {
+			t.Errorf("snapshot slot %s family = %q, want harness", slot.Slot, slot.Family)
+		}
+	}
+	lines, err := ReadLedger(dir)
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("round ledger: %s %v", lines, err)
+	}
+	var round RoundRecord
+	if err := json.Unmarshal(lines[0], &round); err != nil {
+		t.Fatal(err)
+	}
+	if round.Record != RecordRound || len(round.Roster) != len(in.Roster) {
+		t.Fatalf("round event: %+v", round)
+	}
+	for _, slot := range round.Roster {
+		if slot.Family != "harness" {
+			t.Errorf("round slot %s family = %q, want harness", slot.Slot, slot.Family)
+		}
 	}
 }

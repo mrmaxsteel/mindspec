@@ -14,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
 
 func TestComplete_ResumeRechecksDurableDeferrals(t *testing.T) {
@@ -70,7 +71,7 @@ func runDeferredMaterializationRetry(t *testing.T, change string) {
 	gitRun(t, wt, "commit", "-q", "-m", "baseline artifact")
 	sha := gateRevParse(t, root, branch)
 	dir := filepath.Join(root, "review", "deferred-resume")
-	if err := createV1TestPanel(dir, panel.CreateInput{Spec: specID, Target: branch, BeadID: bp(beadID), Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
+	if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: specID, Target: branch, BeadID: bp(beadID), Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
 		t.Fatal(err)
 	}
 	v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x"}}
@@ -311,7 +312,7 @@ func TestComplete_ResumeTrimsRefutedSlotMembers(t *testing.T) {
 			gitRun(t, wt, "commit", "-q", "-m", "baseline artifact")
 			sha := gateRevParse(t, root, branch)
 			dir := filepath.Join(root, "review", "deferred-resume")
-			if err := createV1TestPanel(dir, panel.CreateInput{Spec: specID, Target: branch, BeadID: bp(beadID), Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
+			if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: specID, Target: branch, BeadID: bp(beadID), Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}}}); err != nil {
 				t.Fatal(err)
 			}
 			v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x", "second ask"}}
@@ -417,7 +418,7 @@ func TestComplete_FreshRetryReconcilesDeferredAudit(t *testing.T) {
 			store.wire(t)
 			panelSkipEnvFn = func() bool { return false }
 			dir := filepath.Join(root, "review", "retry-deferred")
-			if err := createV1TestPanel(dir, panel.CreateInput{Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "a", Lens: "correctness"}, {Slot: "R2", Model: "b", Lens: "tests"}}}); err != nil {
+			if err := paneltest.CreateV1(dir, panel.CreateInput{Spec: specID, Target: "bead/" + beadID, Gate: "bead", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:fixture", Roster: []panel.RosterSlot{{Slot: "R1", Model: "a", Lens: "correctness"}, {Slot: "R2", Model: "b", Lens: "tests"}}}); err != nil {
 				t.Fatal(err)
 			}
 			v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding /tmp/x"}}

@@ -681,6 +681,37 @@ func TestPanelCreate_RoundConflictKeepsDirtyCheckout(t *testing.T) {
 	}
 }
 
+func TestPanelCreate_CarryRefusalKeepsDirtyCheckout(t *testing.T) {
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	f.p.Round = 2
+	f.p.Roster[0].Family = ""
+	f.p.Roster[0].Model = "missing-runner"
+	if err := panel.WriteSnapshot(f.dir, f.p); err != nil {
+		t.Fatal(err)
+	}
+	paneltest.Fixture{Dir: f.dir, Panel: f.p}.Round(t, 2)
+	checkoutOK(t, "--slot", "R1")
+	layout := f.layout(t, "R1")
+	slotWrite(t, filepath.Join(layout.Tree, "README.md"), "dirty tracked file\n")
+	slotWrite(t, filepath.Join(layout.Tree, "untracked", "notes.txt"), "keep these notes\n")
+	before := slotSnapshot(t, layout.Dir)
+	beforePanel := slotSnapshot(t, f.dir)
+	resetPanelCreateFlags(t)
+	out, err := runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "3")
+	if err == nil || !strings.Contains(err.Error(), "cannot carry slot R1 without a matching runner") {
+		t.Fatalf("carry refusal: %v %s", err, out)
+	}
+	if _, err := os.Stat(layout.Dir); err != nil {
+		t.Fatalf("carry refusal removed dirty slot directory: %v", err)
+	}
+	if after := slotSnapshot(t, layout.Dir); !reflect.DeepEqual(before, after) {
+		t.Fatal("carry refusal changed dirty slot bytes")
+	}
+	if after := slotSnapshot(t, f.dir); !reflect.DeepEqual(beforePanel, after) {
+		t.Fatal("carry refusal changed panel bytes")
+	}
+}
+
 func TestPanelCreate_BadBriefKeepsDirtyCheckout(t *testing.T) {
 	f := newCheckoutFixture(t, ".mindspec-scratch")
 	resetPanelCreateFlags(t)

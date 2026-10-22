@@ -1,4 +1,4 @@
-package complete
+package paneltest
 
 import (
 	"encoding/json"
@@ -8,9 +8,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
-// createV1TestPanel seeds the historical file-based round used by verb tests.
-// The create command itself is tested with its current v2 contract.
-func createV1TestPanel(dir string, in panel.CreateInput) error {
+// CreateV1 seeds the historical file-based round used by verb tests.
+// Create tests check the current v2 contract.
+func CreateV1(dir string, in panel.CreateInput) error {
 	beadID := ""
 	if in.BeadID != nil {
 		beadID = *in.BeadID
