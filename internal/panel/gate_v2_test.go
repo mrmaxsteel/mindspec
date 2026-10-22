@@ -520,3 +520,55 @@ func assertRoundSchemaDowngradeBlocked(t *testing.T) {
 		t.Fatalf("consistent schema downgrade accepted: integrity=%v pass=%v", r.IntegrityErr, r.PassRule(true))
 	}
 }
+
+func TestGate_PreV2LargeVerdict(t *testing.T) {
+	target, _, _ := submitFixtureSchema(t, 0)
+	raw := `{"verdict":"APPROVE","rationale":"` + strings.Repeat("x", MaxVerdictBytes) + `","concrete_changes_required":["prior item"]}`
+	for _, slot := range []string{"R1", "R2"} {
+		createWrite(t, target.Dir, slot+"-round-1.json", raw)
+	}
+	r := gateV2Read(t, target.Dir)
+	if !r.PassRule(true) || r.InvalidCount() != 0 {
+		t.Errorf("large historical approvals must pass: %+v", r)
+	}
+	slots, err := ReadSlotStatuses(r, nil, time.Now())
+	if err != nil || len(slots) != 2 {
+		t.Fatalf("statuses: %+v %v", slots, err)
+	}
+	for _, slot := range slots {
+		if slot.Status != "final" {
+			t.Errorf("large historical verdict must be final: %+v", slot)
+		}
+	}
+	for _, read := range []func(string, string, int) (FindingVerdict, error){ReadFindingVerdict, ReadSubmittedFindingVerdict} {
+		v, err := read(target.Dir, "R1", 1)
+		if err != nil || v.Verdict != "APPROVE" {
+			t.Errorf("historical finding reader: %+v %v", v, err)
+		}
+	}
+	// A new v2 round must not impose its read limit on historical evidence.
+	p := load(target.Dir).Panel
+	if err := Create(target.Dir, CreateInput{Spec: p.Spec, Target: p.Target, Gate: p.Gate, Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Roster: p.Roster}); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := ReadFindingVerdict(target.Dir, "R1", 1); err != nil || v.Verdict != "APPROVE" {
+		t.Errorf("read with the file's round schema: %v", err)
+	}
+	prior, err := PriorRoundItems(target.Dir, "R1", 2)
+	if err != nil || !reflect.DeepEqual(prior.Items, []string{"prior item"}) {
+		t.Errorf("historical prompt reader: %+v %v", prior, err)
+	}
+}
+
+func TestGateV2_OversizeVerdictWithoutSubmission(t *testing.T) {
+	target, _, _ := submitFixture(t)
+	createWrite(t, target.Dir, "R1-round-1.json", `{"verdict":"APPROVE","rationale":"`+strings.Repeat("x", MaxVerdictBytes)+`"}`)
+	r := gateV2Read(t, target.Dir)
+	if r.InvalidCount() != 1 || len(r.Verdicts) != 1 || r.Verdicts[0].ReadError == "" || r.PassRule(true) {
+		t.Fatalf("oversize v2 verdict must be INVALID: %+v", r)
+	}
+	slots, err := ReadSlotStatuses(r, nil, time.Now())
+	if err != nil || len(slots) != 2 || slots[0].Status != "damaged" || slots[1].Status != "missing" {
+		t.Fatalf("unreadable v2 verdict without submission must be damaged: %+v %v", slots, err)
+	}
+}

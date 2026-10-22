@@ -306,7 +306,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		if roster[i].Family == "" {
 			if carrying {
 				if in.HasRunner == nil || !in.HasRunner(roster[i].Model) {
-					return nil, submitRefusal(fmt.Sprintf("cannot carry slot %s without a matching runner", roster[i].Slot), fmt.Sprintf("mindspec panel create %s --round %d --reviewers %d", filepath.Base(dir), in.Round, len(in.Roster)))
+					return nil, submitRefusal(fmt.Sprintf("cannot carry slot %s without a matching runner", roster[i].Slot), fmt.Sprintf("mindspec panel create %s --round %d --reviewers %d", promptShellQuote(filepath.Base(dir)), in.Round, len(in.Roster)))
 				}
 				roster[i].Family = roster[i].Model
 			} else {

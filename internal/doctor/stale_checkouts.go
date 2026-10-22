@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -86,9 +87,9 @@ func checkStaleCheckouts(r *Report, root string, cfg *config.Config) {
 			}
 			break
 		}
-		recovery := "mindspec panel checkout " + metadata.Slug + " --prune"
+		recovery := "mindspec panel checkout " + shellquote.Quote(termsafe.Escape(metadata.Slug)) + " --prune"
 		if metadata.Spec != "" && metadata.Spec != "adhoc" {
-			recovery += " --spec " + metadata.Spec
+			recovery += " --spec " + shellquote.Quote(metadata.Spec)
 		}
 		r.Checks = append(r.Checks, Check{Name: "Stale panel checkout", Status: Warn, Message: fmt.Sprintf("%s: %s\nrecovery: %s", layout.Dir, reason, recovery)})
 		return nil

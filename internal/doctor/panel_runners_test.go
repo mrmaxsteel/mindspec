@@ -327,7 +327,7 @@ func TestDoctor_StaleCheckouts(t *testing.T) {
 				return
 			}
 			requireDoctorCheck(t, r, "Stale panel checkout", Warn, ": "+tc.reason+"\nrecovery:")
-			requireDoctorCheck(t, r, "Stale panel checkout", Warn, "mindspec panel checkout p --prune")
+			requireDoctorCheck(t, r, "Stale panel checkout", Warn, "mindspec panel checkout 'p' --prune")
 			if len(doctorChecks(r, "Stale panel checkout")) != 1 {
 				t.Fatal("one Warn required for one stale slot")
 			}
@@ -418,5 +418,36 @@ func TestDoctor_ProbeTimeout(t *testing.T) {
 	requireDoctorCheck(t, r, "Panel probe", Error, "did not exit within 10 seconds")
 	if elapsed := time.Since(start); elapsed < 9*time.Second || elapsed > 15*time.Second {
 		t.Fatalf("probe deadline not enforced: %v", elapsed)
+	}
+}
+
+func TestDoctor_StaleCheckoutsLiteralRecovery(t *testing.T) {
+	for _, slug := range []string{"p;printf INJECTED;#", "panel review", "panel's review"} {
+		for _, spec := range []string{"adhoc", "131-test"} {
+			t.Run(slug+"/"+spec, func(t *testing.T) {
+				root := doctorRunnerRoot(t, "")
+				doctorSlot(t, root, spec, slug, 1)
+				r := &Report{}
+				checkStaleCheckouts(r, root, config.DefaultConfig())
+				checks := doctorChecks(r, "Stale panel checkout")
+				if len(checks) != 1 {
+					t.Fatalf("want stale warning: %+v", r.Checks)
+				}
+				_, recovery, ok := strings.Cut(checks[0].Message, "\nrecovery: ")
+				if !ok {
+					t.Fatal("missing recovery")
+				}
+				// Replace the product command with an inert argument printer.
+				script := "capture() { printf '%s\\n' \"$@\"; }; " + strings.Replace(recovery, "mindspec panel checkout", "capture", 1)
+				out, err := exec.Command("/bin/sh", "-c", script).CombinedOutput()
+				want := slug + "\n--prune\n"
+				if spec != "adhoc" {
+					want += "--spec\n" + spec + "\n"
+				}
+				if err != nil || string(out) != want {
+					t.Fatalf("recovery must preserve literal arguments: %q: got %q, want %q (%v)", recovery, out, want, err)
+				}
+			})
+		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -771,7 +772,13 @@ func renderPanelVerify(res *panel.Result, facts panel.GateFacts) (string, panel.
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "panel %s: %d/%d verdict(s) present", slug, len(res.Verdicts), res.ExpectedReviewers())
+	present := 0
+	for _, v := range res.Verdicts {
+		if v.ReadError == "" {
+			present++
+		}
+	}
+	fmt.Fprintf(&b, "panel %s: %d/%d verdict(s) present", slug, present, res.ExpectedReviewers())
 	if len(res.Malformed) > 0 {
 		// R3(c): each malformed filename is panel-dir-sourced (the
 		// verdictFileRE slot group admits ESC/CSI bytes) — escape PER
@@ -876,7 +883,7 @@ func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges
 			continue
 		}
 		sc := slotChanges{Slot: v.Slot}
-		data, err := panel.ReadVerdictFile(filepath.Join(reg.Dir, v.File))
+		data, err := panel.ReadVerdictFile(filepath.Join(reg.Dir, v.File), res.VerdictSchema)
 		if err != nil {
 			sc.DecodeErr = fmt.Sprintf("could not re-read %s: %v", v.File, err)
 			out = append(out, sc)
@@ -1014,8 +1021,8 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 //
 // SpecID/Target/BeadID/Gate are read RAW from a repo-write-attacker-
 // poisonable panel.json, so none of them is rendered raw: the ID-typed
-// pair goes through idrender (forced-safe ID rendering) and the free-form
-// pair through escapeConfigValue + shellQuoteTarget, exactly as
+// pair goes through idrender. Shell arguments also need shellQuoteTarget.
+// The free-form pair goes through escapeConfigValue + shellQuoteTarget, as
 // tallyExitActionNonBead already renders target/gate. Slug is the
 // already-validated positional (validatePanelSlug), carried here so the
 // re-panel names the SAME panel this tally adjudicated.
@@ -1086,7 +1093,7 @@ func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
 		// IS. The ID-typed operands go through idrender (the house
 		// forced-safe renderer, scan (h)): a validated ID renders
 		// byte-identically, a malformed one is forced through
-		// strconv.Quote — one inert, shell-safe token either way. The
+		// strconv.Quote. Quote the spec argument for the shell as well. The
 		// free-form registration fields (target, gate) get
 		// tallyExitActionNonBead's exact treatment: escapeConfigValue
 		// then shellQuoteTarget, so a control byte cannot reach the
@@ -1094,12 +1101,12 @@ func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
 		// printed line is copied into a shell.
 		safeBeadID := idrender.Bead(f.BeadID)
 		recreate := fmt.Sprintf("mindspec panel create %s --bead %s --round %d",
-			f.Slug, safeBeadID, f.NextRound)
+			shellQuoteTarget(escapeConfigValue(f.Slug)), safeBeadID, f.NextRound)
 		// Same omission discipline as tallyExitActionNonBead (F3-2): an
 		// unrecorded operand renders no dangling flag with nothing after
 		// it — which would otherwise swallow the NEXT flag as its value.
 		if f.SpecID != "" {
-			recreate += fmt.Sprintf(" --spec %s", idrender.Spec(f.SpecID))
+			recreate += fmt.Sprintf(" --spec %s", shellQuoteTarget(idrender.Spec(f.SpecID)))
 		}
 		if f.Target != "" {
 			recreate += fmt.Sprintf(" --target %s", shellQuoteTarget(escapeConfigValue(f.Target)))
@@ -1147,7 +1154,7 @@ func tallyExitActionNonBead(d panel.Decision, slug, target, gate, specID string)
 		return nil
 	case panel.Block:
 		var cmd strings.Builder
-		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1>", slug)
+		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1>", shellQuoteTarget(escapeConfigValue(slug)))
 		if gate != "adhoc" {
 			renderedSpec := "<id>"
 			if specID != "" {
@@ -1167,21 +1174,8 @@ func tallyExitActionNonBead(d panel.Decision, slug, target, gate, specID string)
 	}
 }
 
-// shellQuoteTarget renders s as a POSIX-shell single-quoted literal for
-// embedding in a copyable `mindspec panel create ... --target/--gate <s>`
-// recovery command (spec-113-final G2, finding 1): s is wrapped in single
-// quotes with any embedded single quote escaped by the POSIX
-// close-quote/backslash-quote/reopen-quote technique, so a shell
-// metacharacter in s (semicolon, dollar, a backtick, and so on) can never
-// execute when the
-// printed recovery line is copied into a shell. s is ALWAYS quoted, even a
-// "safe" value with no metacharacters, for one predictable rendering —
-// mirrors internal/otel/config.go's own shellQuote (a different package;
-// this trivial helper is duplicated locally rather than imported across an
-// unrelated dependency boundary).
-func shellQuoteTarget(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+// shellQuoteTarget quotes a literal POSIX shell argument.
+func shellQuoteTarget(s string) string { return shellquote.Quote(s) }
 
 // sanitizeNonBeadDecision rewrites d's Message for a NON-BEAD panel (Bead 1
 // Half 2, R1). panel.PanelGateDecision's shared templates are keyed by
@@ -1258,7 +1252,7 @@ func sanitizeNonBeadDecision(d panel.Decision, slug, target, gate string, gitErr
 		msg = fmt.Sprintf(
 			"panel %s target %s no longer exists — the reviewed ref was deleted; "+
 				"re-create the panel against a live ref (mindspec panel create %s%s --target %s)",
-			slug, displayTarget, slug, scope, shellQuoteTarget(displayTarget))
+			slug, displayTarget, shellQuoteTarget(escapeConfigValue(slug)), scope, shellQuoteTarget(displayTarget))
 	}
 
 	// Leg (5b) transient git error: the shared template's message is

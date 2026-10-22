@@ -69,3 +69,55 @@ func TestDoctor_StaleCheckoutsUnsafeMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctor_LocalConfigFIFO(t *testing.T) {
+	for _, operation := range []string{"load", "doctor"} {
+		t.Run(operation, func(t *testing.T) {
+			root := doctorRunnerRoot(t, "")
+			path := filepath.Join(root, localConfigPath)
+			if err := syscall.Mkfifo(path, 0600); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan struct{}, 1)
+			go func() {
+				defer func() { done <- struct{}{} }()
+				if operation == "load" {
+					_, err := config.Load(root)
+					if err == nil || !strings.Contains(err.Error(), "config.local.yaml") || !strings.HasSuffix(err.Error(), "recovery: set only panel.runners and models in .mindspec/config.local.yaml") {
+						t.Errorf("FIFO needs a local config load error and recovery: %v", err)
+					}
+				} else {
+					r := doctorConfigReport(root, Options{})
+					for _, c := range doctorChecks(r, "MindSpec config") {
+						if c.Status == Error && strings.Contains(c.Message, "config.local.yaml") && strings.Contains(c.Message, "recovery: set only panel.runners and models") {
+							return
+						}
+					}
+					t.Errorf("doctor must report local config load Error: %+v", r.Checks)
+				}
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				if err := os.Rename(path, path+".fifo"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				pipe, err := os.OpenFile(path+".fifo", os.O_RDWR|syscall.O_NONBLOCK, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = pipe.Write([]byte("{}\n"))
+				_ = pipe.Close()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("local config reader did not stop")
+				}
+				t.Fatal(operation + " blocked on config.local.yaml FIFO")
+			}
+		})
+	}
+}

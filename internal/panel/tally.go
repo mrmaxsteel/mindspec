@@ -122,7 +122,7 @@ type Result struct {
 	HardBlocks []string
 
 	// Malformed lists the basenames of LatestRound verdict files
-	// that could be read but could not be parsed. They appear here by
+	// that could not be parsed, plus pre-v2 read failures. They appear here by
 	// name and contribute nothing to Verdicts or the counts. An
 	// unparseable roster verdict counts as MISSING.
 	Malformed []string
@@ -399,8 +399,12 @@ func Tally(dir string) (*Result, error) {
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
-		data, err := ReadVerdictFile(filepath.Join(dir, vf.name))
+		data, err := ReadVerdictFile(filepath.Join(dir, vf.name), round.VerdictSchema)
 		if err != nil {
+			if round.VerdictSchema != 2 {
+				res.Malformed = append(res.Malformed, vf.name)
+				continue
+			}
 			v := Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Verdict: "INVALID", Invalid: true, ReadError: err.Error()}
 			if offRoster {
 				res.Unexpected = append(res.Unexpected, v)
@@ -506,7 +510,7 @@ func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, e
 	}
 	for _, v := range res.Verdicts {
 		if v.Slot == slot && v.Round == round && v.ReadError == "" {
-			data, err := ReadVerdictFile(filepath.Join(dir, v.File))
+			data, err := ReadVerdictFile(filepath.Join(dir, v.File), res.VerdictSchema)
 			if err != nil {
 				return FindingVerdict{}, err
 			}

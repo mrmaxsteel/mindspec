@@ -125,7 +125,21 @@ func ReadFindingVerdict(dir, slot string, round int) (FindingVerdict, error) {
 	if round < 1 || round != latest {
 		return FindingVerdict{}, fmt.Errorf("round %d is not latest round %d", round, latest)
 	}
-	data, err := ReadVerdictFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round)))
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return FindingVerdict{}, err
+	}
+	schema := 0
+	for _, line := range lines {
+		var event RoundRecord
+		if err := json.Unmarshal(line, &event); err != nil {
+			return FindingVerdict{}, err
+		}
+		if event.Record == RecordRound && event.Round == round {
+			schema = event.VerdictSchema
+		}
+	}
+	data, err := ReadVerdictFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round)), schema)
 	if err != nil {
 		return FindingVerdict{}, err
 	}

@@ -8,13 +8,17 @@ import (
 )
 
 // ReadVerdictFile reads a regular verdict file without following its final
-// symlink or waiting on a pipe. It refuses files larger than MaxVerdictBytes.
-func ReadVerdictFile(path string) ([]byte, error) {
+// symlink or waiting on a pipe. Only v2 rounds enforce MaxVerdictBytes.
+func ReadVerdictFile(path string, schema int) ([]byte, error) {
 	f, err := safefile.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(io.LimitReader(f, MaxVerdictBytes+1))
+	var reader io.Reader = f
+	if schema == 2 {
+		reader = io.LimitReader(f, MaxVerdictBytes+1)
+	}
+	data, err := io.ReadAll(reader)
 	closeErr := f.Close()
 	if err != nil {
 		return nil, err
@@ -22,7 +26,7 @@ func ReadVerdictFile(path string) ([]byte, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	if len(data) > MaxVerdictBytes {
+	if schema == 2 && len(data) > MaxVerdictBytes {
 		return nil, fmt.Errorf("verdict file exceeds 1 MiB")
 	}
 	return data, nil

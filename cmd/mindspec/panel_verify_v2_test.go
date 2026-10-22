@@ -417,3 +417,55 @@ func TestPanelVerify_ResolutionErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestPanelTally_CollectLargeHistoricalChanges(t *testing.T) {
+	reg := core3Fixture(t, t.TempDir(), "p", "adhoc", false)
+	text := strings.Repeat("x", panel.MaxVerdictBytes)
+	core3JSON(t, reg.Dir, "R1-round-1.json", panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{text}})
+	res, err := panel.Tally(reg.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := collectSlotChanges(reg, res)
+	if len(changes) != 1 || changes[0].DecodeErr != "" || len(changes[0].Changes) != 1 || changes[0].Changes[0] != text {
+		t.Fatal("large historical finding must reach the change list")
+	}
+}
+
+func TestPanelLaunch_CreateRecoveryQuotesSlug(t *testing.T) {
+	for _, state := range []string{"historical", "landed", "migration"} {
+		t.Run(state, func(t *testing.T) {
+			f := newCLIV2(t)
+			slug := "panel's review;printf INJECTED;#"
+			reg := core3Fixture(t, f.root, slug, "adhoc", false)
+			if state == "migration" {
+				err := panel.Create(reg.Dir, panel.CreateInput{Spec: reg.Panel.Spec, Gate: reg.Panel.Gate, Target: reg.Panel.Target, Round: 2, ReviewedHeadSHA: reg.Panel.ReviewedHeadSHA, SubjectDigest: reg.Panel.SubjectDigest, Roster: reg.Panel.Roster})
+				want := "mindspec panel create " + "'" + strings.ReplaceAll(slug, "'", "'\"'\"'") + "'" + " --round 2 --reviewers 2"
+				if err == nil || !strings.Contains(err.Error(), "without a matching runner") || !strings.Contains(err.Error(), want) {
+					t.Fatalf("quote the migration recovery slug: %v", err)
+				}
+				return
+			}
+			if state == "landed" {
+				if err := panel.Create(reg.Dir, panel.CreateInput{Spec: reg.Panel.Spec, Gate: reg.Panel.Gate, Target: reg.Panel.Target, Round: 2, ReviewersOverride: true, ReviewedHeadSHA: reg.Panel.ReviewedHeadSHA, SubjectDigest: reg.Panel.SubjectDigest, Roster: []panel.RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "one"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "two"}}}); err != nil {
+					t.Fatal(err)
+				}
+				res, err := panel.Tally(reg.Dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reg.Panel = *res.Panel
+				reg.Panel.BeadID = ptrStr("mindspec-test.1")
+				old := checkoutReadMetadataFn
+				checkoutReadMetadataFn = func(string) (map[string]interface{}, error) {
+					return map[string]interface{}{"mindspec_landed_review_panel": slug + "@r2"}, nil
+				}
+				t.Cleanup(func() { checkoutReadMetadataFn = old })
+			}
+			_, _, _, err := launchResolution(f.root, reg, "R1", false, true)
+			if err == nil || !strings.Contains(err.Error(), "recovery: mindspec panel create "+shellQuoteTarget(slug)+" --round ") {
+				t.Fatalf("quote the recovery slug: %v", err)
+			}
+		})
+	}
+}

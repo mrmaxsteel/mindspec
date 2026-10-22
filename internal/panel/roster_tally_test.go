@@ -110,7 +110,8 @@ func TestTally_UnparseableCountsNothing(t *testing.T) {
 func TestTally_UnsafeVerdictIsInvalid(t *testing.T) {
 	for _, name := range []string{"R1-round-1.json", "zz-extra-round-1.json"} {
 		t.Run(name, func(t *testing.T) {
-			dir, _ := passFixture(t, 2, VerdictApprove)
+			dir, target, verdict := gateV2Fixture(t)
+			gateV2Submit(t, target, verdict)
 			if name == "R1-round-1.json" {
 				if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, name+".saved")); err != nil {
 					t.Fatal(err)

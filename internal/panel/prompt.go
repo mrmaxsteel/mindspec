@@ -113,7 +113,7 @@ func PriorRoundItems(dir, slot string, round int) (PriorItemsResult, error) {
 			prior = r
 		}
 	}
-	data, err := ReadVerdictFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round-1)))
+	data, err := ReadVerdictFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round-1)), prior.VerdictSchema)
 	if os.IsNotExist(err) {
 		if prior.VerdictSchema == 2 {
 			return unavailablePriorItems("file is absent"), nil
@@ -121,6 +121,9 @@ func PriorRoundItems(dir, slot string, round int) (PriorItemsResult, error) {
 		return PriorItemsResult{}, nil
 	}
 	if err != nil {
+		if prior.VerdictSchema != 2 {
+			return PriorItemsResult{}, nil
+		}
 		return PriorItemsResult{}, err
 	}
 	if prior.VerdictSchema == 2 {

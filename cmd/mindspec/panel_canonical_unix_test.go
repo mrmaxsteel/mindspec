@@ -156,3 +156,19 @@ func TestPanelTally_UnsafeCanonical(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelVerify_CountsReadRosterVerdicts(t *testing.T) {
+	f, _, _, _ := unsafeCanonicalFixture(t, "directory")
+	if err := os.WriteFile(filepath.Join(f.dir, "outsider-round-1.json"), []byte(`{"verdict":"APPROVE"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := panel.Tally(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := panel.GateFacts{Reg: &panel.Registration{Dir: f.dir, Panel: f.p}, Res: res, HeadSHA: f.p.ReviewedHeadSHA, WorktreeAbsent: true}
+	out, _ := renderPanelVerify(res, facts)
+	if !strings.HasPrefix(out, "panel p: 1/2 verdict(s) present\n") {
+		t.Fatalf("count only read roster verdicts: %s", out)
+	}
+}

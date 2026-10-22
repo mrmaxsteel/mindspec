@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/safefile"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -76,14 +78,17 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 	}
 	c.Panel.Runners = merged
 	localPath := filepath.Join(root, ".mindspec", "config.local.yaml")
-	f, err := os.Open(localPath)
-	if os.IsNotExist(err) {
+	f, err := safefile.Open(localPath)
+	if err != nil {
 		info, statErr := os.Lstat(localPath)
 		if os.IsNotExist(statErr) {
 			return nil
 		}
 		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("config.local.yaml: %s\nrecovery: repair or remove the broken link at .mindspec/config.local.yaml", err)
+			_, targetErr := os.Stat(localPath)
+			if os.IsNotExist(targetErr) {
+				return fmt.Errorf("config.local.yaml: %s\nrecovery: repair or remove the broken link at .mindspec/config.local.yaml", err)
+			}
 		}
 	}
 	if err != nil {

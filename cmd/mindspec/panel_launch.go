@@ -71,7 +71,7 @@ func launchResolution(root string, reg panel.Registration, slotID string, replac
 		return cfg, panel.SubmitResolution{}, config.Runner{}, err
 	}
 	if round.VerdictSchema != 2 || round.Round != reg.Panel.Round {
-		return cfg, panel.SubmitResolution{}, config.Runner{}, checkoutFailure("round does not accept process launches", fmt.Sprintf("mindspec panel create %s --round %d", reg.Slug(), reg.Panel.Round+1))
+		return cfg, panel.SubmitResolution{}, config.Runner{}, checkoutFailure("round does not accept process launches", fmt.Sprintf("mindspec panel create %s --round %d", shellQuoteTarget(reg.Slug()), reg.Panel.Round+1))
 	}
 	resolved, err := resolveEffectivePanelSlot(cfg, reg.Dir, reg.Panel, slot)
 	if err != nil {
@@ -87,7 +87,7 @@ func launchResolution(root string, reg panel.Registration, slotID string, replac
 		return cfg, resolved, runner, err
 	}
 	if resolved.Landed {
-		return cfg, resolved, runner, checkoutFailure("panel round is already landed", fmt.Sprintf("mindspec panel create %s --round %d", reg.Slug(), reg.Panel.Round+1))
+		return cfg, resolved, runner, checkoutFailure("panel round is already landed", fmt.Sprintf("mindspec panel create %s --round %d", shellQuoteTarget(reg.Slug()), reg.Panel.Round+1))
 	}
 	if runner.Kind != "process" {
 		return cfg, resolved, runner, checkoutFailure("slot uses a harness runner", "mindspec panel prompt "+shellQuoteTarget(reg.Slug())+" --slot "+shellQuoteTarget(slotID)+checkoutSpecFlag(reg))
