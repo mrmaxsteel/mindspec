@@ -360,7 +360,6 @@ func TestCeremonyNonInflation_ConfigKeys(t *testing.T) {
 		"loop.halt.on_reject",
 		"loop.halt.panel_deadlock_rounds",
 		"loop.handoff_log",
-		"merge_strategy",
 		"models",
 		"panel",
 		"panel.approve_threshold",

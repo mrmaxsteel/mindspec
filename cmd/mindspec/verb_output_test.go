@@ -416,7 +416,6 @@ func verbOutputTestRepo(t *testing.T) string {
 		}
 	}
 	writeVerbFixtureFile(t, root, ".mindspec/config.yaml", `protected_branches: [main]
-merge_strategy: direct
 worktree_root: .worktrees
 enforcement:
   pre_commit_hook: true

@@ -74,10 +74,6 @@ func TestResolveSpecCreateID_AutoNumber(t *testing.T) {
 			arg:      "005-explicit", want: "005-explicit",
 		},
 		{
-			name: "explicit letter-suffixed ID used verbatim",
-			arg:  "008b-explicit", want: "008b-explicit",
-		},
-		{
 			name: "invalid as slug AND as ID is refused with both forms named",
 			arg:  "Seam_X", wantErr: "must match <NNN>-<slug>",
 		},

@@ -7,6 +7,11 @@
 `doctor.Info` renders as `[INFO]`. `Report.HasFailures` counts only Error
 and Missing. `Report.Fix` never runs an Info fix function.
 
+Doctor reports one Info for a top-level `merge_strategy` key in
+`.mindspec/config.yaml`: `merge_strategy is no longer used; remove it from .mindspec/config.yaml`.
+A commented or indented key gives no finding. This Info does not change
+the exit code. `doctor --fix` leaves the key in place.
+
 | Lifecycle function | Contract |
 |:-------------------|:---------|
 | `FindNamingMerges(root, specBranch, beadID)` | Returns two-parent naming merges on the first-parent chain, newest first. It does not check content or the bead tip. |
@@ -583,7 +588,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
-| `mindspec config show` | Print the effective config (panel/models/loop/runner + pre-existing keys), read-only (spec 109 R9) |
+| `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
 | `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |

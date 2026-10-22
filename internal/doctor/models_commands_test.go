@@ -45,7 +45,7 @@ func TestMissingModels_AllThreeStates(t *testing.T) {
 
 	t.Run("config present without field", func(t *testing.T) {
 		root := t.TempDir()
-		writeConfig(t, root, "merge_strategy: auto\n")
+		writeConfig(t, root, "worktree_root: .worktrees\n")
 		config.ResetCache()
 
 		r := &Report{}
@@ -138,7 +138,7 @@ func TestScaffoldModelsBlock_ThreeStates(t *testing.T) {
 
 	t.Run("file present without field → block appended, prior bytes unchanged", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "merge_strategy: auto\nworktree_root: .worktrees\n"
+		prior := "protected_branches: [main]\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -162,7 +162,7 @@ func TestScaffoldModelsBlock_ThreeStates(t *testing.T) {
 
 	t.Run("file present with field → byte-identical (no-op)", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "models:\n  authoring: claude\nmerge_strategy: auto\n"
+		prior := "models:\n  authoring: claude\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -252,7 +252,7 @@ func TestMissingCommands_AllThreeStates(t *testing.T) {
 
 	t.Run("config present without field", func(t *testing.T) {
 		root := t.TempDir()
-		writeConfig(t, root, "merge_strategy: auto\n")
+		writeConfig(t, root, "worktree_root: .worktrees\n")
 		config.ResetCache()
 
 		r := &Report{}
@@ -346,7 +346,7 @@ func TestScaffoldCommandsBlock_ThreeStates(t *testing.T) {
 
 	t.Run("file present without field → block appended, prior bytes unchanged", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "merge_strategy: auto\nworktree_root: .worktrees\n"
+		prior := "protected_branches: [main]\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -370,7 +370,7 @@ func TestScaffoldCommandsBlock_ThreeStates(t *testing.T) {
 
 	t.Run("file present with field → byte-identical (no-op)", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "commands:\n  build: make build\nmerge_strategy: auto\n"
+		prior := "commands:\n  build: make build\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -450,7 +450,7 @@ func TestScaffoldConfigBlock_ThreeStates_AllKeys(t *testing.T) {
 
 		t.Run(tc.name+"/file present without key → appended, prior bytes preserved", func(t *testing.T) {
 			root := t.TempDir()
-			prior := "merge_strategy: auto\n"
+			prior := "worktree_root: .worktrees\n"
 			writeConfig(t, root, prior)
 			configPath := filepath.Join(root, ".mindspec", "config.yaml")
 			if err := tc.scaffold(configPath); err != nil {
@@ -470,7 +470,7 @@ func TestScaffoldConfigBlock_ThreeStates_AllKeys(t *testing.T) {
 
 		t.Run(tc.name+"/file present with key → byte-identical no-op, operator bytes never rewritten", func(t *testing.T) {
 			root := t.TempDir()
-			prior := "merge_strategy: auto\n" + tc.keyLiteral + "\n"
+			prior := "worktree_root: .worktrees\n" + tc.keyLiteral + "\n"
 			writeConfig(t, root, prior)
 			configPath := filepath.Join(root, ".mindspec", "config.yaml")
 			before, _ := os.ReadFile(configPath)

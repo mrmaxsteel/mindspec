@@ -398,6 +398,10 @@ scenarios (the KILL-TESTED/DOCUMENTED-FORWARD-SAFE classification, ADR-0041
 
 ## Finalization preflight and remote decision
 
+The harness sandbox config sets protected branches, the worktree root and
+enforcement options. It does not write `merge_strategy`. The finalization
+scenario with a remote still tests the push path.
+
 Approval reads the remote configuration once through the error-returning
 `RemoteConfigured` query. A read error refuses before lifecycle writes.
 `FinalizeEpic` receives that value and does not probe again. Its `MergeStrategy`

@@ -5,7 +5,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestHarnessSandbox_NoMergeStrategy(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSandboxConfig(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg["merge_strategy"]; ok {
+		t.Fatal("sandbox config contains the removed key")
+	}
+	if cfg["worktree_root"] != ".worktrees" || cfg["enforcement"] == nil {
+		t.Fatalf("sandbox config is incomplete: %v", cfg)
+	}
+}
 
 func TestSandboxCreatesValidRepo(t *testing.T) {
 	s := NewSandbox(t)
