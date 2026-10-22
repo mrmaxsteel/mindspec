@@ -1058,3 +1058,84 @@ func TestMergeTreeLanding_InvalidOperandsRefuse(t *testing.T) {
 		}
 	}
 }
+
+func rangeFixture(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "work")
+	neWriteFile(t, dir, "early.txt", "early work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "early work")
+	early := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neWriteFile(t, dir, "last.txt", "last work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "last work")
+	head := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Import work", "work")
+	return dir, base, early, head
+}
+
+func TestRangeRevertedAt_DetectsRevertOfRangeChange(t *testing.T) {
+	dir, base, early, head := rangeFixture(t)
+	neRunGit(t, dir, "revert", "--no-edit", early)
+	got, err := RangeRevertedAt(dir, base, head, "main")
+	if err != nil || !got {
+		t.Fatalf("earlier range change was reverted: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_LaterEditNotRevert(t *testing.T) {
+	dir, base, _, head := rangeFixture(t)
+	neWriteFile(t, dir, "early.txt", "early work with later edits\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "evolve work")
+	got, err := RangeRevertedAt(dir, base, head, "main")
+	if err != nil || got {
+		t.Fatalf("later edit is not a revert: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_BaseExcludesEarlierCommits(t *testing.T) {
+	dir, _, early, head := rangeFixture(t)
+	neRunGit(t, dir, "revert", "--no-edit", early)
+	got, err := RangeRevertedAt(dir, early, head, "main")
+	if err != nil || got {
+		t.Fatalf("change before base must not count: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_PartialCommitRevert(t *testing.T) {
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neWriteFile(t, dir, "a.txt", "alpha\n")
+	neWriteFile(t, dir, "b.txt", "beta\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "two paths")
+	head := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	// An absent original path is a partial revert. A copy at another path
+	// cannot provide that path's content.
+	if err := os.Rename(filepath.Join(dir, "a.txt"), filepath.Join(dir, "copy.txt")); err != nil {
+		t.Fatal(err)
+	}
+	neWriteFile(t, dir, "b.txt", "beta with later work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "remove one path and evolve another")
+	got, err := RangeRevertedAt(dir, base, head, "HEAD")
+	if err != nil || !got {
+		t.Fatalf("conflict or copy masked a reverted path: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_ReadError(t *testing.T) {
+	dir, base, _, head := rangeFixture(t)
+	if _, err := RangeRevertedAt(dir, base, head, "missing-ref"); err == nil {
+		t.Fatal("missing target must return an error")
+	}
+	for _, args := range [][3]string{{"--all", head, "main"}, {base, "--all", "main"}, {base, head, "--all"}} {
+		if _, err := RangeRevertedAt(dir, args[0], args[1], args[2]); err == nil {
+			t.Fatalf("option operand accepted: %v", args)
+		}
+	}
+}

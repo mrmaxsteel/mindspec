@@ -9,6 +9,7 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/lifecycle/scan.go scanAncestorFindings workspace.SpecBranch":                                              {Count: 1, Gate: "waist: workspace.SpecBranch validates the spec ID before composition. The lineage resolver also validates the returned ID."},
 	"internal/lifecycle/merge_state.go FindNamingMerges workspace.BeadBranch":                                           {Count: 1, Gate: "waist: BeadBranch validates the bead ID before the merge scan"},
 	"internal/lifecycle/merge_state.go FindValidMerge workspace.BeadBranch":                                             {Count: 1, Gate: "waist: BeadBranch validates the bead ID before tip resolution"},
 	"internal/lifecycle/merge_state.go mergeSpecDir workspace.SpecDir":                                                  {Count: 1, Gate: "waist: SpecDir validates the spec ID before path composition"},

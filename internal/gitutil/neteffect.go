@@ -49,6 +49,7 @@
 package gitutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -119,7 +120,8 @@ func execMergeTreeWriteTree(workdir, base, ours, theirs string) (mergeTreeResult
 
 // mergeTreeWriteTreeNoRenamesFn is the injectable seam over `git merge-tree
 // --write-tree` with rename/copy detection DISABLED (spec 125 G-BLOCK-1) —
-// used ONLY by RevertShape's reverse un-apply. merge-ort does rename
+// used by RevertShape and RangeRevertedAt for reverse previews.
+// merge-ort does rename
 // detection by default, which lets a coincidentally-identical blob at an
 // UNRELATED path count as M's "moved" content: a true revert of M (its
 // content removed at its original path) plus unrelated later work that
@@ -385,6 +387,64 @@ func RevertShape(workdir, mergeSHA, target string) (bool, error) {
 	// the tip's current tree — the tip carries none of M's content at its
 	// original paths).
 	return res.treeOID == targetTree, nil
+}
+
+// RangeRevertedAt checks every commit in base..head at target. It reverses
+// each commit against target with rename detection off. An unchanged path
+// in a clean reverse preview has lost that commit's change. A path restored
+// to its parent value also proves a revert. A conflict
+// on another path cannot hide it. Empty commits contribute no changes.
+// Reads and previews leave refs, the index and the worktree unchanged.
+func RangeRevertedAt(workdir, base, head, target string) (bool, error) {
+	for _, ref := range []string{base, head, target} {
+		if err := rejectOptionLike(ref); err != nil {
+			return false, err
+		}
+	}
+	cmd := execCommand("git", gitArgs(workdir, "rev-list", "--parents", base+".."+head, "--")...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("reading work range: %w", err)
+	}
+	for _, line := range strings.FieldsFunc(string(out), func(r rune) bool { return r == '\n' }) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return false, fmt.Errorf("work range has a commit with no base parent")
+		}
+		commit, parent := fields[0], fields[1]
+		paths, err := DiffNameOnlyNoRenames(workdir, parent, commit)
+		if err != nil {
+			return false, err
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		preview, err := mergeTreeWriteTreeNoRenamesFn(workdir, commit, target, parent)
+		if err != nil {
+			return false, err
+		}
+		for _, path := range paths {
+			before, err := TreePathEntry(workdir, target, path)
+			if err != nil {
+				return false, err
+			}
+			after, err := TreePathEntry(workdir, preview.treeOID, path)
+			if err != nil {
+				return false, err
+			}
+			original, err := TreePathEntry(workdir, parent, path)
+			if err != nil {
+				return false, err
+			}
+			// A conflicted modify/delete preview can keep the target blob.
+			// That unchanged blob alone proves nothing. A return to the
+			// parent still proves a revert even if another path conflicts.
+			if bytes.Equal(before, original) || !preview.conflict && bytes.Equal(before, after) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // parseIssueStatuses parses a .beads/issues.jsonl blob (one JSON object per

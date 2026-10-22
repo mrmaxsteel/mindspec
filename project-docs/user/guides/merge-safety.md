@@ -178,3 +178,37 @@ Related recovery surfaces reference this verb: a `plan approve` or
 path for the externally-merged case, and the orphaned-bead hints
 propose inspection (never `mindspec complete`, never a pasteable
 force-delete) when merge provenance is not positively established.
+
+
+## Work in history without a naming merge
+
+`mindspec reattest <bead-id>` first checks first-parent merges. It then
+checks reachable merges. When neither scan finds a candidate, it checks
+the surviving bead branch and its full work range at the spec tip.
+
+- `ancestor-without-naming-merge`: the changes are present, but no merge
+  names the prerequisite. A re-merge cannot help. A person must verify the
+  work before using the override. The output gives one command for each
+  open dependent in the same epic:
+  `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>`.
+  With no dependent, it says that no bead waits and prints `mindspec doctor`.
+- `no-owned-exact-merge` with a history line: the commits are in history,
+  but the tool cannot show that their changes remain present. It gives no
+  override recommendation. An unknown range base or a tip that belongs
+  to another bead also gives no override recommendation.
+- A missing branch, a tip outside spec history, or an empty work range
+  makes no history claim. Read errors refuse and make no content claim.
+
+A branch tip strictly inside another bead's work range cannot be told
+apart from the prerequisite's own work. A person must check that case.
+Doctor reports a prerequisite with present content and no landed binding
+at Warn. The finding names the prerequisite and gives its dependent
+commands. Doctor makes no automatic fix.
+
+For an attested restore, a person must verify the merge and its diff first.
+Then restore the bead branch at that merge's verified second parent:
+
+```bash
+git branch bead/<bead-id> <verified-second-parent-sha>
+mindspec reattest <bead-id>
+```

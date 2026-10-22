@@ -369,7 +369,7 @@ func TestFindLandedMergeReachable_OnlyViaSibling(t *testing.T) {
 	writes := installReattestRecorder(t)
 	_, err = ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "test-actor")
 	var refusal *ReattestRefusal
-	if !errors.As(err, &refusal) || refusal.State != ReattestStateNoOwnedMerge || len(*writes) != 0 {
+	if !errors.As(err, &refusal) || refusal.State != ReattestStateAncestor || len(*writes) != 0 {
 		t.Fatalf("sibling-only reattest: %v writes=%v", err, *writes)
 	}
 }
@@ -1048,16 +1048,17 @@ func TestFindLandedMergeReachable_SubjectMatcherRejectsOtherTargetsAndPrefixes(t
 	for _, tc := range []struct {
 		bead, subject string
 		octopus       bool
+		state         string
 	}{
-		{fallbackBead, "Merge bead/" + fallbackBead + " into bead/other", false},
-		{fallbackBead, "Merge bead/" + fallbackBead + " into spec/other-spec", false},
-		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "' into spec/other-spec", false},
-		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "'", false},
-		{fallbackBead, "Merge bead/" + fallbackBead, true},
-		{fallbackBead, "Merge bead/" + fallbackBead + ".10", false},
-		{fallbackBead, "Merge bead/" + fallbackBead + "-x", false},
-		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".10", false},
-		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".1-x", false},
+		{fallbackBead, "Merge bead/" + fallbackBead + " into bead/other", false, ReattestStateAncestor},
+		{fallbackBead, "Merge bead/" + fallbackBead + " into spec/other-spec", false, ReattestStateAncestor},
+		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "' into spec/other-spec", false, ReattestStateAncestor},
+		{fallbackBead, "Merge branch 'bead/" + fallbackBead + "'", false, ReattestStateAncestor},
+		{fallbackBead, "Merge bead/" + fallbackBead, true, ReattestStateAncestor},
+		{fallbackBead, "Merge bead/" + fallbackBead + ".10", false, ReattestStateAncestor},
+		{fallbackBead, "Merge bead/" + fallbackBead + "-x", false, ReattestStateAncestor},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".10", false, ReattestStateNoOwnedMerge},
+		{fallbackBead + ".1", "Merge bead/" + fallbackBead + ".1-x", false, ReattestStateNoOwnedMerge},
 	} {
 		t.Run(tc.subject+"/for="+tc.bead, func(t *testing.T) {
 			f := siblingFallbackFixture(t)
@@ -1088,7 +1089,7 @@ func TestFindLandedMergeReachable_SubjectMatcherRejectsOtherTargetsAndPrefixes(t
 			writes := installReattestRecorder(t)
 			res, err := ReattestLandedMerge(f.dir, fallbackSpec, tc.bead, "test-actor")
 			var refusal *ReattestRefusal
-			if res != nil || !errors.As(err, &refusal) || refusal.State != ReattestStateNoOwnedMerge || len(*writes) != 0 {
+			if res != nil || !errors.As(err, &refusal) || refusal.State != tc.state || len(*writes) != 0 {
 				t.Fatalf("reattest admitted excluded subject: %+v %v writes=%v", res, err, *writes)
 			}
 		})
@@ -1234,5 +1235,53 @@ func TestReadBack_StaleAuditSingleCandidate(t *testing.T) {
 	res, err := ReattestLandedMerge(m2.dir, fallbackSpec, fallbackBead, "test-actor")
 	if err != nil || res == nil || !res.Wrote || len(*writes) != 1 || !auditMatches((*writes)[0].updates, fallbackSpec, m2.merge, m2.second) {
 		t.Fatalf("single stale audit was not repaired: %+v %v writes=%v", res, err, *writes)
+	}
+}
+
+func TestFallbackSafety_ForwardContentErrorRefuses(t *testing.T) {
+	f := newFallbackFixture(t)
+	old := fallbackForwardContentFn
+	t.Cleanup(func() { fallbackForwardContentFn = old })
+	fallbackForwardContentFn = func(string, string, string, string) (gitutil.Subsumption, error) {
+		return gitutil.SubsumptionLanded, errors.New("forward read failed")
+	}
+	assertFallbackReadRefuses(t, f, "forward read failed")
+}
+
+func TestFallbackSafety_ReverseContentErrorRefuses(t *testing.T) {
+	f := newFallbackFixture(t)
+	oldForward, oldReverse := fallbackForwardContentFn, fallbackReverseContentFn
+	t.Cleanup(func() { fallbackForwardContentFn = oldForward; fallbackReverseContentFn = oldReverse })
+	fallbackForwardContentFn = func(string, string, string, string) (gitutil.Subsumption, error) {
+		return gitutil.SubsumptionCleanDivergence, nil
+	}
+	fallbackReverseContentFn = func(string, string, string) (bool, error) { return false, errors.New("reverse read failed") }
+	assertFallbackReadRefuses(t, f, "reverse read failed")
+}
+
+func TestFallbackSafety_BranchTipErrorRefuses(t *testing.T) {
+	f := newFallbackFixture(t)
+	old := fallbackBranchTipFn
+	t.Cleanup(func() { fallbackBranchTipFn = old })
+	fallbackBranchTipFn = func(string, string) (string, bool, error) { return "", false, errors.New("branch tip read failed") }
+	assertFallbackReadRefuses(t, f, "branch tip read failed")
+}
+
+func assertFallbackReadRefuses(t *testing.T, f fallbackFixture, want string) {
+	t.Helper()
+	writes := installReattestRecorder(t)
+	result, err := ReattestLandedMerge(f.dir, fallbackSpec, fallbackBead, "tester")
+	if result != nil || err == nil || !strings.Contains(err.Error(), want) || len(*writes) != 0 {
+		t.Fatalf("read did not refuse: result=%+v error=%v writes=%v", result, err, *writes)
+	}
+	// The audited automatic read-back must also refuse the same read error.
+	stubBindingRead(t, map[string]interface{}{
+		"mindspec_landed_merge_sha": f.merge, "mindspec_landed_second_parent": f.second,
+		reattestKeyMerge: f.merge, reattestKeySecond: f.second, reattestKeyScannedBranch: fallbackSpec,
+		reattestKeyActor: "tester", reattestKeyAt: time.Now().UTC().Format(time.RFC3339), reattestKeyOp: reattestOp,
+	})
+	landed, err := FindLandedMergeReachable(f.dir, fallbackSpec, fallbackBead)
+	if landed != nil || err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("read-back did not refuse: %+v %v", landed, err)
 	}
 }

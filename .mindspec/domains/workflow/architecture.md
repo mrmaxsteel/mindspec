@@ -1087,9 +1087,9 @@ only from a hand-crafted operator merge — and it is NOT auto-recoverable
 via `mindspec reattest` either: reattest's ownership nominator is the
 same subject parse, so it refuses an anonymous-subject merge too (it
 cannot nominate a merge whose subject names no bead). The honest
-recovery is to re-merge the work under a bead-naming subject, or to
-accept the safe fail-closed (MF-3 refuses that dependency); the audited
-ADR-0035 `mindspec-q9ea` human attested-restore is the last-resort exit.
+recovery uses the ancestor check below. If the changes are present,
+a re-merge cannot help. A person must verify the work before using the
+dependent override. An attested restore requires a verified merge first.
 The spec's forward-only residual text is superseded by this fail-closed
 shape.
 
@@ -1126,8 +1126,7 @@ parameter, flag, or argument through which a caller can assert a
 merge/second-parent pair (AC-8), no bypass flag, no `--all` fleet mode
 (mass mutation stays a scripted sequence of explicit per-bead
 invocations), and `doctor` never writes through it. Fail-closed on
-every ambiguity: no owned exact merge → refuse to the audited ADR-0035
-`mindspec-q9ea` human attested-restore exit BY NAME; owned primary candidates
+every ambiguity: no owned exact merge → run the ancestor check below; owned primary candidates
 with different second parents → ambiguity refusal; a contradicting
 surviving tip → refusal; a non-matching panel set is recorded as
 non-corroborating and never refuses; a REVERTED classification (the
@@ -1459,7 +1458,6 @@ uses for unprovable ID-substitution positions. `internal/bootstrap/
 bootstrap.go`'s `starterGitignore` gained `.mindspec/phase.lock` so
 greenfield projects gitignore the new lockfile from their first commit.
 
-
 ### Ownership at the landing tree
 
 Both per-bead content gates use one landing-tree `ownerRef`. The diff
@@ -1484,3 +1482,39 @@ uses the actual ID and `--resolve-merge`. A
 materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.
+
+### Ancestor without a naming merge
+
+Reattest checks this state only after both merge scans find no candidate.
+The bead branch must exist, and its tip must be an ancestor of the spec tip.
+The base is the newest spec first-parent commit that is an ancestor of the
+bead tip. An empty range keeps `no-owned-exact-merge`. A missing base is
+unknown. Read failures refuse and make no positive content claim.
+
+A tip that equals another bead naming merge's second parent is not the
+prerequisite's own work. A tip strictly inside that range is not detected
+as foreign work. A person must verify the work before using an override.
+
+The content check uses the full base-to-tip range at the fixed spec tip.
+`RangeRevertedAt` checks each commit in that range, including early commits.
+Only content present with no reverted change gives
+`ancestor-without-naming-merge`. This state writes no binding. It says that
+a re-merge cannot help. It prints one evidenced readiness override command
+for each open dependent in the same epic. With no dependents, it prints
+`mindspec doctor` and says that no bead waits on the prerequisite.
+
+Reverted or indeterminate content keeps `no-owned-exact-merge`. The text
+states only that the commits are in history. It does not claim that the
+work is present. No override is recommended. A missing branch or a tip
+outside spec history makes no history claim. The attested restore exit
+requires a person to verify the merge and its diff before restoring its
+second parent as the bead branch.
+
+The lifecycle scan nominates prerequisites from surviving bead branches.
+It uses the same read-only git classifier and checks epic lineage. This
+includes closed prerequisites. It reports only beads with no landed binding.
+Doctor renders the finding at Warn under the prerequisite's name. It has
+no automatic fix and uses the same dependent recovery commands. The scan
+uses the invocation cache to resolve each surviving bead branch to its epic.
+The dependent read uses uncached tracker reads, with one `bd show` per
+eligible child.
