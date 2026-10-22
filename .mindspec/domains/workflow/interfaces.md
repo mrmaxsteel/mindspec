@@ -303,6 +303,10 @@ timestamp is a different key. Coverage manifest keys are
 reject malformed records. `panel disposition check` takes the panel as an
 optional positional (`check <panel>`, same as `--panel`; a conflicting pair
 refuses) and infers `--spec` from that panel's registration when omitted.
+`panel disposition append` completes a finding-only disposition row: it fills
+`record`, `spec` and `gate` (panel registration; spec falls back to `--spec`),
+`panel`, `created_at`, `convergent_with` and `backfilled` when absent, and a
+rejected row prints the full required shape with an example.
 `panel create` recovery lines fill in the spec and bead target the caller
 already gave, shell-quoted, instead of `<id>` placeholders. Events contribute no telemetry rows or slot coverage.
 `panel disposition append` refuses the verb kinds, and manifests on non-legacy

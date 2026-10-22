@@ -362,3 +362,47 @@ func TestDispositionCheck_PositionalPanel(t *testing.T) {
 		t.Fatalf("conflicting positional and --panel must refuse: %v", err)
 	}
 }
+
+// TestPanelDispositionAppend_FillsRowFromFlags: a row that gives only the
+// finding (reviewer, model, severity, summary, disposition) is completed
+// from --panel and the panel registration. The old command refused it with
+// "missing required field record".
+func TestPanelDispositionAppend_FillsRowFromFlags(t *testing.T) {
+	const specID = "117-panel-review-telemetry"
+	const panelName = "p117-fill"
+	root := mkDispositionRoot(t, specID)
+	if err := panel.WriteSnapshot(filepath.Join(root, ".mindspec", "specs", specID, "reviews", panelName), panel.Panel{Spec: specID, Gate: "bead", Round: 1}); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"reviewer":"R1","model":"opus","severity":"minor","summary":"rename X","disposition":"confirmed-fixed"}`
+	if err := runDispositionAppend(t, specID, panelName, data); err != nil {
+		t.Fatalf("append of a finding-only row: %v", err)
+	}
+	m := readStoredRow(t, root, specID, panelName)
+	if m["record"] != "disposition" || m["panel"] != panelName || m["spec"] != specID || m["gate"] != "bead" {
+		t.Errorf("record/panel not filled: %v", m)
+	}
+	if ts, _ := m["created_at"].(string); ts == "" {
+		t.Errorf("created_at not filled: %v", m)
+	}
+	if id, _ := m["id"].(string); id == "" {
+		t.Errorf("id not derived: %v", m)
+	}
+}
+
+// TestPanelDispositionAppend_InvalidRowShowsShape: a row missing a field
+// the caller must give names that field and prints the full shape with an
+// example, so one rejection is enough to fix the input.
+func TestPanelDispositionAppend_InvalidRowShowsShape(t *testing.T) {
+	const specID = "117-panel-review-telemetry"
+	mkDispositionRoot(t, specID)
+	err := runDispositionAppend(t, specID, "p117-shape", `{"reviewer":"R1","model":"opus","severity":"minor","summary":"rename X","spec":"117","gate":"bead"}`)
+	if err == nil {
+		t.Fatal("append without disposition = nil, want refusal")
+	}
+	for _, want := range []string{"missing required field disposition", "a disposition row needs:", "example: {"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
+}
