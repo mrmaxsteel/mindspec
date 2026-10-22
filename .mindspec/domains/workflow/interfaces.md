@@ -398,6 +398,65 @@ Disposition validate, check and query accept these record kinds.
 The CLI helper `findPanelRoot` returns the verified slot's main root or falls back to `findRoot` when no slot is found.
 `landedBindingFor` checks the exact panel-round metadata value. It returns false for an empty bead identity and propagates read errors.
 
+### Panel Gate v2 (verdict ledger)
+
+`panel.Create` writes `verdict_schema: 2` in the snapshot and round record.
+`RoundSchema` selects the schema from the latest round record.
+`CheckHandEdits` requires the snapshot's pin to match that record.
+A v2 round uses the submission ledger gate.
+A historical round without the pin keeps the file-based gate rules.
+A downgrade after a v2 round blocks the gate.
+`Tally` judges only the latest verdict-file round.
+A snapshot round that differs from the latest verdict-file round blocks the gate.
+The snapshot round must also match the latest round record.
+
+`panel.SubmissionRecord` stores `record: "verdict"` in the ledger.
+It records `spec`, `panel`, `slot`, `round` and `seq` as submission identity.
+It records `status`, `verdict`, `family` and `model`.
+It records `runner_kind`, `runner_source`, `via`, `attempt` and `reason`.
+It records `file_sha256` and `created_at`.
+The optional boolean `hard_block` records a veto.
+The writer omits `hard_block` when false.
+
+The highest `seq` replaces the earlier submission for that slot and round.
+The ledger retains the earlier records.
+The v2 gate counts a roster file only when its hash matches that submission.
+The submission must be final and must not have verdict VOID.
+If a later attempt exists, it must end as `submitted` with the same submission sequence.
+A finding refutation matches the slot, round, finding ID and raw-text hash.
+It remains applicable to a replacement REQUEST_CHANGES with that same finding.
+A hard block or invalid verdict prevents the refutation from applying.
+
+`mindspec panel submit [slug] --file <path|->` accepts a file or standard input.
+Outside a slot directory, it requires a slug, `--slot` and `--round`.
+`--spec` selects the owning spec.
+The command infers the target from the working directory or an absolute file path.
+Slot discovery checks `slot.json`, `tree/` and the configured isolation path.
+The command refuses different working-directory and file-path slots.
+It refuses explicit targets that differ from the inferred slot identity.
+It refuses slot directories that differ from the current panel round or spec.
+It resolves the effective runner and model under the submission lock.
+It refuses direct submissions for process slots and rounds that have landed.
+It prints the slot status and rule line after submission.
+It exits 0 on success and 1 on a returned error.
+
+`panel.CheckCreate` checks the roster before prior-round scratch cleanup.
+It refuses a carried slot without a family if its model has no matching runner.
+It refuses an empty model or a model with whitespace or control characters.
+It also refuses a model that starts with a dash.
+These refusals preserve the prior round's scratch paths.
+
+In text mode, `panel verify` prints a rule preview and BLOCK for an unreadable registration.
+It exits 2 when it cannot read slot status.
+`panel tally` prints the BLOCK decision for an unreadable registration.
+It exits 1 on that decision's guard error.
+`panel verify --json` prints slot records without a preview when status reading succeeds.
+If status reading fails, it prints the text preview and exits 2 even with `--json`.
+`panel tally` has no `--json` flag.
+
+`paneltest.CreateV1` seeds a historical v1 round for tests.
+It writes a round event without `verdict_schema` and a panel snapshot.
+
 ### Panel Checkout (`cmd/mindspec/panel_checkout.go`)
 
 `mindspec panel checkout <slug> --slot S` creates or reuses a reviewer clone at the reviewed SHA.
