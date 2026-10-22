@@ -13,6 +13,7 @@ paths:
   - internal/hook/**
   - internal/setup/**
   - internal/panel/**
+  - internal/panellaunch/**
   - internal/rules/**
   - internal/bootstrap/**
   - internal/adr/**
