@@ -1042,16 +1042,15 @@ sufficient:
   equality check) and is never collapsed into the names-no-bead state.
 - **LANDED-NESS** ("did it land") is git TOPOLOGY: a two-parent
   first-parent merge on the spec branch whose second parent EQUALS the
-  bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
-  (panel `reviewed_head_sha`, surviving branch tip, binding second
-  parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
-  every corroboration is exact-equality only. A surviving-tip or binding
-  mismatch is a fail-closed contradiction. Panel evidence is a SET of
-  all well-formed SHAs across registrations: an exact member confirms;
-  a non-matching set is non-corroborating and never vetoes another leg.
+  bead's landed tip. Surviving tips and bindings require exact equality.
+  A surviving-tip or binding mismatch is a fail-closed contradiction.
+  Panel evidence is a set of well-formed SHAs from registrations and
+  ledger-backed rebinds. An exact member confirms. A reviewed ancestor
+  also confirms when its diff to the second parent is empty or contains
+  only allowed tool artifacts. See [Reviewed-tree confirmation](#reviewed-tree-confirmation).
+  A set with neither match confirms nothing and never vetoes another leg.
   Empty, placeholder and malformed values never reach git. With no
-  exact-and-owned match the function REFUSES rather
-  than picking the newest ancestor-consistent merge.
+  corroboration for an owned candidate, the function refuses.
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
 over an already-subject-owned candidate — never an ownership authority

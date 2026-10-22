@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -90,6 +91,36 @@ func TestFindLandedMerge_ReviewedTreeEmptyWrapperConfirms(t *testing.T) {
 	if err != nil || got == nil || got.SHA != f.merge || got.SecondParent != f.second || !strings.Contains(got.Provenance, "reviewed-tree") {
 		t.Fatalf("empty wrapper must confirm with its rule: %+v %v", got, err)
 	}
+}
+
+func TestFindLandedMerge_ReviewedTreeNonAncestorNoConfirm(t *testing.T) {
+	f := newReviewedTreeFixture(t, "empty")
+	f.run("checkout", "-b", "sibling-review", f.reviewed)
+	f.run("commit", "--allow-empty", "-m", "sibling review")
+	sibling := revParseIn(t, f.dir, "HEAD")
+	f.run("checkout", reviewedTreeSpec)
+	ancestor, err := isAncestorFn(f.dir, sibling, f.second)
+	if err != nil || ancestor {
+		t.Fatalf("sibling must not be an ancestor: ancestor=%v err=%v", ancestor, err)
+	}
+	paths, err := gitutil.DiffNameOnlyNoRenames(f.dir, sibling, f.second)
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("sibling must have the same tree: paths=%v err=%v", paths, err)
+	}
+	_, survives, err := resolveBranchTip(f.dir, "bead/"+fallbackBead)
+	if err != nil || survives {
+		t.Fatalf("bead branch must be absent: survives=%v err=%v", survives, err)
+	}
+	stubBindingRead(t, nil)
+	registerFallbackPanel(t, f.dir, "sibling-review", sibling, 1)
+	reviewed := reviewedHeadSHAForBead(f.dir, reviewedTreeSpec, fallbackBead)
+	if _, registered := reviewed[sibling]; !registered {
+		t.Fatal("sibling review must be registered")
+	}
+	if _, exact := reviewed[f.second]; exact {
+		t.Fatal("second parent must not have an exact review")
+	}
+	requireReviewedTreeNoConfirmation(t, f)
 }
 
 func TestFindLandedMerge_ReviewedTreeSourceDiffNoConfirm(t *testing.T) {

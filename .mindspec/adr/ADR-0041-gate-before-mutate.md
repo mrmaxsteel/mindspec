@@ -846,8 +846,9 @@ A subject-named first-parent candidate has second parent D. The panel datum
 confirms when D is in R (`exact`). It also confirms when some r in R is an
 ancestor of D and `git diff --no-renames --name-only -z r D` lists no paths
 or only tool-artifact paths (`reviewed-tree`). The tool-artifact set comes
-from `panel.ToolArtifactPaths` for the spec directory of the bead's own
-epic. The review glob is limited to that spec. Another spec's artifacts
+from `panel.ToolArtifactPaths` for the spec directory of the spec branch
+that the caller names. On the close path, this is the bead's own spec.
+The review glob is limited to that spec. Another spec's artifacts
 do not qualify. Rename detection stays off so both paths must qualify.
 An unavailable review object or failed review read confirms nothing.
 

@@ -28,7 +28,8 @@ func TestDocs_Spec132Amendments_ReviewedTree(t *testing.T) {
 		"unregistered key is unverified and confirms nothing", "subject-named first-parent candidate",
 		"D is in R (`exact`)", "ancestor of D", "git diff --no-renames --name-only -z r D",
 		"no paths or only tool-artifact paths (`reviewed-tree`)", "panel.ToolArtifactPaths",
-		"spec directory of the bead's own epic", "review glob is limited to that spec",
+		"spec directory of the spec branch that the caller names",
+		"On the close path, this is the bead's own spec", "review glob is limited to that spec",
 		"Another spec's artifacts do not qualify", "both paths must qualify",
 		"failed review read confirms nothing", "confirms and never vetoes",
 		"tip or binding contradiction still refuses", "revert check still runs after confirmation",
@@ -51,6 +52,28 @@ func TestDocs_Spec132Amendments_ReviewedTree(t *testing.T) {
 	} {
 		if !strings.Contains(prior, clause+" See [Amendment (Spec 132)](#amendment-spec-132)") {
 			t.Errorf("missing adjacent back-pointer for %q", clause)
+		}
+	}
+	data, err = os.ReadFile("../../.mindspec/domains/workflow/architecture.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ownership, ok := strings.Cut(string(data), "### `FindLandedMerge`: two-source ownership identity (R5)")
+	if !ok {
+		t.Fatal("missing finder ownership section")
+	}
+	ownership, _, _ = strings.Cut(ownership, "\n### ")
+	ownership = strings.Join(strings.Fields(ownership), " ")
+	for _, phrase := range []string{
+		"Surviving tips and bindings require exact equality",
+		"An exact member confirms. A reviewed ancestor also confirms",
+		"its diff to the second parent is empty or contains only allowed tool artifacts",
+		"See [Reviewed-tree confirmation](#reviewed-tree-confirmation)",
+		"A set with neither match confirms nothing and never vetoes another leg",
+		"With no corroboration for an owned candidate, the function refuses",
+	} {
+		if !strings.Contains(ownership, phrase) {
+			t.Errorf("finder ownership section missing %q", phrase)
 		}
 	}
 }
