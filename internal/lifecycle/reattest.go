@@ -443,7 +443,7 @@ func ancestorWithoutNamingMerge(root, specBranch, beadID, beadBranch string, mer
 		name, named := parseMergeSubjectBeadBranch(m.Subject)
 		if len(m.Parents) == 2 && named && name != beadBranch && m.Parents[1] == tip {
 			r.NoRestore = true
-			r.Detail = fmt.Sprintf("tip %s is the second parent of merge %s (%s). This is not %s's own work.", termsafe.Escape(tip), termsafe.Escape(m.SHA), termsafe.Escape(m.Subject), termsafe.Escape(beadID))
+			r.Detail += "\n" + fmt.Sprintf("tip %s is the second parent of merge %s (%s). This is not %s's own work.", termsafe.Escape(tip), termsafe.Escape(m.SHA), termsafe.Escape(m.Subject), termsafe.Escape(beadID))
 			return r
 		}
 	}
@@ -451,7 +451,7 @@ func ancestorWithoutNamingMerge(root, specBranch, beadID, beadBranch string, mer
 	outcome, contentErr := ancestorContentFn(root, base, tip, specTip)
 	reverted, revertErr := ancestorRangeRevertedFn(root, base, tip, specTip)
 	if contentErr != nil || revertErr != nil || outcome != gitutil.SubsumptionLanded || reverted {
-		r.Detail = fmt.Sprintf("commits in %s..%s are in the spec history at %s. The tool cannot show that their changes are present.", termsafe.Escape(base), termsafe.Escape(tip), termsafe.Escape(specTip))
+		r.Detail += "\n" + fmt.Sprintf("commits in %s..%s are in the spec history at %s. The tool cannot show that their changes are present.", termsafe.Escape(base), termsafe.Escape(tip), termsafe.Escape(specTip))
 		for _, err := range []error{contentErr, revertErr} {
 			if err != nil {
 				r.Detail += " Evidence is indeterminate: " + termsafe.Escape(err.Error())

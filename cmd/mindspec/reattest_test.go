@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
@@ -466,41 +468,125 @@ func TestADR0041ReattestAmendment_Anchored(t *testing.T) {
 	}
 }
 
-func TestReattestText_NoHistoricalCitations(t *testing.T) {
-	const beadID = "mindspec-ab12"
+// reattestTextRefusal gets the Detail from the lifecycle, including each
+// no-owned variant. Tracker reads are fake; git evidence comes from temp repos.
+func reattestTextRefusal(t *testing.T, scenario string) *lifecycle.ReattestRefusal {
+	t.Helper()
+	const beadID, specBranch = "mindspec-ab12", "spec/132-test"
 	root := t.TempDir()
 	rebindGit(t, root, "init", "-b", "main")
-	rebindGit(t, root, "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "initial")
-	rebindGit(t, root, "branch", "spec/132-test")
-	_, err := lifecycle.ReattestLandedMerge(root, "spec/132-test", beadID, "tester")
-	var bare *lifecycle.ReattestRefusal
-	if !errors.As(err, &bare) || bare.State != lifecycle.ReattestStateNoOwnedMerge {
-		t.Fatalf("expected the real no-owned refusal, got %v", err)
+	rebindGit(t, root, "config", "core.hooksPath", "/dev/null")
+	rebindGit(t, root, "commit", "--allow-empty", "-m", "initial")
+	rebindGit(t, root, "checkout", "-b", specBranch)
+	wantState, wantDetail := lifecycle.ReattestStateNoOwnedMerge, "no first-parent or admitted reachable merge"
+	if scenario != "bare" {
+		if scenario == "unknown-base" {
+			rebindGit(t, root, "checkout", "--orphan", "bead/"+beadID)
+		} else {
+			rebindGit(t, root, "checkout", "-b", "bead/"+beadID)
+		}
+		rebindWrite(t, root, "work.txt", "prerequisite work\n")
+		rebindGit(t, root, "add", ".")
+		rebindGit(t, root, "commit", "-m", "prerequisite work")
+		tip := rebindGit(t, root, "rev-parse", "HEAD")
+		rebindGit(t, root, "checkout", "-b", "bead/mindspec-carrier")
+		rebindWrite(t, root, "carrier.txt", "carrier work\n")
+		rebindGit(t, root, "add", ".")
+		rebindGit(t, root, "commit", "-m", "carrier work")
+		rebindGit(t, root, "checkout", specBranch)
+		rebindGit(t, root, "merge", "--no-ff", "--allow-unrelated-histories", "-m", "Merge bead/mindspec-carrier", "bead/mindspec-carrier")
+		switch scenario {
+		case "ancestor":
+			wantState, wantDetail = lifecycle.ReattestStateAncestor, "changes are present on"
+		case "history":
+			rebindGit(t, root, "revert", "--no-edit", tip)
+			wantDetail = "cannot show that their changes are present"
+		case "not-own-work":
+			rebindGit(t, root, "branch", "-f", "bead/"+beadID, "bead/mindspec-carrier")
+			wantDetail = "not " + beadID + "'s own work"
+		case "unknown-base":
+			wantState, wantDetail = lifecycle.ReattestStateUnknown, "no first-parent base exists"
+		case "indeterminate-git":
+			// Refuse one git read, while the two merge scans still use real git.
+			git, err := exec.LookPath("git")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			script := "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = 'bead/mindspec-ab12^{commit}' ]; then exit 128; fi\ndone\nexec " + fmt.Sprintf("%q", git) + " \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			wantState, wantDetail = lifecycle.ReattestStateIndeterminate, "git evidence is indeterminate"
+		case "indeterminate-dependents":
+			wantState, wantDetail = lifecycle.ReattestStateIndeterminate, "cannot read dependent beads"
+		default:
+			t.Fatalf("unknown fixture %q", scenario)
+		}
 	}
+	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if len(args) != 3 || args[0] != "show" || args[1] != beadID || args[2] != "--json" {
+			t.Fatalf("unexpected tracker read: %v", args)
+		}
+		if scenario == "indeterminate-dependents" {
+			return nil, errors.New("tracker read failed")
+		}
+		return []byte(`[]`), nil
+	}))
+	result, err := lifecycle.ReattestLandedMerge(root, specBranch, beadID, "tester")
+	var r *lifecycle.ReattestRefusal
+	if result != nil || !errors.As(err, &r) || r.State != wantState || !strings.Contains(r.Detail, wantDetail) {
+		t.Fatalf("fixture %s: want %s with %q, got %+v %v", scenario, wantState, wantDetail, result, err)
+	}
+	return r
+}
+
+func TestReattestText_NoHistoricalCitations(t *testing.T) {
+	const beadID = "mindspec-ab12"
 	historical := regexp.MustCompile(`ADR-[0-9]|q9ea|[Ss]pec [0-9]{3}`)
 	for _, known := range []string{"ADR-0041", "q9ea", "spec 132", "Spec 125"} {
 		if !historical.MatchString(known) {
 			t.Fatalf("citation detector missed %q", known)
 		}
 	}
-	for _, state := range []string{lifecycle.ReattestStateNoOwnedMerge, lifecycle.ReattestStateAncestor, lifecycle.ReattestStateIndeterminate, lifecycle.ReattestStateUnknown,
-		lifecycle.ReattestStateAmbiguous, lifecycle.ReattestStateTipContradiction, lifecycle.ReattestStatePanelContradiction,
-		lifecycle.ReattestStateReverted, lifecycle.ReattestStateMultipleFallbackCandidates} {
-		r := &lifecycle.ReattestRefusal{BeadID: beadID, State: state, Detail: bare.Detail, Recovery: []string{"mindspec doctor"}}
-		text := reattestCmd.Short + "\n" + reattestCmd.Long + "\n" + reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
-		if match := historical.FindString(text); match != "" {
-			t.Errorf("state %s cites %q: %s", state, match, text)
-		}
-		for _, forbidden := range []string{"R6.", "#251"} {
-			if strings.Contains(text, forbidden) {
-				t.Errorf("state %s cites %q: %s", state, forbidden, text)
+	for _, scenario := range []string{"bare", "ancestor", "history", "not-own-work", "unknown-base", "indeterminate-git", "indeterminate-dependents"} {
+		t.Run(scenario, func(t *testing.T) {
+			r := reattestTextRefusal(t, scenario)
+			text := reattestCmd.Short + "\n" + reattestCmd.Long + "\n" + reattestRefusalFailure(beadID, "bead/"+beadID, "spec/132-test", r).Error()
+			if match := historical.FindString(text); match != "" {
+				t.Errorf("state %s cites %q: %s", r.State, match, text)
 			}
-		}
-		for _, line := range strings.Split(text, "\n") {
-			if strings.HasPrefix(line, "recovery:") && strings.ContainsAny(line, "()") {
-				t.Errorf("recovery contains prose: %s", line)
+			for _, forbidden := range []string{"R6.", "#251"} {
+				if strings.Contains(text, forbidden) {
+					t.Errorf("state %s cites %q: %s", r.State, forbidden, text)
+				}
 			}
-		}
+			for _, line := range strings.Split(text, "\n") {
+				if strings.HasPrefix(line, "recovery:") && strings.ContainsAny(line, "()") {
+					t.Errorf("recovery contains prose: %s", line)
+				}
+			}
+		})
+	}
+}
+
+func TestReattestText_NoOwnedRecovery(t *testing.T) {
+	for _, scenario := range []string{"history", "not-own-work"} {
+		t.Run(scenario, func(t *testing.T) {
+			r := reattestTextRefusal(t, scenario)
+			text := reattestRefusalFailure("mindspec-ab12", "bead/mindspec-ab12", "spec/132-test", r).Error()
+			for _, want := range []string{"no first-parent or admitted reachable merge", "attested restore", "only after a person verifies the merge", "recovery: git log --first-parent --merges spec/132-test"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("missing %q: %s", want, text)
+				}
+			}
+			for _, forbidden := range []string{"recovery: mindspec doctor", "recovery: git branch", "--allow-not-ready"} {
+				if strings.Contains(text, forbidden) {
+					t.Errorf("ineffective recovery %q: %s", forbidden, text)
+				}
+			}
+		})
 	}
 }
 

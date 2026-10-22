@@ -1473,3 +1473,5 @@ includes closed prerequisites. It reports only beads with no landed binding.
 Doctor renders the finding at Warn under the prerequisite's name. It has
 no automatic fix and uses the same dependent recovery commands. The scan
 uses the invocation cache to resolve each surviving bead branch to its epic.
+The dependent read uses uncached tracker reads, with one `bd show` per
+eligible child.

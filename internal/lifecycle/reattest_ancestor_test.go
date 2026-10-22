@@ -11,6 +11,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
+// Capture the shipped reader before init installs the hermetic default.
+var ancestorDependentsFnDefault = ancestorDependentsFn
+
 func init() {
 	ancestorDependentsFn = func(string) ([]string, error) { return nil, nil }
 }
@@ -156,6 +159,7 @@ func TestReattest_AncestorOtherBeadTipNotOwn(t *testing.T) {
 			if !strings.Contains(r.Detail, "not "+ancestorBead+"'s own work") || !r.NoRestore || len(r.Recovery) > 0 {
 				t.Fatalf("wrong work must offer no override: %+v", r)
 			}
+			assertAncestorNoOwnedDetail(t, r)
 		})
 	}
 }
@@ -185,6 +189,53 @@ func TestReattest_AncestorRevertedHistoryOnly(t *testing.T) {
 	r := ancestorRefusal(t, f, ReattestStateNoOwnedMerge)
 	if !strings.Contains(r.Detail, "are in the spec history") || !strings.Contains(r.Detail, "cannot show that their changes are present") || strings.Contains(r.Detail, "changes are present on") || !r.NoRestore {
 		t.Fatalf("wrong history evidence: %+v", r)
+	}
+	assertAncestorNoOwnedDetail(t, r)
+}
+
+func assertAncestorNoOwnedDetail(t *testing.T, r *ReattestRefusal) {
+	t.Helper()
+	for _, want := range []string{"no first-parent or admitted reachable merge", "attested restore", "only after a person verifies the merge"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("no-owned detail missing %q: %s", want, r.Detail)
+		}
+	}
+}
+
+// The two checks must each refuse even when the other check passes.
+func TestReattest_AncestorContentAndRevertChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcome  gitutil.Subsumption
+		reverted bool
+	}{
+		{"revert-alone", gitutil.SubsumptionLanded, true},
+		{"content-alone", gitutil.SubsumptionCleanDivergence, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := ancestorFixture(t)
+			content, revert := ancestorContentFn, ancestorRangeRevertedFn
+			t.Cleanup(func() { ancestorContentFn, ancestorRangeRevertedFn = content, revert })
+			contentCalls, revertCalls := 0, 0
+			ancestorContentFn = func(root, base, head, target string) (gitutil.Subsumption, error) {
+				contentCalls++
+				if root != f.dir || head != f.second || target != f.merge || base != revParseIn(t, f.dir, f.merge+"^1") {
+					t.Fatalf("wrong content range: %s %s %s %s", root, base, head, target)
+				}
+				return tc.outcome, nil
+			}
+			ancestorRangeRevertedFn = func(root, base, head, target string) (bool, error) {
+				revertCalls++
+				if root != f.dir || head != f.second || target != f.merge || base != revParseIn(t, f.dir, f.merge+"^1") {
+					t.Fatalf("wrong revert range: %s %s %s %s", root, base, head, target)
+				}
+				return tc.reverted, nil
+			}
+			r := ancestorRefusal(t, f, ReattestStateNoOwnedMerge)
+			if contentCalls != 1 || revertCalls != 1 || !strings.Contains(r.Detail, "cannot show that their changes are present") || strings.Contains(r.Detail, "changes are present on") {
+				t.Fatalf("unsafe content claim: content calls=%d revert calls=%d refusal=%+v", contentCalls, revertCalls, r)
+			}
+		})
 	}
 }
 
@@ -249,6 +300,19 @@ func TestReattest_AncestorRecoveryPerDependent(t *testing.T) {
 	want := []string{"mindspec next mindspec-dep1 --allow-not-ready=MF-3 --evidence <file>", "mindspec next mindspec-dep2 --allow-not-ready=MF-3 --evidence <file>"}
 	if !reflect.DeepEqual(r.Recovery, want) {
 		t.Fatalf("recovery = %v, want %v", r.Recovery, want)
+	}
+}
+
+func TestReattest_AncestorProductionDefaultRecovery(t *testing.T) {
+	f := ancestorFixture(t)
+	old := ancestorDependentsFn
+	t.Cleanup(func() { ancestorDependentsFn = old })
+	ancestorDependentsFn = ancestorDependentsFnDefault
+	stubAncestorTracker(t)
+	r := ancestorRefusal(t, f, ReattestStateAncestor)
+	want := []string{"mindspec next mindspec-dep1 --allow-not-ready=MF-3 --evidence <file>", "mindspec next mindspec-dep2 --allow-not-ready=MF-3 --evidence <file>"}
+	if !reflect.DeepEqual(r.Recovery, want) {
+		t.Fatalf("production default recovery = %v, want %v", r.Recovery, want)
 	}
 }
 

@@ -367,12 +367,3 @@ enumeration):
   evolved-but-present content identifies while true reverts refuse, and
   the new `mindspec reattest <bead-id>` verb is the explicit audited
   recovery (troubleshooting entry above).
-
-### Verify a merge before closing the bead
-
-`mindspec complete <bead-id> --merge-only` merges and keeps the bead open.
-A bead has one naming merge. Do not revert a `--merge-only` merge by hand.
-Send rejected work to a follow-up bead. If the merge was reverted, restore
-its content with the refusal's scoped recovery first. Then run the panel
-at the bead tip and `mindspec complete <bead-id>` to close the bead.
-The restore commit does not create a second naming merge.

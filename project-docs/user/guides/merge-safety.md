@@ -212,12 +212,3 @@ Then restore the bead branch at that merge's verified second parent:
 git branch bead/<bead-id> <verified-second-parent-sha>
 mindspec reattest <bead-id>
 ```
-
-## Merge, verify, then close
-
-`mindspec complete <bead-id> --merge-only` keeps the bead open after its
-merge. A bead has one naming merge. Do not revert a `--merge-only` merge
-by hand. Put rejected work in a follow-up bead. If the merge was reverted,
-use the refusal's scoped recovery to restore its content first. Then run
-the panel at the bead tip and `mindspec complete <bead-id>` to close it.
-The restore commit does not create a second naming merge.

@@ -261,10 +261,17 @@ func runReattest(deps reattestDeps, root, beadID, specBranchFlag string) error {
 // an ADR-0035 guard failure with a genuine forward exit (§2(i): never a
 // bare re-invocation that cannot change the refused fact).
 func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle.ReattestRefusal) error {
+	inspect := fmt.Sprintf("git log --first-parent --merges %s", scanned)
 	if r.State == lifecycle.ReattestStateAncestor || r.NoRestore || r.State == lifecycle.ReattestStateIndeterminate {
 		recovery := r.Recovery
 		if len(recovery) == 0 {
-			recovery = []string{"mindspec doctor"}
+			if r.State == lifecycle.ReattestStateNoOwnedMerge {
+				// R6.4 and R6.7 keep the no-owned exit, without an override
+				// or a branch restore that cannot fix this diagnosed state.
+				recovery = []string{inspect}
+			} else {
+				recovery = []string{"mindspec doctor"}
+			}
 		}
 		return guard.NewFailure("cannot re-attest bead "+safeBeadID+": "+r.Detail, recovery...)
 	}
@@ -275,7 +282,6 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
 		)
 	}
-	inspect := fmt.Sprintf("git log --first-parent --merges %s", scanned)
 	switch r.State {
 	case lifecycle.ReattestStateNoOwnedMerge:
 		// ADR-0041 §2(ii): verify the merge before an attested restore.
