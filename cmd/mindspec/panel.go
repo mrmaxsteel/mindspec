@@ -454,22 +454,14 @@ func validatePanelSlug(slug string) error {
 	return rejectControlBytes("slug", slug)
 }
 
-// rejectControlBytes rejects a value containing any control character —
-// C0 (including \n/\r/NUL), DEL, or C1 (U+0080-U+009F, e.g. the CSI
-// U+009B terminal-injection vector report.go's stripControl already
-// documents as the 'codex-render-leak #2' incident) — via
-// unicode.IsControl, mirroring stripControl's own predicate. The
-// control-byte discipline validatePanelSlug applies to <slug> and `panel
-// create` additionally applies to --bead/--target: a value bearing a
-// control byte must never reach a rendered message or a guard.NewFailure
-// recovery line, where an embedded newline could forge a fake `recovery:`
-// line (spec-109-final-review G2).
+// rejectControlBytes rejects control and format characters, and line and
+// paragraph separators. Printable Unicode remains valid in panel identities.
 func rejectControlBytes(label, value string) error {
 	for _, r := range value {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
 			return guard.NewFailure(
-				fmt.Sprintf("%s %q contains a control character and is rejected", label, value),
-				"remove any control characters (including newlines) from the value")
+				fmt.Sprintf("%s %q contains an unsafe character and is rejected", label, value),
+				"remove control characters, format characters, and line or paragraph separators from the value")
 		}
 	}
 	return nil
@@ -578,7 +570,7 @@ func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registra
 		}
 		return panel.Registration{}, guard.NewFailure(
 			fmt.Sprintf("ambiguous panel slug %q:\n%s", slug, strings.Join(details, "\n")),
-			fmt.Sprintf("mindspec panel tally %s --spec <id> (choose a listed spec; if copies remain, run from that checkout)", shellQuoteTarget(slug)))
+			"repeat the command with --spec <id> (choose a listed spec; if copies remain, run from that checkout)")
 	}
 	return panel.Registration{}, guard.NewFailure(
 		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, specID),

@@ -1339,3 +1339,63 @@ func TestPanelLaunch_PgidReadRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelLaunch_RetryDetailArgRunner(t *testing.T) {
+	f := newLaunchFixture(t)
+	good := paneltest.Bytes(t, f.v)
+	bad := bytes.Replace(good, []byte(`"round":1`), []byte(`"round":`+strings.Repeat("9", 1048000)), 1)
+	if bytes.Equal(bad, good) {
+		t.Fatal("replacement failed")
+	}
+	_, refusal := panel.ParseVerdictV2(bad)
+	if refusal == nil {
+		t.Fatal("bad round accepted")
+	}
+	t.Logf("verdict bytes=%d retry refusal bytes=%d", len(bad), len(retryRefusal(refusal)))
+	badPath, goodPath := filepath.Join(f.root, "bad.json"), filepath.Join(f.root, "good.json")
+	slotWrite(t, badPath, string(bad))
+	slotWrite(t, goodPath, string(good))
+	runner := config.Runner{Family: "a", Kind: "process", Argv: []string{f.script, "{prompt}"}, Prompt: "arg", Output: "stdout"}
+	cfg, err := json.Marshal(map[string]any{"panel": map[string]any{"runners": []config.Runner{runner}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slotWrite(t, filepath.Join(f.root, ".mindspec", "config.local.yaml"), string(cfg))
+	config.ResetCache()
+	f.scriptBody(t, `nonce=$(printf '%s\n' "$1" | sed -n 's/^MINDSPEC-VERDICT-BEGIN //p')
+if [ ! -e retry-marker ]; then
+ : > retry-marker
+ file=`+shellQuoteTarget(badPath)+`
+else
+ file=`+shellQuoteTarget(goodPath)+`
+fi
+printf 'MINDSPEC-VERDICT-BEGIN %s\n' "$nonce"
+cat "$file"
+printf '\nMINDSPEC-VERDICT-END %s\n' "$nonce"`)
+	out, err := f.run(t, false)
+	events := f.events(t)
+	for _, event := range events {
+		t.Logf("attempt=%d status=%s", event.Attempt, event.Status)
+	}
+	prompt := slotRead(t, filepath.Join(f.layout(t).AttemptDir(2), "prompt.md"))
+	if len(prompt) > 16384 {
+		t.Errorf("retry prompt too large: %d bytes", len(prompt))
+	}
+	if err != nil {
+		t.Fatalf("valid second response could not submit: %v (output bytes=%d)", err, len(out))
+	}
+	f.status(t, "final")
+	if len(events) != 4 || events[1].Status != "malformed" || events[3].Status != "submitted" {
+		t.Fatalf("expected retry and submission: %+v", events)
+	}
+
+}
+
+func TestPanelLaunch_RetryDetailBound(t *testing.T) {
+	detail := strings.Repeat("é", 511) + "界" + "\x1b"
+	err := &panel.VerdictError{Failure: termsafe.NewFailure("blocked", "inspect"), Pointer: "/round", Detail: detail}
+	want := termsafe.Escape("/round: " + strings.Repeat("é", 510) + "...\nrecovery: inspect")
+	if got := retryRefusal(err); got != want {
+		t.Fatalf("detail was not bounded at a UTF-8 boundary: got %q want %q", got, want)
+	}
+}

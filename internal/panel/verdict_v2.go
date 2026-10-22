@@ -108,6 +108,9 @@ type VerdictError struct {
 	Detail  string
 }
 
+// Unwrap exposes the embedded failure to errors.Is and errors.As.
+func (e *VerdictError) Unwrap() error { return e.Failure }
+
 func verdictError(pointer, message string) error {
 	if pointer == "" {
 		pointer = "/"

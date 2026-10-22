@@ -2,6 +2,7 @@ package panel_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func TestVerdictV2_Accepts(t *testing.T) {
@@ -283,5 +285,25 @@ func TestVerdictV2_SchemaMatchesValidator(t *testing.T) {
 			m["commands_run"] = items
 			check(t, m, n == 200)
 		})
+	}
+}
+
+func TestVerdictError_TrustedFailure(t *testing.T) {
+	_, err := panel.ParseVerdictV2([]byte(`{}`))
+	var verdict *panel.VerdictError
+	if !errors.As(err, &verdict) {
+		t.Fatalf("expected verdict error: %v", err)
+	}
+	var failure *termsafe.Failure
+	if !errors.As(fmt.Errorf("wrapped: %w", err), &failure) || failure != verdict.Failure {
+		t.Fatalf("embedded failure not found: %v", err)
+	}
+	prefixed := termsafe.PrefixFailure(err, "context: ")
+	if prefixed.Error() != "context: "+err.Error() {
+		t.Fatalf("prefix lost trusted formatting: %q", prefixed)
+	}
+	joined := termsafe.JoinFailures([]error{err}, "inspect")
+	if joined.Error() != failure.Message()+"\nrecovery: inspect" {
+		t.Fatalf("join lost trusted formatting: %q", joined)
 	}
 }

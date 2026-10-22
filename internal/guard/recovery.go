@@ -3,6 +3,8 @@ package guard
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // Recovery-line convention (spec 092-agent-contract-hardening, Req 12;
@@ -74,9 +76,21 @@ func (f *Failure) Error() string { return f.formatted }
 // TrustedRecovery marks the producer's formatted recovery as trusted.
 func (f *Failure) TrustedRecovery() {}
 
-// NewFailure returns FormatFailure(msg, commands...) as a typed error.
+// NewFailure returns a terminal-safe typed error. Message line breaks remain,
+// but message lines cannot supply recovery lines. Commands stay on one line.
 func NewFailure(msg string, commands ...string) error {
-	return &Failure{formatted: FormatFailure(msg, commands...)}
+	lines := strings.Split(msg, "\n")
+	for i, line := range lines {
+		lines[i] = termsafe.EscapeRecovery(line)
+		if strings.HasPrefix(lines[i], "recovery:") {
+			lines[i] = " " + lines[i]
+		}
+	}
+	safeCommands := make([]string, len(commands))
+	for i, command := range commands {
+		safeCommands[i] = termsafe.EscapeRecovery(command)
+	}
+	return &Failure{formatted: FormatFailure(strings.Join(lines, "\n"), safeCommands...)}
 }
 
 // HasFinalRecoveryLine reports whether the final line of msg is a

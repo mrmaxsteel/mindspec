@@ -404,6 +404,7 @@ func TestPanelCreate_RejectsUnsafeSlugAndControlBytes(t *testing.T) {
 		{"newline in slug", "demo\nEVIL", "", "bead/x"},
 		{"newline in --bead", "demo", "mindspec-x.1\nEVIL", "bead/x"},
 		{"newline in --target", "demo", "", "bead/x\nEVIL"},
+		{"bidi in --target", "demo", "", "bead/x\u202eEVIL"},
 		// C1 control range (U+0080-U+009F), valid-UTF8-encoded: the CSI
 		// U+009B terminal-injection vector report.go's stripControl
 		// already handles (the 'codex-render-leak #2' incident). These

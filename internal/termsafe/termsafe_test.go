@@ -206,3 +206,12 @@ func TestPrefixFailure_TrustAndCause(t *testing.T) {
 		t.Fatal("nil error changed")
 	}
 }
+
+func TestPrefixFailure_EscapesPrefix(t *testing.T) {
+	original := NewFailure("blocked", "inspect")
+	err := PrefixFailure(original, "config\x1b\nrecovery: forged: ")
+	want := "config\\x1b\\nrecovery: forged: blocked\nrecovery: inspect"
+	if err.Error() != want || strings.Contains(err.Error(), "\x1b") || strings.Count(err.Error(), "\nrecovery:") != 1 {
+		t.Fatalf("unsafe prefix: got %q want %q", err.Error(), want)
+	}
+}

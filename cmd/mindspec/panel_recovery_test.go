@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -180,5 +181,78 @@ func TestPanelLaunch_InvalidSlotRootRecovery(t *testing.T) {
 				t.Fatalf("raw ESC in slot refusal: %q", err)
 			}
 		})
+	}
+}
+
+func TestPanelCheckout_UnknownPanelRecoveryRejectsUnsafeRunes(t *testing.T) {
+	const recoveryForUnsafePanelIdentity = "remove control characters, format characters, and line or paragraph separators from the value"
+	for _, slug := range []string{"missing\u202eVISIBLE", "missing\u2028recovery: forged"} {
+		for _, verb := range []string{"launch", "checkout", "recover"} {
+			t.Run(verb+"/"+strconv.Quote(slug), func(t *testing.T) {
+				newCheckoutFixture(t, ".mindspec-scratch")
+				args := []string{verb, slug, "R1"}
+				if verb == "checkout" {
+					args = []string{verb, slug, "--slot", "R1"}
+				}
+				if verb == "recover" {
+					args = append(args, "--reason", "probe")
+				}
+				_, err := runPanelVerbCmd(args...)
+				if err == nil {
+					t.Fatal("expected unknown-panel refusal")
+				}
+				if strings.Count(err.Error(), "\nrecovery:") != 1 || !strings.HasSuffix(err.Error(), "\nrecovery: "+recoveryForUnsafePanelIdentity) {
+					t.Errorf("producer recovery lost: %q", err.Error())
+				}
+				_, recovery, ok := strings.Cut(err.Error(), "\nrecovery: ")
+				if !ok {
+					t.Fatal("missing recovery")
+				}
+				if strings.IndexFunc(recovery, func(r rune) bool { return !strconv.IsPrint(r) }) >= 0 {
+					t.Fatalf("recovery command contains raw unsafe Unicode: %q", recovery)
+				}
+			})
+		}
+	}
+}
+
+func TestPanelCheckout_AmbiguousRecovery(t *testing.T) {
+	for _, verb := range []string{"launch", "checkout", "recover"} {
+		t.Run(verb, func(t *testing.T) {
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			other := f.p
+			other.Spec = "902-other"
+			if err := panel.WriteSnapshot(filepath.Join(f.root, ".mindspec", "specs", other.Spec, "reviews", "p"), other); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{verb, "p", "R1"}
+			if verb == "checkout" {
+				args = []string{verb, "p", "--slot", "R1"}
+			}
+			if verb == "recover" {
+				args = append(args, "--reason", "test")
+			}
+			_, err := runPanelVerbCmd(args...)
+			if err == nil {
+				t.Fatal("ambiguous slug accepted")
+			}
+			want := "\nrecovery: repeat the command with --spec <id> (choose a listed spec; if copies remain, run from that checkout)"
+			if !strings.HasSuffix(err.Error(), want) || strings.Count(err.Error(), "\nrecovery:") != 1 {
+				t.Fatalf("ambiguous recovery changed: %q", err)
+			}
+		})
+	}
+}
+
+func TestPanelIdentity_UnsafeRunes(t *testing.T) {
+	for _, value := range []string{"bad\u202e", "bad\u200b", "bad\u2028", "bad\u2029"} {
+		for _, label := range []string{"slug", "--bead", "--target"} {
+			if err := rejectControlBytes(label, value); err == nil {
+				t.Errorf("unsafe %s accepted: %q", label, value)
+			}
+		}
+	}
+	if err := validatePanelSlug("réview—可視"); err != nil {
+		t.Fatalf("printable Unicode refused: %v", err)
 	}
 }

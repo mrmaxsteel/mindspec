@@ -239,7 +239,7 @@ func launchStatus(cmd *cobra.Command, root string, reg panel.Registration, slot 
 	return nil
 }
 
-// retryRefusal bounds the JSON pointer while preserving the refusal and recovery.
+// retryRefusal bounds the raw JSON pointer and detail before terminal escaping.
 func retryRefusal(err error) string {
 	var verdict *panel.VerdictError
 	if !errors.As(err, &verdict) {
@@ -249,7 +249,11 @@ func retryRefusal(err error) string {
 	if len(pointer) > 200 {
 		pointer = strings.ToValidUTF8(pointer[:200], "")
 	}
-	return termsafe.Escape(pointer + ": " + verdict.Detail + "\nrecovery: " + verdict.Recovery())
+	detail := verdict.Detail
+	if len(detail) > 1024 {
+		detail = strings.ToValidUTF8(detail[:1024-len("...")], "") + "..."
+	}
+	return termsafe.Escape(pointer + ": " + detail + "\nrecovery: " + verdict.Recovery())
 }
 
 func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
