@@ -336,6 +336,8 @@ This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-dri
 ## Workflow
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
+
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
 %s
 ## Modes
 
@@ -369,6 +371,8 @@ const starterClaudeMD = `# CLAUDE.md
 See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
+
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
 
 ## Skills
 
@@ -415,6 +419,8 @@ const appendAgentsBlockTemplate = `
 This project uses [MindSpec](https://github.com/mrmaxsteel/mindspec), a spec-driven development framework.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance.
+
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
 %s
 ### Modes
 
@@ -450,6 +456,8 @@ const appendClaudeBlock = `
 See [AGENTS.md](AGENTS.md) for project conventions shared across all coding agents.
 
 Run ` + "`mindspec instruct`" + ` for mode-appropriate operating guidance. This is emitted automatically by the SessionStart hook.
+
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
 
 ### Skills
 
@@ -493,6 +501,8 @@ See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding a
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
 
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
+
 ## Skills
 
 MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
@@ -507,6 +517,8 @@ const appendCopilotBlock = `
 See [AGENTS.md](../AGENTS.md) for project conventions shared across all coding agents.
 
 On session start, run ` + "`mindspec instruct`" + ` in the terminal for mode-appropriate operating guidance.
+
+This step and the ` + "`bd`" + ` steps are for the top-level session only. A subagent that works from a dispatch brief does not run ` + "`mindspec instruct`" + ` or ` + "`bd`" + `: its brief and the bead context it gets replace them.
 
 ### Skills
 
