@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
@@ -200,64 +201,104 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 	}
 }
 
-func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
-	fakeDir := t.TempDir()
-	logPath := filepath.Join(fakeDir, "bd.log")
-	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BD_INVOCATIONS\"\nexit 1\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BD_INVOCATIONS", logPath)
-	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Cleanup(phase.SetRunBDForTest(func(...string) ([]byte, error) { return nil, nil }))
-	root := t.TempDir()
-	const specID = "129-linkage"
-	dir := filepath.Join(root, ".mindspec", "specs", specID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specE2EValidSpecMD(specID)), 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { return []byte(`[]`), nil }))
-	creates := 0
-	t.Cleanup(SetSpecRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "create" {
-			creates++
-			var meta map[string]interface{}
-			found := false
-			epic := false
-			for i, a := range args {
-				if a == "--type=epic" {
-					epic = true
-				}
-				if a == "--metadata" && i+1 < len(args) {
-					found = true
-					if err := json.Unmarshal([]byte(args[i+1]), &meta); err != nil {
-						t.Fatal(err)
+func TestSpecApprove_WritesSpecID(t *testing.T) {
+	for _, specID := range []string{"129-linkage", "129b-linkage"} {
+		t.Run(specID, func(t *testing.T) {
+			fakeDir := t.TempDir()
+			logPath := filepath.Join(fakeDir, "bd.log")
+			if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BD_INVOCATIONS\"\nexit 1\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("BD_INVOCATIONS", logPath)
+			t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Cleanup(phase.SetRunBDForTest(func(...string) ([]byte, error) { return nil, nil }))
+			root := t.TempDir()
+			dir := filepath.Join(root, ".mindspec", "specs", specID)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(specE2EValidSpecMD(specID)), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { return []byte(`[]`), nil }))
+			creates := 0
+			t.Cleanup(SetSpecRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) > 0 && args[0] == "create" {
+					creates++
+					var meta map[string]interface{}
+					found := false
+					epic := false
+					for i, a := range args {
+						if a == "--type=epic" {
+							epic = true
+						}
+						if a == "--metadata" && i+1 < len(args) {
+							found = true
+							if err := json.Unmarshal([]byte(args[i+1]), &meta); err != nil {
+								t.Fatal(err)
+							}
+						}
 					}
+					if !epic || !found || (specID == "129-linkage" && meta["spec_num"] != float64(129)) {
+						t.Fatalf("expected epic metadata, got %q", args)
+					}
+					if specID == "129b-linkage" {
+						if _, present := meta["spec_num"]; present {
+							t.Fatalf("lettered ID must not write a numeric alias: %q", args)
+						}
+					}
+					if meta["spec_id"] != specID {
+						t.Fatalf("epic must carry the full spec_id: %q", args)
+					}
+					return []byte(`{"id":"epic-129"}`), nil
 				}
+				if len(args) == 2 && args[0] == "dolt" && args[1] == "push" {
+					return nil, nil
+				}
+				t.Fatalf("unexpected call %q", args)
+				return nil, nil
+			}))
+			if _, err := ApproveSpec(root, specID, "fixture", &executor.MockExecutor{}); err != nil {
+				t.Fatal(err)
 			}
-			if !epic || !found || meta["spec_num"] != float64(129) {
-				t.Fatalf("expected epic metadata, got %q", args)
+			if log, err := os.ReadFile(logPath); !os.IsNotExist(err) {
+				t.Fatalf("approval pin must not invoke external bd: log=%q, err=%v", log, err)
 			}
-			if _, ok := meta["spec_id"]; ok {
-				t.Fatalf("epic must not carry spec_id: %q", args)
+			if creates != 1 {
+				t.Fatalf("expected one checked epic create, got %d", creates)
 			}
-			return []byte(`{"id":"epic-129"}`), nil
-		}
-		if len(args) == 2 && args[0] == "dolt" && args[1] == "push" {
-			return nil, nil
-		}
-		t.Fatalf("unexpected call %q", args)
-		return nil, nil
-	}))
-	if _, err := ApproveSpec(root, specID, "fixture", &executor.MockExecutor{}); err != nil {
-		t.Fatal(err)
+		})
 	}
-	if log, err := os.ReadFile(logPath); !os.IsNotExist(err) {
-		t.Fatalf("approval pin must not invoke external bd: log=%q, err=%v", log, err)
-	}
-	if creates != 1 {
-		t.Fatalf("expected one checked epic create, got %d", creates)
+}
+
+func TestSpecApprove_DuplicateRefusesBeforeApproval(t *testing.T) {
+	for _, specID := range []string{"129-linkage", "129b-linkage"} {
+		t.Run(specID, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".mindspec/specs", specID)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "spec.md")
+			before := specE2EValidSpecMD(specID)
+			if err := os.WriteFile(path, []byte(before), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) {
+				return []byte(fmt.Sprintf(`[{"id":"epic-a","metadata":{"spec_id":%q}},{"id":"epic-b","status":"closed","metadata":{"spec_id":%q}}]`, specID, specID)), nil
+			}))
+			mock := &executor.MockExecutor{}
+			_, err := ApproveSpec(root, specID, "test", mock)
+			if err == nil || !strings.Contains(err.Error(), "epic-a, epic-b") {
+				t.Fatalf("duplicate approval: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != before || len(mock.Calls) != 0 {
+				t.Fatal("duplicate refusal changed approval or executor state")
+			}
+		})
 	}
 }

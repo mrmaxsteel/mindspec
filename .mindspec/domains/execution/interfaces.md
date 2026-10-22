@@ -10,7 +10,9 @@ type Executor interface {
     InitSpecWorkspace(specID string) (WorkspaceInfo, error)
     DispatchBead(beadID, specID string) (WorkspaceInfo, error)
     CompleteBead(beadID, specBranch, msg, overrideReason string, resolveMerge bool) error
-    FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error)
+    PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error
+    PushProbe(branch string) error
+    FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error)
     Cleanup(specID string, force bool) error
 
     // Epic handoff (notification hook — no-op for MindspecExecutor)
@@ -127,7 +129,20 @@ cannot drift:
 |:---------|:--------|
 | `ExactSecondParentMerges(workdir, branch, tip)` | `branch`'s two-parent first-parent merges whose second parent EQUALS `tip` exactly, newest-first. The ONE exact-match landed-ness primitive: octopus merges and ancestor-consistent-but-not-equal candidates are excluded, never guessed at. `tip` is option-reject gated before reaching any git argv. |
 | `ReachableMerges(workdir, ref)` | Every merge reachable from `ref`, newest-first in topological order (`git log --merges --topo-order`), with SHA, full parents and subject. Includes merges off the first-parent chain. Rejects option-like refs. Lifecycle uses it only after zero owned primary candidates; the primitive itself grants no landing or close decision (spec 129). |
+| `RangeRevertedAt(workdir, base, head, target)` | Checks every commit in `base..head` at `target`. It uses reverse previews with rename detection off. A path that has its parent value, or stays unchanged in a clean reverse preview, is reverted. A conflict on another path cannot hide it. The base excludes earlier commits. Read errors return `(false, err)`. Refs, the index and worktree stay unchanged. |
 | `RevertShape(workdir, mergeSHA, target)` | Reverse un-apply no-op test — `merge-tree(base=M, ours=target tip, theirs=M^1)` with rename/copy detection DISABLED (`-c merge.renames=false`). True iff the un-apply is a clean no-op whose tree equals the tip's (the tip carries none of M's content at its original paths — a true `git revert M`, or its content-indistinguishable clean-full-removal residual). Requires a >=2-parent merge; any infra failure propagates as `(false, err)` — undetermined is never a classification. Consulted only under `ContentSubsumedOutcome`'s `SubsumptionCleanDivergence` arm; the forward (rename-detecting) legs are untouched. |
+
+### Merge-state read helpers
+
+The merge-state reader also uses these read-only helpers in
+`internal/gitutil/gitops.go`:
+
+| Function | Contract |
+|:---------|:---------|
+| `DiffNameOnlyNoRenames(workdir, base, head)` | Runs `git diff --no-renames --name-only -z`. Returns both sides of a rename. Splits on NUL to preserve path bytes. |
+| `FirstParentCommitsAfter(workdir, base, head)` | Returns later commits on the first-parent chain, newest first, with full IDs, parents and subjects. |
+| `TreePathEntry(workdir, ref, path)` | Reads the path's mode, type and object ID. An empty result means absence. A read failure returns an error. |
+| `WorktreeForBranch(workdir, branch)` | Finds the branch checkout from NUL-separated worktree records. Returns an empty path when no checkout exists. |
 
 ### Gitignore Ensure (`internal/gitutil/gitignore.go`, spec 123 R4)
 
@@ -188,7 +203,7 @@ boundary:
 | Symbol | Purpose |
 |:-------|:--------|
 | `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Exclusions use `:(exclude,glob)` pathspecs so a single `*` never matches `/`, agreeing with the tool-artifact matcher. Touches no real index/ref/worktree state. |
-| `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. |
+| `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. Uses `--no-renames --name-only -z` and preserves exact filename bytes. |
 | `MaterializeStageCommit(wtPath, tree, parent, stage, subject)` | Builds a commit via plumbing (`git commit-tree`, no hooks) carrying the pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`; `StageMaterialization`/`StageArtifactSync`) — read back on re-entry instead of inferred from a tree diff. |
 | `PublishStageMarker(beadID, oid, expectedOld)` / `ReadStageMarker(beadID)` / `ClearStageMarker(beadID, expectedOID)` | The write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`, all via per-ref compare-and-swap: publish before either stage's branch advances (CREATE semantics when `expectedOld == ""`), read to discriminate a resumed run, clear on the terminal step only against the OID this invocation owns. |
 | `AdvanceBranchExpectedOld(branch, newSHA, expectedOld)` | CAS branch-ref advance a concurrent mover cannot silently clobber. |
@@ -197,8 +212,8 @@ boundary:
 Together: `M` builds candidate commit `C` from `T`; `R` resets the index to
 `C`; `S` re-classifies the exact delta about to be committed (any
 non-artifact path outside the named set REFUSES here, before commit `D` is
-built) then builds `D`; `G` is the pre-existing preserved-merge machinery
-(unchanged); `T` clears the marker on both completion paths. `MockExecutor`
+built) then builds `D`. Normal and merge-only completion use the same exact
+path reader. `G` is the pre-existing preserved-merge machinery (unchanged); `T` clears the marker on both completion paths. `MockExecutor`
 stubs all eight with configurable results defaulting to zero values, so a
 pre-existing test that never configures them exercises the
 nothing-to-materialize (both stages elide) path unchanged.
@@ -321,4 +336,128 @@ architecture doc, § Merge safety layer (spec 127).
 ### Deferral reads and rename paths
 
 - `internal/bead.CheckDeferral` reads status, description, parent chains and `discovered-from` dependencies through `bd show`. It checks that the follow-up exists, stays open and remains outside the owning epic. The defer verb, completion and implementation approval use the same checks. Each compares path-redacted finding text with the path-redacted description.
-- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option.
+- `ChangedFiles` accepts optional `ChangedFilesOptions{NoRenames: true}`. This option lists both sides of a rename. Rebind checks and records use this option. Committed ranges return git's quoted paths by default, also with `NoRenames` alone.
+- `ChangedFilesOptions{ExactPaths: true}` selects `--no-renames --name-only -z` for committed ranges. Doc-sync and ADR divergence use this option. Working-tree reads use the same path rules. These reads list both rename endpoints and preserve exact filename bytes. Domain enumeration through `TreeDirsAtRef` also preserves exact name bytes with NUL separators.
+
+## Finalization preflight
+
+`PreflightFinalizeMerges` checks layout and work destruction for each pending
+bead-to-spec merge in the lifecycle allow-set. It also checks spec-to-main when
+`hasRemote` is false. It uses the finalizer's candidate helper and writes no state.
+It also checks for existing naming merges through `gitutil.FindNamingMerges`,
+the shared implementation of `lifecycle.FindNamingMerges`. A moved bead tip
+refuses with the follow-up recovery from `complete`. The finalizer checks all
+candidates before its first write and repeats the check at each live merge.
+The executor repeats both guards at each live merge with the current tips.
+
+`PushProbe` tests the `PushBranch` remote and refspec with
+`git push --dry-run --no-verify` and `GIT_TERMINAL_PROMPT=0`. Only a failed probe
+refuses. An HTTP(S) authentication failure adds a credential-helper hint.
+A file remote needs no credential helper. The real push still runs its hooks.
+
+`gitutil.RemoteConfigured() (bool, error)` reads `git remote` in the process cwd.
+A failed read returns `(false, err)`. `lifecycle.RemoteConfigured` exposes this
+query to the workflow layer. `gitutil.HasRemote` retains its bool-only contract
+for its other callers. `lifecycle.HasRemote` has no production caller left.
+Approval makes one decision and passes it to `FinalizeEpic`:
+true selects push; false selects local merge. Finalization does not probe again.
+
+## Landing-tree ownership inputs
+
+| Symbol | Purpose |
+|:-------|:--------|
+| `gitutil.MergeTreeLanding(workdir, base, ours, theirs)` | Runs `git merge-tree --write-tree --name-only -z --merge-base=<base>`. Returns the tree and raw conflicted paths on exit 0 or 1. Other failures return an error. It changes no ref, index, or worktree. |
+| `Executor.LandingTree(workdir, base, specTip, beadRef)` | Previews the bead content into the spec tip. A bare candidate tree is wrapped in an unreferenced commit for the merge. During a preserved merge in `workdir`, returns the resolved index tree instead. Unmerged entries refuse. `MockExecutor` records the call and supports a result, conflict list, error, or function. |
+| `executor.IsPreservedMergeError(err)` | Identifies a preserved-merge refusal, including a wrapped refusal. |
+| `executor.PreservedMergeReentryRefusal(err, expectedSource, reentryHint)` | Uses the refusal's worktree to render the unresolved `resumeAwareMerge` refusal. Checks source binding first. Returns the foreign or indeterminate refusal when binding fails, or the edit, stage, and re-run steps for the bound conflict. It changes no merge, ref, index entry, or worktree file. |
+| `gitutil.LandingIndexTree(workdir)` | Runs `git write-tree` on the real index. Returns an unreferenced tree. Unmerged entries refuse. It can update the index cache-tree extension. Staged entries do not change. |
+
+The workflow layer passes the spec worktree as `workdir` when it exists.
+Source conflicts retain a preview tree with clean ownership manifests.
+Ownership conflicts return their path list for the caller's path decision.
+
+## Finalize resume interfaces
+
+- `FinalizeStageError{Stage, Err}` preserves the inner error and identifies the
+  failed stage. `Unwrap` keeps error matching available.
+- `SetFinalizeStepHookForTest(fn)` installs a stage fault hook and returns its
+  restore function. Tests must restore it. The production hook is nil.
+- `ResumeFinalizedEpic(epicID, specID, lifecycleChildren, hasRemote)` requires a
+  closed epic and stored `done` phase at the workflow boundary. It checks the
+  final publication tip and every lifecycle child's landed binding against the
+  target. It returns an error before cleanup when evidence is absent or unreadable.
+- `FetchFinalizeTarget(workdir, branch)` fetches an exact origin head into a unique
+  temporary ref. It returns the commit SHA and a release function. The caller
+  holds the ref through the ancestry checks and then releases it.
+
+`mindspec_finalize_tip` records the spec tip after export and all auto-merges.
+Every finalize run overwrites it before publication. `mindspec_pre_finalize_tip`
+keeps the routing checkpoint. `mindspec_finalize_branch` records use of the
+protected-main carrier so a retry can finish that carrier after local spec-branch
+deletion. The carrier reuses its local branch and skips an unchanged remote tip.
+A changed tip uses a lease pinned to the remote head read just before the push.
+
+`RemoteHeadSHA`, `PushBranch`, and `DeleteBranch` accept an optional working
+directory. Resume reads, pushes, and branch removals use the explicit repo root.
+A stale worktree row for an absent bead branch requires the recorded publication
+tip and that bead's binding in the spec history before finalization can continue.
+
+`FinalizeEpic` checks every scoped bead worktree and the spec worktree after
+publication and its hooks, before forced removal of those worktrees. `ResumeFinalizedEpic` runs
+the same check on all remaining worktrees before its first removal. A dirty
+worktree, a failed status read, or a worktree inspection error returns
+`FinalizeStageError` at `cleanup`. No worktree or branch is removed. The caller
+prints the epic state and the pending-work recovery. An absent worktree can
+continue through the remaining cleanup.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+returns `FinalizeStageError` before publication or cleanup. Its recovery is
+`mindspec impl approve <spec>`. The caller adds the epic state line. The pending
+file, worktree, and branch remain for a retry. An absent spec worktree has no
+artifact commit to run. An absent pending bead worktree also has no artifact
+commit to run; its branch can still merge through the spec worktree.
+
+`internal/mergefollowup` builds the moved-tip refusal and follow-up commands for
+both completion and finalization. It reads no state and executes no commands.
+
+## Separate bead merge, publication, and cleanup
+
+`Executor.MergeBead` keeps the layout guard, live work-destruction
+preflight, and preserved-merge dispatch. It makes no binding or cleanup
+write. `MergeBeadOptions.Closed` selects the re-entry command. For a closed
+child of the spec epic, the workflow sets `Closed: true`. The executor then
+omits `--merge-only` from every re-entry hint. The default keeps `--merge-only`.
+Both modes leave binding and cleanup to the caller. The workflow returns
+executor refusals with final recovery lines unchanged.
+Other merge guard failures keep their recovery.
+
+`FirstParentMerges` returns full commit identities. `CompletionState`
+reads the merge head, staged paths, and a full-SHA commit range.
+The workflow layer selects the naming merge and decides whether to close.
+
+`PublishBeadClose` exports the tracker in the spec worktree and commits
+only the paths it is given. The caller includes the export path.
+`CleanupBead` checks ancestry and reads bead user changes immediately before
+forced removal. `CompleteBead` uses the same check after its commits and merge
+hooks. Tool artifacts stay exempt. The exemption preserves decoded filename
+whitespace. A lookalike path is user work.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read
+error refuse with a completion retry command. A worktree list read error also
+refuses before the executor can remove a checkout by name. The pending file, worktree, and
+branch remain. A removal error also refuses. A retry finishes the remaining work. `MockExecutor` exposes the
+same methods and records calls.

@@ -145,7 +145,7 @@ func EvaluateReadiness(root, beadID string) (*Report, error) {
 		return nil, fmt.Errorf("bead %s has no discoverable owning spec lineage", idrender.Bead(beadID))
 	}
 
-	n, err := beadIndex(beadID)
+	n, err := beadIndex(beadID, epicID)
 	if err != nil {
 		return nil, &NonPlanFormError{BeadID: beadID, EpicID: epicID, SpecID: specID}
 	}
@@ -205,14 +205,14 @@ type NonPlanFormError struct {
 
 // Error returns the existing dotted-index diagnostic byte for byte.
 func (e *NonPlanFormError) Error() string {
-	_, err := beadIndex(e.BeadID)
+	_, err := beadIndex(e.BeadID, e.EpicID)
 	if err != nil {
 		return err.Error()
 	}
 	return fmt.Sprintf("bead %s has no dotted epic-child index (expected <epic>.<N>)", idrender.Bead(e.BeadID))
 }
 
-func beadIndex(beadID string) (int, error) {
+func beadIndex(beadID, epicID string) (int, error) {
 	m := beadIndexRe.FindStringSubmatch(beadID)
 	if m == nil {
 		return 0, fmt.Errorf("bead %s has no dotted epic-child index (expected <epic>.<N>)", idrender.Bead(beadID))
@@ -220,6 +220,9 @@ func beadIndex(beadID string) (int, error) {
 	n, err := strconv.Atoi(m[1])
 	if err != nil || n < 1 {
 		return 0, fmt.Errorf("bead %s has an invalid epic-child index", idrender.Bead(beadID))
+	}
+	if beadID != epicID+"."+m[1] {
+		return 0, fmt.Errorf("bead %s has a different epic prefix (expected %s.<N>)", idrender.Bead(beadID), idrender.Bead(epicID))
 	}
 	return n, nil
 }

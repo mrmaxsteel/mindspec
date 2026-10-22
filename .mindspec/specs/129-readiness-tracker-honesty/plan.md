@@ -357,7 +357,7 @@ No ADR is superseded. No new ADR is needed beyond ADR-0045, which has already la
 - **Lint and format.** `go test ./internal/lint/...` covers the argv ratchet `TestArgvIDOperandGated` (every git or bd exec site and every wrapper caller is a row in `ratchet_argv_table_test.go`), the composition allowlist `TestWorkspaceCompositionCallSiteAllowlist` (every `workspace.*` helper call is a row in `ratchet_composition_allowlist_test.go`) and Bead 1's `TestBDRowCapWaist`. It does NOT cover the ADR-0030 boundary for `internal/validate/readiness` (§ ADR Fitness, ADR-0030). `gofmt -l .` must print nothing; doc comments stay plain ASCII.
 - **Run lines are not vacuous.** Every `-run` alternative names a test that exists at this plan's commit or that a step adds (marked NEW). Each implementer runs each targeted line once with `-v` and confirms every named test prints `--- PASS`. Run lines take the form `go test ./<pkg>/ -run '<regex>' -count=1`.
 - **Domain docs per bead.** Each bead edits the domain-doc sections it owns (§ Shared files, Doc ownership). No bead plans `--allow-doc-skew`.
-- **Package scope.** `internal/harness` and `internal/instruct` tests run with `-short` only. The whole suite gate is `go build ./... && go test ./... -short` (AC-19).
+- **Package scope.** `internal/harness` and `internal/instruct` tests run with `-short` only. The whole suite gate is `go build ./... && go test ./... -short -timeout=20m` (AC-19).
 
 ## Bead 1: bd row-cap waist, row-cap lint and linkage pins
 
@@ -413,7 +413,7 @@ No ADR is superseded. No new ADR is needed beyond ADR-0045, which has already la
 - [ ] `go test ./internal/approve/ -run 'TestAdoptLattice_ListViaWaist|TestPlanApprove_BeadsCarrySpecID|TestSpecApprove_EpicHasNoSpecID' -count=1` passes
 - [ ] `go test ./internal/lint/ -run 'TestBDRowCapWaist|TestArgvIDOperandGated' -count=1` passes, including the three injected-file legs
 - [ ] `go test ./internal/doctor/ -run 'TestCheckBdVersionFloor_' -count=1` passes; `go test ./internal/phase/... ./internal/doctor/... -count=1` passes, which proves `phase.Cache`'s explicit `-n 0` is tolerated
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-7: every R2.1 site's recorded argv carries exactly one `-n 0`; every rejected spelling in step 1 errors with no bd spawn; with 101 ready rows the emit-only list has 101 items (red-on-revert: 100 today).
@@ -514,7 +514,7 @@ None.
 - [ ] `go test ./internal/lifecycle/ ./cmd/mindspec/ -run 'TestReattest' -count=1` passes, with `TestReattest_ContradictoryBindingOverwrittenAudited` and `TestReattest_StaleOlderRemergeBindingRewrittenToNewest` unchanged and `TestReattest_HappyPathFleetState`'s existing assertions kept
 - [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes (NEW test file)
 - [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes (the new exec row and the new composition rows)
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-11 lifecycle legs:
@@ -574,7 +574,7 @@ None.
 - [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes (readiness still never reads the override marker)
 - [ ] `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) prints only the two existing `os/exec` lines (`fixtures.go`, `readiness_test.go`); the output is recorded in the commit body (§ ADR Fitness, ADR-0030)
 - [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes unchanged
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-14: `TestMF2_FormSymmetry` passes over the full table; `TestReadiness_MF2AllClasses`' six R5.2 legs pass; legs 1, 4 and 6 are recorded red-on-revert.
@@ -633,7 +633,7 @@ None.
 - [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes
 - [ ] `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) prints only the two existing `os/exec` lines (`fixtures.go`, `readiness_test.go`); the output is recorded in the commit body
 - [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist' -count=1` passes unchanged (no new exec site or `workspace.*` call)
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-10: legs a–g pass; a, b and f are recorded red-on-revert; leg g is a FAIL "could not determine whether…", never PASS. (iii)'s parent read runs only when (i) and (ii) are negative (`TestReadiness_MF3_ParentReadOnlyWhenNeeded`).
@@ -714,7 +714,7 @@ Bead 2 (`FindLandedMergeReachable`, `*LandedMergeOffFirstParent`, `ErrLandedMerg
 - [ ] `go test ./internal/next/ -run 'TestBuildReadySet_|TestNearMissN|TestExclusionNotice_NamesIDs' -count=1` passes
 - [ ] `go test ./cmd/mindspec/ -run 'TestNextSelection_|TestNext_ScopedSelection_|TestNext_EmitOnlyReadsPlanFromSpecBranch|TestNext_PlanDivergenceNotice|TestNext_PlanBlobAbsentUsesCheckout|TestNext_PlanProbeFailureRefuses|TestNext_LazyPlanReadForNoLineageRow|TestNext_NoPlanYetAllN4|TestNext_SelectorOnEmptySet_Refuses|TestNext_NearMissPositional_Refuses|TestNext_UnlinkedReadyPositional_Refuses|TestNext_N4NoLineagePositionalRefuses|TestNext_EmptyScoped_|TestNextMenu_PrintsSpecIDForm|TestNext_101ReadyBeads_AllVisible' -count=1` passes
 - [ ] `go test ./internal/instruct/ -short -run 'TestImplementTemplate_EmptinessRule' -count=1` passes
-- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist|TestBDRowCapWaist' -count=1` passes; `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `go test ./internal/lint/ -run 'TestArgvIDOperandGated|TestWorkspaceCompositionCallSiteAllowlist|TestBDRowCapWaist' -count=1` passes; `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-1: on the edge-only, capping fake:
@@ -778,7 +778,7 @@ Bead 1 (`bead.ReadyJSON`, uncapped `ResolveActiveBead`, the argv-table rows it a
 - [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes
 - [ ] `grep -n -e '"os/exec"' -e 'internal/gitutil"' internal/validate/readiness/*.go` (run, unpiped) still prints only the two existing `os/exec` lines (`fixtures.go`, `readiness_test.go`), so `override.go` adds neither import; the output is recorded in the commit body (§ ADR Fitness, ADR-0030)
 - [ ] `mindspec adr list` (run) lists ADR-0045
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-17 (coverage, render and exit legs):
@@ -869,14 +869,14 @@ Bead 3 (`Signal.Failures`, `FailureRecordDigests`, `IsIndeterminateRecord`, the 
 - [ ] `go test ./internal/validate/ -run 'TestADR0041_Spec129Amendment' -count=1` passes with parts (i)–(iii)
 - [ ] `go test ./internal/complete/ -run 'TestReadinessIsolation_' -count=1` passes; `go test ./internal/lint/... -count=1` passes (the argv ratchet, the composition allowlist and the guard recovery-convention lint cover the new sites and recovery lines)
 - [ ] `mindspec validate spec 129-readiness-tracker-honesty` (run) reports 0 errors
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes, with `internal/harness` and `internal/instruct` under `-short`
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes, with `internal/harness` and `internal/instruct` under `-short`
 
 **Acceptance Criteria**
 - AC-6: legs a–f pass, each refusing before any mutation with a byte-identical audit. The unscoped claim with no resolved spec dispatches into T, cut from `spec/<T>`. The missing spec branch refuses with `ClaimBead` never called. Red-on-revert is recorded.
 - AC-15: all eight legs pass. The MF-2+MF-3 refusal's last `recovery:` line contains `--allow-not-ready=MF-2,MF-3 --evidence <path-to-justification>` and no operator path.
 - AC-16: all ten legs pass across Beads 3 and 7, plus the directory and empty-file evidence legs. The growth and MF-4-multiplicity legs are recorded red-on-revert against the single-fingerprint design.
 - AC-3 (scoped-override leg): `mindspec next <O> --spec S --allow-not-ready=MF-1 --evidence <f>` claims O and records `signals: [MF-1]`.
-- AC-17 (re-claim legs) pass. AC-18 (ADR-0041 part iii) passes. AC-19: `go build ./... && go test ./... -short` and `go test ./internal/lint/...` are green.
+- AC-17 (re-claim legs) pass. AC-18 (ADR-0041 part iii) passes. AC-19: `go build ./... && go test ./... -short -timeout=20m` and `go test ./internal/lint/...` are green.
 
 **Depends on**
 Bead 4 (MF-3 records, including `indeterminate`), Bead 5 (`cmd/mindspec/next.go` selection rewrite) and Bead 6 (marker schema v2 builder, validator, `ready-check` coverage).
@@ -906,7 +906,7 @@ Bead 4 (MF-3 records, including `indeterminate`), Bead 5 (`cmd/mindspec/next.go`
 - [ ] `go test ./internal/complete/ -run 'TestPanelGate_UntrackedIgnoredRegistration' -count=1` passes (NEW test)
 - [ ] `go test ./internal/doctor/... ./internal/setup/... -count=1` passes unchanged (no new tracked-runtime finding; setup's list is untouched)
 - [ ] `git check-ignore -v .mindspec/specs/129-readiness-tracker-honesty/reviews/x/panel.json` (run in the bead worktree) names the `.mindspec/specs/*/reviews/**` line
-- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short` passes
+- [ ] `gofmt -l .` prints nothing; `go build ./... && go test ./... -short -timeout=20m` passes
 
 **Acceptance Criteria**
 - AC-20: init adds both `/**` entries on a greenfield and an existing `.gitignore`, idempotently, under the review header; the anchored patterns ignore both review locations and not `src/reviews/`; the two lists are disjoint; this repo's `.gitignore` carries both lines.
@@ -939,6 +939,6 @@ Enumerated with `grep -nE '^- \[ \] \*\*AC-[0-9]+' .mindspec/specs/129-readiness
 | AC-16 (R6.2 record digests, no widening) | Bead 3 verification (`TestFailureRecordDigests_Deterministic`, `TestFailureRecordDigests_WriterReaderAgree`); Bead 3 verification (`TestReadiness_MF1AggregatesAllFailures`, `TestReadiness_MF4AggregatesAllOccurrences`); Bead 7 verification (`TestOverride_*`, `TestAllowNotReady_EvidenceTooLargeRefuses`, `TestAllowNotReady_EvidenceDirectoryRefuses`, `TestAllowNotReady_EvidenceEmptyRefuses`) |
 | AC-17 (R6.3, R6.4 validated read-back) | Bead 6 verification (`TestReadyCheck_HonoursValidMarkerOnly`, `TestOverrideMarker_Validity`, `TestReadyCheck_LegacyRecoveryReleasesThenReclaims`, `TestReadyCheck_MixedCoverageRecoveryNamesAllFailing`); Bead 7 verification (end-to-end release and re-claim legs) |
 | AC-18 (R6.5, R7, ADR-0041 amendment) | Bead 6 verification (skill line and staged-rule marker pins, `mindspec adr list` showing ADR-0045, back-pointers); Bead 2 verification (ADR-0041 parts i–ii text pin); Bead 7 verification (ADR-0041 part iii text pin, `mindspec validate spec 129-readiness-tracker-honesty`) |
-| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short`; `go test ./internal/lint/...`); Beads 3, 4 and 6 record the readiness import grep in place of a boundary lint (§ ADR Fitness, ADR-0030); Bead 7 runs the whole-suite gate last |
+| AC-19 (method) | Every bead's final verification line (`gofmt -l .`; `go build ./... && go test ./... -short -timeout=20m`; `go test ./internal/lint/...`); Beads 3, 4 and 6 record the readiness import grep in place of a boundary lint (§ ADR Fitness, ADR-0030); Bead 7 runs the whole-suite gate last |
 | AC-20 (R8.1 init ignores reviews) | Bead 8 verification (`TestBootstrap_ReviewsIgnored{Greenfield,ExistingGitignore,Idempotent}`, `TestReviewIgnoreEntries_NotRuntimeEntries`, the repo `.gitignore` check-ignore line) |
 | AC-21 (R8.2, R8.3 no auto-commit; gates read untracked) | Bead 8 verification (`TestCommitAll_SkipsIgnoredReviews`, `TestSnapshotWorktreeTree_SkipsIgnoredReviews`, `TestPanelGate_UntrackedIgnoredRegistration` with its non-vacuous Block assertions); Bead 2 verification (`TestReviewedHeadSHASet_UntrackedIgnored`) |

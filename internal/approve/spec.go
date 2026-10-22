@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,6 +72,15 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		return nil, err
 	}
 
+	specNum, _ := parseSpecID(specID)
+	existingEpicID, lookupErr := phase.FindEpicBySpecID(specID)
+	if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
+		if errors.Is(lookupErr, phase.ErrSpecResolution) {
+			return nil, lookupErr
+		}
+		return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
+	}
+
 	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(specDir, "spec.md")
 	if err = updateSpecApproval(specPath, approvedBy); err != nil {
@@ -81,44 +91,52 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	// Epic creation = spec approval gate. The epic's existence is the durable record.
 	// Idempotent: if the epic already exists (e.g., pre-created by test setup or
 	// a previous approval attempt), skip creation.
-	specNum, _ := parseSpecID(specID)
-	if specNum > 0 {
-		existingEpicID, _ := phase.FindEpicBySpecID(specID)
-		if existingEpicID != "" {
-			// Epic already exists — skip creation (idempotent).
-			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
-			// Spec 128 R3.6 (round-4 G2): see backfillExistingEpicPhase's
-			// doc comment for the chosen disposition and rationale.
-			// Final-review round 1 (R2/G3): the backfill error can chain a
-			// bd merge-write failure's raw stderr — wrap before
-			// DescribeLockFailure renders it (bdRenderedError preserves
-			// Unwrap, so the timeout classification inside is unchanged).
-			if msg, err := backfillExistingEpicPhase(root, existingEpicID); err != nil {
-				result.Warnings = append(result.Warnings, phase.DescribeLockFailure(next.RenderBDError(err), fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
-			} else if msg != "" {
-				result.Warnings = append(result.Warnings, msg)
-			}
-		} else {
+	if existingEpicID != "" {
+		// Epic already exists — skip creation (idempotent).
+		result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
+		// Spec 128 R3.6 (round-4 G2): see backfillExistingEpicPhase's
+		// doc comment for the chosen disposition and rationale.
+		// Final-review round 1 (R2/G3): the backfill error can chain a
+		// bd merge-write failure's raw stderr — wrap before
+		// DescribeLockFailure renders it (bdRenderedError preserves
+		// Unwrap, so the timeout classification inside is unchanged).
+		if msg, err := backfillExistingEpicPhase(root, existingEpicID); err != nil {
+			result.Warnings = append(result.Warnings, phase.DescribeLockFailure(next.RenderBDError(err), fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID))))
+		} else if msg != "" {
+			result.Warnings = append(result.Warnings, msg)
+		}
+	} else {
+		if specNum > 0 {
 			if err := phase.CheckSpecNumberCollision(specNum); err != nil {
 				return nil, fmt.Errorf("spec number collision: %w", err)
 			}
-			// Spec 080: include mindspec_phase in initial epic metadata
-			metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s","mindspec_phase":"plan"}`, specNum, titleFromSpecID(specID))
-			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
-			out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
-			if epicErr != nil {
-				// Final-review round 1 (R2/G3): epicErr carries
-				// wrapBDError'd raw bd stderr and this warning is printed
-				// verbatim by cmd/mindspec/spec.go — escape at the append.
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", next.RenderBDError(epicErr)))
-			} else {
-				var created struct {
-					ID string `json:"id"`
-				}
-				if json.Unmarshal(out, &created) == nil && created.ID != "" {
-					// Push to Dolt so other agents see the epic immediately
-					_, _ = specRunBDFn("dolt", "push")
-				}
+		}
+		// Spec 080: include mindspec_phase in initial epic metadata
+		metadataFields := map[string]interface{}{"spec_id": specID, "spec_title": titleFromSpecID(specID)}
+		if specNum > 0 {
+			metadataFields["spec_num"] = specNum
+		}
+		metadata, err := json.Marshal(metadataFields)
+		if err != nil {
+			return nil, err
+		}
+		// This is a creation seed, not an update to a stored phase. Keep
+		// variable fields JSON-escaped and add the constant phase to the object.
+		metadataJSON := fmt.Sprintf(`{"mindspec_phase":"plan",%s`, metadata[1:])
+		epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
+		out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadataJSON, "--json")
+		if epicErr != nil {
+			// Final-review round 1 (R2/G3): epicErr carries
+			// wrapBDError'd raw bd stderr and this warning is printed
+			// verbatim by cmd/mindspec/spec.go — escape at the append.
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not create lifecycle epic: %v", next.RenderBDError(epicErr)))
+		} else {
+			var created struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(out, &created) == nil && created.ID != "" {
+				// Push to Dolt so other agents see the epic immediately
+				_, _ = specRunBDFn("dolt", "push")
 			}
 		}
 	}

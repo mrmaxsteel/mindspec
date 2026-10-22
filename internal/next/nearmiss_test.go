@@ -2,6 +2,7 @@ package next
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -115,8 +116,8 @@ func newNearMissFixture(t *testing.T, duplicate bool) *nearMissFixture {
 	}
 	rows := [][4]string{
 		{"epic-129.1", "neutral", "epic-129", "bug"}, // A
-		{"epic-129.2", "[129-fixture] G", "", "task"},
-		{"epic-129.3", "[129] G prime", "", "task"},
+		{"epic-129.2", "[129-fixture] G", "epic-129", "task"},
+		{"epic-129.3", "[129] G prime", "epic-129", "task"},
 		{"epic-129.4", "neutral", "", "task"}, // D
 		{"epic-129.5", "[129-fixture] P", "other-parent", "task"},
 		{"epic-129.7", "[777] Q2", "", "task"},
@@ -148,7 +149,7 @@ func newNearMissFixture(t *testing.T, duplicate bool) *nearMissFixture {
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Reset seams explicitly; tests exercise the production resolver and shared cache.
 	oldReady, oldRun, oldFind := readyJSONFn, runBDFn, findEpicForBeadFn
-	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicForBeadWithCache
+	readyJSONFn, runBDFn, findEpicForBeadFn = bead.ReadyJSON, bead.RunBD, phase.FindEpicLineageWithCache
 	t.Cleanup(func() { readyJSONFn, runBDFn, findEpicForBeadFn = oldReady, oldRun, oldFind })
 	t.Cleanup(phase.SetRunBDForTest(bead.RunBD))
 	t.Cleanup(phase.SetListJSONForTest(bead.ListJSON))
@@ -181,7 +182,7 @@ func TestNearMissN1_RecoveryYieldsClaimable(t *testing.T) {
 		t.Fatal("detached mapped bead must be blocking")
 	}
 	m := missByID(t, rs, "epic-129.4")
-	want := "bead epic-129.4 has the plan-bead form for epic epic-129 and plan.md maps Bead 4, but it has no lineage (no parent edge and no spec tag in its title)\nrecovery: bd update epic-129.4 --parent epic-129"
+	want := "bead epic-129.4 has the plan-bead form for epic epic-129 and plan.md maps Bead 4, but it has no lineage (no parent-child edge to an epic)\nrecovery: bd update epic-129.4 --parent epic-129"
 	if m.String() != want {
 		t.Fatalf("N1 diagnostic:\n%s", m.String())
 	}
@@ -198,14 +199,14 @@ func TestNearMissN1_RecoveryYieldsClaimable(t *testing.T) {
 		t.Fatalf("recovered bead never reached readiness signals: %+v %v", report, err)
 	}
 }
-func TestNearMissN2b_SameNumberReparentCorrectsLineage(t *testing.T) {
+func TestNearMissN1_TitleOnlySameNumber(t *testing.T) {
 	f := newNearMissFixture(t, true)
 	rs, err := BuildReadySet(f.root, "129-fixture")
 	if err == nil {
-		t.Fatal("duplicate epic title lineage must block")
+		t.Fatal("a title-only bead must have no lineage")
 	}
 	m := missByID(t, rs, "epic-129.6")
-	if m.Class != "N2b" || !strings.Contains(m.String(), "its lineage resolves to duplicate-129 by title number 129\nrecovery: bd update epic-129.6 --parent epic-129") {
+	if m.Class != "N1" || !strings.Contains(m.String(), "it has no lineage (no parent-child edge to an epic)\nrecovery: bd update epic-129.6 --parent epic-129") {
 		t.Fatalf("same number recovery: %s", m.String())
 	}
 	if out, err := exec.Command(filepath.Join(f.root, "bd"), "update", "epic-129.6", "--parent", "epic-129").CombinedOutput(); err != nil {
@@ -220,15 +221,15 @@ func TestNearMissN2b_SameNumberReparentCorrectsLineage(t *testing.T) {
 		t.Fatalf("actual lineage after update: %s %v", epic, err)
 	}
 }
-func TestNearMissN2b_OtherNumberInspectsFirst(t *testing.T) {
+func TestNearMissN1_TitleOnlyOtherNumber(t *testing.T) {
 	f := newNearMissFixture(t, false)
 	rs, err := BuildReadySet(f.root, "129-fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := missByID(t, rs, "epic-129.7")
-	want := []string{"recovery: bd show epic-129.7 --json", "recovery (only if epic-129.7 belongs to 129-fixture): bd update epic-129.7 --parent epic-129"}
-	if m.Class != "N2b" || !reflect.DeepEqual(m.Recoveries, want) {
+	want := []string{"recovery: bd update epic-129.7 --parent epic-129"}
+	if m.Class != "N1" || !reflect.DeepEqual(m.Recoveries, want) {
 		t.Fatalf("other-number: %+v", m)
 	}
 }
@@ -278,14 +279,15 @@ func TestNearMissN2a_NamedEpicParentWithoutMetadata(t *testing.T) {
 	}
 	f.save(t)
 	rs, err := BuildReadySet(f.root, "129-fixture")
-	if err == nil || len(rs.Filtered) != 0 || len(rs.NearMisses) != 2 {
-		t.Fatalf("named parents must remain blocking near-misses: %+v %v", rs, err)
+	var empty *EmptyAfterFilterError
+	if !errors.As(err, &empty) || len(rs.Filtered) != 0 || len(rs.NearMisses) != len(f.rows) {
+		t.Fatalf("expected inspection-only near-misses: %+v %v", rs, err)
 	}
 	for _, row := range f.rows {
 		m := missByID(t, rs, row.ID)
 		want := fmt.Sprintf("bead %s has the plan-bead form for epic epic-129, but its parent is plain-epic\nrecovery: bd show %s --json", row.ID, row.ID)
-		if m.Class != "N2a" || !m.Blocking || m.String() != want || strings.Contains(m.String(), "bd update") || strings.Contains(m.String(), "no parent edge") {
-			t.Errorf("named parent must use inspection-only recovery: %s", m.String())
+		if m.Class != "N2a" || !m.Blocking || m.String() != want || strings.Contains(m.String(), "bd update") {
+			t.Fatalf("unexpected near-miss: %+v", m)
 		}
 	}
 }

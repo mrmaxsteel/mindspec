@@ -415,16 +415,15 @@ func TestReadiness_MF3_CompleteWrapperShape(t *testing.T) {
 }
 
 func TestReadiness_MF3_CompleteWrapperNoBindingReattest(t *testing.T) {
-	root, branch, dep, current, merge, _ := mf3GitFixture(t, false, true, false)
+	root, branch, dep, current, merge, second := mf3GitFixture(t, false, true, false)
 	log := traceMF3Git(t)
-	_, err := lifecycle.FindLandedMergeReachable(root, branch, dep)
-	var noEvidence *lifecycle.LandedMergeNoEvidence
-	if !errors.As(err, &noEvidence) || noEvidence.MergeSHA != merge {
-		t.Fatalf("candidate evidence: %T %v", err, err)
+	landed, err := lifecycle.FindLandedMergeReachable(root, branch, dep)
+	if err != nil || landed == nil || landed.SHA != merge || landed.SecondParent != second || landed.Provenance != "panel reviewed-tree" {
+		t.Fatalf("reviewed empty wrapper must confirm without a binding: %+v %v", landed, err)
 	}
 	s := readMF3(t, root, current)
-	if s.Pass || !strings.Contains(s.Detail, merge) || !strings.Contains(s.Detail, "no admissible datum corroborates it") || strings.Contains(s.Detail, "no two-parent merge reachable") {
-		t.Fatalf("missing candidate evidence: %+v", s)
+	if !s.Pass {
+		t.Fatalf("reviewed empty wrapper must pass before reattest: %+v", s)
 	}
 	if _, err := lifecycle.ReattestLandedMerge(root, branch, dep, "readiness-fixture"); err != nil {
 		t.Fatal(err)

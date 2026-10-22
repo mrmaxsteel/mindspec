@@ -80,10 +80,9 @@ func TestPanelTally_ReattestRecoveryPreservesRef(t *testing.T) {
 			if !ok {
 				t.Fatalf("missing inspect command: %v", err)
 			}
-			command, _, ok = strings.Cut(command, "   (inspect")
-			if !ok {
-				t.Fatal("missing inspect annotation")
-			}
+			// Recovery lines contain executable commands without prose suffixes.
+			// A fallback refusal can include another recovery on the next line.
+			command, _, _ = strings.Cut(command, "\n")
 			got, shellErr := exec.Command("/bin/sh", "-c", `capture() { printf '%s\000' "$@"; }; capture `+command).CombinedOutput()
 			flags := "--first-parent\x00--merges\x00"
 			if fallback {

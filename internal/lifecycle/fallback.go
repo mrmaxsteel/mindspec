@@ -67,22 +67,32 @@ func reachableCandidates(root, specBranch, beadBranch string) ([]gitutil.MergeCo
 
 // fallbackSafety re-derives F3 and F4 from git at the CURRENT tip. F1 is
 // checked by each caller before selecting m. All read failures (F5) stay errors.
+var (
+	fallbackBranchTipFn      = resolveBranchTip
+	fallbackForwardContentFn = func(root, base, head, target string) (gitutil.Subsumption, error) {
+		return landedContentSubsumedFn(root, base, head, target)
+	}
+	fallbackReverseContentFn = func(root, head, target string) (bool, error) {
+		return landedRevertShapeFn(root, head, target)
+	}
+)
+
 func fallbackSafety(root, specBranch, beadBranch string, m gitutil.MergeCommit) error {
-	tip, survives, err := resolveBranchTip(root, beadBranch)
+	tip, survives, err := fallbackBranchTipFn(root, beadBranch)
 	if err != nil {
-		return fmt.Errorf("resolving surviving branch %s: %w", termsafe.Escape(beadBranch), err)
+		return fmt.Errorf("resolving surviving branch %s: %s", termsafe.Escape(beadBranch), termsafe.Escape(err.Error()))
 	}
 	if survives && tip != m.Parents[1] {
 		return fmt.Errorf("%w: surviving branch %s tip %s contradicts merge %s's second parent %s", ErrLandedMergeContradiction, termsafe.Escape(beadBranch), termsafe.Escape(tip), m.SHA, m.Parents[1])
 	}
-	outcome, err := landedContentSubsumedFn(root, m.Parents[0], m.SHA, specBranch)
+	outcome, err := fallbackForwardContentFn(root, m.Parents[0], m.SHA, specBranch)
 	if err != nil {
-		return fmt.Errorf("checking net effect of merge %s: %w", m.SHA, err)
+		return fmt.Errorf("checking net effect of merge %s: %s", termsafe.Escape(m.SHA), termsafe.Escape(err.Error()))
 	}
 	if outcome == gitutil.SubsumptionCleanDivergence {
-		reverted, err := landedRevertShapeFn(root, m.SHA, specBranch)
+		reverted, err := fallbackReverseContentFn(root, m.SHA, specBranch)
 		if err != nil {
-			return fmt.Errorf("checking revert shape of merge %s: %w", m.SHA, err)
+			return fmt.Errorf("checking revert shape of merge %s: %s", termsafe.Escape(m.SHA), termsafe.Escape(err.Error()))
 		}
 		if reverted {
 			return fmt.Errorf("%w: merge %s was reverted or cleanly removed after landing at %s's current tip", ErrLandedMergeReverted, m.SHA, termsafe.Escape(specBranch))

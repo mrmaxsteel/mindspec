@@ -16,6 +16,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/mergefollowup"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -97,6 +99,7 @@ type MindspecExecutor struct {
 	WorktreeOps WorktreeOps
 
 	landedReview *landedReview
+	completeMode string
 }
 
 // landedReview is supplied only to CompleteBead's binding producer.
@@ -365,7 +368,12 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 
 	// Find bead worktree.
 	var wtPath string
-	if entries, err := g.WorktreeOps.List(); err == nil {
+	entries, listErr := g.WorktreeOps.List()
+	if listErr != nil {
+		return guard.NewFailure("cannot read bead worktrees: "+termsafe.Escape(listErr.Error()),
+			fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
+	}
+	if listErr == nil {
 		for _, e := range entries {
 			if e.Name == wtName || e.Branch == beadBranch {
 				wtName = e.Name
@@ -418,7 +426,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(specWtPath); err == nil {
+	if _, err := os.Stat(specWtPath); err == nil && g.completeMode != "cleanup-only" {
 		// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard in front
 		// of the bead→spec merge. Blocks ONLY the regression direction (a
 		// canonical/legacy bead branch onto a flat spec target); mutates nothing.
@@ -444,10 +452,14 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// aborted) and, on a genuinely fresh conflict, leaves it IN PLACE
 		// (Spec 092 Req 14(a)'s original abort-and-refuse behavior is
 		// retired by this spec — see resumeAwareMerge's doc comment).
-		if err := resumeAwareMerge(specWtPath, resolveMerge, beadBranch, fmt.Sprintf("mindspec complete %s %s", beadID, ResolveMergeFlag),
+		modeFlag := ""
+		if g.completeMode == "merge-only" {
+			modeFlag = " --merge-only"
+		}
+		if err := resumeAwareMerge(specWtPath, resolveMerge, beadBranch, fmt.Sprintf("mindspec complete %s%s %s", idrender.Bead(beadID), modeFlag, ResolveMergeFlag),
 			func() error { return gitutil.MergeInto(specWtPath, beadBranch) },
 			func(mergeErr error) error {
-				return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, fmt.Sprintf("mindspec complete %s", beadID), mergeErr)
+				return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, fmt.Sprintf("mindspec complete %s%s", idrender.Bead(beadID), modeFlag), mergeErr)
 			},
 		); err != nil {
 			return err
@@ -496,19 +508,30 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// MergeInto of an already-ancestor branch is a no-op, and the
 		// re-run's ensureLandedBinding locates the SAME merge by identity —
 		// never a silent warn-and-continue past an unrecorded binding.
-		if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch, review); bindErr != nil {
-			return guard.NewFailure(
-				fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
-				fmt.Sprintf("mindspec complete %s", beadID),
-			)
+		if g.completeMode == "" {
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch, review); bindErr != nil {
+				return guard.NewFailure(
+					fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
+					fmt.Sprintf("mindspec complete %s", beadID),
+				)
+			}
 		}
+	}
+	if g.completeMode == "merge-only" || g.completeMode == "closed-merge" {
+		return nil
 	}
 
 	// Remove worktree and delete branch from repo root (not from inside the
 	// worktree being removed). Matches the pattern in FinalizeEpic().
 	if err := withWorkingDir(g.Root, func() error {
-		if wtName != "" {
+		if wtName != "" && (g.completeMode == "" || wtPath != "") {
+			if err := checkBeadCleanupWorktree(wtPath, beadID); err != nil {
+				return err
+			}
 			if err := g.WorktreeOps.Remove(wtName); err != nil {
+				if g.completeMode != "" {
+					return err
+				}
 				// Final-review G3-2 (spec 120): wtName may be the
 				// agent-writable bd-list e.Name (reassigned on the
 				// OR-match above) — escape it so a control-bearing name
@@ -516,8 +539,13 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", termsafe.Escape(wtName), err)
 			}
 		}
-		if err := gitutil.DeleteBranch(beadBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+		if beadBranchPresent || g.completeMode == "" {
+			if err := gitutil.DeleteBranch(beadBranch); err != nil {
+				if g.completeMode != "" {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -552,14 +580,174 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 //	                    branch deletion)
 var finalizeStepHookFn func(stage string) error
 
-// finalizeStepHook invokes finalizeStepHookFn for stage when set,
-// translating a non-nil return into the terminal error FinalizeEpic's
-// caller sees — a no-op when no hook is installed (production default).
+// Finalize metadata is separate from bead binding writes. Each write preserves
+// unrelated tracker keys and fails closed when the tracker cannot be read.
+var (
+	finalizeMetadataReadFn  = bead.GetMetadata
+	finalizeMetadataWriteFn = bead.MergeMetadata
+)
+
+// SetFinalizeStepHookForTest sets the stage fault seam. Tests must restore it.
+func SetFinalizeStepHookForTest(fn func(stage string) error) (restore func()) {
+	old := finalizeStepHookFn
+	finalizeStepHookFn = fn
+	return func() { finalizeStepHookFn = old }
+}
+
+// finalizeStepHook is a no-op when no test hook is installed.
 func finalizeStepHook(stage string) error {
 	if finalizeStepHookFn == nil {
 		return nil
 	}
 	return finalizeStepHookFn(stage)
+}
+
+// finalizeBeadWorktrees scopes both early preflight and finalization to the
+// same worktree candidates. An explicit empty allow-set admits no beads.
+func (g *MindspecExecutor) finalizeBeadWorktrees(epicID, specID, specBranch string, lifecycleAllowSet []string) ([]bead.WorktreeListEntry, error) {
+	entries, err := g.WorktreeOps.List()
+	if err != nil {
+		return nil, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %s", idrender.Bead(epicID), termsafe.Escape(err.Error()))
+	}
+	allow := make(map[string]bool, len(lifecycleAllowSet))
+	for _, id := range lifecycleAllowSet {
+		allow[id] = true
+	}
+	var candidates []bead.WorktreeListEntry
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
+			continue
+		}
+		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+		if idvalidate.BeadID(beadID) != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
+			continue
+		}
+		if lifecycleAllowSet == nil {
+			return nil, fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to merge without an explicit scope", idrender.Bead(epicID), termsafe.Escape(e.Branch))
+		}
+		if allow[beadID] {
+			exists, err := gitutil.BranchExistsIn(g.Root, e.Branch)
+			if err != nil {
+				return nil, guard.NewFailure("cannot check bead branch: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+			}
+			if exists {
+				candidates = append(candidates, e)
+			} else if err := g.verifyRemovedFinalizeBead(epicID, beadID, specBranch); err != nil {
+				return nil, guard.NewFailure("cannot use an absent bead branch without published landing evidence: "+termsafe.Escape(err.Error()), "restore the bead branch", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+			}
+		}
+	}
+	return candidates, nil
+}
+
+// verifyRemovedFinalizeBead distinguishes partial cleanup from a stale row
+// that has no durable landing evidence. A missing branch alone is not proof.
+func (g *MindspecExecutor) verifyRemovedFinalizeBead(epicID, beadID, specBranch string) error {
+	meta, err := finalizeMetadataReadFn(epicID)
+	if err != nil {
+		return err
+	}
+	tip, _ := meta["mindspec_finalize_tip"].(string)
+	if !finalizeFullSHA(tip) {
+		return errors.New("no final publication tip")
+	}
+	if err := g.requireFinalizeAncestor(tip, specBranch); err != nil {
+		return err
+	}
+	binding, err := mergeBindingReadFn(beadID)
+	if err != nil {
+		return err
+	}
+	for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent"} {
+		sha, _ := binding[key].(string)
+		if !finalizeFullSHA(sha) {
+			return errors.New("no landed binding")
+		}
+		if err := g.requireFinalizeAncestor(sha, specBranch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PreflightFinalizeMerges checks every pending bead merge and, for a local
+// finalization, the spec-to-main merge. It writes no lifecycle or git state.
+func (g *MindspecExecutor) PreflightFinalizeMerges(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, hasRemote bool) error {
+	if err := idvalidate.SpecID(specID); err != nil {
+		return err
+	}
+	entries, err := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		merged, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e)
+		if err != nil {
+			return err
+		}
+		if merged {
+			continue
+		}
+		if err := guardMergeLayout(e.Branch, specBranch, g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); err != nil {
+			return err
+		}
+		if err := g.preflightMergeDestruction(e.Branch, specBranch, overrideReason, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+			return err
+		}
+	}
+	if !hasRemote {
+		if err := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); err != nil {
+			return err
+		}
+		if err := g.preflightMergeDestruction(specBranch, "main", overrideReason, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkFinalizeBeadMerge shares the naming-merge query with lifecycle. The
+// git query lives below both packages to preserve the execution boundary.
+func (g *MindspecExecutor) checkFinalizeBeadMerge(epicID, specID, specBranch string, e bead.WorktreeListEntry) (bool, error) {
+	rerun := fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))
+	merged, err := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+	if err != nil {
+		return false, guard.NewFailure("cannot check pending merge for "+termsafe.Escape(e.Branch)+": "+termsafe.Escape(err.Error()), rerun)
+	}
+	if merged {
+		return true, nil
+	}
+	beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
+	if err := idvalidate.BeadID(beadID); err != nil {
+		return false, guard.NewFailure("invalid pending bead branch", rerun)
+	}
+	rows, err := gitutil.FindNamingMerges(g.Root, specBranch, beadID)
+	if err != nil {
+		return false, guard.NewFailure("cannot read naming merges: "+termsafe.Escape(err.Error()), rerun)
+	}
+	if len(rows) == 0 {
+		return false, nil
+	}
+	row := rows[0]
+	tip, err := gitutil.RevParseRef(g.Root, e.Branch)
+	if err != nil {
+		return false, guard.NewFailure("cannot read bead tip: "+termsafe.Escape(err.Error()), rerun)
+	}
+	state, err := g.CompletionState(g.Root, row.Parents[1], e.Branch)
+	if err != nil {
+		return false, guard.NewFailure("cannot read new bead commits: "+termsafe.Escape(err.Error()), rerun)
+	}
+	commits := make([]mergefollowup.Commit, 0, len(state.NewCommits))
+	for _, commit := range state.NewCommits {
+		commits = append(commits, mergefollowup.Commit{SHA: commit.SHA, Subject: commit.Subject})
+	}
+	return false, mergefollowup.MovedTipFailure(beadID, epicID, e.Path, row.Parents[1], tip, commits)
+}
+
+// PushProbe checks remote publication before lifecycle writes.
+func (g *MindspecExecutor) PushProbe(branch string) error {
+	return gitutil.PushProbe(g.Root, branch)
 }
 
 // FinalizeEpic merges the spec branch to main, cleans up workspaces and
@@ -581,8 +769,17 @@ func finalizeStepHook(stage string) error {
 // (ADR-0041 §1) with no existing seam separating its internal steps;
 // finalizeStepHook is invoked at five stages so each can be individually
 // fault-injected (finalize_fault_test.go).
-func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge bool) (FinalizeResult, error) {
-	result := FinalizeResult{}
+func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (result FinalizeResult, err error) {
+	stage := "export"
+	defer func() {
+		if err != nil {
+			err = &FinalizeStageError{Stage: stage, Err: err}
+		}
+	}()
+	result = FinalizeResult{MergeStrategy: "direct"}
+	if hasRemote {
+		result.MergeStrategy = "pr"
+	}
 
 	if !gitutil.BranchExists(specBranch) {
 		return result, fmt.Errorf("spec branch %s does not exist", specBranch)
@@ -595,6 +792,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// this same specID is therefore guaranteed to succeed.
 	if err := idvalidate.SpecID(specID); err != nil {
 		return result, fmt.Errorf("finalize epic %s: invalid spec id %s: %w", epicID, idrender.Spec(specID), err)
+	}
+
+	// Refuse a moved bead tip before the first finalize mutation. Repeat the
+	// check at the live merge because artifact commits can advance a branch.
+	candidates, candidateErr := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
+	if candidateErr != nil {
+		return result, candidateErr
+	}
+	for _, e := range candidates {
+		if _, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e); err != nil {
+			return result, err
+		}
 	}
 
 	allow := make(map[string]bool, len(lifecycleAllowSet))
@@ -617,6 +826,20 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		preFinalizeTip = ""
 	}
 
+	// Keep the routing checkpoint across failed runs. The publication tip below
+	// is separate and is overwritten after all export commits and auto-merges.
+	meta, metaErr := finalizeMetadataReadFn(epicID)
+	if metaErr != nil {
+		return result, metaErr
+	}
+	if saved, ok := meta["mindspec_pre_finalize_tip"].(string); ok && saved != "" {
+		preFinalizeTip = saved
+	} else if preFinalizeTip != "" {
+		if err := finalizeMetadataWriteFn(epicID, map[string]interface{}{"mindspec_pre_finalize_tip": preFinalizeTip}); err != nil {
+			return result, err
+		}
+	}
+
 	// Auto-commit any remaining spec artifacts.
 	cfg, cfgErr := config.Load(g.Root)
 	if cfgErr != nil {
@@ -624,17 +847,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	}
 	// specID already validated above; err is impossible here.
 	specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
-	if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
-		// Spec 127 R5(d)(v)/E-r5-2: a preserved-merge precondition failure
-		// is NOT an ordinary commit hiccup this leg may warn-and-continue
-		// past — committing over a preserved conflict here is exactly the
-		// two-parent `chore:` resurrection this spec exists to prevent, so
-		// THIS class hard-refuses; every other commitWithExport failure at
-		// this site keeps today's warn-and-continue behavior unchanged.
-		if isPreservedMergeError(err) {
-			return result, err
+	savedTip, _ := meta["mindspec_finalize_tip"].(string)
+	currentTip, _ := gitutil.RevParseRef(g.Root, specBranch)
+	status, statusErr := gitutil.Status(specWtPath)
+	if _, statErr := os.Stat(specWtPath); !os.IsNotExist(statErr) && (savedTip == "" || savedTip != currentTip || statusErr != nil || strings.TrimSpace(status) != "") {
+		if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
+			// A failed export or commit must preserve pending work. A
+			// preserved merge keeps its specific resolution recovery.
+			if isPreservedMergeError(err) {
+				return result, err
+			}
+			return result, guard.NewFailure("cannot commit remaining spec artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
-		fmt.Fprintf(os.Stderr, "warning: auto-commit in spec worktree: %v\n", err)
 	}
 
 	// Auto-merge unmerged bead branches into spec branch before cleanup.
@@ -645,48 +869,32 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// enumeration failure, which could leave real merge candidates
 	// entirely unmerged with no signal. Abort with a named error instead
 	// (AC-14).
-	entries, listErr := g.WorktreeOps.List()
+	stage = "auto_merge"
+	entries, listErr := g.finalizeBeadWorktrees(epicID, specID, specBranch, lifecycleAllowSet)
 	if listErr != nil {
-		return result, fmt.Errorf("finalize epic %s: enumerating worktrees for bead auto-merge: %w", epicID, listErr)
+		return result, listErr
 	}
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
-			continue
-		}
-		// Reverse-derivation gate (ADR-0042 §1 reverse, AC-23): beadID is
-		// parsed back OUT of an agent-creatable local git branch name. A
-		// malformed candidate is skipped entirely — never auto-merged,
-		// never embedded in an ID role — rather than trusted by its
-		// bead/-prefix shape alone.
 		beadID := strings.TrimPrefix(e.Branch, workspace.BeadBranchPrefix)
-		if idvalidate.BeadID(beadID) != nil {
-			// ADR-0042 degrade policy: name the skipped branch (escaped) so a
-			// malformed reverse-derivation candidate is not silently dropped.
-			fmt.Fprintf(os.Stderr, "warning: skipping worktree branch %s: not a well-formed bead branch (reverse-derivation gate)\n", termsafe.Escape(e.Branch))
-			continue
-		}
-		if lifecycleAllowSet == nil {
-			// AC-14: a nil allow-set alongside a real bead/<id> candidate
-			// means the caller never computed a scope — abort rather
-			// than silently skip (today's bug) or silently admit
-			// (a scope bypass).
-			return result, fmt.Errorf("finalize epic %s: bead branch %s present with no lifecycle allow-set computed — refusing to merge without an explicit scope", epicID, e.Branch)
-		}
-		if !allow[beadID] {
-			// R6: the exclusion boundary is lifecycle identity — a
-			// foreign-epic bead or a same-epic NON-lifecycle follow-up
-			// (open or closed) is left exactly alone.
-			continue
-		}
 		// Auto-commit any remaining bead artifacts.
-		if e.Path != "" {
-			if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil && isPreservedMergeError(err) {
-				// Spec 127 R5(d)(v)/E-r5-2: same discipline as the spec-
-				// worktree leg above — a preserved-merge precondition
-				// failure is never silently swallowed, even though every
-				// OTHER commitWithExport failure at this site stays
-				// swallowed (unchanged pre-existing behavior).
+		alreadyMerged, ancestorErr := gitutil.IsAncestor(g.Root, e.Branch, specBranch)
+		if ancestorErr != nil {
+			return result, guard.NewFailure("cannot read bead branch ancestry: "+termsafe.Escape(ancestorErr.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if alreadyMerged {
+			if err := checkMergedFinalizeWorktree(e.Path, specID); err != nil {
 				return result, err
+			}
+		}
+		if e.Path != "" && !alreadyMerged {
+			if _, statErr := os.Stat(e.Path); !os.IsNotExist(statErr) {
+				if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil {
+					// Stop before merge, publication, or cleanup on every failure.
+					if isPreservedMergeError(err) {
+						return result, err
+					}
+					return result, guard.NewFailure("cannot commit remaining bead artifacts: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+				}
 			}
 		}
 		// Merge bead branch into spec branch if not already an ancestor.
@@ -743,6 +951,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				)
 			}
 		default:
+			if _, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e); err != nil {
+				return result, err
+			}
 			// Genuinely unmerged — the only leg that truly needs the spec
 			// worktree (MergeInto runs inside it). G1-1: when it is
 			// missing, refuse recoverably — proceeding would skip the
@@ -818,9 +1029,17 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		result.DiffStat = stat
 	}
 
-	// Push to remote if available.
-	if gitutil.HasRemote() {
-		result.MergeStrategy = "pr"
+	stage = "finalize_tip"
+	publicationTip, tipErr := gitutil.RevParseRef(g.Root, specBranch)
+	if tipErr != nil {
+		return result, tipErr
+	}
+	if err := finalizeMetadataWriteFn(epicID, map[string]interface{}{"mindspec_finalize_tip": publicationTip}); err != nil {
+		return result, err
+	}
+
+	// Publish with the caller's one preflight decision.
+	if hasRemote {
 
 		// Push the spec branch FIRST, unconditionally — the baseline
 		// contract every "pr" finalize has always had. Bug wu7t panel
@@ -828,8 +1047,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// this push, so a failure anywhere in the orphan path still
 		// surfaces as an error but can never cost the operator the
 		// baseline spec-branch push.
-		if err := gitutil.PushBranch(specBranch); err != nil {
-			return result, fmt.Errorf("pushing %s: %w", specBranch, err)
+		stage = "push"
+		if err := g.pushFinalizeBranch(specBranch); err != nil {
+			return result, err
 		}
 		// Spec 119 Bead 6 (AC-26 i4, stage "push"): the spec branch is now
 		// genuinely pushed. A real push failure above already terminates
@@ -896,6 +1116,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		}
 
 		if orphaned {
+			stage = "orphan_finalize"
 			branchName, finErr := g.finalizeOrphanedSpecBranch(cfg, epicID, specID)
 			if finErr != nil {
 				return result, finErr
@@ -910,8 +1131,6 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 				return result, err
 			}
 		}
-	} else {
-		result.MergeStrategy = "direct"
 	}
 
 	// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard for the
@@ -923,6 +1142,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// covers only the local direct-merge seam (the PR path relies on the Bead-3
 	// precondition + PR review).
 	if result.MergeStrategy == "direct" {
+		stage = "direct_merge"
 		if guardErr := guardMergeLayout(specBranch, "main", g.layoutAtRef, workspace.MigrationRecoveryActive(g.Root)); guardErr != nil {
 			return result, guardErr
 		}
@@ -950,7 +1170,13 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// main and merges specBranch at g.Root, touching neither the bead
 		// worktrees nor the spec worktree the cleanup below removes.
 		if err := resumeAwareMerge(g.Root, resolveMerge, specBranch, fmt.Sprintf("mindspec impl approve %s %s", specID, ResolveMergeFlag),
-			func() error { return gitutil.MergeBranch(g.Root, specBranch, "main") },
+			func() error {
+				landed, err := gitutil.IsAncestor(g.Root, specBranch, "main")
+				if err != nil || landed {
+					return err
+				}
+				return gitutil.MergeBranch(g.Root, specBranch, "main")
+			},
 			func(mergeErr error) error {
 				return directMergeConflictFailure(g.Root, specBranch, fmt.Sprintf("mindspec impl approve %s", specID), mergeErr)
 			},
@@ -963,10 +1189,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// above (auto-merge, push, the orphan-finalize branch) has already run;
 	// the cleanup leg (worktree/branch removals, the no-remote direct
 	// merge, spec-branch deletion) has not started yet.
+	stage = "pre_cleanup"
 	if err := finalizeStepHook("pre_cleanup"); err != nil {
 		return result, err
 	}
 
+	stage = "cleanup"
 	// Run from repo root for cleanup operations.
 	if err := withWorkingDir(g.Root, func() error {
 		// Clean up lingering bead worktrees/branches. Spec 119 Bead 3:
@@ -978,6 +1206,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		entries, listErr := g.WorktreeOps.List()
 		if listErr != nil {
 			return fmt.Errorf("finalize epic %s: enumerating worktrees for cleanup: %w", epicID, listErr)
+		}
+		// Publication can run hooks that create pending work. Check every
+		// scoped worktree before the first removal, so a dirty later entry
+		// also preserves earlier worktrees and their branches.
+		if err := checkFinalizeCleanupWorktrees(entries, specWtPath, specID, allow); err != nil {
+			return err
 		}
 		for _, e := range entries {
 			if !strings.HasPrefix(e.Branch, workspace.BeadBranchPrefix) {
@@ -1000,8 +1234,25 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			if !allow[beadID] {
 				continue
 			}
-			_ = g.WorktreeOps.Remove(e.Name)
-			_ = gitutil.DeleteBranch(e.Branch)
+			if !gitutil.BranchExists(e.Branch) {
+				continue
+			}
+			landed, err := gitutil.IsAncestor(g.Root, e.Branch, publicationTip)
+			if err != nil {
+				return fmt.Errorf("cannot check cleanup ancestry for branch %s: %s", termsafe.Escape(e.Branch), termsafe.Escape(err.Error()))
+			}
+			if !landed {
+				return fmt.Errorf("cannot clean up branch %s: tip is not an ancestor of %s", termsafe.Escape(e.Branch), publicationTip)
+			}
+			if err := g.preflightMergeDestruction(e.Branch, publicationTip, "", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+				return err
+			}
+			if err := g.WorktreeOps.Remove(e.Name); err != nil && !isAlreadyRemovedErr(err) {
+				return err
+			}
+			if err := gitutil.DeleteBranch(e.Branch); err != nil {
+				return err
+			}
 		}
 
 		// Remove spec worktree (specID already validated in FinalizeEpic above).
@@ -1030,12 +1281,304 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		// mutation above (bead worktree/branch removals, spec worktree
 		// removal, the no-remote direct spec→main merge, spec-branch
 		// deletion) has already landed for real by this point.
+		stage = "post_cleanup"
 		return finalizeStepHook("post_cleanup")
 	}); err != nil {
 		return result, err
 	}
 
 	return result, nil
+}
+
+// pushFinalizeBranch avoids a second push when the remote already has this tip.
+func (g *MindspecExecutor) pushFinalizeBranch(branch string) error {
+	remote, err := gitutil.RemoteHeadSHA("origin", branch, g.Root)
+	if err != nil {
+		return fmt.Errorf("pushing branch %s: %w", termsafe.Escape(branch), err)
+	}
+	local, err := gitutil.RevParseRef(g.Root, branch)
+	if err != nil || remote == local {
+		return err
+	}
+	return gitutil.PushBranch(branch, g.Root)
+}
+
+// ResumeFinalizedEpic verifies durable landing evidence before any cleanup.
+// This path never recreates a deleted remote spec branch.
+func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children []string, hasRemote bool) (FinalizeResult, error) {
+	result := FinalizeResult{MergeStrategy: "direct"}
+	if err := idvalidate.SpecID(specID); err != nil {
+		return result, err
+	}
+	if err := idvalidate.BeadID(epicID); err != nil {
+		return result, err
+	}
+	meta, err := finalizeMetadataReadFn(epicID)
+	if err != nil {
+		return result, err
+	}
+	tip, _ := meta["mindspec_finalize_tip"].(string)
+	if !finalizeFullSHA(tip) {
+		return result, errors.New("no final publication tip")
+	}
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+	target, err := gitutil.RevParseRef(g.Root, "main")
+	if hasRemote {
+		result.MergeStrategy = "pr"
+		branch, _ := workspace.SpecBranch(specID)
+		remote, remoteErr := gitutil.RemoteHeadSHA("origin", branch, g.Root)
+		if remoteErr != nil {
+			return result, remoteErr
+		}
+		if remote == "" {
+			branch = "main"
+		}
+		target, release, err = gitutil.FetchFinalizeTarget(g.Root, branch)
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := g.requireFinalizeAncestor(tip, target); err != nil {
+		return result, err
+	}
+	for _, child := range children {
+		if err := idvalidate.BeadID(child); err != nil {
+			return result, err
+		}
+		binding, err := mergeBindingReadFn(child)
+		if err != nil {
+			return result, err
+		}
+		for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent"} {
+			sha, _ := binding[key].(string)
+			if !finalizeFullSHA(sha) {
+				return result, fmt.Errorf("no landed binding for %s", idrender.Bead(child))
+			}
+			if err := g.requireFinalizeAncestor(sha, target); err != nil {
+				return result, err
+			}
+		}
+	}
+	// A protected-main carrier can still need its export after local cleanup.
+	carrier, _ := meta["mindspec_finalize_branch"].(string)
+	if hasRemote && carrier != "" {
+		cfg, err := config.Load(g.Root)
+		if err != nil {
+			return result, err
+		}
+		result.FinalizeBranch, err = g.finalizeOrphanedSpecBranch(cfg, epicID, specID)
+		if err != nil {
+			return result, err
+		}
+	}
+	entries, err := g.WorktreeOps.List()
+	if err != nil {
+		return result, &FinalizeStageError{Stage: "cleanup", Err: err}
+	}
+	err = func() error {
+		cfg, cfgErr := config.Load(g.Root)
+		if cfgErr != nil {
+			cfg = config.DefaultConfig()
+		}
+		specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
+		allow := make(map[string]bool, len(children))
+		for _, child := range children {
+			allow[child] = true
+		}
+		if err := checkFinalizeCleanupWorktrees(entries, specWtPath, specID, allow); err != nil {
+			return err
+		}
+		for _, child := range children {
+			branch, err := workspace.BeadBranch(child)
+			if err != nil {
+				return err
+			}
+			exists, err := gitutil.BranchExistsIn(g.Root, branch)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				continue
+			}
+			if err := g.requireFinalizeAncestor(branch, target); err != nil {
+				return err
+			}
+			if err := g.preflightMergeDestruction(branch, target, "", fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))); err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if entry.Branch == branch {
+					if err := g.WorktreeOps.Remove(entry.Name); err != nil && !isAlreadyRemovedErr(err) {
+						return err
+					}
+				}
+			}
+			if err := gitutil.DeleteBranch(branch, g.Root); err != nil {
+				return err
+			}
+		}
+		name, _ := workspace.SpecWorktreeName(specID)
+		if err := g.WorktreeOps.Remove(name); err != nil && !isAlreadyRemovedErr(err) {
+			return err
+		}
+		return nil
+	}()
+	if err != nil {
+		return result, &FinalizeStageError{Stage: "cleanup", Err: err}
+	}
+	return result, nil
+}
+
+// checkFinalizeCleanupWorktrees checks the whole removal scope before any
+// forced removal. Branch ancestry does not protect uncommitted hook output.
+func checkFinalizeCleanupWorktrees(entries []bead.WorktreeListEntry, specWtPath, specID string, allow map[string]bool) error {
+	for _, entry := range entries {
+		id, ok := strings.CutPrefix(entry.Branch, workspace.BeadBranchPrefix)
+		if !ok || idvalidate.BeadID(id) != nil || !allow[id] {
+			continue
+		}
+		if err := checkMergedFinalizeWorktree(entry.Path, specID); err != nil {
+			return err
+		}
+	}
+	return checkMergedFinalizeWorktree(specWtPath, specID)
+}
+
+// checkMergedFinalizeWorktree protects pending work that branch ancestry
+// cannot cover. Both finalization paths call it before forced cleanup.
+func checkMergedFinalizeWorktree(path, specID string) error {
+	if path == "" {
+		return nil
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		status, statusErr := gitutil.Status(path)
+		if statusErr != nil {
+			return guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if strings.TrimSpace(status) != "" {
+			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.TrimSpace(status)),
+				"preserve the pending changes in a follow-up branch, then leave this worktree clean",
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+	} else if !os.IsNotExist(statErr) {
+		return guard.NewFailure("cannot inspect already merged worktree: "+termsafe.Escape(statErr.Error()),
+			fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+	}
+	return nil
+}
+
+// checkTemporaryFinalizeWorktree protects hook output in the disposable carrier
+// checkout. Only this checkout exempts tool artifacts, which a retry regenerates.
+func checkTemporaryFinalizeWorktree(root, wtPath, specID string) error {
+	retry := fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))
+	info, err := os.Stat(wtPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return guard.NewFailure("cannot inspect temporary finalization worktree: "+termsafe.Escape(err.Error()), retry)
+	}
+
+	// Status on a plain directory can report the enclosing repository's dirt.
+	// Check this repository's worktree registrations before reading status.
+	out, err := exec.Command("git", "-C", root, "worktree", "list", "--porcelain", "-z").Output()
+	if err != nil {
+		return guard.NewFailure("cannot read temporary finalization worktree registration: "+termsafe.Escape(err.Error()), retry)
+	}
+	registered := false
+	for _, field := range strings.Split(string(out), "\x00") {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok {
+			if entry, err := os.Stat(path); err == nil && os.SameFile(info, entry) {
+				registered = true
+				break
+			}
+		}
+	}
+	if !registered {
+		return guard.NewFailure("temporary finalization path is not a registered worktree of this repository: "+termsafe.Escape(wtPath),
+			"move the directory to a safe path, then retry approval", retry)
+	}
+	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
+	if err != nil {
+		return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(err.Error()), retry)
+	}
+	for _, line := range strings.Split(status, "\n") {
+		p, parseErr := panel.PorcelainPath(line)
+		if parseErr != nil {
+			return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(parseErr.Error()), retry)
+		}
+		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
+			return guard.NewFailure("temporary finalization worktree has pending changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
+				"preserve the changes at a safe path, then leave this worktree clean", retry)
+		}
+	}
+	return nil
+}
+
+// checkBeadCleanupWorktree is the executor backstop after commits and merge
+// hooks. Tool artifacts have the same exemption as the workflow dirt check.
+func checkBeadCleanupWorktree(wtPath, beadID string) error {
+	if wtPath == "" {
+		return nil
+	}
+	retry := fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID))
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return guard.NewFailure("cannot inspect bead worktree: "+termsafe.Escape(err.Error()), retry)
+	}
+	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
+	if err != nil {
+		return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(err.Error()), retry)
+	}
+	for _, line := range strings.Split(status, "\n") {
+		p, parseErr := panel.PorcelainPath(line)
+		if parseErr != nil {
+			return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(parseErr.Error()), retry)
+		}
+		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
+			return guard.NewFailure("bead worktree has uncommitted user changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
+				"preserve the pending changes, then leave this worktree clean", retry)
+		}
+	}
+	return nil
+}
+
+func finalizeFullSHA(sha string) bool {
+	if len(sha) != 40 && len(sha) != 64 {
+		return false
+	}
+	for _, c := range sha {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *MindspecExecutor) requireFinalizeAncestor(ancestor, target string) error {
+	landed, err := gitutil.IsAncestor(g.Root, ancestor, target)
+	if err != nil {
+		return err
+	}
+	if !landed {
+		sha, err := gitutil.RevParseRef(g.Root, ancestor)
+		if err != nil {
+			return err
+		}
+		targetSHA, err := gitutil.RevParseRef(g.Root, target)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("commit %s is not an ancestor of target %s", sha, targetSHA)
+	}
+	return nil
 }
 
 // finalizeOrphanedSpecBranch is bug wu7t's protected-main recovery: when
@@ -1047,20 +1590,13 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 // refreshes .beads/issues.jsonl via the same commitWithExport helper every
 // other finalize commit uses, commits it there, and pushes the branch.
 //
-// The whole flow is RETRY-IDEMPOTENT (panel round 1, Group 1): a crashed or
-// failed prior run may leave behind a temporary worktree (pruned first,
-// before any branch operation — the leftover may still have choreBranch
-// checked out, which would block the branch delete), a stale local branch
-// (deleted and recreated fresh from origin/main), and an already-pushed
-// remote branch (reconciled with a force-with-lease push pinned to the
-// observed remote tip — a plain push would be rejected non-fast-forward,
-// R4's empirical repro). The temporary worktree is always removed before
-// returning, success or failure, so it never leaks into `mindspec doctor`
-// or `bd worktree list`. Returns the branch name on success; the local
-// chore branch is intentionally left behind (harmless — a retry deletes and
-// recreates it; note this differs from the spec branch, which FinalizeEpic's
-// cleanup DELETES locally after pushing).
-func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (string, error) {
+// A retry removes a leftover temporary checkout, then reuses the local carrier
+// branch. An unchanged export makes no commit and no push. A changed export
+// appends a commit and uses a lease pinned to the remote head read just before
+// the push. A temporary checkout with only tool artifacts is removed after each
+// attempt. User changes or an inspection error preserve it for recovery. An
+// unregistered directory must be moved aside before retrying. No PR opens.
+func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID, specID string) (branch string, retErr error) {
 	choreBranch, err := workspace.FinalizeBranch(specID)
 	if err != nil {
 		return "", err
@@ -1084,28 +1620,29 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", err
 	}
 
-	// Self-heal leftovers from a crashed prior run BEFORE touching the
-	// branch: a leftover temp worktree fails WorktreeAdd below, and one
-	// with choreBranch still checked out also blocks DeleteBranch. All
-	// best-effort — force-remove a registered worktree, fall back to
-	// clearing an unregistered directory, and prune any dangling
-	// registration whose directory is already gone.
+	// A leftover can hold hook output from a previous publication.
+	// Refuse on user changes, an unreadable checkout, or an unregistered path.
+	if err := checkTemporaryFinalizeWorktree(g.Root, wtPath, specID); err != nil {
+		return "", err
+	}
 	if _, statErr := os.Stat(wtPath); statErr == nil {
-		if remErr := gitutil.WorktreeRemoveForce(g.Root, wtPath); remErr != nil {
-			_ = os.RemoveAll(wtPath)
+		if err := gitutil.WorktreeRemoveForce(g.Root, wtPath); err != nil {
+			return "", guard.NewFailure("cannot remove temporary finalize worktree: "+termsafe.Escape(err.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
 	}
 	_ = gitutil.WorktreePrune(g.Root)
 
 	if err := withWorkingDir(g.Root, func() error {
 		if gitutil.BranchExists(choreBranch) {
-			if err := gitutil.DeleteBranch(choreBranch); err != nil {
-				return fmt.Errorf("clearing stale local branch %s: %w", choreBranch, err)
-			}
+			return nil
 		}
 		return gitutil.CreateBranch(choreBranch, "origin/main")
 	}); err != nil {
-		return "", fmt.Errorf("creating %s from origin/main: %w", choreBranch, err)
+		return "", fmt.Errorf("creating %s from origin/main: %w", termsafe.Escape(choreBranch), err)
+	}
+	if err := finalizeMetadataWriteFn(epicID, map[string]interface{}{"mindspec_finalize_branch": choreBranch}); err != nil {
+		return "", err
 	}
 
 	// R5 check-at-use (ADR-0042 §4, AC-11): re-validate containment of the
@@ -1121,8 +1658,15 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		return "", fmt.Errorf("creating temporary worktree for %s: %w", choreBranch, err)
 	}
 	defer func() {
+		// This also runs after a failed commit or push. Hooks can write
+		// files even when the publication itself fails.
+		if err := checkTemporaryFinalizeWorktree(g.Root, wtPath, specID); err != nil {
+			retErr = errors.Join(retErr, err)
+			return
+		}
 		if err := gitutil.WorktreeRemoveForce(g.Root, wtPath); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not remove temporary finalize worktree %s: %v\n", wtPath, err)
+			retErr = errors.Join(retErr, guard.NewFailure("cannot remove temporary finalize worktree: "+termsafe.Escape(err.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
 		}
 	}()
 
@@ -1142,6 +1686,13 @@ func (g *MindspecExecutor) finalizeOrphanedSpecBranch(cfg *config.Config, epicID
 		remoteSHA, lsErr := gitutil.RemoteHeadSHA("origin", choreBranch)
 		if lsErr != nil {
 			return fmt.Errorf("checking remote tip of %s: %w", choreBranch, lsErr)
+		}
+		localSHA, err := gitutil.RevParseRef(g.Root, choreBranch)
+		if err != nil {
+			return err
+		}
+		if remoteSHA == localSHA {
+			return nil
 		}
 		if remoteSHA == "" {
 			return gitutil.PushBranch(choreBranch)
@@ -1220,10 +1771,14 @@ func (g *MindspecExecutor) CommitAll(path, msg string) error {
 // the exact semantics (working tree vs head) the docsync.go call site relies
 // on. When both refs are set, shells out to `git diff --name-only base..head`
 // directly and parses the newline-separated output inline (the executor must
-// not import enforcement packages to reuse a parser).
+// not import enforcement packages to reuse a parser). ExactPaths selects
+// a NUL-separated range read that lists both rename endpoints.
 func (g *MindspecExecutor) ChangedFiles(base, head string, options ...ChangedFilesOptions) ([]string, error) {
 	if base == "" {
 		return gitutil.DiffNameOnlyRef("", head)
+	}
+	if len(options) > 0 && options[0].ExactPaths {
+		return gitutil.DiffNameOnlyNoRenames(g.Root, base, head)
 	}
 	// SEC-5 (spec 097 R1, executor gap): guard both range operands before
 	// they reach git argv — a `-`-prefixed ref would otherwise be reparsed
@@ -1365,13 +1920,13 @@ func (g *MindspecExecutor) TreeDirsAtRef(ref, dirPath string) ([]string, error) 
 	if err := gitutil.RejectOptionLike(ref); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("git", "-C", g.Root, "ls-tree", ref, dirPath+"/")
+	cmd := exec.Command("git", "-C", g.Root, "ls-tree", "-z", ref, "--", dirPath+"/")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-tree %s %s/: %w", ref, dirPath, err)
 	}
 	var dirs []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+	for _, line := range strings.Split(string(out), "\x00") {
 		if line == "" {
 			continue
 		}
@@ -1421,11 +1976,11 @@ func (g *MindspecExecutor) LsTree(workdir, rev string) (string, error) {
 	return gitutil.LsTree(workdir, rev)
 }
 
-// Status returns `git status --porcelain` for workdir. Thin pass-through to
-// gitutil.Status — the panel gate's worktree dirty-check seam routed through
-// the executor (ADR-0030).
+// Status lists each changed path separately for artifact-aware callers.
+// Disabling rename/copy detection keeps source changes visible to the panel
+// gate and ledger preflight without changing their path decoder.
 func (g *MindspecExecutor) Status(workdir string) (string, error) {
-	return gitutil.Status(workdir)
+	return gitutil.StatusNoRenamesWithStderr(workdir)
 }
 
 // slotGitEnv removes inherited GIT_* variables and disables system config.
@@ -2140,4 +2695,134 @@ func withWorkingDir(dir string, fn func() error) error {
 		}
 	}()
 	return fn()
+}
+
+// IsPreservedMergeError reports whether err wraps a preserved-merge refusal.
+func IsPreservedMergeError(err error) bool {
+	return isPreservedMergeError(err)
+}
+
+// PreservedMergeReentryRefusal renders the unresolved resumeAwareMerge refusal.
+// It checks the source binding before it gives conflict resolution steps.
+// It changes no merge, ref, index entry, or worktree file.
+// A cause that is not a preserved-merge refusal is returned unchanged.
+func PreservedMergeReentryRefusal(cause error, expectedSource, reentryHint string) error {
+	var preserved *preservedMergeError
+	if !errors.As(cause, &preserved) {
+		return cause
+	}
+	workdir := preserved.workdir
+	class, preservedTip, sourceTip, err := classifyPreservedMergeBinding(workdir, expectedSource)
+	if err != nil {
+		return bindingIndeterminateRefusal(workdir, expectedSource, err, reentryHint)
+	}
+	if class == bindingForeign {
+		return foreignMergeRefusal(workdir, expectedSource, preservedTip, sourceTip, reentryHint)
+	}
+	return stillConflictedRefusal(workdir, reentryHint)
+}
+
+// LandingTree reads ownership from the prospective merge result.
+func (g *MindspecExecutor) LandingTree(workdir, base, specTip, beadRef string) (string, []string, error) {
+	if gitutil.MergeInProgress(workdir) {
+		if paths := gitutil.ConflictedFiles(workdir); len(paths) > 0 {
+			return "", paths, preservedMergeRefusal(workdir, paths, mergeReentryHint(workdir))
+		}
+		tree, err := gitutil.LandingIndexTree(workdir)
+		return tree, nil, err
+	}
+	tree, err := gitutil.TreeSHA(workdir, beadRef)
+	if err != nil {
+		return "", nil, err
+	}
+	if tree == beadRef {
+		beadRef, err = gitutil.MaterializeStageCommit(workdir, tree, base, "", "ownership landing preview")
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return gitutil.MergeTreeLanding(workdir, base, specTip, beadRef)
+}
+
+// FirstParentMerges returns full identities. The caller selects naming merges.
+func (g *MindspecExecutor) FirstParentMerges(ref string) ([]MergeIdentity, error) {
+	rows, err := gitutil.FirstParentMerges(g.Root, ref)
+	if err != nil {
+		return nil, err
+	}
+	var out []MergeIdentity
+	for _, row := range rows {
+		out = append(out, MergeIdentity{SHA: row.SHA, Parents: row.Parents, Subject: row.Subject})
+	}
+	return out, nil
+}
+
+// CompletionState does not change the index or refs.
+func (g *MindspecExecutor) CompletionState(workdir, base, head string) (CompletionState, error) {
+	var state CompletionState
+	status, err := gitutil.StatusZWithStderr(workdir)
+	if err != nil {
+		return state, err
+	}
+	state.MergeHead, err = gitutil.RevParseRef(workdir, "MERGE_HEAD")
+	if err != nil && !errors.Is(err, gitutil.ErrRefNotFound) {
+		return state, err
+	}
+	fields := strings.Split(status, "\x00")
+	for i := 0; i < len(fields); i++ {
+		line := fields[i]
+		if line == "" {
+			continue
+		}
+		if len(line) < 4 {
+			return state, fmt.Errorf("invalid worktree status record")
+		}
+		if line[0] != ' ' && line[0] != '?' {
+			state.StagedPaths = append(state.StagedPaths, line[3:])
+		}
+		if strings.ContainsAny(line[:2], "RC") {
+			i++
+			if i >= len(fields) || fields[i] == "" {
+				return state, fmt.Errorf("invalid rename status record")
+			}
+			if line[0] != ' ' && line[0] != '?' {
+				state.StagedPaths = append(state.StagedPaths, fields[i])
+			}
+		}
+	}
+	if base != "" && head != "" {
+		rows, err := gitutil.FirstParentCommitsAfter(g.Root, base, head)
+		if err != nil {
+			return state, err
+		}
+		for _, row := range rows {
+			state.NewCommits = append(state.NewCommits, MergeIdentity{SHA: row.SHA, Parents: row.Parents, Subject: row.Subject})
+		}
+	}
+	return state, nil
+}
+
+// MergeBead retains every existing merge guard and leaves cleanup to the caller.
+func (g *MindspecExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error {
+	g.completeMode = "merge-only"
+	if opts.Closed {
+		g.completeMode = "closed-merge"
+	}
+	defer func() { g.completeMode = "" }()
+	return g.CompleteBead(beadID, specBranch, "", overrideReason, resolveMerge)
+}
+
+// CleanupBead uses the existing cleanup site without another merge or binding.
+func (g *MindspecExecutor) CleanupBead(beadID, specBranch string) error {
+	g.completeMode = "cleanup-only"
+	defer func() { g.completeMode = "" }()
+	return g.CompleteBead(beadID, specBranch, "", "", false)
+}
+
+// PublishBeadClose publishes the close before any evidence is removed.
+func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) error {
+	if err := execBeadExportFn(workdir); err != nil {
+		return err
+	}
+	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
 }

@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -231,7 +232,7 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 // epic (query succeeded, no match) both surface as the same "no epic found"
 // error. This function distinguishes them via the exported
 // `phase.Cache.AllEpics` (an error there is unambiguously the query failing)
-// and the same `ExtractSpecMetadata`/`SpecIDFromMetadata` matching logic
+// and the shared full-ID resolver
 // `FindEpicBySpecID` uses internally, so the two refusals carry DISTINCT
 // messages and recovery commands:
 //
@@ -246,35 +247,19 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 //     supported no-epic plan-approve scenario (P10).
 func resolveTargetEpic(specID string) (string, error) {
 	c := phase.NewCache()
-	epics, err := c.AllEpics()
+	_, err := c.AllEpics()
 	if err != nil {
 		return "", guard.NewFailure(
 			fmt.Sprintf("cannot resolve the lifecycle epic for spec %s: querying epics failed: %v", specID, err),
 			fmt.Sprintf("mindspec plan approve %s", specID),
 		)
 	}
-	for _, epic := range epics {
-		num, title := phase.ExtractSpecMetadata(epic)
-		if num == 0 || title == "" {
-			continue
-		}
-		// D1 (ADR-0042): a malformed derivation can never match a
-		// well-formed specID — treat as no-match, same as any other
-		// non-matching epic.
-		derived, derivedErr := phase.SpecIDFromMetadata(num, title)
-		if derivedErr == nil && derived == specID {
-			// gate-all-ids (ADR-0042): epic.ID is a bd-sourced value that
-			// flows into `bd list --parent`/`bd create --parent` argv on the
-			// ApprovePlan path (queryExistingChildren / createBeadsFromParsed).
-			// Validate before returning it as an authority-bearing id, mirroring
-			// phase.Cache.FindEpicBySpecID's RETURN gate (cache.go). A malformed
-			// bd-minted id is treated as no-match (no bd-minted exemption).
-			if idvalidate.BeadID(epic.ID) != nil {
-				continue
-			}
-			return epic.ID, nil
-		}
+	if epicID, err := c.FindEpicBySpecID(specID); err == nil {
+		return epicID, nil
+	} else if !errors.Is(err, phase.ErrNoEpicForSpec) {
+		return "", err
 	}
+
 	return "", guard.NewFailure(
 		fmt.Sprintf("no lifecycle epic found for spec %s — the epic is created at spec-approve time, so its absence here means spec-approve's epic-create previously degraded to a warning instead of succeeding", specID),
 		fmt.Sprintf("mindspec spec approve %s", specID),

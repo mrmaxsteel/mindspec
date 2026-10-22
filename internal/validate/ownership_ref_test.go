@@ -221,3 +221,148 @@ func TestValidateDivergence_BranchOnlyDomainDirFromRef(t *testing.T) {
 		t.Errorf("expected no findings for an owned+covered file, got %+v", findings)
 	}
 }
+
+// The advisory reads the landing tree only. A bead-side claim cannot
+// preserve ownership when that claim is absent at the landing tree.
+func TestCheckUnclaimedSource_LandingTree(t *testing.T) {
+	for _, claimed := range []bool{true, false} {
+		t.Run(fmt.Sprint(claimed), func(t *testing.T) {
+			reads := 0
+			mock := &executor.MockExecutor{
+				TreeDirsAtRefFn: func(ref, dir string) ([]string, error) {
+					if ref != "LANDING" {
+						t.Fatalf("enumeration ref = %q", ref)
+					}
+					return []string{"core"}, nil
+				},
+				FileAtRefOrAbsentFn: func(ref, path string) ([]byte, bool, error) {
+					if ref != "LANDING" {
+						t.Fatalf("manifest ref = %q", ref)
+					}
+					reads++
+					if claimed {
+						return []byte("paths:\n  - internal/core/**\n"), true, nil
+					}
+					return nil, false, nil
+				},
+			}
+			r := &Result{}
+			checkUnclaimedSource(r, mock, t.TempDir(), "LANDING", []string{"internal/**"}, []string{"internal/core/core.go"})
+			if reads == 0 {
+				t.Fatal("no ownership reads")
+			}
+			if got := len(r.Issues); (claimed && got != 0) || (!claimed && got != 1) {
+				t.Fatalf("claimed=%v: issues=%+v", claimed, r.Issues)
+			}
+			if r.HasFailures() {
+				t.Fatal("ownership advisory must not block")
+			}
+		})
+	}
+}
+
+func TestValidateDocsSnapshot_UnclaimedSourceUsesOwnershipRef(t *testing.T) {
+	for _, claimed := range []bool{true, false} {
+		t.Run(fmt.Sprint(claimed), func(t *testing.T) {
+			root := t.TempDir()
+			writeSourceGlobsConfig(t, root, []string{"web/**"})
+			mock := &executor.MockExecutor{
+				ChangedFilesTreeResult: []string{"web/app.js", ".mindspec/docs/domains/core/architecture.md"},
+				TreeDirsAtRefFn: func(ref, dir string) ([]string, error) {
+					if ref != "LANDING" {
+						t.Errorf("domain enumeration used %q, want ownership ref LANDING", ref)
+					}
+					if dir == ".mindspec/docs/domains" {
+						return []string{"core"}, nil
+					}
+					return nil, nil
+				},
+				FileAtRefOrAbsentFn: func(ref, path string) ([]byte, bool, error) {
+					if ref != "LANDING" {
+						t.Errorf("manifest read used %q, want ownership ref LANDING", ref)
+					}
+					if path != coreManifestRel {
+						return nil, false, nil
+					}
+					// The candidate has the opposite claim to the landing tree.
+					if (ref == "LANDING") == claimed {
+						return []byte("paths:\n  - web/**\n"), true, nil
+					}
+					return []byte("paths:\n  - internal/old/**\n"), true, nil
+				},
+			}
+			r := ValidateDocsSnapshot(root, "BASE", "CANDIDATE", "LANDING", "/bead", mock)
+			if r.HasFailures() {
+				t.Fatalf("doc-sync: %+v", r.Issues)
+			}
+			warned := false
+			for _, issue := range r.Issues {
+				if issue.Name == "unclaimed-source" {
+					warned = true
+					if !strings.Contains(issue.Message, "web/app.js") {
+						t.Errorf("advisory omits the source path: %+v", issue)
+					}
+				}
+			}
+			if warned == claimed {
+				t.Errorf("claimed=%v: unclaimed-source warning=%v, issues=%+v", claimed, warned, r.Issues)
+			}
+			if len(mock.CallsTo("TreeDirsAtRef")) == 0 || len(mock.CallsTo("FileAtRefOrAbsent")) == 0 {
+				t.Fatal("ownership inputs were not read")
+			}
+			for _, call := range mock.CallsTo("ChangedFilesTree") {
+				if call.Args[1] != "BASE" || call.Args[2] != "CANDIDATE" {
+					t.Errorf("diff range changed: %+v", call.Args)
+				}
+			}
+		})
+	}
+}
+
+// Both gates resolve path-shaped spec and ADR domains through the same
+// ref used by attribution, package doc-sync, and source advisories.
+func TestLandingTree_AllOwnershipReaders(t *testing.T) {
+	root := t.TempDir()
+	specDir := root + "/.mindspec/docs/specs/132-landing"
+	writeSpecAndPlan(t, root, specDir, "132-landing", []string{"internal/core/core.go"}, []string{"ADR-0132"})
+	writeADR(t, root, "ADR-0132", "Accepted", []string{"internal/core/"})
+	reads := 0
+	mock := &executor.MockExecutor{
+		ChangedFilesTreeResult: []string{"internal/core/core.go", ".mindspec/docs/domains/core/architecture.md"},
+		TreeDirsAtRefFn: func(ref, dir string) ([]string, error) {
+			if ref != "LANDING" {
+				t.Fatalf("enumeration used %q", ref)
+			}
+			reads++
+			return []string{"core"}, nil
+		},
+		FileAtRefOrAbsentFn: func(ref, path string) ([]byte, bool, error) {
+			if ref != "LANDING" {
+				t.Fatalf("ownership input used %q", ref)
+			}
+			reads++
+			if path == coreManifestRel {
+				return []byte("paths:\n  - internal/core/**\n"), true, nil
+			}
+			return nil, false, nil
+		},
+	}
+	docs := ValidateDocsSnapshot(root, "BASE", "CANDIDATE", "LANDING", "/bead", mock)
+	if docs.HasFailures() {
+		t.Fatalf("doc-sync: %+v", docs.Issues)
+	}
+	adr, findings := CheckADRDivergenceSnapshot(root, "BASE", mock, specDir, "bead-1", "CANDIDATE", "LANDING", "/bead")
+	if adr.HasFailures() || len(findings) != 0 {
+		t.Fatalf("ADR resolution or attribution: %+v %+v", adr.Issues, findings)
+	}
+	advisory := &Result{}
+	checkUnclaimedSource(advisory, mock, root, "LANDING", []string{"internal/**"}, []string{"internal/core/core.go"})
+	if len(advisory.Issues) != 0 || reads == 0 {
+		t.Fatalf("ownership inputs were not applied: %+v, reads=%d", advisory.Issues, reads)
+	}
+	for _, call := range mock.CallsTo("ChangedFilesTree") {
+		if call.Args[1] != "BASE" || call.Args[2] != "CANDIDATE" {
+			t.Fatalf("ownership changed the diff: %+v", call.Args)
+		}
+	}
+}

@@ -3000,6 +3000,7 @@ var backgroundExpectedExemptions = []backgroundExpectedExemption{
 // TestBootstrapManifest_BackgroundReconciliation's own doc comment for
 // what fixture (α) can and cannot claim as a result.
 var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
+	{"project-docs/user/guides/merge-safety.md", "git -C \"<spec worktree>\" checkout <merge> -- <paths>"},
 	{"ms-bead-cycle", "Never merge a bead branch with raw `git merge bead/<id>`"},
 	{"ms-bead-cycle", "stopped between bd-close and the actual git merge"},
 }
@@ -3011,7 +3012,7 @@ var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
 // registries_test.go's TestKnownSitesExemptionList_CountSentinel
 // already applies one layer up), rather than being invisible.
 func TestBackgroundJustifiedWideningExemptions_CountSentinel(t *testing.T) {
-	if got, want := len(backgroundJustifiedWideningExemptions), 2; got != want {
+	if got, want := len(backgroundJustifiedWideningExemptions), 3; got != want {
 		t.Errorf("len(backgroundJustifiedWideningExemptions) = %d, want %d", got, want)
 	}
 }

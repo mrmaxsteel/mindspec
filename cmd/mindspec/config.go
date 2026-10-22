@@ -192,7 +192,6 @@ func renderConfig(cfg *config.Config) (string, error) {
 	for _, br := range cfg.ProtectedBranches {
 		fmt.Fprintf(&b, "  - %s\n", escapeConfigValue(br))
 	}
-	fmt.Fprintf(&b, "merge_strategy: %s\n", escapeConfigValue(cfg.MergeStrategy))
 	fmt.Fprintf(&b, "worktree_root: %s\n", escapeConfigValue(cfg.WorktreeRoot))
 	fmt.Fprintf(&b, "auto_finalize: %t\n", cfg.AutoFinalize)
 	fmt.Fprintf(&b, "auto_open_finalize_pr: %t\n", cfg.AutoOpenFinalizePR)

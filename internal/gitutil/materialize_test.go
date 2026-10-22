@@ -159,6 +159,46 @@ func TestChangedFilesTree_IdenticalTreesAreEmpty(t *testing.T) {
 	}
 }
 
+func TestChangedFilesTree_ExactPathsAndRenameEndpoints(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	mustRunGit(t, dir, "config", "diff.renames", "true")
+	const source = "user-source.txt"
+	const destination = ".mindspec/specs/132-test/reviews/race/dispositions.jsonl"
+	mustWrite(t, dir, source, "user bytes\n")
+	mustRunGit(t, dir, "add", "-A")
+	mustRunGit(t, dir, "commit", "-qm", "source")
+	base := mustRevParse(t, dir, "HEAD")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, destination)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, source), filepath.Join(dir, destination)); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{source, destination, ".beads/issues.jsonl ", ".beads/issues.jsonl\t", ".beads/issues.jsonl\n", " leading.txt", "unicode-雪.txt"}
+	for _, path := range want[2:] {
+		mustWrite(t, dir, path, "user bytes\n")
+	}
+	tree, err := SnapshotWorktreeTree(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ChangedFilesTree(dir, base, tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Errorf("path count: got %q, want %q", got, want)
+	}
+	for _, path := range want {
+		if !containsPath(got, path) {
+			t.Errorf("missing exact path %q in %q", path, got)
+		}
+	}
+	t.Logf("changed paths: %q", got)
+}
+
 // TestMaterializeStageCommit_TrailerRoundTrip: the pinned Mindspec-Stage
 // trailer round-trips through ReadStageTrailer, and the commit is
 // parented exactly as requested.

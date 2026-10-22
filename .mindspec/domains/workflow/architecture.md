@@ -98,7 +98,9 @@ The execution engine trusts that approved plans are well-decomposed and simply e
   is the manual reconcile.
 - `internal/next.CheckDirtyTreeDetail` splits dirty-tree detection
   into artifact dirt vs user dirt; only user dirt blocks, and the
-  failure names the offending paths and the active worktree.
+  failure names the offending paths and the active worktree. The status read
+  disables rename and copy detection before it applies artifact exemptions.
+  It matches decoded filename bytes exactly, including whitespace.
 - Operator-facing command forms are noun-verb (`mindspec spec
   approve`, `mindspec plan approve`, `mindspec impl approve`) across
   instruct templates and skipped-gate warnings.
@@ -382,8 +384,10 @@ Both materialization legs refuse rather than commit onto a main checkout
 when no bead worktree is resolved (AC-3/AC-4; the user `--commit-msg`
 `CommitAll` targets the matched bead worktree ONLY — no root fallback —
 and a worktree-enumeration failure propagates instead of being swallowed),
-and the artifact-sync follow-up commit is pathspec-scoped — never an
-`add -A` equivalent. A bead's own advisory scope check
+and the artifact-sync follow-up commit uses a checked snapshot. The delta
+reader disables rename detection and preserves exact filename bytes with
+NUL separators. Normal and merge-only completion refuse user paths before
+they build the artifact commit. A bead's own advisory scope check
 (`internal/complete/bead_scope.go`) warns, non-fatally, when a bead's diff
 touches files outside its plan-declared `file_paths` baseline — pure
 advisory, never a gate.
@@ -406,6 +410,25 @@ dep add` failure is now named in `result.Warnings` (both bead IDs) instead
 of a silent `continue` (AC-20); a missing `work_chunks` block warns loudly
 instead of silently wiring zero edges (AC-19).
 
+### `mindspec impl approve`: early merge and push checks
+
+After the migration exemption, approval makes one error-returning has-remote
+decision before the spec-branch existence switch. A probe error refuses with
+`recovery: git remote -v`. It never selects local merge on a read error.
+
+After the plan and lifecycle allow-set are resolved, `PreflightFinalizeMerges`
+checks layout and work destruction for each pending bead-to-spec merge.
+It also checks for an existing naming merge before it permits a new merge. On the
+direct path it also checks spec-to-main. On the push path, `PushProbe` tests the
+same remote and refspec as the real push, with a dry run that skips hooks and
+disables terminal prompts. Only a failed probe refuses. Only an HTTP(S)
+authentication failure adds a credential-helper hint.
+
+These checks run before the placeholder ADR write, the stale-phase reconcile,
+and the epic close. `FinalizeEpic` receives the same has-remote value and never
+probes again. The executor repeats both merge guards on the current tips after
+auto-merges. Both early and live checks must pass.
+
 ### `mindspec impl approve`: epic-scoped finalize + the pre-terminal orphan/obligation gate
 
 The FinalizeEpic lifecycle allow-set (`phase.LifecycleChildIDsForEpic` ∩
@@ -421,6 +444,33 @@ epic close, NO phase write, NO merge, NO push on a refusal.
 
 ### `mindspec doctor` + `mindspec next`: shared lifecycle-divergence predicates
 
+Doctor uses git state to classify an open bead after a naming merge.
+One first-parent naming merge must have the current bead tip as its second
+parent. Its changes must remain present at the spec tip. This state gives
+Info and a `mindspec complete <bead>` recovery. The finding has no fix
+function. The operator verifies the merge before closing the bead.
+Metadata markers do not change severity. Other stale-open findings stay Error.
+If a merge-state read or recovery builder fails, the scan still checks the
+existing landed evidence. A confirmed landed merge stays Error.
+
+The presence check lists both sides of renames. It excludes tool artifacts.
+A path is reverted when its content equals the content before the merge,
+including absence for an added path. A later naming merge for another bead
+exempts the paths it changes. Other later edits do not count as reverts.
+An open bead with a reverted path gets one Error with restore guidance.
+It gets no stale-open finding and no automatic fix. Closed beads get no
+reverted-merge finding.
+The scan excludes closed beads even when the tracker returns them in the
+open-bead list.
+
+Restore guidance lists later first-parent commits that changed the reverted
+paths, newest first. It shows full commit IDs and escaped subjects. It warns
+that a revert affects the whole commit. A clean spec checkout also permits
+a path-scoped restore through `guard.NewDestructiveCommand`. User changes
+or a status read error remove that choice. The remaining recovery restores
+the merge, closes the bead after verification, and puts rejected work in a
+follow-up bead.
+
 `internal/lifecycle.FindOrphanedClosedBeads`/`ScanOrphanedClosedBeads`/
 `StaleOpenBeads`/`FindLandedMerge`/`MergedUnclosed` are the single-sourced
 predicates `mindspec complete`, `mindspec impl approve`, `mindspec next`,
@@ -430,8 +480,8 @@ whose Dolt status disagrees with its landed-merge git evidence, reads the
 same way from every surface. `internal/doctor`'s `stale_open.go` and
 `finalize_orphans.go` wire these predicates into `mindspec doctor`'s CI
 mode (`--ci`, `SkipLocalEnv`) — now gated in `.github/workflows/ci.yml` —
-so a lifecycle divergence fails CI the same way a stale-schema drift
-already did.
+so Error and Missing lifecycle findings fail CI. Info and Warn findings
+do not change the exit code.
 
 ### Fault-injection regression suite (spec 119 Bead 6, AC-26)
 
@@ -986,16 +1036,15 @@ sufficient:
   equality check) and is never collapsed into the names-no-bead state.
 - **LANDED-NESS** ("did it land") is git TOPOLOGY: a two-parent
   first-parent merge on the spec branch whose second parent EQUALS the
-  bead's landed tip. The pre-125 ancestor-TOLERANT confirmation legs
-  (panel `reviewed_head_sha`, surviving branch tip, binding second
-  parent, each of which could "confirm" via `IsAncestor`) are REMOVED:
-  every corroboration is exact-equality only. A surviving-tip or binding
-  mismatch is a fail-closed contradiction. Panel evidence is a SET of
-  all well-formed SHAs across registrations: an exact member confirms;
-  a non-matching set is non-corroborating and never vetoes another leg.
+  bead's landed tip. Surviving tips and bindings require exact equality.
+  A surviving-tip or binding mismatch is a fail-closed contradiction.
+  Panel evidence is a set of well-formed SHAs from registrations and
+  ledger-backed rebinds. An exact member confirms. A reviewed ancestor
+  also confirms when its diff to the second parent is empty or contains
+  only allowed tool artifacts. See [Reviewed-tree confirmation](#reviewed-tree-confirmation).
+  A set with neither match confirms nothing and never vetoes another leg.
   Empty, placeholder and malformed values never reach git. With no
-  exact-and-owned match the function REFUSES rather
-  than picking the newest ancestor-consistent merge.
+  corroboration for an owned candidate, the function refuses.
 
 The bd-metadata binding (and the panel SHA) is a git-corroborated CACHE
 over an already-subject-owned candidate — never an ownership authority
@@ -1031,9 +1080,9 @@ only from a hand-crafted operator merge — and it is NOT auto-recoverable
 via `mindspec reattest` either: reattest's ownership nominator is the
 same subject parse, so it refuses an anonymous-subject merge too (it
 cannot nominate a merge whose subject names no bead). The honest
-recovery is to re-merge the work under a bead-naming subject, or to
-accept the safe fail-closed (MF-3 refuses that dependency); the audited
-ADR-0035 `mindspec-q9ea` human attested-restore is the last-resort exit.
+recovery uses the ancestor check below. If the changes are present,
+a re-merge cannot help. A person must verify the work before using the
+dependent override. An attested restore requires a verified merge first.
 The spec's forward-only residual text is superseded by this fail-closed
 shape.
 
@@ -1070,8 +1119,7 @@ parameter, flag, or argument through which a caller can assert a
 merge/second-parent pair (AC-8), no bypass flag, no `--all` fleet mode
 (mass mutation stays a scripted sequence of explicit per-bead
 invocations), and `doctor` never writes through it. Fail-closed on
-every ambiguity: no owned exact merge → refuse to the audited ADR-0035
-`mindspec-q9ea` human attested-restore exit BY NAME; owned primary candidates
+every ambiguity: no owned exact merge → run the ancestor check below; owned primary candidates
 with different second parents → ambiguity refusal; a contradicting
 surviving tip → refusal; a non-matching panel set is recorded as
 non-corroborating and never refuses; a REVERTED classification (the
@@ -1254,9 +1302,13 @@ against that snapshot BEFORE any commit exists
 (`internal/validate/docsync.go`'s `ValidateDocsSnapshot` and
 `internal/validate/adr_divergence.go`'s `CheckADRDivergenceSnapshot` /
 `divergence.go`'s `ValidateDivergenceSnapshot` — new tree-vs-tree legs
-alongside the unchanged committed-range functions reconcile mode and
+alongside the committed-range functions reconcile mode and
 `impl approve`'s whole-branch backstop still call), and only on a full
 gate pass materializes the snapshot into the bead branch's real commits.
+Doc-sync and divergence use snapshot and committed-range diffs that list
+both rename endpoints and preserve exact filename bytes. Committed-range
+calls select `ExactPaths: true`. The working-tree doc-sync reader has the
+same path rules.
 Because no complete-authored commit exists before the gates run, a gate
 refusal now ALWAYS leaves the bead branch tip at `reviewed_head_sha` —
 the retry meets the identical gate, never a false panel-staleness block
@@ -1304,7 +1356,9 @@ refusal machinery (`DirtyTreeFailure`'s worktree-context +
 final-recovery-line contract, unchanged) stays exercised by a
 seam-injected leg (AC-8(iii)) independent of which conditional classes
 happen to be live in a given fixture. `CheckDirtyTreeProportional`
-narrows the guard to this rule for the claim path only.
+narrows the guard to this rule for the claim path only. It treats a rename
+or copy as artifact dirt only when both endpoints match artifact paths.
+It preserves filename whitespace and names both endpoints for user dirt.
 
 ### R6 — Deterministic, honest bead selection (#187/#146)
 
@@ -1330,7 +1384,7 @@ pinned bypass disclosure below, making no claim about readiness.
 
 Scoped selection uses one uncapped global `bd ready -n 0 --json` result.
 A selectable member is an open non-epic whose ID is exactly `<E>.<N>`
-(N ≥ 1, one segment), whose unchanged `phase.FindEpicForBead` resolver
+(N ≥ 1, one segment), whose `phase.FindEpicLineageWithCache` resolver
 returns E, and whose positional heading AND `work_chunks` entry N exist.
 `bead.PlanBeadIndex` and `readiness.PlanMapsBead` are the shared predicates.
 Issue type, title and metadata are not membership inputs. Members keep bd's
@@ -1344,14 +1398,14 @@ need mapping. Readiness still reads the checkout, as the notice discloses.
 
 Every linked non-member is named by ID with its reason and recovery.
 Classification order is N2a (non-epic parent), N2c (foreign epic dependency),
-N4 (unmapped follow-up), N2b (foreign title lineage), N1 (mapped but no
-lineage), N3 (parent/title/metadata link without the plan-bead predicate).
-N1, N2a, N2b, N2c and lifecycle parent-edge N3 rows block an empty-set
+N4 (unmapped follow-up), N1 (mapped but no lineage), N3 (parent/title/metadata link without the plan-bead predicate).
+N1, N2a, N2c and lifecycle parent-edge N3 rows block an empty-set
 success. N4, non-lifecycle parent-edge N3, title-only and metadata-only N3
 rows are informational. Recoveries never overwrite a named parent.
-A detached mapped N1, or same-number N2b, can recover by adding the intended
-epic parent; other-number N2b first calls for inspection and makes that
-edit conditional on ownership.
+A detached mapped N1 can recover by adding the intended epic parent.
+A title tag does not supply lineage. A foreign parent-child epic stays N2c
+and requires inspection. A blocks edge does not supply lineage. Each plan
+row uses one bead read; the resolver returns edge provenance with the ID.
 
 Selectors are checked before empty-set handling. A positional near-miss
 gets its reason even when no members exist. An N4 with lineage E can
@@ -1402,3 +1456,184 @@ lines) in the same disclosed-residual vocabulary the registry already
 uses for unprovable ID-substitution positions. `internal/bootstrap/
 bootstrap.go`'s `starterGitignore` gained `.mindspec/phase.lock` so
 greenfield projects gitignore the new lockfile from their first commit.
+
+## Ownership at the landing tree
+
+Both per-bead content gates use one landing-tree `ownerRef`. The diff
+stays at the bead's fork-to-tip range or prospective snapshot `T`.
+`Executor.LandingTree` previews the merge into the current spec tip.
+The gate reads all ownership inputs at that result: Impacted-Domains
+normalization, domain enumeration, path attribution, ADR domain
+resolution, internal-package doc-sync, and the unclaimed-source advisory.
+Claims added at the spec tip apply. Claims revoked there do not apply.
+A claim must belong to a resolved Impacted Domain. Readers do not combine
+claims from two refs.
+
+A source conflict leaves clean ownership manifests readable in the
+preview tree. The executor keeps the merge conflict for resolution.
+`complete.OwnershipLandingConflict` returns the tree and conflicted
+paths when a manifest itself conflicts. No ownership reader runs on that
+preview. During preserved-merge re-entry, ownership comes from the spec
+worktree's resolved index. Unmerged entries keep the executor's resumption
+refusal unchanged. A bound merge shows the edit, stage, and re-run steps.
+A foreign or indeterminate binding shows its own refusal. The re-run hint
+uses the actual ID and `--resolve-merge`. A
+materialization resume with `--resolve-merge` also runs this gate before
+it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
+diff and reads ownership at the landed merge.
+
+## Reviewed-tree confirmation
+
+`FindLandedMerge` builds its reviewed set from panel registrations and
+ledger-backed rebinds. A reviewed-SHA metadata key confirms nothing unless
+the set contains it. An unregistered key is unverified in the provenance.
+
+A subject-named first-parent merge can match a registered review exactly.
+It can also match a reviewed ancestor when the second parent's tree differs
+only by tool artifacts. The path diff disables rename detection and keeps
+both sides of a rename. It accepts an empty wrapper commit. It accepts
+tracker exports and panel ledgers for the bead's own spec. A source edit,
+a source-to-artifact rename, or another spec's ledger does not qualify.
+The artifact set comes from `panel.ToolArtifactPaths`; its review glob is
+limited to the lifecycle spec directory. Registration fields do not widen it.
+
+The returned provenance names `exact` or `reviewed-tree`. An unavailable
+review object or failed review read confirms nothing. This datum never
+vetoes a matching tip or binding. Tip and binding contradictions still
+refuse, and the revert check still runs after confirmation. Reachable
+fallback does not evaluate the datum and still needs its audited git checks.
+
+## Ancestor without a naming merge
+
+Reattest checks this state only after both merge scans find no candidate.
+The bead branch must exist, and its tip must be an ancestor of the spec tip.
+The base is the newest spec first-parent commit that is an ancestor of the
+bead tip. An empty range keeps `no-owned-exact-merge`. A missing base is
+unknown. Read failures refuse and make no positive content claim.
+
+A tip that equals another bead naming merge's second parent is not the
+prerequisite's own work. A tip strictly inside that range is not detected
+as foreign work. A person must verify the work before using an override.
+
+The content check uses the full base-to-tip range at the fixed spec tip.
+`RangeRevertedAt` checks each commit in that range, including early commits.
+Only content present with no reverted change gives
+`ancestor-without-naming-merge`. This state writes no binding. It says that
+a re-merge cannot help. It prints one evidenced readiness override command
+for each open dependent in the same epic. With no dependents, it prints
+`mindspec doctor` and says that no bead waits on the prerequisite.
+
+Reverted or indeterminate content keeps `no-owned-exact-merge`. The text
+states only that the commits are in history. It does not claim that the
+work is present. No override is recommended. A missing branch or a tip
+outside spec history makes no history claim. The attested restore exit
+requires a person to verify the merge and its diff before restoring its
+second parent as the bead branch.
+
+The lifecycle scan nominates prerequisites from surviving bead branches.
+It uses the same read-only git classifier and checks epic lineage. This
+includes closed prerequisites. It reports only beads with no landed binding.
+Doctor renders the finding at Warn under the prerequisite's name. It has
+no automatic fix and uses the same dependent recovery commands. The scan
+uses the invocation cache to resolve each surviving bead branch to its epic.
+The dependent read uses uncached tracker reads, with one `bd show` per
+eligible child.
+
+## Full spec binding and lineage checks
+
+The workflow uses one parent-child epic as bead lineage. The phase resolver
+returns its provenance with the full spec ID. Scoped next selection uses
+this result without a second bead read. A foreign parent with no spec ID
+stays an inspection-only N2a near-miss. A foreign spec-bound parent stays
+N2c even when its binding needs repair. Both use `bd show <bead> --json`;
+only the scoped spec's own binding can refuse selection. Readiness requires
+the exact `<epic>.<N>` form for positional mapping.
+
+Spec approval checks the full ID for duplicate bindings before it writes
+approval, including for existing lettered specs. It writes `spec_id` on
+each new epic. Plan approval and lifecycle scans use full-ID resolution. The stored ID takes priority over legacy
+numeric metadata and epic title IDs. Conflicting legacy and title IDs
+require an explicit stored-ID repair. Lettered IDs retain their letter.
+A scoped lookup checks closed epics too. Duplicate bindings block that
+spec only. Doctor reports duplicate bindings and open title-only beads at
+Warn, then runs the remaining checks. The lineage check skips projects
+without a Beads store or redirect. An export alone does not enable the check. New spec creation refuses lettered IDs;
+existing lettered directories stay valid.
+
+## Implementation approval recovery
+
+A close, phase-write, or finalize failure stops approval. Approval reads the epic
+status after the failure. It places one state line before the inner error and
+names the failed stage. Inner recovery lines remain last. Approval adds a re-run
+command only when the inner error has no recovery command.
+
+A retry with a spec branch runs all pre-close gates on the current tip. The epic
+status does not bypass a gate. A closed epic skips the close write. A missing
+spec branch takes a separate evidence check. It requires a closed epic, stored
+phase `done`, the final publication tip, and all lifecycle child bindings in the
+target history. The executor fetches remote evidence before checking ancestry.
+A failed check retains the branch-missing adopt recovery. A successful check
+returns the `already landed` message and completes safe cleanup.
+
+The executor checks a remaining bead worktree before it skips an already merged
+branch. After publication and its hooks, it checks every scoped bead worktree
+and the spec worktree before forced removal of those worktrees. The branch-missing resume runs
+the same check before its first removal. Pending changes, an unreadable status,
+or a worktree inspection error return a cleanup-stage failure. Approval prints
+the epic state and preserves the recovery commands. All remaining worktrees and
+branches survive for recovery.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+An export or artifact-commit failure in the spec worktree or a pending bead
+stops finalization before publication and cleanup. The error names the failed
+stage and gives `mindspec impl approve <spec>` as recovery. Pending files,
+worktrees, and branches remain. A retry can finish after the fault is fixed.
+An absent spec or pending bead worktree has no artifact commit to run. A pending
+bead branch can still merge through the spec worktree.
+
+Before any finalization write, the executor checks all pending bead branches
+for an existing naming merge. A moved tip refuses with the same follow-up
+recovery as `complete`. The live merge repeats this check after artifact
+commits. It cannot create a second naming merge. Both paths use the recovery
+builder in `internal/mergefollowup`.
+
+## Verification between merge and close
+
+`complete --merge-only` runs the gates and materializes the bead. It records
+pending mode before the merge, then records the merge SHA. The bead stays
+open. The command retains the branch, worktree, stage marker, and panel ledger.
+
+Git state selects the later closing path. A bead has one naming merge.
+Its second parent must equal the bead tip. An open bead also needs the
+merge's changed paths present at the spec tip. A later naming merge for
+another bead can supersede those paths. Tool artifacts do not count.
+Use a follow-up bead for fixes found after verification.
+
+The closing path runs the panel gate at the bead tip and the content gates
+over M^1..M. Ownership comes from M's tree. It closes the bead, writes its
+landed binding and review identity, records overrides, and publishes the
+close with a path-scoped export and ledger commit in the spec worktree.
+After publication, it clears markers and reads bead user changes again before
+removal. The executor repeats this read at removal. Tool artifacts stay exempt.
+The exemption preserves decoded filename whitespace. A lookalike path blocks the close.
+Status reads disable rename and copy detection.
+New user changes or a status or stat read error stop cleanup. The pending file,
+worktree, and branch remain. The error gives a completion retry command.
+Each step resumes from its own done signal.
+
+A closed resume keeps all gates and tip checks. It skips the presence check.
+An absent worktree passes the user-changes check. In a non-flat layout with
+panel enforcement, no worktree and no surviving registration refuses.

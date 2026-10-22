@@ -121,7 +121,7 @@ func newNextHonestyFixture(t *testing.T) *nextHonestyFixture {
 	root := t.TempDir()
 	f := &nextHonestyFixture{root: root, path: filepath.Join(root, "tracker.json"), deps: map[string][]map[string]string{}}
 	f.epics = []map[string]interface{}{{"id": "epic-129", "title": "[SPEC 129] fixture", "status": "open", "issue_type": "epic", "metadata": map[string]interface{}{"spec_num": 129, "spec_title": "fixture", "mindspec_phase": "plan"}}}
-	f.rows = []map[string]interface{}{nextHonestyRow("epic-129.1", "neutral", "epic-129", "task", "open"), nextHonestyRow("epic-129.2", "[129-fixture] reporter", "", "task", "open"), nextHonestyRow("epic-129.3", "[129] numeric", "", "bug", "open")}
+	f.rows = []map[string]interface{}{nextHonestyRow("epic-129.1", "neutral", "epic-129", "task", "open"), nextHonestyRow("epic-129.2", "[129-fixture] reporter", "epic-129", "task", "open"), nextHonestyRow("epic-129.3", "[129] numeric", "epic-129", "bug", "open")}
 	f.write(t)
 	dir := filepath.Join(root, ".mindspec/specs/129-fixture")
 	if err := os.MkdirAll(dir, 0755); err != nil {

@@ -21,6 +21,16 @@ import (
 // bp returns a pointer to s, for building panel.Panel.BeadID fixtures.
 func bp(s string) *string { return &s }
 
+func TestConfigShow_NoMergeStrategyRow(t *testing.T) {
+	out, err := renderConfig(config.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "merge_strategy") {
+		t.Fatalf("config show contains the removed key:\n%s", out)
+	}
+}
+
 // resetConfigShowGateFlags resets configShowCmd's --gate/--json flags to
 // their zero values, both immediately and via t.Cleanup. rootCmd is a
 // package-level singleton these tests share via Execute(), and cobra does

@@ -1,6 +1,8 @@
 paths:
   - internal/state/**
   - internal/config/**
+  # Core owns the configuration loader and its project settings.
+  - .mindspec/config.yaml
   - internal/workspace/**
   - internal/spec/**
   - internal/idvalidate/**

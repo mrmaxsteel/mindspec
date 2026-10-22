@@ -89,12 +89,12 @@ func statusTag(s doctor.Status) string {
 		return "[MISSING]"
 	case doctor.Error:
 		return "[ERROR]"
+	case doctor.Info:
+		return "[INFO]"
 	case doctor.Warn:
 		return "[WARN]"
 	case doctor.Fixed:
 		return "[FIXED]"
-	case doctor.Info:
-		return "[INFO]"
 	default:
 		return "[UNKNOWN]"
 	}

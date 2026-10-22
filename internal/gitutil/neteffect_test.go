@@ -984,3 +984,200 @@ func TestDiffNameStatusBuckets_UnhandledStatusFailsClosed(t *testing.T) {
 // itself is stubbed) — any string works, but rejectOptionLike still runs
 // first, so it must not look option-like.
 const unhandledStatusTestWorkdir = "/tmp/mindspec-unhandled-status-test-workdir"
+
+func TestMergeTreeLanding_CleanReturnsTree(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "spec")
+	neWriteFile(t, dir, "claim", "spec claim\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "claim")
+	neRunGit(t, dir, "checkout", "-b", "bead", base)
+	neWriteFile(t, dir, "source", "bead content\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "source")
+	before := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	tree, conflicts, err := MergeTreeLanding(dir, base, "spec", "bead")
+	if err != nil || tree == "" || len(conflicts) != 0 {
+		t.Fatalf("landing: %q %v %v", tree, conflicts, err)
+	}
+	for path, want := range map[string]string{"claim": "spec claim\n", "source": "bead content\n"} {
+		data, err := FileAtRef(dir, tree, path)
+		if err != nil || string(data) != want {
+			t.Fatalf("%s: %q %v", path, data, err)
+		}
+	}
+	if after := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD")); after != before {
+		t.Fatal("preview moved HEAD")
+	}
+	if status := neRunGit(t, dir, "status", "--porcelain"); status != "" {
+		t.Fatalf("preview changed index or files: %s", status)
+	}
+}
+
+func TestMergeTreeLanding_ConflictListsPaths(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	path := "source\twith\ncontrols"
+	neWriteFile(t, dir, path, "base\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "base source")
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "spec")
+	neWriteFile(t, dir, path, "spec\n")
+	neWriteFile(t, dir, "OWNERSHIP.yaml", "paths: [source]\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "spec")
+	neRunGit(t, dir, "checkout", "-b", "bead", base)
+	neWriteFile(t, dir, path, "bead\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "bead")
+	tree, conflicts, err := MergeTreeLanding(dir, base, "spec", "bead")
+	if err != nil || tree == "" || len(conflicts) != 1 || conflicts[0] != path {
+		t.Fatalf("landing: %q %q %v", tree, conflicts, err)
+	}
+	data, err := FileAtRef(dir, tree, "OWNERSHIP.yaml")
+	if err != nil || string(data) != "paths: [source]\n" {
+		t.Fatalf("clean ownership lost: %q %v", data, err)
+	}
+	if MergeInProgress(dir) {
+		t.Fatal("preview started a merge")
+	}
+}
+
+func TestMergeTreeLanding_InvalidOperandsRefuse(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	for _, args := range [][3]string{{"--bad", "HEAD", "HEAD"}, {"HEAD", "--bad", "HEAD"}, {"HEAD", "HEAD", "--bad"}, {"HEAD", "HEAD", "missing"}} {
+		if tree, _, err := MergeTreeLanding(dir, args[0], args[1], args[2]); err == nil || tree != "" {
+			t.Fatalf("%v: tree=%q err=%v", args, tree, err)
+		}
+	}
+}
+
+func rangeFixture(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "-b", "work")
+	neWriteFile(t, dir, "early.txt", "early work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "early work")
+	early := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neWriteFile(t, dir, "last.txt", "last work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "last work")
+	head := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neRunGit(t, dir, "checkout", "main")
+	neRunGit(t, dir, "merge", "--no-ff", "-m", "Import work", "work")
+	return dir, base, early, head
+}
+
+func TestRangeRevertedAt_DetectsRevertOfRangeChange(t *testing.T) {
+	dir, base, early, head := rangeFixture(t)
+	neRunGit(t, dir, "revert", "--no-edit", early)
+	got, err := RangeRevertedAt(dir, base, head, "main")
+	if err != nil || !got {
+		t.Fatalf("earlier range change was reverted: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_LaterEditNotRevert(t *testing.T) {
+	dir, base, _, head := rangeFixture(t)
+	neWriteFile(t, dir, "early.txt", "early work with later edits\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "evolve work")
+	got, err := RangeRevertedAt(dir, base, head, "main")
+	if err != nil || got {
+		t.Fatalf("later edit is not a revert: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_BaseExcludesEarlierCommits(t *testing.T) {
+	dir, _, early, head := rangeFixture(t)
+	neRunGit(t, dir, "revert", "--no-edit", early)
+	got, err := RangeRevertedAt(dir, early, head, "main")
+	if err != nil || got {
+		t.Fatalf("change before base must not count: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_PartialCommitRevert(t *testing.T) {
+	dir := initGitRepo(t)
+	base := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	neWriteFile(t, dir, "a.txt", "alpha\n")
+	neWriteFile(t, dir, "b.txt", "beta\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "two paths")
+	head := strings.TrimSpace(neRunGit(t, dir, "rev-parse", "HEAD"))
+	// An absent original path is a partial revert. A copy at another path
+	// cannot provide that path's content.
+	if err := os.Rename(filepath.Join(dir, "a.txt"), filepath.Join(dir, "copy.txt")); err != nil {
+		t.Fatal(err)
+	}
+	neWriteFile(t, dir, "b.txt", "beta with later work\n")
+	neRunGit(t, dir, "add", ".")
+	neRunGit(t, dir, "commit", "-m", "remove one path and evolve another")
+	got, err := RangeRevertedAt(dir, base, head, "HEAD")
+	if err != nil || !got {
+		t.Fatalf("conflict or copy masked a reverted path: %v %v", got, err)
+	}
+}
+
+func TestRangeRevertedAt_ReadError(t *testing.T) {
+	dir, base, _, head := rangeFixture(t)
+	if _, err := RangeRevertedAt(dir, base, head, "missing-ref"); err == nil {
+		t.Fatal("missing target must return an error")
+	}
+	for _, args := range [][3]string{{"--all", head, "main"}, {base, "--all", "main"}, {base, head, "--all"}} {
+		if _, err := RangeRevertedAt(dir, args[0], args[1], args[2]); err == nil {
+			t.Fatalf("option operand accepted: %v", args)
+		}
+	}
+}
+
+// A tracker-shaped destination does not make a source deletion or a lookalike
+// filename a tracker-only carrier. Main has a later export in both cases.
+func TestNetEffectLanded_TrackerShapeRequiresExactPathsAndRenameEndpoints(t *testing.T) {
+	for _, kind := range []string{"source-renamed-to-tracker", "whitespace-lookalike"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+			t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+			dir := initGitRepo(t)
+			neRunGit(t, dir, "config", "diff.renames", "true")
+			const source = "user-export.txt"
+			neWriteFile(t, dir, source, `{"id":"epic-1","status":"in_progress"}`+"\n")
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "source export")
+			neRunGit(t, dir, "checkout", "-b", "carrier")
+			if kind == "source-renamed-to-tracker" {
+				if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(filepath.Join(dir, source), filepath.Join(dir, trackerJSONLPath)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				neWriteFile(t, dir, trackerJSONLPath+" ", "pending user bytes\n")
+			}
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "user work on carrier")
+			neRunGit(t, dir, "checkout", "main")
+			neWriteFile(t, dir, trackerJSONLPath, `{"id":"epic-1","status":"closed"}`+"\n")
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "later tracker export")
+			landed, err := NetEffectLanded(dir, "carrier", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if landed {
+				t.Error("user work was accepted as a tracker-only carrier")
+			}
+			t.Logf("landed=%v", landed)
+		})
+	}
+}
