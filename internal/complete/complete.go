@@ -616,6 +616,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// 1.5. Impl-only guard: verify the epic phase is implement or review.
+	closedAtEntry := false
 	epicID, epicErr := phase.FindEpicBySpecIDWithCache(epicCache, specID)
 	if epicErr == nil && epicID != "" {
 		// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
@@ -632,6 +633,17 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// re-validated against the enum here on the not-equal path
 			// — escape it as free text.
 			return nil, fmt.Errorf("bead %s belongs to spec %s which is in '%s' phase.\nmindspec complete is for implementation beads only.", safeBeadID, idrender.Spec(specID), termsafe.Escape(epicPhase))
+		}
+		if phaseErr == nil {
+			// Reuse the phase query's cached child status when it is available.
+			// A new close keeps its existing durability checks below.
+			children, _ := epicCache.GetChildren(epicID)
+			for _, child := range children {
+				if child.ID == beadID {
+					closedAtEntry = strings.EqualFold(strings.TrimSpace(child.Status), "closed")
+					break
+				}
+			}
 		}
 	}
 
@@ -1136,6 +1148,28 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 
 	if opts.MergeOnly {
 		return runMergeOnly(root, beadID, specID, specBranch, exec, opts)
+	}
+
+	// A closed, unmerged bead needs no second close. Keep its workspace until
+	// the merge binding, export and ledger are durable, then finish cleanup.
+	if branchPresent && reconcile == nil && closedAtEntry {
+		if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge); err != nil {
+			retry := opts
+			retry.ResolveMerge = true
+			return nil, completionFailure(beadID, retry, "merging closed bead", err)
+		}
+		rows, err := namingMerges(exec, specBranch, beadID)
+		if err != nil {
+			return nil, completionFailure(beadID, opts, "reading naming merges", err)
+		}
+		if len(rows) > 1 {
+			return nil, guard.NewFailure("the closed bead needs one naming merge before publication", completionCommand(beadID, opts))
+		}
+		if len(rows) == 1 {
+			return runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath, rows[0], exec, opts, false)
+		}
+		// An unchanged ancestor branch creates no naming merge. Keep the
+		// existing completion path for that case.
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)

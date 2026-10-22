@@ -876,3 +876,6 @@ skips presence, and finishes the binding, override, export, marker, and
 cleanup steps. Step 1–4 recovery repeats the supplied doc-skew and ADR
 override flags with their reasons. A repeated merge-only call records the
 existing valid merge and makes no second merge.
+
+A closed bead without a naming merge runs the merge recovery without a
+second close. It publishes the closed export and panel ledger before cleanup.

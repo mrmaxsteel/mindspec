@@ -329,7 +329,8 @@ reads the merge head, staged paths, and a full-SHA commit range.
 The workflow layer selects the naming merge and decides whether to close.
 
 `PublishBeadClose` exports the tracker in the spec worktree and commits
-only the export and supplied ledger paths. `CleanupBead` checks ancestry,
-removes the bead worktree, and deletes the branch. A read or removal error
+only the paths it is given. The caller includes the export path.
+`CleanupBead` checks ancestry, removes the bead worktree, and deletes the
+branch. A read or removal error
 refuses; a retry finishes the remaining work. `MockExecutor` exposes the
 same methods and records calls.

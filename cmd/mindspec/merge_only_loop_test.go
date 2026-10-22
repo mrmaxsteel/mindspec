@@ -15,7 +15,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/doctor"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 const mergeLoopSpec = "132-window"
@@ -56,7 +58,7 @@ func loopBead(id string, deps ...string) map[string]interface{} {
 	return map[string]interface{}{"id": id, "title": "[132] implement verification", "issue_type": "task", "status": "open", "description": "Implement the accepted behavior.", "dependencies": dependencies, "parent": mergeLoopEpic, "metadata": map[string]interface{}{"spec_id": mergeLoopSpec}}
 }
 func loopPlan(ids []string) string {
-	text := "---\nstatus: Approved\nspec_id: 132-window\nversion: \"1\"\nbead_ids:\n"
+	text := "---\nstatus: Approved\nspec_id: 132-window\nversion: \"1\"\nadr_citations:\n  - ADR-9001\nbead_ids:\n"
 	for _, id := range ids {
 		text += "  - " + id + "\n"
 	}
@@ -134,11 +136,19 @@ elif cmd=="close":
  for id in args[1:]:
   if not id.startswith("-"): issues[id]["status"]="closed"
  save()
+elif cmd=="create":
+ id="mindspec-loop.3"
+ issues[id]={"id":id,"title":args[1],"issue_type":"task","status":"open","description":"Implement the follow-up fix.","parent":value("--parent"),"dependencies":[{"id":value("--parent"),"dependency_type":"parent-child"},{"id":value("--deps"),"dependency_type":"blocks"}],"metadata":{"spec_id":"132-window"}}
+ save(); print(json.dumps(issues[id]))
 elif cmd=="dolt": pass
 elif cmd=="export":
  os.makedirs(".beads",exist_ok=True)
  with open(value("-o") or ".beads/issues.jsonl","w") as f:
   for id in sorted(issues): f.write(json.dumps(issues[id],sort_keys=True)+"\n")
+elif cmd=="worktree" and args[1]=="create":
+ wt_path=os.path.abspath(args[2]); branch=value("--branch")
+ subprocess.run(["git","worktree","add",wt_path,branch],check=True)
+ db["worktrees"].append({"name":os.path.basename(wt_path),"branch":branch,"path":wt_path});save()
 elif cmd=="worktree" and args[1]=="list": print(json.dumps(db["worktrees"]))
 elif cmd=="worktree" and args[1]=="remove":
  rows=[r for r in db["worktrees"] if r["name"]==args[2]]
@@ -156,6 +166,8 @@ else:
 	loopWrite(t, f.root, ".mindspec/config.yaml", "source_globs:\n  - internal/**/*.go\n")
 	loopWrite(t, f.root, ".mindspec/specs/"+mergeLoopSpec+"/spec.md", "# Spec\n\n## Goal\nVerify a merge before close.\n\n## Impacted Domains\n\n- workflow\n")
 	loopWrite(t, f.root, ".mindspec/specs/"+mergeLoopSpec+"/plan.md", loopPlan([]string{mergeLoopBead, "mindspec-loop.2"}))
+	loopWrite(t, f.root, ".mindspec/domains/workflow/OWNERSHIP.yaml", "paths:\n  - feature.md\n")
+	loopWrite(t, f.root, ".mindspec/adr/ADR-9001.md", "# ADR-9001: Verification\n\n- **Status**: Accepted\n- **Domain(s)**: workflow\n\n## Decision\nOwn verification files.\n")
 	loopWrite(t, f.root, ".gitignore", ".worktrees/\n")
 	loopWrite(t, f.root, "README.md", "base\n")
 	loopGit(t, f.root, "init", "-q", "-b", "main")
@@ -164,7 +176,9 @@ else:
 	loopGit(t, f.root, "branch", "spec/"+mergeLoopSpec)
 	loopGit(t, f.root, "checkout", "-qb", "bead/"+mergeLoopBead)
 	loopWrite(t, f.root, "README.md", "implemented\n")
-	loopGit(t, f.root, "commit", "-qam", "implement")
+	loopWrite(t, f.root, "feature.md", "feature\n")
+	loopGit(t, f.root, "add", "README.md", "feature.md")
+	loopGit(t, f.root, "commit", "-qm", "implement")
 	loopGit(t, f.root, "checkout", "-q", "main")
 	loopGit(t, f.root, "worktree", "add", f.specWT, "spec/"+mergeLoopSpec)
 	loopGit(t, f.root, "worktree", "add", f.beadWT, "bead/"+mergeLoopBead)
@@ -296,52 +310,215 @@ func (f *mergeLoopFixture) finishDependent() {
 		f.t.Fatalf("doctor after approval: %+v", report.Checks)
 	}
 }
-func TestComplete_MergeOnlyRestoreLoop(t *testing.T) {
-	f := newMergeLoopFixture(t)
-	r := f.complete(mergeLoopBead, complete.CompleteOpts{MergeOnly: true})
-	f.assertOpenMergeDetected()
-	loopGit(t, f.specWT, "revert", "-m", "1", "--no-edit", r.MergeSHA)
-	if _, err := complete.Run(f.root, mergeLoopBead, mergeLoopSpec, "", f.ex, complete.CompleteOpts{}); err == nil {
-		t.Fatal("reverted merge closed")
+
+// recoveryLines keeps the command operands from the refusal. Git commands run
+// unchanged in the temp repo. Lifecycle commands call their Go entry points so
+// the test needs no installed binary. The fake tracker handles tracker commands.
+func recoveryLines(t *testing.T, err error) []string {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected a refusal with recovery lines")
 	}
-	loopGit(t, f.specWT, "checkout", r.MergeSHA, "--", "README.md")
-	loopGit(t, f.specWT, "commit", "-qm", "restore merged paths")
-	f.complete(mergeLoopBead, complete.CompleteOpts{})
-	f.assertCleanAndReady()
-	f.finishDependent()
+	var lines []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if strings.HasPrefix(line, "recovery: ") {
+			lines = append(lines, strings.TrimPrefix(line, "recovery: "))
+		}
+	}
+	if len(lines) == 0 {
+		t.Fatalf("no recovery lines: %v", err)
+	}
+	return lines
+}
+func (f *mergeLoopFixture) shellRecovery(line string) {
+	f.t.Helper()
+	cmd := exec.Command("sh", "-c", line)
+	cmd.Dir = f.root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		f.t.Fatalf("printed recovery %s: %v\n%s", line, err, out)
+	}
+}
+func (f *mergeLoopFixture) completeRecovery(line string) {
+	f.t.Helper()
+	args := strings.Fields(line)
+	if len(args) != 3 || args[0] != "mindspec" || args[1] != "complete" {
+		f.t.Fatalf("unexpected complete recovery: %s", line)
+	}
+	f.complete(args[2], complete.CompleteOpts{})
+}
+func (f *mergeLoopFixture) nextRecovery(line string) string {
+	f.t.Helper()
+	args := strings.Fields(line)
+	if len(args) != 3 || args[0] != "mindspec" || args[1] != "next" {
+		f.t.Fatalf("unexpected next recovery: %s", line)
+	}
+	id := args[2]
+	// These are next's gate, claim and dispatch entry points. No override is set.
+	if _, err := next.GateReadiness(f.root, id, next.GateOptions{}); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := next.ClaimBead(id); err != nil {
+		f.t.Fatal(err)
+	}
+	path, err := next.EnsureWorktree(f.root, id, mergeLoopSpec, f.ex)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return path
+}
+func (f *mergeLoopFixture) recordPanel(id, path string, round int) {
+	f.t.Helper()
+	specDir, err := workspace.SpecDir(f.root, mergeLoopSpec)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tip := loopGit(f.t, path, "rev-parse", "HEAD")
+	// A fixture panel supplies local verdicts. No model or panel CLI runs here.
+	p := panel.Panel{BeadID: &id, Spec: mergeLoopSpec, Target: "bead/" + id, Gate: "bead", Round: round, ExpectedReviewers: 2, ReviewedHeadSHA: tip}
+	data, err := json.Marshal(p)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	dir := filepath.Join(specDir, "reviews", id)
+	loopWrite(f.t, dir, "panel.json", string(data))
+	for _, slot := range []string{"R1", "R2"} {
+		loopWrite(f.t, dir, fmt.Sprintf("%s-round-%d.json", slot, round), `{"verdict":"APPROVE"}`)
+	}
+	regs := panel.ForBead(panel.Scan(specDir), id)
+	if len(regs) != 1 || regs[0].Panel.ReviewedHeadSHA != tip || regs[0].Panel.Round != round {
+		f.t.Fatalf("panel not recorded at tip: %+v", regs)
+	}
+}
+func TestComplete_MergeOnlyRestoreLoop(t *testing.T) {
+	for _, kind := range []string{"full", "partial"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newMergeLoopFixture(t)
+			r := f.complete(mergeLoopBead, complete.CompleteOpts{MergeOnly: true})
+			f.assertOpenMergeDetected()
+			if kind == "full" {
+				loopGit(t, f.specWT, "revert", "-m", "1", "--no-edit", r.MergeSHA)
+			} else {
+				loopWrite(t, f.specWT, "README.md", "base\n")
+				loopGit(t, f.specWT, "commit", "-qam", "partial revert")
+			}
+			_, err := complete.Run(f.root, mergeLoopBead, mergeLoopSpec, "", f.ex, complete.CompleteOpts{})
+			lines := recoveryLines(t, err)
+			restored, committed, closed := false, false, false
+			for _, line := range lines {
+				switch {
+				case strings.HasPrefix(line, "git ") && strings.Contains(line, " revert "):
+					if kind == "full" {
+						f.shellRecovery(line)
+						restored = true
+					}
+				case strings.HasPrefix(line, "git ") && strings.Contains(line, " checkout "):
+					if kind == "partial" {
+						f.shellRecovery(line)
+						restored = true
+					}
+				case strings.HasPrefix(line, "git ") && strings.Contains(line, " commit "):
+					if kind == "partial" {
+						f.shellRecovery(line)
+						committed = true
+					}
+				case strings.HasPrefix(line, "mindspec complete "):
+					if !restored || (kind == "partial" && !committed) {
+						t.Fatal("complete printed before restore")
+					}
+					f.completeRecovery(line)
+					closed = true
+				}
+			}
+			if !restored || !closed {
+				t.Fatalf("restore commands did not run: %v", lines)
+			}
+			merges, err := f.ex.FirstParentMerges("spec/" + mergeLoopSpec)
+			if err != nil || len(merges) != 1 || merges[0].SHA != r.MergeSHA {
+				t.Fatalf("restore made another naming merge: %v %v", merges, err)
+			}
+			f.assertCleanAndReady()
+			f.finishDependent()
+		})
+	}
 }
 func TestComplete_MergeOnlyFollowUpLoop(t *testing.T) {
 	f := newMergeLoopFixture(t)
-	r := f.complete(mergeLoopBead, complete.CompleteOpts{MergeOnly: true})
+	f.complete(mergeLoopBead, complete.CompleteOpts{MergeOnly: true})
 	f.assertOpenMergeDetected()
-	parent := r.MergeParents[1]
 	loopWrite(t, f.beadWT, "README.md", "fixed\n")
 	loopGit(t, f.beadWT, "commit", "-qam", "fix after verification")
-	tip := loopGit(t, f.root, "rev-parse", "bead/"+mergeLoopBead)
-	if _, err := complete.Run(f.root, mergeLoopBead, mergeLoopSpec, "", f.ex, complete.CompleteOpts{}); err == nil {
-		t.Fatal("advanced tip closed")
+	_, err := complete.Run(f.root, mergeLoopBead, mergeLoopSpec, "", f.ex, complete.CompleteOpts{MergeOnly: true})
+	recoveryLines(t, err)
+	if !strings.Contains(err.Error(), "bead tip moved") {
+		t.Fatalf("second merge-only did not refuse moved tip: %v", err)
 	}
-	loopGit(t, f.root, "branch", mergeLoopBead+"-followup", tip)
-	loopGit(t, f.beadWT, "reset", "--keep", parent)
-	f.complete(mergeLoopBead, complete.CompleteOpts{})
-	f.assertCleanAndReady()
+	f.recordPanel(mergeLoopBead, f.beadWT, 1)
+	_, err = complete.Run(f.root, mergeLoopBead, mergeLoopSpec, "", f.ex, complete.CompleteOpts{})
+	lines := recoveryLines(t, err)
+	if !strings.Contains(err.Error(), "The new bead needs its own panel") {
+		t.Fatalf("missing follow-up panel instruction: %v", err)
+	}
 	f.load()
-	f.db["issues"].(map[string]interface{})["mindspec-loop.3"] = loopBead("mindspec-loop.3", mergeLoopBead)
-	loopWrite(t, f.specWT, ".mindspec/specs/"+mergeLoopSpec+"/plan.md", loopPlan([]string{mergeLoopBead, "mindspec-loop.2", "mindspec-loop.3"}))
-	loopGit(t, f.specWT, "add", ".mindspec/specs/"+mergeLoopSpec+"/plan.md")
-	loopGit(t, f.specWT, "commit", "-qm", "plan follow-up")
+	if _, exists := f.db["issues"].(map[string]interface{})["mindspec-loop.3"]; exists {
+		t.Fatal("follow-up already exists")
+	}
+	planPath := ".mindspec/specs/" + mergeLoopSpec + "/plan.md"
+	planBefore, readErr := os.ReadFile(filepath.Join(f.specWT, planPath))
+	if readErr != nil || strings.Contains(string(planBefore), "## Bead 3:") || strings.Contains(string(planBefore), "id: 3") {
+		t.Fatalf("follow-up already planned: %v", readErr)
+	}
 	path := filepath.Join(f.specWT, ".worktrees", "worktree-mindspec-loop.3")
-	loopGit(t, f.root, "worktree", "add", "-b", "bead/mindspec-loop.3", path, "spec/"+mergeLoopSpec)
-	loopGit(t, path, "cherry-pick", parent+".."+mergeLoopBead+"-followup")
-	loopGit(t, f.root, "branch", "-D", mergeLoopBead+"-followup")
-	f.db["worktrees"] = append(f.db["worktrees"].([]interface{}), map[string]interface{}{"name": "worktree-mindspec-loop.3", "branch": "bead/mindspec-loop.3", "path": path})
-	f.save()
-	if _, err := next.GateReadiness(f.root, "mindspec-loop.3", next.GateOptions{}); err != nil {
-		t.Fatal(err)
+	replace := strings.NewReplacer("<title>", "Follow-up fix", "<new bead>", "mindspec-loop.3", "<new bead worktree>", path)
+	panelRecorded, planned, dispatched := false, false, false
+	for _, printed := range lines {
+		line := replace.Replace(printed)
+		switch {
+		case strings.HasPrefix(line, "git "):
+			f.shellRecovery(line)
+		case strings.HasPrefix(line, "run a new panel round for the bead at its tip"):
+			f.recordPanel(mergeLoopBead, f.beadWT, 2)
+			panelRecorded = true
+		case strings.HasPrefix(line, "mindspec complete "):
+			if !panelRecorded {
+				t.Fatal("complete ran before the printed panel round")
+			}
+			f.completeRecovery(line)
+			f.assertCleanAndReady()
+		case strings.HasPrefix(line, "bd create "):
+			f.shellRecovery(line)
+		case strings.HasPrefix(line, "edit plan.md on the spec branch:"):
+			// This printed line is an editing instruction, not shell syntax. Check its
+			// operands, then perform the requested plan edit and commit in the fixture.
+			for _, operand := range []string{"Nth ## Bead heading", "acceptance criterion", "work_chunks id N", "key_file_paths", "commit plan.md"} {
+				if !strings.Contains(line, operand) {
+					t.Fatalf("plan recovery lacks %q: %s", operand, line)
+				}
+			}
+			loopWrite(t, f.specWT, planPath, loopPlan([]string{mergeLoopBead, "mindspec-loop.2", "mindspec-loop.3"}))
+			loopGit(t, f.specWT, "add", planPath)
+			loopGit(t, f.specWT, "commit", "-qm", "plan follow-up")
+			planned = true
+		case strings.HasPrefix(line, "mindspec next "):
+			if !planned {
+				t.Fatal("dispatch ran before the printed plan edit")
+			}
+			got, err := filepath.EvalSymlinks(f.nextRecovery(line))
+			want, wantErr := filepath.EvalSymlinks(path)
+			if err != nil || wantErr != nil || got != want {
+				t.Fatalf("wrong follow-up worktree: got=%s want=%s err=%v %v", got, want, err, wantErr)
+			}
+			dispatched = true
+		default:
+			t.Fatalf("unhandled printed recovery: %s", line)
+		}
 	}
-	if err := next.ClaimBead("mindspec-loop.3"); err != nil {
-		t.Fatal(err)
+	if !panelRecorded || !planned || !dispatched {
+		t.Fatalf("incomplete recovery: %v", lines)
 	}
+	if got := loopGit(t, path, "show", "HEAD:README.md"); got != "fixed" {
+		t.Fatalf("printed recovery lost fix: %s", got)
+	}
+	f.recordPanel("mindspec-loop.3", path, 1)
 	f.complete("mindspec-loop.3", complete.CompleteOpts{})
 	f.finishDependent()
 }

@@ -16,6 +16,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -26,6 +28,7 @@ type windowFixture struct {
 	t                                 *testing.T
 	root, specWT, beadWT, parent, tip string
 	closed                            bool
+	closeCalls                        int
 	meta                              map[string]interface{}
 	ex                                *windowExecutor
 }
@@ -62,7 +65,9 @@ func (w windowWorktrees) List() ([]bead.WorktreeListEntry, error) {
 	return []bead.WorktreeListEntry{{Name: "worktree-" + closingBead, Branch: "bead/" + closingBead, Path: w.f.beadWT}}, nil
 }
 func (w windowWorktrees) Remove(string) error {
-	gitRun(w.f.t, w.f.root, "worktree", "remove", w.f.beadWT)
+	// Completion has already refused user dirt. Match the tracker remover's
+	// ability to discard tool artifacts that remain after publication.
+	gitRun(w.f.t, w.f.root, "worktree", "remove", "--force", w.f.beadWT)
 	return nil
 }
 
@@ -110,7 +115,7 @@ func newWindowFixture(t *testing.T) *windowFixture {
 	ex.WorktreeOps = windowWorktrees{f}
 	f.ex = &windowExecutor{MindspecExecutor: ex, f: f}
 	worktreeListFn = ex.WorktreeOps.List
-	closeBeadFn = func(...string) error { f.closed = true; return nil }
+	closeBeadFn = func(...string) error { f.closeCalls++; f.closed = true; return nil }
 	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
 		status := "in_progress"
 		if f.closed {
@@ -200,12 +205,19 @@ func TestComplete_MergeOnlyBranchlessRefuses(t *testing.T) {
 	}
 }
 func TestComplete_MergeOnlyHandCommitStaysOpen(t *testing.T) {
-	f := newWindowFixture(t)
-	m := f.merge()
-	f.meta[mergeOnlyPendingKey] = "pending"
-	r, err := f.run(CompleteOpts{})
-	if err != nil || f.closed || r.MergeSHA != m {
-		t.Fatalf("%+v %v", r, err)
+	f := sourceConflictWindow(t)
+	_, err := f.run(CompleteOpts{MergeOnly: true})
+	requireWindowRefusal(t, err, "--merge-only --resolve-merge")
+	if !gitutil.MergeInProgress(f.specWT) || f.meta[mergeOnlyPendingKey] != "pending" || f.closed {
+		t.Fatal("merge-only did not preserve the conflict and pending mode")
+	}
+	writeFile(t, f.specWT, "README.md", "resolved by hand\n")
+	gitRun(t, f.specWT, "add", "README.md")
+	gitRun(t, f.specWT, "commit", "--no-edit")
+	m := gateRevParse(t, f.root, "spec/"+closingSpec)
+	r, err := f.run(CompleteOpts{MergeOnly: true, ResolveMerge: true})
+	if err != nil || f.closed || !r.MergeOnly || r.MergeSHA != m || f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil {
+		t.Fatalf("hand-committed conflict did not record merge-only: %+v %v metadata=%v", r, err, f.meta)
 	}
 }
 func TestComplete_HandMergeTakesClosingPath(t *testing.T) {
@@ -250,11 +262,27 @@ func TestComplete_UserDirtAfterMergeOnlyRefuses(t *testing.T) {
 }
 func TestComplete_RepeatedMergeOnlyNoNewMerge(t *testing.T) {
 	f := newWindowFixture(t)
-	m := f.mergedOnly()
-	delete(f.meta, mergeOnlySHAKey)
+	mergeMeta := completeMergeMetadataFn
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if _, present := updates[mergeOnlySHAKey]; present {
+			return errors.New("marker write failed")
+		}
+		return mergeMeta(id, updates)
+	}
+	_, err := f.run(CompleteOpts{MergeOnly: true})
+	requireWindowRefusal(t, err, "marker write failed")
+	m := gateRevParse(t, f.root, "spec/"+closingSpec)
+	if f.closed || f.meta[mergeOnlySHAKey] != nil || f.meta[mergeOnlyPendingKey] != "pending" {
+		t.Fatalf("wrong state after failed marker write: %v", f.meta)
+	}
+	completeMergeMetadataFn = mergeMeta
 	r, err := f.run(CompleteOpts{MergeOnly: true})
-	if err != nil || r.MergeSHA != m || f.closed || gateRevParse(t, f.root, "spec/"+closingSpec) != m {
-		t.Fatalf("repeat merged or closed: %+v %v", r, err)
+	if err != nil || r.MergeSHA != m || f.closed || gateRevParse(t, f.root, "spec/"+closingSpec) != m || f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil {
+		t.Fatalf("repeat must record the marker without merging or closing: %+v %v metadata=%v", r, err, f.meta)
+	}
+	rows, err := namingMerges(f.ex, "spec/"+closingSpec, closingBead)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("repeat naming merges: %v %v", rows, err)
 	}
 }
 func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
@@ -270,9 +298,59 @@ func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
 		t.Fatal("made a second merge")
 	}
 }
+func (f *windowFixture) registerLedger() string {
+	f.t.Helper()
+	specDir, err := workspace.SpecDir(f.root, closingSpec)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	p := panel.Panel{BeadID: windowBeadPointer(), Spec: closingSpec, Target: "bead/" + closingBead, Gate: "bead", Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: gateRevParse(f.t, f.root, "bead/"+closingBead)}
+	writeCoLocatedPanel(f.t, specDir, "closing-panel", p, approveVerdicts(2))
+	dir := filepath.Join(specDir, "reviews", "closing-panel")
+	core3Cover(f.t, panel.Registration{Dir: dir, Panel: p})
+	wt, paths, err := SpecLedgerPaths(f.root, closingSpec, closingBead)
+	if err != nil || wt != f.specWT || len(paths) != 1 {
+		f.t.Fatalf("ledger fixture not selected: %s %v %v", wt, paths, err)
+	}
+	return paths[0]
+}
+func (f *windowFixture) assertPublished(ledger string) {
+	f.t.Helper()
+	data, err := f.ex.FileAtRef("spec/"+closingSpec, ".beads/issues.jsonl")
+	var row struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err != nil || json.Unmarshal(data, &row) != nil || row.ID != closingBead || row.Status != "closed" {
+		f.t.Fatalf("close not published: %s %v", data, err)
+	}
+	if ledger != "" {
+		committed, err := f.ex.FileAtRef("spec/"+closingSpec, ledger)
+		current, readErr := os.ReadFile(filepath.Join(f.specWT, ledger))
+		if err != nil || readErr != nil || len(current) == 0 || string(committed) != string(current) {
+			f.t.Fatalf("ledger not published: committed=%s current=%s err=%v read=%v", committed, current, err, readErr)
+		}
+	}
+}
+func TestComplete_ToolArtifactDirtAfterMergeOnlyCloses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, ".beads/issues.jsonl", "{\"id\":\"window-1\",\"status\":\"in_progress\",\"metadata\":{}}\n")
+	artifacts, user, err := next.CheckDirtyTreeDetail(f.beadWT, f.beadWT)
+	if err != nil || len(artifacts) == 0 || len(user) != 0 {
+		t.Fatalf("fixture needs artifact dirt only: %v %v %v", artifacts, user, err)
+	}
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !f.closed || !r.WorktreeRemoved {
+		t.Fatalf("artifact dirt blocked close: %+v %v", r, err)
+	}
+	f.assertPublished("")
+}
+
 func TestComplete_AfterMergeOnlyPublishesClose(t *testing.T) {
 	f := newWindowFixture(t)
 	f.mergedOnly()
+	ledger := f.registerLedger()
 	r, err := f.run(CompleteOpts{})
 	if err != nil || !r.BeadClosed {
 		t.Fatalf("%+v %v", r, err)
@@ -287,10 +365,13 @@ func TestComplete_AfterMergeOnlyPublishesClose(t *testing.T) {
 	if _, err := os.Stat(f.beadWT); !os.IsNotExist(err) {
 		t.Fatalf("worktree remains: %v", err)
 	}
+	f.assertPublished(ledger)
 }
+
 func TestComplete_AfterMergeOnlyExportFailureConverges(t *testing.T) {
 	f := newWindowFixture(t)
 	m := f.mergedOnly()
+	ledger := f.registerLedger()
 	f.ex.publishErr = errors.New("export unavailable")
 	_, err := f.run(CompleteOpts{})
 	requireWindowRefusal(t, err, "closing step 4")
@@ -305,7 +386,9 @@ func TestComplete_AfterMergeOnlyExportFailureConverges(t *testing.T) {
 	if err != nil || !r.WorktreeRemoved || f.meta["mindspec_landed_merge_sha"] != m {
 		t.Fatalf("%+v %v", r, err)
 	}
+	f.assertPublished(ledger)
 }
+
 func TestComplete_ClosingPathSpecWorktreeBusyRefuses(t *testing.T) {
 	for _, kind := range []string{"staged", "merge"} {
 		t.Run(kind, func(t *testing.T) {
@@ -360,7 +443,9 @@ func TestComplete_ClosedBeadResumesAllSteps(t *testing.T) {
 	for step := 2; step <= 6; step++ {
 		t.Run(fmt.Sprint(step), func(t *testing.T) {
 			f := newWindowFixture(t)
-			f.mergedOnly()
+			m := f.mergedOnly()
+			ledger := f.registerLedger()
+			opts := CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"}
 			orig := closingStepHook
 			t.Cleanup(func() { closingStepHook = orig })
 			closingStepHook = func(s int) error {
@@ -369,12 +454,16 @@ func TestComplete_ClosedBeadResumesAllSteps(t *testing.T) {
 				}
 				return nil
 			}
-			_, err := f.run(CompleteOpts{})
+			_, err := f.run(opts)
 			requireWindowRefusal(t, err, fmt.Sprintf("closing step %d", step))
 			closingStepHook = nil
-			r, err := f.run(CompleteOpts{})
+			r, err := f.run(opts)
 			if err != nil || !r.WorktreeRemoved {
 				t.Fatalf("%+v %v", r, err)
+			}
+			f.assertPublished(ledger)
+			if f.meta["mindspec_landed_merge_sha"] != m || f.meta["mindspec_landed_second_parent"] != f.tip || f.meta["mindspec_landed_reviewed_sha"] != f.tip || f.meta["mindspec_doc_skew_reason"] != opts.AllowDocSkew || f.meta["mindspec_adr_override_reason"] != opts.OverrideADR {
+				t.Fatalf("resume lost binding or override metadata: %v", f.meta)
 			}
 		})
 	}
@@ -621,7 +710,7 @@ func windowBeadPointer() *string { id := closingBead; return &id }
 
 func TestComplete_FollowupRecoveryOrder(t *testing.T) {
 	f := newWindowFixture(t)
-	f.mergedOnly()
+	m := f.mergedOnly()
 	writeFile(t, f.beadWT, "fix.txt", "fix")
 	gitRun(t, f.beadWT, "add", "-A")
 	gitRun(t, f.beadWT, "commit", "-qm", "fix")
@@ -630,6 +719,17 @@ func TestComplete_FollowupRecoveryOrder(t *testing.T) {
 		t.Fatal("expected moved-tip refusal")
 	}
 	text := err.Error()
+	resetLine := ""
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, " reset --keep ") {
+			resetLine = line
+		}
+	}
+	fields := strings.Fields(resetLine)
+	want := gateRevParse(t, f.root, m+"^2")
+	if len(fields) == 0 || fields[len(fields)-1] != want {
+		t.Fatalf("reset operand must be merge second parent %s: %s", want, resetLine)
+	}
 	last := -1
 	for _, fragment := range []string{"recovery: git branch ", " reset --keep ", "recovery: mindspec complete ", "recovery: bd create ", "recovery: edit plan.md", "recovery: mindspec next ", " cherry-pick ", "recovery: git branch -D "} {
 		pos := strings.Index(text, fragment)
@@ -682,6 +782,17 @@ func TestComplete_PlainConflictResolveFinishes(t *testing.T) {
 }
 func TestComplete_ClosedUnmergedRerunMerges(t *testing.T) {
 	f := newWindowFixture(t)
+	list := phaseEpicListJSONStub(closingSpec, "epic-window", state.ModeImplement)
+	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		for _, arg := range args {
+			if arg == "--parent" {
+				return json.Marshal([]phase.ChildInfo{{ID: closingBead, Status: "closed"}})
+			}
+		}
+		return list(args...)
+	})
+	t.Cleanup(restoreList)
+	ledger := f.registerLedger()
 	f.closed = true
 	r, err := f.run(CompleteOpts{})
 	if err != nil || !r.BeadClosed {
@@ -690,6 +801,22 @@ func TestComplete_ClosedUnmergedRerunMerges(t *testing.T) {
 	rows, err := namingMerges(f.ex, "spec/"+closingSpec, closingBead)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("closed unmerged bead did not merge: %v %v", rows, err)
+	}
+
+	f.assertPublished(ledger)
+	m := rows[0]
+	if f.meta["mindspec_landed_merge_sha"] != m.SHA || f.meta["mindspec_landed_second_parent"] != m.Parents[1] || f.meta["mindspec_landed_reviewed_sha"] != m.Parents[1] {
+		t.Fatalf("binding missing: %v", f.meta)
+	}
+	if !r.WorktreeRemoved || f.closeCalls != 0 {
+		t.Fatalf("cleanup or duplicate close: %+v closes=%d", r, f.closeCalls)
+	}
+	if _, err := os.Stat(f.beadWT); !os.IsNotExist(err) {
+		t.Fatalf("worktree survives: %v", err)
+	}
+	present, err := gitutil.BranchExistsIn(f.root, "bead/"+closingBead)
+	if err != nil || present {
+		t.Fatalf("branch survives: %v %v", present, err)
 	}
 }
 
@@ -719,4 +846,32 @@ func TestComplete_MergeOnlyMarkerFailureRetries(t *testing.T) {
 	if err != nil || r.MergeSHA != merge || f.closed || gateRevParse(t, f.root, "spec/"+closingSpec) != merge {
 		t.Fatalf("marker retry made a new merge or closed: %+v %v", r, err)
 	}
+}
+
+func TestComplete_HandMergeImpactedDomainsExitCloses(t *testing.T) {
+	f := newWindowFixture(t)
+	specPath := ".mindspec/specs/" + closingSpec + "/spec.md"
+	writeFile(t, f.beadWT, ".mindspec/specs/"+closingSpec+"/plan.md", "---\nstatus: Approved\nspec_id: 132-window\nversion: \"1\"\nadr_citations:\n  - ADR-9001\n---\n")
+	writeFile(t, f.beadWT, ".mindspec/adr/ADR-9001.md", "# ADR-9001: Gadget\n\n- **Status**: Accepted\n- **Domain(s)**: gadget\n\n## Decision\nOwn gadget.\n")
+	writeFile(t, f.beadWT, ".mindspec/domains/gadget/OWNERSHIP.yaml", "paths:\n  - internal/gadget/**\n  - feature.txt\n")
+	writeFile(t, f.beadWT, ".mindspec/domains/gadget/architecture.md", "Gadget owns its source.\n")
+	writeFile(t, f.beadWT, "internal/gadget/gadget.go", "package gadget\n")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "gadget implementation")
+	m := f.merge()
+	_, err := f.run(CompleteOpts{})
+	for _, fragment := range []string{"adr-divergence-unowned", "internal/gadget/gadget.go", "add that domain to the spec's Impacted Domains and commit the spec", "commit --amend --no-edit", "--unset-metadata " + mergeOnlySHAKey, "mindspec complete " + closingBead, "--override-adr", "A later commit does not change the merge", m} {
+		requireWindowRefusal(t, err, fragment)
+	}
+	if f.closed || f.closeCalls != 0 || f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatal("ownership refusal closed or bound the bead")
+	}
+	writeFile(t, f.specWT, specPath, "# Spec\n\n## Impacted Domains\n\n- widget\n- gadget\n")
+	gitRun(t, f.specWT, "add", specPath)
+	gitRun(t, f.specWT, "commit", "-qm", "declare gadget impact")
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed || !r.WorktreeRemoved || f.meta["mindspec_landed_merge_sha"] != m {
+		t.Fatalf("Impacted Domains exit did not close the original merge: %+v %v %v", r, err, f.meta)
+	}
+	f.assertPublished("")
 }

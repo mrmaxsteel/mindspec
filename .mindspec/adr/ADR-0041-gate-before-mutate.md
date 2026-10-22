@@ -837,8 +837,9 @@ after artifact commits and bead auto-merges. Both early and live guards must pas
 
 `complete --merge-only` is a commit phase with no close. It runs the panel
 and content gates, materializes the bead, records pending mode, and merges.
-It records the merge SHA and both parents. It leaves the bead open, with
-no landed binding, ledger commit, marker clear, or workspace removal.
+It prints the merge SHA and both parents and records the SHA.
+It leaves the bead open, with no landed binding, ledger commit, marker clear,
+or workspace removal.
 
 Git state selects the closing call. A bead has at most one naming merge.
 The merge's second parent must equal the bead tip. An open bead also needs
@@ -864,7 +865,8 @@ A closed resume re-runs the full panel gate and M's content gates, checks
 the tip and user changes, and resumes every remaining step. It skips the
 presence check. In a non-flat layout, an absent bead worktree with no
 surviving panel registration refuses when the panel gate is enforced.
-A closed bead without a naming merge retains the normal merge recovery.
+A closed bead without a naming merge runs the merge recovery without a
+second close. It publishes the export and ledger before cleanup.
 
 When an ownership manifest conflicts, an open plain completion refuses
 before close. Merge-only and closed-unmerged recovery preserve the merge.
