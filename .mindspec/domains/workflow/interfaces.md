@@ -584,7 +584,11 @@ configuration.
 The entry records `{round, from_sha, to_sha, paths, reason, created_at}`,
 with subject exclusions removed from `paths`. The `rebind` event also records
 the new subject digest. The verb appends the event before one snapshot write.
-An equal SHA prints `already fresh` and writes nothing. Completion copies
+An equal SHA prints `already fresh` and writes nothing. For a `spec_approve`
+or `plan_approve` panel whose target is a commit SHA, the live tip is the
+spec branch tip (the recorded SHA when that branch is absent); `verify`,
+`tally` and `rebind` share this rule, so an edit to the spec or plan after a
+pinned review reads stale and a rebind records it. Completion copies
 entries into `panel_rebound_entries` through the fail-closed metadata stage
 before close; only ledger-matched `from_sha` values join the landed reviewed-SHA
 set, with exact equality. This verb shares slug validation and supports `--spec`

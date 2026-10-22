@@ -693,8 +693,48 @@ func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (s
 		if target == "" {
 			return "", fmt.Errorf("panel.json records no target ref")
 		}
+		if branch := pinnedSubjectBranch(reg.Panel, target); branch != "" {
+			if sha, err := revParseForPanelFn(scanRoot, branch); err == nil {
+				return sha, nil
+			}
+		}
 		return revParseForPanelFn(scanRoot, target)
 	}
+}
+
+// pinnedSubjectBranch returns the spec branch for a spec or plan panel
+// whose target is a commit SHA. A SHA never moves, so comparing the
+// reviewed SHA with it always reads "fresh": a later edit to spec.md or
+// plan.md on the spec branch was invisible to verify, tally and rebind,
+// and rebind wrote no audit record. The live target for those gates is the
+// spec branch tip instead. It returns "" for every other panel, and the
+// caller falls back to the recorded target when the branch is absent.
+func pinnedSubjectBranch(p panel.Panel, target string) string {
+	if p.Gate != "spec_approve" && p.Gate != "plan_approve" {
+		return ""
+	}
+	if !looksLikeCommitSHA(target) {
+		return ""
+	}
+	branch, err := workspace.SpecBranch(p.Spec)
+	if err != nil {
+		return ""
+	}
+	return branch
+}
+
+// looksLikeCommitSHA reports whether ref is an abbreviated or full hex
+// object name.
+func looksLikeCommitSHA(ref string) bool {
+	if len(ref) < 7 || len(ref) > 64 {
+		return false
+	}
+	for _, c := range ref {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // panelBeadWorktreePath resolves the bead worktree path for the dirty-tree
