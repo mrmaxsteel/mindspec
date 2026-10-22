@@ -439,14 +439,8 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 				return nil, err
 			}
 			if !ignored {
-				// Checkout checks ignore rules before it takes a lock.
-				// A refused root cannot have a new checkout in progress.
-				// Use only existing slot paths and lock files in this case.
-				if _, err := os.Lstat(entry.Dir); os.IsNotExist(err) {
-					continue
-				} else if err != nil {
-					return nil, err
-				}
+				// Use existing lock files, even before a slot directory exists.
+				// If the ignore check fails, do not create lock files.
 				if _, err := os.Lstat(entry.Lock); os.IsNotExist(err) {
 					continue
 				} else if err != nil {

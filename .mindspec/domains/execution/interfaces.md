@@ -88,6 +88,9 @@ Missing paths, invalid file types and Git errors refuse reuse.
 
 `CheckSlotIgnore` uses `slotMainGit` for `check-ignore --quiet -- <path>`.
 It sets `core.excludesFile=/dev/null` to disable explicit and default global ignore files.
+Exit 1 returns an error that matches `executor.ErrSlotNotIgnored` with `errors.Is`.
+The error keeps the Git refusal text and exit code.
+If the ignore check returns an error, cleanup uses only existing lock files. It creates no lock file.
 `CheckIgnore` retains the operator configuration for ledger checks.
 `LsFiles` calls `gitutil.LsFiles` with the operator's Git configuration.
 `gitutil.LsFiles` moves a leading `--literal-pathspecs` before `ls-files`.

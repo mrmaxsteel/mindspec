@@ -364,3 +364,41 @@ func TestExecutor_SlotTrustQueryCeilingAndRemoval(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutor_CheckSlotIgnoreErrorKinds(t *testing.T) {
+	f := newSlotTrustFixture(t)
+	executor := NewMindspecExecutor(f.root)
+	t.Run("ignored", func(t *testing.T) {
+		if err := executor.CheckSlotIgnore(f.root, "ignored"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("not ignored", func(t *testing.T) {
+		err := executor.CheckSlotIgnore(f.root, "unignored")
+		if !errors.Is(err, ErrSlotNotIgnored) {
+			t.Fatalf("exit 1 must match ErrSlotNotIgnored: %v", err)
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			t.Fatalf("ignore refusal lost exit 1: %v", err)
+		}
+		_, original := slotMainGit(f.root, "-c", "core.excludesFile=/dev/null", "check-ignore", "--quiet", "--", "unignored")
+		if original == nil || err.Error() != original.Error() {
+			t.Fatalf("ignore refusal text changed: got %v, want %v", err, original)
+		}
+	})
+	t.Run("trust query failure", func(t *testing.T) {
+		t.Setenv("TMPDIR", filepath.Join(f.root, "absent-temp-parent"))
+		err := executor.CheckSlotIgnore(f.root, "ignored")
+		if err == nil || errors.Is(err, ErrSlotNotIgnored) || !strings.Contains(err.Error(), "create repository trust query directory") {
+			t.Fatalf("trust query failure must be operational: %v", err)
+		}
+	})
+	t.Run("git failure", func(t *testing.T) {
+		err := executor.CheckSlotIgnore(t.TempDir(), "ignored")
+		var exit *exec.ExitError
+		if err == nil || errors.Is(err, ErrSlotNotIgnored) || !errors.As(err, &exit) || exit.ExitCode() != 128 {
+			t.Fatalf("exit 128 must be operational: %v", err)
+		}
+	})
+}

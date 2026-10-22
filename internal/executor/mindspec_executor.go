@@ -1591,9 +1591,23 @@ func (g *MindspecExecutor) CheckIgnore(workdir, file string) error {
 	return gitutil.CheckIgnore(workdir, file)
 }
 
+// ErrSlotNotIgnored means that Git found no ignore rule for the slot path.
+var ErrSlotNotIgnored = errors.New("slot path is not ignored")
+
+type slotNotIgnoredError struct{ cause error }
+
+func (e slotNotIgnoredError) Error() string        { return e.cause.Error() }
+func (e slotNotIgnoredError) Unwrap() error        { return e.cause }
+func (e slotNotIgnoredError) Is(target error) bool { return target == ErrSlotNotIgnored }
+
 // CheckSlotIgnore uses global safe.directory trust and disables global ignore files.
+// Exit 1 matches ErrSlotNotIgnored. Other errors stop the check.
 func (g *MindspecExecutor) CheckSlotIgnore(workdir, file string) error {
 	_, err := slotMainGit(workdir, "-c", "core.excludesFile=/dev/null", "check-ignore", "--quiet", "--", file)
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return slotNotIgnoredError{cause: err}
+	}
 	return err
 }
 

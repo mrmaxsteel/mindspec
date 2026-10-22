@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
@@ -814,6 +816,163 @@ func TestPanelCleanup_UnignoredRootNoCheckout(t *testing.T) {
 				t.Errorf("cleanup created the isolation root: %v", err)
 			}
 		})
+	}
+}
+
+type cleanupIgnoreFailure struct{ executor.Executor }
+
+func (cleanupIgnoreFailure) CheckSlotIgnore(string, string) error {
+	return errors.New("repository trust query failed")
+}
+
+func TestPanelCleanup_IgnoreFailureHeldLockNoDir(t *testing.T) {
+	for _, verb := range []string{"create", "abandon"} {
+		t.Run(verb, func(t *testing.T) {
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			checkoutOK(t, "--slot", "R1")
+			lock, err := panel.AcquireSlotLock(f.layout(t, "R2").Lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Release()
+			if _, err := os.Lstat(f.layout(t, "R2").Dir); !os.IsNotExist(err) {
+				t.Fatalf("R2 directory must be absent: %v", err)
+			}
+			orig := newExecutorFn
+			newExecutorFn = func(root string) executor.Executor { return cleanupIgnoreFailure{orig(root)} }
+			t.Cleanup(func() { newExecutorFn = orig })
+			scratch := filepath.Join(f.root, f.isolation)
+			beforePanel, beforeScratch := slotSnapshot(t, f.dir), slotSnapshot(t, scratch)
+			var out string
+			if verb == "create" {
+				resetPanelCreateFlags(t)
+				out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+			} else {
+				out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
+			}
+			if err == nil || !strings.Contains(err.Error()+out, "slot lock is held: "+f.layout(t, "R2").Lock) {
+				t.Errorf("held R2 lock must stop cleanup: %v %s", err, out)
+			}
+			if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
+				t.Error("held-lock refusal changed panel or ledger bytes")
+			}
+			if !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
+				t.Error("held-lock refusal changed scratch bytes")
+			}
+		})
+	}
+}
+
+func TestPanelCleanup_IgnoreFailureNoLockFile(t *testing.T) {
+	for _, verb := range []string{"create", "abandon"} {
+		t.Run(verb, func(t *testing.T) {
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			orig := newExecutorFn
+			newExecutorFn = func(root string) executor.Executor { return cleanupIgnoreFailure{orig(root)} }
+			t.Cleanup(func() { newExecutorFn = orig })
+			scratch := filepath.Join(f.root, f.isolation)
+			if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+				t.Fatalf("scratch must be absent before cleanup: %v", err)
+			}
+			var out string
+			var err error
+			if verb == "create" {
+				resetPanelCreateFlags(t)
+				out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+			} else {
+				out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
+			}
+			if err != nil {
+				t.Fatalf("%s without a lock file: %v %s", verb, err, out)
+			}
+			var got panel.Panel
+			if err := json.Unmarshal(slotRead(t, filepath.Join(f.dir, panel.FileName)), &got); err != nil {
+				t.Fatal(err)
+			}
+			if verb == "create" && got.Round != 2 || verb == "abandon" && !got.Abandoned {
+				t.Errorf("%s did not update the panel: round=%d abandoned=%t", verb, got.Round, got.Abandoned)
+			}
+			if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+				t.Errorf("cleanup created files under the isolation root: %v", err)
+			}
+		})
+	}
+}
+
+func TestPanelCleanup_UnignoredHeldLockNoDir(t *testing.T) {
+	for _, verb := range []string{"create", "abandon"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+			t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+			f := newCheckoutFixture(t, ".mindspec-scratch")
+			checkoutOK(t, "--slot", "R1")
+			lock, err := panel.AcquireSlotLock(f.layout(t, "R2").Lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Release()
+			if _, err := os.Lstat(f.layout(t, "R2").Dir); !os.IsNotExist(err) {
+				t.Fatalf("R2 directory must be absent: %v", err)
+			}
+			slotWrite(t, filepath.Join(f.root, ".gitignore"), "review/\n.mindspec/\n")
+			if err := newExecutor(f.root).CheckSlotIgnore(f.root, f.isolation); !errors.Is(err, executor.ErrSlotNotIgnored) {
+				t.Fatalf("root must be unignored: %v", err)
+			}
+			scratch := filepath.Join(f.root, f.isolation)
+			beforePanel, beforeScratch := slotSnapshot(t, f.dir), slotSnapshot(t, scratch)
+			var out string
+			if verb == "create" {
+				resetPanelCreateFlags(t)
+				out, err = runPanelCmd("create", "p", "--gate", "adhoc", "--target", "main", "--round", "2")
+			} else {
+				out, err = runPanelCmd("abandon", "p", "--reason", "review ended", "--by", "operator")
+			}
+			if err == nil || !strings.Contains(err.Error()+out, "R2") {
+				t.Errorf("held R2 lock must stop cleanup: %v %s", err, out)
+			}
+			if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
+				t.Error("held-lock refusal changed panel or ledger bytes")
+			}
+			if !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
+				t.Error("held-lock refusal changed scratch bytes")
+			}
+		})
+	}
+}
+
+func TestPanelCleanup_UnignoredSlotNoLockFile(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	f := newCheckoutFixture(t, ".mindspec-scratch")
+	layout := f.layout(t, "R1")
+	slotWrite(t, filepath.Join(layout.Dir, "keep"), "slot bytes\n")
+	slotWrite(t, filepath.Join(f.root, ".gitignore"), "review/\n.mindspec/\n")
+	if err := newExecutor(f.root).CheckSlotIgnore(f.root, f.isolation); !errors.Is(err, executor.ErrSlotNotIgnored) {
+		t.Fatalf("root must be unignored: %v", err)
+	}
+	if _, err := os.Lstat(layout.Lock); !os.IsNotExist(err) {
+		t.Fatalf("lock file must be absent: %v", err)
+	}
+	beforePanel := slotSnapshot(t, f.dir)
+	scratch := filepath.Join(f.root, f.isolation)
+	beforeScratch := slotSnapshot(t, scratch)
+	reg, err := checkoutRegistration(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := cleanupPanelCheckouts(f.root, reg, f.isolation, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if _, err := os.Lstat(layout.Lock); !os.IsNotExist(err) {
+		t.Errorf("cleanup created a lock file under an unignored root: %v", err)
+	}
+	if !reflect.DeepEqual(beforePanel, slotSnapshot(t, f.dir)) {
+		t.Error("cleanup changed panel or ledger bytes")
+	}
+	if !reflect.DeepEqual(beforeScratch, slotSnapshot(t, scratch)) {
+		t.Error("cleanup changed an unignored slot without a lock file")
 	}
 }
 
