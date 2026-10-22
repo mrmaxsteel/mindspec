@@ -171,6 +171,15 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/approve/impl.go", Func: "implFinalizeFailure", Detail: "arg1:unprovable",
 		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
 		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "variadic-spread:commands", Rationale: "Busy-worktree recovery names status, merge repair, and complete. An own-branch merge offers abort before the follow-up sequence.", Obligation: "TestComplete_ClosedOwnMergeInProgressAborts and TestComplete_ClosedMergedForeignMergeInProgressRefuses pin identity and state preservation."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg1:unprovable", Rationale: "The command is a status read in the validated spec worktree.", Obligation: "TestComplete_ClosingPathSpecWorktreeBusyRefuses pins the pre-close refusal."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg2:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted override reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},
+	{File: "internal/complete/closing.go", Func: "movedTipFailure", Detail: "variadic-spread:commands", Rationale: "The future recovery preserves the tip before reset-with-keep, then cherry-picks before it deletes the saved branch. It executes no command.", Obligation: "TestComplete_FollowupRecoveryOrder pins preservation, reset, original close, plan edit, claim, cherry-pick and deletion order."},
+	{File: "internal/complete/closing.go", Func: "mergedRangeFailure", Detail: "variadic-spread:commands", Rationale: "Repair guidance contains a scoped amend, marker removal, complete retry and audited overrides.", Obligation: "TestComplete_ClosingPathGatesMergeRange pins the measured range and later-commit refusal."},
+	{File: "internal/complete/merge_only.go", Func: "checkMergeMarker", Detail: "arg1:unprovable", Rationale: "The recovery removes a fixed metadata key from a validated bead.", Obligation: "TestComplete_ForeignMarkerRefuses pins refusal before close."},
+	{File: "internal/complete/merge_only.go", Func: "completionFailure", Detail: "arg1:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},
+	{File: "internal/complete/merge_only.go", Func: "ownershipCompletionFailure", Detail: "arg1:unprovable", Rationale: "The retry is complete with merge-only for the validated bead.", Obligation: "TestComplete_OwnershipConflictRefusesBeforeClose pins refusal before close."},
+	{File: "internal/complete/merge_only.go", Func: "runMergeOnly", Detail: "arg1:unprovable", Rationale: "The retry is complete merge-only with resolve-merge and shell-quoted reasons when needed.", Obligation: "TestComplete_MergeOnlyConflictStaysMergeOnly pins re-entry and open state."},
 	{File: "internal/lifecycle/merge_state.go", Func: "RestoreMergeRecovery", Detail: "variadic-spread:commands",
 		Rationale:  "Restore guidance uses escaped, shell-quoted operands. A clean spec checkout permits the path restore only through the destructive command constructor. Other outcomes retain whole-commit revert guidance.",
 		Obligation: "internal/lifecycle TestMergeState_RestoreCheckoutFromConstructor pins the constructor and rendered restore. TestMergeState_RestoreOmitsCheckoutOnUserChanges pins the omitted choice for unsafe or unreadable checkouts."},
@@ -948,6 +957,8 @@ const exemptionHollowObligation = "internal/lint's TestDestructiveGuidanceSweep_
 // len(KnownSitesExemptionList) against the derived total, never a
 // hand-typed number.
 var KnownSitesExemptionList = []KnownSiteExemptionEntry{
+	{Surface: "project-docs/user/guides/merge-safety.md", Text: "git -C \"<spec worktree>\" checkout <merge> -- <paths>", Count: 1, Family: FamilyGitCheckoutPathspecDiscard, Rationale: "The restore is an explicit path-scoped choice in a clean spec worktree. It follows inspection of the named merge and paths.", Obligation: "TestKnownSitesExemptionList_MergeOnlyRestore pins the clean-worktree limit and restore-then-close order."},
+
 	// The ten LIVE entries — reconciled against this spec's
 	// Background inventory at quoted-string grain (the eight
 	// Background named) plus the two "ms-bead-cycle" skill-map-key

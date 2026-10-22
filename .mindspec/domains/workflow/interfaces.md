@@ -885,3 +885,28 @@ Scoped next selection uses `phase.FindEpicLineageWithCache`. Its returned
 provenance replaces the second bead read. A foreign parent-child epic stays
 inspection-only. A mapped title-only row has no lineage and is N1.
 Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.
+
+## Merge-only completion
+
+| Surface | Contract |
+|:--|:--|
+| `mindspec complete <bead> --merge-only` | Run all gates and merge for verification. Print the full merge SHA and both parents. Keep the bead open. |
+| `--merge-only --resolve-merge` | Resume the preserved merge. Check ownership from the resolved index. Keep the bead open. |
+| Plain `complete` after a naming merge | Check the bead tip, user changes, panel, and M^1..M content. Publish the close before cleanup. |
+| `mindspec_merge_only=pending` | Retain merge-only mode across interruptions, including a plain re-entry. |
+| `mindspec_merge_only_sha` | Name the recorded merge. A foreign or non-naming marker refuses. Git state decides validity. |
+
+The closing call clears both merge-only keys after publication. No key
+replaces the panel gate. A closed resume checks the same merge and tip,
+skips presence, and finishes the binding, override, export, marker, and
+cleanup steps. Step 1–4 recovery repeats the supplied doc-skew and ADR
+override flags with their reasons. A repeated merge-only call records the
+existing valid merge and makes no second merge.
+
+A closed child of the spec epic without a naming merge runs the merge
+recovery without a second close. It publishes the closed export and panel ledger before cleanup.
+An epic, phase, or child-status read failure refuses before close, merge,
+or cleanup. Retry completion when the read succeeds. A closed-unmerged
+conflict keeps its line boundaries and ends with one `--resolve-merge`
+recovery. The executor omits `--merge-only` from every re-entry hint on this path.
+Other merge guard failures keep their recovery.

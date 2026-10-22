@@ -349,3 +349,25 @@ tip and that bead's binding in the spec history before finalization can continue
 in a remaining merged bead worktree. A dirty worktree, a failed status read, or a
 worktree inspection error refuses before removal and preserves the branch and
 worktree. An absent worktree can continue through the remaining cleanup.
+
+## Separate bead merge, publication, and cleanup
+
+`Executor.MergeBead` keeps the layout guard, live work-destruction
+preflight, and preserved-merge dispatch. It makes no binding or cleanup
+write. `MergeBeadOptions.Closed` selects the re-entry command. For a closed
+child of the spec epic, the workflow sets `Closed: true`. The executor then
+omits `--merge-only` from every re-entry hint. The default keeps `--merge-only`.
+Both modes leave binding and cleanup to the caller. The workflow returns
+executor refusals with final recovery lines unchanged.
+Other merge guard failures keep their recovery.
+
+`FirstParentMerges` returns full commit identities. `CompletionState`
+reads the merge head, staged paths, and a full-SHA commit range.
+The workflow layer selects the naming merge and decides whether to close.
+
+`PublishBeadClose` exports the tracker in the spec worktree and commits
+only the paths it is given. The caller includes the export path.
+`CleanupBead` checks ancestry, removes the bead worktree, and deletes the
+branch. A read or removal error
+refuses; a retry finishes the remaining work. `MockExecutor` exposes the
+same methods and records calls.

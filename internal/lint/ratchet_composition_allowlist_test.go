@@ -10,6 +10,12 @@ package lint
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
 	"internal/lifecycle/scan.go scanAncestorFindings workspace.SpecBranch":                                              {Count: 1, Gate: "waist: workspace.SpecBranch validates the spec ID before composition. The lineage resolver also validates the returned ID."},
+	"internal/complete/merge_only.go ownershipCompletionFailure workspace.BeadBranch":                                   {Count: 1, Gate: "The workspace helper validates the bead ID before the preserved-merge recovery uses its branch."},
+	"internal/complete/closing.go runMergedCompletion workspace.SpecBranch":                                             {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},
+	"internal/complete/closing.go runMergedCompletion workspace.SpecDir":                                                {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},
+	"internal/complete/closing.go runMergedCompletion workspace.SpecWorktreePath":                                       {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},
+	"internal/complete/merge_only.go mergeOnlyResult workspace.SpecWorktreePath":                                        {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},
+	"internal/complete/merge_only.go namingMerges workspace.BeadBranch":                                                 {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},
 	"internal/lifecycle/merge_state.go FindNamingMerges workspace.BeadBranch":                                           {Count: 1, Gate: "waist: BeadBranch validates the bead ID before the merge scan"},
 	"internal/lifecycle/merge_state.go FindValidMerge workspace.BeadBranch":                                             {Count: 1, Gate: "waist: BeadBranch validates the bead ID before tip resolution"},
 	"internal/lifecycle/merge_state.go mergeSpecDir workspace.SpecDir":                                                  {Count: 1, Gate: "waist: SpecDir validates the spec ID before path composition"},

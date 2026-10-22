@@ -16,6 +16,12 @@ type ChangedFilesOptions struct {
 	NoRenames bool
 }
 
+// MergeBeadOptions selects the re-entry command for a merge without cleanup.
+type MergeBeadOptions struct {
+	// Closed omits --merge-only from re-entry hints for an already closed bead.
+	Closed bool
+}
+
 // Executor abstracts workspace lifecycle operations. Implementations include
 // MindspecExecutor (local git+worktrees) and MockExecutor (testing).
 //
@@ -23,6 +29,17 @@ type ChangedFilesOptions struct {
 // MindspecExecutor, no-op directory in MockExecutor). "Epic" is a group of beads
 // (implementation tasks) belonging to a single spec lifecycle.
 type Executor interface {
+	// MergeBead merges without closing, binding or removing the bead workspace.
+	MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool, opts MergeBeadOptions) error
+	// CleanupBead removes only a bead whose tip is an ancestor of the spec.
+	CleanupBead(beadID, specBranch string) error
+	// FirstParentMerges reads merge identities without ownership inference.
+	FirstParentMerges(ref string) ([]MergeIdentity, error)
+	// CompletionState reads merge state, staged paths and new commits.
+	CompletionState(workdir, base, head string) (CompletionState, error)
+	// PublishBeadClose exports the tracker and commits only the supplied paths.
+	PublishBeadClose(workdir string, paths []string) error
+
 	// InitSpecWorkspace creates a workspace for spec authoring.
 	// Creates branch, worktree, and ensures gitignore entries.
 	InitSpecWorkspace(specID string) (WorkspaceInfo, error)
@@ -365,4 +382,18 @@ func (e *FinalizeStageError) Unwrap() error { return e.Err }
 // for the next CompleteBead binding write (Spec 130 R12).
 type LandedReviewSetter interface {
 	SetLandedReview(sha, panel string)
+}
+
+// MergeIdentity is a full commit identity from the first-parent chain.
+type MergeIdentity struct {
+	SHA     string
+	Parents []string
+	Subject string
+}
+
+// CompletionState contains only read-only closing facts.
+type CompletionState struct {
+	MergeHead   string
+	StagedPaths []string
+	NewCommits  []MergeIdentity
 }

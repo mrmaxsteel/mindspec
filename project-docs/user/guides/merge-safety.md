@@ -212,3 +212,46 @@ Then restore the bead branch at that merge's verified second parent:
 git branch bead/<bead-id> <verified-second-parent-sha>
 mindspec reattest <bead-id>
 ```
+
+## Merge, verify, then close
+
+Run `mindspec complete <bead-id> --merge-only` to merge for verification.
+The command prints the merge SHA and both parents. It keeps the bead open
+and retains its branch and worktree. After verification, run
+`mindspec complete <bead-id>` until it exits 0. The closing call publishes
+the tracker export and panel ledger before it removes the workspace.
+
+A bead can have only one naming merge. A repeated merge-only call records
+the same valid merge. Put later fixes in a follow-up bead. If the bead tip
+moved, use the printed recovery to preserve those commits and restore the
+original tip. Run a new panel round there if needed. Close the original
+bead first. Then create the follow-up, add its acceptance criterion and
+work chunk to plan.md on the spec branch, and claim it. The new bead needs
+its own panel.
+
+Do not revert a `--merge-only` merge by hand. Use a follow-up bead for a
+rejected change. If the merge was reverted, inspect the listed commits
+and use the printed restore recovery. A revert undoes the whole commit.
+In a clean spec worktree, the path-scoped choice is:
+
+```bash
+git -C "<spec worktree>" checkout <merge> -- <paths>
+git -C "<spec worktree>" commit -m "Restore merged paths"
+mindspec complete <bead-id>
+```
+
+Use the exact merge SHA and paths from the refusal. This is an alternative
+to the whole-commit reverts. Restore first, then close. The restore commit
+does not create a second naming merge.
+
+For a merge-only conflict, resolve and stage the named files. Run
+`mindspec complete <bead-id> --merge-only --resolve-merge`. A plain retry
+also stays merge-only while pending mode exists. Run complete again after
+it records the merge to close the bead.
+
+Content gates on a committed merge measure that merge's own change.
+A later doc commit does not change it. If the merge is still the spec tip
+and has no landed binding, stage only the ownership manifests or doc paths
+named by the refusal. Amend the merge, clear the old merge-only SHA with
+the printed command, and retry. Add a domain to Impacted Domains when it
+owns the path. The recorded doc-skew and ADR overrides remain available.

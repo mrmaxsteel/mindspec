@@ -107,7 +107,7 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // each assertion, so the three checks cannot silently drift apart from
 // one another even though the underlying "10" is still, unavoidably,
 // a hand-pinned sentinel value (that's what a sentinel is).
-const wantKnownSitesLiveCount = 10
+const wantKnownSitesLiveCount = 11
 
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {
@@ -1309,4 +1309,23 @@ func repoRootFromGuardTestDir(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
+}
+
+func TestKnownSitesExemptionList_MergeOnlyRestore(t *testing.T) {
+	data, err := os.ReadFile("../../project-docs/user/guides/merge-safety.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	clean := strings.Index(text, "In a clean spec worktree")
+	restore := strings.Index(text, "git -C \"<spec worktree>\" checkout <merge> -- <paths>")
+	if clean < 0 || restore <= clean {
+		t.Fatal("path restore must require a clean spec worktree")
+	}
+	tail := text[restore:]
+	commit := strings.Index(tail, "commit -m")
+	close := strings.Index(tail, "mindspec complete")
+	if commit < 0 || close <= commit {
+		t.Fatal("restore must commit before complete")
+	}
 }

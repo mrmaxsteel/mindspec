@@ -137,7 +137,7 @@ func TestCeremonyNonInflation_HelpFlags(t *testing.T) {
 			// silently widened.
 			name: "mindspec complete",
 			path: []string{"complete"},
-			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--help", "--override-adr", "--resolve-merge", "--spec", "--supersede-adr", "--trace"),
+			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--help", "--merge-only", "--override-adr", "--resolve-merge", "--spec", "--supersede-adr", "--trace"),
 		},
 		{
 			// Same spec 127 R4(b)/R5(d) additions as "mindspec complete" above.

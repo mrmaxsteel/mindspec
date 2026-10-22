@@ -245,6 +245,16 @@ internal/complete/panel_core3.go	PanelCore3Failure	arg1:unprovable
 internal/complete/panel_deferred.go	deferralFailure	arg1:unprovable
 internal/complete/panel_deferred.go	PanelDeferredAuditFailure	arg1:unprovable
 
+internal/complete/closing.go	runMergedCompletion	variadic-spread:commands
+internal/complete/closing.go	runMergedCompletion	arg1:unprovable
+internal/complete/closing.go	runMergedCompletion	arg2:unprovable
+internal/complete/closing.go	movedTipFailure	variadic-spread:commands
+internal/complete/closing.go	mergedRangeFailure	variadic-spread:commands
+internal/complete/merge_only.go	checkMergeMarker	arg1:unprovable
+internal/complete/merge_only.go	completionFailure	arg1:unprovable
+internal/complete/merge_only.go	ownershipCompletionFailure	arg1:unprovable
+internal/complete/merge_only.go	runMergeOnly	arg1:unprovable
+
 [known_sites_exemption_list]
 # BEAD 7 EXIT (fixture (β)'s documented discipline): the four
 # .claude/agents/spec-orchestrator.md lines this section used to carry
@@ -265,3 +275,4 @@ ms-bead-cycle	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gat
 ms-impl-approve	bead branch already raw-`git merge`d and then `bd close`d,	1	git merge
 plugins/mindspec/skills/ms-bead-cycle/SKILL.md	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
 plugins/mindspec/skills/ms-bead-cycle/SKILL.md	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).	1	git merge
+project-docs/user/guides/merge-safety.md	git -C "<spec worktree>" checkout <merge> -- <paths>	1	git checkout -- <path>
