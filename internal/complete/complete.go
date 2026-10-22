@@ -282,6 +282,10 @@ var (
 type CompleteOpts struct {
 	AllowDocSkew string
 
+	// MergeOnly merges for verification and keeps the bead open.
+	MergeOnly              bool
+	deferOwnershipConflict bool
+
 	// OverrideADR is the human-readable reason for bypassing the
 	// ADR-divergence gate. Empty string means "no override". A
 	// non-empty string causes the gate to be SKIPPED (treated as
@@ -352,6 +356,10 @@ type Result struct {
 	NextBead        string
 	NextSpec        string
 	SpecWorktree    string
+	MergeOnly       bool
+	MergeSHA        string
+	MergeParents    []string
+	mergePrinted    bool
 	// NextModeIndeterminate is true when advanceState's post-close child
 	// read failed (AC-4b, spec 128 bead 5): NextMode/NextBead carry their
 	// zero values rather than a mode fabricated from a nil child set.
@@ -723,6 +731,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// beadID already passed idvalidate.BeadID at the top of Run — these
 	// waist calls cannot fail.
 	beadHead, _ := workspace.BeadBranch(beadID)
+	beadBranch := beadHead
 	entries, err := worktreeListFn()
 	if err != nil {
 		// Final-review r2 (F2): a worktree-enumeration failure is a genuine
@@ -736,6 +745,54 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 	expectedName, _ := workspace.BeadWorktreeName(beadID)
 	wtPath, beadHead = resolveBeadWorktree(entries, expectedName, beadHead)
+
+	// Select merge-only and closing paths from git state before the stage
+	// discriminator. An attested stage marker cannot replace these gates.
+	branchPresent := true
+	if _, rpErr := exec.RevParseRef(root, beadBranch); rpErr != nil {
+		if !exec.IsRefNotFound(rpErr) {
+			return nil, completionFailure(beadID, opts, "reading bead branch", rpErr)
+		}
+		branchPresent = false
+	}
+	if !branchPresent && opts.MergeOnly {
+		return nil, guard.NewFailure("there is no bead branch to merge", "mindspec complete "+safeBeadID)
+	}
+	var mergeMeta map[string]interface{}
+	var mergeMetadataErr error
+	if branchPresent {
+		mergeMeta, err = completeGetMetadataFn(beadID)
+		mergeMetadataErr = err
+		pending := mergeMeta[mergeOnlyPendingKey] == "pending"
+		rows, readErr := namingMerges(exec, specBranch, beadID)
+		if readErr != nil {
+			return nil, completionFailure(beadID, opts, "reading naming merges", readErr)
+		}
+		if opts.MergeOnly || pending || len(rows) > 0 {
+			if mergeMetadataErr != nil {
+				return nil, completionFailure(beadID, opts, "reading merge-only metadata", mergeMetadataErr)
+			}
+			if err := checkMergeMarker(beadID, mergeMeta, rows); err != nil {
+				return nil, err
+			}
+			if len(rows) > 1 {
+				var detail strings.Builder
+				detail.WriteString("a bead can have only one naming merge")
+				for _, row := range rows {
+					fmt.Fprintf(&detail, "\nmerge %s; parents: %s; subject: %s", termsafe.Escape(row.SHA), strings.Join(termsafeEscapeEach(row.Parents), " "), termsafe.Escape(row.Subject))
+				}
+				return nil, guard.NewFailure(detail.String(), "mindspec complete "+safeBeadID)
+			}
+			if len(rows) == 1 {
+				return runMergedCompletion(root, beadID, specID, epicID, beadBranch, wtPath, rows[0], exec, opts, pending)
+			}
+		}
+		if pending {
+			opts.MergeOnly = true
+			fmt.Printf("A merge-only run is pending. The bead stays open.\nRun complete again after recording to close the bead.\nrecovery: mindspec complete %s\nTo abandon pending mode before its merge:\nrecovery: bd update %s --unset-metadata mindspec_merge_only\n", safeBeadID, safeBeadID)
+		}
+	}
+	opts.deferOwnershipConflict = opts.MergeOnly
 
 	// 2.1. Merged-unclosed / branch-less forward reconcile detection
 	// (Spec 119 R4, Bead 1 Steps 4-6). A normal in-progress bead ALWAYS
@@ -757,7 +814,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// WITHOUT ever calling exec.MergeBase against the now-absent
 	// bead/<id> ref (the exit-128 bug this fixes, AC-5).
 	var reconcile *reconcileState
-	if wtPath == "" {
+	if !branchPresent {
+		beadHead = beadBranch
 		if _, rpErr := exec.RevParseRef(root, beadHead); rpErr != nil && exec.IsRefNotFound(rpErr) {
 			landed, ok, mergedErr := mergedUnclosedFn(root, specBranch, beadID)
 			if mergedErr != nil {
@@ -887,6 +945,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		if panelGateErr != nil {
 			return nil, panelGateErr
 		}
+		if mergeMetadataErr != nil {
+			return nil, completionFailure(beadID, opts, "reading merge-only metadata", mergeMetadataErr)
+		}
 		if err := checkAndRecordPanelDeferrals(beadID, panelDecisions, panelGateEnabled); err != nil {
 			return nil, err
 		}
@@ -911,6 +972,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
 			}
 		}
+	}
+
+	if mergeMetadataErr != nil {
+		return nil, completionFailure(beadID, opts, "reading merge-only metadata", mergeMetadataErr)
 	}
 
 	// Capture the first Allow before materialization so every write-ahead marker
@@ -997,7 +1062,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 	} else if wtPath == "" {
 		if err := runCommittedRangeGate(root, beadID, beadHead, specDir, base, exec, opts, warnWriter); err != nil {
-			return nil, err
+			deferConflict, stateErr := deferOwnershipConflict(beadID, opts, err)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if !deferConflict {
+				return nil, ownershipCompletionFailure(beadID, opts, err)
+			}
 		}
 	}
 	if reconcile == nil {
@@ -1005,7 +1076,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// full snapshot-gate-materialize sequence (the gate above did NOT
 		// already run in this branch); wtPath == "" is a pure dirt-check
 		// refusal-or-noop (the committed-range gate above already ran).
-		if err := runMaterialization(materializationInput{
+		materialization := materializationInput{
 			exec:         exec,
 			root:         root,
 			beadID:       beadID,
@@ -1018,8 +1089,22 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			resumeStage:  resumeStage,
 			landedReview: landedReview,
 			warnWriter:   warnWriter,
-		}); err != nil {
-			return nil, err
+		}
+		if err := runMaterialization(materialization); err != nil {
+			var conflict *OwnershipLandingConflict
+			if !errors.As(err, &conflict) {
+				return nil, ownershipCompletionFailure(beadID, opts, err)
+			}
+			deferConflict, stateErr := deferOwnershipConflict(beadID, opts, err)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if !deferConflict {
+				return nil, ownershipCompletionFailure(beadID, opts, err)
+			}
+			if err := materializeConflictedOwnership(materialization, conflict); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1047,6 +1132,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
+	}
+
+	if opts.MergeOnly {
+		return runMergeOnly(root, beadID, specID, specBranch, exec, opts)
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -1487,6 +1576,16 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
+	if r != nil && r.MergeOnly {
+		var out strings.Builder
+		fmt.Fprintf(&out, "Bead %s is merged for verification. The bead stays open.\n", idrender.Bead(r.BeadID))
+		if !r.mergePrinted {
+			fmt.Fprintf(&out, "merge: %s\nparents: %s\n", termsafe.Escape(r.MergeSHA), strings.Join(termsafeEscapeEach(r.MergeParents), " "))
+		}
+		fmt.Fprintf(&out, "recovery: mindspec complete %s\n", idrender.Bead(r.BeadID))
+		return out.String()
+	}
+
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Bead %s closed.\n", idrender.Bead(r.BeadID))
 	if r.WorktreeRemoved {
@@ -1674,6 +1773,7 @@ func adrDivergenceFailure(beadID, findings string) error {
 // The completion path must decide how to preserve and resolve this merge.
 type OwnershipLandingConflict struct {
 	Tree       string
+	BeadTree   string
 	Conflicted []string
 }
 
@@ -1732,7 +1832,7 @@ func ownershipLandingTree(root, specDir, beadRef, beadHead string, exec executor
 	}
 	for _, path := range conflicted {
 		if filepath.Base(path) == "OWNERSHIP.yaml" {
-			return "", &OwnershipLandingConflict{Tree: tree, Conflicted: conflicted}
+			return "", &OwnershipLandingConflict{Tree: tree, BeadTree: beadRef, Conflicted: conflicted}
 		}
 	}
 	return tree, nil
@@ -1743,6 +1843,10 @@ func ownershipLandingTree(root, specDir, beadRef, beadHead string, exec executor
 func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec executor.Executor, opts CompleteOpts, warnWriter io.Writer) error {
 	ownerRef, err := ownershipLandingTree(root, specDir, beadHead, beadHead, exec)
 	if err != nil {
+		var conflict *OwnershipLandingConflict
+		if errors.As(err, &conflict) && opts.deferOwnershipConflict {
+			return nil
+		}
 		return &landingOwnershipError{beadID: beadID, cause: err}
 	}
 	return runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef, exec, opts, warnWriter)

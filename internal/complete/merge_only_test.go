@@ -1,0 +1,722 @@
+package complete
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
+)
+
+const closingSpec = "132-window"
+const closingBead = "window-1"
+
+type windowFixture struct {
+	t                                 *testing.T
+	root, specWT, beadWT, parent, tip string
+	closed                            bool
+	meta                              map[string]interface{}
+	ex                                *windowExecutor
+}
+
+type windowExecutor struct {
+	*executor.MindspecExecutor
+	f          *windowFixture
+	publishErr error
+	cleanupErr error
+}
+
+func (e *windowExecutor) PublishBeadClose(wt string, paths []string) error {
+	if e.publishErr != nil {
+		return e.publishErr
+	}
+	data, _ := json.Marshal(map[string]interface{}{"id": closingBead, "status": map[bool]string{true: "closed", false: "in_progress"}[e.f.closed]})
+	writeFile(e.f.t, wt, ".beads/issues.jsonl", string(data)+"\n")
+	return e.CommitPaths(wt, "publish close", paths)
+}
+func (e *windowExecutor) CleanupBead(id, target string) error {
+	if e.cleanupErr != nil {
+		return e.cleanupErr
+	}
+	return e.MindspecExecutor.CleanupBead(id, target)
+}
+
+type windowWorktrees struct{ f *windowFixture }
+
+func (w windowWorktrees) Create(string, string) error { return errors.New("unexpected create") }
+func (w windowWorktrees) List() ([]bead.WorktreeListEntry, error) {
+	if _, err := os.Stat(w.f.beadWT); os.IsNotExist(err) {
+		return nil, nil
+	}
+	return []bead.WorktreeListEntry{{Name: "worktree-" + closingBead, Branch: "bead/" + closingBead, Path: w.f.beadWT}}, nil
+}
+func (w windowWorktrees) Remove(string) error {
+	gitRun(w.f.t, w.f.root, "worktree", "remove", w.f.beadWT)
+	return nil
+}
+
+func newWindowFixture(t *testing.T) *windowFixture {
+	t.Helper()
+	saveAndRestore(t)
+	fakeBdOnPath(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	f := &windowFixture{t: t, root: setupTempRoot(t), meta: map[string]interface{}{}}
+	stubPhaseEpic(t, closingSpec, "epic-window")
+	resolveTargetFn = func(string, string) (string, error) { return closingSpec, nil }
+	findLocalRootFn = func() (string, error) { return f.root, nil }
+	writeFile(t, f.root, ".mindspec/config.yaml", "source_globs:\n  - internal/**/*.go\n")
+	writeFile(t, f.root, ".mindspec/specs/"+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
+	writeFile(t, f.root, ".gitignore", ".worktrees/\n")
+	writeFile(t, f.root, "README.md", "before\n")
+	writeFile(t, f.root, ".beads/issues.jsonl", "{\"id\":\"window-1\",\"status\":\"in_progress\"}\n")
+	gitRun(t, f.root, "init", "-q", "-b", "main")
+	gitRun(t, f.root, "config", "user.email", "test@example.invalid")
+	gitRun(t, f.root, "config", "user.name", "Test")
+	gitRun(t, f.root, "add", "-A")
+	gitRun(t, f.root, "commit", "-qm", "base")
+	f.parent = gateRevParse(t, f.root, "HEAD")
+	gitRun(t, f.root, "branch", "spec/"+closingSpec)
+	gitRun(t, f.root, "checkout", "-qb", "bead/"+closingBead)
+	writeFile(t, f.root, "README.md", "after\n")
+	writeFile(t, f.root, "feature.txt", "feature\n")
+	gitRun(t, f.root, "add", "-A")
+	gitRun(t, f.root, "commit", "-qm", "implement")
+	f.tip = gateRevParse(t, f.root, "HEAD")
+	gitRun(t, f.root, "checkout", "-q", "main")
+	cfg, err := config.Load(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.specWT, err = workspace.SpecWorktreePath(f.root, cfg, closingSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.beadWT = filepath.Join(f.specWT, ".worktrees", "worktree-"+closingBead)
+	gitRun(t, f.root, "worktree", "add", f.specWT, "spec/"+closingSpec)
+	gitRun(t, f.root, "worktree", "add", f.beadWT, "bead/"+closingBead)
+	ex := executor.NewMindspecExecutor(f.root)
+	ex.WorktreeOps = windowWorktrees{f}
+	f.ex = &windowExecutor{MindspecExecutor: ex, f: f}
+	worktreeListFn = ex.WorktreeOps.List
+	closeBeadFn = func(...string) error { f.closed = true; return nil }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		status := "in_progress"
+		if f.closed {
+			status = "closed"
+		}
+		return next.BeadInfo{ID: id, Status: status}, nil
+	}
+	completeGetMetadataFn = func(string) (map[string]interface{}, error) { return f.meta, nil }
+	completeMergeMetadataFn = func(_ string, updates map[string]interface{}) error {
+		for k, v := range updates {
+			f.meta[k] = v
+		}
+		return nil
+	}
+	origDelete := completeDeleteMetadataFn
+	t.Cleanup(func() { completeDeleteMetadataFn = origDelete })
+	completeDeleteMetadataFn = func(_ string, keys ...string) error {
+		for _, k := range keys {
+			delete(f.meta, k)
+		}
+		return nil
+	}
+	checkDirtyTreeFn = next.CheckDirtyTreeDetail
+	// The fixture owns the only worktree and uses no real tracker.
+	runBDFn = func(...string) ([]byte, error) { return []byte("[]"), nil }
+	return f
+}
+
+func (f *windowFixture) run(opts CompleteOpts) (*Result, error) {
+	f.t.Helper()
+	return Run(f.root, closingBead, closingSpec, "", f.ex, opts)
+}
+func (f *windowFixture) merge() string {
+	f.t.Helper()
+	gitRun(f.t, f.specWT, "merge", "--no-ff", "-qm", "Merge bead/"+closingBead, "bead/"+closingBead)
+	return gateRevParse(f.t, f.root, "spec/"+closingSpec)
+}
+func (f *windowFixture) mergedOnly() string {
+	f.t.Helper()
+	r, err := f.run(CompleteOpts{MergeOnly: true})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if r.BeadClosed || f.closed || !r.MergeOnly {
+		f.t.Fatalf("merge-only closed bead: %+v", r)
+	}
+	return r.MergeSHA
+}
+func requireWindowRefusal(t *testing.T, err error, fragment string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), fragment) {
+		t.Fatalf("want refusal %q, got %v", fragment, err)
+	}
+}
+
+func TestComplete_MergeOnlyKeepsBeadOpen(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.mergedOnly()
+	if f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil || f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatalf("wrong metadata: %v", f.meta)
+	}
+	if _, err := os.Stat(f.beadWT); err != nil {
+		t.Fatal(err)
+	}
+	data, err := f.ex.FileAtRef(m, ".beads/issues.jsonl")
+	if err != nil || !strings.Contains(string(data), "in_progress") {
+		t.Fatalf("merge publishes close: %s %v", data, err)
+	}
+}
+func TestComplete_PendingKeyPlainCompleteStaysOpen(t *testing.T) {
+	f := newWindowFixture(t)
+	f.meta[mergeOnlyPendingKey] = "pending"
+	r, err := f.run(CompleteOpts{})
+	if err != nil || f.closed || !r.MergeOnly {
+		t.Fatalf("pending closed: %+v %v", r, err)
+	}
+}
+func TestComplete_MergeOnlyBranchlessRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	gitRun(t, f.root, "worktree", "remove", f.beadWT)
+	gitRun(t, f.root, "branch", "-D", "bead/"+closingBead)
+	_, err := f.run(CompleteOpts{MergeOnly: true})
+	requireWindowRefusal(t, err, "there is no bead branch")
+	if f.closed {
+		t.Fatal("closed branchless bead")
+	}
+}
+func TestComplete_MergeOnlyHandCommitStaysOpen(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.merge()
+	f.meta[mergeOnlyPendingKey] = "pending"
+	r, err := f.run(CompleteOpts{})
+	if err != nil || f.closed || r.MergeSHA != m {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_HandMergeTakesClosingPath(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.merge()
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !f.closed || !r.WorktreeRemoved || f.meta["mindspec_landed_merge_sha"] != m {
+		t.Fatalf("close failed: %+v %v %v", r, err, f.meta)
+	}
+}
+func TestComplete_ForeignMarkerRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.meta[mergeOnlySHAKey] = f.parent
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "--unset-metadata mindspec_merge_only_sha")
+	if f.closed {
+		t.Fatal("closed with foreign marker")
+	}
+}
+func TestComplete_BeadAdvancedAfterMergeOnlyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, "fix.txt", "fix\n")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "fix after verification")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "fix after verification")
+	if f.closed {
+		t.Fatal("closed moved tip")
+	}
+}
+func TestComplete_UserDirtAfterMergeOnlyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, "fix.txt", "fix\n")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "uncommitted user changes")
+	if f.closed {
+		t.Fatal("closed dirty bead")
+	}
+}
+func TestComplete_RepeatedMergeOnlyNoNewMerge(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.mergedOnly()
+	delete(f.meta, mergeOnlySHAKey)
+	r, err := f.run(CompleteOpts{MergeOnly: true})
+	if err != nil || r.MergeSHA != m || f.closed || gateRevParse(t, f.root, "spec/"+closingSpec) != m {
+		t.Fatalf("repeat merged or closed: %+v %v", r, err)
+	}
+}
+func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, "fix.txt", "fix\n")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "later fix")
+	before := gateRevParse(t, f.root, "spec/"+closingSpec)
+	_, err := f.run(CompleteOpts{MergeOnly: true})
+	requireWindowRefusal(t, err, "bead tip moved")
+	if gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+		t.Fatal("made a second merge")
+	}
+}
+func TestComplete_AfterMergeOnlyPublishesClose(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed {
+		t.Fatalf("%+v %v", r, err)
+	}
+	data, err := f.ex.FileAtRef("spec/"+closingSpec, ".beads/issues.jsonl")
+	if err != nil || !strings.Contains(string(data), "\"closed\"") {
+		t.Fatalf("close not published: %s %v", data, err)
+	}
+	if f.meta[mergeOnlySHAKey] != nil || f.meta[mergeOnlyPendingKey] != nil {
+		t.Fatalf("markers remain: %v", f.meta)
+	}
+	if _, err := os.Stat(f.beadWT); !os.IsNotExist(err) {
+		t.Fatalf("worktree remains: %v", err)
+	}
+}
+func TestComplete_AfterMergeOnlyExportFailureConverges(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.mergedOnly()
+	f.ex.publishErr = errors.New("export unavailable")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "closing step 4")
+	if !f.closed {
+		t.Fatal("close did not persist")
+	}
+	if _, err := os.Stat(f.beadWT); err != nil {
+		t.Fatal("cleanup started before publication")
+	}
+	f.ex.publishErr = nil
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.WorktreeRemoved || f.meta["mindspec_landed_merge_sha"] != m {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_ClosingPathSpecWorktreeBusyRefuses(t *testing.T) {
+	for _, kind := range []string{"staged", "merge"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newWindowFixture(t)
+			f.mergedOnly()
+			if kind == "staged" {
+				writeFile(t, f.specWT, "busy.txt", "busy\n")
+				gitRun(t, f.specWT, "add", "busy.txt")
+			} else {
+				gitRun(t, f.root, "checkout", "-qb", "foreign")
+				writeFile(t, f.root, "other.txt", "other\n")
+				gitRun(t, f.root, "add", "-A")
+				gitRun(t, f.root, "commit", "-qm", "foreign")
+				gitRun(t, f.root, "checkout", "-q", "main")
+				gitRun(t, f.specWT, "merge", "--no-ff", "--no-commit", "foreign")
+			}
+			_, err := f.run(CompleteOpts{})
+			requireWindowRefusal(t, err, "spec worktree is busy")
+			if f.closed {
+				t.Fatal("closed busy bead")
+			}
+		})
+	}
+}
+func TestComplete_ClosedBeadFinishesCleanup(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	f.ex.cleanupErr = errors.New("cleanup interrupted")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "closing step 6")
+	f.ex.cleanupErr = nil
+	f.ex.publishErr = errors.New("export must be a no-op after publication")
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.WorktreeRemoved {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_ClosedBeadLaterRevertResumesCleanup(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.mergedOnly()
+	f.ex.cleanupErr = errors.New("cleanup interrupted")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "closing step 6")
+	gitRun(t, f.specWT, "revert", "-m", "1", "--no-edit", m)
+	f.ex.cleanupErr = nil
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.WorktreeRemoved {
+		t.Fatalf("closed resume ran presence check: %+v %v", r, err)
+	}
+}
+func TestComplete_ClosedBeadResumesAllSteps(t *testing.T) {
+	for step := 2; step <= 6; step++ {
+		t.Run(fmt.Sprint(step), func(t *testing.T) {
+			f := newWindowFixture(t)
+			f.mergedOnly()
+			orig := closingStepHook
+			t.Cleanup(func() { closingStepHook = orig })
+			closingStepHook = func(s int) error {
+				if s == step {
+					return errors.New("interrupted")
+				}
+				return nil
+			}
+			_, err := f.run(CompleteOpts{})
+			requireWindowRefusal(t, err, fmt.Sprintf("closing step %d", step))
+			closingStepHook = nil
+			r, err := f.run(CompleteOpts{})
+			if err != nil || !r.WorktreeRemoved {
+				t.Fatalf("%+v %v", r, err)
+			}
+		})
+	}
+}
+
+func TestComplete_RevertedMergeOnlyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.mergedOnly()
+	gitRun(t, f.specWT, "revert", "-m", "1", "--no-edit", m)
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "reverted paths")
+	if f.closed {
+		t.Fatal("closed reverted bead")
+	}
+	requireWindowRefusal(t, err, m)
+}
+func TestComplete_PartlyRevertedMergeOnlyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.specWT, "README.md", "before\n")
+	gitRun(t, f.specWT, "commit", "-qam", "partly revert")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "README.md")
+	if f.closed {
+		t.Fatal("closed partly reverted bead")
+	}
+}
+func TestComplete_PresenceCheckLaterEditNotRevert(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.specWT, "README.md", "later edit\n")
+	gitRun(t, f.specWT, "commit", "-qam", "later edit")
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_PresenceCheckLaterMergeExemptsPath(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	gitRun(t, f.root, "checkout", "-qb", "bead/other-1", "spec/"+closingSpec)
+	writeFile(t, f.root, "README.md", "before\n")
+	gitRun(t, f.root, "commit", "-qam", "other change")
+	gitRun(t, f.root, "checkout", "-q", "main")
+	gitRun(t, f.specWT, "merge", "--no-ff", "-qm", "Merge bead/other-1", "bead/other-1")
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_MergeOnlyRefusalEscapes(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, "fix.txt", "fix\n")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "fix\x1b[31m")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "fix")
+	if strings.Contains(err.Error(), "\x1b") {
+		t.Fatalf("raw control in refusal: %q", err)
+	}
+	tip := gateRevParse(t, f.root, "bead/"+closingBead)
+	if !strings.Contains(err.Error(), tip) {
+		t.Fatal("missing full SHA")
+	}
+}
+func TestComplete_ClosedBeadUserDirtRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	writeFile(t, f.beadWT, "dirty.txt", "dirty\n")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "uncommitted user changes")
+	if f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatal("mutated binding before refusal")
+	}
+}
+func TestComplete_ClosedMergedForeignMergeInProgressRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	gitRun(t, f.root, "checkout", "-qb", "foreign")
+	writeFile(t, f.root, "foreign.txt", "foreign\n")
+	gitRun(t, f.root, "add", "-A")
+	gitRun(t, f.root, "commit", "-qm", "foreign")
+	gitRun(t, f.root, "checkout", "-q", "main")
+	gitRun(t, f.specWT, "merge", "--no-ff", "--no-commit", "foreign")
+	_, err := f.run(CompleteOpts{ResolveMerge: true})
+	requireWindowRefusal(t, err, "spec worktree is busy")
+	if !gitutil.MergeInProgress(f.specWT) {
+		t.Fatal("foreign merge changed")
+	}
+}
+func TestComplete_ClosedOwnMergeInProgressAborts(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.merge()
+	f.closed = true
+	// A later spec commit permits another merge state for the same source.
+	link, readErr := os.ReadFile(filepath.Join(f.specWT, ".git"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(string(link), "gitdir:"))
+	writeFile(t, gitDir, "MERGE_HEAD", f.tip+"\n")
+	_, err := f.run(CompleteOpts{ResolveMerge: true})
+	requireWindowRefusal(t, err, "merge --abort")
+	if gateRevParse(t, f.root, "spec/"+closingSpec) != m || !gitutil.MergeInProgress(f.specWT) {
+		t.Fatal("busy path mutated merge")
+	}
+
+	writeFile(t, f.beadWT, "README.md", "advanced tip\n")
+	gitRun(t, f.beadWT, "commit", "-qam", "advance while another merge is pending")
+	_, err = f.run(CompleteOpts{ResolveMerge: true})
+	requireWindowRefusal(t, err, "spec worktree is busy")
+	if strings.Contains(err.Error(), "merge --abort") {
+		t.Fatal("a merge head different from the current bead tip must not get the own-merge abort exit")
+	}
+}
+func TestComplete_ClosedNonFlatAbsentWorktreeRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	// Use a canonical on-disk directory. The merge identity stays unchanged.
+	if err := os.Rename(filepath.Join(f.root, ".mindspec", "specs"), filepath.Join(f.root, ".mindspec", "saved-specs")); err != nil {
+		t.Fatal(err)
+	}
+	makeCanonicalSpecDir(t, f.root, closingSpec)
+	gitRun(t, f.root, "worktree", "remove", f.beadWT)
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "no panel registration survives")
+}
+func TestComplete_ClosedNonFlatAbsentWorktreeGateOffAllows(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	if err := os.Rename(filepath.Join(f.root, ".mindspec", "specs"), filepath.Join(f.root, ".mindspec", "saved-specs")); err != nil {
+		t.Fatal(err)
+	}
+	makeCanonicalSpecDir(t, f.root, closingSpec)
+	writeFile(t, f.root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
+	config.ResetCache()
+	gitRun(t, f.root, "worktree", "remove", f.beadWT)
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.WorktreeRemoved {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_ClosedHandMergeNoPanelFailsOpen(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.WorktreeRemoved {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_ClosedHandMergeStalePanelRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	p := panel.Panel{BeadID: windowBeadPointer(), Spec: closingSpec, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: f.parent}
+	specDir, _ := workspace.SpecDir(f.root, closingSpec)
+	writeCoLocatedPanel(t, specDir, "stale-panel", p, approveVerdicts(2))
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "commits landed after review")
+	if f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatal("stale panel wrote binding")
+	}
+}
+func TestComplete_ClosedHandMergeForgedReviewedKeyRefuses(t *testing.T) {
+	f := newWindowFixture(t)
+	f.merge()
+	f.closed = true
+	f.meta["mindspec_landed_reviewed_sha"] = f.tip
+	p := panel.Panel{BeadID: windowBeadPointer(), Spec: closingSpec, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: f.parent}
+	specDir, _ := workspace.SpecDir(f.root, closingSpec)
+	writeCoLocatedPanel(t, specDir, "stale-panel", p, approveVerdicts(2))
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "commits landed after review")
+}
+func TestComplete_ClosingPathGatesMergeRange(t *testing.T) {
+	f := newWindowFixture(t)
+	// A source-only change at M must fail doc-sync. A later doc commit cannot
+	// change M's measured range.
+	writeFile(t, f.beadWT, "internal/widget/widget.go", "package widget\n")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "source")
+	m := f.merge()
+	writeFile(t, f.specWT, ".mindspec/domains/widget/architecture.md", "Widget source.\n")
+	gitRun(t, f.specWT, "add", "-A")
+	gitRun(t, f.specWT, "commit", "-qm", "later docs")
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "doc-sync")
+	requireWindowRefusal(t, err, "A later commit does not change the merge")
+	if f.closed || f.meta["mindspec_landed_merge_sha"] != nil {
+		t.Fatal("gate failure mutated close")
+	}
+	requireWindowRefusal(t, err, m)
+}
+func TestComplete_OverrideRunRecoveryRepeatsFlag(t *testing.T) {
+	for _, step := range []int{1, 2, 3, 4} {
+		t.Run(fmt.Sprint(step), func(t *testing.T) {
+			f := newWindowFixture(t)
+			f.merge()
+			orig := closingStepHook
+			t.Cleanup(func() { closingStepHook = orig })
+			closingStepHook = func(s int) error {
+				if s == step {
+					return errors.New("fault")
+				}
+				return nil
+			}
+			_, err := f.run(CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
+			requireWindowRefusal(t, err, "--allow-doc-skew 'reviewed docs'")
+			requireWindowRefusal(t, err, "--override-adr 'reviewed design'")
+			closingStepHook = nil
+			r, err := f.run(CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
+			if err != nil || !r.BeadClosed {
+				t.Fatalf("%+v %v", r, err)
+			}
+			if f.meta["mindspec_doc_skew_reason"] != "reviewed docs" || f.meta["mindspec_adr_override_reason"] != "reviewed design" {
+				t.Fatal(f.meta)
+			}
+		})
+	}
+}
+func TestComplete_BranchlessReconcileUnchanged(t *testing.T) {
+	f := newWindowFixture(t)
+	m := f.merge()
+	gitRun(t, f.root, "worktree", "remove", f.beadWT)
+	gitRun(t, f.root, "branch", "-D", "bead/"+closingBead)
+	f.meta["mindspec_landed_merge_sha"] = m
+	f.meta["mindspec_landed_second_parent"] = f.tip
+	mergedUnclosedFn = func(string, string, string) (*lifecycle.LandedMerge, bool, error) {
+		return &lifecycle.LandedMerge{SHA: m, FirstParent: f.parent, SecondParent: f.tip}, true, nil
+	}
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed || f.meta["mindspec_reconcile_landed_merge_sha"] != m {
+		t.Fatalf("%+v %v %v", r, err, f.meta)
+	}
+}
+
+func windowBeadPointer() *string { id := closingBead; return &id }
+
+func TestComplete_FollowupRecoveryOrder(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	writeFile(t, f.beadWT, "fix.txt", "fix")
+	gitRun(t, f.beadWT, "add", "-A")
+	gitRun(t, f.beadWT, "commit", "-qm", "fix")
+	_, err := f.run(CompleteOpts{})
+	if err == nil {
+		t.Fatal("expected moved-tip refusal")
+	}
+	text := err.Error()
+	last := -1
+	for _, fragment := range []string{"recovery: git branch ", " reset --keep ", "recovery: mindspec complete ", "recovery: bd create ", "recovery: edit plan.md", "recovery: mindspec next ", " cherry-pick ", "recovery: git branch -D "} {
+		pos := strings.Index(text, fragment)
+		if pos <= last {
+			t.Fatalf("recovery order: missing or misplaced %q in %s", fragment, text)
+		}
+		last = pos
+	}
+}
+
+func sourceConflictWindow(t *testing.T) *windowFixture {
+	t.Helper()
+	f := newWindowFixture(t)
+	writeFile(t, f.specWT, "README.md", "spec changed\n")
+	gitRun(t, f.specWT, "commit", "-qam", "spec change")
+	return f
+}
+func TestComplete_MergeOnlyConflictStaysMergeOnly(t *testing.T) {
+	f := sourceConflictWindow(t)
+	_, err := f.run(CompleteOpts{MergeOnly: true})
+	requireWindowRefusal(t, err, "--merge-only --resolve-merge")
+	if f.closed || !gitutil.MergeInProgress(f.specWT) {
+		t.Fatal("merge-only conflict lost state")
+	}
+	_, err = f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "--merge-only --resolve-merge")
+	if f.closed {
+		t.Fatal("plain unresolved re-entry closed the pending bead")
+	}
+	writeFile(t, f.specWT, "README.md", "resolved\n")
+	gitRun(t, f.specWT, "add", "README.md")
+	r, err := f.run(CompleteOpts{ResolveMerge: true})
+	if err != nil || f.closed || !r.MergeOnly {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_PlainConflictResolveFinishes(t *testing.T) {
+	f := sourceConflictWindow(t)
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "--resolve-merge")
+	if !f.closed || !gitutil.MergeInProgress(f.specWT) {
+		t.Fatal("plain conflict changed close-before-merge semantics")
+	}
+	writeFile(t, f.specWT, "README.md", "resolved\n")
+	gitRun(t, f.specWT, "add", "README.md")
+	r, err := f.run(CompleteOpts{ResolveMerge: true})
+	if err != nil || !r.BeadClosed {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestComplete_ClosedUnmergedRerunMerges(t *testing.T) {
+	f := newWindowFixture(t)
+	f.closed = true
+	r, err := f.run(CompleteOpts{})
+	if err != nil || !r.BeadClosed {
+		t.Fatalf("%+v %v", r, err)
+	}
+	rows, err := namingMerges(f.ex, "spec/"+closingSpec, closingBead)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("closed unmerged bead did not merge: %v %v", rows, err)
+	}
+}
+
+func TestComplete_MergeOnlyMarkerFailureRetries(t *testing.T) {
+	f := newWindowFixture(t)
+	mergeMeta := completeMergeMetadataFn
+	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+		if _, present := updates[mergeOnlySHAKey]; present {
+			return errors.New("marker write failed")
+		}
+		return mergeMeta(id, updates)
+	}
+	var err error
+	output := captureStdout(t, func() { _, err = f.run(CompleteOpts{MergeOnly: true}) })
+	requireWindowRefusal(t, err, "marker write failed")
+	merge := gateRevParse(t, f.root, "spec/"+closingSpec)
+	if f.closed || f.meta[mergeOnlyPendingKey] != "pending" {
+		t.Fatal("failed marker write lost pending mode")
+	}
+	for _, value := range []string{merge, f.tip, f.parent} {
+		if !strings.Contains(output, value) {
+			t.Fatalf("merge identity missing before marker failure: %q lacks %s", output, value)
+		}
+	}
+	completeMergeMetadataFn = mergeMeta
+	r, err := f.run(CompleteOpts{})
+	if err != nil || r.MergeSHA != merge || f.closed || gateRevParse(t, f.root, "spec/"+closingSpec) != merge {
+		t.Fatalf("marker retry made a new merge or closed: %+v %v", r, err)
+	}
+}

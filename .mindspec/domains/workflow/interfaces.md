@@ -859,3 +859,20 @@ refutation removes each covered item whose round and raw-text hash still match.
 It replays the recorded landed identity through `SetLandedReview` before
 `CompleteBead`. A resume with no recorded identity supplies none. Each new marker
 attestation overwrites both identity fields, including when there was no Allow.
+
+## Merge-only completion
+
+| Surface | Contract |
+|:--|:--|
+| `mindspec complete <bead> --merge-only` | Run all gates and merge for verification. Print the full merge SHA and both parents. Keep the bead open. |
+| `--merge-only --resolve-merge` | Resume the preserved merge. Check ownership from the resolved index. Keep the bead open. |
+| Plain `complete` after a naming merge | Check the bead tip, user changes, panel, and M^1..M content. Publish the close before cleanup. |
+| `mindspec_merge_only=pending` | Retain merge-only mode across interruptions, including a plain re-entry. |
+| `mindspec_merge_only_sha` | Name the recorded merge. A foreign or non-naming marker refuses. Git state decides validity. |
+
+The closing call clears both merge-only keys after publication. No key
+replaces the panel gate. A closed resume checks the same merge and tip,
+skips presence, and finishes the binding, override, export, marker, and
+cleanup steps. Step 1–4 recovery repeats the supplied doc-skew and ADR
+override flags with their reasons. A repeated merge-only call records the
+existing valid merge and makes no second merge.

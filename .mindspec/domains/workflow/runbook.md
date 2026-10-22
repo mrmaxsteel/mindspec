@@ -362,3 +362,35 @@ enumeration):
   evolved-but-present content identifies while true reverts refuse, and
   the new `mindspec reattest <bead-id>` verb is the explicit audited
   recovery (troubleshooting entry above).
+
+## Verify a merge before close
+
+Run `mindspec complete <bead> --merge-only`. Inspect the printed merge SHA
+and both parents. Run the verification commands on the spec branch.
+Then run `mindspec complete <bead>` until it exits 0.
+
+A bead can have only one naming merge. Send later fixes to a follow-up
+bead. If the tip moved, preserve the fix branch and use the printed
+reset-with-keep recovery. Re-panel the original tip when required.
+Close it before you add and claim the follow-up bead. Append the new
+Nth Bead heading and its work_chunks entry to plan.md on the spec branch.
+Give the new bead a concrete acceptance criterion and key_file_paths.
+The new bead needs its own panel.
+
+Do not revert a `--merge-only` merge by hand. If it was reverted, use the
+printed restore recovery. Inspect each listed commit; a revert undoes
+the whole commit. The path-scoped alternative applies only in a clean
+spec worktree. Restore and commit the named paths, then run complete
+until it exits 0. The restore commit keeps the one naming merge.
+
+A content gate on a committed merge measures that merge. A later doc
+commit cannot change it. When the merge is still the spec tip and has
+no landed binding, stage only the named ownership or doc repairs,
+amend the merge, clear the old merge-only SHA, and run complete again.
+The command also prints the impacted-domain and audited override exits.
+
+For a conflict, resolve and stage the files. Re-enter with
+`mindspec complete <bead> --merge-only --resolve-merge`. A pending
+merge-only call stays merge-only on a plain retry. After it records the
+merge, run complete again to close. To abandon pending mode before its
+merge, unset the `mindspec_merge_only` metadata key.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
@@ -65,8 +66,8 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 				writeFile(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
 			}
 			if scenario == "missing reviewed ref" {
-				// The canonical panel target is absent, while the listed bead
-				// worktree has a valid recovery branch for Run's later gates.
+				// R3.0 path 1 selects branch-less reconcile when the canonical
+				// branch is absent, even with a listed recovery worktree.
 				gitRun(t, root, "checkout", "-q", "bead/"+beadID)
 				gitRun(t, root, "branch", "-m", "bead/mindspec-recovery.1")
 				worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
@@ -103,7 +104,21 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 			}
 
 			ex := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
+			closed := false
+			closeBeadFn = func(...string) error { closed = true; return nil }
 			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+			if scenario == "missing reviewed ref" {
+				if err == nil || !strings.Contains(err.Error(), "no landed merge commit") || !guard.HasFinalRecoveryLine(err.Error()) {
+					t.Fatalf("branch-less reconcile without landed evidence must refuse with recovery: result=%+v err=%v", res, err)
+				}
+				if res != nil || closed || len(ex.calls) != 0 {
+					t.Fatalf("refusal must precede close, review binding and completion: result=%+v closed=%v calls=%v", res, closed, ex.calls)
+				}
+				if tip := gateRevParse(t, root, "bead/mindspec-recovery.1"); tip != reviewedSHA {
+					t.Fatalf("refusal must keep the recovery branch: got %s, want %s", tip, reviewedSHA)
+				}
+				return
+			}
 			if err != nil || res == nil || !res.BeadClosed {
 				t.Fatalf("complete must reach terminal mutation: result=%+v err=%v calls=%v", res, err, ex.calls)
 			}

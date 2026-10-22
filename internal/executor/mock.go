@@ -5,6 +5,12 @@ import "sync"
 // MockExecutor implements Executor for testing. It records all method calls
 // and returns configurable results. Safe for concurrent use.
 type MockExecutor struct {
+	MergeBeadFn         func(beadID, specBranch, overrideReason string, resolveMerge bool) error
+	CleanupBeadFn       func(beadID, specBranch string) error
+	FirstParentMergesFn func(ref string) ([]MergeIdentity, error)
+	CompletionStateFn   func(workdir, base, head string) (CompletionState, error)
+	PublishBeadCloseFn  func(workdir string, paths []string) error
+
 	mu    sync.Mutex
 	Calls []MockCall
 
@@ -451,4 +457,40 @@ func (m *MockExecutor) LandingTree(workdir, base, specTip, beadRef string) (stri
 		tree = "mock-landing-tree"
 	}
 	return tree, m.LandingTreeConflicted, m.LandingTreeErr
+}
+
+func (m *MockExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool) error {
+	m.record("MergeBead", beadID, specBranch, overrideReason, resolveMerge)
+	if m.MergeBeadFn != nil {
+		return m.MergeBeadFn(beadID, specBranch, overrideReason, resolveMerge)
+	}
+	return nil
+}
+func (m *MockExecutor) CleanupBead(beadID, specBranch string) error {
+	m.record("CleanupBead", beadID, specBranch)
+	if m.CleanupBeadFn != nil {
+		return m.CleanupBeadFn(beadID, specBranch)
+	}
+	return nil
+}
+func (m *MockExecutor) FirstParentMerges(ref string) ([]MergeIdentity, error) {
+	m.record("FirstParentMerges", ref)
+	if m.FirstParentMergesFn != nil {
+		return m.FirstParentMergesFn(ref)
+	}
+	return nil, nil
+}
+func (m *MockExecutor) CompletionState(workdir, base, head string) (CompletionState, error) {
+	m.record("CompletionState", workdir, base, head)
+	if m.CompletionStateFn != nil {
+		return m.CompletionStateFn(workdir, base, head)
+	}
+	return CompletionState{}, nil
+}
+func (m *MockExecutor) PublishBeadClose(workdir string, paths []string) error {
+	m.record("PublishBeadClose", workdir, paths)
+	if m.PublishBeadCloseFn != nil {
+		return m.PublishBeadCloseFn(workdir, paths)
+	}
+	return nil
 }

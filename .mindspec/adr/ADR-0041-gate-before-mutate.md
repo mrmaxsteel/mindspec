@@ -832,3 +832,41 @@ remote. The real push still runs its pre-push hooks.
 again. The early guards, push probe, and finalization use this one value.
 The executor keeps both live guards before each merge. It reads the current tips
 after artifact commits and bead auto-merges. Both early and live guards must pass.
+
+### Merge-only commit and closing call
+
+`complete --merge-only` is a commit phase with no close. It runs the panel
+and content gates, materializes the bead, records pending mode, and merges.
+It records the merge SHA and both parents. It leaves the bead open, with
+no landed binding, ledger commit, marker clear, or workspace removal.
+
+Git state selects the closing call. A bead has at most one naming merge.
+The merge's second parent must equal the bead tip. An open bead also needs
+its merged changes present at the spec tip. A repeated merge-only call
+records the same valid merge and makes no new merge. Metadata is a hint.
+
+The closing call runs the full panel gate at the bead tip. It measures
+doc-sync, ADR divergence, and ownership over M^1..M, with M as ownerRef.
+A later commit does not change M. An ownership or doc-only repair can
+amend M when M is the spec tip and no landed binding exists. Stage only
+the named repair paths. Clear the old merge-only SHA after the amend.
+Adding an owning domain to Impacted Domains and the audited gate overrides
+remain available exits.
+
+The closing call checks spec-worktree merge state and staged paths first.
+It then closes, writes the binding and reviewed identity, records overrides,
+publishes the close with a path-scoped export and ledger commit in the spec worktree,
+clears the stage and merge-only markers, and removes the bead workspace.
+A failed step keeps the later steps pending. Retry recovery repeats any
+doc-skew or ADR override flag and its reason.
+
+A closed resume re-runs the full panel gate and M's content gates, checks
+the tip and user changes, and resumes every remaining step. It skips the
+presence check. In a non-flat layout, an absent bead worktree with no
+surviving panel registration refuses when the panel gate is enforced.
+A closed bead without a naming merge retains the normal merge recovery.
+
+When an ownership manifest conflicts, an open plain completion refuses
+before close. Merge-only and closed-unmerged recovery preserve the merge.
+Re-entry reads ownership from the resolved index. A hand-committed merge
+is checked over M^1..M before recording or close.

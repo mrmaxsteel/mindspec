@@ -1484,3 +1484,26 @@ uses the actual ID and `--resolve-merge`. A
 materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.
+
+## Verification between merge and close
+
+`complete --merge-only` runs the gates and materializes the bead. It records
+pending mode before the merge, then records the merge SHA. The bead stays
+open. The command retains the branch, worktree, stage marker, and panel ledger.
+
+Git state selects the later closing path. A bead has one naming merge.
+Its second parent must equal the bead tip. An open bead also needs the
+merge's changed paths present at the spec tip. A later naming merge for
+another bead can supersede those paths. Tool artifacts do not count.
+Use a follow-up bead for fixes found after verification.
+
+The closing path runs the panel gate at the bead tip and the content gates
+over M^1..M. Ownership comes from M's tree. It closes the bead, writes its
+landed binding and review identity, records overrides, and publishes the
+close with a path-scoped export and ledger commit in the spec worktree.
+Only then does it clear markers and remove the bead workspace.
+Each step resumes from its own done signal.
+
+A closed resume keeps all gates and tip checks. It skips the presence check.
+An absent worktree passes the user-changes check. In a non-flat layout with
+panel enforcement, no worktree and no surviving registration refuses.

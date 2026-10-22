@@ -317,3 +317,19 @@ true selects push; false selects local merge. Finalization does not probe again.
 The workflow layer passes the spec worktree as `workdir` when it exists.
 Source conflicts retain a preview tree with clean ownership manifests.
 Ownership conflicts return their path list for the caller's path decision.
+
+## Separate bead merge, publication, and cleanup
+
+`Executor.MergeBead` keeps the layout guard, live work-destruction
+preflight, and preserved-merge dispatch. It makes no binding or cleanup
+write. Its mode selects the merge-only re-entry command.
+
+`FirstParentMerges` returns full commit identities. `CompletionState`
+reads the merge head, staged paths, and a full-SHA commit range.
+The workflow layer selects the naming merge and decides whether to close.
+
+`PublishBeadClose` exports the tracker in the spec worktree and commits
+only the export and supplied ledger paths. `CleanupBead` checks ancestry,
+removes the bead worktree, and deletes the branch. A read or removal error
+refuses; a retry finishes the remaining work. `MockExecutor` exposes the
+same methods and records calls.

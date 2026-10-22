@@ -97,6 +97,7 @@ type MindspecExecutor struct {
 	WorktreeOps WorktreeOps
 
 	landedReview *landedReview
+	completeMode string
 }
 
 // landedReview is supplied only to CompleteBead's binding producer.
@@ -365,7 +366,11 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 
 	// Find bead worktree.
 	var wtPath string
-	if entries, err := g.WorktreeOps.List(); err == nil {
+	entries, listErr := g.WorktreeOps.List()
+	if listErr != nil && g.completeMode != "" {
+		return listErr
+	}
+	if listErr == nil {
 		for _, e := range entries {
 			if e.Name == wtName || e.Branch == beadBranch {
 				wtName = e.Name
@@ -418,7 +423,7 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(specWtPath); err == nil {
+	if _, err := os.Stat(specWtPath); err == nil && g.completeMode != "cleanup-only" {
 		// Spec 106 Bead 4 (Req 9): DIRECTIONAL layout-fingerprint guard in front
 		// of the bead→spec merge. Blocks ONLY the regression direction (a
 		// canonical/legacy bead branch onto a flat spec target); mutates nothing.
@@ -444,10 +449,14 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// aborted) and, on a genuinely fresh conflict, leaves it IN PLACE
 		// (Spec 092 Req 14(a)'s original abort-and-refuse behavior is
 		// retired by this spec — see resumeAwareMerge's doc comment).
-		if err := resumeAwareMerge(specWtPath, resolveMerge, beadBranch, fmt.Sprintf("mindspec complete %s %s", beadID, ResolveMergeFlag),
+		modeFlag := ""
+		if g.completeMode == "merge-only" {
+			modeFlag = " --merge-only"
+		}
+		if err := resumeAwareMerge(specWtPath, resolveMerge, beadBranch, fmt.Sprintf("mindspec complete %s%s %s", idrender.Bead(beadID), modeFlag, ResolveMergeFlag),
 			func() error { return gitutil.MergeInto(specWtPath, beadBranch) },
 			func(mergeErr error) error {
-				return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, fmt.Sprintf("mindspec complete %s", beadID), mergeErr)
+				return beadToSpecConflictFailure(beadBranch, specBranch, specWtPath, fmt.Sprintf("mindspec complete %s%s", idrender.Bead(beadID), modeFlag), mergeErr)
 			},
 		); err != nil {
 			return err
@@ -496,19 +505,27 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 		// MergeInto of an already-ancestor branch is a no-op, and the
 		// re-run's ensureLandedBinding locates the SAME merge by identity —
 		// never a silent warn-and-continue past an unrecorded binding.
-		if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch, review); bindErr != nil {
-			return guard.NewFailure(
-				fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
-				fmt.Sprintf("mindspec complete %s", beadID),
-			)
+		if g.completeMode == "" {
+			if bindErr := g.ensureLandedBinding(beadID, specBranch, beadBranch, review); bindErr != nil {
+				return guard.NewFailure(
+					fmt.Sprintf("bead %s's branch %s merged into %s, but the merge-time landed-merge binding could not be recorded (%v) — refusing to clean up its branch/worktree before this binding is durable.", beadID, beadBranch, specBranch, bindErr),
+					fmt.Sprintf("mindspec complete %s", beadID),
+				)
+			}
 		}
+	}
+	if g.completeMode == "merge-only" {
+		return nil
 	}
 
 	// Remove worktree and delete branch from repo root (not from inside the
 	// worktree being removed). Matches the pattern in FinalizeEpic().
 	if err := withWorkingDir(g.Root, func() error {
-		if wtName != "" {
+		if wtName != "" && (g.completeMode == "" || wtPath != "") {
 			if err := g.WorktreeOps.Remove(wtName); err != nil {
+				if g.completeMode != "" {
+					return err
+				}
 				// Final-review G3-2 (spec 120): wtName may be the
 				// agent-writable bd-list e.Name (reassigned on the
 				// OR-match above) — escape it so a control-bearing name
@@ -516,8 +533,13 @@ func (g *MindspecExecutor) CompleteBead(beadID, specBranch, msg, overrideReason 
 				fmt.Fprintf(os.Stderr, "warning: could not remove worktree %s: %v\n", termsafe.Escape(wtName), err)
 			}
 		}
-		if err := gitutil.DeleteBranch(beadBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+		if beadBranchPresent || g.completeMode == "" {
+			if err := gitutil.DeleteBranch(beadBranch); err != nil {
+				if g.completeMode != "" {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "warning: could not delete branch %s: %v\n", beadBranch, err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -2046,4 +2068,84 @@ func (g *MindspecExecutor) LandingTree(workdir, base, specTip, beadRef string) (
 		}
 	}
 	return gitutil.MergeTreeLanding(workdir, base, specTip, beadRef)
+}
+
+// FirstParentMerges returns full identities. The caller selects naming merges.
+func (g *MindspecExecutor) FirstParentMerges(ref string) ([]MergeIdentity, error) {
+	rows, err := gitutil.FirstParentMerges(g.Root, ref)
+	if err != nil {
+		return nil, err
+	}
+	var out []MergeIdentity
+	for _, row := range rows {
+		out = append(out, MergeIdentity{SHA: row.SHA, Parents: row.Parents, Subject: row.Subject})
+	}
+	return out, nil
+}
+
+// CompletionState does not change the index or refs.
+func (g *MindspecExecutor) CompletionState(workdir, base, head string) (CompletionState, error) {
+	var state CompletionState
+	status, err := gitutil.StatusZWithStderr(workdir)
+	if err != nil {
+		return state, err
+	}
+	state.MergeHead, err = gitutil.RevParseRef(workdir, "MERGE_HEAD")
+	if err != nil && !errors.Is(err, gitutil.ErrRefNotFound) {
+		return state, err
+	}
+	fields := strings.Split(status, "\x00")
+	for i := 0; i < len(fields); i++ {
+		line := fields[i]
+		if line == "" {
+			continue
+		}
+		if len(line) < 4 {
+			return state, fmt.Errorf("invalid worktree status record")
+		}
+		if line[0] != ' ' && line[0] != '?' {
+			state.StagedPaths = append(state.StagedPaths, line[3:])
+		}
+		if strings.ContainsAny(line[:2], "RC") {
+			i++
+			if i >= len(fields) || fields[i] == "" {
+				return state, fmt.Errorf("invalid rename status record")
+			}
+			if line[0] != ' ' && line[0] != '?' {
+				state.StagedPaths = append(state.StagedPaths, fields[i])
+			}
+		}
+	}
+	if base != "" && head != "" {
+		rows, err := gitutil.FirstParentCommitsAfter(g.Root, base, head)
+		if err != nil {
+			return state, err
+		}
+		for _, row := range rows {
+			state.NewCommits = append(state.NewCommits, MergeIdentity{SHA: row.SHA, Parents: row.Parents, Subject: row.Subject})
+		}
+	}
+	return state, nil
+}
+
+// MergeBead retains every existing merge guard and leaves cleanup to the caller.
+func (g *MindspecExecutor) MergeBead(beadID, specBranch, overrideReason string, resolveMerge bool) error {
+	g.completeMode = "merge-only"
+	defer func() { g.completeMode = "" }()
+	return g.CompleteBead(beadID, specBranch, "", overrideReason, resolveMerge)
+}
+
+// CleanupBead uses the existing cleanup site without another merge or binding.
+func (g *MindspecExecutor) CleanupBead(beadID, specBranch string) error {
+	g.completeMode = "cleanup-only"
+	defer func() { g.completeMode = "" }()
+	return g.CompleteBead(beadID, specBranch, "", "", false)
+}
+
+// PublishBeadClose publishes the close before any evidence is removed.
+func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) error {
+	if err := execBeadExportFn(workdir); err != nil {
+		return err
+	}
+	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
 }

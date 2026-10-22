@@ -2,6 +2,8 @@ package complete
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -47,7 +50,10 @@ func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
 
 	root := t.TempDir()
 	gitRun(t, root, "init", "-q", "-b", "main")
+	gitRun(t, root, "config", "user.name", "Test")
+	gitRun(t, root, "config", "user.email", "test@example.invalid")
 	writeFile(t, root, "README.md", "# fixture\n")
+	writeFile(t, root, ".beads/issues.jsonl", "{\"id\":\""+beadID+"\",\"status\":\"in_progress\"}\n")
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-q", "-m", "base")
 	gitRun(t, root, "checkout", "-q", "-b", specBranch)
@@ -63,11 +69,34 @@ func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
 	gitRun(t, root, "checkout", "-q", "main")
 
 	wireRealMergedUnclosedFixture(t, root, specID)
+	newFakeMetadataStore().wire(t)
 	var closed bool
 	closeBeadFn = func(...string) error { closed = true; return nil }
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		status := "in_progress"
+		if closed {
+			status = "closed"
+		}
+		return next.BeadInfo{ID: id, Status: status}, nil
+	}
+
+	// R3.8 publishes the close in the spec worktree before cleanup.
+	// Keep real git publication and use a fixture-local tracker exporter.
+	specWT := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+	gitRun(t, root, "worktree", "add", specWT, specBranch)
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != export ] || [ \"$2\" != -o ] || [ \"$3\" != .beads/issues.jsonl ]; then exit 1; fi\n" +
+		"printf '%s\\n' '{\"id\":\"" + beadID + "\",\"status\":\"closed\"}' > .beads/issues.jsonl\n"
+	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	newExec := func() executor.Executor {
-		return &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
+		ex := executor.NewMindspecExecutor(root)
+		ex.WorktreeOps = noopWorktreeOps{}
+		return &readStubMergeExecutor{Executor: ex}
 	}
 
 	_, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{AllowDocSkew: "test: e2e fixture"})
@@ -98,8 +127,19 @@ func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-run after restoring the branch must converge, got: %v", err)
 	}
-	if res == nil || !res.BeadClosed {
+	if res == nil || !res.BeadClosed || !closed {
 		t.Fatalf("expected the bead to close after restoring the branch, res=%+v", res)
+	}
+	ex := newExec()
+	data, present, err := ex.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
+	if err != nil || !present || !strings.Contains(string(data), `"status":"closed"`) {
+		t.Fatalf("spec branch must publish the close: present=%v data=%s err=%v", present, data, err)
+	}
+	if parent := gateRevParse(t, root, specBranch+"^1"); parent != mergeSHA {
+		t.Fatalf("publication must follow the original merge without another merge: parent=%s want=%s", parent, mergeSHA)
+	}
+	if _, err := ex.RevParseRef(root, beadBranch); !ex.IsRefNotFound(err) {
+		t.Fatalf("published close must finish branch cleanup, got: %v", err)
 	}
 }
 
