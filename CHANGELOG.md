@@ -7,18 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.18.0] - 2026-10-22
 
-- A binary older than this release refuses panel ledgers that contain the new record kinds.
-- Every new panel round uses verdict schema v2 with no opt-out. A verdict file without a submission no longer counts. Reviewers use `mindspec panel submit` or the process output channel in their prompt.
-- The latest submission replaces earlier submissions for a slot and round. The ledger retains all submissions.
-- Zero config runs every slot on the harness. No tool runner ships. Configure process runners in `panel.runners`.
-- A reviewer family needs a runner. `panel create` refuses a family with no runner. Add a runner as shown below.
-- `panel.substitution` is retired. Set `on_quota` on a process runner to select its quota substitute.
-- `panel verify` exits 0 when all slots are final. It exits 1 for running or missing slots, harness drafts, or a pending quota handoff. It exits 2 in every other case.
-- Spec and plan approval use these default lenses: falsifiability, scope-honesty, contradiction and feasibility.
-- At the first v2 round, a carried slot without a family needs a runner that matches its old model. If none exists, create a fresh roster with `mindspec panel create <slug> --round <N+1> --reviewers <n>`.
-- A model-only reviewer entry runs on the harness with its model. `config resolve` and `doctor` warn for each such entry.
+Two specs and one fix PR since v0.17.0. The theme is **the binary runs the panel and finishes the landing**. PR #271 moves panel execution into the binary: reviewers submit verdicts through `mindspec panel submit`, the binary launches and recovers reviewer processes, and runners, lenses and acceptance questions are config. PR #270 makes the lifecycle verbs finish safely after a partial failure: `impl approve` refuses early for failures it can predict and converges on a re-run, `complete --merge-only` lets you verify a merge before you close the bead, and bead titles no longer decide lineage. PR #269 tells subagents to skip the session-start steps. Not a pure drop-in. Read **Changed** and **Removed** before you upgrade: every new panel round needs submitted v2 verdicts, every reviewer family needs a runner, `panel.substitution` and `merge_strategy` are gone, a bead needs a parent-child edge to its epic, and `spec create` refuses new lettered spec IDs.
+
+On upgrade: add a `panel.runners` entry for each reviewer family that is not the harness (example under **Changed**). Replace `panel.substitution` with `on_quota` on the process runner. Run `mindspec init` to add the ignore lines for `.mindspec/config.local.yaml` and the panel isolation root (`.mindspec-scratch` by default). Remove `merge_strategy` from `.mindspec/config.yaml` (PR #270). Run `mindspec doctor`, and run the printed `bd update <bead> --parent <epic>` for each bead that it lists as title-only lineage (PR #270). After the first v2 panel round in a repo, use only v0.18.0 or later binaries there: an older binary refuses the new ledger records.
+
+### Added
+- **`mindspec panel submit` (PR #271, GH #249)** — validates a verdict against schema v2 and binds its bytes to a ledger record. `--file -` reads stdin. `mindspec panel schema` prints the JSON Schema.
+- **`mindspec panel launch <slug> <slot>` and `panel recover <slug> <slot> --reason R` (PR #271)** — `launch` runs a process reviewer, retries a refused verdict and submits the result. `recover` submits the recorded output of an orphaned attempt. `--replace` starts a replacement for a final verdict.
+- **`mindspec panel checkout` and `panel prompt` (PR #271)** — `checkout --slot S` or `--all` makes an isolated clone and scratch directory for each slot under the isolation root. `--dispatch` records a new harness attempt. `--fixer` makes fixer scratch. `--prune` removes the panel's slot directories. `prompt --slot S` prints the slot review prompt and writes no files.
+- **Slot status on `panel verify` (PR #271)** — each slot gets one status: `final`, `damaged`, `void`, `draft`, `running`, `quota_wall`, `launch_failed`, `malformed`, `unsubmitted` or `missing`. `--json` gives the same data with the effective family, model, lens and kind.
+- **Panel config (PR #271, GH #229)** — `panel.runners` (`harness` or `process`, with `argv`, `prompt`, `output`, `probe`, `quota_signals` and `on_quota`), `panel.lenses`, `panel.gates.<gate>.lenses`, `panel.gates.<gate>.acceptance` and `panel.isolation_root`. A one-family panel is valid. `mindspec config resolve --gate <gate> [--json]` previews a new roster and the source of each value.
+- **Machine-local config (PR #271)** — `.mindspec/config.local.yaml` holds machine-local `panel.runners` and `models`. It merges after the project file. Do not track it. A symlinked local config is refused.
+- **`mindspec rules` (PR #271, GH #253)** — lists the panel and bead-loop conduct rules. `--scope` selects orchestrator, implementer, reviewer or fixer rules. `rules show <id>` prints one rule. `instruct` renders the same table.
+- **New doctor checks (PR #271, GH #254)** — `doctor` checks each reviewer family's runner, each process runner's command on PATH, the ignore lines for local config and the isolation root, staged-rule markers in installed skills, and stale slot checkouts. `--probe` runs runner probes from any config source with a 10-second limit. `--ci` skips launchers, probes, tool suggestions and stale checkouts. A new `[INFO]` result does not fail `doctor`.
+- **`mindspec complete <bead> --merge-only` (PR #270, GH #250)** — runs every `complete` gate and merges the bead into the spec branch, but keeps the bead open. It prints the merge SHA and both parents. Verify the merge, then run `mindspec complete <bead>` until it exits 0 to close the bead. A bead has at most one naming merge: put a later fix in a follow-up bead, and do not revert a `--merge-only` merge by hand. The refusals print the follow-up and restore recovery lines. On a conflict, run `mindspec complete <bead> --merge-only --resolve-merge`.
+- **Work in history without a naming merge (PR #270, GH #251)** — when no merge names a prerequisite bead but its commits are in the spec history, `mindspec reattest` reports `ancestor-without-naming-merge` if a content check proves the changes are present. It writes no landed binding. A person must verify the work. The output gives one `mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>` line for each open dependent. `doctor` reports the prerequisite at Warn.
+- **`impl approve` state line and re-run (PR #270, GH #244)** — a failure after the epic close prints one state line ("epic closed" or "epic still open") and the finalize stage that failed. A re-run continues from that stage. After the host deletes a merged spec branch, a re-run prints "already landed" and exits 0 only when the epic, the finalize tip and every landed bead are ancestors of the target.
+
+### Changed
+- **Verdict schema v2 for every new round (PR #271)** — every new panel round uses verdict schema v2 with no opt-out. A verdict file without a submission no longer counts. Reviewers use `mindspec panel submit` or the process output channel in their prompt. The latest submission replaces earlier submissions for a slot and round. The ledger retains all submissions. Rounds created before this release keep their old rules.
+- **Unreadable verdict files block (PR #271)** — on a v2 round, an unreadable verdict file (FIFO, symlink, directory or oversize), also off the roster, is INVALID in `tally` and blocks the gate. `verify` shows the slot as `damaged`.
+- **Runners are config (PR #271)** — zero config runs every slot on the harness. No tool runner ships. Configure process runners in `panel.runners`. A reviewer family needs a runner. `panel create` refuses a family with no runner. Add a runner as shown below.
+- **Quota substitution moves to the runner (PR #271)** — `panel.substitution` is retired. Set `on_quota` on a process runner to select its quota substitute. A non-zero exit or a timeout must match a configured `quota_signals` entry before substitution occurs.
+- **`panel verify` exit codes (PR #271)** — `panel verify` exits 0 when all slots are final. It exits 1 for running or missing slots, harness drafts, or a pending quota handoff. It exits 2 in every other case, a damaged panel included. Exit 0 does not mean that the gate passes. Scripts that expected exit 0 on a damaged panel must change.
+- **Default approval lenses (PR #271)** — spec and plan approval use these default lenses: falsifiability, scope-honesty, contradiction and feasibility.
+- **Carried slots at the first v2 round (PR #271)** — at the first v2 round, a carried slot without a family needs a runner that matches its old model. If none exists, create a fresh roster with `mindspec panel create <slug> --round <N+1> --reviewers <n>`.
+- **Model-only reviewers (PR #271)** — a model-only reviewer entry runs on the harness with its model. `config resolve` and `doctor` warn for each such entry.
+- **Newer ledger records (PR #271)** — a binary older than this release refuses panel ledgers that contain the new record kinds.
+- **Thin panel skills (PR #271)** — `ms-panel-run`, `ms-panel-tally` and the `ms-panel` workflow now only dispatch and call the binary. The workflow takes its runners from config. Existing installs refresh through skill snapshots.
+- **Shell-safe recovery lines (PR #271)** — recovery lines quote slug and spec arguments for the shell and escape unsafe characters.
+- **Session-start steps are for the top-level session (PR #269)** — the generated agent instructions (Claude, Codex and Copilot managed blocks, and the bootstrap templates) now say that `mindspec instruct` and the `bd` steps are for the top-level session only. A subagent that works from a dispatch brief skips them.
+- **One has-remote decision in `impl approve` (PR #270)** — `impl approve` decides one time, before any change, whether to push (a remote exists) or merge locally. Finalize uses that value. If git cannot tell whether a remote is configured, approval refuses with `cannot tell whether a git remote is configured` and `recovery: git remote -v`. Before, the error read as "no remote".
+- **`impl approve` refuses early (PR #270, GH #244)** — before the epic close, approval runs the merge-layout guard, the work-destruction preflight and, on the push path, a `git push --dry-run`. Only a failed probe refuses. A failed export or artifact commit stops approval before publication and cleanup, and a merged bead worktree with uncommitted work refuses with a recovery line. Before, approval could continue and remove the work.
+- **Cleanup keeps hook output (PR #270)** — `complete` and `impl approve` check the bead and spec worktrees again after commit and push hooks run, before they remove a worktree. New user changes stop cleanup, and the file, worktree and branch remain. Tool artifacts such as `.beads/issues.jsonl` stay exempt, but only by exact name and only when both ends of a rename are artifacts.
+- **Stale-open with a valid merge is Info (PR #270, GH #250)** — `doctor` reports an open bead that has a valid naming merge at Info, with `recovery: mindspec complete <bead>`. Without a valid merge it stays at Error. An open bead whose merge was reverted is an Error with the restore recovery.
+- **Reviewed-tree corroboration (PR #270, GH #233)** — a reviewed SHA now confirms a landed merge when it is an ancestor of the merge's second parent and the difference holds only tool-written files. It never vetoes a landing.
+- **Lineage is the parent-child edge only (PR #270)** — a bead's lineage is its one parent-child dependency on an epic. A `blocks` edge to an epic is not lineage. The bead-title fallback is gone. More than one parent epic refuses with `recovery: bd dep remove <bead> <epic>`. `doctor` warns for each open bead that resolved only by its title.
+- **Full spec IDs (PR #270)** — `spec approve` writes the full spec ID to the epic's `spec_id` metadata. A lettered spec ID such as `042b-x` resolves to its own spec, never to the base number. When the epic's sources disagree, resolution refuses with `recovery: bd update <epic> --set-metadata spec_id=<id>`. `doctor` reports two epics that resolve to one spec.
+- **`spec create` refuses new lettered IDs (PR #270)** — a new spec ID must use digits before the slug. Existing lettered spec directories stay valid.
+- **`complete` refuses an unresolved spec binding (PR #270)** — when `complete` cannot resolve the bead's spec, it refuses before any change.
 
 ```yaml
 # before: create now refuses this entry
@@ -31,6 +60,17 @@ reviewers: [{family: codex, model: m1}]
 Place these entries under `panel` in `.mindspec/config.yaml`.
 Use `.mindspec/config.local.yaml` for machine-local runners and models.
 Runners merge by family: a later entry replaces the same family or appends a new family.
+
+### Removed
+- **`merge_strategy` (PR #270)** — the config key had no effect. `impl approve` pushes when a git remote exists and merges locally otherwise. A config that still has the key loads. `doctor` prints `merge_strategy is no longer used; remove it from .mindspec/config.yaml` at Info. `config show` no longer prints the row.
+- **`panel.substitution` and `claude_sub_on_quota` (PR #271)** — use `on_quota` on a runner.
+
+### Fixed
+- **Ownership at the landing tree (PR #270, GH #234)** — `complete` reads `OWNERSHIP.yaml` from the tree that will land, not from the bead tip. A domain claim made on the spec branch after the bead forked now counts, so `adr-divergence-unowned` no longer blocks an owned path. When `OWNERSHIP.yaml` itself conflicts, plain `complete` refuses before the close with `recovery: mindspec complete <bead> --merge-only`.
+- **Half-done `impl approve` (PR #270, GH #244)** — a failure after the epic close no longer leaves a state that a re-run cannot finish. On protected main, a re-run reuses the existing `chore/finalize-<id>` branch.
+- **Renamed files cannot hide user changes (PR #270)** — status and diff reads that feed the tool-artifact exemption turn rename detection off and keep exact filenames. A user file renamed onto an artifact path, or named like one with trailing whitespace, now blocks the close.
+- **Reattest and finalize text (PR #270)** — reattest and finalize messages no longer print internal record numbers or bead IDs.
+- **`spec approve` with a lettered spec ID (PR #270)** — it now writes the epic and its `spec_id`.
 
 ## [0.17.0] - 2026-10-21
 
@@ -280,7 +320,8 @@ A large release headlined by the **flattened `.mindspec/` layout**, plus ten spe
 
 Release notes for v0.9.0 and prior are on the [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases) page.
 
-[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.14.0...v0.15.0

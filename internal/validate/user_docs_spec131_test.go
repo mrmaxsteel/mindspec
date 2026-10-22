@@ -90,9 +90,9 @@ func TestUserDocs_NoRetiredPanelClaims(t *testing.T) {
 	})
 	t.Run("changelog", func(t *testing.T) {
 		body := readPanelDoc(t, "CHANGELOG.md")
-		_, body, ok := strings.Cut(body, "## [Unreleased]\n")
+		_, body, ok := strings.Cut(body, "## [0.18.0]")
 		if !ok {
-			t.Fatal("missing unreleased section")
+			t.Fatal("missing 0.18.0 section")
 		}
 		body, _, _ = strings.Cut(body, "\n## [")
 		requirePanelDoc(t, body, "schema v2 with no opt-out", "without a submission no longer counts", "latest submission replaces", "No tool runner ships", "family needs a runner", "panel.substitution` is retired", "on_quota", "exits 0", "exits 1", "exits 2", "falsifiability, scope-honesty, contradiction and feasibility", "first v2 round", "--round <N+1> --reviewers <n>", "model-only reviewer", "`config resolve` and `doctor` warn")
