@@ -146,9 +146,13 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		// Any explicit --spec — blank or not — is refused with --gate
 		// adhoc.
 		if gate == "adhoc" && cmd.Flags().Changed("spec") {
+			specForRecovery := specID
+			if strings.TrimSpace(specForRecovery) == "" {
+				specForRecovery = ""
+			}
 			return guard.NewFailure(
-				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", specID),
-				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(specID, "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
+				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", idrender.Spec(specID)),
+				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(idrender.Spec(specForRecovery), "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
 		}
 		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
@@ -174,7 +178,8 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 
 		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
 		if err != nil {
-			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec %s --target %s", shellQuoteTarget(slug), knownOr(specID, "<id>"), knownOr(beadRecoveryTarget(target, beadID), "bead/<id>"))
+			targetRef := beadRecoveryTarget(target, beadID)
+			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec %s --target %s", shellQuoteTarget(slug), knownOr(idrender.Spec(specID), "<id>"), knownOr(targetRef, "bead/<id>"))
 			if beadID != "" && gate != "" && gate != "bead" {
 				recovery = fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(target)) + panelCreateScope(specID, gate)
 				if gate != "adhoc" {
@@ -574,8 +579,8 @@ func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registra
 			"repeat the command with --spec <id> (choose a listed spec; if copies remain, run from that checkout)")
 	}
 	return panel.Registration{}, guard.NewFailure(
-		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, specID),
-		fmt.Sprintf("mindspec panel create %s --spec %s --target <ref>", shellQuoteTarget(slug), knownOr(specID, "<id>")))
+		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, idrender.Spec(specID)),
+		fmt.Sprintf("mindspec panel create %s --spec %s --target <ref>", shellQuoteTarget(slug), knownOr(idrender.Spec(specID), "<id>")))
 }
 
 // knownOr renders a known value for a recovery line, shell-quoted and
@@ -594,8 +599,8 @@ func beadRecoveryTarget(target, beadID string) string {
 	if strings.HasPrefix(target, "bead/") && idvalidate.BeadID(strings.TrimPrefix(target, "bead/")) == nil {
 		return target
 	}
-	if idvalidate.BeadID(beadID) == nil {
-		return "bead/" + beadID
+	if branch, err := workspace.BeadBranch(beadID); err == nil {
+		return branch
 	}
 	return ""
 }
@@ -712,52 +717,10 @@ func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (s
 		if reg.Err != nil {
 			return "", fmt.Errorf("panel.json records no target ref: %w", reg.Err)
 		}
-		target := strings.TrimSpace(reg.Panel.Target)
-		if target == "" {
-			return "", fmt.Errorf("panel.json records no target ref")
-		}
-		if branch := pinnedSubjectBranch(reg.Panel, target); branch != "" {
-			if sha, err := revParseForPanelFn(scanRoot, branch); err == nil {
-				return sha, nil
-			}
-		}
-		return revParseForPanelFn(scanRoot, target)
+		return panel.ResolveSubjectHead(reg.Panel, scanRoot, func(specID string) (string, error) {
+			return workspace.SpecBranch(specID)
+		}, revParseForPanelFn, newExecutor(scanRoot).IsRefNotFound)
 	}
-}
-
-// pinnedSubjectBranch returns the spec branch for a spec or plan panel
-// whose target is a commit SHA. A SHA never moves, so comparing the
-// reviewed SHA with it always reads "fresh": a later edit to spec.md or
-// plan.md on the spec branch was invisible to verify, tally and rebind,
-// and rebind wrote no audit record. The live target for those gates is the
-// spec branch tip instead. It returns "" for every other panel, and the
-// caller falls back to the recorded target when the branch is absent.
-func pinnedSubjectBranch(p panel.Panel, target string) string {
-	if p.Gate != "spec_approve" && p.Gate != "plan_approve" {
-		return ""
-	}
-	if !looksLikeCommitSHA(target) {
-		return ""
-	}
-	branch, err := workspace.SpecBranch(p.Spec)
-	if err != nil {
-		return ""
-	}
-	return branch
-}
-
-// looksLikeCommitSHA reports whether ref is an abbreviated or full hex
-// object name.
-func looksLikeCommitSHA(ref string) bool {
-	if len(ref) < 7 || len(ref) > 64 {
-		return false
-	}
-	for _, c := range ref {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // panelBeadWorktreePath resolves the bead worktree path for the dirty-tree

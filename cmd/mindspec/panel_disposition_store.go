@@ -223,8 +223,9 @@ slot, otherwise.`,
 // dispositionRowShape is the hint printed when a disposition row fails
 // validation: the fields the caller must give, and an example.
 const dispositionRowShape = `a disposition row needs: reviewer, model, severity, summary, disposition
-(one of confirmed-fixed, confirmed-deferred, confirmed-scope-trim, deferred,
-false-contamination, audited-refuted). Optional: convergent_with, evidence_ref,
+(one of confirmed-fixed, confirmed-scope-trim, deferred, false-contamination).
+Use panel defer for confirmed-deferred and panel refute for audited-refuted.
+Optional: convergent_with, evidence_ref,
 note, round. append fills record, id, spec, gate, panel, created_at,
 convergent_with and backfilled when they are absent.
 example: {"reviewer":"R1","model":"opus","severity":"minor","summary":"rename X","disposition":"confirmed-fixed","evidence_ref":"abc1234"}`
@@ -253,20 +254,26 @@ func fillDispositionRow(record []byte, specID, panelName string, now func() time
 	}
 	_, hasSpec := m["spec"]
 	_, hasGate := m["gate"]
-	if !hasSpec || !hasGate {
-		if root, err := findPanelRoot(config.IsolationRootFor); err == nil {
-			if reg, err := findPanelRegistration(root, panelName); err == nil && reg.Err == nil {
-				if !hasSpec {
-					m["spec"] = panel.RecordSpec(reg.Panel)
-				}
-				if !hasGate {
-					gate := reg.Panel.Gate
-					if gate == "" {
-						gate = "adhoc"
-					}
-					m["gate"] = gate
-				}
+	if root, err := findPanelRoot(config.IsolationRootFor); err == nil && len(panelSlugMatches(root, panelName)) > 0 {
+		reg, err := findPanelRegistration(root, panelName, specID)
+		if err != nil {
+			return nil, err
+		}
+		if reg.Err != nil {
+			return nil, reg.Err
+		}
+		if reg.Panel.Spec != specID {
+			return nil, fmt.Errorf("panel spec must match --spec")
+		}
+		if !hasSpec {
+			m["spec"] = panel.RecordSpec(reg.Panel)
+		}
+		if !hasGate {
+			gate := reg.Panel.Gate
+			if gate == "" {
+				gate = "adhoc"
 			}
+			m["gate"] = gate
 		}
 	}
 	if _, ok := m["spec"]; !ok {

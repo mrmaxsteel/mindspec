@@ -75,9 +75,19 @@ func setupRebind(t *testing.T, gates ...string) (root, dir, from string) {
 	rebindGit(t, root, "add", ".")
 	rebindGit(t, root, "commit", "-qm", "base")
 	from = rebindGit(t, root, "rev-parse", "HEAD")
-	if len(gates) > 0 && gates[0] == "plan-pinned" {
-		// A plan panel pinned to the reviewed commit SHA, not a branch.
+	if len(gates) > 0 && (gates[0] == "plan-pinned" || gates[0] == "spec-pinned") {
+		// A spec or plan panel pinned to the reviewed commit object name.
 		gate, target = "plan_approve", from
+		if gates[0] == "spec-pinned" {
+			gate = "spec_approve"
+		}
+		if len(gates) > 1 {
+			var length int
+			if _, err := fmt.Sscan(gates[1], &length); err != nil || length < 4 || length > len(from) {
+				t.Fatal("invalid test SHA length")
+			}
+			target = from[:length]
+		}
 		rebindGit(t, root, "branch", "spec/900-demo")
 	}
 	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", "HEAD")+"\n", panel.Subject(gate, ".mindspec/specs/900-demo"))

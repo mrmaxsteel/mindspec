@@ -262,10 +262,10 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 				SubjectTree: panel.SubjectTreeReader((&executor.MindspecExecutor{}).LsTree),
 				RevParse: func(workdir, _ string) (string, error) {
 					if !reg.Panel.IsBead() {
-						if strings.TrimSpace(reg.Panel.Target) == "" {
-							return "", fmt.Errorf("panel.json records no target ref")
-						}
-						return (&executor.MindspecExecutor{}).RevParseRef(workdir, reg.Panel.Target)
+						exec := &executor.MindspecExecutor{}
+						return panel.ResolveSubjectHead(reg.Panel, workdir, func(specID string) (string, error) {
+							return workspace.SpecBranch(specID)
+						}, exec.RevParseRef, exec.IsRefNotFound)
 					}
 					sha, exists := resolve(beadID)
 					if !exists {

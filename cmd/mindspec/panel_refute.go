@@ -127,8 +127,9 @@ func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error
 }
 
 // deferVerdict reads a verdict for panel defer. A finding on an APPROVE
-// verdict (a MINOR note in concrete_changes_required) can go to a follow-up
-// bead too; REJECT, INVALID and hard_block verdicts cannot. An APPROVE
+// verdict (a minor note in v2 findings or legacy concrete_changes_required)
+// can go to a follow-up bead too; REJECT, INVALID and hard_block verdicts
+// cannot. An APPROVE
 // verdict's items get the same ccr[i] ids and hashes as REQUEST_CHANGES
 // items. The second value is the verdict word, which sets the severity.
 func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, error) {

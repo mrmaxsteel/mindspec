@@ -916,5 +916,5 @@ func sessionFreshnessGate(sess *state.Session, force, explicitID bool) (string, 
 	case explicitID:
 		return fmt.Sprintf("warning: session freshness gate (%s); claiming the named bead anyway", reason), nil
 	}
-	return "", fmt.Errorf("session freshness gate: %s.\nYou MUST run /clear to reset your context, then retry.\nDo NOT attempt workarounds — /clear is required.", reason)
+	return "", fmt.Errorf("session freshness gate: %s.\nClaim with an explicit bead ID, use --force, or run /clear (or start a fresh session) and retry.", reason)
 }

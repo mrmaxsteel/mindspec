@@ -46,7 +46,7 @@ Run `cd {{.ActiveWorktree | shellsafe}}` to enter the bead worktree. All code ch
 {{- end}}
 
 Do NOT create manual workflow branches/worktrees in implement mode.
-After `mindspec complete` succeeds, do NOT run `mindspec next` or claim another bead. Tell the user: run `/clear` (or start a fresh agent), then `mindspec next` to continue.
+After `mindspec complete` succeeds, do NOT run `mindspec next` or claim another bead. The next bead needs a fresh context: run `/clear` (or start a fresh agent), then `mindspec next` to continue.
 If the user asks for an interrupt fix (urgent bug + continue feature), do both:
 1. Apply and commit the urgent fix.
 2. Resume bead scope and produce the requested feature artifact(s).
@@ -91,7 +91,7 @@ When the bead is done:
 1. Run verification steps and capture evidence
 2. Update documentation (doc-sync)
 3. Run `mindspec complete {{.ActiveBead}} "describe what you did"` — auto-commits all changes, closes the bead, merges bead→spec, removes the worktree, and advances state
-4. **STOP** — do NOT run `mindspec next` or claim another bead. Tell the user: run `/clear` (or start a fresh agent), then `mindspec next`
+4. **STOP** — do NOT run `mindspec next` or claim another bead. The next bead needs a fresh context: run `/clear` (or start a fresh agent), then `mindspec next`
 
 **Do NOT use `bd close` to finish a bead.** It skips merge topology, worktree cleanup, and state transitions. Always use `mindspec complete`.
 **Never edit phase metadata directly.** Phase metadata is managed automatically by `mindspec complete` — if phase state looks wrong, run `mindspec repair phase <spec-id>`.
