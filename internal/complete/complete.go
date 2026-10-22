@@ -1169,9 +1169,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// replace its merge-only recovery with the closed-bead re-entry.
 			if message := strings.TrimRight(err.Error(), "\n"); guard.HasFinalRecoveryLine(message) {
 				lines := strings.Split(message, "\n")
-				mergeOnlyRecovery := guard.RecoveryPrefix + completionCommand(beadID, CompleteOpts{MergeOnly: true, ResolveMerge: true})
-				if lines[len(lines)-1] == mergeOnlyRecovery {
-					return nil, guard.NewFailure(strings.Join(lines[:len(lines)-1], "\n"), completionCommand(beadID, retry))
+				mergeOnlyCommand := completionCommand(beadID, CompleteOpts{MergeOnly: true, ResolveMerge: true})
+				finalLine := lines[len(lines)-1]
+				if strings.HasSuffix(finalLine, " "+mergeOnlyCommand) {
+					recovery := strings.TrimPrefix(strings.TrimSuffix(finalLine, mergeOnlyCommand), guard.RecoveryPrefix) + completionCommand(beadID, retry)
+					return nil, guard.NewFailure(strings.Join(lines[:len(lines)-1], "\n"), recovery)
 				}
 				return nil, err
 			}

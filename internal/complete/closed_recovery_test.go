@@ -48,6 +48,42 @@ func requireClosedConflictRecovery(t *testing.T, err error, path string) {
 	}
 }
 
+func TestComplete_ClosedStagedResolutionRecovery(t *testing.T) {
+	f := sourceConflictWindow(t)
+	stubClosedWindowChild(t)
+	ledger := f.registerLedger()
+	f.closed = true
+	_, err := f.run(CompleteOpts{})
+	requireClosedConflictRecovery(t, err, "README.md")
+	writeFile(t, f.specWT, "README.md", "resolved\n")
+	gitRun(t, f.specWT, "add", "README.md")
+	before := gateRevParse(t, f.root, "spec/"+closingSpec)
+
+	_, err = f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "a resolved merge is already staged")
+	text := err.Error()
+	lines := strings.Split(text, "\n")
+	want := "recovery: re-run with --resolve-merge to finish it: mindspec complete " + closingBead + " --resolve-merge"
+	if lines[len(lines)-1] != want || strings.Count(text, "\nrecovery: ") != 1 || strings.Contains(text, "--merge-only") {
+		t.Fatalf("want one final staged closed-bead recovery %q, got:\n%s", want, text)
+	}
+	if !gitutil.MergeInProgress(f.specWT) || f.closeCalls != 0 || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+		t.Fatalf("staged refusal changed merge or close state: closes=%d", f.closeCalls)
+	}
+	if _, err := os.Stat(f.beadWT); err != nil {
+		t.Fatalf("staged refusal removed bead worktree: %v", err)
+	}
+
+	r, err := f.run(CompleteOpts{ResolveMerge: true})
+	if err != nil || !r.BeadClosed || !r.WorktreeRemoved || f.closeCalls != 0 {
+		t.Fatalf("closed staged re-entry: %+v err=%v closes=%d", r, err, f.closeCalls)
+	}
+	f.assertPublished(ledger)
+	if f.meta["mindspec_landed_merge_sha"] == nil {
+		t.Fatalf("closed staged recovery did not write the binding: %v", f.meta)
+	}
+}
+
 func TestComplete_ClosedSourceConflictRecovery(t *testing.T) {
 	f := sourceConflictWindow(t)
 	stubClosedWindowChild(t)
