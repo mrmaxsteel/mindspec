@@ -66,6 +66,58 @@ func (f launchFixture) layout(t *testing.T) panel.SlotLayout {
 	}
 	return l
 }
+
+func TestPanelCheckout_PruneTerminalSafeAttemptPath(t *testing.T) {
+	f := newLaunchFixture(t)
+	oldRoot := f.root
+	newRoot := oldRoot + "-hostile\x1bc\nrecovery: printf INJECTED"
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Rename(newRoot, oldRoot); err != nil {
+			t.Error(err)
+		}
+		if err := os.Chdir(oldRoot); err != nil {
+			t.Error(err)
+		}
+	}()
+	f.root = newRoot
+	f.dir = filepath.Join(newRoot, "review", "run")
+	f.script = filepath.Join(newRoot, "fake.sh")
+	if err := os.Chdir(newRoot); err != nil {
+		t.Fatal(err)
+	}
+	config.ResetCache()
+	f.configure(t, "stdout", "", "")
+	f.runner(t, "", 0)
+	layout := f.layout(t)
+	attempt := layout.AttemptDir(1)
+	if err := os.MkdirAll(attempt, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runLock, err := panel.AcquireSlotLock(filepath.Join(attempt, "run.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runLock.Release()
+	if _, err := os.Stat(filepath.Join(attempt, "pgid")); !os.IsNotExist(err) {
+		t.Fatalf("prerequisite: attempt must have no pgid: %v", err)
+	}
+	out, err := runPanelVerbCmd("checkout", "run", "--prune", "--slot", "R1")
+	if err == nil || !strings.Contains(err.Error(), "cannot stop attempt") || !strings.Contains(out, "cannot stop attempt") {
+		t.Fatalf("missing held-attempt refusal: output=%q error=%v", out, err)
+	}
+	for _, text := range []string{out, err.Error()} {
+		if !strings.Contains(text, termsafe.Escape(attempt)) || !strings.Contains(text, "\nrecovery: inspect the attempt directory and its live supervisor") {
+			t.Errorf("missing safe path or recovery: %q", text)
+		}
+		if strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
+			t.Errorf("attempt error contains terminal controls or a forged recovery line: %q", text)
+		}
+	}
+}
+
 func (f launchFixture) configure(t *testing.T, output, quota, to string) {
 	t.Helper()
 	r := config.Runner{Family: "a", Kind: "process", Argv: []string{f.script}, Prompt: "stdin", Output: output, OnQuota: to}

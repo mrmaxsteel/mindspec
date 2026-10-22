@@ -212,8 +212,11 @@ func TestDoctor_LoadErrorReported(t *testing.T) {
 			if tc.local != "" {
 				writeFile(t, filepath.Join(root, localConfigPath), tc.local)
 			}
-			r := doctorConfigReport(root, Options{})
-			if len(r.Checks) != 1 || r.Checks[0].Status != Error || !strings.Contains(r.Checks[0].Message, "recovery: "+tc.recovery) {
+			writeFile(t, filepath.Join(root, ".mindspec", "domains", "example", "OWNERSHIP.yaml"), "paths: [internal/**]\n")
+			r := &Report{}
+			checkOwnershipManifests(r, root)
+			checkConfiguration(r, root, Options{})
+			if len(r.Checks) != 1 || r.Checks[0].Name != "MindSpec config" || r.Checks[0].Status != Error || !strings.Contains(r.Checks[0].Message, "recovery: "+tc.recovery) {
 				t.Fatalf("one load Error with recovery required: %+v", r.Checks)
 			}
 		})

@@ -8,6 +8,43 @@ import (
 )
 
 func TestGateV2_LedgerSnapshotReplacement(t *testing.T) {
+	t.Run("tally/submissions", func(t *testing.T) {
+		dir, target, v := gateV2Fixture(t)
+		v.Status = "draft"
+		gateV2Submit(t, target, v)
+		if gateV2Read(t, dir).PassRule(true) {
+			t.Fatal("prerequisite: the draft snapshot must block")
+		}
+		reads := 0
+		result, err := tally(dir, func(dir string) ([][]byte, error) {
+			reads++
+			lines, err := ReadLedger(dir)
+			if err != nil {
+				return nil, err
+			}
+			if reads != 1 {
+				t.Fatal("reader took more than one ledger snapshot")
+			}
+			v.Status = "final"
+			gateV2Submit(t, target, v)
+			return lines, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reads != 1 {
+			t.Fatalf("snapshot seam was not used: %d reads", reads)
+		}
+		if !gateV2Read(t, dir).PassRule(true) {
+			t.Fatal("prerequisite: a fresh ledger read must pass after the final submission")
+		}
+		reg := Registration{Dir: dir, Panel: *result.Panel}
+		decision := PanelGateDecision(GateFacts{Reg: &reg, Res: result, HeadSHA: result.Panel.ReviewedHeadSHA, WorktreeAbsent: true})
+		if result.PassRule(true) || decision.Action != Block {
+			t.Fatalf("the draft snapshot must block despite the final submission on disk: pass=%v gate=%v", result.PassRule(true), decision.Action)
+		}
+	})
+
 	for _, reader := range []string{"tally", "statuses"} {
 		t.Run(reader, func(t *testing.T) {
 			dir, target, v := gateV2Fixture(t)

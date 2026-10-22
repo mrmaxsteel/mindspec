@@ -597,15 +597,16 @@ Implementation approval checks registration integrity before it skips abandoned 
 live commit and subject digest and the gate's roster through
 `config.PanelGateReviewerSlots`. It appends a `round` ledger event before
 rewriting `panel.json`, then rewrites the BRIEF machine-managed header.
-Both snapshot and event contain `roster: [{slot, model, lens}]`,
+Both snapshot and event contain `roster: [{slot, family, model, lens}]`,
 `expected_reviewers: len(roster)` and `telemetry: "required"`. New writes
 omit `approve_threshold`. The BRIEF lists each roster entry as `slot model lens`.
 
 Gate defaults are 6 slots for `spec_approve`, `plan_approve`, `final_review`
 and `adhoc`, and 4 for `bead`. An explicit reviewer list retains its configured
 size. `--reviewers N` requires N >= 2 and distributes slots round-robin over
-the resolved reviewer entries in list order, ignoring their configured counts;
-without an explicit list, the family order is `claude, codex`. Slots use ids
+the resolved reviewer entries in list order, ignoring their configured counts.
+Without an explicit list, slots follow the merged runner order.
+The zero-config default uses the `harness` family for every slot. Slots use ids
 `R1..Rn`. A re-panel copies the latest round event's roster unless
 `--reviewers` is supplied (legacy panels copy a recorded roster if present).
 Without `--gate`, create uses `adhoc` roster defaults, omits the snapshot

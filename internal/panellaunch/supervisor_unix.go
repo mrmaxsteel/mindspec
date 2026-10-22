@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 const supervisorMode = "__mindspec_panel_supervisor"
@@ -206,7 +208,7 @@ func StopOrphan(dir string, pgid int) error {
 		return err
 	}
 	if pgid <= 1 || pgid == syscall.Getpgrp() {
-		return fmt.Errorf("cannot stop attempt %s\nrecovery: inspect the attempt directory and its live supervisor", dir)
+		return fmt.Errorf("cannot stop attempt %s\nrecovery: inspect the attempt directory and its live supervisor", termsafe.Escape(dir))
 	}
 	if err := stopOrphanSignal(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err
@@ -221,7 +223,7 @@ func StopOrphan(dir string, pgid int) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("attempt remains locked: %s\nrecovery: inspect the attempt directory and its live supervisor", dir)
+			return fmt.Errorf("attempt remains locked: %s\nrecovery: inspect the attempt directory and its live supervisor", termsafe.Escape(dir))
 		}
 	}
 }

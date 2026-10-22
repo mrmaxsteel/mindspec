@@ -24,7 +24,15 @@ func checkConfiguration(r *Report, root string, opts Options) {
 		if !strings.Contains(message, "recovery:") {
 			message += "\nrecovery: repair the config file and run mindspec doctor"
 		}
-		r.Checks = append(r.Checks, Check{Name: "MindSpec config", Status: Error, Message: message})
+		check := Check{Name: "MindSpec config", Status: Error, Message: message}
+		// Ownership can encounter the same load error while resolving scratch exclusions.
+		for i, prior := range r.Checks {
+			if prior.Name == "ownership" && prior.Status == Error && prior.Message == err.Error() {
+				r.Checks[i] = check
+				return
+			}
+		}
+		r.Checks = append(r.Checks, check)
 		return
 	}
 	checkSourceGlobs(r, root, cfg)
