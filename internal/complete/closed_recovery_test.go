@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 )
@@ -72,6 +73,69 @@ func TestComplete_ClosedSourceConflictRecovery(t *testing.T) {
 	}
 }
 
+type closedMergeFailureExecutor struct {
+	*windowExecutor
+	failure error
+	calls   int
+}
+
+func (e *closedMergeFailureExecutor) MergeBead(string, string, string, bool) error {
+	e.calls++
+	return e.failure
+}
+
+func TestComplete_ClosedNonConflictRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name, message, recovery string
+	}{
+		{
+			name:     "layout",
+			message:  "layout regression: refusing to merge a legacy branch into a flat target",
+			recovery: "git rebase spec/" + closingSpec + " bead/" + closingBead,
+		},
+		{
+			name:     "destruction",
+			message:  "refusing to merge: the stale snapshot would delete landed work",
+			recovery: "inspect the branch, then re-run with --allow-net-deletion \"<reason>\" to proceed anyway — then mindspec complete " + closingBead,
+		},
+		{
+			name:     "evidence",
+			message:  "could not determine whether merging would destroy work",
+			recovery: "retry once the underlying failure is resolved, or re-run with --allow-net-deletion \"<reason>\" to proceed without verified evidence — then mindspec complete " + closingBead,
+		},
+		{
+			name:     "other-bead",
+			message:  "another bead has a preserved merge",
+			recovery: "mindspec complete other-1 --merge-only --resolve-merge",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWindowFixture(t)
+			stubClosedWindowChild(t)
+			f.closed = true
+			before := gateRevParse(t, f.root, "spec/"+closingSpec)
+			failure := guard.NewFailure(tc.message, tc.recovery)
+			ex := &closedMergeFailureExecutor{windowExecutor: f.ex, failure: failure}
+			_, err := Run(f.root, closingBead, closingSpec, "", ex, CompleteOpts{})
+			requireWindowRefusal(t, err, tc.message)
+			lines := strings.Split(err.Error(), "\n")
+			want := guard.RecoveryPrefix + tc.recovery
+			if lines[len(lines)-1] != want || strings.HasSuffix(err.Error(), "recovery: mindspec complete "+closingBead+" --resolve-merge") {
+				t.Fatalf("want final guard recovery %q, got:\n%s", want, err)
+			}
+			if err != failure {
+				t.Fatalf("non-conflict failure must return intact: %v", err)
+			}
+			if ex.calls != 1 || f.closeCalls != 0 || len(f.meta) != 0 || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+				t.Fatalf("guard failure changed completion state: merge calls=%d closes=%d metadata=%v", ex.calls, f.closeCalls, f.meta)
+			}
+			if _, err := os.Stat(f.beadWT); err != nil {
+				t.Fatalf("guard failure removed bead worktree: %v", err)
+			}
+		})
+	}
+}
+
 func TestComplete_ClosedStatusReadFailureRefuses(t *testing.T) {
 	for _, storedPhase := range []string{state.ModeImplement, "invalid"} {
 		t.Run(storedPhase, func(t *testing.T) {
@@ -104,6 +168,11 @@ func TestComplete_ClosedStatusReadFailureRefuses(t *testing.T) {
 			}))
 			_, err := f.run(CompleteOpts{})
 			requireWindowRefusal(t, err, "child status read failed")
+			stage := "reading bead status"
+			if storedPhase == "invalid" {
+				stage = "reading implementation phase"
+			}
+			requireWindowRefusal(t, err, stage)
 			want := "recovery: mindspec complete " + closingBead
 			lines := strings.Split(err.Error(), "\n")
 			if len(lines) != 2 || lines[1] != want {

@@ -877,9 +877,10 @@ cleanup steps. Step 1–4 recovery repeats the supplied doc-skew and ADR
 override flags with their reasons. A repeated merge-only call records the
 existing valid merge and makes no second merge.
 
-A closed bead without a naming merge runs the merge recovery without a
-second close. It publishes the closed export and panel ledger before cleanup.
+A closed child of the spec epic without a naming merge runs the merge
+recovery without a second close. It publishes the closed export and panel ledger before cleanup.
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`
 recovery, without `--merge-only`.
+Other merge guard failures keep their recovery.
