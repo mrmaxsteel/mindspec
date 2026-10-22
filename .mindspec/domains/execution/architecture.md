@@ -430,8 +430,10 @@ remote SHA read just before the push. No PR is opened by the executor.
 and all lifecycle child binding SHAs against the target. Remote evidence comes
 from an exact head fetched into a temporary ref. A missing remote spec head
 selects remote main. A failed fetch or ancestry check stops cleanup. Cleanup
-repeats the destruction guard and requires branch-tip ancestry. It can finish
-when a prior run removed a worktree but left its branch.
+repeats the destruction guard and requires branch-tip ancestry. Before removal,
+it uses the same worktree check as `FinalizeEpic`. Pending changes, an unreadable
+status, or a worktree inspection error preserve the worktree and branch and stop
+cleanup. It can finish when a prior run removed a worktree but left its branch.
 
 `FinalizeStageError` carries the failed stage without changing the inner error.
 `SetFinalizeStepHookForTest` lets approval tests inject faults into real executor

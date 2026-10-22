@@ -378,6 +378,8 @@ remote spec branch, or remote main if the host deleted the spec branch. A fetch
 failure or missing ancestry retains the adopt recovery. A host squash or rebase
 merge needs that recovery too. A retry does not recreate a deleted remote head.
 
-If a retry finds pending changes in an already merged bead worktree, it stops
-before cleanup. Preserve the pending changes in a follow-up branch and leave
-the original worktree clean. Then run `mindspec impl approve <spec>` again.
+A retry checks each remaining merged bead worktree, including after local
+spec-branch deletion. Pending changes, an unreadable status, or a worktree
+inspection error stop cleanup and keep the worktree and branch. Preserve pending
+changes in a follow-up branch. Make the original worktree clean and readable.
+Then run `mindspec impl approve <spec>` again.

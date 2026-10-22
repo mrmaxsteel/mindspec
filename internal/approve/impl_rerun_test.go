@@ -37,6 +37,7 @@ type rerunWorktrees struct {
 	t                   *testing.T
 	root                string
 	entries             []bead.WorktreeListEntry
+	removeCalls         []string
 	failRemove          bool
 	failAfterSpecRemove bool
 }
@@ -44,6 +45,7 @@ type rerunWorktrees struct {
 func (w *rerunWorktrees) List() ([]bead.WorktreeListEntry, error) { return w.entries, nil }
 func (w *rerunWorktrees) Create(string, string) error             { return errors.New("unexpected create") }
 func (w *rerunWorktrees) Remove(name string) error {
+	w.removeCalls = append(w.removeCalls, name)
 	if w.failRemove {
 		return errors.New("cleanup fault")
 	}
@@ -535,6 +537,56 @@ func TestApproveImpl_RerunKeepsDirtyMergedBead(t *testing.T) {
 			}
 			if exists, _ := lifecycle.BranchExistsIn(f.root, "bead/bead-1"); !exists {
 				t.Fatal("refusal removed bead branch")
+			}
+		})
+	}
+}
+
+func TestApproveImpl_BranchMissingKeepsDirtyMergedBead(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "push"}[remote], func(t *testing.T) {
+			f := newRerunFixture(t, remote, false)
+			wt := filepath.Join(f.root, ".worktrees", "worktree-bead-1")
+			preflightGit(t, f.root, "worktree", "add", wt, "bead/bead-1")
+			f.worktrees.entries[0].Path = wt
+			t.Cleanup(executor.SetFinalizeStepHookForTest(func(stage string) error {
+				if stage == "pre_cleanup" {
+					return errors.New("stop before cleanup")
+				}
+				return nil
+			}))
+			if _, err := f.approve(); err == nil || !strings.Contains(err.Error(), "stop before cleanup") {
+				t.Fatalf("expected publication before cleanup: %v", err)
+			}
+			executor.SetFinalizeStepHookForTest(nil)
+			// Enter the supported branch-missing recovery state with a
+			// surviving bead worktree and valid publication and child evidence.
+			preflightGit(t, f.root, "worktree", "remove", f.specWT)
+			preflightGit(t, f.root, "branch", "-D", "spec/010-test")
+			f.assertConverged()
+			path := filepath.Join(wt, "feature.txt")
+			const correction = "pending correction after publication\n"
+			if err := os.WriteFile(path, []byte(correction), 0644); err != nil {
+				t.Fatal(err)
+			}
+			result, err := f.approve()
+			if err == nil || !strings.Contains(err.Error(), "already merged worktree has pending changes") {
+				t.Errorf("branch-missing retry must refuse dirty merged worktree: %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "recovery: mindspec impl approve 010-test") {
+				t.Errorf("missing runnable recovery: %v", err)
+			}
+			if result != nil && strings.Contains(strings.Join(result.Warnings, "\n"), "already landed") {
+				t.Error("dirty surviving worktree reported already landed")
+			}
+			if len(f.worktrees.removeCalls) != 0 {
+				t.Errorf("refusal reached forced cleanup: %v", f.worktrees.removeCalls)
+			}
+			if content, readErr := os.ReadFile(path); readErr != nil || string(content) != correction {
+				t.Errorf("retry lost pending correction: content=%q error=%v", content, readErr)
+			}
+			if exists, err := lifecycle.BranchExistsIn(f.root, "bead/bead-1"); err != nil || !exists {
+				t.Errorf("refusal removed bead branch: exists=%v error=%v", exists, err)
 			}
 		})
 	}

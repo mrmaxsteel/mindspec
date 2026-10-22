@@ -27,7 +27,7 @@ func TestDocs_Spec132Amendments_Finalize(t *testing.T) {
 		"only when the inner error has no recovery line", "mindspec_finalize_tip",
 		"after the export commit and all bead auto-merges", "Every run overwrites",
 		"pre-finalize routing checkpoint stays separate", "one close", "same carrier branch",
-		"--force-with-lease", "git ls-remote", "The executor opens no PR", "finalize-PR automation (§4)", "adopts an open PR for the same carrier head", "every pre-close gate again",
+		"--force-with-lease", "git ls-remote", "The executor opens no PR", "finalize-PR automation (§4)", "adopts an open PR for the same carrier head", "a retry opens no second PR while the first is open or merged", "every pre-close gate again",
 		"already landed", "epic is closed", "stored phase is done", "every lifecycle child's landed binding",
 		"temporary ref", "remote main", "fetch failure", "squash or rebase merge",
 		"destruction guard again", "tips are ancestors of the target",

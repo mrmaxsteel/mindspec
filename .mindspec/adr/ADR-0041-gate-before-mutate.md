@@ -853,7 +853,8 @@ cleanup only after these checks pass. A protected-main
 retry uses the same carrier branch. When that remote head differs, it pushes with
 `--force-with-lease` on the SHA that `git ls-remote` reads just before the push.
 The executor opens no PR. The finalize-PR automation (§4) adopts an open PR
-for the same carrier head and base, so a retry never opens a second PR.
+for the same carrier head and base, so a retry opens no second PR while the first is
+open or merged.
 This also applies after local spec-branch deletion.
 
 While the spec branch exists, approval runs every pre-close gate again on its
@@ -866,4 +867,6 @@ ref. If the host deleted that head, it fetches remote main instead. A fetch
 failure, missing object, or squash or rebase merge refuses with the branch-missing
 adopt recovery. Approval does not recreate a deleted remote spec branch. Cleanup
 runs the destruction guard again and removes only bead branches whose tips are
-ancestors of the target.
+ancestors of the target. It uses the same worktree check as `FinalizeEpic` before
+removal. Pending changes, an unreadable status, or a worktree inspection error
+stop cleanup and preserve the worktree and branch for recovery.

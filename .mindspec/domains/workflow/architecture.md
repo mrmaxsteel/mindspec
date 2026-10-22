@@ -1475,5 +1475,6 @@ A failed check retains the branch-missing adopt recovery. A successful check
 returns the `already landed` message and completes safe cleanup.
 
 The executor checks a remaining bead worktree before it skips an already merged
-branch. Pending changes or an unreadable status stop finalization before cleanup.
+branch and before it removes that worktree after local spec-branch deletion.
+Pending changes, an unreadable status, or a worktree inspection error stop cleanup.
 The worktree and branch remain for recovery.

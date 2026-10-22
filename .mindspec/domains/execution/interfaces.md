@@ -330,7 +330,7 @@ directory. Resume reads, pushes, and branch removals use the explicit repo root.
 A stale worktree row for an absent bead branch requires the recorded publication
 tip and that bead's binding in the spec history before finalization can continue.
 
-Before `FinalizeEpic` skips an already merged bead, it checks the remaining
-worktree for pending changes. A dirty worktree or a failed status read refuses
-before cleanup and preserves the branch and worktree. An absent worktree can
-continue through the remaining cleanup.
+`FinalizeEpic` and `ResumeFinalizedEpic` use the same check for pending changes
+in a remaining merged bead worktree. A dirty worktree, a failed status read, or a
+worktree inspection error refuses before removal and preserves the branch and
+worktree. An absent worktree can continue through the remaining cleanup.

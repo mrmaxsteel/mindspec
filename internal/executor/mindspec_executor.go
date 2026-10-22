@@ -808,23 +808,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		if ancestorErr != nil {
 			return result, guard.NewFailure("cannot read bead branch ancestry: "+termsafe.Escape(ancestorErr.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
-		if e.Path != "" && alreadyMerged {
-			// Committed ancestry does not cover pending work. A retry skips
-			// merged beads, but must not let forced cleanup discard changes.
-			if _, statErr := os.Stat(e.Path); statErr == nil {
-				status, statusErr := gitutil.Status(e.Path)
-				if statusErr != nil {
-					return result, guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
-						fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
-				}
-				if strings.TrimSpace(status) != "" {
-					return result, guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(e.Path)+":\n"+escapeLines(strings.TrimSpace(status)),
-						"preserve the pending changes in a follow-up branch, then leave this worktree clean",
-						fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
-				}
-			} else if !os.IsNotExist(statErr) {
-				return result, guard.NewFailure("cannot inspect already merged worktree: "+termsafe.Escape(statErr.Error()),
-					fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		if alreadyMerged {
+			if err := checkMergedFinalizeWorktree(e.Path, specID); err != nil {
+				return result, err
 			}
 		}
 		if e.Path != "" && !alreadyMerged {
@@ -1332,6 +1318,9 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 			}
 			for _, entry := range entries {
 				if entry.Branch == branch {
+					if err := checkMergedFinalizeWorktree(entry.Path, specID); err != nil {
+						return err
+					}
 					if err := g.WorktreeOps.Remove(entry.Name); err != nil && !isAlreadyRemovedErr(err) {
 						return err
 					}
@@ -1348,6 +1337,30 @@ func (g *MindspecExecutor) ResumeFinalizedEpic(epicID, specID string, children [
 		return nil
 	}()
 	return result, err
+}
+
+// checkMergedFinalizeWorktree protects pending work that branch ancestry
+// cannot cover. Both finalization paths call it before forced cleanup.
+func checkMergedFinalizeWorktree(path, specID string) error {
+	if path == "" {
+		return nil
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		status, statusErr := gitutil.Status(path)
+		if statusErr != nil {
+			return guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if strings.TrimSpace(status) != "" {
+			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.TrimSpace(status)),
+				"preserve the pending changes in a follow-up branch, then leave this worktree clean",
+				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
+	} else if !os.IsNotExist(statErr) {
+		return guard.NewFailure("cannot inspect already merged worktree: "+termsafe.Escape(statErr.Error()),
+			fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+	}
+	return nil
 }
 
 func finalizeFullSHA(sha string) bool {
