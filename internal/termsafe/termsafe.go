@@ -42,3 +42,20 @@ func Escape(s string) string {
 	}
 	return s
 }
+
+// Failure holds a safe message and one recovery line. Only NewFailure sets
+// its fields, so callers can trust its formatting without checking error text.
+type Failure struct {
+	message  string
+	recovery string
+}
+
+// NewFailure escapes both fields before it adds the recovery line.
+func NewFailure(message, recovery string) *Failure {
+	return &Failure{message: Escape(message), recovery: Escape(recovery)}
+}
+
+func (f *Failure) Error() string { return f.message + "\nrecovery: " + f.recovery }
+
+// Message returns the safe message without the recovery line.
+func (f *Failure) Message() string { return f.message }

@@ -98,6 +98,14 @@ func TestPanelVerify_SlotStatus(t *testing.T) {
 		})
 	}
 }
+func TestPanelVerify_ProcessDraftExitCode(t *testing.T) {
+	f := newCLIV2(t)
+	completeOtherV2(t, f)
+	seedVerifyStateV2(t, f, "draft")
+	rebindWrite(t, f.root, ".mindspec/config.local.yaml", "panel:\n  runners: [{family: harness, kind: process, argv: [fake-reviewer], prompt: stdin, output: stdout}]\n")
+	verifySlotV2(t, f, "draft", 2)
+}
+
 func TestPanelVerify_DispatchedUnsubmitted(t *testing.T) {
 	f := newCLIV2(t)
 	completeOtherV2(t, f)

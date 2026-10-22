@@ -118,6 +118,65 @@ func TestPanelCheckout_PruneTerminalSafeAttemptPath(t *testing.T) {
 	}
 }
 
+func TestPanelCheckout_PruneTerminalSafePgid(t *testing.T) {
+	for _, kind := range []string{"symlink", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newLaunchFixture(t)
+			oldRoot := f.root
+			newRoot := oldRoot + "-hostile\x1bc\nrecovery: printf INJECTED"
+			if err := os.Rename(oldRoot, newRoot); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := os.Rename(newRoot, oldRoot); err != nil {
+					t.Error(err)
+				}
+				if err := os.Chdir(oldRoot); err != nil {
+					t.Error(err)
+				}
+			}()
+			f.root = newRoot
+			f.dir = filepath.Join(newRoot, "review", "run")
+			f.script = filepath.Join(newRoot, "fake.sh")
+			if err := os.Chdir(newRoot); err != nil {
+				t.Fatal(err)
+			}
+			config.ResetCache()
+			f.configure(t, "stdout", "", "")
+			f.runner(t, "", 0)
+			layout := f.layout(t)
+			attempt := layout.AttemptDir(1)
+			if err := os.MkdirAll(attempt, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			pgid := filepath.Join(attempt, "pgid")
+			if kind == "symlink" {
+				if err := os.Symlink(f.script, pgid); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Mkdir(pgid, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if events := f.events(t); len(events) != 0 {
+				t.Fatalf("prerequisite: attempt must be unregistered: %+v", events)
+			}
+			out, err := runPanelVerbCmd("checkout", "run", "--prune", "--slot", "R1")
+			if err == nil || !strings.Contains(err.Error(), "pgid") || !strings.Contains(out, "pgid") {
+				t.Fatalf("missing unsafe pgid refusal: output=%q error=%v", out, err)
+			}
+			for _, text := range []string{out, err.Error()} {
+				if strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
+					t.Errorf("pgid error contains terminal controls or a forged recovery line: %q", text)
+				}
+				const recovery = "\nrecovery: inspect the attempt directory and its live supervisor"
+				if strings.Count(text, "\nrecovery:") != 1 || !strings.HasSuffix(strings.TrimSuffix(text, "\n"), recovery) {
+					t.Errorf("pgid error must end with exactly one real recovery line: %q", text)
+				}
+			}
+		})
+	}
+}
+
 func (f launchFixture) configure(t *testing.T, output, quota, to string) {
 	t.Helper()
 	r := config.Runner{Family: "a", Kind: "process", Argv: []string{f.script}, Prompt: "stdin", Output: output, OnQuota: to}

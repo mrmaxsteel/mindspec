@@ -186,7 +186,7 @@ func checkProcessOrphans(root string, reg panel.Registration, layout panel.SlotL
 					pgid, _ = strconv.Atoi(value)
 				}
 			} else if !os.IsNotExist(err) {
-				return err
+				return checkoutFailure(err.Error(), "inspect the attempt directory and its live supervisor")
 			}
 		}
 		if err := panellaunch.StopOrphan(dir, pgid); err != nil {

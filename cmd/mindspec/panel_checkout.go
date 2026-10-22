@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,11 +29,14 @@ var checkoutReadMetadataFn = bead.GetMetadata
 var panelCheckoutOrphanCheck = func(root string, reg panel.Registration, layout panel.SlotLayout) error { return nil }
 
 func checkoutFailure(message, recovery string) error {
-	return fmt.Errorf("%s\nrecovery: %s", termsafe.Escape(message), recovery)
+	return termsafe.NewFailure(message, recovery)
 }
 
 func checkoutError(err error, recovery string) error {
-	if err == nil || strings.Contains(err.Error(), "\nrecovery:") {
+	if err == nil {
+		return err
+	}
+	if _, ok := err.(*termsafe.Failure); ok {
 		return err
 	}
 	return checkoutFailure(err.Error(), recovery)
@@ -469,7 +473,10 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 		}
 		lock, err := panel.AcquireSlotLock(entry.Lock)
 		if err != nil {
-			message, _, _ := strings.Cut(err.Error(), "\nrecovery:")
+			message := err.Error()
+			if errors.Is(err, panel.ErrSlotLocked) {
+				message = fmt.Sprintf("%s: %s", panel.ErrSlotLocked, entry.Lock)
+			}
 			failures = append(failures, message)
 			held = append(held, shellQuoteTarget(entry.Lock))
 			continue
@@ -483,12 +490,16 @@ func cleanupPanelCheckouts(root string, reg panel.Registration, isolation string
 	}
 	for _, entry := range affected {
 		if err := panelCheckoutOrphanCheck(root, reg, entry); err != nil {
-			failures = append(failures, err.Error())
+			message := err.Error()
+			if failure, ok := err.(*termsafe.Failure); ok {
+				message = failure.Message()
+			}
+			failures = append(failures, message)
 		}
 	}
 	if len(failures) > 0 {
 		release()
-		return nil, fmt.Errorf("%s", strings.Join(failures, "\n"))
+		return nil, checkoutFailure(strings.Join(failures, "; "), "inspect the attempt directory and its live supervisor")
 	}
 	// This is the same lock inode as the panel writer. Release it before the
 	// writer runs; the slot locks stay held through the caller's operation.

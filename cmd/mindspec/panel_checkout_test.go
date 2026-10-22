@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func slotTestGitInput(t *testing.T, dir, input string, args ...string) string {
@@ -1103,4 +1104,24 @@ func TestPanelCheckout_ProcessRecoverySpec(t *testing.T) {
 		t.Fatal("process dispatch accepted")
 	}
 	assertCheckoutRecovery(t, err.Error(), "mindspec panel launch "+shellQuoteTarget("p")+" "+shellQuoteTarget("R1")+" --spec "+shellQuoteTarget(f.p.Spec))
+}
+
+func TestPanelCheckout_ErrorTrustBoundary(t *testing.T) {
+	trusted := checkoutFailure("safe message", "inspect the slot")
+	if got := checkoutError(trusted, "fallback"); got != trusted {
+		t.Fatalf("trusted failure lost its recovery: %v", got)
+	}
+	for _, err := range []error{
+		fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED"),
+		fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED: %w", trusted),
+	} {
+		got := checkoutError(err, "inspect the slot").Error()
+		want := termsafe.Escape(err.Error()) + "\nrecovery: inspect the slot"
+		if got != want || strings.Contains(got, "\x1b") || strings.Count(got, "\nrecovery:") != 1 {
+			t.Errorf("untrusted error bypassed escaping: got %q want %q", got, want)
+		}
+	}
+	if got := checkoutError(nil, "fallback"); got != nil {
+		t.Fatalf("nil error changed: %v", got)
+	}
 }

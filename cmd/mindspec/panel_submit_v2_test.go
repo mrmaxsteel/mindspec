@@ -237,9 +237,19 @@ func TestPanelSubmit_ABA(t *testing.T) {
 			t.Fatalf("submit: %v %s", err, out)
 		}
 	}
+	before, err := panel.ReadLedger(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runPanelVerbCmd(f.args(f.file(t, a))...); err != nil {
+		t.Fatalf("rerun third A: %v %s", err, out)
+	}
 	lines, err := panel.ReadLedger(f.dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, lines) {
+		t.Error("immediate rerun of third A added or changed a ledger record")
 	}
 	var seqs []int
 	for _, line := range lines {

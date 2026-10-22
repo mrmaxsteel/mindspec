@@ -1,6 +1,9 @@
 package termsafe
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestTermsafeEscape_SafeSetQuoteAndNoOp pins AC6: the safe-set/quote rule's
 // single home is internal/termsafe, and it behaves as documented: printable
@@ -129,4 +132,17 @@ func containsRune(s string, want rune) bool {
 		}
 	}
 	return false
+}
+
+func TestFailure_EscapesMessageAndRecovery(t *testing.T) {
+	message := "path\x1bc\nrecovery: printf INJECTED"
+	recovery := "inspect\x1b\nrecovery: forged"
+	failure := NewFailure(message, recovery)
+	want := Escape(message) + "\nrecovery: " + Escape(recovery)
+	if got := failure.Error(); got != want || strings.Count(got, "\nrecovery:") != 1 || strings.Contains(got, "\x1b") {
+		t.Fatalf("unsafe failure: got %q want %q", got, want)
+	}
+	if got := failure.Message(); got != Escape(message) {
+		t.Fatalf("unsafe message: %q", got)
+	}
 }

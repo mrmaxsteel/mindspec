@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // TestLaunchActor is a local test executable, never a model runner.
@@ -392,5 +394,40 @@ func TestPanelLaunch_UnsafeOrphanGroup(t *testing.T) {
 				t.Fatalf("unsafe orphan group: error=%v signals=%d", err, calls)
 			}
 		})
+	}
+}
+
+func TestPanelLaunch_OrphanRemainsLockedTerminalSafe(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hostile\x1bc\nrecovery: printf INJECTED")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := takeRunLock(filepath.Join(dir, "run.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	old := stopOrphanSignal
+	t.Cleanup(func() { stopOrphanSignal = old })
+	pgid := syscall.Getpgrp() + 1
+	calls := 0
+	stopOrphanSignal = func(pid int, sig syscall.Signal) error {
+		calls++
+		if pid != -pgid || sig != syscall.SIGKILL {
+			t.Errorf("unexpected signal: pid=%d signal=%v", pid, sig)
+		}
+		return nil
+	}
+	err = StopOrphan(dir, pgid)
+	if err == nil || !strings.HasPrefix(err.Error(), "attempt remains locked: ") || calls != 1 {
+		t.Fatalf("missing held-lock timeout: error=%v signals=%d", err, calls)
+	}
+	text := err.Error()
+	if !strings.Contains(text, termsafe.Escape(dir)) || strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
+		t.Errorf("unsafe held-lock refusal: %q", text)
+	}
+	const recovery = "\nrecovery: inspect the attempt directory and its live supervisor"
+	if strings.Count(text, "\nrecovery:") != 1 || !strings.HasSuffix(text, recovery) {
+		t.Errorf("held-lock refusal must end with one real recovery line: %q", text)
 	}
 }
