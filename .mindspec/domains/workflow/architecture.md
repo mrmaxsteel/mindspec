@@ -1483,6 +1483,27 @@ materialization resume with `--resolve-merge` also runs this gate before
 it resumes a stage. A landed reconcile keeps its merge-parent-to-merge
 diff and reads ownership at the landed merge.
 
+### Reviewed-tree confirmation
+
+`FindLandedMerge` builds its reviewed set from panel registrations and
+ledger-backed rebinds. A reviewed-SHA metadata key confirms nothing unless
+the set contains it. An unregistered key is unverified in the provenance.
+
+A subject-named first-parent merge can match a registered review exactly.
+It can also match a reviewed ancestor when the second parent's tree differs
+only by tool artifacts. The path diff disables rename detection and keeps
+both sides of a rename. It accepts an empty wrapper commit. It accepts
+tracker exports and panel ledgers for the bead's own spec. A source edit,
+a source-to-artifact rename, or another spec's ledger does not qualify.
+The artifact set comes from `panel.ToolArtifactPaths`; its review glob is
+limited to the lifecycle spec directory. Registration fields do not widen it.
+
+The returned provenance names `exact` or `reviewed-tree`. An unavailable
+review object or failed review read confirms nothing. This datum never
+vetoes a matching tip or binding. Tip and binding contradictions still
+refuse, and the revert check still runs after confirmation. Reachable
+fallback does not evaluate the datum and still needs its audited git checks.
+
 ### Ancestor without a naming merge
 
 Reattest checks this state only after both merge scans find no candidate.

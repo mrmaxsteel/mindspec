@@ -16,6 +16,7 @@ package lifecycle
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -113,6 +114,8 @@ type LandedMergeNoEvidence struct {
 	// refusal: a second owned candidate merge carries THIS different
 	// second parent, so no single landing can be attested.
 	ConflictingSecondParent string
+	// Provenance records unavailable or non-confirming review data.
+	Provenance string
 }
 
 func (e *LandedMergeNoEvidence) Error() string {
@@ -120,8 +123,12 @@ func (e *LandedMergeNoEvidence) Error() string {
 		return fmt.Sprintf("%s: %s on %s (owned merges disagree on the landed tip — candidate merge %s's second parent %s vs another owned merge's second parent %s — refusing to pick one)",
 			ErrLandedMergeNotFound, termsafe.Escape(e.BeadID), termsafe.Escape(e.SpecBranch), termsafe.Escape(e.MergeSHA), termsafe.Escape(e.SecondParent), termsafe.Escape(e.ConflictingSecondParent))
 	}
-	return fmt.Sprintf("%s: %s on %s (candidate merge %s, second parent %s — no admissible datum confirms it)",
+	message := fmt.Sprintf("%s: %s on %s (candidate merge %s, second parent %s — no admissible datum confirms it)",
 		ErrLandedMergeNotFound, termsafe.Escape(e.BeadID), termsafe.Escape(e.SpecBranch), termsafe.Escape(e.MergeSHA), termsafe.Escape(e.SecondParent))
+	if e.Provenance != "" {
+		message += "; " + termsafe.Escape(e.Provenance)
+	}
+	return message
 }
 
 // Unwrap makes errors.Is(err, ErrLandedMergeNotFound) succeed for a
@@ -141,6 +148,8 @@ type LandedMerge struct {
 	FirstParent string
 	// SecondParent is the merged bead branch's tip at merge time.
 	SecondParent string
+	// Provenance names the confirmation rule and the review-key status.
+	Provenance string
 }
 
 // Seams (test stubs). Defaults call the real gitutil/panel packages.
@@ -238,9 +247,13 @@ func wellFormedGitObjectID(s string) bool {
 // candidate, and above all never reach git as an operand.
 func landedBindingForBead(beadID string) (*landedBinding, bool) {
 	meta, err := landedBindingMetadataFn(beadID)
-	if err != nil || meta == nil {
+	if err != nil {
 		return nil, false
 	}
+	return landedBindingFromMetadata(meta)
+}
+
+func landedBindingFromMetadata(meta map[string]interface{}) (*landedBinding, bool) {
 	sha, _ := meta["mindspec_landed_merge_sha"].(string)
 	sp, _ := meta["mindspec_landed_second_parent"].(string)
 	sha = strings.TrimSpace(sha)
@@ -365,10 +378,8 @@ func cutBranchToken(s string) string {
 //   - LANDED-NESS ("did it land") is git TOPOLOGY: a first-parent merge
 //     on specBranch with exactly two parents whose SECOND parent EQUALS
 //     the bead's landed tip — an EXACT match against a REAL merge. The
-//     pre-125 ancestor-TOLERANT confirmation legs are REMOVED: an
-//     ancestor-only-consistent datum is NEVER a positive identification
-//     (AC-2b/AC-2c) — with no exact-and-owned match this function
-//     REFUSES, never picks the newest ancestor-consistent merge.
+//     tip and binding legs require exact equality. A registered review may
+//     precede that tip only when its tree differs by tool artifacts alone.
 //
 // Candidate generation has exactly ONE admissible entry point (spec 125
 // R5; the anonymous-subject binding-SHA path was REMOVED as a BLOCKING
@@ -398,11 +409,11 @@ func cutBranchToken(s string) string {
 // refusal).
 //
 // A subject-named candidate is positively identified ONLY when at least
-// one admissible datum EXACT-matches it AND no available datum
-// contradicts it. The admissible data, all equality-only:
+// one admissible datum confirms it AND no tip or binding datum contradicts it.
 //
-//   - a registered panel SHA SET containing the candidate's exact
-//     second parent (panel.Scan/ForBead over the repo root and, when
+//   - a registered panel SHA SET containing the candidate's exact second
+//     parent, or an ancestor with only tool-artifact differences for this spec
+//     (panel.Scan/ForBead over the repo root and, when
 //     specID is derivable from specBranch, the spec's own co-located
 //     reviews/ directory);
 //   - a surviving bead/<id> branch's tip EQUAL to the second parent;
@@ -417,8 +428,9 @@ func cutBranchToken(s string) string {
 //     git-corroborated CACHE over an already-subject-OWNED candidate,
 //     never an ownership authority of its own.
 //
-// A non-matching panel set is non-corroborating, never a veto, and cannot
-// confirm an ancestor or pre-empt an exact tip/binding contradiction.
+// A non-matching panel set is non-corroborating, never a veto. The panel
+// datum cannot pre-empt an exact tip or binding contradiction. An unregistered
+// reviewed-SHA metadata key confirms nothing. Fallback never uses this datum.
 // The binding is a git-corroborated CACHE, never an
 // authority (§2(ii) "never subject text alone" is preserved: the subject
 // NOMINATES which bead; topology proves landed-ness). A cache pointing at
@@ -471,7 +483,7 @@ func cutBranchToken(s string) string {
 // so FindLandedMerge correctly reports the plain ErrLandedMergeNotFound
 // (no candidate to name) for it.
 //
-// Any git/read failure (a first-parent-merges scan failure, a
+// Any required git/read failure (a first-parent-merges scan failure, a
 // surviving-branch rev-parse failure, or a net-effect-check failure) is
 // returned as-is (not wrapped in ErrLandedMergeNotFound) so callers can
 // fail closed on infra trouble rather than silently treating it as "not
@@ -558,7 +570,11 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 	if tipErr != nil {
 		return nil, fmt.Errorf("resolving surviving branch %s: %w", beadBranch, tipErr)
 	}
-	binding, haveBinding := landedBindingForBead(beadID)
+	meta, metaErr := landedBindingMetadataFn(beadID)
+	if metaErr != nil {
+		meta = nil
+	}
+	binding, haveBinding := landedBindingFromMetadata(meta)
 
 	// All owned candidates must agree on ONE second parent (FIX-2b, the
 	// same R5 fail-closed rule ReattestLandedMerge applies): candidates
@@ -581,14 +597,17 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 	group := candidates
 	oldest := group[len(group)-1]
 
-	confirmed := false
-
-	if _, exact := reviewed[secondParent]; exact {
-		confirmed = true
+	provenance := reviewedTreeProvenance(root, specBranch, secondParent, reviewed)
+	confirmed := provenance != ""
+	if sha, _ := meta["mindspec_landed_reviewed_sha"].(string); sha != "" {
+		if _, registered := reviewed[sha]; !registered {
+			provenance += "; reviewed SHA key unverified"
+		}
 	}
 	if branchSurvives {
 		if branchTip == secondParent {
 			confirmed = true
+			provenance += "; surviving tip exact"
 		} else {
 			// Exact-equality only: a surviving branch whose tip is not the
 			// merge's second parent (e.g. new unlanded commits) contradicts
@@ -640,6 +659,7 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 			// single-key binding confirms on its one present key — the
 			// pre-121 partial-binding shape).
 			confirmed = true
+			provenance += "; landed binding exact"
 		}
 	}
 
@@ -650,6 +670,7 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 		noEvidence := &LandedMergeNoEvidence{
 			BeadID: beadID, SpecBranch: specBranch,
 			MergeSHA: newest.SHA, SecondParent: secondParent,
+			Provenance: strings.TrimPrefix(provenance, "; "),
 		}
 		if len(reviewed) > 0 {
 			return nil, fmt.Errorf("%w (panel set non-corroborating)", noEvidence)
@@ -722,12 +743,70 @@ func FindLandedMerge(root, specBranch, beadID string) (*LandedMerge, error) {
 
 	// AC-2e: the NEWEST same-second-parent exact match names the merge;
 	// the content-check above was anchored on the OLDEST (M₁).
-	return &LandedMerge{SHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent}, nil
+	return &LandedMerge{SHA: newest.SHA, FirstParent: newest.Parents[0], SecondParent: secondParent, Provenance: strings.TrimPrefix(provenance, "; ")}, nil
+}
+
+// reviewedTreeProvenance confirms exact reviews or artifact-only descendants.
+// Missing review objects and read failures confirm nothing. This optional datum
+// never vetoes a surviving tip or binding. Callers still check contradictions
+// and reverted content after confirmation.
+func reviewedTreeProvenance(root, specBranch, secondParent string, reviewed map[string]struct{}) string {
+	if _, exact := reviewed[secondParent]; exact {
+		return "panel exact"
+	}
+	// Git scans return full object IDs. An abbreviated candidate must not
+	// turn an exact review into an apparent ancestor confirmation.
+	if len(secondParent) != 40 && len(secondParent) != 64 {
+		return ""
+	}
+	if len(reviewed) == 0 {
+		return ""
+	}
+	specID := strings.TrimPrefix(specBranch, workspace.SpecBranchPrefix)
+	if idvalidate.SpecID(specID) != nil {
+		return ""
+	}
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return ""
+	}
+	patterns := panel.ToolArtifactPaths(specDir)
+	for reviewedSHA := range reviewed {
+		ancestor, err := isAncestorFn(root, reviewedSHA, secondParent)
+		if err != nil || !ancestor {
+			continue
+		}
+		paths, err := gitutil.DiffNameOnlyNoRenames(root, reviewedSHA, secondParent)
+		if err != nil {
+			continue
+		}
+		artifactsOnly := true
+		for _, name := range paths {
+			matched := false
+			for _, pattern := range patterns {
+				// ToolArtifactPaths covers all specs. Limit its review glob
+				// to the lifecycle spec, never the registration's spec field.
+				pattern = strings.Replace(pattern, "*/reviews/", specID+"/reviews/", 1)
+				if ok, _ := path.Match(pattern, name); ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				artifactsOnly = false
+				break
+			}
+		}
+		if artifactsOnly {
+			return "panel reviewed-tree"
+		}
+	}
+	return ""
 }
 
 // reviewedHeadSHAForBead returns every class-(c) SHA registered for beadID,
-// including untracked registrations. An exact match confirms; a non-matching
-// set is non-corroborating and never vetoes the tip or binding legs.
+// including untracked registrations and ledger-backed rebinds. Metadata keys
+// do not add reviews to this set.
 func reviewedHeadSHAForBead(root, specBranch, beadID string) map[string]struct{} {
 	// Reverse-derivation gate (ADR-0042 §1 reverse): specID is parsed back
 	// OUT of an agent-writable branch name via TrimPrefix. A malformed

@@ -749,6 +749,7 @@ is non-corroborating, never a contradiction or a veto. Empty, placeholder
 and malformed values are non-corroborating and never git operands.
 Reattest records a non-matching set as non-corroborating and can proceed
 on datum (a). The set alone never confirms an ancestor or a fallback.
+See [Amendment (Spec 132)](#amendment-spec-132) for the reviewed-tree rule on first-parent candidates.
 
 These semantics reach the CLOSE paths through `FindLandedMerge`:
 `MergedUnclosed`, `complete`'s reconcile and `stale_open`, as well as
@@ -757,7 +758,8 @@ evidence Spec 125 did not admit: an exact tip, binding or panel match
 confirms; a non-matching set alone yields `LandedMergeNoEvidence`, which
 `MergedUnclosed` propagates as an error and never a close. On the normal
 completion path, complete lands a commit no panel reviewed (OQ-3), so
-the panel leg is normally non-corroborating; binding review to landing
+the panel leg is normally non-corroborating. See [Amendment (Spec 132)](#amendment-spec-132).
+Binding review to landing
 belongs to the panel substrate.
 
 **Binding veto versus audited repair:** a contradictory surviving tip or
@@ -832,3 +834,24 @@ remote. The real push still runs its pre-push hooks.
 again. The early guards, push probe, and finalization use this one value.
 The executor keeps both live guards before each merge. It reads the current tips
 after artifact commits and bead auto-merges. Both early and live guards must pass.
+
+### Reviewed-tree confirmation
+
+This subsection changes Amendment (Spec 129), part (ii), for
+`FindLandedMerge`. The reviewed set R comes from panel registrations and
+ledger-backed rebinds. The `mindspec_landed_reviewed_sha` key counts only
+when it is in R. An unregistered key is unverified and confirms nothing.
+
+A subject-named first-parent candidate has second parent D. The panel datum
+confirms when D is in R (`exact`). It also confirms when some r in R is an
+ancestor of D and `git diff --no-renames --name-only -z r D` lists no paths
+or only tool-artifact paths (`reviewed-tree`). The tool-artifact set comes
+from `panel.ToolArtifactPaths` for the spec directory of the bead's own
+epic. The review glob is limited to that spec. Another spec's artifacts
+do not qualify. Rename detection stays off so both paths must qualify.
+An unavailable review object or failed review read confirms nothing.
+
+The datum confirms and never vetoes. A tip or binding contradiction still
+refuses. The revert check still runs after confirmation. The provenance
+string names `exact` or `reviewed-tree`. The reachable-fallback path does
+not evaluate this datum. Its audited git checks remain in force.
