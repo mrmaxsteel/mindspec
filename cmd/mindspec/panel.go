@@ -876,7 +876,7 @@ func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges
 			continue
 		}
 		sc := slotChanges{Slot: v.Slot}
-		data, err := os.ReadFile(filepath.Join(reg.Dir, v.File))
+		data, err := panel.ReadVerdictFile(filepath.Join(reg.Dir, v.File))
 		if err != nil {
 			sc.DecodeErr = fmt.Sprintf("could not re-read %s: %v", v.File, err)
 			out = append(out, sc)
@@ -955,6 +955,9 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		// both) are both panel-dir-sourced; escape each at this render
 		// site.
 		fmt.Fprintf(&b, "  %s: %s%s\n", termsafe.Escape(v.Slot), termsafe.Escape(v.Verdict), hb)
+		if v.ReadError != "" {
+			fmt.Fprintf(&b, "    verdict read failed: %s\n    recovery: submit a new verdict with mindspec panel submit\n", termsafe.Escape(v.ReadError))
+		}
 	}
 	if len(res.Malformed) > 0 {
 		// R3(c): per-element, same discipline as renderPanelVerify above.
@@ -967,6 +970,9 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	}
 	for _, v := range res.Unexpected {
 		fmt.Fprintf(&b, "unexpected slot: %s (%s)\n", termsafe.Escape(v.Slot), termsafe.Escape(v.File))
+		if v.ReadError != "" {
+			fmt.Fprintf(&b, "    verdict read failed: %s\n    recovery: use only roster verdict files in the panel directory\n", termsafe.Escape(v.ReadError))
+		}
 	}
 
 	b.WriteString("\ndecision: ")

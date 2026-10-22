@@ -41,7 +41,7 @@ func ConsolidatedName(round int) string {
 	return fmt.Sprintf("consolidated-round-%d.md", round)
 }
 
-// Verdict is one reviewer's parsed verdict file from the latest round.
+// Verdict is one reviewer's parsed verdict or read failure from the latest round.
 type Verdict struct {
 	// File is the basename, e.g. "codex-correctness-round-2.json".
 	File string
@@ -61,6 +61,8 @@ type Verdict struct {
 	Invalid    bool
 	Findings   []Finding
 	SlotSHA256 string
+	// ReadError marks an unreadable verdict as INVALID. It cannot supply findings.
+	ReadError string
 }
 
 // verdictJSON validates the core verdict fields before finding payload parsing.
@@ -108,9 +110,8 @@ type Result struct {
 	// the registered round's outcome.
 	RoundMismatch bool
 
-	// Verdicts are the successfully parsed verdicts of LatestRound,
-	// sorted by Slot. Verdict files from earlier rounds are never
-	// tallied.
+	// Verdicts are parsed verdicts and INVALID read failures of LatestRound,
+	// sorted by Slot. Verdict files from earlier rounds are never tallied.
 	Verdicts []Verdict
 	// Approves and Rejects count canonical APPROVE / REJECT verdicts
 	// in Verdicts. REQUEST_CHANGES (and anything unrecognized) is
@@ -121,7 +122,7 @@ type Result struct {
 	HardBlocks []string
 
 	// Malformed lists the basenames of LatestRound verdict files
-	// that exist but could not be read or parsed. They appear here by
+	// that could be read but could not be parsed. They appear here by
 	// name and contribute nothing to Verdicts or the counts. An
 	// unparseable roster verdict counts as MISSING.
 	Malformed []string
@@ -339,16 +340,20 @@ func Tally(dir string) (*Result, error) {
 		}
 	}
 
-	// Filename-derived rounds.
+	roster := map[string]bool{}
+	if res.Panel != nil {
+		for _, slot := range res.Panel.Roster {
+			roster[slot.Slot] = true
+		}
+	}
+	// Filename-derived rounds. Unrelated directories do not supply rounds.
+	// A directory at a current roster verdict path is a damaged verdict.
 	type vfile struct {
 		name, slot string
 		round      int
 	}
 	var vfiles []vfile
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
 		m := verdictFileRE.FindStringSubmatch(e.Name())
 		if m == nil {
 			continue
@@ -356,6 +361,9 @@ func Tally(dir string) (*Result, error) {
 		round, err := strconv.Atoi(m[2])
 		if err != nil {
 			continue // unreachable for \d+ short of overflow
+		}
+		if e.IsDir() && (res.Panel == nil || round != res.Panel.Round || !roster[m[1]]) {
+			continue
 		}
 		vfiles = append(vfiles, vfile{name: e.Name(), slot: m[1], round: round})
 		if round > res.LatestRound {
@@ -385,21 +393,20 @@ func Tally(dir string) (*Result, error) {
 			return nil, err
 		}
 	}
-	roster := map[string]bool{}
-	if res.Panel != nil {
-		for _, slot := range res.Panel.Roster {
-			roster[slot.Slot] = true
-		}
-	}
 	// Tally the latest round only.
 	for _, vf := range vfiles {
 		if vf.round != res.LatestRound {
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
-		data, err := os.ReadFile(filepath.Join(dir, vf.name))
+		data, err := ReadVerdictFile(filepath.Join(dir, vf.name))
 		if err != nil {
-			res.Malformed = append(res.Malformed, vf.name)
+			v := Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Verdict: "INVALID", Invalid: true, ReadError: err.Error()}
+			if offRoster {
+				res.Unexpected = append(res.Unexpected, v)
+			} else {
+				res.Verdicts = append(res.Verdicts, v)
+			}
 			continue
 		}
 		if round.VerdictSchema == 2 && !offRoster {
@@ -498,8 +505,8 @@ func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, e
 		return FindingVerdict{}, res.IntegrityErr
 	}
 	for _, v := range res.Verdicts {
-		if v.Slot == slot && v.Round == round {
-			data, err := os.ReadFile(filepath.Join(dir, v.File))
+		if v.Slot == slot && v.Round == round && v.ReadError == "" {
+			data, err := ReadVerdictFile(filepath.Join(dir, v.File))
 			if err != nil {
 				return FindingVerdict{}, err
 			}

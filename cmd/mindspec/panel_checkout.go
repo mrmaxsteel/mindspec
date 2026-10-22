@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -117,13 +118,10 @@ func ensureSlotCheckout(root string, reg panel.Registration, layout panel.SlotLa
 		return checkoutFailure(err.Error(), recovery)
 	}
 	metadata := panel.SlotMetadata{Spec: panelRecordSpec(reg.Panel), Slug: reg.Slug(), Round: reg.Panel.Round, Slot: slot, MainRoot: root}
-	if info, err := os.Lstat(layout.Metadata); err == nil {
-		if !info.Mode().IsRegular() {
-			return checkoutFailure("slot metadata is not a regular file", recovery)
-		}
-		raw, err := os.ReadFile(layout.Metadata)
+	if _, err := os.Lstat(layout.Metadata); err == nil {
+		raw, err := workspace.ReadSlotMetadata(layout.Metadata)
 		if err != nil {
-			return err
+			return checkoutFailure(err.Error(), recovery)
 		}
 		var old panel.SlotMetadata
 		if json.Unmarshal(raw, &old) != nil || old != metadata {

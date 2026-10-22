@@ -11,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -28,17 +29,22 @@ func checkStaleCheckouts(r *Report, root string, cfg *config.Config) {
 			return err
 		}
 		parts := strings.Split(rel, string(filepath.Separator))
-		if entry.IsDir() {
+		isMetadata := len(parts) == 5 && entry.Name() == "slot.json"
+		if entry.IsDir() && !isMetadata {
 			if entry.Name() == ".locks" || len(parts) > 4 {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if len(parts) != 5 || entry.Name() != "slot.json" || entry.Type()&os.ModeSymlink != 0 {
+		if !isMetadata {
 			return nil
 		}
-		data, err := os.ReadFile(path) //nolint:gosec // Go 1.23 has no root-scoped read API. This check only reads local metadata.
+		data, err := workspace.ReadSlotMetadata(path)
 		if err != nil {
+			r.Checks = append(r.Checks, Check{Name: "Panel checkouts", Status: Warn, Message: fmt.Sprintf("%s: %s\nrecovery: repair the slot metadata", termsafe.Escape(path), termsafe.Escape(err.Error()))})
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		var metadata panel.SlotMetadata

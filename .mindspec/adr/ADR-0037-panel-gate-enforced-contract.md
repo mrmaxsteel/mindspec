@@ -709,3 +709,9 @@ A slot discharge binds to the hash of the ordered item texts.
 The trust boundary in §8 also applies to `panel submit`. Submit binds bytes to a
 ledger record. It does not authenticate a reviewer. Repository write access can
 change both the verdict file and the ledger.
+
+`internal/panel` may import a third internal package, the stdlib-only
+`internal/safefile`, to read reviewer-writable verdict files without following
+links and without blocking. The leaf rule's purpose does not change: no config,
+git or process code belongs in `internal/panel`.
+`TestPanelLeafImports_StdlibPlusTermsafeOnly` checks the exact import set.

@@ -111,7 +111,7 @@ Verify reports one status per slot:
 | Status | Meaning |
 |:-------|:--------|
 | `final` | Latest final submission is complete and its file matches |
-| `damaged` | Counted final submission has a missing or changed file |
+| `damaged` | Counted final submission has a missing, changed or unreadable file |
 | `void` | Latest submitted verdict is VOID |
 | `draft` | Latest submission is a draft |
 | `running` | Current attempt is pending or running |
@@ -124,7 +124,9 @@ Verify reports one status per slot:
 Exit 0 means all slots are final. It does not mean the gate passes.
 Exit 1 means a slot is running or missing, a harness draft is pending, or a quota handoff is pending.
 Exit 2 applies in every other case. `--json` includes the effective family, model, lens, kind, annotations and `handoff_pending`.
-On a status-read error, verify prints a text preview and exits 2, also with `--json`.
+On a status-read error, verify exits 2. Text output includes a preview. With `--json`, output contains only a JSON error object.
+A slot can show `attempt <k> run.lock probe failed: ...` when its lock probe fails.
+An unreadable verdict marks only its slot as damaged, with `verdict read failed: ...`. Verify still reports all slots.
 
 ## Decision and recovery
 

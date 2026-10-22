@@ -78,10 +78,13 @@ func TestPassRule_ZeroApprovePasses(t *testing.T) {
 	}
 }
 func TestPassRule_EachTermBlocks(t *testing.T) {
-	for _, term := range []string{"complete", "veto", "fresh", "discharged", "intact"} {
+	for _, term := range []string{"complete", "veto", "fresh", "discharged", "intact", "round mismatch", "unexpected veto"} {
 		t.Run(term, func(t *testing.T) {
 			dir, p := passFixture(t, 2, VerdictApprove)
 			r := passTally(t, dir)
+			if !r.PassRule(true) {
+				t.Fatal("approval baseline must pass")
+			}
 			facts := GateFacts{Reg: &Registration{Dir: dir, Panel: p}, Res: r, HeadSHA: p.ReviewedHeadSHA, WorktreeAbsent: true}
 			switch term {
 			case "complete":
@@ -97,6 +100,10 @@ func TestPassRule_EachTermBlocks(t *testing.T) {
 				r.Approves--
 			case "intact":
 				r.IntegrityErr = fmt.Errorf("roster")
+			case "round mismatch":
+				r.RoundMismatch = true
+			case "unexpected veto":
+				r.Unexpected = []Verdict{{Slot: "outsider", Verdict: VerdictApprove, HardBlock: true}}
 			}
 			if d := PanelGateDecision(facts); d.Action != Block {
 				t.Fatalf("%s alone must block: %+v", term, d)

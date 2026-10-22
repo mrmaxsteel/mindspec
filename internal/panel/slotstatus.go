@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // SlotRuntime supplies config and lock facts without coupling the leaf to config.
@@ -108,10 +110,7 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 		sub := subs[roster.Slot]
 		events := attempts[roster.Slot]
 		file := fmt.Sprintf("%s-round-%d.json", roster.Slot, p.Round)
-		data, readErr := os.ReadFile(filepath.Join(res.Dir, file))
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return nil, readErr
-		}
+		data, readErr := ReadVerdictFile(filepath.Join(res.Dir, file))
 		exists := readErr == nil
 		matches := exists && sub.Seq > 0 && findingHash(data) == sub.FileSHA256
 		if round.VerdictSchema != 2 {
@@ -176,6 +175,10 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 					}
 				}
 			}
+		}
+		if readErr != nil && !os.IsNotExist(readErr) {
+			s.Status = "damaged"
+			s.Annotations = append(s.Annotations, "verdict read failed: "+termsafe.Escape(readErr.Error()))
 		}
 		var replaced string
 		for _, line := range lines {

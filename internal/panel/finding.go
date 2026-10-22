@@ -125,7 +125,7 @@ func ReadFindingVerdict(dir, slot string, round int) (FindingVerdict, error) {
 	if round < 1 || round != latest {
 		return FindingVerdict{}, fmt.Errorf("round %d is not latest round %d", round, latest)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round)))
+	data, err := ReadVerdictFile(filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, round)))
 	if err != nil {
 		return FindingVerdict{}, err
 	}

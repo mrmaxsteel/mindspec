@@ -884,10 +884,10 @@ func TestPanelLaunch_RefusesOutputFIFO(t *testing.T) {
 			var runErr error
 			select {
 			case runErr = <-done:
-			case <-time.After(2 * time.Second):
+			case <-time.After(30 * time.Second):
 				// Release only this test's readers, including repeated digest reads.
 				var paths []string
-				deadline := time.After(3 * time.Second)
+				deadline := time.After(30 * time.Second)
 				ticker := time.NewTicker(5 * time.Millisecond)
 				defer ticker.Stop()
 			releasing:

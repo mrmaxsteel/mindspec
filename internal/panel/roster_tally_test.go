@@ -70,7 +70,7 @@ func TestTally_RosterCompleteness(t *testing.T) {
 }
 
 func TestTally_UnparseableCountsNothing(t *testing.T) {
-	for _, placement := range []string{"legacy extra", "off roster", "on roster", "unreadable off roster"} {
+	for _, placement := range []string{"legacy extra", "off roster", "on roster"} {
 		t.Run(placement, func(t *testing.T) {
 			dir, p := passFixture(t, 2, VerdictApprove)
 			name := "zz-extra-round-1.json"
@@ -83,11 +83,7 @@ func TestTally_UnparseableCountsNothing(t *testing.T) {
 				name = "R1-round-1.json"
 				wantAction = Block
 			}
-			if placement == "unreadable off roster" {
-				if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, name)); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := os.WriteFile(filepath.Join(dir, name), []byte("{not json"), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("{not json"), 0644); err != nil {
 				t.Fatal(err)
 			}
 			r := passTally(t, dir)
@@ -106,6 +102,36 @@ func TestTally_UnparseableCountsNothing(t *testing.T) {
 			}
 			if placement == "on roster" && (r.Complete() || r.MissingCount() != 1) {
 				t.Fatalf("unparseable roster verdict must count as missing: %+v", r)
+			}
+		})
+	}
+}
+
+func TestTally_UnsafeVerdictIsInvalid(t *testing.T) {
+	for _, name := range []string{"R1-round-1.json", "zz-extra-round-1.json"} {
+		t.Run(name, func(t *testing.T) {
+			dir, _ := passFixture(t, 2, VerdictApprove)
+			if name == "R1-round-1.json" {
+				if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, name+".saved")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, name)); err != nil {
+				t.Fatal(err)
+			}
+			r := passTally(t, dir)
+			if r.InvalidCount() != 1 || len(r.Malformed) != 0 || r.PassRule(true) {
+				t.Fatalf("unsafe verdict must be INVALID: %+v", r)
+			}
+			verdicts := r.Verdicts
+			if name != "R1-round-1.json" {
+				verdicts = r.Unexpected
+			}
+			if len(verdicts) == 0 || verdicts[0].Verdict != "INVALID" || verdicts[0].ReadError == "" {
+				t.Fatalf("unsafe verdict must retain its read error: %+v", verdicts)
+			}
+			if d := passDecision(t, dir); d.Action != Block {
+				t.Fatalf("unsafe verdict must block: %+v", d)
 			}
 		})
 	}
