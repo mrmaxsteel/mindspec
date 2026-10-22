@@ -281,7 +281,6 @@ func surfaceRefFileSurfaces(t *testing.T, root string) map[string]string {
 			t.Fatalf("walking %s: %v", dir, err)
 		}
 	}
-	walk("file:", "plugins/mindspec/scripts")
 	walk("file:", "internal/bootstrap/assets")
 	walk("file:", "internal/instruct/templates")
 	walk("file:", ".claude/skills")
@@ -405,7 +404,6 @@ func TestSurfaceRefs_ScansEverySurfaceKind(t *testing.T) {
 	for _, want := range []string{
 		"managed:ms-bead-cycle", "managed:ms-spec-approve", "managed:claudeMDManagedBlock", "managed:agentsMDBlockTemplate",
 		"workflow:ms-panel.js",
-		"file:plugins/mindspec/scripts/codex_verdict_extract.sh",
 		"file:internal/bootstrap/assets/bd-jsonl-merge-driver.sh",
 		"file:internal/instruct/templates/idle.md",
 		"file:.claude/skills/ms-spec-final-review/SKILL.md",

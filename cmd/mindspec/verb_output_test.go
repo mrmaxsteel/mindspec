@@ -126,6 +126,8 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
+	"mindspec panel launch":   "runs a reviewer and records its verdict; no lifecycle-phase state",
+	"mindspec panel recover":  "records a verdict from saved reviewer output; no lifecycle-phase state",
 	"mindspec config resolve": "read-only: previews resolved panel slots and their config sources",
 	"mindspec panel rebind":   "panel bookkeeping: refreshes the reviewed SHA and digest with an audit entry; no lifecycle phase mutation",
 	"mindspec panel defer":    "records a panel deferral and disposition; no lifecycle phase mutation",
