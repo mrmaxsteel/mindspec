@@ -36,7 +36,7 @@ func checkoutError(err error, recovery string) error {
 	if err == nil {
 		return err
 	}
-	var failure *termsafe.Failure
+	var failure termsafe.RecoveryFailure
 	if errors.As(err, &failure) {
 		return failure
 	}

@@ -496,7 +496,7 @@ func TestSlotAttempts(t *testing.T) {
 }
 func TestPanelSubmit_CoreRefusals(t *testing.T) {
 	t.Run("terminal safe", func(t *testing.T) {
-		want := "\"message\\x1b[31m\"\nrecovery: retry\\x1b[0m"
+		want := "message\\x1b[31m\nrecovery: retry\\x1b[0m"
 		if got := submitRefusal("message\x1b[31m", "retry\x1b[0m").Error(); got != want {
 			t.Fatalf("unsafe refusal: want %q, got %q", want, got)
 		}

@@ -1,12 +1,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func panelConfigFixture(t *testing.T, main, local string) string {
@@ -391,5 +394,32 @@ func TestIsolationRoot_Validate(t *testing.T) {
 	value, err := IsolationRootFor(root)
 	if err != nil || value != ".mindspec-scratch" {
 		t.Fatalf("root helper: %s %v", value, err)
+	}
+}
+
+func TestConfigRecovery_ProducerPrefixes(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix string
+		produce      func() error
+	}{
+		{"local", "config.local.yaml: ", func() error { return localError(ValidateModel("-bad")) }},
+		{"reviewer validation", "panel.reviewers[0]: ", func() error { return validateReviewerEntries([]Reviewer{{Model: "-bad"}}, "panel.reviewers") }},
+		{"slot expansion", "default reviewers[0]: ", func() error {
+			_, err := DefaultConfig().expandSlots("adhoc", []Reviewer{{Family: "harness", Model: "-bad"}})
+			return err
+		}},
+		{"model map", "models[\"unused\"]: ", func() error {
+			c := DefaultConfig()
+			c.Models = map[string]string{"unused": "-bad"}
+			return validatePanelConfig(c)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.produce()
+			var failure *termsafe.Failure
+			if !errors.As(err, &failure) || !strings.HasPrefix(failure.Message(), tc.prefix) || err.Error() != failure.Error() || strings.Count(err.Error(), "\nrecovery:") != 1 {
+				t.Fatalf("producer context lost: %v", err)
+			}
+		})
 	}
 }

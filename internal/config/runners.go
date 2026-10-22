@@ -188,7 +188,7 @@ func validatePanelConfig(c *Config) error {
 	}
 	for key, model := range c.Models {
 		if err := ValidateModel(model); err != nil {
-			return fmt.Errorf("models[%q]: %w", key, err)
+			return termsafe.PrefixFailure(err, fmt.Sprintf("models[%q]: ", key))
 		}
 	}
 	for _, gate := range PanelGateKeys {

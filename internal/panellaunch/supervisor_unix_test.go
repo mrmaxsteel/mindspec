@@ -423,7 +423,7 @@ func TestPanelLaunch_OrphanRemainsLockedTerminalSafe(t *testing.T) {
 		t.Fatalf("missing held-lock timeout: error=%v signals=%d", err, calls)
 	}
 	text := err.Error()
-	want := termsafe.Escape("attempt remains locked: "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
+	want := termsafe.EscapeRecovery("attempt remains locked: "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
 	if text != want {
 		t.Errorf("path must be escaped once: got %q want %q", text, want)
 	}
@@ -453,7 +453,7 @@ func TestPanelLaunch_OrphanSmallPGIDRefusal(t *testing.T) {
 			calls := 0
 			stopOrphanSignal = func(int, syscall.Signal) error { calls++; return holder.Close() }
 			err = StopOrphan(dir, pgid)
-			want := termsafe.Escape("cannot stop attempt "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
+			want := termsafe.EscapeRecovery("cannot stop attempt "+dir) + "\nrecovery: inspect the attempt directory and its live supervisor"
 			if err == nil || err.Error() != want || calls != 0 {
 				t.Fatalf("small pgid must refuse without a signal: error=%v want=%q signals=%d", err, want, calls)
 			}

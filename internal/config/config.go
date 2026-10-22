@@ -494,7 +494,7 @@ func loadUncached(root string) (*Config, error) {
 
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+		return nil, termsafe.PrefixFailure(err, "parsing config: ")
 	}
 	if err := loadPanelLayers(root, data, cfg); err != nil {
 		return nil, err
@@ -649,7 +649,7 @@ func validateReviewerEntries(reviewers []Reviewer, label string) error {
 	for i, r := range reviewers {
 		if r.Model != "" {
 			if err := ValidateModel(r.Model); err != nil {
-				return fmt.Errorf("%s[%d]: %w", label, i, err)
+				return termsafe.PrefixFailure(err, fmt.Sprintf("%s[%d]: ", label, i))
 			}
 		}
 		if r.model() == "" {
@@ -904,7 +904,7 @@ func (c *Config) expandSlots(gate string, reviewers []Reviewer) ([]ReviewerSlot,
 			model = c.SubstituteModel(family)
 		}
 		if err := ValidateModel(model); err != nil {
-			return nil, fmt.Errorf("%s[%d]: %w", c.reviewerLabel(gate), i, err)
+			return nil, termsafe.PrefixFailure(err, fmt.Sprintf("%s[%d]: ", c.reviewerLabel(gate), i))
 		}
 		for j := 0; j < r.CountValue(); j++ {
 			lens := r.Lens

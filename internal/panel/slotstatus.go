@@ -74,7 +74,7 @@ func roundSchema(lines [][]byte) (RoundRecord, error) {
 		latest = r
 	}
 	if seenV2 && latest.VerdictSchema != 2 {
-		return latest, fmt.Errorf("round registration removed the verdict schema; recovery: create a new round")
+		return latest, termsafe.NewFailure("round registration removed the verdict schema", "create a new round")
 	}
 	return latest, nil
 }

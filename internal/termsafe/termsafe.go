@@ -7,6 +7,7 @@ package termsafe
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -47,6 +48,14 @@ func Escape(s string) string {
 	return s
 }
 
+// RecoveryFailure is a producer-formatted refusal with its own recovery.
+// Wrappers must construct a typed failure to retain their message at a terminal
+// boundary. A plain wrapper does not make its text trusted.
+type RecoveryFailure interface {
+	error
+	TrustedRecovery()
+}
+
 // Failure holds a safe message and one recovery line. Only constructors set
 // its fields, so callers can trust its formatting without checking error text.
 type Failure struct {
@@ -72,7 +81,7 @@ func EscapeRecovery(s string) string {
 
 // NewFailure escapes raw message and recovery text once.
 func NewFailure(message, recovery string) *Failure {
-	return &Failure{message: Escape(message), recovery: EscapeRecovery(recovery)}
+	return &Failure{message: EscapeRecovery(message), recovery: EscapeRecovery(recovery)}
 }
 
 // NewWrappedFailure retains cause for errors.Is and errors.As.
@@ -102,3 +111,22 @@ func (f *Failure) Unwrap() error { return f.cause }
 
 // Message returns the safe message without the recovery line.
 func (f *Failure) Message() string { return f.message }
+
+// TrustedRecovery marks the producer's formatted recovery as trusted.
+func (f *Failure) TrustedRecovery() {}
+
+// Recovery returns the safe recovery text without its line prefix.
+func (f *Failure) Recovery() string { return f.recovery }
+
+// PrefixFailure adds producer context to a typed failure. Only the raw prefix
+// needs escaping; the message and recovery have already been escaped.
+func PrefixFailure(err error, prefix string) error {
+	if err == nil {
+		return nil
+	}
+	var failure *Failure
+	if errors.As(err, &failure) {
+		return &Failure{message: EscapeRecovery(prefix) + failure.message, recovery: failure.recovery, cause: err}
+	}
+	return fmt.Errorf("%s%w", prefix, err)
+}

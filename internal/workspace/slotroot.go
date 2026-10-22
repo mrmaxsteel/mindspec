@@ -44,7 +44,7 @@ func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotR
 		treeInfo, treeErr := os.Stat(tree)
 		if metaErr == nil && treeErr == nil && treeInfo.IsDir() {
 			refuse := func() (SlotRoot, bool, error) {
-				return SlotRoot{}, true, fmt.Errorf("invalid slot directory %s\nrecovery: use mindspec panel checkout to create the slot directory", termsafe.Escape(dir))
+				return SlotRoot{}, true, termsafe.NewFailure(fmt.Sprintf("invalid slot directory %s", dir), "use mindspec panel checkout to create the slot directory")
 			}
 			raw, err := ReadSlotMetadata(metadata)
 			if err != nil || json.Unmarshal(raw, &slot) != nil {

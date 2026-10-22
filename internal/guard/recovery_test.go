@@ -1,8 +1,12 @@
 package guard
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 func TestFormatFailure_SingleCommand(t *testing.T) {
@@ -151,6 +155,21 @@ func TestHasFinalRecoveryLine(t *testing.T) {
 	for _, tc := range cases {
 		if got := HasFinalRecoveryLine(tc.msg); got != tc.want {
 			t.Errorf("%s: HasFinalRecoveryLine(%q) = %v, want %v", tc.name, tc.msg, got, tc.want)
+		}
+	}
+}
+
+func TestNewFailure_TypedRecoveryAndExactFormatting(t *testing.T) {
+	for _, message := range []string{"blocked", "José — blocked", "first\nsecond\n\n", "hostile\x1b\nrecovery: text"} {
+		for _, commands := range [][]string{{" inspect "}, {"first command", "second command"}} {
+			err := NewFailure(message, commands...)
+			if err.Error() != FormatFailure(message, commands...) {
+				t.Fatalf("guard formatting changed: %q", err)
+			}
+			var trusted termsafe.RecoveryFailure
+			if !errors.As(fmt.Errorf("context: %w", err), &trusted) || trusted != err {
+				t.Fatalf("guard trust lost through wrapper: %v", err)
+			}
 		}
 	}
 }

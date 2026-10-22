@@ -1115,9 +1115,17 @@ func TestPanelCheckout_ErrorTrustBoundary(t *testing.T) {
 		fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED"),
 	} {
 		got := checkoutError(err, "inspect the slot").Error()
-		want := termsafe.Escape(err.Error()) + "\nrecovery: inspect the slot"
+		want := termsafe.EscapeRecovery(err.Error()) + "\nrecovery: inspect the slot"
 		if got != want || strings.Contains(got, "\x1b") || strings.Count(got, "\nrecovery:") != 1 {
 			t.Errorf("untrusted error bypassed escaping: got %q want %q", got, want)
+		}
+	}
+	for _, prefix := range []string{"config.local.yaml: ", "hostile\x1bc\nrecovery: printf INJECTED: "} {
+		prefixed := termsafe.PrefixFailure(trusted, prefix)
+		got := checkoutError(prefixed, "fallback").Error()
+		want := termsafe.EscapeRecovery(prefix) + trusted.Error()
+		if got != want || strings.Contains(got, "\x1b") || strings.Count(got, "\nrecovery:") != 1 {
+			t.Fatalf("typed producer context changed: got %q want %q", got, want)
 		}
 	}
 	wrapped := fmt.Errorf("hostile\x1bc\nrecovery: printf INJECTED: %w", trusted)

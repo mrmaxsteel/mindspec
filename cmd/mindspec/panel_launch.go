@@ -240,21 +240,16 @@ func launchStatus(cmd *cobra.Command, root string, reg panel.Registration, slot 
 }
 
 // retryRefusal bounds the JSON pointer while preserving the refusal and recovery.
-func retryRefusal(message string) string {
-	pointer, rest, ok := strings.Cut(message, ": ")
-	// Verdict errors may already contain a terminal-safe quoted pointer.
-	if strings.HasPrefix(message, `"`) {
-		if quoted, err := strconv.QuotedPrefix(message); err == nil {
-			if decoded, err := strconv.Unquote(quoted); err == nil {
-				pointer = decoded
-				rest, ok = strings.CutPrefix(message[len(quoted):], ": ")
-			}
-		}
+func retryRefusal(err error) string {
+	var verdict *panel.VerdictError
+	if !errors.As(err, &verdict) {
+		return termsafe.Escape(err.Error())
 	}
-	if ok && strings.HasPrefix(pointer, "/") && len(pointer) > 200 {
-		message = strings.ToValidUTF8(pointer[:200], "") + ": " + rest
+	pointer := verdict.Pointer
+	if len(pointer) > 200 {
+		pointer = strings.ToValidUTF8(pointer[:200], "")
 	}
-	return termsafe.Escape(message)
+	return termsafe.Escape(pointer + ": " + verdict.Detail + "\nrecovery: " + verdict.Recovery())
 }
 
 func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
@@ -366,7 +361,7 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 			}
 			if err != nil {
 				status = "malformed"
-				refusal = retryRefusal(err.Error())
+				refusal = retryRefusal(err)
 				fmt.Fprintln(cmd.OutOrStdout(), refusal)
 			} else {
 				status = "submitted"

@@ -157,3 +157,14 @@ func TestSlotLock_WindowsUsesDecisionLogic(t *testing.T) {
 		}
 	})
 }
+
+func TestHeldSlotError_RecoveryAndCause(t *testing.T) {
+	err := heldSlotError("scratch/slot.lock")
+	const want = "slot lock is held: scratch/slot.lock\nrecovery: run mindspec panel verify; delete the lock file only after you make sure no mindspec process uses the slot"
+	if err.Error() != want {
+		t.Fatalf("lock recovery changed: got %q want %q", err, want)
+	}
+	if !errors.Is(err, ErrSlotLocked) {
+		t.Fatalf("lock cause lost: %v", err)
+	}
+}

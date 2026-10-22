@@ -99,11 +99,20 @@ func verdictV2Definition() *verdictSchemaNode {
 
 // VerdictV2Schema returns the schema layer only, without transport or relations.
 func VerdictV2Schema() ([]byte, error) { return json.MarshalIndent(verdictV2Definition(), "", "  ") }
+
+// VerdictError retains the raw JSON pointer and detail for bounded retry prompts.
+// The embedded failure supplies the terminal-safe message and recovery.
+type VerdictError struct {
+	*termsafe.Failure
+	Pointer string
+	Detail  string
+}
+
 func verdictError(pointer, message string) error {
 	if pointer == "" {
 		pointer = "/"
 	}
-	return termsafe.NewFailure(fmt.Sprintf("%s: %s", pointer, message), "correct the verdict and submit it again")
+	return &VerdictError{Failure: termsafe.NewFailure(fmt.Sprintf("%s: %s", pointer, message), "correct the verdict and submit it again"), Pointer: pointer, Detail: message}
 }
 func pointerChild(p, key string) string {
 	return p + "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")

@@ -143,7 +143,7 @@ func loadPanelLayers(root string, data []byte, c *Config) error {
 func localError(err error) error {
 	var failure *termsafe.Failure
 	if errors.As(err, &failure) {
-		return fmt.Errorf("config.local.yaml: %w", failure)
+		return termsafe.PrefixFailure(err, "config.local.yaml: ")
 	}
 	return termsafe.NewFailure(fmt.Sprintf("config.local.yaml: %s", err), "set only panel.runners and models in .mindspec/config.local.yaml")
 }
@@ -190,7 +190,7 @@ func recordSourcesActive(n *yaml.Node, path, source string, c *Config, active ma
 					return err
 				}
 				if err := ValidateModel(model); err != nil {
-					return fmt.Errorf("%s: %w", next, err)
+					return termsafe.PrefixFailure(err, next+": ")
 				}
 			}
 			if next == "panel.isolation_root" {

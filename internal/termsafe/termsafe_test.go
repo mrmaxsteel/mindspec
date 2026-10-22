@@ -140,11 +140,11 @@ func TestFailure_EscapesMessageAndRecovery(t *testing.T) {
 	message := "path\x1bc\nrecovery: printf INJECTED"
 	recovery := "inspect\x1b\nrecovery: forged"
 	failure := NewFailure(message, recovery)
-	want := Escape(message) + "\nrecovery: " + EscapeRecovery(recovery)
+	want := EscapeRecovery(message) + "\nrecovery: " + EscapeRecovery(recovery)
 	if got := failure.Error(); got != want || strings.Count(got, "\nrecovery:") != 1 || strings.Contains(got, "\x1b") {
 		t.Fatalf("unsafe failure: got %q want %q", got, want)
 	}
-	if got := failure.Message(); got != Escape(message) {
+	if got := failure.Message(); got != EscapeRecovery(message) {
 		t.Fatalf("unsafe message: %q", got)
 	}
 }
@@ -178,5 +178,31 @@ func TestFailure_WrappedCauseAndSafeJoin(t *testing.T) {
 	want := failure.Message() + "; " + Escape("plain\x1b\nrecovery: forged") + "\nrecovery: inspect"
 	if joined.Error() != want {
 		t.Fatalf("join changed escaped messages: got %q want %q", joined.Error(), want)
+	}
+}
+
+func TestFailure_MessagePreservesPrintableUnicode(t *testing.T) {
+	message := "unknown panel.gates key — use a valid gate key"
+	if got := NewFailure(message, "rename the key").Error(); got != message+"\nrecovery: rename the key" {
+		t.Fatalf("printable Unicode was quoted: %q", got)
+	}
+}
+
+func TestPrefixFailure_TrustAndCause(t *testing.T) {
+	cause := errors.New("cause")
+	original := NewWrappedFailure(cause, "José\x1b\nrecovery: forged", "inspect 'José'")
+	err := PrefixFailure(original, "config.local.yaml: ")
+	var failure *Failure
+	if !errors.Is(err, cause) || !errors.As(err, &failure) || failure.Message() != "config.local.yaml: "+original.Message() || failure.Recovery() != original.Recovery() {
+		t.Fatalf("typed context or cause lost: %v", err)
+	}
+	plain := errors.New("untrusted\x1b\nrecovery: forged")
+	err = PrefixFailure(plain, "context: ")
+	var trusted RecoveryFailure
+	if errors.As(err, &trusted) || !errors.Is(err, plain) {
+		t.Fatalf("plain error gained trust or lost cause: %v", err)
+	}
+	if PrefixFailure(nil, "context") != nil {
+		t.Fatal("nil error changed")
 	}
 }

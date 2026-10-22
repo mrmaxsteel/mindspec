@@ -110,7 +110,7 @@ func TestPanelCheckout_PruneTerminalSafeAttemptPath(t *testing.T) {
 		t.Fatalf("missing held-attempt refusal: output=%q error=%v", out, err)
 	}
 	for _, text := range []string{out, err.Error()} {
-		if !strings.Contains(text, termsafe.Escape("cannot stop attempt "+attempt)) || !strings.Contains(text, "\nrecovery: inspect the attempt directory and its live supervisor") {
+		if !strings.Contains(text, termsafe.EscapeRecovery("cannot stop attempt "+attempt)) || !strings.Contains(text, "\nrecovery: inspect the attempt directory and its live supervisor") {
 			t.Errorf("missing safe path or recovery: %q", text)
 		}
 		if strings.Contains(text, "\x1b") || strings.Contains(text, "\nrecovery: printf INJECTED") {
@@ -808,19 +808,93 @@ func TestPanelLaunch_MissingExitQuota(t *testing.T) {
 	}
 }
 func TestPanelLaunch_RetryPointer(t *testing.T) {
-	rest := strings.Repeat("long refusal ", 30) + "\nrecovery: preserve this complete message"
-	for _, pointer := range []string{"/" + strings.Repeat("x", 240), "/" + strings.Repeat("é", 130), "/" + strings.Repeat("x", 240) + "\x1b"} {
-		for _, rendered := range []string{pointer, termsafe.Escape(pointer)} {
-			got := retryRefusal(rendered + ": " + rest)
-			wantPointer := strings.ToValidUTF8(pointer[:200], "")
-			if got != termsafe.Escape(wantPointer+": "+rest) {
-				t.Fatalf("only pointer should be cut: %q", got)
+	for _, key := range []string{strings.Repeat("x", 240) + "\x1b", strings.Repeat("é", 130)} {
+		var object map[string]any
+		if err := json.Unmarshal(paneltest.Bytes(t, paneltest.Verdict("APPROVE")), &object); err != nil {
+			t.Fatal(err)
+		}
+		object[key] = 1
+		raw, err := json.Marshal(object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = panel.ParseVerdictV2(raw)
+		if err == nil {
+			t.Fatal("unknown field accepted")
+		}
+		pointer := "/" + key
+		wantPointer := strings.ToValidUTF8(pointer[:200], "")
+		want := termsafe.Escape(wantPointer + ": unknown field\nrecovery: correct the verdict and submit it again")
+		for _, refusal := range []error{err, fmt.Errorf("validation: %w", err)} {
+			got := retryRefusal(refusal)
+			if got != want || strings.Contains(got, "\x1b") {
+				t.Errorf("raw pointer must be cut to at most 200 bytes: got %q want %q", got, want)
 			}
 		}
 	}
-	message := "a long refusal: " + rest
-	if got := retryRefusal(message); got != termsafe.Escape(message) {
+
+	message := "a long refusal: " + strings.Repeat("long refusal ", 30)
+	if got := retryRefusal(errors.New(message)); got != termsafe.Escape(message) {
 		t.Fatalf("non-pointer refusal cut: %q", got)
+	}
+}
+
+func TestPanelLaunch_MissingBriefRecovery(t *testing.T) {
+	f := newLaunchFixture(t)
+	brief := filepath.Join(f.dir, "BRIEF.md")
+	if err := os.Rename(brief, brief+".quarantine"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runPanelVerbCmd("launch", "run", "R1")
+	if err == nil {
+		t.Fatal("missing brief accepted")
+	}
+	assertCheckoutRecovery(t, err.Error(), "run panel create to render the brief")
+}
+
+func TestPanelLaunch_RetryPointerArgRunner(t *testing.T) {
+	f := newLaunchFixture(t)
+	var object map[string]any
+	if err := json.Unmarshal(paneltest.Bytes(t, f.v), &object); err != nil {
+		t.Fatal(err)
+	}
+	object[strings.Repeat("\u202e", 300000)] = 1
+	bad, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPath, goodPath := filepath.Join(f.root, "bad.json"), filepath.Join(f.root, "good.json")
+	slotWrite(t, badPath, string(bad))
+	slotWrite(t, goodPath, string(paneltest.Bytes(t, f.v)))
+	runner := config.Runner{Family: "a", Kind: "process", Argv: []string{f.script, "{prompt}"}, Prompt: "arg", Output: "stdout"}
+	cfg, err := json.Marshal(map[string]any{"panel": map[string]any{"runners": []config.Runner{runner}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slotWrite(t, filepath.Join(f.root, ".mindspec", "config.local.yaml"), string(cfg))
+	config.ResetCache()
+	f.scriptBody(t, `nonce=$(printf '%s\n' "$1" | sed -n 's/^MINDSPEC-VERDICT-BEGIN //p')
+if [ ! -e retry-marker ]; then
+ : > retry-marker
+ file=`+shellQuoteTarget(badPath)+`
+else
+ file=`+shellQuoteTarget(goodPath)+`
+fi
+printf 'MINDSPEC-VERDICT-BEGIN %s\n' "$nonce"
+cat "$file"
+printf '\nMINDSPEC-VERDICT-END %s\n' "$nonce"`)
+	out, err := f.run(t, false)
+	if err != nil {
+		t.Fatalf("valid second response was not submitted: %v; output bytes: %d", err, len(out))
+	}
+	f.status(t, "final")
+	events := f.events(t)
+	if len(events) != 4 || events[1].Status != "malformed" || events[3].Status != "submitted" {
+		t.Fatalf("expected one retry and a submission: %+v", events)
+	}
+	prompt := string(slotRead(t, filepath.Join(f.layout(t).AttemptDir(2), "prompt.md")))
+	if !strings.Contains(prompt, "unknown field") || strings.Contains(prompt, "\x1b") {
+		t.Fatalf("retry prompt lost safe refusal: %q", prompt)
 	}
 }
 
@@ -1235,7 +1309,7 @@ func TestPanelCheckout_CleanupEscapesFailureOnce(t *testing.T) {
 		return termsafe.NewFailure(message, "inspect the attempt directory and its live supervisor")
 	}
 	_, err := runPanelVerbCmd("checkout", "p", "--prune", "--slot", "R1")
-	assertProducerRecovery(t, err, termsafe.Escape(message), "inspect the attempt directory and its live supervisor")
+	assertProducerRecovery(t, err, termsafe.EscapeRecovery(message), "inspect the attempt directory and its live supervisor")
 }
 
 func TestPanelLaunch_PgidReadRecovery(t *testing.T) {

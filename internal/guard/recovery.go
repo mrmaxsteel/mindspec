@@ -1,7 +1,6 @@
 package guard
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -67,9 +66,17 @@ func FormatFailure(msg string, commands ...string) string {
 	return b.String()
 }
 
-// NewFailure returns FormatFailure(msg, commands...) as an error.
+// Failure holds a guard refusal with its validated recovery commands.
+type Failure struct{ formatted string }
+
+func (f *Failure) Error() string { return f.formatted }
+
+// TrustedRecovery marks the producer's formatted recovery as trusted.
+func (f *Failure) TrustedRecovery() {}
+
+// NewFailure returns FormatFailure(msg, commands...) as a typed error.
 func NewFailure(msg string, commands ...string) error {
-	return errors.New(FormatFailure(msg, commands...))
+	return &Failure{formatted: FormatFailure(msg, commands...)}
 }
 
 // HasFinalRecoveryLine reports whether the final line of msg is a
