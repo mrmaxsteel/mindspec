@@ -391,15 +391,6 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	// fail-closed refusal decisions.
 	result.Warnings = append(result.Warnings, planLintDoubleAssignedFiles(facts.sections)...)
 
-	// The validator's unlisted-plan-path warning is advisory; surface it at
-	// approve time too, because the emitted bead file lists come from
-	// key_file_paths only.
-	for _, iss := range vr.Issues {
-		if iss.Severity == validate.SevWarning && iss.Name == validate.PlanPathsWarningName {
-			result.Warnings = append(result.Warnings, iss.Message)
-		}
-	}
-
 	if len(facts.workChunks) == 0 {
 		// AC-19: a legacy prose-only plan still approves (wiring nothing —
 		// no prose dependency parser exists, spec 097 R3), but silently

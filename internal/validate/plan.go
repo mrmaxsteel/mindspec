@@ -236,10 +236,6 @@ func ValidatePlan(root, specID string) *Result {
 		checkBeadSection(r, bs)
 	}
 
-	// Advisory: a file path named in the plan body but absent from every
-	// work_chunks[].key_file_paths entry does not reach any bead's file list.
-	checkUnlistedPlanPaths(r, content, fm.WorkChunks)
-
 	// Spec 076: cross-bead decomposition quality checks
 	if !isApproved {
 		// Load project config for decomposition thresholds. Non-fatal: a
