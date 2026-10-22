@@ -23,6 +23,75 @@ func findCheckContaining(r *Report, substr string) *Check {
 
 const sourceGlobsCheckName = ".mindspec/config.yaml source_globs"
 
+func TestDoctor_LegacyMergeStrategyInfo(t *testing.T) {
+	for _, content := range []string{
+		"merge_strategy: pr\n",
+		"merge_strategy : direct\n",
+		"merge_strategy\t: auto\n",
+	} {
+		t.Run(content, func(t *testing.T) {
+			root := t.TempDir()
+			writeConfig(t, root, content+"source_globs: [cmd/**]\n")
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+			r := &Report{}
+			// This is the config entry point used by RunWithOptions.
+			checkSourceGlobs(r, root)
+			var infos []Check
+			for _, c := range r.Checks {
+				if c.Status == Info {
+					infos = append(infos, c)
+				}
+			}
+			if len(infos) != 1 {
+				t.Fatalf("want one Info, got %+v", r.Checks)
+			}
+			c := infos[0]
+			if c.Message != "merge_strategy is no longer used; remove it from .mindspec/config.yaml" {
+				t.Fatalf("unexpected Info text: %q", c.Message)
+			}
+			for _, pattern := range []string{`ADR-[0-9]`, `q9ea`, `[Ss]pec [0-9]{3}`} {
+				if regexp.MustCompile(pattern).MatchString(c.Message) {
+					t.Errorf("Info text contains internal record %q: %q", pattern, c.Message)
+				}
+			}
+			if c.FixFunc != nil || r.HasFailures() {
+				t.Fatal("Info must have no fix and must not set the CLI failure predicate")
+			}
+			r.Fix()
+			after, err := os.ReadFile(filepath.Join(root, ".mindspec", "config.yaml"))
+			if err != nil || string(after) != content+"source_globs: [cmd/**]\n" {
+				t.Fatalf("doctor fix changed the legacy config: %q, %v", after, err)
+			}
+			if findCheck(r, c.Name).Status != Info || r.HasFailures() {
+				t.Fatal("Info must stay non-failing after fix")
+			}
+		})
+	}
+}
+
+func TestDoctor_LegacyMergeStrategyCommentedOrNested(t *testing.T) {
+	for _, content := range []string{
+		"", "worktree_root: .worktrees\n", "# merge_strategy: pr\n",
+		"other:\n  merge_strategy: pr\n", "  merge_strategy: pr\n",
+		"extra_merge_strategy: pr\n", "merge_strategy_extra: pr\n",
+	} {
+		t.Run(content, func(t *testing.T) {
+			root := t.TempDir()
+			if content != "" {
+				writeConfig(t, root, content)
+			}
+			config.ResetCache()
+			t.Cleanup(config.ResetCache)
+			r := &Report{}
+			checkSourceGlobs(r, root)
+			if c := findCheck(r, ".mindspec/config.yaml merge_strategy"); c != nil {
+				t.Fatalf("unexpected legacy-key finding: %+v", c)
+			}
+		})
+	}
+}
+
 // TestMissingSourceGlobs_AllThreeStates exercises spec 091 Req 18: the
 // missing-source-globs Warn fires when config.yaml is absent, present
 // without the field, or present with an empty list; and clears once a
@@ -55,7 +124,7 @@ func TestMissingSourceGlobs_AllThreeStates(t *testing.T) {
 
 	t.Run("config present without field", func(t *testing.T) {
 		root := t.TempDir()
-		writeConfig(t, root, "merge_strategy: auto\n")
+		writeConfig(t, root, "worktree_root: .worktrees\n")
 		config.ResetCache()
 
 		r := &Report{}
@@ -135,7 +204,7 @@ func TestScaffoldSourceGlobs_ThreeStates(t *testing.T) {
 
 	t.Run("file present without field → block appended, prior bytes unchanged", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "merge_strategy: auto\nworktree_root: .worktrees\n"
+		prior := "protected_branches: [main]\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -159,7 +228,7 @@ func TestScaffoldSourceGlobs_ThreeStates(t *testing.T) {
 
 	t.Run("file present with field → byte-identical (no-op)", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "source_globs:\n  - cmd/**\nmerge_strategy: auto\n"
+		prior := "source_globs:\n  - cmd/**\nworktree_root: .worktrees\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -176,7 +245,7 @@ func TestScaffoldSourceGlobs_ThreeStates(t *testing.T) {
 
 	t.Run("file present with empty field → byte-identical (no-op)", func(t *testing.T) {
 		root := t.TempDir()
-		prior := "merge_strategy: auto\nsource_globs: []\n"
+		prior := "worktree_root: .worktrees\nsource_globs: []\n"
 		writeConfig(t, root, prior)
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
@@ -246,7 +315,7 @@ func TestScaffoldSourceGlobs_WhitespaceBeforeColon(t *testing.T) {
 		{"space before colon", "source_globs : []\n"},
 		{"tab before colon", "source_globs\t: []\n"},
 		{"two spaces around colon", "source_globs  :  []\n"},
-		{"space before colon after other content", "merge_strategy: auto\nsource_globs : []\n"},
+		{"space before colon after other content", "worktree_root: .worktrees\nsource_globs : []\n"},
 		{"populated with space before colon", "source_globs :\n  - cmd/**\n"},
 	}
 	for _, tc := range presentVariants {
@@ -290,7 +359,7 @@ func TestScaffoldSourceGlobs_WhitespaceBeforeColon(t *testing.T) {
 	// config.Load cleanly with exactly one LIVE source_globs key.
 	t.Run("absent/commented key gets appended and loads clean", func(t *testing.T) {
 		root := t.TempDir()
-		writeConfig(t, root, "# source_globs: []\nmerge_strategy: auto\n")
+		writeConfig(t, root, "# source_globs: []\nworktree_root: .worktrees\n")
 		config.ResetCache()
 		configPath := filepath.Join(root, ".mindspec", "config.yaml")
 

@@ -121,12 +121,16 @@ diff.
 
 ### Config
 
+`Config` has no `MergeStrategy` field or default. The loader ignores the
+legacy `merge_strategy` key. The remote configuration selects publication:
+push when a git remote exists, otherwise merge locally.
+
 ```go
 package config
 
 // Config represents .mindspec/config.yaml settings.
 type Config struct {
-    // ... pre-existing fields (ProtectedBranches, MergeStrategy,
+    // ... pre-existing fields (ProtectedBranches,
     // WorktreeRoot, AutoFinalize, Enforcement, Recording, Decomposition,
     // SourceGlobs) — unchanged by spec 109.
 

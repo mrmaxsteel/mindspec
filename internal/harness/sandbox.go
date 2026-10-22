@@ -15,6 +15,14 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/setup"
 )
 
+const sandboxConfig = `protected_branches: [main]
+worktree_root: .worktrees
+enforcement:
+  pre_commit_hook: true
+  cli_guards: true
+  agent_hooks: false
+`
+
 // Sandbox is an isolated git repository with recording shims installed,
 // ready for running agent sessions or deterministic lifecycle tests.
 type Sandbox struct {
@@ -59,15 +67,7 @@ func NewSandbox(t *testing.T) *Sandbox {
 
 	// Write sandbox-specific config (overrides any bootstrap defaults).
 	mindspecDir := filepath.Join(root, ".mindspec")
-	configContent := `protected_branches: [main]
-merge_strategy: direct
-worktree_root: .worktrees
-enforcement:
-  pre_commit_hook: true
-  cli_guards: true
-  agent_hooks: false
-`
-	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(configContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"), []byte(sandboxConfig), 0o644); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
 

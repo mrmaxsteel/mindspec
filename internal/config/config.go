@@ -17,7 +17,6 @@ import (
 // Config represents .mindspec/config.yaml settings.
 type Config struct {
 	ProtectedBranches []string `yaml:"protected_branches"`
-	MergeStrategy     string   `yaml:"merge_strategy"`
 	WorktreeRoot      string   `yaml:"worktree_root"`
 	AutoFinalize      bool     `yaml:"auto_finalize"`
 	// AutoOpenFinalizePR and AutoMergeFinalizePR govern the spec 121
@@ -435,7 +434,6 @@ type Enforcement struct {
 func DefaultConfig() *Config {
 	return &Config{
 		ProtectedBranches:   []string{"main", "master"},
-		MergeStrategy:       "auto",
 		WorktreeRoot:        ".worktrees",
 		AutoOpenFinalizePR:  true,
 		AutoMergeFinalizePR: false,
@@ -556,9 +554,6 @@ func loadUncached(root string) (*Config, error) {
 	if len(cfg.ProtectedBranches) == 0 {
 		cfg.ProtectedBranches = DefaultConfig().ProtectedBranches
 	}
-	if cfg.MergeStrategy == "" {
-		cfg.MergeStrategy = "auto"
-	}
 	if cfg.WorktreeRoot == "" {
 		cfg.WorktreeRoot = ".worktrees"
 	}
@@ -584,8 +579,8 @@ func loadUncached(root string) (*Config, error) {
 	}
 
 	// Decomposition thresholds: per-field zero-value backfill. Explicit `0`
-	// in YAML is treated as "unset" (same convention as MergeStrategy /
-	// WorktreeRoot). Projects that want effectively-disabled checks should
+	// in YAML is treated as "unset" (same convention as WorktreeRoot).
+	// Projects that want effectively-disabled checks should
 	// pick large/small sentinel values rather than 0.
 	d := &cfg.Decomposition
 	defD := DefaultConfig().Decomposition

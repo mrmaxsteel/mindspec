@@ -202,7 +202,7 @@ func TestResolveFeedbackRemote_ProjectCommittedConfigIgnored(t *testing.T) {
 	if err := os.MkdirAll(projectMindspec, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	committed := "feedback_remote:\n  url: https://committed.example/db\nmerge_strategy: pr\n"
+	committed := "feedback_remote:\n  url: https://committed.example/db\nworktree_root: .feedback-worktrees\n"
 	if err := os.WriteFile(filepath.Join(projectMindspec, "config.yaml"), []byte(committed), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -233,8 +233,8 @@ func TestResolveFeedbackRemote_ProjectCommittedConfigIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("project Load error: %v", err)
 	}
-	if cfg.MergeStrategy != "pr" {
-		t.Errorf("project Load should still parse non-feedback keys, got merge_strategy=%q", cfg.MergeStrategy)
+	if cfg.WorktreeRoot != ".feedback-worktrees" {
+		t.Errorf("project Load must parse non-feedback keys, got worktree_root=%q", cfg.WorktreeRoot)
 	}
 }
 
