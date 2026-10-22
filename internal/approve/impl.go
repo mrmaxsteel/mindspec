@@ -390,7 +390,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// branch's diff. The `--allow-doc-skew "<reason>"` override
 	// suppresses the failure; the reason is recorded on the spec
 	// epic's metadata only AFTER FinalizeEpic returns nil.
-	base, mbErr := exec.MergeBase("main", specBranch)
+	base, mbErr := implDiffBase(root, exec, specBranch)
 	if mbErr != nil {
 		return nil, fmt.Errorf("computing merge-base for doc-sync: %w", mbErr)
 	}
@@ -728,6 +728,31 @@ func implFinalizeFailure(epicID, specID, stage string, inner error) error {
 		return guard.NewFailure(message, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 	}
 	return errors.New(message)
+}
+
+// implDiffBase returns the base of the whole-branch content gates. It
+// starts from the merge-base of local main and the spec branch. Local main
+// can be behind origin/main while the spec branch has merged origin/main.
+// Then the files that origin/main changed after the local main tip look
+// like spec changes, and the ADR gate refuses them as unowned. When the
+// merge-base with origin/main is a descendant of the local merge-base, it
+// is the true fork point, so this function uses it. In all other cases
+// (no origin/main ref, local main ahead, or diverged history) the local
+// merge-base stays the base.
+func implDiffBase(root string, exec executor.Executor, specBranch string) (string, error) {
+	local, err := exec.MergeBase("main", specBranch)
+	if err != nil {
+		return "", err
+	}
+	remote, rErr := exec.MergeBase("origin/main", specBranch)
+	if rErr != nil || remote == "" || remote == local {
+		return local, nil
+	}
+	newer, aErr := implIsAncestorFn(root, local, remote)
+	if aErr != nil || !newer {
+		return local, nil
+	}
+	return remote, nil
 }
 
 func readBeadStatus(id string) (string, error) {
