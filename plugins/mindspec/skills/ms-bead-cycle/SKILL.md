@@ -7,7 +7,7 @@ description: Single-bead orchestrator — pick + claim (step 0) → impl → pan
 
 Drive one bead from claim to merge using the panel review loop. Compose the smaller skills; don't reimplement them. The cycle owns step 0 (pick + claim) and the merge terminal (`mindspec complete`) directly — these were previously the separate `/ms-bead-next` and `/ms-bead-merge` skills, folded in here so the orchestrator that owns sequencing also owns the bead's entry and exit.
 
-Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orchestrator rules (only the cycle runs `mindspec complete`, after the panel gate passes; never raw-merge a bead branch; one push at end-of-spec).
+Include the standard guardrails (AGENTS.md, Bead-loop guardrails) — the orchestrator rules (only the cycle runs `mindspec complete`, after the panel gate passes; never raw-merge a bead branch; one push at end-of-spec).
 
 ## Inputs
 
@@ -60,7 +60,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
        tally PASS  → merge terminal → exit
        tally BLOCK → fix, refute or defer each finding
                    → /ms-bead-fix or re-panel → continue
-       any REJECT / HARD block → halt (see /ms-panel-tally § halt-recover)
+       any REJECT / HARD block → halt (see /ms-panel-tally recovery)
 
 /ms-bead-fix           (round 1 → round 2 fix commit)
   ↓ new commit SHA + flagged deviations
@@ -106,7 +106,7 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
    ```
    `<summary>` is a 1-2 sentence positional argument describing what landed, used for the merge commit message. `complete` runs from the repo root and is location-agnostic — do NOT `cd` into the bead worktree first. It auto-commits any stray staged files, closes the bead in `bd`, merges `bead/<id>` into the spec branch with a `Merge bead/<id>` commit, and removes the bead worktree.
 
-   ADR-divergence and claim/worktree failures surface their own repair ladders in the CLI error (point-of-use) — follow those; no skill prose duplicates them.
+   Architecture-divergence and claim/worktree failures surface their own repair ladders in the CLI error (point-of-use) — follow those; no skill prose duplicates them.
 
 2. **Verify the merge.**
    ```bash
@@ -114,35 +114,34 @@ The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec 
    ```
    (`mindspec complete` prints no merge SHA, so the `git log` is the merge-commit verify.)
 
-3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md § Bead-loop guardrails).
+3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).
 
 > The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: `mindspec complete`'s user-dirt blocking and its closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the in-binary `mindspec complete` gate's dirty-tree Block. Don't re-add the checklist as prose.
 
-**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. ADR check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.
+**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.
 
 ## Implementation notes
 
 - **Panel slugs**: `<spec-prefix>-bead<N>` for round 1, `<spec-prefix>-bead<N>-r<R>` for round R≥2. Keeps each round's verdicts in its own dir, easier to diff.
 - **Flagged deviations carry across rounds.** When the impl or fix subagent reports deviations from its prompt, those become "Fix-author deviations (assess these)" sections in the next BRIEF — the panel must explicitly assess whether the deviation is acceptable. Don't bury them.
-- **Round-2 codex reviewers are different from claude.** Claude `Agent`s can re-read the round-1 verdict JSON inline. Codex CLI sessions need that path inserted into their prompt explicitly — they don't share conversation context across rounds.
+- Use `panel prompt` for each slot and round. The binary includes that slot's prior-round findings.
 - **Test-suite truth wins over reviewer opinion.** If the panel splits and one reviewer's REQUEST_CHANGES rests on a claim that tests pass disproves, the orchestrator should note the contradiction. Don't blindly trust either side; the synthesis is your job.
 
-## Family-asymmetry handling
+## Findings across families
 
-The headline signal is when every Claude-family slot APPROVEs while one or more Codex slots REQUEST_CHANGES (or vice versa). Pay particular attention:
+Apply `review.reproduce`: reproduce each blocking claim in an isolated slot tree before a fix dispatch or refutation.
+Apply `review.no-vote`: an approval count does not resolve a finding.
+Apply `panel.fix-after-final` and `panel.one-fixer`: wait for verify exit 0, then dispatch one fixer in the target worktree.
 
-Evidence runs BOTH directions: CLI reviewers catch real bugs the interactive reviewers miss, AND CLI reviewers sometimes false-flag a "suite is red in a clean checkout" or "hollow fixture" claim that a clean reproduction refutes. Either way, treat any empirical finding from a non-interactive CLI reviewer as verify, never confirmed: reproduce the claim — test-execution and code-reasoning findings alike — in an isolated checkout (`/ms-panel-run`'s mutation-isolation mechanics) before treating it as confirmed.
-
-| Pattern | Likely meaning | Action |
-|:--------|:---------------|:-------|
-| All Claude slots APPROVE, 1+ Codex REQUEST_CHANGES with empirical evidence | The Codex claims to have run something and found a bug the Claudes missed | Verify, never confirmed: reproduce the claim yourself in an isolated checkout before treating it as a confirmed REQUEST_CHANGES |
-| All Codex slots APPROVE, 1+ Claude REQUEST_CHANGES on contract design | Claude is reading the diff at a level Codex skipped | Investigate the design claim; usually worth a fix |
-| Unanimous APPROVE | Genuine consensus | Proceed to merge |
-| Unanimous REQUEST_CHANGES | The implementation is genuinely off; fix or rewrite |
+| Pattern | Action |
+|:--------|:-------|
+| One family approves; another requests changes | Reproduce each blocking claim and compare the evidence |
+| All slots approve | Check the tally and artifact gates before completion |
+| All slots request changes | Consolidate the findings before the fix dispatch |
 
 ## Anti-patterns
 
-- Don't skip the panel even when "the diff looks fine to me". The point of the panel is that *your* judgement is one of seven — don't pre-empt it.
+- Don't skip the panel even when "the diff looks fine to me". The point of the panel is that *your* judgement is one of the configured reviewers — don't pre-empt it.
 - Don't run multiple fix-cycles inside a round. One panel → one fix → one re-panel. Compounding fixes within a round makes the next panel's job ambiguous.
 - Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
 - Resolve each REQUEST_CHANGES finding before merge. Fix it, refute it with evidence, or defer it to a validated follow-up bead. Re-run tally.

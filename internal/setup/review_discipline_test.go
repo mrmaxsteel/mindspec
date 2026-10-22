@@ -71,43 +71,18 @@ type fragmentRow struct {
 }
 
 var reviewDisciplineFragmentRows = []fragmentRow{
-	// AC-4 (R2) — reviewer mutation-isolation.
-	{ac: "AC-4", desc: "ms-panel-run mutation-isolation worktree command", surface: "ms-panel-run", want: "git worktree add --detach"},
-	{ac: "AC-4", desc: "ms-spec-final-review mutation-isolation worktree command", surface: "ms-spec-final-review", want: "git worktree add --detach"},
-	{ac: "AC-4", desc: "ms-panel-tally contested-finding re-verify fragment", surface: "ms-panel-tally", want: "re-verify it yourself in a fresh detached checkout"},
-	{ac: "AC-4", desc: "ms-spec-final-review worktree-cleanup clause (removed when reviewer done)", surface: "ms-spec-final-review", want: "removed when the reviewer is done"},
-
-	// AC-5 (R3) — verify-never-confirm.
-	{ac: "AC-5", desc: "ms-bead-cycle no longer blindly trusts the empirical check", surface: "ms-bead-cycle", want: "trust the empirical check", negate: true},
-	{ac: "AC-5", desc: "ms-bead-cycle verify-never-confirm fragment", surface: "ms-bead-cycle", want: "verify, never confirmed"},
-	{ac: "AC-5", desc: "ms-panel-tally verify-never-confirm fragment", surface: "ms-panel-tally", want: "verify, never confirmed"},
-	{ac: "AC-5", desc: "ms-panel-run documents the security-classifier substitution fallback", surface: "ms-panel-run", want: "correctness-framed persona"},
-
-	// AC-8 (R6) — findings-never-out-voted, reviewer-facing.
-	{ac: "AC-8", desc: "ms-panel-run findings-never-out-voted", surface: "ms-panel-run", want: "findings-never-out-voted"},
-	{ac: "AC-8", desc: "ms-spec-final-review findings-never-out-voted", surface: "ms-spec-final-review", want: "findings-never-out-voted"},
-
-	// AC-9 (R7) — absolute scratch, clean-worktree check, home-path sweep.
-	{ac: "AC-9", desc: "ms-panel-run absolute-scratch: never a relative path", surface: "ms-panel-run", want: "never a relative path"},
-	{ac: "AC-9", desc: "ms-panel-run absolute-scratch: harness cwd-resets", surface: "ms-panel-run", want: "harness cwd-resets"},
-	{ac: "AC-9", desc: "ms-bead-fix absolute-scratch: never a relative path", surface: "ms-bead-fix", want: "never a relative path"},
-	{ac: "AC-9", desc: "ms-bead-fix absolute-scratch: harness cwd-resets", surface: "ms-bead-fix", want: "harness cwd-resets"},
-	{ac: "AC-9", desc: "ms-spec-final-review absolute-scratch: never a relative path", surface: "ms-spec-final-review", want: "never a relative path"},
-	{ac: "AC-9", desc: "ms-spec-final-review absolute-scratch: harness cwd-resets", surface: "ms-spec-final-review", want: "harness cwd-resets"},
-	{ac: "AC-9", desc: "ms-bead-cycle clean-worktree check before mindspec complete", surface: "ms-bead-cycle", want: "git status --porcelain"},
-	{ac: "AC-9", desc: "ms-panel-run no longer names the operator's literal home path", surface: "ms-panel-run", want: "/Users/Max", negate: true},
-
-	// AC-13 (partial) — inverted: no shipped skill cites ADR-0044. A consumer's
-	// own .mindspec/adr/ holds a different ADR under that number. (The ADR-file
-	// existence + Accepted-marker half is TestReviewDiscipline_ADR0044ExistsAccepted
-	// below; Bead 3 appends the two lifecycle-literal citation rows).
-	{ac: "AC-13", desc: "ms-panel-run states reviewer conduct", surface: "ms-panel-run", want: "Reviewers apply these conduct rules at every gate."},
-	{ac: "AC-13", desc: "ms-panel-tally states contested-finding conduct", surface: "ms-panel-tally", want: "verify, never confirmed"},
-	{ac: "AC-13", desc: "ms-panel-run cites no mindspec ADR-0044", surface: "ms-panel-run", want: "ADR-0044", negate: true},
-	{ac: "AC-13", desc: "ms-panel-tally cites no mindspec ADR-0044", surface: "ms-panel-tally", want: "ADR-0044", negate: true},
-	{ac: "AC-13", desc: "ms-bead-cycle cites no mindspec ADR-0044", surface: "ms-bead-cycle", want: "ADR-0044", negate: true},
-	{ac: "AC-13", desc: "ms-bead-fix cites no mindspec ADR-0044", surface: "ms-bead-fix", want: "ADR-0044", negate: true},
-	{ac: "AC-13", desc: "ms-spec-final-review cites no mindspec ADR-0044", surface: "ms-spec-final-review", want: "ADR-0044", negate: true},
+	{ac: "AC-4", desc: "slot isolation", surface: "ms-panel-run", want: "panel.isolated-checkout"},
+	{ac: "AC-4", desc: "final isolation", surface: "ms-spec-final-review", want: "panel.isolated-checkout"},
+	{ac: "AC-5", desc: "reproduction", surface: "ms-bead-cycle", want: "review.reproduce"},
+	{ac: "AC-5", desc: "contested findings", surface: "ms-panel-tally", want: "review.reproduce"},
+	{ac: "AC-5", desc: "classifier redispatch", surface: "ms-panel-run", want: "review.classifier-redispatch"},
+	{ac: "AC-8", desc: "no vote", surface: "ms-panel-run", want: "review.no-vote"},
+	{ac: "AC-8", desc: "final no vote", surface: "ms-spec-final-review", want: "review.no-vote"},
+	{ac: "AC-9", desc: "slot scratch", surface: "ms-panel-run", want: "panel.scratch-in-slot"},
+	{ac: "AC-9", desc: "fixer scratch", surface: "ms-bead-fix", want: "panel.scratch-in-slot"},
+	{ac: "AC-9", desc: "final scratch", surface: "ms-spec-final-review", want: "panel.scratch-in-slot"},
+	{ac: "AC-9", desc: "clean completion", surface: "ms-bead-cycle", want: "git status --porcelain"},
+	{ac: "AC-13", desc: "rule lookup", surface: "ms-panel-run", want: "mindspec rules show <id>"},
 }
 
 // TestReviewDiscipline_Fragments is the table-driven [CI] guard for
@@ -619,43 +594,14 @@ func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 var reviewDisciplineBead3FragmentRows = []fragmentRow{
-	// AC-1 (R1a) — the shipped default stated ONCE in canonical form, per
-	// surface, plus the finding-aware pass rule.
-	{ac: "AC-1", desc: "ms-panel-run canonical shipped-default sentence", surface: "ms-panel-run", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
-	{ac: "AC-1", desc: "ms-panel-run pass rule", surface: "ms-panel-run", want: "0 unresolved REQUEST_CHANGES"},
-	{ac: "AC-1", desc: "ms-panel-tally canonical shipped-default sentence", surface: "ms-panel-tally", want: "shipped defaults: 6/6/4/6 reviewers for spec/plan/bead/final; adhoc 6"},
-	{ac: "AC-1", desc: "ms-panel-tally pass rule", surface: "ms-panel-tally", want: "0 unresolved REQUEST_CHANGES"},
-
-	// AC-1 (panel F1 MINOR) — the two DEFAULT-lens-relabel sentences pinned
-	// as fragments, so a LABEL-ONLY deletion REDs here even before the
-	// structural six-row-table check below notices the table lost its label.
-	{ac: "AC-1", desc: "ms-panel-run slot-lens table DEFAULT label", surface: "ms-panel-run", want: "DEFAULT lens assignment for up to six slots"},
-	{ac: "AC-1", desc: "ms-panel-run slot lenses follow the gate size and families follow the resolved roster", surface: "ms-panel-run", want: "Use the lenses for the panel's first N slots (4 for bead). Take each slot's family from the gate's resolved roster, not the Family column."},
-	{ac: "AC-1", desc: "ms-panel-run has no shipped six-slot mix claim", surface: "ms-panel-run", want: "shipped 6-slot mix", negate: true},
-	{ac: "AC-1", desc: "ms-panel-run slot-lens table scaled-mix assignment rule", surface: "ms-panel-run", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
-	{ac: "AC-1", desc: "ms-spec-final-review lens table DEFAULT label", surface: "ms-spec-final-review", want: "DEFAULT lens assignment for the shipped mix"},
-	{ac: "AC-1", desc: "ms-spec-final-review lens table scaled-mix assignment rule", surface: "ms-spec-final-review", want: "assign each configured slot a distinct lens, reusing or splitting this default set"},
-
-	// AC-1 (panel S2) — the swept ms-bead-cycle / ms-spec-autopilot residuals'
-	// REPLACEMENT wording pinned positively; the sweep patterns below RED the
-	// old fixed-six forms if restored, and these rows RED if the replacement
-	// text silently disappears.
-	{ac: "AC-1", desc: "ms-bead-cycle Sequence diagram derives fan-out from the configured mix", surface: "ms-bead-cycle", want: "then the configured reviewers fan out"},
-	{ac: "AC-1", desc: "ms-bead-cycle family-asymmetry headline is topology-neutral", surface: "ms-bead-cycle", want: "every Claude-family slot APPROVEs"},
-	{ac: "AC-1", desc: "ms-spec-autopilot parallelism note derives from the configured mix", surface: "ms-spec-autopilot", want: "across the configured panel reviewers + the impl subagent"},
-	{ac: "AC-1", desc: "ms-spec-autopilot report template uses <N>/<N>, not a literal tally", surface: "ms-spec-autopilot", want: "<N>/<N> APPROVE"},
-
-	// AC-6 (R4b/c) — document-gate lens defaults table (the plugin-skill
-	// half; the lifecycle-literal half is reviewDisciplineLiteralFragmentRows
-	// below).
-	{ac: "AC-6", desc: "ms-panel-run document-gate lens table heading", surface: "ms-panel-run", want: "Document-gate lens defaults"},
-	{ac: "AC-6", desc: "ms-panel-run document-gate lens: falsifiability of ACs", surface: "ms-panel-run", want: "Falsifiability of ACs"},
-
-	// AC-7 (R5) — BRIEF verbatim-AC rule replaces the old summarise-only
-	// guidance; the AC-provenance reviewer duty is named.
-	{ac: "AC-7", desc: "ms-panel-run BRIEF verbatim-AC rule: additive, never a replacement", surface: "ms-panel-run", want: "additive, never a replacement"},
-	{ac: "AC-7", desc: "ms-panel-run no longer tells the skill to merely summarise the plan", surface: "ms-panel-run", want: "Don't paste the plan; summarise it.", negate: true},
-	{ac: "AC-7", desc: "ms-panel-run names the AC-provenance reviewer duty", surface: "ms-panel-run", want: "AC-provenance duty"},
+	{ac: "AC-1", desc: "resolved roster", surface: "ms-panel-run", want: "mindspec panel verify <panel-slug> --json"},
+	{ac: "AC-1", desc: "run pass rule", surface: "ms-panel-run", want: "0 unresolved REQUEST_CHANGES"},
+	{ac: "AC-1", desc: "tally pass rule", surface: "ms-panel-tally", want: "0 unresolved REQUEST_CHANGES"},
+	{ac: "AC-1", desc: "cycle fanout", surface: "ms-bead-cycle", want: "then the configured reviewers fan out"},
+	{ac: "AC-1", desc: "autopilot fanout", surface: "ms-spec-autopilot", want: "across the configured panel reviewers + the impl subagent"},
+	{ac: "AC-1", desc: "autopilot report", surface: "ms-spec-autopilot", want: "<N>/<N> APPROVE"},
+	{ac: "AC-6", desc: "binary lenses", surface: "ms-panel-run", want: "The binary resolves the roster, lenses, acceptance question and verdict contract."},
+	{ac: "AC-7", desc: "binary prompt", surface: "ms-panel-run", want: "mindspec panel prompt"},
 }
 
 // TestReviewDiscipline_Bead3Fragments is Bead 3's table-driven [CI] guard,
@@ -868,26 +814,14 @@ func acTwoCheckReviewerKeys(ladder acTwoLadder) []string {
 // it, and asserts (i) it names gates bead/spec_approve/final_review and (ii)
 // every reviewer entry carries ONLY family/count keys.
 func TestReviewDiscipline_AC2LadderExampleStructural(t *testing.T) {
-	skills := pluginmindspec.SkillFiles()
-	content, ok := skills["ms-panel-run"]
-	if !ok {
-		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-panel-run" entry`)
-	}
-	yamlText, ok := acTwoExtractFencedYAML(content)
-	if !ok {
-		t.Fatal("could not extract a commented ```yaml fenced panel.gates ladder example from ms-panel-run")
-	}
-	ladder, err := acTwoParseLadder(yamlText)
-	if err != nil {
-		t.Fatalf("parsing the extracted panel.gates ladder example: %v\n%s", err, yamlText)
-	}
-	for _, gate := range []string{"bead", "spec_approve", "final_review"} {
-		if _, ok := ladder.Panel.Gates[gate]; !ok {
-			t.Errorf("panel.gates ladder example is missing gate %q", gate)
+	for _, name := range []string{"ms-panel-run", "ms-spec-final-review"} {
+		body := pluginmindspec.SkillFiles()[name]
+		if strings.Contains(body, "```yaml") || regexp.MustCompile(`(?m)^\|[ ]*[RF][0-9]+`).MatchString(body) {
+			t.Errorf("%s duplicates binary config tables", name)
 		}
-	}
-	for _, p := range acTwoCheckReviewerKeys(ladder) {
-		t.Error(p)
+		if !strings.Contains(body, "binary") {
+			t.Errorf("%s must delegate roster and lenses to binary", name)
+		}
 	}
 }
 
@@ -896,34 +830,12 @@ func TestReviewDiscipline_AC2LadderExampleStructural(t *testing.T) {
 // the extracted example (never the real file) must RED the SAME
 // key-set assertion the positive test uses.
 func TestReviewDiscipline_AC2LadderExampleNegativeModelKey(t *testing.T) {
-	skills := pluginmindspec.SkillFiles()
-	content, ok := skills["ms-panel-run"]
-	if !ok {
-		t.Fatal(`pluginmindspec.SkillFiles() has no "ms-panel-run" entry`)
-	}
-	yamlText, ok := acTwoExtractFencedYAML(content)
-	if !ok {
-		t.Fatal("could not extract the panel.gates ladder example fixture")
-	}
-
-	countLineRE := regexp.MustCompile(`(?m)^([ \t]*)count: 4\n`)
-	loc := countLineRE.FindStringSubmatchIndex(yamlText)
-	if loc == nil {
-		t.Fatal("fixture assumption broken: could not locate a 'count: 4' line to inject a model: key after")
-	}
-	indent := yamlText[loc[2]:loc[3]]
-	insertAt := loc[1]
-	mutated := yamlText[:insertAt] + indent + "model: opus\n" + yamlText[insertAt:]
-	if mutated == yamlText {
-		t.Fatal("fixture assumption broken: injection had no effect")
-	}
-
-	ladder, err := acTwoParseLadder(mutated)
+	ladder, err := acTwoParseLadder("panel:\n  gates:\n    bead:\n      reviewers:\n        - family: harness\n          count: 4\n          model: unexpected\n")
 	if err != nil {
-		t.Fatalf("parsing the mutated fixture: %v\n%s", err, mutated)
+		t.Fatal(err)
 	}
-	if problems := acTwoCheckReviewerKeys(ladder); len(problems) == 0 {
-		t.Fatal("expected the injected model: key to RED the reviewer-entry key-set check, but it found no problems")
+	if len(acTwoCheckReviewerKeys(ladder)) == 0 {
+		t.Fatal("model-key mutation passed")
 	}
 }
 
@@ -1148,21 +1060,7 @@ func acOneSurfaces() map[string]string {
 // ms-bead-impl's "6." list ordinal) produces ZERO sweep hits by wording —
 // a future edit that needs a digit/enumeration in one of those sections
 // should add its OWN locator-keyed entry here rather than loosen a pattern.
-var reviewDisciplineAC1Allowlist = []acTenAllowEntry{
-	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-run", locator: "so there is nothing to pass here", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "6 reviewers", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "6/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{surface: "ms-panel-tally", locator: "see the Panel-size ladder in `ms-panel-run`", matched: "4/6", count: 1, reason: "labelled per-gate shipped sizes; the fixed-six sweep also matches fragments of the 6/6/4/6 size sequence"},
-	{
-		surface: "ms-panel-run",
-		locator: "DEFAULT lens assignment for up to six slots",
-		matched: "six slot",
-		count:   1,
-		reason:  "the DEFAULT-labelled lens-table heading sentence (§ Slot lens defaults) — the exact label + scaled-mix rule the structural six-row-table check REQUIRES; pinned positively by the Bead3 fragment rows so a label-only deletion REDs",
-	},
-}
+var reviewDisciplineAC1Allowlist = []acTenAllowEntry{}
 
 // acOneValidate mirrors acTenValidate's occurrence-and-location-accounted
 // matching (surface, resolved-locator-line, exact matched text, count) but
@@ -1373,7 +1271,7 @@ func TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals(t *testing.
 		{
 			name:     "ms-bead-cycle family-asymmetry headline",
 			surface:  "ms-bead-cycle",
-			swept:    "every Claude-family slot APPROVEs",
+			swept:    "One family approves; another requests changes",
 			restored: "all three Claudes APPROVE",
 		},
 		{
@@ -1430,7 +1328,7 @@ func TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals(t *testing.
 // "three `Agent` calls", and the only committed fixture was a de-backticked
 // surrogate.
 func TestReviewDiscipline_AC1SweepGuardNegativeBacktickedFanOutRevert(t *testing.T) {
-	const swept = "fan out one `Agent` call per configured Claude-family slot"
+	const swept = "Dispatch that prompt once with the harness agent tool"
 	const restored = "fan out three `Agent` calls (Claude) and three `codex exec` background processes (Codex)"
 
 	surfaces := acOneSurfaces()
@@ -1562,33 +1460,19 @@ func TestReviewDiscipline_AC1SweepGuardNegativeBareSixRowTable(t *testing.T) {
 // file) leaves a bare six-row table that REDs — a label-only deletion cannot
 // survive even if every substring pattern stays quiet.
 func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) {
-	for _, tc := range []struct {
-		surface string
-		label   string
-	}{
-		{"ms-panel-run", "DEFAULT lens assignment for up to six slots"},
-		{"ms-spec-final-review", "DEFAULT lens assignment for the shipped mix"},
-	} {
-		t.Run(tc.surface, func(t *testing.T) {
-			surfaces := acOneSurfaces()
-			original, ok := surfaces[tc.surface]
-			if !ok {
-				t.Fatalf("fixture assumption broken: %s missing from acOneSurfaces()", tc.surface)
-			}
-			if !strings.Contains(original, tc.label) {
-				t.Fatalf("fixture assumption broken: %s no longer carries the DEFAULT label %q", tc.surface, tc.label)
-			}
-			if problems := acOneSixRowTableProblems(tc.surface, original); len(problems) != 0 {
-				t.Fatalf("precondition broken: the labelled real %s table should be structurally GREEN; got: %v", tc.surface, problems)
-			}
-			mutated := strings.Replace(original, tc.label, "lens assignment", 1)
-			if mutated == original {
-				t.Fatal("fixture assumption broken: label strip had no effect")
-			}
-			if problems := acOneSixRowTableProblems(tc.surface, mutated); len(problems) == 0 {
-				t.Fatalf("expected stripping the DEFAULT label from %s's lens table to RED the structural sweep", tc.surface)
-			}
-		})
+	for _, surface := range []string{"ms-panel-run", "ms-spec-final-review"} {
+		body := acOneSurfaces()[surface]
+		if p := acOneSixRowTableProblems(surface, body); len(p) != 0 {
+			t.Fatal(p)
+		}
+		var table strings.Builder
+		table.WriteString("\n| Slot | Lens |\n|:---|:---|\n")
+		for i := 1; i <= 6; i++ {
+			fmt.Fprintf(&table, "| R%d | lens |\n", i)
+		}
+		if len(acOneSixRowTableProblems(surface, body+table.String())) == 0 {
+			t.Fatal("unlabelled-table mutation passed")
+		}
 	}
 }
 
@@ -1602,33 +1486,12 @@ func TestReviewDiscipline_AC1SweepGuardNegativeTableLabelStripped(t *testing.T) 
 // ---------------------------------------------------------------------------
 
 var reviewDisciplineBead4FragmentRows = []fragmentRow{
-	// AC-11 (R8b) — the F2 full-regression slot's CI-parity instruction
-	// (commands.ci, the commands.test fallback, the no-declaration
-	// advisory) is asserted BOUND to the named F2 slot row by
-	// TestReviewDiscipline_AC11F2SlotBinding below, NOT as whole-body rows
-	// here — the final-review codex G1 finding: whole-body strings.Contains
-	// rows stayed GREEN when the instruction was moved out of the F2 row
-	// into an unrelated section. Only the Not-a-CI-substitute fragments
-	// (which live in the "What this skill is NOT" section, not the F2 row)
-	// and the negative tripwires remain body-wide rows.
-	{ac: "AC-11", desc: "ms-spec-final-review extends Not-a-CI-substitute with the local-green vs CI-green rationale", surface: "ms-spec-final-review", want: "not the same signal as CI-green on the PR"},
-	// This row pins the NEW closing clause this bead ADDED to the
-	// Not-a-CI-substitute bullet — not the pre-existing "Not a CI
-	// substitute" lead-in, which already existed verbatim at this bead's
-	// parent commit (7ec96295) and so would stay present (and this row
-	// would stay GREEN) even if this bead's own edit were fully reverted.
-	// Pinning the new closing clause instead means a revert of the Bead-4
-	// edit genuinely REDs this row.
-	{ac: "AC-11", desc: "ms-spec-final-review Not-a-CI-substitute extension's closing clause (new text, absent at parent)", surface: "ms-spec-final-review", want: "F2's result is reviewer-side parity evidence, never a substitute for the PR's own CI run"},
-
-	// AC-11 negative tripwires (honest, per spec.md's own framing — NOT a
-	// proof of absence for every possible concrete invocation, just these
-	// four known-risk patterns; AC-10's `go test -short` row already
-	// backstops that specific pattern independently).
-	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `go test` invocation", surface: "ms-spec-final-review", want: "go test", negate: true},
-	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `npm test` invocation", surface: "ms-spec-final-review", want: "npm test", negate: true},
-	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `pytest` invocation", surface: "ms-spec-final-review", want: "pytest", negate: true},
-	{ac: "AC-11", desc: "ms-spec-final-review names no concrete `make test` invocation", surface: "ms-spec-final-review", want: "make test", negate: true},
+	{ac: "AC-11", desc: "CI parity rule", surface: "ms-spec-final-review", want: "review.ci-parity"},
+	{ac: "AC-11", desc: "CI separate result", surface: "ms-spec-final-review", want: "A local result does not replace the PR's CI result."},
+	{ac: "AC-11", desc: "no test command", surface: "ms-spec-final-review", want: "go test", negate: true},
+	{ac: "AC-11", desc: "no npm command", surface: "ms-spec-final-review", want: "npm test", negate: true},
+	{ac: "AC-11", desc: "no pytest command", surface: "ms-spec-final-review", want: "pytest", negate: true},
+	{ac: "AC-11", desc: "no make command", surface: "ms-spec-final-review", want: "make test", negate: true},
 }
 
 // TestReviewDiscipline_Bead4Fragments is Bead 4's table-driven [CI] guard,
@@ -1671,7 +1534,7 @@ func TestReviewDiscipline_Bead4Fragments(t *testing.T) {
 // row is one physical line, so (?m)'s per-line `.*$` captures exactly it.
 // An interpreted string because a Go raw string cannot contain the backtick
 // the formatting class must include.
-var acElevenF2RowRE = regexp.MustCompile("(?m)^[ \t]*\\|[ \t`*_]*F2[ \t`*_]*\\|.*$")
+var acElevenF2RowRE = regexp.MustCompile(`(?m)^4\. Apply .*review\.ci-parity.*$`)
 
 // acElevenF2SlotRow extracts the single F2 slot row from content. ok=false
 // (with a diagnostic) when the row is missing or ambiguous — an absent or
@@ -1697,7 +1560,7 @@ var reviewDisciplineAC11F2SlotFragments = []struct {
 }{
 	{"names commands.ci", "commands.ci"},
 	{"names the commands.test fallback", "commands.test"},
-	{"records the no-declaration advisory verbatim", "no declared CI invocation — CI parity not reproduced"},
+	{"records the verbatim invocation rule", "verbatim"},
 }
 
 // TestReviewDiscipline_AC11F2SlotBinding is the F2-slot-bound half of the
@@ -1722,7 +1585,7 @@ func TestReviewDiscipline_AC11F2SlotBinding(t *testing.T) {
 
 // acElevenF2CIParityInstruction is the full CI-parity instruction sentence
 // as shipped inside the F2 slot row — the move-out mutation's payload.
-const acElevenF2CIParityInstruction = "Then, in that same checkout and before sign-off, reproduce the project's declared CI invocation VERBATIM: run `commands.ci` when the project's config declares it, falling back to `commands.test` when `commands.ci` is undeclared. When the project's config declares NEITHER key, do not skip the check silently — record the explicit advisory finding \"no declared CI invocation — CI parity not reproduced\"."
+const acElevenF2CIParityInstruction = "run the project's `commands.ci` verbatim, else `commands.test`, in the slot tree."
 
 // TestReviewDiscipline_AC11F2SlotBindingMutationProbe proves the slot
 // binding is not vacuous by applying the SAME production predicate

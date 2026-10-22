@@ -1,15 +1,15 @@
 # mindspec — autonomous spec-driven implementation, with multi-reviewer panels
 
-A Claude Code skills package that takes a `mindspec`-approved plan and drives it to completion bead-by-bead, with a 6-reviewer (3 Claude + 3 Codex) panel gating each bead before merge. The orchestrator's main context stays small; every step is delegated to subagents.
-
-Proven in use across ~25 beads. The pattern reliably catches asymmetric defects — a Claude reviewer approving while a Codex reviewer empirically tests and finds the routing bug, or vice versa.
+A skills package that takes an approved MindSpec plan through implementation and panel review.
+The binary owns the panel roster, prompts, submissions and decision. Skills dispatch the work.
+Zero config uses one harness family. Add process runners for other review tools.
 
 ## What this plugin replaces
 
 | Without | With |
 |:--------|:-----|
-| "Implement bead. Eyeball diff. Merge." | "Implement → 6-reviewer panel → fix → re-panel → merge" |
-| Single-reviewer LLM gating | Mixed-family panel; family disagreement is the signal |
+| "Implement bead. Eyeball diff. Merge." | "Implement → configured panel → fix → re-panel → merge" |
+| Single-reviewer LLM gating | Independent slots with configured models and lenses |
 | Manual "what's the next ready bead?" | `/ms-bead-cycle` step 0 reads `bd ready` + the plan dep graph, claims, sets up the worktree |
 | Manual fix-up after review | `/ms-bead-fix` consolidates verdicts and dispatches a fix subagent |
 | Manual per-bead orchestration | `/ms-bead-cycle` runs the whole pick → impl → review → merge loop |
@@ -45,7 +45,7 @@ These are the existing mindspec gating skills. The new skills in this plugin ass
 
 | Skill | Purpose |
 |:------|:--------|
-| `/ms-panel-run` | Step 0 writes the panel dir + BRIEF + `panel.json`; then launch 6 reviewers (3 Claude `Agent`s + 3 Codex CLI sessions) and collect verdicts |
+| `/ms-panel-run` | Step 0 writes the panel dir + BRIEF + `panel.json`; then dispatch the roster from `panel verify --json` and collect submissions |
 | `/ms-panel-tally` | Single decision authority: decision matrix (fresh, intact, complete, no veto, no unresolved REQUEST_CHANGES), artifact gates, consolidation, halt-recovery, escape hatch |
 
 ### Orchestrators (new)
@@ -72,7 +72,7 @@ Each cycle iteration:
 ```
 step 0              → pick + claim next bead, create worktree
 /ms-bead-impl       → implementation subagent commits to bead/<id>
-/ms-panel-run       → step 0 writes BRIEF + panel.json at <spec-dir>/reviews/<panel>/; 6 reviewers fan out in parallel
+/ms-panel-run       → step 0 writes BRIEF + panel.json at <spec-dir>/reviews/<panel>/; configured reviewers run in parallel
 /ms-panel-tally     → tally PASS → done; tally BLOCK → fix, refute or defer
 /ms-bead-fix        → consolidated changes → fix subagent → new commit
 /ms-panel-run       → round 2 re-bumps round + reviewed_head_sha, verifies the fix
@@ -99,22 +99,12 @@ merge terminal      → mindspec complete <bead-id> "<summary>" (hook-gated)
 > bypass, which is why missing-artifact
 > findings HARD-block regardless of vote count.
 
-## Why six reviewers, mixed families
+## Panel defaults
 
-Single-LLM gating misses defects asymmetrically:
-
-- Anthropic models lean narrative-coherent — they explain the diff well, but may miss empirical edge cases.
-- OpenAI models lean empirical — they run validators and probe edge cases, but their natural-language synthesis is less reliable.
-
-A six-slot panel with 3+3 lets you weight convergence: if all three Claudes APPROVE and all three Codex REQUEST_CHANGES, that's a different signal from a unanimous APPROVE. The orchestrator's tally pays attention to family asymmetry.
-
-Empirically (~25 beads): unanimous APPROVE on round 1 is rare. Most beads need exactly one fix round. The reviewers that flag changes are usually one Claude and two Codex, or two Claudes and three Codex — different lenses landing on different defects.
-
-> **Why six reviewers.** The default panel uses three reviewers from
-> each model family. Each reviewer has a separate lens. Adjust the panel
-> size for the work and the compute budget. The pass rule stays the same:
-> the panel must be fresh, intact and complete. It must have no veto and
-> no unresolved REQUEST_CHANGES finding.
+Bead panels have 4 reviewers. Spec, plan, final and adhoc panels have 6.
+Zero config runs all slots on the harness. A one-family panel is valid.
+Each reviewer has a separate lens. Configure the roster and runners for the work and budget.
+The gate needs a fresh, intact panel with every slot in, no veto and no unresolved finding.
 
 ## Why these patterns
 
@@ -124,7 +114,7 @@ see why it works:
 
 | Pattern | Where the plugin uses it |
 |:--------|:-------------------------|
-| Parallelization | the 6-reviewer panel — independent subtasks, voting aggregator |
+| Parallelization | the configured panel — independent review slots and one binary decision |
 | Orchestrator-workers | `/ms-spec-autopilot` + `/ms-bead-cycle` dispatching to specialist subagents |
 | Evaluator-optimizer | the impl → panel → fix → re-panel iterative loop |
 | Prompt chaining | the spec → plan → bead lifecycle |
@@ -132,12 +122,33 @@ see why it works:
 
 ## Configuration
 
-- `codex` CLI on PATH (`codex exec --skip-git-repo-check`).
-- `bd` (beads) for issue tracking.
-- `mindspec` for bead lifecycle.
-- Claude Code host with the `Agent` tool.
+Use `bd` for issue tracking and `mindspec` for the lifecycle.
+The host needs an agent tool for harness slots. No named reviewer CLI is required.
+Configure each process tool in `panel.runners` before you add its family to the reviewers.
+Process runners need a Unix host. Use harness slots on Windows.
 
-When codex hits its usage limit mid-panel, the orchestrator detects the empty/truncated output and substitutes a Claude `Agent` in the same slot (R4 → R4 claude-sub, etc.). Verdict comparability is preserved by keeping the slot name and writing the same JSON shape.
+```yaml
+panel:
+  runners:
+    - family: local-review
+      kind: process
+      argv: [review-cli, "{prompt_file}"]
+      prompt: file
+      output: stdout
+      quota_signals: ["quota limit reached"]
+      on_quota: harness
+  reviewers:
+    - {family: harness, count: 2}
+    - {family: local-review, count: 2}
+```
+
+Replace `review-cli` with your local tool. Match its output to `panel prompt`.
+`on_quota` selects the substitute family when stderr matches a configured quota signal.
+The slot keeps its id. Verify reports the effective runner and a pending harness handoff.
+The adapter dispatches a harness substitute through `panel checkout --slot <slot> --dispatch` and `panel prompt`.
+Reviewers use `panel submit` or their configured process output channel.
+`panel.substitution` and `claude_sub_on_quota` are retired; use `on_quota` on a runner.
+Machine-local runner and model settings belong in `.mindspec/config.local.yaml`.
 
 ## Disk layout
 
@@ -151,9 +162,9 @@ When codex hits its usage limit mid-panel, the orchestrator detects the empty/tr
         bead<N>_impl_prompt.md
       <panel-slug>/                         # one per panel round
         BRIEF.md
-        claude-1-round-1.json
+        R1-round-1.json
         ...
-        codex-6-round-2.json                # round 2 after fix-up
+        R6-round-2.json                # round 2 after fix-up
 ```
 
 ## Integration with mindspec core

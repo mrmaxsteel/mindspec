@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Every new panel round uses verdict schema v2 with no opt-out. A verdict file without a submission no longer counts. Reviewers use `mindspec panel submit` or the process output channel in their prompt.
+- The latest submission replaces earlier submissions for a slot and round. The ledger retains all submissions.
+- Zero config runs every slot on the harness. No tool runner ships. Configure process runners in `panel.runners`.
+- A reviewer family needs a runner. `panel create` refuses a family with no runner. Add a runner as shown below.
+- `panel.substitution` is retired. Set `on_quota` on a process runner to select its quota substitute.
+- `panel verify` exits 0 when all slots are final. It exits 1 for running or missing slots, harness drafts, or a pending quota handoff. It exits 2 in every other case.
+- Spec and plan approval use these default lenses: falsifiability, scope-honesty, contradiction and feasibility.
+- At the first v2 round, a carried slot without a family needs a runner that matches its old model. If none exists, create a fresh roster with `mindspec panel create <slug> --round <N+1> --reviewers <n>`.
+- A model-only reviewer entry runs on the harness with its model. `config resolve` and `doctor` warn for each such entry.
+
+```yaml
+# before: create now refuses this entry
+reviewers: [{family: codex, model: m1}]
+# after
+runners: [{family: codex, kind: process, argv: [codex, "{prompt_file}"], prompt: file, output: stdout}]
+reviewers: [{family: codex, model: m1}]
+```
+
+Place these entries under `panel` in `.mindspec/config.yaml`.
+Use `.mindspec/config.local.yaml` for machine-local runners and models.
+Runners merge by family: a later entry replaces the same family or appends a new family.
+
 ## [0.17.0] - 2026-10-21
 
 One spec and two fix PRs since v0.16.0. The theme is **panel integrity**: spec 130 makes the review-panel gate decide only on facts that the binary writes. A panel passes when every finding is fixed, refuted or deferred; the APPROVE count is no longer a decision input. New verbs record refutations, deferrals, rebinds and abandonment, so no skill tells an agent to edit `panel.json` by hand. Staleness compares the reviewed files, not the whole commit. Not a pure drop-in: six behaviour changes are deliberate — the N−1 approve threshold is replaced by the pass rule, default panel sizes are set per gate (bead panels are now 4), `panel create` refuses rounds and bead registrations it used to accept, a hand-edited `panel.json` blocks the gate, `complete` and `impl approve` enforce disposition coverage, and each panel's `dispositions.jsonl` is tracked in git again — see **Changed**. Panels created before this release (no roster in the ledger) keep their old counting and are exempt from the new hand-edit and coverage checks. PR #266 fixes three `mindspec complete` defects, and PR #267 removes internal project references from everything MindSpec installs or prints.
