@@ -320,7 +320,9 @@ exclusively through eight new `Executor` interface methods
   against a bare tree OID (`-C workdir`, never a hardcoded root or the
   caller's cwd) — the tree-vs-tree leg the doc-sync/ADR-divergence gates
   use to measure `base..T` directly, so "committed tree ≡ measured tree"
-  is mechanical once materialization runs.
+  is mechanical once materialization runs. It uses
+  `--no-renames --name-only -z` to list both rename endpoints and preserve
+  exact filename bytes.
 - **`MaterializeStageCommit(wtPath, tree, parent, stage, subject)`** builds
   a commit object via plumbing (`git commit-tree`, no hooks) carrying a
   pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`,
@@ -358,7 +360,8 @@ clear) staged sequence (ADR-0041 §3(i)): `M` builds candidate commit `C`
 from `T` (`-p <tip>`); `R` refreshes the real index to `C`; `S` re-classifies
 the exact delta about to be committed — any path outside the named-artifact
 set REFUSES here, before the artifact-sync commit `D` is ever built — then
-builds `D` (`-p C`); `G` is the pre-existing preserved-merge machinery,
+builds `D` (`-p C`). Normal and merge-only completion use the same reader.
+`G` is the pre-existing preserved-merge machinery,
 untouched; `T` clears the marker on both the ordinary and landed-merge-
 reconcile completion paths. `MockExecutor` (`internal/executor/mock.go`)
 stubs all eight methods with configurable results/errors, defaulting to

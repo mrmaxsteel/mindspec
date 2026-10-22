@@ -181,6 +181,8 @@ non-ASCII spec and panel directory names and literal arrows in path names.
 The next guard matches decoded filename bytes exactly, including whitespace.
 Its proportional claim check exempts a rename or copy only when both endpoints
 match artifact paths. It names both endpoints of user renames and copies.
+Normal and merge-only completion read the artifact-sync snapshot delta with
+rename detection off and NUL separators. Filename bytes stay exact.
 On flat layouts complete checks each existing matched ledger with
 `exec.CheckIgnore` in the spec worktree before any side effect. After the
 bead merge, it commits all matched ledgers once with `exec.CommitPaths`

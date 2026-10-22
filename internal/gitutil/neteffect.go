@@ -582,7 +582,9 @@ func NetEffectLanded(workdir, ref, target string) (bool, error) {
 	// definitive NOT-landed answer, and only when ref's WHOLE diff against
 	// the merge-base is confined to the tracker export (the carrier shape,
 	// derived from the diff itself — never from the caller).
-	changed, err := DiffNameOnly(workdir, base, ref)
+	// Check both rename endpoints and exact filename bytes before exempting
+	// the tracker export. A lookalike path is user work.
+	changed, err := DiffNameOnlyNoRenames(workdir, base, ref)
 	if err != nil {
 		return false, fmt.Errorf("diffing %s against merge-base: %w", ref, err)
 	}

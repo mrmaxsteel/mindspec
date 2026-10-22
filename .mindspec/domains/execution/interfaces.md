@@ -151,7 +151,7 @@ boundary:
 | Symbol | Purpose |
 |:-------|:--------|
 | `SnapshotWorktreeTree(wtPath, exclude)` | Builds candidate tree `T` from wtPath's prospective content (tracked+untracked+deletions) via a TEMPORARY index seeded from HEAD first, so an excluded path (`.beads/issues.jsonl`) survives unchanged in `T` rather than being dropped. Exclusions use `:(exclude,glob)` pathspecs so a single `*` never matches `/`, agreeing with the tool-artifact matcher. Touches no real index/ref/worktree state. |
-| `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. |
+| `ChangedFilesTree(workdir, base, treeOID)` | Diffs a committed ref against a bare tree OID, `-C workdir` — the tree-vs-tree leg the doc-sync/ADR-divergence gates measure `base..T` with. Uses `--no-renames --name-only -z` and preserves exact filename bytes. |
 | `MaterializeStageCommit(wtPath, tree, parent, stage, subject)` | Builds a commit via plumbing (`git commit-tree`, no hooks) carrying the pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`; `StageMaterialization`/`StageArtifactSync`) — read back on re-entry instead of inferred from a tree diff. |
 | `PublishStageMarker(beadID, oid, expectedOld)` / `ReadStageMarker(beadID)` / `ClearStageMarker(beadID, expectedOID)` | The write-ahead marker protocol at `refs/mindspec/materialized/<bead-id>`, all via per-ref compare-and-swap: publish before either stage's branch advances (CREATE semantics when `expectedOld == ""`), read to discriminate a resumed run, clear on the terminal step only against the OID this invocation owns. |
 | `AdvanceBranchExpectedOld(branch, newSHA, expectedOld)` | CAS branch-ref advance a concurrent mover cannot silently clobber. |
@@ -160,8 +160,8 @@ boundary:
 Together: `M` builds candidate commit `C` from `T`; `R` resets the index to
 `C`; `S` re-classifies the exact delta about to be committed (any
 non-artifact path outside the named set REFUSES here, before commit `D` is
-built) then builds `D`; `G` is the pre-existing preserved-merge machinery
-(unchanged); `T` clears the marker on both completion paths. `MockExecutor`
+built) then builds `D`. Normal and merge-only completion use the same exact
+path reader. `G` is the pre-existing preserved-merge machinery (unchanged); `T` clears the marker on both completion paths. `MockExecutor`
 stubs all eight with configurable results defaulting to zero values, so a
 pre-existing test that never configures them exercises the
 nothing-to-materialize (both stages elide) path unchanged.

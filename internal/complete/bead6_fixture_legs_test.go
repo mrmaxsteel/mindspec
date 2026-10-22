@@ -40,6 +40,7 @@ package complete
 //   TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates (xxiv; final-review round 1 G1, R6 F1's executed marker-spoof repro)
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1394,6 +1395,111 @@ func TestBead6Leg_xxi_SStageSnapshotRaceRefusesBeforeCommittingD(t *testing.T) {
 	// correct resumption evidence for a later re-run, not a leak.
 	if oid, stage, present := readMarker(t, root, beadID); !present || oid != cCommit || stage != stageMaterialization {
 		t.Errorf("expected the surviving marker to name C (%s) at stage %q, got oid=%q stage=%q present=%v", cCommit, stageMaterialization, oid, stage, present)
+	}
+}
+
+// artifactSyncRaceRecorder traps downstream mutations so a failed regression
+// retains the fixture for assertions. Snapshot and commit construction use git.
+type artifactSyncRaceRecorder struct {
+	*sStageSnapshotRaceExecutor
+	stageCalls, mergeCalls, cleanupCalls int
+}
+
+func (e *artifactSyncRaceRecorder) MaterializeStageCommit(wt, tree, parent, stage, subject string) (string, error) {
+	e.stageCalls++
+	return e.Executor.MaterializeStageCommit(wt, tree, parent, stage, subject)
+}
+
+func (e *artifactSyncRaceRecorder) CompleteBead(string, string, string, string, bool) error {
+	e.mergeCalls++
+	return fmt.Errorf("unexpected completion after artifact-sync race")
+}
+
+func (e *artifactSyncRaceRecorder) MergeBead(string, string, string, bool, executor.MergeBeadOptions) error {
+	e.mergeCalls++
+	return fmt.Errorf("unexpected merge after artifact-sync race")
+}
+
+func (e *artifactSyncRaceRecorder) CleanupBead(string, string) error {
+	e.cleanupCalls++
+	return fmt.Errorf("unexpected cleanup after artifact-sync race")
+}
+
+func TestBead6Leg_xxi_SStageRenameOntoArtifactRefusesBeforeCommit(t *testing.T) {
+	testArtifactSyncPathRace(t, true)
+}
+
+func TestBead6Leg_xxi_SStageWhitespaceLookalikeRefusesBeforeCommit(t *testing.T) {
+	testArtifactSyncPathRace(t, false)
+}
+
+func testArtifactSyncPathRace(t *testing.T, rename bool) {
+	t.Helper()
+	for _, mode := range []string{"normal", "merge-only", "ownership-conflict-merge-only"} {
+		t.Run(mode, func(t *testing.T) {
+			var f *windowFixture
+			if mode == "ownership-conflict-merge-only" {
+				f = ownershipWindow(t)
+			} else {
+				f = newWindowFixture(t)
+			}
+			gitRun(t, f.beadWT, "config", "diff.renames", "true")
+			beadBranch, specBranch := "bead/"+closingBead, "spec/"+closingSpec
+			beforeBead := gateRevParse(t, f.root, beadBranch)
+			beforeSpec := gateRevParse(t, f.root, specBranch)
+			const source = "feature.txt"
+			destination := ".beads/issues.jsonl "
+			if rename {
+				destination = ".mindspec/specs/" + closingSpec + "/reviews/snapshot-race/dispositions.jsonl"
+			}
+			race := &sStageSnapshotRaceExecutor{Executor: f.ex, t: t, inject: func() {
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(f.beadWT, destination)), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if rename {
+					if err := os.Rename(filepath.Join(f.beadWT, source), filepath.Join(f.beadWT, destination)); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					writeFile(t, f.beadWT, destination, "pending user bytes\n")
+				}
+			}}
+			ex := &artifactSyncRaceRecorder{sStageSnapshotRaceExecutor: race}
+			opts := CompleteOpts{MergeOnly: mode != "normal"}
+			result, err := Run(f.root, closingBead, closingSpec, "", ex, opts)
+			if err == nil || !strings.Contains(err.Error(), "genuine uncommitted changes surviving materialization") {
+				t.Errorf("want snapshot user-dirt refusal, got result=%+v error=%v", result, err)
+			}
+			if race.snapshotCalls != 2 {
+				t.Errorf("race must run at second snapshot, got %d calls", race.snapshotCalls)
+			}
+			if ex.stageCalls != 0 || f.closeCalls != 0 || ex.mergeCalls != 0 || ex.cleanupCalls != 0 || f.closed {
+				t.Errorf("race reached mutation: stages=%d closes=%d merges=%d cleanups=%d closed=%v", ex.stageCalls, f.closeCalls, ex.mergeCalls, ex.cleanupCalls, f.closed)
+			}
+			if got := gateRevParse(t, f.root, beadBranch); got != beforeBead {
+				t.Errorf("bead tip changed: %s -> %s", beforeBead, got)
+			}
+			if got := gateRevParse(t, f.root, specBranch); got != beforeSpec {
+				t.Errorf("spec tip changed: %s -> %s", beforeSpec, got)
+			}
+			if !fileExistsAtRef(t, f.root, beadBranch, source) || fileExistsAtRef(t, f.root, beadBranch, destination) {
+				t.Error("branch must retain source and exclude injected destination")
+			}
+			want := "pending user bytes\n"
+			if rename {
+				want = "feature\n"
+			}
+			if data, readErr := os.ReadFile(filepath.Join(f.beadWT, destination)); readErr != nil || string(data) != want {
+				t.Errorf("pending bytes lost: %q %v", data, readErr)
+			}
+			if _, _, present := readMarker(t, f.root, closingBead); present {
+				t.Error("refusal must not publish a stage marker")
+			}
+			if mode == "ownership-conflict-merge-only" && f.meta[mergeOnlyPendingKey] != "pending" {
+				t.Error("fixture did not enter conflicted-ownership materialization")
+			}
+			t.Logf("snapshots=%d stages=%d closes=%d merges=%d cleanups=%d error=%v", race.snapshotCalls, ex.stageCalls, f.closeCalls, ex.mergeCalls, ex.cleanupCalls, err)
+		})
 	}
 }
 

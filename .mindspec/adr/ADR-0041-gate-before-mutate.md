@@ -131,7 +131,10 @@ Every mutating lifecycle verb (`mindspec complete`, `mindspec plan approve`,
      current tip (`ChangedFilesTree(currentTip, T')`, where `T'` is the
      S-stage's own snapshot), the run REFUSES — named paths, before
      `MaterializeStageCommit`/the marker publication for `D` — if that
-     delta contains ANY path outside the named-artifact set. Because the
+     delta contains ANY path outside the named-artifact set. Normal and
+     merge-only completion use `--no-renames --name-only -z` for this
+     delta. Both rename endpoints and exact filename bytes reach the
+     artifact classifier. Because the
      check inspects the SAME data the commit is built from rather than a
      prior read, the classification-to-snapshot race is closed by
      construction, not narrowed: there is no window left in which a
@@ -315,7 +318,9 @@ forward-reconcile contract rather than a new one:
   item-1 squash blind spot at both of its consumers (the protected-main
   already-merged probe and the doctor merged-carrier suppression), which
   route through one shared exported predicate so neither consumer can drift
-  into its own reimplementation.
+  into its own reimplementation. The tracker-only fallback uses
+  `--no-renames --name-only -z`. Both rename endpoints must qualify, and
+  filename bytes stay exact.
 
 ### 3. The kill/forward-safe classification (AC-26's fault-injection matrix)
 

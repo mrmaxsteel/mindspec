@@ -542,9 +542,8 @@ func runMaterialization(in materializationInput) error {
 		// this snapshot's own `add -A` (an external writer: an editor
 		// flush, a concurrent agent — no privileged seam required).
 		// Refuse naming it BEFORE MaterializeStageCommit/publication:
-		// this closes the classification-to-snapshot race totally,
-		// because the check now inspects the same data the commit is
-		// built from, not a separate, earlier read.
+		// ChangedFilesTree lists both rename endpoints with exact filename
+		// bytes. This check inspects the tree that will form the commit.
 		if nonArtifact := nonArtifactPaths(changedFromCurrent, workspace.SpecsDir(wtPath)); len(nonArtifact) > 0 {
 			return sExitGenuineDirtRefusal(beadID, nonArtifact)
 		}

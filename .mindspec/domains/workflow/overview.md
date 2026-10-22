@@ -52,6 +52,8 @@ Mode system is implemented. Beads is the single state store (ADR-0023) — no fi
 Completion dirt checks disable rename and copy detection. An artifact
 destination cannot hide a changed source. The exemption preserves decoded
 filename whitespace. A whitespace suffix makes a lookalike path user dirt.
+Normal and merge-only completion also check the artifact-sync snapshot delta
+with `--no-renames --name-only -z`. Filename bytes stay exact.
 The claim guard exempts a rename or copy only when both endpoints are artifacts.
 
 Adding a future artifact (e.g. `.beads/events.jsonl`) is a one-line change to the classifier's path list; the broader artifact policy (ADR-0025) does not change.

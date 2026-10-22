@@ -395,8 +395,10 @@ Both materialization legs refuse rather than commit onto a main checkout
 when no bead worktree is resolved (AC-3/AC-4; the user `--commit-msg`
 `CommitAll` targets the matched bead worktree ONLY — no root fallback —
 and a worktree-enumeration failure propagates instead of being swallowed),
-and the artifact-sync follow-up commit is pathspec-scoped — never an
-`add -A` equivalent. A bead's own advisory scope check
+and the artifact-sync follow-up commit uses a checked snapshot. The delta
+reader disables rename detection and preserves exact filename bytes with
+NUL separators. Normal and merge-only completion refuse user paths before
+they build the artifact commit. A bead's own advisory scope check
 (`internal/complete/bead_scope.go`) warns, non-fatally, when a bead's diff
 touches files outside its plan-declared `file_paths` baseline — pure
 advisory, never a gate.
@@ -1314,6 +1316,8 @@ against that snapshot BEFORE any commit exists
 alongside the unchanged committed-range functions reconcile mode and
 `impl approve`'s whole-branch backstop still call), and only on a full
 gate pass materializes the snapshot into the bead branch's real commits.
+The snapshot diff lists both rename endpoints and preserves filename bytes.
+Doc-sync and divergence use this same reader.
 Because no complete-authored commit exists before the gates run, a gate
 refusal now ALWAYS leaves the bead branch tip at `reviewed_head_sha` —
 the retry meets the identical gate, never a false panel-staleness block

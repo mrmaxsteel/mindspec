@@ -10,6 +10,11 @@ work-destruction preflight and its `--allow-net-deletion` override, the
 See [lifecycle-modes.md](lifecycle-modes.md) for the per-verb mode
 agreement table these verbs' success states feed.
 
+Before the artifact commit, normal and merge-only completion check the
+snapshot delta with rename detection off. The check preserves exact filename
+bytes. A source renamed onto an artifact path or a whitespace-suffixed
+lookalike stops completion before that commit. Pending files stay on disk.
+
 ## Gate-refused `mindspec complete` converges on a plain retry
 
 `mindspec complete`'s content gates (doc-sync, ADR-divergence) now run

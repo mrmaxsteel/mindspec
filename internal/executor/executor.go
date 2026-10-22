@@ -281,7 +281,8 @@ type Executor interface {
 	// commit-ish) and treeOID (typically a bare tree object from
 	// SnapshotWorktreeTree), diffed `-C workdir` — never a hardcoded root,
 	// never the caller's cwd, so the per-bead content gates always measure
-	// the SAME bead worktree the snapshot was taken in.
+	// the SAME bead worktree the snapshot was taken in. Rename/copy detection
+	// stays off. Returned filename bytes are exact, with no quoting or trim.
 	ChangedFilesTree(workdir, base, treeOID string) ([]string, error)
 
 	// MaterializeStageCommit builds (via plumbing, no hooks) a write-ahead

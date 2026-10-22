@@ -246,7 +246,9 @@ enumeration):
    see `project-docs/user/guides/merge-safety.md` for the distinct
    POST-gate class (a merge conflict, a `bd close` failure), whose
    preserved-merge/forward-reconcile recovery (spec 127) is UNCHANGED by
-   this reorder.
+   this reorder. The artifact-sync snapshot check also runs in merge-only
+   mode. It disables rename detection and preserves exact filename bytes.
+   A user path stops completion before the artifact commit.
 2. **`mindspec repair phase` now refuses a backward move by default**
    (R3.3): moving an epic's stored phase backward in lifecycle order
    (`spec < plan < implement < review < done`) requires

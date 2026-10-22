@@ -1139,3 +1139,45 @@ func TestRangeRevertedAt_ReadError(t *testing.T) {
 		}
 	}
 }
+
+// A tracker-shaped destination does not make a source deletion or a lookalike
+// filename a tracker-only carrier. Main has a later export in both cases.
+func TestNetEffectLanded_TrackerShapeRequiresExactPathsAndRenameEndpoints(t *testing.T) {
+	for _, kind := range []string{"source-renamed-to-tracker", "whitespace-lookalike"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+			t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+			dir := initGitRepo(t)
+			neRunGit(t, dir, "config", "diff.renames", "true")
+			const source = "user-export.txt"
+			neWriteFile(t, dir, source, `{"id":"epic-1","status":"in_progress"}`+"\n")
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "source export")
+			neRunGit(t, dir, "checkout", "-b", "carrier")
+			if kind == "source-renamed-to-tracker" {
+				if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(filepath.Join(dir, source), filepath.Join(dir, trackerJSONLPath)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				neWriteFile(t, dir, trackerJSONLPath+" ", "pending user bytes\n")
+			}
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "user work on carrier")
+			neRunGit(t, dir, "checkout", "main")
+			neWriteFile(t, dir, trackerJSONLPath, `{"id":"epic-1","status":"closed"}`+"\n")
+			neRunGit(t, dir, "add", "-A")
+			neRunGit(t, dir, "commit", "-qm", "later tracker export")
+			landed, err := NetEffectLanded(dir, "carrier", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if landed {
+				t.Error("user work was accepted as a tracker-only carrier")
+			}
+			t.Logf("landed=%v", landed)
+		})
+	}
+}
