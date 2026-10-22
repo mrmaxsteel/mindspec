@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -83,6 +84,10 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		return bead.CheckDeferral(beadID, epic, reviewedBead, texts, panel.RedactFindingPaths)
 	}
 	if err := check(); err != nil {
+		var reqErr *bead.DeferralRequirementsError
+		if errors.As(err, &reqErr) {
+			return guard.NewFailure(reqErr.Error(), reqErr.Recovery)
+		}
 		return panelVerbFailure(err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)

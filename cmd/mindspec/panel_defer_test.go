@@ -353,3 +353,22 @@ func TestPanelDefer_RefusalNamesDefer(t *testing.T) {
 		t.Fatalf("defer refusal must name defer: %s", msg)
 	}
 }
+
+// TestPanelDefer_RefusalListsEveryMissingRequirement: with no
+// discovered-from edge and no finding text in the description, one
+// refusal names both and its recovery line gives the exact edge command
+// instead of the generic "correct the panel arguments" line.
+func TestPanelDefer_RefusalListsEveryMissingRequirement(t *testing.T) {
+	root, _ := setupDischarge(t)
+	fake := fakeDeferralBD(t)
+	rebindWrite(t, fake, "follow-up.json", `[{"id":"follow-up","status":"open","description":"other","dependencies":[]}]`)
+	msg := assertPanelRefusal(t, root, deferArgs()...)
+	for _, want := range []string{"discovered-from edge", "must contain every deferred finding", "missing test", "recovery: bd dep add follow-up epic-x --type discovered-from"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "correct the panel arguments") {
+		t.Errorf("refusal must not fall back to the generic recovery:\n%s", msg)
+	}
+}
